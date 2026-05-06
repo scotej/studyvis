@@ -1,0 +1,13 @@
+node_modules
+dist
+storybook-static
+src-tauri/target
+src-tauri/gen
+package-lock.json
+
+# Canonical docs are hand-formatted; Prettier should not touch them.
+ARCHITECTURE.md
+BUILD-PROMPTS.md
+CLAUDE.md
+DESIGN-SYSTEM.md
+PLAN.md
