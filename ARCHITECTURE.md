@@ -68,7 +68,7 @@ Pinned versions are the floor; bump as needed but never silently downgrade.
 - **tauri-plugin-global-shortcut** — system-wide PTT and AI-dialog hotkeys.
 - **tauri-plugin-notification** — incoming-invite notifications.
 - **tauri-plugin-autostart** — opt-in launch-at-login.
-- **tauri-plugin-updater** — pull updates from GitHub Releases (V1 polish).
+- **tauri-plugin-updater** — listed for completeness; **dormant in V1** (registration commented out). V1 ships unsigned installers per the friends-only direction in PLAN.md §5, so no signed update artifacts can be verified. The plugin is left in `Cargo.toml` so future phases (post-signing-credentials) can re-enable it without a dependency change.
 - **tauri-plugin-store** — small key/value config (separate from SQLite for hot config).
 
 ### AI inference (V2+)
@@ -491,7 +491,7 @@ studyvis/
 
 ### Windows
 - WebView2 handles camera/mic/screen prompts natively.
-- Code-signing certificate required for SmartScreen reputation. Self-signed acceptable for V1 testing; EV cert nice-to-have for V1 release.
+- V1 ships an unsigned `.msi`. Windows SmartScreen will warn on first launch ("Windows protected your PC") — friends click "More info" → "Run anyway". A code-signing certificate (and ideally an EV cert for instant SmartScreen reputation) would remove the warning; deferred until creds are available.
 
 ### Linux
 - WebKitGTK handles camera/mic; `getDisplayMedia` is the open question. V0 verifies.
