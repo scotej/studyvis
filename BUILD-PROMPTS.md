@@ -29,7 +29,7 @@ Each prompt assumes Claude Code has fresh context and no memory of prior session
   - V1-P9: Audit log panel + Pomodoro sync
   - V1-P10: Onboarding flow
   - V1-P11: Settings panel
-  - V1-P12: Cross-platform packaging + signed installers
+  - V1-P12: Cross-platform packaging (friends-only, unsigned installers, manual update)
 - **V2 — AI accountability**
   - V2-P1: llama-server sidecar integration
   - V2-P2: Model picker + first-run benchmark
@@ -51,30 +51,41 @@ Each prompt assumes Claude Code has fresh context and no memory of prior session
 
 ---
 
-## Universal preamble (already embedded in every prompt below)
+## Universal preamble (embedded verbatim in every prompt below)
 
-Every prompt in this file begins with the same preamble that authorises subagent use, advisor calls, deep thinking, and reads of the canonical docs. It looks like this:
+Every prompt block in this file begins with the same preamble. It is **inlined verbatim** in each prompt's fenced code block — copy the whole block and paste, no assembly required. The canonical preamble:
 
-> You are working on StudyVis, a peer-to-peer desktop study app for close friends. Read these documents in full first, every time, before making any decisions:
+> You are working on StudyVis, a peer-to-peer desktop study app for close friends. Read these in full before making decisions:
 > - `/Users/scott/PycharmProjects/studyvis/PLAN.md`
 > - `/Users/scott/PycharmProjects/studyvis/ARCHITECTURE.md`
 > - `/Users/scott/PycharmProjects/studyvis/DESIGN-SYSTEM.md`
+> - `/Users/scott/PycharmProjects/studyvis/CLAUDE.md`
+> - `~/.claude/projects/-Users-scott-PycharmProjects-studyvis/memory/MEMORY.md` (carryovers from prior phases — debts that should land in this phase or be re-routed forward)
 >
-> These three files are the source of truth. If anything in this prompt conflicts with them, ask before deviating. If anything in those files is unclear, surface it.
+> These are the source of truth. If anything in this prompt conflicts with them, surface the conflict — don't silently deviate.
 >
-> You have unlimited reasoning budget. Think for as long and as deeply as the task demands. Use subagents freely:
-> - **Explore** for orientation, codebase searches, and "where is X?" questions.
-> - **Plan** for architectural decisions and trade-off analysis.
-> - **general-purpose** for parallel research and any open-ended investigation.
-> Use the **advisor** before committing to any non-obvious approach and once before declaring the task done. There is no token budget to conserve.
+> Reasoning budget is unlimited. Use subagents freely (Explore, Plan, general-purpose). Call the **advisor** before committing to a non-obvious approach and once before declaring the task done.
 >
-> Use **Context7** for any library documentation you need; prefer it to web search.
+> Use **Context7** for library docs; prefer it to web search. Verify, don't assume — look up versions, APIs, and CLI flags before depending on them.
 >
-> Verify, don't assume. When you reach for a fact about an external library, API, version, or model name, look it up.
+> **Version policy.** Pinned versions in canonical docs are floors, not ceilings. Prefer current; note bumps in your end-of-task summary; never silently downgrade.
 >
-> Do not introduce features, abstractions, or polish beyond what this prompt asks for. Do not add comments unless the *why* is non-obvious. Do not write documentation files unless explicitly asked.
-
-That preamble is included verbatim at the top of each prompt block. You don't need to add it manually.
+> **File-shape policy.** If a doc or this prompt prescribes a path or config shape that conflicts with the current framework idiom (e.g. modern Tauri 2 puts the builder in `lib.rs` not `main.rs`; TS 6 deprecates `baseUrl`), prefer the current idiom and note the deviation.
+>
+> **Package-manager policy.** Use the manager indicated by the lockfile already in the repo (npm if `package-lock.json`, bun if `bun.lockb`, pnpm if `pnpm-lock.yaml`). Do not switch.
+>
+> **Verification policy.** Prefer headless commands (`tsc -b`, `vite build`, `storybook build`, `cargo check`) — those are agent-verifiable. Avoid `tauri dev`, `storybook dev`, and cross-machine peer-to-peer tests in autonomous execution; mark those user-verifiable in the PR.
+>
+> **Phase invariant.** If this is a V1 prompt: do not create `src/features/ai/`, do not add AI deps to `package.json` or `src-tauri/Cargo.toml`, do not create `tests/ai-eval/`. Any such leak is a violation — surface and reject.
+>
+> **Scope discipline.** Don't introduce features, abstractions, or polish beyond what this prompt asks. No backwards-compatibility shims. No comments unless the *why* is non-obvious. No new documentation files unless asked.
+>
+> **End-of-task exit sequence (mandatory).**
+> 1. Single commit. Stage only the files this task should change. Message format: `<phase-id>: <subject>` (e.g. `V1-P3: identity creation`).
+> 2. Push to a feature branch on `github.com/scotej/studyvis` (default branch `main`). Branch name: `v<phase-major>/p<N>-<short-slug>` where `<phase-major>` is 1 for V1 prompts, 2 for V2, 3 for V3 (e.g. `v1/p3-identity`, `v2/p1-llama-sidecar`). Direct push to `main` is not authorized.
+> 3. If GitHub rejects on email privacy, amend the commit with the noreply email and retry: `git -c user.email='134114466+scotej@users.noreply.github.com' commit --amend --no-edit --reset-author`.
+> 4. Open a PR with `gh pr create --base main --head v<phase-major>/p<N>-<slug> --title "<phase-id>: <subject>"`. PR body has **Summary** and **Test plan** sections. Do NOT merge — the user reviews.
+> 5. End-of-task summary in chat: (a) what shipped, (b) deviations from prompt or canonical-doc text and why, (c) **Inherited debts** — anything that surfaced and belongs to a later phase, named by phase id (e.g. "V1-P12 must wire `plugins.updater` config + signing key").
 
 ---
 
@@ -102,24 +113,37 @@ The whole stack assumes `getUserMedia` and `getDisplayMedia` work in Tauri 2's w
 **Prompt to paste**:
 
 ````
-You are working on StudyVis, a peer-to-peer desktop study app for close friends. Read these documents in full first, every time, before making any decisions:
+You are working on StudyVis, a peer-to-peer desktop study app for close friends. Read these in full before making decisions:
 - /Users/scott/PycharmProjects/studyvis/PLAN.md
 - /Users/scott/PycharmProjects/studyvis/ARCHITECTURE.md
 - /Users/scott/PycharmProjects/studyvis/DESIGN-SYSTEM.md
+- /Users/scott/PycharmProjects/studyvis/CLAUDE.md
+- ~/.claude/projects/-Users-scott-PycharmProjects-studyvis/memory/MEMORY.md (carryovers from prior phases — debts that should land in this phase or be re-routed forward)
 
-These three files are the source of truth. If anything in this prompt conflicts with them, ask before deviating. If anything in those files is unclear, surface it.
+These are the source of truth. If anything in this prompt conflicts with them, surface the conflict — don't silently deviate.
 
-You have unlimited reasoning budget. Think for as long and as deeply as the task demands. Use subagents freely:
-- Explore for orientation, codebase searches, and "where is X?" questions.
-- Plan for architectural decisions and trade-off analysis.
-- general-purpose for parallel research and any open-ended investigation.
-Use the advisor before committing to any non-obvious approach and once before declaring the task done. There is no token budget to conserve.
+Reasoning budget is unlimited. Use subagents freely (Explore, Plan, general-purpose). Call the advisor before committing to a non-obvious approach and once before declaring the task done.
 
-Use Context7 for any library documentation you need; prefer it to web search.
+Use Context7 for library docs; prefer it to web search. Verify, don't assume — look up versions, APIs, and CLI flags before depending on them.
 
-Verify, don't assume. When you reach for a fact about an external library, API, version, or model name, look it up.
+Version policy: pinned versions in canonical docs are floors, not ceilings. Prefer current; note bumps in your end-of-task summary; never silently downgrade.
 
-Do not introduce features, abstractions, or polish beyond what this prompt asks for. Do not add comments unless the why is non-obvious. Do not write documentation files unless explicitly asked.
+File-shape policy: if a doc or this prompt prescribes a path or config shape that conflicts with the current framework idiom (e.g. modern Tauri 2 puts the builder in lib.rs not main.rs; TS 6 deprecates baseUrl), prefer the current idiom and note the deviation.
+
+Package-manager policy: use the manager indicated by the lockfile already in the repo (npm if package-lock.json, bun if bun.lockb, pnpm if pnpm-lock.yaml). Do not switch.
+
+Verification policy: prefer headless commands (tsc -b, vite build, storybook build, cargo check) — those are agent-verifiable. Avoid tauri dev, storybook dev, and cross-machine peer-to-peer tests in autonomous execution; mark those user-verifiable in the PR.
+
+Phase invariant: if this is a V1 prompt, do not create src/features/ai/, do not add AI deps to package.json or src-tauri/Cargo.toml, do not create tests/ai-eval/. Any such leak is a violation — surface and reject.
+
+Scope discipline: don't introduce features, abstractions, or polish beyond what this prompt asks. No backwards-compatibility shims. No comments unless the why is non-obvious. No new documentation files unless asked.
+
+End-of-task exit sequence (mandatory):
+1. Single commit. Stage only the files this task should change. Message format: "<phase-id>: <subject>" (e.g. "V1-P3: identity creation").
+2. Push to a feature branch on github.com/scotej/studyvis (default branch main). Branch name: v<phase-major>/p<N>-<short-slug> where <phase-major> is 1 for V1 prompts, 2 for V2, 3 for V3 (e.g. v1/p3-identity, v2/p1-llama-sidecar). Direct push to main is not authorized.
+3. If GitHub rejects on email privacy, amend the commit with the noreply email and retry: git -c user.email='134114466+scotej@users.noreply.github.com' commit --amend --no-edit --reset-author
+4. Open a PR with: gh pr create --base main --head v<phase-major>/p<N>-<slug> --title "<phase-id>: <subject>". PR body has Summary and Test plan sections. Do NOT merge — the user reviews.
+5. End-of-task summary in chat: (a) what shipped, (b) deviations from prompt or canonical-doc text and why, (c) Inherited debts — anything that surfaced and belongs to a later phase, named by phase id (e.g. "V1-P12 must wire plugins.updater config + signing key").
 
 ---
 
@@ -170,38 +194,53 @@ V1 produces a complete, polished study app with video, friends, invitations, and
 **Depends on**: V0-P1 passed (V0-REPORT.md says "proceed to V1").
 **Reads**: PLAN.md, ARCHITECTURE.md §2, §11, DESIGN-SYSTEM.md §3.
 **Outputs**: Complete project scaffold under `/Users/scott/PycharmProjects/studyvis/` matching the directory layout in ARCHITECTURE.md §11.
-**Acceptance criteria**:
-- `bun install` (or `npm install`) succeeds.
-- `bun run tauri dev` launches an empty Tauri 2 app with React rendering "StudyVis" centered.
-- `bun run storybook` launches Storybook with one example story.
-- Tailwind v4 is configured and a sample className renders.
-- shadcn/ui CLI initialized; one example primitive (Button) is vendored under `src/components/ui/`.
-- TypeScript strict mode on; ESLint + Prettier configured; pre-commit hook stub in place (Husky or Lefthook).
-- The Tauri plugins enumerated in ARCHITECTURE.md §2 are added to `Cargo.toml` and registered in the Rust builder, even if their JS-side wrappers aren't called yet.
+**Acceptance criteria** (headless — see preamble verification policy):
+- Install succeeds (`npm install` if `package-lock.json`, `bun install` if `bun.lockb`).
+- `tsc -b && vite build` succeeds.
+- `storybook build` produces `storybook-static/` with at least one rendered story.
+- `cargo check` in `src-tauri/` succeeds with all six plugins registered.
+- Tailwind v4 is configured and a sample className renders in the Vite build output.
+- shadcn/ui CLI is initialized (`components.json` present); one primitive (Button) is vendored under `src/components/ui/`.
+- TypeScript strict mode on; ESLint + Prettier configured; pre-commit hook stub in place (Husky or Lefthook) running `lint`.
+- The Tauri plugins enumerated in ARCHITECTURE.md §2 are dependencies in `src-tauri/Cargo.toml` and registered in the Rust builder, even if their JS-side wrappers aren't called yet.
+- (User-verifiable, not agent-verifiable) `tauri dev` launches a window showing "StudyVis" — agent should confirm `tauri dev` *compiles and spawns* the binary, not visually inspect the window.
 
 **Out of scope**: tokens (V1-P2), identity (V1-P3), any feature code.
 
 **Prompt to paste**:
 
 ````
-You are working on StudyVis, a peer-to-peer desktop study app for close friends. Read these documents in full first, every time, before making any decisions:
+You are working on StudyVis, a peer-to-peer desktop study app for close friends. Read these in full before making decisions:
 - /Users/scott/PycharmProjects/studyvis/PLAN.md
 - /Users/scott/PycharmProjects/studyvis/ARCHITECTURE.md
 - /Users/scott/PycharmProjects/studyvis/DESIGN-SYSTEM.md
+- /Users/scott/PycharmProjects/studyvis/CLAUDE.md
+- ~/.claude/projects/-Users-scott-PycharmProjects-studyvis/memory/MEMORY.md (carryovers from prior phases — debts that should land in this phase or be re-routed forward)
 
-These three files are the source of truth. If anything in this prompt conflicts with them, ask before deviating. If anything in those files is unclear, surface it.
+These are the source of truth. If anything in this prompt conflicts with them, surface the conflict — don't silently deviate.
 
-You have unlimited reasoning budget. Think for as long and as deeply as the task demands. Use subagents freely:
-- Explore for orientation, codebase searches, and "where is X?" questions.
-- Plan for architectural decisions and trade-off analysis.
-- general-purpose for parallel research and any open-ended investigation.
-Use the advisor before committing to any non-obvious approach and once before declaring the task done. There is no token budget to conserve.
+Reasoning budget is unlimited. Use subagents freely (Explore, Plan, general-purpose). Call the advisor before committing to a non-obvious approach and once before declaring the task done.
 
-Use Context7 for any library documentation you need; prefer it to web search.
+Use Context7 for library docs; prefer it to web search. Verify, don't assume — look up versions, APIs, and CLI flags before depending on them.
 
-Verify, don't assume. When you reach for a fact about an external library, API, version, or model name, look it up.
+Version policy: pinned versions in canonical docs are floors, not ceilings. Prefer current; note bumps in your end-of-task summary; never silently downgrade.
 
-Do not introduce features, abstractions, or polish beyond what this prompt asks for. Do not add comments unless the why is non-obvious. Do not write documentation files unless explicitly asked.
+File-shape policy: if a doc or this prompt prescribes a path or config shape that conflicts with the current framework idiom (e.g. modern Tauri 2 puts the builder in lib.rs not main.rs; TS 6 deprecates baseUrl), prefer the current idiom and note the deviation.
+
+Package-manager policy: use the manager indicated by the lockfile already in the repo (npm if package-lock.json, bun if bun.lockb, pnpm if pnpm-lock.yaml). Do not switch.
+
+Verification policy: prefer headless commands (tsc -b, vite build, storybook build, cargo check) — those are agent-verifiable. Avoid tauri dev, storybook dev, and cross-machine peer-to-peer tests in autonomous execution; mark those user-verifiable in the PR.
+
+Phase invariant: if this is a V1 prompt, do not create src/features/ai/, do not add AI deps to package.json or src-tauri/Cargo.toml, do not create tests/ai-eval/. Any such leak is a violation — surface and reject.
+
+Scope discipline: don't introduce features, abstractions, or polish beyond what this prompt asks. No backwards-compatibility shims. No comments unless the why is non-obvious. No new documentation files unless asked.
+
+End-of-task exit sequence (mandatory):
+1. Single commit. Stage only the files this task should change. Message format: "<phase-id>: <subject>" (e.g. "V1-P3: identity creation").
+2. Push to a feature branch on github.com/scotej/studyvis (default branch main). Branch name: v<phase-major>/p<N>-<short-slug> where <phase-major> is 1 for V1 prompts, 2 for V2, 3 for V3 (e.g. v1/p3-identity, v2/p1-llama-sidecar). Direct push to main is not authorized.
+3. If GitHub rejects on email privacy, amend the commit with the noreply email and retry: git -c user.email='134114466+scotej@users.noreply.github.com' commit --amend --no-edit --reset-author
+4. Open a PR with: gh pr create --base main --head v<phase-major>/p<N>-<slug> --title "<phase-id>: <subject>". PR body has Summary and Test plan sections. Do NOT merge — the user reviews.
+5. End-of-task summary in chat: (a) what shipped, (b) deviations from prompt or canonical-doc text and why, (c) Inherited debts — anything that surfaced and belongs to a later phase, named by phase id (e.g. "V1-P12 must wire plugins.updater config + signing key").
 
 ---
 
@@ -211,14 +250,18 @@ The repo /Users/scott/PycharmProjects/studyvis/ currently contains only the four
 
 Concretely:
 
-1. Initialize a Tauri 2 project in place at /Users/scott/PycharmProjects/studyvis/. Use bun as the JS runtime (or npm if bun is unavailable). Use React 19 + Vite 6 + TypeScript strict.
-2. Confirm in Cargo.toml that all Tauri 2 plugins listed in ARCHITECTURE.md §2 are dependencies: tauri-plugin-shell, tauri-plugin-global-shortcut, tauri-plugin-notification, tauri-plugin-autostart, tauri-plugin-updater, tauri-plugin-store. Register each in src-tauri/src/main.rs builder chain. Wrappers can be empty/no-op for now.
-3. Install Tailwind CSS v4 with the official Vite plugin. Configure src/design/index.css as the entrypoint with Tailwind layers and a placeholder for token CSS variables.
-4. Install and initialize shadcn/ui (the React variant for Vite). Vendor a single primitive — the Button component — under src/components/ui/Button.tsx, and confirm an example usage works.
-5. Install Storybook for Vite + React. Configure with the same Tailwind setup. Add one example story for Button at src/stories/Button.stories.tsx.
-6. Configure ESLint with strict React + TypeScript rules, Prettier, and an `eslint-plugin-no-restricted-imports` rule that's a placeholder for the architectural import constraints (we'll fill the actual rules in V1-P2).
-7. Set up Husky (or Lefthook) with a pre-commit hook stub that just runs `bun run lint`. Real token-checking script lands in V1-P2.
-8. Bundle the Inter Variable font via @fontsource/inter and JetBrains Mono via @fontsource/jetbrains-mono.
+1. Initialize a Tauri 2 project in place at /Users/scott/PycharmProjects/studyvis/. Use the package manager that matches an existing lockfile (or default to npm if none). React 19 + Vite 6+ + TypeScript strict (apply the version policy from the preamble — current latest is fine).
+2. Confirm in src-tauri/Cargo.toml that all Tauri 2 plugins listed in ARCHITECTURE.md §2 are dependencies: tauri-plugin-shell, tauri-plugin-global-shortcut, tauri-plugin-notification, tauri-plugin-autostart, tauri-plugin-updater, tauri-plugin-store. Register each in the Tauri 2 builder chain. Notes:
+   - Modern Tauri 2 puts the builder in src-tauri/src/lib.rs (mobile-compat); main.rs is a thin shim. Edit lib.rs.
+   - tauri-plugin-updater::Builder::build() reads plugins.updater from tauri.conf.json at registration time and panics if the config is null. V1-P12 wires the real config + signing key. For V1-P1, register the updater behind #[cfg(not(debug_assertions))] so dev builds skip it; release builds will need V1-P12 before they run.
+   - tauri init may auto-add tauri-plugin-log; remove it from Cargo.toml and lib.rs since it isn't in ARCHITECTURE.md §2's plugin list.
+   - global-shortcut, autostart, and updater are desktop-only — wrap their .plugin(...) calls with #[cfg(desktop)].
+3. Install Tailwind CSS v4 with the official Vite plugin (@tailwindcss/vite). Configure src/design/index.css as the entrypoint with `@import "tailwindcss";` and a placeholder for token CSS variables. The Button you vendor in step 4 needs at least the shadcn default CSS-variable theme to render — that's an acceptable placeholder; V1-P2 replaces those values from tokens.ts.
+4. Install and initialize shadcn/ui (the React variant for Vite). Vendor a single primitive — the Button component — under src/components/ui/Button.tsx (capital B). Configure components.json so its Tailwind CSS path points to src/design/index.css, not the default src/index.css.
+5. Install Storybook (latest, for Vite + React). Configure .storybook/preview.ts to import src/design/index.css so Tailwind classes work in stories. Add one story for Button at src/stories/Button.stories.tsx.
+6. Configure ESLint (flat config, eslint.config.js) with strict React + TypeScript rules, integrate Prettier (eslint-config-prettier), and add a `no-restricted-imports` rule as an empty-paths placeholder for the architectural import constraints V1-P2 will fill.
+7. Set up Husky (or Lefthook) with a pre-commit hook stub that runs `npm run lint` (or the equivalent for the active package manager). Real token-checking script lands in V1-P2.
+8. Bundle Inter Variable and JetBrains Mono Variable. Use Context7 to confirm the current variable-axis npm packages — historically @fontsource-variable/inter and @fontsource-variable/jetbrains-mono. The @fontsource/* counterparts are static-weight only; do not use them for variable axes.
 9. Create the empty directory tree per ARCHITECTURE.md §11 (use .gitkeep for empty dirs):
    src-tauri/{src/commands,src/db,binaries,capabilities}
    src/{design,components,components/ui,features,features/identity,features/friends,features/session,features/settings,lib,lib/trystero,lib/webrtc,lib/crypto,lib/db,stores,stories}
@@ -226,23 +269,16 @@ Concretely:
    tests/{unit,integration}
    Note: src/features/ai/ does NOT exist in V1.
 10. Replace the default Tauri React App.tsx with a minimal centered "StudyVis" heading using a Button from ui/.
-11. Verify everything builds:
-    - `bun run tauri dev` launches the app successfully.
-    - `bun run storybook` launches Storybook on a free port.
-    - `bun run build` succeeds.
-12. Commit the scaffold as a single commit with message "V1-P1: project scaffold".
-
-Acceptance criteria:
-- The /Users/scott/PycharmProjects/studyvis/ directory matches ARCHITECTURE.md §11 (no src/features/ai/).
-- All listed Tauri plugins are dependencies and registered.
-- Tailwind v4 + shadcn/ui Button working.
-- Storybook running with one example story.
-- TS strict on; ESLint + Prettier configured; pre-commit hook installed.
-- One commit with all the scaffold.
+11. Headless verification (do NOT run tauri dev or storybook dev — they spawn windows and are user-verifiable):
+    - `tsc -b && vite build` succeeds.
+    - `storybook build` succeeds.
+    - `cargo check` in src-tauri/ succeeds with all six plugins compiled.
+    - (Optional) the user can run `tauri dev` themselves to visually confirm the window — agent stops at compile success.
+12. Commit the scaffold as a single commit (per preamble exit sequence: feature branch v1/p1-scaffold, PR to main, no merge).
 
 Notes:
-- Use Context7 to verify the current Tauri 2 init flow, Tailwind v4 setup steps, and shadcn/ui Vite instructions before writing config.
-- If any plugin's current major version differs from what ARCHITECTURE.md §2 implies, prefer the current version and note the change in your end-of-task summary.
+- Acceptance criteria are listed in the prompt header above the fenced block; this body is the actionable plan.
+- Linux carryover: if V0-REPORT.md says Linux WebKitGTK getDisplayMedia failed (V0 was deferred), V1 ships Mac+Windows only per PLAN.md §5; V1-P12 will exclude Linux packaging. V1-P1 itself is OS-agnostic — no action needed here, just don't add Linux-specific scaffolding that assumes V0 passed.
 - Do not write any feature code. No identity. No friends. No session. No styling beyond what shadcn/ui's default Button provides.
 - Stop after the scaffold is in. Do not start V1-P2.
 ````
@@ -267,24 +303,37 @@ Notes:
 **Prompt to paste**:
 
 ````
-You are working on StudyVis, a peer-to-peer desktop study app for close friends. Read these documents in full first, every time, before making any decisions:
+You are working on StudyVis, a peer-to-peer desktop study app for close friends. Read these in full before making decisions:
 - /Users/scott/PycharmProjects/studyvis/PLAN.md
 - /Users/scott/PycharmProjects/studyvis/ARCHITECTURE.md
 - /Users/scott/PycharmProjects/studyvis/DESIGN-SYSTEM.md
+- /Users/scott/PycharmProjects/studyvis/CLAUDE.md
+- ~/.claude/projects/-Users-scott-PycharmProjects-studyvis/memory/MEMORY.md (carryovers from prior phases — debts that should land in this phase or be re-routed forward)
 
-These three files are the source of truth. If anything in this prompt conflicts with them, ask before deviating. If anything in those files is unclear, surface it.
+These are the source of truth. If anything in this prompt conflicts with them, surface the conflict — don't silently deviate.
 
-You have unlimited reasoning budget. Think for as long and as deeply as the task demands. Use subagents freely:
-- Explore for orientation, codebase searches, and "where is X?" questions.
-- Plan for architectural decisions and trade-off analysis.
-- general-purpose for parallel research and any open-ended investigation.
-Use the advisor before committing to any non-obvious approach and once before declaring the task done. There is no token budget to conserve.
+Reasoning budget is unlimited. Use subagents freely (Explore, Plan, general-purpose). Call the advisor before committing to a non-obvious approach and once before declaring the task done.
 
-Use Context7 for any library documentation you need; prefer it to web search.
+Use Context7 for library docs; prefer it to web search. Verify, don't assume — look up versions, APIs, and CLI flags before depending on them.
 
-Verify, don't assume. When you reach for a fact about an external library, API, version, or model name, look it up.
+Version policy: pinned versions in canonical docs are floors, not ceilings. Prefer current; note bumps in your end-of-task summary; never silently downgrade.
 
-Do not introduce features, abstractions, or polish beyond what this prompt asks for. Do not add comments unless the why is non-obvious. Do not write documentation files unless explicitly asked.
+File-shape policy: if a doc or this prompt prescribes a path or config shape that conflicts with the current framework idiom (e.g. modern Tauri 2 puts the builder in lib.rs not main.rs; TS 6 deprecates baseUrl), prefer the current idiom and note the deviation.
+
+Package-manager policy: use the manager indicated by the lockfile already in the repo (npm if package-lock.json, bun if bun.lockb, pnpm if pnpm-lock.yaml). Do not switch.
+
+Verification policy: prefer headless commands (tsc -b, vite build, storybook build, cargo check) — those are agent-verifiable. Avoid tauri dev, storybook dev, and cross-machine peer-to-peer tests in autonomous execution; mark those user-verifiable in the PR.
+
+Phase invariant: if this is a V1 prompt, do not create src/features/ai/, do not add AI deps to package.json or src-tauri/Cargo.toml, do not create tests/ai-eval/. Any such leak is a violation — surface and reject.
+
+Scope discipline: don't introduce features, abstractions, or polish beyond what this prompt asks. No backwards-compatibility shims. No comments unless the why is non-obvious. No new documentation files unless asked.
+
+End-of-task exit sequence (mandatory):
+1. Single commit. Stage only the files this task should change. Message format: "<phase-id>: <subject>" (e.g. "V1-P3: identity creation").
+2. Push to a feature branch on github.com/scotej/studyvis (default branch main). Branch name: v<phase-major>/p<N>-<short-slug> where <phase-major> is 1 for V1 prompts, 2 for V2, 3 for V3 (e.g. v1/p3-identity, v2/p1-llama-sidecar). Direct push to main is not authorized.
+3. If GitHub rejects on email privacy, amend the commit with the noreply email and retry: git -c user.email='134114466+scotej@users.noreply.github.com' commit --amend --no-edit --reset-author
+4. Open a PR with: gh pr create --base main --head v<phase-major>/p<N>-<slug> --title "<phase-id>: <subject>". PR body has Summary and Test plan sections. Do NOT merge — the user reviews.
+5. End-of-task summary in chat: (a) what shipped, (b) deviations from prompt or canonical-doc text and why, (c) Inherited debts — anything that surfaced and belongs to a later phase, named by phase id (e.g. "V1-P12 must wire plugins.updater config + signing key").
 
 ---
 
@@ -319,23 +368,33 @@ Concretely:
    - A custom or pattern rule rejecting JSX attributes like `style={{color: '#xxx'}}` (a no-inline-styles lint or react/forbid-component-props with a pattern).
 9. Add an inline placeholder for the StudyVis brand mark at src/components/Logo.tsx (sage circle inscribed in an amber square, both at radius lg). Generate a simple PNG from this design at the standard Tauri icon sizes (32, 128, 256, 512, 1024) and save under src-tauri/icons/. Generate tray icons at 16/20/22/24 (monochrome white).
 10. Add an entry on the dev /style route showing the logo at all sizes.
-11. Run `bun run tauri dev` and confirm:
-    - The empty-but-themed app launches with dark canvas, primary text legible, accent visible somewhere.
-    - /style route renders every primitive correctly.
-    - Theme switch (you can wire a temporary toggle on /style for now) works between dark and light without a remount.
-12. Commit as "V1-P2: design system foundation".
+11. Headless verification (per preamble — do NOT run tauri dev):
+    - `tsc -b && vite build` succeeds. The /style route is reachable in the dev build (you can grep dist/ output to confirm the route is registered, or run `vite preview` and curl /style).
+    - `storybook build` succeeds with one story per vendored primitive.
+    - `scripts/check-tokens.ts` runs cleanly against the current source.
+    - `npm run lint` (or active package manager equivalent) passes.
+    - (User-verifiable) Theme toggle on /style switches dark↔light without remount; agent does not visually verify.
+12. Add CI workflow at .github/workflows/ci.yml — runs on every push and pull_request to main:
+    - Job 1 (frontend): checkout, setup Node 20+, install deps, `npm run lint`, `tsc -b`, `vite build`, `storybook build`, run `scripts/check-tokens.ts`.
+    - Job 2 (rust): checkout, setup Rust stable, `cargo check` in src-tauri/ (with --target host).
+    - Both jobs must pass for the PR to be mergeable.
+    - Use Context7 to confirm current actions/checkout, actions/setup-node, dtolnay/rust-toolchain versions; do not bake in deprecated v3 actions.
+    - The release workflow at .github/workflows/release.yml lands later in V1-P12.
+13. Commit as "V1-P2: design system foundation" (per preamble exit sequence: feature branch, PR, no merge).
 
 Acceptance criteria:
 - src/design/tokens.ts matches DESIGN-SYSTEM.md §2.
 - Every primitive in §4 is vendored, themed, and has a Storybook story.
-- /style route renders all primitives + status states side-by-side.
+- /style route renders all primitives + status states side-by-side (verified via vite build output or vite preview + curl).
 - scripts/check-tokens.ts is wired and rejects raw hex codes via pre-commit.
 - ESLint rejects @radix-ui imports outside ui/.
-- App launches, /style renders, theme toggles. No console errors.
+- .github/workflows/ci.yml exists; the PR opened by this prompt's exit sequence shows green checks before the user reviews.
+- (User-verifiable) App launches, /style renders, theme toggles. No console errors.
 
 Notes:
 - Tailwind v4 is significantly different from v3 (CSS-first config, @theme directive). Use Context7 to read current v4 docs before writing the config.
 - shadcn/ui's vendor flow drops files into the location you specify; let it land in src/components/ui/.
+- This prompt is large (~17 primitives × stories + check-tokens + ESLint + icons + CI). If your context is filling, you have license to split into V1-P2a (tokens + Tailwind + check-tokens + ESLint + CI) and V1-P2b (primitives + stories + /style + icons) — open two PRs in that order. Don't pre-split unless context pressure demands it.
 - Don't add features yet. After /style works, stop.
 ````
 
@@ -349,7 +408,37 @@ Notes:
 **Prompt to paste**:
 
 ````
-[Universal preamble — same as above]
+You are working on StudyVis, a peer-to-peer desktop study app for close friends. Read these in full before making decisions:
+- /Users/scott/PycharmProjects/studyvis/PLAN.md
+- /Users/scott/PycharmProjects/studyvis/ARCHITECTURE.md
+- /Users/scott/PycharmProjects/studyvis/DESIGN-SYSTEM.md
+- /Users/scott/PycharmProjects/studyvis/CLAUDE.md
+- ~/.claude/projects/-Users-scott-PycharmProjects-studyvis/memory/MEMORY.md (carryovers from prior phases — debts that should land in this phase or be re-routed forward)
+
+These are the source of truth. If anything in this prompt conflicts with them, surface the conflict — don't silently deviate.
+
+Reasoning budget is unlimited. Use subagents freely (Explore, Plan, general-purpose). Call the advisor before committing to a non-obvious approach and once before declaring the task done.
+
+Use Context7 for library docs; prefer it to web search. Verify, don't assume — look up versions, APIs, and CLI flags before depending on them.
+
+Version policy: pinned versions in canonical docs are floors, not ceilings. Prefer current; note bumps in your end-of-task summary; never silently downgrade.
+
+File-shape policy: if a doc or this prompt prescribes a path or config shape that conflicts with the current framework idiom (e.g. modern Tauri 2 puts the builder in lib.rs not main.rs; TS 6 deprecates baseUrl), prefer the current idiom and note the deviation.
+
+Package-manager policy: use the manager indicated by the lockfile already in the repo (npm if package-lock.json, bun if bun.lockb, pnpm if pnpm-lock.yaml). Do not switch.
+
+Verification policy: prefer headless commands (tsc -b, vite build, storybook build, cargo check) — those are agent-verifiable. Avoid tauri dev, storybook dev, and cross-machine peer-to-peer tests in autonomous execution; mark those user-verifiable in the PR.
+
+Phase invariant: if this is a V1 prompt, do not create src/features/ai/, do not add AI deps to package.json or src-tauri/Cargo.toml, do not create tests/ai-eval/. Any such leak is a violation — surface and reject.
+
+Scope discipline: don't introduce features, abstractions, or polish beyond what this prompt asks. No backwards-compatibility shims. No comments unless the why is non-obvious. No new documentation files unless asked.
+
+End-of-task exit sequence (mandatory):
+1. Single commit. Stage only the files this task should change. Message format: "<phase-id>: <subject>" (e.g. "V1-P3: identity creation").
+2. Push to a feature branch on github.com/scotej/studyvis (default branch main). Branch name: v<phase-major>/p<N>-<short-slug> where <phase-major> is 1 for V1 prompts, 2 for V2, 3 for V3 (e.g. v1/p3-identity, v2/p1-llama-sidecar). Direct push to main is not authorized.
+3. If GitHub rejects on email privacy, amend the commit with the noreply email and retry: git -c user.email='134114466+scotej@users.noreply.github.com' commit --amend --no-edit --reset-author
+4. Open a PR with: gh pr create --base main --head v<phase-major>/p<N>-<slug> --title "<phase-id>: <subject>". PR body has Summary and Test plan sections. Do NOT merge — the user reviews.
+5. End-of-task summary in chat: (a) what shipped, (b) deviations from prompt or canonical-doc text and why, (c) Inherited debts — anything that surfaced and belongs to a later phase, named by phase id (e.g. "V1-P12 must wire plugins.updater config + signing key").
 
 ---
 
@@ -371,7 +460,7 @@ Concretely:
    - verifyMessage(edPub, message, sig): boolean  — Ed25519 verify.
    - boxEncrypt(theirXPub, myXPriv, plaintext): { nonce, ciphertext } — NaCl-style box using x25519 ECDH + XSalsa20-Poly1305 from @noble/ciphers. Random 24-byte nonce per call.
    - boxDecrypt(theirXPub, myXPriv, nonce, ciphertext): Uint8Array  — inverse, throws on auth failure.
-3. Implement private-key storage via OS keychain. Use Tauri's tauri-plugin-stronghold OR tauri-plugin-keyring (verify via Context7 which is current and stable for v2). Expose Rust commands in src-tauri/src/commands/identity.rs:
+3. Implement private-key storage via OS keychain. Use **tauri-plugin-keyring** (NOT tauri-plugin-stronghold). Reasoning: keyring delegates to native OS credential stores (macOS Keychain, Windows Credential Manager, Linux Secret Service / libsecret) which is exactly what ARCHITECTURE.md §3 specifies; stronghold is a custom encrypted vault format that adds complexity, a dependency on iota-libraries, and doesn't actually use the OS-native stores the architecture asks for. Verify via Context7 that tauri-plugin-keyring is on Tauri 2 and works on all three OSes; if it has been deprecated or renamed since this prompt was written, surface that in your end-of-task summary and pick the current native-credential-store plugin. Expose Rust commands in src-tauri/src/commands/identity.rs:
    - identity_save_keys(ed_priv_hex, x_priv_hex)
    - identity_load_keys() -> { ed_priv_hex, x_priv_hex }
    - identity_exists() -> bool
@@ -402,7 +491,7 @@ Acceptance criteria:
 - App boots into IdentitySetup on first launch and into the placeholder on subsequent launches.
 
 Notes:
-- Verify the current state of tauri-plugin-stronghold vs tauri-plugin-keyring via Context7. Pick whichever is more actively maintained for v2 and works on macOS/Windows/Linux.
+- The keyring choice is locked in step 3 (keyring, not stronghold). Don't re-litigate it; surface only if the plugin has been renamed/deprecated.
 - Mnemonic validation is BIP39 default (English wordlist, 24 words = 256 bits + 8-bit checksum).
 - The Ed25519 ↔ X25519 split is non-negotiable: NaCl box uses Curve25519 (X25519); converting Ed25519 keys to X25519 via the Edwards-to-Montgomery transform is a footgun on top of @noble's API surface. Two keypairs derived from one mnemonic via HKDF is the standard pattern and is what V1-P6 will rely on.
 - Don't expose mnemonic in any local storage — it lives in user's head/paper after the one-time display. The app keeps a 16-byte SHA256 fingerprint of it for "did the user back this up correctly later?" checks (V3).
@@ -418,7 +507,37 @@ Notes:
 **Prompt to paste**:
 
 ````
-[Universal preamble]
+You are working on StudyVis, a peer-to-peer desktop study app for close friends. Read these in full before making decisions:
+- /Users/scott/PycharmProjects/studyvis/PLAN.md
+- /Users/scott/PycharmProjects/studyvis/ARCHITECTURE.md
+- /Users/scott/PycharmProjects/studyvis/DESIGN-SYSTEM.md
+- /Users/scott/PycharmProjects/studyvis/CLAUDE.md
+- ~/.claude/projects/-Users-scott-PycharmProjects-studyvis/memory/MEMORY.md (carryovers from prior phases — debts that should land in this phase or be re-routed forward)
+
+These are the source of truth. If anything in this prompt conflicts with them, surface the conflict — don't silently deviate.
+
+Reasoning budget is unlimited. Use subagents freely (Explore, Plan, general-purpose). Call the advisor before committing to a non-obvious approach and once before declaring the task done.
+
+Use Context7 for library docs; prefer it to web search. Verify, don't assume — look up versions, APIs, and CLI flags before depending on them.
+
+Version policy: pinned versions in canonical docs are floors, not ceilings. Prefer current; note bumps in your end-of-task summary; never silently downgrade.
+
+File-shape policy: if a doc or this prompt prescribes a path or config shape that conflicts with the current framework idiom (e.g. modern Tauri 2 puts the builder in lib.rs not main.rs; TS 6 deprecates baseUrl), prefer the current idiom and note the deviation.
+
+Package-manager policy: use the manager indicated by the lockfile already in the repo (npm if package-lock.json, bun if bun.lockb, pnpm if pnpm-lock.yaml). Do not switch.
+
+Verification policy: prefer headless commands (tsc -b, vite build, storybook build, cargo check) — those are agent-verifiable. Avoid tauri dev, storybook dev, and cross-machine peer-to-peer tests in autonomous execution; mark those user-verifiable in the PR.
+
+Phase invariant: if this is a V1 prompt, do not create src/features/ai/, do not add AI deps to package.json or src-tauri/Cargo.toml, do not create tests/ai-eval/. Any such leak is a violation — surface and reject.
+
+Scope discipline: don't introduce features, abstractions, or polish beyond what this prompt asks. No backwards-compatibility shims. No comments unless the why is non-obvious. No new documentation files unless asked.
+
+End-of-task exit sequence (mandatory):
+1. Single commit. Stage only the files this task should change. Message format: "<phase-id>: <subject>" (e.g. "V1-P3: identity creation").
+2. Push to a feature branch on github.com/scotej/studyvis (default branch main). Branch name: v<phase-major>/p<N>-<short-slug> where <phase-major> is 1 for V1 prompts, 2 for V2, 3 for V3 (e.g. v1/p3-identity, v2/p1-llama-sidecar). Direct push to main is not authorized.
+3. If GitHub rejects on email privacy, amend the commit with the noreply email and retry: git -c user.email='134114466+scotej@users.noreply.github.com' commit --amend --no-edit --reset-author
+4. Open a PR with: gh pr create --base main --head v<phase-major>/p<N>-<slug> --title "<phase-id>: <subject>". PR body has Summary and Test plan sections. Do NOT merge — the user reviews.
+5. End-of-task summary in chat: (a) what shipped, (b) deviations from prompt or canonical-doc text and why, (c) Inherited debts — anything that surfaced and belongs to a later phase, named by phase id (e.g. "V1-P12 must wire plugins.updater config + signing key").
 
 ---
 
@@ -465,7 +584,37 @@ Notes:
 **Prompt to paste**:
 
 ````
-[Universal preamble]
+You are working on StudyVis, a peer-to-peer desktop study app for close friends. Read these in full before making decisions:
+- /Users/scott/PycharmProjects/studyvis/PLAN.md
+- /Users/scott/PycharmProjects/studyvis/ARCHITECTURE.md
+- /Users/scott/PycharmProjects/studyvis/DESIGN-SYSTEM.md
+- /Users/scott/PycharmProjects/studyvis/CLAUDE.md
+- ~/.claude/projects/-Users-scott-PycharmProjects-studyvis/memory/MEMORY.md (carryovers from prior phases — debts that should land in this phase or be re-routed forward)
+
+These are the source of truth. If anything in this prompt conflicts with them, surface the conflict — don't silently deviate.
+
+Reasoning budget is unlimited. Use subagents freely (Explore, Plan, general-purpose). Call the advisor before committing to a non-obvious approach and once before declaring the task done.
+
+Use Context7 for library docs; prefer it to web search. Verify, don't assume — look up versions, APIs, and CLI flags before depending on them.
+
+Version policy: pinned versions in canonical docs are floors, not ceilings. Prefer current; note bumps in your end-of-task summary; never silently downgrade.
+
+File-shape policy: if a doc or this prompt prescribes a path or config shape that conflicts with the current framework idiom (e.g. modern Tauri 2 puts the builder in lib.rs not main.rs; TS 6 deprecates baseUrl), prefer the current idiom and note the deviation.
+
+Package-manager policy: use the manager indicated by the lockfile already in the repo (npm if package-lock.json, bun if bun.lockb, pnpm if pnpm-lock.yaml). Do not switch.
+
+Verification policy: prefer headless commands (tsc -b, vite build, storybook build, cargo check) — those are agent-verifiable. Avoid tauri dev, storybook dev, and cross-machine peer-to-peer tests in autonomous execution; mark those user-verifiable in the PR.
+
+Phase invariant: if this is a V1 prompt, do not create src/features/ai/, do not add AI deps to package.json or src-tauri/Cargo.toml, do not create tests/ai-eval/. Any such leak is a violation — surface and reject.
+
+Scope discipline: don't introduce features, abstractions, or polish beyond what this prompt asks. No backwards-compatibility shims. No comments unless the why is non-obvious. No new documentation files unless asked.
+
+End-of-task exit sequence (mandatory):
+1. Single commit. Stage only the files this task should change. Message format: "<phase-id>: <subject>" (e.g. "V1-P3: identity creation").
+2. Push to a feature branch on github.com/scotej/studyvis (default branch main). Branch name: v<phase-major>/p<N>-<short-slug> where <phase-major> is 1 for V1 prompts, 2 for V2, 3 for V3 (e.g. v1/p3-identity, v2/p1-llama-sidecar). Direct push to main is not authorized.
+3. If GitHub rejects on email privacy, amend the commit with the noreply email and retry: git -c user.email='134114466+scotej@users.noreply.github.com' commit --amend --no-edit --reset-author
+4. Open a PR with: gh pr create --base main --head v<phase-major>/p<N>-<slug> --title "<phase-id>: <subject>". PR body has Summary and Test plan sections. Do NOT merge — the user reviews.
+5. End-of-task summary in chat: (a) what shipped, (b) deviations from prompt or canonical-doc text and why, (c) Inherited debts — anything that surfaced and belongs to a later phase, named by phase id (e.g. "V1-P12 must wire plugins.updater config + signing key").
 
 ---
 
@@ -501,11 +650,15 @@ Concretely:
 8. Integration test under tests/integration/pair.test.ts that runs both sides in-process (each in its own trystero room with a shared mock relay if possible; if not, document the manual two-machine test in pair.test.md).
 9. Commit as "V1-P5: trystero + friend pairing".
 
-Acceptance criteria:
-- Two app instances on different machines using trystero Nostr can pair via the 12-word code in under 30 seconds.
-- The friends DB on each side has the other's identity persisted post-pairing.
-- AddFriendDialog renders both flows with appropriate states.
-- pair.test verifies the round-trip; manually tested with two real instances at least once.
+Acceptance criteria — agent-verifiable:
+- `tsc -b && vite build` and `cargo check` succeed with the new module.
+- pair.test.ts (in-process two-instance harness using two trystero rooms or a mocked relay) round-trips: host generates 12 words → joiner consumes → both sides finish with the other's persisted identity matching the input. Tampering with the signature inside the test causes verification to throw.
+- Storybook stories for AddFriendDialog cover pre-state, in-progress, success, and error.
+- friends DB schema in src/lib/db/friends.ts now persists `(ed_pubkey, x_pubkey, display_name, paired_at)` exactly as ARCHITECTURE.md §5 step 14 requires.
+
+Acceptance criteria — user-verifiable (the agent does not run these; flag them in the PR's Test plan as "needs user"):
+- Two app instances on physically different machines using trystero Nostr pair via the 12-word code in under 30 seconds.
+- After pairing, both apps show the other in their friends list.
 
 Notes:
 - Use Context7 to verify trystero's joinRoom + makeAction signatures.
@@ -519,7 +672,37 @@ Notes:
 **Prompt to paste**:
 
 ````
-[Universal preamble]
+You are working on StudyVis, a peer-to-peer desktop study app for close friends. Read these in full before making decisions:
+- /Users/scott/PycharmProjects/studyvis/PLAN.md
+- /Users/scott/PycharmProjects/studyvis/ARCHITECTURE.md
+- /Users/scott/PycharmProjects/studyvis/DESIGN-SYSTEM.md
+- /Users/scott/PycharmProjects/studyvis/CLAUDE.md
+- ~/.claude/projects/-Users-scott-PycharmProjects-studyvis/memory/MEMORY.md (carryovers from prior phases — debts that should land in this phase or be re-routed forward)
+
+These are the source of truth. If anything in this prompt conflicts with them, surface the conflict — don't silently deviate.
+
+Reasoning budget is unlimited. Use subagents freely (Explore, Plan, general-purpose). Call the advisor before committing to a non-obvious approach and once before declaring the task done.
+
+Use Context7 for library docs; prefer it to web search. Verify, don't assume — look up versions, APIs, and CLI flags before depending on them.
+
+Version policy: pinned versions in canonical docs are floors, not ceilings. Prefer current; note bumps in your end-of-task summary; never silently downgrade.
+
+File-shape policy: if a doc or this prompt prescribes a path or config shape that conflicts with the current framework idiom (e.g. modern Tauri 2 puts the builder in lib.rs not main.rs; TS 6 deprecates baseUrl), prefer the current idiom and note the deviation.
+
+Package-manager policy: use the manager indicated by the lockfile already in the repo (npm if package-lock.json, bun if bun.lockb, pnpm if pnpm-lock.yaml). Do not switch.
+
+Verification policy: prefer headless commands (tsc -b, vite build, storybook build, cargo check) — those are agent-verifiable. Avoid tauri dev, storybook dev, and cross-machine peer-to-peer tests in autonomous execution; mark those user-verifiable in the PR.
+
+Phase invariant: if this is a V1 prompt, do not create src/features/ai/, do not add AI deps to package.json or src-tauri/Cargo.toml, do not create tests/ai-eval/. Any such leak is a violation — surface and reject.
+
+Scope discipline: don't introduce features, abstractions, or polish beyond what this prompt asks. No backwards-compatibility shims. No comments unless the why is non-obvious. No new documentation files unless asked.
+
+End-of-task exit sequence (mandatory):
+1. Single commit. Stage only the files this task should change. Message format: "<phase-id>: <subject>" (e.g. "V1-P3: identity creation").
+2. Push to a feature branch on github.com/scotej/studyvis (default branch main). Branch name: v<phase-major>/p<N>-<short-slug> where <phase-major> is 1 for V1 prompts, 2 for V2, 3 for V3 (e.g. v1/p3-identity, v2/p1-llama-sidecar). Direct push to main is not authorized.
+3. If GitHub rejects on email privacy, amend the commit with the noreply email and retry: git -c user.email='134114466+scotej@users.noreply.github.com' commit --amend --no-edit --reset-author
+4. Open a PR with: gh pr create --base main --head v<phase-major>/p<N>-<slug> --title "<phase-id>: <subject>". PR body has Summary and Test plan sections. Do NOT merge — the user reviews.
+5. End-of-task summary in chat: (a) what shipped, (b) deviations from prompt or canonical-doc text and why, (c) Inherited debts — anything that surfaced and belongs to a later phase, named by phase id (e.g. "V1-P12 must wire plugins.updater config + signing key").
 
 ---
 
@@ -554,11 +737,15 @@ Concretely:
 8. Integration test under tests/integration/invite.test.ts that two in-process apps can exchange a valid encrypted invite end-to-end.
 9. Commit as "V1-P6: friends list + inbox + invite".
 
-Acceptance criteria:
-- Two paired apps on different machines see each other as "Available" within 60s of both running.
-- Clicking "Invite" on the friends list sends a NaCl-box-encrypted invite that the receiver decrypts, verifies, and surfaces as an OS notification.
-- Invites from non-friends are silently dropped; verify with a third instance.
-- Presence updates via the heartbeat topic, NOT via the inbox topic.
+Acceptance criteria — agent-verifiable:
+- `tsc -b && vite build` and `cargo check` succeed.
+- invite.test.ts (two in-process apps using mocked-relay or two trystero rooms) round-trips: app A pairs with app B, A sends an invite envelope to B's inbox, B decrypts + verifies + dispatches the accept handler (logged for V1-P6). Tampering with the ciphertext, the nonce, or the inner sig each cause B to drop. A non-friend C sending into B's inbox is dropped without decrypting.
+- Presence channel uses presence_topic, not inbox_topic — verified by reading the source.
+- Storybook stories for FriendsList (empty, populated, mixed online/offline) build.
+
+Acceptance criteria — user-verifiable:
+- Two paired apps on different physical machines see each other as "Available" within 60s of both running.
+- Clicking "Invite" causes the receiver's machine to display a tauri-plugin-notification OS notification.
 
 Notes:
 - @noble/ciphers exposes XSalsa20-Poly1305; @noble/curves exposes X25519. NaCl box is X25519 ECDH → derive shared secret → XSalsa20-Poly1305 with a random 24-byte nonce. The boxEncrypt/boxDecrypt helpers should already exist from V1-P3; reuse them. Test against a known nacl_box test vector to be safe.
@@ -573,7 +760,37 @@ Notes:
 **Prompt to paste**:
 
 ````
-[Universal preamble]
+You are working on StudyVis, a peer-to-peer desktop study app for close friends. Read these in full before making decisions:
+- /Users/scott/PycharmProjects/studyvis/PLAN.md
+- /Users/scott/PycharmProjects/studyvis/ARCHITECTURE.md
+- /Users/scott/PycharmProjects/studyvis/DESIGN-SYSTEM.md
+- /Users/scott/PycharmProjects/studyvis/CLAUDE.md
+- ~/.claude/projects/-Users-scott-PycharmProjects-studyvis/memory/MEMORY.md (carryovers from prior phases — debts that should land in this phase or be re-routed forward)
+
+These are the source of truth. If anything in this prompt conflicts with them, surface the conflict — don't silently deviate.
+
+Reasoning budget is unlimited. Use subagents freely (Explore, Plan, general-purpose). Call the advisor before committing to a non-obvious approach and once before declaring the task done.
+
+Use Context7 for library docs; prefer it to web search. Verify, don't assume — look up versions, APIs, and CLI flags before depending on them.
+
+Version policy: pinned versions in canonical docs are floors, not ceilings. Prefer current; note bumps in your end-of-task summary; never silently downgrade.
+
+File-shape policy: if a doc or this prompt prescribes a path or config shape that conflicts with the current framework idiom (e.g. modern Tauri 2 puts the builder in lib.rs not main.rs; TS 6 deprecates baseUrl), prefer the current idiom and note the deviation.
+
+Package-manager policy: use the manager indicated by the lockfile already in the repo (npm if package-lock.json, bun if bun.lockb, pnpm if pnpm-lock.yaml). Do not switch.
+
+Verification policy: prefer headless commands (tsc -b, vite build, storybook build, cargo check) — those are agent-verifiable. Avoid tauri dev, storybook dev, and cross-machine peer-to-peer tests in autonomous execution; mark those user-verifiable in the PR.
+
+Phase invariant: if this is a V1 prompt, do not create src/features/ai/, do not add AI deps to package.json or src-tauri/Cargo.toml, do not create tests/ai-eval/. Any such leak is a violation — surface and reject.
+
+Scope discipline: don't introduce features, abstractions, or polish beyond what this prompt asks. No backwards-compatibility shims. No comments unless the why is non-obvious. No new documentation files unless asked.
+
+End-of-task exit sequence (mandatory):
+1. Single commit. Stage only the files this task should change. Message format: "<phase-id>: <subject>" (e.g. "V1-P3: identity creation").
+2. Push to a feature branch on github.com/scotej/studyvis (default branch main). Branch name: v<phase-major>/p<N>-<short-slug> where <phase-major> is 1 for V1 prompts, 2 for V2, 3 for V3 (e.g. v1/p3-identity, v2/p1-llama-sidecar). Direct push to main is not authorized.
+3. If GitHub rejects on email privacy, amend the commit with the noreply email and retry: git -c user.email='134114466+scotej@users.noreply.github.com' commit --amend --no-edit --reset-author
+4. Open a PR with: gh pr create --base main --head v<phase-major>/p<N>-<slug> --title "<phase-id>: <subject>". PR body has Summary and Test plan sections. Do NOT merge — the user reviews.
+5. End-of-task summary in chat: (a) what shipped, (b) deviations from prompt or canonical-doc text and why, (c) Inherited debts — anything that surfaced and belongs to a later phase, named by phase id (e.g. "V1-P12 must wire plugins.updater config + signing key").
 
 ---
 
@@ -615,7 +832,37 @@ Notes:
 **Prompt to paste**:
 
 ````
-[Universal preamble]
+You are working on StudyVis, a peer-to-peer desktop study app for close friends. Read these in full before making decisions:
+- /Users/scott/PycharmProjects/studyvis/PLAN.md
+- /Users/scott/PycharmProjects/studyvis/ARCHITECTURE.md
+- /Users/scott/PycharmProjects/studyvis/DESIGN-SYSTEM.md
+- /Users/scott/PycharmProjects/studyvis/CLAUDE.md
+- ~/.claude/projects/-Users-scott-PycharmProjects-studyvis/memory/MEMORY.md (carryovers from prior phases — debts that should land in this phase or be re-routed forward)
+
+These are the source of truth. If anything in this prompt conflicts with them, surface the conflict — don't silently deviate.
+
+Reasoning budget is unlimited. Use subagents freely (Explore, Plan, general-purpose). Call the advisor before committing to a non-obvious approach and once before declaring the task done.
+
+Use Context7 for library docs; prefer it to web search. Verify, don't assume — look up versions, APIs, and CLI flags before depending on them.
+
+Version policy: pinned versions in canonical docs are floors, not ceilings. Prefer current; note bumps in your end-of-task summary; never silently downgrade.
+
+File-shape policy: if a doc or this prompt prescribes a path or config shape that conflicts with the current framework idiom (e.g. modern Tauri 2 puts the builder in lib.rs not main.rs; TS 6 deprecates baseUrl), prefer the current idiom and note the deviation.
+
+Package-manager policy: use the manager indicated by the lockfile already in the repo (npm if package-lock.json, bun if bun.lockb, pnpm if pnpm-lock.yaml). Do not switch.
+
+Verification policy: prefer headless commands (tsc -b, vite build, storybook build, cargo check) — those are agent-verifiable. Avoid tauri dev, storybook dev, and cross-machine peer-to-peer tests in autonomous execution; mark those user-verifiable in the PR.
+
+Phase invariant: if this is a V1 prompt, do not create src/features/ai/, do not add AI deps to package.json or src-tauri/Cargo.toml, do not create tests/ai-eval/. Any such leak is a violation — surface and reject.
+
+Scope discipline: don't introduce features, abstractions, or polish beyond what this prompt asks. No backwards-compatibility shims. No comments unless the why is non-obvious. No new documentation files unless asked.
+
+End-of-task exit sequence (mandatory):
+1. Single commit. Stage only the files this task should change. Message format: "<phase-id>: <subject>" (e.g. "V1-P3: identity creation").
+2. Push to a feature branch on github.com/scotej/studyvis (default branch main). Branch name: v<phase-major>/p<N>-<short-slug> where <phase-major> is 1 for V1 prompts, 2 for V2, 3 for V3 (e.g. v1/p3-identity, v2/p1-llama-sidecar). Direct push to main is not authorized.
+3. If GitHub rejects on email privacy, amend the commit with the noreply email and retry: git -c user.email='134114466+scotej@users.noreply.github.com' commit --amend --no-edit --reset-author
+4. Open a PR with: gh pr create --base main --head v<phase-major>/p<N>-<slug> --title "<phase-id>: <subject>". PR body has Summary and Test plan sections. Do NOT merge — the user reviews.
+5. End-of-task summary in chat: (a) what shipped, (b) deviations from prompt or canonical-doc text and why, (c) Inherited debts — anything that surfaced and belongs to a later phase, named by phase id (e.g. "V1-P12 must wire plugins.updater config + signing key").
 
 ---
 
@@ -647,21 +894,23 @@ Concretely:
    - Tear down trystero room and getUserMedia tracks on leave/end.
 10. Hard-cap mesh at 4 users (3 peers + self). If a 5th tries to join, reject the connection on the host's side and show a toast ("Session is full — max 4 friends").
 11. Storybook stories for VideoTile and VideoGrid (mocked streams using a colored canvas).
-12. Manual test: host on machine A, invite Alice on machine B and Bob on machine C. All three see each other; PTT works; leaving each in turn ends correctly.
-13. Commit as "V1-P8: session room + WebRTC mesh + PTT".
+12. Integration test under tests/integration/session.test.ts: spin up two in-process apps in the same trystero session room with mocked MediaStream tracks (canvas + AudioContext). Confirm onPeerJoin fires on both, peer-count cap at 4 rejects a 5th joiner, leave handler tears down tracks and removes the row.
+13. Commit as "V1-P8: session room + WebRTC mesh + PTT" (per preamble exit sequence).
 
-Acceptance criteria:
-- 2-, 3-, and 4-user sessions establish full-mesh WebRTC.
-- Camera + mic permissions prompted on first session join (per OS).
-- Default-muted; Cmd/Ctrl+[ unmutes while held.
-- Session ends gracefully when only one user remains; row inserted into sessions table.
-- VideoGrid layout adapts to peer count.
-- 5th joiner is rejected with a toast.
+Acceptance criteria — agent-verifiable:
+- `tsc -b && vite build`, `cargo check`, and `storybook build` succeed.
+- session.test.ts passes: two in-process apps in the same room observe onPeerJoin/Leave; mesh peer count caps at 4 (5th instance is rejected); leave handler tears down trystero room and persists a sessions row.
+- VideoGrid component layout is testable with mocked peer counts (1, 2, 3, 4); render snapshots cover each.
+
+Acceptance criteria — user-verifiable:
+- Host on machine A, invite Alice on machine B and Bob on machine C. All three see each other's actual cameras + mics; PTT (`Cmd/Ctrl+[`) works; leaving each in turn ends correctly.
+- Camera + mic permission prompts appear on first session join per OS.
+- Default-muted; PTT key unmutes only while held.
 
 Notes:
 - WebRTC mesh: trystero handles SDP/ICE for you. You add and consume streams via the room API.
 - Audio echo: rely on WebRTC's built-in AEC; recommend headphones in onboarding (V1-P10).
-- Stop after a 3-user manual test passes. Audit log + Pomodoro is V1-P9.
+- Stop after the integration test passes. The user does the cross-machine smoke test out-of-band; audit log + Pomodoro is V1-P9.
 ````
 
 ## V1-P9: Audit log panel + Pomodoro sync
@@ -669,7 +918,37 @@ Notes:
 **Prompt to paste**:
 
 ````
-[Universal preamble]
+You are working on StudyVis, a peer-to-peer desktop study app for close friends. Read these in full before making decisions:
+- /Users/scott/PycharmProjects/studyvis/PLAN.md
+- /Users/scott/PycharmProjects/studyvis/ARCHITECTURE.md
+- /Users/scott/PycharmProjects/studyvis/DESIGN-SYSTEM.md
+- /Users/scott/PycharmProjects/studyvis/CLAUDE.md
+- ~/.claude/projects/-Users-scott-PycharmProjects-studyvis/memory/MEMORY.md (carryovers from prior phases — debts that should land in this phase or be re-routed forward)
+
+These are the source of truth. If anything in this prompt conflicts with them, surface the conflict — don't silently deviate.
+
+Reasoning budget is unlimited. Use subagents freely (Explore, Plan, general-purpose). Call the advisor before committing to a non-obvious approach and once before declaring the task done.
+
+Use Context7 for library docs; prefer it to web search. Verify, don't assume — look up versions, APIs, and CLI flags before depending on them.
+
+Version policy: pinned versions in canonical docs are floors, not ceilings. Prefer current; note bumps in your end-of-task summary; never silently downgrade.
+
+File-shape policy: if a doc or this prompt prescribes a path or config shape that conflicts with the current framework idiom (e.g. modern Tauri 2 puts the builder in lib.rs not main.rs; TS 6 deprecates baseUrl), prefer the current idiom and note the deviation.
+
+Package-manager policy: use the manager indicated by the lockfile already in the repo (npm if package-lock.json, bun if bun.lockb, pnpm if pnpm-lock.yaml). Do not switch.
+
+Verification policy: prefer headless commands (tsc -b, vite build, storybook build, cargo check) — those are agent-verifiable. Avoid tauri dev, storybook dev, and cross-machine peer-to-peer tests in autonomous execution; mark those user-verifiable in the PR.
+
+Phase invariant: if this is a V1 prompt, do not create src/features/ai/, do not add AI deps to package.json or src-tauri/Cargo.toml, do not create tests/ai-eval/. Any such leak is a violation — surface and reject.
+
+Scope discipline: don't introduce features, abstractions, or polish beyond what this prompt asks. No backwards-compatibility shims. No comments unless the why is non-obvious. No new documentation files unless asked.
+
+End-of-task exit sequence (mandatory):
+1. Single commit. Stage only the files this task should change. Message format: "<phase-id>: <subject>" (e.g. "V1-P3: identity creation").
+2. Push to a feature branch on github.com/scotej/studyvis (default branch main). Branch name: v<phase-major>/p<N>-<short-slug> where <phase-major> is 1 for V1 prompts, 2 for V2, 3 for V3 (e.g. v1/p3-identity, v2/p1-llama-sidecar). Direct push to main is not authorized.
+3. If GitHub rejects on email privacy, amend the commit with the noreply email and retry: git -c user.email='134114466+scotej@users.noreply.github.com' commit --amend --no-edit --reset-author
+4. Open a PR with: gh pr create --base main --head v<phase-major>/p<N>-<slug> --title "<phase-id>: <subject>". PR body has Summary and Test plan sections. Do NOT merge — the user reviews.
+5. End-of-task summary in chat: (a) what shipped, (b) deviations from prompt or canonical-doc text and why, (c) Inherited debts — anything that surfaced and belongs to a later phase, named by phase id (e.g. "V1-P12 must wire plugins.updater config + signing key").
 
 ---
 
@@ -718,7 +997,37 @@ Notes:
 **Prompt to paste**:
 
 ````
-[Universal preamble]
+You are working on StudyVis, a peer-to-peer desktop study app for close friends. Read these in full before making decisions:
+- /Users/scott/PycharmProjects/studyvis/PLAN.md
+- /Users/scott/PycharmProjects/studyvis/ARCHITECTURE.md
+- /Users/scott/PycharmProjects/studyvis/DESIGN-SYSTEM.md
+- /Users/scott/PycharmProjects/studyvis/CLAUDE.md
+- ~/.claude/projects/-Users-scott-PycharmProjects-studyvis/memory/MEMORY.md (carryovers from prior phases — debts that should land in this phase or be re-routed forward)
+
+These are the source of truth. If anything in this prompt conflicts with them, surface the conflict — don't silently deviate.
+
+Reasoning budget is unlimited. Use subagents freely (Explore, Plan, general-purpose). Call the advisor before committing to a non-obvious approach and once before declaring the task done.
+
+Use Context7 for library docs; prefer it to web search. Verify, don't assume — look up versions, APIs, and CLI flags before depending on them.
+
+Version policy: pinned versions in canonical docs are floors, not ceilings. Prefer current; note bumps in your end-of-task summary; never silently downgrade.
+
+File-shape policy: if a doc or this prompt prescribes a path or config shape that conflicts with the current framework idiom (e.g. modern Tauri 2 puts the builder in lib.rs not main.rs; TS 6 deprecates baseUrl), prefer the current idiom and note the deviation.
+
+Package-manager policy: use the manager indicated by the lockfile already in the repo (npm if package-lock.json, bun if bun.lockb, pnpm if pnpm-lock.yaml). Do not switch.
+
+Verification policy: prefer headless commands (tsc -b, vite build, storybook build, cargo check) — those are agent-verifiable. Avoid tauri dev, storybook dev, and cross-machine peer-to-peer tests in autonomous execution; mark those user-verifiable in the PR.
+
+Phase invariant: if this is a V1 prompt, do not create src/features/ai/, do not add AI deps to package.json or src-tauri/Cargo.toml, do not create tests/ai-eval/. Any such leak is a violation — surface and reject.
+
+Scope discipline: don't introduce features, abstractions, or polish beyond what this prompt asks. No backwards-compatibility shims. No comments unless the why is non-obvious. No new documentation files unless asked.
+
+End-of-task exit sequence (mandatory):
+1. Single commit. Stage only the files this task should change. Message format: "<phase-id>: <subject>" (e.g. "V1-P3: identity creation").
+2. Push to a feature branch on github.com/scotej/studyvis (default branch main). Branch name: v<phase-major>/p<N>-<short-slug> where <phase-major> is 1 for V1 prompts, 2 for V2, 3 for V3 (e.g. v1/p3-identity, v2/p1-llama-sidecar). Direct push to main is not authorized.
+3. If GitHub rejects on email privacy, amend the commit with the noreply email and retry: git -c user.email='134114466+scotej@users.noreply.github.com' commit --amend --no-edit --reset-author
+4. Open a PR with: gh pr create --base main --head v<phase-major>/p<N>-<slug> --title "<phase-id>: <subject>". PR body has Summary and Test plan sections. Do NOT merge — the user reviews.
+5. End-of-task summary in chat: (a) what shipped, (b) deviations from prompt or canonical-doc text and why, (c) Inherited debts — anything that surfaced and belongs to a later phase, named by phase id (e.g. "V1-P12 must wire plugins.updater config + signing key").
 
 ---
 
@@ -759,7 +1068,37 @@ Notes:
 **Prompt to paste**:
 
 ````
-[Universal preamble]
+You are working on StudyVis, a peer-to-peer desktop study app for close friends. Read these in full before making decisions:
+- /Users/scott/PycharmProjects/studyvis/PLAN.md
+- /Users/scott/PycharmProjects/studyvis/ARCHITECTURE.md
+- /Users/scott/PycharmProjects/studyvis/DESIGN-SYSTEM.md
+- /Users/scott/PycharmProjects/studyvis/CLAUDE.md
+- ~/.claude/projects/-Users-scott-PycharmProjects-studyvis/memory/MEMORY.md (carryovers from prior phases — debts that should land in this phase or be re-routed forward)
+
+These are the source of truth. If anything in this prompt conflicts with them, surface the conflict — don't silently deviate.
+
+Reasoning budget is unlimited. Use subagents freely (Explore, Plan, general-purpose). Call the advisor before committing to a non-obvious approach and once before declaring the task done.
+
+Use Context7 for library docs; prefer it to web search. Verify, don't assume — look up versions, APIs, and CLI flags before depending on them.
+
+Version policy: pinned versions in canonical docs are floors, not ceilings. Prefer current; note bumps in your end-of-task summary; never silently downgrade.
+
+File-shape policy: if a doc or this prompt prescribes a path or config shape that conflicts with the current framework idiom (e.g. modern Tauri 2 puts the builder in lib.rs not main.rs; TS 6 deprecates baseUrl), prefer the current idiom and note the deviation.
+
+Package-manager policy: use the manager indicated by the lockfile already in the repo (npm if package-lock.json, bun if bun.lockb, pnpm if pnpm-lock.yaml). Do not switch.
+
+Verification policy: prefer headless commands (tsc -b, vite build, storybook build, cargo check) — those are agent-verifiable. Avoid tauri dev, storybook dev, and cross-machine peer-to-peer tests in autonomous execution; mark those user-verifiable in the PR.
+
+Phase invariant: if this is a V1 prompt, do not create src/features/ai/, do not add AI deps to package.json or src-tauri/Cargo.toml, do not create tests/ai-eval/. Any such leak is a violation — surface and reject.
+
+Scope discipline: don't introduce features, abstractions, or polish beyond what this prompt asks. No backwards-compatibility shims. No comments unless the why is non-obvious. No new documentation files unless asked.
+
+End-of-task exit sequence (mandatory):
+1. Single commit. Stage only the files this task should change. Message format: "<phase-id>: <subject>" (e.g. "V1-P3: identity creation").
+2. Push to a feature branch on github.com/scotej/studyvis (default branch main). Branch name: v<phase-major>/p<N>-<short-slug> where <phase-major> is 1 for V1 prompts, 2 for V2, 3 for V3 (e.g. v1/p3-identity, v2/p1-llama-sidecar). Direct push to main is not authorized.
+3. If GitHub rejects on email privacy, amend the commit with the noreply email and retry: git -c user.email='134114466+scotej@users.noreply.github.com' commit --amend --no-edit --reset-author
+4. Open a PR with: gh pr create --base main --head v<phase-major>/p<N>-<slug> --title "<phase-id>: <subject>". PR body has Summary and Test plan sections. Do NOT merge — the user reviews.
+5. End-of-task summary in chat: (a) what shipped, (b) deviations from prompt or canonical-doc text and why, (c) Inherited debts — anything that surfaced and belongs to a later phase, named by phase id (e.g. "V1-P12 must wire plugins.updater config + signing key").
 
 ---
 
@@ -800,45 +1139,98 @@ Notes:
 - Stop after settings is fully usable.
 ````
 
-## V1-P12: Cross-platform packaging + signed installers
+## V1-P12: Cross-platform packaging (friends-only, unsigned installers, manual update)
 
 **Prompt to paste**:
 
 ````
-[Universal preamble]
+You are working on StudyVis, a peer-to-peer desktop study app for close friends. Read these in full before making decisions:
+- /Users/scott/PycharmProjects/studyvis/PLAN.md
+- /Users/scott/PycharmProjects/studyvis/ARCHITECTURE.md
+- /Users/scott/PycharmProjects/studyvis/DESIGN-SYSTEM.md
+- /Users/scott/PycharmProjects/studyvis/CLAUDE.md
+- ~/.claude/projects/-Users-scott-PycharmProjects-studyvis/memory/MEMORY.md (carryovers from prior phases — debts that should land in this phase or be re-routed forward)
+
+These are the source of truth. If anything in this prompt conflicts with them, surface the conflict — don't silently deviate.
+
+Reasoning budget is unlimited. Use subagents freely (Explore, Plan, general-purpose). Call the advisor before committing to a non-obvious approach and once before declaring the task done.
+
+Use Context7 for library docs; prefer it to web search. Verify, don't assume — look up versions, APIs, and CLI flags before depending on them.
+
+Version policy: pinned versions in canonical docs are floors, not ceilings. Prefer current; note bumps in your end-of-task summary; never silently downgrade.
+
+File-shape policy: if a doc or this prompt prescribes a path or config shape that conflicts with the current framework idiom (e.g. modern Tauri 2 puts the builder in lib.rs not main.rs; TS 6 deprecates baseUrl), prefer the current idiom and note the deviation.
+
+Package-manager policy: use the manager indicated by the lockfile already in the repo (npm if package-lock.json, bun if bun.lockb, pnpm if pnpm-lock.yaml). Do not switch.
+
+Verification policy: prefer headless commands (tsc -b, vite build, storybook build, cargo check) — those are agent-verifiable. Avoid tauri dev, storybook dev, and cross-machine peer-to-peer tests in autonomous execution; mark those user-verifiable in the PR.
+
+Phase invariant: if this is a V1 prompt, do not create src/features/ai/, do not add AI deps to package.json or src-tauri/Cargo.toml, do not create tests/ai-eval/. Any such leak is a violation — surface and reject.
+
+Scope discipline: don't introduce features, abstractions, or polish beyond what this prompt asks. No backwards-compatibility shims. No comments unless the why is non-obvious. No new documentation files unless asked.
+
+End-of-task exit sequence (mandatory):
+1. Single commit. Stage only the files this task should change. Message format: "<phase-id>: <subject>" (e.g. "V1-P3: identity creation").
+2. Push to a feature branch on github.com/scotej/studyvis (default branch main). Branch name: v<phase-major>/p<N>-<short-slug> where <phase-major> is 1 for V1 prompts, 2 for V2, 3 for V3 (e.g. v1/p3-identity, v2/p1-llama-sidecar). Direct push to main is not authorized.
+3. If GitHub rejects on email privacy, amend the commit with the noreply email and retry: git -c user.email='134114466+scotej@users.noreply.github.com' commit --amend --no-edit --reset-author
+4. Open a PR with: gh pr create --base main --head v<phase-major>/p<N>-<slug> --title "<phase-id>: <subject>". PR body has Summary and Test plan sections. Do NOT merge — the user reviews.
+5. End-of-task summary in chat: (a) what shipped, (b) deviations from prompt or canonical-doc text and why, (c) Inherited debts — anything that surfaced and belongs to a later phase, named by phase id (e.g. "V1-P12 must wire plugins.updater config + signing key").
 
 ---
 
-YOUR TASK: V1-P12 — Signed installers for macOS, Windows, Linux.
+YOUR TASK: V1-P12 — Friends-only unsigned installers, manual update model.
+
+Scope decision (per user direction, supersedes PLAN.md §3 "signed installers" and ARCHITECTURE.md §2 "tauri-plugin-updater" wording — both canonical docs need a follow-up edit, see Notes):
+
+(Throughout this prompt, "ARCH.md" refers to ARCHITECTURE.md.)
+
+- Audience is the user's friends (small group, technically literate). We do NOT have Apple Developer ID or a Windows code-signing cert. Ship unsigned artifacts; friends accept the OS warnings.
+- No auto-updates. Friends manually download new versions from GitHub Releases. The tauri-plugin-updater dependency stays in Cargo.toml but is never registered in lib.rs (the V1-P1 cfg-gate already keeps it out of dev; V1-P12 keeps it out of release too — effectively dormant until V3).
+- Linux fork: read V0-REPORT.md. If V0 confirmed Linux WebKitGTK getDisplayMedia works, ship Linux. If V0 deferred Linux per PLAN.md §5, SKIP step 3 below.
 
 Concretely:
 
-1. macOS — produce a notarized .dmg:
-   - Apple Developer ID Application certificate (provided by user as env vars APPLE_ID, APPLE_PASSWORD, APPLE_TEAM_ID, signing identity).
-   - Use Tauri's macOS sign + notarize hooks. Document the env-var setup at the top of /Users/scott/PycharmProjects/studyvis/RELEASING.md.
-   - Hardened runtime enabled.
-   - Universal binary (arm64 + x64) where feasible.
-2. Windows — produce a code-signed .msi:
-   - Use Tauri's MSIX/MSI bundler.
-   - Code-signing certificate (user provides; for V1 testing, accept self-signed and document the SmartScreen warning).
-3. Linux — produce .deb, .rpm, .AppImage. AppImage signing optional.
-4. Add a GitHub Actions CI workflow at .github/workflows/release.yml that on a tag like v1.0.0 builds all three platforms and uploads to GitHub Releases. Use ARCHITECTURE.md §2 plugin list to ensure tauri-plugin-updater is wired to look at GitHub Releases.
-5. Updater config: latest.json published per release. tauri-plugin-updater fetches and prompts the user to install.
-6. Smoke test all three installers on physical/VM machines for each OS the user has access to. Document any platform-specific quirks in V1-RELEASE-NOTES.md.
-7. Wire an "About StudyVis" dialog in Settings showing version, license (currently: all rights reserved per PLAN.md §2 — display as "© <year> Scott — all rights reserved"), and an "Open release notes" link.
-8. Commit as "V1-P12: packaging + installers".
-9. Tag the commit v1.0.0 and verify the CI release flow produces all three artifacts.
+1. macOS — produce a `.dmg` with Tauri's default ad-hoc signing:
+   - `cargo tauri build` produces `src-tauri/target/release/bundle/dmg/*.dmg`. No Developer ID, no notarization.
+   - First-run UX: friends right-click the `.app` → Open to bypass Gatekeeper. Document this in INSTALL.md.
+   - Universal binary (arm64 + x64) where feasible — Tauri's universal bundle target handles this.
+2. Windows — produce an unsigned `.msi`:
+   - Tauri's WiX bundler produces `src-tauri/target/release/bundle/msi/*.msi`.
+   - First-run UX: SmartScreen will warn "Windows protected your PC" → "More info" → "Run anyway". Document in INSTALL.md.
+3. Linux (only if V0 authorized it) — produce an `.AppImage`:
+   - Best UX for unsigned distribution: no install, no root, just `chmod +x` and run.
+   - Skip .deb / .rpm — they require sudo and add no value for a friends-only group.
+4. Updater plugin: leave `tauri-plugin-updater` in Cargo.toml (per ARCH.md §2) but do NOT register it in lib.rs. Remove the `#[cfg(not(debug_assertions))]`-gated block from V1-P1; replace with a comment: "// updater registration deferred to V3 — friends-only V1 ships without auto-update; see V1-P12 scope decision". This means V1 release builds no longer panic at startup, since the plugin isn't registered at all.
+5. CI release workflow at `.github/workflows/release.yml`: on push of a tag matching `v*.*.*`, build the three artifacts (or two if Linux deferred), upload to GitHub Releases. Use `softprops/action-gh-release` (or current equivalent — verify via Context7) to attach artifacts. Only secret needed is the auto-provided `GITHUB_TOKEN`.
+6. Write `INSTALL.md` at the repo root explaining how each OS's friends install:
+   - macOS: download `.dmg`, drag to Applications, right-click the icon in Applications → Open the first time, click "Open" in the warning dialog.
+   - Windows: download `.msi`, double-click; SmartScreen → "More info" → "Run anyway".
+   - Linux: download `.AppImage`, `chmod +x StudyVis-*.AppImage`, double-click or run from terminal.
+   - Update model: download a new release from GitHub Releases when a new version drops. No auto-update.
+   - This file IS allowed despite the "no extra docs" rule because the prompt explicitly asks for it.
+7. Wire an "About StudyVis" dialog in Settings showing version (from package.json/Cargo.toml), license string ("© <year> Scott — all rights reserved" per PLAN.md), and a link to the GitHub Releases page (so friends know where to grab updates).
+8. Smoke test the produced installers on physical/VM machines the user has access to. Briefly note any platform-specific quirks in `INSTALL.md`.
+9. Tag the resulting commit v1.0.0 once acceptance criteria pass; verify the release workflow attaches artifacts to the GitHub Release.
 
-Acceptance criteria:
-- Building locally produces a working .dmg / .msi / .deb (et al) per OS.
-- macOS .dmg passes Gatekeeper without quarantine warning (notarized).
-- Windows .msi installs cleanly with at most a self-signed SmartScreen warning (documented).
-- Updater config in place even if no second release exists yet.
+Acceptance criteria — agent-verifiable:
+- `cargo tauri build` succeeds locally on the host OS and produces the expected bundle in `src-tauri/target/release/bundle/`.
+- `cargo check` passes after the V1-P1 updater cfg-gate is replaced (no plugin registration; no crash on startup either).
+- `.github/workflows/release.yml` exists and lints (`actionlint` if installed; otherwise YAML parses).
+- INSTALL.md exists and covers all three (or two) OSes.
+- About dialog component is wired and renders version + license string.
+
+Acceptance criteria — user-verifiable:
+- Friend on macOS can right-click → Open the `.dmg`-installed `.app` and the app launches.
+- Friend on Windows can SmartScreen-bypass the `.msi` and the app installs + launches.
+- (If Linux) Friend can `chmod +x` the AppImage and it launches.
+- Tag push triggers the release workflow; resulting GitHub Release page shows artifacts.
 
 Notes:
-- For codesigning credentials, the user provides via their CI secrets — never bake them in the repo.
+- This prompt diverges from PLAN.md §3 ("ships with signed installers") and ARCHITECTURE.md §2 (which lists `tauri-plugin-updater` as wired). Both canonical docs need a follow-up edit to match. In your end-of-task summary, surface this as an "Inherited debt" so the user can update the docs in a separate PR.
 - License: PLAN.md §6 says no license yet (all rights reserved). Don't add a LICENSE file with an OSS license.
-- Stop after one full release of v1.0.0 builds locally.
+- The macOS codesign carryover from V0 (broken default codesign) is now moot — we're not signing. After this prompt, the codesign carryover should be removed from MEMORY.md/v0_findings.md (its debt has been retired by scope decision, not by being paid).
+- The V1-P12 updater carryover in `project_v1_p12_updater_config.md` is also moot for V1; rewrite the memory entry to "deferred to V3 if/when signing creds become available" rather than deleting it.
+- Stop after one full release of v1.0.0 builds locally and the GitHub Release shows artifacts.
 ````
 
 ---
@@ -852,7 +1244,37 @@ V2 layers focus detection, scoring, AI dialogue, and post-session reports on top
 **Prompt to paste**:
 
 ````
-[Universal preamble]
+You are working on StudyVis, a peer-to-peer desktop study app for close friends. Read these in full before making decisions:
+- /Users/scott/PycharmProjects/studyvis/PLAN.md
+- /Users/scott/PycharmProjects/studyvis/ARCHITECTURE.md
+- /Users/scott/PycharmProjects/studyvis/DESIGN-SYSTEM.md
+- /Users/scott/PycharmProjects/studyvis/CLAUDE.md
+- ~/.claude/projects/-Users-scott-PycharmProjects-studyvis/memory/MEMORY.md (carryovers from prior phases — debts that should land in this phase or be re-routed forward)
+
+These are the source of truth. If anything in this prompt conflicts with them, surface the conflict — don't silently deviate.
+
+Reasoning budget is unlimited. Use subagents freely (Explore, Plan, general-purpose). Call the advisor before committing to a non-obvious approach and once before declaring the task done.
+
+Use Context7 for library docs; prefer it to web search. Verify, don't assume — look up versions, APIs, and CLI flags before depending on them.
+
+Version policy: pinned versions in canonical docs are floors, not ceilings. Prefer current; note bumps in your end-of-task summary; never silently downgrade.
+
+File-shape policy: if a doc or this prompt prescribes a path or config shape that conflicts with the current framework idiom (e.g. modern Tauri 2 puts the builder in lib.rs not main.rs; TS 6 deprecates baseUrl), prefer the current idiom and note the deviation.
+
+Package-manager policy: use the manager indicated by the lockfile already in the repo (npm if package-lock.json, bun if bun.lockb, pnpm if pnpm-lock.yaml). Do not switch.
+
+Verification policy: prefer headless commands (tsc -b, vite build, storybook build, cargo check) — those are agent-verifiable. Avoid tauri dev, storybook dev, and cross-machine peer-to-peer tests in autonomous execution; mark those user-verifiable in the PR.
+
+Phase invariant: if this is a V1 prompt, do not create src/features/ai/, do not add AI deps to package.json or src-tauri/Cargo.toml, do not create tests/ai-eval/. Any such leak is a violation — surface and reject.
+
+Scope discipline: don't introduce features, abstractions, or polish beyond what this prompt asks. No backwards-compatibility shims. No comments unless the why is non-obvious. No new documentation files unless asked.
+
+End-of-task exit sequence (mandatory):
+1. Single commit. Stage only the files this task should change. Message format: "<phase-id>: <subject>" (e.g. "V1-P3: identity creation").
+2. Push to a feature branch on github.com/scotej/studyvis (default branch main). Branch name: v<phase-major>/p<N>-<short-slug> where <phase-major> is 1 for V1 prompts, 2 for V2, 3 for V3 (e.g. v1/p3-identity, v2/p1-llama-sidecar). Direct push to main is not authorized.
+3. If GitHub rejects on email privacy, amend the commit with the noreply email and retry: git -c user.email='134114466+scotej@users.noreply.github.com' commit --amend --no-edit --reset-author
+4. Open a PR with: gh pr create --base main --head v<phase-major>/p<N>-<slug> --title "<phase-id>: <subject>". PR body has Summary and Test plan sections. Do NOT merge — the user reviews.
+5. End-of-task summary in chat: (a) what shipped, (b) deviations from prompt or canonical-doc text and why, (c) Inherited debts — anything that surfaced and belongs to a later phase, named by phase id (e.g. "V1-P12 must wire plugins.updater config + signing key").
 
 ---
 
@@ -892,7 +1314,37 @@ Notes:
 **Prompt to paste**:
 
 ````
-[Universal preamble]
+You are working on StudyVis, a peer-to-peer desktop study app for close friends. Read these in full before making decisions:
+- /Users/scott/PycharmProjects/studyvis/PLAN.md
+- /Users/scott/PycharmProjects/studyvis/ARCHITECTURE.md
+- /Users/scott/PycharmProjects/studyvis/DESIGN-SYSTEM.md
+- /Users/scott/PycharmProjects/studyvis/CLAUDE.md
+- ~/.claude/projects/-Users-scott-PycharmProjects-studyvis/memory/MEMORY.md (carryovers from prior phases — debts that should land in this phase or be re-routed forward)
+
+These are the source of truth. If anything in this prompt conflicts with them, surface the conflict — don't silently deviate.
+
+Reasoning budget is unlimited. Use subagents freely (Explore, Plan, general-purpose). Call the advisor before committing to a non-obvious approach and once before declaring the task done.
+
+Use Context7 for library docs; prefer it to web search. Verify, don't assume — look up versions, APIs, and CLI flags before depending on them.
+
+Version policy: pinned versions in canonical docs are floors, not ceilings. Prefer current; note bumps in your end-of-task summary; never silently downgrade.
+
+File-shape policy: if a doc or this prompt prescribes a path or config shape that conflicts with the current framework idiom (e.g. modern Tauri 2 puts the builder in lib.rs not main.rs; TS 6 deprecates baseUrl), prefer the current idiom and note the deviation.
+
+Package-manager policy: use the manager indicated by the lockfile already in the repo (npm if package-lock.json, bun if bun.lockb, pnpm if pnpm-lock.yaml). Do not switch.
+
+Verification policy: prefer headless commands (tsc -b, vite build, storybook build, cargo check) — those are agent-verifiable. Avoid tauri dev, storybook dev, and cross-machine peer-to-peer tests in autonomous execution; mark those user-verifiable in the PR.
+
+Phase invariant: if this is a V1 prompt, do not create src/features/ai/, do not add AI deps to package.json or src-tauri/Cargo.toml, do not create tests/ai-eval/. Any such leak is a violation — surface and reject.
+
+Scope discipline: don't introduce features, abstractions, or polish beyond what this prompt asks. No backwards-compatibility shims. No comments unless the why is non-obvious. No new documentation files unless asked.
+
+End-of-task exit sequence (mandatory):
+1. Single commit. Stage only the files this task should change. Message format: "<phase-id>: <subject>" (e.g. "V1-P3: identity creation").
+2. Push to a feature branch on github.com/scotej/studyvis (default branch main). Branch name: v<phase-major>/p<N>-<short-slug> where <phase-major> is 1 for V1 prompts, 2 for V2, 3 for V3 (e.g. v1/p3-identity, v2/p1-llama-sidecar). Direct push to main is not authorized.
+3. If GitHub rejects on email privacy, amend the commit with the noreply email and retry: git -c user.email='134114466+scotej@users.noreply.github.com' commit --amend --no-edit --reset-author
+4. Open a PR with: gh pr create --base main --head v<phase-major>/p<N>-<slug> --title "<phase-id>: <subject>". PR body has Summary and Test plan sections. Do NOT merge — the user reviews.
+5. End-of-task summary in chat: (a) what shipped, (b) deviations from prompt or canonical-doc text and why, (c) Inherited debts — anything that surfaced and belongs to a later phase, named by phase id (e.g. "V1-P12 must wire plugins.updater config + signing key").
 
 ---
 
@@ -943,7 +1395,37 @@ Notes:
 **Prompt to paste**:
 
 ````
-[Universal preamble]
+You are working on StudyVis, a peer-to-peer desktop study app for close friends. Read these in full before making decisions:
+- /Users/scott/PycharmProjects/studyvis/PLAN.md
+- /Users/scott/PycharmProjects/studyvis/ARCHITECTURE.md
+- /Users/scott/PycharmProjects/studyvis/DESIGN-SYSTEM.md
+- /Users/scott/PycharmProjects/studyvis/CLAUDE.md
+- ~/.claude/projects/-Users-scott-PycharmProjects-studyvis/memory/MEMORY.md (carryovers from prior phases — debts that should land in this phase or be re-routed forward)
+
+These are the source of truth. If anything in this prompt conflicts with them, surface the conflict — don't silently deviate.
+
+Reasoning budget is unlimited. Use subagents freely (Explore, Plan, general-purpose). Call the advisor before committing to a non-obvious approach and once before declaring the task done.
+
+Use Context7 for library docs; prefer it to web search. Verify, don't assume — look up versions, APIs, and CLI flags before depending on them.
+
+Version policy: pinned versions in canonical docs are floors, not ceilings. Prefer current; note bumps in your end-of-task summary; never silently downgrade.
+
+File-shape policy: if a doc or this prompt prescribes a path or config shape that conflicts with the current framework idiom (e.g. modern Tauri 2 puts the builder in lib.rs not main.rs; TS 6 deprecates baseUrl), prefer the current idiom and note the deviation.
+
+Package-manager policy: use the manager indicated by the lockfile already in the repo (npm if package-lock.json, bun if bun.lockb, pnpm if pnpm-lock.yaml). Do not switch.
+
+Verification policy: prefer headless commands (tsc -b, vite build, storybook build, cargo check) — those are agent-verifiable. Avoid tauri dev, storybook dev, and cross-machine peer-to-peer tests in autonomous execution; mark those user-verifiable in the PR.
+
+Phase invariant: if this is a V1 prompt, do not create src/features/ai/, do not add AI deps to package.json or src-tauri/Cargo.toml, do not create tests/ai-eval/. Any such leak is a violation — surface and reject.
+
+Scope discipline: don't introduce features, abstractions, or polish beyond what this prompt asks. No backwards-compatibility shims. No comments unless the why is non-obvious. No new documentation files unless asked.
+
+End-of-task exit sequence (mandatory):
+1. Single commit. Stage only the files this task should change. Message format: "<phase-id>: <subject>" (e.g. "V1-P3: identity creation").
+2. Push to a feature branch on github.com/scotej/studyvis (default branch main). Branch name: v<phase-major>/p<N>-<short-slug> where <phase-major> is 1 for V1 prompts, 2 for V2, 3 for V3 (e.g. v1/p3-identity, v2/p1-llama-sidecar). Direct push to main is not authorized.
+3. If GitHub rejects on email privacy, amend the commit with the noreply email and retry: git -c user.email='134114466+scotej@users.noreply.github.com' commit --amend --no-edit --reset-author
+4. Open a PR with: gh pr create --base main --head v<phase-major>/p<N>-<slug> --title "<phase-id>: <subject>". PR body has Summary and Test plan sections. Do NOT merge — the user reviews.
+5. End-of-task summary in chat: (a) what shipped, (b) deviations from prompt or canonical-doc text and why, (c) Inherited debts — anything that surfaced and belongs to a later phase, named by phase id (e.g. "V1-P12 must wire plugins.updater config + signing key").
 
 ---
 
@@ -985,7 +1467,37 @@ Notes:
 **Prompt to paste**:
 
 ````
-[Universal preamble]
+You are working on StudyVis, a peer-to-peer desktop study app for close friends. Read these in full before making decisions:
+- /Users/scott/PycharmProjects/studyvis/PLAN.md
+- /Users/scott/PycharmProjects/studyvis/ARCHITECTURE.md
+- /Users/scott/PycharmProjects/studyvis/DESIGN-SYSTEM.md
+- /Users/scott/PycharmProjects/studyvis/CLAUDE.md
+- ~/.claude/projects/-Users-scott-PycharmProjects-studyvis/memory/MEMORY.md (carryovers from prior phases — debts that should land in this phase or be re-routed forward)
+
+These are the source of truth. If anything in this prompt conflicts with them, surface the conflict — don't silently deviate.
+
+Reasoning budget is unlimited. Use subagents freely (Explore, Plan, general-purpose). Call the advisor before committing to a non-obvious approach and once before declaring the task done.
+
+Use Context7 for library docs; prefer it to web search. Verify, don't assume — look up versions, APIs, and CLI flags before depending on them.
+
+Version policy: pinned versions in canonical docs are floors, not ceilings. Prefer current; note bumps in your end-of-task summary; never silently downgrade.
+
+File-shape policy: if a doc or this prompt prescribes a path or config shape that conflicts with the current framework idiom (e.g. modern Tauri 2 puts the builder in lib.rs not main.rs; TS 6 deprecates baseUrl), prefer the current idiom and note the deviation.
+
+Package-manager policy: use the manager indicated by the lockfile already in the repo (npm if package-lock.json, bun if bun.lockb, pnpm if pnpm-lock.yaml). Do not switch.
+
+Verification policy: prefer headless commands (tsc -b, vite build, storybook build, cargo check) — those are agent-verifiable. Avoid tauri dev, storybook dev, and cross-machine peer-to-peer tests in autonomous execution; mark those user-verifiable in the PR.
+
+Phase invariant: if this is a V1 prompt, do not create src/features/ai/, do not add AI deps to package.json or src-tauri/Cargo.toml, do not create tests/ai-eval/. Any such leak is a violation — surface and reject.
+
+Scope discipline: don't introduce features, abstractions, or polish beyond what this prompt asks. No backwards-compatibility shims. No comments unless the why is non-obvious. No new documentation files unless asked.
+
+End-of-task exit sequence (mandatory):
+1. Single commit. Stage only the files this task should change. Message format: "<phase-id>: <subject>" (e.g. "V1-P3: identity creation").
+2. Push to a feature branch on github.com/scotej/studyvis (default branch main). Branch name: v<phase-major>/p<N>-<short-slug> where <phase-major> is 1 for V1 prompts, 2 for V2, 3 for V3 (e.g. v1/p3-identity, v2/p1-llama-sidecar). Direct push to main is not authorized.
+3. If GitHub rejects on email privacy, amend the commit with the noreply email and retry: git -c user.email='134114466+scotej@users.noreply.github.com' commit --amend --no-edit --reset-author
+4. Open a PR with: gh pr create --base main --head v<phase-major>/p<N>-<slug> --title "<phase-id>: <subject>". PR body has Summary and Test plan sections. Do NOT merge — the user reviews.
+5. End-of-task summary in chat: (a) what shipped, (b) deviations from prompt or canonical-doc text and why, (c) Inherited debts — anything that surfaced and belongs to a later phase, named by phase id (e.g. "V1-P12 must wire plugins.updater config + signing key").
 
 ---
 
@@ -1024,7 +1536,37 @@ Notes:
 **Prompt to paste**:
 
 ````
-[Universal preamble]
+You are working on StudyVis, a peer-to-peer desktop study app for close friends. Read these in full before making decisions:
+- /Users/scott/PycharmProjects/studyvis/PLAN.md
+- /Users/scott/PycharmProjects/studyvis/ARCHITECTURE.md
+- /Users/scott/PycharmProjects/studyvis/DESIGN-SYSTEM.md
+- /Users/scott/PycharmProjects/studyvis/CLAUDE.md
+- ~/.claude/projects/-Users-scott-PycharmProjects-studyvis/memory/MEMORY.md (carryovers from prior phases — debts that should land in this phase or be re-routed forward)
+
+These are the source of truth. If anything in this prompt conflicts with them, surface the conflict — don't silently deviate.
+
+Reasoning budget is unlimited. Use subagents freely (Explore, Plan, general-purpose). Call the advisor before committing to a non-obvious approach and once before declaring the task done.
+
+Use Context7 for library docs; prefer it to web search. Verify, don't assume — look up versions, APIs, and CLI flags before depending on them.
+
+Version policy: pinned versions in canonical docs are floors, not ceilings. Prefer current; note bumps in your end-of-task summary; never silently downgrade.
+
+File-shape policy: if a doc or this prompt prescribes a path or config shape that conflicts with the current framework idiom (e.g. modern Tauri 2 puts the builder in lib.rs not main.rs; TS 6 deprecates baseUrl), prefer the current idiom and note the deviation.
+
+Package-manager policy: use the manager indicated by the lockfile already in the repo (npm if package-lock.json, bun if bun.lockb, pnpm if pnpm-lock.yaml). Do not switch.
+
+Verification policy: prefer headless commands (tsc -b, vite build, storybook build, cargo check) — those are agent-verifiable. Avoid tauri dev, storybook dev, and cross-machine peer-to-peer tests in autonomous execution; mark those user-verifiable in the PR.
+
+Phase invariant: if this is a V1 prompt, do not create src/features/ai/, do not add AI deps to package.json or src-tauri/Cargo.toml, do not create tests/ai-eval/. Any such leak is a violation — surface and reject.
+
+Scope discipline: don't introduce features, abstractions, or polish beyond what this prompt asks. No backwards-compatibility shims. No comments unless the why is non-obvious. No new documentation files unless asked.
+
+End-of-task exit sequence (mandatory):
+1. Single commit. Stage only the files this task should change. Message format: "<phase-id>: <subject>" (e.g. "V1-P3: identity creation").
+2. Push to a feature branch on github.com/scotej/studyvis (default branch main). Branch name: v<phase-major>/p<N>-<short-slug> where <phase-major> is 1 for V1 prompts, 2 for V2, 3 for V3 (e.g. v1/p3-identity, v2/p1-llama-sidecar). Direct push to main is not authorized.
+3. If GitHub rejects on email privacy, amend the commit with the noreply email and retry: git -c user.email='134114466+scotej@users.noreply.github.com' commit --amend --no-edit --reset-author
+4. Open a PR with: gh pr create --base main --head v<phase-major>/p<N>-<slug> --title "<phase-id>: <subject>". PR body has Summary and Test plan sections. Do NOT merge — the user reviews.
+5. End-of-task summary in chat: (a) what shipped, (b) deviations from prompt or canonical-doc text and why, (c) Inherited debts — anything that surfaced and belongs to a later phase, named by phase id (e.g. "V1-P12 must wire plugins.updater config + signing key").
 
 ---
 
@@ -1067,7 +1609,37 @@ Notes:
 **Prompt to paste**:
 
 ````
-[Universal preamble]
+You are working on StudyVis, a peer-to-peer desktop study app for close friends. Read these in full before making decisions:
+- /Users/scott/PycharmProjects/studyvis/PLAN.md
+- /Users/scott/PycharmProjects/studyvis/ARCHITECTURE.md
+- /Users/scott/PycharmProjects/studyvis/DESIGN-SYSTEM.md
+- /Users/scott/PycharmProjects/studyvis/CLAUDE.md
+- ~/.claude/projects/-Users-scott-PycharmProjects-studyvis/memory/MEMORY.md (carryovers from prior phases — debts that should land in this phase or be re-routed forward)
+
+These are the source of truth. If anything in this prompt conflicts with them, surface the conflict — don't silently deviate.
+
+Reasoning budget is unlimited. Use subagents freely (Explore, Plan, general-purpose). Call the advisor before committing to a non-obvious approach and once before declaring the task done.
+
+Use Context7 for library docs; prefer it to web search. Verify, don't assume — look up versions, APIs, and CLI flags before depending on them.
+
+Version policy: pinned versions in canonical docs are floors, not ceilings. Prefer current; note bumps in your end-of-task summary; never silently downgrade.
+
+File-shape policy: if a doc or this prompt prescribes a path or config shape that conflicts with the current framework idiom (e.g. modern Tauri 2 puts the builder in lib.rs not main.rs; TS 6 deprecates baseUrl), prefer the current idiom and note the deviation.
+
+Package-manager policy: use the manager indicated by the lockfile already in the repo (npm if package-lock.json, bun if bun.lockb, pnpm if pnpm-lock.yaml). Do not switch.
+
+Verification policy: prefer headless commands (tsc -b, vite build, storybook build, cargo check) — those are agent-verifiable. Avoid tauri dev, storybook dev, and cross-machine peer-to-peer tests in autonomous execution; mark those user-verifiable in the PR.
+
+Phase invariant: if this is a V1 prompt, do not create src/features/ai/, do not add AI deps to package.json or src-tauri/Cargo.toml, do not create tests/ai-eval/. Any such leak is a violation — surface and reject.
+
+Scope discipline: don't introduce features, abstractions, or polish beyond what this prompt asks. No backwards-compatibility shims. No comments unless the why is non-obvious. No new documentation files unless asked.
+
+End-of-task exit sequence (mandatory):
+1. Single commit. Stage only the files this task should change. Message format: "<phase-id>: <subject>" (e.g. "V1-P3: identity creation").
+2. Push to a feature branch on github.com/scotej/studyvis (default branch main). Branch name: v<phase-major>/p<N>-<short-slug> where <phase-major> is 1 for V1 prompts, 2 for V2, 3 for V3 (e.g. v1/p3-identity, v2/p1-llama-sidecar). Direct push to main is not authorized.
+3. If GitHub rejects on email privacy, amend the commit with the noreply email and retry: git -c user.email='134114466+scotej@users.noreply.github.com' commit --amend --no-edit --reset-author
+4. Open a PR with: gh pr create --base main --head v<phase-major>/p<N>-<slug> --title "<phase-id>: <subject>". PR body has Summary and Test plan sections. Do NOT merge — the user reviews.
+5. End-of-task summary in chat: (a) what shipped, (b) deviations from prompt or canonical-doc text and why, (c) Inherited debts — anything that surfaced and belongs to a later phase, named by phase id (e.g. "V1-P12 must wire plugins.updater config + signing key").
 
 ---
 
@@ -1107,7 +1679,37 @@ Notes:
 **Prompt to paste**:
 
 ````
-[Universal preamble]
+You are working on StudyVis, a peer-to-peer desktop study app for close friends. Read these in full before making decisions:
+- /Users/scott/PycharmProjects/studyvis/PLAN.md
+- /Users/scott/PycharmProjects/studyvis/ARCHITECTURE.md
+- /Users/scott/PycharmProjects/studyvis/DESIGN-SYSTEM.md
+- /Users/scott/PycharmProjects/studyvis/CLAUDE.md
+- ~/.claude/projects/-Users-scott-PycharmProjects-studyvis/memory/MEMORY.md (carryovers from prior phases — debts that should land in this phase or be re-routed forward)
+
+These are the source of truth. If anything in this prompt conflicts with them, surface the conflict — don't silently deviate.
+
+Reasoning budget is unlimited. Use subagents freely (Explore, Plan, general-purpose). Call the advisor before committing to a non-obvious approach and once before declaring the task done.
+
+Use Context7 for library docs; prefer it to web search. Verify, don't assume — look up versions, APIs, and CLI flags before depending on them.
+
+Version policy: pinned versions in canonical docs are floors, not ceilings. Prefer current; note bumps in your end-of-task summary; never silently downgrade.
+
+File-shape policy: if a doc or this prompt prescribes a path or config shape that conflicts with the current framework idiom (e.g. modern Tauri 2 puts the builder in lib.rs not main.rs; TS 6 deprecates baseUrl), prefer the current idiom and note the deviation.
+
+Package-manager policy: use the manager indicated by the lockfile already in the repo (npm if package-lock.json, bun if bun.lockb, pnpm if pnpm-lock.yaml). Do not switch.
+
+Verification policy: prefer headless commands (tsc -b, vite build, storybook build, cargo check) — those are agent-verifiable. Avoid tauri dev, storybook dev, and cross-machine peer-to-peer tests in autonomous execution; mark those user-verifiable in the PR.
+
+Phase invariant: if this is a V1 prompt, do not create src/features/ai/, do not add AI deps to package.json or src-tauri/Cargo.toml, do not create tests/ai-eval/. Any such leak is a violation — surface and reject.
+
+Scope discipline: don't introduce features, abstractions, or polish beyond what this prompt asks. No backwards-compatibility shims. No comments unless the why is non-obvious. No new documentation files unless asked.
+
+End-of-task exit sequence (mandatory):
+1. Single commit. Stage only the files this task should change. Message format: "<phase-id>: <subject>" (e.g. "V1-P3: identity creation").
+2. Push to a feature branch on github.com/scotej/studyvis (default branch main). Branch name: v<phase-major>/p<N>-<short-slug> where <phase-major> is 1 for V1 prompts, 2 for V2, 3 for V3 (e.g. v1/p3-identity, v2/p1-llama-sidecar). Direct push to main is not authorized.
+3. If GitHub rejects on email privacy, amend the commit with the noreply email and retry: git -c user.email='134114466+scotej@users.noreply.github.com' commit --amend --no-edit --reset-author
+4. Open a PR with: gh pr create --base main --head v<phase-major>/p<N>-<slug> --title "<phase-id>: <subject>". PR body has Summary and Test plan sections. Do NOT merge — the user reviews.
+5. End-of-task summary in chat: (a) what shipped, (b) deviations from prompt or canonical-doc text and why, (c) Inherited debts — anything that surfaced and belongs to a later phase, named by phase id (e.g. "V1-P12 must wire plugins.updater config + signing key").
 
 ---
 
@@ -1158,7 +1760,37 @@ Notes:
 **Prompt to paste**:
 
 ````
-[Universal preamble]
+You are working on StudyVis, a peer-to-peer desktop study app for close friends. Read these in full before making decisions:
+- /Users/scott/PycharmProjects/studyvis/PLAN.md
+- /Users/scott/PycharmProjects/studyvis/ARCHITECTURE.md
+- /Users/scott/PycharmProjects/studyvis/DESIGN-SYSTEM.md
+- /Users/scott/PycharmProjects/studyvis/CLAUDE.md
+- ~/.claude/projects/-Users-scott-PycharmProjects-studyvis/memory/MEMORY.md (carryovers from prior phases — debts that should land in this phase or be re-routed forward)
+
+These are the source of truth. If anything in this prompt conflicts with them, surface the conflict — don't silently deviate.
+
+Reasoning budget is unlimited. Use subagents freely (Explore, Plan, general-purpose). Call the advisor before committing to a non-obvious approach and once before declaring the task done.
+
+Use Context7 for library docs; prefer it to web search. Verify, don't assume — look up versions, APIs, and CLI flags before depending on them.
+
+Version policy: pinned versions in canonical docs are floors, not ceilings. Prefer current; note bumps in your end-of-task summary; never silently downgrade.
+
+File-shape policy: if a doc or this prompt prescribes a path or config shape that conflicts with the current framework idiom (e.g. modern Tauri 2 puts the builder in lib.rs not main.rs; TS 6 deprecates baseUrl), prefer the current idiom and note the deviation.
+
+Package-manager policy: use the manager indicated by the lockfile already in the repo (npm if package-lock.json, bun if bun.lockb, pnpm if pnpm-lock.yaml). Do not switch.
+
+Verification policy: prefer headless commands (tsc -b, vite build, storybook build, cargo check) — those are agent-verifiable. Avoid tauri dev, storybook dev, and cross-machine peer-to-peer tests in autonomous execution; mark those user-verifiable in the PR.
+
+Phase invariant: if this is a V1 prompt, do not create src/features/ai/, do not add AI deps to package.json or src-tauri/Cargo.toml, do not create tests/ai-eval/. Any such leak is a violation — surface and reject.
+
+Scope discipline: don't introduce features, abstractions, or polish beyond what this prompt asks. No backwards-compatibility shims. No comments unless the why is non-obvious. No new documentation files unless asked.
+
+End-of-task exit sequence (mandatory):
+1. Single commit. Stage only the files this task should change. Message format: "<phase-id>: <subject>" (e.g. "V1-P3: identity creation").
+2. Push to a feature branch on github.com/scotej/studyvis (default branch main). Branch name: v<phase-major>/p<N>-<short-slug> where <phase-major> is 1 for V1 prompts, 2 for V2, 3 for V3 (e.g. v1/p3-identity, v2/p1-llama-sidecar). Direct push to main is not authorized.
+3. If GitHub rejects on email privacy, amend the commit with the noreply email and retry: git -c user.email='134114466+scotej@users.noreply.github.com' commit --amend --no-edit --reset-author
+4. Open a PR with: gh pr create --base main --head v<phase-major>/p<N>-<slug> --title "<phase-id>: <subject>". PR body has Summary and Test plan sections. Do NOT merge — the user reviews.
+5. End-of-task summary in chat: (a) what shipped, (b) deviations from prompt or canonical-doc text and why, (c) Inherited debts — anything that surfaced and belongs to a later phase, named by phase id (e.g. "V1-P12 must wire plugins.updater config + signing key").
 
 ---
 
@@ -1199,7 +1831,37 @@ Notes:
 **Prompt to paste**:
 
 ````
-[Universal preamble]
+You are working on StudyVis, a peer-to-peer desktop study app for close friends. Read these in full before making decisions:
+- /Users/scott/PycharmProjects/studyvis/PLAN.md
+- /Users/scott/PycharmProjects/studyvis/ARCHITECTURE.md
+- /Users/scott/PycharmProjects/studyvis/DESIGN-SYSTEM.md
+- /Users/scott/PycharmProjects/studyvis/CLAUDE.md
+- ~/.claude/projects/-Users-scott-PycharmProjects-studyvis/memory/MEMORY.md (carryovers from prior phases — debts that should land in this phase or be re-routed forward)
+
+These are the source of truth. If anything in this prompt conflicts with them, surface the conflict — don't silently deviate.
+
+Reasoning budget is unlimited. Use subagents freely (Explore, Plan, general-purpose). Call the advisor before committing to a non-obvious approach and once before declaring the task done.
+
+Use Context7 for library docs; prefer it to web search. Verify, don't assume — look up versions, APIs, and CLI flags before depending on them.
+
+Version policy: pinned versions in canonical docs are floors, not ceilings. Prefer current; note bumps in your end-of-task summary; never silently downgrade.
+
+File-shape policy: if a doc or this prompt prescribes a path or config shape that conflicts with the current framework idiom (e.g. modern Tauri 2 puts the builder in lib.rs not main.rs; TS 6 deprecates baseUrl), prefer the current idiom and note the deviation.
+
+Package-manager policy: use the manager indicated by the lockfile already in the repo (npm if package-lock.json, bun if bun.lockb, pnpm if pnpm-lock.yaml). Do not switch.
+
+Verification policy: prefer headless commands (tsc -b, vite build, storybook build, cargo check) — those are agent-verifiable. Avoid tauri dev, storybook dev, and cross-machine peer-to-peer tests in autonomous execution; mark those user-verifiable in the PR.
+
+Phase invariant: if this is a V1 prompt, do not create src/features/ai/, do not add AI deps to package.json or src-tauri/Cargo.toml, do not create tests/ai-eval/. Any such leak is a violation — surface and reject.
+
+Scope discipline: don't introduce features, abstractions, or polish beyond what this prompt asks. No backwards-compatibility shims. No comments unless the why is non-obvious. No new documentation files unless asked.
+
+End-of-task exit sequence (mandatory):
+1. Single commit. Stage only the files this task should change. Message format: "<phase-id>: <subject>" (e.g. "V1-P3: identity creation").
+2. Push to a feature branch on github.com/scotej/studyvis (default branch main). Branch name: v<phase-major>/p<N>-<short-slug> where <phase-major> is 1 for V1 prompts, 2 for V2, 3 for V3 (e.g. v1/p3-identity, v2/p1-llama-sidecar). Direct push to main is not authorized.
+3. If GitHub rejects on email privacy, amend the commit with the noreply email and retry: git -c user.email='134114466+scotej@users.noreply.github.com' commit --amend --no-edit --reset-author
+4. Open a PR with: gh pr create --base main --head v<phase-major>/p<N>-<slug> --title "<phase-id>: <subject>". PR body has Summary and Test plan sections. Do NOT merge — the user reviews.
+5. End-of-task summary in chat: (a) what shipped, (b) deviations from prompt or canonical-doc text and why, (c) Inherited debts — anything that surfaced and belongs to a later phase, named by phase id (e.g. "V1-P12 must wire plugins.updater config + signing key").
 
 ---
 
@@ -1252,7 +1914,37 @@ V3 prompts are independent of each other; ship in any order. Each is its own foc
 **Prompt**: bundle whisper.cpp as a second Tauri sidecar. Hold-to-record on Cmd/Ctrl+], stream audio to a local whisper-tiny model, transcribe on release, feed the transcript into the existing AI dialog flow as if typed. AI replies remain text. Acceptance: latency from key release to AI reply ≤ 4s on target hardware; transcripts stored only as transient strings, never written to disk.
 
 ````
-[Universal preamble]
+You are working on StudyVis, a peer-to-peer desktop study app for close friends. Read these in full before making decisions:
+- /Users/scott/PycharmProjects/studyvis/PLAN.md
+- /Users/scott/PycharmProjects/studyvis/ARCHITECTURE.md
+- /Users/scott/PycharmProjects/studyvis/DESIGN-SYSTEM.md
+- /Users/scott/PycharmProjects/studyvis/CLAUDE.md
+- ~/.claude/projects/-Users-scott-PycharmProjects-studyvis/memory/MEMORY.md (carryovers from prior phases — debts that should land in this phase or be re-routed forward)
+
+These are the source of truth. If anything in this prompt conflicts with them, surface the conflict — don't silently deviate.
+
+Reasoning budget is unlimited. Use subagents freely (Explore, Plan, general-purpose). Call the advisor before committing to a non-obvious approach and once before declaring the task done.
+
+Use Context7 for library docs; prefer it to web search. Verify, don't assume — look up versions, APIs, and CLI flags before depending on them.
+
+Version policy: pinned versions in canonical docs are floors, not ceilings. Prefer current; note bumps in your end-of-task summary; never silently downgrade.
+
+File-shape policy: if a doc or this prompt prescribes a path or config shape that conflicts with the current framework idiom (e.g. modern Tauri 2 puts the builder in lib.rs not main.rs; TS 6 deprecates baseUrl), prefer the current idiom and note the deviation.
+
+Package-manager policy: use the manager indicated by the lockfile already in the repo (npm if package-lock.json, bun if bun.lockb, pnpm if pnpm-lock.yaml). Do not switch.
+
+Verification policy: prefer headless commands (tsc -b, vite build, storybook build, cargo check) — those are agent-verifiable. Avoid tauri dev, storybook dev, and cross-machine peer-to-peer tests in autonomous execution; mark those user-verifiable in the PR.
+
+Phase invariant: if this is a V1 prompt, do not create src/features/ai/, do not add AI deps to package.json or src-tauri/Cargo.toml, do not create tests/ai-eval/. Any such leak is a violation — surface and reject.
+
+Scope discipline: don't introduce features, abstractions, or polish beyond what this prompt asks. No backwards-compatibility shims. No comments unless the why is non-obvious. No new documentation files unless asked.
+
+End-of-task exit sequence (mandatory):
+1. Single commit. Stage only the files this task should change. Message format: "<phase-id>: <subject>" (e.g. "V1-P3: identity creation").
+2. Push to a feature branch on github.com/scotej/studyvis (default branch main). Branch name: v<phase-major>/p<N>-<short-slug> where <phase-major> is 1 for V1 prompts, 2 for V2, 3 for V3 (e.g. v1/p3-identity, v2/p1-llama-sidecar). Direct push to main is not authorized.
+3. If GitHub rejects on email privacy, amend the commit with the noreply email and retry: git -c user.email='134114466+scotej@users.noreply.github.com' commit --amend --no-edit --reset-author
+4. Open a PR with: gh pr create --base main --head v<phase-major>/p<N>-<slug> --title "<phase-id>: <subject>". PR body has Summary and Test plan sections. Do NOT merge — the user reviews.
+5. End-of-task summary in chat: (a) what shipped, (b) deviations from prompt or canonical-doc text and why, (c) Inherited debts — anything that surfaced and belongs to a later phase, named by phase id (e.g. "V1-P12 must wire plugins.updater config + signing key").
 
 ---
 
@@ -1283,7 +1975,37 @@ Acceptance criteria:
 **Prompt**: a local-only Settings → Stats page showing focused-minutes per day/week, study streaks, top study partners. Source data is the local audit_events + sessions tables. Charts via Recharts or Visx (verify via Context7). Shouldn't transmit anywhere.
 
 ````
-[Universal preamble]
+You are working on StudyVis, a peer-to-peer desktop study app for close friends. Read these in full before making decisions:
+- /Users/scott/PycharmProjects/studyvis/PLAN.md
+- /Users/scott/PycharmProjects/studyvis/ARCHITECTURE.md
+- /Users/scott/PycharmProjects/studyvis/DESIGN-SYSTEM.md
+- /Users/scott/PycharmProjects/studyvis/CLAUDE.md
+- ~/.claude/projects/-Users-scott-PycharmProjects-studyvis/memory/MEMORY.md (carryovers from prior phases — debts that should land in this phase or be re-routed forward)
+
+These are the source of truth. If anything in this prompt conflicts with them, surface the conflict — don't silently deviate.
+
+Reasoning budget is unlimited. Use subagents freely (Explore, Plan, general-purpose). Call the advisor before committing to a non-obvious approach and once before declaring the task done.
+
+Use Context7 for library docs; prefer it to web search. Verify, don't assume — look up versions, APIs, and CLI flags before depending on them.
+
+Version policy: pinned versions in canonical docs are floors, not ceilings. Prefer current; note bumps in your end-of-task summary; never silently downgrade.
+
+File-shape policy: if a doc or this prompt prescribes a path or config shape that conflicts with the current framework idiom (e.g. modern Tauri 2 puts the builder in lib.rs not main.rs; TS 6 deprecates baseUrl), prefer the current idiom and note the deviation.
+
+Package-manager policy: use the manager indicated by the lockfile already in the repo (npm if package-lock.json, bun if bun.lockb, pnpm if pnpm-lock.yaml). Do not switch.
+
+Verification policy: prefer headless commands (tsc -b, vite build, storybook build, cargo check) — those are agent-verifiable. Avoid tauri dev, storybook dev, and cross-machine peer-to-peer tests in autonomous execution; mark those user-verifiable in the PR.
+
+Phase invariant: if this is a V1 prompt, do not create src/features/ai/, do not add AI deps to package.json or src-tauri/Cargo.toml, do not create tests/ai-eval/. Any such leak is a violation — surface and reject.
+
+Scope discipline: don't introduce features, abstractions, or polish beyond what this prompt asks. No backwards-compatibility shims. No comments unless the why is non-obvious. No new documentation files unless asked.
+
+End-of-task exit sequence (mandatory):
+1. Single commit. Stage only the files this task should change. Message format: "<phase-id>: <subject>" (e.g. "V1-P3: identity creation").
+2. Push to a feature branch on github.com/scotej/studyvis (default branch main). Branch name: v<phase-major>/p<N>-<short-slug> where <phase-major> is 1 for V1 prompts, 2 for V2, 3 for V3 (e.g. v1/p3-identity, v2/p1-llama-sidecar). Direct push to main is not authorized.
+3. If GitHub rejects on email privacy, amend the commit with the noreply email and retry: git -c user.email='134114466+scotej@users.noreply.github.com' commit --amend --no-edit --reset-author
+4. Open a PR with: gh pr create --base main --head v<phase-major>/p<N>-<slug> --title "<phase-id>: <subject>". PR body has Summary and Test plan sections. Do NOT merge — the user reviews.
+5. End-of-task summary in chat: (a) what shipped, (b) deviations from prompt or canonical-doc text and why, (c) Inherited debts — anything that surfaced and belongs to a later phase, named by phase id (e.g. "V1-P12 must wire plugins.updater config + signing key").
 
 ---
 
@@ -1312,7 +2034,37 @@ Acceptance criteria:
 **Prompt**: Settings → Shortcuts page with KeybindCapture component. Rebind PTT-friends, PTT-AI, and any future shortcuts. Conflicts detected and surfaced; reset-to-defaults available.
 
 ````
-[Universal preamble]
+You are working on StudyVis, a peer-to-peer desktop study app for close friends. Read these in full before making decisions:
+- /Users/scott/PycharmProjects/studyvis/PLAN.md
+- /Users/scott/PycharmProjects/studyvis/ARCHITECTURE.md
+- /Users/scott/PycharmProjects/studyvis/DESIGN-SYSTEM.md
+- /Users/scott/PycharmProjects/studyvis/CLAUDE.md
+- ~/.claude/projects/-Users-scott-PycharmProjects-studyvis/memory/MEMORY.md (carryovers from prior phases — debts that should land in this phase or be re-routed forward)
+
+These are the source of truth. If anything in this prompt conflicts with them, surface the conflict — don't silently deviate.
+
+Reasoning budget is unlimited. Use subagents freely (Explore, Plan, general-purpose). Call the advisor before committing to a non-obvious approach and once before declaring the task done.
+
+Use Context7 for library docs; prefer it to web search. Verify, don't assume — look up versions, APIs, and CLI flags before depending on them.
+
+Version policy: pinned versions in canonical docs are floors, not ceilings. Prefer current; note bumps in your end-of-task summary; never silently downgrade.
+
+File-shape policy: if a doc or this prompt prescribes a path or config shape that conflicts with the current framework idiom (e.g. modern Tauri 2 puts the builder in lib.rs not main.rs; TS 6 deprecates baseUrl), prefer the current idiom and note the deviation.
+
+Package-manager policy: use the manager indicated by the lockfile already in the repo (npm if package-lock.json, bun if bun.lockb, pnpm if pnpm-lock.yaml). Do not switch.
+
+Verification policy: prefer headless commands (tsc -b, vite build, storybook build, cargo check) — those are agent-verifiable. Avoid tauri dev, storybook dev, and cross-machine peer-to-peer tests in autonomous execution; mark those user-verifiable in the PR.
+
+Phase invariant: if this is a V1 prompt, do not create src/features/ai/, do not add AI deps to package.json or src-tauri/Cargo.toml, do not create tests/ai-eval/. Any such leak is a violation — surface and reject.
+
+Scope discipline: don't introduce features, abstractions, or polish beyond what this prompt asks. No backwards-compatibility shims. No comments unless the why is non-obvious. No new documentation files unless asked.
+
+End-of-task exit sequence (mandatory):
+1. Single commit. Stage only the files this task should change. Message format: "<phase-id>: <subject>" (e.g. "V1-P3: identity creation").
+2. Push to a feature branch on github.com/scotej/studyvis (default branch main). Branch name: v<phase-major>/p<N>-<short-slug> where <phase-major> is 1 for V1 prompts, 2 for V2, 3 for V3 (e.g. v1/p3-identity, v2/p1-llama-sidecar). Direct push to main is not authorized.
+3. If GitHub rejects on email privacy, amend the commit with the noreply email and retry: git -c user.email='134114466+scotej@users.noreply.github.com' commit --amend --no-edit --reset-author
+4. Open a PR with: gh pr create --base main --head v<phase-major>/p<N>-<slug> --title "<phase-id>: <subject>". PR body has Summary and Test plan sections. Do NOT merge — the user reviews.
+5. End-of-task summary in chat: (a) what shipped, (b) deviations from prompt or canonical-doc text and why, (c) Inherited debts — anything that surfaced and belongs to a later phase, named by phase id (e.g. "V1-P12 must wire plugins.updater config + signing key").
 
 ---
 
@@ -1341,7 +2093,37 @@ Acceptance criteria:
 **Prompt**: Settings → AI gains "Capture displays" with options "Primary only" (current default), "All displays". Wire src/features/ai/captureScreen.ts to capture all selected displays into a single composited image (side-by-side or grid), passed to the AI for evaluation.
 
 ````
-[Universal preamble]
+You are working on StudyVis, a peer-to-peer desktop study app for close friends. Read these in full before making decisions:
+- /Users/scott/PycharmProjects/studyvis/PLAN.md
+- /Users/scott/PycharmProjects/studyvis/ARCHITECTURE.md
+- /Users/scott/PycharmProjects/studyvis/DESIGN-SYSTEM.md
+- /Users/scott/PycharmProjects/studyvis/CLAUDE.md
+- ~/.claude/projects/-Users-scott-PycharmProjects-studyvis/memory/MEMORY.md (carryovers from prior phases — debts that should land in this phase or be re-routed forward)
+
+These are the source of truth. If anything in this prompt conflicts with them, surface the conflict — don't silently deviate.
+
+Reasoning budget is unlimited. Use subagents freely (Explore, Plan, general-purpose). Call the advisor before committing to a non-obvious approach and once before declaring the task done.
+
+Use Context7 for library docs; prefer it to web search. Verify, don't assume — look up versions, APIs, and CLI flags before depending on them.
+
+Version policy: pinned versions in canonical docs are floors, not ceilings. Prefer current; note bumps in your end-of-task summary; never silently downgrade.
+
+File-shape policy: if a doc or this prompt prescribes a path or config shape that conflicts with the current framework idiom (e.g. modern Tauri 2 puts the builder in lib.rs not main.rs; TS 6 deprecates baseUrl), prefer the current idiom and note the deviation.
+
+Package-manager policy: use the manager indicated by the lockfile already in the repo (npm if package-lock.json, bun if bun.lockb, pnpm if pnpm-lock.yaml). Do not switch.
+
+Verification policy: prefer headless commands (tsc -b, vite build, storybook build, cargo check) — those are agent-verifiable. Avoid tauri dev, storybook dev, and cross-machine peer-to-peer tests in autonomous execution; mark those user-verifiable in the PR.
+
+Phase invariant: if this is a V1 prompt, do not create src/features/ai/, do not add AI deps to package.json or src-tauri/Cargo.toml, do not create tests/ai-eval/. Any such leak is a violation — surface and reject.
+
+Scope discipline: don't introduce features, abstractions, or polish beyond what this prompt asks. No backwards-compatibility shims. No comments unless the why is non-obvious. No new documentation files unless asked.
+
+End-of-task exit sequence (mandatory):
+1. Single commit. Stage only the files this task should change. Message format: "<phase-id>: <subject>" (e.g. "V1-P3: identity creation").
+2. Push to a feature branch on github.com/scotej/studyvis (default branch main). Branch name: v<phase-major>/p<N>-<short-slug> where <phase-major> is 1 for V1 prompts, 2 for V2, 3 for V3 (e.g. v1/p3-identity, v2/p1-llama-sidecar). Direct push to main is not authorized.
+3. If GitHub rejects on email privacy, amend the commit with the noreply email and retry: git -c user.email='134114466+scotej@users.noreply.github.com' commit --amend --no-edit --reset-author
+4. Open a PR with: gh pr create --base main --head v<phase-major>/p<N>-<slug> --title "<phase-id>: <subject>". PR body has Summary and Test plan sections. Do NOT merge — the user reviews.
+5. End-of-task summary in chat: (a) what shipped, (b) deviations from prompt or canonical-doc text and why, (c) Inherited debts — anything that surfaced and belongs to a later phase, named by phase id (e.g. "V1-P12 must wire plugins.updater config + signing key").
 
 ---
 
@@ -1365,7 +2147,37 @@ Acceptance criteria:
 **Prompt**: actually visit every component and verify the lightTokens variant from DESIGN-SYSTEM.md §2 renders cleanly. Likely small contrast adjustments to status colors. Add light-theme stories for every component.
 
 ````
-[Universal preamble]
+You are working on StudyVis, a peer-to-peer desktop study app for close friends. Read these in full before making decisions:
+- /Users/scott/PycharmProjects/studyvis/PLAN.md
+- /Users/scott/PycharmProjects/studyvis/ARCHITECTURE.md
+- /Users/scott/PycharmProjects/studyvis/DESIGN-SYSTEM.md
+- /Users/scott/PycharmProjects/studyvis/CLAUDE.md
+- ~/.claude/projects/-Users-scott-PycharmProjects-studyvis/memory/MEMORY.md (carryovers from prior phases — debts that should land in this phase or be re-routed forward)
+
+These are the source of truth. If anything in this prompt conflicts with them, surface the conflict — don't silently deviate.
+
+Reasoning budget is unlimited. Use subagents freely (Explore, Plan, general-purpose). Call the advisor before committing to a non-obvious approach and once before declaring the task done.
+
+Use Context7 for library docs; prefer it to web search. Verify, don't assume — look up versions, APIs, and CLI flags before depending on them.
+
+Version policy: pinned versions in canonical docs are floors, not ceilings. Prefer current; note bumps in your end-of-task summary; never silently downgrade.
+
+File-shape policy: if a doc or this prompt prescribes a path or config shape that conflicts with the current framework idiom (e.g. modern Tauri 2 puts the builder in lib.rs not main.rs; TS 6 deprecates baseUrl), prefer the current idiom and note the deviation.
+
+Package-manager policy: use the manager indicated by the lockfile already in the repo (npm if package-lock.json, bun if bun.lockb, pnpm if pnpm-lock.yaml). Do not switch.
+
+Verification policy: prefer headless commands (tsc -b, vite build, storybook build, cargo check) — those are agent-verifiable. Avoid tauri dev, storybook dev, and cross-machine peer-to-peer tests in autonomous execution; mark those user-verifiable in the PR.
+
+Phase invariant: if this is a V1 prompt, do not create src/features/ai/, do not add AI deps to package.json or src-tauri/Cargo.toml, do not create tests/ai-eval/. Any such leak is a violation — surface and reject.
+
+Scope discipline: don't introduce features, abstractions, or polish beyond what this prompt asks. No backwards-compatibility shims. No comments unless the why is non-obvious. No new documentation files unless asked.
+
+End-of-task exit sequence (mandatory):
+1. Single commit. Stage only the files this task should change. Message format: "<phase-id>: <subject>" (e.g. "V1-P3: identity creation").
+2. Push to a feature branch on github.com/scotej/studyvis (default branch main). Branch name: v<phase-major>/p<N>-<short-slug> where <phase-major> is 1 for V1 prompts, 2 for V2, 3 for V3 (e.g. v1/p3-identity, v2/p1-llama-sidecar). Direct push to main is not authorized.
+3. If GitHub rejects on email privacy, amend the commit with the noreply email and retry: git -c user.email='134114466+scotej@users.noreply.github.com' commit --amend --no-edit --reset-author
+4. Open a PR with: gh pr create --base main --head v<phase-major>/p<N>-<slug> --title "<phase-id>: <subject>". PR body has Summary and Test plan sections. Do NOT merge — the user reviews.
+5. End-of-task summary in chat: (a) what shipped, (b) deviations from prompt or canonical-doc text and why, (c) Inherited debts — anything that surfaced and belongs to a later phase, named by phase id (e.g. "V1-P12 must wire plugins.updater config + signing key").
 
 ---
 
@@ -1392,7 +2204,37 @@ Acceptance criteria:
 **Prompt**: the missing piece from V1-P3. New onboarding step: "Recover existing identity from 24 words." Validates the mnemonic via @scure/bip39, derives keypair via the V1-P3 mnemonicToIdentity function, writes identity.json and seeds keychain. Friend re-pairing still required (other side has no idea you're the same person).
 
 ````
-[Universal preamble]
+You are working on StudyVis, a peer-to-peer desktop study app for close friends. Read these in full before making decisions:
+- /Users/scott/PycharmProjects/studyvis/PLAN.md
+- /Users/scott/PycharmProjects/studyvis/ARCHITECTURE.md
+- /Users/scott/PycharmProjects/studyvis/DESIGN-SYSTEM.md
+- /Users/scott/PycharmProjects/studyvis/CLAUDE.md
+- ~/.claude/projects/-Users-scott-PycharmProjects-studyvis/memory/MEMORY.md (carryovers from prior phases — debts that should land in this phase or be re-routed forward)
+
+These are the source of truth. If anything in this prompt conflicts with them, surface the conflict — don't silently deviate.
+
+Reasoning budget is unlimited. Use subagents freely (Explore, Plan, general-purpose). Call the advisor before committing to a non-obvious approach and once before declaring the task done.
+
+Use Context7 for library docs; prefer it to web search. Verify, don't assume — look up versions, APIs, and CLI flags before depending on them.
+
+Version policy: pinned versions in canonical docs are floors, not ceilings. Prefer current; note bumps in your end-of-task summary; never silently downgrade.
+
+File-shape policy: if a doc or this prompt prescribes a path or config shape that conflicts with the current framework idiom (e.g. modern Tauri 2 puts the builder in lib.rs not main.rs; TS 6 deprecates baseUrl), prefer the current idiom and note the deviation.
+
+Package-manager policy: use the manager indicated by the lockfile already in the repo (npm if package-lock.json, bun if bun.lockb, pnpm if pnpm-lock.yaml). Do not switch.
+
+Verification policy: prefer headless commands (tsc -b, vite build, storybook build, cargo check) — those are agent-verifiable. Avoid tauri dev, storybook dev, and cross-machine peer-to-peer tests in autonomous execution; mark those user-verifiable in the PR.
+
+Phase invariant: if this is a V1 prompt, do not create src/features/ai/, do not add AI deps to package.json or src-tauri/Cargo.toml, do not create tests/ai-eval/. Any such leak is a violation — surface and reject.
+
+Scope discipline: don't introduce features, abstractions, or polish beyond what this prompt asks. No backwards-compatibility shims. No comments unless the why is non-obvious. No new documentation files unless asked.
+
+End-of-task exit sequence (mandatory):
+1. Single commit. Stage only the files this task should change. Message format: "<phase-id>: <subject>" (e.g. "V1-P3: identity creation").
+2. Push to a feature branch on github.com/scotej/studyvis (default branch main). Branch name: v<phase-major>/p<N>-<short-slug> where <phase-major> is 1 for V1 prompts, 2 for V2, 3 for V3 (e.g. v1/p3-identity, v2/p1-llama-sidecar). Direct push to main is not authorized.
+3. If GitHub rejects on email privacy, amend the commit with the noreply email and retry: git -c user.email='134114466+scotej@users.noreply.github.com' commit --amend --no-edit --reset-author
+4. Open a PR with: gh pr create --base main --head v<phase-major>/p<N>-<slug> --title "<phase-id>: <subject>". PR body has Summary and Test plan sections. Do NOT merge — the user reviews.
+5. End-of-task summary in chat: (a) what shipped, (b) deviations from prompt or canonical-doc text and why, (c) Inherited debts — anything that surfaced and belongs to a later phase, named by phase id (e.g. "V1-P12 must wire plugins.updater config + signing key").
 
 ---
 
@@ -1420,7 +2262,37 @@ Acceptance criteria:
 **Prompt**: full keyboard navigation audit. Reduced-motion mode actually disables animations. Screen-reader labels on every icon button, dynamic regions, dialog focus traps, status announcements. WCAG AA across the app.
 
 ````
-[Universal preamble]
+You are working on StudyVis, a peer-to-peer desktop study app for close friends. Read these in full before making decisions:
+- /Users/scott/PycharmProjects/studyvis/PLAN.md
+- /Users/scott/PycharmProjects/studyvis/ARCHITECTURE.md
+- /Users/scott/PycharmProjects/studyvis/DESIGN-SYSTEM.md
+- /Users/scott/PycharmProjects/studyvis/CLAUDE.md
+- ~/.claude/projects/-Users-scott-PycharmProjects-studyvis/memory/MEMORY.md (carryovers from prior phases — debts that should land in this phase or be re-routed forward)
+
+These are the source of truth. If anything in this prompt conflicts with them, surface the conflict — don't silently deviate.
+
+Reasoning budget is unlimited. Use subagents freely (Explore, Plan, general-purpose). Call the advisor before committing to a non-obvious approach and once before declaring the task done.
+
+Use Context7 for library docs; prefer it to web search. Verify, don't assume — look up versions, APIs, and CLI flags before depending on them.
+
+Version policy: pinned versions in canonical docs are floors, not ceilings. Prefer current; note bumps in your end-of-task summary; never silently downgrade.
+
+File-shape policy: if a doc or this prompt prescribes a path or config shape that conflicts with the current framework idiom (e.g. modern Tauri 2 puts the builder in lib.rs not main.rs; TS 6 deprecates baseUrl), prefer the current idiom and note the deviation.
+
+Package-manager policy: use the manager indicated by the lockfile already in the repo (npm if package-lock.json, bun if bun.lockb, pnpm if pnpm-lock.yaml). Do not switch.
+
+Verification policy: prefer headless commands (tsc -b, vite build, storybook build, cargo check) — those are agent-verifiable. Avoid tauri dev, storybook dev, and cross-machine peer-to-peer tests in autonomous execution; mark those user-verifiable in the PR.
+
+Phase invariant: if this is a V1 prompt, do not create src/features/ai/, do not add AI deps to package.json or src-tauri/Cargo.toml, do not create tests/ai-eval/. Any such leak is a violation — surface and reject.
+
+Scope discipline: don't introduce features, abstractions, or polish beyond what this prompt asks. No backwards-compatibility shims. No comments unless the why is non-obvious. No new documentation files unless asked.
+
+End-of-task exit sequence (mandatory):
+1. Single commit. Stage only the files this task should change. Message format: "<phase-id>: <subject>" (e.g. "V1-P3: identity creation").
+2. Push to a feature branch on github.com/scotej/studyvis (default branch main). Branch name: v<phase-major>/p<N>-<short-slug> where <phase-major> is 1 for V1 prompts, 2 for V2, 3 for V3 (e.g. v1/p3-identity, v2/p1-llama-sidecar). Direct push to main is not authorized.
+3. If GitHub rejects on email privacy, amend the commit with the noreply email and retry: git -c user.email='134114466+scotej@users.noreply.github.com' commit --amend --no-edit --reset-author
+4. Open a PR with: gh pr create --base main --head v<phase-major>/p<N>-<slug> --title "<phase-id>: <subject>". PR body has Summary and Test plan sections. Do NOT merge — the user reviews.
+5. End-of-task summary in chat: (a) what shipped, (b) deviations from prompt or canonical-doc text and why, (c) Inherited debts — anything that surfaced and belongs to a later phase, named by phase id (e.g. "V1-P12 must wire plugins.updater config + signing key").
 
 ---
 
