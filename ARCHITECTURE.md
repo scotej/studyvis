@@ -47,12 +47,13 @@ Pinned versions are the floor; bump as needed but never silently downgrade.
 
 ### Frontend
 - **Tauri 2.x** — desktop shell. Native WebView per OS (WKWebView on macOS, WebView2 on Windows, WebKitGTK on Linux).
-- **React 19+** with **Vite 6+** — UI framework and build.
+- **React 19+** with **Vite 8+** — UI framework and build (V1-P1 landed Vite 8.0.10; floor is whatever current major is at re-pin time).
 - **Tailwind CSS v4** — styling (uses CSS variables, native CSS layer support).
 - **shadcn/ui** — component primitives, Radix-based, source vendored under `src/components/ui/`.
 - **lucide-react** — icons.
 - **framer-motion** — limited transition usage (see DESIGN-SYSTEM.md §motion).
-- **@fontsource/inter** — bundled Inter Variable font.
+- **@fontsource-variable/inter** — bundled Inter Variable font (the variable-axis package; the `@fontsource/inter` package is static-weight only and not used here).
+- **@fontsource-variable/jetbrains-mono** — bundled JetBrains Mono Variable font (used by BIP39 display + debug log per DESIGN-SYSTEM.md §3).
 
 ### P2P + crypto
 - **trystero** (default Nostr strategy, npm: `trystero`) — signaling and room rendezvous.
