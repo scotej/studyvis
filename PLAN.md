@@ -30,7 +30,7 @@ Surfaced explicitly because the design implies a footprint the user should conse
 
 1. **Local-first.** Personal data — keypairs, friends list, session reports, AI logs — lives only on the user's device. Never synced, never backed up to anyone's cloud.
 2. **No backend we operate.** All discovery uses public infrastructure (Nostr relays, BitTorrent trackers as fallback, public TURN). We never run servers we'd have to keep alive or pay for as the user base grows.
-3. **Polished, not MVP.** Even V1 ships with full onboarding, a settings panel, autostart, and signed installers. We don't ship beta-feeling things even when they're functional.
+3. **Polished, not MVP.** Even V1 ships with full onboarding, a settings panel, autostart, and per-OS installers. We don't ship beta-feeling things even when they're functional. (Installers are unsigned for V1's friends-only audience — see §5; signing returns in a later phase if a Developer ID and code-signing cert become available.)
 4. **AI augments, doesn't surveil.** AI inference happens on-device. Camera + screen pixels are never transmitted. Only end-of-session score and real-time event flags ("on task" / "warning" / "alerted") are shared with peers.
 5. **Friends-only trust model.** No defenses against actively malicious peers. We don't try to prevent a user from disabling their own AI or fudging their own score — they can already do that, and these are their friends.
 6. **Reversible decisions over locked-in choices.** Trystero strategy, vision model, scoring weights — all swappable. If Nostr relays vanish in five years, we change one import.
@@ -62,7 +62,7 @@ A complete, polished video-study app for friends. Zero AI code present. The app 
 - System tray + autostart-at-login (opt-in) so the user is reachable for invites.
 - Onboarding — welcome → permissions → identity setup (with BIP39 backup) → add first friend (or skip) → tutorial.
 - Settings — friends management, identity export/import, autostart toggle, PTT keybindings (rebindable), theme (dark / light / auto), notification preferences.
-- Signed installers for macOS (.dmg, notarized), Windows (.msi, code-signed), Linux (.deb, .rpm, .AppImage).
+- Per-OS installers for the friends-only V1 audience: macOS `.dmg` (Tauri ad-hoc signing only — friends right-click → Open the first time to bypass Gatekeeper), Windows `.msi` (unsigned — friends click through SmartScreen "Run anyway"), Linux `.AppImage` (chmod +x and run; no install required). No auto-update — friends pull new releases manually from GitHub Releases. Apple notarization, Windows code-signing, and the in-app updater plugin are deferred to a later phase if and when signing credentials become available.
 
 **Non-goals (V1):**
 - Any AI inference, model picker, model download, vision processing, focus scoring.
