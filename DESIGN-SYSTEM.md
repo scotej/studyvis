@@ -208,8 +208,8 @@ A `theme: "dark" | "light" | "auto"` setting decides which token map is active; 
 | CSS engine | Tailwind CSS | v4.x | Native CSS layers, variable-based theming |
 | Component primitives | shadcn/ui (Radix) | latest as of V1-P2 | Vendored under `src/components/ui/` |
 | Icons | lucide-react | 0.x latest | Stroke 1.5, default size 16 |
-| Font (sans) | Inter Variable | via @fontsource/inter | Bundled, no CDN |
-| Font (mono) | JetBrains Mono | via @fontsource/jetbrains-mono | Used only for BIP39 display + debug log |
+| Font (sans) | Inter Variable | via @fontsource-variable/inter | Bundled, no CDN. Static `@fontsource/inter` is NOT used. |
+| Font (mono) | JetBrains Mono | via @fontsource-variable/jetbrains-mono | Used only for BIP39 display + debug log. |
 | Motion | framer-motion | 12.x | Used for ≤5 places (see §6) |
 | State | Zustand | 5.x | Picked default; Jotai acceptable substitute |
 

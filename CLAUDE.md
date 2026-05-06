@@ -36,7 +36,7 @@ The `src/features/ai/` directory **does not exist in V1**. Adding any AI-related
 
 ## Stack at a glance
 
-- **Tauri 2** + **React 19** + **Vite 6** + **Tailwind v4** + **shadcn/ui** + **TypeScript strict**.
+- **Tauri 2** + **React 19** + **Vite 8** + **Tailwind v4** + **shadcn/ui** + **TypeScript strict**.
 - **trystero** (Nostr default) for P2P discovery; **@noble/ed25519** + **@scure/bip39** + **@noble/curves** + **@noble/ciphers** for crypto.
 - **rusqlite** under Rust commands for local DB.
 - **llama-server** sidecar (V2+) bundled per platform via Tauri `externalBin`.
