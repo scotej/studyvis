@@ -5,6 +5,10 @@ export type SessionRow = {
   startedAt: number
   endedAt: number
   totalMinutes: number
+  // JSON-array string of every ed_pubkey_hex observed via signed-hello in
+  // this session, sorted lexicographically (canonical regardless of join
+  // order). NULL when no hello was received — solo session or pre-V1-P9.
+  peerPubkeys: string | null
 }
 
 export async function sessionsInsert(row: SessionRow): Promise<void> {
@@ -13,5 +17,6 @@ export async function sessionsInsert(row: SessionRow): Promise<void> {
     startedAt: row.startedAt,
     endedAt: row.endedAt,
     totalMinutes: row.totalMinutes,
+    peerPubkeys: row.peerPubkeys,
   })
 }

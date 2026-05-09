@@ -7,19 +7,30 @@ pub struct SessionRow {
     pub started_at: i64,
     pub ended_at: i64,
     pub total_minutes: i64,
+    // JSON-array string of ed_pubkey_hex values observed via signed-hello in
+    // the session, sorted lexicographically. NULL when no hello arrived.
+    pub peer_pubkeys: Option<String>,
 }
 
 pub fn insert(conn: &Connection, row: &SessionRow) -> Result<()> {
-    // V1-P8 stores only the placeholder fields; declared_topic + score arrive
-    // with the V2 report shape, peer_pubkeys arrives with the V1-P9 audit log.
+    // V1-P8 stored only the placeholder fields; V1-P9 added peer_pubkeys
+    // (from the signed-hello binding). declared_topic + score arrive with
+    // the V2 report shape.
     conn.execute(
-        "INSERT INTO sessions (id, started_at, ended_at, total_minutes)
-         VALUES (?1, ?2, ?3, ?4)
+        "INSERT INTO sessions (id, started_at, ended_at, total_minutes, peer_pubkeys)
+         VALUES (?1, ?2, ?3, ?4, ?5)
          ON CONFLICT(id) DO UPDATE SET
              started_at    = excluded.started_at,
              ended_at      = excluded.ended_at,
-             total_minutes = excluded.total_minutes",
-        params![row.id, row.started_at, row.ended_at, row.total_minutes],
+             total_minutes = excluded.total_minutes,
+             peer_pubkeys  = COALESCE(excluded.peer_pubkeys, sessions.peer_pubkeys)",
+        params![
+            row.id,
+            row.started_at,
+            row.ended_at,
+            row.total_minutes,
+            row.peer_pubkeys,
+        ],
     )?;
     Ok(())
 }
@@ -43,19 +54,21 @@ mod tests {
             started_at: 1_700_000_000_000,
             ended_at: 1_700_000_300_000,
             total_minutes: 5,
+            peer_pubkeys: Some("[\"aa\",\"bb\"]".into()),
         };
         insert(&conn, &row).expect("insert");
-        let read: (String, i64, i64, Option<i64>) = conn
+        let read: (String, i64, i64, Option<i64>, Option<String>) = conn
             .query_row(
-                "SELECT id, started_at, ended_at, total_minutes FROM sessions WHERE id = ?1",
+                "SELECT id, started_at, ended_at, total_minutes, peer_pubkeys FROM sessions WHERE id = ?1",
                 ["topic-hex"],
-                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
             )
             .expect("select");
         assert_eq!(read.0, "topic-hex");
         assert_eq!(read.1, 1_700_000_000_000);
         assert_eq!(read.2, 1_700_000_300_000);
         assert_eq!(read.3, Some(5));
+        assert_eq!(read.4.as_deref(), Some("[\"aa\",\"bb\"]"));
     }
 
     #[test]
@@ -66,6 +79,7 @@ mod tests {
             started_at: 1,
             ended_at: 2,
             total_minutes: 0,
+            peer_pubkeys: None,
         };
         insert(&conn, &row).expect("insert 1");
         row.ended_at = 99;
@@ -83,5 +97,39 @@ mod tests {
             )
             .expect("read ended_at");
         assert_eq!(ended, 99);
+    }
+
+    #[test]
+    fn insert_preserves_peer_pubkeys_when_subsequent_upsert_omits_them() {
+        // First insert carries the JSON array (e.g. session ended via the
+        // local leave-handler after hellos arrived). A subsequent upsert
+        // (e.g. an idempotent leave) without the column must NOT clobber
+        // the previously-stored bindings; COALESCE on excluded.peer_pubkeys
+        // keeps them.
+        let conn = fresh();
+        let row = SessionRow {
+            id: "topic-hex".into(),
+            started_at: 1,
+            ended_at: 2,
+            total_minutes: 0,
+            peer_pubkeys: Some("[\"aa\"]".into()),
+        };
+        insert(&conn, &row).expect("insert 1");
+        let again = SessionRow {
+            id: "topic-hex".into(),
+            started_at: 1,
+            ended_at: 9,
+            total_minutes: 0,
+            peer_pubkeys: None,
+        };
+        insert(&conn, &again).expect("insert 2");
+        let kept: Option<String> = conn
+            .query_row(
+                "SELECT peer_pubkeys FROM sessions WHERE id = ?1",
+                ["topic-hex"],
+                |r| r.get(0),
+            )
+            .expect("read peer_pubkeys");
+        assert_eq!(kept.as_deref(), Some("[\"aa\"]"));
     }
 }
