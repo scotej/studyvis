@@ -1,4 +1,10 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useState,
+} from 'react'
 import type { ReactNode } from 'react'
 
 import { ThemeContext, type ThemeMode } from '@/design/theme-context'
@@ -52,7 +58,9 @@ export function ThemeProvider({
 
   const resolved: 'dark' | 'light' = mode === 'auto' ? system : mode
 
-  useEffect(() => {
+  const useIsoLayoutEffect =
+    typeof window === 'undefined' ? useEffect : useLayoutEffect
+  useIsoLayoutEffect(() => {
     applyClass(resolved)
   }, [resolved])
 

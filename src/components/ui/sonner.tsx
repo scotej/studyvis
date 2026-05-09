@@ -10,11 +10,13 @@ import { Toaster as Sonner, type ToasterProps } from 'sonner'
 import { useTheme } from '@/design/theme-context'
 
 const Toaster = ({ ...props }: ToasterProps) => {
-  const { mode } = useTheme()
+  const { mode, resolved } = useTheme()
+  const sonnerTheme: ToasterProps['theme'] =
+    mode === 'auto' ? 'system' : resolved
 
   return (
     <Sonner
-      theme={mode as ToasterProps['theme']}
+      theme={sonnerTheme}
       className="toaster group"
       icons={{
         success: <CircleCheckIcon className="size-4" />,

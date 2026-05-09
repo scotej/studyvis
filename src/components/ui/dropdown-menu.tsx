@@ -72,7 +72,7 @@ function DropdownMenuItem({
       data-inset={inset}
       data-variant={variant}
       className={cn(
-        "relative flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-hidden select-none focus:bg-bg-raised focus:text-text-primary data-[disabled]:pointer-events-none data-[disabled]:opacity-50 data-[inset]:pl-8 data-[variant=destructive]:text-status-alerted data-[variant=destructive]:focus:bg-status-alerted data-[variant=destructive]:focus:text-status-alerted [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 [&_svg:not([class*='text-'])]:text-text-secondary data-[variant=destructive]:*:[svg]:text-status-alerted!",
+        "relative flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-hidden select-none focus:bg-bg-raised focus:text-text-primary data-[disabled]:pointer-events-none data-[disabled]:opacity-50 data-[inset]:pl-8 data-[variant=destructive]:text-status-alerted data-[variant=destructive]:focus:bg-status-alerted/10 data-[variant=destructive]:focus:text-status-alerted [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 [&_svg:not([class*='text-'])]:text-text-secondary data-[variant=destructive]:*:[svg]:text-status-alerted!",
         className
       )}
       {...props}
