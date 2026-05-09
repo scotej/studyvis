@@ -41,6 +41,7 @@ import { useTheme } from '@/design/theme-context'
 import { toast } from 'sonner'
 
 import { IdentitySetup } from '@/features/identity/IdentitySetup'
+import trayIcon22 from '../../src-tauri/icons/tray/22x22.png'
 
 const MOCK_MNEMONIC = [
   'ocean',
@@ -368,6 +369,66 @@ export function StyleGuide() {
               <Logo size="lg" />
               <Logo size="xl" />
               <Logo size="xl" monochrome className="text-text-primary" />
+            </div>
+          </Section>
+
+          <Section title="System tray + global shortcuts">
+            <p className="text-sm text-text-secondary">
+              The tray icon is the white-on-transparent monochrome glyph below.
+              On macOS it ships as a template image so the OS recolors it for
+              light or dark menu bars. The two global shortcuts are reserved
+              system-wide while StudyVis is running.
+            </p>
+            <div className="flex items-center gap-6">
+              <div className="flex flex-col items-center gap-2">
+                <div className="rounded-md border border-border-default bg-bg-base p-3">
+                  <img
+                    src={trayIcon22}
+                    alt="StudyVis tray icon"
+                    width={22}
+                    height={22}
+                  />
+                </div>
+                <span className="text-xs text-text-muted">
+                  on dark menu bar
+                </span>
+              </div>
+              <div className="flex flex-col items-center gap-2">
+                <div className="rounded-md border border-border-default bg-white p-3">
+                  <img
+                    src={trayIcon22}
+                    alt="StudyVis tray icon (light bar)"
+                    width={22}
+                    height={22}
+                    style={{ filter: 'invert(1)' }}
+                  />
+                </div>
+                <span className="text-xs text-text-muted">
+                  on light menu bar (template inverts)
+                </span>
+              </div>
+            </div>
+            <Separator />
+            <div className="flex flex-col gap-2 text-sm">
+              <div className="flex items-center gap-2">
+                <Kbd>⌘</Kbd>
+                <Kbd>[</Kbd>
+                <span className="text-text-secondary">/</span>
+                <Kbd>Ctrl</Kbd>
+                <Kbd>[</Kbd>
+                <span>Push to talk · friends</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <Kbd>⌘</Kbd>
+                <Kbd>]</Kbd>
+                <span className="text-text-secondary">/</span>
+                <Kbd>Ctrl</Kbd>
+                <Kbd>]</Kbd>
+                <span>Talk to AI</span>
+                <span className="ml-2 text-xs text-text-muted">
+                  V1: registered, no-op
+                </span>
+              </div>
             </div>
           </Section>
 

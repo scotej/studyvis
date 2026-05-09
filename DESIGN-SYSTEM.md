@@ -523,3 +523,16 @@ Period at the end of full sentences, none on labels, none on button text.
 - **New component in `ui/`**: requires a Storybook story, a `/style` page entry, and an ESLint allowlist update (because `ui/` is the only place Radix imports are allowed).
 - **New component in `components/`**: requires a Storybook story.
 - **Theme variant additions** (e.g. sepia): treated as a new release feature, not a tokens.ts edit.
+
+## 17. Keybindings
+
+V1 ships two global shortcuts. Both are registered in the system layer via `tauri-plugin-global-shortcut` and fire even when the StudyVis window is not focused — that is the point.
+
+| Action | macOS | Windows / Linux | State (V1) |
+| --- | --- | --- | --- |
+| Push to talk · friends | `⌘ [` | `Ctrl [` | Press unmutes mic, release mutes; the audio path lands in V1-P8. |
+| Talk to AI | `⌘ ]` | `Ctrl ]` | Registered (key reserved on the user's machine) but the handler is a no-op. V2-P7 wires it to the floating AI dialog window. |
+
+**Conflicts to know about.** `⌘ [` is "back" in many macOS apps (Safari, Finder, IDEs). When the StudyVis window has focus, the global shortcut wins and our PTT fires instead of the app-level back action. This is intentional: PTT must be reliable mid-session regardless of which app is foreground. Users who can't live with the conflict can rebind in Settings → Shortcuts (lands in V1-P11). Until then, the binding is fixed.
+
+**Surface in the UI.** Show the active binding via `<Kbd>` in any session-time UI that mentions PTT (the wireframe footer in §8.3, the temporary debug panel that ships before V1-P11). Use `⌘` glyph on macOS, the literal `Ctrl` on other platforms — match the OS-native rendering convention.
