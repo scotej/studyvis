@@ -4,7 +4,9 @@ import {
   type ActionSender,
   type DataPayload,
   type JoinRoomCallbacks,
+  type JsonValue,
   type Room,
+  type TargetPeers,
 } from 'trystero'
 
 export const APP_ID = 'studyvis'
@@ -19,10 +21,24 @@ export type TopicAction<T extends DataPayload> = {
   receive: ActionReceiver<T>
 }
 
+export type PeerStreamHandler = (
+  stream: MediaStream,
+  peerId: string,
+  metadata?: JsonValue
+) => void
+
 export type TopicRoom = {
   makeAction: <T extends DataPayload>(namespace: string) => TopicAction<T>
   onPeerJoin: (fn: (peerId: string) => void) => void
   onPeerLeave: (fn: (peerId: string) => void) => void
+  onPeerStream: (fn: PeerStreamHandler) => void
+  addStream: (
+    stream: MediaStream,
+    targetPeers?: TargetPeers,
+    metadata?: JsonValue
+  ) => void
+  removeStream: (stream: MediaStream, targetPeers?: TargetPeers) => void
+  getPeers: () => Record<string, RTCPeerConnection>
   leave: () => Promise<void>
 }
 
@@ -44,6 +60,14 @@ function wrapRoom(room: Room): TopicRoom {
     },
     onPeerJoin: (fn) => room.onPeerJoin(fn),
     onPeerLeave: (fn) => room.onPeerLeave(fn),
+    onPeerStream: (fn) => room.onPeerStream(fn),
+    addStream: (stream, targetPeers, metadata) => {
+      room.addStream(stream, targetPeers, metadata)
+    },
+    removeStream: (stream, targetPeers) => {
+      room.removeStream(stream, targetPeers)
+    },
+    getPeers: () => room.getPeers(),
     leave: () => room.leave(),
   }
 }

@@ -6,16 +6,15 @@ import {
   AddFriendDialog,
   FriendsList,
   InboxBoot,
-  inviteFriend,
   type PresenceMap,
 } from '@/features/friends'
 import { IdentitySetupGate, useIdentity } from '@/features/identity'
+import { inviteToCurrentSession, SessionView } from '@/features/session'
 import { DebugSystemPanel } from '@/features/system'
-import { bytesToHex } from '@/lib/crypto/identity'
-import { sessionTopic } from '@/lib/crypto/topics'
 import type { Friend } from '@/lib/db/friends'
 import { boxEncryptWithKeyring } from '@/lib/db/identity'
 import { useFriendsStore } from '@/stores/friendsStore'
+import { useSessionStore } from '@/stores/sessionStore'
 
 const isDev = import.meta.env.DEV
 
@@ -23,6 +22,7 @@ export function Home() {
   const { identity, status, actions } = useIdentity()
   const friendsStatus = useFriendsStore((s) => s.status)
   const loadFriends = useFriendsStore((s) => s.load)
+  const sessionStatus = useSessionStore((s) => s.status)
   const [addOpen, setAddOpen] = useState(false)
   const [presence, setPresence] = useState<PresenceMap>({})
 
@@ -35,30 +35,16 @@ export function Home() {
   const handleInvite = useCallback(
     async (friend: Friend) => {
       if (!identity) return
-      // Placeholder session topic + password until V1-P8 generates the real
-      // ones from a host-side session_id. The receive path treats both as
-      // opaque strings, so this stays consistent end-to-end.
-      const sessionId = new Uint8Array(32)
-      crypto.getRandomValues(sessionId)
-      const sessionPwBytes = new Uint8Array(32)
-      crypto.getRandomValues(sessionPwBytes)
       try {
-        await inviteFriend(
-          {
+        await inviteToCurrentSession({
+          friend,
+          sender: {
             edPubkeyHex: identity.ed_pubkey_hex,
             displayName: identity.display_name,
             sign: actions.signWithKeyring,
             encryptTo: boxEncryptWithKeyring,
           },
-          {
-            edPubkeyHex: friend.ed_pubkey_hex,
-            xPubkeyHex: friend.x_pubkey_hex,
-          },
-          {
-            sessionTopic: sessionTopic(sessionId),
-            sessionPassword: bytesToHex(sessionPwBytes),
-          }
-        )
+        })
         toast.success(
           `Invite sent to ${friend.display_name?.trim() || 'your friend'}.`
         )
@@ -82,6 +68,20 @@ export function Home() {
 
   if (status === 'absent') {
     return <IdentitySetupGate create={actions.create} />
+  }
+
+  if (sessionStatus === 'active') {
+    return (
+      <>
+        <SessionView />
+        {identity ? (
+          <InboxBoot
+            myEdPubkeyHex={identity.ed_pubkey_hex}
+            onPresenceChange={setPresence}
+          />
+        ) : null}
+      </>
+    )
   }
 
   return (

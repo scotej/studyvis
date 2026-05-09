@@ -7,6 +7,7 @@ use tauri::{AppHandle, Manager};
 
 pub mod friends;
 pub mod migrations;
+pub mod sessions;
 
 pub struct DbPool(pub Arc<Mutex<Connection>>);
 

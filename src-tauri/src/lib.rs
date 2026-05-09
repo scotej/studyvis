@@ -7,6 +7,7 @@ use tauri::Manager;
 use commands::friends::{
     friends_add, friends_get_x_pubkey, friends_list, friends_remove, friends_update_last_studied,
 };
+use commands::sessions::sessions_insert;
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 use commands::identity::{
     identity_box_decrypt, identity_box_encrypt, identity_exists, identity_load_record,
@@ -29,6 +30,7 @@ pub fn run() {
         friends_remove,
         friends_update_last_studied,
         friends_get_x_pubkey,
+        sessions_insert,
         identity_save_keys,
         identity_exists,
         identity_save_record,
@@ -47,6 +49,7 @@ pub fn run() {
         friends_remove,
         friends_update_last_studied,
         friends_get_x_pubkey,
+        sessions_insert,
         autostart_set_enabled,
         autostart_is_enabled,
     ]);
@@ -58,6 +61,7 @@ pub fn run() {
         friends_remove,
         friends_update_last_studied,
         friends_get_x_pubkey,
+        sessions_insert,
     ]);
 
     let builder = builder.on_window_event(|window, event| {

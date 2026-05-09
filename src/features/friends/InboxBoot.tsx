@@ -6,10 +6,12 @@ import {
   sendNotification,
 } from '@tauri-apps/plugin-notification'
 
+import { joinSession } from '@/features/session'
 import { hexToBytes } from '@/lib/crypto/identity'
 import { boxDecryptWithKeyring } from '@/lib/db/identity'
 import { getFriendXPubkey } from '@/lib/db/friends'
 import { useFriendsStore } from '@/stores/friendsStore'
+import { useSessionStore } from '@/stores/sessionStore'
 
 import { subscribeToOwnInbox, type ValidInvite } from './inbox'
 import { startPresence, type PresenceMap } from './presence'
@@ -109,10 +111,17 @@ async function handleValidInvite(invite: ValidInvite) {
 }
 
 function acceptInvite(invite: ValidInvite) {
-  // V1-P8 wires the real session-join handler. For now, log the placeholder
-  // so the round-trip is observable in dev.
-  console.info('would join session', {
-    from: invite.from_ed_pubkey,
-    session_topic: invite.payload.session_topic,
-  })
+  // Joining while already in a session would tear down the existing one.
+  // For V1, refuse — the user explicitly leaves first.
+  if (useSessionStore.getState().status === 'active') {
+    toast.error('Leave the current session before joining another.')
+    return
+  }
+  try {
+    joinSession(invite.payload.session_topic, invite.payload.session_password)
+  } catch (err) {
+    const message =
+      err instanceof Error ? err.message : 'Could not join the session.'
+    toast.error(message)
+  }
 }
