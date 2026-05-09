@@ -49,7 +49,12 @@ export function isPomodoroMessage(value: unknown): value is PomodoroMessage {
     v.v === 1 &&
     (v.phase === 'work' || v.phase === 'rest') &&
     (v.preset === '25/5' || v.preset === '50/10') &&
-    typeof v.ends_at === 'number'
+    // NaN / Infinity would poison the countdown math
+    // (`Math.max(0, endsAt - now)` returns NaN), so require a finite
+    // positive timestamp.
+    typeof v.ends_at === 'number' &&
+    Number.isFinite(v.ends_at) &&
+    v.ends_at > 0
   )
 }
 
@@ -81,6 +86,7 @@ export function pickNextBroadcaster(
   if (eligible.length === 0) return null
   const sorted = [...eligible].sort((a, b) => {
     if (a.joined_at !== b.joined_at) return a.joined_at - b.joined_at
+    if (a.ed_pubkey_hex === b.ed_pubkey_hex) return 0
     return a.ed_pubkey_hex < b.ed_pubkey_hex ? -1 : 1
   })
   return sorted[0].ed_pubkey_hex

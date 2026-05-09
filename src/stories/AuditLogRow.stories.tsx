@@ -1,6 +1,7 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
 
 import { AuditLogRow } from '@/components/AuditLogRow'
+import { tokens } from '@/design/tokens'
 
 const NOW = 1_700_000_000_000
 
@@ -35,7 +36,10 @@ export const Stack: Story = {
   render: () => (
     <ul
       className="m-0 list-none p-0"
-      style={{ width: 320, background: 'var(--bg-surface)' }}
+      style={{
+        width: tokens.sizes.auditPanelWidth,
+        background: 'var(--bg-surface)',
+      }}
     >
       <AuditLogRow
         name="You"
