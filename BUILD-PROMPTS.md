@@ -757,7 +757,7 @@ Concretely:
 - `boxEncrypt` / `boxDecrypt` / `signMessage` / `verifyMessage` already exist in `src/lib/crypto/identity.ts` (V1-P3). Import; do not re-derive.
 - `getFriendXPubkey(edPubkey)` in `src/lib/db/friends.ts` (V1-P4) wraps the `friends_get_x_pubkey` Tauri command. Use it for the receiver-side lookup.
 - The friend's x_pubkey is also already in the `useFriendsStore` cache from V1-P5 — prefer the store for hot lookups, fall back to `getFriendXPubkey` only on cache miss.
-- The local user's keypair: signing goes through the existing `signWithKeyring` Rust command (V1-P3). For NaCl box decryption, the X25519 private key still has to surface to JS via `loadKeys` — there's no Rust-side `identity_box_decrypt` yet (carried over to a later phase). Use `loadKeys` and pass `xPriv` to `boxDecrypt`.
+- The local user's keypair: signing goes through the existing `signWithKeyring` Rust command (V1-P3). For NaCl box decryption there is currently NO JS-side path to the X25519 private key — `identity_load_keys` was dropped in commit `4caea98`. **This phase MUST add a Rust-side `identity_box_decrypt(theirXPubHex, nonceB64, ciphertextB64) -> Vec<u8>` Tauri command** that loads `x_priv` from the keyring, runs the NaCl-box-compatible decrypt (X25519 ECDH → HSalsa20 with NaCl SIGMA → XSalsa20-Poly1305 — port the construction from `boxDecrypt` in `src/lib/crypto/identity.ts`), and returns the plaintext. JS callers wrap it as `boxDecryptWithKeyring(theirXPub, nonce, ciphertext)`. Do NOT reintroduce `identity_load_keys`.
 
 1. Implement src/features/friends/inbox.ts:
    - subscribeToOwnInbox(): joins the user's own inbox topic (= inboxTopic(my_ed_pubkey) per ARCHITECTURE.md §4) with password = inboxPassword(my_ed_pubkey) on app boot. Listens for makeAction("invite") payloads.
@@ -1100,13 +1100,15 @@ YOUR TASK: V1-P10 — Polished onboarding flow.
 
 Implement onboarding per PLAN.md §5 V1 features ("Onboarding — welcome → permissions → identity setup → add first friend (or skip) → tutorial").
 
+**Read first**: V1-P5 left an in-modal display-name capture inside `AddFriendDialog` as a stopgap (a `DisplayNameStep` rendered when `identity.display_name` is empty). When this phase lands the canonical name input in step 4 below, you MUST also: (a) delete `DisplayNameStep` from `src/features/friends/AddFriendDialogView.tsx` (and the `DisplayNamePhase` plumbing in `AddFriendDialog.tsx`), (b) gate `AddFriendDialog` so it refuses to open (or shows an inline "finish onboarding first" message) when `identity.display_name` is empty. The `useIdentity().actions.setDisplayName(name)` action introduced in V1-P5 already wraps `identity_save_record` — reuse it from the onboarding step; do NOT introduce a new identity-mutation path.
+
 Concretely:
 
 1. Build src/features/onboarding/Onboarding.tsx with steps:
    - Step 1: Welcome. Single CTA "Let's set up", short copy per DESIGN-SYSTEM.md §14 tone.
    - Step 2: Permissions walkthrough. Plain explanation of what each permission is for. CTAs prompt the OS for camera, mic, notifications. (Screen capture is V2 only, skipped here.)
    - Step 3: Identity setup (already built in V1-P3 — refactor to plug into the onboarding flow rather than render at boot when missing).
-   - Step 4: Pick a display name.
+   - Step 4: Pick a display name. Persist via `useIdentity().actions.setDisplayName(name)` (added in V1-P5).
    - Step 5: Add first friend (uses V1-P5 AddFriendDialog) or skip. If skip, end onboarding; if added, show "Now invite them to a session" hint.
    - Step 6: Tutorial — a static 3-card explainer of how to invite, what PTT does, and how to leave a session. No active demo; just text and screenshots.
 2. Onboarding completes when the user finishes step 6 or explicitly skips. Persist a "onboarding_completed_at" key via tauri-plugin-store; subsequent launches go straight to the friends list.
