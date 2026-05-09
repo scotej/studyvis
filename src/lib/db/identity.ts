@@ -11,11 +11,6 @@ export type IdentityRecord = {
   mnemonic_fingerprint: string
 }
 
-export type StoredKeys = {
-  ed_priv_hex: string
-  x_priv_hex: string
-}
-
 export async function identityExists(): Promise<boolean> {
   return invoke<boolean>('identity_exists')
 }
@@ -35,10 +30,6 @@ export async function saveKeys(
   xPrivHex: string
 ): Promise<void> {
   await invoke('identity_save_keys', { edPrivHex, xPrivHex })
-}
-
-export async function loadKeys(): Promise<StoredKeys> {
-  return invoke<StoredKeys>('identity_load_keys')
 }
 
 export async function signWithKeyring(

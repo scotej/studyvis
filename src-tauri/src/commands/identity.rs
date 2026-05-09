@@ -78,11 +78,6 @@ pub async fn identity_save_keys(
 }
 
 #[tauri::command]
-pub async fn identity_load_keys() -> Result<StoredKeys, String> {
-    load_stored()
-}
-
-#[tauri::command]
 pub async fn identity_exists(app: AppHandle) -> Result<bool, String> {
     let path = identity_path(&app)?;
     Ok(path.exists())

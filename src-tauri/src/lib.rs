@@ -8,8 +8,8 @@ use commands::friends::{
 };
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 use commands::identity::{
-    identity_exists, identity_load_keys, identity_load_record, identity_save_keys,
-    identity_save_record, identity_sign,
+    identity_exists, identity_load_record, identity_save_keys, identity_save_record,
+    identity_sign,
 };
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -27,7 +27,6 @@ pub fn run() {
         friends_update_last_studied,
         friends_get_x_pubkey,
         identity_save_keys,
-        identity_load_keys,
         identity_exists,
         identity_save_record,
         identity_load_record,
