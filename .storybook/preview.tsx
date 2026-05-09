@@ -3,13 +3,16 @@ import '@fontsource-variable/inter/index.css'
 import '@fontsource-variable/jetbrains-mono/index.css'
 import '../src/design/index.css'
 
+import { ThemeProvider } from '../src/design/theme'
+import { tokens, lightTokens } from '../src/design/tokens'
+
 const preview: Preview = {
   parameters: {
     backgrounds: {
       default: 'dark',
       values: [
-        { name: 'dark', value: '#0F1115' },
-        { name: 'light', value: '#FAFAF7' },
+        { name: 'dark', value: tokens.color.bg.base },
+        { name: 'light', value: lightTokens.color.bg.base },
       ],
     },
     controls: {
@@ -19,6 +22,13 @@ const preview: Preview = {
       },
     },
   },
+  decorators: [
+    (Story) => (
+      <ThemeProvider defaultMode="dark">
+        <Story />
+      </ThemeProvider>
+    ),
+  ],
 }
 
 export default preview

@@ -1,13 +1,21 @@
-import { Button } from '@/components/ui/Button'
+import { BrowserRouter, Route, Routes } from 'react-router'
+
+import { ThemeProvider } from '@/design/theme'
+import { Home } from '@/routes/Home'
+import { StyleGuide } from '@/routes/StyleGuide'
+
+const isDev = import.meta.env.DEV
 
 function App() {
   return (
-    <main className="dark bg-background text-foreground flex min-h-screen items-center justify-center">
-      <div className="flex flex-col items-center gap-6">
-        <h1 className="text-4xl font-semibold tracking-tight">StudyVis</h1>
-        <Button>Get started</Button>
-      </div>
-    </main>
+    <ThemeProvider>
+      <BrowserRouter>
+        <Routes>
+          <Route path="/" element={<Home />} />
+          {isDev ? <Route path="/style" element={<StyleGuide />} /> : null}
+        </Routes>
+      </BrowserRouter>
+    </ThemeProvider>
   )
 }
 
