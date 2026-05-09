@@ -84,8 +84,12 @@ Every prompt block in this file begins with the same preamble. It is **inlined v
 > 1. Single commit. Stage only the files this task should change. Message format: `<phase-id>: <subject>` (e.g. `V1-P3: identity creation`).
 > 2. Push to a feature branch on `github.com/scotej/studyvis` (default branch `main`). Branch name: `v<phase-major>/p<N>-<short-slug>` where `<phase-major>` is 1 for V1 prompts, 2 for V2, 3 for V3 (e.g. `v1/p3-identity`, `v2/p1-llama-sidecar`). Direct push to `main` is not authorized.
 > 3. If GitHub rejects on email privacy, amend the commit with the noreply email and retry: `git -c user.email='134114466+scotej@users.noreply.github.com' commit --amend --no-edit --reset-author`.
-> 4. Open a PR with `gh pr create --base main --head v<phase-major>/p<N>-<slug> --title "<phase-id>: <subject>"`. PR body has **Summary** and **Test plan** sections. Do NOT merge — the user reviews.
-> 5. End-of-task summary in chat: (a) what shipped, (b) deviations from prompt or canonical-doc text and why, (c) **Inherited debts** — anything that surfaced and belongs to a later phase, named by phase id (e.g. "V1-P12 must wire `plugins.updater` config + signing key").
+> 4. Open a PR with `gh pr create --base main --head v<phase-major>/p<N>-<slug> --title "<phase-id>: <subject>"`. PR body has **Summary** and **Test plan** sections. **Copilot code review is enabled on this repo and fires automatically when the PR opens** — no need to add a reviewer manually.
+> 5. **Wait for the Copilot review.** Poll with `gh pr view <num> --json reviews,comments` every ~30s for up to **10 minutes**. If no Copilot review lands within the window, note that in a PR comment and proceed to step 8.
+> 6. **Address actionable Copilot findings** (bug, correctness issue, missing edge case, security concern). Re-run the same verification commands the prompt prescribes (`cargo test`, `tsc -b`, `vite build`, `lint`, etc.) after each fix. Skip purely stylistic nits or unactionable observations; list what you skipped with one-line reasons in the follow-up commit message.
+> 7. **Single follow-up commit** with message `<phase-id>: address Copilot review` (or `<phase-id>: no Copilot review within window` if step 5 timed out). Push to the same branch. If there were zero actionable findings AND zero stylistic nits worth noting, skip the follow-up commit.
+> 8. **Auto-merge**: `gh pr merge <num> --squash --delete-branch`. If branch protection blocks the merge because a required CI check is still running, wait for CI to settle (`gh pr checks <num>`) and retry once. If the branch went stale (main moved during the Copilot fix loop), rebase: `git fetch origin && git pull --rebase origin main` on the feature branch, re-verify, push, and retry the merge. Never bypass required checks (no `--admin`); never force-push to `main`.
+> 9. End-of-task summary in chat: (a) what shipped, (b) deviations from prompt or canonical-doc text and why, (c) **Copilot findings addressed and skipped** (with one-line reason for each skip), (d) **Inherited debts** — anything that surfaced and belongs to a later phase, named by phase id (e.g. "V1-P12 must wire `plugins.updater` config + signing key"), (e) confirmation that the PR was merged and the branch deleted.
 
 ---
 
@@ -142,8 +146,12 @@ End-of-task exit sequence (mandatory):
 1. Single commit. Stage only the files this task should change. Message format: "<phase-id>: <subject>" (e.g. "V1-P3: identity creation").
 2. Push to a feature branch on github.com/scotej/studyvis (default branch main). Branch name: v<phase-major>/p<N>-<short-slug> where <phase-major> is 1 for V1 prompts, 2 for V2, 3 for V3 (e.g. v1/p3-identity, v2/p1-llama-sidecar). Direct push to main is not authorized.
 3. If GitHub rejects on email privacy, amend the commit with the noreply email and retry: git -c user.email='134114466+scotej@users.noreply.github.com' commit --amend --no-edit --reset-author
-4. Open a PR with: gh pr create --base main --head v<phase-major>/p<N>-<slug> --title "<phase-id>: <subject>". PR body has Summary and Test plan sections. Do NOT merge — the user reviews.
-5. End-of-task summary in chat: (a) what shipped, (b) deviations from prompt or canonical-doc text and why, (c) Inherited debts — anything that surfaced and belongs to a later phase, named by phase id (e.g. "V1-P12 must wire plugins.updater config + signing key").
+4. Open a PR with: gh pr create --base main --head v<phase-major>/p<N>-<slug> --title "<phase-id>: <subject>". PR body has Summary and Test plan sections. Copilot code review is enabled on this repo and fires automatically when the PR opens — no need to add a reviewer manually.
+5. Wait for the Copilot review. Poll with `gh pr view <num> --json reviews,comments` every ~30s for up to 10 minutes. If no Copilot review lands within the window, note that in a PR comment and proceed to step 8.
+6. For each actionable Copilot finding (bug, correctness issue, missing edge case, security concern): fix it in code. Re-run the same verification commands the prompt prescribes (cargo test, tsc -b, vite build, lint, etc.). Skip purely stylistic nits or unactionable observations and list what you skipped (with one-line reason each) in the follow-up commit message.
+7. Single follow-up commit with message "<phase-id>: address Copilot review" (or "<phase-id>: no Copilot review within window" if step 5 timed out). Push to the same branch. If there were zero actionable findings AND zero stylistic nits, skip the follow-up commit.
+8. Auto-merge: `gh pr merge <num> --squash --delete-branch`. If branch protection blocks the merge because a required CI check is still running, wait for CI to settle (poll `gh pr checks <num>`) and retry once. If the branch went stale (main moved during the Copilot fix loop and the PR shows "out-of-date"), `git fetch origin && git pull --rebase origin main` on the feature branch, re-run the verification commands, push, and retry the merge — never force-push to main, never bypass required checks (no `--admin`).
+9. End-of-task summary in chat: (a) what shipped, (b) deviations from prompt or canonical-doc text and why, (c) Copilot findings addressed and skipped (with reason for each skip), (d) Inherited debts — anything that surfaced and belongs to a later phase, named by phase id (e.g. "V1-P12 must wire plugins.updater config + signing key"), (e) confirmation that the PR was merged and the branch deleted.
 
 ---
 
@@ -239,8 +247,12 @@ End-of-task exit sequence (mandatory):
 1. Single commit. Stage only the files this task should change. Message format: "<phase-id>: <subject>" (e.g. "V1-P3: identity creation").
 2. Push to a feature branch on github.com/scotej/studyvis (default branch main). Branch name: v<phase-major>/p<N>-<short-slug> where <phase-major> is 1 for V1 prompts, 2 for V2, 3 for V3 (e.g. v1/p3-identity, v2/p1-llama-sidecar). Direct push to main is not authorized.
 3. If GitHub rejects on email privacy, amend the commit with the noreply email and retry: git -c user.email='134114466+scotej@users.noreply.github.com' commit --amend --no-edit --reset-author
-4. Open a PR with: gh pr create --base main --head v<phase-major>/p<N>-<slug> --title "<phase-id>: <subject>". PR body has Summary and Test plan sections. Do NOT merge — the user reviews.
-5. End-of-task summary in chat: (a) what shipped, (b) deviations from prompt or canonical-doc text and why, (c) Inherited debts — anything that surfaced and belongs to a later phase, named by phase id (e.g. "V1-P12 must wire plugins.updater config + signing key").
+4. Open a PR with: gh pr create --base main --head v<phase-major>/p<N>-<slug> --title "<phase-id>: <subject>". PR body has Summary and Test plan sections. Copilot code review is enabled on this repo and fires automatically when the PR opens — no need to add a reviewer manually.
+5. Wait for the Copilot review. Poll with `gh pr view <num> --json reviews,comments` every ~30s for up to 10 minutes. If no Copilot review lands within the window, note that in a PR comment and proceed to step 8.
+6. For each actionable Copilot finding (bug, correctness issue, missing edge case, security concern): fix it in code. Re-run the same verification commands the prompt prescribes (cargo test, tsc -b, vite build, lint, etc.). Skip purely stylistic nits or unactionable observations and list what you skipped (with one-line reason each) in the follow-up commit message.
+7. Single follow-up commit with message "<phase-id>: address Copilot review" (or "<phase-id>: no Copilot review within window" if step 5 timed out). Push to the same branch. If there were zero actionable findings AND zero stylistic nits, skip the follow-up commit.
+8. Auto-merge: `gh pr merge <num> --squash --delete-branch`. If branch protection blocks the merge because a required CI check is still running, wait for CI to settle (poll `gh pr checks <num>`) and retry once. If the branch went stale (main moved during the Copilot fix loop and the PR shows "out-of-date"), `git fetch origin && git pull --rebase origin main` on the feature branch, re-run the verification commands, push, and retry the merge — never force-push to main, never bypass required checks (no `--admin`).
+9. End-of-task summary in chat: (a) what shipped, (b) deviations from prompt or canonical-doc text and why, (c) Copilot findings addressed and skipped (with reason for each skip), (d) Inherited debts — anything that surfaced and belongs to a later phase, named by phase id (e.g. "V1-P12 must wire plugins.updater config + signing key"), (e) confirmation that the PR was merged and the branch deleted.
 
 ---
 
@@ -332,8 +344,12 @@ End-of-task exit sequence (mandatory):
 1. Single commit. Stage only the files this task should change. Message format: "<phase-id>: <subject>" (e.g. "V1-P3: identity creation").
 2. Push to a feature branch on github.com/scotej/studyvis (default branch main). Branch name: v<phase-major>/p<N>-<short-slug> where <phase-major> is 1 for V1 prompts, 2 for V2, 3 for V3 (e.g. v1/p3-identity, v2/p1-llama-sidecar). Direct push to main is not authorized.
 3. If GitHub rejects on email privacy, amend the commit with the noreply email and retry: git -c user.email='134114466+scotej@users.noreply.github.com' commit --amend --no-edit --reset-author
-4. Open a PR with: gh pr create --base main --head v<phase-major>/p<N>-<slug> --title "<phase-id>: <subject>". PR body has Summary and Test plan sections. Do NOT merge — the user reviews.
-5. End-of-task summary in chat: (a) what shipped, (b) deviations from prompt or canonical-doc text and why, (c) Inherited debts — anything that surfaced and belongs to a later phase, named by phase id (e.g. "V1-P12 must wire plugins.updater config + signing key").
+4. Open a PR with: gh pr create --base main --head v<phase-major>/p<N>-<slug> --title "<phase-id>: <subject>". PR body has Summary and Test plan sections. Copilot code review is enabled on this repo and fires automatically when the PR opens — no need to add a reviewer manually.
+5. Wait for the Copilot review. Poll with `gh pr view <num> --json reviews,comments` every ~30s for up to 10 minutes. If no Copilot review lands within the window, note that in a PR comment and proceed to step 8.
+6. For each actionable Copilot finding (bug, correctness issue, missing edge case, security concern): fix it in code. Re-run the same verification commands the prompt prescribes (cargo test, tsc -b, vite build, lint, etc.). Skip purely stylistic nits or unactionable observations and list what you skipped (with one-line reason each) in the follow-up commit message.
+7. Single follow-up commit with message "<phase-id>: address Copilot review" (or "<phase-id>: no Copilot review within window" if step 5 timed out). Push to the same branch. If there were zero actionable findings AND zero stylistic nits, skip the follow-up commit.
+8. Auto-merge: `gh pr merge <num> --squash --delete-branch`. If branch protection blocks the merge because a required CI check is still running, wait for CI to settle (poll `gh pr checks <num>`) and retry once. If the branch went stale (main moved during the Copilot fix loop and the PR shows "out-of-date"), `git fetch origin && git pull --rebase origin main` on the feature branch, re-run the verification commands, push, and retry the merge — never force-push to main, never bypass required checks (no `--admin`).
+9. End-of-task summary in chat: (a) what shipped, (b) deviations from prompt or canonical-doc text and why, (c) Copilot findings addressed and skipped (with reason for each skip), (d) Inherited debts — anything that surfaced and belongs to a later phase, named by phase id (e.g. "V1-P12 must wire plugins.updater config + signing key"), (e) confirmation that the PR was merged and the branch deleted.
 
 ---
 
@@ -437,8 +453,12 @@ End-of-task exit sequence (mandatory):
 1. Single commit. Stage only the files this task should change. Message format: "<phase-id>: <subject>" (e.g. "V1-P3: identity creation").
 2. Push to a feature branch on github.com/scotej/studyvis (default branch main). Branch name: v<phase-major>/p<N>-<short-slug> where <phase-major> is 1 for V1 prompts, 2 for V2, 3 for V3 (e.g. v1/p3-identity, v2/p1-llama-sidecar). Direct push to main is not authorized.
 3. If GitHub rejects on email privacy, amend the commit with the noreply email and retry: git -c user.email='134114466+scotej@users.noreply.github.com' commit --amend --no-edit --reset-author
-4. Open a PR with: gh pr create --base main --head v<phase-major>/p<N>-<slug> --title "<phase-id>: <subject>". PR body has Summary and Test plan sections. Do NOT merge — the user reviews.
-5. End-of-task summary in chat: (a) what shipped, (b) deviations from prompt or canonical-doc text and why, (c) Inherited debts — anything that surfaced and belongs to a later phase, named by phase id (e.g. "V1-P12 must wire plugins.updater config + signing key").
+4. Open a PR with: gh pr create --base main --head v<phase-major>/p<N>-<slug> --title "<phase-id>: <subject>". PR body has Summary and Test plan sections. Copilot code review is enabled on this repo and fires automatically when the PR opens — no need to add a reviewer manually.
+5. Wait for the Copilot review. Poll with `gh pr view <num> --json reviews,comments` every ~30s for up to 10 minutes. If no Copilot review lands within the window, note that in a PR comment and proceed to step 8.
+6. For each actionable Copilot finding (bug, correctness issue, missing edge case, security concern): fix it in code. Re-run the same verification commands the prompt prescribes (cargo test, tsc -b, vite build, lint, etc.). Skip purely stylistic nits or unactionable observations and list what you skipped (with one-line reason each) in the follow-up commit message.
+7. Single follow-up commit with message "<phase-id>: address Copilot review" (or "<phase-id>: no Copilot review within window" if step 5 timed out). Push to the same branch. If there were zero actionable findings AND zero stylistic nits, skip the follow-up commit.
+8. Auto-merge: `gh pr merge <num> --squash --delete-branch`. If branch protection blocks the merge because a required CI check is still running, wait for CI to settle (poll `gh pr checks <num>`) and retry once. If the branch went stale (main moved during the Copilot fix loop and the PR shows "out-of-date"), `git fetch origin && git pull --rebase origin main` on the feature branch, re-run the verification commands, push, and retry the merge — never force-push to main, never bypass required checks (no `--admin`).
+9. End-of-task summary in chat: (a) what shipped, (b) deviations from prompt or canonical-doc text and why, (c) Copilot findings addressed and skipped (with reason for each skip), (d) Inherited debts — anything that surfaced and belongs to a later phase, named by phase id (e.g. "V1-P12 must wire plugins.updater config + signing key"), (e) confirmation that the PR was merged and the branch deleted.
 
 ---
 
@@ -460,12 +480,12 @@ Concretely:
    - verifyMessage(edPub, message, sig): boolean  — Ed25519 verify.
    - boxEncrypt(theirXPub, myXPriv, plaintext): { nonce, ciphertext } — NaCl-style box using x25519 ECDH + XSalsa20-Poly1305 from @noble/ciphers. Random 24-byte nonce per call.
    - boxDecrypt(theirXPub, myXPriv, nonce, ciphertext): Uint8Array  — inverse, throws on auth failure.
-3. Implement private-key storage via OS keychain. Use **tauri-plugin-keyring** (NOT tauri-plugin-stronghold). Reasoning: keyring delegates to native OS credential stores (macOS Keychain, Windows Credential Manager, Linux Secret Service / libsecret) which is exactly what ARCHITECTURE.md §3 specifies; stronghold is a custom encrypted vault format that adds complexity, a dependency on iota-libraries, and doesn't actually use the OS-native stores the architecture asks for. Verify via Context7 that tauri-plugin-keyring is on Tauri 2 and works on all three OSes; if it has been deprecated or renamed since this prompt was written, surface that in your end-of-task summary and pick the current native-credential-store plugin. Expose Rust commands in src-tauri/src/commands/identity.rs:
+3. Implement private-key storage via OS keychain. Use the **`keyring` crate directly** (NOT `tauri-plugin-keyring`, NOT `tauri-plugin-stronghold`). Reasoning: the named `tauri-plugin-keyring` v0.1.0 does not actually support Linux despite citing Secret Service in its docs; the underlying `keyring` Rust crate (3.6+) supports macOS Keychain, Windows Credential Manager, and Linux Secret Service when you opt in per-target. Stronghold is a custom encrypted vault that does not use OS-native stores at all. Add target-gated entries in `src-tauri/Cargo.toml` so Linux builds do not currently fail: `[target.'cfg(target_os = "macos")'.dependencies.keyring]` with `features = ["apple-native"]` and the equivalent `windows-native` block; defer Linux's `sync-secret-service` feature wire-up to V3 (see V1-P3 carryover). Expose Rust commands in src-tauri/src/commands/identity.rs:
    - identity_save_keys(ed_priv_hex, x_priv_hex)
    - identity_load_keys() -> { ed_priv_hex, x_priv_hex }
    - identity_exists() -> bool
    The frontend never sees raw private keys after first generation; signing and box-decryption go through Rust commands that touch the keychain internally.
-4. Implement src/lib/db/identity.ts that reads/writes the public-side identity file at $APP_DATA/studyvis/identity.json (use Tauri's path::data_dir()) with shape:
+4. Implement src/lib/db/identity.ts that reads/writes the public-side identity file at `$DATA_DIR/studyvis/identity.json` where `$DATA_DIR` is obtained via Tauri 2's `app.path().data_dir()` (NOT `app_data_dir()` — that double-nests under the bundle identifier). JS side calls these via Rust commands; the FE never holds the path string. Shape:
    { version: 1, ed_pubkey_hex: string, x_pubkey_hex: string, display_name: string, created_at: number, mnemonic_fingerprint: sha256(mnemonic.join(" ")).slice(0, 16) }
 5. Build src/features/identity/ with:
    - useIdentity() hook returning { identity, status: "loading" | "absent" | "ready", actions: { create, signWithKeyring, ... } }.
@@ -536,8 +556,12 @@ End-of-task exit sequence (mandatory):
 1. Single commit. Stage only the files this task should change. Message format: "<phase-id>: <subject>" (e.g. "V1-P3: identity creation").
 2. Push to a feature branch on github.com/scotej/studyvis (default branch main). Branch name: v<phase-major>/p<N>-<short-slug> where <phase-major> is 1 for V1 prompts, 2 for V2, 3 for V3 (e.g. v1/p3-identity, v2/p1-llama-sidecar). Direct push to main is not authorized.
 3. If GitHub rejects on email privacy, amend the commit with the noreply email and retry: git -c user.email='134114466+scotej@users.noreply.github.com' commit --amend --no-edit --reset-author
-4. Open a PR with: gh pr create --base main --head v<phase-major>/p<N>-<slug> --title "<phase-id>: <subject>". PR body has Summary and Test plan sections. Do NOT merge — the user reviews.
-5. End-of-task summary in chat: (a) what shipped, (b) deviations from prompt or canonical-doc text and why, (c) Inherited debts — anything that surfaced and belongs to a later phase, named by phase id (e.g. "V1-P12 must wire plugins.updater config + signing key").
+4. Open a PR with: gh pr create --base main --head v<phase-major>/p<N>-<slug> --title "<phase-id>: <subject>". PR body has Summary and Test plan sections. Copilot code review is enabled on this repo and fires automatically when the PR opens — no need to add a reviewer manually.
+5. Wait for the Copilot review. Poll with `gh pr view <num> --json reviews,comments` every ~30s for up to 10 minutes. If no Copilot review lands within the window, note that in a PR comment and proceed to step 8.
+6. For each actionable Copilot finding (bug, correctness issue, missing edge case, security concern): fix it in code. Re-run the same verification commands the prompt prescribes (cargo test, tsc -b, vite build, lint, etc.). Skip purely stylistic nits or unactionable observations and list what you skipped (with one-line reason each) in the follow-up commit message.
+7. Single follow-up commit with message "<phase-id>: address Copilot review" (or "<phase-id>: no Copilot review within window" if step 5 timed out). Push to the same branch. If there were zero actionable findings AND zero stylistic nits, skip the follow-up commit.
+8. Auto-merge: `gh pr merge <num> --squash --delete-branch`. If branch protection blocks the merge because a required CI check is still running, wait for CI to settle (poll `gh pr checks <num>`) and retry once. If the branch went stale (main moved during the Copilot fix loop and the PR shows "out-of-date"), `git fetch origin && git pull --rebase origin main` on the feature branch, re-run the verification commands, push, and retry the merge — never force-push to main, never bypass required checks (no `--admin`).
+9. End-of-task summary in chat: (a) what shipped, (b) deviations from prompt or canonical-doc text and why, (c) Copilot findings addressed and skipped (with reason for each skip), (d) Inherited debts — anything that surfaced and belongs to a later phase, named by phase id (e.g. "V1-P12 must wire plugins.updater config + signing key"), (e) confirmation that the PR was merged and the branch deleted.
 
 ---
 
@@ -546,27 +570,28 @@ YOUR TASK: V1-P4 — Persistent local store via SQLite.
 Concretely:
 
 1. Add rusqlite (with bundled SQLite) to Cargo.toml. Decide: queries over Tauri commands, or migrate to better-sqlite3 in JS. Recommended: rusqlite via Tauri commands for security (DB file stays under Rust's control, never exposed to JS as raw FS access). Use Plan agent to weigh trade-offs and document the decision in src/lib/db/README.md (one paragraph max).
-2. Database file at $APP_DATA/studyvis/app.db.
-3. src-tauri/src/db/schema.sql:
+2. Database file at `$DATA_DIR/studyvis/app.db` (Tauri 2 `app.path().data_dir()` + "studyvis"; same parent as identity.json from V1-P3).
+3. Initial migration in src-tauri/src/db/migrations/001_initial.sql with three data tables. Do NOT include schema_version here — the runner manages it (see step 4).
    - friends(ed_pubkey_hex TEXT PRIMARY KEY, x_pubkey_hex TEXT NOT NULL, display_name TEXT, paired_at INTEGER, last_studied_with INTEGER, mnemonic_fingerprint TEXT)  -- both pubkeys per ARCHITECTURE.md §3
    - sessions(id TEXT PRIMARY KEY, started_at INTEGER, ended_at INTEGER, peer_pubkeys TEXT, total_minutes INTEGER, declared_topic TEXT NULL, score INTEGER NULL)  -- peer_pubkeys is a JSON array of ed_pubkey_hex; score/topic NULL until V2
    - audit_events(id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT, ts INTEGER, who TEXT, kind TEXT, detail TEXT, sig TEXT)  -- who is ed_pubkey_hex
-   - schema_version(version INTEGER PRIMARY KEY)
-4. Migration runner that on app boot reads schema_version and applies any pending migrations. V1 migration: 001_initial.sql with the above schema.
-5. Tauri commands in src-tauri/src/commands/friends.rs:
+4. Migration runner in src-tauri/src/db/migrations.rs: on app boot, `CREATE TABLE IF NOT EXISTS schema_version(version INTEGER PRIMARY KEY)` *outside* any transaction (chicken-and-egg with reading it), then read current version, then apply pending migrations inside a single transaction. Pattern: `MIGRATIONS: &[(u32, &str)]` indexed by version, with each SQL embedded via `include_str!`. Runner must be idempotent — running twice is a no-op. Promote `db` to `pub mod db` in `lib.rs` so cargo integration tests can import `studyvis_lib::db::*`.
+5. Tauri commands in src-tauri/src/commands/friends.rs (all wrap thin calls into pure functions over `&Connection` in `db::friends` for testability):
    - friends_list() -> Vec<Friend>  (Friend = { ed_pubkey_hex, x_pubkey_hex, display_name, paired_at, last_studied_with })
-   - friends_add(ed_pubkey, x_pubkey, name, ts)
+   - friends_add(ed_pubkey, x_pubkey, name, ts)  -- use `INSERT ... ON CONFLICT(ed_pubkey_hex) DO UPDATE` so re-pairing the same friend updates rather than errors
    - friends_remove(ed_pubkey)
    - friends_update_last_studied(ed_pubkey, ts)
    - friends_get_x_pubkey(ed_pubkey) -> Option<String>  (used by V1-P6 invite flow)
 6. JS wrappers in src/lib/db/friends.ts that invoke the commands.
-7. Zustand store in src/stores/friendsStore.ts that mirrors the friends table; loaded on app boot, mutated via the JS wrappers.
-8. Unit tests for the migration runner (apply on empty DB, no-op on already-applied), and integration tests under tests/integration/ that round-trip add → list → remove.
-9. Wire the friends store load into App.tsx's boot sequence so the placeholder from V1-P3 now reads "Identity ready. Friends: <count>".
+7. Zustand store in src/stores/friendsStore.ts that mirrors the friends table; loaded on app boot, mutated via the JS wrappers. Use Zustand 5.x.
+8. Tests:
+   - Migration runner unit tests in `src-tauri/src/db/migrations.rs` `#[cfg(test)]`: applies on empty in-memory DB; second run on the same connection is a no-op (and does not duplicate the schema_version row).
+   - Friends round-trip integration tests in `src-tauri/tests/friends_roundtrip.rs` (Cargo idiom): exercise add → list → update_last_studied → remove → get_x_pubkey. JS-side `tests/integration/` is left empty for V1-P5+ — a JS-mock invoke would only test the mock.
+9. Wire the friends store load into the **Home route** (`src/routes/Home.tsx` — that's where V1-P3 left the placeholder, NOT App.tsx). On mount, when identity status flips to 'ready' and store status is 'idle', call `useFriendsStore.getState().load()` exactly once. Render "Identity ready. Friends: <count>".
 10. Commit as "V1-P4: SQLite + friends store".
 
 Acceptance criteria:
-- $APP_DATA/studyvis/app.db is created on first launch with all four tables.
+- `$DATA_DIR/studyvis/app.db` is created on first launch with all four tables (the three from 001_initial.sql plus schema_version created by the runner).
 - Migration runner applies 001_initial idempotently.
 - All four friends commands work; round-trip tests pass.
 - Zustand store correctly hydrates on boot and reflects DB mutations.
@@ -574,8 +599,9 @@ Acceptance criteria:
 
 Notes:
 - Path APIs in Tauri 2 are namespaced under tauri::path; verify exact functions via Context7.
-- Use a connection pool (one connection is fine for this app, just guard with a Mutex).
+- Use `Arc<std::sync::Mutex<rusqlite::Connection>>` (one connection is fine for this app). Don't reach for `tokio::sync::Mutex` — locks are only held across short sync rusqlite calls, never across `.await`. Wrap as a tuple-struct (`pub struct DbPool(pub Arc<Mutex<Connection>>);`) and `app.manage(pool)` it from the `setup` hook so commands receive it via `tauri::State<'_, DbPool>`.
 - audit_events.detail is JSON serialized; use serde_json on Rust side.
+- Tauri auto-converts camelCase JS args to snake_case Rust params (e.g. JS `invoke('friends_add', { edPubkey, xPubkey, name, ts })` → Rust `friends_add(ed_pubkey: String, x_pubkey: String, name: String, ts: i64)`). Same convention as V1-P3 identity commands.
 - Stop after the friends count renders. No UI for adding friends yet — that's V1-P5.
 ````
 
@@ -613,14 +639,25 @@ End-of-task exit sequence (mandatory):
 1. Single commit. Stage only the files this task should change. Message format: "<phase-id>: <subject>" (e.g. "V1-P3: identity creation").
 2. Push to a feature branch on github.com/scotej/studyvis (default branch main). Branch name: v<phase-major>/p<N>-<short-slug> where <phase-major> is 1 for V1 prompts, 2 for V2, 3 for V3 (e.g. v1/p3-identity, v2/p1-llama-sidecar). Direct push to main is not authorized.
 3. If GitHub rejects on email privacy, amend the commit with the noreply email and retry: git -c user.email='134114466+scotej@users.noreply.github.com' commit --amend --no-edit --reset-author
-4. Open a PR with: gh pr create --base main --head v<phase-major>/p<N>-<slug> --title "<phase-id>: <subject>". PR body has Summary and Test plan sections. Do NOT merge — the user reviews.
-5. End-of-task summary in chat: (a) what shipped, (b) deviations from prompt or canonical-doc text and why, (c) Inherited debts — anything that surfaced and belongs to a later phase, named by phase id (e.g. "V1-P12 must wire plugins.updater config + signing key").
+4. Open a PR with: gh pr create --base main --head v<phase-major>/p<N>-<slug> --title "<phase-id>: <subject>". PR body has Summary and Test plan sections. Copilot code review is enabled on this repo and fires automatically when the PR opens — no need to add a reviewer manually.
+5. Wait for the Copilot review. Poll with `gh pr view <num> --json reviews,comments` every ~30s for up to 10 minutes. If no Copilot review lands within the window, note that in a PR comment and proceed to step 8.
+6. For each actionable Copilot finding (bug, correctness issue, missing edge case, security concern): fix it in code. Re-run the same verification commands the prompt prescribes (cargo test, tsc -b, vite build, lint, etc.). Skip purely stylistic nits or unactionable observations and list what you skipped (with one-line reason each) in the follow-up commit message.
+7. Single follow-up commit with message "<phase-id>: address Copilot review" (or "<phase-id>: no Copilot review within window" if step 5 timed out). Push to the same branch. If there were zero actionable findings AND zero stylistic nits, skip the follow-up commit.
+8. Auto-merge: `gh pr merge <num> --squash --delete-branch`. If branch protection blocks the merge because a required CI check is still running, wait for CI to settle (poll `gh pr checks <num>`) and retry once. If the branch went stale (main moved during the Copilot fix loop and the PR shows "out-of-date"), `git fetch origin && git pull --rebase origin main` on the feature branch, re-run the verification commands, push, and retry the merge — never force-push to main, never bypass required checks (no `--admin`).
+9. End-of-task summary in chat: (a) what shipped, (b) deviations from prompt or canonical-doc text and why, (c) Copilot findings addressed and skipped (with reason for each skip), (d) Inherited debts — anything that surfaced and belongs to a later phase, named by phase id (e.g. "V1-P12 must wire plugins.updater config + signing key"), (e) confirmation that the PR was merged and the branch deleted.
 
 ---
 
 YOUR TASK: V1-P5 — Trystero discovery and friend pairing flow.
 
 Implement ARCHITECTURE.md §5 (friend pairing flow) end-to-end.
+
+**Read first**: V1-P3 left the local user's `display_name` as `""` (empty string) — see `useIdentity.ts` and the V1-P3 carryover in MEMORY.md. Pairing exchanges display_name with the friend, so V1-P5 MUST collect the user's display name before any pairing flow can run. Either (a) add a one-time "Set your display name" prompt the first time AddFriendDialog opens, OR (b) coordinate with V1-P10 onboarding to land the input there and gate AddFriendDialog on a non-empty name. Pick (a) only if V1-P10 hasn't shipped yet; otherwise reuse the onboarding input. Persist via the existing `identity_save_record` Tauri command — do NOT introduce a new identity-mutation path.
+
+Reuse the V1-P4 surface — DO NOT introduce a new friends DB layer:
+- Persist new friends exclusively via `useFriendsStore.getState().add(edPubkey, xPubkey, name, ts)` which internally invokes the `friends_add` Tauri command.
+- Do NOT call `invoke('friends_add', ...)` directly from the pairing code — go through the store so the in-memory list updates atomically with the DB write.
+- Do NOT duplicate `boxEncrypt`/`boxDecrypt`/`signMessage`/`verifyMessage` from `src/lib/crypto/identity.ts` (V1-P3) — import them.
 
 Concretely:
 
@@ -644,7 +681,7 @@ Concretely:
 5. Build src/features/friends/AddFriendDialog.tsx with two tabs:
    - "Generate code" — runs hostPairing, shows the 12 words in JetBrains Mono with a Copy button, displays "waiting for Alice to enter the code…" with a cancel.
    - "Enter code" — text input for 12 words (also accepts pasted clipboard), calls joinPairing, shows progress.
-   - On success, both flows persist the new friend via the friends store and close the dialog.
+   - On success, both flows call `useFriendsStore.getState().add(edPubkey, xPubkey, displayName, Date.now())` (which invokes the V1-P4 `friends_add` Tauri command), then close the dialog. Toast on error.
 6. Add an "Add friend" button somewhere visible (the placeholder is fine for now) wired to open the dialog.
 7. Storybook stories for AddFriendDialog (mock both pre-state, in-progress, success, error).
 8. Integration test under tests/integration/pair.test.ts that runs both sides in-process (each in its own trystero room with a shared mock relay if possible; if not, document the manual two-machine test in pair.test.md).
@@ -654,7 +691,7 @@ Acceptance criteria — agent-verifiable:
 - `tsc -b && vite build` and `cargo check` succeed with the new module.
 - pair.test.ts (in-process two-instance harness using two trystero rooms or a mocked relay) round-trips: host generates 12 words → joiner consumes → both sides finish with the other's persisted identity matching the input. Tampering with the signature inside the test causes verification to throw.
 - Storybook stories for AddFriendDialog cover pre-state, in-progress, success, and error.
-- friends DB schema in src/lib/db/friends.ts now persists `(ed_pubkey, x_pubkey, display_name, paired_at)` exactly as ARCHITECTURE.md §5 step 14 requires.
+- The V1-P4 friends DB schema (`(ed_pubkey, x_pubkey, display_name, paired_at)`) is the only sink — verify by reading the `friends` table after a successful pairing test and confirming the row matches the inputs to `useFriendsStore.add()`.
 
 Acceptance criteria — user-verifiable (the agent does not run these; flag them in the PR's Test plan as "needs user"):
 - Two app instances on physically different machines using trystero Nostr pair via the 12-word code in under 30 seconds.
@@ -701,8 +738,12 @@ End-of-task exit sequence (mandatory):
 1. Single commit. Stage only the files this task should change. Message format: "<phase-id>: <subject>" (e.g. "V1-P3: identity creation").
 2. Push to a feature branch on github.com/scotej/studyvis (default branch main). Branch name: v<phase-major>/p<N>-<short-slug> where <phase-major> is 1 for V1 prompts, 2 for V2, 3 for V3 (e.g. v1/p3-identity, v2/p1-llama-sidecar). Direct push to main is not authorized.
 3. If GitHub rejects on email privacy, amend the commit with the noreply email and retry: git -c user.email='134114466+scotej@users.noreply.github.com' commit --amend --no-edit --reset-author
-4. Open a PR with: gh pr create --base main --head v<phase-major>/p<N>-<slug> --title "<phase-id>: <subject>". PR body has Summary and Test plan sections. Do NOT merge — the user reviews.
-5. End-of-task summary in chat: (a) what shipped, (b) deviations from prompt or canonical-doc text and why, (c) Inherited debts — anything that surfaced and belongs to a later phase, named by phase id (e.g. "V1-P12 must wire plugins.updater config + signing key").
+4. Open a PR with: gh pr create --base main --head v<phase-major>/p<N>-<slug> --title "<phase-id>: <subject>". PR body has Summary and Test plan sections. Copilot code review is enabled on this repo and fires automatically when the PR opens — no need to add a reviewer manually.
+5. Wait for the Copilot review. Poll with `gh pr view <num> --json reviews,comments` every ~30s for up to 10 minutes. If no Copilot review lands within the window, note that in a PR comment and proceed to step 8.
+6. For each actionable Copilot finding (bug, correctness issue, missing edge case, security concern): fix it in code. Re-run the same verification commands the prompt prescribes (cargo test, tsc -b, vite build, lint, etc.). Skip purely stylistic nits or unactionable observations and list what you skipped (with one-line reason each) in the follow-up commit message.
+7. Single follow-up commit with message "<phase-id>: address Copilot review" (or "<phase-id>: no Copilot review within window" if step 5 timed out). Push to the same branch. If there were zero actionable findings AND zero stylistic nits, skip the follow-up commit.
+8. Auto-merge: `gh pr merge <num> --squash --delete-branch`. If branch protection blocks the merge because a required CI check is still running, wait for CI to settle (poll `gh pr checks <num>`) and retry once. If the branch went stale (main moved during the Copilot fix loop and the PR shows "out-of-date"), `git fetch origin && git pull --rebase origin main` on the feature branch, re-run the verification commands, push, and retry the merge — never force-push to main, never bypass required checks (no `--admin`).
+9. End-of-task summary in chat: (a) what shipped, (b) deviations from prompt or canonical-doc text and why, (c) Copilot findings addressed and skipped (with reason for each skip), (d) Inherited debts — anything that surfaced and belongs to a later phase, named by phase id (e.g. "V1-P12 must wire plugins.updater config + signing key"), (e) confirmation that the PR was merged and the branch deleted.
 
 ---
 
@@ -712,17 +753,23 @@ Implement ARCHITECTURE.md §6 end-to-end.
 
 Concretely:
 
+**Reuse the V1-P3/V1-P4 surface — DO NOT reimplement crypto or DB lookups:**
+- `boxEncrypt` / `boxDecrypt` / `signMessage` / `verifyMessage` already exist in `src/lib/crypto/identity.ts` (V1-P3). Import; do not re-derive.
+- `getFriendXPubkey(edPubkey)` in `src/lib/db/friends.ts` (V1-P4) wraps the `friends_get_x_pubkey` Tauri command. Use it for the receiver-side lookup.
+- The friend's x_pubkey is also already in the `useFriendsStore` cache from V1-P5 — prefer the store for hot lookups, fall back to `getFriendXPubkey` only on cache miss.
+- The local user's keypair: signing goes through the existing `signWithKeyring` Rust command (V1-P3). For NaCl box decryption, the X25519 private key still has to surface to JS via `loadKeys` — there's no Rust-side `identity_box_decrypt` yet (carried over to a later phase). Use `loadKeys` and pass `xPriv` to `boxDecrypt`.
+
 1. Implement src/features/friends/inbox.ts:
    - subscribeToOwnInbox(): joins the user's own inbox topic (= inboxTopic(my_ed_pubkey) per ARCHITECTURE.md §4) with password = inboxPassword(my_ed_pubkey) on app boot. Listens for makeAction("invite") payloads.
    - On invite envelope received (wire shape from ARCHITECTURE.md §6 step 5: { v, from_ed_pubkey, nonce, ciphertext }):
-     a. Read from_ed_pubkey OUTSIDE the box. Check friends.db. If not a friend, drop silently — no decrypt cost paid.
-     b. Look up sender_x_pubkey = friends_get_x_pubkey(from_ed_pubkey).
-     c. boxDecrypt(sender_x_pubkey, our_x_priv, nonce, ciphertext) → payload bytes. On auth failure, drop.
-     d. Parse payload JSON. Verify inner sig is valid Ed25519 over (payload without sig field) against from_ed_pubkey. On invalid sig, drop.
+     a. Read from_ed_pubkey OUTSIDE the box. Check `useFriendsStore` for the friend. If not a friend, drop silently — no decrypt cost paid.
+     b. Look up sender_x_pubkey from the store (or via `getFriendXPubkey(from_ed_pubkey)` from `src/lib/db/friends.ts` if the store is cold).
+     c. `boxDecrypt(senderXPubkey, ourXPriv, nonce, ciphertext)` → payload bytes (function from `src/lib/crypto/identity.ts`). On auth failure, drop.
+     d. Parse payload JSON. Verify inner sig is valid Ed25519 over (payload without sig field) against from_ed_pubkey via `verifyMessage`. On invalid sig, drop.
      e. Check expires_at > now. On expiry, drop.
    - On valid invite: dispatches an event handled by the session feature (V1-P8 will pick this up; for now, log + show a Toast).
 2. Implement src/features/friends/invite.ts:
-   - inviteFriend(friend, sessionTopic, sessionPassword): looks up friend's x_pubkey from friends.db (via friends_get_x_pubkey), builds the inner payload = { session_topic, session_password, sam_display_name, expires_at: now+5min, sig: ed25519_sign(payload_without_sig, our_ed_priv) }, serializes it, generates a random 24-byte nonce, runs boxEncrypt(their_x_pubkey, our_x_keypair, nonce, payload_bytes) → ciphertext. Wire shape sent to friend's inbox: { v: 1, from_ed_pubkey: our_ed_pubkey_hex, nonce: base64(nonce), ciphertext: base64(ciphertext) }. Joins friend's inbox topic (= inboxTopic(friend.ed_pubkey) with inboxPassword(friend.ed_pubkey)) temporarily, sends via room.makeAction("invite"), leaves.
+   - inviteFriend(friend, sessionTopic, sessionPassword): looks up friend's x_pubkey from `useFriendsStore` (the friend record already carries it from V1-P5 pairing), builds the inner payload = { session_topic, session_password, our_display_name, expires_at: now+5min, sig: signMessage(our_ed_priv, serialize(payload_without_sig)) }, serializes it, generates a random 24-byte nonce, runs `boxEncrypt(their_x_pubkey, our_x_keypair, plaintext)` → { nonce, ciphertext } (the existing helper generates the nonce internally — pass through both). Wire shape sent to friend's inbox: { v: 1, from_ed_pubkey: our_ed_pubkey_hex, nonce: base64(nonce), ciphertext: base64(ciphertext) }. Joins friend's inbox topic (= inboxTopic(friend.ed_pubkey) with inboxPassword(friend.ed_pubkey)) temporarily, sends via room.makeAction("invite"), leaves.
    - The session_topic and session_password are passed in (generated by V1-P8); for now, generate placeholder values to wire up the round-trip.
 3. Implement src/features/friends/FriendsList.tsx matching DESIGN-SYSTEM.md §8.2:
    - Lists every friend from the store.
@@ -748,7 +795,7 @@ Acceptance criteria — user-verifiable:
 - Clicking "Invite" causes the receiver's machine to display a tauri-plugin-notification OS notification.
 
 Notes:
-- @noble/ciphers exposes XSalsa20-Poly1305; @noble/curves exposes X25519. NaCl box is X25519 ECDH → derive shared secret → XSalsa20-Poly1305 with a random 24-byte nonce. The boxEncrypt/boxDecrypt helpers should already exist from V1-P3; reuse them. Test against a known nacl_box test vector to be safe.
+- @noble/ciphers exposes XSalsa20-Poly1305; @noble/curves exposes X25519. NaCl box is X25519 ECDH → HSalsa20 (NaCl's standard SIGMA "expand 32-byte k") → XSalsa20-Poly1305 with a random 24-byte nonce. The boxEncrypt/boxDecrypt helpers in `src/lib/crypto/identity.ts` (V1-P3) already implement this libsodium-compatible construction. Add a libsodium `crypto_box_easy` test vector to `tests/unit/identity.test.ts` if one isn't there yet (carried over from V1-P3) so the byte-for-byte compatibility is locked in before invites go on the wire.
 - Remember the friend's x_pubkey was saved during pairing (V1-P5); it's in friends.db now and you don't need to re-fetch it.
 - The invite payload includes session_topic and session_password — placeholders for now; V1-P8 generates real ones.
 - Don't actually start a session yet on accept — just log "would start session".
@@ -789,12 +836,18 @@ End-of-task exit sequence (mandatory):
 1. Single commit. Stage only the files this task should change. Message format: "<phase-id>: <subject>" (e.g. "V1-P3: identity creation").
 2. Push to a feature branch on github.com/scotej/studyvis (default branch main). Branch name: v<phase-major>/p<N>-<short-slug> where <phase-major> is 1 for V1 prompts, 2 for V2, 3 for V3 (e.g. v1/p3-identity, v2/p1-llama-sidecar). Direct push to main is not authorized.
 3. If GitHub rejects on email privacy, amend the commit with the noreply email and retry: git -c user.email='134114466+scotej@users.noreply.github.com' commit --amend --no-edit --reset-author
-4. Open a PR with: gh pr create --base main --head v<phase-major>/p<N>-<slug> --title "<phase-id>: <subject>". PR body has Summary and Test plan sections. Do NOT merge — the user reviews.
-5. End-of-task summary in chat: (a) what shipped, (b) deviations from prompt or canonical-doc text and why, (c) Inherited debts — anything that surfaced and belongs to a later phase, named by phase id (e.g. "V1-P12 must wire plugins.updater config + signing key").
+4. Open a PR with: gh pr create --base main --head v<phase-major>/p<N>-<slug> --title "<phase-id>: <subject>". PR body has Summary and Test plan sections. Copilot code review is enabled on this repo and fires automatically when the PR opens — no need to add a reviewer manually.
+5. Wait for the Copilot review. Poll with `gh pr view <num> --json reviews,comments` every ~30s for up to 10 minutes. If no Copilot review lands within the window, note that in a PR comment and proceed to step 8.
+6. For each actionable Copilot finding (bug, correctness issue, missing edge case, security concern): fix it in code. Re-run the same verification commands the prompt prescribes (cargo test, tsc -b, vite build, lint, etc.). Skip purely stylistic nits or unactionable observations and list what you skipped (with one-line reason each) in the follow-up commit message.
+7. Single follow-up commit with message "<phase-id>: address Copilot review" (or "<phase-id>: no Copilot review within window" if step 5 timed out). Push to the same branch. If there were zero actionable findings AND zero stylistic nits, skip the follow-up commit.
+8. Auto-merge: `gh pr merge <num> --squash --delete-branch`. If branch protection blocks the merge because a required CI check is still running, wait for CI to settle (poll `gh pr checks <num>`) and retry once. If the branch went stale (main moved during the Copilot fix loop and the PR shows "out-of-date"), `git fetch origin && git pull --rebase origin main` on the feature branch, re-run the verification commands, push, and retry the merge — never force-push to main, never bypass required checks (no `--admin`).
+9. End-of-task summary in chat: (a) what shipped, (b) deviations from prompt or canonical-doc text and why, (c) Copilot findings addressed and skipped (with reason for each skip), (d) Inherited debts — anything that surfaced and belongs to a later phase, named by phase id (e.g. "V1-P12 must wire plugins.updater config + signing key"), (e) confirmation that the PR was merged and the branch deleted.
 
 ---
 
 YOUR TASK: V1-P7 — System tray, autostart-at-login (opt-in), global shortcuts for PTT and (placeholder) AI dialog.
+
+**Already in place from V1-P1:** `tauri-plugin-autostart`, `tauri-plugin-global-shortcut`, and `tauri-plugin-notification` are already registered in `src-tauri/src/lib.rs`. V1-P7 wires *usage* — do NOT re-register the plugins.
 
 Concretely:
 
@@ -802,12 +855,12 @@ Concretely:
    - "Open StudyVis"
    - "—"
    - "Quit"
-   On left-click of the tray, toggle the main window visibility.
+   On left-click of the tray, toggle the main window visibility. Use the existing tray icons under `src-tauri/icons/tray/` (V1-P2 generated `16/20/22/24` px white-on-dark variants; the dark-on-light variant is owed forward — see V1-P2 carryover — flag it in your end-of-task summary if light-mode menu bars are unreadable on the host OS).
 2. Window close behavior: if autostart is enabled OR if "minimize to tray on close" setting is true (default true), hide the window instead of quitting. Right-click tray → Quit fully exits.
-3. Implement opt-in autostart-at-login via tauri-plugin-autostart. Default: off. Settings UI lands in V1-P11; for now, expose a Tauri command toggle and call it from a debug button on the main view.
-4. Register global shortcuts via tauri-plugin-global-shortcut:
-   - PTT-friends: Ctrl+[ on Win/Linux, Cmd+[ on macOS. Press = unmute mic; release = mute mic. Hook into a Zustand pttStore that the (V1-P8) WebRTC layer will read.
-   - PTT-AI: Ctrl+] / Cmd+] — wired to an empty handler for V1; V2-P7 connects it to the AI dialog window. Comment why it's currently a no-op.
+3. Wire opt-in autostart-at-login (the `tauri-plugin-autostart` is already registered in lib.rs from V1-P1). Default: off. Expose a Tauri command toggle and call it from a debug button on the main view; real settings UI lands in V1-P11.
+4. Register specific global shortcuts via the already-initialized `tauri-plugin-global-shortcut`:
+   - PTT-friends: Ctrl+[ on Win/Linux, Cmd+[ on macOS. Press = unmute mic; release = mute mic. Hook into a Zustand `pttStore` (new in `src/stores/pttStore.ts`, parallel to `friendsStore`) that the V1-P8 WebRTC layer will read.
+   - PTT-AI: Ctrl+] / Cmd+] — register but wire to an empty handler for V1; V2-P7 connects it to the AI dialog window. Comment why it's currently a no-op.
 5. Add a per-user setting "Launch StudyVis at login" with a Switch on a temporary debug panel (real settings UI in V1-P11). Default off.
 6. macOS: confirm tray icon renders correctly in light + dark menu bars. Provide template-style monochrome icon. Verify on at least the host OS.
 7. Storybook stories: tray menu can't be storybooked, but capture screenshots in /style for the tray + global-shortcut overlay.
@@ -861,8 +914,12 @@ End-of-task exit sequence (mandatory):
 1. Single commit. Stage only the files this task should change. Message format: "<phase-id>: <subject>" (e.g. "V1-P3: identity creation").
 2. Push to a feature branch on github.com/scotej/studyvis (default branch main). Branch name: v<phase-major>/p<N>-<short-slug> where <phase-major> is 1 for V1 prompts, 2 for V2, 3 for V3 (e.g. v1/p3-identity, v2/p1-llama-sidecar). Direct push to main is not authorized.
 3. If GitHub rejects on email privacy, amend the commit with the noreply email and retry: git -c user.email='134114466+scotej@users.noreply.github.com' commit --amend --no-edit --reset-author
-4. Open a PR with: gh pr create --base main --head v<phase-major>/p<N>-<slug> --title "<phase-id>: <subject>". PR body has Summary and Test plan sections. Do NOT merge — the user reviews.
-5. End-of-task summary in chat: (a) what shipped, (b) deviations from prompt or canonical-doc text and why, (c) Inherited debts — anything that surfaced and belongs to a later phase, named by phase id (e.g. "V1-P12 must wire plugins.updater config + signing key").
+4. Open a PR with: gh pr create --base main --head v<phase-major>/p<N>-<slug> --title "<phase-id>: <subject>". PR body has Summary and Test plan sections. Copilot code review is enabled on this repo and fires automatically when the PR opens — no need to add a reviewer manually.
+5. Wait for the Copilot review. Poll with `gh pr view <num> --json reviews,comments` every ~30s for up to 10 minutes. If no Copilot review lands within the window, note that in a PR comment and proceed to step 8.
+6. For each actionable Copilot finding (bug, correctness issue, missing edge case, security concern): fix it in code. Re-run the same verification commands the prompt prescribes (cargo test, tsc -b, vite build, lint, etc.). Skip purely stylistic nits or unactionable observations and list what you skipped (with one-line reason each) in the follow-up commit message.
+7. Single follow-up commit with message "<phase-id>: address Copilot review" (or "<phase-id>: no Copilot review within window" if step 5 timed out). Push to the same branch. If there were zero actionable findings AND zero stylistic nits, skip the follow-up commit.
+8. Auto-merge: `gh pr merge <num> --squash --delete-branch`. If branch protection blocks the merge because a required CI check is still running, wait for CI to settle (poll `gh pr checks <num>`) and retry once. If the branch went stale (main moved during the Copilot fix loop and the PR shows "out-of-date"), `git fetch origin && git pull --rebase origin main` on the feature branch, re-run the verification commands, push, and retry the merge — never force-push to main, never bypass required checks (no `--admin`).
+9. End-of-task summary in chat: (a) what shipped, (b) deviations from prompt or canonical-doc text and why, (c) Copilot findings addressed and skipped (with reason for each skip), (d) Inherited debts — anything that surfaced and belongs to a later phase, named by phase id (e.g. "V1-P12 must wire plugins.updater config + signing key"), (e) confirmation that the PR was merged and the branch deleted.
 
 ---
 
@@ -947,8 +1004,12 @@ End-of-task exit sequence (mandatory):
 1. Single commit. Stage only the files this task should change. Message format: "<phase-id>: <subject>" (e.g. "V1-P3: identity creation").
 2. Push to a feature branch on github.com/scotej/studyvis (default branch main). Branch name: v<phase-major>/p<N>-<short-slug> where <phase-major> is 1 for V1 prompts, 2 for V2, 3 for V3 (e.g. v1/p3-identity, v2/p1-llama-sidecar). Direct push to main is not authorized.
 3. If GitHub rejects on email privacy, amend the commit with the noreply email and retry: git -c user.email='134114466+scotej@users.noreply.github.com' commit --amend --no-edit --reset-author
-4. Open a PR with: gh pr create --base main --head v<phase-major>/p<N>-<slug> --title "<phase-id>: <subject>". PR body has Summary and Test plan sections. Do NOT merge — the user reviews.
-5. End-of-task summary in chat: (a) what shipped, (b) deviations from prompt or canonical-doc text and why, (c) Inherited debts — anything that surfaced and belongs to a later phase, named by phase id (e.g. "V1-P12 must wire plugins.updater config + signing key").
+4. Open a PR with: gh pr create --base main --head v<phase-major>/p<N>-<slug> --title "<phase-id>: <subject>". PR body has Summary and Test plan sections. Copilot code review is enabled on this repo and fires automatically when the PR opens — no need to add a reviewer manually.
+5. Wait for the Copilot review. Poll with `gh pr view <num> --json reviews,comments` every ~30s for up to 10 minutes. If no Copilot review lands within the window, note that in a PR comment and proceed to step 8.
+6. For each actionable Copilot finding (bug, correctness issue, missing edge case, security concern): fix it in code. Re-run the same verification commands the prompt prescribes (cargo test, tsc -b, vite build, lint, etc.). Skip purely stylistic nits or unactionable observations and list what you skipped (with one-line reason each) in the follow-up commit message.
+7. Single follow-up commit with message "<phase-id>: address Copilot review" (or "<phase-id>: no Copilot review within window" if step 5 timed out). Push to the same branch. If there were zero actionable findings AND zero stylistic nits, skip the follow-up commit.
+8. Auto-merge: `gh pr merge <num> --squash --delete-branch`. If branch protection blocks the merge because a required CI check is still running, wait for CI to settle (poll `gh pr checks <num>`) and retry once. If the branch went stale (main moved during the Copilot fix loop and the PR shows "out-of-date"), `git fetch origin && git pull --rebase origin main` on the feature branch, re-run the verification commands, push, and retry the merge — never force-push to main, never bypass required checks (no `--admin`).
+9. End-of-task summary in chat: (a) what shipped, (b) deviations from prompt or canonical-doc text and why, (c) Copilot findings addressed and skipped (with reason for each skip), (d) Inherited debts — anything that surfaced and belongs to a later phase, named by phase id (e.g. "V1-P12 must wire plugins.updater config + signing key"), (e) confirmation that the PR was merged and the branch deleted.
 
 ---
 
@@ -1026,8 +1087,12 @@ End-of-task exit sequence (mandatory):
 1. Single commit. Stage only the files this task should change. Message format: "<phase-id>: <subject>" (e.g. "V1-P3: identity creation").
 2. Push to a feature branch on github.com/scotej/studyvis (default branch main). Branch name: v<phase-major>/p<N>-<short-slug> where <phase-major> is 1 for V1 prompts, 2 for V2, 3 for V3 (e.g. v1/p3-identity, v2/p1-llama-sidecar). Direct push to main is not authorized.
 3. If GitHub rejects on email privacy, amend the commit with the noreply email and retry: git -c user.email='134114466+scotej@users.noreply.github.com' commit --amend --no-edit --reset-author
-4. Open a PR with: gh pr create --base main --head v<phase-major>/p<N>-<slug> --title "<phase-id>: <subject>". PR body has Summary and Test plan sections. Do NOT merge — the user reviews.
-5. End-of-task summary in chat: (a) what shipped, (b) deviations from prompt or canonical-doc text and why, (c) Inherited debts — anything that surfaced and belongs to a later phase, named by phase id (e.g. "V1-P12 must wire plugins.updater config + signing key").
+4. Open a PR with: gh pr create --base main --head v<phase-major>/p<N>-<slug> --title "<phase-id>: <subject>". PR body has Summary and Test plan sections. Copilot code review is enabled on this repo and fires automatically when the PR opens — no need to add a reviewer manually.
+5. Wait for the Copilot review. Poll with `gh pr view <num> --json reviews,comments` every ~30s for up to 10 minutes. If no Copilot review lands within the window, note that in a PR comment and proceed to step 8.
+6. For each actionable Copilot finding (bug, correctness issue, missing edge case, security concern): fix it in code. Re-run the same verification commands the prompt prescribes (cargo test, tsc -b, vite build, lint, etc.). Skip purely stylistic nits or unactionable observations and list what you skipped (with one-line reason each) in the follow-up commit message.
+7. Single follow-up commit with message "<phase-id>: address Copilot review" (or "<phase-id>: no Copilot review within window" if step 5 timed out). Push to the same branch. If there were zero actionable findings AND zero stylistic nits, skip the follow-up commit.
+8. Auto-merge: `gh pr merge <num> --squash --delete-branch`. If branch protection blocks the merge because a required CI check is still running, wait for CI to settle (poll `gh pr checks <num>`) and retry once. If the branch went stale (main moved during the Copilot fix loop and the PR shows "out-of-date"), `git fetch origin && git pull --rebase origin main` on the feature branch, re-run the verification commands, push, and retry the merge — never force-push to main, never bypass required checks (no `--admin`).
+9. End-of-task summary in chat: (a) what shipped, (b) deviations from prompt or canonical-doc text and why, (c) Copilot findings addressed and skipped (with reason for each skip), (d) Inherited debts — anything that surfaced and belongs to a later phase, named by phase id (e.g. "V1-P12 must wire plugins.updater config + signing key"), (e) confirmation that the PR was merged and the branch deleted.
 
 ---
 
@@ -1097,8 +1162,12 @@ End-of-task exit sequence (mandatory):
 1. Single commit. Stage only the files this task should change. Message format: "<phase-id>: <subject>" (e.g. "V1-P3: identity creation").
 2. Push to a feature branch on github.com/scotej/studyvis (default branch main). Branch name: v<phase-major>/p<N>-<short-slug> where <phase-major> is 1 for V1 prompts, 2 for V2, 3 for V3 (e.g. v1/p3-identity, v2/p1-llama-sidecar). Direct push to main is not authorized.
 3. If GitHub rejects on email privacy, amend the commit with the noreply email and retry: git -c user.email='134114466+scotej@users.noreply.github.com' commit --amend --no-edit --reset-author
-4. Open a PR with: gh pr create --base main --head v<phase-major>/p<N>-<slug> --title "<phase-id>: <subject>". PR body has Summary and Test plan sections. Do NOT merge — the user reviews.
-5. End-of-task summary in chat: (a) what shipped, (b) deviations from prompt or canonical-doc text and why, (c) Inherited debts — anything that surfaced and belongs to a later phase, named by phase id (e.g. "V1-P12 must wire plugins.updater config + signing key").
+4. Open a PR with: gh pr create --base main --head v<phase-major>/p<N>-<slug> --title "<phase-id>: <subject>". PR body has Summary and Test plan sections. Copilot code review is enabled on this repo and fires automatically when the PR opens — no need to add a reviewer manually.
+5. Wait for the Copilot review. Poll with `gh pr view <num> --json reviews,comments` every ~30s for up to 10 minutes. If no Copilot review lands within the window, note that in a PR comment and proceed to step 8.
+6. For each actionable Copilot finding (bug, correctness issue, missing edge case, security concern): fix it in code. Re-run the same verification commands the prompt prescribes (cargo test, tsc -b, vite build, lint, etc.). Skip purely stylistic nits or unactionable observations and list what you skipped (with one-line reason each) in the follow-up commit message.
+7. Single follow-up commit with message "<phase-id>: address Copilot review" (or "<phase-id>: no Copilot review within window" if step 5 timed out). Push to the same branch. If there were zero actionable findings AND zero stylistic nits, skip the follow-up commit.
+8. Auto-merge: `gh pr merge <num> --squash --delete-branch`. If branch protection blocks the merge because a required CI check is still running, wait for CI to settle (poll `gh pr checks <num>`) and retry once. If the branch went stale (main moved during the Copilot fix loop and the PR shows "out-of-date"), `git fetch origin && git pull --rebase origin main` on the feature branch, re-run the verification commands, push, and retry the merge — never force-push to main, never bypass required checks (no `--admin`).
+9. End-of-task summary in chat: (a) what shipped, (b) deviations from prompt or canonical-doc text and why, (c) Copilot findings addressed and skipped (with reason for each skip), (d) Inherited debts — anything that surfaced and belongs to a later phase, named by phase id (e.g. "V1-P12 must wire plugins.updater config + signing key"), (e) confirmation that the PR was merged and the branch deleted.
 
 ---
 
@@ -1120,9 +1189,9 @@ Concretely:
 
 1. SettingsLayout (left rail nav + right pane content) per DESIGN-SYSTEM.md §4.
 2. Each category renders SettingsRow components with label + control + helper text.
-3. All settings persist via tauri-plugin-store (a separate small JSON, distinct from app.db).
+3. All settings persist via `tauri-plugin-store` (already registered in `lib.rs` from V1-P1) at a small JSON file at `$DATA_DIR/studyvis/settings.json`, distinct from `app.db`. As part of this phase, **migrate `theme` off `localStorage["studyvis.theme"]`** (added in V1-P2) into `tauri-plugin-store` so all persistent prefs share a single backend. Read the legacy `localStorage` key one last time on first boot post-migration and fold it into the store, then clear it.
 4. "Open data folder" uses tauri-plugin-shell to reveal the folder in the OS file manager.
-5. "Show backup mnemonic" uses the Rust signing/identity command path to fetch the mnemonic — but actually we don't store the mnemonic; we store the seed in keychain, derive mnemonic on demand. Re-derive each time, never cache.
+5. "Show backup mnemonic": V1-P3 stored only the derived Ed25519 + X25519 private keys in the OS keychain (`{ ed_priv_hex, x_priv_hex }` — see `src-tauri/src/commands/identity.rs`). Neither the BIP39 mnemonic nor the master seed is retrievable post-onboarding, by design. Recovering the mnemonic requires explicitly storing it (deferred to the V3 BIP39 recovery flow). For V1, the "Show backup mnemonic" row is greyed out with a helper: "Available in V3 — keep your original 24-word backup safe." This is a deviation from the original V1 ambition but matches the actual V1-P3 storage model; flag it in your end-of-task summary.
 6. Apply theme changes immediately on toggle.
 7. Storybook stories per category.
 8. Commit as "V1-P11: settings panel".
@@ -1173,8 +1242,12 @@ End-of-task exit sequence (mandatory):
 1. Single commit. Stage only the files this task should change. Message format: "<phase-id>: <subject>" (e.g. "V1-P3: identity creation").
 2. Push to a feature branch on github.com/scotej/studyvis (default branch main). Branch name: v<phase-major>/p<N>-<short-slug> where <phase-major> is 1 for V1 prompts, 2 for V2, 3 for V3 (e.g. v1/p3-identity, v2/p1-llama-sidecar). Direct push to main is not authorized.
 3. If GitHub rejects on email privacy, amend the commit with the noreply email and retry: git -c user.email='134114466+scotej@users.noreply.github.com' commit --amend --no-edit --reset-author
-4. Open a PR with: gh pr create --base main --head v<phase-major>/p<N>-<slug> --title "<phase-id>: <subject>". PR body has Summary and Test plan sections. Do NOT merge — the user reviews.
-5. End-of-task summary in chat: (a) what shipped, (b) deviations from prompt or canonical-doc text and why, (c) Inherited debts — anything that surfaced and belongs to a later phase, named by phase id (e.g. "V1-P12 must wire plugins.updater config + signing key").
+4. Open a PR with: gh pr create --base main --head v<phase-major>/p<N>-<slug> --title "<phase-id>: <subject>". PR body has Summary and Test plan sections. Copilot code review is enabled on this repo and fires automatically when the PR opens — no need to add a reviewer manually.
+5. Wait for the Copilot review. Poll with `gh pr view <num> --json reviews,comments` every ~30s for up to 10 minutes. If no Copilot review lands within the window, note that in a PR comment and proceed to step 8.
+6. For each actionable Copilot finding (bug, correctness issue, missing edge case, security concern): fix it in code. Re-run the same verification commands the prompt prescribes (cargo test, tsc -b, vite build, lint, etc.). Skip purely stylistic nits or unactionable observations and list what you skipped (with one-line reason each) in the follow-up commit message.
+7. Single follow-up commit with message "<phase-id>: address Copilot review" (or "<phase-id>: no Copilot review within window" if step 5 timed out). Push to the same branch. If there were zero actionable findings AND zero stylistic nits, skip the follow-up commit.
+8. Auto-merge: `gh pr merge <num> --squash --delete-branch`. If branch protection blocks the merge because a required CI check is still running, wait for CI to settle (poll `gh pr checks <num>`) and retry once. If the branch went stale (main moved during the Copilot fix loop and the PR shows "out-of-date"), `git fetch origin && git pull --rebase origin main` on the feature branch, re-run the verification commands, push, and retry the merge — never force-push to main, never bypass required checks (no `--admin`).
+9. End-of-task summary in chat: (a) what shipped, (b) deviations from prompt or canonical-doc text and why, (c) Copilot findings addressed and skipped (with reason for each skip), (d) Inherited debts — anything that surfaced and belongs to a later phase, named by phase id (e.g. "V1-P12 must wire plugins.updater config + signing key"), (e) confirmation that the PR was merged and the branch deleted.
 
 ---
 
@@ -1200,7 +1273,7 @@ Concretely:
 3. Linux (only if V0 authorized it) — produce an `.AppImage`:
    - Best UX for unsigned distribution: no install, no root, just `chmod +x` and run.
    - Skip .deb / .rpm — they require sudo and add no value for a friends-only group.
-4. Updater plugin: leave `tauri-plugin-updater` in Cargo.toml (per ARCH.md §2) but do NOT register it in lib.rs. Remove the `#[cfg(not(debug_assertions))]`-gated block from V1-P1; replace with a comment: "// updater registration deferred to V3 — friends-only V1 ships without auto-update; see V1-P12 scope decision". This means V1 release builds no longer panic at startup, since the plugin isn't registered at all.
+4. Updater plugin: leave `tauri-plugin-updater` in `src-tauri/Cargo.toml` (per ARCH.md §2). In `src-tauri/src/lib.rs`, find the existing `#[cfg(not(debug_assertions))] app.handle().plugin(tauri_plugin_updater::Builder::new().build())?;` block (added in V1-P1) and **delete it**, replacing with a comment: `// updater registration deferred to V3 — friends-only V1 ships without auto-update; see V1-P12 scope decision`. With the registration gone, V1 release builds will no longer attempt to wire the plugin at all (currently the cfg-gate keeps it out of dev only, so a release build today would fail with "no updater config" — V1-P12 retires that whole code path).
 5. CI release workflow at `.github/workflows/release.yml`: on push of a tag matching `v*.*.*`, build the three artifacts (or two if Linux deferred), upload to GitHub Releases. Use `softprops/action-gh-release` (or current equivalent — verify via Context7) to attach artifacts. Only secret needed is the auto-provided `GITHUB_TOKEN`.
 6. Write `INSTALL.md` at the repo root explaining how each OS's friends install:
    - macOS: download `.dmg`, drag to Applications, right-click the icon in Applications → Open the first time, click "Open" in the warning dialog.
@@ -1273,8 +1346,12 @@ End-of-task exit sequence (mandatory):
 1. Single commit. Stage only the files this task should change. Message format: "<phase-id>: <subject>" (e.g. "V1-P3: identity creation").
 2. Push to a feature branch on github.com/scotej/studyvis (default branch main). Branch name: v<phase-major>/p<N>-<short-slug> where <phase-major> is 1 for V1 prompts, 2 for V2, 3 for V3 (e.g. v1/p3-identity, v2/p1-llama-sidecar). Direct push to main is not authorized.
 3. If GitHub rejects on email privacy, amend the commit with the noreply email and retry: git -c user.email='134114466+scotej@users.noreply.github.com' commit --amend --no-edit --reset-author
-4. Open a PR with: gh pr create --base main --head v<phase-major>/p<N>-<slug> --title "<phase-id>: <subject>". PR body has Summary and Test plan sections. Do NOT merge — the user reviews.
-5. End-of-task summary in chat: (a) what shipped, (b) deviations from prompt or canonical-doc text and why, (c) Inherited debts — anything that surfaced and belongs to a later phase, named by phase id (e.g. "V1-P12 must wire plugins.updater config + signing key").
+4. Open a PR with: gh pr create --base main --head v<phase-major>/p<N>-<slug> --title "<phase-id>: <subject>". PR body has Summary and Test plan sections. Copilot code review is enabled on this repo and fires automatically when the PR opens — no need to add a reviewer manually.
+5. Wait for the Copilot review. Poll with `gh pr view <num> --json reviews,comments` every ~30s for up to 10 minutes. If no Copilot review lands within the window, note that in a PR comment and proceed to step 8.
+6. For each actionable Copilot finding (bug, correctness issue, missing edge case, security concern): fix it in code. Re-run the same verification commands the prompt prescribes (cargo test, tsc -b, vite build, lint, etc.). Skip purely stylistic nits or unactionable observations and list what you skipped (with one-line reason each) in the follow-up commit message.
+7. Single follow-up commit with message "<phase-id>: address Copilot review" (or "<phase-id>: no Copilot review within window" if step 5 timed out). Push to the same branch. If there were zero actionable findings AND zero stylistic nits, skip the follow-up commit.
+8. Auto-merge: `gh pr merge <num> --squash --delete-branch`. If branch protection blocks the merge because a required CI check is still running, wait for CI to settle (poll `gh pr checks <num>`) and retry once. If the branch went stale (main moved during the Copilot fix loop and the PR shows "out-of-date"), `git fetch origin && git pull --rebase origin main` on the feature branch, re-run the verification commands, push, and retry the merge — never force-push to main, never bypass required checks (no `--admin`).
+9. End-of-task summary in chat: (a) what shipped, (b) deviations from prompt or canonical-doc text and why, (c) Copilot findings addressed and skipped (with reason for each skip), (d) Inherited debts — anything that surfaced and belongs to a later phase, named by phase id (e.g. "V1-P12 must wire plugins.updater config + signing key"), (e) confirmation that the PR was merged and the branch deleted.
 
 ---
 
@@ -1343,8 +1420,12 @@ End-of-task exit sequence (mandatory):
 1. Single commit. Stage only the files this task should change. Message format: "<phase-id>: <subject>" (e.g. "V1-P3: identity creation").
 2. Push to a feature branch on github.com/scotej/studyvis (default branch main). Branch name: v<phase-major>/p<N>-<short-slug> where <phase-major> is 1 for V1 prompts, 2 for V2, 3 for V3 (e.g. v1/p3-identity, v2/p1-llama-sidecar). Direct push to main is not authorized.
 3. If GitHub rejects on email privacy, amend the commit with the noreply email and retry: git -c user.email='134114466+scotej@users.noreply.github.com' commit --amend --no-edit --reset-author
-4. Open a PR with: gh pr create --base main --head v<phase-major>/p<N>-<slug> --title "<phase-id>: <subject>". PR body has Summary and Test plan sections. Do NOT merge — the user reviews.
-5. End-of-task summary in chat: (a) what shipped, (b) deviations from prompt or canonical-doc text and why, (c) Inherited debts — anything that surfaced and belongs to a later phase, named by phase id (e.g. "V1-P12 must wire plugins.updater config + signing key").
+4. Open a PR with: gh pr create --base main --head v<phase-major>/p<N>-<slug> --title "<phase-id>: <subject>". PR body has Summary and Test plan sections. Copilot code review is enabled on this repo and fires automatically when the PR opens — no need to add a reviewer manually.
+5. Wait for the Copilot review. Poll with `gh pr view <num> --json reviews,comments` every ~30s for up to 10 minutes. If no Copilot review lands within the window, note that in a PR comment and proceed to step 8.
+6. For each actionable Copilot finding (bug, correctness issue, missing edge case, security concern): fix it in code. Re-run the same verification commands the prompt prescribes (cargo test, tsc -b, vite build, lint, etc.). Skip purely stylistic nits or unactionable observations and list what you skipped (with one-line reason each) in the follow-up commit message.
+7. Single follow-up commit with message "<phase-id>: address Copilot review" (or "<phase-id>: no Copilot review within window" if step 5 timed out). Push to the same branch. If there were zero actionable findings AND zero stylistic nits, skip the follow-up commit.
+8. Auto-merge: `gh pr merge <num> --squash --delete-branch`. If branch protection blocks the merge because a required CI check is still running, wait for CI to settle (poll `gh pr checks <num>`) and retry once. If the branch went stale (main moved during the Copilot fix loop and the PR shows "out-of-date"), `git fetch origin && git pull --rebase origin main` on the feature branch, re-run the verification commands, push, and retry the merge — never force-push to main, never bypass required checks (no `--admin`).
+9. End-of-task summary in chat: (a) what shipped, (b) deviations from prompt or canonical-doc text and why, (c) Copilot findings addressed and skipped (with reason for each skip), (d) Inherited debts — anything that surfaced and belongs to a later phase, named by phase id (e.g. "V1-P12 must wire plugins.updater config + signing key"), (e) confirmation that the PR was merged and the branch deleted.
 
 ---
 
@@ -1424,8 +1505,12 @@ End-of-task exit sequence (mandatory):
 1. Single commit. Stage only the files this task should change. Message format: "<phase-id>: <subject>" (e.g. "V1-P3: identity creation").
 2. Push to a feature branch on github.com/scotej/studyvis (default branch main). Branch name: v<phase-major>/p<N>-<short-slug> where <phase-major> is 1 for V1 prompts, 2 for V2, 3 for V3 (e.g. v1/p3-identity, v2/p1-llama-sidecar). Direct push to main is not authorized.
 3. If GitHub rejects on email privacy, amend the commit with the noreply email and retry: git -c user.email='134114466+scotej@users.noreply.github.com' commit --amend --no-edit --reset-author
-4. Open a PR with: gh pr create --base main --head v<phase-major>/p<N>-<slug> --title "<phase-id>: <subject>". PR body has Summary and Test plan sections. Do NOT merge — the user reviews.
-5. End-of-task summary in chat: (a) what shipped, (b) deviations from prompt or canonical-doc text and why, (c) Inherited debts — anything that surfaced and belongs to a later phase, named by phase id (e.g. "V1-P12 must wire plugins.updater config + signing key").
+4. Open a PR with: gh pr create --base main --head v<phase-major>/p<N>-<slug> --title "<phase-id>: <subject>". PR body has Summary and Test plan sections. Copilot code review is enabled on this repo and fires automatically when the PR opens — no need to add a reviewer manually.
+5. Wait for the Copilot review. Poll with `gh pr view <num> --json reviews,comments` every ~30s for up to 10 minutes. If no Copilot review lands within the window, note that in a PR comment and proceed to step 8.
+6. For each actionable Copilot finding (bug, correctness issue, missing edge case, security concern): fix it in code. Re-run the same verification commands the prompt prescribes (cargo test, tsc -b, vite build, lint, etc.). Skip purely stylistic nits or unactionable observations and list what you skipped (with one-line reason each) in the follow-up commit message.
+7. Single follow-up commit with message "<phase-id>: address Copilot review" (or "<phase-id>: no Copilot review within window" if step 5 timed out). Push to the same branch. If there were zero actionable findings AND zero stylistic nits, skip the follow-up commit.
+8. Auto-merge: `gh pr merge <num> --squash --delete-branch`. If branch protection blocks the merge because a required CI check is still running, wait for CI to settle (poll `gh pr checks <num>`) and retry once. If the branch went stale (main moved during the Copilot fix loop and the PR shows "out-of-date"), `git fetch origin && git pull --rebase origin main` on the feature branch, re-run the verification commands, push, and retry the merge — never force-push to main, never bypass required checks (no `--admin`).
+9. End-of-task summary in chat: (a) what shipped, (b) deviations from prompt or canonical-doc text and why, (c) Copilot findings addressed and skipped (with reason for each skip), (d) Inherited debts — anything that surfaced and belongs to a later phase, named by phase id (e.g. "V1-P12 must wire plugins.updater config + signing key"), (e) confirmation that the PR was merged and the branch deleted.
 
 ---
 
@@ -1496,8 +1581,12 @@ End-of-task exit sequence (mandatory):
 1. Single commit. Stage only the files this task should change. Message format: "<phase-id>: <subject>" (e.g. "V1-P3: identity creation").
 2. Push to a feature branch on github.com/scotej/studyvis (default branch main). Branch name: v<phase-major>/p<N>-<short-slug> where <phase-major> is 1 for V1 prompts, 2 for V2, 3 for V3 (e.g. v1/p3-identity, v2/p1-llama-sidecar). Direct push to main is not authorized.
 3. If GitHub rejects on email privacy, amend the commit with the noreply email and retry: git -c user.email='134114466+scotej@users.noreply.github.com' commit --amend --no-edit --reset-author
-4. Open a PR with: gh pr create --base main --head v<phase-major>/p<N>-<slug> --title "<phase-id>: <subject>". PR body has Summary and Test plan sections. Do NOT merge — the user reviews.
-5. End-of-task summary in chat: (a) what shipped, (b) deviations from prompt or canonical-doc text and why, (c) Inherited debts — anything that surfaced and belongs to a later phase, named by phase id (e.g. "V1-P12 must wire plugins.updater config + signing key").
+4. Open a PR with: gh pr create --base main --head v<phase-major>/p<N>-<slug> --title "<phase-id>: <subject>". PR body has Summary and Test plan sections. Copilot code review is enabled on this repo and fires automatically when the PR opens — no need to add a reviewer manually.
+5. Wait for the Copilot review. Poll with `gh pr view <num> --json reviews,comments` every ~30s for up to 10 minutes. If no Copilot review lands within the window, note that in a PR comment and proceed to step 8.
+6. For each actionable Copilot finding (bug, correctness issue, missing edge case, security concern): fix it in code. Re-run the same verification commands the prompt prescribes (cargo test, tsc -b, vite build, lint, etc.). Skip purely stylistic nits or unactionable observations and list what you skipped (with one-line reason each) in the follow-up commit message.
+7. Single follow-up commit with message "<phase-id>: address Copilot review" (or "<phase-id>: no Copilot review within window" if step 5 timed out). Push to the same branch. If there were zero actionable findings AND zero stylistic nits, skip the follow-up commit.
+8. Auto-merge: `gh pr merge <num> --squash --delete-branch`. If branch protection blocks the merge because a required CI check is still running, wait for CI to settle (poll `gh pr checks <num>`) and retry once. If the branch went stale (main moved during the Copilot fix loop and the PR shows "out-of-date"), `git fetch origin && git pull --rebase origin main` on the feature branch, re-run the verification commands, push, and retry the merge — never force-push to main, never bypass required checks (no `--admin`).
+9. End-of-task summary in chat: (a) what shipped, (b) deviations from prompt or canonical-doc text and why, (c) Copilot findings addressed and skipped (with reason for each skip), (d) Inherited debts — anything that surfaced and belongs to a later phase, named by phase id (e.g. "V1-P12 must wire plugins.updater config + signing key"), (e) confirmation that the PR was merged and the branch deleted.
 
 ---
 
@@ -1565,8 +1654,12 @@ End-of-task exit sequence (mandatory):
 1. Single commit. Stage only the files this task should change. Message format: "<phase-id>: <subject>" (e.g. "V1-P3: identity creation").
 2. Push to a feature branch on github.com/scotej/studyvis (default branch main). Branch name: v<phase-major>/p<N>-<short-slug> where <phase-major> is 1 for V1 prompts, 2 for V2, 3 for V3 (e.g. v1/p3-identity, v2/p1-llama-sidecar). Direct push to main is not authorized.
 3. If GitHub rejects on email privacy, amend the commit with the noreply email and retry: git -c user.email='134114466+scotej@users.noreply.github.com' commit --amend --no-edit --reset-author
-4. Open a PR with: gh pr create --base main --head v<phase-major>/p<N>-<slug> --title "<phase-id>: <subject>". PR body has Summary and Test plan sections. Do NOT merge — the user reviews.
-5. End-of-task summary in chat: (a) what shipped, (b) deviations from prompt or canonical-doc text and why, (c) Inherited debts — anything that surfaced and belongs to a later phase, named by phase id (e.g. "V1-P12 must wire plugins.updater config + signing key").
+4. Open a PR with: gh pr create --base main --head v<phase-major>/p<N>-<slug> --title "<phase-id>: <subject>". PR body has Summary and Test plan sections. Copilot code review is enabled on this repo and fires automatically when the PR opens — no need to add a reviewer manually.
+5. Wait for the Copilot review. Poll with `gh pr view <num> --json reviews,comments` every ~30s for up to 10 minutes. If no Copilot review lands within the window, note that in a PR comment and proceed to step 8.
+6. For each actionable Copilot finding (bug, correctness issue, missing edge case, security concern): fix it in code. Re-run the same verification commands the prompt prescribes (cargo test, tsc -b, vite build, lint, etc.). Skip purely stylistic nits or unactionable observations and list what you skipped (with one-line reason each) in the follow-up commit message.
+7. Single follow-up commit with message "<phase-id>: address Copilot review" (or "<phase-id>: no Copilot review within window" if step 5 timed out). Push to the same branch. If there were zero actionable findings AND zero stylistic nits, skip the follow-up commit.
+8. Auto-merge: `gh pr merge <num> --squash --delete-branch`. If branch protection blocks the merge because a required CI check is still running, wait for CI to settle (poll `gh pr checks <num>`) and retry once. If the branch went stale (main moved during the Copilot fix loop and the PR shows "out-of-date"), `git fetch origin && git pull --rebase origin main` on the feature branch, re-run the verification commands, push, and retry the merge — never force-push to main, never bypass required checks (no `--admin`).
+9. End-of-task summary in chat: (a) what shipped, (b) deviations from prompt or canonical-doc text and why, (c) Copilot findings addressed and skipped (with reason for each skip), (d) Inherited debts — anything that surfaced and belongs to a later phase, named by phase id (e.g. "V1-P12 must wire plugins.updater config + signing key"), (e) confirmation that the PR was merged and the branch deleted.
 
 ---
 
@@ -1638,8 +1731,12 @@ End-of-task exit sequence (mandatory):
 1. Single commit. Stage only the files this task should change. Message format: "<phase-id>: <subject>" (e.g. "V1-P3: identity creation").
 2. Push to a feature branch on github.com/scotej/studyvis (default branch main). Branch name: v<phase-major>/p<N>-<short-slug> where <phase-major> is 1 for V1 prompts, 2 for V2, 3 for V3 (e.g. v1/p3-identity, v2/p1-llama-sidecar). Direct push to main is not authorized.
 3. If GitHub rejects on email privacy, amend the commit with the noreply email and retry: git -c user.email='134114466+scotej@users.noreply.github.com' commit --amend --no-edit --reset-author
-4. Open a PR with: gh pr create --base main --head v<phase-major>/p<N>-<slug> --title "<phase-id>: <subject>". PR body has Summary and Test plan sections. Do NOT merge — the user reviews.
-5. End-of-task summary in chat: (a) what shipped, (b) deviations from prompt or canonical-doc text and why, (c) Inherited debts — anything that surfaced and belongs to a later phase, named by phase id (e.g. "V1-P12 must wire plugins.updater config + signing key").
+4. Open a PR with: gh pr create --base main --head v<phase-major>/p<N>-<slug> --title "<phase-id>: <subject>". PR body has Summary and Test plan sections. Copilot code review is enabled on this repo and fires automatically when the PR opens — no need to add a reviewer manually.
+5. Wait for the Copilot review. Poll with `gh pr view <num> --json reviews,comments` every ~30s for up to 10 minutes. If no Copilot review lands within the window, note that in a PR comment and proceed to step 8.
+6. For each actionable Copilot finding (bug, correctness issue, missing edge case, security concern): fix it in code. Re-run the same verification commands the prompt prescribes (cargo test, tsc -b, vite build, lint, etc.). Skip purely stylistic nits or unactionable observations and list what you skipped (with one-line reason each) in the follow-up commit message.
+7. Single follow-up commit with message "<phase-id>: address Copilot review" (or "<phase-id>: no Copilot review within window" if step 5 timed out). Push to the same branch. If there were zero actionable findings AND zero stylistic nits, skip the follow-up commit.
+8. Auto-merge: `gh pr merge <num> --squash --delete-branch`. If branch protection blocks the merge because a required CI check is still running, wait for CI to settle (poll `gh pr checks <num>`) and retry once. If the branch went stale (main moved during the Copilot fix loop and the PR shows "out-of-date"), `git fetch origin && git pull --rebase origin main` on the feature branch, re-run the verification commands, push, and retry the merge — never force-push to main, never bypass required checks (no `--admin`).
+9. End-of-task summary in chat: (a) what shipped, (b) deviations from prompt or canonical-doc text and why, (c) Copilot findings addressed and skipped (with reason for each skip), (d) Inherited debts — anything that surfaced and belongs to a later phase, named by phase id (e.g. "V1-P12 must wire plugins.updater config + signing key"), (e) confirmation that the PR was merged and the branch deleted.
 
 ---
 
@@ -1708,8 +1805,12 @@ End-of-task exit sequence (mandatory):
 1. Single commit. Stage only the files this task should change. Message format: "<phase-id>: <subject>" (e.g. "V1-P3: identity creation").
 2. Push to a feature branch on github.com/scotej/studyvis (default branch main). Branch name: v<phase-major>/p<N>-<short-slug> where <phase-major> is 1 for V1 prompts, 2 for V2, 3 for V3 (e.g. v1/p3-identity, v2/p1-llama-sidecar). Direct push to main is not authorized.
 3. If GitHub rejects on email privacy, amend the commit with the noreply email and retry: git -c user.email='134114466+scotej@users.noreply.github.com' commit --amend --no-edit --reset-author
-4. Open a PR with: gh pr create --base main --head v<phase-major>/p<N>-<slug> --title "<phase-id>: <subject>". PR body has Summary and Test plan sections. Do NOT merge — the user reviews.
-5. End-of-task summary in chat: (a) what shipped, (b) deviations from prompt or canonical-doc text and why, (c) Inherited debts — anything that surfaced and belongs to a later phase, named by phase id (e.g. "V1-P12 must wire plugins.updater config + signing key").
+4. Open a PR with: gh pr create --base main --head v<phase-major>/p<N>-<slug> --title "<phase-id>: <subject>". PR body has Summary and Test plan sections. Copilot code review is enabled on this repo and fires automatically when the PR opens — no need to add a reviewer manually.
+5. Wait for the Copilot review. Poll with `gh pr view <num> --json reviews,comments` every ~30s for up to 10 minutes. If no Copilot review lands within the window, note that in a PR comment and proceed to step 8.
+6. For each actionable Copilot finding (bug, correctness issue, missing edge case, security concern): fix it in code. Re-run the same verification commands the prompt prescribes (cargo test, tsc -b, vite build, lint, etc.). Skip purely stylistic nits or unactionable observations and list what you skipped (with one-line reason each) in the follow-up commit message.
+7. Single follow-up commit with message "<phase-id>: address Copilot review" (or "<phase-id>: no Copilot review within window" if step 5 timed out). Push to the same branch. If there were zero actionable findings AND zero stylistic nits, skip the follow-up commit.
+8. Auto-merge: `gh pr merge <num> --squash --delete-branch`. If branch protection blocks the merge because a required CI check is still running, wait for CI to settle (poll `gh pr checks <num>`) and retry once. If the branch went stale (main moved during the Copilot fix loop and the PR shows "out-of-date"), `git fetch origin && git pull --rebase origin main` on the feature branch, re-run the verification commands, push, and retry the merge — never force-push to main, never bypass required checks (no `--admin`).
+9. End-of-task summary in chat: (a) what shipped, (b) deviations from prompt or canonical-doc text and why, (c) Copilot findings addressed and skipped (with reason for each skip), (d) Inherited debts — anything that surfaced and belongs to a later phase, named by phase id (e.g. "V1-P12 must wire plugins.updater config + signing key"), (e) confirmation that the PR was merged and the branch deleted.
 
 ---
 
@@ -1789,8 +1890,12 @@ End-of-task exit sequence (mandatory):
 1. Single commit. Stage only the files this task should change. Message format: "<phase-id>: <subject>" (e.g. "V1-P3: identity creation").
 2. Push to a feature branch on github.com/scotej/studyvis (default branch main). Branch name: v<phase-major>/p<N>-<short-slug> where <phase-major> is 1 for V1 prompts, 2 for V2, 3 for V3 (e.g. v1/p3-identity, v2/p1-llama-sidecar). Direct push to main is not authorized.
 3. If GitHub rejects on email privacy, amend the commit with the noreply email and retry: git -c user.email='134114466+scotej@users.noreply.github.com' commit --amend --no-edit --reset-author
-4. Open a PR with: gh pr create --base main --head v<phase-major>/p<N>-<slug> --title "<phase-id>: <subject>". PR body has Summary and Test plan sections. Do NOT merge — the user reviews.
-5. End-of-task summary in chat: (a) what shipped, (b) deviations from prompt or canonical-doc text and why, (c) Inherited debts — anything that surfaced and belongs to a later phase, named by phase id (e.g. "V1-P12 must wire plugins.updater config + signing key").
+4. Open a PR with: gh pr create --base main --head v<phase-major>/p<N>-<slug> --title "<phase-id>: <subject>". PR body has Summary and Test plan sections. Copilot code review is enabled on this repo and fires automatically when the PR opens — no need to add a reviewer manually.
+5. Wait for the Copilot review. Poll with `gh pr view <num> --json reviews,comments` every ~30s for up to 10 minutes. If no Copilot review lands within the window, note that in a PR comment and proceed to step 8.
+6. For each actionable Copilot finding (bug, correctness issue, missing edge case, security concern): fix it in code. Re-run the same verification commands the prompt prescribes (cargo test, tsc -b, vite build, lint, etc.). Skip purely stylistic nits or unactionable observations and list what you skipped (with one-line reason each) in the follow-up commit message.
+7. Single follow-up commit with message "<phase-id>: address Copilot review" (or "<phase-id>: no Copilot review within window" if step 5 timed out). Push to the same branch. If there were zero actionable findings AND zero stylistic nits, skip the follow-up commit.
+8. Auto-merge: `gh pr merge <num> --squash --delete-branch`. If branch protection blocks the merge because a required CI check is still running, wait for CI to settle (poll `gh pr checks <num>`) and retry once. If the branch went stale (main moved during the Copilot fix loop and the PR shows "out-of-date"), `git fetch origin && git pull --rebase origin main` on the feature branch, re-run the verification commands, push, and retry the merge — never force-push to main, never bypass required checks (no `--admin`).
+9. End-of-task summary in chat: (a) what shipped, (b) deviations from prompt or canonical-doc text and why, (c) Copilot findings addressed and skipped (with reason for each skip), (d) Inherited debts — anything that surfaced and belongs to a later phase, named by phase id (e.g. "V1-P12 must wire plugins.updater config + signing key"), (e) confirmation that the PR was merged and the branch deleted.
 
 ---
 
@@ -1860,8 +1965,12 @@ End-of-task exit sequence (mandatory):
 1. Single commit. Stage only the files this task should change. Message format: "<phase-id>: <subject>" (e.g. "V1-P3: identity creation").
 2. Push to a feature branch on github.com/scotej/studyvis (default branch main). Branch name: v<phase-major>/p<N>-<short-slug> where <phase-major> is 1 for V1 prompts, 2 for V2, 3 for V3 (e.g. v1/p3-identity, v2/p1-llama-sidecar). Direct push to main is not authorized.
 3. If GitHub rejects on email privacy, amend the commit with the noreply email and retry: git -c user.email='134114466+scotej@users.noreply.github.com' commit --amend --no-edit --reset-author
-4. Open a PR with: gh pr create --base main --head v<phase-major>/p<N>-<slug> --title "<phase-id>: <subject>". PR body has Summary and Test plan sections. Do NOT merge — the user reviews.
-5. End-of-task summary in chat: (a) what shipped, (b) deviations from prompt or canonical-doc text and why, (c) Inherited debts — anything that surfaced and belongs to a later phase, named by phase id (e.g. "V1-P12 must wire plugins.updater config + signing key").
+4. Open a PR with: gh pr create --base main --head v<phase-major>/p<N>-<slug> --title "<phase-id>: <subject>". PR body has Summary and Test plan sections. Copilot code review is enabled on this repo and fires automatically when the PR opens — no need to add a reviewer manually.
+5. Wait for the Copilot review. Poll with `gh pr view <num> --json reviews,comments` every ~30s for up to 10 minutes. If no Copilot review lands within the window, note that in a PR comment and proceed to step 8.
+6. For each actionable Copilot finding (bug, correctness issue, missing edge case, security concern): fix it in code. Re-run the same verification commands the prompt prescribes (cargo test, tsc -b, vite build, lint, etc.). Skip purely stylistic nits or unactionable observations and list what you skipped (with one-line reason each) in the follow-up commit message.
+7. Single follow-up commit with message "<phase-id>: address Copilot review" (or "<phase-id>: no Copilot review within window" if step 5 timed out). Push to the same branch. If there were zero actionable findings AND zero stylistic nits, skip the follow-up commit.
+8. Auto-merge: `gh pr merge <num> --squash --delete-branch`. If branch protection blocks the merge because a required CI check is still running, wait for CI to settle (poll `gh pr checks <num>`) and retry once. If the branch went stale (main moved during the Copilot fix loop and the PR shows "out-of-date"), `git fetch origin && git pull --rebase origin main` on the feature branch, re-run the verification commands, push, and retry the merge — never force-push to main, never bypass required checks (no `--admin`).
+9. End-of-task summary in chat: (a) what shipped, (b) deviations from prompt or canonical-doc text and why, (c) Copilot findings addressed and skipped (with reason for each skip), (d) Inherited debts — anything that surfaced and belongs to a later phase, named by phase id (e.g. "V1-P12 must wire plugins.updater config + signing key"), (e) confirmation that the PR was merged and the branch deleted.
 
 ---
 
@@ -1943,8 +2052,12 @@ End-of-task exit sequence (mandatory):
 1. Single commit. Stage only the files this task should change. Message format: "<phase-id>: <subject>" (e.g. "V1-P3: identity creation").
 2. Push to a feature branch on github.com/scotej/studyvis (default branch main). Branch name: v<phase-major>/p<N>-<short-slug> where <phase-major> is 1 for V1 prompts, 2 for V2, 3 for V3 (e.g. v1/p3-identity, v2/p1-llama-sidecar). Direct push to main is not authorized.
 3. If GitHub rejects on email privacy, amend the commit with the noreply email and retry: git -c user.email='134114466+scotej@users.noreply.github.com' commit --amend --no-edit --reset-author
-4. Open a PR with: gh pr create --base main --head v<phase-major>/p<N>-<slug> --title "<phase-id>: <subject>". PR body has Summary and Test plan sections. Do NOT merge — the user reviews.
-5. End-of-task summary in chat: (a) what shipped, (b) deviations from prompt or canonical-doc text and why, (c) Inherited debts — anything that surfaced and belongs to a later phase, named by phase id (e.g. "V1-P12 must wire plugins.updater config + signing key").
+4. Open a PR with: gh pr create --base main --head v<phase-major>/p<N>-<slug> --title "<phase-id>: <subject>". PR body has Summary and Test plan sections. Copilot code review is enabled on this repo and fires automatically when the PR opens — no need to add a reviewer manually.
+5. Wait for the Copilot review. Poll with `gh pr view <num> --json reviews,comments` every ~30s for up to 10 minutes. If no Copilot review lands within the window, note that in a PR comment and proceed to step 8.
+6. For each actionable Copilot finding (bug, correctness issue, missing edge case, security concern): fix it in code. Re-run the same verification commands the prompt prescribes (cargo test, tsc -b, vite build, lint, etc.). Skip purely stylistic nits or unactionable observations and list what you skipped (with one-line reason each) in the follow-up commit message.
+7. Single follow-up commit with message "<phase-id>: address Copilot review" (or "<phase-id>: no Copilot review within window" if step 5 timed out). Push to the same branch. If there were zero actionable findings AND zero stylistic nits, skip the follow-up commit.
+8. Auto-merge: `gh pr merge <num> --squash --delete-branch`. If branch protection blocks the merge because a required CI check is still running, wait for CI to settle (poll `gh pr checks <num>`) and retry once. If the branch went stale (main moved during the Copilot fix loop and the PR shows "out-of-date"), `git fetch origin && git pull --rebase origin main` on the feature branch, re-run the verification commands, push, and retry the merge — never force-push to main, never bypass required checks (no `--admin`).
+9. End-of-task summary in chat: (a) what shipped, (b) deviations from prompt or canonical-doc text and why, (c) Copilot findings addressed and skipped (with reason for each skip), (d) Inherited debts — anything that surfaced and belongs to a later phase, named by phase id (e.g. "V1-P12 must wire plugins.updater config + signing key"), (e) confirmation that the PR was merged and the branch deleted.
 
 ---
 
@@ -2004,8 +2117,12 @@ End-of-task exit sequence (mandatory):
 1. Single commit. Stage only the files this task should change. Message format: "<phase-id>: <subject>" (e.g. "V1-P3: identity creation").
 2. Push to a feature branch on github.com/scotej/studyvis (default branch main). Branch name: v<phase-major>/p<N>-<short-slug> where <phase-major> is 1 for V1 prompts, 2 for V2, 3 for V3 (e.g. v1/p3-identity, v2/p1-llama-sidecar). Direct push to main is not authorized.
 3. If GitHub rejects on email privacy, amend the commit with the noreply email and retry: git -c user.email='134114466+scotej@users.noreply.github.com' commit --amend --no-edit --reset-author
-4. Open a PR with: gh pr create --base main --head v<phase-major>/p<N>-<slug> --title "<phase-id>: <subject>". PR body has Summary and Test plan sections. Do NOT merge — the user reviews.
-5. End-of-task summary in chat: (a) what shipped, (b) deviations from prompt or canonical-doc text and why, (c) Inherited debts — anything that surfaced and belongs to a later phase, named by phase id (e.g. "V1-P12 must wire plugins.updater config + signing key").
+4. Open a PR with: gh pr create --base main --head v<phase-major>/p<N>-<slug> --title "<phase-id>: <subject>". PR body has Summary and Test plan sections. Copilot code review is enabled on this repo and fires automatically when the PR opens — no need to add a reviewer manually.
+5. Wait for the Copilot review. Poll with `gh pr view <num> --json reviews,comments` every ~30s for up to 10 minutes. If no Copilot review lands within the window, note that in a PR comment and proceed to step 8.
+6. For each actionable Copilot finding (bug, correctness issue, missing edge case, security concern): fix it in code. Re-run the same verification commands the prompt prescribes (cargo test, tsc -b, vite build, lint, etc.). Skip purely stylistic nits or unactionable observations and list what you skipped (with one-line reason each) in the follow-up commit message.
+7. Single follow-up commit with message "<phase-id>: address Copilot review" (or "<phase-id>: no Copilot review within window" if step 5 timed out). Push to the same branch. If there were zero actionable findings AND zero stylistic nits, skip the follow-up commit.
+8. Auto-merge: `gh pr merge <num> --squash --delete-branch`. If branch protection blocks the merge because a required CI check is still running, wait for CI to settle (poll `gh pr checks <num>`) and retry once. If the branch went stale (main moved during the Copilot fix loop and the PR shows "out-of-date"), `git fetch origin && git pull --rebase origin main` on the feature branch, re-run the verification commands, push, and retry the merge — never force-push to main, never bypass required checks (no `--admin`).
+9. End-of-task summary in chat: (a) what shipped, (b) deviations from prompt or canonical-doc text and why, (c) Copilot findings addressed and skipped (with reason for each skip), (d) Inherited debts — anything that surfaced and belongs to a later phase, named by phase id (e.g. "V1-P12 must wire plugins.updater config + signing key"), (e) confirmation that the PR was merged and the branch deleted.
 
 ---
 
@@ -2063,8 +2180,12 @@ End-of-task exit sequence (mandatory):
 1. Single commit. Stage only the files this task should change. Message format: "<phase-id>: <subject>" (e.g. "V1-P3: identity creation").
 2. Push to a feature branch on github.com/scotej/studyvis (default branch main). Branch name: v<phase-major>/p<N>-<short-slug> where <phase-major> is 1 for V1 prompts, 2 for V2, 3 for V3 (e.g. v1/p3-identity, v2/p1-llama-sidecar). Direct push to main is not authorized.
 3. If GitHub rejects on email privacy, amend the commit with the noreply email and retry: git -c user.email='134114466+scotej@users.noreply.github.com' commit --amend --no-edit --reset-author
-4. Open a PR with: gh pr create --base main --head v<phase-major>/p<N>-<slug> --title "<phase-id>: <subject>". PR body has Summary and Test plan sections. Do NOT merge — the user reviews.
-5. End-of-task summary in chat: (a) what shipped, (b) deviations from prompt or canonical-doc text and why, (c) Inherited debts — anything that surfaced and belongs to a later phase, named by phase id (e.g. "V1-P12 must wire plugins.updater config + signing key").
+4. Open a PR with: gh pr create --base main --head v<phase-major>/p<N>-<slug> --title "<phase-id>: <subject>". PR body has Summary and Test plan sections. Copilot code review is enabled on this repo and fires automatically when the PR opens — no need to add a reviewer manually.
+5. Wait for the Copilot review. Poll with `gh pr view <num> --json reviews,comments` every ~30s for up to 10 minutes. If no Copilot review lands within the window, note that in a PR comment and proceed to step 8.
+6. For each actionable Copilot finding (bug, correctness issue, missing edge case, security concern): fix it in code. Re-run the same verification commands the prompt prescribes (cargo test, tsc -b, vite build, lint, etc.). Skip purely stylistic nits or unactionable observations and list what you skipped (with one-line reason each) in the follow-up commit message.
+7. Single follow-up commit with message "<phase-id>: address Copilot review" (or "<phase-id>: no Copilot review within window" if step 5 timed out). Push to the same branch. If there were zero actionable findings AND zero stylistic nits, skip the follow-up commit.
+8. Auto-merge: `gh pr merge <num> --squash --delete-branch`. If branch protection blocks the merge because a required CI check is still running, wait for CI to settle (poll `gh pr checks <num>`) and retry once. If the branch went stale (main moved during the Copilot fix loop and the PR shows "out-of-date"), `git fetch origin && git pull --rebase origin main` on the feature branch, re-run the verification commands, push, and retry the merge — never force-push to main, never bypass required checks (no `--admin`).
+9. End-of-task summary in chat: (a) what shipped, (b) deviations from prompt or canonical-doc text and why, (c) Copilot findings addressed and skipped (with reason for each skip), (d) Inherited debts — anything that surfaced and belongs to a later phase, named by phase id (e.g. "V1-P12 must wire plugins.updater config + signing key"), (e) confirmation that the PR was merged and the branch deleted.
 
 ---
 
@@ -2122,8 +2243,12 @@ End-of-task exit sequence (mandatory):
 1. Single commit. Stage only the files this task should change. Message format: "<phase-id>: <subject>" (e.g. "V1-P3: identity creation").
 2. Push to a feature branch on github.com/scotej/studyvis (default branch main). Branch name: v<phase-major>/p<N>-<short-slug> where <phase-major> is 1 for V1 prompts, 2 for V2, 3 for V3 (e.g. v1/p3-identity, v2/p1-llama-sidecar). Direct push to main is not authorized.
 3. If GitHub rejects on email privacy, amend the commit with the noreply email and retry: git -c user.email='134114466+scotej@users.noreply.github.com' commit --amend --no-edit --reset-author
-4. Open a PR with: gh pr create --base main --head v<phase-major>/p<N>-<slug> --title "<phase-id>: <subject>". PR body has Summary and Test plan sections. Do NOT merge — the user reviews.
-5. End-of-task summary in chat: (a) what shipped, (b) deviations from prompt or canonical-doc text and why, (c) Inherited debts — anything that surfaced and belongs to a later phase, named by phase id (e.g. "V1-P12 must wire plugins.updater config + signing key").
+4. Open a PR with: gh pr create --base main --head v<phase-major>/p<N>-<slug> --title "<phase-id>: <subject>". PR body has Summary and Test plan sections. Copilot code review is enabled on this repo and fires automatically when the PR opens — no need to add a reviewer manually.
+5. Wait for the Copilot review. Poll with `gh pr view <num> --json reviews,comments` every ~30s for up to 10 minutes. If no Copilot review lands within the window, note that in a PR comment and proceed to step 8.
+6. For each actionable Copilot finding (bug, correctness issue, missing edge case, security concern): fix it in code. Re-run the same verification commands the prompt prescribes (cargo test, tsc -b, vite build, lint, etc.). Skip purely stylistic nits or unactionable observations and list what you skipped (with one-line reason each) in the follow-up commit message.
+7. Single follow-up commit with message "<phase-id>: address Copilot review" (or "<phase-id>: no Copilot review within window" if step 5 timed out). Push to the same branch. If there were zero actionable findings AND zero stylistic nits, skip the follow-up commit.
+8. Auto-merge: `gh pr merge <num> --squash --delete-branch`. If branch protection blocks the merge because a required CI check is still running, wait for CI to settle (poll `gh pr checks <num>`) and retry once. If the branch went stale (main moved during the Copilot fix loop and the PR shows "out-of-date"), `git fetch origin && git pull --rebase origin main` on the feature branch, re-run the verification commands, push, and retry the merge — never force-push to main, never bypass required checks (no `--admin`).
+9. End-of-task summary in chat: (a) what shipped, (b) deviations from prompt or canonical-doc text and why, (c) Copilot findings addressed and skipped (with reason for each skip), (d) Inherited debts — anything that surfaced and belongs to a later phase, named by phase id (e.g. "V1-P12 must wire plugins.updater config + signing key"), (e) confirmation that the PR was merged and the branch deleted.
 
 ---
 
@@ -2176,8 +2301,12 @@ End-of-task exit sequence (mandatory):
 1. Single commit. Stage only the files this task should change. Message format: "<phase-id>: <subject>" (e.g. "V1-P3: identity creation").
 2. Push to a feature branch on github.com/scotej/studyvis (default branch main). Branch name: v<phase-major>/p<N>-<short-slug> where <phase-major> is 1 for V1 prompts, 2 for V2, 3 for V3 (e.g. v1/p3-identity, v2/p1-llama-sidecar). Direct push to main is not authorized.
 3. If GitHub rejects on email privacy, amend the commit with the noreply email and retry: git -c user.email='134114466+scotej@users.noreply.github.com' commit --amend --no-edit --reset-author
-4. Open a PR with: gh pr create --base main --head v<phase-major>/p<N>-<slug> --title "<phase-id>: <subject>". PR body has Summary and Test plan sections. Do NOT merge — the user reviews.
-5. End-of-task summary in chat: (a) what shipped, (b) deviations from prompt or canonical-doc text and why, (c) Inherited debts — anything that surfaced and belongs to a later phase, named by phase id (e.g. "V1-P12 must wire plugins.updater config + signing key").
+4. Open a PR with: gh pr create --base main --head v<phase-major>/p<N>-<slug> --title "<phase-id>: <subject>". PR body has Summary and Test plan sections. Copilot code review is enabled on this repo and fires automatically when the PR opens — no need to add a reviewer manually.
+5. Wait for the Copilot review. Poll with `gh pr view <num> --json reviews,comments` every ~30s for up to 10 minutes. If no Copilot review lands within the window, note that in a PR comment and proceed to step 8.
+6. For each actionable Copilot finding (bug, correctness issue, missing edge case, security concern): fix it in code. Re-run the same verification commands the prompt prescribes (cargo test, tsc -b, vite build, lint, etc.). Skip purely stylistic nits or unactionable observations and list what you skipped (with one-line reason each) in the follow-up commit message.
+7. Single follow-up commit with message "<phase-id>: address Copilot review" (or "<phase-id>: no Copilot review within window" if step 5 timed out). Push to the same branch. If there were zero actionable findings AND zero stylistic nits, skip the follow-up commit.
+8. Auto-merge: `gh pr merge <num> --squash --delete-branch`. If branch protection blocks the merge because a required CI check is still running, wait for CI to settle (poll `gh pr checks <num>`) and retry once. If the branch went stale (main moved during the Copilot fix loop and the PR shows "out-of-date"), `git fetch origin && git pull --rebase origin main` on the feature branch, re-run the verification commands, push, and retry the merge — never force-push to main, never bypass required checks (no `--admin`).
+9. End-of-task summary in chat: (a) what shipped, (b) deviations from prompt or canonical-doc text and why, (c) Copilot findings addressed and skipped (with reason for each skip), (d) Inherited debts — anything that surfaced and belongs to a later phase, named by phase id (e.g. "V1-P12 must wire plugins.updater config + signing key"), (e) confirmation that the PR was merged and the branch deleted.
 
 ---
 
@@ -2233,8 +2362,12 @@ End-of-task exit sequence (mandatory):
 1. Single commit. Stage only the files this task should change. Message format: "<phase-id>: <subject>" (e.g. "V1-P3: identity creation").
 2. Push to a feature branch on github.com/scotej/studyvis (default branch main). Branch name: v<phase-major>/p<N>-<short-slug> where <phase-major> is 1 for V1 prompts, 2 for V2, 3 for V3 (e.g. v1/p3-identity, v2/p1-llama-sidecar). Direct push to main is not authorized.
 3. If GitHub rejects on email privacy, amend the commit with the noreply email and retry: git -c user.email='134114466+scotej@users.noreply.github.com' commit --amend --no-edit --reset-author
-4. Open a PR with: gh pr create --base main --head v<phase-major>/p<N>-<slug> --title "<phase-id>: <subject>". PR body has Summary and Test plan sections. Do NOT merge — the user reviews.
-5. End-of-task summary in chat: (a) what shipped, (b) deviations from prompt or canonical-doc text and why, (c) Inherited debts — anything that surfaced and belongs to a later phase, named by phase id (e.g. "V1-P12 must wire plugins.updater config + signing key").
+4. Open a PR with: gh pr create --base main --head v<phase-major>/p<N>-<slug> --title "<phase-id>: <subject>". PR body has Summary and Test plan sections. Copilot code review is enabled on this repo and fires automatically when the PR opens — no need to add a reviewer manually.
+5. Wait for the Copilot review. Poll with `gh pr view <num> --json reviews,comments` every ~30s for up to 10 minutes. If no Copilot review lands within the window, note that in a PR comment and proceed to step 8.
+6. For each actionable Copilot finding (bug, correctness issue, missing edge case, security concern): fix it in code. Re-run the same verification commands the prompt prescribes (cargo test, tsc -b, vite build, lint, etc.). Skip purely stylistic nits or unactionable observations and list what you skipped (with one-line reason each) in the follow-up commit message.
+7. Single follow-up commit with message "<phase-id>: address Copilot review" (or "<phase-id>: no Copilot review within window" if step 5 timed out). Push to the same branch. If there were zero actionable findings AND zero stylistic nits, skip the follow-up commit.
+8. Auto-merge: `gh pr merge <num> --squash --delete-branch`. If branch protection blocks the merge because a required CI check is still running, wait for CI to settle (poll `gh pr checks <num>`) and retry once. If the branch went stale (main moved during the Copilot fix loop and the PR shows "out-of-date"), `git fetch origin && git pull --rebase origin main` on the feature branch, re-run the verification commands, push, and retry the merge — never force-push to main, never bypass required checks (no `--admin`).
+9. End-of-task summary in chat: (a) what shipped, (b) deviations from prompt or canonical-doc text and why, (c) Copilot findings addressed and skipped (with reason for each skip), (d) Inherited debts — anything that surfaced and belongs to a later phase, named by phase id (e.g. "V1-P12 must wire plugins.updater config + signing key"), (e) confirmation that the PR was merged and the branch deleted.
 
 ---
 
@@ -2291,8 +2424,12 @@ End-of-task exit sequence (mandatory):
 1. Single commit. Stage only the files this task should change. Message format: "<phase-id>: <subject>" (e.g. "V1-P3: identity creation").
 2. Push to a feature branch on github.com/scotej/studyvis (default branch main). Branch name: v<phase-major>/p<N>-<short-slug> where <phase-major> is 1 for V1 prompts, 2 for V2, 3 for V3 (e.g. v1/p3-identity, v2/p1-llama-sidecar). Direct push to main is not authorized.
 3. If GitHub rejects on email privacy, amend the commit with the noreply email and retry: git -c user.email='134114466+scotej@users.noreply.github.com' commit --amend --no-edit --reset-author
-4. Open a PR with: gh pr create --base main --head v<phase-major>/p<N>-<slug> --title "<phase-id>: <subject>". PR body has Summary and Test plan sections. Do NOT merge — the user reviews.
-5. End-of-task summary in chat: (a) what shipped, (b) deviations from prompt or canonical-doc text and why, (c) Inherited debts — anything that surfaced and belongs to a later phase, named by phase id (e.g. "V1-P12 must wire plugins.updater config + signing key").
+4. Open a PR with: gh pr create --base main --head v<phase-major>/p<N>-<slug> --title "<phase-id>: <subject>". PR body has Summary and Test plan sections. Copilot code review is enabled on this repo and fires automatically when the PR opens — no need to add a reviewer manually.
+5. Wait for the Copilot review. Poll with `gh pr view <num> --json reviews,comments` every ~30s for up to 10 minutes. If no Copilot review lands within the window, note that in a PR comment and proceed to step 8.
+6. For each actionable Copilot finding (bug, correctness issue, missing edge case, security concern): fix it in code. Re-run the same verification commands the prompt prescribes (cargo test, tsc -b, vite build, lint, etc.). Skip purely stylistic nits or unactionable observations and list what you skipped (with one-line reason each) in the follow-up commit message.
+7. Single follow-up commit with message "<phase-id>: address Copilot review" (or "<phase-id>: no Copilot review within window" if step 5 timed out). Push to the same branch. If there were zero actionable findings AND zero stylistic nits, skip the follow-up commit.
+8. Auto-merge: `gh pr merge <num> --squash --delete-branch`. If branch protection blocks the merge because a required CI check is still running, wait for CI to settle (poll `gh pr checks <num>`) and retry once. If the branch went stale (main moved during the Copilot fix loop and the PR shows "out-of-date"), `git fetch origin && git pull --rebase origin main` on the feature branch, re-run the verification commands, push, and retry the merge — never force-push to main, never bypass required checks (no `--admin`).
+9. End-of-task summary in chat: (a) what shipped, (b) deviations from prompt or canonical-doc text and why, (c) Copilot findings addressed and skipped (with reason for each skip), (d) Inherited debts — anything that surfaced and belongs to a later phase, named by phase id (e.g. "V1-P12 must wire plugins.updater config + signing key"), (e) confirmation that the PR was merged and the branch deleted.
 
 ---
 
@@ -2328,4 +2465,5 @@ Things every prompt session above does, by design:
 - **Context7 over web search** for any library doc lookup.
 - **Verify, don't assume.** Library APIs change; the preamble enforces verification.
 - **No documentation files unless asked.** Prevents Claude Code from generating sprawling extra .md files; updates to the canonical four go through explicit edits.
-- **Single commit per prompt.** Easy to review and revert.
+- **Single commit per prompt** for the main work, optionally one follow-up commit titled `<phase-id>: address Copilot review`. Easy to review and revert.
+- **Copilot-reviewed, then auto-merged.** Each PR gets an automatic GitHub Copilot code review (repo setting). Claude waits up to 10 minutes, addresses actionable findings in a follow-up commit, then squash-merges via `gh pr merge --squash --delete-branch`. CI must be green; never bypass branch protection. The user is no longer the merge gate — they remain the *post-hoc* reviewer of merged main.
