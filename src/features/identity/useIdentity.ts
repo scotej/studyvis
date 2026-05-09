@@ -51,15 +51,24 @@ export function useIdentity(): UseIdentityResult {
   const [status, setStatus] = useState<IdentityStatus>('loading')
 
   const refresh = useCallback(async () => {
-    const exists = await identityExists()
-    if (!exists) {
+    try {
+      const exists = await identityExists()
+      if (!exists) {
+        setIdentity(null)
+        setStatus('absent')
+        return
+      }
+      const record = await loadIdentityRecord()
+      setIdentity(record)
+      setStatus(record ? 'ready' : 'absent')
+    } catch (err) {
+      // Surface to the user via console; fall back to absent so they aren't
+      // stuck on a blank loading screen. A V1-P3 corrupted-file recovery path
+      // is owed — see memory carryovers.
+      console.error('useIdentity.refresh failed:', err)
       setIdentity(null)
       setStatus('absent')
-      return
     }
-    const record = await loadIdentityRecord()
-    setIdentity(record)
-    setStatus(record ? 'ready' : 'absent')
   }, [])
 
   useEffect(() => {

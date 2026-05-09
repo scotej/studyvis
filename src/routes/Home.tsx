@@ -1,19 +1,13 @@
-import { useMemo } from 'react'
 import { Link } from 'react-router'
 
 import { Button } from '@/components/ui/button'
 import { Logo } from '@/components/Logo'
-import { IdentitySetup, useIdentity } from '@/features/identity'
+import { IdentitySetupGate, useIdentity } from '@/features/identity'
 
 const isDev = import.meta.env.DEV
 
 export function Home() {
   const { identity, status, actions } = useIdentity()
-  const create = actions.create
-  const created = useMemo(
-    () => (status === 'absent' ? create() : null),
-    [status, create]
-  )
 
   if (status === 'loading') {
     return (
@@ -24,10 +18,8 @@ export function Home() {
     )
   }
 
-  if (status === 'absent' && created) {
-    return (
-      <IdentitySetup mnemonic={created.mnemonic} onConfirm={created.commit} />
-    )
+  if (status === 'absent') {
+    return <IdentitySetupGate create={actions.create} />
   }
 
   return (

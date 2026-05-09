@@ -7,9 +7,9 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager};
 
 const KEYRING_SERVICE: &str = "com.studyvis.app";
-const KEYRING_USER_ED: &str = "identity-ed25519-priv";
-const KEYRING_USER_X: &str = "identity-x25519-priv";
+const KEYRING_USER: &str = "identity-keys";
 const IDENTITY_FILE: &str = "identity.json";
+const PRIV_KEY_LEN: usize = 32;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct StoredKeys {
@@ -27,12 +27,8 @@ pub struct IdentityRecord {
     pub mnemonic_fingerprint: String,
 }
 
-fn ed_entry() -> Result<Entry, String> {
-    Entry::new(KEYRING_SERVICE, KEYRING_USER_ED).map_err(|e| e.to_string())
-}
-
-fn x_entry() -> Result<Entry, String> {
-    Entry::new(KEYRING_SERVICE, KEYRING_USER_X).map_err(|e| e.to_string())
+fn keys_entry() -> Result<Entry, String> {
+    Entry::new(KEYRING_SERVICE, KEYRING_USER).map_err(|e| e.to_string())
 }
 
 fn data_dir(app: &AppHandle) -> Result<PathBuf, String> {
@@ -49,30 +45,41 @@ fn identity_path(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(data_dir(app)?.join(IDENTITY_FILE))
 }
 
+fn validate_priv_hex(label: &str, value: &str) -> Result<(), String> {
+    let bytes = hex::decode(value).map_err(|e| format!("{label}: {e}"))?;
+    if bytes.len() != PRIV_KEY_LEN {
+        return Err(format!(
+            "{label} must decode to {PRIV_KEY_LEN} bytes, got {}",
+            bytes.len()
+        ));
+    }
+    Ok(())
+}
+
+fn load_stored() -> Result<StoredKeys, String> {
+    let payload = keys_entry()?.get_password().map_err(|e| e.to_string())?;
+    serde_json::from_str(&payload).map_err(|e| format!("parse stored keys: {e}"))
+}
+
 #[tauri::command]
 pub async fn identity_save_keys(
     ed_priv_hex: String,
     x_priv_hex: String,
 ) -> Result<(), String> {
-    hex::decode(&ed_priv_hex).map_err(|e| format!("ed_priv_hex: {e}"))?;
-    hex::decode(&x_priv_hex).map_err(|e| format!("x_priv_hex: {e}"))?;
-    ed_entry()?
-        .set_password(&ed_priv_hex)
-        .map_err(|e| e.to_string())?;
-    x_entry()?
-        .set_password(&x_priv_hex)
-        .map_err(|e| e.to_string())?;
+    validate_priv_hex("ed_priv_hex", &ed_priv_hex)?;
+    validate_priv_hex("x_priv_hex", &x_priv_hex)?;
+    let payload = serde_json::to_string(&StoredKeys {
+        ed_priv_hex,
+        x_priv_hex,
+    })
+    .map_err(|e| e.to_string())?;
+    keys_entry()?.set_password(&payload).map_err(|e| e.to_string())?;
     Ok(())
 }
 
 #[tauri::command]
 pub async fn identity_load_keys() -> Result<StoredKeys, String> {
-    let ed_priv_hex = ed_entry()?.get_password().map_err(|e| e.to_string())?;
-    let x_priv_hex = x_entry()?.get_password().map_err(|e| e.to_string())?;
-    Ok(StoredKeys {
-        ed_priv_hex,
-        x_priv_hex,
-    })
+    load_stored()
 }
 
 #[tauri::command]
@@ -107,12 +114,12 @@ pub async fn identity_load_record(
 
 #[tauri::command]
 pub async fn identity_sign(message: Vec<u8>) -> Result<Vec<u8>, String> {
-    let ed_priv_hex = ed_entry()?.get_password().map_err(|e| e.to_string())?;
-    let priv_bytes = hex::decode(&ed_priv_hex).map_err(|e| e.to_string())?;
-    let priv_arr: [u8; 32] = priv_bytes
+    let stored = load_stored()?;
+    let priv_bytes = hex::decode(&stored.ed_priv_hex).map_err(|e| e.to_string())?;
+    let priv_arr: [u8; PRIV_KEY_LEN] = priv_bytes
         .as_slice()
         .try_into()
-        .map_err(|_| "ed25519 priv key must be 32 bytes".to_string())?;
+        .map_err(|_| format!("ed25519 priv key must be {PRIV_KEY_LEN} bytes"))?;
     let signing_key = SigningKey::from_bytes(&priv_arr);
     let sig = signing_key.sign(&message);
     Ok(sig.to_bytes().to_vec())

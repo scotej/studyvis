@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { CheckIcon, CopyIcon } from 'lucide-react'
 import { toast } from 'sonner'
 
@@ -12,23 +12,32 @@ export type IdentitySetupProps = {
   onConfirm: () => void | Promise<void>
 }
 
-const COLUMN_COUNT = 3
-
 export function IdentitySetup({ mnemonic, onConfirm }: IdentitySetupProps) {
   const [acknowledged, setAcknowledged] = useState(false)
   const [copied, setCopied] = useState(false)
   const [submitting, setSubmitting] = useState(false)
+  const copiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  const columns = useMemo(
-    () => splitIntoColumns(mnemonic, COLUMN_COUNT),
-    [mnemonic]
-  )
+  useEffect(() => {
+    return () => {
+      if (copiedTimerRef.current !== null) {
+        clearTimeout(copiedTimerRef.current)
+        copiedTimerRef.current = null
+      }
+    }
+  }, [])
 
   async function handleCopy() {
     try {
       await navigator.clipboard.writeText(mnemonic.join(' '))
       setCopied(true)
-      window.setTimeout(() => setCopied(false), 1500)
+      if (copiedTimerRef.current !== null) {
+        clearTimeout(copiedTimerRef.current)
+      }
+      copiedTimerRef.current = setTimeout(() => {
+        setCopied(false)
+        copiedTimerRef.current = null
+      }, 1500)
     } catch {
       toast.error("Couldn't copy to clipboard.")
     }
@@ -64,23 +73,19 @@ export function IdentitySetup({ mnemonic, onConfirm }: IdentitySetupProps) {
           aria-label="24-word recovery phrase"
         >
           <ol
-            className="grid grid-cols-3 gap-x-8 gap-y-2 font-mono text-sm leading-snug"
+            className="grid grid-flow-col grid-rows-8 gap-x-8 gap-y-2 font-mono text-sm leading-snug"
             data-slot="mnemonic-grid"
           >
-            {columns.map((column, columnIndex) => (
-              <ul key={columnIndex} className="flex flex-col gap-2">
-                {column.map(({ index, word }) => (
-                  <li
-                    key={index}
-                    className="flex items-baseline gap-3 tabular-nums"
-                  >
-                    <span className="w-6 text-right text-text-muted">
-                      {String(index + 1).padStart(2, '0')}
-                    </span>
-                    <span className="text-text-primary">{word}</span>
-                  </li>
-                ))}
-              </ul>
+            {mnemonic.map((word, index) => (
+              <li
+                key={index}
+                className="flex items-baseline gap-3 tabular-nums"
+              >
+                <span className="w-6 text-right text-text-muted">
+                  {String(index + 1).padStart(2, '0')}
+                </span>
+                <span className="text-text-primary">{word}</span>
+              </li>
             ))}
           </ol>
 
@@ -129,19 +134,4 @@ export function IdentitySetup({ mnemonic, onConfirm }: IdentitySetupProps) {
       </div>
     </main>
   )
-}
-
-function splitIntoColumns(words: Mnemonic, columns: number) {
-  const perColumn = Math.ceil(words.length / columns)
-  const out: Array<Array<{ index: number; word: string }>> = []
-  for (let c = 0; c < columns; c++) {
-    const items: Array<{ index: number; word: string }> = []
-    for (let r = 0; r < perColumn; r++) {
-      const i = c * perColumn + r
-      if (i >= words.length) break
-      items.push({ index: i, word: words[i] })
-    }
-    out.push(items)
-  }
-  return out
 }
