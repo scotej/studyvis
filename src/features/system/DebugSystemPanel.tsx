@@ -18,7 +18,9 @@ export function DebugSystemPanel() {
   const pttActive = usePttStore((s) => s.active)
 
   const switchDisabled =
-    autostart.status === 'loading' || autostart.status === 'unavailable'
+    autostart.status === 'loading' ||
+    autostart.status === 'saving' ||
+    autostart.status === 'unavailable'
 
   return (
     <section
@@ -28,7 +30,7 @@ export function DebugSystemPanel() {
       <div className="mb-4 flex items-baseline justify-between">
         <h2 className="text-base font-medium text-text-primary">System</h2>
         <span className="text-xs uppercase tracking-wide text-text-muted">
-          Debug · ships in V1-P11 settings
+          Debug · replaced by Settings in V1-P11
         </span>
       </div>
 

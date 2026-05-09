@@ -529,7 +529,7 @@ Period at the end of full sentences, none on labels, none on button text.
 V1 ships two global shortcuts. Both are registered in the system layer via `tauri-plugin-global-shortcut` and fire even when the StudyVis window is not focused — that is the point.
 
 | Action | macOS | Windows / Linux | State (V1) |
-|-|-|-|-|
+| --- | --- | --- | --- |
 | Push to talk · friends | `⌘ [` | `Ctrl [` | Press unmutes mic, release mutes; the audio path lands in V1-P8. |
 | Talk to AI | `⌘ ]` | `Ctrl ]` | Registered (key reserved on the user's machine) but the handler is a no-op. V2-P7 wires it to the floating AI dialog window. |
 
