@@ -33,3 +33,14 @@ export function pairPassword(words: string[]): string {
 export function sessionTopic(sessionId: Uint8Array): string {
   return digestHex('studyvis:session:v1:', bytesToHex(sessionId))
 }
+
+// Presence channel — kept distinct from inbox so heartbeat traffic doesn't
+// drown invite traffic, and so a friend who is online for presence is not
+// silently "online for invites" if the receive path crashes after subscribe.
+export function presenceTopic(edPubkey: Uint8Array): string {
+  return digestHex('studyvis:presence:v1:', bytesToBase64(edPubkey))
+}
+
+export function presencePassword(edPubkey: Uint8Array): string {
+  return digestHex('studyvis:presence-pw:v1:', bytesToBase64(edPubkey))
+}

@@ -1,4 +1,5 @@
 mod commands;
+pub mod crypto;
 pub mod db;
 
 use tauri::Manager;
@@ -8,8 +9,8 @@ use commands::friends::{
 };
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 use commands::identity::{
-    identity_exists, identity_load_record, identity_save_keys, identity_save_record,
-    identity_sign,
+    identity_box_decrypt, identity_box_encrypt, identity_exists, identity_load_record,
+    identity_save_keys, identity_save_record, identity_sign,
 };
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -31,6 +32,8 @@ pub fn run() {
         identity_save_record,
         identity_load_record,
         identity_sign,
+        identity_box_decrypt,
+        identity_box_encrypt,
     ]);
 
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]

@@ -167,6 +167,26 @@ describe('boxEncrypt / boxDecrypt', () => {
       boxDecrypt(stranger.xPub, recipient.xPriv, nonce, ciphertext)
     ).toThrow()
   })
+
+  test('decrypts a libsodium crypto_box_easy vector byte-for-byte', () => {
+    // Vector generated with pynacl (libsodium binding) using RFC 7748 §6.1
+    // X25519 reference scalars. Locks our @noble/ciphers + HSalsa20 construction
+    // to libsodium's crypto_box_easy output format ([poly1305_tag(16) || ciphertext]).
+    // Sender = Alice, recipient = Bob.
+    const aliceXPub = hexToBytes(
+      '8520f0098930a754748b7ddcb43ef75a0dbf3a0d26381af4eba4a98eaa9b4e6a'
+    )
+    const bobXPriv = hexToBytes(
+      '5dab087e624a8a4b79e17f8b83800ee66f3bb1292618b6fd1c2f8b27ff88e0eb'
+    )
+    const nonce = hexToBytes('69696ee955b62b73cd62bda875fc73d68219e0036b7a0b37')
+    const ciphertext = hexToBytes(
+      '7e5c50f10331000e8b4f7019d8eb46f443ea113e0d9f89d520eb2ddab0631f986c7e88f9355d'
+    )
+    const expected = new TextEncoder().encode('studyvis-invite-vector')
+    const decrypted = boxDecrypt(aliceXPub, bobXPriv, nonce, ciphertext)
+    expect(Array.from(decrypted)).toEqual(Array.from(expected))
+  })
 })
 
 describe('HKDF derivation properties', () => {
