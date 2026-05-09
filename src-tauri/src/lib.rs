@@ -1,5 +1,11 @@
 mod commands;
+pub mod db;
 
+use tauri::Manager;
+
+use commands::friends::{
+    friends_add, friends_get_x_pubkey, friends_list, friends_remove, friends_update_last_studied,
+};
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 use commands::identity::{
     identity_exists, identity_load_keys, identity_load_record, identity_save_keys,
@@ -15,6 +21,11 @@ pub fn run() {
 
     #[cfg(any(target_os = "macos", target_os = "windows"))]
     let builder = builder.invoke_handler(tauri::generate_handler![
+        friends_list,
+        friends_add,
+        friends_remove,
+        friends_update_last_studied,
+        friends_get_x_pubkey,
         identity_save_keys,
         identity_load_keys,
         identity_exists,
@@ -23,8 +34,22 @@ pub fn run() {
         identity_sign,
     ]);
 
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    let builder = builder.invoke_handler(tauri::generate_handler![
+        friends_list,
+        friends_add,
+        friends_remove,
+        friends_update_last_studied,
+        friends_get_x_pubkey,
+    ]);
+
     builder
         .setup(|app| {
+            let pool = db::init(&app.handle()).map_err(|e| -> Box<dyn std::error::Error> {
+                format!("db init: {e}").into()
+            })?;
+            app.manage(pool);
+
             #[cfg(desktop)]
             {
                 app.handle()

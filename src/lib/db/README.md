@@ -1,0 +1,3 @@
+# Local DB
+
+The SQLite database file lives at `$DATA_DIR/studyvis/app.db` and is owned exclusively by the Rust side. Frontend code reaches it only through `#[tauri::command]` wrappers in `src-tauri/src/commands/friends.rs` (and future siblings); the file path is never exposed to JS, so the webview cannot read or rewrite it via `@tauri-apps/plugin-fs`. We chose `rusqlite` (bundled) over `better-sqlite3` in JS for two reasons: (1) keeping queries Rust-side preserves the principle that durable state is gated behind a typed command surface, and (2) `bundled` ships a known SQLite version with the binary so we don't depend on the user's system sqlite.
