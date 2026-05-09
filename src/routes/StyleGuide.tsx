@@ -27,12 +27,7 @@ import { Progress } from '@/components/ui/progress'
 import { Separator } from '@/components/ui/separator'
 import { Slider } from '@/components/ui/slider'
 import { Switch } from '@/components/ui/switch'
-import {
-  Tabs,
-  TabsContent,
-  TabsList,
-  TabsTrigger,
-} from '@/components/ui/tabs'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
 import { Toaster } from '@/components/ui/sonner'
 import {
@@ -44,6 +39,35 @@ import {
 import { Logo } from '@/components/Logo'
 import { useTheme } from '@/design/theme-context'
 import { toast } from 'sonner'
+
+import { IdentitySetup } from '@/features/identity/IdentitySetup'
+
+const MOCK_MNEMONIC = [
+  'ocean',
+  'ladder',
+  'cinnamon',
+  'trumpet',
+  'cobalt',
+  'hammock',
+  'pine',
+  'mirror',
+  'quartz',
+  'fountain',
+  'pencil',
+  'bridge',
+  'mosaic',
+  'thistle',
+  'rumor',
+  'saffron',
+  'lantern',
+  'pebble',
+  'vapor',
+  'oasis',
+  'cipher',
+  'maple',
+  'garnet',
+  'horizon',
+]
 
 function StatusDot({
   tone,
@@ -211,8 +235,8 @@ export function StyleGuide() {
               </CardHeader>
               <CardContent>
                 <p className="text-sm text-text-secondary">
-                  Body content sits in the surface variant. The card itself
-                  uses radius lg, the page uses radius md.
+                  Body content sits in the surface variant. The card itself uses
+                  radius lg, the page uses radius md.
                 </p>
               </CardContent>
               <CardFooter className="gap-2">
@@ -344,6 +368,17 @@ export function StyleGuide() {
               <Logo size="lg" />
               <Logo size="xl" />
               <Logo size="xl" monochrome className="text-text-primary" />
+            </div>
+          </Section>
+
+          <Section title="IdentitySetup (mock 24 words)">
+            <div className="overflow-hidden rounded-lg border border-border-default">
+              <IdentitySetup
+                mnemonic={MOCK_MNEMONIC}
+                onConfirm={() => {
+                  toast.success('IdentitySetup confirmed (mock).')
+                }}
+              />
             </div>
           </Section>
         </div>
