@@ -16,9 +16,7 @@ export type InviteToSessionArgs = {
 
 export class InviteWhileGuestError extends Error {
   constructor() {
-    super(
-      'cannot invite from a session you joined as a guest — only the host can invite'
-    )
+    super('Only the host can invite others to this session.')
     this.name = 'InviteWhileGuestError'
   }
 }

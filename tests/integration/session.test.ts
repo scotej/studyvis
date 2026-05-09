@@ -192,7 +192,6 @@ beforeEach(async () => {
     sessionPassword: null,
     isHost: false,
     startedAt: null,
-    endedAt: null,
     hadAnyPeer: false,
     peers: {},
     room: null,

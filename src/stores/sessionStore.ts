@@ -2,7 +2,7 @@ import { create } from 'zustand'
 
 import type { TopicRoom } from '@/lib/trystero'
 
-export type SessionStatus = 'idle' | 'active' | 'ended'
+export type SessionStatus = 'idle' | 'active'
 
 export type PeerSnapshot = {
   peerId: string
@@ -25,7 +25,6 @@ type SessionState = {
   sessionPassword: string | null
   isHost: boolean
   startedAt: number | null
-  endedAt: number | null
   hadAnyPeer: boolean
   peers: Record<string, PeerSnapshot>
   room: TopicRoom | null
@@ -35,7 +34,6 @@ type SessionState = {
   peerLeft: (peerId: string) => void
   setPeerStream: (peerId: string, hasStream: boolean) => void
   setPeerPtt: (peerId: string, active: boolean) => void
-  markEnded: (endedAt: number) => void
   reset: () => void
 }
 
@@ -46,7 +44,6 @@ const INITIAL: Pick<
   | 'sessionPassword'
   | 'isHost'
   | 'startedAt'
-  | 'endedAt'
   | 'hadAnyPeer'
   | 'peers'
   | 'room'
@@ -57,7 +54,6 @@ const INITIAL: Pick<
   sessionPassword: null,
   isHost: false,
   startedAt: null,
-  endedAt: null,
   hadAnyPeer: false,
   peers: {},
   room: null,
@@ -73,7 +69,6 @@ export const useSessionStore = create<SessionState>((set) => ({
       sessionPassword: init.sessionPassword,
       isHost: init.isHost,
       startedAt: init.startedAt,
-      endedAt: null,
       hadAnyPeer: false,
       peers: {},
       room: init.room,
@@ -106,8 +101,6 @@ export const useSessionStore = create<SessionState>((set) => ({
       if (!cur) return s
       return { peers: { ...s.peers, [peerId]: { ...cur, ptt: active } } }
     }),
-  markEnded: (endedAt) =>
-    set((s) => (s.status === 'active' ? { status: 'ended', endedAt } : s)),
   reset: () => set({ ...INITIAL }),
 }))
 

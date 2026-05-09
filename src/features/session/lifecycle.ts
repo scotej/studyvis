@@ -79,9 +79,11 @@ export function buildLeaveHandler(args: {
     } catch (err) {
       console.error('sessions_insert failed:', err)
     }
-    const store = useSessionStore.getState()
-    store.markEnded(endedAt)
-    store.reset()
+    // The store had a transient `ended` state, but reset() immediately
+    // overwrites it — nothing renders the in-between phase, so we go
+    // straight to idle. If a later phase wants a "session ended" splash
+    // screen, reintroduce markEnded() and stage the reset behind a UI tick.
+    useSessionStore.getState().reset()
   }
 }
 
