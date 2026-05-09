@@ -1,5 +1,7 @@
 import { invoke } from '@tauri-apps/api/core'
 
+import { base64ToBytes, bytesToBase64, bytesToHex } from '@/lib/encoding'
+
 export const IDENTITY_VERSION = 1 as const
 
 export type IdentityRecord = {
@@ -39,4 +41,34 @@ export async function signWithKeyring(
     message: Array.from(message),
   })
   return new Uint8Array(sig)
+}
+
+export async function boxDecryptWithKeyring(
+  theirXPub: Uint8Array,
+  nonce: Uint8Array,
+  ciphertext: Uint8Array
+): Promise<Uint8Array> {
+  const plaintext = await invoke<number[]>('identity_box_decrypt', {
+    theirXPubHex: bytesToHex(theirXPub),
+    nonceB64: bytesToBase64(nonce),
+    ciphertextB64: bytesToBase64(ciphertext),
+  })
+  return new Uint8Array(plaintext)
+}
+
+export async function boxEncryptWithKeyring(
+  theirXPub: Uint8Array,
+  plaintext: Uint8Array
+): Promise<{ nonce: Uint8Array; ciphertext: Uint8Array }> {
+  const result = await invoke<{ nonce_b64: string; ciphertext_b64: string }>(
+    'identity_box_encrypt',
+    {
+      theirXPubHex: bytesToHex(theirXPub),
+      plaintext: Array.from(plaintext),
+    }
+  )
+  return {
+    nonce: base64ToBytes(result.nonce_b64),
+    ciphertext: base64ToBytes(result.ciphertext_b64),
+  }
 }

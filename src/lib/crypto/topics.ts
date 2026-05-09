@@ -1,14 +1,8 @@
 import { sha256 } from '@noble/hashes/sha2.js'
 
-import { bytesToHex } from '@/lib/crypto/identity'
+import { bytesToBase64, bytesToHex } from '@/lib/encoding'
 
 const enc = new TextEncoder()
-
-function bytesToBase64(bytes: Uint8Array): string {
-  let bin = ''
-  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i])
-  return btoa(bin)
-}
 
 function digestHex(label: string, payload: string): string {
   return bytesToHex(sha256(enc.encode(label + payload)))
@@ -32,4 +26,15 @@ export function pairPassword(words: string[]): string {
 
 export function sessionTopic(sessionId: Uint8Array): string {
   return digestHex('studyvis:session:v1:', bytesToHex(sessionId))
+}
+
+// Presence channel — kept distinct from inbox so heartbeat traffic doesn't
+// drown invite traffic, and so a friend who is online for presence is not
+// silently "online for invites" if the receive path crashes after subscribe.
+export function presenceTopic(edPubkey: Uint8Array): string {
+  return digestHex('studyvis:presence:v1:', bytesToBase64(edPubkey))
+}
+
+export function presencePassword(edPubkey: Uint8Array): string {
+  return digestHex('studyvis:presence-pw:v1:', bytesToBase64(edPubkey))
 }
