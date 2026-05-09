@@ -32,6 +32,7 @@ export type UseIdentityResult = {
     create: () => CreatedIdentity
     signWithKeyring: (message: Uint8Array) => Promise<Uint8Array>
     refresh: () => Promise<void>
+    setDisplayName: (name: string) => Promise<void>
   }
 }
 
@@ -88,6 +89,19 @@ export function useIdentity(): UseIdentityResult {
     return { mnemonic: id.mnemonic, record, commit }
   }, [])
 
+  const setDisplayName = useCallback(
+    async (name: string) => {
+      const trimmed = name.trim()
+      if (!trimmed) throw new Error('display name must not be empty')
+      const current = identity
+      if (!current) throw new Error('no identity loaded')
+      const next: IdentityRecord = { ...current, display_name: trimmed }
+      await saveIdentityRecord(next)
+      setIdentity(next)
+    },
+    [identity]
+  )
+
   return {
     identity,
     status,
@@ -95,6 +109,7 @@ export function useIdentity(): UseIdentityResult {
       create,
       signWithKeyring,
       refresh,
+      setDisplayName,
     },
   }
 }
