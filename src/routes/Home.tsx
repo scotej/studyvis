@@ -10,6 +10,7 @@ import {
   type PresenceMap,
 } from '@/features/friends'
 import { IdentitySetupGate, useIdentity } from '@/features/identity'
+import { DebugSystemPanel } from '@/features/system'
 import { bytesToHex } from '@/lib/crypto/identity'
 import { sessionTopic } from '@/lib/crypto/topics'
 import type { Friend } from '@/lib/db/friends'
@@ -90,6 +91,9 @@ export function Home() {
         onAddFriend={() => setAddOpen(true)}
         onInvite={(friend) => void handleInvite(friend)}
       />
+      <div className="px-6 pb-8">
+        <DebugSystemPanel />
+      </div>
       <AddFriendDialog open={addOpen} onOpenChange={setAddOpen} />
       {identity ? (
         <InboxBoot
