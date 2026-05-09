@@ -1,8 +1,9 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { Link } from 'react-router'
 
 import { Button } from '@/components/ui/button'
 import { Logo } from '@/components/Logo'
+import { AddFriendDialog } from '@/features/friends'
 import { IdentitySetupGate, useIdentity } from '@/features/identity'
 import { useFriendsStore } from '@/stores/friendsStore'
 
@@ -13,6 +14,7 @@ export function Home() {
   const friendsCount = useFriendsStore((s) => s.friends.length)
   const friendsStatus = useFriendsStore((s) => s.status)
   const loadFriends = useFriendsStore((s) => s.load)
+  const [addOpen, setAddOpen] = useState(false)
 
   useEffect(() => {
     if (status === 'ready' && friendsStatus === 'idle') {
@@ -46,7 +48,8 @@ export function Home() {
             {identity.ed_pubkey_hex.slice(0, 16)}…
           </code>
         ) : null}
-        <Button>Get started</Button>
+        <Button onClick={() => setAddOpen(true)}>Add friend</Button>
+        <AddFriendDialog open={addOpen} onOpenChange={setAddOpen} />
         {isDev ? (
           <Link to="/style" className="text-sm text-text-secondary underline">
             /style
