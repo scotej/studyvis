@@ -24,6 +24,7 @@ tauri-plugin-notification = "2"
 tauri-plugin-store = "2"
 ed25519-dalek = "2"
 hex = "0.4"
+rusqlite = { version = "0.39", features = ["bundled"] }
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-global-shortcut = "2"

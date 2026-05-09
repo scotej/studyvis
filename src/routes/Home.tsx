@@ -1,13 +1,24 @@
+import { useEffect } from 'react'
 import { Link } from 'react-router'
 
 import { Button } from '@/components/ui/button'
 import { Logo } from '@/components/Logo'
 import { IdentitySetupGate, useIdentity } from '@/features/identity'
+import { useFriendsStore } from '@/stores/friendsStore'
 
 const isDev = import.meta.env.DEV
 
 export function Home() {
   const { identity, status, actions } = useIdentity()
+  const friendsCount = useFriendsStore((s) => s.friends.length)
+  const friendsStatus = useFriendsStore((s) => s.status)
+  const loadFriends = useFriendsStore((s) => s.load)
+
+  useEffect(() => {
+    if (status === 'ready' && friendsStatus === 'idle') {
+      void loadFriends()
+    }
+  }, [status, friendsStatus, loadFriends])
 
   if (status === 'loading') {
     return (
@@ -28,7 +39,7 @@ export function Home() {
         <Logo size="xl" />
         <h1 className="text-2xl font-semibold tracking-tight">StudyVis</h1>
         <p className="text-sm text-text-secondary">
-          Identity ready, V1-P4 will go here.
+          Identity ready. Friends: {friendsCount}
         </p>
         {identity ? (
           <code className="font-mono text-xs text-text-muted">
