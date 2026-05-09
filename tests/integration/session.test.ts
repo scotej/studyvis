@@ -87,6 +87,7 @@ vi.mock('@/lib/trystero', () => {
     })
 
     return {
+      selfId: peerId,
       makeAction<T>(namespace: string) {
         const send = async (
           data: T,

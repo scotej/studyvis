@@ -15,6 +15,7 @@ pub async fn sessions_insert(
     started_at: i64,
     ended_at: i64,
     total_minutes: i64,
+    peer_pubkeys: Option<String>,
 ) -> Result<(), String> {
     let conn = lock(&state)?;
     let row = sessions::SessionRow {
@@ -22,6 +23,7 @@ pub async fn sessions_insert(
         started_at,
         ended_at,
         total_minutes,
+        peer_pubkeys,
     };
     sessions::insert(&conn, &row).map_err(|e| e.to_string())
 }

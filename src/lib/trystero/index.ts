@@ -1,5 +1,6 @@
 import {
   joinRoom,
+  selfId,
   type ActionReceiver,
   type ActionSender,
   type DataPayload,
@@ -10,6 +11,11 @@ import {
 } from 'trystero'
 
 export const APP_ID = 'studyvis'
+
+// Trystero's `selfId` is a process-global string (one trystero instance per
+// Tauri webview). Consumers MUST read it via `room.selfId` rather than
+// importing `selfId` directly so the in-process bus mock can hand each
+// simulated peer its own id without monkey-patching the trystero module.
 
 export type TopicConfig = {
   topic: string
@@ -28,6 +34,7 @@ export type PeerStreamHandler = (
 ) => void
 
 export type TopicRoom = {
+  selfId: string
   makeAction: <T extends DataPayload>(namespace: string) => TopicAction<T>
   onPeerJoin: (fn: (peerId: string) => void) => void
   onPeerLeave: (fn: (peerId: string) => void) => void
@@ -54,6 +61,7 @@ export const joinTopic: JoinTopicFn = ({ topic, password }, callbacks) => {
 
 function wrapRoom(room: Room): TopicRoom {
   return {
+    selfId,
     makeAction<T extends DataPayload>(namespace: string): TopicAction<T> {
       const [send, receive] = room.makeAction<T>(namespace)
       return { send, receive }

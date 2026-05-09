@@ -4,6 +4,8 @@ import { sessionTopic as deriveSessionTopic } from '@/lib/crypto/topics'
 import { sessionsInsert } from '@/lib/db/sessions'
 import { bytesToBase64 } from '@/lib/encoding'
 import { joinTopic, type TopicRoom } from '@/lib/trystero'
+import { useAuditStore } from '@/stores/auditStore'
+import { usePomodoroStore } from '@/stores/pomodoroStore'
 import { useSessionStore } from '@/stores/sessionStore'
 
 export const SESSION_FULL_ACTION = 'session-full'
@@ -69,12 +71,16 @@ export function buildLeaveHandler(args: {
       0,
       Math.floor((endedAt - args.startedAt) / 60_000)
     )
+    // Snapshot the peer-pubkey list BEFORE reset() clears the store. The
+    // column is sorted JSON for canonicality regardless of join order.
+    const peerPubkeys = useSessionStore.getState().collectPeerPubkeys()
     try {
       await sessionsInsert({
         id: args.topic,
         startedAt: args.startedAt,
         endedAt,
         totalMinutes,
+        peerPubkeys,
       })
     } catch (err) {
       console.error('sessions_insert failed:', err)
@@ -84,6 +90,8 @@ export function buildLeaveHandler(args: {
     // straight to idle. If a later phase wants a "session ended" splash
     // screen, reintroduce markEnded() and stage the reset behind a UI tick.
     useSessionStore.getState().reset()
+    useAuditStore.getState().reset()
+    usePomodoroStore.getState().reset()
   }
 }
 
