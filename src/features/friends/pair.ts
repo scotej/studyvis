@@ -132,46 +132,49 @@ async function runPair(
   })
   const action = room.makeAction<HelloPayload>(HELLO_ACTION)
 
-  let settled = false
-  return await new Promise<PairedFriend>((resolve, reject) => {
-    const cleanup = async () => {
-      if (opts.signal) opts.signal.removeEventListener('abort', onAbort)
-      try {
-        await room.leave()
-      } catch {
-        // best-effort: a failed leave shouldn't mask the actual outcome
+  let onAbort: (() => void) | null = null
+  try {
+    return await new Promise<PairedFriend>((resolve, reject) => {
+      let settled = false
+      const settle = (fn: () => void) => {
+        if (settled) return
+        settled = true
+        fn()
       }
-    }
-    const settle = (fn: () => void) => {
-      if (settled) return
-      settled = true
-      fn()
-      void cleanup()
-    }
-    const onAbort = () => settle(() => reject(new PairAbortedError()))
+      onAbort = () => settle(() => reject(new PairAbortedError()))
 
-    if (opts.signal) opts.signal.addEventListener('abort', onAbort)
+      if (opts.signal) opts.signal.addEventListener('abort', onAbort)
 
-    action.receive((payload) => {
-      if (settled) return
-      try {
-        const friend = verifyHello(words, payload)
-        settle(() => resolve(friend))
-      } catch (err) {
-        settle(() => reject(err))
-      }
+      action.receive((payload) => {
+        if (settled) return
+        try {
+          const friend = verifyHello(words, payload)
+          settle(() => resolve(friend))
+        } catch (err) {
+          settle(() => reject(err))
+        }
+      })
+
+      room.onPeerJoin(async () => {
+        if (settled) return
+        try {
+          const hello = await buildHello(words, ctx)
+          await action.send(hello)
+        } catch (err) {
+          settle(() => reject(err))
+        }
+      })
     })
-
-    room.onPeerJoin(async () => {
-      if (settled) return
-      try {
-        const hello = await buildHello(words, ctx)
-        await action.send(hello)
-      } catch (err) {
-        settle(() => reject(err))
-      }
-    })
-  })
+  } finally {
+    if (opts.signal && onAbort) {
+      opts.signal.removeEventListener('abort', onAbort)
+    }
+    try {
+      await room.leave()
+    } catch {
+      // best-effort: a failed leave shouldn't mask the actual outcome
+    }
+  }
 }
 
 export function hostPairing(

@@ -1,11 +1,11 @@
-import { joinRoom } from 'trystero'
-import type {
-  ActionReceiver,
-  ActionSender,
-  DataPayload,
-  JoinRoomCallbacks,
-  Room,
-} from '@trystero-p2p/core'
+import {
+  joinRoom,
+  type ActionReceiver,
+  type ActionSender,
+  type DataPayload,
+  type JoinRoomCallbacks,
+  type Room,
+} from 'trystero'
 
 export const APP_ID = 'studyvis'
 

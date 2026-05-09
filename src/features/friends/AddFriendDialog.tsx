@@ -35,12 +35,6 @@ export function AddFriendDialog({ open, onOpenChange }: AddFriendDialogProps) {
   const abortRef = useRef<AbortController | null>(null)
   const successCloseRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  const cancel = useCallback(() => {
-    abortRef.current?.abort()
-    abortRef.current = null
-    setPhase({ kind: 'idle' })
-  }, [])
-
   useEffect(() => {
     return () => {
       abortRef.current?.abort()
@@ -68,6 +62,10 @@ export function AddFriendDialog({ open, onOpenChange }: AddFriendDialogProps) {
     },
     [onOpenChange]
   )
+
+  const cancel = useCallback(() => {
+    handleOpenChange(false)
+  }, [handleOpenChange])
 
   const persistAndFinish = useCallback(
     async (friend: PairedFriend) => {
