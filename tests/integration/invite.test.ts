@@ -99,6 +99,8 @@ import {
 import {
   buildInviteEnvelope,
   inviteFriend,
+  InviteTimeoutError,
+  sendInviteEnvelope,
   subscribeToOwnInbox,
   validateInviteEnvelope,
   type InboxContext,
@@ -336,6 +338,24 @@ describe('invite envelope round-trip', () => {
         boxDecrypt(theirXPub, alice.identity.xPriv, nonce_, ct_),
     })
     expect(result).toBeNull()
+  })
+
+  test('sendInviteEnvelope rejects with InviteTimeoutError when recipient never appears', async () => {
+    const sam = makeApp('Sam')
+    const alice = makeApp('Alice')
+    const envelope = await buildInviteEnvelope(
+      sam.sender,
+      { edPubkeyHex: alice.edHex, xPubkeyHex: alice.xHex },
+      SAMPLE_SESSION
+    )
+    // No `subscribeToOwnInbox` for alice → no peer ever joins sam's send room.
+    await expect(
+      sendInviteEnvelope(
+        { edPubkeyHex: alice.edHex, xPubkeyHex: alice.xHex },
+        envelope,
+        { sendTimeoutMs: 50 }
+      )
+    ).rejects.toBeInstanceOf(InviteTimeoutError)
   })
 
   test('expired invite is dropped', async () => {

@@ -21,6 +21,12 @@ import { joinTopic, type TopicRoom } from '@/lib/trystero'
 export const HEARTBEAT_ACTION = 'heartbeat'
 export const HEARTBEAT_INTERVAL_MS = 30_000
 export const ONLINE_WINDOW_MS = 60_000
+// `isOnline` is computed at render time, but React only re-renders when the
+// presence map reference changes. Without this sweep, a friend going offline
+// (last heartbeat ages past ONLINE_WINDOW_MS) never updates the UI because
+// no new heartbeat arrives. Re-emitting on a tick shorter than the online
+// window guarantees the dot flips within ~SWEEP_INTERVAL_MS of the cutoff.
+export const SWEEP_INTERVAL_MS = 15_000
 
 export type HeartbeatPayload = {
   ts: number
@@ -35,6 +41,7 @@ export type PresenceContext = {
   // Test seams.
   now?: () => number
   intervalMs?: number
+  sweepIntervalMs?: number
 }
 
 export type PresenceSubscription = {
@@ -104,11 +111,19 @@ export function startPresence(ctx: PresenceContext): PresenceSubscription {
     for (const fn of heartbeatSenders) void fn(payload)
   }
   send()
-  const handle = setInterval(send, intervalMs)
+  const heartbeatHandle = setInterval(send, intervalMs)
+
+  // Re-emit a snapshot of the presence map on a sweep tick so the UI
+  // re-evaluates `isOnline` and a friend whose last heartbeat aged past
+  // ONLINE_WINDOW_MS visibly flips to offline.
+  const sweepHandle = setInterval(() => {
+    ctx.onPresenceChange({ ...presence })
+  }, ctx.sweepIntervalMs ?? SWEEP_INTERVAL_MS)
 
   return {
     leave: async () => {
-      clearInterval(handle)
+      clearInterval(heartbeatHandle)
+      clearInterval(sweepHandle)
       await Promise.all(
         rooms.map((r) =>
           r.leave().catch(() => {

@@ -1,14 +1,8 @@
 import { sha256 } from '@noble/hashes/sha2.js'
 
-import { bytesToHex } from '@/lib/crypto/identity'
+import { bytesToBase64, bytesToHex } from '@/lib/encoding'
 
 const enc = new TextEncoder()
-
-function bytesToBase64(bytes: Uint8Array): string {
-  let bin = ''
-  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i])
-  return btoa(bin)
-}
 
 function digestHex(label: string, payload: string): string {
   return bytesToHex(sha256(enc.encode(label + payload)))

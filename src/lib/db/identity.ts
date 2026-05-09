@@ -1,5 +1,7 @@
 import { invoke } from '@tauri-apps/api/core'
 
+import { base64ToBytes, bytesToBase64, bytesToHex } from '@/lib/encoding'
+
 export const IDENTITY_VERSION = 1 as const
 
 export type IdentityRecord = {
@@ -41,19 +43,6 @@ export async function signWithKeyring(
   return new Uint8Array(sig)
 }
 
-function bytesToBase64(bytes: Uint8Array): string {
-  let bin = ''
-  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i])
-  return btoa(bin)
-}
-
-function bytesToHex(bytes: Uint8Array): string {
-  let out = ''
-  for (let i = 0; i < bytes.length; i++)
-    out += bytes[i].toString(16).padStart(2, '0')
-  return out
-}
-
 export async function boxDecryptWithKeyring(
   theirXPub: Uint8Array,
   nonce: Uint8Array,
@@ -65,13 +54,6 @@ export async function boxDecryptWithKeyring(
     ciphertextB64: bytesToBase64(ciphertext),
   })
   return new Uint8Array(plaintext)
-}
-
-function base64ToBytes(b64: string): Uint8Array {
-  const bin = atob(b64)
-  const out = new Uint8Array(bin.length)
-  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i)
-  return out
 }
 
 export async function boxEncryptWithKeyring(

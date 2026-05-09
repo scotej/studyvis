@@ -115,7 +115,7 @@ function FriendRow({ friend, online, now, onInvite }: FriendRowProps) {
             size="sm"
             onClick={onInvite}
             aria-label={`Invite ${name}`}
-            className="opacity-0 transition-opacity duration-fast group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100"
+            className="pointer-events-none opacity-0 transition-opacity duration-fast group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100 focus-visible:pointer-events-auto focus-visible:opacity-100"
           >
             Invite
           </Button>
@@ -128,8 +128,7 @@ function FriendRow({ friend, online, now, onInvite }: FriendRowProps) {
 function PresenceDot({ online }: { online: boolean }) {
   return (
     <span
-      role="img"
-      aria-label={online ? 'online' : 'offline'}
+      aria-hidden="true"
       className={cn(
         'inline-flex size-2.5 shrink-0 rounded-full',
         online ? 'bg-status-online' : 'bg-status-offline'

@@ -1,9 +1,9 @@
-import { hexToBytes, verifyMessage } from '@/lib/crypto/identity'
+import { verifyMessage } from '@/lib/crypto/identity'
 import { inboxPassword, inboxTopic } from '@/lib/crypto/topics'
+import { base64ToBytes, hexToBytes } from '@/lib/encoding'
 import { joinTopic, type TopicRoom } from '@/lib/trystero'
 
 import {
-  base64ToBytes,
   INVITE_ACTION,
   INVITE_ENVELOPE_VERSION,
   serializePayloadForSig,
@@ -78,8 +78,16 @@ export async function validateInviteEnvelope(
 ): Promise<ValidInvite | null> {
   if (!isInviteEnvelope(envelope)) return null
 
-  // Step 1: friend-list lookup BEFORE decrypt cost (§6 step 9).
-  const senderXPubHex = await ctx.lookupFriendXPub(envelope.from_ed_pubkey)
+  // Step 1: friend-list lookup BEFORE decrypt cost (§6 step 9). A throwing
+  // lookup (DB read error, etc.) becomes a silent drop — same threat-model
+  // bucket as a non-friend envelope, and avoids an unhandled rejection
+  // bubbling out of the receive callback.
+  let senderXPubHex: string | null
+  try {
+    senderXPubHex = await ctx.lookupFriendXPub(envelope.from_ed_pubkey)
+  } catch {
+    return null
+  }
   if (!senderXPubHex) return null
 
   // Step 2: decode wire bytes.

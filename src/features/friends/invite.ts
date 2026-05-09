@@ -1,9 +1,8 @@
-import { bytesToHex, hexToBytes } from '@/lib/crypto/identity'
 import { inboxPassword, inboxTopic } from '@/lib/crypto/topics'
+import { bytesToBase64, bytesToHex, hexToBytes } from '@/lib/encoding'
 import { joinTopic } from '@/lib/trystero'
 
 import {
-  bytesToBase64,
   INVITE_ACTION,
   INVITE_ENVELOPE_VERSION,
   INVITE_TTL_MS,
@@ -36,7 +35,22 @@ export type InviteSender = {
 export type InviteOptions = {
   ttlMs?: number
   now?: () => number
+  // Maximum time to wait for the recipient to be on their inbox topic before
+  // giving up. Default 15s — long enough to absorb a slow Nostr handshake,
+  // short enough that a click on a friend who just went offline gets fast
+  // feedback instead of a stuck-forever toast. Caller may override via
+  // AbortSignal in a later phase (V1-P8/P10).
+  sendTimeoutMs?: number
 }
+
+export class InviteTimeoutError extends Error {
+  constructor() {
+    super('invite send timed out — recipient did not appear on inbox topic')
+    this.name = 'InviteTimeoutError'
+  }
+}
+
+const DEFAULT_SEND_TIMEOUT_MS = 15_000
 
 export type SessionInvite = {
   sessionTopic: string
@@ -83,15 +97,17 @@ export async function buildInviteEnvelope(
 
 // Joins the recipient's inbox topic, sends one invite envelope as
 // makeAction(INVITE_ACTION), then leaves. Caller awaits the full lifecycle —
-// the room is fully closed when the promise settles.
+// the room is fully closed when the promise settles, including on timeout.
 export async function sendInviteEnvelope(
   recipient: InviteRecipient,
-  envelope: InviteEnvelope
+  envelope: InviteEnvelope,
+  opts: { sendTimeoutMs?: number } = {}
 ): Promise<void> {
   const recipientEdPub = hexToBytes(recipient.edPubkeyHex)
   if (recipientEdPub.length !== 32) {
     throw new Error('recipient ed_pubkey must decode to 32 bytes')
   }
+  const timeoutMs = opts.sendTimeoutMs ?? DEFAULT_SEND_TIMEOUT_MS
   const room = joinTopic({
     topic: inboxTopic(recipientEdPub),
     password: inboxPassword(recipientEdPub),
@@ -104,11 +120,15 @@ export async function sendInviteEnvelope(
       const settle = (fn: () => void) => {
         if (settled) return
         settled = true
+        clearTimeout(timer)
         fn()
       }
+      const timer = setTimeout(() => {
+        settle(() => reject(new InviteTimeoutError()))
+      }, timeoutMs)
       // Once at least one peer is on the topic, fire the envelope to all
-      // listeners and resolve. If no peer ever joins, the caller's outer
-      // timeout (or AbortSignal in a future phase) decides when to give up.
+      // listeners and resolve. The timeout above guarantees the promise
+      // settles even if no peer ever joins.
       room.onPeerJoin(() => {
         if (settled) return
         action
@@ -133,5 +153,7 @@ export async function inviteFriend(
   opts: InviteOptions = {}
 ): Promise<void> {
   const envelope = await buildInviteEnvelope(sender, recipient, session, opts)
-  await sendInviteEnvelope(recipient, envelope)
+  await sendInviteEnvelope(recipient, envelope, {
+    sendTimeoutMs: opts.sendTimeoutMs,
+  })
 }

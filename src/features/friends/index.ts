@@ -12,8 +12,10 @@ export { InboxBoot, type InboxBootProps } from './InboxBoot'
 export {
   buildInviteEnvelope,
   buildInvitePayload,
+  InviteTimeoutError,
   inviteFriend,
   sendInviteEnvelope,
+  type EncryptToFn,
   type InviteOptions,
   type InviteRecipient,
   type InviteSender,
@@ -29,6 +31,7 @@ export {
 export {
   HEARTBEAT_INTERVAL_MS,
   ONLINE_WINDOW_MS,
+  SWEEP_INTERVAL_MS,
   isOnline,
   startPresence,
   type HeartbeatPayload,
