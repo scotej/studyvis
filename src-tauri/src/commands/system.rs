@@ -93,3 +93,25 @@ pub fn system_open_releases<R: Runtime>(app: AppHandle<R>) -> Result<(), String>
         .open_url(RELEASES_URL, None::<&str>)
         .map_err(|e| e.to_string())
 }
+
+// macOS Sequoia surfaces Screen Recording grants as a per-app entry in
+// System Settings → Privacy & Security → Screen Recording. The
+// `x-apple.systempreferences` URL scheme jumps the user straight to that
+// pane. On non-macOS targets the command no-ops with an error so callers
+// fall back to a textual instruction.
+#[tauri::command]
+pub fn system_open_screen_capture_settings<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        const URL: &str =
+            "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture";
+        app.opener()
+            .open_url(URL, None::<&str>)
+            .map_err(|e| e.to_string())
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = app;
+        Err("not supported on this platform".to_string())
+    }
+}

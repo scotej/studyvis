@@ -7,8 +7,16 @@ export {
   PTT_STATE_ACTION,
   SESSION_FULL_ACTION,
   SESSION_FULL_MESSAGE,
+  SESSION_ENDED_SPLASH_MS,
   type SessionHandle,
 } from './lifecycle'
+export {
+  AUDIO_DEVICE_DEFAULT_ID,
+  listAudioInputs,
+  swapAudioInput,
+  type AudioInputOption,
+  type SwapAudioInputDeps,
+} from './audioDevices'
 export {
   AUDIT_ACTION,
   AUDIT_EVENT_VERSION,

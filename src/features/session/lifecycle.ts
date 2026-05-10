@@ -14,6 +14,10 @@ export const PTT_STATE_ACTION = 'ptt-state'
 // 4-user mesh hard cap (host + 3 peers, ARCHITECTURE.md §7).
 export const MAX_REMOTE_PEERS = 3
 export const SESSION_FULL_MESSAGE = 'Session is full — max 4 friends'
+// How long the "session ended" splash stays visible after the room tears
+// down before sessionStore.reset() returns the UI to the friends list.
+// Short enough to feel like a confirmation, not an interruption.
+export const SESSION_ENDED_SPLASH_MS = 1500
 
 export type SessionHandle = {
   sessionTopic: string
@@ -99,13 +103,32 @@ export function buildLeaveHandler(args: {
     } catch (err) {
       console.error('markStudied failed:', err)
     }
-    // The store had a transient `ended` state, but reset() immediately
-    // overwrites it — nothing renders the in-between phase, so we go
-    // straight to idle. If a later phase wants a "session ended" splash
-    // screen, reintroduce markEnded() and stage the reset behind a UI tick.
-    useSessionStore.getState().reset()
+    // Compute the splash snapshot BEFORE flipping state so SessionEndedSplash
+    // has stable content for its full lifetime. The peers map is cleared by
+    // reset() after SESSION_ENDED_SPLASH_MS, so we capture display names now.
+    const durationSeconds = Math.max(
+      0,
+      Math.floor((endedAt - args.startedAt) / 1000)
+    )
+    const peerNames = Object.values(sessionState.peers)
+      .map((p) => p.displayName)
+      .filter((n): n is string => typeof n === 'string' && n.length > 0)
+    // Flip to 'ended' so the session view can show its splash for
+    // SESSION_ENDED_SPLASH_MS, then reset() returns the UI to idle. Audit
+    // + pomodoro stores reset immediately because nothing on screen reads
+    // them during the splash phase.
+    useSessionStore.getState().markEnded({ durationSeconds, peerNames })
     useAuditStore.getState().reset()
     usePomodoroStore.getState().reset()
+    setTimeout(() => {
+      const after = useSessionStore.getState()
+      // Defend against a fresh session beginning during the splash window
+      // (e.g. accepting an invite immediately): only reset when we're still
+      // showing the ended state for THIS session.
+      if (after.status === 'ended' && after.sessionTopic === args.topic) {
+        after.reset()
+      }
+    }, SESSION_ENDED_SPLASH_MS)
   }
 }
 

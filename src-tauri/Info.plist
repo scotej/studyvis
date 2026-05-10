@@ -6,5 +6,7 @@
 	<string>StudyVis turns on your camera so your friends can see you while you study together.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>StudyVis uses your microphone for push-to-talk so your friends can hear you when you hold the PTT shortcut.</string>
+	<key>NSScreenCaptureUsageDescription</key>
+	<string>StudyVis captures a still image of your screen on a regular interval so the local AI can check that your study session stays on topic. Screen frames never leave this Mac.</string>
 </dict>
 </plist>
