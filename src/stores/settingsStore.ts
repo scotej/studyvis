@@ -214,12 +214,27 @@ export function __resetSettingsStoreDeps(): void {
   activeDeps = defaultDeps
 }
 
-async function writeKey(key: string, value: unknown): Promise<void> {
+// Setters fire-and-forget (call sites use `void setTheme(...)`), so any
+// rejection here would surface as an unhandled promise rejection. We catch,
+// log, and surface the failure via the store's `error` field — the
+// optimistic in-memory `set()` above the call still wins, so the UI
+// reflects the user's intent and the next call retries the write.
+async function writeKey(
+  set: (partial: Partial<SettingsState>) => void,
+  key: string,
+  value: unknown
+): Promise<void> {
   const factory = activeDeps.storeFactory
   if (!factory) return
-  const store = factory()
-  await store.set(key, value)
-  await store.save()
+  try {
+    const store = factory()
+    await store.set(key, value)
+    await store.save()
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    console.error(`settingsStore.writeKey(${key}) failed:`, err)
+    set({ error: message })
+  }
 }
 
 export const useSettingsStore = create<SettingsState>((set, get) => ({
@@ -264,38 +279,40 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
 
   setTheme: async (mode) => {
     set((s) => ({ values: { ...s.values, theme: mode } }))
-    await writeKey(SETTINGS_KEY_THEME, mode)
+    await writeKey(set, SETTINGS_KEY_THEME, mode)
   },
 
   setReduceMotion: async (enabled) => {
     set((s) => ({ values: { ...s.values, reduceMotion: enabled } }))
-    await writeKey(SETTINGS_KEY_REDUCE_MOTION, enabled)
+    await writeKey(set, SETTINGS_KEY_REDUCE_MOTION, enabled)
   },
 
   setIncomingInviteNotificationEnabled: async (enabled) => {
     set((s) => ({
       values: { ...s.values, incomingInviteNotificationEnabled: enabled },
     }))
-    await writeKey(SETTINGS_KEY_INVITE_NOTIFY, enabled)
+    await writeKey(set, SETTINGS_KEY_INVITE_NOTIFY, enabled)
   },
 
   setMinimizeToTrayOnClose: async (enabled) => {
     set((s) => ({ values: { ...s.values, minimizeToTrayOnClose: enabled } }))
-    await writeKey(SETTINGS_KEY_MINIMIZE_TRAY, enabled)
+    await writeKey(set, SETTINGS_KEY_MINIMIZE_TRAY, enabled)
     try {
       await activeDeps.runtime.pushMinimizeToTray(enabled)
     } catch (err) {
-      set({ error: err instanceof Error ? err.message : String(err) })
+      const message = err instanceof Error ? err.message : String(err)
+      console.error('pushMinimizeToTray failed:', err)
+      set({ error: message })
     }
   },
 
   setDebugLogEnabled: async (enabled) => {
     set((s) => ({ values: { ...s.values, debugLogEnabled: enabled } }))
-    await writeKey(SETTINGS_KEY_DEBUG_LOG, enabled)
+    await writeKey(set, SETTINGS_KEY_DEBUG_LOG, enabled)
   },
 
   setTurnPreference: async (pref) => {
     set((s) => ({ values: { ...s.values, turnPreference: pref } }))
-    await writeKey(SETTINGS_KEY_TURN_PREF, pref)
+    await writeKey(set, SETTINGS_KEY_TURN_PREF, pref)
   },
 }))

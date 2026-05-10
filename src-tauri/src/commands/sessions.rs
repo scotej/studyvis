@@ -18,11 +18,14 @@ pub async fn sessions_insert(
     peer_pubkeys: Option<String>,
 ) -> Result<(), String> {
     let conn = lock(&state)?;
+    // V1 callers (lifecycle.ts) always pass concrete values; the SessionRow
+    // struct uses Option<i64> only so SELECT paths tolerate NULL rows that
+    // future migrations or partial inserts might leave behind.
     let row = sessions::SessionRow {
         id,
-        started_at,
-        ended_at,
-        total_minutes,
+        started_at: Some(started_at),
+        ended_at: Some(ended_at),
+        total_minutes: Some(total_minutes),
         peer_pubkeys,
     };
     sessions::insert(&conn, &row).map_err(|e| e.to_string())
