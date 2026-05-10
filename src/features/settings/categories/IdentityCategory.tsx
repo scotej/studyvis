@@ -86,7 +86,7 @@ export function IdentityCategory() {
               disabled={!canSave}
               aria-disabled={!canSave}
             >
-              {submitting ? 'Saving…' : 'Save'}
+              Save
             </Button>
           </form>
         }

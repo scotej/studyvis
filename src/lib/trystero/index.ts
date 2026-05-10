@@ -33,12 +33,21 @@ export type PeerStreamHandler = (
   metadata?: JsonValue
 ) => void
 
+export type Unsubscribe = () => void
+
+// Trystero's underlying onPeerJoin / onPeerLeave / onPeerStream are last-wins:
+// only the most recently registered callback fires (per Trystero README + our
+// Context7 lookup). Multiple unrelated subscribers in this app (cap-evict,
+// hello-targeted-resend, stream binding, etc.) used to silently overwrite
+// each other. The wrapper fans out from a single underlying registration to
+// any number of subscribers and returns an unsubscribe so a re-mounting
+// effect can drop its registration on cleanup.
 export type TopicRoom = {
   selfId: string
   makeAction: <T extends DataPayload>(namespace: string) => TopicAction<T>
-  onPeerJoin: (fn: (peerId: string) => void) => void
-  onPeerLeave: (fn: (peerId: string) => void) => void
-  onPeerStream: (fn: PeerStreamHandler) => void
+  onPeerJoin: (fn: (peerId: string) => void) => Unsubscribe
+  onPeerLeave: (fn: (peerId: string) => void) => Unsubscribe
+  onPeerStream: (fn: PeerStreamHandler) => Unsubscribe
   addStream: (
     stream: MediaStream,
     targetPeers?: TargetPeers,
@@ -60,15 +69,44 @@ export const joinTopic: JoinTopicFn = ({ topic, password }, callbacks) => {
 }
 
 function wrapRoom(room: Room): TopicRoom {
+  const joinSubs = new Set<(peerId: string) => void>()
+  const leaveSubs = new Set<(peerId: string) => void>()
+  const streamSubs = new Set<PeerStreamHandler>()
+
+  room.onPeerJoin((peerId) => {
+    for (const fn of joinSubs) fn(peerId)
+  })
+  room.onPeerLeave((peerId) => {
+    for (const fn of leaveSubs) fn(peerId)
+  })
+  room.onPeerStream((stream, peerId, metadata) => {
+    for (const fn of streamSubs) fn(stream, peerId, metadata)
+  })
+
   return {
     selfId,
     makeAction<T extends DataPayload>(namespace: string): TopicAction<T> {
       const [send, receive] = room.makeAction<T>(namespace)
       return { send, receive }
     },
-    onPeerJoin: (fn) => room.onPeerJoin(fn),
-    onPeerLeave: (fn) => room.onPeerLeave(fn),
-    onPeerStream: (fn) => room.onPeerStream(fn),
+    onPeerJoin: (fn) => {
+      joinSubs.add(fn)
+      return () => {
+        joinSubs.delete(fn)
+      }
+    },
+    onPeerLeave: (fn) => {
+      leaveSubs.add(fn)
+      return () => {
+        leaveSubs.delete(fn)
+      }
+    },
+    onPeerStream: (fn) => {
+      streamSubs.add(fn)
+      return () => {
+        streamSubs.delete(fn)
+      }
+    },
     addStream: (stream, targetPeers, metadata) => {
       room.addStream(stream, targetPeers, metadata)
     },

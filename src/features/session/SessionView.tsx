@@ -17,6 +17,7 @@ import {
   useAuditStore,
   verifyIncomingAuditEvent,
 } from '@/stores/auditStore'
+import { useIdentityStore } from '@/stores/identityStore'
 import { usePomodoroStore } from '@/stores/pomodoroStore'
 import { useSessionStore } from '@/stores/sessionStore'
 import { usePttStore } from '@/stores/pttStore'
@@ -33,7 +34,6 @@ import { PTT_STATE_ACTION } from './lifecycle'
 import { startPomodoroController, type PeerOrderingEntry } from './pomodoro'
 
 const MEDIA_CONSTRAINTS: MediaStreamConstraints = { video: true, audio: true }
-const isDev = import.meta.env.DEV
 
 type PttPayload = { active: boolean }
 
@@ -49,16 +49,19 @@ export function SessionView() {
   const peers = useSessionStore((s) => s.peers)
   const setPeerHello = useSessionStore((s) => s.setPeerHello)
   const { identity } = useIdentity()
+  // The hello+audit+pomodoro effect depends only on stable identity slices
+  // (ed_pubkey_hex + x_pubkey_hex) so a display-name edit during a session
+  // does not retear the controller. The display_name is read from the
+  // singleton identity store at effect-mount time so the hello payload
+  // reflects whatever name was set when we joined.
+  const myEdPubkeyHex = identity?.ed_pubkey_hex ?? null
+  const myXPubkeyHex = identity?.x_pubkey_hex ?? null
   const pttActive = usePttStore((s) => s.active)
   const auditEvents = useAuditStore((s) => s.events)
   // useShallow stops the hello+audit+pomodoro effect from re-firing on every
   // 5-second broadcaster tick: without it the selector returns a fresh
   // object literal each store mutation, which would re-render SessionView
-  // and (because `useIdentity` rebuilds its `actions` object on every
-  // render) churn the effect's dep array — tearing down the controller
-  // mid-session. The fix is two-fold: (1) shallow-equal the slice here,
-  // (2) use the module-imported `signWithKeyring` directly so the dep
-  // array carries a stable function reference.
+  // and tear down the controller mid-session.
   const pomodoroSnapshot = usePomodoroStore(
     useShallow((s) => ({
       phase: s.phase,
@@ -141,12 +144,12 @@ export function SessionView() {
   // "setState synchronously inside an effect body" doesn't fire.
   useEffect(() => {
     if (!room) return
-    room.onPeerStream((stream, peerId) => {
+    const offStream = room.onPeerStream((stream, peerId) => {
       setRemoteStreams((cur) => ({ ...cur, [peerId]: stream }))
       const cur = useSessionStore.getState().peers[peerId]
       if (cur) useSessionStore.getState().setPeerStream(peerId, true)
     })
-    room.onPeerLeave((peerId) => {
+    const offLeave = room.onPeerLeave((peerId) => {
       setRemoteStreams((cur) => {
         if (!(peerId in cur)) return cur
         const next = { ...cur }
@@ -160,6 +163,10 @@ export function SessionView() {
         return next
       })
     })
+    return () => {
+      offStream()
+      offLeave()
+    }
   }, [room])
 
   // PTT broadcast: send our active-state on every change so peers can render
@@ -189,17 +196,16 @@ export function SessionView() {
     if (send) void send({ active: pttActive })
   }, [pttActive])
 
-  // Hello + audit + pomodoro pipeline. Wired once per (room, identity).
-  // Tearing down on either change cleans up timers + resets stores.
+  // Hello + audit + pomodoro pipeline. Deps are the stable string slices of
+  // identity — display-name edits do not tear the controller down, because
+  // hello payloads are one-shot per peer and capture display_name at
+  // effect-mount time from the singleton identity store.
   useEffect(() => {
-    if (!room || !identity || !sessionTopic || !startedAt) return
+    if (!room || !myEdPubkeyHex || !myXPubkeyHex || !sessionTopic || !startedAt)
+      return
     let stopped = false
-    const myEdPubkeyHex = identity.ed_pubkey_hex
-    const myDisplayName = identity.display_name
-    // Module-imported sign — stable reference across renders. Using
-    // `actions.signWithKeyring` from `useIdentity` would change identity
-    // every render and tear the controller down (see the snapshot
-    // selector comment above).
+    const myDisplayName =
+      useIdentityStore.getState().identity?.display_name ?? ''
     const sign = signWithKeyring
 
     const helloHandle = startHelloProtocol({
@@ -243,7 +249,7 @@ export function SessionView() {
     auditAction.receive((data, peerId) => {
       const expectedEd =
         useSessionStore.getState().peers[peerId]?.edPubkeyHex ?? null
-      const verified = verifyIncomingAuditEvent(data, peerId, expectedEd)
+      const verified = verifyIncomingAuditEvent(data, expectedEd)
       if (!verified) return
       useAuditStore.getState().append(verified)
     })
@@ -288,7 +294,7 @@ export function SessionView() {
       pomodoroStartRef.current = null
       pomodoroStopRef.current = null
     }
-  }, [room, identity, sessionTopic, startedAt, setPeerHello])
+  }, [room, myEdPubkeyHex, myXPubkeyHex, sessionTopic, startedAt, setPeerHello])
 
   const handleLeave = useCallback(() => {
     if (!sessionLeave) return
@@ -326,7 +332,7 @@ export function SessionView() {
   if (!room) return null
 
   const peerEntries = Object.values(peers)
-  const youName = identity?.display_name ?? ''
+  const youName = identity?.display_name?.trim() || 'You'
   const broadcasterName = pomodoroSnapshot.iAmBroadcaster
     ? 'you'
     : pomodoroSnapshot.broadcasterEdPubkey
@@ -343,8 +349,12 @@ export function SessionView() {
       <div className="flex min-h-0 flex-1">
         <div className="flex-1 px-6 py-6">
           {mediaError ? (
-            <div className="mb-4 rounded-md border border-status-alerted bg-bg-surface px-4 py-3 text-sm text-status-alerted">
-              Couldn’t access camera or microphone: {mediaError}
+            <div
+              role="alert"
+              aria-live="assertive"
+              className="mb-4 rounded-md border border-status-alerted bg-bg-surface px-4 py-3 text-sm text-status-alerted"
+            >
+              Couldn't access camera or microphone: {mediaError}
             </div>
           ) : null}
           <VideoGrid>
@@ -384,47 +394,12 @@ export function SessionView() {
             onStart={handleStartPomodoro}
             onStop={handleStopPomodoro}
           />
-          {isDev ? (
-            <DebugBreakButtons
-              onPause={() => emitAuditRef.current?.('paused_break', {})}
-              onResume={() => emitAuditRef.current?.('resumed', {})}
-            />
-          ) : null}
         </span>
         <Button variant="secondary" size="sm" onClick={handleLeave}>
           Leave
         </Button>
       </footer>
     </main>
-  )
-}
-
-function DebugBreakButtons({
-  onPause,
-  onResume,
-}: {
-  onPause: () => void
-  onResume: () => void
-}) {
-  return (
-    <span className="flex items-center gap-1">
-      <Button
-        size="sm"
-        variant="ghost"
-        onClick={onPause}
-        title="Debug: emit paused_break audit event"
-      >
-        break
-      </Button>
-      <Button
-        size="sm"
-        variant="ghost"
-        onClick={onResume}
-        title="Debug: emit resumed audit event"
-      >
-        back
-      </Button>
-    </span>
   )
 }
 

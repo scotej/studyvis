@@ -68,9 +68,9 @@ class BusRoom {
           receivers.set(namespace, list)
         },
       }),
-      onPeerJoin: () => {},
-      onPeerLeave: () => {},
-      onPeerStream: () => {},
+      onPeerJoin: () => () => {},
+      onPeerLeave: () => () => {},
+      onPeerStream: () => () => {},
       addStream: () => {},
       removeStream: () => {},
       getPeers: () => ({}),

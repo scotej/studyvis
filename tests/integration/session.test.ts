@@ -116,9 +116,17 @@ vi.mock('@/lib/trystero', () => {
       },
       onPeerJoin: (fn: Listener) => {
         room.onJoin.push(fn)
+        return () => {
+          const i = room.onJoin.indexOf(fn)
+          if (i >= 0) room.onJoin.splice(i, 1)
+        }
       },
       onPeerLeave: (fn: Listener) => {
         room.onLeave.push(fn)
+        return () => {
+          const i = room.onLeave.indexOf(fn)
+          if (i >= 0) room.onLeave.splice(i, 1)
+        }
       },
       onPeerStream: (fn: StreamHandler) => {
         room.onStream.push(fn)
@@ -127,6 +135,10 @@ vi.mock('@/lib/trystero', () => {
         for (const other of bus.rooms.values()) {
           if (other === room || other.left) continue
           for (const s of other.streams) fn(s, other.peerId)
+        }
+        return () => {
+          const i = room.onStream.indexOf(fn)
+          if (i >= 0) room.onStream.splice(i, 1)
         }
       },
       addStream: (stream: unknown) => {

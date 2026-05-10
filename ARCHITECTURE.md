@@ -51,7 +51,6 @@ Pinned versions are the floor; bump as needed but never silently downgrade.
 - **Tailwind CSS v4** — styling (uses CSS variables, native CSS layer support).
 - **shadcn/ui** — component primitives, Radix-based, source vendored under `src/components/ui/`.
 - **lucide-react** — icons.
-- **framer-motion** — limited transition usage (see DESIGN-SYSTEM.md §motion).
 - **@fontsource-variable/inter** — bundled Inter Variable font (the variable-axis package; the `@fontsource/inter` package is static-weight only and not used here).
 - **@fontsource-variable/jetbrains-mono** — bundled JetBrains Mono Variable font (used by BIP39 display + debug log per DESIGN-SYSTEM.md §3).
 
@@ -62,7 +61,7 @@ Pinned versions are the floor; bump as needed but never silently downgrade.
 - **@noble/ciphers** — XSalsa20-Poly1305 used as the symmetric primitive in NaCl box.
 - **@scure/bip39** — 24-word identity backup mnemonic; `mnemonicToSeedSync` produces the 64-byte master seed used by HKDF to derive both signing and encryption keypairs.
 - **@noble/hashes** — HKDF-SHA256 for keypair derivation from the BIP39 master seed.
-- **better-sqlite3** (via Tauri sidecar or rusqlite) — local persistent state.
+- **rusqlite** (Rust-side, bundled SQLite) — local persistent state. SQLite access is exclusively through Tauri commands; the frontend never opens DB handles directly.
 
 ### Tauri plugins (all v2.x)
 - **tauri-plugin-shell** — required for sidecar binaries (llama-server).
@@ -212,7 +211,7 @@ Sam (host)                                                  Alice (invited frien
                         plaintext: serialize({
                           session_topic,
                           session_password,
-                          sam_display_name,
+                          display_name,
                           expires_at: now+5min,
                           sig: ed25519_sign(payload_without_sig, sam_ed_priv)
                         })
@@ -261,7 +260,7 @@ type DataMessage =
   | { type: "alert"; severity: "warning" | "alerted"; reason: string; ts: number; sig: string }
   | { type: "topic_change"; new_topic: string; ts: number; sig: string }
   | { type: "break"; status: "started" | "ended"; ts: number; sig: string }
-  | { type: "pomodoro"; phase: "work" | "rest"; ends_at: number; ts: number; sig: string }
+  | { type: "pomodoro"; phase: "work" | "rest"; preset: "25/5" | "50/10"; ends_at: number; ts: number; sig: string }
   | { type: "score_final"; score: number; sig: string }   // sent only at session end
 ```
 
@@ -412,7 +411,7 @@ Audit log is also written to local SQLite per session for the post-session repor
 
 One peer is the "broadcaster" — by default, whoever started the timer.
 
-- Broadcaster sends `{ type: "pomodoro", phase, ends_at }` on the data channel every 5 s while a phase is active. Receivers display the phase; clock skew under 1 s is treated as zero (same Pomodoro phase by definition).
+- Broadcaster sends `{ type: "pomodoro", phase, preset, ends_at }` on the data channel every 5 s while a phase is active. `phase` is the 2-state wire form (`"work" | "rest"`); `preset` (`"25/5" | "50/10"`) lets receivers label the active phase without inferring duration. The internal state machine remains 5-state (idle / work-25 / rest-5 / work-50 / rest-10); `(phase, preset)` reconstructs the right UI label on the receiver side. Receivers display the phase; clock skew under 1 s is treated as zero (same Pomodoro phase by definition).
 - On broadcaster disconnect: each peer waits 10 s; if no `pomodoro` message arrives, the next-oldest peer (by `joined_at`) takes over and resumes from the same `ends_at`.
 - Phase transitions ("work" → "rest" → "work") are unicast only by the broadcaster; receivers don't transition autonomously, they wait for the message. This avoids drift.
 
@@ -423,7 +422,6 @@ studyvis/
 ├─ src-tauri/                     # Rust side
 │  ├─ Cargo.toml
 │  ├─ tauri.conf.json
-│  ├─ Entitlements.plist          # macOS permissions
 │  ├─ binaries/                   # bundled sidecars
 │  │  ├─ llama-server-mac-arm64
 │  │  ├─ llama-server-mac-x64
@@ -480,21 +478,23 @@ studyvis/
 
 ## 12. Permissions and entitlements
 
-### macOS (`Entitlements.plist`)
-- `com.apple.security.device.camera` — for camera in sessions and AI capture.
-- `com.apple.security.device.audio-input` — for PTT.
-- `com.apple.security.device.screen-capture` — for AI screen capture (V2+).
-- `com.apple.security.network.client` — for Nostr/TURN/HF model download.
-- `com.apple.security.app-sandbox` (optional, V3) — sandboxed mode.
-- `Info.plist` strings: `NSCameraUsageDescription`, `NSMicrophoneUsageDescription`, `NSScreenCaptureUsageDescription` — explanations the OS shows on first prompt.
+### macOS (`Info.plist`)
+V1 ships unsigned `.dmg` artifacts (Tauri's default ad-hoc signing only). No Apple Developer ID, no notarization, no formal entitlements file — `Entitlements.plist` is therefore not bundled in V1. Per-resource access is gated entirely through `Info.plist` usage-description strings, which Tauri merges from `src-tauri/Info.plist` (a sibling file to `tauri.conf.json`):
+- `NSCameraUsageDescription` — explanation the OS shows on first camera prompt (V1).
+- `NSMicrophoneUsageDescription` — explanation for first microphone prompt (V1; required for PTT).
+- `NSScreenCaptureUsageDescription` — added in V2 alongside the AI screen-capture pipeline; absent in V1.
+
+When code-signing credentials become available (V3 or later), an `Entitlements.plist` re-enters the bundle with:
+- `com.apple.security.device.camera`, `com.apple.security.device.audio-input`, `com.apple.security.device.screen-capture` (V2+), `com.apple.security.network.client`, optional `com.apple.security.app-sandbox`.
 
 ### Windows
 - WebView2 handles camera/mic/screen prompts natively.
 - V1 ships an unsigned `.msi`. Windows SmartScreen will warn on first launch ("Windows protected your PC") — friends click "More info" → "Run anyway". A code-signing certificate (and ideally an EV cert for instant SmartScreen reputation) would remove the warning; deferred until creds are available.
 
-### Linux
-- WebKitGTK handles camera/mic; `getDisplayMedia` is the open question. V0 verifies.
-- AppImage / deb / rpm packages.
+### Linux (deferred)
+Linux is not part of the V1 release matrix — V0 deferred WebKitGTK `getDisplayMedia` validation, and the friends-only V1 audience is macOS + Windows only (`keyring` is gated to those two platforms; the V1-P12 release workflow excludes Linux). When V0 is re-run on Linux and passes, V3 lights up Linux:
+- WebKitGTK handles camera/mic; `getDisplayMedia` remains the open question pending V0 re-run.
+- Distribution: `.AppImage` (no install, no sudo); `.deb`/`.rpm` only if there's a clear friends-need.
 
 ### Tauri capabilities
 `src-tauri/capabilities/default.json` permits the specific plugins we use: shell (sidecar exec only for our bundled binaries), notification, global-shortcut, autostart, store. Permissions are scoped to the main window.

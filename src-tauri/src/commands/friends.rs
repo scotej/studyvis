@@ -2,7 +2,9 @@ use tauri::State;
 
 use crate::db::{friends, DbPool};
 
-fn lock<'a>(state: &'a State<'_, DbPool>) -> Result<std::sync::MutexGuard<'a, rusqlite::Connection>, String> {
+fn lock<'a>(
+    state: &'a State<'_, DbPool>,
+) -> Result<std::sync::MutexGuard<'a, rusqlite::Connection>, String> {
     state.0.lock().map_err(|e| format!("db poisoned: {e}"))
 }
 
@@ -25,10 +27,7 @@ pub async fn friends_add(
 }
 
 #[tauri::command]
-pub async fn friends_remove(
-    state: State<'_, DbPool>,
-    ed_pubkey: String,
-) -> Result<(), String> {
+pub async fn friends_remove(state: State<'_, DbPool>, ed_pubkey: String) -> Result<(), String> {
     let conn = lock(&state)?;
     friends::remove(&conn, &ed_pubkey).map_err(|e| e.to_string())?;
     Ok(())

@@ -61,8 +61,8 @@ A complete, polished video-study app for friends. Zero AI code present. The app 
 - Session ends when only one user remains; each user can leave individually.
 - System tray + autostart-at-login (opt-in) so the user is reachable for invites.
 - Onboarding — welcome → permissions → identity setup (with BIP39 backup) → add first friend (or skip) → tutorial.
-- Settings — friends management, identity export/import, autostart toggle, PTT keybindings (rebindable), theme (dark / light / auto), notification preferences.
-- Per-OS installers for the friends-only V1 audience: macOS `.dmg` (Tauri ad-hoc signing only — friends right-click → Open the first time to bypass Gatekeeper), Windows `.msi` (unsigned — friends click through SmartScreen "Run anyway"), Linux `.AppImage` (chmod +x and run; no install required). No auto-update — friends pull new releases manually from GitHub Releases. Apple notarization, Windows code-signing, and the in-app updater plugin are deferred to a later phase if and when signing credentials become available.
+- Settings — friends management, identity export/import, autostart toggle, PTT keybindings (fixed defaults; rebinding lands in V3), theme (dark / light / auto), notification preferences.
+- Per-OS installers for the friends-only V1 audience: macOS + Windows only — Linux is deferred to V3 pending V0 re-run on Linux (WebKitGTK `getDisplayMedia` was the open question). macOS `.dmg` (Tauri ad-hoc signing only — friends right-click → Open the first time to bypass Gatekeeper); Windows `.msi` (unsigned — friends click through SmartScreen "Run anyway"). No auto-update — friends pull new releases manually from GitHub Releases. Apple notarization, Windows code-signing, and the in-app updater plugin are deferred to a later phase if and when signing credentials become available.
 
 **Non-goals (V1):**
 - Any AI inference, model picker, model download, vision processing, focus scoring.
@@ -111,7 +111,7 @@ Refinements that make the product feel native rather than functional. Not a sing
 
 **Features (in no particular order):**
 - Stats dashboard — focused minutes per day/week, study streaks, favourite study partners. Local only.
-- Custom keybindings UI for both PTTs.
+- Custom keybindings UI for both PTTs (V1 ships fixed defaults).
 - Multi-monitor capture toggle.
 - Light theme polish + auto theme follows OS.
 - BIP39 identity recovery flow (lost laptop → restore from 24 words).

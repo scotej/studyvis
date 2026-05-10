@@ -149,7 +149,7 @@ function PermissionRow({
             disabled={requesting}
             aria-disabled={requesting ? true : undefined}
           >
-            {requesting ? 'Requesting…' : denied ? 'Try again' : 'Grant'}
+            {denied ? 'Try again' : 'Grant'}
           </Button>
         )}
       </div>

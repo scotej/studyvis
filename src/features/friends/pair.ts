@@ -149,6 +149,7 @@ async function runPair(
 
   let onAbort: (() => void) | null = null
   let timeoutHandle: ReturnType<typeof setTimeout> | null = null
+  let unsubscribePeerJoin: () => void = () => {}
   try {
     return await new Promise<PairedFriend>((resolve, reject) => {
       let settled = false
@@ -178,7 +179,7 @@ async function runPair(
         }
       })
 
-      room.onPeerJoin(async () => {
+      unsubscribePeerJoin = room.onPeerJoin(async () => {
         if (settled) return
         // Trystero may fire onPeerJoin twice when both peers race the
         // microtask in the in-process test bus; only notify once.
@@ -203,6 +204,7 @@ async function runPair(
     if (opts.signal && onAbort) {
       opts.signal.removeEventListener('abort', onAbort)
     }
+    unsubscribePeerJoin()
     try {
       await room.leave()
     } catch {

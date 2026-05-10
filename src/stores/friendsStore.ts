@@ -4,7 +4,7 @@ import {
   addFriend as dbAddFriend,
   listFriends,
   removeFriend as dbRemoveFriend,
-  updateLastStudied as dbUpdateLastStudied,
+  updateLastStudied,
   type Friend,
 } from '@/lib/db/friends'
 
@@ -22,7 +22,9 @@ type FriendsState = {
     ts: number
   ) => Promise<void>
   remove: (edPubkey: string) => Promise<void>
-  markStudied: (edPubkey: string, ts: number) => Promise<void>
+  // Bumps last_studied_with for each peer who participated in a session that
+  // just ended. Called from buildLeaveHandler after sessions_insert.
+  markStudied: (edPubkeys: readonly string[], ts: number) => Promise<void>
 }
 
 export const useFriendsStore = create<FriendsState>((set, get) => ({
@@ -57,12 +59,16 @@ export const useFriendsStore = create<FriendsState>((set, get) => ({
     }))
   },
 
-  markStudied: async (edPubkey, ts) => {
-    await dbUpdateLastStudied(edPubkey, ts)
-    set((state) => ({
-      friends: state.friends.map((f) =>
-        f.ed_pubkey_hex === edPubkey ? { ...f, last_studied_with: ts } : f
-      ),
-    }))
+  markStudied: async (edPubkeys, ts) => {
+    if (edPubkeys.length === 0) return
+    await Promise.allSettled(
+      edPubkeys.map((edPubkey) => updateLastStudied(edPubkey, ts))
+    )
+    try {
+      const friends = await listFriends()
+      set({ friends })
+    } catch {
+      // best-effort: leave list as-is; next mount/load will resync.
+    }
   },
 }))

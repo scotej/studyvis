@@ -92,7 +92,11 @@ mod tests {
         insert(&conn, &sample("aa")).expect("insert 1");
         insert(&conn, &sample("aa")).expect("insert 2");
         let read = list_for_session(&conn, "topic-hex").expect("list");
-        assert_eq!(read.len(), 1, "duplicate sig should not produce a second row");
+        assert_eq!(
+            read.len(),
+            1,
+            "duplicate sig should not produce a second row"
+        );
     }
 
     #[test]

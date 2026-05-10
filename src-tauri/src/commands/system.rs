@@ -45,10 +45,7 @@ impl MinimizeToTrayFlag {
 }
 
 #[tauri::command]
-pub fn autostart_set_enabled<R: Runtime>(
-    app: AppHandle<R>,
-    enabled: bool,
-) -> Result<(), String> {
+pub fn autostart_set_enabled<R: Runtime>(app: AppHandle<R>, enabled: bool) -> Result<(), String> {
     let manager = app.autolaunch();
     if enabled {
         manager.enable().map_err(|e| e.to_string())

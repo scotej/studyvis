@@ -29,6 +29,9 @@ jobs:
       - name: Lint
         run: npm run lint
 
+      - name: Format check
+        run: npx prettier --check .
+
       - name: Test
         run: npm test
 
@@ -42,18 +45,32 @@ jobs:
         run: npm run check-tokens
 
   rust:
-    name: Rust (cargo check)
+    name: Rust
     runs-on: macos-latest
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v6
 
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
 
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri -> target
 
+      - name: cargo fmt
+        working-directory: src-tauri
+        run: cargo fmt --check
+
       - name: cargo check
         working-directory: src-tauri
         run: cargo check --locked
+
+      - name: cargo clippy (correctness only)
+        working-directory: src-tauri
+        run: cargo clippy --all-targets -- -A clippy::all -D clippy::correctness
+
+      - name: cargo test
+        working-directory: src-tauri
+        run: cargo test --locked

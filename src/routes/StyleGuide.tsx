@@ -418,7 +418,7 @@ export function StyleGuide() {
                     alt="StudyVis tray icon (light bar)"
                     width={22}
                     height={22}
-                    style={{ filter: 'invert(1)' }}
+                    className="invert"
                   />
                 </div>
                 <span className="text-xs text-text-muted">
@@ -435,17 +435,6 @@ export function StyleGuide() {
                 <Kbd>Ctrl</Kbd>
                 <Kbd>[</Kbd>
                 <span>Push to talk · friends</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <Kbd>⌘</Kbd>
-                <Kbd>]</Kbd>
-                <span className="text-text-secondary">/</span>
-                <Kbd>Ctrl</Kbd>
-                <Kbd>]</Kbd>
-                <span>Talk to AI</span>
-                <span className="ml-2 text-xs text-text-muted">
-                  V1: registered, no-op
-                </span>
               </div>
             </div>
           </Section>

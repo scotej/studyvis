@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { AlertCircleIcon, CheckIcon, CopyIcon, Loader2Icon } from 'lucide-react'
+import { AlertCircleIcon, CheckIcon, CopyIcon } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import {
@@ -250,16 +250,14 @@ function HostStatusLine({ phase }: { phase: AddFriendPhase }) {
   }
   if (phase.kind === 'host-waiting' && phase.peerArrived) {
     return (
-      <p className="flex items-center gap-2 text-sm text-text-secondary">
-        <Loader2Icon className="size-4 animate-spin" aria-hidden />
-        Friend joined — exchanging keys…
+      <p className="text-sm text-text-secondary" aria-live="polite">
+        Friend joined — exchanging keys.
       </p>
     )
   }
   return (
-    <p className="flex items-center gap-2 text-sm text-text-secondary">
-      <Loader2Icon className="size-4 animate-spin" aria-hidden />
-      Waiting for your friend to enter the code…
+    <p className="text-sm text-text-secondary" aria-live="polite">
+      Waiting for your friend to enter the code.
     </p>
   )
 }
@@ -289,12 +287,18 @@ function JoinPanel({
   if (inProgress) {
     return (
       <div className="flex flex-col gap-5">
-        <p className="flex items-center gap-2 text-sm text-text-secondary">
-          <Loader2Icon className="size-4 animate-spin" aria-hidden />
+        <p className="text-sm text-text-secondary" aria-live="polite">
           {phase.peerArrived
-            ? 'Friend joined — exchanging keys…'
-            : 'Looking for your friend on the network…'}
+            ? 'Friend joined — exchanging keys.'
+            : 'Looking for your friend on the network.'}
         </p>
+        <div
+          aria-hidden="true"
+          className="flex animate-pulse flex-col gap-2 rounded-lg border border-border-default bg-bg-surface p-4"
+        >
+          <div className="h-3 w-2/3 rounded-md bg-bg-raised" />
+          <div className="h-3 w-1/2 rounded-md bg-bg-raised" />
+        </div>
         <DialogFooter>
           <Button variant="outline" onClick={onCancel}>
             Cancel

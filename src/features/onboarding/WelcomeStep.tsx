@@ -14,7 +14,7 @@ export function WelcomeStep({ progress, onContinue }: WelcomeStepProps) {
     <OnboardingStep
       ariaLabel="Welcome"
       progress={progress}
-      primaryAction={{ label: "Let's set up", onClick: onContinue }}
+      primaryAction={{ label: "Let's set you up", onClick: onContinue }}
     >
       <div className="flex flex-col items-center gap-6 text-center">
         <Logo size="xl" />

@@ -5,6 +5,7 @@ import { sessionsInsert } from '@/lib/db/sessions'
 import { bytesToBase64 } from '@/lib/encoding'
 import { joinTopic, type TopicRoom } from '@/lib/trystero'
 import { useAuditStore } from '@/stores/auditStore'
+import { useFriendsStore } from '@/stores/friendsStore'
 import { usePomodoroStore } from '@/stores/pomodoroStore'
 import { useSessionStore } from '@/stores/sessionStore'
 
@@ -19,6 +20,9 @@ export type SessionHandle = {
   sessionPassword: string
   room: TopicRoom
   leave: () => Promise<void>
+  // Closure-bound peer set — used by integration tests (session.test.ts) for
+  // per-instance inspection because the singleton `useSessionStore` is
+  // overwritten by each subsequent `begin()`.
   peers: () => readonly string[]
 }
 
@@ -71,9 +75,14 @@ export function buildLeaveHandler(args: {
       0,
       Math.floor((endedAt - args.startedAt) / 60_000)
     )
-    // Snapshot the peer-pubkey list BEFORE reset() clears the store. The
-    // column is sorted JSON for canonicality regardless of join order.
-    const peerPubkeys = useSessionStore.getState().collectPeerPubkeys()
+    // Snapshot peer pubkeys BEFORE reset() clears the store. The sessions
+    // column stores the sorted JSON form for canonicality; the per-peer list
+    // is what we need for the friends.last_studied_with bump.
+    const sessionState = useSessionStore.getState()
+    const peerPubkeys = sessionState.collectPeerPubkeys()
+    const peerEdPubkeys = Object.values(sessionState.peers)
+      .map((p) => p.edPubkeyHex)
+      .filter((hex): hex is string => typeof hex === 'string')
     try {
       await sessionsInsert({
         id: args.topic,
@@ -84,6 +93,11 @@ export function buildLeaveHandler(args: {
       })
     } catch (err) {
       console.error('sessions_insert failed:', err)
+    }
+    try {
+      await useFriendsStore.getState().markStudied(peerEdPubkeys, endedAt)
+    } catch (err) {
+      console.error('markStudied failed:', err)
     }
     // The store had a transient `ended` state, but reset() immediately
     // overwrites it — nothing renders the in-between phase, so we go

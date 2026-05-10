@@ -204,13 +204,13 @@ A `theme: "dark" | "light" | "auto"` setting decides which token map is active; 
 
 | Concern | Choice | Version floor | Notes |
 |-|-|-|-|
-| UI framework | React | 19.x | Vite 6 |
+| UI framework | React | 19.x | Vite 8+ |
 | CSS engine | Tailwind CSS | v4.x | Native CSS layers, variable-based theming |
 | Component primitives | shadcn/ui (Radix) | latest as of V1-P2 | Vendored under `src/components/ui/` |
 | Icons | lucide-react | 0.x latest | Stroke 1.5, default size 16 |
 | Font (sans) | Inter Variable | via @fontsource-variable/inter | Bundled, no CDN. Static `@fontsource/inter` is NOT used. |
 | Font (mono) | JetBrains Mono | via @fontsource-variable/jetbrains-mono | Used only for BIP39 display + debug log. |
-| Motion | framer-motion | 12.x | Used for ≤5 places (see §6) |
+| Motion | Tailwind transitions | (built-in) | V1 uses Tailwind transition utilities for the ≤5 motion uses (see §6); framer-motion is not a V1 dep. Reduced-motion mode + any heavier motion library deferred to V3. |
 | State | Zustand | 5.x | Picked default; Jotai acceptable substitute |
 
 Bumps are fine; downgrades are not without reason.
@@ -234,7 +234,7 @@ These are the only components allowed to read raw HTML / Radix primitives. Modif
 | `Popover` | Floating anchor. |
 | `DropdownMenu` | |
 | `Tooltip` | Default delay 400 ms. |
-| `Toast` | Bottom-right. Auto-dismiss 4 s default. |
+| `Toast` | `sonner`-backed (`src/components/ui/sonner.tsx`). Bottom-right. Auto-dismiss 4 s default. |
 | `Avatar` | With fallback initials. Always circular, sizes 24/32/48. |
 | `Badge` | Pill, color variants from status tokens. |
 | `Switch` | |
@@ -266,7 +266,7 @@ These components only import from `ui/`, `design/tokens.ts`, and shared utilitie
 | `FriendRow` | Single friend with `Invite` button. |
 | `AddFriendDialog` | 12-word generate / paste flow. |
 | `OnboardingStep` | Full-bleed onboarding surface, single CTA, optional secondary. |
-| `BipBackupPanel` | Mono-font 24-word display + copy + "I've saved them" confirmation. |
+| `BipBackupPanel` | Mono-font 24-word display + copy + "I've saved them" confirmation. *Currently inlined in `src/features/identity/IdentitySetup.tsx`; pending extraction to a standalone component (V3 polish).* |
 | `SessionTimer` | Pomodoro timer with phase indicator, broadcaster badge if you're broadcasting. |
 | `ModelPicker` | (V2) Radio cards: name, size, RAM, measured speed badge. |
 | `BenchmarkRunner` | (V2) 30-second benchmark progress display. |
@@ -443,13 +443,13 @@ This window:
 │  AI            │   Reduce motion           [  ◐  ]                   │
 │  Network       │     Replaces transitions with fades.                │
 │  Advanced      │                                                     │
-│                │                                                     │
+│  About         │                                                     │
 │                │                                                     │
 │                │                                                     │
 └────────────────┴─────────────────────────────────────────────────────┘
 ```
 
-Settings categories visible: Identity, Friends, Sessions, Appearance, Notifications, Shortcuts, AI (V2), Network, Advanced. AI is hidden in V1.
+Settings categories visible: Identity, Friends, Sessions, Appearance, Notifications, Shortcuts, AI (V2), Network, Advanced, About. AI is hidden in V1. About shows app version + license string + a link to GitHub Releases (added in V1-P12).
 
 ## 9. Iconography
 

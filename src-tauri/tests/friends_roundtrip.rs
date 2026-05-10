@@ -10,8 +10,7 @@ fn setup() -> Connection {
 #[test]
 fn add_then_list_returns_inserted_friend() {
     let conn = setup();
-    friends::add(&conn, "ed_sam", "x_sam", "Sam", 1_700_000_000)
-        .expect("add friend");
+    friends::add(&conn, "ed_sam", "x_sam", "Sam", 1_700_000_000).expect("add friend");
     let listed = friends::list(&conn).expect("list friends");
     assert_eq!(listed.len(), 1);
     let f = &listed[0];
@@ -25,12 +24,14 @@ fn add_then_list_returns_inserted_friend() {
 #[test]
 fn add_is_upsert_on_ed_pubkey_conflict() {
     let conn = setup();
-    friends::add(&conn, "ed_sam", "x_sam_old", "Sam", 1_700_000_000)
-        .expect("add 1");
-    friends::add(&conn, "ed_sam", "x_sam_new", "Sammy", 1_700_000_500)
-        .expect("upsert");
+    friends::add(&conn, "ed_sam", "x_sam_old", "Sam", 1_700_000_000).expect("add 1");
+    friends::add(&conn, "ed_sam", "x_sam_new", "Sammy", 1_700_000_500).expect("upsert");
     let listed = friends::list(&conn).expect("list");
-    assert_eq!(listed.len(), 1, "should not duplicate on ed_pubkey conflict");
+    assert_eq!(
+        listed.len(),
+        1,
+        "should not duplicate on ed_pubkey conflict"
+    );
     assert_eq!(listed[0].x_pubkey_hex, "x_sam_new");
     assert_eq!(listed[0].display_name.as_deref(), Some("Sammy"));
     assert_eq!(listed[0].paired_at, Some(1_700_000_500));
@@ -58,10 +59,8 @@ fn remove_unknown_friend_is_zero_rows() {
 #[test]
 fn update_last_studied_writes_the_timestamp() {
     let conn = setup();
-    friends::add(&conn, "ed_sam", "x_sam", "Sam", 1_700_000_000)
-        .expect("add");
-    let touched = friends::update_last_studied(&conn, "ed_sam", 1_700_000_999)
-        .expect("update");
+    friends::add(&conn, "ed_sam", "x_sam", "Sam", 1_700_000_000).expect("add");
+    let touched = friends::update_last_studied(&conn, "ed_sam", 1_700_000_999).expect("update");
     assert_eq!(touched, 1);
     let f = friends::list(&conn).expect("list").remove(0);
     assert_eq!(f.last_studied_with, Some(1_700_000_999));

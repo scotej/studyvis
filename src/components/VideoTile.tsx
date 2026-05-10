@@ -21,12 +21,13 @@ export type VideoTileProps = {
 export function VideoTile({
   name,
   stream,
-  state = 'focused',
+  state,
   ptt = false,
   isLocal = false,
   className,
 }: VideoTileProps) {
   const videoRef = useRef<HTMLVideoElement | null>(null)
+  const resolvedState: FocusState = state ?? (stream ? 'online' : 'offline')
 
   useEffect(() => {
     const el = videoRef.current
@@ -56,7 +57,7 @@ export function VideoTile({
       />
       <div className="pointer-events-none absolute inset-x-0 bottom-0 flex items-center justify-between gap-3 bg-overlay-glass px-4 py-2.5">
         <div className="flex min-w-0 items-center gap-2">
-          <FocusIndicator state={state} />
+          <FocusIndicator state={resolvedState} />
           <span className="truncate text-sm font-medium text-text-primary">
             {name}
           </span>

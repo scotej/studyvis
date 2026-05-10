@@ -115,8 +115,9 @@ export function AdvancedCategory() {
             size="sm"
             onClick={() => void handleReplayOnboarding()}
             disabled={resettingOnboarding}
+            aria-disabled={resettingOnboarding ? true : undefined}
           >
-            {resettingOnboarding ? 'Resetting…' : 'Replay'}
+            Replay
           </Button>
         }
       />

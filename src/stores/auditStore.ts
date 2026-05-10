@@ -13,12 +13,6 @@ import { verifyMessage } from '@/lib/crypto/identity'
 import { auditEventInsert } from '@/lib/db/audit'
 import { bytesToHex, hexToBytes } from '@/lib/encoding'
 
-// Monotonic counter for breaking ties when two events share the same `ts`
-// (microsecond clock collisions are rare in practice but trivial to
-// construct with vi.useFakeTimers); ensures the panel's chronological
-// ordering is stable.
-let nextSeq = 0
-
 export type StoredAuditEvent = AuditEvent & {
   // Per-event monotonic sequence used as React key. Receiver-side seq is
   // assigned by the local store in arrival order; the wire payload does not
@@ -28,6 +22,12 @@ export type StoredAuditEvent = AuditEvent & {
 
 type AuditState = {
   events: StoredAuditEvent[]
+  // Monotonic counter for breaking ties when two events share the same `ts`
+  // (microsecond clock collisions are rare in practice but trivial to
+  // construct with vi.useFakeTimers). Held in store state so HMR /
+  // StrictMode dev double-mount can't inherit a stale module-level value
+  // and emit a duplicate `seq` for the first event of a fresh session.
+  nextSeq: number
   // Pushes a verified event onto the local list. Used by both the local-
   // emit path (after our own send succeeds) and the receive path (after
   // signature + binding checks pass). Idempotent on (who, ts, kind, sig)
@@ -57,12 +57,14 @@ export function __setAuditPersistFn(
 
 export const useAuditStore = create<AuditState>((set, get) => ({
   events: [],
+  nextSeq: 0,
   append: (event) => {
     // Drop exact duplicates (same sig). Cheap O(n) scan; n is small (events
     // accrue at human cadence per session).
     if (get().events.some((e) => e.sig === event.sig)) return
-    const stored: StoredAuditEvent = { ...event, seq: ++nextSeq }
-    set((s) => ({ events: [...s.events, stored] }))
+    const seq = get().nextSeq + 1
+    const stored: StoredAuditEvent = { ...event, seq }
+    set((s) => ({ events: [...s.events, stored], nextSeq: seq }))
     // Best-effort SQLite persistence (V1-P9 carryover): the panel reflects
     // the event regardless of disk write success. The post-session report
     // (V2) is the consumer of the persisted rows.
@@ -70,10 +72,7 @@ export const useAuditStore = create<AuditState>((set, get) => ({
       console.error('audit persist failed:', err)
     })
   },
-  reset: () => {
-    nextSeq = 0
-    set({ events: [] })
-  },
+  reset: () => set({ events: [], nextSeq: 0 }),
 }))
 
 export type SignFn = (bytes: Uint8Array) => Promise<Uint8Array>
@@ -108,14 +107,13 @@ export async function buildAuditEvent(args: EmitArgs): Promise<AuditEvent> {
 // Verifies an incoming audit event against the peerId↔ed_pubkey binding
 // established by signed-hello. Returns the verified event iff:
 //   - shape matches the V1 wire schema
-//   - the binding for senderPeerId exists (i.e. hello arrived first)
+//   - `expectedEdPubkeyHex` (caller's binding lookup) exists
 //   - the event's `who` matches the binding (no impersonation)
 //   - the Ed25519 signature over canonical bytes verifies
 // Anything else is a silent drop, matching ARCHITECTURE.md §7's
 // "Unsigned or invalid-signature messages are dropped" rule.
 export function verifyIncomingAuditEvent(
   data: unknown,
-  senderPeerId: string,
   expectedEdPubkeyHex: string | null
 ): AuditEvent | null {
   if (!isAuditEvent(data)) return null
@@ -141,8 +139,5 @@ export function verifyIncomingAuditEvent(
     detail: data.detail,
   })
   if (!verifyMessage(edPub, signed, sig)) return null
-  // Suppress unused-arg lint while keeping `senderPeerId` in the signature
-  // for callers who pass it as documentation that the binding was checked.
-  void senderPeerId
   return data
 }

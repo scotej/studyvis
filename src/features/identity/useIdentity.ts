@@ -1,115 +1,28 @@
-import { useCallback, useEffect, useState } from 'react'
-
 import {
-  bytesToHex,
-  generateIdentity,
-  mnemonicFingerprint,
-  type Identity,
-  type Mnemonic,
-} from '@/lib/crypto/identity'
-import {
-  identityExists,
-  loadIdentityRecord,
-  saveIdentityRecord,
-  saveKeys,
-  signWithKeyring,
-  IDENTITY_VERSION,
-  type IdentityRecord,
-} from '@/lib/db/identity'
+  useIdentityStore,
+  type CreatedIdentity,
+  type IdentityActions,
+  type IdentityStatus,
+} from '@/stores/identityStore'
+import { type IdentityRecord } from '@/lib/db/identity'
 
-export type IdentityStatus = 'loading' | 'absent' | 'ready'
-
-export type CreatedIdentity = {
-  mnemonic: Mnemonic
-  record: IdentityRecord
-  commit: () => Promise<void>
-}
+export type { CreatedIdentity, IdentityStatus }
 
 export type UseIdentityResult = {
   identity: IdentityRecord | null
   status: IdentityStatus
-  actions: {
-    create: () => CreatedIdentity
-    signWithKeyring: (message: Uint8Array) => Promise<Uint8Array>
-    refresh: () => Promise<void>
-    setDisplayName: (name: string) => Promise<void>
-  }
+  actions: IdentityActions
 }
 
-function recordFromIdentity(id: Identity, displayName: string): IdentityRecord {
-  return {
-    version: IDENTITY_VERSION,
-    ed_pubkey_hex: bytesToHex(id.edPub),
-    x_pubkey_hex: bytesToHex(id.xPub),
-    display_name: displayName,
-    created_at: Date.now(),
-    mnemonic_fingerprint: mnemonicFingerprint(id.mnemonic),
-  }
-}
-
+// Thin selector over the singleton identityStore. Multiple components used to
+// instantiate their own copies of this hook (Home + Onboarding), each holding
+// independent React state — after IdentitySetupGate.commit() the outer copy
+// stayed stale. The store is the single source of truth; the actions object
+// is constructed once and is reference-stable, so consumers can safely
+// destructure it without churning effect dep arrays.
 export function useIdentity(): UseIdentityResult {
-  const [identity, setIdentity] = useState<IdentityRecord | null>(null)
-  const [status, setStatus] = useState<IdentityStatus>('loading')
-
-  const refresh = useCallback(async () => {
-    try {
-      const exists = await identityExists()
-      if (!exists) {
-        setIdentity(null)
-        setStatus('absent')
-        return
-      }
-      const record = await loadIdentityRecord()
-      setIdentity(record)
-      setStatus(record ? 'ready' : 'absent')
-    } catch (err) {
-      // Surface to the user via console; fall back to absent so they aren't
-      // stuck on a blank loading screen. A V1-P3 corrupted-file recovery path
-      // is owed — see memory carryovers.
-      console.error('useIdentity.refresh failed:', err)
-      setIdentity(null)
-      setStatus('absent')
-    }
-  }, [])
-
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- one-shot mount load: refresh awaits the Tauri commands before any setState fires
-    void refresh()
-  }, [refresh])
-
-  const create = useCallback((): CreatedIdentity => {
-    const id = generateIdentity()
-    const record = recordFromIdentity(id, '')
-    const commit = async () => {
-      await saveKeys(bytesToHex(id.edPriv), bytesToHex(id.xPriv))
-      await saveIdentityRecord(record)
-      setIdentity(record)
-      setStatus('ready')
-    }
-    return { mnemonic: id.mnemonic, record, commit }
-  }, [])
-
-  const setDisplayName = useCallback(
-    async (name: string) => {
-      const trimmed = name.trim()
-      if (!trimmed) throw new Error('display name must not be empty')
-      const current = identity
-      if (!current) throw new Error('no identity loaded')
-      const next: IdentityRecord = { ...current, display_name: trimmed }
-      await saveIdentityRecord(next)
-      setIdentity(next)
-    },
-    [identity]
-  )
-
-  return {
-    identity,
-    status,
-    actions: {
-      create,
-      signWithKeyring,
-      refresh,
-      setDisplayName,
-    },
-  }
+  const identity = useIdentityStore((s) => s.identity)
+  const status = useIdentityStore((s) => s.status)
+  const actions = useIdentityStore((s) => s.actions)
+  return { identity, status, actions }
 }

@@ -1,6 +1,4 @@
-use crypto_box::{
-    aead::Aead, PublicKey as BoxPublicKey, SalsaBox, SecretKey as BoxSecretKey,
-};
+use crypto_box::{aead::Aead, PublicKey as BoxPublicKey, SalsaBox, SecretKey as BoxSecretKey};
 
 pub const X_KEY_LEN: usize = 32;
 pub const NONCE_LEN: usize = 24;

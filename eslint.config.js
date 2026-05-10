@@ -17,6 +17,36 @@ const radixImportRule = {
   ],
 }
 
+// Primitives in src/components/ui/ may not import upward into application
+// layers (DESIGN-SYSTEM.md §7 rule 2). The patterns use gitignore-style
+// negation because ESLint's group glob is case-insensitive and a PascalCase
+// vs kebab-case discriminator wouldn't work. We restrict the whole
+// components/ tree and re-allow components/ui/.
+const uiLayerImportRule = {
+  patterns: [
+    {
+      group: ['@/components/**', '!@/components/ui', '!@/components/ui/**'],
+      message:
+        'src/components/ui/ may not import composed app components. Compose at a higher layer.',
+    },
+    {
+      group: ['@/features/*', '@/features/**'],
+      message:
+        'src/components/ui/ may not import from features/. Pass behavior down via props or hooks.',
+    },
+    {
+      group: ['@/stores/*', '@/stores/**'],
+      message:
+        'src/components/ui/ may not import from stores/. Primitives stay state-agnostic.',
+    },
+    {
+      group: ['@/routes/*', '@/routes/**'],
+      message:
+        'src/components/ui/ may not import from routes/. Routes are top-level composition.',
+    },
+  ],
+}
+
 const inlineHexStyleRule = {
   selector:
     "JSXAttribute[name.name='style'] Literal[value=/#[0-9a-fA-F]{3,8}\\b/]",
@@ -51,7 +81,7 @@ export default defineConfig([
   {
     files: ['src/components/ui/**/*.{ts,tsx}'],
     rules: {
-      'no-restricted-imports': 'off',
+      'no-restricted-imports': ['error', uiLayerImportRule],
       'react-refresh/only-export-components': 'off',
     },
   },

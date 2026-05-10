@@ -12,8 +12,7 @@ export type SettingsRowProps = {
   stack?: boolean
   className?: string
   // Renders the row at low contrast and disables pointer events on the
-  // control slot. Used for "Show backup mnemonic" (V3 deferral) and for the
-  // "Coming soon" rebind shortcut row.
+  // control slot. Used for V3-deferred rows (e.g. "Show backup mnemonic").
   disabled?: boolean
 }
 

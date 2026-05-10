@@ -17,9 +17,7 @@ export const Triggers: Story = {
   render: () => (
     <div className="flex flex-col gap-3">
       <div className="flex flex-wrap gap-2">
-        <Button onClick={() => toast('Bo joined the session.')}>
-          Default
-        </Button>
+        <Button onClick={() => toast('Bo joined the session.')}>Default</Button>
         <Button
           variant="outline"
           onClick={() => toast.success('Saved to disk.')}

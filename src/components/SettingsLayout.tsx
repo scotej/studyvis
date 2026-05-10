@@ -2,6 +2,7 @@ import { type ReactNode } from 'react'
 import { ChevronLeftIcon } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
+import { tokens } from '@/design/tokens'
 import { cn } from '@/lib/utils'
 
 export type SettingsCategoryDescriptor<TId extends string = string> = {
@@ -39,7 +40,7 @@ export function SettingsLayout<TId extends string = string>({
             variant="ghost"
             size="sm"
             onClick={onClose}
-            aria-label="Back to friends"
+            aria-label="Close settings"
           >
             <ChevronLeftIcon /> Back
           </Button>
@@ -49,7 +50,8 @@ export function SettingsLayout<TId extends string = string>({
       <div className="flex flex-1">
         <nav
           aria-label="Settings categories"
-          className="w-[280px] shrink-0 border-r border-border-subtle bg-bg-surface px-3 py-6"
+          className="shrink-0 border-r border-border-subtle bg-bg-surface px-3 py-6"
+          style={{ width: tokens.sizes.sidebarWidth }}
         >
           <ul className="flex flex-col gap-1">
             {categories.map((category) => {
@@ -61,7 +63,7 @@ export function SettingsLayout<TId extends string = string>({
                     onClick={() => onCategorySelect(category.id)}
                     aria-current={active ? 'page' : undefined}
                     className={cn(
-                      'flex w-full items-center justify-start rounded-md px-3 py-2 text-left text-sm transition-colors outline-none focus-visible:ring-[3px] focus-visible:ring-accent-ring',
+                      'flex w-full items-center justify-start rounded-md px-3 py-2 text-left text-sm transition-colors outline-none focus-visible:ring-3 focus-visible:ring-accent-ring',
                       active
                         ? 'bg-bg-raised font-medium text-text-primary'
                         : 'text-text-secondary hover:bg-bg-raised hover:text-text-primary'

@@ -45,9 +45,7 @@ describe('useFriendsStore.add is the only sink, mapping to V1-P4 schema', () => 
       .getState()
       .add(friend.edPubkey, friend.xPubkey, friend.name, ts)
 
-    const addCall = invokeMock.mock.calls.find(
-      ([cmd]) => cmd === 'friends_add'
-    )
+    const addCall = invokeMock.mock.calls.find(([cmd]) => cmd === 'friends_add')
     expect(addCall).toBeDefined()
     expect(addCall?.[1]).toEqual({
       edPubkey: friend.edPubkey,

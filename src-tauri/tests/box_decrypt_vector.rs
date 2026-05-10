@@ -5,10 +5,8 @@
 
 use studyvis_lib::crypto::nacl_box_decrypt;
 
-const ALICE_X_PUB_HEX: &str =
-    "8520f0098930a754748b7ddcb43ef75a0dbf3a0d26381af4eba4a98eaa9b4e6a";
-const BOB_X_PRIV_HEX: &str =
-    "5dab087e624a8a4b79e17f8b83800ee66f3bb1292618b6fd1c2f8b27ff88e0eb";
+const ALICE_X_PUB_HEX: &str = "8520f0098930a754748b7ddcb43ef75a0dbf3a0d26381af4eba4a98eaa9b4e6a";
+const BOB_X_PRIV_HEX: &str = "5dab087e624a8a4b79e17f8b83800ee66f3bb1292618b6fd1c2f8b27ff88e0eb";
 const NONCE_HEX: &str = "69696ee955b62b73cd62bda875fc73d68219e0036b7a0b37";
 const CIPHERTEXT_HEX: &str =
     "7e5c50f10331000e8b4f7019d8eb46f443ea113e0d9f89d520eb2ddab0631f986c7e88f9355d";
@@ -64,9 +62,7 @@ fn rejects_tampered_nonce() {
 fn rejects_wrong_sender_pub() {
     // Use bob's own public key (instead of alice's) as the "sender" — a
     // stranger who substitutes a different sender key should fail to decrypt.
-    let bob_pub = decode32(
-        "de9edb7d7b7dc1b4d35b61c2ece435373f8343c85b78674dadfc7e146f882b4f",
-    );
+    let bob_pub = decode32("de9edb7d7b7dc1b4d35b61c2ece435373f8343c85b78674dadfc7e146f882b4f");
     let bob_priv = decode32(BOB_X_PRIV_HEX);
     let nonce = decode24(NONCE_HEX);
     let ciphertext = hex::decode(CIPHERTEXT_HEX).expect("ct hex");

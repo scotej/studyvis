@@ -21,9 +21,7 @@ export function Logo({
   const px = SIZES[size]
   const radius = Math.round(px * 0.25)
   const circleR = Math.round(px * 0.3)
-  const squareFill = monochrome
-    ? 'currentColor'
-    : 'var(--color-accent-default)'
+  const squareFill = monochrome ? 'currentColor' : 'var(--color-accent-default)'
   const circleFill = monochrome ? 'transparent' : 'var(--color-status-focused)'
   const circleStroke = monochrome ? 'currentColor' : 'transparent'
 

@@ -51,9 +51,7 @@ export {
   hostPairing,
   joinPairing,
   PAIR_WORD_COUNT,
-  PairAbortedError,
   PairTimeoutError,
-  PairVerificationError,
   type PairedFriend,
   type PairingContext,
 } from './pair'

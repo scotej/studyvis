@@ -117,9 +117,11 @@ export async function sendInviteEnvelope(
   try {
     await new Promise<void>((resolve, reject) => {
       let settled = false
+      let unsubscribePeerJoin: (() => void) | null = null
       const settle = (fn: () => void) => {
         if (settled) return
         settled = true
+        unsubscribePeerJoin?.()
         clearTimeout(timer)
         fn()
       }
@@ -129,7 +131,7 @@ export async function sendInviteEnvelope(
       // Once at least one peer is on the topic, fire the envelope to all
       // listeners and resolve. The timeout above guarantees the promise
       // settles even if no peer ever joins.
-      room.onPeerJoin(() => {
+      unsubscribePeerJoin = room.onPeerJoin(() => {
         if (settled) return
         action
           .send(envelope)

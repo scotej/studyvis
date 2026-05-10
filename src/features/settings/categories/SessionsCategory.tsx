@@ -36,8 +36,8 @@ export function SessionsCategory() {
 
   return (
     <SettingsSection heading="Sessions">
-      {status === 'loading' ? (
-        <SettingsRow label="Loading session history…" />
+      {status === 'loading' || status === 'idle' ? (
+        <SessionRowSkeleton />
       ) : null}
       {status === 'error' ? (
         <SettingsRow
@@ -61,7 +61,7 @@ export function SessionsCategory() {
             <button
               key={session.id}
               type="button"
-              className="text-left transition-colors outline-none hover:bg-bg-raised focus-visible:bg-bg-raised focus-visible:ring-[3px] focus-visible:ring-accent-ring"
+              className="text-left transition-colors outline-none hover:bg-bg-raised focus-visible:bg-bg-raised focus-visible:ring-3 focus-visible:ring-accent-ring"
               onClick={() => setSelected(session)}
             >
               <SettingsRow
@@ -140,6 +140,19 @@ function formatSessionMeta(session: SessionRecord): string {
   const peerLabel =
     peers === 0 ? 'solo' : peers === 1 ? '1 friend' : `${peers} friends`
   return `${minutes} min · ${peerLabel}`
+}
+
+function SessionRowSkeleton() {
+  return (
+    <div
+      role="status"
+      aria-label="Loading sessions"
+      className="flex animate-pulse flex-col gap-2 py-3"
+    >
+      <div className="h-4 w-1/3 rounded-md bg-bg-raised" />
+      <div className="h-3 w-1/4 rounded-md bg-bg-raised" />
+    </div>
+  )
 }
 
 function decodePeers(raw: string | null): string[] {

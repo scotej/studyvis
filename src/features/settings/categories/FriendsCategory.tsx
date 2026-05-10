@@ -27,7 +27,7 @@ export function FriendsCategory() {
     try {
       await remove(pendingRemoval.ed_pubkey_hex)
       toast.success(
-        `Removed ${pendingRemoval.display_name?.trim() || 'friend'}.`
+        `Removed ${pendingRemoval.display_name?.trim() || 'your friend'}.`
       )
       setPendingRemoval(null)
     } catch (err) {
@@ -59,7 +59,7 @@ export function FriendsCategory() {
                   variant="ghost"
                   size="sm"
                   onClick={() => setPendingRemoval(friend)}
-                  aria-label={`Remove ${friend.display_name?.trim() || 'friend'}`}
+                  aria-label={`Remove ${friend.display_name?.trim() || 'your friend'}`}
                 >
                   <Trash2Icon /> Remove
                 </Button>
@@ -100,7 +100,7 @@ export function FriendsCategory() {
               disabled={removing}
               aria-disabled={removing}
             >
-              {removing ? 'Removing…' : 'Remove'}
+              Remove
             </Button>
           </DialogFooter>
         </DialogContent>

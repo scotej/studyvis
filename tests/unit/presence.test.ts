@@ -23,13 +23,7 @@ vi.mock('@/lib/trystero', () => {
     return bus
   }
 
-  function joinTopic({
-    topic,
-    password,
-  }: {
-    topic: string
-    password: string
-  }) {
+  function joinTopic({ topic, password }: { topic: string; password: string }) {
     const key = `${topic}|${password}`
     const bus = getBus(key)
     const peerId = `peer-${++nextPeer}`
@@ -60,9 +54,17 @@ vi.mock('@/lib/trystero', () => {
       },
       onPeerJoin: (fn: Listener) => {
         room.onJoin.push(fn)
+        return () => {
+          const i = room.onJoin.indexOf(fn)
+          if (i >= 0) room.onJoin.splice(i, 1)
+        }
       },
       onPeerLeave: (fn: Listener) => {
         room.onLeave.push(fn)
+        return () => {
+          const i = room.onLeave.indexOf(fn)
+          if (i >= 0) room.onLeave.splice(i, 1)
+        }
       },
       leave: async () => {
         room.left = true

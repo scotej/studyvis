@@ -274,8 +274,20 @@ export function startPomodoroController(
       state.broadcasterEdPubkey
     )
     if (next === null) {
-      // Everyone but the (gone) broadcaster has left. Local-only timer will
-      // continue ticking visually via endsAt; nothing to broadcast.
+      // Broadcaster is gone and there is no successor — everyone else has
+      // left too. Local UI was still showing the pre-silence phase; reset
+      // it locally so the timer doesn't appear frozen forever. No broadcast
+      // (no one to receive) and no audit hook (we are not the broadcaster
+      // emitting an end event).
+      stopBroadcasting()
+      state = {
+        phase: 'idle',
+        endsAt: null,
+        preset: null,
+        broadcasterEdPubkey: null,
+        iAmBroadcaster: false,
+      }
+      pushSnapshot()
       return
     }
     if (next === args.myEdPubkeyHex) {

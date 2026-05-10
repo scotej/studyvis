@@ -9,9 +9,6 @@ import { generateIdentity, signMessage } from '@/lib/crypto/identity'
 import { bytesToHex } from '@/lib/encoding'
 import { buildAuditEvent, verifyIncomingAuditEvent } from '@/stores/auditStore'
 
-const PEER_A = 'peer-aaaa'
-const PEER_B = 'peer-bbbb'
-
 function buildEvent(
   edPriv: Uint8Array,
   edPub: Uint8Array,
@@ -42,11 +39,7 @@ describe('buildAuditEvent + verifyIncomingAuditEvent round-trip', () => {
     })
     expect(event.kind).toBe('joined')
     expect(event.ts).toBe(1_700_000_002_000)
-    const verified = verifyIncomingAuditEvent(
-      event,
-      PEER_A,
-      bytesToHex(me.edPub)
-    )
+    const verified = verifyIncomingAuditEvent(event, bytesToHex(me.edPub))
     expect(verified).not.toBeNull()
     expect(verified?.sig).toBe(event.sig)
   })
@@ -56,7 +49,7 @@ describe('verifyIncomingAuditEvent rejects malformed / unsigned / tampered', () 
   test('rejects when expected ed_pubkey is null (no signed-hello binding yet)', () => {
     const me = generateIdentity()
     const event = buildEvent(me.edPriv, me.edPub)
-    expect(verifyIncomingAuditEvent(event, PEER_A, null)).toBeNull()
+    expect(verifyIncomingAuditEvent(event, null)).toBeNull()
   })
 
   test('rejects when the declared `who` does not match the binding', () => {
@@ -67,9 +60,7 @@ describe('verifyIncomingAuditEvent rejects malformed / unsigned / tampered', () 
     const a = generateIdentity()
     const b = generateIdentity()
     const event = buildEvent(a.edPriv, a.edPub, { who: bytesToHex(b.edPub) })
-    expect(
-      verifyIncomingAuditEvent(event, PEER_A, bytesToHex(a.edPub))
-    ).toBeNull()
+    expect(verifyIncomingAuditEvent(event, bytesToHex(a.edPub))).toBeNull()
   })
 
   test('rejects a tampered detail field', () => {
@@ -79,9 +70,7 @@ describe('verifyIncomingAuditEvent rejects malformed / unsigned / tampered', () 
       ...event,
       detail: { tag: 'tampered' },
     }
-    expect(
-      verifyIncomingAuditEvent(tampered, PEER_A, bytesToHex(me.edPub))
-    ).toBeNull()
+    expect(verifyIncomingAuditEvent(tampered, bytesToHex(me.edPub))).toBeNull()
   })
 
   test('rejects a tampered signature', () => {
@@ -92,27 +81,19 @@ describe('verifyIncomingAuditEvent rejects malformed / unsigned / tampered', () 
       // Flip one nibble of the sig.
       sig: event.sig.slice(0, -1) + (event.sig.endsWith('0') ? '1' : '0'),
     }
-    expect(
-      verifyIncomingAuditEvent(tampered, PEER_A, bytesToHex(me.edPub))
-    ).toBeNull()
+    expect(verifyIncomingAuditEvent(tampered, bytesToHex(me.edPub))).toBeNull()
   })
 
   test('rejects when the wrong identity is used to verify', () => {
     const a = generateIdentity()
     const b = generateIdentity()
     const event = buildEvent(a.edPriv, a.edPub)
-    expect(
-      verifyIncomingAuditEvent(event, PEER_A, bytesToHex(b.edPub))
-    ).toBeNull()
+    expect(verifyIncomingAuditEvent(event, bytesToHex(b.edPub))).toBeNull()
   })
 
   test('rejects an entirely unsigned-shaped payload', () => {
     expect(
-      verifyIncomingAuditEvent(
-        { kind: 'joined', who: 'aa' },
-        PEER_A,
-        'aa'.repeat(32)
-      )
+      verifyIncomingAuditEvent({ kind: 'joined', who: 'aa' }, 'aa'.repeat(32))
     ).toBeNull()
   })
 
@@ -130,12 +111,10 @@ describe('verifyIncomingAuditEvent rejects malformed / unsigned / tampered', () 
     }
     const sigBytes = signMessage(me.edPriv, serializeAuditForSig(core as never))
     const event = { ...core, sig: bytesToHex(sigBytes) }
-    expect(
-      verifyIncomingAuditEvent(event, PEER_A, bytesToHex(me.edPub))
-    ).toBeNull()
+    expect(verifyIncomingAuditEvent(event, bytesToHex(me.edPub))).toBeNull()
   })
 
-  test('rejects a peer claiming someone else’s identity (impersonation)', () => {
+  test("rejects a peer claiming someone else's identity (impersonation)", () => {
     // Peer B generates a signature with their own key but claims to be A.
     // Even with the right sig over their canonical bytes, the binding
     // (peerId B → ed_pubkey B) gates the verify call. Receiver looks up
@@ -143,8 +122,6 @@ describe('verifyIncomingAuditEvent rejects malformed / unsigned / tampered', () 
     const a = generateIdentity()
     const b = generateIdentity()
     const event = buildEvent(b.edPriv, b.edPub, { who: bytesToHex(a.edPub) })
-    expect(
-      verifyIncomingAuditEvent(event, PEER_B, bytesToHex(b.edPub))
-    ).toBeNull()
+    expect(verifyIncomingAuditEvent(event, bytesToHex(b.edPub))).toBeNull()
   })
 })

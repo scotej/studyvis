@@ -131,7 +131,9 @@ function PresenceDot({ online }: { online: boolean }) {
       aria-hidden="true"
       className={cn(
         'inline-flex size-2.5 shrink-0 rounded-full',
-        online ? 'bg-status-online' : 'bg-status-offline'
+        online
+          ? 'bg-status-online'
+          : 'border-2 border-status-offline bg-transparent'
       )}
     />
   )

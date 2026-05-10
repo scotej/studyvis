@@ -111,7 +111,7 @@ async function handleValidInvite(invite: ValidInvite) {
       const result = await requestPermission()
       granted = result === 'granted'
     }
-    if (granted) sendNotification({ title: 'StudyVis', body: message })
+    if (granted) await sendNotification({ title: 'StudyVis', body: message })
   } catch {
     // Notification plugin is best-effort; the in-app toast is the
     // user-visible source of truth.

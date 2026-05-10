@@ -162,7 +162,3 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   },
   reset: () => set({ ...INITIAL }),
 }))
-
-export function selectPeerCount(s: SessionState): number {
-  return Object.keys(s.peers).length
-}

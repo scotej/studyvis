@@ -77,16 +77,24 @@ export function Home() {
     return <Onboarding onComplete={onboarding.complete} />
   }
 
+  // InboxBoot is rendered exactly once, outside the view selector, so React
+  // doesn't unmount + remount it (and tear down the always-on inbox + presence
+  // subscriptions) on every settings/session toggle. The identity-readiness
+  // gate stays — only render once `useIdentity` has resolved to a record.
+  const inbox =
+    identity && status === 'ready' ? (
+      <InboxBoot
+        key="inbox-boot"
+        myEdPubkeyHex={identity.ed_pubkey_hex}
+        onPresenceChange={setPresence}
+      />
+    ) : null
+
   if (sessionStatus === 'active') {
     return (
       <>
         <SessionView />
-        {identity ? (
-          <InboxBoot
-            myEdPubkeyHex={identity.ed_pubkey_hex}
-            onPresenceChange={setPresence}
-          />
-        ) : null}
+        {inbox}
       </>
     )
   }
@@ -95,47 +103,39 @@ export function Home() {
     return (
       <>
         <Settings onClose={() => setView('main')} />
-        {identity ? (
-          <InboxBoot
-            myEdPubkeyHex={identity.ed_pubkey_hex}
-            onPresenceChange={setPresence}
-          />
-        ) : null}
+        {inbox}
       </>
     )
   }
 
   return (
-    <main className="min-h-screen bg-bg-base text-text-primary">
-      <div className="mx-auto flex w-full max-w-3xl items-center justify-end gap-2 px-6 pt-6">
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => setView('settings')}
-          aria-label="Open settings"
-        >
-          <Settings2Icon /> Settings
-        </Button>
-      </div>
-      <FriendsList
-        presence={presence}
-        onAddFriend={() => setAddOpen(true)}
-        onInvite={(friend) => void handleInvite(friend)}
-      />
-      <AddFriendDialog open={addOpen} onOpenChange={setAddOpen} />
-      {identity ? (
-        <InboxBoot
-          myEdPubkeyHex={identity.ed_pubkey_hex}
-          onPresenceChange={setPresence}
-        />
-      ) : null}
-      {isDev ? (
-        <div className="px-6 pb-8 text-center">
-          <Link to="/style" className="text-sm text-text-secondary underline">
-            /style
-          </Link>
+    <>
+      <main className="min-h-screen bg-bg-base text-text-primary">
+        <div className="mx-auto flex w-full max-w-3xl items-center justify-end gap-2 px-6 pt-6">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setView('settings')}
+            aria-label="Open settings"
+          >
+            <Settings2Icon /> Settings
+          </Button>
         </div>
-      ) : null}
-    </main>
+        <FriendsList
+          presence={presence}
+          onAddFriend={() => setAddOpen(true)}
+          onInvite={(friend) => void handleInvite(friend)}
+        />
+        <AddFriendDialog open={addOpen} onOpenChange={setAddOpen} />
+        {isDev ? (
+          <div className="px-6 pb-8 text-center">
+            <Link to="/style" className="text-sm text-text-secondary underline">
+              /style
+            </Link>
+          </div>
+        ) : null}
+      </main>
+      {inbox}
+    </>
   )
 }

@@ -1,15 +1,21 @@
 import { cn } from '@/lib/utils'
 
-export type FocusState = 'focused' | 'warning' | 'alerted' | 'offline'
+export type V1FocusState = 'online' | 'on_break' | 'offline'
+export type V2FocusState = 'focused' | 'warning' | 'alerted' | 'offline'
+export type FocusState = V1FocusState | V2FocusState
 
 const STATE_COLORS: Record<FocusState, string> = {
+  online: 'bg-status-online',
+  on_break: 'bg-status-warning',
   focused: 'bg-status-focused',
   warning: 'bg-status-warning',
   alerted: 'bg-status-alerted',
-  offline: 'bg-status-offline',
+  offline: 'bg-transparent border-2 border-status-offline',
 }
 
 const STATE_LABELS: Record<FocusState, string> = {
+  online: 'Online',
+  on_break: 'On break',
   focused: 'On task',
   warning: 'Self-warning',
   alerted: 'Off task',

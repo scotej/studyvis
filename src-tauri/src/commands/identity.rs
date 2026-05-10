@@ -66,10 +66,7 @@ fn load_stored() -> Result<StoredKeys, String> {
 }
 
 #[tauri::command]
-pub async fn identity_save_keys(
-    ed_priv_hex: String,
-    x_priv_hex: String,
-) -> Result<(), String> {
+pub async fn identity_save_keys(ed_priv_hex: String, x_priv_hex: String) -> Result<(), String> {
     validate_priv_hex("ed_priv_hex", &ed_priv_hex)?;
     validate_priv_hex("x_priv_hex", &x_priv_hex)?;
     let payload = serde_json::to_string(&StoredKeys {
@@ -77,7 +74,9 @@ pub async fn identity_save_keys(
         x_priv_hex,
     })
     .map_err(|e| e.to_string())?;
-    keys_entry()?.set_password(&payload).map_err(|e| e.to_string())?;
+    keys_entry()?
+        .set_password(&payload)
+        .map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -88,10 +87,7 @@ pub async fn identity_exists(app: AppHandle) -> Result<bool, String> {
 }
 
 #[tauri::command]
-pub async fn identity_save_record(
-    app: AppHandle,
-    record: IdentityRecord,
-) -> Result<(), String> {
+pub async fn identity_save_record(app: AppHandle, record: IdentityRecord) -> Result<(), String> {
     let path = identity_path(&app)?;
     let json = serde_json::to_vec_pretty(&record).map_err(|e| e.to_string())?;
     fs::write(&path, json).map_err(|e| format!("write {}: {e}", path.display()))?;
@@ -99,9 +95,7 @@ pub async fn identity_save_record(
 }
 
 #[tauri::command]
-pub async fn identity_load_record(
-    app: AppHandle,
-) -> Result<Option<IdentityRecord>, String> {
+pub async fn identity_load_record(app: AppHandle) -> Result<Option<IdentityRecord>, String> {
     let path = identity_path(&app)?;
     if !path.exists() {
         return Ok(None);

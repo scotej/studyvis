@@ -157,7 +157,7 @@ export function startHelloProtocol(
   // For peers who join after us, send a targeted hello so they get the
   // binding immediately rather than after our next broadcast (there is none —
   // hello is one-shot per peer).
-  args.room.onPeerJoin((peerId) => {
+  const offJoin = args.room.onPeerJoin((peerId) => {
     void (async () => {
       const payload = await payloadPromise
       try {
@@ -175,15 +175,15 @@ export function startHelloProtocol(
     args.onPeerHello(peerId, hello)
   })
 
-  args.room.onPeerLeave((peerId) => {
+  const offLeave = args.room.onPeerLeave((peerId) => {
     args.onPeerLeave(peerId)
   })
 
   return {
     ourHelloSent,
     teardown: () => {
-      // No timers / no resources held outside the trystero room; the room's
-      // own teardown (lifecycle.buildLeaveHandler) closes the channel.
+      offJoin()
+      offLeave()
     },
   }
 }

@@ -1,6 +1,13 @@
 #!/usr/bin/env node
 // Generates StudyVis app + tray icons from the in-code Logo design.
 // One-shot codegen: run after touching the Logo geometry, commit the PNGs.
+//
+// COLORS — kept in sync with src/design/tokens.ts manually.
+// .mjs cannot import the .ts token map at runtime without a build step, so
+// the two literals below mirror these tokens by name. If you change the
+// tokens, update both here and re-run this script:
+//   ACCENT  ← color.accent.default  (warm amber)
+//   SAGE    ← color.status.focused  (sage green; also color.status.online)
 
 import { mkdir, writeFile } from 'node:fs/promises'
 import path from 'node:path'
@@ -10,7 +17,9 @@ const ROOT = path.resolve(import.meta.dirname, '..')
 const ICONS_DIR = path.join(ROOT, 'src-tauri', 'icons')
 const TRAY_DIR = path.join(ICONS_DIR, 'tray')
 
+// Mirrors color.accent.default in src/design/tokens.ts.
 const ACCENT = '#E8A87C'
+// Mirrors color.status.focused in src/design/tokens.ts.
 const SAGE = '#7FB069'
 
 const APP_SIZES = [32, 64, 128, 256, 512, 1024]
@@ -48,7 +57,10 @@ async function main() {
   const masterSize = 1024
   const masterSvg = appSvg(masterSize)
   const masterPath = path.join(ICONS_DIR, 'icon.png')
-  await writeFile(masterPath, await sharp(Buffer.from(masterSvg)).png().toBuffer())
+  await writeFile(
+    masterPath,
+    await sharp(Buffer.from(masterSvg)).png().toBuffer()
+  )
 
   for (const size of APP_SIZES) {
     const file = size === 256 ? '256x256.png' : `${size}x${size}.png`
@@ -57,7 +69,11 @@ async function main() {
   await render(appSvg(256), path.join(ICONS_DIR, '128x128@2x.png'), 256)
 
   for (const size of TRAY_SIZES) {
-    await render(traySvg(size), path.join(TRAY_DIR, `${size}x${size}.png`), size)
+    await render(
+      traySvg(size),
+      path.join(TRAY_DIR, `${size}x${size}.png`),
+      size
+    )
   }
 
   console.log('Generated app icons + tray icons under src-tauri/icons/')

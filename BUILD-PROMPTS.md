@@ -1293,7 +1293,7 @@ CARRY-FORWARD DEBTS (from prior phases — incorporate into this work):
 
 YOUR TASK: V1-P12 — Friends-only unsigned installers, manual update model.
 
-Scope decision (per user direction, supersedes PLAN.md §3 "signed installers" and ARCHITECTURE.md §2 "tauri-plugin-updater" wording — both canonical docs need a follow-up edit, see Notes):
+Scope decision (per user direction; PLAN.md §5 + ARCHITECTURE.md §2 already reflect the friends-only unsigned/no-updater direction — no canonical-doc follow-up edit is owed by V1-P12 itself):
 
 (Throughout this prompt, "ARCH.md" refers to ARCHITECTURE.md.)
 
@@ -1314,7 +1314,7 @@ Concretely:
    - Best UX for unsigned distribution: no install, no root, just `chmod +x` and run.
    - Skip .deb / .rpm — they require sudo and add no value for a friends-only group.
 4. Updater plugin: leave `tauri-plugin-updater` in `src-tauri/Cargo.toml` (per ARCH.md §2). In `src-tauri/src/lib.rs`, find the existing `#[cfg(not(debug_assertions))] app.handle().plugin(tauri_plugin_updater::Builder::new().build())?;` block (added in V1-P1) and **delete it**, replacing with a comment: `// updater registration deferred to V3 — friends-only V1 ships without auto-update; see V1-P12 scope decision`. With the registration gone, V1 release builds will no longer attempt to wire the plugin at all (currently the cfg-gate keeps it out of dev only, so a release build today would fail with "no updater config" — V1-P12 retires that whole code path).
-5. CI release workflow at `.github/workflows/release.yml`: on push of a tag matching `v*.*.*`, build the three artifacts (or two if Linux deferred), upload to GitHub Releases. Use `softprops/action-gh-release` (or current equivalent — verify via Context7) to attach artifacts. Only secret needed is the auto-provided `GITHUB_TOKEN`.
+5. CI release workflow at `.github/workflows/release.yml`: on push of a tag matching `v*.*.*`, build the artifacts and upload to GitHub Releases. Use `tauri-apps/tauri-action@v0.6.2` — it does build + release upload in one shot for Tauri projects, so a separate `softprops/action-gh-release` step is unnecessary. Only secret needed is the auto-provided `GITHUB_TOKEN`. Matrix: `macos-latest` (universal target with both `aarch64-apple-darwin` + `x86_64-apple-darwin`) and `windows-latest`; Linux deferred per V0/PLAN.md §5. Set `releaseDraft: true` so the user reviews before publishing; `uploadUpdaterJson: false` so no `latest.json` artifact appears.
 6. Write `INSTALL.md` at the repo root explaining how each OS's friends install:
    - macOS: download `.dmg`, drag to Applications, right-click the icon in Applications → Open the first time, click "Open" in the warning dialog.
    - Windows: download `.msi`, double-click; SmartScreen → "More info" → "Run anyway".
@@ -1339,7 +1339,7 @@ Acceptance criteria — user-verifiable:
 - Tag push triggers the release workflow; resulting GitHub Release page shows artifacts.
 
 Notes:
-- This prompt diverges from PLAN.md §3 ("ships with signed installers") and ARCHITECTURE.md §2 (which lists `tauri-plugin-updater` as wired). Both canonical docs need a follow-up edit to match. In your end-of-task summary, surface this as an "Inherited debt" so the user can update the docs in a separate PR.
+- PLAN.md §5 + ARCHITECTURE.md §2 already document the friends-only unsigned direction and the dormant `tauri-plugin-updater` (registration retired in `lib.rs`, dependency retained in `Cargo.toml`); no canonical-doc follow-up edit is owed by V1-P12.
 - License: PLAN.md §6 says no license yet (all rights reserved). Don't add a LICENSE file with an OSS license.
 - The macOS codesign carryover from V0 (broken default codesign) is now moot — we're not signing. After this prompt, the codesign carryover should be removed from MEMORY.md/v0_findings.md (its debt has been retired by scope decision, not by being paid).
 - The V1-P12 updater carryover in `project_v1_p12_updater_config.md` is also moot for V1; rewrite the memory entry to "deferred to V3 if/when signing creds become available" rather than deleting it.
