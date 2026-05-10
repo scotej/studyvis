@@ -74,6 +74,19 @@ export async function swapAudioInput(
     stopAllTracks(fresh)
     throw new Error('selected audio device produced no audio tracks')
   }
+  // Stop any tracks on `fresh` we don't intend to keep — extra audio tracks
+  // from a browser quirk, or a stray video track if constraints widen
+  // later. Without this they'd hold the device handle open after newTrack
+  // moves to the local stream and never be referenced again.
+  for (const t of fresh.getTracks()) {
+    if (t !== newTrack) {
+      try {
+        t.stop()
+      } catch {
+        // ignore
+      }
+    }
+  }
   // Inherit the session's current mute-state: muted-by-default with PTT
   // toggling enabled. The fresh track starts enabled, so we mirror.
   newTrack.enabled = pttActive

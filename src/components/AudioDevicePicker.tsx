@@ -80,7 +80,7 @@ export function AudioDevicePicker({
         <Button
           variant="ghost"
           size="sm"
-          disabled={swapping || devices.length === 0}
+          disabled={swapping}
           aria-label={`Microphone — currently ${label}`}
           className="gap-2"
         >
