@@ -8,6 +8,7 @@ import {
   generatePairingCode,
   hostPairing,
   joinPairing,
+  PairTimeoutError,
   type PairedFriend,
   type PairingContext,
 } from './pair'
@@ -16,6 +17,10 @@ import {
   type AddFriendPhase,
   type AddFriendTab,
 } from './AddFriendDialogView'
+
+// 90s gives a comfortable margin over typical Nostr relay rendezvous (~5–15s)
+// while still surfacing a clear failure when the peer never arrives.
+const PAIR_TIMEOUT_MS = 90_000
 
 export type AddFriendDialogProps = {
   open: boolean
@@ -106,15 +111,29 @@ export function AddFriendDialog({ open, onOpenChange }: AddFriendDialogProps) {
     const words = generatePairingCode()
     const ctrl = new AbortController()
     abortRef.current = ctrl
-    setPhase({ kind: 'host-waiting', words })
+    setPhase({ kind: 'host-waiting', words, peerArrived: false })
     try {
-      const friend = await hostPairing(words, ctx, { signal: ctrl.signal })
+      const friend = await hostPairing(words, ctx, {
+        signal: ctrl.signal,
+        timeoutMs: PAIR_TIMEOUT_MS,
+        onPeerJoinedTopic: () => {
+          setPhase((current) =>
+            current.kind === 'host-waiting'
+              ? { ...current, peerArrived: true }
+              : current
+          )
+        },
+      })
       await persistAndFinish(friend)
     } catch (err) {
       if (ctrl.signal.aborted) return
-      const message = err instanceof Error ? err.message : 'Pairing failed.'
-      setPhase({ kind: 'error', message })
-      toast.error('Pairing failed.')
+      if (err instanceof PairTimeoutError) {
+        setPhase({ kind: 'host-timeout', words })
+      } else {
+        const message = err instanceof Error ? err.message : 'Pairing failed.'
+        setPhase({ kind: 'error', message })
+        toast.error('Pairing failed.')
+      }
     } finally {
       if (abortRef.current === ctrl) abortRef.current = null
     }
@@ -126,15 +145,29 @@ export function AddFriendDialog({ open, onOpenChange }: AddFriendDialogProps) {
       if (!ctx) return
       const ctrl = new AbortController()
       abortRef.current = ctrl
-      setPhase({ kind: 'join-progress' })
+      setPhase({ kind: 'join-progress', peerArrived: false })
       try {
-        const friend = await joinPairing(words, ctx, { signal: ctrl.signal })
+        const friend = await joinPairing(words, ctx, {
+          signal: ctrl.signal,
+          timeoutMs: PAIR_TIMEOUT_MS,
+          onPeerJoinedTopic: () => {
+            setPhase((current) =>
+              current.kind === 'join-progress'
+                ? { ...current, peerArrived: true }
+                : current
+            )
+          },
+        })
         await persistAndFinish(friend)
       } catch (err) {
         if (ctrl.signal.aborted) return
-        const message = err instanceof Error ? err.message : 'Pairing failed.'
-        setPhase({ kind: 'error', message })
-        toast.error('Pairing failed.')
+        if (err instanceof PairTimeoutError) {
+          setPhase({ kind: 'join-timeout' })
+        } else {
+          const message = err instanceof Error ? err.message : 'Pairing failed.'
+          setPhase({ kind: 'error', message })
+          toast.error('Pairing failed.')
+        }
       } finally {
         if (abortRef.current === ctrl) abortRef.current = null
       }
