@@ -131,23 +131,43 @@ const defaultRuntime: BenchmarkRuntime = {
     throw new Error(`sidecar /health did not return 2xx within ${timeoutMs} ms`)
   },
   runChatCompletion: async (port, body) => {
+    // Generous upper bound: warmup on a CPU-only 7B run is ~60–90 s; subsequent
+    // samples land in 15–30 s. 5 minutes covers warmup + a wide tail. Without
+    // an abort, a hung llama-server (or stalled connection) would block the
+    // benchmark indefinitely and prevent runBenchmark's `finally` from
+    // stopping the sidecar.
+    const REQUEST_TIMEOUT_MS = 5 * 60 * 1000
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
     const start = performance.now()
-    const res = await fetch(`http://127.0.0.1:${port}/v1/chat/completions`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    })
-    if (!res.ok) {
-      const text = await res.text().catch(() => '')
-      throw new Error(
-        `chat/completions returned HTTP ${res.status}${text ? `: ${text}` : ''}`
-      )
+    try {
+      const res = await fetch(`http://127.0.0.1:${port}/v1/chat/completions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      })
+      if (!res.ok) {
+        const text = await res.text().catch(() => '')
+        throw new Error(
+          `chat/completions returned HTTP ${res.status}${text ? `: ${text}` : ''}`
+        )
+      }
+      // Drain the body so the connection is reusable; we don't care about the
+      // text for the benchmark.
+      await res.text()
+      return (performance.now() - start) / 1000
+    } catch (err) {
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        throw new Error(
+          `chat/completions stalled past ${REQUEST_TIMEOUT_MS / 1000}s — sidecar may be hung`,
+          { cause: err }
+        )
+      }
+      throw err
+    } finally {
+      clearTimeout(timer)
     }
-    // Drain the body so the connection is reusable; we don't care about the
-    // text for the benchmark.
-    await res.text()
-    const elapsedMs = performance.now() - start
-    return elapsedMs / 1000
   },
   now: () => Date.now(),
 }

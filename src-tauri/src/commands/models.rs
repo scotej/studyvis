@@ -29,7 +29,13 @@ const TMP_SUFFIX: &str = ".tmp";
 // traffic at ~1/sec while still feeling live in the UI.
 const PROGRESS_EVENT_BYTES: u64 = 1024 * 1024;
 const PROGRESS_EVENT_INTERVAL: Duration = Duration::from_millis(250);
-const HTTP_TIMEOUT: Duration = Duration::from_secs(120);
+// reqwest's `timeout()` is a TOTAL request timeout — applying it to streaming
+// multi-GB GETs would reliably abort downloads on normal connections (5 GB at
+// 10 MB/s ≈ 8 minutes). We use `connect_timeout` for the TCP/TLS handshake
+// only and rely on the per-chunk `AtomicBool` cancel flag + manual streaming
+// loop to bound long-running downloads. HEAD checks reuse the same client and
+// are small enough that the absent total timeout doesn't matter.
+const HTTP_CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
 
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 const KEYRING_SERVICE: &str = "com.studyvis.app";
@@ -144,7 +150,7 @@ pub struct HeadResult {
 
 fn build_client() -> Result<reqwest::Client, String> {
     reqwest::Client::builder()
-        .timeout(HTTP_TIMEOUT)
+        .connect_timeout(HTTP_CONNECT_TIMEOUT)
         .user_agent(concat!(
             "studyvis/",
             env!("CARGO_PKG_VERSION"),
@@ -652,10 +658,25 @@ async fn download_one<R: Runtime>(
     Ok(())
 }
 
+// Streams the file in 64 KiB chunks rather than `fs::read`-ing the whole thing
+// into memory. The fast-path skip checks an existing on-disk artifact against
+// the manifest's expected hash; multi-GB GGUFs would otherwise spike RAM by
+// the file's size on the resume path.
 fn hash_file_blocking(path: &Path) -> Result<String, String> {
-    let bytes = fs::read(path).map_err(|e| format!("read {}: {e}", path.display()))?;
+    use std::io::{BufReader, Read};
+    let file = File::open(path).map_err(|e| format!("open {}: {e}", path.display()))?;
+    let mut reader = BufReader::with_capacity(64 * 1024, file);
     let mut hasher = Sha256::new();
-    hasher.update(&bytes);
+    let mut buf = [0u8; 64 * 1024];
+    loop {
+        let n = reader
+            .read(&mut buf)
+            .map_err(|e| format!("read {}: {e}", path.display()))?;
+        if n == 0 {
+            break;
+        }
+        hasher.update(&buf[..n]);
+    }
     Ok(hex::encode(hasher.finalize()))
 }
 
