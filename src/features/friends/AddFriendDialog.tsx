@@ -15,7 +15,6 @@ import {
   AddFriendDialogView,
   type AddFriendPhase,
   type AddFriendTab,
-  type DisplayNamePhase,
 } from './AddFriendDialogView'
 
 export type AddFriendDialogProps = {
@@ -23,14 +22,16 @@ export type AddFriendDialogProps = {
   onOpenChange: (open: boolean) => void
 }
 
+// V1-P10 invariant: the dialog is only opened with a non-empty display name —
+// onboarding step 4 collects it. We still defensively bail here in case a
+// caller forgets, so we never start a pairing with an empty display_name.
 export function AddFriendDialog({ open, onOpenChange }: AddFriendDialogProps) {
   const { identity, actions: identityActions } = useIdentity()
   const addFriend = useFriendsStore((s) => s.add)
+  const hasDisplayName = Boolean(identity?.display_name?.trim())
 
   const [tab, setTab] = useState<AddFriendTab>('host')
   const [phase, setPhase] = useState<AddFriendPhase>({ kind: 'idle' })
-  const [nameSubmitting, setNameSubmitting] = useState(false)
-  const [nameError, setNameError] = useState<string | null>(null)
 
   const abortRef = useRef<AbortController | null>(null)
   const successCloseRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -55,8 +56,6 @@ export function AddFriendDialog({ open, onOpenChange }: AddFriendDialogProps) {
         }
         setTab('host')
         setPhase({ kind: 'idle' })
-        setNameError(null)
-        setNameSubmitting(false)
       }
       onOpenChange(next)
     },
@@ -143,23 +142,6 @@ export function AddFriendDialog({ open, onOpenChange }: AddFriendDialogProps) {
     [buildCtx, persistAndFinish]
   )
 
-  const handleSetDisplayName = useCallback(
-    async (name: string) => {
-      setNameSubmitting(true)
-      setNameError(null)
-      try {
-        await identityActions.setDisplayName(name)
-      } catch (err) {
-        const message =
-          err instanceof Error ? err.message : 'Could not save name.'
-        setNameError(message)
-      } finally {
-        setNameSubmitting(false)
-      }
-    },
-    [identityActions]
-  )
-
   const handleCopyWords = useCallback(async (words: string[]) => {
     try {
       await navigator.clipboard.writeText(words.join(' '))
@@ -170,10 +152,6 @@ export function AddFriendDialog({ open, onOpenChange }: AddFriendDialogProps) {
     }
   }, [])
 
-  const displayNamePhase: DisplayNamePhase = identity?.display_name
-    ? { kind: 'collected' }
-    : { kind: 'collecting', submitting: nameSubmitting, error: nameError }
-
   return (
     <AddFriendDialogView
       open={open}
@@ -181,8 +159,7 @@ export function AddFriendDialog({ open, onOpenChange }: AddFriendDialogProps) {
       tab={tab}
       onTabChange={setTab}
       phase={phase}
-      displayNamePhase={displayNamePhase}
-      onSetDisplayName={handleSetDisplayName}
+      missingDisplayName={!hasDisplayName}
       onStartHost={() => void startHost()}
       onJoinSubmit={(words) => void startJoin(words)}
       onCancel={cancel}

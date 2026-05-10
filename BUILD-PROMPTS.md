@@ -1203,10 +1203,8 @@ CARRY-FORWARD DEBTS (from prior phases — incorporate into this work):
 - From V1-P8: Add ESC-to-leave during a session, an audio device picker, and "headphones recommended" copy where appropriate. If you want a "session ended" splash before returning to the friends list, reintroduce the dropped `markEnded()` action on `useSessionStore` and stage `reset()` behind a UI tick (V1-P8 dropped it because `markEnded` then immediate `reset` was a wash).
 - From V1-P9: Persist verified audit events to the existing `audit_events` SQLite table (see `src-tauri/src/db/migrations/001_initial.sql`). V1-P9 added `useAuditStore` + `verifyIncomingAuditEvent` + the signed-hello binding, but only renders events in-memory; the DB row never gets written. The Settings panel's "Sessions" category will surface session history, so this is the natural place to add `audit_event_insert` Tauri command + write-on-append in `auditStore`. The post-session report (V2) will then have a populated table to read from.
 - From V1-P9: The `SessionView` ships a dev-only `[break]` `[back]` debug button that emits `paused_break` / `resumed` audit events with no actual mute/state semantics. Replace with real break controls when the UX is designed (the actual break feature is V2; V1 just needs the placeholders to round-trip).
-
----
-
-YOUR TASK: V1-P11 — Complete Settings panel (V1 categories only).
+- From V1-P10: Wire the Advanced → "Replay onboarding" button to `useOnboardingState().reset()` from `@/features/onboarding` (which clears the `onboarding_completed_at` key in `tauri-plugin-store` and flips `Home.tsx` back into the `<Onboarding />` branch). The store + reset path already exists; the Settings panel just needs the button to call it.
+- From V1-P10: OS-notification `onAction` / `registerActionTypes` (the V1-P6 inherited debt) is **not implementable on desktop** — `tauri-plugin-notification` v2's desktop `invoke_handler` only registers `notify` / `request_permission` / `is_permission_granted` (verified at github.com/tauri-apps/plugins-workspace/v2/plugins/notification/src/lib.rs); calling the JS `registerActionTypes` would 500. Treat this as upstream-blocked, not a Settings concern; V1's accept path remains the in-app toast and the Settings panel doesn't need to surface anything here. Revisit when the desktop plugin grows action support.
 
 DESIGN-SYSTEM.md §8.5 wireframe + §4 inventory.
 

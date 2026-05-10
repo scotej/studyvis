@@ -10,7 +10,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
@@ -26,18 +25,13 @@ export type AddFriendPhase =
   | { kind: 'success'; name: string }
   | { kind: 'error'; message: string }
 
-export type DisplayNamePhase =
-  | { kind: 'collected' }
-  | { kind: 'collecting'; submitting: boolean; error: string | null }
-
 export type AddFriendDialogViewProps = {
   open: boolean
   onOpenChange: (open: boolean) => void
   tab: AddFriendTab
   onTabChange: (tab: AddFriendTab) => void
   phase: AddFriendPhase
-  displayNamePhase: DisplayNamePhase
-  onSetDisplayName: (name: string) => Promise<void>
+  missingDisplayName: boolean
   onStartHost: () => void
   onJoinSubmit: (words: string[]) => void
   onCancel: () => void
@@ -58,8 +52,7 @@ export function AddFriendDialogView({
   tab,
   onTabChange,
   phase,
-  displayNamePhase,
-  onSetDisplayName,
+  missingDisplayName,
   onStartHost,
   onJoinSubmit,
   onCancel,
@@ -68,12 +61,8 @@ export function AddFriendDialogView({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-xl">
-        {displayNamePhase.kind === 'collecting' ? (
-          <DisplayNameStep
-            submitting={displayNamePhase.submitting}
-            error={displayNamePhase.error}
-            onSubmit={onSetDisplayName}
-          />
+        {missingDisplayName ? (
+          <MissingDisplayNamePanel onCancel={onCancel} />
         ) : (
           <PairingStep
             tab={tab}
@@ -90,56 +79,22 @@ export function AddFriendDialogView({
   )
 }
 
-function DisplayNameStep({
-  submitting,
-  error,
-  onSubmit,
-}: {
-  submitting: boolean
-  error: string | null
-  onSubmit: (name: string) => Promise<void>
-}) {
-  const [value, setValue] = useState('')
-  const trimmed = value.trim()
-  const disabled = submitting || trimmed.length === 0
+function MissingDisplayNamePanel({ onCancel }: { onCancel: () => void }) {
   return (
-    <form
-      onSubmit={(e) => {
-        e.preventDefault()
-        if (disabled) return
-        void onSubmit(trimmed)
-      }}
-      className="flex flex-col gap-5"
-    >
+    <div className="flex flex-col gap-5">
       <DialogHeader>
-        <DialogTitle>Set your display name</DialogTitle>
+        <DialogTitle>Finish onboarding first</DialogTitle>
         <DialogDescription>
-          This is how friends will see you after pairing.
+          Pick a display name in onboarding before adding friends — it&apos;s
+          how they&apos;ll see you when you pair.
         </DialogDescription>
       </DialogHeader>
-      <div className="flex flex-col gap-2">
-        <Label htmlFor="display-name">Display name</Label>
-        <Input
-          id="display-name"
-          autoFocus
-          maxLength={64}
-          value={value}
-          onChange={(e) => setValue(e.target.value)}
-          aria-invalid={error ? true : undefined}
-          aria-describedby={error ? 'display-name-error' : undefined}
-        />
-        {error ? (
-          <p id="display-name-error" className="text-xs text-status-alerted">
-            {error}
-          </p>
-        ) : null}
-      </div>
       <DialogFooter>
-        <Button type="submit" disabled={disabled} aria-disabled={disabled}>
-          Continue
+        <Button variant="outline" onClick={onCancel}>
+          Got it
         </Button>
       </DialogFooter>
-    </form>
+    </div>
   )
 }
 
