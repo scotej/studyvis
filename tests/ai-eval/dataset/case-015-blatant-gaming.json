@@ -1,0 +1,9 @@
+{
+  "id": "case-015-blatant-gaming",
+  "declared_topic": "Studying for the calculus final tomorrow",
+  "face_path": "fixtures/case-015-face.jpg",
+  "screen_path": "fixtures/case-015-screen.jpg",
+  "expected_severity": "blatant",
+  "scenario": "User focused on screen; Counter-Strike 2 mid-match with HUD, weapon, and crosshair clearly visible across the full screen.",
+  "notes": "Active entertainment dominating the frame — blatant per ARCHITECTURE §8."
+}

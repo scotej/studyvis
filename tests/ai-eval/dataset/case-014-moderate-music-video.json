@@ -1,0 +1,9 @@
+{
+  "id": "case-014-moderate-music-video",
+  "declared_topic": "Preparing for the MCAT physical sciences section",
+  "face_path": "fixtures/case-014-face.jpg",
+  "screen_path": "fixtures/case-014-screen.jpg",
+  "expected_severity": "moderate",
+  "scenario": "User watching screen; YouTube playing a music video for a pop artist — not gameplay, not full-screen entertainment, but unrelated.",
+  "notes": "Boundary case between mild and moderate; placed in moderate because the user is actively consuming entertainment content."
+}

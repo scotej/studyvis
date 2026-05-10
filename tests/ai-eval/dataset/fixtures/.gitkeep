@@ -1,0 +1,13 @@
+# Curate this directory.
+#
+# The 20 starter scenarios in tests/ai-eval/dataset/case-*.json reference
+# fixtures named case-NNN-face.jpg and case-NNN-screen.jpg here. Capture
+# real webcam frames + screenshots that match each scenario's description,
+# resize/encode them to match the production capture format:
+#
+#   face   — 384×384, JPEG quality 0.8   (FACE_FRAME_SIZE,   FACE_FRAME_QUALITY)
+#   screen — ≤ 1024 px wide, JPEG q 0.7 (SCREEN_FRAME_MAX_WIDTH, SCREEN_FRAME_QUALITY)
+#
+# Keep the JPEGs small. Avoid faces of people who haven't consented.
+#
+# See ../../README.md for the broader curation workflow.

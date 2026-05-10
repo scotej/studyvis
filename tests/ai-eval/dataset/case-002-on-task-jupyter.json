@@ -1,0 +1,9 @@
+{
+  "id": "case-002-on-task-jupyter",
+  "declared_topic": "Linear regression analysis on housing prices",
+  "face_path": "fixtures/case-002-face.jpg",
+  "screen_path": "fixtures/case-002-screen.jpg",
+  "expected_severity": "on_task",
+  "scenario": "User looking at screen; JupyterLab notebook shows a pandas dataframe of house prices and a matplotlib scatter plot with regression line.",
+  "notes": "STEM tool with topic-aligned content."
+}

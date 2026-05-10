@@ -1,0 +1,9 @@
+{
+  "id": "case-017-blatant-twitch",
+  "declared_topic": "Reading chapters 5 and 6 of the Operating Systems textbook",
+  "face_path": "fixtures/case-017-face.jpg",
+  "screen_path": "fixtures/case-017-screen.jpg",
+  "expected_severity": "blatant",
+  "scenario": "User watching screen; Twitch.tv full-screen with a streamer playing Valorant, chat scrolling on the right.",
+  "notes": "Active entertainment via livestream."
+}

@@ -1736,6 +1736,9 @@ CARRY-FORWARD DEBTS (from prior phases — incorporate into this work):
 - From V2-P3: the orchestrator must pass the live local camera `MediaStreamTrack` to `captureFace(track)` (the track already running in `SessionView.tsx`); do not call `getUserMedia({ video: true })` a second time — that would acquire a second camera handle.
 - From V2-P3: capture functions surface `CaptureError` with typed `code`s (`screen_capture_denied`, `screen_capture_no_video`, `frame_extraction_failed`, etc.); the loop must map `screen_capture_denied` to the `ScreenCapturePermissionOverlay` (already implemented in `src/components/`) rather than retrying blindly. Other codes should pause the loop and surface a one-line toast.
 - From V2-P3: surface the `useSidecarStore.errored=true` terminal state via the new "Last error" affordance V2-P9 will add to Settings → AI — the loop must stop scheduling fresh ticks while errored is true and only resume after the user clicks Restart.
+- From V2-P4: call `parseJudgment(content)` on every llama-server response; when `result.ok === false`, feed `result.fallback` (severity=on_task) into the score machine — never crash the loop on malformed JSON and never escalate a parse-failure into an off-task event.
+- From V2-P4: build the chat-completion request from `FOCUS_SYSTEM_PROMPT` + a `"Declared topic: <topic>"` user-text block + face/screen as `{type:"image_url", image_url:{url:"data:image/jpeg;base64,..."}}` blocks with `response_format:{type:"json_object"}`, `temperature: 0`, `max_tokens: 200` — match the exact shape `tests/ai-eval/run.ts` uses so eval numbers predict runtime behaviour.
+- From V2-P4: import the `Severity` enum and `SEVERITIES` array from `@/features/ai` (defined in `parseJudgment.ts`) for `scoreMachine.ts`'s threshold table — do not redeclare the enum locally.
 
 ---
 

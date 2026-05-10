@@ -1,0 +1,9 @@
+{
+  "id": "case-003-on-task-paper",
+  "declared_topic": "Reading a research paper on transformer architectures",
+  "face_path": "fixtures/case-003-face.jpg",
+  "screen_path": "fixtures/case-003-screen.jpg",
+  "expected_severity": "on_task",
+  "scenario": "User attentively reading; PDF reader shows the 'Attention is All You Need' paper, mid-page with the attention diagram visible.",
+  "notes": "Reading research papers is canonical on-task for any AI/ML topic."
+}

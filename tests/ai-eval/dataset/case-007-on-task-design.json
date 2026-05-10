@@ -1,0 +1,9 @@
+{
+  "id": "case-007-on-task-design",
+  "declared_topic": "Designing a dashboard UI in Figma",
+  "face_path": "fixtures/case-007-face.jpg",
+  "screen_path": "fixtures/case-007-screen.jpg",
+  "expected_severity": "on_task",
+  "scenario": "User focused on screen; Figma canvas shows a dashboard frame with charts, sidebar, and a component library panel open.",
+  "notes": "Drawing tools count per ARCHITECTURE §8 rules."
+}

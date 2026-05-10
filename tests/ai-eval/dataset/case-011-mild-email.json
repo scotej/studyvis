@@ -1,0 +1,9 @@
+{
+  "id": "case-011-mild-email",
+  "declared_topic": "Working through HackerRank algorithm problems",
+  "face_path": "fixtures/case-011-face.jpg",
+  "screen_path": "fixtures/case-011-screen.jpg",
+  "expected_severity": "mild",
+  "scenario": "User reading screen; Gmail inbox showing unrelated personal email open mid-message.",
+  "notes": "Email is a common brief off-topic excursion."
+}

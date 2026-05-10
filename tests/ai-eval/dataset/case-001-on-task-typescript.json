@@ -1,0 +1,9 @@
+{
+  "id": "case-001-on-task-typescript",
+  "declared_topic": "Implementing a binary search tree in TypeScript",
+  "face_path": "fixtures/case-001-face.jpg",
+  "screen_path": "fixtures/case-001-screen.jpg",
+  "expected_severity": "on_task",
+  "scenario": "User faces the screen with neutral expression; VS Code is open showing a TypeScript file with a BST class definition (insert, delete, inOrder methods visible).",
+  "notes": "Obvious baseline. The model must recognise an IDE-with-relevant-code as on_task."
+}
