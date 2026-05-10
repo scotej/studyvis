@@ -10,6 +10,7 @@ import {
   type AuditEventKind,
 } from '@/features/session/audit'
 import { verifyMessage } from '@/lib/crypto/identity'
+import { auditEventInsert } from '@/lib/db/audit'
 import { bytesToHex, hexToBytes } from '@/lib/encoding'
 
 // Monotonic counter for breaking ties when two events share the same `ts`
@@ -35,6 +36,25 @@ type AuditState = {
   reset: () => void
 }
 
+// Test seam — replaced by Vitest mocks in unit tests so the store can be
+// driven without a Tauri runtime. Production calls the real Tauri command.
+let persistFn: (event: AuditEvent) => Promise<void> = async (event) => {
+  await auditEventInsert({
+    sessionId: event.session_topic,
+    ts: event.ts,
+    who: event.who,
+    kind: event.kind,
+    detail: JSON.stringify(event.detail ?? {}),
+    sig: event.sig,
+  })
+}
+
+export function __setAuditPersistFn(
+  fn: (event: AuditEvent) => Promise<void>
+): void {
+  persistFn = fn
+}
+
 export const useAuditStore = create<AuditState>((set, get) => ({
   events: [],
   append: (event) => {
@@ -43,6 +63,12 @@ export const useAuditStore = create<AuditState>((set, get) => ({
     if (get().events.some((e) => e.sig === event.sig)) return
     const stored: StoredAuditEvent = { ...event, seq: ++nextSeq }
     set((s) => ({ events: [...s.events, stored] }))
+    // Best-effort SQLite persistence (V1-P9 carryover): the panel reflects
+    // the event regardless of disk write success. The post-session report
+    // (V2) is the consumer of the persisted rows.
+    void persistFn(event).catch((err) => {
+      console.error('audit persist failed:', err)
+    })
   },
   reset: () => {
     nextSeq = 0

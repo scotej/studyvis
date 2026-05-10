@@ -24,6 +24,7 @@ import { Input } from '@/components/ui/input'
 import { Kbd } from '@/components/ui/kbd'
 import { Label } from '@/components/ui/label'
 import { Progress } from '@/components/ui/progress'
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { Separator } from '@/components/ui/separator'
 import { Slider } from '@/components/ui/slider'
 import { Switch } from '@/components/ui/switch'
@@ -285,6 +286,23 @@ export function StyleGuide() {
               <div className="flex flex-col gap-3">
                 <Label>Slider</Label>
                 <Slider defaultValue={[40]} max={100} step={1} />
+              </div>
+              <div className="flex flex-col gap-3">
+                <Label>RadioGroup</Label>
+                <RadioGroup defaultValue="b" className="gap-2">
+                  <div className="flex items-center gap-2">
+                    <RadioGroupItem value="a" id="style-rg-a" />
+                    <Label htmlFor="style-rg-a">Option A</Label>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <RadioGroupItem value="b" id="style-rg-b" />
+                    <Label htmlFor="style-rg-b">Option B</Label>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <RadioGroupItem value="c" id="style-rg-c" />
+                    <Label htmlFor="style-rg-c">Option C</Label>
+                  </div>
+                </RadioGroup>
               </div>
               <div className="flex flex-col gap-3">
                 <Label>Progress</Label>

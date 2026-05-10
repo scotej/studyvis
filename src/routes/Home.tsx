@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router'
+import { Settings2Icon } from 'lucide-react'
 import { toast } from 'sonner'
 
+import { Button } from '@/components/ui/button'
 import {
   AddFriendDialog,
   FriendsList,
@@ -11,13 +13,15 @@ import {
 import { useIdentity } from '@/features/identity'
 import { Onboarding, useOnboardingState } from '@/features/onboarding'
 import { inviteToCurrentSession, SessionView } from '@/features/session'
-import { DebugSystemPanel } from '@/features/system'
+import { Settings } from '@/features/settings'
 import type { Friend } from '@/lib/db/friends'
 import { boxEncryptWithKeyring } from '@/lib/db/identity'
 import { useFriendsStore } from '@/stores/friendsStore'
 import { useSessionStore } from '@/stores/sessionStore'
 
 const isDev = import.meta.env.DEV
+
+type View = 'main' | 'settings'
 
 export function Home() {
   const { identity, status, actions } = useIdentity()
@@ -27,6 +31,7 @@ export function Home() {
   const sessionStatus = useSessionStore((s) => s.status)
   const [addOpen, setAddOpen] = useState(false)
   const [presence, setPresence] = useState<PresenceMap>({})
+  const [view, setView] = useState<View>('main')
 
   useEffect(() => {
     if (status === 'ready' && friendsStatus === 'idle') {
@@ -86,16 +91,37 @@ export function Home() {
     )
   }
 
+  if (view === 'settings') {
+    return (
+      <>
+        <Settings onClose={() => setView('main')} />
+        {identity ? (
+          <InboxBoot
+            myEdPubkeyHex={identity.ed_pubkey_hex}
+            onPresenceChange={setPresence}
+          />
+        ) : null}
+      </>
+    )
+  }
+
   return (
     <main className="min-h-screen bg-bg-base text-text-primary">
+      <div className="mx-auto flex w-full max-w-3xl items-center justify-end gap-2 px-6 pt-6">
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => setView('settings')}
+          aria-label="Open settings"
+        >
+          <Settings2Icon /> Settings
+        </Button>
+      </div>
       <FriendsList
         presence={presence}
         onAddFriend={() => setAddOpen(true)}
         onInvite={(friend) => void handleInvite(friend)}
       />
-      <div className="px-6 pb-8">
-        <DebugSystemPanel />
-      </div>
       <AddFriendDialog open={addOpen} onOpenChange={setAddOpen} />
       {identity ? (
         <InboxBoot

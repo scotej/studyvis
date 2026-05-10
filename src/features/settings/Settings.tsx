@@ -1,0 +1,73 @@
+import { useEffect, useState } from 'react'
+
+import {
+  SettingsLayout,
+  type SettingsCategoryDescriptor,
+} from '@/components/SettingsLayout'
+import { useSettingsStore } from '@/stores/settingsStore'
+
+import { AdvancedCategory } from './categories/AdvancedCategory'
+import { AppearanceCategory } from './categories/AppearanceCategory'
+import { FriendsCategory } from './categories/FriendsCategory'
+import { IdentityCategory } from './categories/IdentityCategory'
+import { NetworkCategory } from './categories/NetworkCategory'
+import { NotificationsCategory } from './categories/NotificationsCategory'
+import { SessionsCategory } from './categories/SessionsCategory'
+import { ShortcutsCategory } from './categories/ShortcutsCategory'
+
+export type SettingsCategoryId =
+  | 'identity'
+  | 'friends'
+  | 'sessions'
+  | 'appearance'
+  | 'notifications'
+  | 'shortcuts'
+  | 'network'
+  | 'advanced'
+
+const CATEGORIES: ReadonlyArray<
+  SettingsCategoryDescriptor<SettingsCategoryId>
+> = [
+  { id: 'identity', label: 'Identity' },
+  { id: 'friends', label: 'Friends' },
+  { id: 'sessions', label: 'Sessions' },
+  { id: 'appearance', label: 'Appearance' },
+  { id: 'notifications', label: 'Notifications' },
+  { id: 'shortcuts', label: 'Shortcuts' },
+  { id: 'network', label: 'Network' },
+  { id: 'advanced', label: 'Advanced' },
+]
+
+export type SettingsProps = {
+  onClose?: () => void
+}
+
+// Container: owns the active-category state and subscribes the settings
+// store. Each category sub-component reads what it needs.
+export function Settings({ onClose }: SettingsProps) {
+  const [activeCategoryId, setActiveCategoryId] =
+    useState<SettingsCategoryId>('identity')
+  const hydrate = useSettingsStore((s) => s.hydrate)
+
+  useEffect(() => {
+    void hydrate()
+  }, [hydrate])
+
+  return (
+    <SettingsLayout
+      categories={CATEGORIES}
+      activeCategoryId={activeCategoryId}
+      onCategorySelect={setActiveCategoryId}
+      onClose={onClose}
+    >
+      {activeCategoryId === 'identity' ? <IdentityCategory /> : null}
+      {activeCategoryId === 'friends' ? <FriendsCategory /> : null}
+      {activeCategoryId === 'sessions' ? <SessionsCategory /> : null}
+      {activeCategoryId === 'appearance' ? <AppearanceCategory /> : null}
+      {activeCategoryId === 'notifications' ? <NotificationsCategory /> : null}
+      {activeCategoryId === 'shortcuts' ? <ShortcutsCategory /> : null}
+      {activeCategoryId === 'network' ? <NetworkCategory /> : null}
+      {activeCategoryId === 'advanced' ? <AdvancedCategory /> : null}
+    </SettingsLayout>
+  )
+}
