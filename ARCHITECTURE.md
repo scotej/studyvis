@@ -322,14 +322,14 @@ loop:
 
 Each chosen vision model requires a matching `*.mmproj.gguf` projector file. Both downloaded together by the model picker. Default candidates (verified on Hugging Face Hub):
 
-| Tier | Model | Quant | Approx size | Approx p95 latency on target hardware | License |
+| Tier | Model | Quant | Approx download (model + mmproj) | Approx p95 latency on target hardware | License |
 |-|-|-|-|-|-|
-| Fastest | `ggml-org/moondream2-20250414-GGUF` | Q4_K_M | ~1.5 GB | 2–5 s | Apache-2.0 |
-| Balanced | `ggml-org/Qwen2.5-VL-3B-Instruct-GGUF` | Q4_K_M | ~3 GB | 5–15 s | Apache-2.0 |
-| Best (gated) | `ggml-org/gemma-3-4b-it-GGUF` | Q4_K_M | ~3.5 GB | 8–18 s | Gemma terms (user accepts on HF) |
-| Heaviest | `ggml-org/Qwen2.5-VL-7B-Instruct-GGUF` | Q4_K_M | ~6 GB | 15–30 s | Apache-2.0 |
+| Fastest | `ggml-org/moondream2-20250414-GGUF` | f16 (no Q4 in repo) | ~3.5 GB (2.7 + 0.85) | 2–5 s | Apache-2.0 |
+| Balanced | `ggml-org/Qwen2.5-VL-3B-Instruct-GGUF` | Q4_K_M + mmproj-Q8_0 | ~2.6 GB (1.8 + 0.8) | 5–15 s | Apache-2.0 |
+| Best (gated) | `ggml-org/gemma-3-4b-it-GGUF` | Q4_K_M | ~3.2 GB (2.4 + 0.8) | 8–18 s | Gemma terms (user accepts on HF) |
+| Heaviest | `ggml-org/Qwen2.5-VL-7B-Instruct-GGUF` | Q4_K_M + mmproj-Q8_0 | ~5.2 GB (4.4 + 0.8) | 15–30 s | Apache-2.0 |
 
-Latencies are estimates pending real-machine measurement during V2 development. Model picker shows real numbers after the user's first benchmark.
+Latencies are estimates pending real-machine measurement during V2 development. Model picker shows real numbers after the user's first benchmark. The "Fastest" tier ships the f16 weights because `ggml-org/moondream2-20250414-GGUF` does not publish a Q4_K_M quant — earlier table revisions claimed Q4_K_M / ~1.5 GB; we corrected this to the actual repo content during V2-P2. The Qwen tiers pair the Q4_K_M model with the smaller Q8_0 projector (the f16 projector is ~1.3 GB) to keep the per-tier download footprint sane.
 
 ### Capture mechanics
 
