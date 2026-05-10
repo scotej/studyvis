@@ -52,7 +52,16 @@ export {
   joinPairing,
   PAIR_WORD_COUNT,
   PairAbortedError,
+  PairTimeoutError,
   PairVerificationError,
   type PairedFriend,
   type PairingContext,
 } from './pair'
+export {
+  BIP39_WORDLIST,
+  isBip39Word,
+  pairWordsAreComplete,
+  sanitizePairWordInput,
+  tokenizePairWords,
+} from './wordlist'
+export { PairWordInput, type PairWordInputProps } from './PairWordInput'

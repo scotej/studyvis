@@ -24,6 +24,14 @@ export type PairedFriend = {
 
 export type PairOptions = {
   signal?: AbortSignal
+  // Fires once the room sees the other peer arrive but before the signed
+  // hello has been verified. Lets the dialog flip its status text from
+  // "waiting for friend" to "exchanging keys".
+  onPeerJoinedTopic?: () => void
+  // Reject with PairTimeoutError if the pair hasn't settled within this many
+  // milliseconds. Existing call sites that don't pass this stay timeout-less,
+  // matching pre-V1-P12-polish behavior.
+  timeoutMs?: number
 }
 
 export type HelloPayload = {
@@ -38,6 +46,13 @@ export class PairAbortedError extends Error {
   constructor() {
     super('pairing aborted')
     this.name = 'PairAbortedError'
+  }
+}
+
+export class PairTimeoutError extends Error {
+  constructor() {
+    super('pairing timed out')
+    this.name = 'PairTimeoutError'
   }
 }
 
@@ -133,9 +148,11 @@ async function runPair(
   const action = room.makeAction<HelloPayload>(HELLO_ACTION)
 
   let onAbort: (() => void) | null = null
+  let timeoutHandle: ReturnType<typeof setTimeout> | null = null
   try {
     return await new Promise<PairedFriend>((resolve, reject) => {
       let settled = false
+      let peerSeen = false
       const settle = (fn: () => void) => {
         if (settled) return
         settled = true
@@ -144,6 +161,12 @@ async function runPair(
       onAbort = () => settle(() => reject(new PairAbortedError()))
 
       if (opts.signal) opts.signal.addEventListener('abort', onAbort)
+
+      if (typeof opts.timeoutMs === 'number' && opts.timeoutMs > 0) {
+        timeoutHandle = setTimeout(() => {
+          settle(() => reject(new PairTimeoutError()))
+        }, opts.timeoutMs)
+      }
 
       action.receive((payload) => {
         if (settled) return
@@ -157,6 +180,16 @@ async function runPair(
 
       room.onPeerJoin(async () => {
         if (settled) return
+        // Trystero may fire onPeerJoin twice when both peers race the
+        // microtask in the in-process test bus; only notify once.
+        if (!peerSeen) {
+          peerSeen = true
+          try {
+            opts.onPeerJoinedTopic?.()
+          } catch {
+            // Swallow notification errors — they shouldn't fail the pair.
+          }
+        }
         try {
           const hello = await buildHello(words, ctx)
           await action.send(hello)
@@ -166,6 +199,7 @@ async function runPair(
       })
     })
   } finally {
+    if (timeoutHandle !== null) clearTimeout(timeoutHandle)
     if (opts.signal && onAbort) {
       opts.signal.removeEventListener('abort', onAbort)
     }

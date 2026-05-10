@@ -106,6 +106,7 @@ import {
   joinPairing,
   PAIR_WORD_COUNT,
   PairAbortedError,
+  PairTimeoutError,
   PairVerificationError,
   verifyHello,
   type PairingContext,
@@ -231,5 +232,38 @@ describe('round-trip pairing (in-process two instances)', () => {
     const promise = hostPairing(words, sam, { signal: ctrl.signal })
     queueMicrotask(() => ctrl.abort())
     await expect(promise).rejects.toBeInstanceOf(PairAbortedError)
+  })
+
+  test('host rejects with PairTimeoutError when no peer arrives', async () => {
+    vi.useFakeTimers()
+    const words = generatePairingCode()
+    const sam = makeCtx('Sam')
+    const promise = hostPairing(words, sam, { timeoutMs: 1_000 })
+    // Attach the rejection handler before advancing timers; otherwise the
+    // setTimeout fires and rejects synchronously on the next tick, producing
+    // a "PromiseRejectionHandledWarning" since the handler isn't yet on it.
+    const assertion = expect(promise).rejects.toBeInstanceOf(PairTimeoutError)
+    await vi.advanceTimersByTimeAsync(1_500)
+    await assertion
+  })
+
+  test('onPeerJoinedTopic fires once on each side before the hello settles', async () => {
+    const words = generatePairingCode()
+    const sam = makeCtx('Sam')
+    const alice = makeCtx('Alice')
+    const samNotifications: number[] = []
+    const aliceNotifications: number[] = []
+
+    await Promise.all([
+      hostPairing(words, sam, {
+        onPeerJoinedTopic: () => samNotifications.push(Date.now()),
+      }),
+      joinPairing(words, alice, {
+        onPeerJoinedTopic: () => aliceNotifications.push(Date.now()),
+      }),
+    ])
+
+    expect(samNotifications).toHaveLength(1)
+    expect(aliceNotifications).toHaveLength(1)
   })
 })

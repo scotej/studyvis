@@ -80,18 +80,50 @@ export const MissingDisplayName: Story = {
   },
 }
 
-export const HostInProgress: Story = {
+export const HostWaitingForPeer: Story = {
   args: {
     initialTab: 'host',
-    phase: { kind: 'host-waiting', words: MOCK_WORDS },
+    phase: { kind: 'host-waiting', words: MOCK_WORDS, peerArrived: false },
     missingDisplayName: false,
   },
 }
 
-export const JoinInProgress: Story = {
+export const HostPeerJoined: Story = {
+  args: {
+    initialTab: 'host',
+    phase: { kind: 'host-waiting', words: MOCK_WORDS, peerArrived: true },
+    missingDisplayName: false,
+  },
+}
+
+export const HostTimeout: Story = {
+  args: {
+    initialTab: 'host',
+    phase: { kind: 'host-timeout', words: MOCK_WORDS },
+    missingDisplayName: false,
+  },
+}
+
+export const JoinWaitingForPeer: Story = {
   args: {
     initialTab: 'join',
-    phase: { kind: 'join-progress' },
+    phase: { kind: 'join-progress', peerArrived: false },
+    missingDisplayName: false,
+  },
+}
+
+export const JoinPeerJoined: Story = {
+  args: {
+    initialTab: 'join',
+    phase: { kind: 'join-progress', peerArrived: true },
+    missingDisplayName: false,
+  },
+}
+
+export const JoinTimeout: Story = {
+  args: {
+    initialTab: 'join',
+    phase: { kind: 'join-timeout' },
     missingDisplayName: false,
   },
 }
