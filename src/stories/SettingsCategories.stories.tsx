@@ -1,5 +1,6 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
 
+import { AboutCategory } from '@/features/settings/categories/AboutCategory'
 import { AdvancedCategory } from '@/features/settings/categories/AdvancedCategory'
 import { AppearanceCategory } from '@/features/settings/categories/AppearanceCategory'
 import { FriendsCategory } from '@/features/settings/categories/FriendsCategory'
@@ -59,4 +60,8 @@ export const Network: Story = {
 
 export const Advanced: Story = {
   render: () => <AdvancedCategory />,
+}
+
+export const About: Story = {
+  render: () => <AboutCategory />,
 }

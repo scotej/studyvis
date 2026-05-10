@@ -80,3 +80,16 @@ pub fn system_open_data_folder<R: Runtime>(app: AppHandle<R>) -> Result<String, 
         .map_err(|e| e.to_string())?;
     Ok(dir_str)
 }
+
+#[tauri::command]
+pub fn system_open_url<R: Runtime>(app: AppHandle<R>, url: String) -> Result<(), String> {
+    // Restrict to https only — the About card opens the public Releases page,
+    // and refusing other schemes here keeps the IPC narrow even though the
+    // command is only called from our own UI.
+    if !url.starts_with("https://") {
+        return Err("only https URLs are accepted".into());
+    }
+    app.opener()
+        .open_url(url, None::<&str>)
+        .map_err(|e| e.to_string())
+}
