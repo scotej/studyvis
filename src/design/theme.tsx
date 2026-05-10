@@ -8,15 +8,7 @@ import {
 import type { ReactNode } from 'react'
 
 import { ThemeContext, type ThemeMode } from '@/design/theme-context'
-
-const STORAGE_KEY = 'studyvis.theme'
-
-function readStored(): ThemeMode {
-  if (typeof window === 'undefined') return 'dark'
-  const v = window.localStorage.getItem(STORAGE_KEY)
-  if (v === 'dark' || v === 'light' || v === 'auto') return v
-  return 'dark'
-}
+import { useSettingsStore } from '@/stores/settingsStore'
 
 function applyClass(resolved: 'dark' | 'light') {
   if (typeof document === 'undefined') return
@@ -43,10 +35,22 @@ export function ThemeProvider({
   children: ReactNode
   defaultMode?: ThemeMode
 }) {
-  const [mode, setModeState] = useState<ThemeMode>(
-    () => defaultMode ?? readStored()
-  )
+  const themeFromStore = useSettingsStore((s) => s.values.theme)
+  const settingsStatus = useSettingsStore((s) => s.status)
+  const setThemeInStore = useSettingsStore((s) => s.setTheme)
+  const hydrateSettings = useSettingsStore((s) => s.hydrate)
+
+  // Until the persistent store hydrates, fall back to the optional
+  // `defaultMode` prop (Storybook uses "dark"). Once status flips to "ready",
+  // `themeFromStore` becomes the source of truth.
+  const mode: ThemeMode =
+    settingsStatus === 'ready' ? themeFromStore : (defaultMode ?? 'dark')
+
   const [system, setSystem] = useState<'dark' | 'light'>(() => detectSystem())
+
+  useEffect(() => {
+    void hydrateSettings()
+  }, [hydrateSettings])
 
   useEffect(() => {
     if (typeof window === 'undefined' || !window.matchMedia) return
@@ -64,12 +68,15 @@ export function ThemeProvider({
     applyClass(resolved)
   }, [resolved])
 
-  const setMode = useCallback((next: ThemeMode) => {
-    setModeState(next)
-    if (typeof window !== 'undefined') {
-      window.localStorage.setItem(STORAGE_KEY, next)
-    }
-  }, [])
+  const setMode = useCallback(
+    (next: ThemeMode) => {
+      // Fire-and-forget: the settings store mutates state synchronously, so
+      // the UI reflects the change on the next render even if the LazyStore
+      // write is in flight.
+      void setThemeInStore(next)
+    },
+    [setThemeInStore]
+  )
 
   const value = useMemo(
     () => ({ mode, resolved, setMode }),

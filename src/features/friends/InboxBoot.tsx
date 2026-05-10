@@ -12,6 +12,7 @@ import { boxDecryptWithKeyring } from '@/lib/db/identity'
 import { getFriendXPubkey } from '@/lib/db/friends'
 import { useFriendsStore } from '@/stores/friendsStore'
 import { useSessionStore } from '@/stores/sessionStore'
+import { useSettingsStore } from '@/stores/settingsStore'
 
 import { subscribeToOwnInbox, type ValidInvite } from './inbox'
 import { startPresence, type PresenceMap } from './presence'
@@ -96,6 +97,13 @@ async function handleValidInvite(invite: ValidInvite) {
       onClick: () => acceptInvite(invite),
     },
   })
+
+  // Settings → Notifications gate (V1-P11). The in-app toast above always
+  // fires; only the OS-level prompt is opt-out so a user who's silenced
+  // notifications still sees the invite when the app is foreground.
+  if (!useSettingsStore.getState().values.incomingInviteNotificationEnabled) {
+    return
+  }
 
   try {
     let granted = await isPermissionGranted()

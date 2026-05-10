@@ -7,21 +7,25 @@ use tauri::Manager;
 use commands::friends::{
     friends_add, friends_get_x_pubkey, friends_list, friends_remove, friends_update_last_studied,
 };
-use commands::sessions::sessions_insert;
+use commands::sessions::{audit_event_insert, sessions_insert, sessions_list};
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 use commands::identity::{
     identity_box_decrypt, identity_box_encrypt, identity_exists, identity_load_record,
     identity_save_keys, identity_save_record, identity_sign,
 };
 #[cfg(desktop)]
-use commands::system::{autostart_is_enabled, autostart_set_enabled, QuitFlag};
+use commands::system::{
+    autostart_is_enabled, autostart_set_enabled, system_minimize_to_tray_set_enabled,
+    system_open_data_folder, MinimizeToTrayFlag, QuitFlag,
+};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_notification::init())
-        .plugin(tauri_plugin_store::Builder::new().build());
+        .plugin(tauri_plugin_store::Builder::new().build())
+        .plugin(tauri_plugin_opener::init());
 
     #[cfg(all(desktop, any(target_os = "macos", target_os = "windows")))]
     let builder = builder.invoke_handler(tauri::generate_handler![
@@ -31,6 +35,8 @@ pub fn run() {
         friends_update_last_studied,
         friends_get_x_pubkey,
         sessions_insert,
+        sessions_list,
+        audit_event_insert,
         identity_save_keys,
         identity_exists,
         identity_save_record,
@@ -40,6 +46,8 @@ pub fn run() {
         identity_box_encrypt,
         autostart_set_enabled,
         autostart_is_enabled,
+        system_minimize_to_tray_set_enabled,
+        system_open_data_folder,
     ]);
 
     #[cfg(all(desktop, not(any(target_os = "macos", target_os = "windows"))))]
@@ -50,8 +58,12 @@ pub fn run() {
         friends_update_last_studied,
         friends_get_x_pubkey,
         sessions_insert,
+        sessions_list,
+        audit_event_insert,
         autostart_set_enabled,
         autostart_is_enabled,
+        system_minimize_to_tray_set_enabled,
+        system_open_data_folder,
     ]);
 
     #[cfg(not(desktop))]
@@ -62,6 +74,8 @@ pub fn run() {
         friends_update_last_studied,
         friends_get_x_pubkey,
         sessions_insert,
+        sessions_list,
+        audit_event_insert,
     ]);
 
     let builder = builder.on_window_event(|window, event| {
@@ -73,6 +87,12 @@ pub fn run() {
             {
                 let app = window.app_handle();
                 if QuitFlag::is_armed(app) {
+                    return;
+                }
+                if !MinimizeToTrayFlag::is_enabled(app) {
+                    // User has opted out of close-to-tray; honor a real quit.
+                    // On macOS this matches native Cmd+Q expectation; on
+                    // Windows / Linux closing the window exits the process.
                     return;
                 }
                 api.prevent_close();
@@ -95,6 +115,7 @@ pub fn run() {
             #[cfg(desktop)]
             {
                 app.manage(QuitFlag::new());
+                app.manage(MinimizeToTrayFlag::new());
                 setup_desktop(app)?;
             }
             Ok(())

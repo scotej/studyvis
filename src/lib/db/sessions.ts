@@ -11,6 +11,17 @@ export type SessionRow = {
   peerPubkeys: string | null
 }
 
+// Shape returned by `sessions_list`. Tauri auto-camelCases parameter names
+// on JS→Rust invokes, but the response is serde's serialized struct, which
+// uses Rust's snake_case field names verbatim.
+export type SessionRecord = {
+  id: string
+  started_at: number | null
+  ended_at: number | null
+  total_minutes: number | null
+  peer_pubkeys: string | null
+}
+
 export async function sessionsInsert(row: SessionRow): Promise<void> {
   await invoke('sessions_insert', {
     id: row.id,
@@ -19,4 +30,8 @@ export async function sessionsInsert(row: SessionRow): Promise<void> {
     totalMinutes: row.totalMinutes,
     peerPubkeys: row.peerPubkeys,
   })
+}
+
+export async function listSessions(): Promise<SessionRecord[]> {
+  return invoke<SessionRecord[]>('sessions_list')
 }

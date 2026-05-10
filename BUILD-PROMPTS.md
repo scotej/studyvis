@@ -1287,6 +1287,7 @@ End-of-task exit sequence (mandatory):
 CARRY-FORWARD DEBTS (from prior phases — incorporate into this work):
 - From V1-P1: Wire `plugins.updater` config + signing key. V1-P1 registered the plugin behind `#[cfg(not(debug_assertions))]` so dev builds skip it; release builds need the real config + signing material before they run. Per the friends-only direction (PLAN.md §5), code-signing + notarization may be deferred until credentials become available — if so, keep the `cfg` gate and document the deferral.
 - From V1-P8: `src-tauri/Info.plist` (NSCameraUsageDescription + NSMicrophoneUsageDescription) is in place but its strings only fully take effect inside a signed/notarized macOS bundle. Friends-only V1 ships unsigned, so the OS prompts work for `tauri dev` and ad-hoc-signed bundles but tightened code-signing is owed when credentials are available. Verify the Info.plist still merges correctly into the final bundle for whatever signing path you ship.
+- From V1-P11: Verify the packaged build can call `app.opener().reveal_item_in_dir(...)` from `system_open_data_folder`. V1-P11 added `tauri-plugin-opener` and registers it in `lib.rs`, but the custom Tauri command path (Rust-internal call, no JS IPC) wasn't exercised under Tauri's ACL during dev. If the bundled build refuses, add the opener plugin's permission to `src-tauri/capabilities/default.json` (likely `opener:default` or scoped `opener:allow-reveal-item-in-dir`).
 
 ---
 
@@ -1553,6 +1554,11 @@ End-of-task exit sequence (mandatory):
 8. Single follow-up commit with message "<phase-id>: address Copilot review" (or "<phase-id>: no Copilot review within window" if step 6 timed out). Push to the same branch. If there were zero actionable findings AND zero stylistic nits AND no late-discovered debts, skip the follow-up commit.
 9. Auto-merge: `gh pr merge <num> --squash --delete-branch`. If branch protection blocks the merge because a required CI check is still running, wait for CI to settle (poll `gh pr checks <num>`) and retry once. If the branch went stale (main moved during the Copilot fix loop and the PR shows "out-of-date"), `git fetch origin && git pull --rebase origin main` on the feature branch, re-run the verification commands, push, and retry the merge — never force-push to main, never bypass required checks (no `--admin`).
 10. End-of-task summary in chat: (a) what shipped, (b) deviations from prompt or canonical-doc text and why, (c) Copilot findings addressed and skipped (with reason for each skip), (d) Inherited debts — anything that surfaced and belongs to a later phase, named by phase id (e.g. "V1-P12 must wire plugins.updater config + signing key"), and confirm each debt was also routed into BUILD-PROMPTS.md per step 1, (e) confirmation that the PR was merged and the branch deleted.
+
+---
+
+CARRY-FORWARD DEBTS (from prior phases — incorporate into this work):
+- From V1-P11: V1-P8 carryovers ESC-to-leave during a session, audio device picker, and the optional "session ended" splash via reintroduced `markEnded()` are session-room enhancements (not settings concerns) — V2-P3 is the natural home since this phase already touches session-time UX. Land them alongside the capture pipeline.
 
 ---
 
@@ -1862,6 +1868,7 @@ End-of-task exit sequence (mandatory):
 
 CARRY-FORWARD DEBTS (from prior phases — incorporate into this work):
 - From V1-P7: `Cmd/Ctrl+]` is already registered as a global shortcut but its handler is a no-op (it just logs). Wire it here to spawn or focus the AI dialog window with `transparent: true`, `decorations: false`, `alwaysOnTop: true` per ARCHITECTURE.md §12. The existing `on_window_event` handler is already label-scoped to `"main"`, so the dialog's close events won't be intercepted by V1-P7's hide-to-tray logic.
+- From V1-P11: Replace the dev-only `[break]` `[back]` debug buttons in `SessionView` with the real break controls. The actual break feature is the AI break dialogue (PLAN.md V2 features) that lives in this phase — the placeholders only round-trip `paused_break` / `resumed` audit events, no real mute/state semantics yet. Wire to `features/session/break.requestBreak` per V2-P7 step 3.
 
 ---
 
@@ -2180,6 +2187,11 @@ End-of-task exit sequence (mandatory):
 8. Single follow-up commit with message "<phase-id>: address Copilot review" (or "<phase-id>: no Copilot review within window" if step 6 timed out). Push to the same branch. If there were zero actionable findings AND zero stylistic nits AND no late-discovered debts, skip the follow-up commit.
 9. Auto-merge: `gh pr merge <num> --squash --delete-branch`. If branch protection blocks the merge because a required CI check is still running, wait for CI to settle (poll `gh pr checks <num>`) and retry once. If the branch went stale (main moved during the Copilot fix loop and the PR shows "out-of-date"), `git fetch origin && git pull --rebase origin main` on the feature branch, re-run the verification commands, push, and retry the merge — never force-push to main, never bypass required checks (no `--admin`).
 10. End-of-task summary in chat: (a) what shipped, (b) deviations from prompt or canonical-doc text and why, (c) Copilot findings addressed and skipped (with reason for each skip), (d) Inherited debts — anything that surfaced and belongs to a later phase, named by phase id (e.g. "V1-P12 must wire plugins.updater config + signing key"), and confirm each debt was also routed into BUILD-PROMPTS.md per step 1, (e) confirmation that the PR was merged and the branch deleted.
+
+---
+
+CARRY-FORWARD DEBTS (from prior phases — incorporate into this work):
+- From V1-P11: The Settings → Shortcuts pane already displays the active PTT bindings and ships a disabled "Coming soon" rebind row — wire that row to the `KeybindCapture` component this phase introduces, persist captured combos via the V1-P11 `useSettingsStore`, and re-register through `tauri-plugin-global-shortcut` using the `Mutex<Shortcut>` interior-mutability pattern noted in V1-P7's carryover.
 
 ---
 

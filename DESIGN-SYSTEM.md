@@ -239,6 +239,7 @@ These are the only components allowed to read raw HTML / Radix primitives. Modif
 | `Badge` | Pill, color variants from status tokens. |
 | `Switch` | |
 | `Slider` | |
+| `RadioGroup` | One-of-N selection. Used by Settings → Appearance (theme) and Settings → Network (TURN preference). |
 | `Tabs` | |
 | `ScrollArea` | Custom scrollbars, themed. |
 | `Separator` | |

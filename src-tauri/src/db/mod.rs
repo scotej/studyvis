@@ -3,8 +3,9 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use rusqlite::Connection;
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Manager, Runtime};
 
+pub mod audit_events;
 pub mod friends;
 pub mod migrations;
 pub mod sessions;
@@ -13,7 +14,7 @@ pub struct DbPool(pub Arc<Mutex<Connection>>);
 
 const DB_FILE: &str = "app.db";
 
-pub fn data_dir(app: &AppHandle) -> Result<PathBuf, String> {
+pub fn data_dir<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, String> {
     let base = app
         .path()
         .data_dir()
@@ -23,7 +24,7 @@ pub fn data_dir(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(dir)
 }
 
-pub fn init(app: &AppHandle) -> Result<DbPool, String> {
+pub fn init<R: Runtime>(app: &AppHandle<R>) -> Result<DbPool, String> {
     let path = data_dir(app)?.join(DB_FILE);
     let mut conn = Connection::open(&path).map_err(|e| format!("open {}: {e}", path.display()))?;
     migrations::run_migrations(&mut conn).map_err(|e| format!("migrations: {e}"))?;

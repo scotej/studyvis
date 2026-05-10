@@ -12,6 +12,24 @@ pub struct SessionRow {
     pub peer_pubkeys: Option<String>,
 }
 
+pub fn list(conn: &Connection) -> Result<Vec<SessionRow>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, started_at, ended_at, total_minutes, peer_pubkeys
+         FROM sessions
+         ORDER BY started_at DESC, id ASC",
+    )?;
+    let rows = stmt.query_map([], |row| {
+        Ok(SessionRow {
+            id: row.get(0)?,
+            started_at: row.get(1)?,
+            ended_at: row.get(2)?,
+            total_minutes: row.get(3)?,
+            peer_pubkeys: row.get(4)?,
+        })
+    })?;
+    rows.collect()
+}
+
 pub fn insert(conn: &Connection, row: &SessionRow) -> Result<()> {
     // V1-P8 stored only the placeholder fields; V1-P9 added peer_pubkeys
     // (from the signed-hello binding). declared_topic + score arrive with
@@ -97,6 +115,37 @@ mod tests {
             )
             .expect("read ended_at");
         assert_eq!(ended, 99);
+    }
+
+    #[test]
+    fn list_orders_by_started_at_desc() {
+        let conn = fresh();
+        insert(
+            &conn,
+            &SessionRow {
+                id: "older".into(),
+                started_at: 100,
+                ended_at: 200,
+                total_minutes: 1,
+                peer_pubkeys: None,
+            },
+        )
+        .expect("insert older");
+        insert(
+            &conn,
+            &SessionRow {
+                id: "newer".into(),
+                started_at: 300,
+                ended_at: 400,
+                total_minutes: 1,
+                peer_pubkeys: None,
+            },
+        )
+        .expect("insert newer");
+        let read = list(&conn).expect("list");
+        assert_eq!(read.len(), 2);
+        assert_eq!(read[0].id, "newer");
+        assert_eq!(read[1].id, "older");
     }
 
     #[test]
