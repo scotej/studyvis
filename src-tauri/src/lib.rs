@@ -12,6 +12,13 @@ use commands::identity::{
     identity_box_decrypt, identity_box_encrypt, identity_exists, identity_load_record,
     identity_save_keys, identity_save_record, identity_sign,
 };
+#[cfg(all(desktop, any(target_os = "macos", target_os = "windows")))]
+use commands::models::{hf_token_clear, hf_token_present, hf_token_save};
+#[cfg(desktop)]
+use commands::models::{
+    model_download, model_download_cancel, model_head_check, model_install_state, model_paths,
+    model_remove, DownloadState,
+};
 use commands::sessions::{
     audit_event_insert, audit_events_list_for_session, sessions_insert, sessions_list,
 };
@@ -75,6 +82,24 @@ pub fn run() {
         sidecar_stop,
         #[cfg(desktop)]
         sidecar_status,
+        #[cfg(desktop)]
+        model_paths,
+        #[cfg(desktop)]
+        model_install_state,
+        #[cfg(desktop)]
+        model_remove,
+        #[cfg(desktop)]
+        model_head_check,
+        #[cfg(desktop)]
+        model_download,
+        #[cfg(desktop)]
+        model_download_cancel,
+        #[cfg(all(desktop, any(target_os = "macos", target_os = "windows")))]
+        hf_token_save,
+        #[cfg(all(desktop, any(target_os = "macos", target_os = "windows")))]
+        hf_token_present,
+        #[cfg(all(desktop, any(target_os = "macos", target_os = "windows")))]
+        hf_token_clear,
     ]);
 
     let builder = builder.on_window_event(|window, event| {
@@ -117,6 +142,7 @@ pub fn run() {
                     read_minimize_to_tray_from_settings(app.handle()).unwrap_or(true);
                 app.manage(MinimizeToTrayFlag::new(initial_minimize_to_tray));
                 app.manage(SidecarState::new());
+                app.manage(DownloadState::new());
                 setup_desktop(app)?;
             }
             Ok(())

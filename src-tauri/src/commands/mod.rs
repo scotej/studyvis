@@ -5,6 +5,9 @@ pub mod sessions;
 pub mod identity;
 
 #[cfg(desktop)]
+pub mod models;
+
+#[cfg(desktop)]
 pub mod sidecar;
 
 #[cfg(desktop)]

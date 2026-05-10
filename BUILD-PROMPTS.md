@@ -1725,6 +1725,8 @@ CARRY-FORWARD DEBTS (from prior phases — incorporate into this work):
 
 - From V2-P1: the sample loop POSTs to `http://127.0.0.1:<useSidecarStore.port>/v1/chat/completions` — confirm that path works under Tauri's CSP (currently `security.csp: null`, which is permissive); if csp is tightened later, allowlist `http://127.0.0.1:*` for `connect-src`.
 - From V2-P1: subscribe to `useSidecarStore.healthy` and pause inference while it flips to false (sidecar restarting); restart-on-crash currently caps at 3 attempts inside 30s and then sets `errored=true`, so the loop must surface that to the user instead of silently retrying.
+- From V2-P2: read the active model id and measured cadence from `useModelStore.activeModelId` + `useModelStore.records[id].benchmark.sampleIntervalSec`; do not hardcode the sample interval. Resolve sidecar args via the `model_paths(modelId)` Tauri command (returns absolute `model_path` / `mmproj_path`) and pass them to `useSidecarStore.start({modelPath, mmprojPath, ctxSize})`.
+- From V2-P2: if `useModelStore.activeModelId` is null or `model_install_state(activeModelId)` reports either file missing, the sample loop must refuse to start the sidecar and surface a "Pick a model in Settings → AI" empty state; do not silently no-op.
 
 ---
 
@@ -2053,6 +2055,9 @@ CARRY-FORWARD DEBTS (from prior phases — incorporate into this work):
 - From V2-P1: the `aiFeaturesEnabled` flag + snake_case key (`ai_features_enabled`) is already declared in `useSettingsStore` with default `false`; add the matching `setAiFeaturesEnabled` setter (mirroring `setMinimizeToTrayOnClose`'s catch-and-surface pattern) and have the master toggle on/off call it — do not re-declare the field.
 - From V2-P1: when the toggle flips off mid-session, call `useSidecarStore.stop()` so the llama-server child process terminates and the health-poll loop unwinds; the sidecar persists `state.errored=true` after the 3-attempt restart budget, so the AI category should also expose a "Last error" line + a "Restart" affordance that calls `start({modelPath, mmprojPath, ctxSize})` again.
 - From V2-P1: rotate `$APP_DATA/studyvis/logs/llama-server.log` — V2-P1 appends to a single growing file; cap by size or daily-rotate inside `src-tauri/src/commands/sidecar.rs::ensure_log_path` so a long-running install doesn't fill the disk.
+- From V2-P2: the Settings → AI category already exists (added in V2-P2 as `src/features/settings/categories/AiCategory.tsx`) and currently renders only the `ModelPickerContainer`; insert the master "Enable AI features" toggle ABOVE the picker — do not re-create the category. When the toggle is off, dim/disable the picker controls (or render a one-line "Enable AI features to manage models" empty state) so the user can't trigger downloads while the gate is closed.
+- From V2-P2: add a "Hugging Face token" management row that surfaces `getHfTokenRuntime().present()` + a "Forget" button calling `getHfTokenRuntime().clear()`; V2-P2 wires the save path inside the Gemma card but ships no UI affordance to clear or replace a stored token. Tokens are stored in the OS keychain under service `com.studyvis.app` / user `hf-access-token`.
+- From V2-P2: toggling AI off must NOT remove `useModelStore` records or delete on-disk model files — the toggle is a runtime gate, not an uninstall. The "Remove" button on each picker card is the only path to delete a downloaded model.
 
 ---
 
