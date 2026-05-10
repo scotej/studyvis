@@ -28,12 +28,9 @@ export function AddFriendStepView({
       ariaLabel="Add your first friend"
       progress={progress}
       primaryAction={{
-        label: justAdded ? 'Continue' : 'Done for now',
+        label: justAdded ? 'Continue' : 'Skip for now',
         onClick: onContinue,
       }}
-      secondaryAction={
-        justAdded ? undefined : { label: 'Skip', onClick: onContinue }
-      }
     >
       <div className="flex w-full max-w-md flex-col items-center gap-6 text-center">
         {justAdded ? (

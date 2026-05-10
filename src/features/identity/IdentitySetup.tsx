@@ -60,6 +60,7 @@ export function IdentitySetup({
     } catch (err) {
       console.error(err)
       toast.error('Could not save identity.')
+    } finally {
       setSubmitting(false)
     }
   }
