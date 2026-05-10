@@ -1647,6 +1647,11 @@ End-of-task exit sequence (mandatory):
 
 ---
 
+CARRY-FORWARD DEBTS (from prior phases — incorporate into this work):
+- From V2-P3: `parseJudgment.ts` and the eval harness must consume the exact base64 strings returned by `captureFace`/`captureScreen` — do not invent another JPEG path; reuse the existing functions from `src/features/ai` so the eval harness exercises the same encoder the sample loop will use.
+
+---
+
 YOUR TASK: V2-P4 — System prompt for focus detection, an evaluation harness, and an iterative tuning loop.
 
 Implement ARCHITECTURE.md §8 system prompt.
@@ -1727,6 +1732,10 @@ CARRY-FORWARD DEBTS (from prior phases — incorporate into this work):
 - From V2-P1: subscribe to `useSidecarStore.healthy` and pause inference while it flips to false (sidecar restarting); restart-on-crash currently caps at 3 attempts inside 30s and then sets `errored=true`, so the loop must surface that to the user instead of silently retrying.
 - From V2-P2: read the active model id and measured cadence from `useModelStore.activeModelId` + `useModelStore.records[id].benchmark.sampleIntervalSec`; do not hardcode the sample interval. Resolve sidecar args via the `model_paths(modelId)` Tauri command (returns absolute `model_path` / `mmproj_path`) and pass them to `useSidecarStore.start({modelPath, mmprojPath, ctxSize})`.
 - From V2-P2: if `useModelStore.activeModelId` is null or `model_install_state(activeModelId)` reports either file missing, the sample loop must refuse to start the sidecar and surface a "Pick a model in Settings → AI" empty state; do not silently no-op.
+- From V2-P3: empirically choose between per-tick `captureScreen()` and a long-lived screen `MediaStream` snapshotted via `CaptureRuntime.extractFrame` — measure on Tauri webview (WKWebView macOS + WebView2 Windows). If per-tick prompts the OS picker every call (which is the documented behaviour on macOS Sequoia), switch to a long-lived track and document the persistent OS screen-recording indicator in onboarding; otherwise prefer per-tick because it minimises battery drain and indicator flicker.
+- From V2-P3: the orchestrator must pass the live local camera `MediaStreamTrack` to `captureFace(track)` (the track already running in `SessionView.tsx`); do not call `getUserMedia({ video: true })` a second time — that would acquire a second camera handle.
+- From V2-P3: capture functions surface `CaptureError` with typed `code`s (`screen_capture_denied`, `screen_capture_no_video`, `frame_extraction_failed`, etc.); the loop must map `screen_capture_denied` to the `ScreenCapturePermissionOverlay` (already implemented in `src/components/`) rather than retrying blindly. Other codes should pause the loop and surface a one-line toast.
+- From V2-P3: surface the `useSidecarStore.errored=true` terminal state via the new "Last error" affordance V2-P9 will add to Settings → AI — the loop must stop scheduling fresh ticks while errored is true and only resume after the user clicks Restart.
 
 ---
 
@@ -2058,6 +2067,8 @@ CARRY-FORWARD DEBTS (from prior phases — incorporate into this work):
 - From V2-P2: the Settings → AI category already exists (added in V2-P2 as `src/features/settings/categories/AiCategory.tsx`) and currently renders only the `ModelPickerContainer`; insert the master "Enable AI features" toggle ABOVE the picker — do not re-create the category. When the toggle is off, dim/disable the picker controls (or render a one-line "Enable AI features to manage models" empty state) so the user can't trigger downloads while the gate is closed.
 - From V2-P2: add a "Hugging Face token" management row that surfaces `getHfTokenRuntime().present()` + a "Forget" button calling `getHfTokenRuntime().clear()`; V2-P2 wires the save path inside the Gemma card but ships no UI affordance to clear or replace a stored token. Tokens are stored in the OS keychain under service `com.studyvis.app` / user `hf-access-token`.
 - From V2-P2: toggling AI off must NOT remove `useModelStore` records or delete on-disk model files — the toggle is a runtime gate, not an uninstall. The "Remove" button on each picker card is the only path to delete a downloaded model.
+- From V2-P3: when the master "Enable AI features" toggle flips on, call `requestScreenCapturePermission()` from `src/features/ai/captureScreen.ts` once to seed the OS prompt. If it rejects with `CaptureError.code === 'screen_capture_denied'`, mount `<ScreenCapturePermissionOverlay />` (`src/components/`) with `onRetry` re-invoking the helper; on rejection by other codes, surface a toast and leave the toggle off. Do NOT call captureScreen() to test the path — the one-shot helper is the dedicated permission seed.
+- From V2-P3: the Info.plist sibling file (`src-tauri/Info.plist`) now carries `NSScreenCaptureUsageDescription`; if V3 reintroduces an `Entitlements.plist` (after signing creds become available), also add `com.apple.security.device.screen-capture` there.
 
 ---
 
@@ -2279,6 +2290,11 @@ End-of-task exit sequence (mandatory):
 8. Single follow-up commit with message "<phase-id>: address Copilot review" (or "<phase-id>: no Copilot review within window" if step 6 timed out). Push to the same branch. If there were zero actionable findings AND zero stylistic nits AND no late-discovered debts, skip the follow-up commit.
 9. Auto-merge: `gh pr merge <num> --squash --delete-branch`. If branch protection blocks the merge because a required CI check is still running, wait for CI to settle (poll `gh pr checks <num>`) and retry once. If the branch went stale (main moved during the Copilot fix loop and the PR shows "out-of-date"), `git fetch origin && git pull --rebase origin main` on the feature branch, re-run the verification commands, push, and retry the merge — never force-push to main, never bypass required checks (no `--admin`).
 10. End-of-task summary in chat: (a) what shipped, (b) deviations from prompt or canonical-doc text and why, (c) Copilot findings addressed and skipped (with reason for each skip), (d) Inherited debts — anything that surfaced and belongs to a later phase, named by phase id (e.g. "V1-P12 must wire plugins.updater config + signing key"), and confirm each debt was also routed into BUILD-PROMPTS.md per step 1, (e) confirmation that the PR was merged and the branch deleted.
+
+---
+
+CARRY-FORWARD DEBTS (from prior phases — incorporate into this work):
+- From V2-P3: `captureScreen()` in `src/features/ai/captureScreen.ts` defers display selection to the OS picker. V3-P3 must add display enumeration (either via the `getDisplayMedia` `monitorTypeSurfaces` constraint, the experimental `getAllScreensMedia` API, or a Rust-side display-enumeration command) before compositing — `getDisplayMedia({ video: true })` alone always re-prompts.
 
 ---
 

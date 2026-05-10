@@ -27,7 +27,8 @@ use commands::sidecar::{sidecar_start, sidecar_status, sidecar_stop, SidecarStat
 #[cfg(desktop)]
 use commands::system::{
     autostart_is_enabled, autostart_set_enabled, system_minimize_to_tray_set_enabled,
-    system_open_data_folder, system_open_releases, MinimizeToTrayFlag, QuitFlag,
+    system_open_data_folder, system_open_releases, system_open_screen_capture_settings,
+    MinimizeToTrayFlag, QuitFlag,
 };
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -76,6 +77,8 @@ pub fn run() {
         system_open_data_folder,
         #[cfg(desktop)]
         system_open_releases,
+        #[cfg(desktop)]
+        system_open_screen_capture_settings,
         #[cfg(desktop)]
         sidecar_start,
         #[cfg(desktop)]

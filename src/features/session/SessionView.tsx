@@ -2,7 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { useShallow } from 'zustand/react/shallow'
 
+import { AudioDevicePicker } from '@/components/AudioDevicePicker'
 import { AuditLogPanel, type AuditLogEntry } from '@/components/AuditLogPanel'
+import { SessionEndedSplash } from '@/components/SessionEndedSplash'
 import { SessionTimer } from '@/components/SessionTimer'
 import { Button } from '@/components/ui/button'
 import { Kbd } from '@/components/ui/kbd'
@@ -29,6 +31,7 @@ import {
   type AuditEventDetail,
   type AuditEventKind,
 } from './audit'
+import { swapAudioInput } from './audioDevices'
 import { startHelloProtocol } from './hello'
 import { PTT_STATE_ACTION } from './lifecycle'
 import { startPomodoroController, type PeerOrderingEntry } from './pomodoro'
@@ -40,13 +43,16 @@ type PttPayload = { active: boolean }
 // Composed session feature surface (DESIGN-SYSTEM.md §8.3): tiles for self +
 // each peer, PTT-driven mute on the local audio track, an audit log right
 // rail, a Pomodoro timer in the bottom bar, and a Leave button. Mounted
-// whenever the session store reports an active session.
+// whenever the session store reports an active or recently-ended session
+// (the latter renders the SessionEndedSplash before reset() clears state).
 export function SessionView() {
+  const status = useSessionStore((s) => s.status)
   const room = useSessionStore((s) => s.room)
   const sessionLeave = useSessionStore((s) => s.leave)
   const sessionTopic = useSessionStore((s) => s.sessionTopic)
   const startedAt = useSessionStore((s) => s.startedAt)
   const peers = useSessionStore((s) => s.peers)
+  const endedSnapshot = useSessionStore((s) => s.endedSnapshot)
   const setPeerHello = useSessionStore((s) => s.setPeerHello)
   const { identity } = useIdentity()
   // The hello+audit+pomodoro effect depends only on stable identity slices
@@ -78,6 +84,10 @@ export function SessionView() {
     Record<string, MediaStream>
   >({})
   const [peerPtt, setPeerPtt] = useState<Record<string, boolean>>({})
+  const [activeAudioDeviceId, setActiveAudioDeviceId] = useState<string | null>(
+    null
+  )
+  const [audioSwapping, setAudioSwapping] = useState(false)
   const localStreamRef = useRef<MediaStream | null>(null)
   const pttSendRef = useRef<((payload: PttPayload) => Promise<void[]>) | null>(
     null
@@ -116,6 +126,13 @@ export function SessionView() {
         room.addStream(stream)
         setLocalStream(stream)
         localStreamRef.current = stream
+        // Surface the OS-chosen default deviceId so the audio picker can
+        // highlight it. enumerateDevices labels are only populated once
+        // a getUserMedia call has succeeded, so this also unblocks the
+        // picker's first render.
+        const initialDeviceId =
+          stream.getAudioTracks()[0]?.getSettings().deviceId ?? null
+        setActiveAudioDeviceId(initialDeviceId)
       } catch (err) {
         const message =
           err instanceof Error ? err.message : 'camera / mic unavailable'
@@ -316,6 +333,58 @@ export function SessionView() {
     })()
   }, [sessionLeave])
 
+  // ESC-to-leave during an active session. We don't trigger on 'ended'
+  // because the splash teardown is already in flight. Native-DOM listener
+  // (not a Radix Dialog) so it works regardless of whether a popover is
+  // open — the audit panel + footer are the focus owners 99% of the time.
+  useEffect(() => {
+    if (status !== 'active') return
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return
+      // Avoid stealing ESC from input fields (none today, but the AI dialog
+      // window in V2-P7 might mount inside this same view).
+      const target = e.target as HTMLElement | null
+      const tag = target?.tagName
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || target?.isContentEditable) {
+        return
+      }
+      e.preventDefault()
+      handleLeave()
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => {
+      window.removeEventListener('keydown', onKeyDown)
+    }
+  }, [status, handleLeave])
+
+  const handleSwapAudioDevice = useCallback(
+    async (nextDeviceId: string) => {
+      const stream = localStreamRef.current
+      if (!stream || audioSwapping) return
+      setAudioSwapping(true)
+      try {
+        await swapAudioInput(
+          nextDeviceId,
+          {
+            getUserMedia: (constraints) =>
+              navigator.mediaDevices.getUserMedia(constraints),
+            room,
+            localStream: stream,
+          },
+          usePttStore.getState().active
+        )
+        setActiveAudioDeviceId(nextDeviceId)
+      } catch (err) {
+        const message =
+          err instanceof Error ? err.message : 'could not switch microphone'
+        toast.error(message)
+      } finally {
+        setAudioSwapping(false)
+      }
+    },
+    [audioSwapping, room]
+  )
+
   const handleStartPomodoro = useCallback((preset: PomodoroPreset) => {
     pomodoroStartRef.current?.(preset)
   }, [])
@@ -329,6 +398,14 @@ export function SessionView() {
     [auditEvents, identity, peers]
   )
 
+  if (status === 'ended' && endedSnapshot) {
+    return (
+      <SessionEndedSplash
+        durationSeconds={endedSnapshot.durationSeconds}
+        peerNames={endedSnapshot.peerNames}
+      />
+    )
+  }
   if (!room) return null
 
   const peerEntries = Object.values(peers)
@@ -378,8 +455,15 @@ export function SessionView() {
         <AuditLogPanel events={auditEntries} />
       </div>
       <footer className="flex items-center justify-between gap-4 border-t border-border-subtle bg-bg-surface px-6 py-4 text-sm">
-        <span className="flex items-center gap-2 text-text-secondary">
-          hold <Kbd>{isMacLikePlatform() ? '⌘[' : 'Ctrl+['}</Kbd> to talk
+        <span className="flex items-center gap-3 text-text-secondary">
+          <span className="flex items-center gap-2">
+            hold <Kbd>{isMacLikePlatform() ? '⌘[' : 'Ctrl+['}</Kbd> to talk
+          </span>
+          <AudioDevicePicker
+            currentDeviceId={activeAudioDeviceId}
+            onSelect={handleSwapAudioDevice}
+            swapping={audioSwapping}
+          />
         </span>
         <span className="flex items-center gap-4">
           <span className="font-mono tabular-nums text-text-secondary">
@@ -395,7 +479,12 @@ export function SessionView() {
             onStop={handleStopPomodoro}
           />
         </span>
-        <Button variant="secondary" size="sm" onClick={handleLeave}>
+        <Button
+          variant="secondary"
+          size="sm"
+          onClick={handleLeave}
+          aria-keyshortcuts="Escape"
+        >
           Leave
         </Button>
       </footer>

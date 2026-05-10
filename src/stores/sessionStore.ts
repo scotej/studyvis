@@ -2,7 +2,18 @@ import { create } from 'zustand'
 
 import type { TopicRoom } from '@/lib/trystero'
 
-export type SessionStatus = 'idle' | 'active'
+export type SessionStatus = 'idle' | 'active' | 'ended'
+
+// Snapshot rendered by SessionEndedSplash during the SESSION_ENDED_SPLASH_MS
+// window after a session closes. Captured by lifecycle.ts in the leave
+// handler before the peers map is cleared by reset().
+export type SessionEndedSnapshot = {
+  // Wall-clock seconds the session ran for, or null if the session never
+  // had a startedAt (defensive — should not happen in practice).
+  durationSeconds: number | null
+  // Display names of the peers present at end time, in arbitrary order.
+  peerNames: string[]
+}
 
 // Mirrors the validated payload shape returned by the V1-P9 signed-hello
 // handshake. Inlined here so the store does not import a feature module
@@ -53,6 +64,14 @@ type SessionState = {
   // observed via signed-hello in this session. Used by the leave handler to
   // populate sessions.peer_pubkeys. NULL until at least one hello arrived.
   collectPeerPubkeys: () => string | null
+  // Flip status to 'ended' AND publish the splash snapshot in one mutation
+  // so the session view can render the SessionEndedSplash with stable
+  // content for its full lifetime. lifecycle.ts is the only caller — it
+  // computes durationSeconds and peerNames from the live state right
+  // before markEnded so the values reflect the session that just closed.
+  // Followed by `reset()` after SESSION_ENDED_SPLASH_MS.
+  endedSnapshot: SessionEndedSnapshot | null
+  markEnded: (snapshot: SessionEndedSnapshot) => void
   reset: () => void
 }
 
@@ -67,6 +86,7 @@ const INITIAL: Pick<
   | 'peers'
   | 'room'
   | 'leave'
+  | 'endedSnapshot'
 > = {
   status: 'idle',
   sessionTopic: null,
@@ -77,6 +97,7 @@ const INITIAL: Pick<
   peers: {},
   room: null,
   leave: null,
+  endedSnapshot: null,
 }
 
 export const useSessionStore = create<SessionState>((set, get) => ({
@@ -160,5 +181,9 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     const sorted = Array.from(seen).sort()
     return JSON.stringify(sorted)
   },
+  markEnded: (snapshot) =>
+    set((s) =>
+      s.status === 'active' ? { status: 'ended', endedSnapshot: snapshot } : s
+    ),
   reset: () => set({ ...INITIAL }),
 }))

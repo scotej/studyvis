@@ -73,6 +73,33 @@ export type {
   ChatContentBlock,
 } from './benchmark'
 
+export { captureFace, FACE_FRAME_SIZE, FACE_FRAME_QUALITY } from './captureFace'
+
+export {
+  captureScreen,
+  requestScreenCapturePermission,
+  SCREEN_FRAME_MAX_WIDTH,
+  SCREEN_FRAME_QUALITY,
+  __setScreenCaptureRuntime,
+  __resetScreenCaptureRuntime,
+} from './captureScreen'
+export type { ScreenCaptureRuntime } from './captureScreen'
+
+export {
+  CaptureError,
+  fitWidth,
+  __setCaptureRuntime,
+  __resetCaptureRuntime,
+  getCaptureRuntime,
+} from './captureShared'
+export type {
+  CaptureRuntime,
+  CaptureFrame,
+  CaptureErrorCode,
+  EncodeJpegRequest,
+  SourceCrop,
+} from './captureShared'
+
 export { ModelPicker } from './ModelPicker'
 export type {
   ModelPickerProps,
