@@ -65,7 +65,7 @@ Pinned versions are the floor; bump as needed but never silently downgrade.
 - **better-sqlite3** (via Tauri sidecar or rusqlite) — local persistent state.
 
 ### Tauri plugins (all v2.x)
-- **tauri-plugin-shell** — required for sidecar binaries (llama-server, future Whisper).
+- **tauri-plugin-shell** — required for sidecar binaries (llama-server).
 - **tauri-plugin-global-shortcut** — system-wide PTT and AI-dialog hotkeys.
 - **tauri-plugin-notification** — incoming-invite notifications.
 - **tauri-plugin-autostart** — opt-in launch-at-login.
@@ -76,7 +76,6 @@ Pinned versions are the floor; bump as needed but never silently downgrade.
 - **llama-server** (binary from llama.cpp build) — bundled per-platform as Tauri sidecar (`mac-arm64`, `mac-x64`, `win-x64`, `linux-x64`).
 - App spawns sidecar on demand, communicates via OpenAI-compatible HTTP on `127.0.0.1:<random-port>`. Exact request shape (image content block field names, multipart vs. base64) verified against the pinned llama-server build at V2-P1 time; the sample-loop pseudocode in §8 is illustrative.
 - Vision models loaded with paired `--mmproj` projector files.
-- **Whisper.cpp** as a second sidecar in V3 for voice-to-AI.
 
 ### Battery awareness (V2+)
 - Tauri 2 has no first-party battery API. Use the `battery` Rust crate inside `src-tauri/src/commands/system.rs` to expose `system_battery() -> { on_battery: bool, percent: u8 }`. The V2 sample loop polls this every 60 s and pauses inference when on battery and percent <20. Linux requires UPower; document fallback if absent.
@@ -429,8 +428,7 @@ studyvis/
 │  │  ├─ llama-server-mac-arm64
 │  │  ├─ llama-server-mac-x64
 │  │  ├─ llama-server-win-x64.exe
-│  │  ├─ llama-server-linux-x64
-│  │  └─ (V3) whisper-* per platform
+│  │  └─ llama-server-linux-x64
 │  ├─ capabilities/
 │  │  └─ default.json             # Tauri 2 ACL
 │  └─ src/

@@ -41,13 +41,12 @@ Each prompt assumes Claude Code has fresh context and no memory of prior session
   - V2-P8: Audit log AI events + post-session report
   - V2-P9: AI features toggle + DB migration + topic declaration
 - **V3 — Polish & breadth**
-  - V3-P1: Voice → AI (Whisper sidecar)
-  - V3-P2: Stats dashboard
-  - V3-P3: Custom keybindings UI
-  - V3-P4: Multi-monitor capture toggle
-  - V3-P5: Light theme polish
-  - V3-P6: BIP39 recovery flow
-  - V3-P7: Accessibility pass
+  - V3-P1: Stats dashboard
+  - V3-P2: Custom keybindings UI
+  - V3-P3: Multi-monitor capture toggle
+  - V3-P4: Light theme polish
+  - V3-P5: BIP39 recovery flow
+  - V3-P6: Accessibility pass
 
 ---
 
@@ -1214,7 +1213,7 @@ Categories to implement in V1:
 - Sessions — read-only history of past sessions from the sessions table; row clicks open a placeholder detail view (V2 fills this with the report).
 - Appearance — theme dark/light/auto, reduce-motion (V3 wires the actual reduced-motion behavior; for V1, just persist the toggle).
 - Notifications — incoming-invite notification on/off; minimize-to-tray on close on/off.
-- Shortcuts — view PTT keybindings; rebinding UI (KeybindCapture from §4) lands in V3-P3, but V1 displays the current bindings and a "Coming soon" note for the rebind button.
+- Shortcuts — view PTT keybindings; rebinding UI (KeybindCapture from §4) lands in V3-P2, but V1 displays the current bindings and a "Coming soon" note for the rebind button.
 - Network — TURN preference (auto / always-on / never), with a one-paragraph explanation of when TURN is needed.
 - Advanced — debug log toggle, "open data folder" button, "replay onboarding" button.
 
@@ -1862,7 +1861,7 @@ End-of-task exit sequence (mandatory):
 ---
 
 CARRY-FORWARD DEBTS (from prior phases — incorporate into this work):
-- From V1-P7: `Cmd/Ctrl+]` is already registered as a global shortcut but its handler is a no-op (it just logs). Wire it here to spawn or focus the AI dialog window with `transparent: true`, `decorations: false`, `alwaysOnTop: true` per ARCHITECTURE.md §12. If the dialog needs PTT semantics for V3-P1's voice-to-AI, also emit `ptt-ai-pressed` / `ptt-ai-released` events from the Rust handler and extend `pttStore` with an `aiActive` flag. The existing `on_window_event` handler is already label-scoped to `"main"`, so the dialog's close events won't be intercepted by V1-P7's hide-to-tray logic.
+- From V1-P7: `Cmd/Ctrl+]` is already registered as a global shortcut but its handler is a no-op (it just logs). Wire it here to spawn or focus the AI dialog window with `transparent: true`, `decorations: false`, `alwaysOnTop: true` per ARCHITECTURE.md §12. The existing `on_window_event` handler is already label-scoped to `"main"`, so the dialog's close events won't be intercepted by V1-P7's hide-to-tray logic.
 
 ---
 
@@ -1904,7 +1903,6 @@ Acceptance criteria:
 
 Notes:
 - Tauri 2 multi-window setup: see ARCHITECTURE.md §12. Use Context7 for current API.
-- Voice→AI is V3-P1; this prompt is text-only.
 - Stop after a manual test of all three intents.
 ````
 
@@ -2077,73 +2075,7 @@ Notes:
 
 V3 prompts are independent of each other; ship in any order. Each is its own focused improvement.
 
-## V3-P1: Voice → AI (Whisper sidecar)
-
-**Prompt**: bundle whisper.cpp as a second Tauri sidecar. Hold-to-record on Cmd/Ctrl+], stream audio to a local whisper-tiny model, transcribe on release, feed the transcript into the existing AI dialog flow as if typed. AI replies remain text. Acceptance: latency from key release to AI reply ≤ 4s on target hardware; transcripts stored only as transient strings, never written to disk.
-
-````
-You are working on StudyVis, a peer-to-peer desktop study app for close friends. Read these in full before making decisions:
-- /Users/scott/PycharmProjects/studyvis/PLAN.md
-- /Users/scott/PycharmProjects/studyvis/ARCHITECTURE.md
-- /Users/scott/PycharmProjects/studyvis/DESIGN-SYSTEM.md
-- /Users/scott/PycharmProjects/studyvis/CLAUDE.md
-- ~/.claude/projects/-Users-scott-PycharmProjects-studyvis/memory/MEMORY.md (carryovers from prior phases — debts that should land in this phase or be re-routed forward)
-
-These are the source of truth. If anything in this prompt conflicts with them, surface the conflict — don't silently deviate.
-
-Reasoning budget is unlimited. Use subagents freely (Explore, Plan, general-purpose). Call the advisor before committing to a non-obvious approach and once before declaring the task done.
-
-Use Context7 for library docs; prefer it to web search. Verify, don't assume — look up versions, APIs, and CLI flags before depending on them.
-
-Version policy: pinned versions in canonical docs are floors, not ceilings. Prefer current; note bumps in your end-of-task summary; never silently downgrade.
-
-File-shape policy: if a doc or this prompt prescribes a path or config shape that conflicts with the current framework idiom (e.g. modern Tauri 2 puts the builder in lib.rs not main.rs; TS 6 deprecates baseUrl), prefer the current idiom and note the deviation.
-
-Package-manager policy: use the manager indicated by the lockfile already in the repo (npm if package-lock.json, bun if bun.lockb, pnpm if pnpm-lock.yaml). Do not switch.
-
-Verification policy: prefer headless commands (tsc -b, vite build, storybook build, cargo check) — those are agent-verifiable. Avoid tauri dev, storybook dev, and cross-machine peer-to-peer tests in autonomous execution; mark those user-verifiable in the PR.
-
-Phase invariant: if this is a V1 prompt, do not create src/features/ai/, do not add AI deps to package.json or src-tauri/Cargo.toml, do not create tests/ai-eval/. Any such leak is a violation — surface and reject.
-
-Scope discipline: don't introduce features, abstractions, or polish beyond what this prompt asks. No backwards-compatibility shims. No comments unless the why is non-obvious. No new documentation files unless asked.
-
-End-of-task exit sequence (mandatory):
-1. Carry inherited debts forward into BUILD-PROMPTS.md. Audit the work for anything that surfaced and belongs to a later phase. For each debt, append a one-line bullet (format: `- From <this-phase-id>: <one sentence on what the future phase must do>`) to the target prompt's CARRY-FORWARD DEBTS section. That section lives INSIDE the fenced prompt block, directly above the `YOUR TASK:` line (separated by `---` dividers) so the next agent who pastes that prompt sees the debt without re-reading memory carryovers. Create the section with that exact heading if it doesn't yet exist. Stage this BUILD-PROMPTS.md change with the rest of the commit in step 2.
-2. Single commit. Stage only the files this task should change (including the BUILD-PROMPTS.md update from step 1). Message format: "<phase-id>: <subject>" (e.g. "V1-P3: identity creation").
-3. Push to a feature branch on github.com/scotej/studyvis (default branch main). Branch name: v<phase-major>/p<N>-<short-slug> where <phase-major> is 1 for V1 prompts, 2 for V2, 3 for V3 (e.g. v1/p3-identity, v2/p1-llama-sidecar). Direct push to main is not authorized.
-4. If GitHub rejects on email privacy, amend the commit with the noreply email and retry: git -c user.email='134114466+scotej@users.noreply.github.com' commit --amend --no-edit --reset-author
-5. Open a PR with: gh pr create --base main --head v<phase-major>/p<N>-<slug> --title "<phase-id>: <subject>". PR body has Summary and Test plan sections. Copilot code review is enabled on this repo and fires automatically when the PR opens — no need to add a reviewer manually.
-6. Wait for the Copilot review. Poll with `gh pr view <num> --json reviews --jq '[.reviews[] | select(.author.login == "copilot-pull-request-reviewer")] | length'` every ~30s for up to 10 minutes (`copilot-pull-request-reviewer` is the actual reviewer login, observed on PR #8). Note: Copilot's PR review is code-focused and may decline to review markdown-only or config-only PRs ("Copilot wasn't able to review any files…"); treat that as a clean pass and proceed. If no Copilot review lands within the window at all, note that in a PR comment and proceed to step 9.
-7. For each actionable Copilot finding (bug, correctness issue, missing edge case, security concern): fix it in code. Re-run the same verification commands the prompt prescribes (cargo test, tsc -b, vite build, lint, etc.). Skip purely stylistic nits or unactionable observations and list what you skipped (with one-line reason each) in the follow-up commit message. If the review surfaces additional inherited debts, append them to BUILD-PROMPTS.md per step 1 and include the change in the follow-up commit.
-8. Single follow-up commit with message "<phase-id>: address Copilot review" (or "<phase-id>: no Copilot review within window" if step 6 timed out). Push to the same branch. If there were zero actionable findings AND zero stylistic nits AND no late-discovered debts, skip the follow-up commit.
-9. Auto-merge: `gh pr merge <num> --squash --delete-branch`. If branch protection blocks the merge because a required CI check is still running, wait for CI to settle (poll `gh pr checks <num>`) and retry once. If the branch went stale (main moved during the Copilot fix loop and the PR shows "out-of-date"), `git fetch origin && git pull --rebase origin main` on the feature branch, re-run the verification commands, push, and retry the merge — never force-push to main, never bypass required checks (no `--admin`).
-10. End-of-task summary in chat: (a) what shipped, (b) deviations from prompt or canonical-doc text and why, (c) Copilot findings addressed and skipped (with reason for each skip), (d) Inherited debts — anything that surfaced and belongs to a later phase, named by phase id (e.g. "V1-P12 must wire plugins.updater config + signing key"), and confirm each debt was also routed into BUILD-PROMPTS.md per step 1, (e) confirmation that the PR was merged and the branch deleted.
-
----
-
-YOUR TASK: V3-P1 — Voice input to the AI agent via local Whisper.
-
-Concretely:
-
-1. Bundle a second Tauri sidecar: whisper-tiny binary from whisper.cpp, per-platform, under src-tauri/binaries/whisper-<platform>(.exe). Pin the build like llama-server (V2-P1).
-2. Add scripts/fetch-whisper.sh to download or build the binary.
-3. src-tauri/src/commands/whisper.rs:
-   - whisper_start(model_path) -> u16  (port for whisper.cpp's HTTP server, or use stdin/stdout if no HTTP mode)
-   - whisper_transcribe(wav_bytes) -> String
-   - whisper_stop()
-4. Frontend: extend AiDialogWindow with a hold-to-record state. Cmd/Ctrl+] held opens the dialog and records mic; release transcribes via whisper.cpp, populates the text box, runs the AI agent.
-5. Whisper-tiny model file fetched on first AI feature enable (already added Hugging Face download flow in V2-P2 — extend it).
-6. Privacy: the audio buffer never persists to disk. Transcript shown to user can be edited before submitting.
-7. Latency target: < 4s from key release to AI reply.
-8. Test with various accents and short phrases.
-9. Commit as "V3-P1: voice→AI".
-
-Acceptance criteria:
-- Hold Cmd/Ctrl+], say "five minute break", release: transcript appears, AI responds.
-- No audio files left on disk.
-````
-
-## V3-P2: Stats dashboard
+## V3-P1: Stats dashboard
 
 **Prompt**: a local-only Settings → Stats page showing focused-minutes per day/week, study streaks, top study partners. Source data is the local audit_events + sessions tables. Charts via Recharts or Visx (verify via Context7). Shouldn't transmit anywhere.
 
@@ -2187,7 +2119,7 @@ End-of-task exit sequence (mandatory):
 
 ---
 
-YOUR TASK: V3-P2 — Stats dashboard.
+YOUR TASK: V3-P1 — Stats dashboard.
 
 Concretely:
 
@@ -2200,14 +2132,14 @@ Concretely:
 3. Add as Settings → Stats category.
 4. Charts: Recharts or Visx (your call after a Context7 check).
 5. Tests with seeded data.
-6. Commit as "V3-P2: stats".
+6. Commit as "V3-P1: stats".
 
 Acceptance criteria:
 - Dashboard renders correctly with 0, 1, 30+ sessions of synthetic data.
 - All counts match what the underlying tables contain.
 ````
 
-## V3-P3: Custom keybindings UI
+## V3-P2: Custom keybindings UI
 
 **Prompt**: Settings → Shortcuts page with KeybindCapture component. Rebind PTT-friends, PTT-AI, and any future shortcuts. Conflicts detected and surfaced; reset-to-defaults available.
 
@@ -2251,7 +2183,7 @@ End-of-task exit sequence (mandatory):
 
 ---
 
-YOUR TASK: V3-P3 — Custom keybindings.
+YOUR TASK: V3-P2 — Custom keybindings.
 
 Concretely:
 
@@ -2264,14 +2196,14 @@ Concretely:
 3. On save, re-register the shortcut via tauri-plugin-global-shortcut.
 4. Persist via tauri-plugin-store.
 5. Tests covering capture, conflict, reset.
-6. Commit as "V3-P3: keybindings".
+6. Commit as "V3-P2: keybindings".
 
 Acceptance criteria:
 - Rebinding PTT-friends to Cmd+. immediately works without restart.
 - Conflicts are caught and explained.
 ````
 
-## V3-P4: Multi-monitor capture toggle
+## V3-P3: Multi-monitor capture toggle
 
 **Prompt**: Settings → AI gains "Capture displays" with options "Primary only" (current default), "All displays". Wire src/features/ai/captureScreen.ts to capture all selected displays into a single composited image (side-by-side or grid), passed to the AI for evaluation.
 
@@ -2315,7 +2247,7 @@ End-of-task exit sequence (mandatory):
 
 ---
 
-YOUR TASK: V3-P4 — Multi-monitor capture.
+YOUR TASK: V3-P3 — Multi-monitor capture.
 
 Concretely:
 
@@ -2324,13 +2256,13 @@ Concretely:
 3. Cap composite width at 2048; downscale uniformly.
 4. AI system prompt unchanged — model evaluates the composited frame.
 5. Test on a multi-monitor host.
-6. Commit as "V3-P4: multi-monitor".
+6. Commit as "V3-P3: multi-monitor".
 
 Acceptance criteria:
 - Two-monitor setup with one monitor on Wikipedia and the other on TikTok produces an "off_task" verdict from the AI when topic is "studying".
 ````
 
-## V3-P5: Light theme polish
+## V3-P4: Light theme polish
 
 **Prompt**: actually visit every component and verify the lightTokens variant from DESIGN-SYSTEM.md §2 renders cleanly. Likely small contrast adjustments to status colors. Add light-theme stories for every component.
 
@@ -2374,7 +2306,7 @@ End-of-task exit sequence (mandatory):
 
 ---
 
-YOUR TASK: V3-P5 — Light theme polish.
+YOUR TASK: V3-P4 — Light theme polish.
 
 Concretely:
 
@@ -2384,7 +2316,7 @@ Concretely:
 4. Update DESIGN-SYSTEM.md §2 if tokens change.
 5. Add light-theme variant to every existing story.
 6. Test the full app under "auto" theme on a system that switches dark/light at sunset.
-7. Commit as "V3-P5: light theme".
+7. Commit as "V3-P4: light theme".
 
 Acceptance criteria:
 - Every component renders cleanly in light theme.
@@ -2392,7 +2324,7 @@ Acceptance criteria:
 - Auto-theme follows OS without artifacts.
 ````
 
-## V3-P6: BIP39 recovery flow
+## V3-P5: BIP39 recovery flow
 
 **Prompt**: the missing piece from V1-P3. New onboarding step: "Recover existing identity from 24 words." Validates the mnemonic via @scure/bip39, derives keypair via the V1-P3 mnemonicToIdentity function, writes identity.json and seeds keychain. Friend re-pairing still required (other side has no idea you're the same person).
 
@@ -2436,7 +2368,7 @@ End-of-task exit sequence (mandatory):
 
 ---
 
-YOUR TASK: V3-P6 — BIP39 recovery flow.
+YOUR TASK: V3-P5 — BIP39 recovery flow.
 
 Concretely:
 
@@ -2448,14 +2380,14 @@ Concretely:
 3. Note clearly: recovering identity does NOT recover friend list. Friends need to re-pair on the new device.
 4. Handle the case of recovering on an already-active install: refuse with a confirm-overwrite step.
 5. Tests for happy path, invalid checksum, partial input.
-6. Commit as "V3-P6: recovery".
+6. Commit as "V3-P5: recovery".
 
 Acceptance criteria:
 - Pasting a known mnemonic restores the same Ed25519 pubkey from V1-P3 unit tests.
 - Onboarding offers the recovery path before generating a new identity.
 ````
 
-## V3-P7: Accessibility pass
+## V3-P6: Accessibility pass
 
 **Prompt**: full keyboard navigation audit. Reduced-motion mode actually disables animations. Screen-reader labels on every icon button, dynamic regions, dialog focus traps, status announcements. WCAG AA across the app.
 
@@ -2499,7 +2431,7 @@ End-of-task exit sequence (mandatory):
 
 ---
 
-YOUR TASK: V3-P7 — Accessibility pass.
+YOUR TASK: V3-P6 — Accessibility pass.
 
 Concretely:
 
@@ -2509,7 +2441,7 @@ Concretely:
 4. Heading hierarchy: one h1 per route, no skipped levels.
 5. Run axe-core or pa11y as a CI step.
 6. Test with VoiceOver (macOS), Narrator (Windows), Orca (Linux).
-7. Commit as "V3-P7: a11y".
+7. Commit as "V3-P6: a11y".
 
 Acceptance criteria:
 - Full session flow (open app → invite friend → join session → leave) usable from keyboard only.

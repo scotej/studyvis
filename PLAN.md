@@ -70,7 +70,6 @@ A complete, polished video-study app for friends. Zero AI code present. The app 
 - Recording sessions.
 - Stranger / public rooms.
 - Mobile clients.
-- Voice → AI (V3).
 
 **Success criteria:**
 - Two friends on different OSes can install, pair, invite, and complete a 25-minute study session without ever opening a help doc.
@@ -95,7 +94,6 @@ Layers focus detection, scoring, AI break dialogue, and post-session reports on 
 - Post-session report — per-user score (0-100), focused-time percentage, per-event log with AI reasoning, generated locally.
 
 **Non-goals (V2):**
-- Voice input to AI (V3).
 - Multi-monitor capture toggle (V3 — V2 captures primary display only).
 - No-camera fallback (V3+, deferred per user request).
 - Stats over time, dashboards, or social comparisons (V3).
@@ -112,7 +110,6 @@ Layers focus detection, scoring, AI break dialogue, and post-session reports on 
 Refinements that make the product feel native rather than functional. Not a single shipping unit — these are independent improvements that can ship in any order.
 
 **Features (in no particular order):**
-- Voice → AI: hold `Ctrl+]` to talk to the AI; Whisper-tiny sidecar transcribes locally; AI still responds in text only (no TTS).
 - Stats dashboard — focused minutes per day/week, study streaks, favourite study partners. Local only.
 - Custom keybindings UI for both PTTs.
 - Multi-monitor capture toggle.
