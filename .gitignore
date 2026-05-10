@@ -30,3 +30,9 @@ storybook-static
 # Tauri / Rust
 src-tauri/target
 src-tauri/gen/schemas
+
+# llama-server sidecar artifacts (fetched by scripts/fetch-llama-server.sh).
+# Per-platform release pipelines run the script before bundling; the produced
+# binaries + companion dylibs/dlls are too large for source control.
+src-tauri/binaries/llama-server-*
+src-tauri/binaries/llama-runtime-*/

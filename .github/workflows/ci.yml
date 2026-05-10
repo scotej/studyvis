@@ -59,6 +59,13 @@ jobs:
         with:
           workspaces: src-tauri -> target
 
+      # tauri.conf.json's bundle.externalBin entry requires the file to exist
+      # on disk during the cargo build script (V2-P1). The Rust job runs on
+      # macos-latest which is Apple Silicon, so the host triple matches the
+      # only one we need for cargo check.
+      - name: Fetch llama-server prebuild
+        run: bash scripts/fetch-llama-server.sh --triple aarch64-apple-darwin
+
       - name: cargo fmt
         working-directory: src-tauri
         run: cargo fmt --check

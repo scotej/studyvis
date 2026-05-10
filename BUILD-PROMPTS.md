@@ -1471,6 +1471,14 @@ End-of-task exit sequence (mandatory):
 
 ---
 
+CARRY-FORWARD DEBTS (from prior phases — incorporate into this work):
+
+- From V2-P1: pass both --model and --mmproj absolute paths to `useSidecarStore.start({ modelPath, mmprojPath, ctxSize })`; the Rust command validates both files exist and rejects with a typed error otherwise.
+- From V2-P1: persist downloaded GGUFs under `$APP_DATA/studyvis/models/<id>/` (Tauri `path::data_dir().join("studyvis/models/<id>/")`) — the same directory the sidecar log lives under (`logs/llama-server.log`); pick a non-conflicting subdir.
+- From V2-P1: the picker's "Select" handler must `await sidecar_stop` before launching the benchmark with a different model/mmproj; the Rust state rejects re-entry while a child is running.
+
+---
+
 YOUR TASK: V2-P2 — Model picker UX with on-device benchmarking.
 
 Implement ARCHITECTURE.md §8 (vision-model + mmproj table) and PLAN.md §5 V2 model-picker requirements.
@@ -1710,6 +1718,13 @@ End-of-task exit sequence (mandatory):
 8. Single follow-up commit with message "<phase-id>: address Copilot review" (or "<phase-id>: no Copilot review within window" if step 6 timed out). Push to the same branch. If there were zero actionable findings AND zero stylistic nits AND no late-discovered debts, skip the follow-up commit.
 9. Auto-merge: `gh pr merge <num> --squash --delete-branch`. If branch protection blocks the merge because a required CI check is still running, wait for CI to settle (poll `gh pr checks <num>`) and retry once. If the branch went stale (main moved during the Copilot fix loop and the PR shows "out-of-date"), `git fetch origin && git pull --rebase origin main` on the feature branch, re-run the verification commands, push, and retry the merge — never force-push to main, never bypass required checks (no `--admin`).
 10. End-of-task summary in chat: (a) what shipped, (b) deviations from prompt or canonical-doc text and why, (c) Copilot findings addressed and skipped (with reason for each skip), (d) Inherited debts — anything that surfaced and belongs to a later phase, named by phase id (e.g. "V1-P12 must wire plugins.updater config + signing key"), and confirm each debt was also routed into BUILD-PROMPTS.md per step 1, (e) confirmation that the PR was merged and the branch deleted.
+
+---
+
+CARRY-FORWARD DEBTS (from prior phases — incorporate into this work):
+
+- From V2-P1: the sample loop POSTs to `http://127.0.0.1:<useSidecarStore.port>/v1/chat/completions` — confirm that path works under Tauri's CSP (currently `security.csp: null`, which is permissive); if csp is tightened later, allowlist `http://127.0.0.1:*` for `connect-src`.
+- From V2-P1: subscribe to `useSidecarStore.healthy` and pause inference while it flips to false (sidecar restarting); restart-on-crash currently caps at 3 attempts inside 30s and then sets `errored=true`, so the loop must surface that to the user instead of silently retrying.
 
 ---
 
@@ -2035,6 +2050,9 @@ End-of-task exit sequence (mandatory):
 
 CARRY-FORWARD DEBTS (from prior phases — incorporate into this work):
 - From V1-P4: The migration framework lives in `src-tauri/src/db/migrations.rs` and uses a `schema_version` table + per-version SQL files run inside a single transaction. Add new V2 columns as a fresh migration file (e.g. `002_v2_topic_score.sql`) appended to the `MIGRATIONS` array — do not edit `001_initial.sql` in place. Keep the `schema_version` row insertion inside the same transaction as the schema changes, then `tx.commit()` once at the end so a partial failure rolls everything back.
+- From V2-P1: the `aiFeaturesEnabled` flag + snake_case key (`ai_features_enabled`) is already declared in `useSettingsStore` with default `false`; add the matching `setAiFeaturesEnabled` setter (mirroring `setMinimizeToTrayOnClose`'s catch-and-surface pattern) and have the master toggle on/off call it — do not re-declare the field.
+- From V2-P1: when the toggle flips off mid-session, call `useSidecarStore.stop()` so the llama-server child process terminates and the health-poll loop unwinds; the sidecar persists `state.errored=true` after the 3-attempt restart budget, so the AI category should also expose a "Last error" line + a "Restart" affordance that calls `start({modelPath, mmprojPath, ctxSize})` again.
+- From V2-P1: rotate `$APP_DATA/studyvis/logs/llama-server.log` — V2-P1 appends to a single growing file; cap by size or daily-rotate inside `src-tauri/src/commands/sidecar.rs::ensure_log_path` so a long-running install doesn't fill the disk.
 
 ---
 

@@ -16,6 +16,8 @@ use commands::sessions::{
     audit_event_insert, audit_events_list_for_session, sessions_insert, sessions_list,
 };
 #[cfg(desktop)]
+use commands::sidecar::{sidecar_start, sidecar_status, sidecar_stop, SidecarState};
+#[cfg(desktop)]
 use commands::system::{
     autostart_is_enabled, autostart_set_enabled, system_minimize_to_tray_set_enabled,
     system_open_data_folder, system_open_releases, MinimizeToTrayFlag, QuitFlag,
@@ -23,11 +25,8 @@ use commands::system::{
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    // tauri-plugin-shell is dropped from V1: the V1-P12 friends-only build
-    // ships no sidecar and no JS-side `shell` API surface. The Cargo.toml
-    // dep stays so V2-P1 (llama-server sidecar) can re-register without a
-    // dependency change.
     let builder = tauri::Builder::default()
+        .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_store::Builder::new().build())
         .plugin(tauri_plugin_opener::init());
@@ -70,6 +69,12 @@ pub fn run() {
         system_open_data_folder,
         #[cfg(desktop)]
         system_open_releases,
+        #[cfg(desktop)]
+        sidecar_start,
+        #[cfg(desktop)]
+        sidecar_stop,
+        #[cfg(desktop)]
+        sidecar_status,
     ]);
 
     let builder = builder.on_window_event(|window, event| {
@@ -99,7 +104,7 @@ pub fn run() {
         }
     });
 
-    builder
+    let app = builder
         .setup(|app| {
             let pool = db::init(app.handle())
                 .map_err(|e| -> Box<dyn std::error::Error> { format!("db init: {e}").into() })?;
@@ -111,12 +116,28 @@ pub fn run() {
                 let initial_minimize_to_tray =
                     read_minimize_to_tray_from_settings(app.handle()).unwrap_or(true);
                 app.manage(MinimizeToTrayFlag::new(initial_minimize_to_tray));
+                app.manage(SidecarState::new());
                 setup_desktop(app)?;
             }
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application");
+
+    // Switching from `.run(generate_context!())` to `.build(...)?.run(|...|)`
+    // gives us the RunEvent stream so we can stop the llama-server sidecar
+    // before the Tauri runtime tears down. ExitRequested fires on every
+    // requested shutdown path (tray-quit, Cmd+Q with minimize-to-tray=false,
+    // OS-initiated shutdown); Exit fires after the runtime commits to exit.
+    // Killing in either path is safe — the second hit no-ops because the
+    // child handle has already been taken.
+    app.run(|app_handle, event| match event {
+        #[cfg(desktop)]
+        tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit => {
+            SidecarState::kill_blocking(app_handle);
+        }
+        _ => {}
+    });
 }
 
 // Reads the persisted `minimize_to_tray_on_close` flag from

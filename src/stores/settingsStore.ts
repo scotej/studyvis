@@ -12,6 +12,11 @@ export type SettingsValues = {
   minimizeToTrayOnClose: boolean
   debugLogEnabled: boolean
   turnPreference: TurnPreference
+  // V2 AI feature gate. Defaults to `false` so V1 builds and the first V2
+  // launch keep the llama-server sidecar dormant. The toggle UI + setter
+  // land in V2-P9; for V2-P1 the value is read-only and consumed by
+  // src/features/ai/sidecar.ts to gate `useSidecarStore.start(...)`.
+  aiFeaturesEnabled: boolean
 }
 
 export const SETTINGS_FILE = 'settings.json'
@@ -22,10 +27,11 @@ export const SETTINGS_KEY_INVITE_NOTIFY = 'incoming_invite_notification_enabled'
 export const SETTINGS_KEY_MINIMIZE_TRAY = 'minimize_to_tray_on_close'
 export const SETTINGS_KEY_DEBUG_LOG = 'debug_log_enabled'
 export const SETTINGS_KEY_TURN_PREF = 'turn_preference'
+export const SETTINGS_KEY_AI_FEATURES = 'ai_features_enabled'
 
 // Defaults match the V1 acceptance criteria + DESIGN-SYSTEM.md §8.5: dark
 // theme on, reduce-motion off, OS notification on for invites, minimize-to-
-// tray on (preserves V1-P7 behavior), debug log off, TURN auto.
+// tray on (preserves V1-P7 behavior), debug log off, TURN auto, AI off.
 export const DEFAULT_SETTINGS: SettingsValues = {
   theme: 'dark',
   reduceMotion: false,
@@ -33,6 +39,7 @@ export const DEFAULT_SETTINGS: SettingsValues = {
   minimizeToTrayOnClose: true,
   debugLogEnabled: false,
   turnPreference: 'auto',
+  aiFeaturesEnabled: false,
 }
 
 export type SettingsStatus = 'loading' | 'ready' | 'error'
@@ -156,6 +163,7 @@ export async function hydrateValuesFromStore(
     tray: await store.get(SETTINGS_KEY_MINIMIZE_TRAY),
     debug: await store.get(SETTINGS_KEY_DEBUG_LOG),
     turn: await store.get(SETTINGS_KEY_TURN_PREF),
+    ai: await store.get(SETTINGS_KEY_AI_FEATURES),
   }
 
   let theme: ThemeMode = isThemeMode(stored.theme)
@@ -198,6 +206,10 @@ export async function hydrateValuesFromStore(
       ),
       debugLogEnabled: readBool(stored.debug, DEFAULT_SETTINGS.debugLogEnabled),
       turnPreference: turn,
+      aiFeaturesEnabled: readBool(
+        stored.ai,
+        DEFAULT_SETTINGS.aiFeaturesEnabled
+      ),
     },
     wroteMigration,
   }
