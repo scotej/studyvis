@@ -1,0 +1,9 @@
+{
+  "id": "case-012-moderate-twitter",
+  "declared_topic": "Writing a thesis chapter on sociolinguistics",
+  "face_path": "fixtures/case-012-face.jpg",
+  "screen_path": "fixtures/case-012-screen.jpg",
+  "expected_severity": "moderate",
+  "scenario": "User scrolling; Twitter/X timeline with multiple unrelated posts, image attachments, and a video preview.",
+  "notes": "Social media — classic moderate. Should not escalate to blatant unless gameplay/video is dominating the frame."
+}

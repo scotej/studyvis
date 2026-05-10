@@ -1,0 +1,9 @@
+{
+  "id": "case-016-blatant-tiktok",
+  "declared_topic": "Finishing the linear algebra homework set",
+  "face_path": "fixtures/case-016-face.jpg",
+  "screen_path": "fixtures/case-016-screen.jpg",
+  "expected_severity": "blatant",
+  "scenario": "User watching screen; TikTok web full-bleed vertical video, like/share counters visible, comment overlay on the side.",
+  "notes": "TikTok-style scrolling is the canonical blatant example."
+}

@@ -1,0 +1,9 @@
+{
+  "id": "case-010-mild-news-browsing",
+  "declared_topic": "Studying integral calculus for an exam",
+  "face_path": "fixtures/case-010-face.jpg",
+  "screen_path": "fixtures/case-010-screen.jpg",
+  "expected_severity": "mild",
+  "scenario": "User looking at screen; browser tab on BBC News showing a non-entertainment article headline about a science announcement.",
+  "notes": "Neutral browsing — not entertainment, but unrelated to declared topic."
+}

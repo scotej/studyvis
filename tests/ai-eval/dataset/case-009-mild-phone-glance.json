@@ -1,0 +1,9 @@
+{
+  "id": "case-009-mild-phone-glance",
+  "declared_topic": "Implementing REST API endpoints in Go",
+  "face_path": "fixtures/case-009-face.jpg",
+  "screen_path": "fixtures/case-009-screen.jpg",
+  "expected_severity": "mild",
+  "scenario": "User looking down at a phone in their hand; screen still shows GoLand IDE with a handler function open but the user is visibly disengaged.",
+  "notes": "Mild distraction: relevant content on screen but user briefly attending elsewhere."
+}

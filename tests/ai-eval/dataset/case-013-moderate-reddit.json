@@ -1,0 +1,9 @@
+{
+  "id": "case-013-moderate-reddit",
+  "declared_topic": "Reviewing organic chemistry mechanisms for finals",
+  "face_path": "fixtures/case-013-face.jpg",
+  "screen_path": "fixtures/case-013-screen.jpg",
+  "expected_severity": "moderate",
+  "scenario": "User browsing screen; Reddit r/funny front page with memes and image previews visible.",
+  "notes": "Social media off-topic content."
+}

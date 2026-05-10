@@ -1,0 +1,9 @@
+{
+  "id": "case-006-on-task-essay",
+  "declared_topic": "Writing an essay on Renaissance art history",
+  "face_path": "fixtures/case-006-face.jpg",
+  "screen_path": "fixtures/case-006-screen.jpg",
+  "expected_severity": "on_task",
+  "scenario": "User typing; Google Docs shows a draft essay titled 'Brunelleschi's Dome and the Birth of Linear Perspective' with citations.",
+  "notes": "Non-STEM topic; should still classify as on_task when content matches."
+}

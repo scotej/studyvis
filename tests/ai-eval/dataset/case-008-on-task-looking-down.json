@@ -1,0 +1,9 @@
+{
+  "id": "case-008-on-task-looking-down",
+  "declared_topic": "Implementing a red-black tree from CLRS",
+  "face_path": "fixtures/case-008-face.jpg",
+  "screen_path": "fixtures/case-008-screen.jpg",
+  "expected_severity": "on_task",
+  "scenario": "User glancing down at a paper notebook (CLRS textbook open beside laptop); screen shows a CLion IDE with a half-written red-black tree implementation in C++.",
+  "notes": "Brief look-away with topic-aligned screen content. Tests the 'default to on_task when uncertain' rule — momentary face-off-screen should not escalate when the screen is clearly on-topic."
+}

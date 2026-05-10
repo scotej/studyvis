@@ -1,0 +1,9 @@
+{
+  "id": "case-004-on-task-math",
+  "declared_topic": "Solving second-order differential equations",
+  "face_path": "fixtures/case-004-face.jpg",
+  "screen_path": "fixtures/case-004-screen.jpg",
+  "expected_severity": "on_task",
+  "scenario": "User writing notes off-screen, glance angled down; screen shows Wolfram Alpha with a worked second-order ODE and step-by-step solution.",
+  "notes": "Math software counts as on_task per ARCHITECTURE §8 rules."
+}
