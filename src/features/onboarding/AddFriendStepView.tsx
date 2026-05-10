@@ -27,6 +27,9 @@ export function AddFriendStepView({
     <OnboardingStep
       ariaLabel="Add your first friend"
       progress={progress}
+      // Label is intentionally state-aware; the handler is uniform because both
+      // states semantically mean "advance onboarding." Pre-pair, the user is
+      // skipping; post-pair, the user is continuing — same exit, honest copy.
       primaryAction={{
         label: justAdded ? 'Continue' : 'Skip for now',
         onClick: onContinue,

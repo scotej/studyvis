@@ -12,7 +12,7 @@ The product exists because every existing alternative either (a) routes everythi
 
 - Small groups of close friends (2–4 per session) who already know each other by name.
 - Hardware floor: 16GB RAM, mid-to-low-tier CPU, no dedicated GPU.
-- Operating systems: macOS (Apple Silicon + Intel), Windows 10/11. Linux is best-effort (see §6).
+- Operating systems: macOS (Apple Silicon + Intel), Windows 10/11. Linux is deferred to V3 pending V0 re-run (see §5).
 - Anonymous to the public internet; pseudonymous to friends (chosen display name + Ed25519 keypair).
 - May expand to wider groups later, but every design decision should pass the "would my four friends like this?" test before the "would a stranger trust this?" test.
 

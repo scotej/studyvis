@@ -36,7 +36,7 @@ export function VideoTile({
   }, [stream])
 
   return (
-    <div
+    <figure
       className={cn(
         'group relative flex aspect-video flex-col overflow-hidden rounded-lg border border-border-default bg-bg-sunk',
         className
@@ -53,9 +53,8 @@ export function VideoTile({
         playsInline
         muted={isLocal}
         className="h-full w-full object-cover"
-        aria-label={`${name} video`}
       />
-      <div className="pointer-events-none absolute inset-x-0 bottom-0 flex items-center justify-between gap-3 bg-overlay-glass px-4 py-2.5">
+      <figcaption className="pointer-events-none absolute inset-x-0 bottom-0 flex items-center justify-between gap-3 bg-overlay-glass px-4 py-2.5">
         <div className="flex min-w-0 items-center gap-2">
           <FocusIndicator state={resolvedState} />
           <span className="truncate text-sm font-medium text-text-primary">
@@ -63,7 +62,7 @@ export function VideoTile({
           </span>
         </div>
         <PttIndicator active={ptt} />
-      </div>
-    </div>
+      </figcaption>
+    </figure>
   )
 }

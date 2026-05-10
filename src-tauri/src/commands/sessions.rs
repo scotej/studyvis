@@ -9,7 +9,7 @@ fn lock<'a>(
 }
 
 #[tauri::command]
-pub async fn sessions_insert(
+pub fn sessions_insert(
     state: State<'_, DbPool>,
     id: String,
     started_at: i64,
@@ -32,13 +32,13 @@ pub async fn sessions_insert(
 }
 
 #[tauri::command]
-pub async fn sessions_list(state: State<'_, DbPool>) -> Result<Vec<sessions::SessionRow>, String> {
+pub fn sessions_list(state: State<'_, DbPool>) -> Result<Vec<sessions::SessionRow>, String> {
     let conn = lock(&state)?;
     sessions::list(&conn).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-pub async fn audit_event_insert(
+pub fn audit_event_insert(
     state: State<'_, DbPool>,
     session_id: String,
     ts: i64,
@@ -57,4 +57,13 @@ pub async fn audit_event_insert(
         sig,
     };
     audit_events::insert(&conn, &row).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn audit_events_list_for_session(
+    state: State<'_, DbPool>,
+    session_id: String,
+) -> Result<Vec<audit_events::AuditEventRow>, String> {
+    let conn = lock(&state)?;
+    audit_events::list_for_session(&conn, &session_id).map_err(|e| e.to_string())
 }

@@ -225,7 +225,7 @@ These are the only components allowed to read raw HTML / Radix primitives. Modif
 
 | Component | Notes |
 |-|-|
-| `Button` | Variants: `default`, `secondary`, `ghost`, `destructive`. Sizes: `sm`, `md`, `lg`, `icon`. |
+| `Button` | Variants: `default`, `secondary`, `ghost`, `destructive`, `outline`, `link`. Sizes: `default`, `xs`, `sm`, `lg`, `icon`, `icon-xs`, `icon-sm`, `icon-lg`. |
 | `Input` | Single-line text. |
 | `Textarea` | |
 | `Label` | |
@@ -236,7 +236,7 @@ These are the only components allowed to read raw HTML / Radix primitives. Modif
 | `Tooltip` | Default delay 400 ms. |
 | `Toast` | `sonner`-backed (`src/components/ui/sonner.tsx`). Bottom-right. Auto-dismiss 4 s default. |
 | `Avatar` | With fallback initials. Always circular, sizes 24/32/48. |
-| `Badge` | Pill, color variants from status tokens. |
+| `Badge` | Pill. Variants: `default`, `secondary`, `destructive`, `outline`, `ghost`, `link`. Status-toned variants (focused / warning / alerted) are V2 polish. |
 | `Switch` | |
 | `Slider` | |
 | `RadioGroup` | One-of-N selection. Used by Settings → Appearance (theme) and Settings → Network (TURN preference). |
@@ -294,7 +294,9 @@ Use motion only when it serves comprehension. Five permitted uses:
 4. **Audit log new row**: `fast` duration, `out` easing, fade + 6-px slide-down. New row only — no re-shuffles.
 5. **Post-session score reveal**: `reveal` duration, `spring` easing, gauge sweep from 0 to final score. Sound: none.
 
-Everything else: instant. No hover bounces, no card lifts, no spinning loaders (use shadcn's `Skeleton` instead). Reduced-motion preference (V3) replaces all of the above with simple opacity changes.
+State-change transitions on `color` / `background-color` / `border-color` / `opacity` are also allowed for discrete UI state changes (hover, focus, selected / `aria-current`, transient indicator visibility such as the PTT mic dot or a progress-step fill), with `duration: fast` and `easing: out`. These are not animations — they soften the swap between two stable states.
+
+Everything else — layout, transform, and decorative motion — is instant. No card lifts, no slide-ins, no scale-on-hover, no bounces, no spinning loaders (use shadcn's `Skeleton` instead). Reduced-motion preference (V3) replaces all of the above with simple opacity changes.
 
 ## 7. Six rules that keep it consistent
 

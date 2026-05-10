@@ -21,3 +21,11 @@ export async function auditEventInsert(row: AuditEventRecord): Promise<void> {
     sig: row.sig,
   })
 }
+
+export async function auditEventsListForSession(
+  sessionId: string
+): Promise<AuditEventRecord[]> {
+  return invoke<AuditEventRecord[]>('audit_events_list_for_session', {
+    sessionId,
+  })
+}

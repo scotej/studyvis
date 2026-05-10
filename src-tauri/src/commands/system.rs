@@ -22,17 +22,21 @@ impl QuitFlag {
     }
 }
 
-// Default true: matches V1-P7 close-to-tray behavior; the JS settings store
-// pushes the user's saved preference on first render via
-// `system_minimize_to_tray_set_enabled`. Reading via Relaxed is safe because
-// the only consumer (`on_window_event`) does not need to race with the JS
-// command — last-write-wins is fine and the cost of a stale read is one
-// duplicate close attempt.
+// Initial value comes from `settings.json` at app boot (see
+// `read_minimize_to_tray_from_settings` in lib.rs); the JS settings store
+// pushes subsequent updates via `system_minimize_to_tray_set_enabled`. Reading
+// from disk during `setup` closes a Cmd+W race window where the previous
+// implementation defaulted to `true` until JS hydrated, so a user with the
+// flag persisted as `false` could see one stray hide-to-tray on the first
+// close before settings hydration. Relaxed ordering is safe because the only
+// consumer (`on_window_event`) does not need to race with the JS command —
+// last-write-wins is fine and the cost of a stale read is one duplicate
+// close attempt.
 pub struct MinimizeToTrayFlag(pub AtomicBool);
 
 impl MinimizeToTrayFlag {
-    pub fn new() -> Self {
-        Self(AtomicBool::new(true))
+    pub fn new(initial: bool) -> Self {
+        Self(AtomicBool::new(initial))
     }
 
     pub fn set<R: Runtime>(app: &AppHandle<R>, enabled: bool) {

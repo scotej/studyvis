@@ -9,6 +9,7 @@ export type OnboardingStepAction = {
   type?: 'submit' | 'button'
   disabled?: boolean
   busy?: boolean
+  ariaDescribedby?: string
 }
 
 export type OnboardingStepProgress = {
@@ -78,6 +79,7 @@ export function OnboardingStep({
               aria-disabled={
                 primaryAction.disabled || primaryAction.busy ? true : undefined
               }
+              aria-describedby={primaryAction.ariaDescribedby}
             >
               {primaryAction.label}
             </Button>

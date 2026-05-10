@@ -8,7 +8,7 @@ import {
   type AuditEventCore,
   type AuditEventDetail,
   type AuditEventKind,
-} from '@/features/session/audit'
+} from '@/lib/audit-types'
 import { verifyMessage } from '@/lib/crypto/identity'
 import { auditEventInsert } from '@/lib/db/audit'
 import { bytesToHex, hexToBytes } from '@/lib/encoding'

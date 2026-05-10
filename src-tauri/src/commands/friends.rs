@@ -8,14 +8,18 @@ fn lock<'a>(
     state.0.lock().map_err(|e| format!("db poisoned: {e}"))
 }
 
+// These commands hold a `std::sync::MutexGuard` for their entire body. Keeping
+// them sync (no `async`) means a future caller cannot accidentally `.await`
+// across the lock and produce a deadlock. Tauri runs sync commands on its IPC
+// thread pool, which matches the rusqlite blocking call shape.
 #[tauri::command]
-pub async fn friends_list(state: State<'_, DbPool>) -> Result<Vec<friends::Friend>, String> {
+pub fn friends_list(state: State<'_, DbPool>) -> Result<Vec<friends::Friend>, String> {
     let conn = lock(&state)?;
     friends::list(&conn).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-pub async fn friends_add(
+pub fn friends_add(
     state: State<'_, DbPool>,
     ed_pubkey: String,
     x_pubkey: String,
@@ -27,14 +31,14 @@ pub async fn friends_add(
 }
 
 #[tauri::command]
-pub async fn friends_remove(state: State<'_, DbPool>, ed_pubkey: String) -> Result<(), String> {
+pub fn friends_remove(state: State<'_, DbPool>, ed_pubkey: String) -> Result<(), String> {
     let conn = lock(&state)?;
     friends::remove(&conn, &ed_pubkey).map_err(|e| e.to_string())?;
     Ok(())
 }
 
 #[tauri::command]
-pub async fn friends_update_last_studied(
+pub fn friends_update_last_studied(
     state: State<'_, DbPool>,
     ed_pubkey: String,
     ts: i64,
@@ -45,7 +49,7 @@ pub async fn friends_update_last_studied(
 }
 
 #[tauri::command]
-pub async fn friends_get_x_pubkey(
+pub fn friends_get_x_pubkey(
     state: State<'_, DbPool>,
     ed_pubkey: String,
 ) -> Result<Option<String>, String> {

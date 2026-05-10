@@ -74,6 +74,7 @@ export function IdentitySetup({
         onClick: () => void handleContinue(),
         disabled: !acknowledged,
         busy: submitting,
+        ariaDescribedby: 'identity-ack-text',
       }}
     >
       <header className="flex flex-col items-center gap-3 text-center">

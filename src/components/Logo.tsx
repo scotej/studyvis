@@ -28,7 +28,7 @@ export function Logo({
   return (
     <svg
       role="img"
-      aria-label="StudyVis"
+      aria-label="studyvis"
       width={px}
       height={px}
       viewBox={`0 0 ${px} ${px}`}

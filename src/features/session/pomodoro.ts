@@ -18,10 +18,18 @@
 // tracks the 5-state model (idle | work-25 | rest-5 | work-50 | rest-10)
 // requested by the V1-P9 prompt; the wire layer is just less granular.
 
-import type { PomodoroPhase, PomodoroPreset } from '@/lib/pomodoro-types'
+import type {
+  PomodoroPhase,
+  PomodoroPreset,
+  PomodoroSnapshot,
+} from '@/lib/pomodoro-types'
 import type { TopicRoom } from '@/lib/trystero'
 
-export type { PomodoroPhase, PomodoroPreset } from '@/lib/pomodoro-types'
+export type {
+  PomodoroPhase,
+  PomodoroPreset,
+  PomodoroSnapshot,
+} from '@/lib/pomodoro-types'
 
 export const POMODORO_ACTION = 'pomodoro'
 export const BROADCAST_INTERVAL_MS = 5_000
@@ -90,17 +98,6 @@ export function pickNextBroadcaster(
     return a.ed_pubkey_hex < b.ed_pubkey_hex ? -1 : 1
   })
   return sorted[0].ed_pubkey_hex
-}
-
-// Public state slice the UI subscribes to. Lives in `pomodoroStore.ts` so
-// the controller below can be plain functions without React entanglement.
-export type PomodoroSnapshot = {
-  phase: PomodoroPhase
-  endsAt: number | null
-  preset: PomodoroPreset | null
-  broadcasterEdPubkey: string | null
-  // Iff this peer is currently broadcasting.
-  iAmBroadcaster: boolean
 }
 
 export type ControllerArgs = {

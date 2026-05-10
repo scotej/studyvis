@@ -69,7 +69,9 @@ export function Home() {
       <main
         className="flex min-h-screen items-center justify-center bg-bg-base text-text-secondary"
         aria-busy="true"
-      />
+      >
+        <span className="sr-only">Loading…</span>
+      </main>
     )
   }
 

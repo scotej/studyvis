@@ -12,7 +12,9 @@ use commands::identity::{
     identity_box_decrypt, identity_box_encrypt, identity_exists, identity_load_record,
     identity_save_keys, identity_save_record, identity_sign,
 };
-use commands::sessions::{audit_event_insert, sessions_insert, sessions_list};
+use commands::sessions::{
+    audit_event_insert, audit_events_list_for_session, sessions_insert, sessions_list,
+};
 #[cfg(desktop)]
 use commands::system::{
     autostart_is_enabled, autostart_set_enabled, system_minimize_to_tray_set_enabled,
@@ -21,13 +23,19 @@ use commands::system::{
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // tauri-plugin-shell is dropped from V1: the V1-P12 friends-only build
+    // ships no sidecar and no JS-side `shell` API surface. The Cargo.toml
+    // dep stays so V2-P1 (llama-server sidecar) can re-register without a
+    // dependency change.
     let builder = tauri::Builder::default()
-        .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_store::Builder::new().build())
         .plugin(tauri_plugin_opener::init());
 
-    #[cfg(all(desktop, any(target_os = "macos", target_os = "windows")))]
+    // `tauri::generate_handler!` accepts outer attributes on individual
+    // entries (each becomes a match arm in the generated dispatcher), so a
+    // single invocation with `#[cfg(...)]` gates per-command replaces the
+    // previous three near-duplicate handler blocks.
     let builder = builder.invoke_handler(tauri::generate_handler![
         friends_list,
         friends_add,
@@ -37,47 +45,31 @@ pub fn run() {
         sessions_insert,
         sessions_list,
         audit_event_insert,
+        audit_events_list_for_session,
+        #[cfg(any(target_os = "macos", target_os = "windows"))]
         identity_save_keys,
+        #[cfg(any(target_os = "macos", target_os = "windows"))]
         identity_exists,
+        #[cfg(any(target_os = "macos", target_os = "windows"))]
         identity_save_record,
+        #[cfg(any(target_os = "macos", target_os = "windows"))]
         identity_load_record,
+        #[cfg(any(target_os = "macos", target_os = "windows"))]
         identity_sign,
+        #[cfg(any(target_os = "macos", target_os = "windows"))]
         identity_box_decrypt,
+        #[cfg(any(target_os = "macos", target_os = "windows"))]
         identity_box_encrypt,
+        #[cfg(desktop)]
         autostart_set_enabled,
+        #[cfg(desktop)]
         autostart_is_enabled,
+        #[cfg(desktop)]
         system_minimize_to_tray_set_enabled,
+        #[cfg(desktop)]
         system_open_data_folder,
+        #[cfg(desktop)]
         system_open_releases,
-    ]);
-
-    #[cfg(all(desktop, not(any(target_os = "macos", target_os = "windows"))))]
-    let builder = builder.invoke_handler(tauri::generate_handler![
-        friends_list,
-        friends_add,
-        friends_remove,
-        friends_update_last_studied,
-        friends_get_x_pubkey,
-        sessions_insert,
-        sessions_list,
-        audit_event_insert,
-        autostart_set_enabled,
-        autostart_is_enabled,
-        system_minimize_to_tray_set_enabled,
-        system_open_data_folder,
-        system_open_releases,
-    ]);
-
-    #[cfg(not(desktop))]
-    let builder = builder.invoke_handler(tauri::generate_handler![
-        friends_list,
-        friends_add,
-        friends_remove,
-        friends_update_last_studied,
-        friends_get_x_pubkey,
-        sessions_insert,
-        sessions_list,
-        audit_event_insert,
     ]);
 
     let builder = builder.on_window_event(|window, event| {
@@ -109,20 +101,47 @@ pub fn run() {
 
     builder
         .setup(|app| {
-            let pool = db::init(&app.handle())
+            let pool = db::init(app.handle())
                 .map_err(|e| -> Box<dyn std::error::Error> { format!("db init: {e}").into() })?;
             app.manage(pool);
 
             #[cfg(desktop)]
             {
                 app.manage(QuitFlag::new());
-                app.manage(MinimizeToTrayFlag::new());
+                let initial_minimize_to_tray =
+                    read_minimize_to_tray_from_settings(app.handle()).unwrap_or(true);
+                app.manage(MinimizeToTrayFlag::new(initial_minimize_to_tray));
                 setup_desktop(app)?;
             }
             Ok(())
         })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+// Reads the persisted `minimize_to_tray_on_close` flag from
+// `settings.json` (the LazyStore file written by `useSettingsStore`) so the
+// boot value of `MinimizeToTrayFlag` reflects the user's saved preference
+// before JS hydration. The settings file lives at
+// `path::app_data_dir()/settings.json` because tauri-plugin-store resolves
+// relative paths via `BaseDirectory::AppData` — this is a different
+// directory from `db::data_dir()` (which is `path::data_dir()/studyvis`)
+// where `identity.json` and `app.db` live.
+//
+// Returns `None` for any failure mode (file missing, unreadable, malformed
+// JSON, key absent, key wrong type) and lets the caller substitute the
+// default. `serde_json::Value` keeps parsing forgiving so future schema
+// additions don't break boot.
+#[cfg(desktop)]
+fn read_minimize_to_tray_from_settings<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+) -> Option<bool> {
+    const SETTINGS_FILE: &str = "settings.json";
+    const KEY_MINIMIZE_TO_TRAY: &str = "minimize_to_tray_on_close";
+    let dir = app.path().app_data_dir().ok()?;
+    let bytes = std::fs::read(dir.join(SETTINGS_FILE)).ok()?;
+    let value: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
+    value.get(KEY_MINIMIZE_TO_TRAY)?.as_bool()
 }
 
 #[cfg(desktop)]

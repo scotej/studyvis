@@ -1,10 +1,13 @@
+-- Pre-release migration: V1 has no shipped users, so this file is amended
+-- in place rather than chained behind a follow-up migration. Dev DB files
+-- created before this amendment are harmless — SQLite tolerates extra
+-- columns no Rust accessor reads or writes.
 CREATE TABLE friends (
-    ed_pubkey_hex        TEXT PRIMARY KEY,
-    x_pubkey_hex         TEXT NOT NULL,
-    display_name         TEXT,
-    paired_at            INTEGER,
-    last_studied_with    INTEGER,
-    mnemonic_fingerprint TEXT
+    ed_pubkey_hex     TEXT PRIMARY KEY,
+    x_pubkey_hex      TEXT NOT NULL,
+    display_name      TEXT,
+    paired_at         INTEGER,
+    last_studied_with INTEGER
 );
 
 CREATE TABLE sessions (

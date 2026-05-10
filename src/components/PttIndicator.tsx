@@ -8,10 +8,12 @@ export type PttIndicatorProps = {
 }
 
 export function PttIndicator({ active, className }: PttIndicatorProps) {
+  // Decorative: parent surfaces (VideoTile, audit log) already announce PTT
+  // state via the peer-row label and audit events. Keeping aria-hidden stable
+  // avoids screen readers tracking the opacity-faded element across toggles.
   return (
     <span
-      aria-hidden={!active}
-      aria-label={active ? 'Transmitting' : undefined}
+      aria-hidden="true"
       className={cn(
         'inline-flex items-center justify-center rounded-full bg-accent-default p-1.5 text-text-inverse transition-opacity duration-fast',
         active ? 'opacity-100' : 'opacity-0',

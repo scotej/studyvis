@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 
-import type { PomodoroSnapshot } from '@/features/session/pomodoro'
+import type { PomodoroSnapshot } from '@/lib/pomodoro-types'
 
 const INITIAL: PomodoroSnapshot = {
   phase: 'idle',
