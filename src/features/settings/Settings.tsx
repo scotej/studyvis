@@ -6,6 +6,7 @@ import {
 } from '@/components/SettingsLayout'
 import { useSettingsStore } from '@/stores/settingsStore'
 
+import { AboutCategory } from './categories/AboutCategory'
 import { AdvancedCategory } from './categories/AdvancedCategory'
 import { AppearanceCategory } from './categories/AppearanceCategory'
 import { FriendsCategory } from './categories/FriendsCategory'
@@ -24,6 +25,7 @@ export type SettingsCategoryId =
   | 'shortcuts'
   | 'network'
   | 'advanced'
+  | 'about'
 
 const CATEGORIES: ReadonlyArray<
   SettingsCategoryDescriptor<SettingsCategoryId>
@@ -36,6 +38,7 @@ const CATEGORIES: ReadonlyArray<
   { id: 'shortcuts', label: 'Shortcuts' },
   { id: 'network', label: 'Network' },
   { id: 'advanced', label: 'Advanced' },
+  { id: 'about', label: 'About' },
 ]
 
 export type SettingsProps = {
@@ -68,6 +71,7 @@ export function Settings({ onClose }: SettingsProps) {
       {activeCategoryId === 'shortcuts' ? <ShortcutsCategory /> : null}
       {activeCategoryId === 'network' ? <NetworkCategory /> : null}
       {activeCategoryId === 'advanced' ? <AdvancedCategory /> : null}
+      {activeCategoryId === 'about' ? <AboutCategory /> : null}
     </SettingsLayout>
   )
 }

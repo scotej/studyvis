@@ -80,3 +80,15 @@ pub fn system_open_data_folder<R: Runtime>(app: AppHandle<R>) -> Result<String, 
         .map_err(|e| e.to_string())?;
     Ok(dir_str)
 }
+
+// The About card needs exactly one outbound URL — the GitHub Releases page —
+// so the command takes no parameters. This keeps the JS-callable IPC surface
+// to a single hardcoded destination rather than a generic open-any-URL.
+const RELEASES_URL: &str = "https://github.com/scotej/studyvis/releases";
+
+#[tauri::command]
+pub fn system_open_releases<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
+    app.opener()
+        .open_url(RELEASES_URL, None::<&str>)
+        .map_err(|e| e.to_string())
+}

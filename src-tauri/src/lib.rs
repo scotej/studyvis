@@ -16,7 +16,7 @@ use commands::identity::{
 #[cfg(desktop)]
 use commands::system::{
     autostart_is_enabled, autostart_set_enabled, system_minimize_to_tray_set_enabled,
-    system_open_data_folder, MinimizeToTrayFlag, QuitFlag,
+    system_open_data_folder, system_open_releases, MinimizeToTrayFlag, QuitFlag,
 };
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -48,6 +48,7 @@ pub fn run() {
         autostart_is_enabled,
         system_minimize_to_tray_set_enabled,
         system_open_data_folder,
+        system_open_releases,
     ]);
 
     #[cfg(all(desktop, not(any(target_os = "macos", target_os = "windows"))))]
@@ -64,6 +65,7 @@ pub fn run() {
         autostart_is_enabled,
         system_minimize_to_tray_set_enabled,
         system_open_data_folder,
+        system_open_releases,
     ]);
 
     #[cfg(not(desktop))]
@@ -141,9 +143,8 @@ fn setup_desktop(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>>
         None::<Vec<&str>>,
     ))?;
 
-    #[cfg(not(debug_assertions))]
-    app.handle()
-        .plugin(tauri_plugin_updater::Builder::new().build())?;
+    // updater registration deferred to V3 — friends-only V1 ships without
+    // auto-update; see V1-P12 scope decision.
 
     // `CmdOrCtrl` resolves to Cmd on macOS and Ctrl elsewhere via the
     // accelerator parser, which avoids the SUPER/META ambiguity in the
