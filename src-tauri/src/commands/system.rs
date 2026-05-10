@@ -100,9 +100,7 @@ pub fn system_open_releases<R: Runtime>(app: AppHandle<R>) -> Result<(), String>
 // pane. On non-macOS targets the command no-ops with an error so callers
 // fall back to a textual instruction.
 #[tauri::command]
-pub fn system_open_screen_capture_settings<R: Runtime>(
-    app: AppHandle<R>,
-) -> Result<(), String> {
+pub fn system_open_screen_capture_settings<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
         const URL: &str =
