@@ -132,10 +132,24 @@ export function __resetParseLogger(): void {
   activeLogger = (...args) => console.warn(...args)
 }
 
+// Max prefix of `raw` we emit to the logger. The full string is preserved on
+// the ParseFallback.raw field for debugging — the logger snippet just keeps
+// console output bounded when a model returns hundreds of tokens of prose,
+// and avoids flooding logs with on-screen text that may be sensitive.
+const LOG_SNIPPET_MAX = 200
+
+function logFallback(reason: string, raw: string): void {
+  const snippet =
+    raw.length > LOG_SNIPPET_MAX
+      ? `${raw.slice(0, LOG_SNIPPET_MAX)}…[${raw.length} chars total]`
+      : raw
+  activeLogger('[parseJudgment] fallback:', reason, { snippet })
+}
+
 export function parseJudgment(raw: string): ParseResult {
-  if (typeof raw !== 'string' || raw.length === 0) {
+  if (typeof raw !== 'string' || raw.trim().length === 0) {
     const reason = 'empty response'
-    activeLogger('[parseJudgment] fallback:', reason, { raw })
+    logFallback(reason, raw)
     return buildFallback(reason, raw)
   }
 
@@ -166,13 +180,13 @@ export function parseJudgment(raw: string): ParseResult {
     if (inner.ok) {
       // Parsed JSON but failed schema validation — surface the why.
       const reason = describeSchemaFailure(inner.value)
-      activeLogger('[parseJudgment] fallback:', reason, { raw })
+      logFallback(reason, raw)
       return buildFallback(reason, raw)
     }
   }
 
   const reason = 'no valid JSON object found in response'
-  activeLogger('[parseJudgment] fallback:', reason, { raw })
+  logFallback(reason, raw)
   return buildFallback(reason, raw)
 }
 

@@ -136,6 +136,13 @@ describe('parseJudgment', () => {
     if (!result.ok) expect(result.reason).toContain('empty response')
   })
 
+  test('falls back on a whitespace-only string', () => {
+    const raw = '   \n\t  '
+    const result = parseJudgment(raw)
+    expectFallback(result, raw)
+    if (!result.ok) expect(result.reason).toContain('empty response')
+  })
+
   test('falls back when severity is not in the allowed enum', () => {
     const raw = JSON.stringify({ ...VALID, severity: 'critical' })
     const result = parseJudgment(raw)
@@ -211,5 +218,18 @@ Let me know.`
     __setParseLogger(logger)
     parseJudgment(JSON.stringify(VALID))
     expect(logger).not.toHaveBeenCalled()
+  })
+
+  test('truncates the logged raw snippet on long responses; full raw stays on the result', () => {
+    const logger = vi.fn()
+    __setParseLogger(logger)
+    const longRaw = 'prose '.repeat(200) + 'no json here'
+    const result = parseJudgment(longRaw)
+    expect(result.ok).toBe(false)
+    expect(logger).toHaveBeenCalled()
+    const meta = logger.mock.calls[0][2] as { snippet: string }
+    expect(meta.snippet.length).toBeLessThan(longRaw.length)
+    expect(meta.snippet).toContain('chars total')
+    if (!result.ok) expect(result.raw).toBe(longRaw)
   })
 })

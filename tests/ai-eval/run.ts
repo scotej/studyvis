@@ -18,7 +18,14 @@
 // tests/ai-eval/RESULTS.md before merging — see README.md.
 
 import { readdir, readFile, stat } from 'node:fs/promises'
-import { resolve, dirname, basename, join } from 'node:path'
+import {
+  resolve,
+  dirname,
+  basename,
+  isAbsolute,
+  join,
+  relative,
+} from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import {
@@ -56,15 +63,17 @@ function parseArgs(argv: string[]): CliArgs {
     } else if (arg.startsWith('--port=')) {
       port = parseIntStrict(arg.slice('--port='.length), '--port')
     } else if (arg === '--model') {
-      model = next
+      model = requireValue(next, '--model')
       i++
     } else if (arg.startsWith('--model=')) {
-      model = arg.slice('--model='.length)
+      model = requireValue(arg.slice('--model='.length), '--model')
     } else if (arg === '--dataset') {
-      datasetDir = resolve(next)
+      datasetDir = resolve(requireValue(next, '--dataset'))
       i++
     } else if (arg.startsWith('--dataset=')) {
-      datasetDir = resolve(arg.slice('--dataset='.length))
+      datasetDir = resolve(
+        requireValue(arg.slice('--dataset='.length), '--dataset')
+      )
     } else if (arg === '--timeout') {
       requestTimeoutSec = parseIntStrict(next, '--timeout')
       i++
@@ -87,12 +96,19 @@ function parseArgs(argv: string[]): CliArgs {
 }
 
 function parseIntStrict(raw: string | undefined, flag: string): number {
-  if (!raw) throw new Error(`${flag} expects a value`)
-  const n = Number.parseInt(raw, 10)
+  const value = requireValue(raw, flag)
+  const n = Number.parseInt(value, 10)
   if (!Number.isInteger(n) || n <= 0) {
-    throw new Error(`${flag} must be a positive integer, got ${raw}`)
+    throw new Error(`${flag} must be a positive integer, got ${value}`)
   }
   return n
+}
+
+function requireValue(raw: string | undefined, flag: string): string {
+  if (raw === undefined || raw.length === 0) {
+    throw new Error(`${flag} expects a non-empty value`)
+  }
+  return raw
 }
 
 function printUsage(): void {
@@ -187,6 +203,25 @@ async function loadJpegBase64(path: string): Promise<string | null> {
   }
 }
 
+// Reject absolute fixture paths and any relative path that escapes datasetDir
+// after resolution. A malicious or fat-fingered dataset entry pointing at
+// e.g. `../../etc/passwd` would otherwise read whatever file the harness
+// process can see.
+function resolveFixturePath(datasetDir: string, fixtureRel: string): string {
+  if (fixtureRel.length === 0) {
+    throw new Error(`fixture path is empty`)
+  }
+  if (isAbsolute(fixtureRel)) {
+    throw new Error(`fixture path is absolute: "${fixtureRel}"`)
+  }
+  const resolved = resolve(datasetDir, fixtureRel)
+  const rel = relative(datasetDir, resolved)
+  if (rel === '' || rel.startsWith('..') || isAbsolute(rel)) {
+    throw new Error(`fixture path escapes dataset directory: "${fixtureRel}"`)
+  }
+  return resolved
+}
+
 type ChatRequest = {
   model: string
   messages: Array<
@@ -261,6 +296,17 @@ async function callSidecar(
     }
     const text = json?.choices?.[0]?.message?.content ?? ''
     return { text, elapsedSec: (performance.now() - start) / 1000 }
+  } catch (err) {
+    // AbortError surfaces as a generic DOMException — translate it into a
+    // clear timeout message so operators can distinguish "model is slow"
+    // from "fetch crashed". Matches the convention in benchmark.ts.
+    if (err instanceof DOMException && err.name === 'AbortError') {
+      throw new Error(
+        `request timed out after ${timeoutSec}s — model may be slow or the sidecar is hung`,
+        { cause: err }
+      )
+    }
+    throw err
   } finally {
     clearTimeout(timer)
   }
@@ -420,8 +466,22 @@ async function main(): Promise<void> {
 
   const outcomes: CaseOutcome[] = []
   for (const entry of entries) {
-    const facePath = resolve(args.datasetDir, entry.face_path)
-    const screenPath = resolve(args.datasetDir, entry.screen_path)
+    let facePath: string
+    let screenPath: string
+    try {
+      facePath = resolveFixturePath(args.datasetDir, entry.face_path)
+      screenPath = resolveFixturePath(args.datasetDir, entry.screen_path)
+    } catch (err) {
+      outcomes.push({
+        kind: 'skipped',
+        entry,
+        reason:
+          err instanceof Error
+            ? err.message
+            : `invalid fixture path: ${String(err)}`,
+      })
+      continue
+    }
     const [faceB64, screenB64] = await Promise.all([
       loadJpegBase64(facePath),
       loadJpegBase64(screenPath),
