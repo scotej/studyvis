@@ -167,10 +167,15 @@ pub async fn sidecar_stop(state: State<'_, SidecarState>) -> Result<(), String> 
     let arc = state.0.clone();
     let mut guard = arc.lock().await;
     // Bumping the generation tells the in-flight watcher to exit instead of
-    // restarting on the upcoming Terminated event.
+    // restarting on the upcoming Terminated event. We wipe every field
+    // sidecar_status reports so a follow-up status() doesn't return stale
+    // model/mmproj metadata while running=false.
     guard.generation = guard.generation.wrapping_add(1);
     let child = guard.child.take();
     guard.port = None;
+    guard.model = None;
+    guard.mmproj = None;
+    guard.ctx_size = None;
     guard.errored = false;
     guard.last_error = None;
     drop(guard);
@@ -266,28 +271,44 @@ fn spawn_llama<R: Runtime>(
         command = command.args(["--mmproj", p]);
     }
     if let Some(dir) = runtime_dir {
-        let dir_str = dir.to_string_lossy();
+        let dir_str = dir.to_string_lossy().into_owned();
         // Prepend the runtime directory to the platform's shared-library
         // search path so the prebuilt llama-server's @rpath / DT_RUNPATH
         // entries (which point at @loader_path / $ORIGIN) resolve the
         // companion libs Tauri places under Contents/Resources/. The
         // statically-linked build path (--shared not passed to
         // build-llama-server.sh) doesn't need this; the env var is harmless
-        // in that case.
+        // in that case. Always prepend rather than overwrite — if the user
+        // already set DYLD_FALLBACK_LIBRARY_PATH / LD_LIBRARY_PATH for some
+        // unrelated reason, blowing it away could break the child's
+        // resolution of transitive deps.
         #[cfg(target_os = "macos")]
         {
-            command = command.env("DYLD_FALLBACK_LIBRARY_PATH", dir_str.as_ref());
+            const KEY: &str = "DYLD_FALLBACK_LIBRARY_PATH";
+            let combined = match std::env::var(KEY) {
+                Ok(prev) if !prev.is_empty() => format!("{}:{}", dir_str, prev),
+                _ => dir_str,
+            };
+            command = command.env(KEY, combined);
         }
         #[cfg(target_os = "linux")]
         {
-            command = command.env("LD_LIBRARY_PATH", dir_str.as_ref());
+            const KEY: &str = "LD_LIBRARY_PATH";
+            let combined = match std::env::var(KEY) {
+                Ok(prev) if !prev.is_empty() => format!("{}:{}", dir_str, prev),
+                _ => dir_str,
+            };
+            command = command.env(KEY, combined);
         }
         #[cfg(target_os = "windows")]
         {
             // Windows has no DYLD-style env; PATH is the DLL search path for
-            // child processes. Prepend, preserving the existing PATH.
-            let existing = std::env::var("PATH").unwrap_or_default();
-            let combined = format!("{};{}", dir_str, existing);
+            // child processes. Always prepend so the existing PATH wins for
+            // unrelated tooling reachable by the sidecar.
+            let combined = match std::env::var("PATH") {
+                Ok(prev) if !prev.is_empty() => format!("{};{}", dir_str, prev),
+                _ => dir_str,
+            };
             command = command.env("PATH", combined);
         }
     }
@@ -345,8 +366,12 @@ async fn watch<R: Runtime>(
         if guard.generation != generation {
             return;
         }
-        // Drop any leftover handle from this generation; the child is gone.
+        // Drop the dead child handle and forget the port immediately so a
+        // sidecar_status() inside the restart-backoff window can't claim
+        // running=false while still reporting the now-bound-by-nobody port.
+        // The new port is recorded only after a successful respawn below.
         guard.child = None;
+        guard.port = None;
 
         // Track restart attempts within RESTART_WINDOW.
         let now = Instant::now();

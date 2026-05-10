@@ -243,7 +243,13 @@ function ensurePollingStarted(): void {
       stopPolling()
       return
     }
-    void activeRuntime.fetchHealth(cur.port).then((healthy) => {
+    const probedPort = cur.port
+    void activeRuntime.fetchHealth(probedPort).then((healthy) => {
+      // Re-check the store before writing: if the user called stop() (or the
+      // sidecar respawned on a new port) while this fetch was in flight, our
+      // probe is stale and shouldn't flip `healthy=true` on a dead port.
+      const after = useSidecarStore.getState()
+      if (after.status !== 'running' || after.port !== probedPort) return
       useSidecarStore.setState({
         healthy,
         lastHealthCheckAt: Date.now(),

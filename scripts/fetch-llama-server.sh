@@ -116,37 +116,36 @@ verify_sha256() {
   fi
 }
 
-fetch_one() {
-  local triple="$1"
-  local asset
+# Defined with `()` (subshell) instead of `{}` so the EXIT trap below fires
+# exactly once per call when this function returns — a `RETURN` trap in the
+# parent shell would also fire on every helper call (asset_name_for et al.)
+# and wipe `$tmp` mid-extraction.
+fetch_one() (
+  triple="$1"
   if ! asset="$(asset_name_for "$triple")"; then
     echo "fetch-llama-server: unsupported triple '$triple' (supported: ${SUPPORTED_TRIPLES})" >&2
     exit 1
   fi
-  local sha
   sha="$(asset_sha256_for "$triple")"
-  local prefix
   prefix="$(archive_prefix_for "$triple")"
-  local exe_suffix
   exe_suffix="$(exe_suffix_for "$triple")"
 
-  local target_bin="${BINARIES_DIR}/llama-server-${triple}${exe_suffix}"
-  local target_runtime="${BINARIES_DIR}/llama-runtime-${triple}"
+  target_bin="${BINARIES_DIR}/llama-server-${triple}${exe_suffix}"
+  target_runtime="${BINARIES_DIR}/llama-runtime-${triple}"
 
   if [ -x "$target_bin" ] && [ -d "$target_runtime" ] && [ "$FORCE" != "1" ]; then
     echo "fetch-llama-server: $triple already populated at ${target_bin#${REPO_ROOT}/} (use --force to refetch)"
-    return 0
+    exit 0
   fi
 
-  local tmp
   tmp="$(mktemp -d)"
-  trap 'rm -rf "$tmp"' RETURN
-  local archive="${tmp}/${asset}"
+  trap 'rm -rf "$tmp"' EXIT
+  archive="${tmp}/${asset}"
   echo "fetch-llama-server: downloading $asset ..."
   curl -fL --progress-bar -o "$archive" "${LLAMA_RELEASE_BASE}/${asset}"
   verify_sha256 "$archive" "$sha"
 
-  local extract_dir="${tmp}/extracted"
+  extract_dir="${tmp}/extracted"
   mkdir -p "$extract_dir"
   case "$asset" in
     *.tar.gz) tar -xzf "$archive" -C "$extract_dir" ;;
@@ -160,7 +159,7 @@ fetch_one() {
     *) echo "fetch-llama-server: unknown archive type for $asset" >&2; exit 1 ;;
   esac
 
-  local source_root="${extract_dir}/${prefix}"
+  source_root="${extract_dir}/${prefix}"
   if [ ! -d "$source_root" ]; then
     echo "fetch-llama-server: expected $source_root inside $asset" >&2
     exit 1
@@ -170,7 +169,7 @@ fetch_one() {
   rm -rf "$target_runtime"
   mkdir -p "$target_runtime"
 
-  local server_src="${source_root}llama-server${exe_suffix}"
+  server_src="${source_root}llama-server${exe_suffix}"
   if [ ! -f "$server_src" ]; then
     echo "fetch-llama-server: expected llama-server${exe_suffix} inside ${source_root}" >&2
     exit 1
@@ -201,10 +200,9 @@ fetch_one() {
   esac
   shopt -u nullglob
 
-  local count
   count="$(find "$target_runtime" -type f | wc -l | tr -d ' ')"
   echo "fetch-llama-server: $triple → $(basename "$target_bin") + $count companion libs"
-}
+)
 
 FORCE=0
 SELECTED=""

@@ -15,7 +15,7 @@ export type SettingsValues = {
   // V2 AI feature gate. Defaults to `false` so V1 builds and the first V2
   // launch keep the llama-server sidecar dormant. The toggle UI + setter
   // land in V2-P9; for V2-P1 the value is read-only and consumed by
-  // src/features/ai/sidecar.ts to gate `startSidecar`.
+  // src/features/ai/sidecar.ts to gate `useSidecarStore.start(...)`.
   aiFeaturesEnabled: boolean
 }
 
