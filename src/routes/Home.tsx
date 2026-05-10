@@ -8,7 +8,8 @@ import {
   InboxBoot,
   type PresenceMap,
 } from '@/features/friends'
-import { IdentitySetupGate, useIdentity } from '@/features/identity'
+import { useIdentity } from '@/features/identity'
+import { Onboarding, useOnboardingState } from '@/features/onboarding'
 import { inviteToCurrentSession, SessionView } from '@/features/session'
 import { DebugSystemPanel } from '@/features/system'
 import type { Friend } from '@/lib/db/friends'
@@ -20,6 +21,7 @@ const isDev = import.meta.env.DEV
 
 export function Home() {
   const { identity, status, actions } = useIdentity()
+  const onboarding = useOnboardingState()
   const friendsStatus = useFriendsStore((s) => s.status)
   const loadFriends = useFriendsStore((s) => s.load)
   const sessionStatus = useSessionStore((s) => s.status)
@@ -34,7 +36,7 @@ export function Home() {
 
   const handleInvite = useCallback(
     async (friend: Friend) => {
-      if (!identity) return
+      if (!identity || !identity.display_name) return
       try {
         await inviteToCurrentSession({
           friend,
@@ -57,7 +59,7 @@ export function Home() {
     [identity, actions.signWithKeyring]
   )
 
-  if (status === 'loading') {
+  if (status === 'loading' || onboarding.status === 'loading') {
     return (
       <main
         className="flex min-h-screen items-center justify-center bg-bg-base text-text-secondary"
@@ -66,8 +68,8 @@ export function Home() {
     )
   }
 
-  if (status === 'absent') {
-    return <IdentitySetupGate create={actions.create} />
+  if (status === 'absent' || onboarding.status === 'pending') {
+    return <Onboarding onComplete={onboarding.complete} />
   }
 
   if (sessionStatus === 'active') {

@@ -6,7 +6,6 @@ import {
   AddFriendDialogView,
   type AddFriendPhase,
   type AddFriendTab,
-  type DisplayNamePhase,
 } from '@/features/friends/AddFriendDialogView'
 
 const MOCK_WORDS = [
@@ -27,10 +26,10 @@ const MOCK_WORDS = [
 type StoryArgs = {
   initialTab: AddFriendTab
   phase: AddFriendPhase
-  displayNamePhase: DisplayNamePhase
+  missingDisplayName: boolean
 }
 
-function Harness({ initialTab, phase, displayNamePhase }: StoryArgs) {
+function Harness({ initialTab, phase, missingDisplayName }: StoryArgs) {
   const [open, setOpen] = useState(true)
   const [tab, setTab] = useState<AddFriendTab>(initialTab)
   return (
@@ -41,10 +40,7 @@ function Harness({ initialTab, phase, displayNamePhase }: StoryArgs) {
         tab={tab}
         onTabChange={setTab}
         phase={phase}
-        displayNamePhase={displayNamePhase}
-        onSetDisplayName={async () => {
-          // no-op for story
-        }}
+        missingDisplayName={missingDisplayName}
         onStartHost={() => {
           // no-op for story
         }}
@@ -72,19 +68,15 @@ export const PreState: Story = {
   args: {
     initialTab: 'host',
     phase: { kind: 'idle' },
-    displayNamePhase: { kind: 'collected' },
+    missingDisplayName: false,
   },
 }
 
-export const NeedsDisplayName: Story = {
+export const MissingDisplayName: Story = {
   args: {
     initialTab: 'host',
     phase: { kind: 'idle' },
-    displayNamePhase: {
-      kind: 'collecting',
-      submitting: false,
-      error: null,
-    },
+    missingDisplayName: true,
   },
 }
 
@@ -92,7 +84,7 @@ export const HostInProgress: Story = {
   args: {
     initialTab: 'host',
     phase: { kind: 'host-waiting', words: MOCK_WORDS },
-    displayNamePhase: { kind: 'collected' },
+    missingDisplayName: false,
   },
 }
 
@@ -100,7 +92,7 @@ export const JoinInProgress: Story = {
   args: {
     initialTab: 'join',
     phase: { kind: 'join-progress' },
-    displayNamePhase: { kind: 'collected' },
+    missingDisplayName: false,
   },
 }
 
@@ -108,7 +100,7 @@ export const Success: Story = {
   args: {
     initialTab: 'host',
     phase: { kind: 'success', name: 'Alice' },
-    displayNamePhase: { kind: 'collected' },
+    missingDisplayName: false,
   },
 }
 
@@ -119,6 +111,6 @@ export const Error: Story = {
       kind: 'error',
       message: "Couldn't reach your friend. Try again?",
     },
-    displayNamePhase: { kind: 'collected' },
+    missingDisplayName: false,
   },
 }

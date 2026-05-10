@@ -195,7 +195,7 @@ export function SessionView() {
     if (!room || !identity || !sessionTopic || !startedAt) return
     let stopped = false
     const myEdPubkeyHex = identity.ed_pubkey_hex
-    const myDisplayName = identity.display_name?.trim() || 'You'
+    const myDisplayName = identity.display_name
     // Module-imported sign — stable reference across renders. Using
     // `actions.signWithKeyring` from `useIdentity` would change identity
     // every render and tear the controller down (see the snapshot
@@ -326,7 +326,7 @@ export function SessionView() {
   if (!room) return null
 
   const peerEntries = Object.values(peers)
-  const youName = identity?.display_name?.trim() || 'You'
+  const youName = identity?.display_name ?? ''
   const broadcasterName = pomodoroSnapshot.iAmBroadcaster
     ? 'you'
     : pomodoroSnapshot.broadcasterEdPubkey
@@ -475,10 +475,7 @@ function mapAuditEntries(
   // wins for self entries; peers with bindings supply their own names.
   const byEdPubkey = new Map<string, string>()
   if (identity) {
-    byEdPubkey.set(
-      identity.ed_pubkey_hex,
-      identity.display_name?.trim() || 'You'
-    )
+    byEdPubkey.set(identity.ed_pubkey_hex, identity.display_name)
   }
   for (const p of Object.values(peers)) {
     if (p.edPubkeyHex && p.displayName) {

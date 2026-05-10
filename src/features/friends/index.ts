@@ -4,7 +4,6 @@ export {
   type AddFriendDialogViewProps,
   type AddFriendPhase,
   type AddFriendTab,
-  type DisplayNamePhase,
 } from './AddFriendDialogView'
 export { FriendsList, type FriendsListProps } from './FriendsList'
 export { FriendsListView, type FriendsListViewProps } from './FriendsListView'
