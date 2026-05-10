@@ -18,10 +18,12 @@ jobs:
             platform: macos-latest
             rust-targets: aarch64-apple-darwin,x86_64-apple-darwin
             args: --target universal-apple-darwin --bundles app,dmg
+            llama-triples: aarch64-apple-darwin x86_64-apple-darwin
           - label: Windows
             platform: windows-latest
             rust-targets: ''
             args: --bundles msi
+            llama-triples: x86_64-pc-windows-msvc
     runs-on: ${{ matrix.platform }}
     timeout-minutes: 60
     steps:
@@ -43,6 +45,13 @@ jobs:
 
       - name: Install frontend dependencies
         run: npm ci
+
+      - name: Fetch llama-server prebuilds
+        shell: bash
+        run: |
+          for t in ${{ matrix.llama-triples }}; do
+            bash scripts/fetch-llama-server.sh --triple "$t"
+          done
 
       - name: Build & publish via tauri-action
         uses: tauri-apps/tauri-action@v0.6.2

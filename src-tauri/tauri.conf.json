@@ -35,6 +35,8 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
+    "externalBin": ["binaries/llama-server"],
+    "resources": ["binaries/llama-runtime-*/*"],
     "android": {
       "debugApplicationIdSuffix": ".debug"
     }
