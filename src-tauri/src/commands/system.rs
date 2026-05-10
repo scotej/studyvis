@@ -81,15 +81,14 @@ pub fn system_open_data_folder<R: Runtime>(app: AppHandle<R>) -> Result<String, 
     Ok(dir_str)
 }
 
+// The About card needs exactly one outbound URL — the GitHub Releases page —
+// so the command takes no parameters. This keeps the JS-callable IPC surface
+// to a single hardcoded destination rather than a generic open-any-URL.
+const RELEASES_URL: &str = "https://github.com/scotej/studyvis/releases";
+
 #[tauri::command]
-pub fn system_open_url<R: Runtime>(app: AppHandle<R>, url: String) -> Result<(), String> {
-    // Restrict to https only — the About card opens the public Releases page,
-    // and refusing other schemes here keeps the IPC narrow even though the
-    // command is only called from our own UI.
-    if !url.starts_with("https://") {
-        return Err("only https URLs are accepted".into());
-    }
+pub fn system_open_releases<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
     app.opener()
-        .open_url(url, None::<&str>)
+        .open_url(RELEASES_URL, None::<&str>)
         .map_err(|e| e.to_string())
 }

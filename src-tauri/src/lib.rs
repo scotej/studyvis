@@ -16,7 +16,7 @@ use commands::identity::{
 #[cfg(desktop)]
 use commands::system::{
     autostart_is_enabled, autostart_set_enabled, system_minimize_to_tray_set_enabled,
-    system_open_data_folder, system_open_url, MinimizeToTrayFlag, QuitFlag,
+    system_open_data_folder, system_open_releases, MinimizeToTrayFlag, QuitFlag,
 };
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -48,7 +48,7 @@ pub fn run() {
         autostart_is_enabled,
         system_minimize_to_tray_set_enabled,
         system_open_data_folder,
-        system_open_url,
+        system_open_releases,
     ]);
 
     #[cfg(all(desktop, not(any(target_os = "macos", target_os = "windows"))))]
@@ -65,7 +65,7 @@ pub fn run() {
         autostart_is_enabled,
         system_minimize_to_tray_set_enabled,
         system_open_data_folder,
-        system_open_url,
+        system_open_releases,
     ]);
 
     #[cfg(not(desktop))]

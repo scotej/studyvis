@@ -6,8 +6,6 @@ import { toast } from 'sonner'
 import { SettingsRow, SettingsSection } from '@/components/SettingsRow'
 import { Button } from '@/components/ui/button'
 
-const RELEASES_URL = 'https://github.com/scotej/studyvis/releases'
-
 const COPYRIGHT_LINE = `© ${new Date().getFullYear()} Scott — all rights reserved`
 
 export function AboutCategory() {
@@ -16,7 +14,7 @@ export function AboutCategory() {
   const handleOpenReleases = useCallback(async () => {
     setOpening(true)
     try {
-      await invoke('system_open_url', { url: RELEASES_URL })
+      await invoke('system_open_releases')
     } catch (err) {
       const message =
         err instanceof Error ? err.message : 'Could not open Releases page.'
@@ -40,7 +38,7 @@ export function AboutCategory() {
           </span>
         }
       />
-      <SettingsRow label="License" help={COPYRIGHT_LINE} />
+      <SettingsRow label="Copyright" help={COPYRIGHT_LINE} />
       <SettingsRow
         label="Releases"
         help="StudyVis doesn't auto-update. Check here when a new version drops."
