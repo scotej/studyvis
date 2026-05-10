@@ -58,7 +58,10 @@ export function PairWordInput({
       const next = values.slice()
       while (next.length < count) next.push('')
       const room = count - startIndex
-      const slice = words.slice(0, room)
+      // Pasted tokens go through the same sanitizer per-keystroke entry uses
+      // (lowercase, strip non-letters, clamp to 8 chars) so paste and typing
+      // agree on what each slot can hold.
+      const slice = words.slice(0, room).map(sanitizePairWordInput)
       for (let i = 0; i < slice.length; i++) {
         next[startIndex + i] = slice[i]
       }
