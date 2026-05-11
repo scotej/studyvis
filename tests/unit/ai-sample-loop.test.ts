@@ -60,16 +60,19 @@ class FakeClock {
       this.timers = this.timers.filter((t) => t.id !== next.id)
       this.now = next.fireAt
       next.handler()
-      // Yield so any chained promises in the handler can settle before we
-      // resolve the next timer.
-      await flushMicrotasks()
+      // Drain microtasks aggressively — the tick chain is await-heavy
+      // (Promise.all capture → fetch → response.json → applyJudgment), and
+      // Node 20 in CI is slower to settle than Node 24 locally. A generous
+      // flush here keeps the per-tick async chain fully resolved before
+      // the next assertion runs.
+      await flushMicrotasks(30)
     }
     this.now = target
-    await flushMicrotasks()
+    await flushMicrotasks(30)
   }
 }
 
-async function flushMicrotasks(n = 3): Promise<void> {
+async function flushMicrotasks(n = 30): Promise<void> {
   for (let i = 0; i < n; i += 1) {
     await Promise.resolve()
   }
