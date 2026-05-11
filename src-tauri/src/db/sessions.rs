@@ -182,11 +182,8 @@ mod tests {
     #[test]
     fn list_tolerates_null_columns() {
         let conn = fresh();
-        conn.execute(
-            "INSERT INTO sessions (id) VALUES ('partial')",
-            [],
-        )
-        .expect("raw insert");
+        conn.execute("INSERT INTO sessions (id) VALUES ('partial')", [])
+            .expect("raw insert");
         let read = list(&conn).expect("list");
         assert_eq!(read.len(), 1);
         assert_eq!(read[0].id, "partial");

@@ -22,8 +22,7 @@ use commands::models::{
     model_remove, DownloadState,
 };
 use commands::sessions::{
-    audit_event_insert, audit_events_list_for_session, sessions_get, sessions_insert,
-    sessions_list,
+    audit_event_insert, audit_events_list_for_session, sessions_get, sessions_insert, sessions_list,
 };
 #[cfg(desktop)]
 use commands::sidecar::{sidecar_start, sidecar_status, sidecar_stop, SidecarState};
