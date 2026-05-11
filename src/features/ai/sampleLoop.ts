@@ -45,7 +45,8 @@ import { CaptureError } from './captureShared'
 import { getDownloadRuntime } from './download'
 import { useFocusStore } from './focusStore'
 import { useModelStore } from './modelStore'
-import { parseJudgment, type Severity } from './parseJudgment'
+import { parseJudgment, type Judgment, type Severity } from './parseJudgment'
+import type { ScoreEvent } from './scoreMachine'
 import { DEFAULT_CTX_SIZE, useSidecarStore } from './sidecar'
 import { FOCUS_SYSTEM_PROMPT } from './systemPrompt'
 
@@ -161,6 +162,16 @@ export type SampleLoopOptions = {
   onCaptureDenied?: () => void
   onCaptureError?: (err: CaptureError) => void
   onSidecarErrored?: (lastError: string | null) => void
+  // Fires once per resolved sample with the events the score machine
+  // emitted for that judgment plus the judgment itself. V2-P6 wires the
+  // peer-alert + self-warning dispatcher through this callback so the
+  // sample loop stays unaware of the data-channel side. Awaited so the
+  // next tick does not start until the dispatcher's audit + broadcast
+  // calls have resolved — keeps the "never queue" invariant honest.
+  onScoreEvents?: (
+    events: ReadonlyArray<ScoreEvent>,
+    judgment: Judgment
+  ) => void | Promise<void>
 }
 
 export type SampleLoopHandle = {
@@ -330,7 +341,16 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
       // response is NEVER an off-task event.
       const parsed = parseJudgment(content)
       const judgment = parsed.ok ? parsed.value : parsed.fallback
-      useFocusStore.getState().applyJudgment(judgment, runtime.now())
+      const events = useFocusStore
+        .getState()
+        .applyJudgment(judgment, runtime.now())
+      if (opts.onScoreEvents) {
+        try {
+          await opts.onScoreEvents(events, judgment)
+        } catch (err) {
+          console.warn('[sampleLoop] onScoreEvents handler threw:', err)
+        }
+      }
     } catch (err) {
       if (err instanceof CaptureError) {
         if (err.code === 'screen_capture_denied') {

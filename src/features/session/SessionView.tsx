@@ -4,12 +4,15 @@ import { useShallow } from 'zustand/react/shallow'
 
 import { AudioDevicePicker } from '@/components/AudioDevicePicker'
 import { AuditLogPanel, type AuditLogEntry } from '@/components/AuditLogPanel'
+import type { FocusState } from '@/components/FocusIndicator'
+import { SelfWarningBadge } from '@/components/SelfWarningBadge'
 import { SessionEndedSplash } from '@/components/SessionEndedSplash'
 import { SessionTimer } from '@/components/SessionTimer'
 import { Button } from '@/components/ui/button'
 import { Kbd } from '@/components/ui/kbd'
 import { VideoGrid } from '@/components/VideoGrid'
 import { VideoTile } from '@/components/VideoTile'
+import { useAlertsUiStore } from '@/features/ai/alertsUiStore'
 import {
   startSampleLoop,
   useFocusStore,
@@ -30,6 +33,8 @@ import { usePomodoroStore } from '@/stores/pomodoroStore'
 import { useSessionStore } from '@/stores/sessionStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { usePttStore } from '@/stores/pttStore'
+
+import { startAiAlertDispatcher, type AiAlertDispatcher } from './aiAlerts'
 
 import {
   AUDIT_ACTION,
@@ -63,6 +68,8 @@ export function SessionView() {
   const setPeerHello = useSessionStore((s) => s.setPeerHello)
   const aiFeaturesEnabled = useSettingsStore((s) => s.values.aiFeaturesEnabled)
   const activeModelId = useModelStore((s) => s.activeModelId)
+  const selfWarning = useAlertsUiStore((s) => s.selfWarning)
+  const alertedPeers = useAlertsUiStore((s) => s.alertedPeers)
   const { identity } = useIdentity()
   // The hello+audit+pomodoro effect depends only on stable identity slices
   // (ed_pubkey_hex + x_pubkey_hex) so a display-name edit during a session
@@ -105,12 +112,22 @@ export function SessionView() {
   // hello/audit/pomodoro pipeline on every render (which would resend
   // hellos and reset broadcaster state).
   const emitAuditRef = useRef<
-    ((kind: AuditEventKind, detail?: AuditEventDetail) => Promise<void>) | null
+    | ((
+        kind: AuditEventKind,
+        detail?: AuditEventDetail,
+        options?: { now?: () => number }
+      ) => Promise<void>)
+    | null
   >(null)
   const pomodoroStartRef = useRef<((preset: PomodoroPreset) => void) | null>(
     null
   )
   const pomodoroStopRef = useRef<(() => void) | null>(null)
+  // The AI-alert dispatcher is created inside the hello+audit+pomodoro
+  // effect (where `sign`, `sessionTopic`, and the audit pipeline already
+  // exist) and read by the sample-loop effect through this ref. Matches
+  // the existing pomodoroStartRef / emitAuditRef pattern.
+  const aiAlertDispatcherRef = useRef<AiAlertDispatcher | null>(null)
 
   // Capture the camera + mic once per active session and add the resulting
   // MediaStream to the trystero room. trystero forwards new tracks to all
@@ -250,9 +267,19 @@ export function SessionView() {
 
     const auditAction = room.makeAction<AuditEvent>(AUDIT_ACTION)
 
-    const emitAudit = async (
+    // V2-P6 splits the audit emit into two halves so the ai_warning path
+    // (local-only, never broadcast) can share the build+sign+append
+    // pipeline without an `if (!shouldBroadcast)` branch deep in the
+    // dispatcher. `emitAudit` is `appendLocalAudit` + broadcast.
+    // Both helpers accept an optional `options.now` so callers that need
+    // the audit-event `ts` to align with a sibling artifact (V2-P6's
+    // dispatcher pairs an `ai_alert` audit row with a signed alert-channel
+    // payload that must share the same `ts`) can pin the timestamp.
+    // Default is `Date.now` via `buildAuditEvent`.
+    const appendLocalAudit = async (
       kind: AuditEventKind,
-      detail: AuditEventDetail = {}
+      detail: AuditEventDetail = {},
+      options?: { now?: () => number }
     ) => {
       const event = await buildAuditEvent({
         sessionTopic,
@@ -260,6 +287,23 @@ export function SessionView() {
         kind,
         detail,
         sign,
+        now: options?.now,
+      })
+      useAuditStore.getState().append(event)
+    }
+
+    const emitAudit = async (
+      kind: AuditEventKind,
+      detail: AuditEventDetail = {},
+      options?: { now?: () => number }
+    ) => {
+      const event = await buildAuditEvent({
+        sessionTopic,
+        myEdPubkeyHex,
+        kind,
+        detail,
+        sign,
+        now: options?.now,
       })
       // Append local first so the panel reflects our own actions
       // immediately, even if broadcast fails.
@@ -279,6 +323,18 @@ export function SessionView() {
       if (!verified) return
       useAuditStore.getState().append(verified)
     })
+
+    const dispatcher = startAiAlertDispatcher({
+      room,
+      sessionTopic,
+      myEdPubkeyHex,
+      sign,
+      resolveSenderEdPubkey: (peerId) =>
+        useSessionStore.getState().peers[peerId]?.edPubkeyHex ?? null,
+      appendLocalAudit,
+      emitAudit,
+    })
+    aiAlertDispatcherRef.current = dispatcher
 
     const controller = startPomodoroController({
       room,
@@ -316,19 +372,24 @@ export function SessionView() {
       stopped = true
       controller.teardown()
       helloHandle.teardown()
+      dispatcher.teardown()
       emitAuditRef.current = null
       pomodoroStartRef.current = null
       pomodoroStopRef.current = null
+      aiAlertDispatcherRef.current = null
     }
   }, [room, myEdPubkeyHex, myXPubkeyHex, sessionTopic, startedAt, setPeerHello])
 
   // V2-P5 focus-score reset: fires exactly once per session start, keyed on
   // startedAt rather than the sample-loop effect's deps. Without this split,
   // an in-session AI-features toggle flap or activeModelId change would
-  // wipe the user's current score.
+  // wipe the user's current score. V2-P6 also resets the alerts-UI store
+  // here so stale self-warnings / alerted-peer entries don't bleed into the
+  // next session.
   useEffect(() => {
     if (status !== 'active' || !startedAt) return
     useFocusStore.getState().reset()
+    useAlertsUiStore.getState().reset()
   }, [status, startedAt])
 
   // V2-P5 AI sample loop: starts when AI features are on, an active model
@@ -344,6 +405,17 @@ export function SessionView() {
       topic: 'Studying',
       modelId: activeModelId,
       getFaceTrack: () => localStreamRef.current?.getVideoTracks()[0] ?? null,
+      onScoreEvents: async (events, judgment) => {
+        // V2-P6: route every sample's emitted events through the alert
+        // dispatcher (warnings → local-only badge + ai_warning audit;
+        // alerts → ai_alert audit + signed broadcast + tile highlight).
+        // The dispatcher is owned by the hello/audit/pomodoro effect; the
+        // ref pattern matches `emitAuditRef` / `pomodoroStartRef`.
+        const dispatcher = aiAlertDispatcherRef.current
+        if (!dispatcher) return
+        await dispatcher.handleScoreEvents(events)
+        dispatcher.handleSeverity(judgment.severity)
+      },
       onStartFail: (reason, detail) => {
         if (reason === 'no_active_model') {
           toast.error('Pick a model in Settings → AI')
@@ -461,6 +533,20 @@ export function SessionView() {
     [auditEvents, identity, peers]
   )
 
+  const myEdPubkey = identity?.ed_pubkey_hex ?? null
+  const selfTileState: FocusState | undefined = myEdPubkey
+    ? myEdPubkey in alertedPeers
+      ? 'alerted'
+      : selfWarning
+        ? 'warning'
+        : 'focused'
+    : selfWarning
+      ? 'warning'
+      : 'focused'
+  const selfAlertReasoning = myEdPubkey
+    ? (alertedPeers[myEdPubkey]?.reasoning ?? undefined)
+    : undefined
+
   if (status === 'ended' && endedSnapshot) {
     return (
       <SessionEndedSplash
@@ -504,15 +590,24 @@ export function SessionView() {
               stream={localStream}
               ptt={pttActive}
               isLocal
+              state={selfTileState}
+              alertReasoning={selfAlertReasoning}
             />
-            {peerEntries.map((peer) => (
-              <VideoTile
-                key={peer.peerId}
-                name={peer.displayName ?? peerLabel(peer.peerId)}
-                stream={remoteStreams[peer.peerId] ?? null}
-                ptt={peerPtt[peer.peerId] ?? false}
-              />
-            ))}
+            {peerEntries.map((peer) => {
+              const peerAlert = peer.edPubkeyHex
+                ? alertedPeers[peer.edPubkeyHex]
+                : undefined
+              return (
+                <VideoTile
+                  key={peer.peerId}
+                  name={peer.displayName ?? peerLabel(peer.peerId)}
+                  stream={remoteStreams[peer.peerId] ?? null}
+                  ptt={peerPtt[peer.peerId] ?? false}
+                  state={peerAlert ? 'alerted' : 'focused'}
+                  alertReasoning={peerAlert?.reasoning}
+                />
+              )
+            })}
           </VideoGrid>
         </div>
         <AuditLogPanel events={auditEntries} />
@@ -551,6 +646,9 @@ export function SessionView() {
           Leave
         </Button>
       </footer>
+      {selfWarning ? (
+        <SelfWarningBadge reasoning={selfWarning.reasoning} />
+      ) : null}
     </main>
   )
 }
@@ -591,6 +689,7 @@ function mapAuditEntries(
     who: string
     kind: AuditEventKind
     ts: number
+    detail: AuditEventDetail
   }>,
   identity: { ed_pubkey_hex: string; display_name: string } | null,
   peers: Record<
@@ -609,12 +708,22 @@ function mapAuditEntries(
       byEdPubkey.set(p.edPubkeyHex, p.displayName)
     }
   }
-  return events.map((e) => ({
-    seq: e.seq,
-    name: byEdPubkey.get(e.who) ?? `Peer ${e.who.slice(0, 6)}`,
-    description: AUDIT_KIND_LABELS[e.kind],
-    ts: e.ts,
-  }))
+  return events.map((e) => {
+    let hoverDetail: string | undefined
+    if (e.kind === 'ai_warning' || e.kind === 'ai_alert') {
+      const reasoning = e.detail?.reasoning
+      if (typeof reasoning === 'string' && reasoning.length > 0) {
+        hoverDetail = reasoning
+      }
+    }
+    return {
+      seq: e.seq,
+      name: byEdPubkey.get(e.who) ?? `Peer ${e.who.slice(0, 6)}`,
+      description: AUDIT_KIND_LABELS[e.kind],
+      ts: e.ts,
+      hoverDetail,
+    }
+  })
 }
 
 function useElapsed(startedAt: number | null): string {

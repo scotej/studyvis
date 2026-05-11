@@ -14,8 +14,22 @@ const POPULATED: AuditLogEntry[] = [
     description: 'started a Pomodoro',
     ts: NOW - 6 * 60_000,
   },
-  { seq: 5, name: 'Bo', description: 'took a break', ts: NOW - 60_000 },
-  { seq: 6, name: 'Bo', description: 'returned', ts: NOW - 5_000 },
+  {
+    seq: 5,
+    name: 'You',
+    description: 'got a self-warning',
+    ts: NOW - 4 * 60_000,
+    hoverDetail: 'Eyes drifting away from the editor for several seconds.',
+  },
+  {
+    seq: 6,
+    name: 'Alice',
+    description: 'looking off-task',
+    ts: NOW - 3 * 60_000,
+    hoverDetail: 'Visible YouTube tab unrelated to the declared topic.',
+  },
+  { seq: 7, name: 'Bo', description: 'took a break', ts: NOW - 60_000 },
+  { seq: 8, name: 'Bo', description: 'returned', ts: NOW - 5_000 },
 ]
 
 const meta = {

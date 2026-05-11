@@ -98,3 +98,29 @@ export const NoStream: Story = {
     </div>
   ),
 }
+
+export const Alerted: Story = {
+  render: () => (
+    <div className="w-full max-w-md">
+      <MockedTile
+        name="Alice"
+        color={tokens.color.status.alerted}
+        state="alerted"
+        alertReasoning="Looking at unrelated tabs."
+      />
+    </div>
+  ),
+}
+
+export const SelfWarning: Story = {
+  render: () => (
+    <div className="w-full max-w-md">
+      <MockedTile
+        name="You"
+        color={tokens.color.accent.default}
+        isLocal
+        state="warning"
+      />
+    </div>
+  ),
+}
