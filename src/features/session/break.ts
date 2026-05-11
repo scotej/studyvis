@@ -122,11 +122,28 @@ export function evaluateBreakRules(
       reason: input.aiReasoning || 'the assistant recommended against it.',
     }
   }
-  const minutes = Math.round(clamped / 60)
+  const displayDuration = formatBreakDuration(clamped)
   const reason = wasCapped
-    ? `approved · ${minutes} min (capped to the ${MAX_BREAK_DURATION_SEC / 60}-min max).`
-    : `approved · ${minutes} min.`
+    ? `approved · ${displayDuration} (capped to the ${MAX_BREAK_DURATION_SEC / 60}-min max).`
+    : `approved · ${displayDuration}.`
   return { verdict: 'approved', durationSec: clamped, reason }
+}
+
+// Renders a break duration so the reason line is accurate to the actual
+// seconds approved. Clean minutes (multiples of 60) render as "N min";
+// sub-minute durations render as "Ns"; everything else renders as
+// "Nm Ms" so a 90-second break doesn't surface as "2 min" or "1 min".
+export function formatBreakDuration(durationSec: number): string {
+  const total = Math.max(0, Math.floor(durationSec))
+  if (total < 60) {
+    return `${total}s`
+  }
+  const minutes = Math.floor(total / 60)
+  const seconds = total % 60
+  if (seconds === 0) {
+    return `${minutes} min`
+  }
+  return `${minutes}m ${seconds}s`
 }
 
 // Audit-pipeline accessors the orchestrator depends on. Mirrors the

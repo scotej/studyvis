@@ -8,6 +8,7 @@ import {
   __resetBreakTimerForTests,
   cancelActiveBreakTimer,
   evaluateBreakRules,
+  formatBreakDuration,
   requestBreak,
   type BreakAuditPipeline,
   type BreakRuleState,
@@ -22,6 +23,25 @@ function state(overrides: Partial<BreakRuleState> = {}): BreakRuleState {
     ...overrides,
   }
 }
+
+describe('formatBreakDuration', () => {
+  test('renders clean minutes as "N min"', () => {
+    expect(formatBreakDuration(300)).toBe('5 min')
+    expect(formatBreakDuration(600)).toBe('10 min')
+    expect(formatBreakDuration(60)).toBe('1 min')
+  })
+  test('renders sub-minute durations in seconds', () => {
+    expect(formatBreakDuration(30)).toBe('30s')
+    expect(formatBreakDuration(59)).toBe('59s')
+  })
+  test('renders mixed durations as "Nm Ms"', () => {
+    expect(formatBreakDuration(90)).toBe('1m 30s')
+    expect(formatBreakDuration(125)).toBe('2m 5s')
+  })
+  test('floors fractional seconds rather than rounding up', () => {
+    expect(formatBreakDuration(59.9)).toBe('59s')
+  })
+})
 
 describe('evaluateBreakRules', () => {
   test('approves a fresh-session 5-min break', () => {

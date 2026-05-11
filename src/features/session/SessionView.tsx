@@ -519,22 +519,43 @@ export function SessionView() {
       }
     }
 
-    void (async () => {
-      const offContextReq = await listen(AI_DIALOG_CONTEXT_REQUEST, () => {
+    // Register a listener with cancellation-safety: if the effect already
+    // tore down by the time `listen()` resolves, we MUST call the returned
+    // unlisten ourselves — pushing it into `unlistens` after the cleanup
+    // ran would leak the subscription.
+    const registerListener = async <T,>(
+      eventName: string,
+      handler: (payload: T) => void
+    ): Promise<void> => {
+      const off = await listen<T>(eventName, (event) => {
         if (cancelled) return
-        void emitTo(
-          AI_DIALOG_WINDOW_LABEL,
-          AI_DIALOG_CONTEXT,
-          buildContextSnapshot()
-        )
+        handler(event.payload)
       })
-      unlistens.push(offContextReq)
+      if (cancelled) {
+        off()
+        return
+      }
+      unlistens.push(off)
+    }
 
-      const offTopic = await listen<AiDialogTopicChangePayload>(
+    const emitToDialog = (event: string, payload: unknown): void => {
+      // The dialog window may have been closed between request and
+      // response; emitTo rejects in that case. Swallow the rejection so
+      // it doesn't surface as an unhandled promise rejection.
+      void emitTo(AI_DIALOG_WINDOW_LABEL, event, payload).catch((err) => {
+        console.warn(`[ai-dialog] emitTo(${event}) failed:`, err)
+      })
+    }
+
+    void (async () => {
+      await registerListener(AI_DIALOG_CONTEXT_REQUEST, () => {
+        emitToDialog(AI_DIALOG_CONTEXT, buildContextSnapshot())
+      })
+
+      await registerListener<AiDialogTopicChangePayload>(
         AI_DIALOG_TOPIC_CHANGE,
-        (event) => {
-          if (cancelled) return
-          const next = event.payload?.new_topic?.trim()
+        (payload) => {
+          const next = payload?.new_topic?.trim()
           if (!next) return
           const previous = useSessionStore.getState().declaredStudyTopic
           if (next === previous) return
@@ -549,25 +570,18 @@ export function SessionView() {
             })
           }
           // Re-push context so a still-open dialog reflects the new value.
-          void emitTo(
-            AI_DIALOG_WINDOW_LABEL,
-            AI_DIALOG_CONTEXT,
-            buildContextSnapshot()
-          )
+          emitToDialog(AI_DIALOG_CONTEXT, buildContextSnapshot())
         }
       )
-      unlistens.push(offTopic)
 
-      const offBreak = await listen<AiDialogBreakRequestPayload>(
+      await registerListener<AiDialogBreakRequestPayload>(
         AI_DIALOG_BREAK_REQUEST,
-        (event) => {
-          if (cancelled) return
-          const payload = event.payload
+        (payload) => {
           if (!payload?.nonce) return
           const emit = emitAuditRef.current
           const append = appendLocalAuditRef.current
           if (!emit || !append) {
-            void emitTo(AI_DIALOG_WINDOW_LABEL, AI_DIALOG_BREAK_RESPONSE, {
+            emitToDialog(AI_DIALOG_BREAK_RESPONSE, {
               nonce: payload.nonce,
               verdict: 'denied',
               reason: 'session not ready',
@@ -609,15 +623,11 @@ export function SessionView() {
                       verdict: 'denied',
                       reason: verdict.reason,
                     }
-              void emitTo(
-                AI_DIALOG_WINDOW_LABEL,
-                AI_DIALOG_BREAK_RESPONSE,
-                response
-              )
+              emitToDialog(AI_DIALOG_BREAK_RESPONSE, response)
             })
             .catch((err) => {
               console.error('[ai-dialog] break flow failed:', err)
-              void emitTo(AI_DIALOG_WINDOW_LABEL, AI_DIALOG_BREAK_RESPONSE, {
+              emitToDialog(AI_DIALOG_BREAK_RESPONSE, {
                 nonce: payload.nonce,
                 verdict: 'denied',
                 reason: err instanceof Error ? err.message : 'unexpected error',
@@ -625,7 +635,6 @@ export function SessionView() {
             })
         }
       )
-      unlistens.push(offBreak)
     })()
 
     return () => {

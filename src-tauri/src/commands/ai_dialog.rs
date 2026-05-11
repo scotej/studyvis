@@ -94,8 +94,8 @@ fn apply_macos_collection_behavior<R: Runtime>(window: &tauri::WebviewWindow<R>)
         // into a Retained so the AppKit method dispatch sees a proper
         // NSWindow reference; the Retained drops at end of scope which
         // matches the autoreleased ownership.
-        let ns_window: Retained<NSWindow> = Retained::retain(raw as *mut NSWindow)
-            .expect("ns_window pointer to be non-null");
+        let ns_window: Retained<NSWindow> =
+            Retained::retain(raw as *mut NSWindow).expect("ns_window pointer to be non-null");
         let mut behavior = ns_window.collectionBehavior();
         behavior |= NSWindowCollectionBehavior::CanJoinAllSpaces;
         behavior |= NSWindowCollectionBehavior::FullScreenAuxiliary;

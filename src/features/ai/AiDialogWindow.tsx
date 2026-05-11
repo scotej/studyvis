@@ -35,6 +35,11 @@ import {
 // declared in `aiDialogChannels.ts`. The main window's SessionView is the
 // other half of the protocol.
 
+// Upper bound on how long the dialog waits for a break-response from the
+// main window. Long enough to absorb an audit-emit retry but short enough
+// that an unresponsive main window can't pin the dialog in `pending`.
+export const BREAK_REQUEST_TIMEOUT_MS = 15_000
+
 export type AiDialogRuntime = {
   // Listen for an event targeted at this dialog window. Defaults to
   // `getCurrentWindow().listen` from @tauri-apps/api. Tests + Storybook
@@ -113,28 +118,48 @@ export function AiDialogWindow({
     if (!runtime) return
     let cancelled = false
     const unlistens: Array<() => void> = []
+    // Snapshot the ref's current Map so the cleanup function operates on
+    // the same instance the effect saw at mount time. The lint rule
+    // (`react-hooks/exhaustive-deps`) catches the case where `.current`
+    // changes between mount and unmount; with a ref-stable Map that's
+    // never reassigned, the snapshot is identical, but the rule fires
+    // pre-emptively anyway.
+    const nonces = pendingNonces.current
+
+    // Register a listener with cancellation-safety: if the effect tore
+    // down before `runtime.listen()` resolved, immediately call the
+    // returned unlisten — pushing it into `unlistens` after the cleanup
+    // ran would leak the subscription.
+    const registerListener = async <T,>(
+      eventName: string,
+      handler: (payload: T) => void
+    ): Promise<void> => {
+      const off = await runtime.listen<T>(eventName, (payload) => {
+        if (cancelled) return
+        handler(payload)
+      })
+      if (cancelled) {
+        off()
+        return
+      }
+      unlistens.push(off)
+    }
 
     void (async () => {
-      const offContext = await runtime.listen<AiDialogContextPayload>(
+      await registerListener<AiDialogContextPayload>(
         AI_DIALOG_CONTEXT,
-        (payload) => {
-          if (cancelled) return
-          setContext(payload)
-        }
+        (payload) => setContext(payload)
       )
-      unlistens.push(offContext)
 
-      const offBreakResp = await runtime.listen<BreakResponsePayload>(
+      await registerListener<BreakResponsePayload>(
         AI_DIALOG_BREAK_RESPONSE,
         (payload) => {
-          if (cancelled) return
-          const resolver = pendingNonces.current.get(payload.nonce)
+          const resolver = nonces.get(payload.nonce)
           if (!resolver) return
-          pendingNonces.current.delete(payload.nonce)
+          nonces.delete(payload.nonce)
           resolver(payload)
         }
       )
-      unlistens.push(offBreakResp)
 
       // Now that we're listening, ask for context.
       try {
@@ -146,6 +171,17 @@ export function AiDialogWindow({
 
     return () => {
       cancelled = true
+      // Reject every in-flight break-request so the submit() promise
+      // resolves rather than leaking a stuck `pending: true` UI on a
+      // component that's about to unmount.
+      for (const [nonce, resolver] of nonces) {
+        resolver({
+          nonce,
+          verdict: 'denied',
+          reason: 'Dialog closed before a verdict arrived.',
+        })
+      }
+      nonces.clear()
       for (const off of unlistens) off()
     }
   }, [runtime])
@@ -162,10 +198,15 @@ export function AiDialogWindow({
     let offBlur: (() => void) | null = null
 
     void (async () => {
-      offBlur = await runtime.listen('tauri://blur', () => {
+      const off = await runtime.listen('tauri://blur', () => {
         if (cancelled) return
         void runtime.close()
       })
+      if (cancelled) {
+        off()
+        return
+      }
+      offBlur = off
     })()
 
     const onKey = (e: KeyboardEvent) => {
@@ -240,8 +281,24 @@ export function AiDialogWindow({
           return
         }
         const nonce = generateNonce(runtime.now())
+        // Hard timeout so a dropped emit or an unresponsive main window
+        // doesn't pin the dialog in `pending: true` forever. The cleanup
+        // effect also rejects this promise on unmount; both paths clean
+        // up the nonce entry.
         const verdict = await new Promise<BreakResponsePayload>((resolve) => {
-          pendingNonces.current.set(nonce, resolve)
+          const timeoutHandle = window.setTimeout(() => {
+            if (!pendingNonces.current.has(nonce)) return
+            pendingNonces.current.delete(nonce)
+            resolve({
+              nonce,
+              verdict: 'denied',
+              reason: 'No response from the session — try again.',
+            })
+          }, BREAK_REQUEST_TIMEOUT_MS)
+          pendingNonces.current.set(nonce, (payload) => {
+            window.clearTimeout(timeoutHandle)
+            resolve(payload)
+          })
           void runtime
             .emit(AI_DIALOG_BREAK_REQUEST, {
               nonce,
@@ -251,6 +308,14 @@ export function AiDialogWindow({
             })
             .catch((err) => {
               console.warn('[ai-dialog] break-request emit failed:', err)
+              if (!pendingNonces.current.has(nonce)) return
+              pendingNonces.current.delete(nonce)
+              window.clearTimeout(timeoutHandle)
+              resolve({
+                nonce,
+                verdict: 'denied',
+                reason: 'Could not reach the session.',
+              })
             })
         })
         setState({

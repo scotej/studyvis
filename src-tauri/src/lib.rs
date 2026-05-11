@@ -4,6 +4,8 @@ pub mod db;
 
 use tauri::Manager;
 
+#[cfg(desktop)]
+use commands::ai_dialog::toggle_ai_dialog;
 use commands::friends::{
     friends_add, friends_get_x_pubkey, friends_list, friends_remove, friends_update_last_studied,
 };
@@ -22,8 +24,6 @@ use commands::models::{
 use commands::sessions::{
     audit_event_insert, audit_events_list_for_session, sessions_insert, sessions_list,
 };
-#[cfg(desktop)]
-use commands::ai_dialog::toggle_ai_dialog;
 #[cfg(desktop)]
 use commands::sidecar::{sidecar_start, sidecar_status, sidecar_stop, SidecarState};
 #[cfg(desktop)]
