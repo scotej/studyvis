@@ -1820,6 +1820,13 @@ End-of-task exit sequence (mandatory):
 
 ---
 
+CARRY-FORWARD DEBTS (from prior phases — incorporate into this work):
+
+- From V2-P5: subscribe to `useFocusStore` so that whenever `applyJudgment` lands a `ScoreEvent[]` in `lastEvents`, V2-P6 broadcasts every `{type:'alert'}` over the data channel (signed `{type:'alert', severity, reasoning, ts, sig}` per ARCHITECTURE.md §7) and renders every `{type:'warning'}` as a local-only badge — warnings must NEVER broadcast, alerts always broadcast, and `useFocusStore.machine.score` must stay private until V2-P8's report.
+- From V2-P5: the alert event payload carries `severity`, `reasoning`, `deduction`, and `scoreAfter`; the broadcast message includes severity + reasoning but MUST omit deduction/scoreAfter so peers can't reconstruct the off-task user's running score.
+
+---
+
 YOUR TASK: V2-P6 — Self-warning UI + peer alert events over the data channel.
 
 Implement ARCHITECTURE.md §8 self-warning vs peer-alert behavior, §9 audit-log AI events for V2.
@@ -1898,6 +1905,7 @@ End-of-task exit sequence (mandatory):
 CARRY-FORWARD DEBTS (from prior phases — incorporate into this work):
 - From V1-P7: `Cmd/Ctrl+]` is already registered as a global shortcut but its handler is a no-op (it just logs). Wire it here to spawn or focus the AI dialog window with `transparent: true`, `decorations: false`, `alwaysOnTop: true` per ARCHITECTURE.md §12. The existing `on_window_event` handler is already label-scoped to `"main"`, so the dialog's close events won't be intercepted by V1-P7's hide-to-tray logic.
 - From V1-P11: Replace the dev-only `[break]` `[back]` debug buttons in `SessionView` with the real break controls. The actual break feature is the AI break dialogue (PLAN.md V2 features) that lives in this phase — the placeholders only round-trip `paused_break` / `resumed` audit events, no real mute/state semantics yet. Wire to `features/session/break.requestBreak` per V2-P7 step 3.
+- From V2-P5: `features/ai/breakStore.ts` already exposes `useBreakStore.startBreak()` / `endBreak()` (single `onBreak: boolean`); the V2-P5 sample loop reads it and skips inference during breaks. V2-P7's `features/session/break.requestBreak` must call `startBreak()` on approve, schedule `endBreak()` at the countdown deadline, and extend the store with the duration / breaks-per-2h-session bookkeeping the rule layer needs (V2-P7 step 4).
 
 ---
 
@@ -1983,6 +1991,12 @@ End-of-task exit sequence (mandatory):
 8. Single follow-up commit with message "<phase-id>: address Copilot review" (or "<phase-id>: no Copilot review within window" if step 6 timed out). Push to the same branch. If there were zero actionable findings AND zero stylistic nits AND no late-discovered debts, skip the follow-up commit.
 9. Auto-merge: `gh pr merge <num> --squash --delete-branch`. If branch protection blocks the merge because a required CI check is still running, wait for CI to settle (poll `gh pr checks <num>`) and retry once. If the branch went stale (main moved during the Copilot fix loop and the PR shows "out-of-date"), `git fetch origin && git pull --rebase origin main` on the feature branch, re-run the verification commands, push, and retry the merge — never force-push to main, never bypass required checks (no `--admin`).
 10. End-of-task summary in chat: (a) what shipped, (b) deviations from prompt or canonical-doc text and why, (c) Copilot findings addressed and skipped (with reason for each skip), (d) Inherited debts — anything that surfaced and belongs to a later phase, named by phase id (e.g. "V1-P12 must wire plugins.updater config + signing key"), and confirm each debt was also routed into BUILD-PROMPTS.md per step 1, (e) confirmation that the PR was merged and the branch deleted.
+
+---
+
+CARRY-FORWARD DEBTS (from prior phases — incorporate into this work):
+
+- From V2-P5: the per-session final score is `useFocusStore.getState().machine.score` (initial 100, floor 0, lives in memory only — no persistence yet). V2-P8 reads this value when peer count drops to 1 and writes it into the V2-P9-added `sessions.score` column via the report generator; the store is `reset()` by SessionView's V2-P5 effect on the next session start, so the value must be captured BEFORE leave/teardown clears it.
 
 ---
 
@@ -2072,6 +2086,12 @@ CARRY-FORWARD DEBTS (from prior phases — incorporate into this work):
 - From V2-P2: toggling AI off must NOT remove `useModelStore` records or delete on-disk model files — the toggle is a runtime gate, not an uninstall. The "Remove" button on each picker card is the only path to delete a downloaded model.
 - From V2-P3: when the master "Enable AI features" toggle flips on, call `requestScreenCapturePermission()` from `src/features/ai/captureScreen.ts` once to seed the OS prompt. If it rejects with `CaptureError.code === 'screen_capture_denied'`, mount `<ScreenCapturePermissionOverlay />` (`src/components/`) with `onRetry` re-invoking the helper; on rejection by other codes, surface a toast and leave the toggle off. Do NOT call captureScreen() to test the path — the one-shot helper is the dedicated permission seed.
 - From V2-P3: the Info.plist sibling file (`src-tauri/Info.plist`) now carries `NSScreenCaptureUsageDescription`; if V3 reintroduces an `Entitlements.plist` (after signing creds become available), also add `com.apple.security.device.screen-capture` there.
+- From V2-P5: `useSettingsStore.values.warningThreshold` (default 2) + `alertThreshold` (default 4) are already in the snapshot with snake_case keys `warning_threshold` / `alert_threshold` and read-only consumers; add `setWarningThreshold` / `setAlertThreshold` setters (mirroring `setMinimizeToTrayOnClose`'s catch-and-surface pattern) and wire the Settings → AI sliders with ranges `[2,8]` / `[3,12]` enforcing `warning < alert` (use `normaliseThresholds` from `@/features/ai` to clamp on save).
+- From V2-P5: `src/features/session/SessionView.tsx` calls `startSampleLoop({ topic: 'Studying', ... })` with a hardcoded topic — replace this with the required session-start topic input V2-P9 owns. The user's input persists to `sessions.declared_topic`; pass the same string into `startSampleLoop({ topic })` so the inference's "Declared topic:" user-block reflects what the user typed.
+- From V2-P5: the loop currently surfaces `onCaptureDenied` / `onSidecarErrored` / `onStartFail` via transient sonner toasts; the V2-P9 "Last error" Settings → AI row should also subscribe (via a store/event seam, since `SampleLoopHandle` doesn't replay) so users have a persistent affordance to act on — the "Restart" button there should call `useSidecarStore.start({modelPath, mmprojPath, ctxSize})` (paths from `model_paths(activeModelId)`), which the running loop's tick will pick up automatically on the next interval.
+- From V2-P5: when `onCaptureDenied` fires, mount the existing `<ScreenCapturePermissionOverlay />` (`src/components/`) with `onRetry` calling `requestScreenCapturePermission()` then `useFocusStore.reset()` + re-mounting the SessionView effect — V2-P5 latches `state.captureDenied=true` on the loop handle, so a fresh `startSampleLoop()` is required to resume after re-grant.
+- From V2-P5: empirically validate per-tick `captureScreen()` during the V2-P9 end-to-end test. If macOS Sequoia / Windows pop the OS picker every tick (the V2-P3 doc'd concern), swap the sample loop to a long-lived screen `MediaStream` acquired once on session-start and snapshotted via `CaptureRuntime.extractFrame`; document the persistent OS screen-recording indicator in onboarding. The CaptureRuntime test seam is already plumbed; the swap is a sampleLoop.ts change, not a captureShared.ts one.
+- From V2-P5: `sampleLoop.ts` reads `useModelStore.records[id].benchmark.sampleIntervalSec` ONCE during boot, not per-tick. When V2-P9 ships the user-override sample-interval slider, either (a) read the user's override per-tick inside `tick()` so mid-session slider moves take effect immediately, or (b) document "applies on next session" in the slider's help text. Option (a) is a small change — replace the boot-time `state.sampleIntervalSec` assignment with a getter the scheduler calls each time it computes `delayMs`.
 
 ---
 

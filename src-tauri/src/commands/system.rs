@@ -1,5 +1,6 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 
+use serde::Serialize;
 use tauri::{AppHandle, Manager, Runtime};
 use tauri_plugin_autostart::ManagerExt;
 use tauri_plugin_opener::OpenerExt;
@@ -92,6 +93,53 @@ pub fn system_open_releases<R: Runtime>(app: AppHandle<R>) -> Result<(), String>
     app.opener()
         .open_url(RELEASES_URL, None::<&str>)
         .map_err(|e| e.to_string())
+}
+
+// V2-P5 battery awareness for the AI sample loop. ARCHITECTURE.md §8: "if
+// user_on_battery and battery_pct < 20: pause AI". Returned shape matches
+// the `RawBattery` interface in `src/features/ai/battery.ts`.
+//
+// Desktops / VMs without a battery and Linux machines without UPower return
+// a graceful "on AC, 100%" so the sample loop keeps ticking; that's safer
+// than refusing inference on hardware the crate can't introspect.
+#[derive(Serialize)]
+pub struct BatteryInfo {
+    pub on_battery: bool,
+    pub percent: u8,
+}
+
+#[tauri::command]
+pub fn system_battery() -> Result<BatteryInfo, String> {
+    let manager = match battery::Manager::new() {
+        Ok(m) => m,
+        Err(_) => return Ok(no_battery_fallback()),
+    };
+    let mut iter = match manager.batteries() {
+        Ok(it) => it,
+        Err(_) => return Ok(no_battery_fallback()),
+    };
+    let primary = match iter.next() {
+        Some(Ok(b)) => b,
+        Some(Err(_)) | None => return Ok(no_battery_fallback()),
+    };
+    let raw_pct = primary.state_of_charge().value * 100.0;
+    let pct_clamped = if raw_pct.is_finite() {
+        raw_pct.clamp(0.0, 100.0)
+    } else {
+        100.0
+    };
+    let on_battery = matches!(primary.state(), battery::State::Discharging);
+    Ok(BatteryInfo {
+        on_battery,
+        percent: pct_clamped.round() as u8,
+    })
+}
+
+fn no_battery_fallback() -> BatteryInfo {
+    BatteryInfo {
+        on_battery: false,
+        percent: 100,
+    }
 }
 
 // macOS Sequoia surfaces Screen Recording grants as a per-app entry in

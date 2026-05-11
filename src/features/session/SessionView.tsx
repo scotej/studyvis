@@ -10,6 +10,12 @@ import { Button } from '@/components/ui/button'
 import { Kbd } from '@/components/ui/kbd'
 import { VideoGrid } from '@/components/VideoGrid'
 import { VideoTile } from '@/components/VideoTile'
+import {
+  startSampleLoop,
+  useFocusStore,
+  useModelStore,
+  type SampleLoopHandle,
+} from '@/features/ai'
 import { useIdentity } from '@/features/identity'
 import { signWithKeyring } from '@/lib/db/identity'
 import type { PomodoroPreset } from '@/lib/pomodoro-types'
@@ -22,6 +28,7 @@ import {
 import { useIdentityStore } from '@/stores/identityStore'
 import { usePomodoroStore } from '@/stores/pomodoroStore'
 import { useSessionStore } from '@/stores/sessionStore'
+import { useSettingsStore } from '@/stores/settingsStore'
 import { usePttStore } from '@/stores/pttStore'
 
 import {
@@ -54,6 +61,8 @@ export function SessionView() {
   const peers = useSessionStore((s) => s.peers)
   const endedSnapshot = useSessionStore((s) => s.endedSnapshot)
   const setPeerHello = useSessionStore((s) => s.setPeerHello)
+  const aiFeaturesEnabled = useSettingsStore((s) => s.values.aiFeaturesEnabled)
+  const activeModelId = useModelStore((s) => s.activeModelId)
   const { identity } = useIdentity()
   // The hello+audit+pomodoro effect depends only on stable identity slices
   // (ed_pubkey_hex + x_pubkey_hex) so a display-name edit during a session
@@ -312,6 +321,52 @@ export function SessionView() {
       pomodoroStopRef.current = null
     }
   }, [room, myEdPubkeyHex, myXPubkeyHex, sessionTopic, startedAt, setPeerHello])
+
+  // V2-P5 AI sample loop: starts when AI features are on, an active model
+  // exists, the session is running, and the local camera track is up.
+  // Stops on any of those flipping. Topic defaults to "Studying" — V2-P9
+  // replaces this with the user's required session-start input.
+  useEffect(() => {
+    if (status !== 'active') return
+    if (!aiFeaturesEnabled) return
+    if (!activeModelId) return
+    if (!localStream) return
+    useFocusStore.getState().reset()
+    let handle: SampleLoopHandle | null = startSampleLoop({
+      topic: 'Studying',
+      modelId: activeModelId,
+      getFaceTrack: () => localStreamRef.current?.getVideoTracks()[0] ?? null,
+      onStartFail: (reason, detail) => {
+        if (reason === 'no_active_model') {
+          toast.error('Pick a model in Settings → AI')
+        } else if (reason === 'model_files_missing') {
+          toast.error('Model files missing — re-download in Settings → AI')
+        } else {
+          toast.error(
+            detail ? `AI failed to start: ${detail}` : 'AI failed to start'
+          )
+        }
+      },
+      onCaptureDenied: () => {
+        toast.error('Screen recording denied — enable it in Settings → AI')
+      },
+      onCaptureError: (err) => {
+        toast.error(`AI capture error: ${err.message}`)
+      },
+      onSidecarErrored: (lastError) => {
+        toast.error(
+          lastError
+            ? `AI model crashed (${lastError}) — restart in Settings → AI`
+            : 'AI model crashed — restart in Settings → AI'
+        )
+      },
+    })
+    return () => {
+      const local = handle
+      handle = null
+      void local?.stop()
+    }
+  }, [status, aiFeaturesEnabled, activeModelId, localStream])
 
   const handleLeave = useCallback(() => {
     if (!sessionLeave) return

@@ -134,3 +134,61 @@ export {
 export { ModelGuide } from './ModelGuide'
 export type { ModelGuideProps } from './ModelGuide'
 export { ModelPickerContainer } from './ModelPickerContainer'
+
+export {
+  step as scoreMachineStep,
+  initialScoreMachineState,
+  normaliseThresholds,
+  clampWarningThreshold,
+  clampAlertThreshold,
+  SEVERITY_DEDUCTIONS,
+  INITIAL_SCORE,
+  SCORE_FLOOR,
+  DEFAULT_WARNING_THRESHOLD,
+  DEFAULT_ALERT_THRESHOLD,
+  WARNING_THRESHOLD_MIN,
+  WARNING_THRESHOLD_MAX,
+  ALERT_THRESHOLD_MIN,
+  ALERT_THRESHOLD_MAX,
+} from './scoreMachine'
+export type {
+  ScoreMachineState,
+  ScoreThresholds,
+  ScoreEvent,
+  StepInput,
+  StepResult,
+} from './scoreMachine'
+
+export {
+  useFocusStore,
+  __setFocusStoreThresholdReader,
+  __resetFocusStoreThresholdReader,
+} from './focusStore'
+export type { FocusStoreThresholdReader } from './focusStore'
+
+export { useBreakStore } from './breakStore'
+
+export {
+  BATTERY_PAUSE_PERCENT,
+  shouldPauseForBattery,
+  getBatteryRuntime,
+  __setBatteryRuntime,
+  __resetBatteryRuntime,
+} from './battery'
+export type { BatteryInfo, BatteryRuntime } from './battery'
+
+export {
+  startSampleLoop,
+  __setSampleLoopRuntime,
+  __resetSampleLoopRuntime,
+  getSampleLoopRuntime,
+  REQUEST_TIMEOUT_MS,
+  BATTERY_POLL_INTERVAL_MS,
+  FALLBACK_SAMPLE_INTERVAL_SEC,
+} from './sampleLoop'
+export type {
+  SampleLoopRuntime,
+  SampleLoopOptions,
+  SampleLoopHandle,
+  SampleLoopStartReason,
+} from './sampleLoop'
