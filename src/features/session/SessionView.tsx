@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { emitTo, listen } from '@tauri-apps/api/event'
 import { toast } from 'sonner'
 import { useShallow } from 'zustand/react/shallow'
 
 import { AudioDevicePicker } from '@/components/AudioDevicePicker'
 import { AuditLogPanel, type AuditLogEntry } from '@/components/AuditLogPanel'
+import { BreakCountdownBadge } from '@/components/BreakCountdownBadge'
 import type { FocusState } from '@/components/FocusIndicator'
 import { SelfWarningBadge } from '@/components/SelfWarningBadge'
 import { SessionEndedSplash } from '@/components/SessionEndedSplash'
@@ -14,9 +16,20 @@ import { VideoGrid } from '@/components/VideoGrid'
 import { VideoTile } from '@/components/VideoTile'
 import { useAlertsUiStore } from '@/features/ai/alertsUiStore'
 import {
+  AI_DIALOG_BREAK_REQUEST,
+  AI_DIALOG_BREAK_RESPONSE,
+  AI_DIALOG_CONTEXT,
+  AI_DIALOG_CONTEXT_REQUEST,
+  AI_DIALOG_TOPIC_CHANGE,
+  AI_DIALOG_WINDOW_LABEL,
   startSampleLoop,
+  useBreakStore,
   useFocusStore,
   useModelStore,
+  type AiDialogBreakRequestPayload,
+  type AiDialogContextPayload,
+  type AiDialogTopicChangePayload,
+  type BreakResponsePayload,
   type SampleLoopHandle,
 } from '@/features/ai'
 import { useIdentity } from '@/features/identity'
@@ -35,6 +48,12 @@ import { useSettingsStore } from '@/stores/settingsStore'
 import { usePttStore } from '@/stores/pttStore'
 
 import { startAiAlertDispatcher, type AiAlertDispatcher } from './aiAlerts'
+
+import {
+  cancelActiveBreakTimer,
+  requestBreak,
+  snapshotBreakState,
+} from './break'
 
 import {
   AUDIT_ACTION,
@@ -70,6 +89,8 @@ export function SessionView() {
   const activeModelId = useModelStore((s) => s.activeModelId)
   const selfWarning = useAlertsUiStore((s) => s.selfWarning)
   const alertedPeers = useAlertsUiStore((s) => s.alertedPeers)
+  const onBreak = useBreakStore((s) => s.onBreak)
+  const breakEndsAt = useBreakStore((s) => s.breakEndsAt)
   const { identity } = useIdentity()
   // The hello+audit+pomodoro effect depends only on stable identity slices
   // (ed_pubkey_hex + x_pubkey_hex) so a display-name edit during a session
@@ -112,6 +133,17 @@ export function SessionView() {
   // hello/audit/pomodoro pipeline on every render (which would resend
   // hellos and reset broadcaster state).
   const emitAuditRef = useRef<
+    | ((
+        kind: AuditEventKind,
+        detail?: AuditEventDetail,
+        options?: { now?: () => number }
+      ) => Promise<void>)
+    | null
+  >(null)
+  // Local-only audit append. V2-P6 added the split (warning path needs
+  // local-only); V2-P7's break_request audit row is also local-only (the
+  // user's intent is private until the verdict resolves).
+  const appendLocalAuditRef = useRef<
     | ((
         kind: AuditEventKind,
         detail?: AuditEventDetail,
@@ -291,6 +323,7 @@ export function SessionView() {
       })
       useAuditStore.getState().append(event)
     }
+    appendLocalAuditRef.current = appendLocalAudit
 
     const emitAudit = async (
       kind: AuditEventKind,
@@ -374,6 +407,7 @@ export function SessionView() {
       helloHandle.teardown()
       dispatcher.teardown()
       emitAuditRef.current = null
+      appendLocalAuditRef.current = null
       pomodoroStartRef.current = null
       pomodoroStopRef.current = null
       aiAlertDispatcherRef.current = null
@@ -385,11 +419,16 @@ export function SessionView() {
   // an in-session AI-features toggle flap or activeModelId change would
   // wipe the user's current score. V2-P6 also resets the alerts-UI store
   // here so stale self-warnings / alerted-peer entries don't bleed into the
-  // next session.
+  // next session. V2-P7 adds the break store reset alongside so the
+  // breaks-this-session quota is scoped to the live session.
   useEffect(() => {
     if (status !== 'active' || !startedAt) return
     useFocusStore.getState().reset()
     useAlertsUiStore.getState().reset()
+    useBreakStore.getState().reset(startedAt)
+    return () => {
+      cancelActiveBreakTimer((handle) => window.clearTimeout(handle as number))
+    }
   }, [status, startedAt])
 
   // V2-P5 AI sample loop: starts when AI features are on, an active model
@@ -402,7 +441,7 @@ export function SessionView() {
     if (!activeModelId) return
     if (!localStream) return
     let handle: SampleLoopHandle | null = startSampleLoop({
-      topic: 'Studying',
+      getTopic: () => useSessionStore.getState().declaredStudyTopic,
       modelId: activeModelId,
       getFaceTrack: () => localStreamRef.current?.getVideoTracks()[0] ?? null,
       onScoreEvents: async (events, judgment) => {
@@ -447,6 +486,153 @@ export function SessionView() {
       void local?.stop()
     }
   }, [status, aiFeaturesEnabled, activeModelId, localStream])
+
+  // V2-P7 — listen for cross-window events from the Ctrl+] AI dialog. The
+  // dialog runs in a separate Tauri WebviewWindow (label = AI_DIALOG_
+  // WINDOW_LABEL) and never touches the main window's stores directly. The
+  // protocol is:
+  //   - context-request → main replies with the current session snapshot
+  //     (declared topic, active model id, recent audit kinds). Mirrors
+  //     work the AI agent needs to build its chat-completion request.
+  //   - topic-change    → main updates declaredStudyTopic + emits the
+  //     broadcast `topic_change` audit row. Then re-emits context so the
+  //     dialog's next submit uses the fresh value.
+  //   - break-request   → main runs the rule layer in features/session/
+  //     break.ts, emits the break_request (LOCAL-only) audit row, then
+  //     either break_approved or break_denied (both broadcast). Replies
+  //     to the dialog with the verdict; the dialog renders it.
+  useEffect(() => {
+    if (status !== 'active' || !room || !sessionTopic || !startedAt) return
+    let cancelled = false
+    const unlistens: Array<() => void> = []
+
+    const buildContextSnapshot = (): AiDialogContextPayload => {
+      const auditEvents = useAuditStore.getState().events
+      const recentAuditKinds = auditEvents
+        .slice(-8)
+        .map((e) => e.kind)
+        .reverse()
+      return {
+        declaredTopic: useSessionStore.getState().declaredStudyTopic,
+        modelId: useModelStore.getState().activeModelId ?? '',
+        recentAuditKinds,
+      }
+    }
+
+    void (async () => {
+      const offContextReq = await listen(AI_DIALOG_CONTEXT_REQUEST, () => {
+        if (cancelled) return
+        void emitTo(
+          AI_DIALOG_WINDOW_LABEL,
+          AI_DIALOG_CONTEXT,
+          buildContextSnapshot()
+        )
+      })
+      unlistens.push(offContextReq)
+
+      const offTopic = await listen<AiDialogTopicChangePayload>(
+        AI_DIALOG_TOPIC_CHANGE,
+        (event) => {
+          if (cancelled) return
+          const next = event.payload?.new_topic?.trim()
+          if (!next) return
+          const previous = useSessionStore.getState().declaredStudyTopic
+          if (next === previous) return
+          useSessionStore.getState().setDeclaredStudyTopic(next)
+          const emit = emitAuditRef.current
+          if (emit) {
+            void emit('topic_change', {
+              previous_topic: previous,
+              new_topic: next,
+            }).catch((err) => {
+              console.error('[ai-dialog] topic_change audit failed:', err)
+            })
+          }
+          // Re-push context so a still-open dialog reflects the new value.
+          void emitTo(
+            AI_DIALOG_WINDOW_LABEL,
+            AI_DIALOG_CONTEXT,
+            buildContextSnapshot()
+          )
+        }
+      )
+      unlistens.push(offTopic)
+
+      const offBreak = await listen<AiDialogBreakRequestPayload>(
+        AI_DIALOG_BREAK_REQUEST,
+        (event) => {
+          if (cancelled) return
+          const payload = event.payload
+          if (!payload?.nonce) return
+          const emit = emitAuditRef.current
+          const append = appendLocalAuditRef.current
+          if (!emit || !append) {
+            void emitTo(AI_DIALOG_WINDOW_LABEL, AI_DIALOG_BREAK_RESPONSE, {
+              nonce: payload.nonce,
+              verdict: 'denied',
+              reason: 'session not ready',
+            } satisfies BreakResponsePayload)
+            return
+          }
+          void requestBreak(
+            {
+              requestedDurationSec: payload.requested_duration_sec,
+              aiRecommendation: payload.ai_recommendation,
+              aiReasoning: payload.ai_reasoning,
+              now: Date.now(),
+            },
+            {
+              appendLocalAudit: append,
+              emitAudit: emit,
+              startApprovedBreak: ({ durationSec, startedAt: at }) =>
+                useBreakStore
+                  .getState()
+                  .startApprovedBreak({ durationSec, startedAt: at }),
+              endBreak: (endedAt) => useBreakStore.getState().endBreak(endedAt),
+              setTimeout: (handler, ms) => window.setTimeout(handler, ms),
+              clearTimeout: (handle) => window.clearTimeout(handle as number),
+              snapshot: snapshotBreakState,
+              now: () => Date.now(),
+            }
+          )
+            .then((verdict) => {
+              const response: BreakResponsePayload =
+                verdict.verdict === 'approved'
+                  ? {
+                      nonce: payload.nonce,
+                      verdict: 'approved',
+                      reason: verdict.reason,
+                      duration_sec: verdict.durationSec,
+                    }
+                  : {
+                      nonce: payload.nonce,
+                      verdict: 'denied',
+                      reason: verdict.reason,
+                    }
+              void emitTo(
+                AI_DIALOG_WINDOW_LABEL,
+                AI_DIALOG_BREAK_RESPONSE,
+                response
+              )
+            })
+            .catch((err) => {
+              console.error('[ai-dialog] break flow failed:', err)
+              void emitTo(AI_DIALOG_WINDOW_LABEL, AI_DIALOG_BREAK_RESPONSE, {
+                nonce: payload.nonce,
+                verdict: 'denied',
+                reason: err instanceof Error ? err.message : 'unexpected error',
+              } satisfies BreakResponsePayload)
+            })
+        }
+      )
+      unlistens.push(offBreak)
+    })()
+
+    return () => {
+      cancelled = true
+      for (const off of unlistens) off()
+    }
+  }, [status, room, sessionTopic, startedAt])
 
   const handleLeave = useCallback(() => {
     if (!sessionLeave) return
@@ -667,6 +853,7 @@ export function SessionView() {
       {selfWarning ? (
         <SelfWarningBadge reasoning={selfWarning.reasoning} />
       ) : null}
+      {onBreak ? <BreakCountdownBadge endsAt={breakEndsAt} /> : null}
     </main>
   )
 }

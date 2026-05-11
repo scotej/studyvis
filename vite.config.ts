@@ -27,6 +27,18 @@ export default defineConfig({
       '@': path.resolve(import.meta.dirname, './src'),
     },
   },
+  // V2-P7 — second HTML entry for the floating Ctrl+] AI dialog window.
+  // Tauri's `WebviewUrl::App("ai-dialog.html".into())` resolves to this
+  // built artifact in production and to `/ai-dialog.html` on the Vite
+  // dev server in development.
+  build: {
+    rollupOptions: {
+      input: {
+        main: path.resolve(import.meta.dirname, 'index.html'),
+        ai_dialog: path.resolve(import.meta.dirname, 'ai-dialog.html'),
+      },
+    },
+  },
   test: {
     include: ['tests/**/*.test.{ts,tsx}'],
     environment: 'node',

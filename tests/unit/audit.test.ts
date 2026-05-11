@@ -97,17 +97,17 @@ describe('verifyIncomingAuditEvent rejects malformed / unsigned / tampered', () 
     ).toBeNull()
   })
 
-  test('rejects a kind not in the current schema (e.g. V2-P7 break flow)', () => {
+  test('rejects a kind not in the current schema (forward-compat sentinel)', () => {
     const me = generateIdentity()
-    // V2-P6 adds `ai_warning` / `ai_alert` to the kind set; the break flow
-    // arrives in V2-P7, so `break_request` is still not a valid kind today
-    // and shape-validation must drop it.
+    // V2-P6 added `ai_warning` / `ai_alert`; V2-P7 added the topic / break
+    // family. `chat_message` is reserved for a future phase and is the
+    // current unknown-kind sentinel for the shape-validator drop path.
     const core = {
       v: AUDIT_EVENT_VERSION,
       session_topic: 'topic-1',
       ts: 1,
       who: bytesToHex(me.edPub),
-      kind: 'break_request',
+      kind: 'chat_message',
       detail: {},
     }
     const sigBytes = signMessage(me.edPriv, serializeAuditForSig(core as never))
@@ -125,6 +125,49 @@ describe('verifyIncomingAuditEvent rejects malformed / unsigned / tampered', () 
         who: bytesToHex(me.edPub),
         kind,
         detail: { severity: 'mild', reasoning: 'looking away' },
+      }
+      const sigBytes = signMessage(me.edPriv, serializeAuditForSig(core))
+      const event = { ...core, sig: bytesToHex(sigBytes) }
+      const verified = verifyIncomingAuditEvent(event, bytesToHex(me.edPub))
+      expect(verified?.kind).toBe(kind)
+    }
+  })
+
+  test('accepts V2-P7 topic + break kinds', () => {
+    const me = generateIdentity()
+    type V2P7Kind =
+      | 'topic_set'
+      | 'topic_change'
+      | 'break_request'
+      | 'break_approved'
+      | 'break_denied'
+    const cases: Array<{
+      kind: V2P7Kind
+      detail: Record<string, string | number>
+    }> = [
+      { kind: 'topic_set', detail: { topic: 'maths' } },
+      {
+        kind: 'topic_change',
+        detail: { previous_topic: 'maths', new_topic: 'coding' },
+      },
+      { kind: 'break_request', detail: { requested_duration_sec: 300 } },
+      {
+        kind: 'break_approved',
+        detail: { duration_sec: 300, reason: 'first break this session' },
+      },
+      {
+        kind: 'break_denied',
+        detail: { reason: 'too soon since last break' },
+      },
+    ]
+    for (const { kind, detail } of cases) {
+      const core = {
+        v: AUDIT_EVENT_VERSION,
+        session_topic: 'topic-1',
+        ts: 1,
+        who: bytesToHex(me.edPub),
+        kind,
+        detail,
       }
       const sigBytes = signMessage(me.edPriv, serializeAuditForSig(core))
       const event = { ...core, sig: bytesToHex(sigBytes) }

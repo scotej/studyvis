@@ -109,7 +109,7 @@ function resetAllStores(): void {
     lastEvents: [],
     lastSampleAt: null,
   })
-  useBreakStore.setState({ onBreak: false })
+  useBreakStore.getState().reset(null)
   useSettingsStore.setState((s) => ({
     ...s,
     values: { ...s.values, aiFeaturesEnabled: true },
@@ -225,7 +225,7 @@ describe('startSampleLoop — start failures', () => {
       buildSampleLoopRuntime({ clock, fetch: vi.fn() as never })
     )
     const handle = startSampleLoop({
-      topic: 't',
+      getTopic: () => 't',
       modelId: null,
       getFaceTrack: () => null,
       onStartFail,
@@ -248,7 +248,7 @@ describe('startSampleLoop — start failures', () => {
       })
     )
     const handle = startSampleLoop({
-      topic: 't',
+      getTopic: () => 't',
       modelId: 'test-model',
       getFaceTrack: () => null,
       onStartFail,
@@ -275,7 +275,7 @@ describe('startSampleLoop — start failures', () => {
       })
     )
     const handle = startSampleLoop({
-      topic: 't',
+      getTopic: () => 't',
       modelId: 'test-model',
       getFaceTrack: () => null,
       onStartFail,
@@ -314,7 +314,7 @@ describe('startSampleLoop — start failures', () => {
     })
 
     const handle = startSampleLoop({
-      topic: 't',
+      getTopic: () => 't',
       modelId: 'test-model',
       getFaceTrack: () => null,
       onStartFail,
@@ -359,7 +359,7 @@ describe('startSampleLoop — happy-path tick', () => {
       })
     )
     const handle = startSampleLoop({
-      topic: 'maths',
+      getTopic: () => 'maths',
       modelId: 'test-model',
       getFaceTrack: () => track,
     })
@@ -415,7 +415,7 @@ describe('startSampleLoop — happy-path tick', () => {
     )
 
     const handle = startSampleLoop({
-      topic: 't',
+      getTopic: () => 't',
       modelId: 'test-model',
       getFaceTrack: () => makeFakeTrack(),
     })
@@ -459,7 +459,7 @@ describe('startSampleLoop — happy-path tick', () => {
       })
     )
     const handle = startSampleLoop({
-      topic: 't',
+      getTopic: () => 't',
       modelId: 'test-model',
       getFaceTrack: () => makeFakeTrack(),
     })
@@ -489,16 +489,18 @@ describe('startSampleLoop — gating skip paths', () => {
     __setSampleLoopRuntime(
       buildSampleLoopRuntime({ clock, fetch: fetchMock as never })
     )
-    useBreakStore.getState().startBreak()
+    useBreakStore
+      .getState()
+      .startApprovedBreak({ durationSec: 300, startedAt: 1000 })
     const handle = startSampleLoop({
-      topic: 't',
+      getTopic: () => 't',
       modelId: 'test-model',
       getFaceTrack: () => makeFakeTrack(),
     })
     await flushMicrotasks(10)
     await clock.advance(5000)
     expect(fetchMock).not.toHaveBeenCalled()
-    useBreakStore.getState().endBreak()
+    useBreakStore.getState().endBreak(2000)
     await clock.advance(5000)
     expect(fetchMock).toHaveBeenCalledTimes(1)
     await handle.stop()
@@ -515,7 +517,7 @@ describe('startSampleLoop — gating skip paths', () => {
       })
     )
     const handle = startSampleLoop({
-      topic: 't',
+      getTopic: () => 't',
       modelId: 'test-model',
       getFaceTrack: () => makeFakeTrack(),
     })
@@ -537,7 +539,7 @@ describe('startSampleLoop — gating skip paths', () => {
       })
     )
     const handle = startSampleLoop({
-      topic: 't',
+      getTopic: () => 't',
       modelId: 'test-model',
       getFaceTrack: () => makeFakeTrack(),
     })
@@ -554,7 +556,7 @@ describe('startSampleLoop — gating skip paths', () => {
       buildSampleLoopRuntime({ clock, fetch: fetchMock as never })
     )
     const handle = startSampleLoop({
-      topic: 't',
+      getTopic: () => 't',
       modelId: 'test-model',
       getFaceTrack: () => makeFakeTrack(),
     })
@@ -592,7 +594,7 @@ describe('startSampleLoop — gating skip paths', () => {
       })
     )
     const handle = startSampleLoop({
-      topic: 't',
+      getTopic: () => 't',
       modelId: 'test-model',
       getFaceTrack: () => makeFakeTrack(),
     })
@@ -617,7 +619,7 @@ describe('startSampleLoop — gating skip paths', () => {
     )
     const onSidecarErrored = vi.fn()
     const handle = startSampleLoop({
-      topic: 't',
+      getTopic: () => 't',
       modelId: 'test-model',
       getFaceTrack: () => makeFakeTrack(),
       onSidecarErrored,
@@ -678,7 +680,7 @@ describe('startSampleLoop — capture errors', () => {
       })
     )
     const handle = startSampleLoop({
-      topic: 't',
+      getTopic: () => 't',
       modelId: 'test-model',
       getFaceTrack: () => makeFakeTrack(),
       onCaptureDenied,
@@ -713,7 +715,7 @@ describe('startSampleLoop — capture errors', () => {
       })
     )
     const handle = startSampleLoop({
-      topic: 't',
+      getTopic: () => 't',
       modelId: 'test-model',
       getFaceTrack: () => makeFakeTrack(),
       onCaptureError,
@@ -757,7 +759,7 @@ describe('startSampleLoop — sidecar lifecycle', () => {
       })
     )
     const handle = startSampleLoop({
-      topic: 't',
+      getTopic: () => 't',
       modelId: 'test-model',
       getFaceTrack: () => makeFakeTrack(),
     })
@@ -793,7 +795,7 @@ describe('startSampleLoop — sidecar lifecycle', () => {
       })
     )
     const handle = startSampleLoop({
-      topic: 't',
+      getTopic: () => 't',
       modelId: 'test-model',
       getFaceTrack: () => makeFakeTrack(),
     })
@@ -824,7 +826,7 @@ describe('startSampleLoop — sidecar lifecycle', () => {
       buildSampleLoopRuntime({ clock, fetch: fetchMock as never })
     )
     const handle = startSampleLoop({
-      topic: 't',
+      getTopic: () => 't',
       modelId: 'test-model',
       getFaceTrack: () => makeFakeTrack(),
     })
@@ -857,7 +859,7 @@ describe('startSampleLoop — sidecar lifecycle', () => {
       buildSampleLoopRuntime({ clock, fetch: fetchMock as never })
     )
     const handle = startSampleLoop({
-      topic: 't',
+      getTopic: () => 't',
       modelId: 'slow-model',
       getFaceTrack: () => makeFakeTrack(),
     })

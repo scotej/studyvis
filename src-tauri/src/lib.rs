@@ -23,6 +23,8 @@ use commands::sessions::{
     audit_event_insert, audit_events_list_for_session, sessions_insert, sessions_list,
 };
 #[cfg(desktop)]
+use commands::ai_dialog::toggle_ai_dialog;
+#[cfg(desktop)]
 use commands::sidecar::{sidecar_start, sidecar_status, sidecar_stop, SidecarState};
 #[cfg(desktop)]
 use commands::system::{
@@ -239,11 +241,13 @@ fn setup_desktop(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>>
                         }
                     }
                 } else if shortcut == &ptt_ai_handle {
-                    // V1: PTT-AI is registered so the keybinding is reserved
-                    // on the user's machine, but no handler exists yet — V2-P7
-                    // wires this to the floating AI dialog window.
+                    // V2-P7 wires this shortcut to the floating Ctrl+] AI
+                    // dialog window. Fire only on key-down so a press/release
+                    // pair doesn't open then immediately close.
                     if event.state() == ShortcutState::Pressed {
-                        log_ptt_ai_noop();
+                        if let Err(err) = toggle_ai_dialog(app) {
+                            eprintln!("[ai-dialog] toggle failed: {err}");
+                        }
                     }
                 }
             })
@@ -306,9 +310,4 @@ fn show_main_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
         let _ = window.show();
         let _ = window.set_focus();
     }
-}
-
-#[cfg(desktop)]
-fn log_ptt_ai_noop() {
-    eprintln!("ptt-ai shortcut fired (V1 no-op; V2-P7 wires AI dialog)");
 }

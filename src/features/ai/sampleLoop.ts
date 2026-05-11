@@ -141,9 +141,11 @@ export type SampleLoopStartReason =
   | 'sidecar_start_failed'
 
 export type SampleLoopOptions = {
-  // Declared study topic. V2-P9 replaces the hardcoded "Studying" default
-  // with the user's required session-start input.
-  topic: string
+  // Declared study topic. Read per-tick via callback so a mid-session
+  // topic_change via the V2-P7 Ctrl+] dialog takes effect on the NEXT
+  // inference without restarting the loop. V2-P9 will wire the same
+  // pattern to the session-start input.
+  getTopic: () => string
   // Live reference to the local camera track owned by SessionView. Read
   // per-tick (not captured at start) so a mid-session device swap (V1-P11
   // audio swap; future video swap) lands on the same handle.
@@ -313,7 +315,7 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
       const port = sidecar.port
       const body = buildChatRequest({
         modelId,
-        topic: opts.topic,
+        topic: opts.getTopic(),
         faceBase64: face,
         screenBase64: screen,
       })
