@@ -6,10 +6,16 @@
 import type { JsonValue } from 'trystero'
 
 // Audit-log event kinds (ARCHITECTURE.md §9). V1 carried only the
-// presence/break/pomodoro kinds; V2-P6 extends the set with `ai_warning`
-// (local-only emit — never broadcast) and `ai_alert` (broadcast). The
-// remaining AI kinds — `topic_set` / `topic_change` / `break_request` /
-// `break_approved` / `break_denied` — land with V2-P7's AI dialog phase.
+// presence/break/pomodoro kinds; V2-P6 extended the set with `ai_warning`
+// (local-only emit — never broadcast) and `ai_alert` (broadcast). V2-P7
+// adds the topic + break flow:
+//   - `topic_set` / `topic_change`: declared study topic at session start
+//     and on mid-session edits from the Ctrl+] dialog. Broadcast.
+//   - `break_request`: user asked the AI for a break. LOCAL-ONLY (mirror of
+//     the V2-P6 `ai_warning` privacy invariant — the request is private
+//     until the rule layer resolves it).
+//   - `break_approved` / `break_denied`: rule-layer verdict. Broadcast so
+//     peers see the outcome.
 export type AuditEventKind =
   | 'joined'
   | 'left'
@@ -19,6 +25,11 @@ export type AuditEventKind =
   | 'pomodoro_end'
   | 'ai_warning'
   | 'ai_alert'
+  | 'topic_set'
+  | 'topic_change'
+  | 'break_request'
+  | 'break_approved'
+  | 'break_denied'
 
 export const AUDIT_EVENT_VERSION = 1 as const
 export const AUDIT_ACTION = 'audit'
@@ -41,6 +52,11 @@ export const AUDIT_KIND_LABELS: Record<AuditEventKind, string> = {
   pomodoro_end: 'stopped the Pomodoro',
   ai_warning: 'got a self-warning',
   ai_alert: 'looking off-task',
+  topic_set: 'set the topic',
+  topic_change: 'changed topic',
+  break_request: 'asked for a break',
+  break_approved: 'took a break',
+  break_denied: 'break was denied',
 }
 
 // Wire shape: `who` is the sender's ed_pubkey hex, `sig` is hex(64), but
@@ -84,7 +100,12 @@ export function isAuditEventKind(value: unknown): value is AuditEventKind {
     value === 'pomodoro_start' ||
     value === 'pomodoro_end' ||
     value === 'ai_warning' ||
-    value === 'ai_alert'
+    value === 'ai_alert' ||
+    value === 'topic_set' ||
+    value === 'topic_change' ||
+    value === 'break_request' ||
+    value === 'break_approved' ||
+    value === 'break_denied'
   )
 }
 

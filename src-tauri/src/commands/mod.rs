@@ -5,6 +5,9 @@ pub mod sessions;
 pub mod identity;
 
 #[cfg(desktop)]
+pub mod ai_dialog;
+
+#[cfg(desktop)]
 pub mod models;
 
 #[cfg(desktop)]

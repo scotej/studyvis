@@ -168,6 +168,43 @@ export type { FocusStoreThresholdReader } from './focusStore'
 
 export { useBreakStore } from './breakStore'
 
+export { AiDialogWindow } from './AiDialogWindow'
+export type { AiDialogWindowProps, AiDialogRuntime } from './AiDialogWindow'
+
+export {
+  handleUserText,
+  parseAgentReply,
+  AGENT_SYSTEM_PROMPT,
+  AGENT_REQUEST_TIMEOUT_MS,
+  AiAgentError,
+  __setAiAgentRuntime,
+  __resetAiAgentRuntime,
+  getAiAgentRuntime,
+} from './aiAgent'
+export type {
+  AgentIntent,
+  AgentReply,
+  AiAgentRuntime,
+  BreakRequestPayload as AgentBreakRequestPayload,
+  HandleUserTextInput,
+  TopicChangePayload,
+} from './aiAgent'
+
+export {
+  AI_DIALOG_WINDOW_LABEL,
+  AI_DIALOG_BREAK_REQUEST,
+  AI_DIALOG_BREAK_RESPONSE,
+  AI_DIALOG_CONTEXT,
+  AI_DIALOG_CONTEXT_REQUEST,
+  AI_DIALOG_TOPIC_CHANGE,
+} from './aiDialogChannels'
+export type {
+  AiDialogContextPayload,
+  AiDialogTopicChangePayload,
+  AiDialogBreakRequestPayload,
+  BreakResponsePayload,
+} from './aiDialogChannels'
+
 export {
   useAlertsUiStore,
   __setAlertsUiRuntime,

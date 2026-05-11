@@ -44,6 +44,11 @@ export type SessionInit = {
   leave: () => Promise<void>
 }
 
+// V2-P7 default until V2-P9 ships the required session-start topic input.
+// Lives at module scope so SessionView + tests can reference the same
+// literal when resetting the field.
+export const DEFAULT_DECLARED_STUDY_TOPIC = 'Studying'
+
 type SessionState = {
   status: SessionStatus
   sessionTopic: string | null
@@ -54,7 +59,16 @@ type SessionState = {
   peers: Record<string, PeerSnapshot>
   room: TopicRoom | null
   leave: (() => Promise<void>) | null
+  // User's declared study topic, consumed by the AI sample loop (V2-P5)
+  // and the Ctrl+] AI dialog (V2-P7). Defaults to
+  // DEFAULT_DECLARED_STUDY_TOPIC until V2-P9's session-start prompt
+  // requires the user to set it. `setDeclaredStudyTopic` is the only
+  // mutator; the dialog window emits a `topic_change` event that
+  // SessionView routes here so the live sample loop sees the next value
+  // on its next tick.
+  declaredStudyTopic: string
   begin: (init: SessionInit) => void
+  setDeclaredStudyTopic: (next: string) => void
   peerJoined: (peerId: string) => void
   peerLeft: (peerId: string) => void
   setPeerStream: (peerId: string, hasStream: boolean) => void
@@ -87,6 +101,7 @@ const INITIAL: Pick<
   | 'room'
   | 'leave'
   | 'endedSnapshot'
+  | 'declaredStudyTopic'
 > = {
   status: 'idle',
   sessionTopic: null,
@@ -98,6 +113,7 @@ const INITIAL: Pick<
   room: null,
   leave: null,
   endedSnapshot: null,
+  declaredStudyTopic: DEFAULT_DECLARED_STUDY_TOPIC,
 }
 
 export const useSessionStore = create<SessionState>((set, get) => ({
@@ -113,7 +129,9 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       peers: {},
       room: init.room,
       leave: init.leave,
+      declaredStudyTopic: DEFAULT_DECLARED_STUDY_TOPIC,
     }),
+  setDeclaredStudyTopic: (next) => set({ declaredStudyTopic: next }),
   peerJoined: (peerId) =>
     set((s) => ({
       hadAnyPeer: true,
