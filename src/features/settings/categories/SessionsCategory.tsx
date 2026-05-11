@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
-import { ChevronLeftIcon } from 'lucide-react'
 
 import { SettingsRow, SettingsSection } from '@/components/SettingsRow'
 import { Button } from '@/components/ui/button'
+import { Report } from '@/features/session'
 import { listSessions, type SessionRecord } from '@/lib/db/sessions'
 
 type LoadStatus = 'idle' | 'loading' | 'ready' | 'error'
@@ -11,7 +11,7 @@ export function SessionsCategory() {
   const [sessions, setSessions] = useState<SessionRecord[]>([])
   const [status, setStatus] = useState<LoadStatus>('idle')
   const [error, setError] = useState<string | null>(null)
-  const [selected, setSelected] = useState<SessionRecord | null>(null)
+  const [selectedId, setSelectedId] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     setStatus('loading')
@@ -30,8 +30,11 @@ export function SessionsCategory() {
     void load()
   }, [load])
 
-  if (selected) {
-    return <SessionDetail session={selected} onBack={() => setSelected(null)} />
+  // Re-opened report uses the same Report shell that the fresh-session-end
+  // mount in Home.tsx uses; the Close handler returns to this list rather
+  // than firing sessionStore.reset (which has no state to clear here).
+  if (selectedId) {
+    return <Report sessionId={selectedId} onClose={() => setSelectedId(null)} />
   }
 
   return (
@@ -62,7 +65,7 @@ export function SessionsCategory() {
               key={session.id}
               type="button"
               className="text-left transition-colors outline-none hover:bg-bg-raised focus-visible:bg-bg-raised focus-visible:ring-3 focus-visible:ring-accent-ring"
-              onClick={() => setSelected(session)}
+              onClick={() => setSelectedId(session.id)}
             >
               <SettingsRow
                 label={formatStartedAt(session.started_at)}
@@ -71,53 +74,6 @@ export function SessionsCategory() {
             </button>
           ))
         : null}
-    </SettingsSection>
-  )
-}
-
-function SessionDetail({
-  session,
-  onBack,
-}: {
-  session: SessionRecord
-  onBack: () => void
-}) {
-  const peers = decodePeers(session.peer_pubkeys)
-  return (
-    <SettingsSection
-      heading={
-        <span className="flex items-center gap-2">
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={onBack}
-            aria-label="Back to sessions"
-          >
-            <ChevronLeftIcon /> Back
-          </Button>
-          Session detail
-        </span>
-      }
-    >
-      <SettingsRow label="Started" help={formatStartedAt(session.started_at)} />
-      <SettingsRow label="Ended" help={formatStartedAt(session.ended_at)} />
-      <SettingsRow
-        label="Total minutes"
-        help={`${session.total_minutes ?? 0}`}
-      />
-      <SettingsRow
-        label="Participants"
-        help={
-          peers.length === 0
-            ? 'No signed-hello bindings recorded for this session.'
-            : peers.map((p) => `${p.slice(0, 12)}…`).join(', ')
-        }
-      />
-      <SettingsRow
-        label="Full report"
-        help="Available in V2 — focused-time percentage and per-event audit log will appear here."
-        disabled
-      />
     </SettingsSection>
   )
 }
@@ -139,7 +95,8 @@ function formatSessionMeta(session: SessionRecord): string {
   const peers = decodePeers(session.peer_pubkeys).length
   const peerLabel =
     peers === 0 ? 'solo' : peers === 1 ? '1 friend' : `${peers} friends`
-  return `${minutes} min · ${peerLabel}`
+  const scoreLabel = session.score != null ? ` · ${session.score} / 100` : ''
+  return `${minutes} min · ${peerLabel}${scoreLabel}`
 }
 
 function SessionRowSkeleton() {

@@ -14,12 +14,15 @@ import {
   useFocusStore,
 } from '@/features/ai'
 import type { Judgment } from '@/features/ai'
+import { snapshotFocusForReport } from '@/features/ai/focusStore'
 
 function resetStore(): void {
   useFocusStore.setState({
     machine: initialScoreMachineState(),
     lastEvents: [],
     lastSampleAt: null,
+    totalSamples: 0,
+    onTaskSamples: 0,
   })
 }
 
@@ -147,5 +150,39 @@ describe('useFocusStore', () => {
     expect(s.machine.score).toBe(INITIAL_SCORE)
     expect(s.lastEvents).toEqual([])
     expect(s.lastSampleAt).toBeNull()
+    expect(s.totalSamples).toBe(0)
+    expect(s.onTaskSamples).toBe(0)
+  })
+
+  test('applyJudgment tallies on_task vs off-task samples for the V2-P8 report', () => {
+    const state = useFocusStore.getState()
+    state.applyJudgment(makeJudgment('on_task'))
+    state.applyJudgment(makeJudgment('on_task'))
+    state.applyJudgment(makeJudgment('mild'))
+    state.applyJudgment(makeJudgment('on_task'))
+    state.applyJudgment(makeJudgment('blatant'))
+    const s = useFocusStore.getState()
+    expect(s.totalSamples).toBe(5)
+    expect(s.onTaskSamples).toBe(3)
+  })
+
+  test('snapshotFocusForReport returns null focused_pct when no samples ran', () => {
+    const snap = snapshotFocusForReport()
+    expect(snap.score).toBe(INITIAL_SCORE)
+    expect(snap.focusedPct).toBeNull()
+  })
+
+  test('snapshotFocusForReport computes focused_pct from the tallies', () => {
+    const state = useFocusStore.getState()
+    // 4 on_task / 1 mild + 1 mild → 4 / 6 ≈ 0.6667
+    state.applyJudgment(makeJudgment('on_task'))
+    state.applyJudgment(makeJudgment('on_task'))
+    state.applyJudgment(makeJudgment('on_task'))
+    state.applyJudgment(makeJudgment('mild'))
+    state.applyJudgment(makeJudgment('on_task'))
+    state.applyJudgment(makeJudgment('mild'))
+    const snap = snapshotFocusForReport()
+    expect(snap.score).toBe(useFocusStore.getState().machine.score)
+    expect(snap.focusedPct).toBeCloseTo(4 / 6, 5)
   })
 })

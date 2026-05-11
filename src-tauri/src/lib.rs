@@ -22,7 +22,7 @@ use commands::models::{
     model_remove, DownloadState,
 };
 use commands::sessions::{
-    audit_event_insert, audit_events_list_for_session, sessions_insert, sessions_list,
+    audit_event_insert, audit_events_list_for_session, sessions_get, sessions_insert, sessions_list,
 };
 #[cfg(desktop)]
 use commands::sidecar::{sidecar_start, sidecar_status, sidecar_stop, SidecarState};
@@ -53,6 +53,7 @@ pub fn run() {
         friends_get_x_pubkey,
         sessions_insert,
         sessions_list,
+        sessions_get,
         audit_event_insert,
         audit_events_list_for_session,
         #[cfg(any(target_os = "macos", target_os = "windows"))]

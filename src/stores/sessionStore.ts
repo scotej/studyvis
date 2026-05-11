@@ -4,17 +4,6 @@ import type { TopicRoom } from '@/lib/trystero'
 
 export type SessionStatus = 'idle' | 'active' | 'ended'
 
-// Snapshot rendered by SessionEndedSplash during the SESSION_ENDED_SPLASH_MS
-// window after a session closes. Captured by lifecycle.ts in the leave
-// handler before the peers map is cleared by reset().
-export type SessionEndedSnapshot = {
-  // Wall-clock seconds the session ran for, or null if the session never
-  // had a startedAt (defensive — should not happen in practice).
-  durationSeconds: number | null
-  // Display names of the peers present at end time, in arbitrary order.
-  peerNames: string[]
-}
-
 // Mirrors the validated payload shape returned by the V1-P9 signed-hello
 // handshake. Inlined here so the store does not import a feature module
 // (keeps stores → lib + zustand only, matching friendsStore / pttStore).
@@ -67,6 +56,13 @@ type SessionState = {
   // SessionView routes here so the live sample loop sees the next value
   // on its next tick.
   declaredStudyTopic: string
+  // The topic value at session START — set once in `begin()` and never
+  // mutated. V2-P8's report generator persists this to
+  // `sessions.declared_topic` so the report's topic timeline can render
+  // "started studying X" before walking the `topic_change` events.
+  // Without this, reconstructing the starting topic from the first
+  // `topic_change.previous_topic` would fail in the no-topic-change case.
+  initialDeclaredTopic: string
   begin: (init: SessionInit) => void
   setDeclaredStudyTopic: (next: string) => void
   peerJoined: (peerId: string) => void
@@ -78,14 +74,12 @@ type SessionState = {
   // observed via signed-hello in this session. Used by the leave handler to
   // populate sessions.peer_pubkeys. NULL until at least one hello arrived.
   collectPeerPubkeys: () => string | null
-  // Flip status to 'ended' AND publish the splash snapshot in one mutation
-  // so the session view can render the SessionEndedSplash with stable
-  // content for its full lifetime. lifecycle.ts is the only caller — it
-  // computes durationSeconds and peerNames from the live state right
-  // before markEnded so the values reflect the session that just closed.
-  // Followed by `reset()` after SESSION_ENDED_SPLASH_MS.
-  endedSnapshot: SessionEndedSnapshot | null
-  markEnded: (snapshot: SessionEndedSnapshot) => void
+  // Flip status to 'ended' so Home.tsx can mount the post-session Report
+  // (V2-P8). The Report queries SQLite for the just-persisted sessions
+  // row + audit_events; the in-memory peers / displayNames aren't
+  // consulted, so markEnded carries no snapshot payload. Reset is driven
+  // by the Report's Close button — there's no auto-timeout.
+  markEnded: () => void
   reset: () => void
 }
 
@@ -100,8 +94,8 @@ const INITIAL: Pick<
   | 'peers'
   | 'room'
   | 'leave'
-  | 'endedSnapshot'
   | 'declaredStudyTopic'
+  | 'initialDeclaredTopic'
 > = {
   status: 'idle',
   sessionTopic: null,
@@ -112,8 +106,8 @@ const INITIAL: Pick<
   peers: {},
   room: null,
   leave: null,
-  endedSnapshot: null,
   declaredStudyTopic: DEFAULT_DECLARED_STUDY_TOPIC,
+  initialDeclaredTopic: DEFAULT_DECLARED_STUDY_TOPIC,
 }
 
 export const useSessionStore = create<SessionState>((set, get) => ({
@@ -130,6 +124,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       room: init.room,
       leave: init.leave,
       declaredStudyTopic: DEFAULT_DECLARED_STUDY_TOPIC,
+      initialDeclaredTopic: DEFAULT_DECLARED_STUDY_TOPIC,
     }),
   setDeclaredStudyTopic: (next) => set({ declaredStudyTopic: next }),
   peerJoined: (peerId) =>
@@ -199,9 +194,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     const sorted = Array.from(seen).sort()
     return JSON.stringify(sorted)
   },
-  markEnded: (snapshot) =>
-    set((s) =>
-      s.status === 'active' ? { status: 'ended', endedSnapshot: snapshot } : s
-    ),
+  markEnded: () =>
+    set((s) => (s.status === 'active' ? { status: 'ended' } : s)),
   reset: () => set({ ...INITIAL }),
 }))

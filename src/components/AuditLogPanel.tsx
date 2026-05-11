@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 
 import { AuditLogRow } from '@/components/AuditLogRow'
 import { tokens } from '@/design/tokens'
+import type { AuditEventKind } from '@/lib/audit-types'
 import { cn } from '@/lib/utils'
 
 export type AuditLogEntry = {
@@ -11,8 +12,12 @@ export type AuditLogEntry = {
   description: string
   ts: number
   // Optional context surfaced on hover (V2-P6 routes the AI reasoning here
-  // for `ai_warning` / `ai_alert` rows).
+  // for `ai_warning` / `ai_alert` rows; V2-P8 extended the hover context
+  // to the V2-P7 break + topic kinds).
   hoverDetail?: string
+  // V2-P8 — when supplied, the row renders a kind-specific icon (sourced
+  // from `lib/audit-icons`) instead of the V1 avatar-initials placeholder.
+  iconKind?: AuditEventKind
 }
 
 export type AuditLogPanelProps = {
@@ -97,6 +102,7 @@ export function AuditLogPanel({ events, now, className }: AuditLogPanelProps) {
                 ts={e.ts}
                 now={effectiveNow}
                 hoverDetail={e.hoverDetail}
+                iconKind={e.iconKind}
               />
             ))}
           </ul>

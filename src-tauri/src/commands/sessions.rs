@@ -9,6 +9,7 @@ fn lock<'a>(
 }
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub fn sessions_insert(
     state: State<'_, DbPool>,
     id: String,
@@ -16,17 +17,22 @@ pub fn sessions_insert(
     ended_at: i64,
     total_minutes: i64,
     peer_pubkeys: Option<String>,
+    declared_topic: Option<String>,
+    score: Option<i64>,
+    focused_pct: Option<f64>,
+    generated_at: Option<i64>,
 ) -> Result<(), String> {
     let conn = lock(&state)?;
-    // V1 callers (lifecycle.ts) always pass concrete values; the SessionRow
-    // struct uses Option<i64> only so SELECT paths tolerate NULL rows that
-    // future migrations or partial inserts might leave behind.
     let row = sessions::SessionRow {
         id,
         started_at: Some(started_at),
         ended_at: Some(ended_at),
         total_minutes: Some(total_minutes),
         peer_pubkeys,
+        declared_topic,
+        score,
+        focused_pct,
+        generated_at,
     };
     sessions::insert(&conn, &row).map_err(|e| e.to_string())
 }
@@ -35,6 +41,15 @@ pub fn sessions_insert(
 pub fn sessions_list(state: State<'_, DbPool>) -> Result<Vec<sessions::SessionRow>, String> {
     let conn = lock(&state)?;
     sessions::list(&conn).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn sessions_get(
+    state: State<'_, DbPool>,
+    id: String,
+) -> Result<Option<sessions::SessionRow>, String> {
+    let conn = lock(&state)?;
+    sessions::get(&conn, &id).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
