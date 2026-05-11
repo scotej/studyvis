@@ -12,7 +12,7 @@ import {
 } from '@/features/friends'
 import { useIdentity } from '@/features/identity'
 import { Onboarding, useOnboardingState } from '@/features/onboarding'
-import { inviteToCurrentSession, SessionView } from '@/features/session'
+import { inviteToCurrentSession, Report, SessionView } from '@/features/session'
 import { Settings } from '@/features/settings'
 import type { Friend } from '@/lib/db/friends'
 import { boxEncryptWithKeyring } from '@/lib/db/identity'
@@ -29,6 +29,7 @@ export function Home() {
   const friendsStatus = useFriendsStore((s) => s.status)
   const loadFriends = useFriendsStore((s) => s.load)
   const sessionStatus = useSessionStore((s) => s.status)
+  const sessionTopic = useSessionStore((s) => s.sessionTopic)
   const [addOpen, setAddOpen] = useState(false)
   const [presence, setPresence] = useState<PresenceMap>({})
   const [view, setView] = useState<View>('main')
@@ -96,6 +97,24 @@ export function Home() {
     return (
       <>
         <SessionView />
+        {inbox}
+      </>
+    )
+  }
+
+  // V2-P8 — surface the post-session report instead of the V2-P3 splash.
+  // Reset is driven by the Close button so the report stays visible until
+  // the user dismisses it (no auto-timeout). The audit + pomodoro stores
+  // are reset on the NEXT session-start by SessionView's V2-P5 reset
+  // effect — this covers the invite-while-on-report path where the user
+  // never clicks Close.
+  if (sessionStatus === 'ended' && sessionTopic) {
+    return (
+      <>
+        <Report
+          sessionId={sessionTopic}
+          onClose={() => useSessionStore.getState().reset()}
+        />
         {inbox}
       </>
     )

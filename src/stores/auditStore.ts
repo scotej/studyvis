@@ -34,6 +34,13 @@ type AuditState = {
   // so a self-loopback doesn't double-render.
   append: (event: AuditEvent) => void
   reset: () => void
+  // Resolves once every in-flight persistFn() invocation has settled. V2-P8
+  // calls this from `buildLeaveHandler` before reading audit_events back
+  // out of SQLite to render the post-session report — without it, the
+  // 'left' / final ai_alert rows can land in SQLite a tick AFTER the
+  // sessions row is upserted. Always resolves; failures are swallowed by
+  // `persistFn(...).catch` upstream.
+  flushPending: () => Promise<void>
 }
 
 // Test seam — replaced by Vitest mocks in unit tests so the store can be
@@ -55,6 +62,14 @@ export function __setAuditPersistFn(
   persistFn = fn
 }
 
+// Module-scoped in-flight set so flushPending() can await every persist that
+// `append()` kicked off — including ones started before flushPending() was
+// even called. A Promise resolves OUT of the set in its own `finally` so the
+// set drains naturally without a separate timer. Lives outside the store
+// state on purpose: Zustand `set` should never touch this (it's not part of
+// the store's value, only its side-effect ledger).
+const pendingPersists = new Set<Promise<unknown>>()
+
 export const useAuditStore = create<AuditState>((set, get) => ({
   events: [],
   nextSeq: 0,
@@ -68,11 +83,19 @@ export const useAuditStore = create<AuditState>((set, get) => ({
     // Best-effort SQLite persistence (V1-P9 carryover): the panel reflects
     // the event regardless of disk write success. The post-session report
     // (V2) is the consumer of the persisted rows.
-    void persistFn(event).catch((err) => {
+    const promise = persistFn(event).catch((err) => {
       console.error('audit persist failed:', err)
+    })
+    pendingPersists.add(promise)
+    void promise.finally(() => {
+      pendingPersists.delete(promise)
     })
   },
   reset: () => set({ events: [], nextSeq: 0 }),
+  flushPending: async () => {
+    if (pendingPersists.size === 0) return
+    await Promise.allSettled(Array.from(pendingPersists))
+  },
 }))
 
 export type SignFn = (bytes: Uint8Array) => Promise<Uint8Array>

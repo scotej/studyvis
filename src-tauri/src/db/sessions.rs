@@ -1,12 +1,12 @@
-use rusqlite::{params, Connection, Result};
+use rusqlite::{params, Connection, OptionalExtension, Result};
 use serde::{Deserialize, Serialize};
 
-// All four numeric columns are NULLable in 001_initial.sql; insert() always
-// writes Some(...), but a SELECT path that hits a NULL row (e.g. partial
-// data from a future migration) would panic on `row.get::<_, i64>(...)`. The
-// struct fields are Option<i64> so list() never panics on legitimate
-// schema-allowed values; insert() callers continue to provide concrete
-// values via SessionInsert below.
+// All numeric columns are NULLable in 001_initial.sql; insert() always writes
+// Some(...) for the V1 lifecycle fields, but a SELECT path that hit a NULL
+// row would panic on `row.get::<_, i64>(...)`. V2-P8 added the report fields
+// (declared_topic, score, focused_pct, generated_at) which are NULL until the
+// post-session report runs; the struct keeps every field optional so list()
+// is panic-free for partial rows.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionRow {
     pub id: String,
@@ -16,11 +16,16 @@ pub struct SessionRow {
     // JSON-array string of ed_pubkey_hex values observed via signed-hello in
     // the session, sorted lexicographically. NULL when no hello arrived.
     pub peer_pubkeys: Option<String>,
+    pub declared_topic: Option<String>,
+    pub score: Option<i64>,
+    pub focused_pct: Option<f64>,
+    pub generated_at: Option<i64>,
 }
 
 pub fn list(conn: &Connection) -> Result<Vec<SessionRow>> {
     let mut stmt = conn.prepare(
-        "SELECT id, started_at, ended_at, total_minutes, peer_pubkeys
+        "SELECT id, started_at, ended_at, total_minutes, peer_pubkeys,
+                declared_topic, score, focused_pct, generated_at
          FROM sessions
          ORDER BY started_at DESC, id ASC",
     )?;
@@ -31,29 +36,68 @@ pub fn list(conn: &Connection) -> Result<Vec<SessionRow>> {
             ended_at: row.get(2)?,
             total_minutes: row.get(3)?,
             peer_pubkeys: row.get(4)?,
+            declared_topic: row.get(5)?,
+            score: row.get(6)?,
+            focused_pct: row.get(7)?,
+            generated_at: row.get(8)?,
         })
     })?;
     rows.collect()
 }
 
+pub fn get(conn: &Connection, id: &str) -> Result<Option<SessionRow>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, started_at, ended_at, total_minutes, peer_pubkeys,
+                declared_topic, score, focused_pct, generated_at
+         FROM sessions
+         WHERE id = ?1",
+    )?;
+    stmt.query_row([id], |row| {
+        Ok(SessionRow {
+            id: row.get(0)?,
+            started_at: row.get(1)?,
+            ended_at: row.get(2)?,
+            total_minutes: row.get(3)?,
+            peer_pubkeys: row.get(4)?,
+            declared_topic: row.get(5)?,
+            score: row.get(6)?,
+            focused_pct: row.get(7)?,
+            generated_at: row.get(8)?,
+        })
+    })
+    .optional()
+}
+
 pub fn insert(conn: &Connection, row: &SessionRow) -> Result<()> {
-    // V1-P8 stored only the placeholder fields; V1-P9 added peer_pubkeys
-    // (from the signed-hello binding). declared_topic + score arrive with
-    // the V2 report shape.
+    // COALESCE on the optional report columns so a leave-handler upsert that
+    // omits them (e.g. a V1-style session insert before the report fields
+    // were populated) does not clobber values written by an earlier call.
+    // Mirrors the pre-existing peer_pubkeys behavior so partial upserts are
+    // additive across the lifetime of a session row.
     conn.execute(
-        "INSERT INTO sessions (id, started_at, ended_at, total_minutes, peer_pubkeys)
-         VALUES (?1, ?2, ?3, ?4, ?5)
+        "INSERT INTO sessions
+             (id, started_at, ended_at, total_minutes, peer_pubkeys,
+              declared_topic, score, focused_pct, generated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
          ON CONFLICT(id) DO UPDATE SET
-             started_at    = excluded.started_at,
-             ended_at      = excluded.ended_at,
-             total_minutes = excluded.total_minutes,
-             peer_pubkeys  = COALESCE(excluded.peer_pubkeys, sessions.peer_pubkeys)",
+             started_at     = excluded.started_at,
+             ended_at       = excluded.ended_at,
+             total_minutes  = excluded.total_minutes,
+             peer_pubkeys   = COALESCE(excluded.peer_pubkeys, sessions.peer_pubkeys),
+             declared_topic = COALESCE(excluded.declared_topic, sessions.declared_topic),
+             score          = COALESCE(excluded.score, sessions.score),
+             focused_pct    = COALESCE(excluded.focused_pct, sessions.focused_pct),
+             generated_at   = COALESCE(excluded.generated_at, sessions.generated_at)",
         params![
             row.id,
             row.started_at,
             row.ended_at,
             row.total_minutes,
             row.peer_pubkeys,
+            row.declared_topic,
+            row.score,
+            row.focused_pct,
+            row.generated_at,
         ],
     )?;
     Ok(())
@@ -70,41 +114,38 @@ mod tests {
         conn
     }
 
-    #[test]
-    fn insert_writes_a_row_with_expected_columns() {
-        let conn = fresh();
-        let row = SessionRow {
-            id: "topic-hex".into(),
+    fn lifecycle_row(id: &str) -> SessionRow {
+        SessionRow {
+            id: id.into(),
             started_at: Some(1_700_000_000_000),
             ended_at: Some(1_700_000_300_000),
             total_minutes: Some(5),
             peer_pubkeys: Some("[\"aa\",\"bb\"]".into()),
-        };
-        insert(&conn, &row).expect("insert");
-        let read: (String, i64, i64, Option<i64>, Option<String>) = conn
-            .query_row(
-                "SELECT id, started_at, ended_at, total_minutes, peer_pubkeys FROM sessions WHERE id = ?1",
-                ["topic-hex"],
-                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
-            )
-            .expect("select");
-        assert_eq!(read.0, "topic-hex");
-        assert_eq!(read.1, 1_700_000_000_000);
-        assert_eq!(read.2, 1_700_000_300_000);
-        assert_eq!(read.3, Some(5));
-        assert_eq!(read.4.as_deref(), Some("[\"aa\",\"bb\"]"));
+            declared_topic: None,
+            score: None,
+            focused_pct: None,
+            generated_at: None,
+        }
+    }
+
+    #[test]
+    fn insert_writes_a_row_with_expected_columns() {
+        let conn = fresh();
+        insert(&conn, &lifecycle_row("topic-hex")).expect("insert");
+        let read = get(&conn, "topic-hex").expect("get").expect("present");
+        assert_eq!(read.id, "topic-hex");
+        assert_eq!(read.started_at, Some(1_700_000_000_000));
+        assert_eq!(read.ended_at, Some(1_700_000_300_000));
+        assert_eq!(read.total_minutes, Some(5));
+        assert_eq!(read.peer_pubkeys.as_deref(), Some("[\"aa\",\"bb\"]"));
     }
 
     #[test]
     fn insert_upserts_on_conflicting_id() {
         let conn = fresh();
-        let mut row = SessionRow {
-            id: "topic-hex".into(),
-            started_at: Some(1),
-            ended_at: Some(2),
-            total_minutes: Some(0),
-            peer_pubkeys: None,
-        };
+        let mut row = lifecycle_row("topic-hex");
+        row.ended_at = Some(2);
+        row.total_minutes = Some(0);
         insert(&conn, &row).expect("insert 1");
         row.ended_at = Some(99);
         row.total_minutes = Some(1);
@@ -113,41 +154,25 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM sessions", [], |r| r.get(0))
             .expect("count");
         assert_eq!(count, 1);
-        let ended: i64 = conn
-            .query_row(
-                "SELECT ended_at FROM sessions WHERE id = ?1",
-                ["topic-hex"],
-                |r| r.get(0),
-            )
-            .expect("read ended_at");
-        assert_eq!(ended, 99);
+        let read = get(&conn, "topic-hex").expect("get").expect("present");
+        assert_eq!(read.ended_at, Some(99));
     }
 
     #[test]
     fn list_orders_by_started_at_desc() {
         let conn = fresh();
-        insert(
-            &conn,
-            &SessionRow {
-                id: "older".into(),
-                started_at: Some(100),
-                ended_at: Some(200),
-                total_minutes: Some(1),
-                peer_pubkeys: None,
-            },
-        )
-        .expect("insert older");
-        insert(
-            &conn,
-            &SessionRow {
-                id: "newer".into(),
-                started_at: Some(300),
-                ended_at: Some(400),
-                total_minutes: Some(1),
-                peer_pubkeys: None,
-            },
-        )
-        .expect("insert newer");
+        let mut older = lifecycle_row("older");
+        older.started_at = Some(100);
+        older.ended_at = Some(200);
+        older.total_minutes = Some(1);
+        older.peer_pubkeys = None;
+        insert(&conn, &older).expect("insert older");
+        let mut newer = lifecycle_row("newer");
+        newer.started_at = Some(300);
+        newer.ended_at = Some(400);
+        newer.total_minutes = Some(1);
+        newer.peer_pubkeys = None;
+        insert(&conn, &newer).expect("insert newer");
         let read = list(&conn).expect("list");
         assert_eq!(read.len(), 2);
         assert_eq!(read[0].id, "newer");
@@ -156,14 +181,9 @@ mod tests {
 
     #[test]
     fn list_tolerates_null_columns() {
-        // Schema allows NULL on started_at / ended_at / total_minutes.
-        // A SELECT path that hit a NULL row used to panic in row.get::<_, i64>.
-        // Insert a partially-populated row directly via SQL and verify list()
-        // hands back an Option-valued struct without erroring.
         let conn = fresh();
         conn.execute(
-            "INSERT INTO sessions (id, started_at, ended_at, total_minutes, peer_pubkeys)
-             VALUES ('partial', NULL, NULL, NULL, NULL)",
+            "INSERT INTO sessions (id) VALUES ('partial')",
             [],
         )
         .expect("raw insert");
@@ -174,15 +194,14 @@ mod tests {
         assert_eq!(read[0].ended_at, None);
         assert_eq!(read[0].total_minutes, None);
         assert_eq!(read[0].peer_pubkeys, None);
+        assert_eq!(read[0].declared_topic, None);
+        assert_eq!(read[0].score, None);
+        assert_eq!(read[0].focused_pct, None);
+        assert_eq!(read[0].generated_at, None);
     }
 
     #[test]
     fn insert_preserves_peer_pubkeys_when_subsequent_upsert_omits_them() {
-        // First insert carries the JSON array (e.g. session ended via the
-        // local leave-handler after hellos arrived). A subsequent upsert
-        // (e.g. an idempotent leave) without the column must NOT clobber
-        // the previously-stored bindings; COALESCE on excluded.peer_pubkeys
-        // keeps them.
         let conn = fresh();
         let row = SessionRow {
             id: "topic-hex".into(),
@@ -190,6 +209,10 @@ mod tests {
             ended_at: Some(2),
             total_minutes: Some(0),
             peer_pubkeys: Some("[\"aa\"]".into()),
+            declared_topic: None,
+            score: None,
+            focused_pct: None,
+            generated_at: None,
         };
         insert(&conn, &row).expect("insert 1");
         let again = SessionRow {
@@ -198,15 +221,57 @@ mod tests {
             ended_at: Some(9),
             total_minutes: Some(0),
             peer_pubkeys: None,
+            declared_topic: None,
+            score: None,
+            focused_pct: None,
+            generated_at: None,
         };
         insert(&conn, &again).expect("insert 2");
-        let kept: Option<String> = conn
-            .query_row(
-                "SELECT peer_pubkeys FROM sessions WHERE id = ?1",
-                ["topic-hex"],
-                |r| r.get(0),
-            )
-            .expect("read peer_pubkeys");
-        assert_eq!(kept.as_deref(), Some("[\"aa\"]"));
+        let read = get(&conn, "topic-hex").expect("get").expect("present");
+        assert_eq!(read.peer_pubkeys.as_deref(), Some("[\"aa\"]"));
+    }
+
+    #[test]
+    fn report_fields_round_trip_and_persist_across_upserts() {
+        // First upsert is the V1-style lifecycle insert without report fields.
+        // The follow-up "report-generator" upsert layers score / focused_pct /
+        // declared_topic / generated_at on top without clobbering started_at
+        // or peer_pubkeys, and a later idempotent lifecycle replay must NOT
+        // erase the report fields.
+        let conn = fresh();
+        insert(&conn, &lifecycle_row("topic-hex")).expect("insert lifecycle");
+        let report_row = SessionRow {
+            id: "topic-hex".into(),
+            started_at: Some(1_700_000_000_000),
+            ended_at: Some(1_700_000_300_000),
+            total_minutes: Some(5),
+            peer_pubkeys: None,
+            declared_topic: Some("Studying".into()),
+            score: Some(87),
+            focused_pct: Some(0.91),
+            generated_at: Some(1_700_000_300_500),
+        };
+        insert(&conn, &report_row).expect("insert report");
+        let read = get(&conn, "topic-hex").expect("get").expect("present");
+        assert_eq!(read.declared_topic.as_deref(), Some("Studying"));
+        assert_eq!(read.score, Some(87));
+        assert_eq!(read.focused_pct, Some(0.91));
+        assert_eq!(read.generated_at, Some(1_700_000_300_500));
+        assert_eq!(read.peer_pubkeys.as_deref(), Some("[\"aa\",\"bb\"]"));
+
+        // Replay the lifecycle upsert; report fields stay populated.
+        insert(&conn, &lifecycle_row("topic-hex")).expect("insert lifecycle replay");
+        let read = get(&conn, "topic-hex").expect("get").expect("present");
+        assert_eq!(read.declared_topic.as_deref(), Some("Studying"));
+        assert_eq!(read.score, Some(87));
+        assert_eq!(read.focused_pct, Some(0.91));
+        assert_eq!(read.generated_at, Some(1_700_000_300_500));
+    }
+
+    #[test]
+    fn get_returns_none_for_unknown_id() {
+        let conn = fresh();
+        let read = get(&conn, "nope").expect("get");
+        assert!(read.is_none());
     }
 }

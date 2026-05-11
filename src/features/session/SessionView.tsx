@@ -8,7 +8,6 @@ import { AuditLogPanel, type AuditLogEntry } from '@/components/AuditLogPanel'
 import { BreakCountdownBadge } from '@/components/BreakCountdownBadge'
 import type { FocusState } from '@/components/FocusIndicator'
 import { SelfWarningBadge } from '@/components/SelfWarningBadge'
-import { SessionEndedSplash } from '@/components/SessionEndedSplash'
 import { SessionTimer } from '@/components/SessionTimer'
 import { Button } from '@/components/ui/button'
 import { Kbd } from '@/components/ui/kbd'
@@ -74,8 +73,8 @@ type PttPayload = { active: boolean }
 // Composed session feature surface (DESIGN-SYSTEM.md §8.3): tiles for self +
 // each peer, PTT-driven mute on the local audio track, an audit log right
 // rail, a Pomodoro timer in the bottom bar, and a Leave button. Mounted
-// whenever the session store reports an active or recently-ended session
-// (the latter renders the SessionEndedSplash before reset() clears state).
+// only while the session store reports an active session — Home.tsx
+// switches to the V2-P8 Report view as soon as status flips to 'ended'.
 export function SessionView() {
   const status = useSessionStore((s) => s.status)
   const room = useSessionStore((s) => s.room)
@@ -83,7 +82,6 @@ export function SessionView() {
   const sessionTopic = useSessionStore((s) => s.sessionTopic)
   const startedAt = useSessionStore((s) => s.startedAt)
   const peers = useSessionStore((s) => s.peers)
-  const endedSnapshot = useSessionStore((s) => s.endedSnapshot)
   const setPeerHello = useSessionStore((s) => s.setPeerHello)
   const aiFeaturesEnabled = useSettingsStore((s) => s.values.aiFeaturesEnabled)
   const activeModelId = useModelStore((s) => s.activeModelId)
@@ -419,13 +417,17 @@ export function SessionView() {
   // an in-session AI-features toggle flap or activeModelId change would
   // wipe the user's current score. V2-P6 also resets the alerts-UI store
   // here so stale self-warnings / alerted-peer entries don't bleed into the
-  // next session. V2-P7 adds the break store reset alongside so the
-  // breaks-this-session quota is scoped to the live session.
+  // next session. V2-P7 added the break store reset; V2-P8 adds audit +
+  // pomodoro to cover the invite-while-on-report path (user clicks an
+  // invite from the post-session report → new session begins without
+  // ever firing the Report's Close handler).
   useEffect(() => {
     if (status !== 'active' || !startedAt) return
     useFocusStore.getState().reset()
     useAlertsUiStore.getState().reset()
     useBreakStore.getState().reset(startedAt)
+    useAuditStore.getState().reset()
+    usePomodoroStore.getState().reset()
     return () => {
       cancelActiveBreakTimer((handle) => window.clearTimeout(handle as number))
     }
@@ -748,14 +750,6 @@ export function SessionView() {
     ? (alertedPeers[myEdPubkey]?.reasoning ?? undefined)
     : undefined
 
-  if (status === 'ended' && endedSnapshot) {
-    return (
-      <SessionEndedSplash
-        durationSeconds={endedSnapshot.durationSeconds}
-        peerNames={endedSnapshot.peerNames}
-      />
-    )
-  }
   if (!room) return null
 
   const peerEntries = Object.values(peers)
@@ -922,22 +916,69 @@ function mapAuditEntries(
       byEdPubkey.set(p.edPubkeyHex, p.displayName)
     }
   }
-  return events.map((e) => {
-    let hoverDetail: string | undefined
-    if (e.kind === 'ai_warning' || e.kind === 'ai_alert') {
-      const reasoning = e.detail?.reasoning
-      if (typeof reasoning === 'string' && reasoning.length > 0) {
-        hoverDetail = reasoning
+  return events.map((e) => ({
+    seq: e.seq,
+    name: byEdPubkey.get(e.who) ?? `Peer ${e.who.slice(0, 6)}`,
+    description: AUDIT_KIND_LABELS[e.kind],
+    ts: e.ts,
+    hoverDetail: hoverDetailFor(e.kind, e.detail),
+    iconKind: e.kind,
+  }))
+}
+
+// Maps each audit kind to the detail field that should surface on hover.
+// V2-P6 covered ai_warning / ai_alert via `detail.reasoning`; V2-P8
+// extends the same pattern to the V2-P7 break + topic kinds so the user
+// sees the "why" / "what changed" without paying for a permanent slot in
+// the row. Unknown / detail-less kinds return undefined and the row
+// renders without a title attribute.
+function hoverDetailFor(
+  kind: AuditEventKind,
+  detail: AuditEventDetail
+): string | undefined {
+  switch (kind) {
+    case 'ai_warning':
+    case 'ai_alert': {
+      const reasoning = detail?.reasoning
+      return typeof reasoning === 'string' && reasoning.length > 0
+        ? reasoning
+        : undefined
+    }
+    case 'topic_change': {
+      const prev = detail?.previous_topic
+      const next = detail?.new_topic
+      if (typeof prev === 'string' && typeof next === 'string') {
+        return `${prev} → ${next}`
       }
+      return undefined
     }
-    return {
-      seq: e.seq,
-      name: byEdPubkey.get(e.who) ?? `Peer ${e.who.slice(0, 6)}`,
-      description: AUDIT_KIND_LABELS[e.kind],
-      ts: e.ts,
-      hoverDetail,
+    case 'topic_set': {
+      const topic = detail?.topic
+      return typeof topic === 'string' && topic.length > 0 ? topic : undefined
     }
-  })
+    case 'break_request': {
+      const requested = detail?.requested_duration_sec
+      const aiReason = detail?.ai_reasoning
+      const parts: string[] = []
+      if (typeof requested === 'number' && Number.isFinite(requested)) {
+        const minutes = Math.max(0, Math.round(requested / 60))
+        parts.push(`requested ${minutes} min`)
+      }
+      if (typeof aiReason === 'string' && aiReason.length > 0) {
+        parts.push(aiReason)
+      }
+      return parts.length > 0 ? parts.join(' — ') : undefined
+    }
+    case 'break_approved':
+    case 'break_denied': {
+      const reason = detail?.reason
+      return typeof reason === 'string' && reason.length > 0
+        ? reason
+        : undefined
+    }
+    default:
+      return undefined
+  }
 }
 
 function useElapsed(startedAt: number | null): string {

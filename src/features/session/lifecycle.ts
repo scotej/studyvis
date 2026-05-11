@@ -1,12 +1,12 @@
 import { toast } from 'sonner'
 
+import { snapshotFocusForReport } from '@/features/ai/focusStore'
 import { sessionTopic as deriveSessionTopic } from '@/lib/crypto/topics'
 import { sessionsInsert } from '@/lib/db/sessions'
 import { bytesToBase64 } from '@/lib/encoding'
 import { joinTopic, type TopicRoom } from '@/lib/trystero'
 import { useAuditStore } from '@/stores/auditStore'
 import { useFriendsStore } from '@/stores/friendsStore'
-import { usePomodoroStore } from '@/stores/pomodoroStore'
 import { useSessionStore } from '@/stores/sessionStore'
 
 export const SESSION_FULL_ACTION = 'session-full'
@@ -14,10 +14,11 @@ export const PTT_STATE_ACTION = 'ptt-state'
 // 4-user mesh hard cap (host + 3 peers, ARCHITECTURE.md §7).
 export const MAX_REMOTE_PEERS = 3
 export const SESSION_FULL_MESSAGE = 'Session is full — max 4 friends'
-// How long the "session ended" splash stays visible after the room tears
-// down before sessionStore.reset() returns the UI to the friends list.
-// Short enough to feel like a confirmation, not an interruption.
-export const SESSION_ENDED_SPLASH_MS = 1500
+// V2-P8 replaces the V2-P3 session-ended splash with the post-session
+// report. The reset now runs when the user dismisses the report (via
+// Report's Close button → useSessionStore.reset()), not on a timer. The
+// constant + auto-reset timer have been retired; the V2-P3 splash was
+// always documented as a placeholder for this report.
 
 export type SessionHandle = {
   sessionTopic: string
@@ -55,11 +56,19 @@ export function createGuestRoom(topic: string, password: string): RoomInit {
   return { room, topic, password }
 }
 
-// Single teardown path: leaves trystero, computes a placeholder report, and
-// upserts a sessions row keyed on session_topic. Each side persists its own
-// row independently when the session ends — ARCHITECTURE.md §13 "peer count
+// Single teardown path: leaves trystero, generates the V2-P8 post-session
+// report by snapshotting per-user score / focused-time / declared topic
+// from in-memory stores BEFORE reset() clears anything, and upserts a
+// sessions row keyed on session_topic. Each side persists its own row
+// independently when the session ends — ARCHITECTURE.md §13 "peer count
 // drops to 1 → generate report". Idempotent so onPeerLeave + click-Leave
 // races don't double-write.
+//
+// The audit-store flush BEFORE the sessions upsert is load-bearing: the
+// 'left' event (and any in-flight ai_alert from the closing exchange) is
+// persisted via a fire-and-forget Tauri command in `auditStore.append`,
+// so without flushPending() the report's first render races the SQLite
+// commit for those last rows.
 export function buildLeaveHandler(args: {
   room: TopicRoom
   topic: string
@@ -70,23 +79,38 @@ export function buildLeaveHandler(args: {
     if (alreadyLeft) return
     alreadyLeft = true
     const endedAt = Date.now()
-    try {
-      await args.room.leave()
-    } catch {
-      // best-effort; persistence still runs
-    }
-    const totalMinutes = Math.max(
-      0,
-      Math.floor((endedAt - args.startedAt) / 60_000)
-    )
-    // Snapshot peer pubkeys BEFORE reset() clears the store. The sessions
-    // column stores the sorted JSON form for canonicality; the per-peer list
-    // is what we need for the friends.last_studied_with bump.
+    // Snapshot every store field the report needs BEFORE room.leave so a
+    // mid-teardown StrictMode / HMR double-mount can't wipe the values
+    // (advisor-flagged invariant). The V2-P5 focusStore reset effect only
+    // fires on 'active', so the score survives the 'ended' window in
+    // practice — but capturing up front decouples us from that gate.
     const sessionState = useSessionStore.getState()
     const peerPubkeys = sessionState.collectPeerPubkeys()
     const peerEdPubkeys = Object.values(sessionState.peers)
       .map((p) => p.edPubkeyHex)
       .filter((hex): hex is string => typeof hex === 'string')
+    const initialDeclaredTopic = sessionState.initialDeclaredTopic
+    const focusSnapshot = snapshotFocusForReport()
+    const totalMinutes = Math.max(
+      0,
+      Math.floor((endedAt - args.startedAt) / 60_000)
+    )
+
+    try {
+      await args.room.leave()
+    } catch {
+      // best-effort; persistence still runs
+    }
+
+    // Make sure every audit_event_insert kicked off during the session
+    // (including the very last 'left' row from our own emit a few ticks
+    // ago) has landed in SQLite before the report queries audit_events.
+    try {
+      await useAuditStore.getState().flushPending()
+    } catch (err) {
+      console.error('audit flushPending failed:', err)
+    }
+
     try {
       await sessionsInsert({
         id: args.topic,
@@ -94,6 +118,10 @@ export function buildLeaveHandler(args: {
         endedAt,
         totalMinutes,
         peerPubkeys,
+        declaredTopic: initialDeclaredTopic,
+        score: focusSnapshot.score,
+        focusedPct: focusSnapshot.focusedPct,
+        generatedAt: endedAt,
       })
     } catch (err) {
       console.error('sessions_insert failed:', err)
@@ -103,32 +131,13 @@ export function buildLeaveHandler(args: {
     } catch (err) {
       console.error('markStudied failed:', err)
     }
-    // Compute the splash snapshot BEFORE flipping state so SessionEndedSplash
-    // has stable content for its full lifetime. The peers map is cleared by
-    // reset() after SESSION_ENDED_SPLASH_MS, so we capture display names now.
-    const durationSeconds = Math.max(
-      0,
-      Math.floor((endedAt - args.startedAt) / 1000)
-    )
-    const peerNames = Object.values(sessionState.peers)
-      .map((p) => p.displayName)
-      .filter((n): n is string => typeof n === 'string' && n.length > 0)
-    // Flip to 'ended' so the session view can show its splash for
-    // SESSION_ENDED_SPLASH_MS, then reset() returns the UI to idle. Audit
-    // + pomodoro stores reset immediately because nothing on screen reads
-    // them during the splash phase.
-    useSessionStore.getState().markEnded({ durationSeconds, peerNames })
-    useAuditStore.getState().reset()
-    usePomodoroStore.getState().reset()
-    setTimeout(() => {
-      const after = useSessionStore.getState()
-      // Defend against a fresh session beginning during the splash window
-      // (e.g. accepting an invite immediately): only reset when we're still
-      // showing the ended state for THIS session.
-      if (after.status === 'ended' && after.sessionTopic === args.topic) {
-        after.reset()
-      }
-    }, SESSION_ENDED_SPLASH_MS)
+    // Flip to 'ended'. The Report view (mounted by Home.tsx when status ===
+    // 'ended') queries the just-persisted sessions row + audit_events for
+    // this topic. Reset of audit + pomodoro stores is driven by the V2-P5
+    // reset effect in SessionView the next time a session begins (handles
+    // the invite-while-on-report path); the V2-P3 1.5 s auto-reset has
+    // been retired alongside the SessionEndedSplash.
+    useSessionStore.getState().markEnded()
   }
 }
 

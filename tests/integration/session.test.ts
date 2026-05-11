@@ -281,7 +281,7 @@ describe('mesh hard-cap', () => {
 })
 
 describe('leave handler tears down the room and persists a sessions row', () => {
-  test('explicit host.leave persists with id == session_topic', async () => {
+  test('explicit host.leave persists with id == session_topic + V2-P8 report fields', async () => {
     const host = hostSession()
     const guest = joinSession(host.sessionTopic, host.sessionPassword)
     await flushMicrotasks()
@@ -303,6 +303,10 @@ describe('leave handler tears down the room and persists a sessions row', () => 
           startedAt: number
           endedAt: number
           totalMinutes: number
+          declaredTopic: string | null
+          score: number | null
+          focusedPct: number | null
+          generatedAt: number | null
         }
       | undefined
     expect(args?.id).toBe(host.sessionTopic)
@@ -310,6 +314,15 @@ describe('leave handler tears down the room and persists a sessions row', () => 
     expect(args?.endedAt).toBeGreaterThanOrEqual(beforeLeaveAt)
     expect(args?.endedAt).toBeLessThanOrEqual(afterLeaveAt + 5)
     expect(args?.totalMinutes).toBeGreaterThanOrEqual(0)
+    // V2-P8: report fields are populated even when AI was off — score
+    // defaults to the INITIAL_SCORE (100) and focused_pct is null because
+    // the sample loop never ran. The declaredTopic comes from the V2-P7
+    // session-start default; generated_at == ended_at because the leave
+    // handler runs the upsert synchronously.
+    expect(args?.declaredTopic).toBe('Studying')
+    expect(args?.score).toBe(100)
+    expect(args?.focusedPct).toBeNull()
+    expect(args?.generatedAt).toBe(args?.endedAt)
 
     await guest.leave()
   })

@@ -17,7 +17,9 @@ CREATE TABLE sessions (
     peer_pubkeys   TEXT,
     total_minutes  INTEGER,
     declared_topic TEXT,
-    score          INTEGER
+    score          INTEGER,
+    focused_pct    REAL,
+    generated_at   INTEGER
 );
 
 CREATE TABLE audit_events (

@@ -1,4 +1,10 @@
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
+import {
+  AUDIT_ICONS,
+  AUDIT_ICON_TONE,
+  type AuditIconTone,
+} from '@/lib/audit-icons'
+import type { AuditEventKind } from '@/lib/audit-types'
 import { cn } from '@/lib/utils'
 
 export type AuditLogRowProps = {
@@ -17,21 +23,29 @@ export type AuditLogRowProps = {
   // the AI judgement reasoning here so off-task events surface the "why"
   // without claiming a permanent slot in the row. Empty string disables.
   hoverDetail?: string
+  // Optional audit-event kind. When supplied the row swaps its avatar dot
+  // for a kind-specific icon (V2-P8) — V2-P6 covered ai_warning/ai_alert
+  // tooltips but not distinct icons. Omitting it falls back to the V1
+  // avatar-initials rendering so legacy stories stay visually identical.
+  iconKind?: AuditEventKind
   className?: string
 }
 
-// Single audit-log row — small avatar, "<name> <description>", relative
-// timestamp per DESIGN-SYSTEM.md §8.3.
+// Single audit-log row — small avatar/icon, "<name> <description>", relative
+// timestamp per DESIGN-SYSTEM.md §8.3. V2-P8 added the per-kind icon mode.
 export function AuditLogRow({
   name,
   description,
   ts,
   now,
   hoverDetail,
+  iconKind,
   className,
 }: AuditLogRowProps) {
   const initials = makeInitials(name)
   const hover = hoverDetail?.trim() || undefined
+  const Icon = iconKind ? AUDIT_ICONS[iconKind] : null
+  const tone: AuditIconTone = iconKind ? AUDIT_ICON_TONE[iconKind] : 'default'
   return (
     <li
       className={cn(
@@ -43,9 +57,21 @@ export function AuditLogRow({
       title={hover}
       aria-description={hover}
     >
-      <Avatar size="sm" aria-hidden="true">
-        <AvatarFallback>{initials}</AvatarFallback>
-      </Avatar>
+      {Icon ? (
+        <span
+          aria-hidden="true"
+          className={cn(
+            'mt-0.5 inline-flex size-6 shrink-0 items-center justify-center rounded-full',
+            toneClassName(tone)
+          )}
+        >
+          <Icon className="size-3.5" />
+        </span>
+      ) : (
+        <Avatar size="sm" aria-hidden="true">
+          <AvatarFallback>{initials}</AvatarFallback>
+        </Avatar>
+      )}
       <div className="flex min-w-0 flex-1 flex-col leading-snug">
         <span className="truncate text-text-primary">
           <span className="font-medium">{name}</span>
@@ -60,6 +86,21 @@ export function AuditLogRow({
       </div>
     </li>
   )
+}
+
+function toneClassName(tone: AuditIconTone): string {
+  switch (tone) {
+    case 'warning':
+      return 'bg-status-warning/15 text-status-warning'
+    case 'alerted':
+      return 'bg-status-alerted/15 text-status-alerted'
+    case 'focused':
+      return 'bg-status-focused/15 text-status-focused'
+    case 'accent':
+      return 'bg-accent-default/15 text-accent-default'
+    default:
+      return 'bg-bg-raised text-text-secondary'
+  }
 }
 
 function makeInitials(name: string): string {

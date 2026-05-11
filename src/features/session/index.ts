@@ -7,9 +7,15 @@ export {
   PTT_STATE_ACTION,
   SESSION_FULL_ACTION,
   SESSION_FULL_MESSAGE,
-  SESSION_ENDED_SPLASH_MS,
   type SessionHandle,
 } from './lifecycle'
+export {
+  Report,
+  ReportView,
+  type ReportProps,
+  type ReportViewProps,
+  type ResolvedReportData,
+} from './Report'
 export {
   AUDIO_DEVICE_DEFAULT_ID,
   listAudioInputs,
