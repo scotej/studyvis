@@ -17,6 +17,12 @@ export type SettingsValues = {
   // land in V2-P9; for V2-P1 the value is read-only and consumed by
   // src/features/ai/sidecar.ts to gate `useSidecarStore.start(...)`.
   aiFeaturesEnabled: boolean
+  // V2-P5 score-machine thresholds (ARCHITECTURE.md §8). Defaults match the
+  // PLAN.md §5 V2 "first 2 / next 2" framing. Setters land in V2-P9 (Settings
+  // → AI sliders, ranges [2,8] / [3,12] enforced there); for V2-P5 the fields
+  // are read-only and consumed by `features/ai/focusStore.ts` at apply-time.
+  warningThreshold: number
+  alertThreshold: number
 }
 
 export const SETTINGS_FILE = 'settings.json'
@@ -28,10 +34,13 @@ export const SETTINGS_KEY_MINIMIZE_TRAY = 'minimize_to_tray_on_close'
 export const SETTINGS_KEY_DEBUG_LOG = 'debug_log_enabled'
 export const SETTINGS_KEY_TURN_PREF = 'turn_preference'
 export const SETTINGS_KEY_AI_FEATURES = 'ai_features_enabled'
+export const SETTINGS_KEY_WARNING_THRESHOLD = 'warning_threshold'
+export const SETTINGS_KEY_ALERT_THRESHOLD = 'alert_threshold'
 
 // Defaults match the V1 acceptance criteria + DESIGN-SYSTEM.md §8.5: dark
 // theme on, reduce-motion off, OS notification on for invites, minimize-to-
 // tray on (preserves V1-P7 behavior), debug log off, TURN auto, AI off.
+// Threshold defaults are PLAN.md §5 V2 "first 2 / next 2".
 export const DEFAULT_SETTINGS: SettingsValues = {
   theme: 'dark',
   reduceMotion: false,
@@ -40,6 +49,8 @@ export const DEFAULT_SETTINGS: SettingsValues = {
   debugLogEnabled: false,
   turnPreference: 'auto',
   aiFeaturesEnabled: false,
+  warningThreshold: 2,
+  alertThreshold: 4,
 }
 
 export type SettingsStatus = 'loading' | 'ready' | 'error'
@@ -164,6 +175,8 @@ export async function hydrateValuesFromStore(
     debug: await store.get(SETTINGS_KEY_DEBUG_LOG),
     turn: await store.get(SETTINGS_KEY_TURN_PREF),
     ai: await store.get(SETTINGS_KEY_AI_FEATURES),
+    warning: await store.get(SETTINGS_KEY_WARNING_THRESHOLD),
+    alert: await store.get(SETTINGS_KEY_ALERT_THRESHOLD),
   }
 
   let theme: ThemeMode = isThemeMode(stored.theme)
@@ -210,9 +223,18 @@ export async function hydrateValuesFromStore(
         stored.ai,
         DEFAULT_SETTINGS.aiFeaturesEnabled
       ),
+      warningThreshold: readNumber(
+        stored.warning,
+        DEFAULT_SETTINGS.warningThreshold
+      ),
+      alertThreshold: readNumber(stored.alert, DEFAULT_SETTINGS.alertThreshold),
     },
     wroteMigration,
   }
+}
+
+function readNumber(v: unknown, fallback: number): number {
+  return typeof v === 'number' && Number.isFinite(v) ? v : fallback
 }
 
 let activeDeps: SettingsStoreDeps = defaultDeps
