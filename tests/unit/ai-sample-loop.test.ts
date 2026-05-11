@@ -6,12 +6,14 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 
 import {
+  BATTERY_POLL_INTERVAL_MS,
   CaptureError,
   __resetBatteryRuntime,
   __resetFocusStoreThresholdReader,
   __resetSampleLoopRuntime,
   __resetSidecarRuntime,
   __setSampleLoopRuntime,
+  getSampleLoopRuntime,
   initialScoreMachineState,
   startSampleLoop,
   useBreakStore,
@@ -280,6 +282,49 @@ describe('startSampleLoop — start failures', () => {
       'sidecar_start_failed',
       'ai_features_disabled'
     )
+    await handle.stop()
+  })
+
+  test('boot-failure self-tears-down: no leaked battery / tick timers after onStartFail', async () => {
+    // Regression: prior to V2-P5 Copilot fix, boot() started the battery
+    // poller BEFORE awaiting startSidecar; if start failed the timer kept
+    // ticking until stop() was explicitly called.
+    const clock = new FakeClock()
+    const onStartFail = vi.fn()
+    let batteryReads = 0
+    __setSampleLoopRuntime(
+      buildSampleLoopRuntime({
+        clock,
+        fetch: vi.fn() as never,
+        startSidecar: async () => null, // simulate failure
+      })
+    )
+    // Wrap readBattery to count invocations so we can assert no scheduled
+    // pollBattery fires after start-failure.
+    const orig = getSampleLoopRuntime()
+    __setSampleLoopRuntime({
+      ...orig,
+      readBattery: async () => {
+        batteryReads += 1
+        return { onBattery: false, percent: 100 }
+      },
+    })
+
+    const handle = startSampleLoop({
+      topic: 't',
+      modelId: 'test-model',
+      getFaceTrack: () => null,
+      onStartFail,
+    })
+    await flushMicrotasks(10)
+    expect(onStartFail).toHaveBeenCalledWith('sidecar_start_failed', undefined)
+    expect(handle.__state().stopped).toBe(true)
+    // Battery seed should NOT have fired — boot bails before pollBattery.
+    expect(batteryReads).toBe(0)
+
+    // Advance well past the would-be battery interval; nothing should fire.
+    await clock.advance(BATTERY_POLL_INTERVAL_MS * 2)
+    expect(batteryReads).toBe(0)
     await handle.stop()
   })
 })

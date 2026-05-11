@@ -366,9 +366,36 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
     }
   }
 
+  // Self-teardown used by boot()'s failure paths and by stop(). Idempotent:
+  // sets stopped=true (so any in-flight schedules short-circuit) and clears
+  // every owned timer / abort handle. NOTE: this does NOT call
+  // runtime.stopSidecar — callers decide whether to tear the sidecar down
+  // (stop() does; boot() doesn't, because the sidecar wasn't successfully
+  // started in the failure paths that call this).
+  function teardownInternal(): void {
+    state.stopped = true
+    if (tickHandle !== null) {
+      runtime.clearTimeout(tickHandle)
+      tickHandle = null
+    }
+    if (batteryHandle !== null) {
+      runtime.clearTimeout(batteryHandle)
+      batteryHandle = null
+    }
+    if (activeAbort) {
+      try {
+        activeAbort.abort()
+      } catch {
+        // best-effort
+      }
+      activeAbort = null
+    }
+  }
+
   async function boot(): Promise<void> {
     if (!opts.modelId) {
       opts.onStartFail?.('no_active_model')
+      teardownInternal()
       return
     }
 
@@ -378,6 +405,7 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
       opts.onStartFail?.('model_files_missing', msg)
+      teardownInternal()
       return
     }
 
@@ -399,9 +427,25 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
       state.sampleIntervalSec = FALLBACK_SAMPLE_INTERVAL_SEC
     }
 
+    // Start the sidecar BEFORE we allocate any recurring work. If it fails,
+    // teardownInternal makes the start-failure handle indistinguishable
+    // from a freshly-stopped one — no leaked battery timer, no stale state.
+    const port = await runtime.startSidecar({
+      modelPath: paths.modelPath,
+      mmprojPath: paths.mmprojPath,
+      ctxSize: DEFAULT_CTX_SIZE,
+    })
+    if (port == null) {
+      const lastError = useSidecarStore.getState().lastError
+      opts.onStartFail?.('sidecar_start_failed', lastError ?? undefined)
+      teardownInternal()
+      return
+    }
+
     // Seed the battery cache before scheduling — first tick should use a
     // real reading, not the constructor default.
     await pollBattery()
+    if (state.stopped) return
     batteryHandle = runtime.setTimeout(function batteryTick() {
       if (state.stopped) return
       void pollBattery().finally(() => {
@@ -412,17 +456,6 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
         )
       })
     }, BATTERY_POLL_INTERVAL_MS)
-
-    const port = await runtime.startSidecar({
-      modelPath: paths.modelPath,
-      mmprojPath: paths.mmprojPath,
-      ctxSize: DEFAULT_CTX_SIZE,
-    })
-    if (port == null) {
-      const lastError = useSidecarStore.getState().lastError
-      opts.onStartFail?.('sidecar_start_failed', lastError ?? undefined)
-      return
-    }
 
     // First tick fires on the sample-interval clock, not synchronously, so
     // the sidecar has time to /health-poll into the healthy state. If it
@@ -437,27 +470,22 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
       'sidecar_start_failed',
       err instanceof Error ? err.message : String(err)
     )
+    teardownInternal()
   })
 
   async function stop(): Promise<void> {
-    if (state.stopped) return
-    state.stopped = true
-    if (tickHandle !== null) {
-      runtime.clearTimeout(tickHandle)
-      tickHandle = null
-    }
-    if (batteryHandle !== null) {
-      runtime.clearTimeout(batteryHandle)
-      batteryHandle = null
-    }
-    if (activeAbort) {
+    if (state.stopped) {
+      // boot()'s failure paths already called teardownInternal(); we still
+      // need to await the boot promise so callers can sequence on stop()
+      // returning, but there's no sidecar to tear down in that case.
       try {
-        activeAbort.abort()
+        await bootPromise
       } catch {
-        // best-effort
+        // boot failures already surfaced through onStartFail
       }
-      activeAbort = null
+      return
     }
+    teardownInternal()
     try {
       await bootPromise
     } catch {

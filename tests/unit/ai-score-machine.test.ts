@@ -254,7 +254,7 @@ describe('threshold clamping + invariants', () => {
   test('normaliseThresholds enforces warning < alert', () => {
     // warning=5, alert=4 (invalid) → alert slides to 6
     expect(normaliseThresholds(5, 4)).toEqual({ warning: 5, alert: 6 })
-    // warning=8 (max) + alert=8 → alert can't exceed 12, so 9
+    // warning=8 + alert=3 (alert<warning) → alert slides up to warning+1 = 9
     expect(normaliseThresholds(8, 3)).toEqual({ warning: 8, alert: 9 })
     // warning=8 + alert=12: already valid
     expect(normaliseThresholds(8, 12)).toEqual({ warning: 8, alert: 12 })
@@ -287,7 +287,7 @@ describe('V2-P5 acceptance — 10-minute simulated session', () => {
   // floor, so a 10-min session at the fastest cadence is exactly 120 ticks.
   const SAMPLE_COUNT = 120
 
-  test('default thresholds — three off-task bursts produce 3 warnings + 3 alerts', () => {
+  test('default thresholds — each off-task burst fires one warning + one alert', () => {
     // Pattern: 10 on-task, 5 off-task (mixed mild/moderate/blatant), repeat.
     // 120 samples / 15 per cycle = 8 cycles → 8 streaks of 5 non-on-task each.
     // Each streak: 2nd sample warning, 4th sample alert, 5th sample silent.

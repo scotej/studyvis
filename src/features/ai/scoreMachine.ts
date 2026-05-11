@@ -179,6 +179,15 @@ export function step(
     alert: DEFAULT_ALERT_THRESHOLD,
   }
 ): StepResult {
+  // Defensive normalisation — step() is a public API (re-exported as
+  // scoreMachineStep), so a caller passing thresholds straight from
+  // unvalidated settings.json can't accidentally produce
+  // warning≥alert or out-of-range values that would fire alert on the
+  // first sample. Cheap call; on already-valid inputs it's a no-op.
+  const safeThresholds = normaliseThresholds(
+    thresholds.warning,
+    thresholds.alert
+  )
   const { severity, reasoning } = input
 
   if (severity === 'on_task') {
@@ -216,7 +225,7 @@ export function step(
   // warning threshold and we cross both on the same streak (sample-by-sample
   // counters under default thresholds: 1 — silent, 2 — warning, 3 — silent,
   // 4 — alert).
-  if (!warned && nextCount >= thresholds.warning) {
+  if (!warned && nextCount >= safeThresholds.warning) {
     warned = true
     events.push({
       type: 'warning',
@@ -229,7 +238,7 @@ export function step(
   // threshold. Latches so subsequent non-on-task samples in the same streak
   // don't re-fire (preventing a single long distraction from draining the
   // score past floor in one streak).
-  if (!alerted && nextCount >= thresholds.alert) {
+  if (!alerted && nextCount >= safeThresholds.alert) {
     alerted = true
     const deduction = SEVERITY_DEDUCTIONS[severity]
     nextScore = Math.max(SCORE_FLOOR, prev.score - deduction)

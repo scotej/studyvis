@@ -322,6 +322,15 @@ export function SessionView() {
     }
   }, [room, myEdPubkeyHex, myXPubkeyHex, sessionTopic, startedAt, setPeerHello])
 
+  // V2-P5 focus-score reset: fires exactly once per session start, keyed on
+  // startedAt rather than the sample-loop effect's deps. Without this split,
+  // an in-session AI-features toggle flap or activeModelId change would
+  // wipe the user's current score.
+  useEffect(() => {
+    if (status !== 'active' || !startedAt) return
+    useFocusStore.getState().reset()
+  }, [status, startedAt])
+
   // V2-P5 AI sample loop: starts when AI features are on, an active model
   // exists, the session is running, and the local camera track is up.
   // Stops on any of those flipping. Topic defaults to "Studying" — V2-P9
@@ -331,7 +340,6 @@ export function SessionView() {
     if (!aiFeaturesEnabled) return
     if (!activeModelId) return
     if (!localStream) return
-    useFocusStore.getState().reset()
     let handle: SampleLoopHandle | null = startSampleLoop({
       topic: 'Studying',
       modelId: activeModelId,
