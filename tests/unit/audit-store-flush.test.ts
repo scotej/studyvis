@@ -91,6 +91,54 @@ describe('useAuditStore.flushPending', () => {
     expect(persists.every((p) => p.settled)).toBe(true)
   })
 
+  test('awaits persists kicked off DURING the flush window (re-snapshot loop)', async () => {
+    // Regression for the Copilot review on PR #27: the first cut took a
+    // single snapshot of pendingPersists, so a new append() during the
+    // flush could leak past it. The fix loops until the set drains.
+    let releaseFirst!: () => void
+    let releaseSecond!: () => void
+    const persists: Array<{ event: AuditEvent; settled: boolean }> = []
+    __setAuditPersistFn((event) => {
+      const entry: { event: AuditEvent; settled: boolean } = {
+        event,
+        settled: false,
+      }
+      persists.push(entry)
+      return new Promise<void>((resolve) => {
+        const releaser = () => {
+          entry.settled = true
+          resolve()
+        }
+        if (persists.length === 1) releaseFirst = releaser
+        else releaseSecond = releaser
+      })
+    })
+
+    useAuditStore.getState().append(fakeEvent())
+
+    let flushed = false
+    const flushPromise = useAuditStore
+      .getState()
+      .flushPending()
+      .then(() => {
+        flushed = true
+      })
+    await Promise.resolve()
+    // Append a SECOND event after the flush already started; it must
+    // block the resolve too.
+    useAuditStore.getState().append(fakeEvent())
+
+    releaseFirst()
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(flushed).toBe(false)
+    releaseSecond()
+    await flushPromise
+    expect(flushed).toBe(true)
+    expect(persists).toHaveLength(2)
+    expect(persists.every((p) => p.settled)).toBe(true)
+  })
+
   test('swallows persist rejections so the report path still progresses', async () => {
     __setAuditPersistFn(async () => {
       throw new Error('disk full')

@@ -93,8 +93,15 @@ export const useAuditStore = create<AuditState>((set, get) => ({
   },
   reset: () => set({ events: [], nextSeq: 0 }),
   flushPending: async () => {
-    if (pendingPersists.size === 0) return
-    await Promise.allSettled(Array.from(pendingPersists))
+    // Re-snapshot the in-flight set after each batch settles so a persist
+    // kicked off WHILE we were awaiting still blocks the resolve. Without
+    // this loop, an audit append during the flush window (e.g. the final
+    // 'left' row that fires immediately after the receive-leave path)
+    // could land in SQLite after the report query — Copilot review on PR
+    // #27 caught this and the test below pins the invariant.
+    while (pendingPersists.size > 0) {
+      await Promise.allSettled(Array.from(pendingPersists))
+    }
   },
 }))
 

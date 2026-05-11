@@ -211,6 +211,15 @@ export function ReportView({
   const focusedPctRaw = session.focused_pct
   const focusedPctLabel =
     focusedPctRaw == null ? '—' : `${Math.round(focusedPctRaw * 100)}%`
+  // Compute the timeline anchor once so every row formats its offset
+  // against the same reference. Falling back to row.ts per-row (the
+  // V2-P8 first-cut behavior) made every row read 00:00 when
+  // session.started_at was null — Copilot review on PR #27 caught this.
+  // Use sessions.started_at when present; otherwise pick the earliest
+  // audit-event ts; default to 0 so formatOffset clamps cleanly.
+  const timelineAnchor =
+    startedAt ??
+    (auditEvents.length > 0 ? Math.min(...auditEvents.map((e) => e.ts)) : 0)
 
   return (
     <main
@@ -293,7 +302,7 @@ export function ReportView({
                       <TimelineRow
                         key={row.sig}
                         row={row}
-                        anchorTs={startedAt ?? row.ts}
+                        anchorTs={timelineAnchor}
                       />
                     ))}
                   </ul>
