@@ -534,15 +534,21 @@ export function SessionView() {
   )
 
   const myEdPubkey = identity?.ed_pubkey_hex ?? null
-  const selfTileState: FocusState | undefined = myEdPubkey
-    ? myEdPubkey in alertedPeers
+  // Per-tile state computation. Always defer to the VideoTile fallback
+  // (`stream ? 'online' : 'offline'`) when there's no positive UI signal
+  // — passing 'focused' while the stream is still null (or AI off) would
+  // claim an "on task" verdict that doesn't exist yet. Order matches the
+  // V2-P5 spec: alerted > warning > focused, with focused only when AI
+  // is on AND we have a stream.
+  const selfTileState: FocusState | undefined = !localStream
+    ? undefined
+    : myEdPubkey && myEdPubkey in alertedPeers
       ? 'alerted'
       : selfWarning
         ? 'warning'
-        : 'focused'
-    : selfWarning
-      ? 'warning'
-      : 'focused'
+        : aiFeaturesEnabled
+          ? 'focused'
+          : undefined
   const selfAlertReasoning = myEdPubkey
     ? (alertedPeers[myEdPubkey]?.reasoning ?? undefined)
     : undefined
@@ -594,16 +600,28 @@ export function SessionView() {
               alertReasoning={selfAlertReasoning}
             />
             {peerEntries.map((peer) => {
+              const peerStream = remoteStreams[peer.peerId] ?? null
               const peerAlert = peer.edPubkeyHex
                 ? alertedPeers[peer.edPubkeyHex]
                 : undefined
+              // Peer state: alerted iff they broadcast an alert (works
+              // regardless of OUR aiFeaturesEnabled — the data channel is
+              // always wired). Otherwise defer to the tile's stream-based
+              // fallback so a peer whose tracks haven't arrived shows
+              // `offline` rather than claiming an `on task` verdict we
+              // don't actually have.
+              const peerState: FocusState | undefined = !peerStream
+                ? undefined
+                : peerAlert
+                  ? 'alerted'
+                  : undefined
               return (
                 <VideoTile
                   key={peer.peerId}
                   name={peer.displayName ?? peerLabel(peer.peerId)}
-                  stream={remoteStreams[peer.peerId] ?? null}
+                  stream={peerStream}
                   ptt={peerPtt[peer.peerId] ?? false}
-                  state={peerAlert ? 'alerted' : 'focused'}
+                  state={peerState}
                   alertReasoning={peerAlert?.reasoning}
                 />
               )
