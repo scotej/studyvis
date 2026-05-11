@@ -10,6 +10,9 @@ export type AuditLogEntry = {
   // Pre-resolved action label, e.g. "joined" / "took a break".
   description: string
   ts: number
+  // Optional context surfaced on hover (V2-P6 routes the AI reasoning here
+  // for `ai_warning` / `ai_alert` rows).
+  hoverDetail?: string
 }
 
 export type AuditLogPanelProps = {
@@ -93,6 +96,7 @@ export function AuditLogPanel({ events, now, className }: AuditLogPanelProps) {
                 description={e.description}
                 ts={e.ts}
                 now={effectiveNow}
+                hoverDetail={e.hoverDetail}
               />
             ))}
           </ul>

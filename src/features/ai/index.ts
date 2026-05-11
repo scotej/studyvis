@@ -169,6 +169,28 @@ export type { FocusStoreThresholdReader } from './focusStore'
 export { useBreakStore } from './breakStore'
 
 export {
+  useAlertsUiStore,
+  __setAlertsUiRuntime,
+  __resetAlertsUiRuntime,
+  PEER_ALERT_TTL_MS,
+  WARNING_TTL_MS,
+} from './alertsUiStore'
+export type {
+  AlertSeverity,
+  SelfWarningState,
+  AlertedPeerEntry,
+  AlertsUiRuntime,
+} from './alertsUiStore'
+
+export {
+  playPeerAlertSound,
+  alertSoundUrl,
+  __setAlertSoundRuntime,
+  __resetAlertSoundRuntime,
+} from './alertSound'
+export type { AlertSoundRuntime } from './alertSound'
+
+export {
   BATTERY_PAUSE_PERCENT,
   shouldPauseForBattery,
   getBatteryRuntime,

@@ -40,3 +40,17 @@ export {
   type HelloProtocolArgs,
   type HelloProtocolHandle,
 } from './hello'
+export {
+  AI_ALERT_ACTION,
+  AI_ALERT_VERSION,
+  buildAiAlertPayload,
+  isAiAlertPayload,
+  serializeAiAlertForSig,
+  startAiAlertDispatcher,
+  verifyIncomingAiAlert,
+  type AiAlertCore,
+  type AiAlertDispatcher,
+  type AiAlertDispatcherArgs,
+  type AiAlertPayload,
+  type BuildAiAlertArgs,
+} from './aiAlerts'

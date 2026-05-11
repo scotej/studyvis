@@ -257,14 +257,29 @@ Beyond 4 users, full mesh becomes wasteful. V1 hard-caps at 4. V3 may add an SFU
 ```ts
 type DataMessage =
   | { type: "audit"; event: AuditEvent; ts: number; sig: string }
-  | { type: "alert"; severity: "warning" | "alerted"; reason: string; ts: number; sig: string }
+  // Peer-alert payload as shipped in V2-P6: the wire `severity` is the
+  // ScoreEvent severity emitted by `features/ai/scoreMachine`
+  // (`"mild" | "moderate" | "blatant"`), and the field carrying the
+  // model's natural-language explanation is `reasoning`. `deduction` and
+  // `scoreAfter` are deliberately omitted so peers cannot reconstruct
+  // the off-task user's running score from broadcasts.
+  | {
+      type: "alert"
+      v: 1
+      session_topic: string
+      who: string                // sender's ed_pubkey_hex
+      severity: "mild" | "moderate" | "blatant"
+      reasoning: string
+      ts: number
+      sig: string
+    }
   | { type: "topic_change"; new_topic: string; ts: number; sig: string }
   | { type: "break"; status: "started" | "ended"; ts: number; sig: string }
   | { type: "pomodoro"; phase: "work" | "rest"; preset: "25/5" | "50/10"; ends_at: number; ts: number; sig: string }
   | { type: "score_final"; score: number; sig: string }   // sent only at session end
 ```
 
-Every message signed with the sender's Ed25519 key over `(type || ts || payload)`. Receivers verify against the known friend pubkey. Unsigned or invalid-signature messages are dropped.
+Every message signed with the sender's Ed25519 key. Audit + alert messages sign canonical-JSON serialisations pinned in `lib/audit-types.ts` and `features/session/aiAlerts.ts` (key order matters for the round-trip). Receivers verify against the peerId↔ed_pubkey binding established by the V1-P9 signed hello. Unsigned or invalid-signature messages are dropped.
 
 ## 8. AI inference pipeline (V2+)
 

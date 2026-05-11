@@ -97,21 +97,40 @@ describe('verifyIncomingAuditEvent rejects malformed / unsigned / tampered', () 
     ).toBeNull()
   })
 
-  test('rejects a kind not in the V1 set (AI events belong to V2)', () => {
+  test('rejects a kind not in the current schema (e.g. V2-P7 break flow)', () => {
     const me = generateIdentity()
-    // Manually construct with a V2 kind to make sure shape-validation drops
-    // it without exposing AI plumbing into V1.
+    // V2-P6 adds `ai_warning` / `ai_alert` to the kind set; the break flow
+    // arrives in V2-P7, so `break_request` is still not a valid kind today
+    // and shape-validation must drop it.
     const core = {
       v: AUDIT_EVENT_VERSION,
       session_topic: 'topic-1',
       ts: 1,
       who: bytesToHex(me.edPub),
-      kind: 'ai_warning',
+      kind: 'break_request',
       detail: {},
     }
     const sigBytes = signMessage(me.edPriv, serializeAuditForSig(core as never))
     const event = { ...core, sig: bytesToHex(sigBytes) }
     expect(verifyIncomingAuditEvent(event, bytesToHex(me.edPub))).toBeNull()
+  })
+
+  test('accepts V2-P6 AI kinds (ai_warning, ai_alert)', () => {
+    const me = generateIdentity()
+    for (const kind of ['ai_warning', 'ai_alert'] as const) {
+      const core = {
+        v: AUDIT_EVENT_VERSION,
+        session_topic: 'topic-1',
+        ts: 1,
+        who: bytesToHex(me.edPub),
+        kind,
+        detail: { severity: 'mild', reasoning: 'looking away' },
+      }
+      const sigBytes = signMessage(me.edPriv, serializeAuditForSig(core))
+      const event = { ...core, sig: bytesToHex(sigBytes) }
+      const verified = verifyIncomingAuditEvent(event, bytesToHex(me.edPub))
+      expect(verified?.kind).toBe(kind)
+    }
   })
 
   test("rejects a peer claiming someone else's identity (impersonation)", () => {

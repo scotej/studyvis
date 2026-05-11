@@ -13,6 +13,10 @@ export type AuditLogRowProps = {
   // Current wall-clock ms used to compute the "ago" string. Required so the
   // component is pure during render — the panel ticks this and re-passes.
   now: number
+  // Optional context shown on hover (and to screen readers) — V2-P6 routes
+  // the AI judgement reasoning here so off-task events surface the "why"
+  // without claiming a permanent slot in the row. Empty string disables.
+  hoverDetail?: string
   className?: string
 }
 
@@ -23,9 +27,11 @@ export function AuditLogRow({
   description,
   ts,
   now,
+  hoverDetail,
   className,
 }: AuditLogRowProps) {
   const initials = makeInitials(name)
+  const hover = hoverDetail?.trim() || undefined
   return (
     <li
       className={cn(
@@ -34,6 +40,8 @@ export function AuditLogRow({
         className
       )}
       data-testid="audit-log-row"
+      title={hover}
+      aria-description={hover}
     >
       <Avatar size="sm" aria-hidden="true">
         <AvatarFallback>{initials}</AvatarFallback>

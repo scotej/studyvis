@@ -5,9 +5,11 @@
 
 import type { JsonValue } from 'trystero'
 
-// V1 audit-log event kinds (ARCHITECTURE.md §9). The full set including AI
-// kinds — `topic_set`, `topic_change`, `ai_warning`, `ai_alert`,
-// `break_request`, `break_approved`, `break_denied` — is V2-and-later.
+// Audit-log event kinds (ARCHITECTURE.md §9). V1 carried only the
+// presence/break/pomodoro kinds; V2-P6 extends the set with `ai_warning`
+// (local-only emit — never broadcast) and `ai_alert` (broadcast). The
+// remaining AI kinds — `topic_set` / `topic_change` / `break_request` /
+// `break_approved` / `break_denied` — land with V2-P7's AI dialog phase.
 export type AuditEventKind =
   | 'joined'
   | 'left'
@@ -15,6 +17,8 @@ export type AuditEventKind =
   | 'resumed'
   | 'pomodoro_start'
   | 'pomodoro_end'
+  | 'ai_warning'
+  | 'ai_alert'
 
 export const AUDIT_EVENT_VERSION = 1 as const
 export const AUDIT_ACTION = 'audit'
@@ -35,6 +39,8 @@ export const AUDIT_KIND_LABELS: Record<AuditEventKind, string> = {
   resumed: 'returned',
   pomodoro_start: 'started a Pomodoro',
   pomodoro_end: 'stopped the Pomodoro',
+  ai_warning: 'got a self-warning',
+  ai_alert: 'looking off-task',
 }
 
 // Wire shape: `who` is the sender's ed_pubkey hex, `sig` is hex(64), but
@@ -76,7 +82,9 @@ export function isAuditEventKind(value: unknown): value is AuditEventKind {
     value === 'paused_break' ||
     value === 'resumed' ||
     value === 'pomodoro_start' ||
-    value === 'pomodoro_end'
+    value === 'pomodoro_end' ||
+    value === 'ai_warning' ||
+    value === 'ai_alert'
   )
 }
 
