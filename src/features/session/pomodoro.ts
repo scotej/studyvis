@@ -12,6 +12,11 @@
 // the existing 5s-tick broadcast loop without resetting the phase, so the
 // timer continues seamlessly.
 //
+// Deliberate stop is distinct from disconnect: `stop()` sends one final
+// message with `stopped: true` so receivers reset to idle instead of
+// handing over (silence alone can't tell the two apart). A dropped stop
+// degrades gracefully to the old silence/handover path.
+//
 // Wire-shape note: ARCHITECTURE.md §7 spec'd `phase: "work" | "rest"` — we
 // keep that 2-state on the wire AND add a `preset` field so receivers can
 // label the active phase as 25/5 vs 50/10. The internal state machine still
@@ -48,6 +53,11 @@ export type PomodoroMessage = {
   phase: WirePhase
   preset: PomodoroPreset
   ends_at: number
+  // Set by the broadcaster's `stop()` so receivers can distinguish a
+  // deliberate stop from a disconnect. Silence alone is ambiguous (it
+  // triggers handover), so the terminal transition needs an explicit
+  // signal — see ARCHITECTURE.md §7.
+  stopped?: true
 }
 
 export function isPomodoroMessage(value: unknown): value is PomodoroMessage {
@@ -57,6 +67,7 @@ export function isPomodoroMessage(value: unknown): value is PomodoroMessage {
     v.v === 1 &&
     (v.phase === 'work' || v.phase === 'rest') &&
     (v.preset === '25/5' || v.preset === '50/10') &&
+    (v.stopped === undefined || v.stopped === true) &&
     // NaN / Infinity would poison the countdown math
     // (`Math.max(0, endsAt - now)` returns NaN), so require a finite
     // positive timestamp.
@@ -308,6 +319,23 @@ export function startPomodoroController(
     if (!isPomodoroMessage(data)) return
     const senderEd = args.resolveSenderEdPubkey(peerId)
     if (!senderEd) return
+    if (data.stopped === true) {
+      // The broadcaster deliberately ended the timer. Reset to idle and do
+      // NOT arm the silence timer — this is a stop, not a disconnect, so
+      // there is no handover. Must be the first branch so a stale `state`
+      // never arms the silence cascade.
+      stopBroadcasting()
+      cancelSilenceTimer()
+      state = {
+        phase: 'idle',
+        endsAt: null,
+        preset: null,
+        broadcasterEdPubkey: null,
+        iAmBroadcaster: false,
+      }
+      pushSnapshot()
+      return
+    }
     // Friend-pair model accepts brief two-broadcaster overlap on
     // reconnection — treat the most recent sender as broadcaster (advisor
     // note #8). If the message is from the broadcaster we already track,
@@ -356,9 +384,27 @@ export function startPomodoroController(
     },
     stop: () => {
       if (state.phase === 'idle') return
+      const wasBroadcaster = state.iAmBroadcaster
+      // Send the explicit stop signal BEFORE resetting state, while
+      // phase/preset/endsAt are still valid, so receivers go idle instead
+      // of treating the ensuing silence as a disconnect and handing over.
+      if (wasBroadcaster && state.preset && state.endsAt != null) {
+        const wire: WirePhase = state.phase.startsWith('work') ? 'work' : 'rest'
+        void action
+          .send({
+            v: 1,
+            phase: wire,
+            preset: state.preset,
+            ends_at: state.endsAt,
+            stopped: true,
+          })
+          .catch(() => {
+            // best-effort; a dropped stop falls back to the receiver's
+            // silence timer (handover), which is the pre-fix behavior.
+          })
+      }
       stopBroadcasting()
       cancelSilenceTimer()
-      const wasBroadcaster = state.iAmBroadcaster
       state = {
         phase: 'idle',
         endsAt: null,
@@ -368,8 +414,6 @@ export function startPomodoroController(
       }
       pushSnapshot()
       if (wasBroadcaster) args.onPomodoroEnd()
-      // No "stop" wire message — receivers infer end via silence + the
-      // pomodoro_end audit event the broadcaster emitted.
     },
     teardown: () => {
       if (teardownCalled) return

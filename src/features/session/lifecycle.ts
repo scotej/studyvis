@@ -86,9 +86,9 @@ export function buildLeaveHandler(args: {
     // practice — but capturing up front decouples us from that gate.
     const sessionState = useSessionStore.getState()
     const peerPubkeys = sessionState.collectPeerPubkeys()
-    const peerEdPubkeys = Object.values(sessionState.peers)
-      .map((p) => p.edPubkeyHex)
-      .filter((hex): hex is string => typeof hex === 'string')
+    // Cumulative set, not the live `peers` map: on the everyone-else-leaves
+    // auto-end path `peerLeft` has already pruned every entry by now.
+    const peerEdPubkeys = [...new Set(sessionState.seenPeerEdPubkeys)]
     const initialDeclaredTopic = sessionState.initialDeclaredTopic
     const focusSnapshot = snapshotFocusForReport()
     const totalMinutes = Math.max(

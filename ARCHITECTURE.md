@@ -275,7 +275,10 @@ type DataMessage =
     }
   | { type: "topic_change"; new_topic: string; ts: number; sig: string }
   | { type: "break"; status: "started" | "ended"; ts: number; sig: string }
-  | { type: "pomodoro"; phase: "work" | "rest"; preset: "25/5" | "50/10"; ends_at: number; ts: number; sig: string }
+  | { type: "pomodoro"; phase: "work" | "rest"; preset: "25/5" | "50/10"; ends_at: number; stopped?: true; ts: number; sig: string }
+  //   `stopped: true` is the broadcaster's deliberate-stop signal: receivers
+  //   reset to idle instead of treating the ensuing silence as a disconnect
+  //   and handing over. Absent on every normal tick.
   | { type: "score_final"; score: number; sig: string }   // sent only at session end
 ```
 

@@ -35,6 +35,7 @@ export type BenchmarkResult = {
 export type BenchmarkProgress =
   | { phase: 'starting-sidecar' }
   | { phase: 'loading-image' }
+  | { phase: 'warmup' }
   | { phase: 'sample'; index: number; total: number }
   | { phase: 'done'; result: BenchmarkResult }
 
@@ -243,27 +244,37 @@ export async function runBenchmark(
     })
     await runtime.waitForHealthy(port, HEALTH_TIMEOUT_MS)
 
+    const dataUri = `data:${image.mimeType};base64,${image.base64}`
+    const requestBody = {
+      model: spec.id,
+      messages: [
+        {
+          role: 'user' as const,
+          content: [
+            { type: 'text' as const, text: BENCHMARK_PROMPT },
+            { type: 'image_url' as const, image_url: { url: dataUri } },
+          ],
+        },
+      ],
+      max_tokens: BENCHMARK_MAX_TOKENS,
+      temperature: 0,
+    }
+
+    // Discard one cold-start sample before measuring. Model load + first
+    // inference is dramatically slower than steady state (CPU 7B warmup
+    // ~60–90 s vs subsequent 15–30 s). Including it made p95 = the warmup
+    // sample, inflating `sampleIntervalSec` 5–10× — and `sampleLoop`'s
+    // floor clamp then prevented the user from lowering it.
+    onProgress({ phase: 'warmup' })
+    await runtime.runChatCompletion(port, requestBody)
+
     for (let i = 0; i < BENCHMARK_SAMPLE_COUNT; i += 1) {
       onProgress({
         phase: 'sample',
         index: i + 1,
         total: BENCHMARK_SAMPLE_COUNT,
       })
-      const dataUri = `data:${image.mimeType};base64,${image.base64}`
-      const sec = await runtime.runChatCompletion(port, {
-        model: spec.id,
-        messages: [
-          {
-            role: 'user',
-            content: [
-              { type: 'text', text: BENCHMARK_PROMPT },
-              { type: 'image_url', image_url: { url: dataUri } },
-            ],
-          },
-        ],
-        max_tokens: BENCHMARK_MAX_TOKENS,
-        temperature: 0,
-      })
+      const sec = await runtime.runChatCompletion(port, requestBody)
       samplesSec.push(sec)
     }
   } finally {
