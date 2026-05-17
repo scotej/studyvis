@@ -28,9 +28,9 @@ use commands::sessions::{
 use commands::sidecar::{sidecar_start, sidecar_status, sidecar_stop, SidecarState};
 #[cfg(desktop)]
 use commands::system::{
-    autostart_is_enabled, autostart_set_enabled, system_battery,
+    autostart_is_enabled, autostart_set_enabled, system_ai_features_set_enabled, system_battery,
     system_minimize_to_tray_set_enabled, system_open_data_folder, system_open_releases,
-    system_open_screen_capture_settings, MinimizeToTrayFlag, QuitFlag,
+    system_open_screen_capture_settings, AiFeaturesFlag, MinimizeToTrayFlag, QuitFlag,
 };
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -76,6 +76,8 @@ pub fn run() {
         autostart_is_enabled,
         #[cfg(desktop)]
         system_minimize_to_tray_set_enabled,
+        #[cfg(desktop)]
+        system_ai_features_set_enabled,
         #[cfg(desktop)]
         system_open_data_folder,
         #[cfg(desktop)]
@@ -149,6 +151,9 @@ pub fn run() {
                 let initial_minimize_to_tray =
                     read_minimize_to_tray_from_settings(app.handle()).unwrap_or(true);
                 app.manage(MinimizeToTrayFlag::new(initial_minimize_to_tray));
+                let initial_ai_features =
+                    read_ai_features_from_settings(app.handle()).unwrap_or(false);
+                app.manage(AiFeaturesFlag::new(initial_ai_features));
                 app.manage(SidecarState::new());
                 app.manage(DownloadState::new());
                 setup_desktop(app)?;
@@ -199,6 +204,20 @@ fn read_minimize_to_tray_from_settings<R: tauri::Runtime>(
     value.get(KEY_MINIMIZE_TO_TRAY)?.as_bool()
 }
 
+// Same one-shot read for the AI-features gate so the global Ctrl+] shortcut
+// honors the saved preference before JS hydration. Defaults to `false` (AI
+// off) so a fresh install or any read failure keeps every AI surface dormant
+// — matching `DEFAULT_SETTINGS.aiFeaturesEnabled`.
+#[cfg(desktop)]
+fn read_ai_features_from_settings<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Option<bool> {
+    const SETTINGS_FILE: &str = "settings.json";
+    const KEY_AI_FEATURES: &str = "ai_features_enabled";
+    let dir = app.path().app_data_dir().ok()?;
+    let bytes = std::fs::read(dir.join(SETTINGS_FILE)).ok()?;
+    let value: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
+    value.get(KEY_AI_FEATURES)?.as_bool()
+}
+
 #[cfg(desktop)]
 fn setup_desktop(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     use std::str::FromStr;
@@ -244,8 +263,10 @@ fn setup_desktop(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>>
                 } else if shortcut == &ptt_ai_handle {
                     // V2-P7 wires this shortcut to the floating Ctrl+] AI
                     // dialog window. Fire only on key-down so a press/release
-                    // pair doesn't open then immediately close.
-                    if event.state() == ShortcutState::Pressed {
+                    // pair doesn't open then immediately close. V2-P9 gates it
+                    // on the AI-features flag so "AI off → zero AI surface"
+                    // holds even when the user hits the key.
+                    if event.state() == ShortcutState::Pressed && AiFeaturesFlag::is_enabled(app) {
                         if let Err(err) = toggle_ai_dialog(app) {
                             eprintln!("[ai-dialog] toggle failed: {err}");
                         }

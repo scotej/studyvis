@@ -63,7 +63,17 @@ type SessionState = {
   // Without this, reconstructing the starting topic from the first
   // `topic_change.previous_topic` would fail in the no-topic-change case.
   initialDeclaredTopic: string
+  // V2-P9 one-shot hand-off for the required session-start topic prompt.
+  // Set while `status === 'idle'` (before any peer can see the session),
+  // consumed and cleared by `begin()`. When non-empty it seeds BOTH
+  // `initialDeclaredTopic` (→ sessions.declared_topic) and the mutable
+  // `declaredStudyTopic` (the sample loop's live value); when null `begin()`
+  // falls back to DEFAULT_DECLARED_STUDY_TOPIC (the AI-off path never sets
+  // it). Kept distinct from `declaredStudyTopic` so the Ctrl+] dialog's
+  // mid-session `topic_change` path stays independent.
+  pendingInitialTopic: string | null
   begin: (init: SessionInit) => void
+  setPendingInitialTopic: (topic: string | null) => void
   setDeclaredStudyTopic: (next: string) => void
   peerJoined: (peerId: string) => void
   peerLeft: (peerId: string) => void
@@ -96,6 +106,7 @@ const INITIAL: Pick<
   | 'leave'
   | 'declaredStudyTopic'
   | 'initialDeclaredTopic'
+  | 'pendingInitialTopic'
 > = {
   status: 'idle',
   sessionTopic: null,
@@ -108,24 +119,34 @@ const INITIAL: Pick<
   leave: null,
   declaredStudyTopic: DEFAULT_DECLARED_STUDY_TOPIC,
   initialDeclaredTopic: DEFAULT_DECLARED_STUDY_TOPIC,
+  pendingInitialTopic: null,
 }
 
 export const useSessionStore = create<SessionState>((set, get) => ({
   ...INITIAL,
   begin: (init) =>
-    set({
-      status: 'active',
-      sessionTopic: init.sessionTopic,
-      sessionPassword: init.sessionPassword,
-      isHost: init.isHost,
-      startedAt: init.startedAt,
-      hadAnyPeer: false,
-      peers: {},
-      room: init.room,
-      leave: init.leave,
-      declaredStudyTopic: DEFAULT_DECLARED_STUDY_TOPIC,
-      initialDeclaredTopic: DEFAULT_DECLARED_STUDY_TOPIC,
+    set((s) => {
+      const declared = s.pendingInitialTopic?.trim()
+      const topic =
+        declared && declared.length > 0
+          ? declared
+          : DEFAULT_DECLARED_STUDY_TOPIC
+      return {
+        status: 'active',
+        sessionTopic: init.sessionTopic,
+        sessionPassword: init.sessionPassword,
+        isHost: init.isHost,
+        startedAt: init.startedAt,
+        hadAnyPeer: false,
+        peers: {},
+        room: init.room,
+        leave: init.leave,
+        declaredStudyTopic: topic,
+        initialDeclaredTopic: topic,
+        pendingInitialTopic: null,
+      }
     }),
+  setPendingInitialTopic: (topic) => set({ pendingInitialTopic: topic }),
   setDeclaredStudyTopic: (next) => set({ declaredStudyTopic: next }),
   peerJoined: (peerId) =>
     set((s) => ({

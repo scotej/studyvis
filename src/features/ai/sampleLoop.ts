@@ -9,11 +9,20 @@
 //     if !sidecar_ready_or_errored:    skip (check Rust state, surface once)
 //     if screen_capture_denied (latched after first denial): skip
 //     ─ face = captureFace(localCameraTrack)
-//     ─ screen = captureScreen()
+//     ─ screen = snapshot the long-lived screen track (acquired ONCE at boot)
 //     ─ POST /v1/chat/completions { FOCUS_SYSTEM_PROMPT + topic + 2 images }
 //     ─ parseJudgment(response.choices[0].message.content)
 //     ─ focusStore.applyJudgment(value or fallback)
-//     sleep(sample_interval)
+//     sleep(effective_sample_interval)   // user override clamped to floor
+//
+// Screen capture: README §"Acquire strategy" documents that getDisplayMedia
+// in both WKWebView (macOS) and WebView2 (Windows) surfaces an OS picker on
+// EVERY acquire. captureScreen()'s acquire-snapshot-release per tick would
+// therefore pop the picker every 5–30 s. V2-P9 takes the documented
+// contingency: one getDisplayMedia at boot, kept alive for the session,
+// snapshotted per tick via the shared CaptureRuntime.extractFrame pipeline.
+// The OS screen-recording indicator stays lit for the whole session (same
+// visibility as the camera tile); onboarding documents this.
 //
 // Scheduling is a self-rescheduling setTimeout chain (not setInterval) so a
 // long inference can never queue: the next tick is scheduled AFTER the
@@ -40,8 +49,12 @@ import {
 } from './battery'
 import { useBreakStore } from './breakStore'
 import { captureFace as defaultCaptureFace } from './captureFace'
-import { captureScreen as defaultCaptureScreen } from './captureScreen'
-import { CaptureError } from './captureShared'
+import {
+  mapDisplayMediaError,
+  SCREEN_FRAME_MAX_WIDTH,
+  SCREEN_FRAME_QUALITY,
+} from './captureScreen'
+import { CaptureError, fitWidth, getCaptureRuntime } from './captureShared'
 import { getDownloadRuntime } from './download'
 import { useFocusStore } from './focusStore'
 import { useModelStore } from './modelStore'
@@ -63,6 +76,27 @@ export const BATTERY_POLL_INTERVAL_MS = 60_000
 // model record is missing one (shouldn't happen, but defensive), this
 // fallback keeps the loop running on the 5 s floor.
 export const FALLBACK_SAMPLE_INTERVAL_SEC = 5
+// Ceiling for the Settings → AI sample-interval slider. The user may slow
+// sampling down to here but never below the model's measured floor (so they
+// can't ask for a cadence the machine can't sustain). Mirrored by the slider
+// max in AiCategory.
+export const MAX_SAMPLE_INTERVAL_SEC = 30
+
+// Effective per-tick cadence: the user's override (Settings → AI) clamped so
+// it never drops below the model's measured floor and never exceeds the
+// slider ceiling. `null` override → run at the floor. Read EVERY tick so a
+// mid-session slider move takes effect on the next interval (V2-P5/V2-P7
+// per-tick-getter discipline; same pattern as `getTopic`).
+export function effectiveIntervalSec(
+  modelFloorSec: number,
+  userOverrideSec: number | null
+): number {
+  const floor = Math.max(1, modelFloorSec)
+  if (userOverrideSec == null || !Number.isFinite(userOverrideSec)) {
+    return floor
+  }
+  return Math.min(MAX_SAMPLE_INTERVAL_SEC, Math.max(floor, userOverrideSec))
+}
 
 export type SampleLoopRuntime = {
   now: () => number
@@ -70,7 +104,12 @@ export type SampleLoopRuntime = {
   clearTimeout: (handle: unknown) => void
   fetch: typeof fetch
   captureFace: (track: MediaStreamTrack) => Promise<string>
-  captureScreen: () => Promise<string>
+  // Acquire the long-lived screen MediaStream ONCE at boot. The default maps
+  // getDisplayMedia rejections to CaptureError via the shared
+  // `mapDisplayMediaError` so the screen_capture_denied latch still fires.
+  // Per-tick snapshots use `getCaptureRuntime().extractFrame` on the track
+  // this returns — no further acquires, so no per-tick OS picker.
+  acquireScreenStream: () => Promise<MediaStream>
   readBattery: () => Promise<BatteryInfo>
   // Resolved absolute paths for the active model. The default reads via the
   // Tauri `model_paths` command (V2-P2). Tests inject a stub.
@@ -104,7 +143,23 @@ const defaultRuntime: SampleLoopRuntime = {
   },
   fetch: (...args) => fetch(...args),
   captureFace: defaultCaptureFace,
-  captureScreen: defaultCaptureScreen,
+  acquireScreenStream: async () => {
+    if (
+      typeof navigator === 'undefined' ||
+      !navigator.mediaDevices ||
+      typeof navigator.mediaDevices.getDisplayMedia !== 'function'
+    ) {
+      throw new CaptureError(
+        'screen_capture_unavailable',
+        'navigator.mediaDevices.getDisplayMedia is not available in this environment'
+      )
+    }
+    try {
+      return await navigator.mediaDevices.getDisplayMedia({ video: true })
+    } catch (err) {
+      throw mapDisplayMediaError(err)
+    }
+  },
   readBattery: () => getBatteryRuntime().read(),
   modelPaths: async (modelId) => {
     const paths = await getDownloadRuntime().paths(modelId)
@@ -188,9 +243,16 @@ type InternalState = {
   captureDenied: boolean
   sidecarErrorReported: boolean
   battery: BatteryInfo
-  sampleIntervalSec: number
+  // The model's measured cadence floor (V2-P2 benchmark). The effective
+  // interval the scheduler uses is computed per-tick from this floor plus the
+  // user's Settings → AI override — see `effectiveIntervalSec()`.
+  modelFloorSec: number
   modelId: string | null
   ticks: number
+  // The long-lived screen MediaStream + its video track, acquired once in
+  // boot() and snapshotted per tick. Null until boot resolves the acquire.
+  screenStream: MediaStream | null
+  screenTrack: MediaStreamTrack | null
 }
 
 export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
@@ -203,9 +265,11 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
     captureDenied: false,
     sidecarErrorReported: false,
     battery: { onBattery: false, percent: 100 },
-    sampleIntervalSec: FALLBACK_SAMPLE_INTERVAL_SEC,
+    modelFloorSec: FALLBACK_SAMPLE_INTERVAL_SEC,
     modelId: opts.modelId,
     ticks: 0,
+    screenStream: null,
+    screenTrack: null,
   }
 
   let tickHandle: unknown | null = null
@@ -215,6 +279,82 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
   // stop() can wait for it before returning. Without this, an immediate
   // stop() could race the still-pending model_paths fetch.
   let bootPromise: Promise<void> | null = null
+
+  // Recomputed every call (every reschedule) so a mid-session Settings → AI
+  // slider move lands on the next interval without restarting the loop.
+  function nextDelayMs(): number {
+    const override = useSettingsStore.getState().values.sampleIntervalSec
+    return effectiveIntervalSec(state.modelFloorSec, override) * 1000
+  }
+
+  // The user clicked the OS "Stop sharing" pill (or the display went away).
+  // Latch like a denial so the loop stops scheduling fresh ticks; a fresh
+  // start() (after re-grant via the permission overlay) is required to
+  // resume — same contract as screen_capture_denied.
+  function onScreenTrackEnded(): void {
+    if (state.stopped) return
+    if (state.captureDenied) return
+    state.captureDenied = true
+    opts.onCaptureDenied?.()
+  }
+
+  async function stopSidecarBestEffort(): Promise<void> {
+    try {
+      await runtime.stopSidecar()
+    } catch (err) {
+      console.warn('[sampleLoop] sidecar stop failed:', err)
+    }
+  }
+
+  function disposeScreenStream(): void {
+    if (state.screenTrack) {
+      try {
+        state.screenTrack.removeEventListener('ended', onScreenTrackEnded)
+      } catch {
+        // best-effort
+      }
+    }
+    if (state.screenStream) {
+      for (const t of state.screenStream.getTracks()) {
+        try {
+          t.stop()
+        } catch {
+          // already-stopped tracks throw on some platforms; ignore
+        }
+      }
+    }
+    state.screenStream = null
+    state.screenTrack = null
+  }
+
+  // Snapshot the long-lived screen track through the SAME pipeline
+  // captureScreen.ts uses internally (fitWidth + CaptureRuntime). No
+  // getDisplayMedia here, so no per-tick OS picker.
+  async function snapshotScreen(track: MediaStreamTrack): Promise<string> {
+    const cap = getCaptureRuntime()
+    const frame = await cap.extractFrame(track)
+    try {
+      const { width, height } = fitWidth(
+        frame.sourceWidth,
+        frame.sourceHeight,
+        SCREEN_FRAME_MAX_WIDTH
+      )
+      if (width === 0 || height === 0) {
+        throw new CaptureError(
+          'frame_extraction_failed',
+          `screen frame had unusable dimensions (${frame.sourceWidth}×${frame.sourceHeight})`
+        )
+      }
+      return await cap.encodeJpegBase64({
+        frame,
+        targetWidth: width,
+        targetHeight: height,
+        quality: SCREEN_FRAME_QUALITY,
+      })
+    } finally {
+      cap.disposeFrame(frame)
+    }
+  }
 
   function schedule(delayMs: number): void {
     if (state.stopped) return
@@ -245,11 +385,11 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
       return
     }
     if (useBreakStore.getState().onBreak) {
-      schedule(state.sampleIntervalSec * 1000)
+      schedule(nextDelayMs())
       return
     }
     if (shouldPauseForBattery(state.battery)) {
-      schedule(state.sampleIntervalSec * 1000)
+      schedule(nextDelayMs())
       return
     }
     if (!useSettingsStore.getState().values.aiFeaturesEnabled) {
@@ -265,7 +405,7 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
         state.sidecarErrorReported = true
         opts.onSidecarErrored?.(sidecar.lastError)
       }
-      schedule(state.sampleIntervalSec * 1000)
+      schedule(nextDelayMs())
       return
     }
     state.sidecarErrorReported = false
@@ -283,7 +423,7 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
       } catch {
         // best-effort; we'll try again next tick
       }
-      schedule(state.sampleIntervalSec * 1000)
+      schedule(nextDelayMs())
       return
     }
 
@@ -291,13 +431,21 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
     if (!track) {
       // SessionView's media-acquire effect is still spinning up. Try again
       // next tick.
-      schedule(state.sampleIntervalSec * 1000)
+      schedule(nextDelayMs())
       return
     }
 
     const modelId = state.modelId
     if (!modelId) {
-      schedule(state.sampleIntervalSec * 1000)
+      schedule(nextDelayMs())
+      return
+    }
+
+    const screenTrack = state.screenTrack
+    if (!screenTrack || screenTrack.readyState === 'ended') {
+      // boot() acquires this; if it's gone the track ended (handled by
+      // onScreenTrackEnded latching captureDenied) — skip defensively.
+      schedule(nextDelayMs())
       return
     }
 
@@ -310,7 +458,7 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
     try {
       const [face, screen] = await Promise.all([
         runtime.captureFace(track),
-        runtime.captureScreen(),
+        snapshotScreen(screenTrack),
       ])
       const port = sidecar.port
       const body = buildChatRequest({
@@ -376,7 +524,7 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
       runtime.clearTimeout(timer)
       activeAbort = null
       state.inFlight = false
-      schedule(state.sampleIntervalSec * 1000)
+      schedule(nextDelayMs())
     }
   }
 
@@ -412,6 +560,9 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
       }
       activeAbort = null
     }
+    // Stop the long-lived screen track so the OS screen-recording indicator
+    // goes dark the moment the session (or AI) ends.
+    disposeScreenStream()
   }
 
   async function boot(): Promise<void> {
@@ -431,9 +582,11 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
       return
     }
 
-    // Read measured cadence from the model store. The V2-P2 benchmark sets
-    // sampleIntervalSec; if the user hasn't benchmarked yet (or the record
-    // was forgotten), the fallback floor keeps the loop ticking but logs.
+    // Read the measured cadence floor from the model store. The V2-P2
+    // benchmark sets sampleIntervalSec; if the user hasn't benchmarked yet
+    // (or the record was forgotten), the fallback floor keeps the loop
+    // ticking but logs. The effective per-tick interval layers the user's
+    // Settings → AI override on top of this floor (see effectiveIntervalSec).
     const interval =
       useModelStore.getState().records[opts.modelId]?.benchmark
         ?.sampleIntervalSec
@@ -441,12 +594,12 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
       typeof interval === 'number' &&
       interval >= FALLBACK_SAMPLE_INTERVAL_SEC
     ) {
-      state.sampleIntervalSec = interval
+      state.modelFloorSec = interval
     } else {
       console.warn(
         `[sampleLoop] no benchmark for ${opts.modelId}, using fallback ${FALLBACK_SAMPLE_INTERVAL_SEC}s`
       )
-      state.sampleIntervalSec = FALLBACK_SAMPLE_INTERVAL_SEC
+      state.modelFloorSec = FALLBACK_SAMPLE_INTERVAL_SEC
     }
 
     // Start the sidecar BEFORE we allocate any recurring work. If it fails,
@@ -463,6 +616,70 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
       teardownInternal()
       return
     }
+
+    // Acquire the screen stream ONCE here. This is the single getDisplayMedia
+    // call for the whole session, so the OS picker shows at most once (not
+    // every tick). Denial latches captureDenied + surfaces onCaptureDenied so
+    // SessionView mounts the permission overlay; other capture errors surface
+    // via onCaptureError. Either way the loop tears down — a fresh start()
+    // after re-grant is required to resume.
+    let screenStream: MediaStream
+    try {
+      screenStream = await runtime.acquireScreenStream()
+    } catch (err) {
+      if (err instanceof CaptureError && err.code === 'screen_capture_denied') {
+        state.captureDenied = true
+        opts.onCaptureDenied?.()
+      } else if (err instanceof CaptureError) {
+        opts.onCaptureError?.(err)
+      } else {
+        opts.onCaptureError?.(
+          new CaptureError(
+            'screen_capture_unavailable',
+            err instanceof Error ? err.message : String(err),
+            { cause: err }
+          )
+        )
+      }
+      // The sidecar was already started above; teardownInternal() does NOT
+      // stop it and a later stop() short-circuits on state.stopped, so the
+      // child would leak. Stop it explicitly on this post-start failure path.
+      await stopSidecarBestEffort()
+      teardownInternal()
+      return
+    }
+    if (state.stopped) {
+      for (const t of screenStream.getTracks()) {
+        try {
+          t.stop()
+        } catch {
+          // ignore
+        }
+      }
+      return
+    }
+    const screenTrack = screenStream.getVideoTracks()[0]
+    if (!screenTrack) {
+      for (const t of screenStream.getTracks()) {
+        try {
+          t.stop()
+        } catch {
+          // ignore
+        }
+      }
+      opts.onCaptureError?.(
+        new CaptureError(
+          'screen_capture_no_video',
+          'getDisplayMedia returned a stream with no video tracks'
+        )
+      )
+      await stopSidecarBestEffort()
+      teardownInternal()
+      return
+    }
+    state.screenStream = screenStream
+    state.screenTrack = screenTrack
+    screenTrack.addEventListener('ended', onScreenTrackEnded)
 
     // Seed the battery cache before scheduling — first tick should use a
     // real reading, not the constructor default.
@@ -483,7 +700,7 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
     // the sidecar has time to /health-poll into the healthy state. If it
     // takes longer than one interval, the first few ticks gracefully skip
     // and refreshSidecarStatus() picks up an errored transition.
-    schedule(state.sampleIntervalSec * 1000)
+    schedule(nextDelayMs())
   }
 
   bootPromise = boot().catch((err) => {

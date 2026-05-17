@@ -1,8 +1,9 @@
 use rusqlite::{Connection, Result};
 
 const MIGRATION_001_INITIAL: &str = include_str!("migrations/001_initial.sql");
+const MIGRATION_002_V2: &str = include_str!("migrations/002_v2.sql");
 
-const MIGRATIONS: &[(u32, &str)] = &[(1, MIGRATION_001_INITIAL)];
+const MIGRATIONS: &[(u32, &str)] = &[(1, MIGRATION_001_INITIAL), (2, MIGRATION_002_V2)];
 
 pub fn run_migrations(conn: &mut Connection) -> Result<u32> {
     conn.execute(
@@ -55,16 +56,19 @@ mod tests {
         .unwrap_or(0)
     }
 
+    const LATEST_VERSION: u32 = 2;
+
     #[test]
-    fn applies_initial_schema_on_empty_db() {
+    fn applies_full_schema_on_empty_db() {
         let mut conn = Connection::open_in_memory().expect("open in-memory");
         let applied = run_migrations(&mut conn).expect("run migrations");
-        assert_eq!(applied, 1);
+        assert_eq!(applied, LATEST_VERSION);
         assert_table_exists(&conn, "schema_version");
         assert_table_exists(&conn, "friends");
         assert_table_exists(&conn, "sessions");
         assert_table_exists(&conn, "audit_events");
-        assert_eq!(current_version(&conn), 1);
+        assert_table_exists(&conn, "models");
+        assert_eq!(current_version(&conn), LATEST_VERSION);
     }
 
     #[test]
@@ -72,11 +76,69 @@ mod tests {
         let mut conn = Connection::open_in_memory().expect("open in-memory");
         run_migrations(&mut conn).expect("first run");
         let applied = run_migrations(&mut conn).expect("second run");
-        assert_eq!(applied, 1);
+        assert_eq!(applied, LATEST_VERSION);
         let rows: i64 = conn
             .query_row("SELECT COUNT(*) FROM schema_version", [], |row| row.get(0))
             .expect("count schema_version rows");
-        assert_eq!(rows, 1, "no duplicate version row should be inserted");
+        assert_eq!(
+            rows, LATEST_VERSION as i64,
+            "exactly one version row per applied migration, no duplicates"
+        );
+    }
+
+    // The acceptance criterion: 002_v2 runs cleanly and non-destructively on a
+    // database already at schema_version 1 with real rows. Simulates an
+    // existing V1 install upgrading.
+    #[test]
+    fn upgrades_v1_db_to_v2_without_data_loss() {
+        let mut conn = Connection::open_in_memory().expect("open in-memory");
+
+        // Bring the DB to exactly version 1 by running only the first
+        // migration, mirroring what a shipped V1 binary left on disk.
+        {
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS schema_version (version INTEGER PRIMARY KEY)",
+                [],
+            )
+            .expect("schema_version");
+            let tx = conn.transaction().expect("tx");
+            tx.execute_batch(MIGRATION_001_INITIAL).expect("apply 001");
+            tx.execute("INSERT INTO schema_version (version) VALUES (1)", [])
+                .expect("record v1");
+            tx.commit().expect("commit v1");
+        }
+        conn.execute(
+            "INSERT INTO friends (ed_pubkey_hex, x_pubkey_hex, display_name, paired_at)
+             VALUES ('aa', 'bb', 'sam', 100)",
+            [],
+        )
+        .expect("insert friend");
+        conn.execute(
+            "INSERT INTO sessions (id, started_at, declared_topic) VALUES ('s1', 1, 'Calculus')",
+            [],
+        )
+        .expect("insert session");
+        assert_eq!(current_version(&conn), 1);
+
+        let applied = run_migrations(&mut conn).expect("upgrade run");
+        assert_eq!(applied, LATEST_VERSION);
+        assert_table_exists(&conn, "models");
+
+        let friends: i64 = conn
+            .query_row("SELECT COUNT(*) FROM friends", [], |row| row.get(0))
+            .expect("count friends");
+        assert_eq!(friends, 1, "V1 friend row must survive the upgrade");
+        let topic: String = conn
+            .query_row(
+                "SELECT declared_topic FROM sessions WHERE id = 's1'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("read session topic");
+        assert_eq!(
+            topic, "Calculus",
+            "V1 session data must survive the upgrade"
+        );
     }
 
     #[test]

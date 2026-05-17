@@ -10,14 +10,22 @@ import {
   InboxBoot,
   type PresenceMap,
 } from '@/features/friends'
+import type { ValidInvite } from '@/features/friends'
 import { useIdentity } from '@/features/identity'
 import { Onboarding, useOnboardingState } from '@/features/onboarding'
-import { inviteToCurrentSession, Report, SessionView } from '@/features/session'
+import {
+  inviteToCurrentSession,
+  joinSession,
+  Report,
+  SessionView,
+  TopicGateModal,
+} from '@/features/session'
 import { Settings } from '@/features/settings'
 import type { Friend } from '@/lib/db/friends'
 import { boxEncryptWithKeyring } from '@/lib/db/identity'
 import { useFriendsStore } from '@/stores/friendsStore'
 import { useSessionStore } from '@/stores/sessionStore'
+import { useSettingsStore } from '@/stores/settingsStore'
 
 const isDev = import.meta.env.DEV
 
@@ -33,6 +41,12 @@ export function Home() {
   const [addOpen, setAddOpen] = useState(false)
   const [presence, setPresence] = useState<PresenceMap>({})
   const [view, setView] = useState<View>('main')
+  // V2-P9 — when AI is on, a session must declare a topic before it goes
+  // live. We queue the start request and run it only after the modal
+  // resolves; the discriminated union keeps the host/guest payloads distinct.
+  const [pendingStart, setPendingStart] = useState<
+    { kind: 'host'; friend: Friend } | { kind: 'guest'; invite: ValidInvite }
+  >()
 
   useEffect(() => {
     if (status === 'ready' && friendsStatus === 'idle') {
@@ -40,7 +54,7 @@ export function Home() {
     }
   }, [status, friendsStatus, loadFriends])
 
-  const handleInvite = useCallback(
+  const runHostInvite = useCallback(
     async (friend: Friend) => {
       if (!identity || !identity.display_name) return
       try {
@@ -63,6 +77,63 @@ export function Home() {
       }
     },
     [identity, actions.signWithKeyring]
+  )
+
+  const runGuestJoin = useCallback((invite: ValidInvite) => {
+    // Joining while already in a session would tear down the existing one;
+    // refuse — the user explicitly leaves first. (Moved here from InboxBoot
+    // so the gate + guard share one decision point.)
+    if (useSessionStore.getState().status === 'active') {
+      toast.error('Leave the current session before joining another.')
+      return
+    }
+    try {
+      joinSession(invite.payload.session_topic, invite.payload.session_password)
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : 'Could not join the session.'
+      toast.error(message)
+    }
+  }, [])
+
+  const aiOn = () => useSettingsStore.getState().values.aiFeaturesEnabled
+
+  const handleInvite = useCallback(
+    (friend: Friend) => {
+      if (aiOn()) setPendingStart({ kind: 'host', friend })
+      else void runHostInvite(friend)
+    },
+    [runHostInvite]
+  )
+
+  const handleInviteAccepted = useCallback(
+    (invite: ValidInvite) => {
+      // Enforce the "leave first" guard BEFORE the topic gate too — otherwise
+      // accepting an invite mid-session (AI on) would queue pendingStart and
+      // pop the topic modal even though runGuestJoin would later refuse.
+      if (useSessionStore.getState().status === 'active') {
+        toast.error('Leave the current session before joining another.')
+        return
+      }
+      if (aiOn()) setPendingStart({ kind: 'guest', invite })
+      else runGuestJoin(invite)
+    },
+    [runGuestJoin]
+  )
+
+  const handleTopicSubmit = useCallback(
+    (topic: string) => {
+      const req = pendingStart
+      setPendingStart(undefined)
+      if (!req) return
+      // Seed the one-shot topic BEFORE the session flips to active so
+      // `begin()` writes it into both initialDeclaredTopic (→
+      // sessions.declared_topic) and the live declaredStudyTopic.
+      useSessionStore.getState().setPendingInitialTopic(topic)
+      if (req.kind === 'host') void runHostInvite(req.friend)
+      else runGuestJoin(req.invite)
+    },
+    [pendingStart, runHostInvite, runGuestJoin]
   )
 
   if (status === 'loading' || onboarding.status === 'loading') {
@@ -90,8 +161,21 @@ export function Home() {
         key="inbox-boot"
         myEdPubkeyHex={identity.ed_pubkey_hex}
         onPresenceChange={setPresence}
+        onInviteAccepted={handleInviteAccepted}
       />
     ) : null
+
+  // Gate + inbox travel together everywhere a new session can be started.
+  const tail = (
+    <>
+      {inbox}
+      <TopicGateModal
+        open={pendingStart !== undefined}
+        onSubmit={handleTopicSubmit}
+        onCancel={() => setPendingStart(undefined)}
+      />
+    </>
+  )
 
   if (sessionStatus === 'active') {
     return (
@@ -115,7 +199,7 @@ export function Home() {
           sessionId={sessionTopic}
           onClose={() => useSessionStore.getState().reset()}
         />
-        {inbox}
+        {tail}
       </>
     )
   }
@@ -124,7 +208,7 @@ export function Home() {
     return (
       <>
         <Settings onClose={() => setView('main')} />
-        {inbox}
+        {tail}
       </>
     )
   }
@@ -145,7 +229,7 @@ export function Home() {
         <FriendsList
           presence={presence}
           onAddFriend={() => setAddOpen(true)}
-          onInvite={(friend) => void handleInvite(friend)}
+          onInvite={handleInvite}
         />
         <AddFriendDialog open={addOpen} onOpenChange={setAddOpen} />
         {isDev ? (
@@ -156,7 +240,7 @@ export function Home() {
           </div>
         ) : null}
       </main>
-      {inbox}
+      {tail}
     </>
   )
 }

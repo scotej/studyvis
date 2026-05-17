@@ -114,7 +114,13 @@ async function acquireScreenStream(): Promise<MediaStream> {
   }
 }
 
-function mapDisplayMediaError(err: unknown): CaptureError {
+// Exported so the V2-P5/V2-P9 long-lived-stream path in sampleLoop.ts maps
+// getDisplayMedia rejections to the same CaptureError codes (the
+// macOS-Sequoia NotAllowedError → `screen_capture_denied` mapping is
+// load-bearing for the permission overlay; duplicating it would risk drift).
+// The long-lived acquire+snapshot loop itself still lives in sampleLoop.ts,
+// per README §"Acquire strategy" — only this error classifier is shared.
+export function mapDisplayMediaError(err: unknown): CaptureError {
   if (err instanceof CaptureError) return err
   if (err instanceof DOMException) {
     let code: CaptureErrorCode

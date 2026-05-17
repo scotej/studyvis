@@ -1,21 +1,354 @@
-import { ModelPickerContainer } from '@/features/ai'
+import { useCallback, useEffect, useState } from 'react'
+import { toast } from 'sonner'
 
-// V2-P2 lands the model picker + benchmark inside Settings → AI.
-// V2-P9 adds the master "Enable AI features" toggle here above the picker.
+import { ScreenCapturePermissionOverlay } from '@/components/ScreenCapturePermissionOverlay'
+import { SettingsRow, SettingsSection } from '@/components/SettingsRow'
+import { Button } from '@/components/ui/button'
+import { Slider } from '@/components/ui/slider'
+import { Switch } from '@/components/ui/switch'
+import {
+  ALERT_THRESHOLD_MAX,
+  ALERT_THRESHOLD_MIN,
+  CaptureError,
+  DEFAULT_CTX_SIZE,
+  effectiveIntervalSec,
+  FALLBACK_SAMPLE_INTERVAL_SEC,
+  getDownloadRuntime,
+  getHfTokenRuntime,
+  MAX_SAMPLE_INTERVAL_SEC,
+  ModelPickerContainer,
+  requestScreenCapturePermission,
+  useModelStore,
+  useSidecarStore,
+  WARNING_THRESHOLD_MAX,
+  WARNING_THRESHOLD_MIN,
+} from '@/features/ai'
+import { useSettingsStore } from '@/stores/settingsStore'
+
+// V2-P9 — the master AI gate plus the tuning controls prior phases left as
+// read-only stubs. When the toggle is off the only thing rendered is the
+// toggle itself: no picker, no sliders, no sidecar affordances. When it's on
+// the gated controls come alive. Side-effects (permission seed on enable,
+// sidecar stop on disable) are orchestrated here so the settings store stays
+// in the `@/stores` layer with no `@/features/ai` import.
 export function AiCategory() {
+  const aiFeaturesEnabled = useSettingsStore((s) => s.values.aiFeaturesEnabled)
+  const setAiFeaturesEnabled = useSettingsStore((s) => s.setAiFeaturesEnabled)
+  const warningThreshold = useSettingsStore((s) => s.values.warningThreshold)
+  const alertThreshold = useSettingsStore((s) => s.values.alertThreshold)
+  const sampleIntervalSec = useSettingsStore((s) => s.values.sampleIntervalSec)
+  const setWarningThreshold = useSettingsStore((s) => s.setWarningThreshold)
+  const setAlertThreshold = useSettingsStore((s) => s.setAlertThreshold)
+  const setSampleIntervalSec = useSettingsStore((s) => s.setSampleIntervalSec)
+  const debugLogEnabled = useSettingsStore((s) => s.values.debugLogEnabled)
+  const setDebugLogEnabled = useSettingsStore((s) => s.setDebugLogEnabled)
+
+  const activeModelId = useModelStore((s) => s.activeModelId)
+  const measuredFloor = useModelStore((s) => {
+    const id = s.activeModelId
+    const measured = id
+      ? s.records[id]?.benchmark?.sampleIntervalSec
+      : undefined
+    return typeof measured === 'number' && measured >= 1
+      ? measured
+      : FALLBACK_SAMPLE_INTERVAL_SEC
+  })
+
+  const sidecarStatus = useSidecarStore((s) => s.status)
+  const sidecarLastError = useSidecarStore((s) => s.lastError)
+
+  const [permissionOverlayOpen, setPermissionOverlayOpen] = useState(false)
+  const [toggling, setToggling] = useState(false)
+  const [restarting, setRestarting] = useState(false)
+  const [tokenPresent, setTokenPresent] = useState<boolean | null>(null)
+
+  const refreshTokenPresence = useCallback(async () => {
+    try {
+      setTokenPresent(await getHfTokenRuntime().present())
+    } catch {
+      setTokenPresent(null)
+    }
+  }, [])
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- one-shot keychain presence check: refreshTokenPresence awaits the Tauri command before any setState fires (same suppression as SessionsCategory / useIdentity.refresh).
+    if (aiFeaturesEnabled) void refreshTokenPresence()
+  }, [aiFeaturesEnabled, refreshTokenPresence])
+
+  // One-shot OS permission seed (V2-P3 carryover): never call captureScreen()
+  // to probe — `requestScreenCapturePermission` is the dedicated seed.
+  const seedScreenPermission = useCallback(async () => {
+    try {
+      await requestScreenCapturePermission()
+    } catch (err) {
+      if (err instanceof CaptureError && err.code === 'screen_capture_denied') {
+        setPermissionOverlayOpen(true)
+        return
+      }
+      const message =
+        err instanceof CaptureError
+          ? err.message
+          : err instanceof Error
+            ? err.message
+            : 'Screen capture is unavailable on this machine.'
+      toast.error(message)
+      // Non-denial failure: roll the gate back so we don't pretend AI is live.
+      await setAiFeaturesEnabled(false)
+    }
+  }, [setAiFeaturesEnabled])
+
+  const handleToggle = useCallback(
+    async (next: boolean) => {
+      setToggling(true)
+      try {
+        await setAiFeaturesEnabled(next)
+        if (next) {
+          await seedScreenPermission()
+        } else {
+          // V2-P1 carryover: terminate the llama-server child + unwind the
+          // health-poll loop the moment the gate closes. Records + on-disk
+          // model files are intentionally NOT touched — the toggle is a
+          // runtime gate, not an uninstall.
+          await useSidecarStore.getState().stop()
+        }
+      } finally {
+        setToggling(false)
+      }
+    },
+    [seedScreenPermission, setAiFeaturesEnabled]
+  )
+
+  const handleRetryPermission = useCallback(async () => {
+    try {
+      await requestScreenCapturePermission()
+      setPermissionOverlayOpen(false)
+      toast.success('Screen recording granted.')
+    } catch (err) {
+      if (err instanceof CaptureError && err.code === 'screen_capture_denied') {
+        // Still denied — keep the overlay up so the user can open Settings.
+        return
+      }
+      toast.error(
+        err instanceof Error ? err.message : 'Could not request access.'
+      )
+    }
+  }, [])
+
+  const handleForgetToken = useCallback(async () => {
+    try {
+      await getHfTokenRuntime().clear()
+      await refreshTokenPresence()
+      toast.success('Hugging Face token removed.')
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : 'Could not remove the token.'
+      )
+    }
+  }, [refreshTokenPresence])
+
+  const handleRestartSidecar = useCallback(async () => {
+    if (!activeModelId) {
+      toast.error('Pick a model first.')
+      return
+    }
+    setRestarting(true)
+    try {
+      const paths = await getDownloadRuntime().paths(activeModelId)
+      await useSidecarStore.getState().start({
+        modelPath: paths.model_path,
+        mmprojPath: paths.mmproj_path,
+        ctxSize: DEFAULT_CTX_SIZE,
+      })
+      toast.success('AI model restarting.')
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : 'Could not restart the model.'
+      )
+    } finally {
+      setRestarting(false)
+    }
+  }, [activeModelId])
+
+  // Clamp the displayed value through the SAME function the loop uses so the
+  // slider can't show a value below `min` (a stale override saved on a faster
+  // model, then switched to a slower one) and what the user sees matches
+  // what the loop will actually run.
+  const effectiveInterval = effectiveIntervalSec(
+    measuredFloor,
+    sampleIntervalSec
+  )
+
   return (
-    <section className="flex flex-col gap-6">
-      <header className="flex flex-col gap-1">
-        <h2 className="text-xl font-semibold tracking-tight text-text-primary">
-          AI
-        </h2>
-        <p className="text-sm text-text-secondary">
-          The vision model runs on this machine and judges only your camera and
-          screen. Pick a model below and StudyVis will benchmark it once to
-          figure out how often it can sample.
-        </p>
-      </header>
-      <ModelPickerContainer />
-    </section>
+    <SettingsSection heading="AI">
+      <p className="mb-3 text-sm text-text-secondary">
+        The vision model runs on this machine and judges only your camera and
+        screen. Nothing leaves your computer. Enable AI to pick a model,
+        benchmark it, and let StudyVis nudge you when you drift off-task.
+      </p>
+
+      <SettingsRow
+        label="Enable AI features"
+        help="Off by default. When off StudyVis is a plain study room — no model, no capture, no scoring. Turning it on prompts once for screen-recording access."
+        control={
+          <Switch
+            checked={aiFeaturesEnabled}
+            disabled={toggling}
+            onCheckedChange={(checked) => void handleToggle(Boolean(checked))}
+            aria-label="Enable AI features"
+          />
+        }
+      />
+
+      {!aiFeaturesEnabled ? (
+        <SettingsRow
+          label="AI is off"
+          help="Enable AI features above to choose and benchmark a vision model and tune how often it samples."
+        />
+      ) : (
+        <>
+          <SettingsRow
+            label="Sample interval"
+            stack
+            help={`How often the model looks (seconds). The floor is what this machine measured (${measuredFloor}s); you can only slow it down, up to ${MAX_SAMPLE_INTERVAL_SEC}s. Takes effect on the next sample.`}
+            control={
+              <div className="flex items-center gap-4">
+                <Slider
+                  className="w-full"
+                  min={measuredFloor}
+                  max={MAX_SAMPLE_INTERVAL_SEC}
+                  step={1}
+                  value={[effectiveInterval]}
+                  onValueChange={([v]) =>
+                    void setSampleIntervalSec(v <= measuredFloor ? null : v)
+                  }
+                  aria-label="Sample interval (seconds)"
+                />
+                <span className="w-16 shrink-0 text-right text-sm tabular-nums text-text-secondary">
+                  {effectiveInterval}s
+                </span>
+              </div>
+            }
+          />
+
+          <SettingsRow
+            label="Warning after"
+            stack
+            help="Consecutive off-task samples before StudyVis warns you privately (only you see it)."
+            control={
+              <div className="flex items-center gap-4">
+                <Slider
+                  className="w-full"
+                  min={WARNING_THRESHOLD_MIN}
+                  max={WARNING_THRESHOLD_MAX}
+                  step={1}
+                  value={[warningThreshold]}
+                  onValueChange={([v]) => {
+                    void setWarningThreshold(v)
+                    // Keep the invariant warning < alert visible immediately.
+                    if (v >= alertThreshold) {
+                      void setAlertThreshold(
+                        Math.min(v + 1, ALERT_THRESHOLD_MAX)
+                      )
+                    }
+                  }}
+                  aria-label="Warning after N off-task samples"
+                />
+                <span className="w-16 shrink-0 text-right text-sm tabular-nums text-text-secondary">
+                  {warningThreshold}
+                </span>
+              </div>
+            }
+          />
+
+          <SettingsRow
+            label="Alert peers after"
+            stack
+            help="Consecutive off-task samples before your friends see you flagged. Always kept above the warning count."
+            control={
+              <div className="flex items-center gap-4">
+                <Slider
+                  className="w-full"
+                  min={ALERT_THRESHOLD_MIN}
+                  max={ALERT_THRESHOLD_MAX}
+                  step={1}
+                  value={[alertThreshold]}
+                  onValueChange={([v]) => {
+                    const floored = Math.max(v, warningThreshold + 1)
+                    void setAlertThreshold(
+                      Math.min(floored, ALERT_THRESHOLD_MAX)
+                    )
+                  }}
+                  aria-label="Alert peers after N off-task samples"
+                />
+                <span className="w-16 shrink-0 text-right text-sm tabular-nums text-text-secondary">
+                  {alertThreshold}
+                </span>
+              </div>
+            }
+          />
+
+          <SettingsRow
+            label="AI diagnostics in debug log"
+            help="AI sample/parse warnings are written to the developer console when the debug log is on. Same setting as Advanced → Debug log."
+            control={
+              <Switch
+                checked={debugLogEnabled}
+                onCheckedChange={(checked) =>
+                  void setDebugLogEnabled(Boolean(checked))
+                }
+                aria-label="AI diagnostics in debug log"
+              />
+            }
+          />
+
+          {tokenPresent ? (
+            <SettingsRow
+              label="Hugging Face token"
+              help="Stored in your OS keychain for gated model downloads (e.g. Gemma). Forgetting it does not delete already-downloaded models."
+              control={
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => void handleForgetToken()}
+                >
+                  Forget
+                </Button>
+              }
+            />
+          ) : null}
+
+          {sidecarStatus === 'errored' ? (
+            <SettingsRow
+              label="AI model crashed"
+              help={
+                sidecarLastError
+                  ? `Last error: ${sidecarLastError}`
+                  : 'The llama-server sidecar exhausted its restart budget.'
+              }
+              control={
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => void handleRestartSidecar()}
+                  disabled={restarting || !activeModelId}
+                >
+                  Restart
+                </Button>
+              }
+            />
+          ) : null}
+
+          <div className="pt-4">
+            <ModelPickerContainer />
+          </div>
+        </>
+      )}
+
+      <ScreenCapturePermissionOverlay
+        open={permissionOverlayOpen}
+        onOpenChange={setPermissionOverlayOpen}
+        onRetry={() => void handleRetryPermission()}
+      />
+    </SettingsSection>
   )
 }

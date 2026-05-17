@@ -9,9 +9,11 @@ import {
   BATTERY_POLL_INTERVAL_MS,
   CaptureError,
   __resetBatteryRuntime,
+  __resetCaptureRuntime,
   __resetFocusStoreThresholdReader,
   __resetSampleLoopRuntime,
   __resetSidecarRuntime,
+  __setCaptureRuntime,
   __setSampleLoopRuntime,
   getSampleLoopRuntime,
   initialScoreMachineState,
@@ -21,6 +23,8 @@ import {
   useModelStore,
   useSidecarStore,
   type BatteryInfo,
+  type CaptureFrame,
+  type CaptureRuntime,
   type SampleLoopRuntime,
 } from '@/features/ai'
 import { useSettingsStore } from '@/stores/settingsStore'
@@ -142,12 +146,54 @@ function makeFakeTrack(): MediaStreamTrack {
   } as unknown as MediaStreamTrack
 }
 
+// V2-P9: the loop now acquires ONE long-lived screen MediaStream at boot and
+// snapshots it per tick via the shared CaptureRuntime. The fake stream's
+// track supports the add/removeEventListener('ended') + stop() the loop uses.
+function makeFakeScreenStream(): MediaStream {
+  const track = {
+    kind: 'video',
+    readyState: 'live',
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    stop: () => {},
+    getSettings: () => ({ width: 1280, height: 720 }),
+  } as unknown as MediaStreamTrack
+  return {
+    getVideoTracks: () => [track],
+    getTracks: () => [track],
+  } as unknown as MediaStream
+}
+
+// Per-tick screen snapshot goes through getCaptureRuntime() (DOM-free here).
+// `screenEncodeCalls` is the analogue of the old captureScreen call count;
+// `screenExtractImpl` lets a test inject a transient/throwing frame grab.
+let screenEncodeCalls = 0
+let screenExtractImpl:
+  | ((track: MediaStreamTrack) => Promise<CaptureFrame>)
+  | null = null
+
+const fakeCaptureRuntime: CaptureRuntime = {
+  extractFrame: async (track) => {
+    if (screenExtractImpl) return screenExtractImpl(track)
+    return {
+      bitmap: {} as unknown as ImageBitmap,
+      sourceWidth: 1280,
+      sourceHeight: 720,
+    }
+  },
+  disposeFrame: () => {},
+  encodeJpegBase64: async () => {
+    screenEncodeCalls += 1
+    return 'screen-base64'
+  },
+}
+
 type RuntimeOptions = {
   clock: FakeClock
   fetch: SampleLoopRuntime['fetch']
   battery?: BatteryInfo
   captureFace?: SampleLoopRuntime['captureFace']
-  captureScreen?: SampleLoopRuntime['captureScreen']
+  acquireScreenStream?: SampleLoopRuntime['acquireScreenStream']
   modelPaths?: SampleLoopRuntime['modelPaths']
   startSidecar?: SampleLoopRuntime['startSidecar']
   stopSidecar?: SampleLoopRuntime['stopSidecar']
@@ -162,7 +208,8 @@ function buildSampleLoopRuntime(opts: RuntimeOptions): SampleLoopRuntime {
     clearTimeout: (h) => opts.clock.clearTimeout(h),
     fetch: opts.fetch,
     captureFace: opts.captureFace ?? (async () => 'face-base64'),
-    captureScreen: opts.captureScreen ?? (async () => 'screen-base64'),
+    acquireScreenStream:
+      opts.acquireScreenStream ?? (async () => makeFakeScreenStream()),
     readBattery: async () => batteryInfo,
     modelPaths:
       opts.modelPaths ??
@@ -203,6 +250,17 @@ function judgmentResponse(severity: string): Response {
     ],
   })
 }
+
+// The DOM-free screen-snapshot pipeline is installed for every test; per-test
+// behaviour is steered via `screenExtractImpl` / `screenEncodeCalls`.
+beforeEach(() => {
+  screenEncodeCalls = 0
+  screenExtractImpl = null
+  __setCaptureRuntime(fakeCaptureRuntime)
+})
+afterEach(() => {
+  __resetCaptureRuntime()
+})
 
 describe('startSampleLoop — start failures', () => {
   beforeEach(() => {
@@ -347,7 +405,6 @@ describe('startSampleLoop — happy-path tick', () => {
     const clock = new FakeClock()
     const fetchMock = vi.fn(async () => judgmentResponse('on_task'))
     const captureFace = vi.fn(async () => 'face-b64')
-    const captureScreen = vi.fn(async () => 'screen-b64')
     const track = makeFakeTrack()
 
     __setSampleLoopRuntime(
@@ -355,7 +412,6 @@ describe('startSampleLoop — happy-path tick', () => {
         clock,
         fetch: fetchMock as never,
         captureFace,
-        captureScreen,
       })
     )
     const handle = startSampleLoop({
@@ -395,7 +451,7 @@ describe('startSampleLoop — happy-path tick', () => {
     expect(userBlocks[1]).toMatchObject({ type: 'image_url' })
     expect(userBlocks[2]).toMatchObject({ type: 'image_url' })
     expect(captureFace).toHaveBeenCalledTimes(1)
-    expect(captureScreen).toHaveBeenCalledTimes(1)
+    expect(screenEncodeCalls).toBe(1)
     expect(useFocusStore.getState().lastSampleAt).toBe(5000)
     await handle.stop()
   })
@@ -674,7 +730,8 @@ describe('startSampleLoop — capture errors', () => {
       buildSampleLoopRuntime({
         clock,
         fetch: fetchMock as never,
-        captureScreen: async () => {
+        // Denial now surfaces at the single boot-time acquire, not per tick.
+        acquireScreenStream: async () => {
           throw new CaptureError('screen_capture_denied', 'denied')
         },
       })
@@ -696,22 +753,58 @@ describe('startSampleLoop — capture errors', () => {
     await handle.stop()
   })
 
+  test('screen acquire failure after sidecar start stops the sidecar (no leak)', async () => {
+    const clock = new FakeClock()
+    const fetchMock = vi.fn()
+    const stopSidecar = vi.fn(async () => {})
+    __setSampleLoopRuntime(
+      buildSampleLoopRuntime({
+        clock,
+        fetch: fetchMock as never,
+        startSidecar: async () => {
+          seedSidecarStoreRunning()
+          return 9999
+        },
+        stopSidecar,
+        acquireScreenStream: async () => {
+          throw new CaptureError('screen_capture_denied', 'denied')
+        },
+      })
+    )
+    const handle = startSampleLoop({
+      getTopic: () => 't',
+      modelId: 'test-model',
+      getFaceTrack: () => makeFakeTrack(),
+    })
+    await flushMicrotasks(10)
+    // The sidecar was started before the (failing) screen acquire; it must
+    // be torn down even though teardownInternal()/stop() short-circuit.
+    expect(stopSidecar).toHaveBeenCalledTimes(1)
+    await handle.stop()
+  })
+
   test('non-denied CaptureError calls onCaptureError but continues scheduling', async () => {
     const clock = new FakeClock()
     const fetchMock = vi.fn(async () => judgmentResponse('on_task'))
     const onCaptureError = vi.fn()
     let attempt = 0
+    // Boot acquire succeeds (default); the transient failure is a per-tick
+    // snapshot error from the shared CaptureRuntime, so the loop keeps going.
+    screenExtractImpl = async () => {
+      attempt += 1
+      if (attempt === 1) {
+        throw new CaptureError('frame_extraction_failed', 'transient')
+      }
+      return {
+        bitmap: {} as unknown as ImageBitmap,
+        sourceWidth: 1280,
+        sourceHeight: 720,
+      }
+    }
     __setSampleLoopRuntime(
       buildSampleLoopRuntime({
         clock,
         fetch: fetchMock as never,
-        captureScreen: async () => {
-          attempt += 1
-          if (attempt === 1) {
-            throw new CaptureError('frame_extraction_failed', 'transient')
-          }
-          return 'screen-b64'
-        },
       })
     )
     const handle = startSampleLoop({
@@ -831,11 +924,11 @@ describe('startSampleLoop — sidecar lifecycle', () => {
       getFaceTrack: () => makeFakeTrack(),
     })
     await flushMicrotasks(10)
-    expect(handle.__state().sampleIntervalSec).toBe(5)
+    expect(handle.__state().modelFloorSec).toBe(5)
     await handle.stop()
   })
 
-  test('uses the benchmark sampleIntervalSec when present', async () => {
+  test('uses the benchmark sampleIntervalSec as the model floor', async () => {
     const clock = new FakeClock()
     useModelStore.setState((s) => ({
       ...s,
@@ -864,7 +957,7 @@ describe('startSampleLoop — sidecar lifecycle', () => {
       getFaceTrack: () => makeFakeTrack(),
     })
     await flushMicrotasks(10)
-    expect(handle.__state().sampleIntervalSec).toBe(21)
+    expect(handle.__state().modelFloorSec).toBe(21)
     // First tick should fire at 21 s, not 5 s.
     await clock.advance(20_000)
     expect(fetchMock).not.toHaveBeenCalled()

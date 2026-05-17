@@ -244,6 +244,8 @@ export {
   REQUEST_TIMEOUT_MS,
   BATTERY_POLL_INTERVAL_MS,
   FALLBACK_SAMPLE_INTERVAL_SEC,
+  MAX_SAMPLE_INTERVAL_SEC,
+  effectiveIntervalSec,
 } from './sampleLoop'
 export type {
   SampleLoopRuntime,
