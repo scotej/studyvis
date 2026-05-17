@@ -7,6 +7,7 @@ import { AudioDevicePicker } from '@/components/AudioDevicePicker'
 import { AuditLogPanel, type AuditLogEntry } from '@/components/AuditLogPanel'
 import { BreakCountdownBadge } from '@/components/BreakCountdownBadge'
 import type { FocusState } from '@/components/FocusIndicator'
+import { ScreenCapturePermissionOverlay } from '@/components/ScreenCapturePermissionOverlay'
 import { SelfWarningBadge } from '@/components/SelfWarningBadge'
 import { SessionTimer } from '@/components/SessionTimer'
 import { Button } from '@/components/ui/button'
@@ -21,6 +22,8 @@ import {
   AI_DIALOG_CONTEXT_REQUEST,
   AI_DIALOG_TOPIC_CHANGE,
   AI_DIALOG_WINDOW_LABEL,
+  CaptureError,
+  requestScreenCapturePermission,
   startSampleLoop,
   useBreakStore,
   useFocusStore,
@@ -123,6 +126,15 @@ export function SessionView() {
     null
   )
   const [audioSwapping, setAudioSwapping] = useState(false)
+  // V2-P9 (V2-P5 carry-forward): the long-lived screen acquire latches the
+  // loop dead on denial / "Stop sharing". Mount the permission overlay; a
+  // successful retry resets focus and clears this flag, which is in the
+  // sample-loop effect's deps so the loop remounts and resumes.
+  const [captureDenied, setCaptureDenied] = useState(false)
+  // Overlay visibility is separate from the loop latch: "Not now" closes the
+  // overlay but leaves the loop dead for this session; only a successful
+  // retry clears `captureDenied` and remounts the loop.
+  const [captureOverlayOpen, setCaptureOverlayOpen] = useState(false)
   const localStreamRef = useRef<MediaStream | null>(null)
   const pttSendRef = useRef<((payload: PttPayload) => Promise<void[]>) | null>(
     null
@@ -397,6 +409,15 @@ export function SessionView() {
       }
       if (stopped) return
       void emitAudit('joined', {})
+      // V2-P9 — the only producer of `topic_set` (kind+label wired in V2-P7,
+      // no producer until now). Fires once per session, only when AI is on
+      // (the required topic prompt only runs in that case), right after
+      // `joined` so the report's topic timeline anchors correctly. Reads the
+      // one-shot initialDeclaredTopic that `begin()` seeded from the gate.
+      if (useSettingsStore.getState().values.aiFeaturesEnabled) {
+        const topic = useSessionStore.getState().initialDeclaredTopic
+        void emitAudit('topic_set', { topic })
+      }
     })()
 
     return () => {
@@ -442,6 +463,8 @@ export function SessionView() {
     if (!aiFeaturesEnabled) return
     if (!activeModelId) return
     if (!localStream) return
+    // Don't relaunch into a denied state — the overlay's retry clears this.
+    if (captureDenied) return
     let handle: SampleLoopHandle | null = startSampleLoop({
       getTopic: () => useSessionStore.getState().declaredStudyTopic,
       modelId: activeModelId,
@@ -469,7 +492,10 @@ export function SessionView() {
         }
       },
       onCaptureDenied: () => {
-        toast.error('Screen recording denied — enable it in Settings → AI')
+        // Latched dead: surface the actionable overlay (retry re-grants +
+        // resumes) rather than a dead-end toast.
+        setCaptureDenied(true)
+        setCaptureOverlayOpen(true)
       },
       onCaptureError: (err) => {
         toast.error(`AI capture error: ${err.message}`)
@@ -487,7 +513,7 @@ export function SessionView() {
       handle = null
       void local?.stop()
     }
-  }, [status, aiFeaturesEnabled, activeModelId, localStream])
+  }, [status, aiFeaturesEnabled, activeModelId, localStream, captureDenied])
 
   // V2-P7 — listen for cross-window events from the Ctrl+] AI dialog. The
   // dialog runs in a separate Tauri WebviewWindow (label = AI_DIALOG_
@@ -724,6 +750,31 @@ export function SessionView() {
     pomodoroStopRef.current?.()
   }, [])
 
+  // V2-P5 carry-forward: re-grant + resume after a mid-session screen-capture
+  // denial. The overlay closes itself before calling this; on success we
+  // reset the focus score (the dead loop's last samples shouldn't count) and
+  // clear the latch, which is in the sample-loop effect deps so it remounts.
+  const handleCaptureRetry = useCallback(() => {
+    void (async () => {
+      try {
+        await requestScreenCapturePermission()
+        useFocusStore.getState().reset()
+        setCaptureDenied(false)
+      } catch (err) {
+        if (
+          err instanceof CaptureError &&
+          err.code === 'screen_capture_denied'
+        ) {
+          setCaptureOverlayOpen(true)
+          return
+        }
+        toast.error(
+          err instanceof Error ? err.message : 'Could not request access.'
+        )
+      }
+    })()
+  }, [])
+
   const elapsed = useElapsed(startedAt)
   const auditEntries = useMemo(
     () => mapAuditEntries(auditEvents, identity, peers),
@@ -857,6 +908,11 @@ export function SessionView() {
         <SelfWarningBadge reasoning={selfWarning.reasoning} />
       ) : null}
       {onBreak ? <BreakCountdownBadge endsAt={breakEndsAt} /> : null}
+      <ScreenCapturePermissionOverlay
+        open={captureOverlayOpen}
+        onOpenChange={setCaptureOverlayOpen}
+        onRetry={handleCaptureRetry}
+      />
     </main>
   )
 }

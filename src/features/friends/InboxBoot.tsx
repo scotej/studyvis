@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 import { toast } from 'sonner'
 import {
   isPermissionGranted,
@@ -6,12 +6,10 @@ import {
   sendNotification,
 } from '@tauri-apps/plugin-notification'
 
-import { joinSession } from '@/features/session'
 import { hexToBytes } from '@/lib/crypto/identity'
 import { boxDecryptWithKeyring } from '@/lib/db/identity'
 import { getFriendXPubkey } from '@/lib/db/friends'
 import { useFriendsStore } from '@/stores/friendsStore'
-import { useSessionStore } from '@/stores/sessionStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 
 import { subscribeToOwnInbox, type ValidInvite } from './inbox'
@@ -20,6 +18,10 @@ import { startPresence, type PresenceMap } from './presence'
 export type InboxBootProps = {
   myEdPubkeyHex: string
   onPresenceChange: (presence: PresenceMap) => void
+  // V2-P9: InboxBoot keeps owning the always-on inbox/presence subscriptions
+  // but no longer decides how a session starts. It forwards an accepted
+  // invite to Home, which applies the AI-on topic gate before `joinSession`.
+  onInviteAccepted: (invite: ValidInvite) => void
 }
 
 // Mounted once after identity is ready (see Home.tsx). On mount it joins the
@@ -27,7 +29,18 @@ export type InboxBootProps = {
 // surfaces any valid invite as both an in-app toast and an OS notification.
 // Acceptance for V1-P6: clicking the notification (or toast) just logs
 // "would join session"; V1-P8 wires the real session-accept flow.
-export function InboxBoot({ myEdPubkeyHex, onPresenceChange }: InboxBootProps) {
+export function InboxBoot({
+  myEdPubkeyHex,
+  onPresenceChange,
+  onInviteAccepted,
+}: InboxBootProps) {
+  // Ref so the inbox subscription effect (keyed on myEdPubkeyHex only) never
+  // resubscribes just because Home re-rendered with a new callback identity.
+  const onInviteAcceptedRef = useRef(onInviteAccepted)
+  useEffect(() => {
+    onInviteAcceptedRef.current = onInviteAccepted
+  }, [onInviteAccepted])
+
   const friends = useFriendsStore((s) => s.friends)
   // Stable key that only changes when the *identity-relevant* friend set
   // does — not on every store mutation (e.g. last_studied_with bump). The
@@ -59,7 +72,7 @@ export function InboxBoot({ myEdPubkeyHex, onPresenceChange }: InboxBootProps) {
       boxDecrypt: boxDecryptWithKeyring,
       onValidInvite: (invite) => {
         if (cancelled) return
-        void handleValidInvite(invite)
+        void handleValidInvite(invite, (i) => onInviteAcceptedRef.current(i))
       },
     })
 
@@ -87,14 +100,17 @@ export function InboxBoot({ myEdPubkeyHex, onPresenceChange }: InboxBootProps) {
   return null
 }
 
-async function handleValidInvite(invite: ValidInvite) {
+async function handleValidInvite(
+  invite: ValidInvite,
+  onAccept: (invite: ValidInvite) => void
+) {
   const senderName = invite.payload.our_display_name?.trim() || 'A friend'
   const message = `${senderName} invites you to study`
 
   toast(message, {
     action: {
       label: 'Accept',
-      onClick: () => acceptInvite(invite),
+      onClick: () => onAccept(invite),
     },
   })
 
@@ -115,21 +131,5 @@ async function handleValidInvite(invite: ValidInvite) {
   } catch {
     // Notification plugin is best-effort; the in-app toast is the
     // user-visible source of truth.
-  }
-}
-
-function acceptInvite(invite: ValidInvite) {
-  // Joining while already in a session would tear down the existing one.
-  // For V1, refuse — the user explicitly leaves first.
-  if (useSessionStore.getState().status === 'active') {
-    toast.error('Leave the current session before joining another.')
-    return
-  }
-  try {
-    joinSession(invite.payload.session_topic, invite.payload.session_password)
-  } catch (err) {
-    const message =
-      err instanceof Error ? err.message : 'Could not join the session.'
-    toast.error(message)
   }
 }

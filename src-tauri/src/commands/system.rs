@@ -49,6 +49,29 @@ impl MinimizeToTrayFlag {
     }
 }
 
+// V2-P9 AI-features gate. Initial value comes from `settings.json` at app
+// boot (see `read_ai_features_from_settings` in lib.rs); the JS settings store
+// pushes subsequent updates via `system_ai_features_set_enabled`. The only
+// consumer is the global Ctrl+] shortcut handler, which no-ops when the flag
+// is off so the floating AI dialog never opens while AI is disabled. Relaxed
+// ordering matches `MinimizeToTrayFlag`: last-write-wins is fine and a stale
+// read costs at most one extra (or skipped) dialog toggle.
+pub struct AiFeaturesFlag(pub AtomicBool);
+
+impl AiFeaturesFlag {
+    pub fn new(initial: bool) -> Self {
+        Self(AtomicBool::new(initial))
+    }
+
+    pub fn set<R: Runtime>(app: &AppHandle<R>, enabled: bool) {
+        app.state::<Self>().0.store(enabled, Ordering::Relaxed);
+    }
+
+    pub fn is_enabled<R: Runtime>(app: &AppHandle<R>) -> bool {
+        app.state::<Self>().0.load(Ordering::Relaxed)
+    }
+}
+
 #[tauri::command]
 pub fn autostart_set_enabled<R: Runtime>(app: AppHandle<R>, enabled: bool) -> Result<(), String> {
     let manager = app.autolaunch();
@@ -70,6 +93,15 @@ pub fn system_minimize_to_tray_set_enabled<R: Runtime>(
     enabled: bool,
 ) -> Result<(), String> {
     MinimizeToTrayFlag::set(&app, enabled);
+    Ok(())
+}
+
+#[tauri::command]
+pub fn system_ai_features_set_enabled<R: Runtime>(
+    app: AppHandle<R>,
+    enabled: bool,
+) -> Result<(), String> {
+    AiFeaturesFlag::set(&app, enabled);
     Ok(())
 }
 

@@ -23,6 +23,11 @@ export type SettingsValues = {
   // are read-only and consumed by `features/ai/focusStore.ts` at apply-time.
   warningThreshold: number
   alertThreshold: number
+  // V2-P9 user override for the AI sample interval (seconds). `null` means
+  // "use the V2-P2 benchmark's measured cadence" (the default). When set, the
+  // sample loop clamps it to the model's measured floor so the user can only
+  // slow sampling down, never push it below what the machine can sustain.
+  sampleIntervalSec: number | null
 }
 
 export const SETTINGS_FILE = 'settings.json'
@@ -36,6 +41,7 @@ export const SETTINGS_KEY_TURN_PREF = 'turn_preference'
 export const SETTINGS_KEY_AI_FEATURES = 'ai_features_enabled'
 export const SETTINGS_KEY_WARNING_THRESHOLD = 'warning_threshold'
 export const SETTINGS_KEY_ALERT_THRESHOLD = 'alert_threshold'
+export const SETTINGS_KEY_SAMPLE_INTERVAL = 'sample_interval_s'
 
 // Defaults match the V1 acceptance criteria + DESIGN-SYSTEM.md §8.5: dark
 // theme on, reduce-motion off, OS notification on for invites, minimize-to-
@@ -51,6 +57,7 @@ export const DEFAULT_SETTINGS: SettingsValues = {
   aiFeaturesEnabled: false,
   warningThreshold: 2,
   alertThreshold: 4,
+  sampleIntervalSec: null,
 }
 
 export type SettingsStatus = 'loading' | 'ready' | 'error'
@@ -66,6 +73,11 @@ type SettingsState = {
   setMinimizeToTrayOnClose: (enabled: boolean) => Promise<void>
   setDebugLogEnabled: (enabled: boolean) => Promise<void>
   setTurnPreference: (pref: TurnPreference) => Promise<void>
+  setAiFeaturesEnabled: (enabled: boolean) => Promise<void>
+  setWarningThreshold: (count: number) => Promise<void>
+  setAlertThreshold: (count: number) => Promise<void>
+  // `null` clears the override, falling back to the model benchmark cadence.
+  setSampleIntervalSec: (seconds: number | null) => Promise<void>
 }
 
 export type StoreLike = {
@@ -90,6 +102,10 @@ export type RuntimeBridge = {
   // user's preference. Best-effort; failures are surfaced via the store's
   // error field but don't block the local UI update.
   pushMinimizeToTray: (enabled: boolean) => Promise<void>
+  // Pushes the AI-features gate to Rust so the global Ctrl+] shortcut handler
+  // can no-op when AI is off (the floating dialog is an AI surface). Same
+  // best-effort contract as `pushMinimizeToTray`.
+  pushAiFeaturesEnabled: (enabled: boolean) => Promise<void>
 }
 
 export type SettingsStoreDeps = {
@@ -144,6 +160,10 @@ const defaultDeps: SettingsStoreDeps = {
       if (!isTauriRuntime()) return
       await invoke('system_minimize_to_tray_set_enabled', { enabled })
     },
+    pushAiFeaturesEnabled: async (enabled) => {
+      if (!isTauriRuntime()) return
+      await invoke('system_ai_features_set_enabled', { enabled })
+    },
   },
 }
 
@@ -177,6 +197,7 @@ export async function hydrateValuesFromStore(
     ai: await store.get(SETTINGS_KEY_AI_FEATURES),
     warning: await store.get(SETTINGS_KEY_WARNING_THRESHOLD),
     alert: await store.get(SETTINGS_KEY_ALERT_THRESHOLD),
+    sampleInterval: await store.get(SETTINGS_KEY_SAMPLE_INTERVAL),
   }
 
   let theme: ThemeMode = isThemeMode(stored.theme)
@@ -228,6 +249,7 @@ export async function hydrateValuesFromStore(
         DEFAULT_SETTINGS.warningThreshold
       ),
       alertThreshold: readNumber(stored.alert, DEFAULT_SETTINGS.alertThreshold),
+      sampleIntervalSec: readNullableNumber(stored.sampleInterval),
     },
     wroteMigration,
   }
@@ -235,6 +257,12 @@ export async function hydrateValuesFromStore(
 
 function readNumber(v: unknown, fallback: number): number {
   return typeof v === 'number' && Number.isFinite(v) ? v : fallback
+}
+
+// `null`/absent/garbage all collapse to `null` ("use the benchmark cadence").
+// Only a finite positive number is a real user override.
+function readNullableNumber(v: unknown): number | null {
+  return typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : null
 }
 
 let activeDeps: SettingsStoreDeps = defaultDeps
@@ -303,6 +331,15 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
         // Best-effort: settings UI continues to work; the desktop flag falls
         // back to its `MinimizeToTrayFlag::new()` default.
       }
+      // Same one-shot push for the AI gate so the Ctrl+] shortcut honors the
+      // saved preference even before the user opens Settings → AI. Rust also
+      // seeds this from settings.json at boot; this just closes the hydration
+      // window.
+      try {
+        await activeDeps.runtime.pushAiFeaturesEnabled(values.aiFeaturesEnabled)
+      } catch {
+        // Best-effort: falls back to `AiFeaturesFlag`'s boot value.
+      }
     } catch (err) {
       set({
         status: 'error',
@@ -348,5 +385,36 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   setTurnPreference: async (pref) => {
     set((s) => ({ values: { ...s.values, turnPreference: pref } }))
     await writeKey(set, SETTINGS_KEY_TURN_PREF, pref)
+  },
+
+  setAiFeaturesEnabled: async (enabled) => {
+    set((s) => ({ values: { ...s.values, aiFeaturesEnabled: enabled } }))
+    await writeKey(set, SETTINGS_KEY_AI_FEATURES, enabled)
+    try {
+      await activeDeps.runtime.pushAiFeaturesEnabled(enabled)
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      console.error('pushAiFeaturesEnabled failed:', err)
+      set({ error: message })
+    }
+  },
+
+  // Range/`warning < alert` enforcement lives in the Settings → AI slider UI
+  // (it has the sibling value to compare against); the store persists the
+  // raw number and `focusStore` re-clamps via `normaliseThresholds` at
+  // apply-time, so an out-of-range persisted value can never break a run.
+  setWarningThreshold: async (count) => {
+    set((s) => ({ values: { ...s.values, warningThreshold: count } }))
+    await writeKey(set, SETTINGS_KEY_WARNING_THRESHOLD, count)
+  },
+
+  setAlertThreshold: async (count) => {
+    set((s) => ({ values: { ...s.values, alertThreshold: count } }))
+    await writeKey(set, SETTINGS_KEY_ALERT_THRESHOLD, count)
+  },
+
+  setSampleIntervalSec: async (seconds) => {
+    set((s) => ({ values: { ...s.values, sampleIntervalSec: seconds } }))
+    await writeKey(set, SETTINGS_KEY_SAMPLE_INTERVAL, seconds)
   },
 }))

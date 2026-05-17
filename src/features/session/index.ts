@@ -2,6 +2,7 @@ export { hostSession } from './host'
 export { joinSession } from './join'
 export { inviteToCurrentSession, InviteWhileGuestError } from './invite'
 export { SessionView } from './SessionView'
+export { TopicGateModal, type TopicGateModalProps } from './TopicGateModal'
 export {
   MAX_REMOTE_PEERS,
   PTT_STATE_ACTION,
