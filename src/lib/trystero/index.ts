@@ -13,9 +13,11 @@ import {
 export const APP_ID = 'studyvis'
 
 // Trystero's `selfId` is a process-global string (one trystero instance per
-// Tauri webview). Consumers MUST read it via `room.selfId` rather than
-// importing `selfId` directly so the in-process bus mock can hand each
-// simulated peer its own id without monkey-patching the trystero module.
+// Tauri webview), so production `wrapRoom` exposes that module-global value
+// as `room.selfId`. Consumers MUST read `room.selfId` (never import `selfId`
+// directly): integration tests substitute their own mock room objects, each
+// carrying a distinct per-peer `selfId`, so a simulated multi-peer session
+// works without monkey-patching the trystero module.
 
 export type TopicConfig = {
   topic: string

@@ -7,12 +7,17 @@
 //   versa) is a confusing UX bug; using two distinct topics surfaces the
 //   inconsistency rather than papering over it.
 //
-// Wire shape: a single `heartbeat` action carrying the sender's monotonic
-// `Date.now()`. Receivers update a `lastSeenAt` map and treat any pubkey
-// whose last heartbeat was within `ONLINE_WINDOW_MS` as online. We never
-// rely on trystero's `onPeerJoin` for the online state — peer presence on
-// the topic is necessary but not sufficient (the peer might be there with
-// a stale subscriber).
+// Wire shape: a single `heartbeat` action. The receiver stamps arrival
+// time with its OWN clock — cross-host wall clocks are not comparable, so
+// the sender's `ts` must never be compared against the receiver's `now`
+// (that caused persistent false offline/online under ordinary NTP/DST
+// skew, and a backward sender clock step wedged presence permanently via
+// the old monotonicity guard). Receivers update a `lastSeenAt` map keyed
+// on receiver-local time and treat any pubkey whose last heartbeat landed
+// within `ONLINE_WINDOW_MS` as online. We never rely on trystero's
+// `onPeerJoin` for the online state — peer presence on the topic is
+// necessary but not sufficient (the peer might be there with a stale
+// subscriber).
 
 import { hexToBytes } from '@/lib/crypto/identity'
 import { presencePassword, presenceTopic } from '@/lib/crypto/topics'
@@ -96,10 +101,9 @@ export function startPresence(ctx: PresenceContext): PresenceSubscription {
     const action = room.makeAction<HeartbeatPayload>(HEARTBEAT_ACTION)
     action.receive((data) => {
       if (!data || typeof (data as HeartbeatPayload).ts !== 'number') return
-      const ts = (data as HeartbeatPayload).ts
-      const previous = presence[friend.ed_pubkey_hex]
-      if (previous !== undefined && previous >= ts) return
-      presence[friend.ed_pubkey_hex] = ts
+      // Stamp with the RECEIVER's clock. A heartbeat that just arrived
+      // means the friend is reachable now, regardless of their wall clock.
+      presence[friend.ed_pubkey_hex] = now()
       ctx.onPresenceChange({ ...presence })
     })
   }

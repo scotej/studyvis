@@ -450,7 +450,17 @@ async fn run_download<R: Runtime>(
         if target.exists() {
             if let Ok(meta) = fs::metadata(&target) {
                 if meta.len() == file.size_bytes {
-                    let computed = hash_file_blocking(&target).map_err(DownloadError::Other)?;
+                    // Hashing a multi-GB GGUF is a synchronous, CPU+IO-bound
+                    // loop. Offload to a blocking thread so it doesn't pin a
+                    // Tauri async-runtime worker and stall concurrent IPC
+                    // (same pattern as sidecar.rs's spawn_blocking).
+                    let hash_target = target.clone();
+                    let computed = tauri::async_runtime::spawn_blocking(move || {
+                        hash_file_blocking(&hash_target)
+                    })
+                    .await
+                    .map_err(|e| DownloadError::Other(e.to_string()))?
+                    .map_err(DownloadError::Other)?;
                     if computed.eq_ignore_ascii_case(&file.sha256_hex) {
                         emit_progress(
                             app,

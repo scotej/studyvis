@@ -364,6 +364,9 @@ export function SessionView() {
         useSessionStore.getState().peers[peerId]?.edPubkeyHex ?? null
       const verified = verifyIncomingAuditEvent(data, expectedEd)
       if (!verified) return
+      // Drop a (signed, valid) event addressed to a different session —
+      // mirrors the ai-alert path's replay guard (aiAlerts.ts). (I8)
+      if (verified.session_topic !== sessionTopic) return
       useAuditStore.getState().append(verified)
     })
 
@@ -506,6 +509,14 @@ export function SessionView() {
             ? `AI model crashed (${lastError}) — restart in Settings → AI`
             : 'AI model crashed — restart in Settings → AI'
         )
+      },
+      onBatteryPause: (info) => {
+        toast.warning(
+          `AI accountability paused — battery at ${info.percent}% on power. It resumes when you plug in or charge above 20%.`
+        )
+      },
+      onBatteryResume: () => {
+        toast.success('AI accountability resumed.')
       },
     })
     return () => {

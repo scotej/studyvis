@@ -242,6 +242,73 @@ describe('pomodoro broadcaster handover on disconnect', () => {
   })
 })
 
+describe('pomodoro deliberate stop propagates (regression: I1)', () => {
+  test('broadcaster stop() resets receivers to idle; no handover fires', async () => {
+    const bus = new Bus()
+    const aliceRoom = new BusRoom(bus, 'peer-a')
+    const bobRoom = new BusRoom(bus, 'peer-b')
+
+    const peerList = [
+      { ed_pubkey_hex: ED.alice, joined_at: 1_000 },
+      { ed_pubkey_hex: ED.bob, joined_at: 2_000 },
+    ]
+    const senderEd: Record<string, string> = {
+      'peer-a': ED.alice,
+      'peer-b': ED.bob,
+    }
+    const resolveSenderEdPubkey = (peerId: string): string | null =>
+      senderEd[peerId] ?? null
+
+    const aliceSnaps: PomodoroSnapshot[] = []
+    const bobSnaps: PomodoroSnapshot[] = []
+
+    const alice = startPomodoroController({
+      room: aliceRoom.asTopicRoom(),
+      myEdPubkeyHex: ED.alice,
+      selfJoinedAt: 1_000,
+      getAllPeerOrdering: () => peerList,
+      resolveSenderEdPubkey,
+      onSnapshot: (s) => aliceSnaps.push(s),
+      onPomodoroStart: () => {},
+      onPomodoroEnd: () => {},
+    })
+    const bob = startPomodoroController({
+      room: bobRoom.asTopicRoom(),
+      myEdPubkeyHex: ED.bob,
+      selfJoinedAt: 2_000,
+      getAllPeerOrdering: () => peerList,
+      resolveSenderEdPubkey,
+      onSnapshot: (s) => bobSnaps.push(s),
+      onPomodoroStart: () => {},
+      onPomodoroEnd: () => {},
+    })
+
+    vi.setSystemTime(10_000)
+    alice.start('25/5')
+    expect(lastSnapshot(bobSnaps).phase).toBe('work-25')
+    expect(lastSnapshot(bobSnaps).broadcasterEdPubkey).toBe(ED.alice)
+
+    // Alice deliberately stops. Bob must go idle immediately on the stop
+    // message — NOT resurrect the timer when the silence window elapses.
+    alice.stop()
+    const bobAfterStop = lastSnapshot(bobSnaps)
+    expect(bobAfterStop.phase).toBe('idle')
+    expect(bobAfterStop.iAmBroadcaster).toBe(false)
+    expect(bobAfterStop.broadcasterEdPubkey).toBeNull()
+
+    // Past the handover window: pre-fix, Bob's silence timer fired here and
+    // he seized the broadcaster role. Post-fix, he stays idle.
+    vi.setSystemTime(10_000 + HANDOVER_SILENCE_MS + 100)
+    await vi.advanceTimersByTimeAsync(HANDOVER_SILENCE_MS + 100)
+    const bobFinal = lastSnapshot(bobSnaps)
+    expect(bobFinal.phase).toBe('idle')
+    expect(bobFinal.iAmBroadcaster).toBe(false)
+
+    alice.teardown()
+    bob.teardown()
+  })
+})
+
 function lastSnapshot(arr: PomodoroSnapshot[]): PomodoroSnapshot {
   if (arr.length === 0) throw new Error('expected at least one snapshot')
   return arr[arr.length - 1]

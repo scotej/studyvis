@@ -80,8 +80,10 @@ describe('runBenchmark', () => {
     __resetBenchmarkRuntime()
   })
 
-  test('produces 3 samples and stops the sidecar even on the happy path', async () => {
-    const env = makeFakeRuntime({ perCallSec: [3, 5, 8] })
+  test('discards the cold-start warmup sample and stops the sidecar', async () => {
+    // First value is the cold-start warmup (must NOT pollute p95); the
+    // next 3 are the measured samples.
+    const env = makeFakeRuntime({ perCallSec: [90, 3, 5, 8] })
     __setBenchmarkRuntime(env.runtime)
     const spec = SUPPORTED_MODELS[1]
     const events: BenchmarkProgress[] = []
@@ -90,17 +92,18 @@ describe('runBenchmark', () => {
       mmprojPath: '/p.gguf',
       onProgress: (e) => events.push(e),
     })
+    // Warmup (90) is excluded — p95 reflects steady state, not model load.
     expect(result.samplesSec).toEqual([3, 5, 8])
     expect(result.p50Sec).toBe(5)
     expect(result.p95Sec).toBe(8)
-    expect(result.sampleIntervalSec).toBe(9) // ceil(8 + 1)
+    expect(result.sampleIntervalSec).toBe(9) // ceil(8 + 1), not ceil(90 + 1)
     expect(env.startedWith).toHaveLength(1)
     expect(env.startedWith[0].modelPath).toBe('/m.gguf')
     expect(env.startedWith[0].mmprojPath).toBe('/p.gguf')
     // Stop fires unconditionally to free RAM after benchmark
     expect(env.stops).toBe(1)
-    // Each request includes the bundled benchmark image as a data URI
-    expect(env.bodies).toHaveLength(3)
+    // Warmup + 3 measured requests, each carrying the data URI
+    expect(env.bodies).toHaveLength(4)
     const dataUriBlock = env.bodies[0].messages[0].content
     expect(Array.isArray(dataUriBlock)).toBe(true)
     if (Array.isArray(dataUriBlock)) {
@@ -110,12 +113,13 @@ describe('runBenchmark', () => {
         expect(imageBlock.image_url.url).toMatch(/^data:image\/png;base64,/)
       }
     }
-    // Progress timeline: load-image, starting-sidecar, 3 samples, done
+    // Progress timeline: load-image, starting-sidecar, warmup, 3 samples, done
     const phases = events.map((e) => e.phase)
     expect(phases[0]).toBe('loading-image')
     expect(phases[1]).toBe('starting-sidecar')
-    expect(phases.slice(2, 5)).toEqual(['sample', 'sample', 'sample'])
-    expect(phases[5]).toBe('done')
+    expect(phases[2]).toBe('warmup')
+    expect(phases.slice(3, 6)).toEqual(['sample', 'sample', 'sample'])
+    expect(phases[6]).toBe('done')
   })
 
   test('still stops the sidecar when a chat completion errors mid-flight', async () => {

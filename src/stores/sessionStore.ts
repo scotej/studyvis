@@ -72,6 +72,12 @@ type SessionState = {
   // it). Kept distinct from `declaredStudyTopic` so the Ctrl+] dialog's
   // mid-session `topic_change` path stays independent.
   pendingInitialTopic: string | null
+  // Every distinct ed_pubkey_hex observed via signed-hello during THIS
+  // session, accumulated and never pruned by `peerLeft`. The leave handler
+  // and `collectPeerPubkeys` read this so the normal everyone-else-leaves
+  // auto-end path (where `peers` is already empty by the time the handler
+  // snapshots) still records who we studied with. Cleared by begin/reset.
+  seenPeerEdPubkeys: string[]
   begin: (init: SessionInit) => void
   setPendingInitialTopic: (topic: string | null) => void
   setDeclaredStudyTopic: (next: string) => void
@@ -107,6 +113,7 @@ const INITIAL: Pick<
   | 'declaredStudyTopic'
   | 'initialDeclaredTopic'
   | 'pendingInitialTopic'
+  | 'seenPeerEdPubkeys'
 > = {
   status: 'idle',
   sessionTopic: null,
@@ -120,6 +127,7 @@ const INITIAL: Pick<
   declaredStudyTopic: DEFAULT_DECLARED_STUDY_TOPIC,
   initialDeclaredTopic: DEFAULT_DECLARED_STUDY_TOPIC,
   pendingInitialTopic: null,
+  seenPeerEdPubkeys: [],
 }
 
 export const useSessionStore = create<SessionState>((set, get) => ({
@@ -144,6 +152,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         declaredStudyTopic: topic,
         initialDeclaredTopic: topic,
         pendingInitialTopic: null,
+        seenPeerEdPubkeys: [],
       }
     }),
   setPendingInitialTopic: (topic) => set({ pendingInitialTopic: topic }),
@@ -194,7 +203,11 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         displayName: null,
         joinedAt: null,
       }
+      const seen = s.seenPeerEdPubkeys.includes(hello.ed_pubkey_hex)
+        ? s.seenPeerEdPubkeys
+        : [...s.seenPeerEdPubkeys, hello.ed_pubkey_hex]
       return {
+        seenPeerEdPubkeys: seen,
         peers: {
           ...s.peers,
           [peerId]: {
@@ -207,12 +220,11 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       }
     }),
   collectPeerPubkeys: () => {
-    const seen = new Set<string>()
-    for (const p of Object.values(get().peers)) {
-      if (p.edPubkeyHex) seen.add(p.edPubkeyHex)
-    }
-    if (seen.size === 0) return null
-    const sorted = Array.from(seen).sort()
+    // Cumulative set observed this session — NOT the live `peers` map,
+    // which `peerLeft` has already emptied on the everyone-leaves path.
+    const seen = get().seenPeerEdPubkeys
+    if (seen.length === 0) return null
+    const sorted = [...new Set(seen)].sort()
     return JSON.stringify(sorted)
   },
   markEnded: () =>

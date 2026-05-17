@@ -428,6 +428,7 @@ function benchmarkPhaseToCard(p: BenchmarkProgress): DownloadPhase {
       return 'benchmark-starting'
     case 'loading-image':
       return 'benchmark-loading-image'
+    case 'warmup':
     case 'sample':
       return 'benchmark-running'
     case 'done':
