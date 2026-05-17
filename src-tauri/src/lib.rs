@@ -266,9 +266,7 @@ fn setup_desktop(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>>
                     // pair doesn't open then immediately close. V2-P9 gates it
                     // on the AI-features flag so "AI off → zero AI surface"
                     // holds even when the user hits the key.
-                    if event.state() == ShortcutState::Pressed
-                        && AiFeaturesFlag::is_enabled(app)
-                    {
+                    if event.state() == ShortcutState::Pressed && AiFeaturesFlag::is_enabled(app) {
                         if let Err(err) = toggle_ai_dialog(app) {
                             eprintln!("[ai-dialog] toggle failed: {err}");
                         }

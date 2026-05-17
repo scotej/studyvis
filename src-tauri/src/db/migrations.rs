@@ -3,8 +3,7 @@ use rusqlite::{Connection, Result};
 const MIGRATION_001_INITIAL: &str = include_str!("migrations/001_initial.sql");
 const MIGRATION_002_V2: &str = include_str!("migrations/002_v2.sql");
 
-const MIGRATIONS: &[(u32, &str)] =
-    &[(1, MIGRATION_001_INITIAL), (2, MIGRATION_002_V2)];
+const MIGRATIONS: &[(u32, &str)] = &[(1, MIGRATION_001_INITIAL), (2, MIGRATION_002_V2)];
 
 pub fn run_migrations(conn: &mut Connection) -> Result<u32> {
     conn.execute(
@@ -130,11 +129,16 @@ mod tests {
             .expect("count friends");
         assert_eq!(friends, 1, "V1 friend row must survive the upgrade");
         let topic: String = conn
-            .query_row("SELECT declared_topic FROM sessions WHERE id = 's1'", [], |row| {
-                row.get(0)
-            })
+            .query_row(
+                "SELECT declared_topic FROM sessions WHERE id = 's1'",
+                [],
+                |row| row.get(0),
+            )
             .expect("read session topic");
-        assert_eq!(topic, "Calculus", "V1 session data must survive the upgrade");
+        assert_eq!(
+            topic, "Calculus",
+            "V1 session data must survive the upgrade"
+        );
     }
 
     #[test]
