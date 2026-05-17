@@ -14,11 +14,21 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - label: macOS (universal)
+          # Per-arch, not universal: the llama-server sidecar (externalBin)
+          # + its runtime libs + the Rust TARGET_TRIPLE cfg are all per-arch
+          # (aarch64/x86_64). A universal target needs a non-existent
+          # `llama-server-universal-apple-darwin`; building each arch
+          # separately matches what the codebase + fetch script support.
+          - label: macOS (Apple Silicon)
             platform: macos-latest
-            rust-targets: aarch64-apple-darwin,x86_64-apple-darwin
-            args: --target universal-apple-darwin --bundles app,dmg
-            llama-triples: aarch64-apple-darwin x86_64-apple-darwin
+            rust-targets: aarch64-apple-darwin
+            args: --target aarch64-apple-darwin --bundles app,dmg
+            llama-triples: aarch64-apple-darwin
+          - label: macOS (Intel)
+            platform: macos-latest
+            rust-targets: x86_64-apple-darwin
+            args: --target x86_64-apple-darwin --bundles app,dmg
+            llama-triples: x86_64-apple-darwin
           - label: Windows
             platform: windows-latest
             rust-targets: ''

@@ -6,7 +6,7 @@ V1 ships unsigned installers for a friends-only audience. Each OS will warn the 
 
 ## macOS (Apple Silicon + Intel)
 
-1. From the [Releases page](https://github.com/scotej/studyvis/releases), download `StudyVis_<version>_universal.dmg`.
+1. From the [Releases page](https://github.com/scotej/studyvis/releases), download the `.dmg` for your Mac's chip: `StudyVis_<version>_aarch64.dmg` for Apple Silicon (M1/M2/M3/M4), or `StudyVis_<version>_x64.dmg` for Intel. (In → About This Mac, "Apple M…" = Apple Silicon, "Intel" = Intel.)
 2. Double-click the `.dmg`. A window opens showing the StudyVis icon and an Applications shortcut. Drag StudyVis into Applications.
 3. Open Finder → Applications. **Right-click** (or Control-click) the StudyVis icon and choose **Open**. macOS shows: _"macOS cannot verify the developer of 'StudyVis'. Are you sure you want to open it?"_. Click **Open**.
 4. Subsequent launches do not re-prompt — double-click works normally.
