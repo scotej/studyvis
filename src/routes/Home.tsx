@@ -108,6 +108,13 @@ export function Home() {
 
   const handleInviteAccepted = useCallback(
     (invite: ValidInvite) => {
+      // Enforce the "leave first" guard BEFORE the topic gate too — otherwise
+      // accepting an invite mid-session (AI on) would queue pendingStart and
+      // pop the topic modal even though runGuestJoin would later refuse.
+      if (useSessionStore.getState().status === 'active') {
+        toast.error('Leave the current session before joining another.')
+        return
+      }
       if (aiOn()) setPendingStart({ kind: 'guest', invite })
       else runGuestJoin(invite)
     },

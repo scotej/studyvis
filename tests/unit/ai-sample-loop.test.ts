@@ -753,6 +753,36 @@ describe('startSampleLoop — capture errors', () => {
     await handle.stop()
   })
 
+  test('screen acquire failure after sidecar start stops the sidecar (no leak)', async () => {
+    const clock = new FakeClock()
+    const fetchMock = vi.fn()
+    const stopSidecar = vi.fn(async () => {})
+    __setSampleLoopRuntime(
+      buildSampleLoopRuntime({
+        clock,
+        fetch: fetchMock as never,
+        startSidecar: async () => {
+          seedSidecarStoreRunning()
+          return 9999
+        },
+        stopSidecar,
+        acquireScreenStream: async () => {
+          throw new CaptureError('screen_capture_denied', 'denied')
+        },
+      })
+    )
+    const handle = startSampleLoop({
+      getTopic: () => 't',
+      modelId: 'test-model',
+      getFaceTrack: () => makeFakeTrack(),
+    })
+    await flushMicrotasks(10)
+    // The sidecar was started before the (failing) screen acquire; it must
+    // be torn down even though teardownInternal()/stop() short-circuit.
+    expect(stopSidecar).toHaveBeenCalledTimes(1)
+    await handle.stop()
+  })
+
   test('non-denied CaptureError calls onCaptureError but continues scheduling', async () => {
     const clock = new FakeClock()
     const fetchMock = vi.fn(async () => judgmentResponse('on_task'))

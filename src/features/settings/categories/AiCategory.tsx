@@ -11,6 +11,7 @@ import {
   ALERT_THRESHOLD_MIN,
   CaptureError,
   DEFAULT_CTX_SIZE,
+  effectiveIntervalSec,
   FALLBACK_SAMPLE_INTERVAL_SEC,
   getDownloadRuntime,
   getHfTokenRuntime,
@@ -168,7 +169,14 @@ export function AiCategory() {
     }
   }, [activeModelId])
 
-  const effectiveInterval = sampleIntervalSec ?? measuredFloor
+  // Clamp the displayed value through the SAME function the loop uses so the
+  // slider can't show a value below `min` (a stale override saved on a faster
+  // model, then switched to a slower one) and what the user sees matches
+  // what the loop will actually run.
+  const effectiveInterval = effectiveIntervalSec(
+    measuredFloor,
+    sampleIntervalSec
+  )
 
   return (
     <SettingsSection heading="AI">

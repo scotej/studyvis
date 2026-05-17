@@ -298,6 +298,14 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
     opts.onCaptureDenied?.()
   }
 
+  async function stopSidecarBestEffort(): Promise<void> {
+    try {
+      await runtime.stopSidecar()
+    } catch (err) {
+      console.warn('[sampleLoop] sidecar stop failed:', err)
+    }
+  }
+
   function disposeScreenStream(): void {
     if (state.screenTrack) {
       try {
@@ -633,6 +641,10 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
           )
         )
       }
+      // The sidecar was already started above; teardownInternal() does NOT
+      // stop it and a later stop() short-circuits on state.stopped, so the
+      // child would leak. Stop it explicitly on this post-start failure path.
+      await stopSidecarBestEffort()
       teardownInternal()
       return
     }
@@ -661,6 +673,7 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
           'getDisplayMedia returned a stream with no video tracks'
         )
       )
+      await stopSidecarBestEffort()
       teardownInternal()
       return
     }
