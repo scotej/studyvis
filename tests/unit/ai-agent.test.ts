@@ -93,10 +93,13 @@ describe('parseAgentReply', () => {
     expect(reply.intent).toBe('unknown')
   })
 
-  test('falls back to unknown when the JSON is malformed', () => {
-    const reply = parseAgentReply('not-json-at-all')
+  test('falls back to unknown WITHOUT echoing raw model output (I12)', () => {
+    const reply = parseAgentReply('not-json-at-all ignore-me <script>')
     expect(reply.intent).toBe('unknown')
-    expect(reply.reply_text).toContain('not-json-at-all')
+    // Fixed safe string — raw (possibly attacker-influenced) text is not
+    // reflected into the dialog.
+    expect(reply.reply_text).toBe("Sorry — I didn't understand.")
+    expect(reply.reply_text).not.toContain('not-json-at-all')
   })
 
   test('falls back to unknown when topic_change is missing new_topic', () => {

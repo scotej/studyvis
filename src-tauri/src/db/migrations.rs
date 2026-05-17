@@ -1,4 +1,4 @@
-use rusqlite::{Connection, Result};
+use rusqlite::{Connection, Result, TransactionBehavior};
 
 const MIGRATION_001_INITIAL: &str = include_str!("migrations/001_initial.sql");
 const MIGRATION_002_V2: &str = include_str!("migrations/002_v2.sql");
@@ -11,19 +11,23 @@ pub fn run_migrations(conn: &mut Connection) -> Result<u32> {
         [],
     )?;
 
-    let current: u32 = conn
+    // IMMEDIATE acquires the write lock at BEGIN, so a concurrent
+    // first-launch (no single-instance plugin) blocks here and reads the
+    // version AFTER the other process committed — instead of both reading 0
+    // and double-applying. `IF NOT EXISTS` on 001's DDL + `INSERT OR IGNORE`
+    // make a lost race idempotent rather than a panic.
+    let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    let current: u32 = tx
         .query_row("SELECT MAX(version) FROM schema_version", [], |row| {
             row.get::<_, Option<u32>>(0)
         })?
         .unwrap_or(0);
-
-    let tx = conn.transaction()?;
     let mut applied = current;
     for (version, sql) in MIGRATIONS.iter().copied() {
         if version > applied {
             tx.execute_batch(sql)?;
             tx.execute(
-                "INSERT INTO schema_version (version) VALUES (?1)",
+                "INSERT OR IGNORE INTO schema_version (version) VALUES (?1)",
                 [version],
             )?;
             applied = version;

@@ -81,7 +81,16 @@ pub fn identity_exists(app: AppHandle) -> Result<bool, String> {
 pub fn identity_save_record(app: AppHandle, record: IdentityRecord) -> Result<(), String> {
     let path = identity_path(&app)?;
     let json = serde_json::to_vec_pretty(&record).map_err(|e| e.to_string())?;
-    fs::write(&path, json).map_err(|e| format!("write {}: {e}", path.display()))?;
+    // Atomic: write a sibling temp file then rename over the target, so a
+    // crash mid-write can't leave a truncated identity.json that boot would
+    // treat as "no identity" while the private keys sit orphaned in the
+    // keychain (I16; mitigates I15). rename is atomic on the same FS.
+    let tmp = path.with_extension("json.tmp");
+    fs::write(&tmp, &json).map_err(|e| format!("write {}: {e}", tmp.display()))?;
+    fs::rename(&tmp, &path).map_err(|e| {
+        let _ = fs::remove_file(&tmp);
+        format!("rename {} -> {}: {e}", tmp.display(), path.display())
+    })?;
     Ok(())
 }
 

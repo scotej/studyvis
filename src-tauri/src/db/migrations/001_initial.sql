@@ -2,7 +2,7 @@
 -- in place rather than chained behind a follow-up migration. Dev DB files
 -- created before this amendment are harmless — SQLite tolerates extra
 -- columns no Rust accessor reads or writes.
-CREATE TABLE friends (
+CREATE TABLE IF NOT EXISTS friends (
     ed_pubkey_hex     TEXT PRIMARY KEY,
     x_pubkey_hex      TEXT NOT NULL,
     display_name      TEXT,
@@ -10,7 +10,7 @@ CREATE TABLE friends (
     last_studied_with INTEGER
 );
 
-CREATE TABLE sessions (
+CREATE TABLE IF NOT EXISTS sessions (
     id             TEXT PRIMARY KEY,
     started_at     INTEGER,
     ended_at       INTEGER,
@@ -22,7 +22,7 @@ CREATE TABLE sessions (
     generated_at   INTEGER
 );
 
-CREATE TABLE audit_events (
+CREATE TABLE IF NOT EXISTS audit_events (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     session_id TEXT,
     ts         INTEGER,

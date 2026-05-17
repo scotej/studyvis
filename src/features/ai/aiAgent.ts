@@ -284,10 +284,14 @@ export function parseAgentReply(raw: string): AgentReply {
       // continue
     }
   }
+  // Don't reflect raw model output into the dialog: on total parse failure
+  // it could carry attacker-influenced on-screen text. Fixed string to the
+  // user; raw goes to the console for debugging (I12).
+  console.warn('[ai-agent] reply parse failure, raw:', raw.slice(0, 200))
   return {
     intent: 'unknown',
     payload: {},
-    reply_text: raw.trim().slice(0, 200) || "Sorry — I didn't understand.",
+    reply_text: "Sorry — I didn't understand.",
   }
 }
 

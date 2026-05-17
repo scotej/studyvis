@@ -69,11 +69,15 @@ pub fn get(conn: &Connection, id: &str) -> Result<Option<SessionRow>> {
 }
 
 pub fn insert(conn: &Connection, row: &SessionRow) -> Result<()> {
-    // COALESCE on the optional report columns so a leave-handler upsert that
-    // omits them (e.g. a V1-style session insert before the report fields
-    // were populated) does not clobber values written by an earlier call.
-    // Mirrors the pre-existing peer_pubkeys behavior so partial upserts are
-    // additive across the lifetime of a session row.
+    // Two distinct upsert semantics, deliberately (I17):
+    //  - started_at / ended_at / total_minutes are authoritative-overwrite:
+    //    the sole caller (lifecycle.ts leave handler) always supplies real
+    //    values in one call, and a later re-summarize MUST be able to
+    //    correct them. COALESCE here would silently swallow a legitimate
+    //    update, so it is intentionally NOT used.
+    //  - the optional report columns (peer_pubkeys, declared_topic, score,
+    //    focused_pct, generated_at) are additive via COALESCE so a partial
+    //    upsert that omits them does not clobber a prior call's values.
     conn.execute(
         "INSERT INTO sessions
              (id, started_at, ended_at, total_minutes, peer_pubkeys,

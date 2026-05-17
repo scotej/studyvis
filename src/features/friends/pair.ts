@@ -92,10 +92,20 @@ export async function buildHello(
 
 export function verifyHello(
   words: string[],
-  hello: HelloPayload
+  hello: HelloPayload,
+  localEdPubHex?: string
 ): PairedFriend {
   if (hello?.type !== 'hello') {
     throw new PairVerificationError('not a hello payload')
+  }
+  if (
+    localEdPubHex !== undefined &&
+    typeof hello.ed_pubkey === 'string' &&
+    hello.ed_pubkey.toLowerCase() === localEdPubHex.toLowerCase()
+  ) {
+    // Pairing with your own pubkey (own code echoed back) would create a
+    // self friend row. The signature would still verify, so reject here. (I18)
+    throw new PairVerificationError('cannot pair with your own identity')
   }
   if (
     typeof hello.ed_pubkey !== 'string' ||
@@ -172,7 +182,7 @@ async function runPair(
       action.receive((payload) => {
         if (settled) return
         try {
-          const friend = verifyHello(words, payload)
+          const friend = verifyHello(words, payload, ctx.edPubHex)
           settle(() => resolve(friend))
         } catch (err) {
           settle(() => reject(err))
