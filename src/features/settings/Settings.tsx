@@ -16,11 +16,13 @@ import { NetworkCategory } from './categories/NetworkCategory'
 import { NotificationsCategory } from './categories/NotificationsCategory'
 import { SessionsCategory } from './categories/SessionsCategory'
 import { ShortcutsCategory } from './categories/ShortcutsCategory'
+import { StatsCategory } from './categories/StatsCategory'
 
 export type SettingsCategoryId =
   | 'identity'
   | 'friends'
   | 'sessions'
+  | 'stats'
   | 'appearance'
   | 'notifications'
   | 'shortcuts'
@@ -35,6 +37,7 @@ const CATEGORIES: ReadonlyArray<
   { id: 'identity', label: 'Identity' },
   { id: 'friends', label: 'Friends' },
   { id: 'sessions', label: 'Sessions' },
+  { id: 'stats', label: 'Stats' },
   { id: 'appearance', label: 'Appearance' },
   { id: 'notifications', label: 'Notifications' },
   { id: 'shortcuts', label: 'Shortcuts' },
@@ -69,6 +72,7 @@ export function Settings({ onClose }: SettingsProps) {
       {activeCategoryId === 'identity' ? <IdentityCategory /> : null}
       {activeCategoryId === 'friends' ? <FriendsCategory /> : null}
       {activeCategoryId === 'sessions' ? <SessionsCategory /> : null}
+      {activeCategoryId === 'stats' ? <StatsCategory /> : null}
       {activeCategoryId === 'appearance' ? <AppearanceCategory /> : null}
       {activeCategoryId === 'notifications' ? <NotificationsCategory /> : null}
       {activeCategoryId === 'shortcuts' ? <ShortcutsCategory /> : null}
