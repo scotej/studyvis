@@ -439,11 +439,12 @@ This window:
 │  Identity      │   Appearance                                        │
 │  Friends       │   ───────────                                       │
 │  Sessions      │                                                     │
-│ ▶ Appearance   │   Theme                                             │
-│  Notifications │     ○  Dark   ○  Light   ●  Auto (follow system)    │
-│  Shortcuts     │                                                     │
-│  AI            │   Reduce motion           [  ◐  ]                   │
-│  Network       │     Replaces transitions with fades.                │
+│  Stats         │   Theme                                             │
+│ ▶ Appearance   │     ○  Dark   ○  Light   ●  Auto (follow system)    │
+│  Notifications │                                                     │
+│  Shortcuts     │   Reduce motion           [  ◐  ]                   │
+│  AI            │     Replaces transitions with fades.                │
+│  Network       │                                                     │
 │  Advanced      │                                                     │
 │  About         │                                                     │
 │                │                                                     │
@@ -451,7 +452,7 @@ This window:
 └────────────────┴─────────────────────────────────────────────────────┘
 ```
 
-Settings categories visible: Identity, Friends, Sessions, Appearance, Notifications, Shortcuts, AI (V2), Network, Advanced, About. AI is hidden in V1. About shows app version + license string + a link to GitHub Releases (added in V1-P12).
+Settings categories visible: Identity, Friends, Sessions, Stats (V3), Appearance, Notifications, Shortcuts, AI (V2), Network, Advanced, About. AI is hidden in V1. Stats (added in V3-P1) is a local-only dashboard sourced from the on-device sessions + audit_events tables; it transmits nothing. About shows app version + license string + a link to GitHub Releases (added in V1-P12).
 
 ## 9. Iconography
 
