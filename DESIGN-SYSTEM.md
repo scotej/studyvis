@@ -30,39 +30,39 @@ The closest reference points: Things 3's typography and quiet confidence; Linear
 export const tokens = {
   color: {
     bg: {
-      base:    '#0F1115',   // app canvas
-      surface: '#171A21',   // cards, side panels, list rows
-      raised:  '#1F232C',   // hovered surfaces, popovers, dialogs
-      sunk:    '#0B0D11',   // text input, scrollable content background
+      base:    '#17130C',   // app canvas
+      surface: '#211A11',   // cards, side panels, list rows
+      raised:  '#2B2317',   // hovered surfaces, popovers, dialogs
+      sunk:    '#100D08',   // text input, scrollable content background
     },
     border: {
-      subtle:  '#262A33',   // divider between rows
-      default: '#2E333D',   // around cards, inputs
-      strong:  '#3A4150',   // active focus ring (combined with accent glow)
+      subtle:  '#332A1C',   // divider between rows
+      default: '#3F3422',   // around cards, inputs
+      strong:  '#52442C',   // active focus ring (combined with accent glow)
     },
     text: {
-      primary:   '#E5E7EB', // body, headings, important UI labels
-      secondary: '#9CA3AF', // captions, helper text, timestamps
-      muted:     '#6B7280', // placeholder, disabled, low-priority
-      inverse:   '#0F1115', // text on accent-filled buttons
+      primary:   '#F0EBE2', // body, headings, important UI labels
+      secondary: '#B0A99C', // captions, helper text, timestamps
+      muted:     '#7D766A', // placeholder, disabled, low-priority
+      inverse:   '#100D08', // text on accent-filled buttons
     },
     accent: {
-      default: '#E8A87C',   // primary actions, focused outlines, brand accents
-      hover:   '#F0B891',
-      active:  '#D89B6F',
-      muted:   '#7A5740',   // accent backgrounds at low opacity
-      ring:    '#E8A87C66', // 40% alpha — focus ring
+      default: '#F2B05A',   // primary actions, focused outlines, brand accents
+      hover:   '#F8C079',
+      active:  '#D9974A',
+      muted:   '#7A5C32',   // accent backgrounds at low opacity
+      ring:    '#F2B05A66', // 40% alpha — focus ring
     },
     status: {
-      focused: '#7FB069',   // sage green — "user is on task" tile dot
-      warning: '#E8C547',   // amber — "self-warning" badge
-      alerted: '#D9776A',   // muted red — "peers notified, score deducted"
-      offline: '#6B7280',   // friend not currently reachable
-      online:  '#7FB069',   // friend currently online (same as focused)
+      focused: '#84B061',   // sage green — "user is on task" tile dot
+      warning: '#EBC646',   // amber — "self-warning" badge
+      alerted: '#DC7860',   // muted red — "peers notified, score deducted"
+      offline: '#7D766A',   // friend not currently reachable
+      online:  '#84B061',   // friend currently online (same as focused)
     },
     overlay: {
       scrim:    '#0006',    // 0% color, 40% alpha — modal backdrop
-      glass:    '#171A21CC',// raised over scrim
+      glass:    '#211A11CC',// raised over scrim
     },
   },
 
@@ -175,25 +175,25 @@ export const lightTokens: Tokens = {
   color: {
     ...tokens.color,
     bg: {
-      base:    '#FAFAF7',
-      surface: '#FFFFFF',
-      raised:  '#F4F4F0',
-      sunk:    '#EDEDE8',
+      base:    '#FAF6EE',
+      surface: '#FFFDF8',
+      raised:  '#F3EEE2',
+      sunk:    '#EBE4D5',
     },
     border: {
-      subtle:  '#E5E5E0',
-      default: '#D4D4CD',
-      strong:  '#9CA3AF',
+      subtle:  '#E7E0D0',
+      default: '#D8CFB9',
+      strong:  '#A89A7C',
     },
     text: {
-      primary:   '#0F1115',
-      secondary: '#4B5563',
-      muted:     '#6B7280',
-      inverse:   '#FFFFFF',
+      primary:   '#1F1B12',
+      secondary: '#5C5547',
+      muted:     '#857C6A',
+      inverse:   '#FFFDF8',
     },
     // accent + status: same hues, slightly higher saturation for light bg contrast
-    accent: { ...tokens.color.accent, default: '#C97A4D', hover: '#B86A3D' },
-    status: { ...tokens.color.status, focused: '#5C8A4B', warning: '#B89531', alerted: '#B5564B' },
+    accent: { ...tokens.color.accent, default: '#A8691E', hover: '#945A1A' },
+    status: { ...tokens.color.status, focused: '#5C8A4B', warning: '#9A7B1F', alerted: '#B5564B', online: '#5C8A4B' },
   },
 }
 ```
