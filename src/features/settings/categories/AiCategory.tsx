@@ -85,17 +85,15 @@ export function AiCategory() {
         setPermissionOverlayOpen(true)
         return
       }
-      const message =
-        err instanceof CaptureError
-          ? err.message
-          : err instanceof Error
-            ? err.message
-            : 'Screen capture is unavailable on this machine.'
-      toast.error(message)
-      // Non-denial failure: roll the gate back so we don't pretend AI is live.
-      await setAiFeaturesEnabled(false)
+      // Any other failure (no video track, getDisplayMedia odd in the
+      // webview) is not a reason to undo the toggle: screen recording is
+      // only needed once a session starts, which is where the loop asks
+      // again. Keep AI on so the model picker stays available.
+      toast(
+        'Pick and download a model now. StudyVis will ask for screen access when you start a session.'
+      )
     }
-  }, [setAiFeaturesEnabled])
+  }, [])
 
   const handleToggle = useCallback(
     async (next: boolean) => {
@@ -181,14 +179,14 @@ export function AiCategory() {
   return (
     <SettingsSection heading="AI">
       <p className="mb-3 text-sm text-text-secondary">
-        The vision model runs on this machine and judges only your camera and
-        screen. Nothing leaves your computer. Enable AI to pick a model,
+        The vision model runs on this machine and only looks at your camera and
+        screen. Nothing leaves your computer. Turn AI on to pick a model,
         benchmark it, and let StudyVis nudge you when you drift off-task.
       </p>
 
       <SettingsRow
         label="Enable AI features"
-        help="Off by default. When off StudyVis is a plain study room — no model, no capture, no scoring. Turning it on prompts once for screen-recording access."
+        help="Off by default. When off StudyVis is a plain study room with no model, no capture, and no scoring. StudyVis asks for screen access when you start your first session."
         control={
           <Switch
             checked={aiFeaturesEnabled}
@@ -206,6 +204,10 @@ export function AiCategory() {
         />
       ) : (
         <>
+          <div className="pt-4">
+            <ModelPickerContainer />
+          </div>
+
           <SettingsRow
             label="Sample interval"
             stack
@@ -337,10 +339,6 @@ export function AiCategory() {
               }
             />
           ) : null}
-
-          <div className="pt-4">
-            <ModelPickerContainer />
-          </div>
         </>
       )}
 

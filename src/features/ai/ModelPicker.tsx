@@ -423,7 +423,7 @@ function CardActions({
       disabled={blocksGated}
       aria-disabled={blocksGated || undefined}
     >
-      <DownloadIcon /> Select
+      <DownloadIcon /> Download
     </Button>
   )
 }
