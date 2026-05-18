@@ -31,10 +31,10 @@ export function IdentityCategory() {
     setSubmitting(true)
     try {
       await actions.setDisplayName(trimmed)
-      toast.success('Display name updated.')
+      toast.success('Name saved.')
     } catch (err) {
       const message =
-        err instanceof Error ? err.message : 'Could not update display name.'
+        err instanceof Error ? err.message : "Couldn't save your name."
       toast.error(message)
     } finally {
       setSubmitting(false)
@@ -115,7 +115,7 @@ export function IdentityCategory() {
       />
       <SettingsRow
         label="Show backup mnemonic"
-        help="Available in V3 — keep your original 24-word backup safe. The mnemonic is not retrievable from this device."
+        help="Coming in V3. Keep your original 24-word backup safe; it can't be recovered from this device."
         disabled
         control={
           <Button variant="secondary" size="sm" disabled aria-disabled="true">

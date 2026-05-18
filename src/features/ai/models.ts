@@ -146,7 +146,7 @@ const HEAVIEST: ModelSpec = {
   gated: false,
   defaultTier: 'heaviest',
   blurb:
-    'Strongest vision quality. Slow on consumer CPUs — only pick this if you have ≥16 GB free RAM and aren’t studying on battery.',
+    'Strongest vision quality, but slow on consumer CPUs. Pick this only if you have ≥16 GB free RAM and aren’t on battery.',
 }
 
 export const SUPPORTED_MODELS: ReadonlyArray<ModelSpec> = [

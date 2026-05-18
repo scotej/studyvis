@@ -122,7 +122,7 @@ export function StyleGuide() {
             <div className="flex items-center gap-3">
               <Logo size="md" />
               <h1 className="text-xl font-semibold tracking-tight">
-                /style — design tokens preview
+                /style · design tokens preview
               </h1>
             </div>
             <div className="flex items-center gap-2">
@@ -151,7 +151,7 @@ export function StyleGuide() {
             </div>
           </header>
 
-          <Section title="Buttons — variants">
+          <Section title="Buttons · variants">
             <div className="flex flex-wrap gap-3">
               <Button>Default</Button>
               <Button variant="secondary">Secondary</Button>
@@ -171,7 +171,7 @@ export function StyleGuide() {
             </div>
           </Section>
 
-          <Section title="Inputs — states">
+          <Section title="Inputs · states">
             <div className="grid grid-cols-2 gap-4">
               <div className="flex flex-col gap-2">
                 <Label htmlFor="d1">Default</Label>

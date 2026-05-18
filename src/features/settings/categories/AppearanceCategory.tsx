@@ -48,7 +48,7 @@ export function AppearanceCategory() {
       />
       <SettingsRow
         label="Reduce motion"
-        help="Replaces transitions with fades. Wired in V3 — the toggle persists today."
+        help="Replaces transitions with fades. Fully wired in V3; your choice is saved now."
         control={
           <Switch
             checked={reduceMotion}

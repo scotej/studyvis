@@ -161,7 +161,7 @@ const defaultRuntime: BenchmarkRuntime = {
     } catch (err) {
       if (err instanceof DOMException && err.name === 'AbortError') {
         throw new Error(
-          `chat/completions stalled past ${REQUEST_TIMEOUT_MS / 1000}s — sidecar may be hung`,
+          `The model didn't respond within ${REQUEST_TIMEOUT_MS / 1000}s. It may be stuck; try restarting it.`,
           { cause: err }
         )
       }

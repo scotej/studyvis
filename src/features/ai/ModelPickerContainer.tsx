@@ -355,10 +355,10 @@ export function ModelPickerContainer() {
             downloadProgress: null,
             errorMessage: null,
           })
-          toast.success(`${spec.displayName} removed.`)
+          toast.success(`Removed ${spec.displayName}.`)
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err)
-          toast.error(`Could not remove ${spec.displayName}: ${message}`)
+          toast.error(`Couldn't remove ${spec.displayName}: ${message}`)
         }
       })()
     },
@@ -370,10 +370,10 @@ export function ModelPickerContainer() {
       try {
         await getHfTokenRuntime().save(token)
         setHfTokenPresent(true)
-        toast.success('Hugging Face token saved to keychain.')
+        toast.success('Token saved to your keychain.')
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err)
-        toast.error(`Could not save token: ${message}`)
+        toast.error(`Couldn't save the token: ${message}`)
       }
     })()
   }, [])
@@ -383,10 +383,10 @@ export function ModelPickerContainer() {
       try {
         await getHfTokenRuntime().clear()
         setHfTokenPresent(false)
-        toast.success('Hugging Face token forgotten.')
+        toast.success('Token forgotten.')
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err)
-        toast.error(`Could not clear token: ${message}`)
+        toast.error(`Couldn't clear the token: ${message}`)
       }
     })()
   }, [])

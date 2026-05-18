@@ -34,8 +34,7 @@ const ROWS: Array<{
   {
     id: 'microphone',
     title: 'Microphone',
-    description:
-      'Used only while you hold the talk key — your mic stays muted otherwise.',
+    description: 'Stays muted until you hold the talk key.',
     Icon: MicIcon,
   },
   {
@@ -85,8 +84,8 @@ export function PermissionsStepView({
       </ul>
 
       <p className="max-w-md text-center text-xs text-text-muted">
-        Headphones recommended — built-in mics + speakers can echo when several
-        friends are talking.
+        Use headphones if you can. Built-in mics and speakers tend to echo once
+        a few friends are talking.
       </p>
 
       {anyDenied ? (

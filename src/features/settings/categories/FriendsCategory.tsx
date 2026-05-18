@@ -32,7 +32,7 @@ export function FriendsCategory() {
       setPendingRemoval(null)
     } catch (err) {
       const message =
-        err instanceof Error ? err.message : 'Could not remove friend.'
+        err instanceof Error ? err.message : "Couldn't remove that friend."
       toast.error(message)
     } finally {
       setRemoving(false)

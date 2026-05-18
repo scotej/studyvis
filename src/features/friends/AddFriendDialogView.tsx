@@ -79,8 +79,8 @@ function MissingDisplayNamePanel({ onCancel }: { onCancel: () => void }) {
       <DialogHeader>
         <DialogTitle>Finish onboarding first</DialogTitle>
         <DialogDescription>
-          Pick a display name in onboarding before adding friends — it&apos;s
-          how they&apos;ll see you when you pair.
+          Pick a display name in onboarding first. It&apos;s how friends will
+          see you when you pair.
         </DialogDescription>
       </DialogHeader>
       <DialogFooter>
@@ -251,7 +251,7 @@ function HostStatusLine({ phase }: { phase: AddFriendPhase }) {
   if (phase.kind === 'host-waiting' && phase.peerArrived) {
     return (
       <p className="text-sm text-text-secondary" aria-live="polite">
-        Friend joined — exchanging keys.
+        Friend joined. Exchanging keys.
       </p>
     )
   }
@@ -289,7 +289,7 @@ function JoinPanel({
       <div className="flex flex-col gap-5">
         <p className="text-sm text-text-secondary" aria-live="polite">
           {phase.peerArrived
-            ? 'Friend joined — exchanging keys.'
+            ? 'Friend joined. Exchanging keys.'
             : 'Looking for your friend on the network.'}
         </p>
         <div
@@ -322,7 +322,7 @@ function JoinPanel({
     >
       <p className="text-xs text-text-muted">
         Type or paste the {PAIR_WORD_COUNT} words. Only words from the BIP39
-        list are accepted — invalid entries are flagged immediately.
+        list work; anything else is flagged as you type.
       </p>
       <PairWordInput
         values={words}

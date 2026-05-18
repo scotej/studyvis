@@ -96,9 +96,8 @@ export function ModelGuide({ records, className }: ModelGuideProps) {
       </div>
 
       <footer className="text-xs text-text-secondary">
-        StudyVis runs the AI loop only on your own machine — your camera and
-        screen pixels never leave the device. The peer-visible alert is just a
-        flag, never a frame.
+        The AI runs on your machine. Your camera and screen stay here. Friends
+        see a flag, not a frame.
       </footer>
     </section>
   )

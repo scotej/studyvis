@@ -41,7 +41,7 @@ export function SelfWarningBadge({
       />
       <div className="flex flex-col gap-1">
         <span className="font-medium text-text-primary">
-          Heads up — looking off-task.
+          Heads up, looking off-task.
         </span>
         <span className="text-text-secondary">{reasoning}</span>
       </div>

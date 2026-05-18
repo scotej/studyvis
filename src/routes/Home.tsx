@@ -73,7 +73,7 @@ export function Home() {
         )
       } catch (err) {
         const message =
-          err instanceof Error ? err.message : 'Could not send invite.'
+          err instanceof Error ? err.message : "Couldn't send the invite."
         toast.error(message)
       }
     },
@@ -92,7 +92,7 @@ export function Home() {
       joinSession(invite.payload.session_topic, invite.payload.session_password)
     } catch (err) {
       const message =
-        err instanceof Error ? err.message : 'Could not join the session.'
+        err instanceof Error ? err.message : "Couldn't join the session."
       toast.error(message)
     }
   }, [])

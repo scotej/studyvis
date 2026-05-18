@@ -87,7 +87,7 @@ export function AddFriendDialog({ open, onOpenChange }: AddFriendDialogProps) {
         }, 1500)
       } catch (err) {
         const message =
-          err instanceof Error ? err.message : 'Could not save friend.'
+          err instanceof Error ? err.message : "Couldn't save your new friend."
         setPhase({ kind: 'error', message })
         toast.error("Couldn't save your new friend.")
       }

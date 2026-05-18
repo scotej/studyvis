@@ -98,7 +98,7 @@ describe('parseAgentReply', () => {
     expect(reply.intent).toBe('unknown')
     // Fixed safe string — raw (possibly attacker-influenced) text is not
     // reflected into the dialog.
-    expect(reply.reply_text).toBe("Sorry — I didn't understand.")
+    expect(reply.reply_text).toBe("I didn't catch that. Say it another way?")
     expect(reply.reply_text).not.toContain('not-json-at-all')
   })
 

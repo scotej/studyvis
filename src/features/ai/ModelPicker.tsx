@@ -474,8 +474,8 @@ function HfTokenPaste({
         This model is gated. Accept the terms at{' '}
         <span className="font-mono">huggingface.co/{repoSlug}</span> first, then
         paste a read-scope token from{' '}
-        <span className="font-mono">huggingface.co/settings/tokens</span>.
-        Tokens are stored in your OS keychain — they never leave your machine.
+        <span className="font-mono">huggingface.co/settings/tokens</span>. Your
+        token is stored in the OS keychain, never sent anywhere.
       </p>
       <div className="flex items-center gap-2">
         <Input

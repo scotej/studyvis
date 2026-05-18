@@ -87,7 +87,8 @@ export function Dashboard({ __loader, now }: DashboardProps) {
         if (cancelled) return
         setStatus({
           kind: 'error',
-          message: err instanceof Error ? err.message : 'Could not load stats.',
+          message:
+            err instanceof Error ? err.message : "Couldn't load your stats.",
         })
       })
     return () => {
@@ -183,7 +184,7 @@ export function DashboardView({ summary }: DashboardViewProps) {
               Top study partners
             </h3>
             {topPartners.length === 0 ? (
-              <Empty message="No study partners yet — your solo sessions still count toward your streak." />
+              <Empty message="No study partners yet. Solo sessions still count toward your streak." />
             ) : (
               <ul className="m-0 flex list-none flex-col gap-2 p-0">
                 {topPartners.map((p) => (

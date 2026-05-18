@@ -6,7 +6,7 @@ import { toast } from 'sonner'
 import { SettingsRow, SettingsSection } from '@/components/SettingsRow'
 import { Button } from '@/components/ui/button'
 
-const COPYRIGHT_LINE = `© ${new Date().getFullYear()} Scott — all rights reserved`
+const COPYRIGHT_LINE = `© ${new Date().getFullYear()} Scott. All rights reserved.`
 
 export function AboutCategory() {
   const [opening, setOpening] = useState(false)
@@ -17,7 +17,7 @@ export function AboutCategory() {
       await invoke('system_open_releases')
     } catch (err) {
       const message =
-        err instanceof Error ? err.message : 'Could not open Releases page.'
+        err instanceof Error ? err.message : "Couldn't open the Releases page."
       toast.error(message)
     } finally {
       setOpening(false)

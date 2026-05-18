@@ -190,7 +190,7 @@ export async function handleUserText(
   if (port == null) {
     throw new AiAgentError(
       'sidecar_unavailable',
-      'AI is not ready — enable it in Settings → AI and try again.'
+      "AI isn't running yet. Turn it on in Settings → AI, then try again."
     )
   }
 
@@ -291,7 +291,7 @@ export function parseAgentReply(raw: string): AgentReply {
   return {
     intent: 'unknown',
     payload: {},
-    reply_text: "Sorry — I didn't understand.",
+    reply_text: "I didn't catch that. Say it another way?",
   }
 }
 
@@ -349,7 +349,7 @@ function normaliseAgentReply(raw: unknown): AgentReply | null {
     return {
       intent: 'unknown',
       payload: {},
-      reply_text: replyText || "Sorry — I didn't understand.",
+      reply_text: replyText || "I didn't catch that. Say it another way?",
     }
   }
   return null

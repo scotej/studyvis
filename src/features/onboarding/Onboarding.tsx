@@ -67,7 +67,7 @@ export function Onboarding({ onComplete }: OnboardingProps) {
         advance()
       } catch (err) {
         setNameError(
-          err instanceof Error ? err.message : 'Could not save name.'
+          err instanceof Error ? err.message : "Couldn't save your name."
         )
       } finally {
         setNameSubmitting(false)

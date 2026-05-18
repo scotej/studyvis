@@ -15,7 +15,7 @@ export function NetworkCategory() {
     <SettingsSection heading="Network">
       <SettingsRow
         label="About TURN"
-        help="StudyVis tries to connect peer-to-peer first. About 15% of network setups (corporate firewalls, strict NATs) require a TURN relay — a public server that forwards encrypted media between you and your friends. Audio and video are still encrypted end-to-end; only encrypted bytes pass through the relay."
+        help="StudyVis connects you to friends directly when it can. Some networks (corporate firewalls, strict NATs) block that, so a relay server passes the traffic along instead. It's still encrypted end-to-end; the relay only ever sees encrypted bytes."
       />
       <SettingsRow
         label="TURN preference"
@@ -35,7 +35,7 @@ export function NetworkCategory() {
             <div className="flex items-center gap-2">
               <RadioGroupItem value="auto" id="turn-auto" />
               <Label htmlFor="turn-auto">
-                Auto — fall back when direct fails
+                Auto (fall back when direct fails)
               </Label>
             </div>
             <div className="flex items-center gap-2">

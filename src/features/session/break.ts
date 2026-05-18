@@ -95,7 +95,7 @@ export function evaluateBreakRules(
       )
       return {
         verdict: 'denied',
-        reason: `your last break was less than 25 minutes ago — try again in ${remainingMin} min.`,
+        reason: `your last break was under 25 minutes ago. Try again in ${remainingMin} min.`,
       }
     }
   }

@@ -54,8 +54,8 @@ export function DisplayNameStep({
             What should friends see?
           </h1>
           <p className="max-w-sm text-sm leading-snug text-text-secondary">
-            Pick anything — your name, a nickname, an emoji. You can change it
-            in Settings.
+            Pick anything: your name, a nickname, an emoji. You can change it in
+            Settings.
           </p>
         </header>
 

@@ -45,7 +45,7 @@ export type InviteOptions = {
 
 export class InviteTimeoutError extends Error {
   constructor() {
-    super('invite send timed out — recipient did not appear on inbox topic')
+    super("Your friend didn't pick up. They may be offline.")
     this.name = 'InviteTimeoutError'
   }
 }

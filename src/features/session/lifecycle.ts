@@ -13,7 +13,7 @@ export const SESSION_FULL_ACTION = 'session-full'
 export const PTT_STATE_ACTION = 'ptt-state'
 // 4-user mesh hard cap (host + 3 peers, ARCHITECTURE.md §7).
 export const MAX_REMOTE_PEERS = 3
-export const SESSION_FULL_MESSAGE = 'Session is full — max 4 friends'
+export const SESSION_FULL_MESSAGE = 'This session is full (4 friends max).'
 // V2-P8 replaces the V2-P3 session-ended splash with the post-session
 // report. The reset now runs when the user dismisses the report (via
 // Report's Close button → useSessionStore.reset()), not on a timer. The

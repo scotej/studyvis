@@ -81,7 +81,7 @@ export function AudioDevicePicker({
           variant="ghost"
           size="sm"
           disabled={swapping}
-          aria-label={`Microphone — currently ${label}`}
+          aria-label={`Microphone, currently ${label}`}
           className="gap-2"
         >
           <MicIcon />

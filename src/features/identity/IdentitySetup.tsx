@@ -59,7 +59,7 @@ export function IdentitySetup({
       await onConfirm()
     } catch (err) {
       console.error(err)
-      toast.error('Could not save identity.')
+      toast.error("Couldn't save your identity.")
     } finally {
       setSubmitting(false)
     }

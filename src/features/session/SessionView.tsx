@@ -487,7 +487,9 @@ export function SessionView() {
         if (reason === 'no_active_model') {
           toast.error('Pick a model in Settings → AI')
         } else if (reason === 'model_files_missing') {
-          toast.error('Model files missing — re-download in Settings → AI')
+          toast.error(
+            'Model files are missing. Re-download them in Settings → AI.'
+          )
         } else {
           toast.error(
             detail ? `AI failed to start: ${detail}` : 'AI failed to start'
@@ -506,17 +508,17 @@ export function SessionView() {
       onSidecarErrored: (lastError) => {
         toast.error(
           lastError
-            ? `AI model crashed (${lastError}) — restart in Settings → AI`
-            : 'AI model crashed — restart in Settings → AI'
+            ? `AI model crashed (${lastError}). Restart it in Settings → AI.`
+            : 'AI model crashed. Restart it in Settings → AI.'
         )
       },
       onBatteryPause: (info) => {
         toast.warning(
-          `AI accountability paused — battery at ${info.percent}% on power. It resumes when you plug in or charge above 20%.`
+          `AI paused to save battery (${info.percent}%). Plug in or charge above 20% to resume.`
         )
       },
       onBatteryResume: () => {
-        toast.success('AI accountability resumed.')
+        toast.success('AI resumed.')
       },
     })
     return () => {
@@ -780,7 +782,7 @@ export function SessionView() {
           return
         }
         toast.error(
-          err instanceof Error ? err.message : 'Could not request access.'
+          err instanceof Error ? err.message : "Couldn't request access."
         )
       }
     })()
@@ -1034,7 +1036,7 @@ function hoverDetailFor(
       if (typeof aiReason === 'string' && aiReason.length > 0) {
         parts.push(aiReason)
       }
-      return parts.length > 0 ? parts.join(' — ') : undefined
+      return parts.length > 0 ? parts.join(' · ') : undefined
     }
     case 'break_approved':
     case 'break_denied': {

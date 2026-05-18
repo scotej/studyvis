@@ -24,7 +24,7 @@ export function AdvancedCategory() {
       await invoke<string>('system_open_data_folder')
     } catch (err) {
       const message =
-        err instanceof Error ? err.message : 'Could not open data folder.'
+        err instanceof Error ? err.message : "Couldn't open the data folder."
       toast.error(message)
     } finally {
       setOpeningFolder(false)
@@ -65,7 +65,7 @@ export function AdvancedCategory() {
       {autostart.status === 'unavailable' ? (
         <SettingsRow
           label="Autostart unavailable"
-          help="No Tauri runtime detected — autostart toggles only work in the packaged app."
+          help="This only works in the packaged app, not the dev build."
         />
       ) : null}
       {autostart.status === 'error' && autostart.error ? (

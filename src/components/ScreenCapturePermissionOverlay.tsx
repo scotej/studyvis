@@ -50,7 +50,7 @@ export function ScreenCapturePermissionOverlay({
           ? err.message
           : typeof err === 'string'
             ? err
-            : 'Could not open System Settings.'
+            : "Couldn't open System Settings."
       toast.error(message)
     } finally {
       setOpening(false)

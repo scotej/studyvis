@@ -232,7 +232,7 @@ export function AiDialogWindow({
       setState((s) => ({
         ...s,
         response: {
-          text: "Session context isn't loaded yet — try again in a moment.",
+          text: "Session context isn't loaded yet. Give it a moment.",
           tone: 'denied',
         },
       }))
@@ -292,7 +292,7 @@ export function AiDialogWindow({
             resolve({
               nonce,
               verdict: 'denied',
-              reason: 'No response from the session — try again.',
+              reason: 'No response from the session. Try again.',
             })
           }, BREAK_REQUEST_TIMEOUT_MS)
           pendingNonces.current.set(nonce, (payload) => {
@@ -314,7 +314,7 @@ export function AiDialogWindow({
               resolve({
                 nonce,
                 verdict: 'denied',
-                reason: 'Could not reach the session.',
+                reason: "Couldn't reach the session.",
               })
             })
         })
@@ -336,7 +336,7 @@ export function AiDialogWindow({
         response: { text: reply.reply_text, tone: 'neutral' },
       })
     } catch (err) {
-      let text = 'Something went wrong.'
+      let text = "That didn't go through. Try again?"
       if (err instanceof AiAgentError) {
         text = err.message
       } else if (err instanceof Error) {
