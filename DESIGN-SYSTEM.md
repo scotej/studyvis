@@ -452,7 +452,7 @@ This window:
 └────────────────┴─────────────────────────────────────────────────────┘
 ```
 
-Settings categories visible: Identity, Friends, Sessions, Stats (V3), Appearance, Notifications, Shortcuts, AI (V2), Network, Advanced, About. AI is hidden in V1. Stats (added in V3-P1) is a local-only dashboard sourced from the on-device sessions + audit_events tables; it transmits nothing. About shows app version + license string + a link to GitHub Releases (added in V1-P12).
+Settings categories visible: Identity, Friends, Sessions, Stats (V3), Appearance, Notifications, Shortcuts, AI (V2), Network, Advanced, About. AI is hidden in V1. Stats (added in V3-P1) is a local-only dashboard computed from the on-device sessions + friends tables; it transmits nothing. About shows app version + license string + a link to GitHub Releases (added in V1-P12).
 
 ## 9. Iconography
 
