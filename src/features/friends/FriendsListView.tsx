@@ -1,6 +1,7 @@
 import { PlusIcon } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
+import { tokens } from '@/design/tokens'
 import { cn } from '@/lib/utils'
 import type { Friend } from '@/lib/db/friends'
 
@@ -23,7 +24,8 @@ export function FriendsListView({
     return (
       <section
         aria-labelledby="friends-heading"
-        className="mx-auto flex w-full max-w-3xl flex-col gap-6 px-6 py-8"
+        className="mx-auto flex w-full flex-col gap-8 px-4 py-4 sm:px-6 sm:py-6"
+        style={{ maxWidth: tokens.sizes.readingMaxWidth }}
       >
         <header className="flex items-center justify-between">
           <h2
@@ -56,7 +58,8 @@ export function FriendsListView({
   return (
     <section
       aria-labelledby="friends-heading"
-      className="mx-auto flex w-full max-w-3xl flex-col gap-4 px-6 py-8"
+      className="mx-auto flex w-full flex-col gap-8 px-4 py-4 sm:px-6 sm:py-6"
+      style={{ maxWidth: tokens.sizes.readingMaxWidth }}
     >
       <header className="flex items-center justify-between">
         <h2

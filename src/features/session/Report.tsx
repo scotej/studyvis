@@ -21,6 +21,7 @@ import { CheckCircle2Icon, ChevronLeftIcon } from 'lucide-react'
 
 import { ScoreGauge } from '@/components/ScoreGauge'
 import { Button } from '@/components/ui/button'
+import { tokens } from '@/design/tokens'
 import {
   AUDIT_KIND_LABELS,
   type AuditEventKind,
@@ -138,7 +139,7 @@ export function Report({ sessionId, onClose, __loader }: ReportProps) {
       .catch((err: unknown) => {
         if (cancelled) return
         const message =
-          err instanceof Error ? err.message : 'Could not load report.'
+          err instanceof Error ? err.message : "Couldn't load the report."
         setStatus({ kind: 'error', message })
       })
     return () => {
@@ -226,8 +227,11 @@ export function ReportView({
       className="flex min-h-screen flex-col bg-bg-base text-text-primary"
       aria-label="Session report"
     >
-      <header className="border-b border-border-subtle px-6 py-4">
-        <div className="mx-auto flex max-w-4xl items-center justify-between gap-4">
+      <header className="border-b border-border-subtle px-4 py-4 sm:px-6">
+        <div
+          className="mx-auto flex items-center justify-between gap-4"
+          style={{ maxWidth: tokens.sizes.readingMaxWidth }}
+        >
           <div className="flex flex-col">
             <span className="text-xs font-medium tracking-wide text-text-secondary uppercase">
               Session report
@@ -242,7 +246,10 @@ export function ReportView({
         </div>
       </header>
 
-      <div className="mx-auto flex w-full max-w-4xl flex-col gap-8 px-6 py-8">
+      <div
+        className="mx-auto flex w-full flex-col gap-8 px-4 py-4 sm:px-6 sm:py-6"
+        style={{ maxWidth: tokens.sizes.readingMaxWidth }}
+      >
         <section className="flex flex-col items-center gap-6 sm:flex-row sm:items-stretch sm:justify-between">
           <div className="flex flex-1 flex-col items-center gap-3 text-center sm:items-start sm:text-left">
             <h1 className="text-xl font-semibold tracking-tight">

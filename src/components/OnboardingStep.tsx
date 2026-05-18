@@ -1,6 +1,7 @@
 import { type ReactNode } from 'react'
 
 import { Button } from '@/components/ui/button'
+import { tokens } from '@/design/tokens'
 import { cn } from '@/lib/utils'
 
 export type OnboardingStepAction = {
@@ -39,22 +40,26 @@ export function OnboardingStep({
     <main
       data-slot="onboarding-step"
       aria-label={ariaLabel}
-      className="relative flex min-h-screen flex-col bg-bg-base px-6 py-12 text-text-primary"
+      className="relative flex min-h-screen flex-col bg-bg-base px-4 py-4 text-text-primary sm:px-6 sm:py-6"
     >
       {progress ? (
         <ProgressDots
           current={progress.current}
           total={progress.total}
-          className="absolute right-6 top-6"
+          className="absolute right-4 top-4 sm:right-6 sm:top-6"
         />
       ) : null}
-      <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col items-center justify-center gap-8">
+      <div
+        className="mx-auto flex w-full flex-1 flex-col items-center justify-center gap-8"
+        style={{ maxWidth: tokens.sizes.contentMaxWidth }}
+      >
         {children}
       </div>
       {primaryAction || secondaryAction ? (
         <footer
           data-slot="onboarding-actions"
-          className="mx-auto mt-8 flex w-full max-w-2xl items-center justify-end gap-3"
+          className="mx-auto mt-8 flex w-full items-center justify-end gap-3"
+          style={{ maxWidth: tokens.sizes.contentMaxWidth }}
         >
           {secondaryAction ? (
             <Button

@@ -4,6 +4,7 @@ import { Settings2Icon } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { Button } from '@/components/ui/button'
+import { tokens } from '@/design/tokens'
 import {
   AddFriendDialog,
   FriendsList,
@@ -216,7 +217,10 @@ export function Home() {
   return (
     <>
       <main className="min-h-screen bg-bg-base text-text-primary">
-        <div className="mx-auto flex w-full max-w-3xl items-center justify-end gap-2 px-6 pt-6">
+        <div
+          className="mx-auto flex w-full items-center justify-end gap-2 px-4 pt-4 sm:px-6 sm:pt-6"
+          style={{ maxWidth: tokens.sizes.readingMaxWidth }}
+        >
           <Button
             variant="ghost"
             size="sm"

@@ -127,6 +127,11 @@ export const tokens = {
 
   sizes: {
     contentMaxWidth: 1200,
+    // Reading/list screens (Report, FriendsListView). DESIGN-SYSTEM §12 only
+    // specifies a measure for settings/onboarding (contentMaxWidth: 1200); a
+    // 1200-wide line length hurts readability on text-dense screens, so these
+    // screens share one narrower measure instead of the page max.
+    readingMaxWidth: 896,
     sidebarWidth: 280,
     auditPanelWidth: 320,
     videoTileMinHeight: 180,
