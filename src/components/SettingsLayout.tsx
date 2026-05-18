@@ -78,9 +78,12 @@ export function SettingsLayout<TId extends string = string>({
         </nav>
         <section
           aria-label={`${activeCategoryLabel(categories, activeCategoryId)} settings`}
-          className="min-w-0 flex-1 overflow-y-auto px-8 py-8"
+          className="min-w-0 flex-1 overflow-y-auto px-4 py-4 sm:px-6 sm:py-6"
         >
-          <div className="mx-auto flex w-full max-w-2xl flex-col gap-6">
+          <div
+            className="mx-auto flex w-full flex-col gap-8"
+            style={{ maxWidth: tokens.sizes.contentMaxWidth }}
+          >
             {children}
           </div>
         </section>

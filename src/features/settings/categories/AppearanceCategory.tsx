@@ -28,7 +28,7 @@ export function AppearanceCategory() {
           <RadioGroup
             value={mode}
             onValueChange={handleThemeChange}
-            className="grid-flow-col auto-cols-min gap-6"
+            className="grid-cols-1 gap-3 sm:grid-flow-col sm:auto-cols-max sm:gap-6"
             aria-label="Theme"
           >
             <div className="flex items-center gap-2">
