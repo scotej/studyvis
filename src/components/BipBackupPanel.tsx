@@ -20,8 +20,9 @@ export type BipBackupPanelProps = {
 
 // The 24-word backup surface from DESIGN-SYSTEM §4 / §8.1: mono-font word
 // grid, copy-to-clipboard, and the optional "I've saved them" confirmation.
-// Extracted from IdentitySetup so the recovery flow and onboarding share one
-// component; the onboarding markup, copy, and aria wiring are unchanged.
+// Extracted from IdentitySetup per the §4 inventory; the onboarding create
+// path consumes it with markup, copy, and aria wiring unchanged. Recovery
+// takes a typed phrase instead, so it does not render this panel.
 export function BipBackupPanel({
   mnemonic,
   confirm,
