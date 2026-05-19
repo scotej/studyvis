@@ -114,14 +114,9 @@ export function IdentityCategory() {
         }
       />
       <SettingsRow
-        label="Show backup mnemonic"
-        help="Coming in V3. Keep your original 24-word backup safe; it can't be recovered from this device."
+        label="Recovery phrase"
+        help="Your 24-word backup is shown once during setup and never saved here. Keep the original safe. It's the only way to recover this identity, by re-deriving it on a fresh install."
         disabled
-        control={
-          <Button variant="secondary" size="sm" disabled aria-disabled="true">
-            Show 24 words
-          </Button>
-        }
       />
     </SettingsSection>
   )

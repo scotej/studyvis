@@ -7,6 +7,7 @@ import {
   deriveFromMnemonic,
   generateIdentity,
   hexToBytes,
+  isValidMnemonic,
   mnemonicFingerprint,
   signMessage,
   verifyMessage,
@@ -61,6 +62,41 @@ describe('deriveFromMnemonic', () => {
   test('rejects checksum-invalid mnemonic', () => {
     const bad = new Array(24).fill('abandon')
     expect(() => deriveFromMnemonic(bad)).toThrow(/invalid BIP39 mnemonic/)
+  })
+})
+
+describe('canonical derivation vector (V1-P3 regression lock)', () => {
+  // The 24-word zero-entropy BIP39 test mnemonic (Trezor vector). The expected
+  // public keys below are produced by this exact construction — BIP39 seed →
+  // HKDF-SHA256 (salt "studyvis", info "ed25519:v1" / "x25519:v1"). A change
+  // to those constants rewrites every existing user's identity and breaks
+  // recovery; this vector is the deliberate tripwire for that.
+  const KNOWN_MNEMONIC = (
+    'abandon abandon abandon abandon abandon abandon abandon abandon ' +
+    'abandon abandon abandon abandon abandon abandon abandon abandon ' +
+    'abandon abandon abandon abandon abandon abandon abandon art'
+  ).split(' ')
+
+  test('a known mnemonic restores the exact Ed25519 + X25519 public keys', () => {
+    const keys = deriveFromMnemonic(KNOWN_MNEMONIC)
+    expect(bytesToHex(keys.edPub)).toBe(
+      'df9f33f39235012c17f3a534eb0a0693afbe2f31182fb14f3916895c87dc4ce9'
+    )
+    expect(bytesToHex(keys.xPub)).toBe(
+      '708fe796199279f04b7ef855bab4715bbd538c4126780ccb9f93caa424ae551d'
+    )
+  })
+
+  test('mnemonicFingerprint is stable for the known mnemonic', () => {
+    expect(mnemonicFingerprint(KNOWN_MNEMONIC)).toBe(
+      '69be79ef3c28f55d7cb84db2dd3c18df'
+    )
+  })
+
+  test('isValidMnemonic accepts the known phrase, rejects mutations', () => {
+    expect(isValidMnemonic(KNOWN_MNEMONIC)).toBe(true)
+    expect(isValidMnemonic(new Array(24).fill('abandon'))).toBe(false)
+    expect(isValidMnemonic(KNOWN_MNEMONIC.slice(0, 23))).toBe(false)
   })
 })
 
