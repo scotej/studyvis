@@ -37,6 +37,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
+import { BipBackupPanel } from '@/components/BipBackupPanel'
 import { Logo } from '@/components/Logo'
 import { useTheme } from '@/design/theme-context'
 import { toast } from 'sonner'
@@ -437,6 +438,10 @@ export function StyleGuide() {
                 <span>Push to talk · friends</span>
               </div>
             </div>
+          </Section>
+
+          <Section title="BipBackupPanel (read-only, mock 24 words)">
+            <BipBackupPanel mnemonic={MOCK_MNEMONIC} />
           </Section>
 
           <Section title="IdentitySetup (mock 24 words)">

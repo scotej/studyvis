@@ -44,6 +44,17 @@ export function generateIdentity(): Identity {
   return { mnemonic, ...keys }
 }
 
+// Canonical mnemonic validator: a 24-word phrase whose words are all in the
+// BIP39 English wordlist and whose checksum is valid. `deriveFromMnemonic`
+// enforces the same two conditions before deriving; the recovery flow uses
+// this to classify input calmly without parsing thrown error strings.
+export function isValidMnemonic(mnemonic: Mnemonic): boolean {
+  return (
+    mnemonic.length === MNEMONIC_WORD_COUNT &&
+    validateMnemonic(mnemonic.join(' '), englishWordlist)
+  )
+}
+
 export function deriveFromMnemonic(mnemonic: Mnemonic): Keys {
   if (mnemonic.length !== MNEMONIC_WORD_COUNT) {
     throw new Error(`mnemonic must be ${MNEMONIC_WORD_COUNT} words`)

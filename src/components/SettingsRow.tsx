@@ -12,7 +12,8 @@ export type SettingsRowProps = {
   stack?: boolean
   className?: string
   // Renders the row at low contrast and disables pointer events on the
-  // control slot. Used for V3-deferred rows (e.g. "Show backup mnemonic").
+  // control slot. Used for low-contrast informational rows such as the
+  // Settings → Identity "Recovery phrase" note.
   disabled?: boolean
 }
 

@@ -1,7 +1,6 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
 
 import { SettingsRow, SettingsSection } from '@/components/SettingsRow'
-import { Button } from '@/components/ui/button'
 import { Kbd } from '@/components/ui/kbd'
 import { Label } from '@/components/ui/label'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
@@ -73,14 +72,9 @@ export const Disabled: Story = {
     <div className="mx-auto w-full max-w-2xl">
       <SettingsSection heading="Identity">
         <SettingsRow
-          label="Show backup mnemonic"
-          help="Available in V3 — keep your original 24-word backup safe."
+          label="Recovery phrase"
+          help="Your 24-word backup is shown once during setup and never saved here. Keep the original safe. It's the only way to recover this identity, by re-deriving it on a fresh install."
           disabled
-          control={
-            <Button variant="secondary" size="sm" disabled>
-              Show 24 words
-            </Button>
-          }
         />
       </SettingsSection>
     </div>

@@ -1,9 +1,10 @@
 import { useCallback, useState } from 'react'
 
-import { IdentitySetupGate, useIdentity } from '@/features/identity'
+import { useIdentity } from '@/features/identity'
 
 import { AddFriendStep } from './AddFriendStep'
 import { DisplayNameStep } from './DisplayNameStep'
+import { IdentityStep } from './IdentityStep'
 import { PermissionsStep } from './PermissionsStep'
 import { TutorialStep } from './TutorialStep'
 import { WelcomeStep } from './WelcomeStep'
@@ -97,13 +98,7 @@ export function Onboarding({ onComplete }: OnboardingProps) {
     return <PermissionsStep progress={progress} onContinue={advance} />
   }
   if (id === 'identity') {
-    return (
-      <IdentitySetupGate
-        progress={progress}
-        create={actions.create}
-        onConfirmed={advance}
-      />
-    )
+    return <IdentityStep progress={progress} onComplete={advance} />
   }
   if (id === 'name') {
     return (

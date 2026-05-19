@@ -2,6 +2,7 @@ import { create } from 'zustand'
 
 import {
   bytesToHex,
+  deriveFromMnemonic,
   generateIdentity,
   mnemonicFingerprint,
   type Identity,
@@ -25,8 +26,18 @@ export type CreatedIdentity = {
   commit: () => Promise<void>
 }
 
+export type RecoveredIdentity = {
+  record: IdentityRecord
+  commit: () => Promise<void>
+}
+
 export type IdentityActions = {
   create: () => CreatedIdentity
+  // Re-derives the keypairs from a 24-word backup the user still holds and
+  // returns the same deferred-commit shape `create` does. Throws if the
+  // mnemonic is not a valid BIP39 phrase (callers pre-validate; the throw is
+  // a defensive backstop). The words are never persisted.
+  recover: (mnemonic: Mnemonic) => RecoveredIdentity
   signWithKeyring: (message: Uint8Array) => Promise<Uint8Array>
   refresh: () => Promise<void>
   setDisplayName: (name: string) => Promise<void>
@@ -73,15 +84,28 @@ export const useIdentityStore = create<IdentityState>((set, get) => {
     }
   }
 
-  const create: IdentityActions['create'] = () => {
-    const id = generateIdentity()
+  // The single persistence path. Both new-identity creation and 24-word
+  // recovery funnel through here so there is exactly one place that writes
+  // keys to the keychain and the public record to identity.json.
+  const buildCommit = (id: Identity) => {
     const record = recordFromIdentity(id, '')
     const commit = async () => {
       await saveKeys(bytesToHex(id.edPriv), bytesToHex(id.xPriv))
       await saveIdentityRecord(record)
       set({ identity: record, status: 'ready' })
     }
+    return { record, commit }
+  }
+
+  const create: IdentityActions['create'] = () => {
+    const id = generateIdentity()
+    const { record, commit } = buildCommit(id)
     return { mnemonic: id.mnemonic, record, commit }
+  }
+
+  const recover: IdentityActions['recover'] = (mnemonic) => {
+    const id: Identity = { mnemonic, ...deriveFromMnemonic(mnemonic) }
+    return buildCommit(id)
   }
 
   const setDisplayName: IdentityActions['setDisplayName'] = async (name) => {
@@ -97,7 +121,7 @@ export const useIdentityStore = create<IdentityState>((set, get) => {
   return {
     identity: null,
     status: 'loading',
-    actions: { create, signWithKeyring, refresh, setDisplayName },
+    actions: { create, recover, signWithKeyring, refresh, setDisplayName },
   }
 })
 
