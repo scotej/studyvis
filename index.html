@@ -35,6 +35,24 @@
           // default (dark). React will reconcile once it hydrates.
         }
       })()
+      // V3-P7 — Apply the reduced-motion attribute before first paint so
+      // the CSS kill switch in src/design/index.css gates every animation
+      // and transition from the very first frame. ApplyReduceMotion keeps
+      // the value in sync after hydration; this script just prevents a
+      // one-frame flash of motion when the user has opted in.
+      ;(function () {
+        try {
+          var stored =
+            window.localStorage.getItem('studyvis.reduceMotion') === 'true'
+          var osPrefers =
+            window.matchMedia &&
+            window.matchMedia('(prefers-reduced-motion: reduce)').matches
+          document.documentElement.dataset.reduceMotion =
+            stored || osPrefers ? 'true' : 'false'
+        } catch (_e) {
+          // Fall through to motion enabled — React reconciles after mount.
+        }
+      })()
     </script>
   </head>
   <body>

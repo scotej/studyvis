@@ -1,5 +1,6 @@
-import { useEffect, useId, useRef, useState } from 'react'
+import { useEffect, useId, useState } from 'react'
 
+import { useReduceMotion } from '@/design/reduce-motion'
 import { tokens } from '@/design/tokens'
 import { cn } from '@/lib/utils'
 
@@ -49,36 +50,37 @@ export function ScoreGauge({
   const arcLength = circumference * sweepFraction
   const targetOffset = arcLength * (1 - clamped / 100)
 
-  // Animate `currentOffset` from `arcLength` (empty) → `targetOffset`. Each
-  // render with a new clamped value re-runs the sweep so re-mounting the
-  // gauge (e.g. opening the report twice) replays the reveal.
-  const [currentOffset, setCurrentOffset] = useState<number>(
-    animate ? arcLength : targetOffset
+  // Reduced motion source of truth (V3-P7): OR of the V1-P11 setting and
+  // the OS `prefers-reduced-motion: reduce` query. The CSS kill switch in
+  // index.css would already clamp the transition under reduced motion, but
+  // ScoreGauge also needs to skip the empty→target sweep entirely — both
+  // the rAF defer and the SVG `transition` are sidestepped, so the gauge
+  // never paints a one-frame "0" before snapping to the final score.
+  const reduceMotion = useReduceMotion()
+  const sweepEnabled = animate && !reduceMotion
+  // `animatedOffset` is only the source of truth while sweeping. When
+  // sweep is off the render derives offset from `targetOffset` directly,
+  // so the effect doesn't need to write state on the early-return path
+  // (which would trip the react-hooks/set-state-in-effect rule).
+  const [animatedOffset, setAnimatedOffset] = useState<number>(
+    sweepEnabled ? arcLength : targetOffset
   )
-  const reduceMotionRef = useRef(false)
   useEffect(() => {
-    if (typeof window === 'undefined') return
-    reduceMotionRef.current = window.matchMedia(
-      '(prefers-reduced-motion: reduce)'
-    ).matches
-  }, [])
-  useEffect(() => {
-    if (!animate || reduceMotionRef.current) {
-      setCurrentOffset(targetOffset)
-      return
-    }
+    if (!sweepEnabled) return
     // Defer one frame so the initial offset paints before the transition,
     // otherwise the browser composites both states in the same paint and
     // the sweep is invisible.
     const raf = window.requestAnimationFrame(() => {
-      setCurrentOffset(targetOffset)
+      setAnimatedOffset(targetOffset)
     })
     return () => window.cancelAnimationFrame(raf)
-  }, [animate, targetOffset])
+  }, [sweepEnabled, targetOffset])
+
+  const currentOffset = sweepEnabled ? animatedOffset : targetOffset
 
   // Open the arc at the bottom: rotate so the gap is centered there.
   const rotation = 135
-  const transition = animate
+  const transition = sweepEnabled
     ? `stroke-dashoffset ${tokens.motion.duration.reveal}ms ${tokens.motion.easing.spring}`
     : 'none'
 

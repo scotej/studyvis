@@ -177,4 +177,28 @@
   :focus-visible {
     outline: none;
   }
+
+  /* V3-P7 — reduced-motion kill switch. `[data-reduce-motion='true']` is
+     set on <html> by the inline pre-paint script (sourced from the V1-P11
+     setting boot cache + OS prefers-reduced-motion) and kept in sync after
+     hydration by <ApplyReduceMotion />. When active, every animation and
+     transition collapses to ~1ms, covering every motion site (state-change
+     transitions, the ScoreGauge sweep, `animate-pulse` skeletons, sonner
+     slide-ins, and anything a future component adds) without per-component
+     conditionals. `animation-iteration-count: 1` freezes infinite
+     animations (skeleton pulse, spinners) on a single iteration so they
+     resolve to a static shape rather than strobing at 1ms × full cycle.
+     `!important` flips cascade priority across layers, so this rule wins
+     against utility layers even though it lives in @layer base. */
+  [data-reduce-motion='true'],
+  [data-reduce-motion='true'] *,
+  [data-reduce-motion='true'] *::before,
+  [data-reduce-motion='true'] *::after {
+    animation-duration: 1ms !important;
+    animation-delay: 0ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important;
+    transition-delay: 0ms !important;
+    scroll-behavior: auto !important;
+  }
 }

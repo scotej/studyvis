@@ -353,7 +353,12 @@ fn setup_desktop(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>>
     use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 
     // V3-P6 — Apply the saved chrome preference before paint. Idempotent
-    // on every other path (default `'system'`, missing file, etc.).
+    // on every other path (default `'system'`, missing file, etc.). The
+    // window is configured `visible: false` in tauri.conf.json so that
+    // the native decoration is never painted before `set_decorations(false)`
+    // / `set_title_bar_style(Overlay)` lands — V3-P7 fixes the V3-P6
+    // one-frame native-frame flash by deferring `window.show()` to the
+    // end of this setup, after `apply_window_style` has had its say.
     apply_window_style(app.handle());
 
     app.handle().plugin(tauri_plugin_autostart::init(
@@ -448,6 +453,15 @@ fn setup_desktop(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>>
             }
         })
         .build(app)?;
+
+    // V3-P7 (V3-P6 carryover) — Reveal the main window now that chrome has
+    // been applied. Configured `visible: false` so the prior code path
+    // doesn't paint a one-frame native frame on Windows before
+    // `set_decorations(false)` strips it. `show()` is instant: no animation
+    // happens regardless of reduced-motion preference.
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.show();
+    }
 
     Ok(())
 }

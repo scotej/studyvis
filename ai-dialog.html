@@ -30,6 +30,22 @@
           // Fall through to CSS default; React will reconcile after mount.
         }
       })()
+      // V3-P7 — Mirror of index.html's reduced-motion boot script. Both
+      // Tauri windows share the same origin (and therefore the same
+      // localStorage), so this picks up the value the main window wrote.
+      ;(function () {
+        try {
+          var stored =
+            window.localStorage.getItem('studyvis.reduceMotion') === 'true'
+          var osPrefers =
+            window.matchMedia &&
+            window.matchMedia('(prefers-reduced-motion: reduce)').matches
+          document.documentElement.dataset.reduceMotion =
+            stored || osPrefers ? 'true' : 'false'
+        } catch (_e) {
+          // Fall through to motion enabled — React reconciles after mount.
+        }
+      })()
     </script>
     <style>
       html,

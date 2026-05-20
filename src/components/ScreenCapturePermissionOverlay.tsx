@@ -85,7 +85,8 @@ export function ScreenCapturePermissionOverlay({
               <li>
                 Click{' '}
                 <strong className="text-text-primary">Open Settings</strong>{' '}
-                below.
+                below. On macOS this is the only place screen-recording access
+                is granted or revoked.
               </li>
               <li>
                 Toggle <strong className="text-text-primary">StudyVis</strong>{' '}
@@ -115,6 +116,16 @@ export function ScreenCapturePermissionOverlay({
             </>
           )}
         </ol>
+        {/* V3-P7 — D5 discharge: the macOS recording indicator (and its
+            Windows counterpart) stays on for the whole AI session. Telling
+            the user this here avoids the "is something wrong?" moment when
+            they notice the indicator mid-session. Inside DialogContent so
+            it's part of the accessible description Radix announces on open.
+            V3-P8 will finalise the wording. */}
+        <p className="text-sm text-text-secondary">
+          Heads-up: your operating system's screen-recording indicator stays on
+          for the whole session. That's expected — it turns off when you leave.
+        </p>
         <DialogFooter>
           <Button variant="ghost" size="sm" onClick={() => onOpenChange(false)}>
             Not now

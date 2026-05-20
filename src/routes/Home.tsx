@@ -217,6 +217,11 @@ export function Home() {
   return (
     <>
       <main className="min-h-screen bg-bg-base text-text-primary">
+        {/* V3-P7 — Visually-hidden top-level heading. The visible heading on
+            this route is "Friends" (h2 inside FriendsListView, used as the
+            section's aria-labelledby anchor); add an h1 so SR users see a
+            clean hierarchy and routes don't skip levels. */}
+        <h1 className="sr-only">StudyVis</h1>
         <div
           className="mx-auto flex w-full items-center justify-end gap-2 px-4 pt-4 sm:px-6 sm:pt-6"
           style={{ maxWidth: tokens.sizes.readingMaxWidth }}

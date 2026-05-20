@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 
 import { AuditLogRow } from '@/components/AuditLogRow'
 import { tokens } from '@/design/tokens'
@@ -30,12 +30,16 @@ export type AuditLogPanelProps = {
 
 const TICK_INTERVAL_MS = 60_000
 
-// Right-rail audit log per DESIGN-SYSTEM.md §4 inventory + §8.3 wireframe.
-// Fixed 320 wide (`tokens.sizes.auditPanelWidth`); auto-scrolls to the
-// newest row only when the user is already at the bottom — preserving
-// scroll position on read-back. `aria-live="polite"` so screen readers
-// announce new rows without interrupting the user (V3 will refine).
+// Right-rail audit log per DESIGN-SYSTEM.md §4 inventory + §8.3 wireframe +
+// ARCHITECTURE.md §9 (the audit log is a live region). Fixed 320 wide
+// (`tokens.sizes.auditPanelWidth`); auto-scrolls to the newest row only
+// when the user is already at the bottom — preserving scroll position on
+// read-back. V3-P7 hardens the SR semantics: `role="log"` on the live list
+// (implies aria-live="polite") + aria-relevant="additions" so new rows
+// announce without interrupting; the surrounding `<aside>` carries the
+// landmark label.
 export function AuditLogPanel({ events, now, className }: AuditLogPanelProps) {
+  const headingId = useId()
   const scrollRef = useRef<HTMLDivElement | null>(null)
   // Track whether the user is pinned to the bottom. We don't use
   // `behavior: 'smooth'` because chained smooth-scrolls fight rapid arrivals.
@@ -68,7 +72,7 @@ export function AuditLogPanel({ events, now, className }: AuditLogPanelProps) {
 
   return (
     <aside
-      aria-label="Session log"
+      aria-labelledby={headingId}
       className={cn(
         'flex h-full flex-col border-l border-border-subtle bg-bg-surface',
         className
@@ -76,7 +80,10 @@ export function AuditLogPanel({ events, now, className }: AuditLogPanelProps) {
       style={{ width: tokens.sizes.auditPanelWidth }}
       data-testid="audit-log-panel"
     >
-      <header className="border-b border-border-subtle px-4 py-3 text-sm font-medium text-text-primary">
+      <header
+        id={headingId}
+        className="border-b border-border-subtle px-4 py-3 text-sm font-medium text-text-primary"
+      >
         Session log
       </header>
       <div
@@ -90,8 +97,10 @@ export function AuditLogPanel({ events, now, className }: AuditLogPanelProps) {
           </p>
         ) : (
           <ul
+            role="log"
             aria-live="polite"
             aria-relevant="additions"
+            aria-labelledby={headingId}
             className="m-0 list-none p-0"
           >
             {events.map((e) => (

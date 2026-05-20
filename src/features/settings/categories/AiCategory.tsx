@@ -191,6 +191,17 @@ export function AiCategory() {
         screen. Nothing leaves your computer. Turn AI on to pick a model,
         benchmark it, and let StudyVis nudge you when you drift off-task.
       </p>
+      {/* V3-P7 — D5 discharge: surface the screen-recording behaviour and
+          the macOS-only Settings path before the user opts in. Phrased
+          plainly here so screen readers announce it as part of the section
+          intro; V3-P8's copy pass will refine the wording. */}
+      <p className="mb-3 text-sm text-text-secondary">
+        While the AI is sampling, your operating system's screen-recording
+        indicator stays on for the whole session. That's expected — it turns off
+        when you leave. On macOS, screen-recording access is granted and revoked
+        only in System Settings → Privacy &amp; Security → Screen Recording;
+        StudyVis can open it for you when needed.
+      </p>
 
       <SettingsRow
         label="Enable AI features"

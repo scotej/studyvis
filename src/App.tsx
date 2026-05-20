@@ -3,6 +3,7 @@ import { BrowserRouter, Route, Routes } from 'react-router'
 
 import { TitleBar } from '@/components/TitleBar'
 import { Toaster } from '@/components/ui/sonner'
+import { ApplyReduceMotion } from '@/design/reduce-motion'
 import { ThemeProvider } from '@/design/theme'
 import { PttListener } from '@/features/system'
 import { Home } from '@/routes/Home'
@@ -38,6 +39,7 @@ function ChromeAwareShell({ children }: { children: ReactNode }) {
 function App() {
   return (
     <ThemeProvider>
+      <ApplyReduceMotion />
       <PttListener />
       <BrowserRouter>
         <ChromeAwareShell>

@@ -83,6 +83,14 @@ const preview: Preview = {
         date: /Date$/i,
       },
     },
+    // V3-P7 — `@storybook/addon-a11y` axe-core integration. `test: 'error'`
+    // turns any violation into a `test-storybook` failure in CI; the panel
+    // in the dev Storybook UI shows them while developing. Element scope
+    // ('#storybook-root') keeps Storybook's own chrome out of the audit.
+    a11y: {
+      test: 'error',
+      element: '#storybook-root',
+    },
   },
   decorators: [withTheme],
 }

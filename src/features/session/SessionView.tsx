@@ -831,6 +831,11 @@ export function SessionView() {
       className="flex min-h-screen flex-col bg-bg-base text-text-primary"
       aria-label="Active session"
     >
+      {/* V3-P7 — Visually-hidden top-level heading so SR users have a clean
+          one-h1-per-route anchor. The visible UI is the video grid + audit
+          panel + footer; none of those would carry "the page title" on their
+          own. */}
+      <h1 className="sr-only">Studying with friends</h1>
       <div className="flex min-h-0 flex-1">
         <div className="flex-1 px-6 py-6">
           {mediaError ? (
