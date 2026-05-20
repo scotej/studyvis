@@ -4,6 +4,8 @@ import { toast } from 'sonner'
 import { ScreenCapturePermissionOverlay } from '@/components/ScreenCapturePermissionOverlay'
 import { SettingsRow, SettingsSection } from '@/components/SettingsRow'
 import { Button } from '@/components/ui/button'
+import { Label } from '@/components/ui/label'
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { Slider } from '@/components/ui/slider'
 import { Switch } from '@/components/ui/switch'
 import {
@@ -23,7 +25,11 @@ import {
   WARNING_THRESHOLD_MAX,
   WARNING_THRESHOLD_MIN,
 } from '@/features/ai'
-import { useSettingsStore } from '@/stores/settingsStore'
+import {
+  isCaptureDisplaysMode,
+  useSettingsStore,
+  type CaptureDisplaysMode,
+} from '@/stores/settingsStore'
 
 // V2-P9 — the master AI gate plus the tuning controls prior phases left as
 // read-only stubs. When the toggle is off the only thing rendered is the
@@ -42,6 +48,8 @@ export function AiCategory() {
   const setSampleIntervalSec = useSettingsStore((s) => s.setSampleIntervalSec)
   const debugLogEnabled = useSettingsStore((s) => s.values.debugLogEnabled)
   const setDebugLogEnabled = useSettingsStore((s) => s.setDebugLogEnabled)
+  const captureDisplays = useSettingsStore((s) => s.values.captureDisplays)
+  const setCaptureDisplays = useSettingsStore((s) => s.setCaptureDisplays)
 
   const activeModelId = useModelStore((s) => s.activeModelId)
   const measuredFloor = useModelStore((s) => {
@@ -286,6 +294,36 @@ export function AiCategory() {
                   {alertThreshold}
                 </span>
               </div>
+            }
+          />
+
+          <SettingsRow
+            label="Capture displays"
+            stack
+            help="All displays sends every monitor to the local AI as one image. Peers never see your screen."
+            control={
+              <RadioGroup
+                value={captureDisplays}
+                onValueChange={(value) => {
+                  if (isCaptureDisplaysMode(value)) {
+                    void setCaptureDisplays(value as CaptureDisplaysMode)
+                  }
+                }}
+                className="grid-cols-1 gap-3 sm:grid-flow-col sm:auto-cols-max sm:gap-6"
+                aria-label="Capture displays"
+              >
+                <div className="flex items-center gap-2">
+                  <RadioGroupItem
+                    value="primary"
+                    id="capture-displays-primary"
+                  />
+                  <Label htmlFor="capture-displays-primary">Primary only</Label>
+                </div>
+                <div className="flex items-center gap-2">
+                  <RadioGroupItem value="all" id="capture-displays-all" />
+                  <Label htmlFor="capture-displays-all">All displays</Label>
+                </div>
+              </RadioGroup>
             }
           />
 

@@ -42,6 +42,28 @@ export type EncodeJpegRequest = {
   sourceCrop?: SourceCrop
 }
 
+// V3-P4 — Multi-monitor composite encode. The pure layout (where each frame
+// lands on the output canvas) is computed by `computeCompositeLayout` in
+// composite.ts; this runtime hook is the side-effecting half that draws the
+// frames into a single canvas and returns one JPEG. Backgrounds outside the
+// drawn placements are left as the canvas default (transparent on
+// OffscreenCanvas, then rendered as black by the JPEG encoder).
+export type CompositePlacementInput = {
+  frame: CaptureFrame
+  // Where to draw this frame on the output canvas (top-left + dimensions).
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
+export type EncodeCompositeJpegRequest = {
+  placements: ReadonlyArray<CompositePlacementInput>
+  outputWidth: number
+  outputHeight: number
+  quality: number
+}
+
 export type CaptureRuntime = {
   // Pull a single frame off a live MediaStreamTrack. Implementations must
   // wait long enough for the underlying decoder to surface a non-black
@@ -54,6 +76,13 @@ export type CaptureRuntime = {
   disposeFrame: (frame: CaptureFrame) => void
   // Downscale + encode to JPEG, return base64 (no data: prefix).
   encodeJpegBase64: (req: EncodeJpegRequest) => Promise<string>
+  // V3-P4 — draw N frames into a single canvas at their pre-computed
+  // placements and encode the canvas as one JPEG (no data: prefix). Used by
+  // the multi-monitor sample-loop snapshot path; the single-display path
+  // still uses encodeJpegBase64.
+  encodeCompositeJpegBase64: (
+    req: EncodeCompositeJpegRequest
+  ) => Promise<string>
 }
 
 export class CaptureError extends Error {
@@ -242,6 +271,94 @@ async function defaultEncodeJpegBase64(
   return await blobToBase64(blob)
 }
 
+async function defaultEncodeCompositeJpegBase64(
+  req: EncodeCompositeJpegRequest
+): Promise<string> {
+  const { placements, outputWidth, outputHeight, quality } = req
+  if (outputWidth <= 0 || outputHeight <= 0) {
+    throw new CaptureError(
+      'encode_failed',
+      `composite output dimensions must be positive (got ${outputWidth}×${outputHeight})`
+    )
+  }
+  if (placements.length === 0) {
+    throw new CaptureError('encode_failed', 'composite has no placements')
+  }
+  const blob = await drawCompositeAndEncode(
+    placements,
+    outputWidth,
+    outputHeight,
+    quality
+  )
+  return await blobToBase64(blob)
+}
+
+async function drawCompositeAndEncode(
+  placements: ReadonlyArray<CompositePlacementInput>,
+  outputWidth: number,
+  outputHeight: number,
+  quality: number
+): Promise<Blob> {
+  const useOffscreen = typeof OffscreenCanvas !== 'undefined'
+  if (useOffscreen) {
+    const canvas = new OffscreenCanvas(outputWidth, outputHeight)
+    const ctx = canvas.getContext('2d')
+    if (!ctx) {
+      throw new CaptureError(
+        'encode_failed',
+        'OffscreenCanvas 2d context unavailable'
+      )
+    }
+    for (const p of placements) {
+      ctx.drawImage(
+        p.frame.bitmap,
+        0,
+        0,
+        p.frame.sourceWidth,
+        p.frame.sourceHeight,
+        p.x,
+        p.y,
+        p.width,
+        p.height
+      )
+    }
+    return await canvas.convertToBlob({ type: 'image/jpeg', quality })
+  }
+  const canvas = document.createElement('canvas')
+  canvas.width = outputWidth
+  canvas.height = outputHeight
+  const ctx = canvas.getContext('2d')
+  if (!ctx) {
+    throw new CaptureError('encode_failed', 'canvas 2d context unavailable')
+  }
+  for (const p of placements) {
+    ctx.drawImage(
+      p.frame.bitmap,
+      0,
+      0,
+      p.frame.sourceWidth,
+      p.frame.sourceHeight,
+      p.x,
+      p.y,
+      p.width,
+      p.height
+    )
+  }
+  return await new Promise<Blob>((resolve, reject) => {
+    canvas.toBlob(
+      (blob) => {
+        if (blob) resolve(blob)
+        else
+          reject(
+            new CaptureError('encode_failed', 'canvas.toBlob returned null')
+          )
+      },
+      'image/jpeg',
+      quality
+    )
+  })
+}
+
 async function drawAndEncode(
   frame: CaptureFrame,
   crop: SourceCrop,
@@ -327,6 +444,7 @@ const defaultRuntime: CaptureRuntime = {
   extractFrame: defaultExtractFrame,
   disposeFrame: defaultDisposeFrame,
   encodeJpegBase64: defaultEncodeJpegBase64,
+  encodeCompositeJpegBase64: defaultEncodeCompositeJpegBase64,
 }
 
 let activeRuntime: CaptureRuntime = defaultRuntime

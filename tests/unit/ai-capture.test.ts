@@ -87,6 +87,7 @@ function makeRuntimeStub(opts: {
       encodeCalls.push(req)
       return opts.base64
     },
+    encodeCompositeJpegBase64: async () => opts.base64,
   }
   return {
     runtime,
@@ -291,6 +292,7 @@ describe('captureScreen', () => {
       },
       disposeFrame: () => {},
       encodeJpegBase64: async () => '',
+      encodeCompositeJpegBase64: async () => '',
     }
     __setCaptureRuntime(failing)
     const track = makeFakeTrack({ width: 1920, height: 1080 })

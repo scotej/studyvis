@@ -10,6 +10,13 @@ import {
 
 export type ThemeMode = 'dark' | 'light' | 'auto'
 export type TurnPreference = 'auto' | 'always' | 'never'
+// V3-P4 — Multi-monitor capture toggle for the AI sample loop. `'primary'`
+// (default) preserves the V2 behavior: one long-lived getDisplayMedia stream,
+// one OS picker at session start. `'all'` enumerates connected displays at
+// boot, acquires a long-lived stream per display, and composites them into a
+// single image each tick. Setting only takes effect on the NEXT loop boot —
+// switching mid-session does not re-prompt or reshape an in-flight loop.
+export type CaptureDisplaysMode = 'primary' | 'all'
 
 export type SettingsValues = {
   theme: ThemeMode
@@ -40,6 +47,8 @@ export type SettingsValues = {
   // side and the Rust handler agree on the wire shape.
   pttFriendsAccelerator: string
   pttAiAccelerator: string
+  // V3-P4 multi-monitor capture toggle. See `CaptureDisplaysMode` above.
+  captureDisplays: CaptureDisplaysMode
 }
 
 export const SETTINGS_FILE = 'settings.json'
@@ -56,6 +65,7 @@ export const SETTINGS_KEY_ALERT_THRESHOLD = 'alert_threshold'
 export const SETTINGS_KEY_SAMPLE_INTERVAL = 'sample_interval_s'
 export const SETTINGS_KEY_PTT_FRIENDS_ACCELERATOR = 'ptt_friends_accelerator'
 export const SETTINGS_KEY_PTT_AI_ACCELERATOR = 'ptt_ai_accelerator'
+export const SETTINGS_KEY_CAPTURE_DISPLAYS = 'capture_displays'
 
 // Defaults match the V1 acceptance criteria + DESIGN-SYSTEM.md §8.5: dark
 // theme on, reduce-motion off, OS notification on for invites, minimize-to-
@@ -74,6 +84,7 @@ export const DEFAULT_SETTINGS: SettingsValues = {
   sampleIntervalSec: null,
   pttFriendsAccelerator: PTT_FRIENDS_DEFAULT_ACCELERATOR,
   pttAiAccelerator: PTT_AI_DEFAULT_ACCELERATOR,
+  captureDisplays: 'primary',
 }
 
 export type SettingsStatus = 'loading' | 'ready' | 'error'
@@ -108,6 +119,9 @@ type SettingsState = {
   ) => Promise<void>
   // Reset both accelerators to their DESIGN-SYSTEM §17 defaults.
   resetShortcutsToDefaults: () => Promise<void>
+  // V3-P4 — Persist the multi-monitor capture mode. Takes effect on the next
+  // sample-loop boot; in-flight loops are not reshaped.
+  setCaptureDisplays: (mode: CaptureDisplaysMode) => Promise<void>
 }
 
 export type StoreLike = {
@@ -218,6 +232,10 @@ export function isTurnPreference(v: unknown): v is TurnPreference {
   return v === 'auto' || v === 'always' || v === 'never'
 }
 
+export function isCaptureDisplaysMode(v: unknown): v is CaptureDisplaysMode {
+  return v === 'primary' || v === 'all'
+}
+
 function readBool(v: unknown, fallback: boolean): boolean {
   return typeof v === 'boolean' ? v : fallback
 }
@@ -243,6 +261,7 @@ export async function hydrateValuesFromStore(
     sampleInterval: await store.get(SETTINGS_KEY_SAMPLE_INTERVAL),
     pttFriends: await store.get(SETTINGS_KEY_PTT_FRIENDS_ACCELERATOR),
     pttAi: await store.get(SETTINGS_KEY_PTT_AI_ACCELERATOR),
+    captureDisplays: await store.get(SETTINGS_KEY_CAPTURE_DISPLAYS),
   }
 
   let theme: ThemeMode = isThemeMode(stored.theme)
@@ -303,6 +322,9 @@ export async function hydrateValuesFromStore(
         stored.pttAi,
         DEFAULT_SETTINGS.pttAiAccelerator
       ),
+      captureDisplays: isCaptureDisplaysMode(stored.captureDisplays)
+        ? stored.captureDisplays
+        : DEFAULT_SETTINGS.captureDisplays,
     },
     wroteMigration,
   }
@@ -509,5 +531,10 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     const setter = get().setShortcutAccelerator
     await setter('ptt-friends', PTT_FRIENDS_DEFAULT_ACCELERATOR)
     await setter('ptt-ai', PTT_AI_DEFAULT_ACCELERATOR)
+  },
+
+  setCaptureDisplays: async (mode) => {
+    set((s) => ({ values: { ...s.values, captureDisplays: mode } }))
+    await writeKey(set, SETTINGS_KEY_CAPTURE_DISPLAYS, mode)
   },
 }))

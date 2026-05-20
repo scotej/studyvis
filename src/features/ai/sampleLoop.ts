@@ -54,7 +54,13 @@ import {
   SCREEN_FRAME_MAX_WIDTH,
   SCREEN_FRAME_QUALITY,
 } from './captureScreen'
-import { CaptureError, fitWidth, getCaptureRuntime } from './captureShared'
+import {
+  CaptureError,
+  fitWidth,
+  getCaptureRuntime,
+  type CaptureFrame,
+} from './captureShared'
+import { COMPOSITE_MAX_WIDTH, computeCompositeLayout } from './composite'
 import { getDownloadRuntime } from './download'
 import { useFocusStore } from './focusStore'
 import { useModelStore } from './modelStore'
@@ -104,12 +110,23 @@ export type SampleLoopRuntime = {
   clearTimeout: (handle: unknown) => void
   fetch: typeof fetch
   captureFace: (track: MediaStreamTrack) => Promise<string>
-  // Acquire the long-lived screen MediaStream ONCE at boot. The default maps
+  // Acquire ONE long-lived screen MediaStream. V2-P9 contract: maps
   // getDisplayMedia rejections to CaptureError via the shared
   // `mapDisplayMediaError` so the screen_capture_denied latch still fires.
-  // Per-tick snapshots use `getCaptureRuntime().extractFrame` on the track
-  // this returns — no further acquires, so no per-tick OS picker.
+  // Per-tick snapshots use `getCaptureRuntime().extractFrame` on the
+  // returned track — no further acquires, so no per-tick OS picker.
+  //
+  // V3-P4: when `captureDisplays === 'all'`, boot() calls this once per
+  // enumerated display so each display gets its own long-lived stream. The
+  // OS picker fires once per call, but only at session start — never on
+  // a sample tick.
   acquireScreenStream: () => Promise<MediaStream>
+  // V3-P4 — how many displays Tauri reports for this device. The default
+  // reads `availableMonitors()` from @tauri-apps/api/window (no permission
+  // needed; it's window metadata). Outside Tauri (Storybook / Vitest) the
+  // default returns 1 so 'all displays' degrades to the single-stream path
+  // and the existing capture flow is unchanged.
+  enumerateDisplayCount: () => Promise<number>
   readBattery: () => Promise<BatteryInfo>
   // Resolved absolute paths for the active model. The default reads via the
   // Tauri `model_paths` command (V2-P2). Tests inject a stub.
@@ -158,6 +175,27 @@ const defaultRuntime: SampleLoopRuntime = {
       return await navigator.mediaDevices.getDisplayMedia({ video: true })
     } catch (err) {
       throw mapDisplayMediaError(err)
+    }
+  },
+  enumerateDisplayCount: async () => {
+    // Dynamic import keeps Tauri's window module off the Vitest + Storybook
+    // boot path; both fall through to a count of 1 and the existing single-
+    // stream capture flow is preserved.
+    if (
+      typeof window === 'undefined' ||
+      (!('__TAURI_INTERNALS__' in window) && !('__TAURI__' in window))
+    ) {
+      return 1
+    }
+    try {
+      const mod = await import('@tauri-apps/api/window')
+      const monitors = await mod.availableMonitors()
+      return Math.max(1, monitors.length)
+    } catch (err) {
+      // availableMonitors() can fail on platforms where the WebView hasn't
+      // yet bound the window plugin. The safe degradation is single-display.
+      console.warn('[sampleLoop] availableMonitors() failed:', err)
+      return 1
     }
   },
   readBattery: () => getBatteryRuntime().read(),
@@ -256,10 +294,12 @@ type InternalState = {
   modelFloorSec: number
   modelId: string | null
   ticks: number
-  // The long-lived screen MediaStream + its video track, acquired once in
-  // boot() and snapshotted per tick. Null until boot resolves the acquire.
-  screenStream: MediaStream | null
-  screenTrack: MediaStreamTrack | null
+  // The long-lived screen MediaStreams acquired in boot(). Empty until boot
+  // resolves. Length 1 in 'primary' mode; length N in 'all' mode when N
+  // displays were enumerated AND the OS granted every acquire. Tracks at
+  // matching indices feed the per-tick snapshot pipeline.
+  screenStreams: MediaStream[]
+  screenTracks: MediaStreamTrack[]
 }
 
 export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
@@ -276,8 +316,8 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
     modelFloorSec: FALLBACK_SAMPLE_INTERVAL_SEC,
     modelId: opts.modelId,
     ticks: 0,
-    screenStream: null,
-    screenTrack: null,
+    screenStreams: [],
+    screenTracks: [],
   }
 
   let tickHandle: unknown | null = null
@@ -315,15 +355,15 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
   }
 
   function disposeScreenStream(): void {
-    if (state.screenTrack) {
+    for (const track of state.screenTracks) {
       try {
-        state.screenTrack.removeEventListener('ended', onScreenTrackEnded)
+        track.removeEventListener('ended', onScreenTrackEnded)
       } catch {
         // best-effort
       }
     }
-    if (state.screenStream) {
-      for (const t of state.screenStream.getTracks()) {
+    for (const stream of state.screenStreams) {
+      for (const t of stream.getTracks()) {
         try {
           t.stop()
         } catch {
@@ -331,14 +371,16 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
         }
       }
     }
-    state.screenStream = null
-    state.screenTrack = null
+    state.screenStreams = []
+    state.screenTracks = []
   }
 
-  // Snapshot the long-lived screen track through the SAME pipeline
+  // Snapshot a single long-lived screen track through the SAME pipeline
   // captureScreen.ts uses internally (fitWidth + CaptureRuntime). No
   // getDisplayMedia here, so no per-tick OS picker.
-  async function snapshotScreen(track: MediaStreamTrack): Promise<string> {
+  async function snapshotSingleScreen(
+    track: MediaStreamTrack
+  ): Promise<string> {
     const cap = getCaptureRuntime()
     const frame = await cap.extractFrame(track)
     try {
@@ -362,6 +404,114 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
     } finally {
       cap.disposeFrame(frame)
     }
+  }
+
+  // V3-P4 — snapshot every long-lived screen track and composite them into a
+  // single horizontal-strip image at most COMPOSITE_MAX_WIDTH wide. No
+  // getDisplayMedia here either; the streams were acquired at boot.
+  async function snapshotAllScreens(
+    tracks: ReadonlyArray<MediaStreamTrack>
+  ): Promise<string> {
+    const cap = getCaptureRuntime()
+    const frames: CaptureFrame[] = []
+    try {
+      for (const track of tracks) {
+        frames.push(await cap.extractFrame(track))
+      }
+      const layout = computeCompositeLayout(
+        frames.map((f) => ({
+          sourceWidth: f.sourceWidth,
+          sourceHeight: f.sourceHeight,
+        })),
+        COMPOSITE_MAX_WIDTH
+      )
+      if (
+        layout.outputWidth === 0 ||
+        layout.outputHeight === 0 ||
+        layout.placements.length === 0
+      ) {
+        throw new CaptureError(
+          'frame_extraction_failed',
+          'composite frame had unusable dimensions'
+        )
+      }
+      return await cap.encodeCompositeJpegBase64({
+        placements: layout.placements.map((p, i) => ({
+          frame: frames[i]!,
+          x: p.x,
+          y: p.y,
+          width: p.width,
+          height: p.height,
+        })),
+        outputWidth: layout.outputWidth,
+        outputHeight: layout.outputHeight,
+        quality: SCREEN_FRAME_QUALITY,
+      })
+    } finally {
+      for (const f of frames) cap.disposeFrame(f)
+    }
+  }
+
+  // Release every screen stream past the primary one. Called when the user
+  // demotes from 'all' to 'primary' mid-session so the OS screen-recording
+  // indicator goes dark for the deselected displays right away — keeping
+  // those streams live would be a surprising privacy/perf cost. The 'ended'
+  // listener is removed BEFORE stop() so the explicit release doesn't latch
+  // captureDenied (only a real revoke from the OS should latch).
+  function releaseExtraScreenStreams(): void {
+    if (state.screenTracks.length <= 1) return
+    const extraTracks = state.screenTracks.slice(1)
+    const extraStreams = state.screenStreams.slice(1)
+    state.screenTracks = state.screenTracks.slice(0, 1)
+    state.screenStreams = state.screenStreams.slice(0, 1)
+    for (const track of extraTracks) {
+      try {
+        track.removeEventListener('ended', onScreenTrackEnded)
+      } catch {
+        // best-effort
+      }
+    }
+    for (const stream of extraStreams) {
+      for (const t of stream.getTracks()) {
+        try {
+          t.stop()
+        } catch {
+          // already-stopped tracks throw on some platforms; ignore
+        }
+      }
+    }
+  }
+
+  // Dispatch per tick. Reads `captureDisplays` from settings on every call so
+  // an all→primary mid-session switch demotes immediately: this tick stops
+  // compositing AND releases the streams the model no longer needs, so the
+  // OS recording indicator goes dark for the deselected displays. A
+  // primary→all switch can't grow the stream set mid-session without a new
+  // OS prompt, so it takes effect on the next loop boot — consistent with
+  // V2-P9's no-prompt-per-tick contract.
+  async function snapshotScreens(): Promise<string> {
+    const mode = useSettingsStore.getState().values.captureDisplays
+    if (mode === 'primary') {
+      releaseExtraScreenStreams()
+    }
+    const tracks = state.screenTracks
+    if (tracks.length === 0) {
+      throw new CaptureError(
+        'screen_capture_no_video',
+        'no live screen tracks to snapshot'
+      )
+    }
+    const liveTracks = tracks.filter((t) => t.readyState !== 'ended')
+    if (liveTracks.length === 0) {
+      throw new CaptureError(
+        'screen_capture_no_video',
+        'all screen tracks have ended'
+      )
+    }
+    if (mode === 'all' && liveTracks.length > 1) {
+      return await snapshotAllScreens(liveTracks)
+    }
+    return await snapshotSingleScreen(liveTracks[0]!)
   }
 
   function schedule(delayMs: number): void {
@@ -460,10 +610,12 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
       return
     }
 
-    const screenTrack = state.screenTrack
-    if (!screenTrack || screenTrack.readyState === 'ended') {
-      // boot() acquires this; if it's gone the track ended (handled by
-      // onScreenTrackEnded latching captureDenied) — skip defensively.
+    if (
+      state.screenTracks.length === 0 ||
+      state.screenTracks.every((t) => t.readyState === 'ended')
+    ) {
+      // boot() acquired these; if they're all gone the 'ended' handler has
+      // already latched captureDenied. Skip defensively.
       schedule(nextDelayMs())
       return
     }
@@ -477,7 +629,7 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
     try {
       const [face, screen] = await Promise.all([
         runtime.captureFace(track),
-        snapshotScreen(screenTrack),
+        snapshotScreens(),
       ])
       const port = sidecar.port
       const body = buildChatRequest({
@@ -636,15 +788,34 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
       return
     }
 
-    // Acquire the screen stream ONCE here. This is the single getDisplayMedia
-    // call for the whole session, so the OS picker shows at most once (not
-    // every tick). Denial latches captureDenied + surfaces onCaptureDenied so
-    // SessionView mounts the permission overlay; other capture errors surface
-    // via onCaptureError. Either way the loop tears down — a fresh start()
-    // after re-grant is required to resume.
-    let screenStream: MediaStream
+    // V3-P4 — decide how many screen streams to acquire BEFORE the first
+    // getDisplayMedia call. Reading the setting once here (not per tick) is
+    // why "All displays" applies on the next loop boot rather than mid-
+    // session — there is no way to add a long-lived stream later without a
+    // new OS picker, which V2-P9 explicitly forbids mid-tick.
+    const captureMode = useSettingsStore.getState().values.captureDisplays
+    let acquireTargetCount = 1
+    if (captureMode === 'all') {
+      try {
+        const reported = await runtime.enumerateDisplayCount()
+        if (Number.isFinite(reported) && reported > 1) {
+          acquireTargetCount = Math.floor(reported)
+        }
+      } catch (err) {
+        // Enumeration failure isn't a session-ending event — fall back to
+        // single-display capture (the V2 behavior).
+        console.warn('[sampleLoop] enumerateDisplayCount() failed:', err)
+      }
+    }
+
+    // The first acquire is the V2-P9 contract: denial latches captureDenied
+    // and surfaces onCaptureDenied so SessionView mounts the permission
+    // overlay. Subsequent acquires (multi-monitor only) treat denial as a
+    // soft fallback — we keep whatever displays the user already granted,
+    // and the model just sees fewer screens.
+    let firstStream: MediaStream
     try {
-      screenStream = await runtime.acquireScreenStream()
+      firstStream = await runtime.acquireScreenStream()
     } catch (err) {
       if (err instanceof CaptureError && err.code === 'screen_capture_denied') {
         state.captureDenied = true
@@ -668,7 +839,7 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
       return
     }
     if (state.stopped) {
-      for (const t of screenStream.getTracks()) {
+      for (const t of firstStream.getTracks()) {
         try {
           t.stop()
         } catch {
@@ -677,9 +848,9 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
       }
       return
     }
-    const screenTrack = screenStream.getVideoTracks()[0]
-    if (!screenTrack) {
-      for (const t of screenStream.getTracks()) {
+    const firstTrack = firstStream.getVideoTracks()[0]
+    if (!firstTrack) {
+      for (const t of firstStream.getTracks()) {
         try {
           t.stop()
         } catch {
@@ -696,9 +867,62 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
       teardownInternal()
       return
     }
-    state.screenStream = screenStream
-    state.screenTrack = screenTrack
-    screenTrack.addEventListener('ended', onScreenTrackEnded)
+    state.screenStreams.push(firstStream)
+    state.screenTracks.push(firstTrack)
+    firstTrack.addEventListener('ended', onScreenTrackEnded)
+
+    // Acquire any additional displays for 'all' mode. Each call shows the OS
+    // picker once; the user picks the next monitor. If they cancel any of
+    // these prompts (or the OS errors), we stop asking and keep whatever
+    // streams the user already granted — no error. The session then composites
+    // however many displays it ended up with (one = the single-display path).
+    for (let i = 1; i < acquireTargetCount; i += 1) {
+      if (state.stopped) return
+      try {
+        const stream = await runtime.acquireScreenStream()
+        const track = stream.getVideoTracks()[0]
+        if (!track) {
+          // Defensive — degraded into a no-track stream. Release and stop
+          // acquiring further; the run continues with whatever we have.
+          for (const t of stream.getTracks()) {
+            try {
+              t.stop()
+            } catch {
+              // ignore
+            }
+          }
+          break
+        }
+        if (state.stopped) {
+          for (const t of stream.getTracks()) {
+            try {
+              t.stop()
+            } catch {
+              // ignore
+            }
+          }
+          return
+        }
+        state.screenStreams.push(stream)
+        state.screenTracks.push(track)
+        track.addEventListener('ended', onScreenTrackEnded)
+      } catch (err) {
+        // Soft fallback: a cancelled picker or any other capture error on
+        // the extra-display acquires drops us back to single-display for
+        // this session. We do NOT latch captureDenied — the primary stream
+        // is still live and the session continues.
+        if (
+          !(err instanceof CaptureError) ||
+          err.code !== 'screen_capture_denied'
+        ) {
+          console.warn(
+            '[sampleLoop] additional display acquire failed:',
+            err instanceof Error ? err.message : err
+          )
+        }
+        break
+      }
+    }
 
     // Seed the battery cache before scheduling — first tick should use a
     // real reading, not the constructor default.
