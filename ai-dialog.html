@@ -5,6 +5,32 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="color-scheme" content="dark light" />
     <title>StudyVis · Ask the AI</title>
+    <script>
+      // Mirror of the boot script in index.html — keep the AI dialog window
+      // in sync with the main window's theme decision before first paint.
+      // Missing cache falls back to 'dark' to match DEFAULT_SETTINGS.theme;
+      // change both together if the app default ever moves.
+      ;(function () {
+        try {
+          var stored = window.localStorage.getItem('studyvis.theme')
+          var mode =
+            stored === 'light' || stored === 'dark' || stored === 'auto'
+              ? stored
+              : 'dark'
+          var systemLight =
+            window.matchMedia &&
+            window.matchMedia('(prefers-color-scheme: light)').matches
+          var resolved =
+            mode === 'auto' ? (systemLight ? 'light' : 'dark') : mode
+          if (resolved === 'light') {
+            document.documentElement.classList.add('light')
+          }
+          document.documentElement.dataset.theme = resolved
+        } catch (_e) {
+          // Fall through to CSS default; React will reconcile after mount.
+        }
+      })()
+    </script>
     <style>
       html,
       body {

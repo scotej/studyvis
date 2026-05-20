@@ -43,14 +43,14 @@ export const tokens = {
     text: {
       primary:   '#F0EBE2', // body, headings, important UI labels
       secondary: '#B0A99C', // captions, helper text, timestamps
-      muted:     '#7D766A', // placeholder, disabled, low-priority
+      muted:     '#9A8E80', // placeholder, disabled, low-priority (V3-P5: bumped from #7D766A to clear WCAG AA on every dark surface)
       inverse:   '#100D08', // text on accent-filled buttons
     },
     accent: {
       default: '#F2B05A',   // primary actions, focused outlines, brand accents
       hover:   '#F8C079',
       active:  '#D9974A',
-      muted:   '#7A5C32',   // accent backgrounds at low opacity
+      muted:   '#A07043',   // accent pill fill (ModelPicker "Gated"); V3-P5 lightened from #7A5C32 to clear inverse-text contrast
       ring:    '#F2B05A66', // 40% alpha — focus ring
     },
     status: {
@@ -167,7 +167,9 @@ export const tokens = {
 export type Tokens = typeof tokens
 ```
 
-### Light theme (V1 ships toggle, default off)
+### Light theme
+
+Same hues as dark; lightness/saturation moved so every text/background pairing clears WCAG AA on the warm-honey canvas. Verified by `scripts/check-contrast.ts` over the pair inventory.
 
 ```ts
 export const lightTokens: Tokens = {
@@ -188,12 +190,36 @@ export const lightTokens: Tokens = {
     text: {
       primary:   '#1F1B12',
       secondary: '#5C5547',
-      muted:     '#857C6A',
+      muted:     '#665F50', // darkened from #857C6A to clear AA on every light surface
       inverse:   '#FFFDF8',
     },
-    // accent + status: same hues, slightly higher saturation for light bg contrast
-    accent: { ...tokens.color.accent, default: '#A8691E', hover: '#945A1A' },
-    status: { ...tokens.color.status, focused: '#5C8A4B', warning: '#9A7B1F', alerted: '#B5564B', online: '#5C8A4B' },
+    accent: {
+      ...tokens.color.accent,
+      default: '#8C5215',   // darkened so amber-pill + white text and the accent/15 chip both clear 4.5:1
+      hover:   '#774511',
+      active:  '#683C0E',   // explicit override — inherited dark #D9974A is too light for inverse text on light
+      muted:   '#7A5C32',   // explicit override — keep light's inverse text legible after dark muted lightened
+      ring:    '#8C521566', // light accent at 40% alpha; the dark ring color is washed out over light
+    },
+    status: {
+      ...tokens.color.status,
+      focused: '#477036',   // each darkened until ≥4.5:1 as text on bg-surface
+      warning: '#7D6314',
+      alerted: '#A24238',
+      online:  '#477036',
+    },
+    overlay: {
+      ...tokens.color.overlay,
+      glass: '#FFFDF8CC',   // explicit override — dark glass band on VideoTile figcaption is muddy under light
+    },
+  },
+  shadow: {
+    ...tokens.shadow,
+    // Warm-canvas-tinted shadows at low alpha. Dark theme shadows (rgba(0,0,0,…))
+    // look muddy on near-white surfaces.
+    sm: '0 1px 2px rgba(43, 35, 23, 0.10)',
+    md: '0 4px 12px rgba(43, 35, 23, 0.12)',
+    lg: '0 12px 32px rgba(43, 35, 23, 0.18)',
   },
 }
 ```

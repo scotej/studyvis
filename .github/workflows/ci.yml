@@ -44,6 +44,9 @@ jobs:
       - name: Token enforcement
         run: npm run check-tokens
 
+      - name: Contrast audit (WCAG AA over token pairs, both themes)
+        run: npm run check-contrast
+
   rust:
     name: Rust
     runs-on: macos-latest

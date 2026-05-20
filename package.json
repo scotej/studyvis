@@ -10,6 +10,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "check-tokens": "tsx scripts/check-tokens.ts",
+    "check-contrast": "tsx scripts/check-contrast.ts",
     "preview": "vite preview",
     "tauri": "tauri",
     "format": "prettier --write .",

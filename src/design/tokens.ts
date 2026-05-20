@@ -14,14 +14,21 @@ export const tokens = {
     text: {
       primary: '#F0EBE2',
       secondary: '#B0A99C',
-      muted: '#7D766A',
+      // Was #7D766A — fails WCAG AA (3.45:1 on bg-raised). Bumped a hair
+      // lighter so timestamps, the kbd hint, and BipBackupPanel indices
+      // clear 4.5:1 on every surface they sit on. Cleared by check-contrast.
+      muted: '#9A8E80',
       inverse: '#100D08',
     },
     accent: {
       default: '#F2B05A',
       hover: '#F8C079',
       active: '#D9974A',
-      muted: '#7A5C32',
+      // Was #7A5C32 — too dark to carry text-inverse at 4.5:1
+      // (the ModelPicker "Gated" pill is `bg-accent-muted text-text-inverse`).
+      // Light theme explicitly re-pins the original darker value (see
+      // lightTokens) so the inverted text-inverse there stays legible.
+      muted: '#A07043',
       ring: '#F2B05A66',
     },
     status: {
@@ -141,6 +148,12 @@ export const tokens = {
 
 export type Tokens = typeof tokens
 
+// Light theme — first-class, not a fallback. Every text/background pairing
+// here clears WCAG AA (verified by scripts/check-contrast.ts in both themes).
+// Same hues as dark; lightness/saturation moved so the warm-honey palette
+// still reads warm on a light canvas. Token shape mirrors :root.light in
+// src/design/index.css (the runtime mechanism is CSS variables; this map is
+// the JS-side source of truth for documentation and Storybook).
 export const lightTokens: Tokens = {
   ...tokens,
   color: {
@@ -159,16 +172,56 @@ export const lightTokens: Tokens = {
     text: {
       primary: '#1F1B12',
       secondary: '#5C5547',
-      muted: '#857C6A',
+      // Darkened from #857C6A — original failed AA on every light surface.
+      muted: '#665F50',
       inverse: '#FFFDF8',
     },
-    accent: { ...tokens.color.accent, default: '#A8691E', hover: '#945A1A' },
+    accent: {
+      ...tokens.color.accent,
+      // Darkened from #A8691E so both the amber-pill + inverse-white text
+      // pairing AND the `accent/15` tinted chip with `text-accent-default`
+      // (AuditLogRow accent tone, Report event row) clear 4.5:1 on a light
+      // canvas. Same hue, just turned down.
+      default: '#8C5215',
+      // Hover is one step darker than default (pressed-into-surface read).
+      hover: '#774511',
+      // Was inherited from dark (#D9974A) — far too light to carry inverse
+      // text on a light canvas. Pinned darker than hover so the pressed
+      // state still reads as the most-committed step.
+      active: '#683C0E',
+      // Re-pinned: dark `accent.muted` had to lighten to clear AA on dark
+      // theme. Light theme needs the original darker brown so light
+      // text-inverse stays legible on the "Gated" pill.
+      muted: '#7A5C32',
+      // Light accent at 40% alpha — the dark ring color (#F2B05A66) is
+      // washed out over a light surface.
+      ring: '#8C521566',
+    },
     status: {
       ...tokens.color.status,
-      focused: '#5C8A4B',
-      warning: '#9A7B1F',
-      alerted: '#B5564B',
-      online: '#5C8A4B',
+      // Each darkened until ≥4.5:1 as text on bg-surface (the worst case
+      // for the audit-row + report event chips). Same hue families.
+      focused: '#477036',
+      warning: '#7D6314',
+      alerted: '#A24238',
+      online: '#477036',
     },
+    overlay: {
+      ...tokens.color.overlay,
+      // Was inherited from dark (#211A11CC) — dark frosted band on the
+      // VideoTile figcaption looked grimy under a light canvas. Light glass
+      // at 80% alpha keeps the caption legible whether the video is dark or
+      // (when the camera is off) the sunk surface shows through.
+      glass: '#FFFDF8CC',
+    },
+  },
+  shadow: {
+    ...tokens.shadow,
+    // Warm-canvas-tinted shadows at low alpha. Dark theme shadows
+    // (rgba(0,0,0,0.30+)) look muddy on a near-white surface — these are
+    // softened and tinted to match the warm palette without hue drift.
+    sm: '0 1px 2px rgba(43, 35, 23, 0.10)',
+    md: '0 4px 12px rgba(43, 35, 23, 0.12)',
+    lg: '0 12px 32px rgba(43, 35, 23, 0.18)',
   },
 }

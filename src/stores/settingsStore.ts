@@ -52,7 +52,14 @@ export type SettingsValues = {
 }
 
 export const SETTINGS_FILE = 'settings.json'
-export const LEGACY_THEME_LOCALSTORAGE_KEY = 'studyvis.theme'
+// `studyvis.theme` was originally the V1 storage key (migrated into the Tauri
+// store at V1-P11). V3-P5 keeps the key alive as a write-through boot cache
+// so the inline script in index.html can resolve the theme synchronously
+// before first paint, avoiding a FOUC of the dark canvas under light/auto.
+export const THEME_LOCALSTORAGE_KEY = 'studyvis.theme'
+// Backwards-compat alias for the migration code path. New code should import
+// THEME_LOCALSTORAGE_KEY directly.
+export const LEGACY_THEME_LOCALSTORAGE_KEY = THEME_LOCALSTORAGE_KEY
 export const SETTINGS_KEY_THEME = 'theme'
 export const SETTINGS_KEY_REDUCE_MOTION = 'reduce_motion'
 export const SETTINGS_KEY_INVITE_NOTIFY = 'incoming_invite_notification_enabled'
@@ -177,7 +184,7 @@ function isTauriRuntime(): boolean {
 function readLegacyThemeFromLocalStorage(): ThemeMode | null {
   if (typeof window === 'undefined') return null
   try {
-    const v = window.localStorage.getItem(LEGACY_THEME_LOCALSTORAGE_KEY)
+    const v = window.localStorage.getItem(THEME_LOCALSTORAGE_KEY)
     if (v === 'dark' || v === 'light' || v === 'auto') return v
   } catch {
     // localStorage may be unavailable (private mode, sandboxed iframes).
@@ -186,13 +193,27 @@ function readLegacyThemeFromLocalStorage(): ThemeMode | null {
   return null
 }
 
+// V3-P5: no longer called by the migration path — localStorage now also
+// serves as the boot-time theme cache (read synchronously by the inline
+// script in index.html), so clearing it would re-introduce a FOUC on the
+// next launch. Kept for the dep-injection seam used by existing tests.
 function clearLegacyThemeInLocalStorage(): void {
   if (typeof window === 'undefined') return
   try {
-    window.localStorage.removeItem(LEGACY_THEME_LOCALSTORAGE_KEY)
+    window.localStorage.removeItem(THEME_LOCALSTORAGE_KEY)
   } catch {
-    // Same fallthrough as the read path; nothing to do if localStorage is
-    // gone. The next boot will look one more time and find nothing.
+    // No-op: same fallthrough as the read path.
+  }
+}
+
+function writeThemeBootCache(mode: ThemeMode): void {
+  if (typeof window === 'undefined') return
+  try {
+    window.localStorage.setItem(THEME_LOCALSTORAGE_KEY, mode)
+  } catch {
+    // localStorage may be unavailable — boot cache is best-effort. The
+    // persistent Tauri store is still the source of truth; the next boot
+    // just won't get the pre-paint hint.
   }
 }
 
@@ -269,16 +290,18 @@ export async function hydrateValuesFromStore(
     : DEFAULT_SETTINGS.theme
   let wroteMigration = false
 
-  // The legacy localStorage key is consulted exactly once — when the
-  // persistent store has no theme value yet. After folding it in, the legacy
-  // key is cleared so subsequent boots short-circuit.
+  // The localStorage key is consulted on hydration when the persistent
+  // Tauri store has no theme value — typically a fresh install with a V1
+  // history, or now also when the boot cache disagrees with the store.
+  // localStorage is left intact (V3-P5): it doubles as the pre-paint cache
+  // for the inline script in index.html, and clearing it would re-introduce
+  // a FOUC on the next launch.
   if (!isThemeMode(stored.theme)) {
     const legacy = migrator.readLegacyTheme()
     if (legacy) {
       theme = legacy
       await store.set(SETTINGS_KEY_THEME, legacy)
       await store.save()
-      migrator.clearLegacyTheme()
       wroteMigration = true
     }
   }
@@ -405,6 +428,10 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
         activeDeps.migrator
       )
       set({ status: 'ready', values, error: null })
+      // Keep the boot cache in sync with the authoritative Tauri store value.
+      // Idempotent — covers the transition launch for existing installs that
+      // never re-picked their theme after V3-P5 landed.
+      writeThemeBootCache(values.theme)
       // Push the minimize-to-tray flag to Rust so the close-to-tray path
       // honors the user's saved preference even before the user opens
       // settings.
@@ -435,6 +462,10 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
 
   setTheme: async (mode) => {
     set((s) => ({ values: { ...s.values, theme: mode } }))
+    // Write-through to the localStorage boot cache so the next launch's
+    // inline script (index.html) applies the right token map before first
+    // paint. Synchronous; fire-and-forget the Tauri-store write after.
+    writeThemeBootCache(mode)
     await writeKey(set, SETTINGS_KEY_THEME, mode)
   },
 

@@ -78,7 +78,11 @@ describe('hydrateValuesFromStore — V1-P11 settings migration', () => {
     expect(migrator.clearLegacyTheme).not.toHaveBeenCalled()
   })
 
-  test('folds legacy localStorage theme into the store and clears it', async () => {
+  test('folds the localStorage theme into the store and leaves the cache intact', async () => {
+    // V3-P5: localStorage now doubles as the pre-paint boot cache the inline
+    // script in index.html reads to avoid a FOUC of the dark canvas. The
+    // migration copies the value into the Tauri store but no longer clears
+    // localStorage — the cache must survive the round trip.
     const store = fakeStore({})
     const migrator = makeMigrator('auto')
     const { values, wroteMigration } = await hydrateValuesFromStore(
@@ -90,8 +94,8 @@ describe('hydrateValuesFromStore — V1-P11 settings migration', () => {
     expect(store.__dump.theme).toBe('auto')
     expect(store.__saveCount).toBeGreaterThan(0)
     expect(migrator.readLegacyTheme).toHaveBeenCalledTimes(1)
-    expect(migrator.clearLegacyTheme).toHaveBeenCalledTimes(1)
-    expect(migrator.__cleared).toBe(true)
+    expect(migrator.clearLegacyTheme).not.toHaveBeenCalled()
+    expect(migrator.__cleared).toBe(false)
   })
 
   test('falls back to default theme when neither store nor legacy has a value', async () => {
