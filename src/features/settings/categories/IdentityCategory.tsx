@@ -6,6 +6,7 @@ import { SettingsRow, SettingsSection } from '@/components/SettingsRow'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { useIdentity } from '@/features/identity'
+import { strings } from '@/strings'
 
 export function IdentityCategory() {
   const { identity, status, actions } = useIdentity()
@@ -13,6 +14,7 @@ export function IdentityCategory() {
   const [submitting, setSubmitting] = useState(false)
   const [copied, setCopied] = useState(false)
   const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const copy = strings.settings.identity
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- syncing local form state to async-loaded identity; the rule is aggressive on this hydrate-once pattern (same suppression as useIdentity.refresh).
@@ -31,15 +33,15 @@ export function IdentityCategory() {
     setSubmitting(true)
     try {
       await actions.setDisplayName(trimmed)
-      toast.success('Name saved.')
+      toast.success(copy.displayName.savedToast)
     } catch (err) {
       const message =
-        err instanceof Error ? err.message : "Couldn't save your name."
+        err instanceof Error ? err.message : copy.displayName.saveError
       toast.error(message)
     } finally {
       setSubmitting(false)
     }
-  }, [name, identity?.display_name, actions])
+  }, [name, identity?.display_name, actions, copy.displayName])
 
   const handleCopy = useCallback(async () => {
     if (!identity) return
@@ -49,7 +51,7 @@ export function IdentityCategory() {
       if (copyTimer.current !== null) clearTimeout(copyTimer.current)
       copyTimer.current = setTimeout(() => setCopied(false), 1500)
     } catch {
-      toast.error("Couldn't copy to clipboard.")
+      toast.error(strings.common.errors.copyToClipboard)
     }
   }, [identity])
 
@@ -57,10 +59,10 @@ export function IdentityCategory() {
   const canSave = dirty && name.trim().length > 0 && !submitting
 
   return (
-    <SettingsSection heading="Identity">
+    <SettingsSection heading={copy.heading}>
       <SettingsRow
-        label="Display name"
-        help="Friends see this name next to your tile. You can change it any time."
+        label={copy.displayName.label}
+        help={copy.displayName.help}
         stack
         control={
           <form
@@ -73,11 +75,11 @@ export function IdentityCategory() {
             <Input
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="Your name"
+              placeholder={copy.displayName.placeholder}
               disabled={status !== 'ready' || submitting}
               maxLength={64}
               className="max-w-sm"
-              aria-label="Display name"
+              aria-label={copy.displayName.ariaLabel}
             />
             <Button
               type="submit"
@@ -86,14 +88,14 @@ export function IdentityCategory() {
               disabled={!canSave}
               aria-disabled={!canSave}
             >
-              Save
+              {copy.displayName.saveCta}
             </Button>
           </form>
         }
       />
       <SettingsRow
-        label="Public key"
-        help="Your pseudonymous identity. Friends recognize you by this key + name."
+        label={copy.publicKey.label}
+        help={copy.publicKey.help}
         stack
         control={
           <div className="flex items-center gap-2">
@@ -106,7 +108,7 @@ export function IdentityCategory() {
               size="sm"
               onClick={() => void handleCopy()}
               disabled={!identity}
-              aria-label="Copy public key"
+              aria-label={copy.publicKey.copyAriaLabel}
             >
               {copied ? <CheckIcon /> : <CopyIcon />}
             </Button>
@@ -114,8 +116,8 @@ export function IdentityCategory() {
         }
       />
       <SettingsRow
-        label="Recovery phrase"
-        help="Your 24-word backup is shown once during setup and never saved here. Keep the original safe. It's the only way to recover this identity, by re-deriving it on a fresh install."
+        label={copy.recoveryPhrase.label}
+        help={copy.recoveryPhrase.help}
         disabled
       />
     </SettingsSection>

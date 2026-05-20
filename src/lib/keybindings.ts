@@ -1,3 +1,5 @@
+import { strings } from '@/strings'
+
 // V3-P3 — combo serialization, display, validation, and the per-platform
 // reserved-combo denylist for the Settings → Shortcuts rebind flow.
 //
@@ -382,25 +384,24 @@ export function validateCombo(
   return null
 }
 
-const ACTION_LABEL: Record<ShortcutAction, string> = {
-  'ptt-friends': 'Push to talk',
-  'ptt-ai': 'Talk to AI',
-}
-
 export function describeConflict(
   combo: Combo,
   reason: ConflictReason,
   platform: Platform
 ): string {
   const inline = comboToInlineDisplay(combo, platform)
+  const conflicts = strings.keybindings.conflicts
   switch (reason.kind) {
     case 'modifier_only':
-      return 'Press a key with the modifier, not just the modifier.'
+      return conflicts.modifierOnly
     case 'no_modifier':
-      return 'Add Ctrl, Cmd, or Alt. A bare key would fire while typing.'
+      return conflicts.noModifier
     case 'self_conflict':
-      return `${inline} is already bound to ${ACTION_LABEL[reason.otherAction]}. Pick another.`
+      return conflicts.selfConflict(
+        inline,
+        strings.keybindings.actionLabels[reason.otherAction]
+      )
     case 'reserved':
-      return `${inline} is reserved by the system. Pick another.`
+      return conflicts.reserved(inline)
   }
 }

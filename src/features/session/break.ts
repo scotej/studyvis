@@ -26,6 +26,7 @@
 
 import { useBreakStore } from '@/features/ai/breakStore'
 import type { AuditEventDetail, AuditEventKind } from '@/lib/audit-types'
+import { strings } from '@/strings'
 
 export const MIN_BREAK_INTERVAL_MS = 25 * 60 * 1000
 export const MAX_BREAK_DURATION_SEC = 10 * 60
@@ -78,13 +79,14 @@ export function evaluateBreakRules(
   input: RequestBreakInput,
   state: BreakRuleState
 ): BreakVerdict {
+  const reasons = strings.ai.breakReasons
   if (state.onBreak) {
-    return { verdict: 'denied', reason: "you're already on a break." }
+    return { verdict: 'denied', reason: reasons.alreadyOnBreak }
   }
   if (state.breaksThisSession >= MAX_BREAKS_PER_SESSION) {
     return {
       verdict: 'denied',
-      reason: `you've already taken ${MAX_BREAKS_PER_SESSION} breaks this session.`,
+      reason: reasons.quotaExceeded(MAX_BREAKS_PER_SESSION),
     }
   }
   if (state.lastBreakEndedAt !== null) {
@@ -93,10 +95,7 @@ export function evaluateBreakRules(
       const remainingMin = Math.ceil(
         (MIN_BREAK_INTERVAL_MS - elapsedMs) / 60_000
       )
-      return {
-        verdict: 'denied',
-        reason: `your last break was under 25 minutes ago. Try again in ${remainingMin} min.`,
-      }
+      return { verdict: 'denied', reason: reasons.cooldown(remainingMin) }
     }
   }
   if (
@@ -105,7 +104,7 @@ export function evaluateBreakRules(
   ) {
     return {
       verdict: 'denied',
-      reason: `breaks need to be at least ${MIN_BREAK_DURATION_SEC} seconds.`,
+      reason: reasons.tooShort(MIN_BREAK_DURATION_SEC),
     }
   }
   // Clamp to cap. We never deny purely for "too long" — the AI may have
@@ -119,13 +118,13 @@ export function evaluateBreakRules(
   if (input.aiRecommendation === 'deny') {
     return {
       verdict: 'denied',
-      reason: input.aiReasoning || 'the assistant recommended against it.',
+      reason: input.aiReasoning || reasons.aiDeniedFallback,
     }
   }
   const displayDuration = formatBreakDuration(clamped)
   const reason = wasCapped
-    ? `approved · ${displayDuration} (capped to the ${MAX_BREAK_DURATION_SEC / 60}-min max).`
-    : `approved · ${displayDuration}.`
+    ? reasons.approvedCapped(displayDuration, MAX_BREAK_DURATION_SEC / 60)
+    : reasons.approved(displayDuration)
   return { verdict: 'approved', durationSec: clamped, reason }
 }
 

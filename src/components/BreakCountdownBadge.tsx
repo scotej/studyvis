@@ -3,6 +3,7 @@ import { Coffee } from 'lucide-react'
 
 import { tokens } from '@/design/tokens'
 import { cn } from '@/lib/utils'
+import { strings } from '@/strings'
 
 export type BreakCountdownBadgeProps = {
   // Wall-clock ms epoch the break is scheduled to end. Null suppresses
@@ -45,7 +46,7 @@ export function BreakCountdownBadge({
     <div
       role="status"
       aria-live="polite"
-      aria-label="Break countdown"
+      aria-label={strings.session.badges.breakAriaLabel}
       data-testid="break-countdown-badge"
       data-tick={tick}
       style={{ zIndex: tokens.zIndex.toast }}
@@ -60,9 +61,11 @@ export function BreakCountdownBadge({
         className="size-4 shrink-0 text-status-warning"
       />
       <div className="flex flex-col">
-        <span className="font-medium text-text-primary">On a break</span>
+        <span className="font-medium text-text-primary">
+          {strings.session.badges.breakTitle}
+        </span>
         <span className="font-mono tabular-nums text-text-secondary">
-          {label} remaining
+          {strings.session.badges.breakRemaining(label)}
         </span>
       </div>
     </div>

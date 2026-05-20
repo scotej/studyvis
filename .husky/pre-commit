@@ -1,4 +1,5 @@
 npm run lint
 npm run check-tokens
+npm run check-strings
 npm run format:check
 npm exec tsc -- --noEmit -p tsconfig.app.json

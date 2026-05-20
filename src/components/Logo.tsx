@@ -1,4 +1,5 @@
 import { cn } from '@/lib/utils'
+import { strings } from '@/strings'
 
 const SIZES = {
   sm: 24,
@@ -28,7 +29,7 @@ export function Logo({
   return (
     <svg
       role="img"
-      aria-label="studyvis"
+      aria-label={strings.chrome.logoAriaLabel}
       width={px}
       height={px}
       viewBox={`0 0 ${px} ${px}`}

@@ -1,6 +1,7 @@
 import { useCallback, useState } from 'react'
 
 import { useIdentity } from '@/features/identity'
+import { strings } from '@/strings'
 
 import { AddFriendStep } from './AddFriendStep'
 import { DisplayNameStep } from './DisplayNameStep'
@@ -68,7 +69,9 @@ export function Onboarding({ onComplete }: OnboardingProps) {
         advance()
       } catch (err) {
         setNameError(
-          err instanceof Error ? err.message : "Couldn't save your name."
+          err instanceof Error
+            ? err.message
+            : strings.onboarding.displayName.saveErrorFallback
         )
       } finally {
         setNameSubmitting(false)
@@ -86,7 +89,7 @@ export function Onboarding({ onComplete }: OnboardingProps) {
         className="flex min-h-screen items-center justify-center bg-bg-base text-text-secondary"
         aria-busy="true"
       >
-        <span className="sr-only">Loading…</span>
+        <span className="sr-only">{strings.common.loading}</span>
       </main>
     )
   }

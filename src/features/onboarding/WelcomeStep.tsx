@@ -3,6 +3,7 @@ import {
   type OnboardingStepProgress,
 } from '@/components/OnboardingStep'
 import { Logo } from '@/components/Logo'
+import { strings } from '@/strings'
 
 export type WelcomeStepProps = {
   progress?: OnboardingStepProgress
@@ -12,18 +13,20 @@ export type WelcomeStepProps = {
 export function WelcomeStep({ progress, onContinue }: WelcomeStepProps) {
   return (
     <OnboardingStep
-      ariaLabel="Welcome"
+      ariaLabel={strings.onboarding.welcome.ariaLabel}
       progress={progress}
-      primaryAction={{ label: "Let's set you up", onClick: onContinue }}
+      primaryAction={{
+        label: strings.onboarding.welcome.cta,
+        onClick: onContinue,
+      }}
     >
       <div className="flex flex-col items-center gap-6 text-center">
         <Logo size="xl" />
         <h1 className="text-2xl font-semibold tracking-tight">
-          Let&apos;s set you up.
+          {strings.onboarding.welcome.heading}
         </h1>
         <p className="max-w-md text-sm leading-snug text-text-secondary">
-          StudyVis is a quiet place to study with friends. No account, no
-          server, no audience. Just you, your friends, and the work.
+          {strings.onboarding.welcome.body}
         </p>
       </div>
     </OnboardingStep>

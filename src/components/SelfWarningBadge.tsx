@@ -2,6 +2,7 @@ import { AlertCircle } from 'lucide-react'
 
 import { tokens } from '@/design/tokens'
 import { cn } from '@/lib/utils'
+import { strings } from '@/strings'
 
 export type SelfWarningBadgeProps = {
   // Reasoning text from the score machine's warning event. Empty string
@@ -26,7 +27,7 @@ export function SelfWarningBadge({
     <div
       role="status"
       aria-live="polite"
-      aria-label="Self-warning"
+      aria-label={strings.session.badges.selfWarningAriaLabel}
       data-testid="self-warning-badge"
       style={{ zIndex: tokens.zIndex.toast }}
       className={cn(
@@ -41,7 +42,7 @@ export function SelfWarningBadge({
       />
       <div className="flex flex-col gap-1">
         <span className="font-medium text-text-primary">
-          Heads up, looking off-task.
+          {strings.session.badges.selfWarningTitle}
         </span>
         <span className="text-text-secondary">{reasoning}</span>
       </div>

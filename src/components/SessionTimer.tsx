@@ -10,6 +10,7 @@ import {
 import { Separator } from '@/components/ui/separator'
 import type { PomodoroPhase, PomodoroPreset } from '@/lib/pomodoro-types'
 import { cn } from '@/lib/utils'
+import { strings } from '@/strings'
 
 export type SessionTimerProps = {
   phase: PomodoroPhase
@@ -25,12 +26,8 @@ export type SessionTimerProps = {
   className?: string
 }
 
-const PHASE_LABEL: Record<Exclude<PomodoroPhase, 'idle'>, string> = {
-  'work-25': 'Focus',
-  'rest-5': 'Break',
-  'work-50': 'Focus',
-  'rest-10': 'Break',
-}
+const PHASE_LABEL: Record<Exclude<PomodoroPhase, 'idle'>, string> = strings
+  .pomodoro.phaseLabels
 
 // Bottom-bar timer per the V1-P9 prompt + DESIGN-SYSTEM.md §4 inventory.
 // Idle: shows "[Pomodoro ▾]" trigger that opens a small popover with
@@ -65,8 +62,11 @@ export function SessionTimer({
           className={cn('gap-2', className)}
           aria-label={
             active
-              ? `Pomodoro ${phaseLabel ?? ''} ${formatMs(remaining)}`
-              : 'Open Pomodoro menu'
+              ? strings.pomodoro.triggerAriaLabel(
+                  phaseLabel ?? '',
+                  formatMs(remaining)
+                )
+              : strings.pomodoro.triggerIdleAriaLabel
           }
         >
           <Timer className="size-4" strokeWidth={1.5} aria-hidden="true" />
@@ -78,7 +78,7 @@ export function SessionTimer({
               </span>
             </span>
           ) : (
-            <span>Pomodoro</span>
+            <span>{strings.pomodoro.label}</span>
           )}
           <ChevronDown
             className="size-3.5 text-text-secondary"
@@ -91,18 +91,23 @@ export function SessionTimer({
         align="end"
         className="w-72"
         role="dialog"
-        aria-label="Pomodoro controls"
+        aria-label={strings.pomodoro.controlsAriaLabel}
       >
         {active ? (
           <div className="flex flex-col gap-3">
             <div>
               <p className="text-sm font-medium text-text-primary">
-                {phaseLabel} · {preset ?? '25/5'}
+                {strings.pomodoro.activeTitle(
+                  phaseLabel ?? '',
+                  preset ?? '25/5'
+                )}
               </p>
               <p className="text-xs text-text-secondary">
                 {iAmBroadcaster
-                  ? "You're driving the timer."
-                  : `Driven by ${broadcasterName ?? 'another peer'}.`}
+                  ? strings.pomodoro.drivingSelf
+                  : strings.pomodoro.drivenBy(
+                      broadcasterName ?? strings.session.broadcasterFallback
+                    )}
               </p>
             </div>
             <Separator />
@@ -114,27 +119,29 @@ export function SessionTimer({
                 setOpen(false)
               }}
             >
-              Stop Pomodoro
+              {strings.pomodoro.stopCta}
             </Button>
           </div>
         ) : (
           <div className="flex flex-col gap-3">
             <p className="text-sm font-medium text-text-primary">
-              Start a Pomodoro
+              {strings.pomodoro.startTitle}
             </p>
             <fieldset className="flex flex-col gap-2 text-sm">
-              <legend className="sr-only">Preset</legend>
+              <legend className="sr-only">
+                {strings.pomodoro.presetLegend}
+              </legend>
               <PresetRadio
                 value="25/5"
-                label="25 / 5"
-                hint="25-minute focus, 5-minute break"
+                label={strings.pomodoro.presets['25/5'].label}
+                hint={strings.pomodoro.presets['25/5'].hint}
                 checked={pickedPreset === '25/5'}
                 onSelect={() => setPickedPreset('25/5')}
               />
               <PresetRadio
                 value="50/10"
-                label="50 / 10"
-                hint="50-minute focus, 10-minute break"
+                label={strings.pomodoro.presets['50/10'].label}
+                hint={strings.pomodoro.presets['50/10'].hint}
                 checked={pickedPreset === '50/10'}
                 onSelect={() => setPickedPreset('50/10')}
               />
@@ -147,7 +154,7 @@ export function SessionTimer({
                 setOpen(false)
               }}
             >
-              Start
+              {strings.pomodoro.startCta}
             </Button>
           </div>
         )}

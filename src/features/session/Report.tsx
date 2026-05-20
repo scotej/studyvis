@@ -21,6 +21,7 @@ import { CheckCircle2Icon, ChevronLeftIcon } from 'lucide-react'
 
 import { ScoreGauge } from '@/components/ScoreGauge'
 import { Button } from '@/components/ui/button'
+import { Skeleton } from '@/components/ui/skeleton'
 import { tokens } from '@/design/tokens'
 import {
   AUDIT_KIND_LABELS,
@@ -34,6 +35,7 @@ import {
 import { listFriends, type Friend } from '@/lib/db/friends'
 import { sessionsGet, type SessionRecord } from '@/lib/db/sessions'
 import { useIdentity } from '@/features/identity'
+import { strings } from '@/strings'
 import {
   AUDIT_ICONS,
   AUDIT_ICON_TONE,
@@ -92,7 +94,7 @@ async function defaultLoader(sessionId: string): Promise<ResolvedReportData> {
     listFriends(),
   ])
   if (!session) {
-    throw new Error('Session not found.')
+    throw new Error(strings.report.notFound)
   }
   const nameByEdPubkey = Object.fromEntries(
     friends
@@ -111,9 +113,11 @@ async function defaultLoader(sessionId: string): Promise<ResolvedReportData> {
 
 export function Report({ sessionId, onClose, __loader }: ReportProps) {
   const [status, setStatus] = useState<Status>({ kind: 'loading' })
+  const [reloadKey, setReloadKey] = useState(0)
   const { identity } = useIdentity()
   const myEdPubkeyHex = identity?.ed_pubkey_hex ?? null
-  const myDisplayName = identity?.display_name?.trim() || 'You'
+  const myDisplayName =
+    identity?.display_name?.trim() || strings.session.selfFallback
 
   useEffect(() => {
     let cancelled = false
@@ -139,39 +143,75 @@ export function Report({ sessionId, onClose, __loader }: ReportProps) {
       .catch((err: unknown) => {
         if (cancelled) return
         const message =
-          err instanceof Error ? err.message : "Couldn't load the report."
+          err instanceof Error ? err.message : strings.report.loadErrorFallback
         setStatus({ kind: 'error', message })
       })
     return () => {
       cancelled = true
     }
-  }, [sessionId, __loader, myEdPubkeyHex, myDisplayName])
+  }, [sessionId, __loader, myEdPubkeyHex, myDisplayName, reloadKey])
 
-  if (status.kind === 'loading') {
+  if (status.kind === 'loading' || status.kind === 'error') {
+    // §10 — loading + error sit inside the same shell as the loaded view so
+    // the user never sees a full-screen sink. Loading shows a Skeleton; the
+    // error renders a calm inline banner with a Retry button.
     return (
       <main
-        aria-busy="true"
-        role="status"
-        className="flex min-h-screen flex-col items-center justify-center bg-bg-base text-text-secondary"
+        className="flex min-h-screen flex-col bg-bg-base text-text-primary"
+        aria-label={strings.report.ariaLabel}
       >
-        <span className="sr-only">Loading report…</span>
-        <div className="h-3 w-32 animate-pulse rounded-full bg-bg-raised" />
+        <header className="border-b border-border-subtle px-4 py-4 sm:px-6">
+          <div
+            className="mx-auto flex items-center justify-between gap-4"
+            style={{ maxWidth: tokens.sizes.readingMaxWidth }}
+          >
+            <div className="flex flex-col">
+              <span className="text-xs font-medium tracking-wide text-text-secondary uppercase">
+                {strings.report.eyebrow}
+              </span>
+            </div>
+            <Button variant="secondary" size="sm" onClick={onClose}>
+              <ChevronLeftIcon /> {strings.common.actions.close}
+            </Button>
+          </div>
+        </header>
+
+        <div
+          className="mx-auto flex w-full flex-col gap-8 px-4 py-4 sm:px-6 sm:py-6"
+          style={{ maxWidth: tokens.sizes.readingMaxWidth }}
+        >
+          {status.kind === 'loading' ? (
+            <div
+              aria-busy="true"
+              role="status"
+              aria-label={strings.report.loading}
+              className="flex flex-col gap-4"
+            >
+              <span className="sr-only">{strings.report.loading}</span>
+              <Skeleton className="h-8 w-2/3" />
+              <Skeleton className="h-32 w-full" />
+              <Skeleton className="h-20 w-full" />
+            </div>
+          ) : (
+            <div
+              role="alert"
+              className="flex items-center justify-between gap-4 rounded-md border border-status-alerted/40 bg-status-alerted/10 px-4 py-3 text-sm"
+            >
+              <span className="text-status-alerted">{status.message}</span>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setReloadKey((k) => k + 1)}
+              >
+                {strings.common.actions.retry}
+              </Button>
+            </div>
+          )}
+        </div>
       </main>
     )
   }
-  if (status.kind === 'error') {
-    return (
-      <main
-        role="alert"
-        className="flex min-h-screen flex-col items-center justify-center gap-4 bg-bg-base text-text-primary"
-      >
-        <p className="text-text-secondary">{status.message}</p>
-        <Button variant="secondary" size="sm" onClick={onClose}>
-          <ChevronLeftIcon /> Back
-        </Button>
-      </main>
-    )
-  }
+
   return <ReportView data={status.data} onClose={onClose} />
 }
 
@@ -225,7 +265,7 @@ export function ReportView({
   return (
     <main
       className="flex min-h-screen flex-col bg-bg-base text-text-primary"
-      aria-label="Session report"
+      aria-label={strings.report.ariaLabel}
     >
       <header className="border-b border-border-subtle px-4 py-4 sm:px-6">
         <div
@@ -234,14 +274,14 @@ export function ReportView({
         >
           <div className="flex flex-col">
             <span className="text-xs font-medium tracking-wide text-text-secondary uppercase">
-              Session report
+              {strings.report.eyebrow}
             </span>
             <span className="text-sm text-text-secondary">
               {formatHeaderRange(startedAt, endedAt)}
             </span>
           </div>
           <Button variant="secondary" size="sm" onClick={onClose}>
-            <ChevronLeftIcon /> Close
+            <ChevronLeftIcon /> {strings.common.actions.close}
           </Button>
         </div>
       </header>
@@ -256,26 +296,23 @@ export function ReportView({
               {formatTopicHeading(session.declared_topic)}
             </h1>
             <p className="text-sm text-text-secondary">
-              Studied for{' '}
+              {strings.report.summaryPrefix}
               <span className="font-medium text-text-primary">
-                {totalMinutes} min
-              </span>{' '}
-              · Focused-time{' '}
+                {strings.report.summaryMinutes(totalMinutes)}
+              </span>
+              {strings.report.summaryMiddle}
               <span className="font-medium text-text-primary">
                 {focusedPctLabel}
               </span>
             </p>
-            <p className="text-xs text-text-muted">
-              Reports stay on this device. Friends never see your score
-              breakdown unless you share it.
-            </p>
+            <p className="text-xs text-text-muted">{strings.report.privacy}</p>
           </div>
           <ScoreGauge score={score} animate={animateScore} />
         </section>
 
-        <Section heading="Topic">
+        <Section heading={strings.report.sections.topic.heading}>
           {topicTimeline.length === 0 ? (
-            <Empty message="No topic recorded." />
+            <Empty message={strings.report.sections.topic.empty} />
           ) : (
             <ol className="m-0 flex list-none flex-col gap-1 p-0">
               {topicTimeline.map((entry, i) => (
@@ -291,9 +328,9 @@ export function ReportView({
           )}
         </Section>
 
-        <Section heading="Timeline">
+        <Section heading={strings.report.sections.timeline.heading}>
           {groupedTimeline.length === 0 ? (
-            <Empty message="No events were recorded." />
+            <Empty message={strings.report.sections.timeline.empty} />
           ) : (
             <div className="flex flex-col gap-4">
               {groupedTimeline.map(({ who, events }) => (
@@ -319,9 +356,9 @@ export function ReportView({
           )}
         </Section>
 
-        <Section heading="Top distractions">
+        <Section heading={strings.report.sections.distractions.heading}>
           {topDistractions.length === 0 ? (
-            <Empty message="No distractions detected. Nice work." />
+            <Empty message={strings.report.sections.distractions.empty} />
           ) : (
             <ul className="m-0 flex list-none flex-col gap-2 p-0">
               {topDistractions.map((entry, i) => (
@@ -439,10 +476,11 @@ function labelFor(
   nameByEdPubkey: Record<string, string>,
   myEdPubkeyHex: string | null
 ): string {
-  if (myEdPubkeyHex && edPubkeyHex === myEdPubkeyHex) return 'You'
+  if (myEdPubkeyHex && edPubkeyHex === myEdPubkeyHex)
+    return strings.session.selfFallback
   const friend = nameByEdPubkey[edPubkeyHex]
   if (friend) return friend
-  return `Peer ${edPubkeyHex.slice(0, 6)}`
+  return strings.session.peerFallback(edPubkeyHex)
 }
 
 function describeRow(
@@ -470,15 +508,15 @@ function describeRow(
 }
 
 function formatTopicHeading(topic: string | null): string {
-  if (!topic || !topic.trim()) return 'Studied'
-  return `Studied ${topic}`
+  if (!topic || !topic.trim()) return strings.report.studiedFallback
+  return strings.report.studiedWithTopic(topic)
 }
 
 function formatHeaderRange(
   startedAt: number | null,
   endedAt: number | null
 ): string {
-  if (startedAt == null) return 'Session details'
+  if (startedAt == null) return strings.report.detailsFallback
   const start = new Date(startedAt)
   const datePart = start.toLocaleString(undefined, {
     weekday: 'short',

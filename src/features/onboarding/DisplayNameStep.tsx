@@ -6,6 +6,7 @@ import {
 } from '@/components/OnboardingStep'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { strings } from '@/strings'
 
 export type DisplayNameStepProps = {
   progress?: OnboardingStepProgress
@@ -30,10 +31,10 @@ export function DisplayNameStep({
 
   return (
     <OnboardingStep
-      ariaLabel="Pick a display name"
+      ariaLabel={strings.onboarding.displayName.ariaLabel}
       progress={progress}
       primaryAction={{
-        label: 'Continue',
+        label: strings.common.actions.continue,
         onClick: () => {
           if (!disabled) onSubmit(trimmed)
         },
@@ -51,16 +52,17 @@ export function DisplayNameStep({
       >
         <header className="flex flex-col items-center gap-3 text-center">
           <h1 className="text-2xl font-semibold tracking-tight">
-            What should friends see?
+            {strings.onboarding.displayName.heading}
           </h1>
           <p className="max-w-sm text-sm leading-snug text-text-secondary">
-            Pick anything: your name, a nickname, an emoji. You can change it in
-            Settings.
+            {strings.onboarding.displayName.body}
           </p>
         </header>
 
         <div className="flex flex-col gap-2">
-          <Label htmlFor="onboarding-display-name">Display name</Label>
+          <Label htmlFor="onboarding-display-name">
+            {strings.onboarding.displayName.label}
+          </Label>
           <Input
             id="onboarding-display-name"
             autoFocus

@@ -3,6 +3,7 @@ import { type ReactNode } from 'react'
 import { Button } from '@/components/ui/button'
 import { tokens } from '@/design/tokens'
 import { cn } from '@/lib/utils'
+import { strings } from '@/strings'
 
 export type OnboardingStepAction = {
   label: string
@@ -108,7 +109,7 @@ function ProgressDots({
   return (
     <ol
       data-slot="onboarding-progress"
-      aria-label={`Step ${current} of ${total}`}
+      aria-label={strings.onboarding.step.progressAriaLabel(current, total)}
       className={cn('flex items-center gap-1.5', className)}
     >
       {dots.map((i) => {

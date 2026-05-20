@@ -6,20 +6,19 @@ import {
   useSettingsStore,
   type TurnPreference,
 } from '@/stores/settingsStore'
+import { strings } from '@/strings'
 
 export function NetworkCategory() {
   const turn = useSettingsStore((s) => s.values.turnPreference)
   const setTurn = useSettingsStore((s) => s.setTurnPreference)
+  const copy = strings.settings.network
 
   return (
-    <SettingsSection heading="Network">
+    <SettingsSection heading={copy.heading}>
+      <SettingsRow label={copy.about.label} help={copy.about.help} />
       <SettingsRow
-        label="About TURN"
-        help="StudyVis connects you to friends directly when it can. Some networks (corporate firewalls, strict NATs) block that, so a relay server passes the traffic along instead. It's still encrypted end-to-end; the relay only ever sees encrypted bytes."
-      />
-      <SettingsRow
-        label="TURN preference"
-        help="Auto is recommended. Always-on burns more bandwidth on the public relay but can stabilize choppy connections. Never disables relay fallback entirely; sessions may fail to connect on strict networks."
+        label={copy.preference.label}
+        help={copy.preference.help}
         stack
         control={
           <RadioGroup
@@ -29,22 +28,24 @@ export function NetworkCategory() {
                 void setTurn(value as TurnPreference)
               }
             }}
-            aria-label="TURN preference"
+            aria-label={copy.preference.ariaLabel}
             className="gap-3"
           >
             <div className="flex items-center gap-2">
               <RadioGroupItem value="auto" id="turn-auto" />
-              <Label htmlFor="turn-auto">
-                Auto (fall back when direct fails)
-              </Label>
+              <Label htmlFor="turn-auto">{copy.preference.options.auto}</Label>
             </div>
             <div className="flex items-center gap-2">
               <RadioGroupItem value="always" id="turn-always" />
-              <Label htmlFor="turn-always">Always on</Label>
+              <Label htmlFor="turn-always">
+                {copy.preference.options.always}
+              </Label>
             </div>
             <div className="flex items-center gap-2">
               <RadioGroupItem value="never" id="turn-never" />
-              <Label htmlFor="turn-never">Never</Label>
+              <Label htmlFor="turn-never">
+                {copy.preference.options.never}
+              </Label>
             </div>
           </RadioGroup>
         }

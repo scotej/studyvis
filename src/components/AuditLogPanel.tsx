@@ -4,6 +4,7 @@ import { AuditLogRow } from '@/components/AuditLogRow'
 import { tokens } from '@/design/tokens'
 import type { AuditEventKind } from '@/lib/audit-types'
 import { cn } from '@/lib/utils'
+import { strings } from '@/strings'
 
 export type AuditLogEntry = {
   seq: number
@@ -84,7 +85,7 @@ export function AuditLogPanel({ events, now, className }: AuditLogPanelProps) {
         id={headingId}
         className="border-b border-border-subtle px-4 py-3 text-sm font-medium text-text-primary"
       >
-        Session log
+        {strings.session.audit.panelHeading}
       </header>
       <div
         ref={scrollRef}
@@ -93,7 +94,7 @@ export function AuditLogPanel({ events, now, className }: AuditLogPanelProps) {
       >
         {events.length === 0 ? (
           <p className="px-4 py-3 text-sm text-text-secondary">
-            Events will appear here as people join, leave, and take breaks.
+            {strings.session.audit.empty}
           </p>
         ) : (
           <ul

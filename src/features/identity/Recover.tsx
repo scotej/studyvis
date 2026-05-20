@@ -2,6 +2,7 @@ import { useRef, useState } from 'react'
 import { toast } from 'sonner'
 
 import { type OnboardingStepProgress } from '@/components/OnboardingStep'
+import { strings } from '@/strings'
 
 import { classifyMnemonic, normalizeMnemonicInput } from './recoverLogic'
 import {
@@ -53,7 +54,7 @@ export function Recover({
       setPhase('done')
     } catch (err) {
       console.error(err)
-      toast.error("Couldn't save your identity.")
+      toast.error(strings.common.errors.savingIdentity)
       setPhase('input')
     }
   }

@@ -2,6 +2,8 @@
 // picker and from Settings → AI. Renders the ARCHITECTURE.md §8 table plus
 // the user's measured speeds when available.
 
+import { strings } from '@/strings'
+
 import {
   SUPPORTED_MODELS,
   totalDownloadBytes,
@@ -21,10 +23,11 @@ function formatGB(bytes: number): string {
 
 function formatMeasured(record: ModelRecord | undefined): string {
   if (!record?.benchmark) return '—'
-  return `${record.benchmark.p95Sec.toFixed(1)} s / check (p95)`
+  return strings.ai.guide.measured(record.benchmark.p95Sec)
 }
 
 export function ModelGuide({ records, className }: ModelGuideProps) {
+  const copy = strings.ai.guide
   return (
     <section
       className={
@@ -38,26 +41,31 @@ export function ModelGuide({ records, className }: ModelGuideProps) {
           id="model-guide-heading"
           className="text-lg font-semibold tracking-tight text-text-primary"
         >
-          What model should I pick?
+          {copy.heading}
         </h3>
-        <p className="text-sm text-text-secondary">
-          Smaller models run faster and use less RAM but describe the screen in
-          less detail. Bigger models catch subtler off-task behavior. The
-          numbers below come from your machine after the first benchmark; the
-          dashes are tiers you haven't tried yet.
-        </p>
+        <p className="text-sm text-text-secondary">{copy.body}</p>
       </header>
 
       <div className="overflow-hidden rounded-md border border-border-subtle">
         <table className="w-full text-left text-sm">
           <thead className="bg-bg-raised text-xs uppercase tracking-wide text-text-secondary">
             <tr>
-              <th className="px-3 py-2 font-medium">Tier</th>
-              <th className="px-3 py-2 font-medium">Model</th>
-              <th className="px-3 py-2 font-medium">Download</th>
-              <th className="px-3 py-2 font-medium">RAM</th>
-              <th className="px-3 py-2 font-medium">License</th>
-              <th className="px-3 py-2 font-medium">Your speed</th>
+              <th className="px-3 py-2 font-medium">
+                {copy.tableHeaders.tier}
+              </th>
+              <th className="px-3 py-2 font-medium">
+                {copy.tableHeaders.model}
+              </th>
+              <th className="px-3 py-2 font-medium">
+                {copy.tableHeaders.download}
+              </th>
+              <th className="px-3 py-2 font-medium">{copy.tableHeaders.ram}</th>
+              <th className="px-3 py-2 font-medium">
+                {copy.tableHeaders.license}
+              </th>
+              <th className="px-3 py-2 font-medium">
+                {copy.tableHeaders.yourSpeed}
+              </th>
             </tr>
           </thead>
           <tbody>
@@ -95,10 +103,7 @@ export function ModelGuide({ records, className }: ModelGuideProps) {
         </table>
       </div>
 
-      <footer className="text-xs text-text-secondary">
-        The AI runs on your machine. Your camera and screen stay here. Friends
-        see a flag, not a frame.
-      </footer>
+      <footer className="text-xs text-text-secondary">{copy.footer}</footer>
     </section>
   )
 }

@@ -13,6 +13,7 @@ import {
   type ShortcutAction,
 } from '@/lib/keybindings'
 import { cn } from '@/lib/utils'
+import { strings } from '@/strings'
 
 export type KeybindCaptureProps = {
   action: ShortcutAction
@@ -113,7 +114,8 @@ export function KeybindCapture({
   }, [armed, cancel, disabled])
 
   const labels = comboToKbdLabels(combo, platform)
-  const actionLabel = action === 'ptt-friends' ? 'push to talk' : 'talk to AI'
+  const actionLabel = strings.keybindings.actionLabelsLower[action]
+  const capture = strings.keybindings.capture
 
   return (
     <div className="flex flex-col items-end gap-2">
@@ -139,14 +141,14 @@ export function KeybindCapture({
           aria-pressed={armed}
           aria-label={
             armed
-              ? `Press a combo for ${actionLabel}, or Escape to cancel`
-              : `Rebind ${actionLabel}`
+              ? capture.armAriaLabel(actionLabel)
+              : capture.rebindAriaLabel(actionLabel)
           }
           aria-describedby={error ? errorId : undefined}
           disabled={disabled}
           data-state={armed ? 'armed' : 'idle'}
         >
-          {armed ? 'Press a key…' : 'Rebind'}
+          {armed ? capture.pressKey : capture.rebind}
         </Button>
       </div>
       {error ? (
@@ -154,9 +156,7 @@ export function KeybindCapture({
           {error}
         </span>
       ) : armed ? (
-        <span className="text-xs text-text-muted">
-          Press a combo, or Esc to cancel.
-        </span>
+        <span className="text-xs text-text-muted">{capture.help}</span>
       ) : null}
     </div>
   )

@@ -8,6 +8,7 @@ import {
 } from 'react'
 
 import { cn } from '@/lib/utils'
+import { strings } from '@/strings'
 
 import {
   BIP39_WORDLIST,
@@ -120,7 +121,7 @@ export function PairWordInput({
   return (
     <>
       <ol
-        aria-label="Pairing code words"
+        aria-label={strings.friends.addDialog.join.ariaLabel}
         className="grid grid-cols-3 gap-x-3 gap-y-2"
       >
         {Array.from({ length: count }).map((_, index) => {
@@ -151,7 +152,9 @@ export function PairWordInput({
                 ref={(el) => {
                   inputRefs.current[index] = el
                 }}
-                aria-label={`Word ${index + 1}`}
+                aria-label={strings.friends.addDialog.join.wordAriaLabel(
+                  index + 1
+                )}
                 aria-invalid={isValid === false || undefined}
                 aria-describedby={isValid === false ? errorId : undefined}
                 list={datalistId}
@@ -175,7 +178,7 @@ export function PairWordInput({
               />
               {isValid === false ? (
                 <span id={errorId} className="sr-only">
-                  Not a valid BIP39 word
+                  {strings.friends.addDialog.join.notInWordlistSr}
                 </span>
               ) : null}
             </li>

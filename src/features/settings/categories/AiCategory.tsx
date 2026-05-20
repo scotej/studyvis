@@ -30,6 +30,7 @@ import {
   useSettingsStore,
   type CaptureDisplaysMode,
 } from '@/stores/settingsStore'
+import { strings } from '@/strings'
 
 // V2-P9 — the master AI gate plus the tuning controls prior phases left as
 // read-only stubs. When the toggle is off the only thing rendered is the
@@ -50,6 +51,7 @@ export function AiCategory() {
   const setDebugLogEnabled = useSettingsStore((s) => s.setDebugLogEnabled)
   const captureDisplays = useSettingsStore((s) => s.values.captureDisplays)
   const setCaptureDisplays = useSettingsStore((s) => s.setCaptureDisplays)
+  const copy = strings.settings.ai
 
   const activeModelId = useModelStore((s) => s.activeModelId)
   const measuredFloor = useModelStore((s) => {
@@ -97,11 +99,9 @@ export function AiCategory() {
       // webview) is not a reason to undo the toggle: screen recording is
       // only needed once a session starts, which is where the loop asks
       // again. Keep AI on so the model picker stays available.
-      toast(
-        'Pick and download a model now. StudyVis will ask for screen access when you start a session.'
-      )
+      toast(copy.permissions.pickModelFirstBody)
     }
-  }, [])
+  }, [copy.permissions.pickModelFirstBody])
 
   const handleToggle = useCallback(
     async (next: boolean) => {
@@ -128,33 +128,37 @@ export function AiCategory() {
     try {
       await requestScreenCapturePermission()
       setPermissionOverlayOpen(false)
-      toast.success('Screen recording granted.')
+      toast.success(copy.permissions.grantedToast)
     } catch (err) {
       if (err instanceof CaptureError && err.code === 'screen_capture_denied') {
         // Still denied — keep the overlay up so the user can open Settings.
         return
       }
       toast.error(
-        err instanceof Error ? err.message : 'Could not request access.'
+        err instanceof Error
+          ? err.message
+          : copy.permissions.requestErrorFallback
       )
     }
-  }, [])
+  }, [copy.permissions])
 
   const handleForgetToken = useCallback(async () => {
     try {
       await getHfTokenRuntime().clear()
       await refreshTokenPresence()
-      toast.success('Hugging Face token removed.')
+      toast.success(copy.hfToken.removedToast)
     } catch (err) {
       toast.error(
-        err instanceof Error ? err.message : 'Could not remove the token.'
+        err instanceof Error
+          ? `${copy.hfToken.removeErrorPrefix}${err.message}`
+          : copy.hfToken.removeErrorPrefix.replace(/: $/, '.')
       )
     }
-  }, [refreshTokenPresence])
+  }, [refreshTokenPresence, copy.hfToken])
 
   const handleRestartSidecar = useCallback(async () => {
     if (!activeModelId) {
-      toast.error('Pick a model first.')
+      toast.error(copy.sidecar.pickModelFirstToast)
       return
     }
     setRestarting(true)
@@ -165,15 +169,15 @@ export function AiCategory() {
         mmprojPath: paths.mmproj_path,
         ctxSize: DEFAULT_CTX_SIZE,
       })
-      toast.success('AI model restarting.')
+      toast.success(copy.sidecar.restartedToast)
     } catch (err) {
       toast.error(
-        err instanceof Error ? err.message : 'Could not restart the model.'
+        err instanceof Error ? err.message : copy.sidecar.restartErrorFallback
       )
     } finally {
       setRestarting(false)
     }
-  }, [activeModelId])
+  }, [activeModelId, copy.sidecar])
 
   // Clamp the displayed value through the SAME function the loop uses so the
   // slider can't show a value below `min` (a stale override saved on a faster
@@ -185,42 +189,28 @@ export function AiCategory() {
   )
 
   return (
-    <SettingsSection heading="AI">
+    <SettingsSection heading={copy.heading}>
+      <p className="mb-3 text-sm text-text-secondary">{copy.intro}</p>
+      {/* D5 — canonical screen-recording indicator note. */}
       <p className="mb-3 text-sm text-text-secondary">
-        The vision model runs on this machine and only looks at your camera and
-        screen. Nothing leaves your computer. Turn AI on to pick a model,
-        benchmark it, and let StudyVis nudge you when you drift off-task.
-      </p>
-      {/* V3-P7 — D5 discharge: surface the screen-recording behaviour and
-          the macOS-only Settings path before the user opts in. Phrased
-          plainly here so screen readers announce it as part of the section
-          intro; V3-P8's copy pass will refine the wording. */}
-      <p className="mb-3 text-sm text-text-secondary">
-        While the AI is sampling, your operating system's screen-recording
-        indicator stays on for the whole session. That's expected — it turns off
-        when you leave. On macOS, screen-recording access is granted and revoked
-        only in System Settings → Privacy &amp; Security → Screen Recording;
-        StudyVis can open it for you when needed.
+        {copy.screenIndicatorNote}
       </p>
 
       <SettingsRow
-        label="Enable AI features"
-        help="Off by default. When off StudyVis is a plain study room with no model, no capture, and no scoring. StudyVis asks for screen access when you start your first session."
+        label={copy.enable.label}
+        help={copy.enable.help}
         control={
           <Switch
             checked={aiFeaturesEnabled}
             disabled={toggling}
             onCheckedChange={(checked) => void handleToggle(Boolean(checked))}
-            aria-label="Enable AI features"
+            aria-label={copy.enable.ariaLabel}
           />
         }
       />
 
       {!aiFeaturesEnabled ? (
-        <SettingsRow
-          label="AI is off"
-          help="Enable AI features above to choose and benchmark a vision model and tune how often it samples."
-        />
+        <SettingsRow label={copy.modelOff.label} help={copy.modelOff.help} />
       ) : (
         <>
           <div className="pt-4">
@@ -228,9 +218,12 @@ export function AiCategory() {
           </div>
 
           <SettingsRow
-            label="Sample interval"
+            label={copy.sampleInterval.label}
             stack
-            help={`How often the model looks (seconds). The floor is what this machine measured (${measuredFloor}s); you can only slow it down, up to ${MAX_SAMPLE_INTERVAL_SEC}s. Takes effect on the next sample.`}
+            help={copy.sampleInterval.help(
+              measuredFloor,
+              MAX_SAMPLE_INTERVAL_SEC
+            )}
             control={
               <div className="flex items-center gap-4">
                 <Slider
@@ -242,7 +235,7 @@ export function AiCategory() {
                   onValueChange={([v]) =>
                     void setSampleIntervalSec(v <= measuredFloor ? null : v)
                   }
-                  aria-label="Sample interval (seconds)"
+                  aria-label={copy.sampleInterval.ariaLabel}
                 />
                 <span className="w-16 shrink-0 text-right text-sm tabular-nums text-text-secondary">
                   {effectiveInterval}s
@@ -252,9 +245,9 @@ export function AiCategory() {
           />
 
           <SettingsRow
-            label="Warning after"
+            label={copy.warnAfter.label}
             stack
-            help="Consecutive off-task samples before StudyVis warns you privately (only you see it)."
+            help={copy.warnAfter.help}
             control={
               <div className="flex items-center gap-4">
                 <Slider
@@ -272,7 +265,7 @@ export function AiCategory() {
                       )
                     }
                   }}
-                  aria-label="Warning after N off-task samples"
+                  aria-label={copy.warnAfter.ariaLabel}
                 />
                 <span className="w-16 shrink-0 text-right text-sm tabular-nums text-text-secondary">
                   {warningThreshold}
@@ -282,9 +275,9 @@ export function AiCategory() {
           />
 
           <SettingsRow
-            label="Alert peers after"
+            label={copy.alertAfter.label}
             stack
-            help="Consecutive off-task samples before your friends see you flagged. Always kept above the warning count."
+            help={copy.alertAfter.help}
             control={
               <div className="flex items-center gap-4">
                 <Slider
@@ -299,7 +292,7 @@ export function AiCategory() {
                       Math.min(floored, ALERT_THRESHOLD_MAX)
                     )
                   }}
-                  aria-label="Alert peers after N off-task samples"
+                  aria-label={copy.alertAfter.ariaLabel}
                 />
                 <span className="w-16 shrink-0 text-right text-sm tabular-nums text-text-secondary">
                   {alertThreshold}
@@ -309,9 +302,9 @@ export function AiCategory() {
           />
 
           <SettingsRow
-            label="Capture displays"
+            label={copy.captureDisplays.label}
             stack
-            help="All displays sends every monitor to the local AI as one image. Peers never see your screen."
+            help={copy.captureDisplays.help}
             control={
               <RadioGroup
                 value={captureDisplays}
@@ -321,48 +314,52 @@ export function AiCategory() {
                   }
                 }}
                 className="grid-cols-1 gap-3 sm:grid-flow-col sm:auto-cols-max sm:gap-6"
-                aria-label="Capture displays"
+                aria-label={copy.captureDisplays.ariaLabel}
               >
                 <div className="flex items-center gap-2">
                   <RadioGroupItem
                     value="primary"
                     id="capture-displays-primary"
                   />
-                  <Label htmlFor="capture-displays-primary">Primary only</Label>
+                  <Label htmlFor="capture-displays-primary">
+                    {copy.captureDisplays.options.primary}
+                  </Label>
                 </div>
                 <div className="flex items-center gap-2">
                   <RadioGroupItem value="all" id="capture-displays-all" />
-                  <Label htmlFor="capture-displays-all">All displays</Label>
+                  <Label htmlFor="capture-displays-all">
+                    {copy.captureDisplays.options.all}
+                  </Label>
                 </div>
               </RadioGroup>
             }
           />
 
           <SettingsRow
-            label="AI diagnostics in debug log"
-            help="AI sample/parse warnings are written to the developer console when the debug log is on. Same setting as Advanced → Debug log."
+            label={copy.diagnostics.label}
+            help={copy.diagnostics.help}
             control={
               <Switch
                 checked={debugLogEnabled}
                 onCheckedChange={(checked) =>
                   void setDebugLogEnabled(Boolean(checked))
                 }
-                aria-label="AI diagnostics in debug log"
+                aria-label={copy.diagnostics.ariaLabel}
               />
             }
           />
 
           {tokenPresent ? (
             <SettingsRow
-              label="Hugging Face token"
-              help="Stored in your OS keychain for gated model downloads (e.g. Gemma). Forgetting it does not delete already-downloaded models."
+              label={copy.hfToken.label}
+              help={copy.hfToken.help}
               control={
                 <Button
                   variant="secondary"
                   size="sm"
                   onClick={() => void handleForgetToken()}
                 >
-                  Forget
+                  {copy.hfToken.forgetCta}
                 </Button>
               }
             />
@@ -370,11 +367,11 @@ export function AiCategory() {
 
           {sidecarStatus === 'errored' ? (
             <SettingsRow
-              label="AI model crashed"
+              label={copy.sidecar.label}
               help={
                 sidecarLastError
-                  ? `Last error: ${sidecarLastError}`
-                  : 'The llama-server sidecar exhausted its restart budget.'
+                  ? copy.sidecar.helpLastError(sidecarLastError)
+                  : copy.sidecar.helpExhausted
               }
               control={
                 <Button
@@ -383,7 +380,7 @@ export function AiCategory() {
                   onClick={() => void handleRestartSidecar()}
                   disabled={restarting || !activeModelId}
                 >
-                  Restart
+                  {copy.sidecar.restartCta}
                 </Button>
               }
             />

@@ -27,6 +27,7 @@ import { boxEncryptWithKeyring } from '@/lib/db/identity'
 import { useFriendsStore } from '@/stores/friendsStore'
 import { useSessionStore } from '@/stores/sessionStore'
 import { useSettingsStore } from '@/stores/settingsStore'
+import { strings } from '@/strings'
 
 const isDev = import.meta.env.DEV
 
@@ -69,7 +70,7 @@ export function Home() {
           },
         })
         toast.success(
-          `Invite sent to ${friend.display_name?.trim() || 'your friend'}.`
+          `Invite sent to ${friend.display_name?.trim() || strings.friends.addDialog.defaultFriendName}.`
         )
       } catch (err) {
         const message =
@@ -85,7 +86,7 @@ export function Home() {
     // refuse — the user explicitly leaves first. (Moved here from InboxBoot
     // so the gate + guard share one decision point.)
     if (useSessionStore.getState().status === 'active') {
-      toast.error('Leave the current session before joining another.')
+      toast.error(strings.errors.leaveSessionFirst)
       return
     }
     try {
@@ -113,7 +114,7 @@ export function Home() {
       // accepting an invite mid-session (AI on) would queue pendingStart and
       // pop the topic modal even though runGuestJoin would later refuse.
       if (useSessionStore.getState().status === 'active') {
-        toast.error('Leave the current session before joining another.')
+        toast.error(strings.errors.leaveSessionFirst)
         return
       }
       if (aiOn()) setPendingStart({ kind: 'guest', invite })
@@ -143,7 +144,7 @@ export function Home() {
         className="flex min-h-screen items-center justify-center bg-bg-base text-text-secondary"
         aria-busy="true"
       >
-        <span className="sr-only">Loading…</span>
+        <span className="sr-only">{strings.common.loading}</span>
       </main>
     )
   }
@@ -221,7 +222,7 @@ export function Home() {
             this route is "Friends" (h2 inside FriendsListView, used as the
             section's aria-labelledby anchor); add an h1 so SR users see a
             clean hierarchy and routes don't skip levels. */}
-        <h1 className="sr-only">StudyVis</h1>
+        <h1 className="sr-only">{strings.app.homeSrHeading}</h1>
         <div
           className="mx-auto flex w-full items-center justify-end gap-2 px-4 pt-4 sm:px-6 sm:pt-6"
           style={{ maxWidth: tokens.sizes.readingMaxWidth }}
@@ -230,9 +231,9 @@ export function Home() {
             variant="ghost"
             size="sm"
             onClick={() => setView('settings')}
-            aria-label="Open settings"
+            aria-label={strings.settings.openAriaLabel}
           >
-            <Settings2Icon /> Settings
+            <Settings2Icon /> {strings.settings.heading}
           </Button>
         </div>
         <FriendsList

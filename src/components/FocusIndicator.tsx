@@ -1,4 +1,5 @@
 import { cn } from '@/lib/utils'
+import { strings } from '@/strings'
 
 export type V1FocusState = 'online' | 'on_break' | 'offline'
 export type V2FocusState = 'focused' | 'warning' | 'alerted' | 'offline'
@@ -14,12 +15,12 @@ const STATE_COLORS: Record<FocusState, string> = {
 }
 
 const STATE_LABELS: Record<FocusState, string> = {
-  online: 'Online',
-  on_break: 'On break',
-  focused: 'On task',
-  warning: 'Self-warning',
-  alerted: 'Off task',
-  offline: 'Offline',
+  online: strings.session.focusStates.online,
+  on_break: strings.session.focusStates.onBreak,
+  focused: strings.session.focusStates.focused,
+  warning: strings.session.focusStates.warning,
+  alerted: strings.session.focusStates.alerted,
+  offline: strings.session.focusStates.offline,
 }
 
 export type FocusIndicatorProps = {

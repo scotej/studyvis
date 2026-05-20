@@ -10,6 +10,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import { Skeleton } from '@/components/ui/skeleton'
+import { strings } from '@/strings'
 
 import { PAIR_WORD_COUNT } from './pair'
 import { PairWordInput } from './PairWordInput'
@@ -74,18 +76,16 @@ export function AddFriendDialogView({
 }
 
 function MissingDisplayNamePanel({ onCancel }: { onCancel: () => void }) {
+  const copy = strings.friends.addDialog.missingName
   return (
     <div className="flex flex-col gap-5">
       <DialogHeader>
-        <DialogTitle>Finish onboarding first</DialogTitle>
-        <DialogDescription>
-          Pick a display name in onboarding first. It&apos;s how friends will
-          see you when you pair.
-        </DialogDescription>
+        <DialogTitle>{copy.title}</DialogTitle>
+        <DialogDescription>{copy.body}</DialogDescription>
       </DialogHeader>
       <DialogFooter>
         <Button variant="outline" onClick={onCancel}>
-          Got it
+          {copy.cta}
         </Button>
       </DialogFooter>
     </div>
@@ -109,13 +109,13 @@ function PairingStep({
   onCancel: () => void
   onCopyWords: (words: string[]) => Promise<boolean>
 }) {
+  const pair = strings.friends.addDialog.pair
   return (
     <div className="flex flex-col gap-5">
       <DialogHeader>
-        <DialogTitle>Add a friend</DialogTitle>
+        <DialogTitle>{pair.title}</DialogTitle>
         <DialogDescription>
-          Share a one-time {PAIR_WORD_COUNT}-word code over any chat. The code
-          is good for one pairing and then discarded.
+          {pair.description(PAIR_WORD_COUNT)}
         </DialogDescription>
       </DialogHeader>
 
@@ -124,8 +124,8 @@ function PairingStep({
       ) : (
         <Tabs value={tab} onValueChange={(v) => onTabChange(v as AddFriendTab)}>
           <TabsList>
-            <TabsTrigger value="host">Generate code</TabsTrigger>
-            <TabsTrigger value="join">Enter code</TabsTrigger>
+            <TabsTrigger value="host">{pair.tabs.generate}</TabsTrigger>
+            <TabsTrigger value="join">{pair.tabs.enter}</TabsTrigger>
           </TabsList>
           <TabsContent value="host" className="mt-4">
             <HostPanel
@@ -161,6 +161,7 @@ function HostPanel({
 }) {
   const [copied, setCopied] = useState(false)
   const copiedTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const host = strings.friends.addDialog.host
 
   useEffect(
     () => () => {
@@ -181,7 +182,7 @@ function HostPanel({
     return (
       <div className="flex flex-col gap-5">
         <ol
-          aria-label="One-time pairing code"
+          aria-label={host.codeAriaLabel}
           className="grid grid-cols-3 gap-x-6 gap-y-2 rounded-lg border border-border-default bg-bg-surface p-4 font-mono text-sm leading-snug"
         >
           {words.map((word, index) => (
@@ -199,15 +200,15 @@ function HostPanel({
             variant="outline"
             size="sm"
             onClick={() => void handleCopy()}
-            aria-label="Copy code to clipboard"
+            aria-label={host.copyAriaLabel}
           >
             {copied ? (
               <>
-                <CheckIcon /> Copied
+                <CheckIcon /> {host.copiedCta}
               </>
             ) : (
               <>
-                <CopyIcon /> Copy
+                <CopyIcon /> {host.copyCta}
               </>
             )}
           </Button>
@@ -215,10 +216,10 @@ function HostPanel({
         <ErrorBanner phase={phase} />
         <DialogFooter>
           {phase.kind === 'host-timeout' ? (
-            <Button onClick={onStart}>Try with a new code</Button>
+            <Button onClick={onStart}>{host.tryNewCodeCta}</Button>
           ) : null}
           <Button variant="outline" onClick={onCancel}>
-            Cancel
+            {strings.common.actions.cancel}
           </Button>
         </DialogFooter>
       </div>
@@ -228,36 +229,36 @@ function HostPanel({
   return (
     <div className="flex flex-col gap-5">
       <p className="text-sm text-text-secondary">
-        We&apos;ll generate {PAIR_WORD_COUNT} words. Send them to your friend
-        over any messenger; they enter them on the other tab.
+        {host.introBody(PAIR_WORD_COUNT)}
       </p>
       <ErrorBanner phase={phase} />
       <DialogFooter>
-        <Button onClick={onStart}>Generate code</Button>
+        <Button onClick={onStart}>{host.generateCta}</Button>
       </DialogFooter>
     </div>
   )
 }
 
 function HostStatusLine({ phase }: { phase: AddFriendPhase }) {
+  const host = strings.friends.addDialog.host
   if (phase.kind === 'host-timeout') {
     return (
       <p className="flex items-center gap-2 text-sm text-status-alerted">
         <AlertCircleIcon className="size-4" aria-hidden />
-        Couldn&apos;t reach your friend within 90 seconds.
+        {host.timeout}
       </p>
     )
   }
   if (phase.kind === 'host-waiting' && phase.peerArrived) {
     return (
       <p className="text-sm text-text-secondary" aria-live="polite">
-        Friend joined. Exchanging keys.
+        {host.connected}
       </p>
     )
   }
   return (
     <p className="text-sm text-text-secondary" aria-live="polite">
-      Waiting for your friend to enter the code.
+      {host.waiting}
     </p>
   )
 }
@@ -279,6 +280,7 @@ function JoinPanel({
   const valid = pairWordsAreComplete(words, PAIR_WORD_COUNT)
   const inProgress = phase.kind === 'join-progress'
   const isTimeout = phase.kind === 'join-timeout'
+  const join = strings.friends.addDialog.join
 
   const handleClear = useCallback(() => {
     setWords(emptyWords())
@@ -288,20 +290,18 @@ function JoinPanel({
     return (
       <div className="flex flex-col gap-5">
         <p className="text-sm text-text-secondary" aria-live="polite">
-          {phase.peerArrived
-            ? 'Friend joined. Exchanging keys.'
-            : 'Looking for your friend on the network.'}
+          {phase.peerArrived ? join.connected : join.searching}
         </p>
         <div
           aria-hidden="true"
-          className="flex animate-pulse flex-col gap-2 rounded-lg border border-border-default bg-bg-surface p-4"
+          className="flex flex-col gap-2 rounded-lg border border-border-default bg-bg-surface p-4"
         >
-          <div className="h-3 w-2/3 rounded-md bg-bg-raised" />
-          <div className="h-3 w-1/2 rounded-md bg-bg-raised" />
+          <Skeleton className="h-3 w-2/3" />
+          <Skeleton className="h-3 w-1/2" />
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onCancel}>
-            Cancel
+            {strings.common.actions.cancel}
           </Button>
         </DialogFooter>
       </div>
@@ -320,10 +320,7 @@ function JoinPanel({
         onSubmit(words)
       }}
     >
-      <p className="text-xs text-text-muted">
-        Type or paste the {PAIR_WORD_COUNT} words. Only words from the BIP39
-        list work; anything else is flagged as you type.
-      </p>
+      <p className="text-xs text-text-muted">{join.hint(PAIR_WORD_COUNT)}</p>
       <PairWordInput
         values={words}
         onChange={setWords}
@@ -341,9 +338,9 @@ function JoinPanel({
                 : 'text-xs text-text-muted'
           }
         >
-          {validCount} / {PAIR_WORD_COUNT} valid
+          {join.validCount(validCount, PAIR_WORD_COUNT)}
           {filledCount > 0 && filledCount > validCount
-            ? ` · ${filledCount - validCount} not in wordlist`
+            ? ` · ${join.notInWordlist(filledCount - validCount)}`
             : ''}
         </p>
         <Button
@@ -353,7 +350,7 @@ function JoinPanel({
           onClick={handleClear}
           disabled={filledCount === 0}
         >
-          Clear
+          {join.clearCta}
         </Button>
       </div>
       {isTimeout ? (
@@ -365,17 +362,16 @@ function JoinPanel({
             className="mr-1 inline size-4 -translate-y-px"
             aria-hidden
           />
-          Couldn&apos;t reach your friend within 90 seconds. Make sure both of
-          you are online and entered the same words, then try again.
+          {join.timeout}
         </p>
       ) : null}
       <ErrorBanner phase={phase} />
       <DialogFooter>
         <Button variant="outline" onClick={onCancel}>
-          Cancel
+          {strings.common.actions.cancel}
         </Button>
         <Button type="submit" disabled={!valid} aria-disabled={!valid}>
-          {isTimeout ? 'Try again' : 'Connect'}
+          {isTimeout ? join.tryAgainCta : join.connectCta}
         </Button>
       </DialogFooter>
     </form>
@@ -383,6 +379,7 @@ function JoinPanel({
 }
 
 function SuccessPanel({ name }: { name: string }) {
+  const success = strings.friends.addDialog.success
   return (
     <div
       role="status"
@@ -390,11 +387,9 @@ function SuccessPanel({ name }: { name: string }) {
     >
       <CheckIcon className="size-6 text-status-focused" aria-hidden />
       <p className="text-base font-medium text-text-primary">
-        Paired with {name}.
+        {success.title(name)}
       </p>
-      <p className="text-sm text-text-secondary">
-        They&apos;re now in your friends list.
-      </p>
+      <p className="text-sm text-text-secondary">{success.body}</p>
     </div>
   )
 }
