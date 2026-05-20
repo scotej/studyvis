@@ -60,7 +60,11 @@ export function ScreenCapturePermissionOverlay({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        aria-describedby="screen-capture-permission-description"
+        // Two ids so the "Heads-up" indicator paragraph also lands in the
+        // accessible description Radix announces on open (Copilot review,
+        // PR #38). DialogPrimitive.Content forwards space-separated
+        // aria-describedby per ARIA semantics.
+        aria-describedby="screen-capture-permission-description screen-capture-permission-indicator-note"
         showCloseButton={false}
       >
         <DialogHeader>
@@ -119,10 +123,13 @@ export function ScreenCapturePermissionOverlay({
         {/* V3-P7 — D5 discharge: the macOS recording indicator (and its
             Windows counterpart) stays on for the whole AI session. Telling
             the user this here avoids the "is something wrong?" moment when
-            they notice the indicator mid-session. Inside DialogContent so
-            it's part of the accessible description Radix announces on open.
-            V3-P8 will finalise the wording. */}
-        <p className="text-sm text-text-secondary">
+            they notice the indicator mid-session. The id is referenced from
+            DialogContent's aria-describedby so SRs read it on open, not just
+            when the user navigates to it. V3-P8 will finalise the wording. */}
+        <p
+          id="screen-capture-permission-indicator-note"
+          className="text-sm text-text-secondary"
+        >
           Heads-up: your operating system's screen-recording indicator stays on
           for the whole session. That's expected — it turns off when you leave.
         </p>
