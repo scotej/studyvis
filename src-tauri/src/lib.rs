@@ -253,9 +253,7 @@ fn read_ai_features_from_settings<R: tauri::Runtime>(app: &tauri::AppHandle<R>) 
 // window stays at its conf-defined chrome — exactly the v1.0.3 shipped
 // behavior.
 #[cfg(desktop)]
-fn read_window_style_is_custom_from_settings<R: tauri::Runtime>(
-    app: &tauri::AppHandle<R>,
-) -> bool {
+fn read_window_style_is_custom_from_settings<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> bool {
     const SETTINGS_FILE: &str = "settings.json";
     const KEY_WINDOW_STYLE: &str = "window_style";
     let read = || -> Option<bool> {
