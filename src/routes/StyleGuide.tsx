@@ -40,6 +40,7 @@ import {
 import { BipBackupPanel } from '@/components/BipBackupPanel'
 import { KeybindCapture } from '@/components/KeybindCapture'
 import { Logo } from '@/components/Logo'
+import { TitleBar } from '@/components/TitleBar'
 import { useTheme } from '@/design/theme-context'
 import {
   DEFAULT_PTT_AI_COMBO,
@@ -522,6 +523,31 @@ export function StyleGuide() {
                     onCommit={handleDemoAi}
                   />
                 </div>
+              </div>
+            </div>
+          </Section>
+
+          <Section title="TitleBar (opt-in custom chrome — V3-P6)">
+            <p className="text-sm text-text-secondary">
+              Rendered only when Settings → Appearance → Window style is
+              "Custom" (default is System). macOS hosts the OS traffic lights
+              via `TitleBarStyle::Overlay`; Windows shows its own min / restore
+              / close cluster. Both share the wordmark and drag region. Switch
+              the Storybook theme toolbar to walk dark and light.
+            </p>
+            <div className="flex flex-col gap-3">
+              <div className="overflow-hidden rounded-md border border-border-default">
+                <TitleBar platform="mac" onControl={() => undefined} />
+              </div>
+              <div className="overflow-hidden rounded-md border border-border-default">
+                <TitleBar platform="windows" onControl={() => undefined} />
+              </div>
+              <div className="overflow-hidden rounded-md border border-border-default">
+                <TitleBar
+                  platform="windows"
+                  forceMaximized
+                  onControl={() => undefined}
+                />
               </div>
             </div>
           </Section>

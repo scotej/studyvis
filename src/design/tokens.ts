@@ -143,6 +143,17 @@ export const tokens = {
     auditPanelWidth: 320,
     videoTileMinHeight: 180,
     videoTileMaxHeight: 360,
+    // V3-P6 custom window chrome (opt-in). The TitleBar band height is shared
+    // across platforms so the wordmark sits at the same vertical centre on
+    // macOS (overlapped onto the system traffic-light area via
+    // TitleBarStyle::Overlay) and Windows (a frameless top band with our own
+    // min/restore/close cluster). 38 was picked to comfortably contain the
+    // macOS traffic lights (≈14 px diameter, ~12 px top inset on Sonoma).
+    titleBarHeight: 38,
+    // Left inset on macOS reserved for the system traffic lights when the
+    // custom chrome is on: 12 px left margin + 3 × 14 px buttons + 2 × 8 px
+    // gaps + 12 px calm gap before the wordmark ≈ 78 px. Windows uses 0.
+    titleBarMacInset: 78,
   },
 }
 
