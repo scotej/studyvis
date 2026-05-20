@@ -198,7 +198,12 @@ function ControlButton({
       onClick={onActivate}
       className={cn(
         'flex h-full w-12 items-center justify-center text-text-secondary outline-none transition-colors duration-fast ease-out-token',
-        'focus-visible:bg-bg-raised focus-visible:text-text-primary',
+        // Match the repo focus-visible convention (SettingsLayout nav
+        // buttons, KeybindCapture): accent ring at 3 px width. `ring-inset`
+        // keeps the ring inside the button bounds since these sit flush
+        // with the window edge — an outset ring would clip against the
+        // top/right edges in custom-chrome mode.
+        'focus-visible:bg-bg-raised focus-visible:text-text-primary focus-visible:ring-3 focus-visible:ring-inset focus-visible:ring-accent-ring',
         hoverCls
       )}
     >
