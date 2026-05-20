@@ -340,7 +340,7 @@ Everything else — layout, transform, and decorative motion — is instant. No 
 2. **All primitives come from `src/components/ui/`.** Application code imports from `components/`, `components/` imports from `ui/`. Reverse imports are an ESLint error.
 3. **One typeface, one accent.** A new design that needs a second accent color or a third font is a redesign — open a discussion, not a hex value.
 4. **Every component has a Storybook story.** Adding a component without a story fails the PR check (V1-P2 sets up Storybook + the lint rule).
-5. **`/style` dev route shows every primitive and every status state side by side.** Smoke-check before each release; visible in dev builds, hidden in production. Keeps drift visible.
+5. **`/style` dev route shows every `ui/` primitive and every status state side by side.** Smoke-check before each release; visible in dev builds, hidden in production. Keeps primitive-layer drift visible. Composed app components (`src/components/*`, the AI dialog, the audit panel, ScoreGauge, etc.) live in Storybook stories — that's the canonical exhibit for the composed layer, and the same a11y / visual axe-core gate runs against it (`npm run check-a11y`). Reducing `/style`'s scope to `ui/` keeps the dev route fast to walk without losing coverage.
 6. **No inline `style={...}` with raw values.** All styling is Tailwind classes (which derive from the token map) or component variants. Inline `style` allowed only for genuinely dynamic numeric values (e.g. video tile aspect ratio); ESLint rule forbids string literals in `style`.
 
 ## 8. Wireframes (ASCII)
