@@ -97,8 +97,17 @@ export type {
   CaptureFrame,
   CaptureErrorCode,
   EncodeJpegRequest,
+  EncodeCompositeJpegRequest,
+  CompositePlacementInput,
   SourceCrop,
 } from './captureShared'
+
+export { COMPOSITE_MAX_WIDTH, computeCompositeLayout } from './composite'
+export type {
+  FrameDims,
+  CompositePlacement,
+  CompositeLayout,
+} from './composite'
 
 export {
   FOCUS_SYSTEM_PROMPT,

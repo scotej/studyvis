@@ -116,7 +116,11 @@ function resetAllStores(): void {
   useBreakStore.getState().reset(null)
   useSettingsStore.setState((s) => ({
     ...s,
-    values: { ...s.values, aiFeaturesEnabled: true },
+    values: {
+      ...s.values,
+      aiFeaturesEnabled: true,
+      captureDisplays: 'primary',
+    },
   }))
   useModelStore.setState((s) => ({
     ...s,
@@ -186,6 +190,10 @@ const fakeCaptureRuntime: CaptureRuntime = {
     screenEncodeCalls += 1
     return 'screen-base64'
   },
+  encodeCompositeJpegBase64: async () => {
+    screenEncodeCalls += 1
+    return 'screen-composite-base64'
+  },
 }
 
 type RuntimeOptions = {
@@ -194,6 +202,7 @@ type RuntimeOptions = {
   battery?: BatteryInfo
   captureFace?: SampleLoopRuntime['captureFace']
   acquireScreenStream?: SampleLoopRuntime['acquireScreenStream']
+  enumerateDisplayCount?: SampleLoopRuntime['enumerateDisplayCount']
   modelPaths?: SampleLoopRuntime['modelPaths']
   startSidecar?: SampleLoopRuntime['startSidecar']
   stopSidecar?: SampleLoopRuntime['stopSidecar']
@@ -210,6 +219,7 @@ function buildSampleLoopRuntime(opts: RuntimeOptions): SampleLoopRuntime {
     captureFace: opts.captureFace ?? (async () => 'face-base64'),
     acquireScreenStream:
       opts.acquireScreenStream ?? (async () => makeFakeScreenStream()),
+    enumerateDisplayCount: opts.enumerateDisplayCount ?? (async () => 1),
     readBattery: async () => batteryInfo,
     modelPaths:
       opts.modelPaths ??
