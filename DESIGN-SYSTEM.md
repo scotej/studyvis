@@ -506,17 +506,19 @@ Every component that fetches or computes anything async ships three states:
 - **Loading**: shadcn `Skeleton` shaped like the eventual content. No spinners. No "loading…" text.
 - **Error**: inline `Toast` for transient errors. For blocking errors (no internet during pairing), a small inline banner with a `Retry` button. Never a modal-of-doom.
 
-## 11. Accessibility (V1 minimums)
+## 11. Accessibility
 
 - Every interactive element keyboard-reachable (Tab order matches DOM order; `tabIndex={0}` only when needed).
-- Visible focus ring (`shadow.glow` + `border.strong`) on focused element.
+- Visible focus ring (`shadow.glow` + `border.strong`) on focused element. Implementation uses the existing tokens via per-component `focus-visible:` utilities (every primitive in `src/components/ui/` and the V3-P6 `<TitleBar />` controls ship one); the global `:focus-visible { outline: none }` reset relies on this convention. The V3-P7 axe-core gate covers DOM and ARIA semantics; pixel-level focus-indicator visibility is verified by manual walk-through (V3-P10's cold-eyes pass exercises it on the live app).
 - Icon-only buttons get `aria-label`.
-- Color contrast ≥ WCAG AA on all text + background pairings (verify in V1-P2 with a color-pair check script).
-- Dynamic events (audit log row arriving) use `aria-live="polite"`.
-- Dialog focus trap via Radix.
+- Color contrast ≥ WCAG AA on all text + background pairings (verified by `scripts/check-contrast.ts` over both themes; V3-P5).
+- Dynamic events (audit log) use `role="log"` + `aria-live="polite"`; alerts use `role="alert"` + `aria-live="assertive"`; status surfaces (AI response bubble, self-warning badge, break countdown) use `role="status"` + `aria-live="polite"`.
+- Dialog focus trap + focus-restore-on-close via Radix.
 - No information conveyed by color alone — status dots also have shape (●/○) or label.
+- One `h1` per route, no skipped levels. `Home`/`SessionView` use a visually-hidden `h1`; other routes have visible headings.
+- Reduced motion (V3-P7): `[data-reduce-motion='true']` on the document element collapses every animation and transition to ~1ms via a `@layer base` CSS rule. The attribute is set OR-of-two-sources (the V1-P11 setting and `prefers-reduced-motion: reduce`), pre-painted by an inline script in `index.html` / `ai-dialog.html`, kept in sync after hydration by `<ApplyReduceMotion />` (the central source in `src/design/reduce-motion.ts`). Because the kill switch is CSS-driven and not per-component, new motion sites are gated by default — no future component can forget.
 
-V3 adds: full screen-reader pass, reduced-motion mode, customizable font sizing.
+V3 ships: full screen-reader pass, reduced-motion mode, axe-core CI gate over every Storybook story. Customizable font sizing is **deferred to post-1.0**.
 
 ## 12. Layout grids
 

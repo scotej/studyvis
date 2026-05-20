@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { invoke } from '@tauri-apps/api/core'
 import { LazyStore } from '@tauri-apps/plugin-store'
 
+import { writeReduceMotionBootCache } from '@/design/reduce-motion'
 import {
   PTT_AI_DEFAULT_ACCELERATOR,
   PTT_FRIENDS_DEFAULT_ACCELERATOR,
@@ -511,6 +512,11 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       // who has already opted into 'custom' was the one who set the cache,
       // so this rewrites the same value (idempotent).
       writeWindowStyleBootCache(values.windowStyle)
+      // V3-P7 — Same one-shot sync for the reduced-motion boot cache so
+      // the inline pre-paint script in index.html / ai-dialog.html resolves
+      // the right value on the next launch (and on the ai-dialog window,
+      // which never hydrates this store).
+      writeReduceMotionBootCache(values.reduceMotion)
       // Push the minimize-to-tray flag to Rust so the close-to-tray path
       // honors the user's saved preference even before the user opens
       // settings.
@@ -550,6 +556,11 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
 
   setReduceMotion: async (enabled) => {
     set((s) => ({ values: { ...s.values, reduceMotion: enabled } }))
+    // V3-P7 — write-through to the localStorage boot cache before the
+    // persistent store. Synchronous, mirrors the theme pattern. Cross-window
+    // sync (main writes → ai-dialog reads) rides the `storage` event the
+    // browser fires in other same-origin windows.
+    writeReduceMotionBootCache(enabled)
     await writeKey(set, SETTINGS_KEY_REDUCE_MOTION, enabled)
   },
 

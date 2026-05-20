@@ -6,6 +6,7 @@ import '@fontsource-variable/inter/index.css'
 import '@fontsource-variable/jetbrains-mono/index.css'
 import '@/design/index.css'
 
+import { ApplyReduceMotion } from '@/design/reduce-motion'
 import {
   AiDialogWindow,
   type AiDialogRuntime,
@@ -44,6 +45,7 @@ const liveRuntime: AiDialogRuntime = {
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
+    <ApplyReduceMotion />
     <AiDialogWindow runtime={liveRuntime} />
   </StrictMode>
 )
