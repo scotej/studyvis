@@ -87,39 +87,53 @@ pub struct ShortcutBindings {
 }
 
 impl ShortcutBindings {
-    pub fn new(
-        initial_ptt_friends: &str,
-        initial_ptt_ai: &str,
-    ) -> Result<Self, Box<dyn std::error::Error>> {
-        let friends =
-            Shortcut::from_str(initial_ptt_friends).map_err(|e| -> Box<dyn std::error::Error> {
-                format!("ptt-friends accelerator: {e}").into()
-            })?;
-        let ai = Shortcut::from_str(initial_ptt_ai).map_err(|e| -> Box<dyn std::error::Error> {
-            format!("ptt-ai accelerator: {e}").into()
-        })?;
-        Ok(Self {
-            ptt_friends: Mutex::new(friends),
-            ptt_ai: Mutex::new(ai),
-        })
+    // Always returns a valid binding pair: a malformed `initial_*` (empty
+    // string, unparseable accelerator from a manually-edited settings.json,
+    // etc.) silently falls back to the shipped default so boot registration
+    // is as forgiving as the JS hydrator. The defaults are known-parseable
+    // string constants, so the inner `expect` cannot trip.
+    pub fn new(initial_ptt_friends: &str, initial_ptt_ai: &str) -> Self {
+        Self {
+            ptt_friends: Mutex::new(Self::parse_or_default(
+                initial_ptt_friends,
+                DEFAULT_PTT_FRIENDS_ACCELERATOR,
+            )),
+            ptt_ai: Mutex::new(Self::parse_or_default(
+                initial_ptt_ai,
+                DEFAULT_PTT_AI_ACCELERATOR,
+            )),
+        }
+    }
+
+    fn parse_or_default(pref: &str, default_accelerator: &str) -> Shortcut {
+        if let Ok(s) = Shortcut::from_str(pref) {
+            return s;
+        }
+        Shortcut::from_str(default_accelerator).expect("default accelerator must parse")
     }
 
     pub fn ptt_friends(&self) -> Shortcut {
-        *self.ptt_friends.lock().expect("ShortcutBindings mutex")
+        // Recover from a poisoned mutex (an unrelated panic while a previous
+        // handler held the lock) so the global shortcut handler never
+        // crashes the process on a hot path.
+        *self.ptt_friends.lock().unwrap_or_else(|e| e.into_inner())
     }
 
     pub fn ptt_ai(&self) -> Shortcut {
-        *self.ptt_ai.lock().expect("ShortcutBindings mutex")
+        *self.ptt_ai.lock().unwrap_or_else(|e| e.into_inner())
     }
 
     fn store_ptt_friends(&self, shortcut: Shortcut) {
-        *self.ptt_friends.lock().expect("ShortcutBindings mutex") = shortcut;
+        *self.ptt_friends.lock().unwrap_or_else(|e| e.into_inner()) = shortcut;
     }
 
     fn store_ptt_ai(&self, shortcut: Shortcut) {
-        *self.ptt_ai.lock().expect("ShortcutBindings mutex") = shortcut;
+        *self.ptt_ai.lock().unwrap_or_else(|e| e.into_inner()) = shortcut;
     }
 }
+
+const DEFAULT_PTT_FRIENDS_ACCELERATOR: &str = "CmdOrCtrl+[";
+const DEFAULT_PTT_AI_ACCELERATOR: &str = "CmdOrCtrl+]";
 
 // Swap one of the two global shortcuts at runtime. Unregister-then-register
 // (per the tauri-plugin-global-shortcut guidance; double-registering the

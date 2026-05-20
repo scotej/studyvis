@@ -62,7 +62,14 @@ export function ShortcutsCategory() {
   )
 
   const handleReset = useCallback(() => {
-    void resetShortcutsToDefaults()
+    // `resetShortcutsToDefaults` awaits each setShortcutAccelerator and a
+    // setter rethrows on runtime registration refusal. Catch here so a
+    // (rare) defaults re-registration failure doesn't surface as an
+    // unhandled promise rejection — the rolled-back values and the
+    // store's `error` field are what the UI consumes.
+    void resetShortcutsToDefaults().catch((err) => {
+      console.error('resetShortcutsToDefaults failed:', err)
+    })
   }, [resetShortcutsToDefaults])
 
   const p = detectPlatform()

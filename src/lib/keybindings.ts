@@ -280,8 +280,10 @@ export function keyDisplay(code: string): string {
 }
 
 // Returns the ordered list of Kbd labels that should render for this combo.
-// Order: primary mod, alt/option, shift, ctrl (mac-only), key. The trailing
-// key is always included.
+// Order on macOS: ctrl, option, shift, cmd, key (the Apple convention —
+// modifier glyphs ascend in the order they sit on the keyboard, with the
+// primary Cmd last next to the key). Order elsewhere: Ctrl, Alt, Shift,
+// key. The trailing key is always included.
 export function comboToKbdLabels(combo: Combo, platform: Platform): string[] {
   const labels: string[] = []
   if (platform === 'mac') {

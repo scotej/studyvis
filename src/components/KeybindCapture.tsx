@@ -49,7 +49,12 @@ export function KeybindCapture({
   useEffect(() => {
     if (!armed) return
     buttonRef.current?.focus()
+    let commitInFlight = false
     const handler = (event: KeyboardEvent) => {
+      // Held-key autorepeat fires a stream of keydowns — ignore them so a
+      // single press doesn't queue multiple commit attempts (the second one
+      // would race against the optimistic set + Rust re-register).
+      if (event.repeat) return
       if (
         event.key === 'Escape' &&
         !event.ctrlKey &&
@@ -68,6 +73,7 @@ export function KeybindCapture({
       }
       event.preventDefault()
       event.stopPropagation()
+      if (commitInFlight) return
       const captured = comboFromKeyboardEvent(event, platform)
       const conflict = validateCombo(captured, {
         otherCombo,
@@ -78,6 +84,7 @@ export function KeybindCapture({
         setError(describeConflict(captured, conflict, platform))
         return
       }
+      commitInFlight = true
       void (async () => {
         try {
           await onCommit(captured)
@@ -85,6 +92,8 @@ export function KeybindCapture({
           setArmed(false)
         } catch (err) {
           setError(err instanceof Error ? err.message : String(err))
+        } finally {
+          commitInFlight = false
         }
       })()
     }

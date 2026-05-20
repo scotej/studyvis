@@ -159,10 +159,7 @@ pub fn run() {
                 app.manage(AiFeaturesFlag::new(initial_ai_features));
                 let (initial_ptt_friends, initial_ptt_ai) =
                     read_shortcut_accelerators_from_settings(app.handle());
-                app.manage(ShortcutBindings::new(
-                    &initial_ptt_friends,
-                    &initial_ptt_ai,
-                )?);
+                app.manage(ShortcutBindings::new(&initial_ptt_friends, &initial_ptt_ai));
                 app.manage(SidecarState::new());
                 app.manage(DownloadState::new());
                 setup_desktop(app)?;
@@ -247,16 +244,23 @@ fn read_shortcut_accelerators_from_settings<R: tauri::Runtime>(
         serde_json::from_slice(&bytes).ok()
     };
     let value = read();
+    // `.filter(|s| !s.is_empty())` collapses a persisted empty string into
+    // the same "missing" branch as a non-string value, so boot registration
+    // never fails on a manually-edited `settings.json` with an empty
+    // accelerator. The JS hydrator already treats `""` as missing; mirror
+    // that here.
     let friends = value
         .as_ref()
         .and_then(|v| v.get(KEY_PTT_FRIENDS))
         .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
         .map(str::to_owned)
         .unwrap_or_else(|| DEFAULT_PTT_FRIENDS.to_owned());
     let ai = value
         .as_ref()
         .and_then(|v| v.get(KEY_PTT_AI))
         .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
         .map(str::to_owned)
         .unwrap_or_else(|| DEFAULT_PTT_AI.to_owned());
     (friends, ai)

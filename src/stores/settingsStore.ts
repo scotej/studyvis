@@ -95,9 +95,13 @@ type SettingsState = {
   // `null` clears the override, falling back to the model benchmark cadence.
   setSampleIntervalSec: (seconds: number | null) => Promise<void>
   // V3-P3 — set the accelerator for one of the two global shortcuts. The
-  // optimistic-in-memory + writeKey-then-runtime-push pattern matches
-  // setMinimizeToTrayOnClose: UI intent wins immediately, the persisted
-  // value follows, and any runtime registration error surfaces in `error`.
+  // order intentionally inverts `setMinimizeToTrayOnClose` because shortcut
+  // semantics are binary: registration must succeed before persistence is
+  // committed, otherwise the on-disk value would disagree with the live OS
+  // binding. So: optimistic in-memory set → runtime push (Rust unregister +
+  // register) → on success persist via writeKey; on failure roll back the
+  // in-memory value, surface the message in `error`, and rethrow so the
+  // KeybindCapture stays armed for retry.
   setShortcutAccelerator: (
     action: ShortcutAction,
     accelerator: string
