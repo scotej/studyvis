@@ -11,14 +11,16 @@
       // wrong canvas. The persistent Tauri store hydrates async; we mirror
       // the chosen theme into localStorage on every set so this script can
       // read it synchronously. On a fresh install the key is absent, we
-      // default to 'auto' and follow the OS — matching the React resolver.
+      // fall back to 'dark' — matching DEFAULT_SETTINGS.theme + the React
+      // resolver's defaultMode fallback. (If the app's default ever moves
+      // to 'auto', flip both this default and the React fallback together.)
       ;(function () {
         try {
           var stored = window.localStorage.getItem('studyvis.theme')
           var mode =
             stored === 'light' || stored === 'dark' || stored === 'auto'
               ? stored
-              : 'auto'
+              : 'dark'
           var systemLight =
             window.matchMedia &&
             window.matchMedia('(prefers-color-scheme: light)').matches

@@ -8,13 +8,15 @@
     <script>
       // Mirror of the boot script in index.html — keep the AI dialog window
       // in sync with the main window's theme decision before first paint.
+      // Missing cache falls back to 'dark' to match DEFAULT_SETTINGS.theme;
+      // change both together if the app default ever moves.
       ;(function () {
         try {
           var stored = window.localStorage.getItem('studyvis.theme')
           var mode =
             stored === 'light' || stored === 'dark' || stored === 'auto'
               ? stored
-              : 'auto'
+              : 'dark'
           var systemLight =
             window.matchMedia &&
             window.matchMedia('(prefers-color-scheme: light)').matches
