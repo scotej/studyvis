@@ -106,6 +106,7 @@ describe('settingsStore — V2-P9 setters', () => {
         pushAiFeaturesEnabled: async (enabled) => {
           pushedAi.push(enabled)
         },
+        setGlobalShortcut: async () => {},
       },
     }
     __setSettingsStoreDeps(deps)
@@ -141,6 +142,7 @@ describe('settingsStore — V2-P9 setters', () => {
         pushAiFeaturesEnabled: async () => {
           throw new Error('boom')
         },
+        setGlobalShortcut: async () => {},
       },
     })
     await useSettingsStore.getState().setAiFeaturesEnabled(true)

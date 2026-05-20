@@ -1,8 +1,11 @@
+use std::str::FromStr;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Mutex;
 
 use serde::Serialize;
 use tauri::{AppHandle, Manager, Runtime};
 use tauri_plugin_autostart::ManagerExt;
+use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut};
 use tauri_plugin_opener::OpenerExt;
 
 use crate::db::data_dir;
@@ -70,6 +73,92 @@ impl AiFeaturesFlag {
     pub fn is_enabled<R: Runtime>(app: &AppHandle<R>) -> bool {
         app.state::<Self>().0.load(Ordering::Relaxed)
     }
+}
+
+// V3-P3 — runtime-mutable global shortcut bindings. The two `Mutex<Shortcut>`
+// fields are the V1-P7 interior-mutability pattern: the handler locks the
+// same Mutex per keystroke to compare against the *current* shortcut, and
+// `system_set_global_shortcut` swaps the held value after unregister +
+// register both succeed. `std::sync::Mutex` is enough — the lock is held
+// for a single field copy.
+pub struct ShortcutBindings {
+    ptt_friends: Mutex<Shortcut>,
+    ptt_ai: Mutex<Shortcut>,
+}
+
+impl ShortcutBindings {
+    pub fn new(
+        initial_ptt_friends: &str,
+        initial_ptt_ai: &str,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
+        let friends =
+            Shortcut::from_str(initial_ptt_friends).map_err(|e| -> Box<dyn std::error::Error> {
+                format!("ptt-friends accelerator: {e}").into()
+            })?;
+        let ai = Shortcut::from_str(initial_ptt_ai).map_err(|e| -> Box<dyn std::error::Error> {
+            format!("ptt-ai accelerator: {e}").into()
+        })?;
+        Ok(Self {
+            ptt_friends: Mutex::new(friends),
+            ptt_ai: Mutex::new(ai),
+        })
+    }
+
+    pub fn ptt_friends(&self) -> Shortcut {
+        *self.ptt_friends.lock().expect("ShortcutBindings mutex")
+    }
+
+    pub fn ptt_ai(&self) -> Shortcut {
+        *self.ptt_ai.lock().expect("ShortcutBindings mutex")
+    }
+
+    fn store_ptt_friends(&self, shortcut: Shortcut) {
+        *self.ptt_friends.lock().expect("ShortcutBindings mutex") = shortcut;
+    }
+
+    fn store_ptt_ai(&self, shortcut: Shortcut) {
+        *self.ptt_ai.lock().expect("ShortcutBindings mutex") = shortcut;
+    }
+}
+
+// Swap one of the two global shortcuts at runtime. Unregister-then-register
+// (per the tauri-plugin-global-shortcut guidance; double-registering the
+// same combo silently fails on some macOS versions). The Mutex update only
+// runs after both side-effects succeed so a partial failure can't leave
+// the handler stale.
+#[tauri::command]
+pub fn system_set_global_shortcut<R: Runtime>(
+    app: AppHandle<R>,
+    action: String,
+    accelerator: String,
+) -> Result<(), String> {
+    let new_shortcut = Shortcut::from_str(&accelerator)
+        .map_err(|e| format!("Couldn't read {accelerator}: {e}"))?;
+    let bindings = app.state::<ShortcutBindings>();
+    let old_shortcut = match action.as_str() {
+        "ptt-friends" => bindings.ptt_friends(),
+        "ptt-ai" => bindings.ptt_ai(),
+        _ => return Err(format!("unknown shortcut action: {action}")),
+    };
+    if old_shortcut == new_shortcut {
+        return Ok(());
+    }
+    let manager = app.global_shortcut();
+    manager
+        .unregister(old_shortcut)
+        .map_err(|e| format!("Couldn't unregister the old shortcut: {e}"))?;
+    if let Err(err) = manager.register(new_shortcut) {
+        // Best-effort: try to put the old one back so the user isn't left
+        // with no PTT binding while their UI shows the rejected new one.
+        let _ = manager.register(old_shortcut);
+        return Err(format!("Couldn't register {accelerator}: {err}"));
+    }
+    match action.as_str() {
+        "ptt-friends" => bindings.store_ptt_friends(new_shortcut),
+        "ptt-ai" => bindings.store_ptt_ai(new_shortcut),
+        _ => unreachable!("action validated above"),
+    }
+    Ok(())
 }
 
 #[tauri::command]

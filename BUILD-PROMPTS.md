@@ -378,6 +378,11 @@ End-of-task exit sequence (mandatory):
 
 ---
 
+CARRY-FORWARD DEBTS (from the V3 debt ledger — incorporate into this work):
+- From V3-P3: walk the new `KeybindCapture` primitive in both themes — the muted helper line, the `status-alerted` inline error, the Kbd group at `opacity-40` while armed, and the Rebind button's `outline` → `secondary` swap. The /style demo currently only renders the mac platform; consider adding an other-platform mirror or a platform parameter so the literal "Ctrl" rendering is part of the drift check too.
+
+---
+
 YOUR TASK: V3-P5 — Light + auto theme polish. Light and auto are wired (src/design/theme.tsx, theme-context.ts, index.css :root.light) but were never walked component-by-component; lightTokens is a first cut. Make light theme genuinely first-class, not a fallback.
 
 Orient (Explore): read tokens.ts (dark + lightTokens), index.css (how :root.light applies the map), theme.tsx (how dark/light/auto resolve; how auto reads the OS), and the /style route + the 55 stories.
@@ -527,6 +532,7 @@ End-of-task exit sequence (mandatory):
 CARRY-FORWARD DEBTS (from the V3 debt ledger — incorporate into this work):
 - D5 — The V2-P9 long-lived screen MediaStream keeps the OS screen-recording indicator lit for the entire AI session, and macOS NSScreenCaptureUsageDescription is a documented no-op (the real control is System Settings → Privacy & Security → Screen Recording). Wherever onboarding/permissions explains screen capture, the copy must (a) tell users the recording indicator stays on the whole session and that's expected, and (b) point macOS users to the System Settings toggle rather than implying an in-app purpose-string prompt. (The exact wording is finalized in V3-P8's copy pass; here, ensure the information is present and announced accessibly — don't leave it only as a visual.)
 - From V3-P2: re-audit `src/features/identity/RecoverView.tsx` for screen-reader and reduced-motion sanity — the `role="alert"` inline error region, focus order when the overwrite-confirm phase swaps the whole screen, and the textarea `aria-describedby` toggling between `recover-count` and `recover-error`.
+- From V3-P3: gate the `transition-opacity ease-out-token` on `KeybindCapture`'s Kbd-group fade-while-armed by the central reduced-motion source. Also re-audit the capture interaction: `aria-pressed` on the Rebind button, `role="alert"` on the inline conflict span, the focus-on-arm via `buttonRef.current?.focus()` inside `useEffect`, and the document-level `keydown` capture listener (capture mode is intentional to beat focused-element handlers; make sure SR + keyboard-only users can still cancel via Esc reliably).
 
 ---
 
@@ -607,6 +613,7 @@ CARRY-FORWARD DEBTS (from the V3 debt ledger — incorporate into this work):
 - D5 (copy half) — Finalize the screen-capture wording: onboarding/permissions copy must say, in StudyVis's voice, that the OS screen-recording indicator stays lit for the whole AI session (expected, not a bug) and that macOS users grant/revoke this in System Settings → Privacy & Security → Screen Recording (the in-app purpose string is a no-op). Keep V3-P7's accessible announcement intact; only sharpen the words.
 - D6 (triage) — Three owner-less UX tunables exist: alertsUiStore PEER_ALERT_TTL_MS / WARNING_TTL_MS as a tile-alert-duration control; evaluateBreakRules using a rolling 2-hour window instead of "4 breaks since session start"; a sessions.breaks_taken column if the post-session report should surface breaks taken. For each: implement it ONLY if it measurably improves the felt product and fits this pass without behavior risk; otherwise leave it and explicitly hand it to V3-P9 to record as deliberately deferred. State your decision per item in the summary.
 - From V3-P2: the onboarding identity fork gives Recover a Back-to-options affordance but the create path (IdentitySetupGate) has none, and Settings → Identity "Recovery phrase" is now informational-only — if cohesion judges the asymmetry a trap, add a symmetric back without changing shipped IdentitySetup chrome; if a Settings "Recover from backup" entry is added, reuse the `Recover` container rather than duplicating the onboarding wiring.
+- From V3-P3: the new keybindings surface introduced user-facing strings that should land in the centralized strings module — Settings → Shortcuts row labels and help text ("Push to talk · friends", "Talk to AI", "Reset to defaults", "Active when AI features are on.", "Opens the floating AI dialog over any app.", "Restores the original combos for both shortcuts."), KeybindCapture's button labels ("Rebind", "Press a key…") and helper line ("Press a combo, or Esc to cancel."), and the conflict copy in `describeConflict()` inside `src/lib/keybindings.ts` (the "reserved by the system", "already bound to …", "Add Ctrl, Cmd, or Alt …", "Press a key with the modifier …" lines). Keep `describeConflict`'s shape — interpolation of action name + accelerator glyph — when relocating.
 
 ---
 
