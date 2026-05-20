@@ -55,8 +55,8 @@ in one installer. See "Friends-only unsigned" install notes in
   toggle is honest about needing a relaunch.
 - **V3-P7 — Accessibility pass + app-wide reduced motion.** Full
   keyboard navigation walk, screen-reader labels on every interactive
-  surface, axe-core a11y gate over every Storybook story (`npm run
-check-a11y`). Reduce motion (Settings → Appearance) is a CSS
+  surface, axe-core a11y gate over every Storybook story
+  (`npm run check-a11y`). Reduce motion (Settings → Appearance) is a CSS
   `[data-reduce-motion='true']` kill switch in `@layer base` — every
   transition and animation collapses to ~1ms automatically, so new
   motion sites are gated by default. Pre-paint via inline script in

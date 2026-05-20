@@ -103,8 +103,12 @@ together.
 Everything that identifies you or remembers your sessions stays in
 the OS user-data directory:
 
-- **macOS** — `~/Library/Application Support/com.studyvis.app/`
-- **Windows** — `%APPDATA%\com.studyvis.app\`
+- **macOS** — `~/Library/Application Support/studyvis/`
+- **Windows** — `%APPDATA%\studyvis\` (i.e. `~/AppData/Roaming/studyvis/`)
+
+`com.studyvis.app` is the bundle identifier + the keychain service
+name; it is NOT the data folder name. The data folder name is
+`studyvis` under `path::data_dir()` (per `src-tauri/src/db/mod.rs`).
 
 Inside:
 
@@ -242,8 +246,8 @@ where you'd see it surface.
   remaining safety net.
 - **`/style` route exhibits `ui/` primitives only.** The composed
   layer (VideoTile, AuditLogPanel, ScoreGauge, AI dialog, …) lives in
-  Storybook stories instead. The Storybook a11y gate (`npm run
-check-a11y`) covers every composed component.
+  Storybook stories instead. The Storybook a11y gate
+  (`npm run check-a11y`) covers every composed component.
 - **`LEGACY_THEME_LOCALSTORAGE_KEY` keeps its V1-P11 name.** The
   constant correctly scopes the pre-paint boot cache for theme /
   windowStyle / reduceMotion, but the name suggests "deprecated"
