@@ -6,6 +6,34 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="color-scheme" content="dark light" />
     <title>StudyVis</title>
+    <script>
+      // Apply the user's theme BEFORE first paint to avoid a flash of the
+      // wrong canvas. The persistent Tauri store hydrates async; we mirror
+      // the chosen theme into localStorage on every set so this script can
+      // read it synchronously. On a fresh install the key is absent, we
+      // default to 'auto' and follow the OS — matching the React resolver.
+      ;(function () {
+        try {
+          var stored = window.localStorage.getItem('studyvis.theme')
+          var mode =
+            stored === 'light' || stored === 'dark' || stored === 'auto'
+              ? stored
+              : 'auto'
+          var systemLight =
+            window.matchMedia &&
+            window.matchMedia('(prefers-color-scheme: light)').matches
+          var resolved =
+            mode === 'auto' ? (systemLight ? 'light' : 'dark') : mode
+          if (resolved === 'light') {
+            document.documentElement.classList.add('light')
+          }
+          document.documentElement.dataset.theme = resolved
+        } catch (_e) {
+          // localStorage / matchMedia unavailable — fall through to the CSS
+          // default (dark). React will reconcile once it hydrates.
+        }
+      })()
+    </script>
   </head>
   <body>
     <div id="root"></div>

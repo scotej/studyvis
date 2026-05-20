@@ -12,13 +12,13 @@
 
   --text-primary: #f0ebe2;
   --text-secondary: #b0a99c;
-  --text-muted: #7d766a;
+  --text-muted: #9a8e80;
   --text-inverse: #100d08;
 
   --accent-default: #f2b05a;
   --accent-hover: #f8c079;
   --accent-active: #d9974a;
-  --accent-muted: #7a5c32;
+  --accent-muted: #a07043;
   --accent-ring: #f2b05a66;
 
   --status-focused: #84b061;
@@ -75,19 +75,28 @@
 
   --text-primary: #1f1b12;
   --text-secondary: #5c5547;
-  --text-muted: #857c6a;
+  --text-muted: #665f50;
   --text-inverse: #fffdf8;
 
-  --accent-default: #a8691e;
-  --accent-hover: #945a1a;
-  --accent-active: #d9974a;
+  --accent-default: #8c5215;
+  --accent-hover: #774511;
+  --accent-active: #683c0e;
   --accent-muted: #7a5c32;
+  --accent-ring: #8c521566;
 
-  --status-focused: #5c8a4b;
-  --status-warning: #9a7b1f;
-  --status-alerted: #b5564b;
+  --status-focused: #477036;
+  --status-warning: #7d6314;
+  --status-alerted: #a24238;
   --status-offline: #7d766a;
-  --status-online: #5c8a4b;
+  --status-online: #477036;
+
+  --overlay-glass: #fffdf8cc;
+
+  /* Tinted, low-alpha shadows for the light canvas. Dark theme shadows
+     (rgba(0,0,0,…)) look muddy on near-white surfaces. */
+  --shadow-token-sm: 0 1px 2px rgba(43, 35, 23, 0.1);
+  --shadow-token-md: 0 4px 12px rgba(43, 35, 23, 0.12);
+  --shadow-token-lg: 0 12px 32px rgba(43, 35, 23, 0.18);
 }
 
 @theme inline {

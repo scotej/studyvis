@@ -460,32 +460,68 @@ export function StyleGuide() {
             <p className="text-sm text-text-secondary">
               Click Rebind, press a modifier+key combo to capture, or Esc to
               cancel. The rebound combo is local to this preview and does not
-              touch the real Settings → Shortcuts pane.
+              touch the real Settings → Shortcuts pane. Rendered in both
+              platforms so the literal "Ctrl" / "⌘" rendering is part of the
+              drift check.
             </p>
-            <div className="flex flex-col gap-3">
-              <div className="flex items-center justify-between gap-4">
-                <span className="text-sm text-text-primary">
-                  Push to talk · friends
-                </span>
-                <KeybindCapture
-                  action="ptt-friends"
-                  combo={demoFriendsCombo}
-                  otherCombo={demoAiCombo}
-                  otherAction="ptt-ai"
-                  platform="mac"
-                  onCommit={handleDemoFriends}
-                />
+            <div className="grid gap-x-8 gap-y-3 sm:grid-cols-2">
+              <div className="flex flex-col gap-2">
+                <div className="text-xs font-medium uppercase tracking-wide text-text-muted">
+                  macOS
+                </div>
+                <div className="flex items-center justify-between gap-4">
+                  <span className="text-sm text-text-primary">
+                    Push to talk · friends
+                  </span>
+                  <KeybindCapture
+                    action="ptt-friends"
+                    combo={demoFriendsCombo}
+                    otherCombo={demoAiCombo}
+                    otherAction="ptt-ai"
+                    platform="mac"
+                    onCommit={handleDemoFriends}
+                  />
+                </div>
+                <div className="flex items-center justify-between gap-4">
+                  <span className="text-sm text-text-primary">Talk to AI</span>
+                  <KeybindCapture
+                    action="ptt-ai"
+                    combo={demoAiCombo}
+                    otherCombo={demoFriendsCombo}
+                    otherAction="ptt-friends"
+                    platform="mac"
+                    onCommit={handleDemoAi}
+                  />
+                </div>
               </div>
-              <div className="flex items-center justify-between gap-4">
-                <span className="text-sm text-text-primary">Talk to AI</span>
-                <KeybindCapture
-                  action="ptt-ai"
-                  combo={demoAiCombo}
-                  otherCombo={demoFriendsCombo}
-                  otherAction="ptt-friends"
-                  platform="mac"
-                  onCommit={handleDemoAi}
-                />
+              <div className="flex flex-col gap-2">
+                <div className="text-xs font-medium uppercase tracking-wide text-text-muted">
+                  Windows / Linux
+                </div>
+                <div className="flex items-center justify-between gap-4">
+                  <span className="text-sm text-text-primary">
+                    Push to talk · friends
+                  </span>
+                  <KeybindCapture
+                    action="ptt-friends"
+                    combo={demoFriendsCombo}
+                    otherCombo={demoAiCombo}
+                    otherAction="ptt-ai"
+                    platform="other"
+                    onCommit={handleDemoFriends}
+                  />
+                </div>
+                <div className="flex items-center justify-between gap-4">
+                  <span className="text-sm text-text-primary">Talk to AI</span>
+                  <KeybindCapture
+                    action="ptt-ai"
+                    combo={demoAiCombo}
+                    otherCombo={demoFriendsCombo}
+                    otherAction="ptt-friends"
+                    platform="other"
+                    onCommit={handleDemoAi}
+                  />
+                </div>
               </div>
             </div>
           </Section>
