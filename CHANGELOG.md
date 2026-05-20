@@ -7,15 +7,16 @@ in `PLAN.md`. Each build prompt landed as a single squash-merged PR;
 the history below collapses to the user-facing story rather than the
 per-PR ledger.
 
-The 1.0.4 release is the first version pushed as a tagged build. The
-internal counter moved 1.0.0 → 1.0.3 during V3 development without a
-release tag; 1.0.4 is the polished 1.0 milestone `PLAN.md` set out to
-build.
+v1.0.0 through v1.0.3 shipped during V1 + V2 + the audit pass; v1.0.4
+is the next patch and the milestone of the V3 polish phase. It is the
+polished 1.0 `PLAN.md` set out to build — feature-complete (V1's
+study-with-friends loop, V2's on-device AI focus detection, V3's
+breadth + polish) and gated by the success-criteria walk in PR #40.
 
-## 1.0.4 — 2026-05-20 — Polished 1.0
+## 1.0.4 — 2026-05-20 — V3 polish, the polished 1.0
 
-The release tag for the first published build. Carries V1 + V2 + V3
-in one installer. See "Friends-only unsigned" install notes in
+The patch release that lands the V3 phase. Carries V1 + V2 + V3 in
+one installer. See "Friends-only unsigned" install notes in
 `INSTALL.md` and the user-facing tour in `README.md`.
 
 ### V3 — polish and breadth
