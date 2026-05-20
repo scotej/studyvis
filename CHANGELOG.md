@@ -11,7 +11,9 @@ v1.0.0 through v1.0.3 shipped during V1 + V2 + the audit pass; v1.0.4
 is the next patch and the milestone of the V3 polish phase. It is the
 polished 1.0 `PLAN.md` set out to build — feature-complete (V1's
 study-with-friends loop, V2's on-device AI focus detection, V3's
-breadth + polish) and gated by the success-criteria walk in PR #40.
+breadth + polish) and gated by the success-criteria walkthrough in
+PR #40 (every V1 + V2 criterion explicitly met-with-evidence or
+deferred-with-reason).
 
 ## 1.0.4 — 2026-05-20 — V3 polish, the polished 1.0
 
