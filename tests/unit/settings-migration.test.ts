@@ -153,4 +153,36 @@ describe('hydrateValuesFromStore — V1-P11 settings migration', () => {
     const { values } = await hydrateValuesFromStore(store, migrator)
     expect(values.turnPreference).toBe('auto')
   })
+
+  // V3-P6 — windowStyle hydrates from `window_style`. Default 'system'
+  // matches the v1.0.3 shipped behavior, so a fresh install or any
+  // missing/invalid value lands on system chrome (the toggle has to be
+  // an active user choice).
+  test('defaults windowStyle to "system" when missing', async () => {
+    const store = fakeStore({})
+    const migrator = makeMigrator(null)
+    const { values } = await hydrateValuesFromStore(store, migrator)
+    expect(values.windowStyle).toBe('system')
+  })
+
+  test('reads windowStyle "custom" when persisted', async () => {
+    const store = fakeStore({ window_style: 'custom' })
+    const migrator = makeMigrator(null)
+    const { values } = await hydrateValuesFromStore(store, migrator)
+    expect(values.windowStyle).toBe('custom')
+  })
+
+  test('reads windowStyle "system" when persisted', async () => {
+    const store = fakeStore({ window_style: 'system' })
+    const migrator = makeMigrator(null)
+    const { values } = await hydrateValuesFromStore(store, migrator)
+    expect(values.windowStyle).toBe('system')
+  })
+
+  test('rejects invalid windowStyle values', async () => {
+    const store = fakeStore({ window_style: 'native' })
+    const migrator = makeMigrator(null)
+    const { values } = await hydrateValuesFromStore(store, migrator)
+    expect(values.windowStyle).toBe('system')
+  })
 })

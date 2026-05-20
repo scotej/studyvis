@@ -307,6 +307,7 @@ describe('settingsStore — V3-P3 shortcut persistence & runtime push', () => {
           if (registerShouldFail) throw new Error('OS refused')
           pushed.push({ action, accelerator })
         },
+        relaunchApp: async () => {},
       },
     }
     __setSettingsStoreDeps(deps)

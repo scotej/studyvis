@@ -277,6 +277,18 @@ fn no_battery_fallback() -> BatteryInfo {
     }
 }
 
+// V3-P6 — Relaunches the StudyVis process. Used by Settings → Appearance
+// after the user toggles the custom window-chrome preference: the
+// decoration / title-bar-style swap takes effect at the *next* Rust
+// `setup()` boot (see `apply_window_style` in lib.rs), so a clean restart
+// is the honest path. `AppHandle::restart` is divergent — it replaces the
+// current process and never returns — so the `Result` return type is
+// kept for `#[tauri::command]` ergonomics and the value never resolves.
+#[tauri::command]
+pub fn system_relaunch_app<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
+    app.restart()
+}
+
 // macOS Sequoia surfaces Screen Recording grants as a per-app entry in
 // System Settings → Privacy & Security → Screen Recording. The
 // `x-apple.systempreferences` URL scheme jumps the user straight to that

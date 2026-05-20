@@ -10,7 +10,7 @@ Reasoning, in order:
 1. **Calm**: this is a focused-work app. The UI must not compete with the user's study material for attention.
 2. **Dark by default**: study sessions skew evening / night; long sessions reward low eye-strain.
 3. **Warm, not corporate**: friends-only. The aesthetic should feel personal and a bit cozy, not Slack-grey.
-4. **Native chrome v1**: respect each OS's window decorations and system menus. Custom frameless chrome is V3 polish.
+4. **Native chrome by default; opt-in custom chrome**: native OS decorations are the default and match every install through v1.0.3. V3-P6 ships an opt-in custom frameless chrome (Settings → Appearance → Window style → Custom) — the studyvis wordmark and a platform-correct control cluster, applied at process boot for a clean state. Tokens in §2: `titleBarHeight` and `titleBarMacInset`. The toggle is honest about needing a relaunch.
 5. **Motion sparingly**: a brief transition when a panel opens; nothing decorative, nothing repeating.
 
 What it is **not**:
@@ -156,11 +156,21 @@ export const tokens = {
 
   // sizing/breakpoint tokens used by layout primitives
   sizes: {
-    contentMaxWidth:    1200,
-    sidebarWidth:        280,
-    auditPanelWidth:     320,
-    videoTileMinHeight:  180,
-    videoTileMaxHeight:  360,
+    contentMaxWidth:        1200,
+    sidebarWidth:            280,
+    auditPanelWidth:         320,
+    videoTileMinHeight:      180,
+    videoTileMaxHeight:      360,
+    // V3-P6 opt-in custom window chrome (TitleBar). The band height is
+    // shared across platforms so the wordmark vertical-centre matches on
+    // macOS (overlap onto the system traffic-light area via
+    // TitleBarStyle::Overlay) and Windows (the app-painted frameless
+    // band with our own min/restore/close cluster).
+    titleBarHeight:           38,
+    // Left inset on macOS reserved for the system traffic lights: 12 + 3
+    // × 14 + 2 × 8 + 12 = 78. Windows uses no inset (wordmark sits at the
+    // left edge with the standard inline gap).
+    titleBarMacInset:         78,
   },
 } as const
 
@@ -517,6 +527,7 @@ V3 adds: full screen-reader pass, reduced-motion mode, customizable font sizing.
 - **Sidebar (settings)**: fixed 280 wide.
 - **Video grid**: flex; tiles maintain a minimum aspect 16:9 and a clamped height (180–360 px).
 - **Spacing**: page padding `space.5` (24); section gap `space.6` (32); inline gap `space.3` (12).
+- **Custom titlebar (V3-P6, opt-in)**: 38 px tall (`sizes.titleBarHeight`). macOS reserves 78 px on the left (`sizes.titleBarMacInset`) for the system traffic-light cluster; the wordmark sits to its right. Windows hosts the app-painted min/restore/close cluster on the right edge. Native chrome is the default; this row of the grid only applies when the user has opted in.
 
 ## 13. Sound
 

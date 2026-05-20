@@ -30,8 +30,8 @@ use commands::sidecar::{sidecar_start, sidecar_status, sidecar_stop, SidecarStat
 use commands::system::{
     autostart_is_enabled, autostart_set_enabled, system_ai_features_set_enabled, system_battery,
     system_minimize_to_tray_set_enabled, system_open_data_folder, system_open_releases,
-    system_open_screen_capture_settings, system_set_global_shortcut, AiFeaturesFlag,
-    MinimizeToTrayFlag, QuitFlag, ShortcutBindings,
+    system_open_screen_capture_settings, system_relaunch_app, system_set_global_shortcut,
+    AiFeaturesFlag, MinimizeToTrayFlag, QuitFlag, ShortcutBindings,
 };
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -87,6 +87,8 @@ pub fn run() {
         system_open_screen_capture_settings,
         #[cfg(desktop)]
         system_set_global_shortcut,
+        #[cfg(desktop)]
+        system_relaunch_app,
         #[cfg(desktop)]
         system_battery,
         #[cfg(desktop)]
@@ -224,6 +226,82 @@ fn read_ai_features_from_settings<R: tauri::Runtime>(app: &tauri::AppHandle<R>) 
     value.get(KEY_AI_FEATURES)?.as_bool()
 }
 
+// V3-P6 — Opt-in custom window chrome.
+//
+// The JS settings store persists `window_style: "system" | "custom"` to
+// `settings.json`. Rust reads it here at boot — *before* the main window
+// paints — and applies decoration / title-bar-style via the platform-
+// specific path:
+//   * macOS: `TitleBarStyle::Overlay` so the system traffic lights stay
+//     alive (double-click-zoom, fullscreen toggle, snap all keep working
+//     natively) but the title-bar band is transparent and our painted
+//     wordmark sits in the overlap. We also clear the window title with
+//     `set_title("")` so the OS-rendered title text doesn't paint over
+//     the wordmark.
+//   * Windows: `set_decorations(false)` removes the native frame; the
+//     `<TitleBar />` React component renders our own min/restore/close
+//     cluster. `data-tauri-drag-region` provides the drag surface.
+//
+// Live swap is intentionally NOT implemented: tauri-apps/tauri#9673 and
+// #12042 document unreliable `setDecorations` behavior on macOS and
+// inconsistent visual results across OSes. Toggling the setting writes
+// the file and the Appearance row prompts a relaunch via the new
+// `system_relaunch_app` command — honest, simple, regression-proof.
+//
+// On every other state (default `'system'`, missing file, malformed
+// JSON, unknown enum value) the function returns `false` and the main
+// window stays at its conf-defined chrome — exactly the v1.0.3 shipped
+// behavior.
+#[cfg(desktop)]
+fn read_window_style_is_custom_from_settings<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+) -> bool {
+    const SETTINGS_FILE: &str = "settings.json";
+    const KEY_WINDOW_STYLE: &str = "window_style";
+    let read = || -> Option<bool> {
+        let dir = app.path().app_data_dir().ok()?;
+        let bytes = std::fs::read(dir.join(SETTINGS_FILE)).ok()?;
+        let value: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
+        Some(value.get(KEY_WINDOW_STYLE)?.as_str()? == "custom")
+    };
+    read().unwrap_or(false)
+}
+
+#[cfg(desktop)]
+fn apply_window_style<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    use tauri::Manager;
+
+    if !read_window_style_is_custom_from_settings(app) {
+        return;
+    }
+    let Some(window) = app.get_webview_window("main") else {
+        return;
+    };
+    #[cfg(target_os = "macos")]
+    {
+        if let Err(err) = window.set_title_bar_style(tauri::TitleBarStyle::Overlay) {
+            eprintln!("[window-chrome] set_title_bar_style failed: {err}");
+        }
+        // Clear the title so the OS doesn't paint title text on top of
+        // our wordmark in the overlay band. The menubar's app entry
+        // still shows "StudyVis" from the bundle Info.plist.
+        let _ = window.set_title("");
+    }
+    #[cfg(target_os = "windows")]
+    {
+        if let Err(err) = window.set_decorations(false) {
+            eprintln!("[window-chrome] set_decorations(false) failed: {err}");
+        }
+    }
+    // Linux / other unix targets: V3-P6 explicitly scopes to macOS +
+    // Windows (PLAN.md §5 release matrix). If a user runs the dev build
+    // on another platform and somehow toggled custom, the window keeps
+    // its native chrome and the React `<TitleBar />` still renders — a
+    // visible double-titlebar that signals "not supported here." The
+    // setting default is 'system' on every platform, so this path is
+    // only reached if the user actively opted in.
+}
+
 // One-shot read of the persisted accelerator strings (V3-P3). Any missing
 // or malformed value falls back to the shipped defaults — same defaults
 // `DEFAULT_SETTINGS` uses on the JS side, so the first registration always
@@ -275,6 +353,10 @@ fn setup_desktop(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>>
         Emitter,
     };
     use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
+
+    // V3-P6 — Apply the saved chrome preference before paint. Idempotent
+    // on every other path (default `'system'`, missing file, etc.).
+    apply_window_style(app.handle());
 
     app.handle().plugin(tauri_plugin_autostart::init(
         tauri_plugin_autostart::MacosLauncher::LaunchAgent,

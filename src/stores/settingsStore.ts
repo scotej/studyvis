@@ -17,6 +17,14 @@ export type TurnPreference = 'auto' | 'always' | 'never'
 // single image each tick. Setting only takes effect on the NEXT loop boot —
 // switching mid-session does not re-prompt or reshape an in-flight loop.
 export type CaptureDisplaysMode = 'primary' | 'all'
+// V3-P6 — Opt-in custom window chrome. `'system'` (default) keeps the OS
+// titlebar untouched and matches the v1.0.3 shipped behavior. `'custom'`
+// asks Rust to apply `set_decorations(false)` (Windows) or
+// `set_title_bar_style(TitleBarStyle::Overlay)` (macOS) at the next boot
+// and renders the `<TitleBar />` component. The change requires a process
+// relaunch because live decoration swaps are unreliable on macOS (see
+// tauri-apps/tauri#9673, #12042).
+export type WindowStyleMode = 'system' | 'custom'
 
 export type SettingsValues = {
   theme: ThemeMode
@@ -49,6 +57,8 @@ export type SettingsValues = {
   pttAiAccelerator: string
   // V3-P4 multi-monitor capture toggle. See `CaptureDisplaysMode` above.
   captureDisplays: CaptureDisplaysMode
+  // V3-P6 opt-in custom window chrome. See `WindowStyleMode` above.
+  windowStyle: WindowStyleMode
 }
 
 export const SETTINGS_FILE = 'settings.json'
@@ -73,6 +83,7 @@ export const SETTINGS_KEY_SAMPLE_INTERVAL = 'sample_interval_s'
 export const SETTINGS_KEY_PTT_FRIENDS_ACCELERATOR = 'ptt_friends_accelerator'
 export const SETTINGS_KEY_PTT_AI_ACCELERATOR = 'ptt_ai_accelerator'
 export const SETTINGS_KEY_CAPTURE_DISPLAYS = 'capture_displays'
+export const SETTINGS_KEY_WINDOW_STYLE = 'window_style'
 
 // Defaults match the V1 acceptance criteria + DESIGN-SYSTEM.md §8.5: dark
 // theme on, reduce-motion off, OS notification on for invites, minimize-to-
@@ -92,6 +103,9 @@ export const DEFAULT_SETTINGS: SettingsValues = {
   pttFriendsAccelerator: PTT_FRIENDS_DEFAULT_ACCELERATOR,
   pttAiAccelerator: PTT_AI_DEFAULT_ACCELERATOR,
   captureDisplays: 'primary',
+  // System chrome is the v1.0.3 shipped behavior — keep it as the default
+  // so a fresh install or a missing-key file matches what users have today.
+  windowStyle: 'system',
 }
 
 export type SettingsStatus = 'loading' | 'ready' | 'error'
@@ -129,6 +143,16 @@ type SettingsState = {
   // V3-P4 — Persist the multi-monitor capture mode. Takes effect on the next
   // sample-loop boot; in-flight loops are not reshaped.
   setCaptureDisplays: (mode: CaptureDisplaysMode) => Promise<void>
+  // V3-P6 — Persist the chrome mode. Takes effect on the next process
+  // launch (Rust reads the value during `setup()` and applies decorations
+  // / title-bar style before the window paints). The Appearance row exposes
+  // a "Relaunch now" button that calls the runtime bridge.
+  setWindowStyle: (mode: WindowStyleMode) => Promise<void>
+  // V3-P6 — Relaunch the app via the Rust runtime bridge. Used by the
+  // Appearance row after a chrome toggle. Resolves immediately so the UI
+  // can disarm; the process is replaced before the resolved promise is
+  // observed in practice.
+  relaunchApp: () => Promise<void>
 }
 
 export type StoreLike = {
@@ -166,6 +190,11 @@ export type RuntimeBridge = {
     action: ShortcutAction,
     accelerator: string
   ) => Promise<void>
+  // V3-P6 — Calls the Rust `system_relaunch_app` command to replace the
+  // process. Returns void so the JS resolution shape matches the other
+  // bridges; in practice the runtime never observes the resolved promise
+  // because the process is replaced.
+  relaunchApp: () => Promise<void>
 }
 
 export type SettingsStoreDeps = {
@@ -217,6 +246,38 @@ function writeThemeBootCache(mode: ThemeMode): void {
   }
 }
 
+// V3-P6 — Window style boot cache. App.tsx reads this synchronously on
+// first render to decide whether to mount the TitleBar component, and
+// freezes the value for the process's lifetime (toggling mid-process
+// would paint a custom titlebar over the still-native decoration). Mirror
+// of the theme boot cache pattern in `writeThemeBootCache`.
+export const WINDOW_STYLE_LOCALSTORAGE_KEY = 'studyvis.windowStyle'
+
+function writeWindowStyleBootCache(mode: WindowStyleMode): void {
+  if (typeof window === 'undefined') return
+  try {
+    window.localStorage.setItem(WINDOW_STYLE_LOCALSTORAGE_KEY, mode)
+  } catch {
+    // Best-effort: Rust still reads the canonical value from settings.json
+    // during `setup()`, so a missing cache only costs us one frame of
+    // potential mismatch between the OS chrome and the React layer at
+    // launch — which is harmless if both agree on 'system'.
+  }
+}
+
+// Reads the persisted window-style choice from localStorage. Returns
+// `'system'` for any failure path (missing key, value not in the enum,
+// localStorage unavailable) so a fresh install matches the default.
+export function readWindowStyleBootCache(): WindowStyleMode {
+  if (typeof window === 'undefined') return 'system'
+  try {
+    const v = window.localStorage.getItem(WINDOW_STYLE_LOCALSTORAGE_KEY)
+    return v === 'custom' ? 'custom' : 'system'
+  } catch {
+    return 'system'
+  }
+}
+
 let cachedLazyStore: LazyStore | null = null
 function defaultLazyStoreFactory(): StoreLike {
   if (!cachedLazyStore) cachedLazyStore = new LazyStore(SETTINGS_FILE)
@@ -242,6 +303,10 @@ const defaultDeps: SettingsStoreDeps = {
       if (!isTauriRuntime()) return
       await invoke('system_set_global_shortcut', { action, accelerator })
     },
+    relaunchApp: async () => {
+      if (!isTauriRuntime()) return
+      await invoke('system_relaunch_app')
+    },
   },
 }
 
@@ -255,6 +320,10 @@ export function isTurnPreference(v: unknown): v is TurnPreference {
 
 export function isCaptureDisplaysMode(v: unknown): v is CaptureDisplaysMode {
   return v === 'primary' || v === 'all'
+}
+
+export function isWindowStyleMode(v: unknown): v is WindowStyleMode {
+  return v === 'system' || v === 'custom'
 }
 
 function readBool(v: unknown, fallback: boolean): boolean {
@@ -283,6 +352,7 @@ export async function hydrateValuesFromStore(
     pttFriends: await store.get(SETTINGS_KEY_PTT_FRIENDS_ACCELERATOR),
     pttAi: await store.get(SETTINGS_KEY_PTT_AI_ACCELERATOR),
     captureDisplays: await store.get(SETTINGS_KEY_CAPTURE_DISPLAYS),
+    windowStyle: await store.get(SETTINGS_KEY_WINDOW_STYLE),
   }
 
   let theme: ThemeMode = isThemeMode(stored.theme)
@@ -348,6 +418,9 @@ export async function hydrateValuesFromStore(
       captureDisplays: isCaptureDisplaysMode(stored.captureDisplays)
         ? stored.captureDisplays
         : DEFAULT_SETTINGS.captureDisplays,
+      windowStyle: isWindowStyleMode(stored.windowStyle)
+        ? stored.windowStyle
+        : DEFAULT_SETTINGS.windowStyle,
     },
     wroteMigration,
   }
@@ -432,6 +505,12 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       // Idempotent — covers the transition launch for existing installs that
       // never re-picked their theme after V3-P5 landed.
       writeThemeBootCache(values.theme)
+      // Same one-shot sync for the V3-P6 window-style boot cache: existing
+      // installs that ship default 'system' get the cache seeded so the
+      // next launch agrees with disk without waiting for hydration. A user
+      // who has already opted into 'custom' was the one who set the cache,
+      // so this rewrites the same value (idempotent).
+      writeWindowStyleBootCache(values.windowStyle)
       // Push the minimize-to-tray flag to Rust so the close-to-tray path
       // honors the user's saved preference even before the user opens
       // settings.
@@ -567,5 +646,31 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   setCaptureDisplays: async (mode) => {
     set((s) => ({ values: { ...s.values, captureDisplays: mode } }))
     await writeKey(set, SETTINGS_KEY_CAPTURE_DISPLAYS, mode)
+  },
+
+  setWindowStyle: async (mode) => {
+    // Optimistic in-memory set, then write through to the localStorage
+    // boot cache *and* the Tauri persistent store. The decoration /
+    // title-bar-style swap happens at the *next* Rust `setup()` boot —
+    // the Appearance row surfaces a "Relaunch now" button so the user
+    // can act on the toggle immediately. No runtime push: a live swap
+    // would be unreliable on macOS (tauri-apps/tauri#9673, #12042), and
+    // rendering the TitleBar immediately would paint over the still-
+    // native decoration (double titlebar). The boot-cache write is
+    // synchronous so the very next process launch — including the one
+    // started by `relaunchApp` — sees the right value before paint.
+    set((s) => ({ values: { ...s.values, windowStyle: mode } }))
+    writeWindowStyleBootCache(mode)
+    await writeKey(set, SETTINGS_KEY_WINDOW_STYLE, mode)
+  },
+
+  relaunchApp: async () => {
+    try {
+      await activeDeps.runtime.relaunchApp()
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      console.error('relaunchApp failed:', err)
+      set({ error: message })
+    }
   },
 }))

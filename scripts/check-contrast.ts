@@ -433,6 +433,14 @@ const PAIRINGS: Pairing[] = [
     severity: 'info',
   },
   {
+    id: 'border-subtle on bg-base',
+    where: 'V3-P6 TitleBar bottom divider (border-b on bg-base canvas)',
+    fg: tok(['border', 'subtle']),
+    bg: [tok(['bg', 'base'])],
+    kind: 'border',
+    severity: 'info',
+  },
+  {
     id: 'border-strong on bg-base',
     where: 'checkbox/radio idle border (active uses accent fill + ring)',
     fg: tok(['border', 'strong']),
