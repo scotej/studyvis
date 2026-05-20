@@ -452,13 +452,48 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
     }
   }
 
+  // Release every screen stream past the primary one. Called when the user
+  // demotes from 'all' to 'primary' mid-session so the OS screen-recording
+  // indicator goes dark for the deselected displays right away — keeping
+  // those streams live would be a surprising privacy/perf cost. The 'ended'
+  // listener is removed BEFORE stop() so the explicit release doesn't latch
+  // captureDenied (only a real revoke from the OS should latch).
+  function releaseExtraScreenStreams(): void {
+    if (state.screenTracks.length <= 1) return
+    const extraTracks = state.screenTracks.slice(1)
+    const extraStreams = state.screenStreams.slice(1)
+    state.screenTracks = state.screenTracks.slice(0, 1)
+    state.screenStreams = state.screenStreams.slice(0, 1)
+    for (const track of extraTracks) {
+      try {
+        track.removeEventListener('ended', onScreenTrackEnded)
+      } catch {
+        // best-effort
+      }
+    }
+    for (const stream of extraStreams) {
+      for (const t of stream.getTracks()) {
+        try {
+          t.stop()
+        } catch {
+          // already-stopped tracks throw on some platforms; ignore
+        }
+      }
+    }
+  }
+
   // Dispatch per tick. Reads `captureDisplays` from settings on every call so
-  // an all→primary mid-session switch demotes the composite immediately
-  // (without acquiring or releasing streams). A primary→all switch can't
-  // grow the stream set mid-session without a new OS prompt, so it takes
-  // effect on the next loop boot — consistent with V2-P9's no-prompt-per-
-  // tick contract.
+  // an all→primary mid-session switch demotes immediately: this tick stops
+  // compositing AND releases the streams the model no longer needs, so the
+  // OS recording indicator goes dark for the deselected displays. A
+  // primary→all switch can't grow the stream set mid-session without a new
+  // OS prompt, so it takes effect on the next loop boot — consistent with
+  // V2-P9's no-prompt-per-tick contract.
   async function snapshotScreens(): Promise<string> {
+    const mode = useSettingsStore.getState().values.captureDisplays
+    if (mode === 'primary') {
+      releaseExtraScreenStreams()
+    }
     const tracks = state.screenTracks
     if (tracks.length === 0) {
       throw new CaptureError(
@@ -473,7 +508,6 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
         'all screen tracks have ended'
       )
     }
-    const mode = useSettingsStore.getState().values.captureDisplays
     if (mode === 'all' && liveTracks.length > 1) {
       return await snapshotAllScreens(liveTracks)
     }
@@ -838,9 +872,10 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
     firstTrack.addEventListener('ended', onScreenTrackEnded)
 
     // Acquire any additional displays for 'all' mode. Each call shows the OS
-    // picker once; the user picks the next monitor. If they cancel (or the
-    // OS only grants one), we keep what we have and behave as single-display
-    // for the rest of the session — no error.
+    // picker once; the user picks the next monitor. If they cancel any of
+    // these prompts (or the OS errors), we stop asking and keep whatever
+    // streams the user already granted — no error. The session then composites
+    // however many displays it ended up with (one = the single-display path).
     for (let i = 1; i < acquireTargetCount; i += 1) {
       if (state.stopped) return
       try {
