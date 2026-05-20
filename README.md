@@ -286,10 +286,13 @@ user-facing entry point.
 
 ## Versioning
 
-1.0.x is the running release series. The internal counter moved
-through 1.0.0–1.0.3 during build-prompt iteration before any version
-was released; 1.0.4 is the first version pushed as a tagged release.
-The version number lives in (and must stay consistent across):
+1.0.x is the running release series. v1.0.0–v1.0.3 shipped as
+friends-only unsigned builds during V1/V2 + the audit pass. v1.0.4 is
+the next patch and the milestone of the V3 polish phase (recovery
+from a 24-word backup, custom keybindings, multi-monitor capture,
+light + auto themes, opt-in custom window chrome, the accessibility
+and reduced-motion pass, and the cohesion + copy pass). The version
+number lives in (and must stay consistent across):
 
 - `package.json` — npm root
 - `package-lock.json` — npm lockfile (two spots: top-level + the
