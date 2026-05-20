@@ -3,6 +3,7 @@ import { PlusIcon } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { tokens } from '@/design/tokens'
 import { cn } from '@/lib/utils'
+import { strings } from '@/strings'
 import type { Friend } from '@/lib/db/friends'
 
 export type FriendsListViewProps = {
@@ -32,15 +33,15 @@ export function FriendsListView({
             id="friends-heading"
             className="text-lg font-semibold tracking-tight text-text-primary"
           >
-            Friends
+            {strings.friends.list.heading}
           </h2>
           <Button onClick={onAddFriend} variant="default" size="sm">
-            <PlusIcon /> Add friend
+            <PlusIcon /> {strings.friends.list.addCta}
           </Button>
         </header>
         <div className="rounded-lg border border-border-default bg-bg-surface p-8 text-center">
           <p className="text-sm text-text-secondary">
-            Add a friend to start studying together.
+            {strings.friends.list.empty}
           </p>
           <Button
             className="mt-4"
@@ -48,7 +49,7 @@ export function FriendsListView({
             variant="default"
             size="sm"
           >
-            <PlusIcon /> Add friend
+            <PlusIcon /> {strings.friends.list.addCta}
           </Button>
         </div>
       </section>
@@ -66,10 +67,10 @@ export function FriendsListView({
           id="friends-heading"
           className="text-lg font-semibold tracking-tight text-text-primary"
         >
-          Friends
+          {strings.friends.list.heading}
         </h2>
         <Button onClick={onAddFriend} variant="default" size="sm">
-          <PlusIcon /> Add friend
+          <PlusIcon /> {strings.friends.list.addCta}
         </Button>
       </header>
       <ul className="divide-y divide-border-subtle rounded-lg border border-border-default bg-bg-surface">
@@ -105,7 +106,9 @@ function FriendRow({ friend, online, now, onInvite }: FriendRowProps) {
           {name}
         </span>
         <span className="text-xs text-text-secondary">
-          {online ? 'Available' : 'Offline'}
+          {online
+            ? strings.friends.list.available
+            : strings.friends.list.offline}
         </span>
       </div>
       <div className="flex items-center justify-end gap-4">
@@ -117,10 +120,10 @@ function FriendRow({ friend, online, now, onInvite }: FriendRowProps) {
             variant="default"
             size="sm"
             onClick={onInvite}
-            aria-label={`Invite ${name}`}
+            aria-label={strings.friends.list.inviteAriaLabel(name)}
             className="pointer-events-none opacity-0 transition-opacity duration-fast group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100 focus-visible:pointer-events-auto focus-visible:opacity-100"
           >
-            Invite
+            {strings.friends.list.inviteCta}
           </Button>
         ) : null}
       </div>
@@ -151,22 +154,23 @@ function formatLastTogether(
   ts: number | null | undefined,
   now: number | undefined
 ): string {
-  if (!ts) return 'never studied together'
+  const last = strings.friends.list.lastTogether
+  if (!ts) return last.never
   const reference = now ?? Date.now()
   const deltaMs = Math.max(0, reference - ts)
   const day = 24 * 60 * 60 * 1000
   const days = Math.floor(deltaMs / day)
-  if (days === 0) return 'last together · today'
-  if (days === 1) return 'last together · yesterday'
-  if (days < 7) return `last together · ${days} days ago`
+  if (days === 0) return last.today
+  if (days === 1) return last.yesterday
+  if (days < 7) return last.daysAgo(days)
   if (days < 30) {
     const weeks = Math.max(1, Math.floor(days / 7))
-    return `last together · ${weeks} week${weeks === 1 ? '' : 's'} ago`
+    return last.weeksAgo(weeks)
   }
   if (days < 365) {
     const months = Math.max(1, Math.floor(days / 30))
-    return `last together · ${months} month${months === 1 ? '' : 's'} ago`
+    return last.monthsAgo(months)
   }
   const years = Math.max(1, Math.floor(days / 365))
-  return `last together · ${years} year${years === 1 ? '' : 's'} ago`
+  return last.yearsAgo(years)
 }

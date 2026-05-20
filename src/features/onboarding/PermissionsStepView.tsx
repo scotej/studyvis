@@ -5,6 +5,7 @@ import {
   type OnboardingStepProgress,
 } from '@/components/OnboardingStep'
 import { Button } from '@/components/ui/button'
+import { strings } from '@/strings'
 
 export type PermissionId = 'camera' | 'microphone' | 'notifications'
 
@@ -27,20 +28,20 @@ const ROWS: Array<{
 }> = [
   {
     id: 'camera',
-    title: 'Camera',
-    description: 'Lets your friends see you while you study together.',
+    title: strings.onboarding.permissions.rows.camera.title,
+    description: strings.onboarding.permissions.rows.camera.description,
     Icon: CameraIcon,
   },
   {
     id: 'microphone',
-    title: 'Microphone',
-    description: 'Stays muted until you hold the talk key.',
+    title: strings.onboarding.permissions.rows.microphone.title,
+    description: strings.onboarding.permissions.rows.microphone.description,
     Icon: MicIcon,
   },
   {
     id: 'notifications',
-    title: 'Notifications',
-    description: "So you see invites when StudyVis isn't focused.",
+    title: strings.onboarding.permissions.rows.notifications.title,
+    description: strings.onboarding.permissions.rows.notifications.description,
     Icon: BellIcon,
   },
 ]
@@ -55,21 +56,26 @@ export function PermissionsStepView({
 
   return (
     <OnboardingStep
-      ariaLabel="Permissions"
+      ariaLabel={strings.onboarding.permissions.ariaLabel}
       progress={progress}
-      primaryAction={{ label: 'Continue', onClick: onContinue }}
+      primaryAction={{
+        label: strings.common.actions.continue,
+        onClick: onContinue,
+      }}
     >
       <header className="flex flex-col items-center gap-3 text-center">
         <h1 className="text-2xl font-semibold tracking-tight">
-          A few permissions to study together
+          {strings.onboarding.permissions.heading}
         </h1>
         <p className="max-w-md text-sm leading-snug text-text-secondary">
-          StudyVis only asks for what a session needs. You can change any of
-          these later in Settings.
+          {strings.onboarding.permissions.body}
         </p>
       </header>
 
-      <ul className="flex w-full flex-col gap-3" aria-label="Permission list">
+      <ul
+        className="flex w-full flex-col gap-3"
+        aria-label={strings.onboarding.permissions.listAriaLabel}
+      >
         {ROWS.map((row) => (
           <PermissionRow
             key={row.id}
@@ -84,8 +90,7 @@ export function PermissionsStepView({
       </ul>
 
       <p className="max-w-md text-center text-xs text-text-muted">
-        Use headphones if you can. Built-in mics and speakers tend to echo once
-        a few friends are talking.
+        {strings.onboarding.permissions.headphonesHint}
       </p>
 
       {anyDenied ? (
@@ -93,7 +98,7 @@ export function PermissionsStepView({
           role="status"
           className="max-w-md text-center text-xs text-text-secondary"
         >
-          You can grant any of these later in Settings.
+          {strings.onboarding.permissions.denialNote}
         </p>
       ) : null}
     </OnboardingStep>
@@ -136,9 +141,10 @@ function PermissionRow({
         {granted ? (
           <span
             className="flex items-center gap-1 text-sm text-status-focused"
-            aria-label={`${title} permission granted`}
+            aria-label={strings.onboarding.permissions.grantedAriaLabel(title)}
           >
-            <CheckIcon className="size-4" aria-hidden /> Granted
+            <CheckIcon className="size-4" aria-hidden />{' '}
+            {strings.onboarding.permissions.grantedLabel}
           </span>
         ) : (
           <Button
@@ -148,7 +154,9 @@ function PermissionRow({
             disabled={requesting}
             aria-disabled={requesting ? true : undefined}
           >
-            {denied ? 'Try again' : 'Grant'}
+            {denied
+              ? strings.onboarding.permissions.tryAgainCta
+              : strings.onboarding.permissions.grantCta}
           </Button>
         )}
       </div>

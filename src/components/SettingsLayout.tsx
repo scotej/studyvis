@@ -4,6 +4,7 @@ import { ChevronLeftIcon } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { tokens } from '@/design/tokens'
 import { cn } from '@/lib/utils'
+import { strings } from '@/strings'
 
 export type SettingsCategoryDescriptor<TId extends string = string> = {
   id: TId
@@ -32,7 +33,7 @@ export function SettingsLayout<TId extends string = string>({
     <main
       data-slot="settings-layout"
       className="flex min-h-screen flex-col bg-bg-base text-text-primary"
-      aria-label="Settings"
+      aria-label={strings.settings.layoutAriaLabel}
     >
       <header className="flex items-center gap-4 border-b border-border-subtle px-6 py-4">
         {onClose ? (
@@ -40,16 +41,18 @@ export function SettingsLayout<TId extends string = string>({
             variant="ghost"
             size="sm"
             onClick={onClose}
-            aria-label="Close settings"
+            aria-label={strings.settings.closeAriaLabel}
           >
-            <ChevronLeftIcon /> Back
+            <ChevronLeftIcon /> {strings.common.actions.back}
           </Button>
         ) : null}
-        <h1 className="text-lg font-semibold tracking-tight">Settings</h1>
+        <h1 className="text-lg font-semibold tracking-tight">
+          {strings.settings.heading}
+        </h1>
       </header>
       <div className="flex flex-1">
         <nav
-          aria-label="Settings categories"
+          aria-label={strings.settings.navAriaLabel}
           className="shrink-0 border-r border-border-subtle bg-bg-surface px-3 py-6"
           style={{ width: tokens.sizes.sidebarWidth }}
         >
@@ -77,7 +80,9 @@ export function SettingsLayout<TId extends string = string>({
           </ul>
         </nav>
         <section
-          aria-label={`${activeCategoryLabel(categories, activeCategoryId)} settings`}
+          aria-label={strings.settings.sectionAriaLabel(
+            activeCategoryLabel(categories, activeCategoryId)
+          )}
           className="min-w-0 flex-1 overflow-y-auto px-4 py-4 sm:px-6 sm:py-6"
         >
           <div
@@ -96,5 +101,7 @@ function activeCategoryLabel<TId extends string>(
   categories: ReadonlyArray<SettingsCategoryDescriptor<TId>>,
   id: TId
 ): string {
-  return categories.find((c) => c.id === id)?.label ?? 'Settings'
+  return (
+    categories.find((c) => c.id === id)?.label ?? strings.settings.fallbackLabel
+  )
 }

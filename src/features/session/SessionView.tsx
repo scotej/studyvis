@@ -48,6 +48,7 @@ import { usePomodoroStore } from '@/stores/pomodoroStore'
 import { useSessionStore } from '@/stores/sessionStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { usePttStore } from '@/stores/pttStore'
+import { strings } from '@/strings'
 
 import { startAiAlertDispatcher, type AiAlertDispatcher } from './aiAlerts'
 
@@ -59,7 +60,6 @@ import {
 
 import {
   AUDIT_ACTION,
-  AUDIT_KIND_LABELS,
   type AuditEvent,
   type AuditEventDetail,
   type AuditEventKind,
@@ -485,14 +485,14 @@ export function SessionView() {
       },
       onStartFail: (reason, detail) => {
         if (reason === 'no_active_model') {
-          toast.error('Pick a model in Settings → AI')
+          toast.error(strings.session.errors.pickModel)
         } else if (reason === 'model_files_missing') {
-          toast.error(
-            'Model files are missing. Re-download them in Settings → AI.'
-          )
+          toast.error(strings.session.errors.modelFilesMissing)
         } else {
           toast.error(
-            detail ? `AI failed to start: ${detail}` : 'AI failed to start'
+            detail
+              ? strings.session.errors.aiFailedToStartDetail(detail)
+              : strings.session.errors.aiFailedToStart
           )
         }
       },
@@ -503,22 +503,20 @@ export function SessionView() {
         setCaptureOverlayOpen(true)
       },
       onCaptureError: (err) => {
-        toast.error(`AI capture error: ${err.message}`)
+        toast.error(strings.session.errors.aiCaptureError(err.message))
       },
       onSidecarErrored: (lastError) => {
         toast.error(
           lastError
-            ? `AI model crashed (${lastError}). Restart it in Settings → AI.`
-            : 'AI model crashed. Restart it in Settings → AI.'
+            ? strings.session.errors.aiCrashedDetail(lastError)
+            : strings.session.errors.aiCrashed
         )
       },
       onBatteryPause: (info) => {
-        toast.warning(
-          `AI paused to save battery (${info.percent}%). Plug in or charge above 20% to resume.`
-        )
+        toast.warning(strings.session.errors.aiPausedForBattery(info.percent))
       },
       onBatteryResume: () => {
-        toast.success('AI resumed.')
+        toast.success(strings.session.errors.aiResumed)
       },
     })
     return () => {
@@ -698,7 +696,10 @@ export function SessionView() {
       try {
         await sessionLeave()
       } catch (err) {
-        const message = err instanceof Error ? err.message : 'could not leave'
+        const message =
+          err instanceof Error
+            ? err.message
+            : strings.session.errors.leaveFailedFallback
         toast.error(message)
       }
     })()
@@ -747,7 +748,9 @@ export function SessionView() {
         setActiveAudioDeviceId(nextDeviceId)
       } catch (err) {
         const message =
-          err instanceof Error ? err.message : 'could not switch microphone'
+          err instanceof Error
+            ? err.message
+            : strings.session.errors.switchMicFailedFallback
         toast.error(message)
       } finally {
         setAudioSwapping(false)
@@ -782,7 +785,9 @@ export function SessionView() {
           return
         }
         toast.error(
-          err instanceof Error ? err.message : "Couldn't request access."
+          err instanceof Error
+            ? err.message
+            : strings.session.errors.requestAccessFallback
         )
       }
     })()
@@ -817,9 +822,9 @@ export function SessionView() {
   if (!room) return null
 
   const peerEntries = Object.values(peers)
-  const youName = identity?.display_name?.trim() || 'You'
+  const youName = identity?.display_name?.trim() || strings.session.selfFallback
   const broadcasterName = pomodoroSnapshot.iAmBroadcaster
-    ? 'you'
+    ? strings.session.broadcasterSelf
     : pomodoroSnapshot.broadcasterEdPubkey
       ? (peerEntries.find(
           (p) => p.edPubkeyHex === pomodoroSnapshot.broadcasterEdPubkey
@@ -829,13 +834,13 @@ export function SessionView() {
   return (
     <main
       className="flex min-h-screen flex-col bg-bg-base text-text-primary"
-      aria-label="Active session"
+      aria-label={strings.session.mainAriaLabel}
     >
       {/* V3-P7 — Visually-hidden top-level heading so SR users have a clean
           one-h1-per-route anchor. The visible UI is the video grid + audit
           panel + footer; none of those would carry "the page title" on their
           own. */}
-      <h1 className="sr-only">Studying with friends</h1>
+      <h1 className="sr-only">{strings.app.sessionSrHeading}</h1>
       <div className="flex min-h-0 flex-1">
         <div className="flex-1 px-6 py-6">
           {mediaError ? (
@@ -844,7 +849,8 @@ export function SessionView() {
               aria-live="assertive"
               className="mb-4 rounded-md border border-status-alerted bg-bg-surface px-4 py-3 text-sm text-status-alerted"
             >
-              Couldn't access camera or microphone: {mediaError}
+              {strings.session.mediaErrorPrefix}
+              {mediaError}
             </div>
           ) : null}
           <VideoGrid>
@@ -891,7 +897,9 @@ export function SessionView() {
       <footer className="flex items-center justify-between gap-4 border-t border-border-subtle bg-bg-surface px-6 py-4 text-sm">
         <span className="flex items-center gap-3 text-text-secondary">
           <span className="flex items-center gap-2">
-            hold <Kbd>{isMacLikePlatform() ? '⌘[' : 'Ctrl+['}</Kbd> to talk
+            {strings.session.footerHoldBefore}
+            <Kbd>{isMacLikePlatform() ? '⌘[' : 'Ctrl+['}</Kbd>
+            {strings.session.footerHoldAfter}
           </span>
           <AudioDevicePicker
             currentDeviceId={activeAudioDeviceId}
@@ -919,7 +927,7 @@ export function SessionView() {
           onClick={handleLeave}
           aria-keyshortcuts="Escape"
         >
-          Leave
+          {strings.session.leaveCta}
         </Button>
       </footer>
       {selfWarning ? (
@@ -946,7 +954,7 @@ function stopTracks(stream: MediaStream): void {
 }
 
 function peerLabel(peerId: string): string {
-  return `Peer ${peerId.slice(0, 6)}`
+  return strings.session.peerFallback(peerId)
 }
 
 function collectOrdering(
@@ -992,8 +1000,8 @@ function mapAuditEntries(
   }
   return events.map((e) => ({
     seq: e.seq,
-    name: byEdPubkey.get(e.who) ?? `Peer ${e.who.slice(0, 6)}`,
-    description: AUDIT_KIND_LABELS[e.kind],
+    name: byEdPubkey.get(e.who) ?? strings.session.peerFallback(e.who),
+    description: strings.audit.kindLabels[e.kind],
     ts: e.ts,
     hoverDetail: hoverDetailFor(e.kind, e.detail),
     iconKind: e.kind,

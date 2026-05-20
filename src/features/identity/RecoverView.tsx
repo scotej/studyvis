@@ -5,6 +5,7 @@ import {
 } from '@/components/OnboardingStep'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
+import { strings } from '@/strings'
 
 import { MNEMONIC_WORD_COUNT } from '@/lib/crypto/identity'
 
@@ -28,15 +29,16 @@ export type RecoverViewProps = {
 }
 
 function errorMessage(kind: RecoverErrorKind, wordCount: number): string {
+  const errs = strings.identity.recover.errors
   switch (kind) {
     case 'empty':
-      return 'Type your 24-word backup to continue.'
+      return errs.empty
     case 'short':
-      return `That's ${wordCount} words. A backup has 24.`
+      return errs.short(wordCount)
     case 'long':
-      return `That's ${wordCount} words. A backup has exactly 24.`
+      return errs.long(wordCount)
     case 'invalid':
-      return "Those 24 words don't add up. Check for a typo or a word out of place against your written copy."
+      return errs.invalid
   }
 }
 
@@ -59,28 +61,26 @@ export function RecoverView({
 }: RecoverViewProps) {
   if (phase === 'confirm') {
     const primary: OnboardingStepAction = {
-      label: 'Replace identity',
+      label: strings.identity.recover.confirm.cta,
       onClick: onConfirmOverwrite,
     }
     const secondary: OnboardingStepAction = {
-      label: 'Cancel',
+      label: strings.common.actions.cancel,
       onClick: onCancelOverwrite,
     }
     return (
       <OnboardingStep
-        ariaLabel="Confirm replacing your identity"
+        ariaLabel={strings.identity.recover.confirm.ariaLabel}
         progress={progress}
         primaryAction={primary}
         secondaryAction={secondary}
       >
         <div className="flex w-full max-w-md flex-col items-center gap-3 text-center">
           <h1 className="text-2xl font-semibold tracking-tight">
-            Replace the identity on this device?
+            {strings.identity.recover.confirm.heading}
           </h1>
           <p className="text-sm leading-snug text-text-secondary">
-            This writes recovered keys over the ones already here. The current
-            identity stays only on whatever device still has it, and this
-            can&apos;t be undone.
+            {strings.identity.recover.confirm.body}
           </p>
         </div>
       </OnboardingStep>
@@ -90,17 +90,19 @@ export function RecoverView({
   if (phase === 'done') {
     return (
       <OnboardingStep
-        ariaLabel="Identity restored"
+        ariaLabel={strings.identity.recover.done.ariaLabel}
         progress={progress}
-        primaryAction={{ label: 'Continue', onClick: onDone }}
+        primaryAction={{
+          label: strings.identity.recover.done.cta,
+          onClick: onDone,
+        }}
       >
         <div className="flex w-full max-w-md flex-col items-center gap-3 text-center">
           <h1 className="text-2xl font-semibold tracking-tight">
-            Identity restored.
+            {strings.identity.recover.done.heading}
           </h1>
           <p className="text-sm leading-snug text-text-secondary">
-            Your friends list didn&apos;t come with it. They don&apos;t know
-            this device is you yet, so you&apos;ll pair with them again.
+            {strings.identity.recover.done.body}
           </p>
         </div>
       </OnboardingStep>
@@ -111,15 +113,15 @@ export function RecoverView({
 
   return (
     <OnboardingStep
-      ariaLabel="Recover your identity"
+      ariaLabel={strings.identity.recover.input.ariaLabel}
       progress={progress}
       primaryAction={{
-        label: 'Recover',
+        label: strings.identity.recover.input.cta,
         onClick: onSubmit,
         busy: submitting,
       }}
       secondaryAction={{
-        label: 'Back',
+        label: strings.common.actions.back,
         onClick: onBack,
         disabled: submitting,
       }}
@@ -133,16 +135,17 @@ export function RecoverView({
       >
         <header className="flex flex-col items-center gap-3 text-center">
           <h1 className="text-2xl font-semibold tracking-tight">
-            Recover your identity
+            {strings.identity.recover.input.heading}
           </h1>
           <p className="max-w-sm text-sm leading-snug text-text-secondary">
-            Type or paste your 24-word backup. The same keys come back on this
-            device.
+            {strings.identity.recover.input.body}
           </p>
         </header>
 
         <div className="flex flex-col gap-2">
-          <Label htmlFor="recover-mnemonic">Recovery phrase</Label>
+          <Label htmlFor="recover-mnemonic">
+            {strings.identity.recover.input.label}
+          </Label>
           <Textarea
             id="recover-mnemonic"
             autoFocus
@@ -151,7 +154,7 @@ export function RecoverView({
             autoCapitalize="none"
             autoCorrect="off"
             className="font-mono"
-            placeholder="ocean ladder cinnamon trumpet …"
+            placeholder={strings.identity.recover.input.placeholder}
             value={value}
             disabled={submitting}
             onChange={(e) => onChange(e.target.value)}
@@ -160,11 +163,14 @@ export function RecoverView({
           />
           <div className="flex items-center justify-between gap-3">
             <span id="recover-count" className="text-xs text-text-muted">
-              {wordCount} / {MNEMONIC_WORD_COUNT} words
+              {strings.identity.recover.input.countLabel(
+                wordCount,
+                MNEMONIC_WORD_COUNT
+              )}
             </span>
             {identityExists ? (
               <span className="text-xs text-text-muted">
-                Replaces the identity on this device.
+                {strings.identity.recover.input.replaceNote}
               </span>
             ) : null}
           </div>

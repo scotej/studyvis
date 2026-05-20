@@ -5,6 +5,7 @@ import {
   type AiResponseTone,
 } from '@/components/AiResponseBubble'
 import { AiTextBox } from '@/components/AiTextBox'
+import { strings } from '@/strings'
 
 import { handleUserText, AiAgentError } from './aiAgent'
 import {
@@ -178,7 +179,7 @@ export function AiDialogWindow({
         resolver({
           nonce,
           verdict: 'denied',
-          reason: 'Dialog closed before a verdict arrived.',
+          reason: strings.ai.dialog.closedReason,
         })
       }
       nonces.clear()
@@ -232,7 +233,7 @@ export function AiDialogWindow({
       setState((s) => ({
         ...s,
         response: {
-          text: "Session context isn't loaded yet. Give it a moment.",
+          text: strings.ai.dialog.contextMissing,
           tone: 'denied',
         },
       }))
@@ -274,7 +275,7 @@ export function AiDialogWindow({
             text: '',
             pending: false,
             response: {
-              text: 'Break requests need the dialog to be running inside the app.',
+              text: strings.ai.dialog.breakNeedsApp,
               tone: 'denied',
             },
           })
@@ -292,7 +293,7 @@ export function AiDialogWindow({
             resolve({
               nonce,
               verdict: 'denied',
-              reason: 'No response from the session. Try again.',
+              reason: strings.ai.dialog.timeout,
             })
           }, BREAK_REQUEST_TIMEOUT_MS)
           pendingNonces.current.set(nonce, (payload) => {
@@ -314,7 +315,7 @@ export function AiDialogWindow({
               resolve({
                 nonce,
                 verdict: 'denied',
-                reason: "Couldn't reach the session.",
+                reason: strings.ai.dialog.timeoutFallback,
               })
             })
         })
@@ -336,7 +337,7 @@ export function AiDialogWindow({
         response: { text: reply.reply_text, tone: 'neutral' },
       })
     } catch (err) {
-      let text = "That didn't go through. Try again?"
+      let text: string = strings.ai.dialog.catchFallback
       if (err instanceof AiAgentError) {
         text = err.message
       } else if (err instanceof Error) {
@@ -358,9 +359,11 @@ export function AiDialogWindow({
       <div className="w-full max-w-md rounded-xl border border-border-default bg-bg-raised p-4 shadow-lg">
         <header className="mb-3 flex items-center justify-between">
           <span className="text-sm font-medium text-text-primary">
-            Ask the AI
+            {strings.ai.dialog.header}
           </span>
-          <span className="text-xs text-text-secondary">Esc to close</span>
+          <span className="text-xs text-text-secondary">
+            {strings.ai.dialog.hint}
+          </span>
         </header>
         <AiTextBox
           value={effective.text}

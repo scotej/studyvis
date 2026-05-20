@@ -11,6 +11,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
+import { strings } from '@/strings'
 
 export type TopicGateModalProps = {
   open: boolean
@@ -71,12 +72,10 @@ export function TopicGateModal({
             >
               <BookOpenIcon className="size-5" />
             </span>
-            <DialogTitle>What are you working on?</DialogTitle>
+            <DialogTitle>{strings.session.topicGate.title}</DialogTitle>
           </div>
           <DialogDescription id="topic-gate-description">
-            StudyVis shares this with the AI so it can tell when you drift
-            off-topic. You can change it any time during the session with
-            Cmd/Ctrl+].
+            {strings.session.topicGate.description}
           </DialogDescription>
         </DialogHeader>
         <form
@@ -89,13 +88,13 @@ export function TopicGateModal({
             autoFocus
             value={value}
             onChange={(e) => setValue(e.target.value)}
-            placeholder="e.g. Calculus problem set 4"
-            aria-label="Study topic"
+            placeholder={strings.session.topicGate.placeholder}
+            aria-label={strings.session.topicGate.ariaLabel}
             maxLength={120}
           />
           <DialogFooter className="mt-4">
             <Button type="button" variant="ghost" size="sm" onClick={onCancel}>
-              Not now
+              {strings.common.actions.notNow}
             </Button>
             <Button
               type="submit"
@@ -103,7 +102,7 @@ export function TopicGateModal({
               size="sm"
               disabled={!canSubmit}
             >
-              Start studying
+              {strings.session.topicGate.submitCta}
             </Button>
           </DialogFooter>
         </form>

@@ -6,6 +6,7 @@ import {
 } from '@/lib/audit-icons'
 import type { AuditEventKind } from '@/lib/audit-types'
 import { cn } from '@/lib/utils'
+import { strings } from '@/strings'
 
 export type AuditLogRowProps = {
   name: string
@@ -112,11 +113,12 @@ function makeInitials(name: string): string {
 }
 
 function formatAgo(ts: number, now: number): string {
+  const time = strings.common.time
   const seconds = Math.max(0, Math.floor((now - ts) / 1000))
-  if (seconds < 5) return 'just now'
-  if (seconds < 60) return `${seconds}s ago`
+  if (seconds < 5) return time.justNow
+  if (seconds < 60) return time.secondsAgo(seconds)
   const minutes = Math.floor(seconds / 60)
-  if (minutes < 60) return `${minutes}m ago`
+  if (minutes < 60) return time.minutesAgo(minutes)
   const hours = Math.floor(minutes / 60)
-  return `${hours}h ago`
+  return time.hoursAgo(hours)
 }

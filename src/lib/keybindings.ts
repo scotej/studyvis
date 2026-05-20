@@ -382,25 +382,8 @@ export function validateCombo(
   return null
 }
 
-const ACTION_LABEL: Record<ShortcutAction, string> = {
-  'ptt-friends': 'Push to talk',
-  'ptt-ai': 'Talk to AI',
-}
-
-export function describeConflict(
-  combo: Combo,
-  reason: ConflictReason,
-  platform: Platform
-): string {
-  const inline = comboToInlineDisplay(combo, platform)
-  switch (reason.kind) {
-    case 'modifier_only':
-      return 'Press a key with the modifier, not just the modifier.'
-    case 'no_modifier':
-      return 'Add Ctrl, Cmd, or Alt. A bare key would fire while typing.'
-    case 'self_conflict':
-      return `${inline} is already bound to ${ACTION_LABEL[reason.otherAction]}. Pick another.`
-    case 'reserved':
-      return `${inline} is reserved by the system. Pick another.`
-  }
-}
+// `describeConflict` lives in `src/lib/keybindings-copy.ts`. It reads from
+// the centralised strings module, so it can't live here without dragging
+// that module into every importer of these pure utilities (notably the
+// settings store). Callers that need the user-facing copy import the
+// adapter directly.

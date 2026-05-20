@@ -7,7 +7,7 @@
 // open-settings button is hidden because non-macOS targets don't have an
 // equivalent stable URL scheme.
 
-import { useCallback, useState } from 'react'
+import { Fragment, useCallback, useState, type ReactNode } from 'react'
 import { ShieldAlertIcon, ExternalLinkIcon } from 'lucide-react'
 import { invoke } from '@tauri-apps/api/core'
 import { toast } from 'sonner'
@@ -22,6 +22,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { isMacLikePlatform } from '@/lib/utils'
+import { strings } from '@/strings'
 
 export type ScreenCapturePermissionOverlayProps = {
   open: boolean
@@ -32,6 +33,23 @@ export type ScreenCapturePermissionOverlayProps = {
   onRetry?: () => void
 }
 
+// Renders **bold** spans in the strings.ts step text. We keep markdown-flavoured
+// bold markers in the strings module (so the source of truth stays in one
+// place) and resolve them here at render time.
+function renderStep(text: string): ReactNode {
+  const parts = text.split(/(\*\*[^*]+\*\*)/g)
+  return parts.map((part, i) => {
+    if (part.startsWith('**') && part.endsWith('**')) {
+      return (
+        <strong key={i} className="text-text-primary">
+          {part.slice(2, -2)}
+        </strong>
+      )
+    }
+    return <Fragment key={i}>{part}</Fragment>
+  })
+}
+
 export function ScreenCapturePermissionOverlay({
   open,
   onOpenChange,
@@ -39,6 +57,7 @@ export function ScreenCapturePermissionOverlay({
 }: ScreenCapturePermissionOverlayProps) {
   const [opening, setOpening] = useState(false)
   const isMac = isMacLikePlatform()
+  const copy = strings.permissions.screenCapture
 
   const handleOpenSettings = useCallback(async () => {
     setOpening(true)
@@ -50,12 +69,14 @@ export function ScreenCapturePermissionOverlay({
           ? err.message
           : typeof err === 'string'
             ? err
-            : "Couldn't open System Settings."
+            : copy.openSettingsErrorFallback
       toast.error(message)
     } finally {
       setOpening(false)
     }
-  }, [])
+  }, [copy.openSettingsErrorFallback])
+
+  const steps = isMac ? copy.stepsMac : copy.stepsOther
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -75,67 +96,29 @@ export function ScreenCapturePermissionOverlay({
             >
               <ShieldAlertIcon className="size-5" />
             </span>
-            <DialogTitle>Allow screen recording</DialogTitle>
+            <DialogTitle>{copy.title}</DialogTitle>
           </div>
           <DialogDescription id="screen-capture-permission-description">
-            StudyVis needs to capture a still image of your screen so the
-            on-device AI can check that your study session stays on topic.
-            Screen frames never leave this {isMac ? 'Mac' : 'computer'}.
+            {copy.body(isMac)}
           </DialogDescription>
         </DialogHeader>
         <ol className="ml-1 list-decimal space-y-2 pl-4 text-sm text-text-secondary marker:text-text-muted">
-          {isMac ? (
-            <>
-              <li>
-                Click{' '}
-                <strong className="text-text-primary">Open Settings</strong>{' '}
-                below. On macOS this is the only place screen-recording access
-                is granted or revoked.
-              </li>
-              <li>
-                Toggle <strong className="text-text-primary">StudyVis</strong>{' '}
-                on under{' '}
-                <span className="text-text-primary">Screen Recording</span>.
-              </li>
-              <li>
-                macOS may ask you to quit and reopen StudyVis. Do that, then
-                come back and click{' '}
-                <strong className="text-text-primary">Try again</strong>.
-              </li>
-            </>
-          ) : (
-            <>
-              <li>
-                When the screen-share picker appears, choose your primary
-                display.
-              </li>
-              <li>
-                Click <strong className="text-text-primary">Share</strong> to
-                allow the on-device AI to read the frame.
-              </li>
-              <li>
-                If the prompt was dismissed, click{' '}
-                <strong className="text-text-primary">Try again</strong> below.
-              </li>
-            </>
-          )}
+          {steps.map((step, i) => (
+            <li key={i}>{renderStep(step)}</li>
+          ))}
         </ol>
-        {/* V3-P7 — D5 discharge: the macOS recording indicator (and its
-            Windows counterpart) stays on for the whole AI session. Telling
-            the user this here avoids the "is something wrong?" moment when
-            they notice the indicator mid-session. The id is referenced from
-            DialogContent's aria-describedby so SRs read it on open, not just
-            when the user navigates to it. V3-P8 will finalise the wording. */}
+        {/* D5 — the macOS recording indicator (and its Windows counterpart)
+            stays on for the whole AI session. The id is referenced from
+            DialogContent's aria-describedby so SRs read it on open. */}
         <p
           id="screen-capture-permission-indicator-note"
           className="text-sm text-text-secondary"
         >
-          Heads-up: your operating system's screen-recording indicator stays on
-          for the whole session. That's expected — it turns off when you leave.
+          {copy.indicatorNote}
         </p>
         <DialogFooter>
           <Button variant="ghost" size="sm" onClick={() => onOpenChange(false)}>
-            Not now
+            {copy.cancelCta}
           </Button>
           {isMac ? (
             <Button
@@ -144,7 +127,7 @@ export function ScreenCapturePermissionOverlay({
               onClick={() => void handleOpenSettings()}
               disabled={opening}
             >
-              <ExternalLinkIcon /> Open Settings
+              <ExternalLinkIcon /> {copy.openSettingsCta}
             </Button>
           ) : null}
           {onRetry ? (
@@ -156,7 +139,7 @@ export function ScreenCapturePermissionOverlay({
                 onRetry()
               }}
             >
-              Try again
+              {copy.tryAgainCta}
             </Button>
           ) : null}
         </DialogFooter>

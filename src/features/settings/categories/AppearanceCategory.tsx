@@ -14,6 +14,7 @@ import {
   type ThemeMode,
   type WindowStyleMode,
 } from '@/stores/settingsStore'
+import { strings } from '@/strings'
 
 export function AppearanceCategory() {
   const { mode, setMode } = useTheme()
@@ -22,6 +23,7 @@ export function AppearanceCategory() {
   const windowStyle = useSettingsStore((s) => s.values.windowStyle)
   const setWindowStyle = useSettingsStore((s) => s.setWindowStyle)
   const relaunchApp = useSettingsStore((s) => s.relaunchApp)
+  const copy = strings.settings.appearance
 
   // The chrome that Rust actually applied this process — frozen at first
   // render. If the user toggles below, `windowStyle` (the saved value)
@@ -40,39 +42,39 @@ export function AppearanceCategory() {
   }
 
   return (
-    <SettingsSection heading="Appearance">
+    <SettingsSection heading={copy.heading}>
       <SettingsRow
-        label="Theme"
-        help="Switches the entire app immediately."
+        label={copy.theme.label}
+        help={copy.theme.help}
         stack
         control={
           <RadioGroup
             value={mode}
             onValueChange={handleThemeChange}
             className="grid-cols-1 gap-3 sm:grid-flow-col sm:auto-cols-max sm:gap-6"
-            aria-label="Theme"
+            aria-label={copy.theme.ariaLabel}
           >
             <div className="flex items-center gap-2">
               <RadioGroupItem value="dark" id="theme-dark" />
-              <Label htmlFor="theme-dark">Dark</Label>
+              <Label htmlFor="theme-dark">{copy.theme.options.dark}</Label>
             </div>
             <div className="flex items-center gap-2">
               <RadioGroupItem value="light" id="theme-light" />
-              <Label htmlFor="theme-light">Light</Label>
+              <Label htmlFor="theme-light">{copy.theme.options.light}</Label>
             </div>
             <div className="flex items-center gap-2">
               <RadioGroupItem value="auto" id="theme-auto" />
-              <Label htmlFor="theme-auto">Auto (follow system)</Label>
+              <Label htmlFor="theme-auto">{copy.theme.options.auto}</Label>
             </div>
           </RadioGroup>
         }
       />
       <SettingsRow
-        label="Window style"
+        label={copy.windowStyle.label}
         help={
           relaunchPending
-            ? 'Applies on next relaunch.'
-            : 'Replaces the native title bar with our own. Applies after a relaunch.'
+            ? copy.windowStyle.helpRelaunchOnly
+            : copy.windowStyle.helpRelaunchAndDescribe
         }
         stack
         control={
@@ -81,15 +83,19 @@ export function AppearanceCategory() {
               value={windowStyle}
               onValueChange={handleWindowStyleChange}
               className="grid-cols-1 gap-3 sm:grid-flow-col sm:auto-cols-max sm:gap-6"
-              aria-label="Window style"
+              aria-label={copy.windowStyle.ariaLabel}
             >
               <div className="flex items-center gap-2">
                 <RadioGroupItem value="system" id="window-style-system" />
-                <Label htmlFor="window-style-system">System</Label>
+                <Label htmlFor="window-style-system">
+                  {copy.windowStyle.options.system}
+                </Label>
               </div>
               <div className="flex items-center gap-2">
                 <RadioGroupItem value="custom" id="window-style-custom" />
-                <Label htmlFor="window-style-custom">Custom</Label>
+                <Label htmlFor="window-style-custom">
+                  {copy.windowStyle.options.custom}
+                </Label>
               </div>
             </RadioGroup>
             {relaunchPending ? (
@@ -98,20 +104,20 @@ export function AppearanceCategory() {
                 size="sm"
                 onClick={() => void relaunchApp()}
               >
-                Relaunch now
+                {copy.windowStyle.relaunchCta}
               </Button>
             ) : null}
           </div>
         }
       />
       <SettingsRow
-        label="Reduce motion"
-        help="Replaces transitions with fades. Fully wired in V3; your choice is saved now."
+        label={copy.reduceMotion.label}
+        help={copy.reduceMotion.help}
         control={
           <Switch
             checked={reduceMotion}
             onCheckedChange={(checked) => void setReduceMotion(checked)}
-            aria-label="Reduce motion"
+            aria-label={copy.reduceMotion.ariaLabel}
           />
         }
       />

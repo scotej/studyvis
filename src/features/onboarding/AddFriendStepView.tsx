@@ -5,6 +5,7 @@ import {
   type OnboardingStepProgress,
 } from '@/components/OnboardingStep'
 import { Button } from '@/components/ui/button'
+import { strings } from '@/strings'
 
 export type AddFriendStepViewProps = {
   progress?: OnboardingStepProgress
@@ -25,13 +26,15 @@ export function AddFriendStepView({
 }: AddFriendStepViewProps) {
   return (
     <OnboardingStep
-      ariaLabel="Add your first friend"
+      ariaLabel={strings.onboarding.addFriend.ariaLabel}
       progress={progress}
       // Label is intentionally state-aware; the handler is uniform because both
       // states semantically mean "advance onboarding." Pre-pair, the user is
       // skipping; post-pair, the user is continuing — same exit, honest copy.
       primaryAction={{
-        label: justAdded ? 'Continue' : 'Skip for now',
+        label: justAdded
+          ? strings.common.actions.continue
+          : strings.common.actions.skipForNow,
         onClick: onContinue,
       }}
     >
@@ -43,10 +46,10 @@ export function AddFriendStepView({
           >
             <CheckIcon className="size-6 text-status-focused" aria-hidden />
             <p className="text-base font-medium text-text-primary">
-              Paired. Now invite them to a session.
+              {strings.onboarding.addFriend.paired}
             </p>
             <p className="text-sm text-text-secondary">
-              They&apos;ll be in your friends list when you&apos;re done.
+              {strings.onboarding.addFriend.pairedDetail}
             </p>
           </div>
         ) : (
@@ -57,15 +60,14 @@ export function AddFriendStepView({
                 aria-hidden
               />
               <h1 className="text-2xl font-semibold tracking-tight">
-                Add your first friend
+                {strings.onboarding.addFriend.heading}
               </h1>
               <p className="max-w-sm text-sm leading-snug text-text-secondary">
-                You and a friend each generate a one-time code; pasting it on
-                the other side pairs you. After that, sessions are one click.
+                {strings.onboarding.addFriend.body}
               </p>
             </header>
             <Button onClick={onAdd}>
-              <UserPlus2Icon /> Add a friend
+              <UserPlus2Icon /> {strings.onboarding.addFriend.addCta}
             </Button>
           </>
         )}

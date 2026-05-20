@@ -324,15 +324,15 @@ Theme switch is purely a re-render of the variable layer; component logic does n
 
 Use motion only when it serves comprehension. Five permitted uses:
 
-1. **Modal / dialog enter-leave**: `fast` duration, `out` easing, fade + 4-px slide-up.
-2. **Sheet / side-panel enter-leave**: `base` duration, `out` easing, slide-from-edge.
-3. **AI dialog appear**: `base` duration, `out` easing, fade-in (no slide; positional stability).
+1. **Modal / dialog enter-leave**: `fast` duration, `out` easing, fade + zoom-in. Wired through `tw-animate-css` (V3-P8); `--tw-enter-duration` / `--tw-exit-duration` map to `--duration-fast` in `src/design/index.css`.
+2. **Sheet / side-panel enter-leave**: `base` duration, `out` easing, slide-from-edge. Same plugin; the Sheet primitive overrides duration to `base` per side.
+3. **AI dialog appear**: `base` duration, `out` easing, fade-in (no slide; positional stability). Same plugin family; the floating Tauri window inherits the fade.
 4. **Audit log new row**: `fast` duration, `out` easing, fade + 6-px slide-down. New row only — no re-shuffles.
-5. **Post-session score reveal**: `reveal` duration, `spring` easing, gauge sweep from 0 to final score. Sound: none.
+5. **Post-session score reveal**: `reveal` duration, `spring` easing, gauge sweep from 0 to final score. Sound: none. Implemented directly in `ScoreGauge` using `tokens.motion.duration.reveal` + `tokens.motion.easing.spring`.
 
 State-change transitions on `color` / `background-color` / `border-color` / `opacity` are also allowed for discrete UI state changes (hover, focus, selected / `aria-current`, transient indicator visibility such as the PTT mic dot or a progress-step fill), with `duration: fast` and `easing: out`. These are not animations — they soften the swap between two stable states.
 
-Everything else — layout, transform, and decorative motion — is instant. No card lifts, no slide-ins, no scale-on-hover, no bounces, no spinning loaders (use shadcn's `Skeleton` instead). Reduced-motion preference (V3) replaces all of the above with simple opacity changes.
+Everything else — layout, transform, and decorative motion — is instant. No card lifts, no slide-ins, no scale-on-hover, no bounces, no spinning loaders (use the vendored `Skeleton` primitive instead — `src/components/ui/skeleton.tsx`). Recharts is configured with `isAnimationActive={false}` so the stats bars paint without an entrance sweep. Reduced-motion (V3-P7) is the global kill switch: `[data-reduce-motion='true']` on `<html>` collapses every transition and animation to ~1ms via `@layer base` in `index.css`, so any motion site is gated by default — new sites never need per-component handling.
 
 ## 7. Six rules that keep it consistent
 
@@ -524,11 +524,12 @@ V3 ships: full screen-reader pass, reduced-motion mode, axe-core CI gate over ev
 
 - **Window minimum**: 1024 × 640.
 - **Window default on first launch**: 1280 × 800.
-- **Content max width** (settings panes, onboarding): 1200.
+- **Content max width** (settings panes, onboarding): 1200 (`sizes.contentMaxWidth`).
+- **Reading max width** (Home/FriendsList, Report, other text-dense screens): 896 (`sizes.readingMaxWidth`). A 1200-wide measure on a list of friends or a report timeline hurts readability; these screens share one narrower measure instead of the page max. Both come from `tokens.sizes` — no hard-coded `1200`/`896` literals anywhere in app code.
 - **Audit log panel**: fixed 320 wide, full height of session view.
 - **Sidebar (settings)**: fixed 280 wide.
 - **Video grid**: flex; tiles maintain a minimum aspect 16:9 and a clamped height (180–360 px).
-- **Spacing**: page padding `space.5` (24); section gap `space.6` (32); inline gap `space.3` (12).
+- **Spacing**: page padding `space.5` (24); section gap `space.6` (32); inline gap `space.3` (12). The route shells (Home, Onboarding, Report, Settings pane) use `px-4 py-4 sm:px-6 sm:py-6` so the page padding steps down to `space.4` (16) below the `sm` breakpoint — a deliberate responsive concession; ≥ `sm` (the realistic minimum window) is on-grid at `space.5`.
 - **Custom titlebar (V3-P6, opt-in)**: 38 px tall (`sizes.titleBarHeight`). macOS reserves 78 px on the left (`sizes.titleBarMacInset`) for the system traffic-light cluster; the wordmark sits to its right. Windows hosts the app-painted min/restore/close cluster on the right edge. Native chrome is the default; this row of the grid only applies when the user has opted in.
 
 ## 13. Sound
@@ -541,7 +542,7 @@ No background music, no UI click sounds, no error chimes.
 
 ## 14. Copy and tone
 
-Short, direct, second person, no hype. The product is for friends; sound like a friend wrote it.
+Short, direct, second person, no hype. The product is for friends; sound like a friend wrote it. Every user-facing string lives in `src/strings.ts` — that's the single source of truth (V3-P8). The `scripts/check-strings.ts` guard runs in pre-commit and fails the build when raw `toast(…)` / `sendNotification(…)` literals slip into components; hoist them into the strings module and reference.
 
 | Avoid | Prefer |
 |-|-|
@@ -550,8 +551,10 @@ Short, direct, second person, no hype. The product is for friends; sound like a 
 | "You have successfully created your identity." | "Identity ready." |
 | "Click here to add a friend!" | "Add a friend" (button label) |
 | "Your AI focus score is 87/100" | "87 / 100" (on the score gauge) |
+| "Could not save your name." | "Couldn't save your name." (use contractions) |
+| "AI failed to start" | "AI failed to start." (period on full sentences) |
 
-Period at the end of full sentences, none on labels, none on button text.
+Period at the end of full sentences, none on labels, none on button text. Use contractions — "Couldn't" reads as a friend; "Could not" reads as a form letter.
 
 ## 15. Brand mark
 

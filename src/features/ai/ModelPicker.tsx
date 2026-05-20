@@ -15,7 +15,6 @@ import {
   DownloadIcon,
   GaugeIcon,
   KeyIcon,
-  Loader2Icon,
   RefreshCwIcon,
   Trash2Icon,
 } from 'lucide-react'
@@ -24,6 +23,8 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Progress } from '@/components/ui/progress'
+import { Skeleton } from '@/components/ui/skeleton'
+import { strings } from '@/strings'
 
 import { type BenchmarkResult } from './benchmark'
 import {
@@ -95,34 +96,35 @@ function formatBytesGB(bytes: number): string {
 }
 
 function formatBenchmark(result: BenchmarkResult): string {
-  return `Speed on your machine: ${result.p95Sec.toFixed(1)} seconds per check`
+  return strings.ai.picker.speedSummary(result.p95Sec)
 }
 
 function phaseLabel(state: PickerStateForModel): string {
+  const phases = strings.ai.picker.phases
   switch (state.phase) {
     case 'idle':
-      return ''
+      return phases.idle
     case 'starting':
-      return 'Starting…'
+      return phases.starting
     case 'downloading-model':
-      return 'Downloading model…'
+      return phases.downloadingModel
     case 'downloading-mmproj':
-      return 'Downloading projector…'
+      return phases.downloadingProjector
     case 'verifying':
-      return 'Verifying SHA-256…'
+      return phases.verifying
     case 'benchmark-starting':
-      return 'Loading model into memory…'
+      return phases.loading
     case 'benchmark-loading-image':
-      return 'Preparing benchmark image…'
+      return phases.preparingBenchmark
     case 'benchmark-running': {
       const i = state.benchmarkSampleIndex ?? 0
       const n = state.benchmarkSampleTotal ?? 0
-      return n > 0 ? `Running sample ${i} / ${n}…` : 'Benchmarking…'
+      return n > 0 ? phases.runningSample(i, n) : phases.benchmarking
     }
     case 'cancelling':
-      return 'Cancelling…'
+      return phases.cancelling
     case 'failed':
-      return state.errorMessage ?? 'Something went wrong.'
+      return state.errorMessage ?? phases.failedFallback
   }
 }
 
@@ -159,16 +161,13 @@ export function ModelPicker({
   return (
     <div
       className={'flex flex-col gap-6' + (className ? ` ${className}` : '')}
-      aria-label="Vision model picker"
+      aria-label={strings.ai.picker.ariaLabel}
     >
       <header className="flex flex-col gap-1">
         <h2 className="text-xl font-semibold tracking-tight text-text-primary">
-          Pick a vision model
+          {strings.ai.picker.heading}
         </h2>
-        <p className="text-sm text-text-secondary">
-          The model runs on your own machine and judges only your camera and
-          screen. Smaller is faster; bigger is more thorough.
-        </p>
+        <p className="text-sm text-text-secondary">{strings.ai.picker.body}</p>
       </header>
 
       <div className="flex flex-col gap-4">
@@ -236,17 +235,17 @@ function ModelCard({
             </span>
             {spec.gated ? (
               <span className="rounded-full bg-accent-muted px-2 py-0.5 text-xs font-medium uppercase tracking-wide text-text-inverse">
-                Gated
+                {strings.ai.picker.pills.gated}
               </span>
             ) : null}
             {isInstalled ? (
               <span className="inline-flex items-center gap-1 rounded-full bg-status-focused px-2 py-0.5 text-xs font-semibold uppercase tracking-wide text-text-inverse">
-                <CheckIcon /> Installed
+                <CheckIcon /> {strings.ai.picker.pills.installed}
               </span>
             ) : null}
             {isPartial ? (
               <span className="inline-flex items-center gap-1 rounded-full bg-status-warning px-2 py-0.5 text-xs font-semibold uppercase tracking-wide text-text-inverse">
-                <AlertCircleIcon /> Incomplete
+                <AlertCircleIcon /> {strings.ai.picker.pills.incomplete}
               </span>
             ) : null}
           </div>
@@ -270,7 +269,7 @@ function ModelCard({
       <dl className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm sm:grid-cols-4">
         <div className="flex flex-col">
           <dt className="text-xs uppercase tracking-wide text-text-muted">
-            Download
+            {strings.ai.picker.dataLabels.download}
           </dt>
           <dd className="text-text-primary">
             {formatBytesGB(totalDownloadBytes(spec))}
@@ -278,19 +277,19 @@ function ModelCard({
         </div>
         <div className="flex flex-col">
           <dt className="text-xs uppercase tracking-wide text-text-muted">
-            RAM
+            {strings.ai.picker.dataLabels.ram}
           </dt>
           <dd className="text-text-primary">{spec.ramRequiredGB} GB</dd>
         </div>
         <div className="flex flex-col">
           <dt className="text-xs uppercase tracking-wide text-text-muted">
-            License
+            {strings.ai.picker.dataLabels.license}
           </dt>
           <dd className="text-text-primary">{spec.license}</dd>
         </div>
         <div className="flex flex-col">
           <dt className="text-xs uppercase tracking-wide text-text-muted">
-            Quant
+            {strings.ai.picker.dataLabels.quant}
           </dt>
           <dd className="font-mono text-text-primary">{spec.quantLabel}</dd>
         </div>
@@ -311,9 +310,10 @@ function ModelCard({
           <p className="text-xs text-text-secondary">{phaseLabel(state)}</p>
         </div>
       ) : busy ? (
-        <p className="flex items-center gap-2 text-xs text-text-secondary">
-          <Loader2Icon className="animate-spin" /> {phaseLabel(state)}
-        </p>
+        <div className="flex flex-col gap-1">
+          <Skeleton className="h-2 w-full" />
+          <p className="text-xs text-text-secondary">{phaseLabel(state)}</p>
+        </div>
       ) : null}
 
       {phase === 'failed' && errorMessage ? (
@@ -365,7 +365,7 @@ function CardActions({
         onClick={() => actions.onCancel(spec)}
         disabled={phaseClass.cancelling}
       >
-        <CircleStopIcon /> Cancel
+        <CircleStopIcon /> {strings.ai.picker.cancelCta}
       </Button>
     )
   }
@@ -378,12 +378,12 @@ function CardActions({
           size="sm"
           onClick={() => actions.onRebenchmark(spec)}
         >
-          <RefreshCwIcon /> Re-benchmark
+          <RefreshCwIcon /> {strings.ai.picker.reBenchmarkCta}
         </Button>
         <Button
           variant="ghost"
           size="icon-sm"
-          aria-label={`Remove ${spec.displayName}`}
+          aria-label={strings.ai.picker.removeAriaLabel(spec.displayName)}
           onClick={() => actions.onRemove(spec)}
         >
           <Trash2Icon />
@@ -401,12 +401,12 @@ function CardActions({
           onClick={() => actions.onSelect(spec)}
           disabled={blocksGated}
         >
-          <DownloadIcon /> Re-download
+          <DownloadIcon /> {strings.ai.picker.reDownloadCta}
         </Button>
         <Button
           variant="ghost"
           size="icon-sm"
-          aria-label={`Remove ${spec.displayName}`}
+          aria-label={strings.ai.picker.removeAriaLabel(spec.displayName)}
           onClick={() => actions.onRemove(spec)}
         >
           <Trash2Icon />
@@ -423,7 +423,7 @@ function CardActions({
       disabled={blocksGated}
       aria-disabled={blocksGated || undefined}
     >
-      <DownloadIcon /> Download
+      <DownloadIcon /> {strings.ai.picker.downloadCta}
     </Button>
   )
 }
@@ -468,14 +468,14 @@ function HfTokenPaste({
         htmlFor="hf-token"
         className="flex items-center gap-2 text-xs uppercase tracking-wide text-text-secondary"
       >
-        <KeyIcon /> Paste your Hugging Face access token
+        <KeyIcon /> {strings.ai.tokenPaste.heading}
       </Label>
       <p className="text-xs text-text-secondary">
-        This model is gated. Accept the terms at{' '}
-        <span className="font-mono">huggingface.co/{repoSlug}</span> first, then
-        paste a read-scope token from{' '}
-        <span className="font-mono">huggingface.co/settings/tokens</span>. Your
-        token is stored in the OS keychain, never sent anywhere.
+        {strings.ai.tokenPaste.bodyBeforeRepo}
+        <span className="font-mono">huggingface.co/{repoSlug}</span>
+        {strings.ai.tokenPaste.bodyAfterRepo}
+        <span className="font-mono">{strings.ai.tokenPaste.bodyTokensUrl}</span>
+        {strings.ai.tokenPaste.bodyAfterTokensUrl}
       </p>
       <div className="flex items-center gap-2">
         <Input
@@ -486,11 +486,11 @@ function HfTokenPaste({
           spellCheck={false}
           value={value}
           onChange={(e) => setValue(e.target.value)}
-          placeholder="hf_xxxxxxxxxxxxxxxxxxxxxxxxx"
+          placeholder={strings.ai.tokenPaste.placeholder}
           className="flex-1 font-mono"
         />
         <Button type="submit" variant="default" size="sm">
-          Save
+          {strings.ai.tokenPaste.saveCta}
         </Button>
         {onClear ? (
           <Button
@@ -498,9 +498,9 @@ function HfTokenPaste({
             variant="ghost"
             size="sm"
             onClick={onClear}
-            aria-label="Forget saved Hugging Face token"
+            aria-label={strings.ai.tokenPaste.forgetAriaLabel}
           >
-            Forget
+            {strings.ai.tokenPaste.forgetCta}
           </Button>
         ) : null}
       </div>

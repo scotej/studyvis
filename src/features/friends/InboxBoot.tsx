@@ -11,6 +11,7 @@ import { boxDecryptWithKeyring } from '@/lib/db/identity'
 import { getFriendXPubkey } from '@/lib/db/friends'
 import { useFriendsStore } from '@/stores/friendsStore'
 import { useSettingsStore } from '@/stores/settingsStore'
+import { strings } from '@/strings'
 
 import { subscribeToOwnInbox, type ValidInvite } from './inbox'
 import { startPresence, type PresenceMap } from './presence'
@@ -104,12 +105,14 @@ async function handleValidInvite(
   invite: ValidInvite,
   onAccept: (invite: ValidInvite) => void
 ) {
-  const senderName = invite.payload.our_display_name?.trim() || 'A friend'
-  const message = `${senderName} invites you to study`
+  const senderName =
+    invite.payload.our_display_name?.trim() ||
+    strings.friends.inbox.senderFallback
+  const message = strings.friends.inbox.inviteBody(senderName)
 
   toast(message, {
     action: {
-      label: 'Accept',
+      label: strings.friends.inbox.acceptAction,
       onClick: () => onAccept(invite),
     },
   })
@@ -127,7 +130,11 @@ async function handleValidInvite(
       const result = await requestPermission()
       granted = result === 'granted'
     }
-    if (granted) await sendNotification({ title: 'StudyVis', body: message })
+    if (granted)
+      await sendNotification({
+        title: strings.notifications.invite.title,
+        body: message,
+      })
   } catch {
     // Notification plugin is best-effort; the in-app toast is the
     // user-visible source of truth.

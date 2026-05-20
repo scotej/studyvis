@@ -2,6 +2,7 @@ import { useEffect, useRef, type KeyboardEvent } from 'react'
 
 import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
+import { strings } from '@/strings'
 
 export type AiTextBoxProps = {
   value: string
@@ -28,7 +29,7 @@ export function AiTextBox({
   onChange,
   onSubmit,
   pending = false,
-  placeholder = 'Ask the AI…',
+  placeholder = strings.ai.dialog.defaultPlaceholder,
   className,
 }: AiTextBoxProps) {
   const ref = useRef<HTMLInputElement>(null)
@@ -56,8 +57,10 @@ export function AiTextBox({
       onChange={(e) => onChange(e.target.value)}
       onKeyDown={handleKeyDown}
       disabled={pending}
-      placeholder={pending ? 'Thinking…' : placeholder}
-      aria-label="Ask the AI"
+      placeholder={
+        pending ? strings.ai.dialog.disabledPlaceholder : placeholder
+      }
+      aria-label={strings.ai.dialog.ariaLabel}
       autoComplete="off"
       autoCorrect="off"
       spellCheck={false}

@@ -6,6 +6,7 @@ import {
 } from '@/components/OnboardingStep'
 import { Kbd } from '@/components/ui/kbd'
 import { isMacLikePlatform } from '@/lib/utils'
+import { strings } from '@/strings'
 
 export type TutorialStepProps = {
   progress?: OnboardingStepProgress
@@ -14,45 +15,50 @@ export type TutorialStepProps = {
 
 export function TutorialStep({ progress, onContinue }: TutorialStepProps) {
   const pttKey = isMacLikePlatform() ? '⌘[' : 'Ctrl+['
+  const cards = strings.onboarding.tutorial.cards
 
   return (
     <OnboardingStep
-      ariaLabel="How a session works"
+      ariaLabel={strings.onboarding.tutorial.ariaLabel}
       progress={progress}
-      primaryAction={{ label: 'Get started', onClick: onContinue }}
+      primaryAction={{
+        label: strings.onboarding.tutorial.cta,
+        onClick: onContinue,
+      }}
     >
       <header className="flex flex-col items-center gap-3 text-center">
         <h1 className="text-2xl font-semibold tracking-tight">
-          How a session works
+          {strings.onboarding.tutorial.heading}
         </h1>
         <p className="max-w-md text-sm leading-snug text-text-secondary">
-          Three things to know. You can re-read this any time from Settings.
+          {strings.onboarding.tutorial.body}
         </p>
       </header>
 
       <ol
         className="grid w-full grid-cols-1 gap-4 md:grid-cols-3"
-        aria-label="Three tips"
+        aria-label={strings.onboarding.tutorial.listAriaLabel}
       >
         <TutorialCard
           Icon={UserPlus2Icon}
-          title="Invite a friend"
-          body="Click a friend in your list. Their app will ring; if they take the call, you're in a session together."
+          title={cards.invite.title}
+          body={cards.invite.body}
         />
         <TutorialCard
           Icon={MicIcon}
-          title="Talk when you mean to"
+          title={cards.talk.title}
           body={
             <>
-              You're muted by default. Hold <Kbd>{pttKey}</Kbd> to talk; let go
-              to mute.
+              {cards.talk.bodyBeforeKbd}
+              <Kbd>{pttKey}</Kbd>
+              {cards.talk.bodyAfterKbd}
             </>
           }
         />
         <TutorialCard
           Icon={DoorOpenIcon}
-          title="Leave any time"
-          body="Click Leave to drop out. The session ends for everyone when only one of you is left."
+          title={cards.leave.title}
+          body={cards.leave.body}
         />
       </ol>
     </OnboardingStep>

@@ -9,6 +9,7 @@ import { Switch } from '@/components/ui/switch'
 import { useOnboardingState } from '@/features/onboarding'
 import { useAutostart } from '@/features/system'
 import { useSettingsStore } from '@/stores/settingsStore'
+import { strings } from '@/strings'
 
 export function AdvancedCategory() {
   const debugLogEnabled = useSettingsStore((s) => s.values.debugLogEnabled)
@@ -17,6 +18,7 @@ export function AdvancedCategory() {
   const onboarding = useOnboardingState()
   const [openingFolder, setOpeningFolder] = useState(false)
   const [resettingOnboarding, setResettingOnboarding] = useState(false)
+  const copy = strings.settings.advanced
 
   const handleOpenDataFolder = useCallback(async () => {
     setOpeningFolder(true)
@@ -24,22 +26,22 @@ export function AdvancedCategory() {
       await invoke<string>('system_open_data_folder')
     } catch (err) {
       const message =
-        err instanceof Error ? err.message : "Couldn't open the data folder."
+        err instanceof Error ? err.message : copy.dataFolder.errorFallback
       toast.error(message)
     } finally {
       setOpeningFolder(false)
     }
-  }, [])
+  }, [copy.dataFolder.errorFallback])
 
   const handleReplayOnboarding = useCallback(async () => {
     setResettingOnboarding(true)
     try {
       await onboarding.reset()
-      toast.success('Onboarding will play on the next launch.')
+      toast.success(copy.replayOnboarding.scheduledToast)
     } finally {
       setResettingOnboarding(false)
     }
-  }, [onboarding])
+  }, [onboarding, copy.replayOnboarding.scheduledToast])
 
   const autostartDisabled =
     autostart.status === 'loading' ||
@@ -47,10 +49,10 @@ export function AdvancedCategory() {
     autostart.status === 'unavailable'
 
   return (
-    <SettingsSection heading="Advanced">
+    <SettingsSection heading={copy.heading}>
       <SettingsRow
-        label="Launch StudyVis at login"
-        help="Off by default. The app stays in the tray to receive invites."
+        label={copy.autostart.label}
+        help={copy.autostart.help}
         control={
           <Switch
             checked={autostart.enabled}
@@ -58,19 +60,19 @@ export function AdvancedCategory() {
             onCheckedChange={(checked) =>
               void autostart.toggle(Boolean(checked))
             }
-            aria-label="Launch StudyVis at login"
+            aria-label={copy.autostart.ariaLabel}
           />
         }
       />
       {autostart.status === 'unavailable' ? (
         <SettingsRow
-          label="Autostart unavailable"
-          help="This only works in the packaged app, not the dev build."
+          label={copy.autostartUnavailable.label}
+          help={copy.autostartUnavailable.help}
         />
       ) : null}
       {autostart.status === 'error' && autostart.error ? (
         <SettingsRow
-          label="Autostart error"
+          label={copy.autostartError.label}
           help={autostart.error}
           control={
             <span className="text-xs text-status-alerted">
@@ -80,21 +82,21 @@ export function AdvancedCategory() {
         />
       ) : null}
       <SettingsRow
-        label="Debug log"
-        help="Logs verbose diagnostic output to the developer console. Off by default; persists across launches."
+        label={copy.debugLog.label}
+        help={copy.debugLog.help}
         control={
           <Switch
             checked={debugLogEnabled}
             onCheckedChange={(checked) =>
               void setDebugLogEnabled(Boolean(checked))
             }
-            aria-label="Debug log"
+            aria-label={copy.debugLog.ariaLabel}
           />
         }
       />
       <SettingsRow
-        label="Open data folder"
-        help="Reveals the directory holding your local SQLite database and identity record."
+        label={copy.dataFolder.label}
+        help={copy.dataFolder.help}
         control={
           <Button
             variant="secondary"
@@ -102,13 +104,13 @@ export function AdvancedCategory() {
             onClick={() => void handleOpenDataFolder()}
             disabled={openingFolder}
           >
-            <FolderOpenIcon /> Open
+            <FolderOpenIcon /> {copy.dataFolder.openCta}
           </Button>
         }
       />
       <SettingsRow
-        label="Replay onboarding"
-        help="Restarts the welcome → permissions → tutorial flow from the beginning. Your identity and friends are kept."
+        label={copy.replayOnboarding.label}
+        help={copy.replayOnboarding.help}
         control={
           <Button
             variant="secondary"
@@ -117,7 +119,7 @@ export function AdvancedCategory() {
             disabled={resettingOnboarding}
             aria-disabled={resettingOnboarding ? true : undefined}
           >
-            Replay
+            {copy.replayOnboarding.replayCta}
           </Button>
         }
       />

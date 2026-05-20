@@ -14,12 +14,14 @@ import {
 } from '@/components/ui/dialog'
 import type { Friend } from '@/lib/db/friends'
 import { useFriendsStore } from '@/stores/friendsStore'
+import { strings } from '@/strings'
 
 export function FriendsCategory() {
   const friends = useFriendsStore((s) => s.friends)
   const remove = useFriendsStore((s) => s.remove)
   const [pendingRemoval, setPendingRemoval] = useState<Friend | null>(null)
   const [removing, setRemoving] = useState(false)
+  const copy = strings.settings.friends
 
   const confirmRemoval = useCallback(async () => {
     if (!pendingRemoval) return
@@ -27,26 +29,25 @@ export function FriendsCategory() {
     try {
       await remove(pendingRemoval.ed_pubkey_hex)
       toast.success(
-        `Removed ${pendingRemoval.display_name?.trim() || 'your friend'}.`
+        copy.removedToast(
+          pendingRemoval.display_name?.trim() || copy.defaultFriendName
+        )
       )
       setPendingRemoval(null)
     } catch (err) {
       const message =
-        err instanceof Error ? err.message : "Couldn't remove that friend."
+        err instanceof Error ? err.message : copy.removeErrorFallback
       toast.error(message)
     } finally {
       setRemoving(false)
     }
-  }, [pendingRemoval, remove])
+  }, [pendingRemoval, remove, copy])
 
   return (
     <>
-      <SettingsSection heading="Friends">
+      <SettingsSection heading={copy.heading}>
         {friends.length === 0 ? (
-          <SettingsRow
-            label="No friends yet"
-            help="Pair with a friend from the main view to see them here."
-          />
+          <SettingsRow label={copy.emptyLabel} help={copy.emptyHelp} />
         ) : (
           friends.map((friend) => (
             <SettingsRow
@@ -59,9 +60,11 @@ export function FriendsCategory() {
                   variant="ghost"
                   size="sm"
                   onClick={() => setPendingRemoval(friend)}
-                  aria-label={`Remove ${friend.display_name?.trim() || 'your friend'}`}
+                  aria-label={copy.removeAriaLabel(
+                    friend.display_name?.trim() || copy.defaultFriendName
+                  )}
                 >
-                  <Trash2Icon /> Remove
+                  <Trash2Icon /> {copy.removeCta}
                 </Button>
               }
             />
@@ -77,10 +80,13 @@ export function FriendsCategory() {
       >
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Remove this friend?</DialogTitle>
+            <DialogTitle>{copy.confirm.title}</DialogTitle>
             <DialogDescription>
               {pendingRemoval
-                ? `${pendingRemoval.display_name?.trim() || 'This friend'} will be removed from your friends list. To study together again you'll need to pair from scratch.`
+                ? copy.confirm.body(
+                    pendingRemoval.display_name?.trim() ||
+                      copy.defaultFriendDisplay
+                  )
                 : ''}
             </DialogDescription>
           </DialogHeader>
@@ -91,7 +97,7 @@ export function FriendsCategory() {
               onClick={() => setPendingRemoval(null)}
               disabled={removing}
             >
-              Cancel
+              {copy.confirm.cancelCta}
             </Button>
             <Button
               type="button"
@@ -100,7 +106,7 @@ export function FriendsCategory() {
               disabled={removing}
               aria-disabled={removing}
             >
-              Remove
+              {copy.confirm.confirmCta}
             </Button>
           </DialogFooter>
         </DialogContent>

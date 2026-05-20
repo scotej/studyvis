@@ -22,6 +22,7 @@ import {
   listAudioInputs,
   type AudioInputOption,
 } from '@/features/session/audioDevices'
+import { strings } from '@/strings'
 
 export type AudioDevicePickerProps = {
   // The deviceId currently in use, or null if we haven't pinned one (initial
@@ -72,7 +73,7 @@ export function AudioDevicePicker({
   }, [])
 
   const active = devices.find((d) => d.deviceId === currentDeviceId)
-  const label = active?.label ?? 'System default'
+  const label = active?.label ?? strings.session.audio.systemDefault
 
   return (
     <DropdownMenu>
@@ -81,7 +82,7 @@ export function AudioDevicePicker({
           variant="ghost"
           size="sm"
           disabled={swapping}
-          aria-label={`Microphone, currently ${label}`}
+          aria-label={strings.session.audio.micAriaLabel(label)}
           className="gap-2"
         >
           <MicIcon />
@@ -89,7 +90,7 @@ export function AudioDevicePicker({
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="min-w-[16rem]">
-        <DropdownMenuLabel>Microphone</DropdownMenuLabel>
+        <DropdownMenuLabel>{strings.session.audio.menuLabel}</DropdownMenuLabel>
         <DropdownMenuSeparator />
         {devices.map((d) => (
           <DropdownMenuItem
@@ -101,7 +102,9 @@ export function AudioDevicePicker({
           </DropdownMenuItem>
         ))}
         {devices.length === 0 ? (
-          <DropdownMenuItem disabled>No microphones detected</DropdownMenuItem>
+          <DropdownMenuItem disabled>
+            {strings.session.audio.empty}
+          </DropdownMenuItem>
         ) : null}
       </DropdownMenuContent>
     </DropdownMenu>

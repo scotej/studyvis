@@ -10,6 +10,7 @@ import {
   type WindowControl,
 } from '@/lib/windowChrome'
 import { cn } from '@/lib/utils'
+import { strings } from '@/strings'
 
 // V3-P6 — Custom window chrome titlebar. Renders only when the user has
 // opted in (Settings → Appearance → Window style → Custom). DESIGN-SYSTEM
@@ -115,7 +116,7 @@ export function TitleBar({
     <header
       data-slot="titlebar"
       role="banner"
-      aria-label="Window titlebar"
+      aria-label={strings.chrome.titleBar.ariaLabel}
       className={cn(
         'relative flex w-full shrink-0 select-none items-center border-b border-border-subtle bg-bg-base',
         className
@@ -139,7 +140,7 @@ export function TitleBar({
           // the chrome band carries the word. `pointer-events: none` lets
           // mousedown on the text pass through to the drag-region parent.
         >
-          studyvis
+          {strings.chrome.titleBar.wordmark}
         </span>
       </div>
       <div
@@ -149,7 +150,10 @@ export function TitleBar({
         aria-hidden="true"
       />
       {detected === 'windows' ? (
-        <div className="flex h-full items-center" aria-label="Window controls">
+        <div
+          className="flex h-full items-center"
+          aria-label={strings.chrome.titleBar.controlsAriaLabel}
+        >
           {controls.map((control) => (
             <ControlButton
               key={control}
@@ -173,14 +177,15 @@ function ControlButton({
   isMaximized: boolean
   onActivate: () => void
 }) {
+  const buttons = strings.chrome.titleBar.buttons
   const label =
     control === 'minimize'
-      ? 'Minimize'
+      ? buttons.minimize
       : control === 'maximize'
         ? isMaximized
-          ? 'Restore'
-          : 'Maximize'
-        : 'Close'
+          ? buttons.restore
+          : buttons.maximize
+        : buttons.close
 
   // Close button: subtle by default, alerted (red) only on hover, with
   // text-inverse for legibility. The hover pairing already exists in

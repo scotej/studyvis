@@ -39,26 +39,6 @@ export const AUDIT_ACTION = 'audit'
 // — the audit log is a UI surface, not a structured event log.
 export type AuditEventDetail = { [key: string]: JsonValue }
 
-// User-facing action label for each kind. The audit panel reads this through
-// the SessionView mapper so the components/ layer stays independent of the
-// V1 vs V2 kind set (the V2 phase will extend this map and the panel
-// renders whatever label the mapper hands it).
-export const AUDIT_KIND_LABELS: Record<AuditEventKind, string> = {
-  joined: 'joined',
-  left: 'left',
-  paused_break: 'took a break',
-  resumed: 'returned',
-  pomodoro_start: 'started a Pomodoro',
-  pomodoro_end: 'stopped the Pomodoro',
-  ai_warning: 'got a self-warning',
-  ai_alert: 'looking off-task',
-  topic_set: 'set the topic',
-  topic_change: 'changed topic',
-  break_request: 'asked for a break',
-  break_approved: 'took a break',
-  break_denied: 'break was denied',
-}
-
 // Wire shape: `who` is the sender's ed_pubkey hex, `sig` is hex(64), but
 // receivers MUST authenticate via the peerId→ed_pubkey map established by
 // the signed-hello handshake — never trust `who` from the wire as the

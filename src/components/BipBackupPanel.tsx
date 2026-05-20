@@ -5,6 +5,7 @@ import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { cn } from '@/lib/utils'
+import { strings } from '@/strings'
 
 export type BipBackupPanelProps = {
   mnemonic: string[]
@@ -52,7 +53,7 @@ export function BipBackupPanel({
         copiedTimerRef.current = null
       }, 1500)
     } catch {
-      toast.error("Couldn't copy to clipboard.")
+      toast.error(strings.common.errors.copyToClipboard)
     }
   }
 
@@ -62,8 +63,8 @@ export function BipBackupPanel({
       data-slot="bip-backup-panel"
     >
       <section
-        className="flex w-full flex-col gap-5 rounded-xl border border-border-default bg-bg-surface p-6"
-        aria-label="24-word recovery phrase"
+        className="flex w-full flex-col gap-6 rounded-xl border border-border-default bg-bg-surface p-6"
+        aria-label={strings.identity.backup.wordlistAriaLabel}
       >
         <ol
           className="grid grid-flow-col grid-rows-8 gap-x-8 gap-y-2 font-mono text-sm leading-snug"
@@ -84,15 +85,15 @@ export function BipBackupPanel({
             variant="outline"
             size="sm"
             onClick={handleCopy}
-            aria-label="Copy 24 words to clipboard"
+            aria-label={strings.identity.backup.copyAriaLabel}
           >
             {copied ? (
               <>
-                <CheckIcon /> Copied
+                <CheckIcon /> {strings.identity.backup.copiedCta}
               </>
             ) : (
               <>
-                <CopyIcon /> Copy to clipboard
+                <CopyIcon /> {strings.identity.backup.copyCta}
               </>
             )}
           </Button>
@@ -108,8 +109,7 @@ export function BipBackupPanel({
             aria-describedby="identity-ack-text"
           />
           <span id="identity-ack-text">
-            I&apos;ve saved these words. I understand losing them means losing
-            this identity.
+            {strings.identity.backup.acknowledge}
           </span>
         </label>
       ) : null}

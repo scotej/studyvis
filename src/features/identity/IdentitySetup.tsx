@@ -6,6 +6,7 @@ import {
   OnboardingStep,
   type OnboardingStepProgress,
 } from '@/components/OnboardingStep'
+import { strings } from '@/strings'
 
 import type { Mnemonic } from '@/lib/crypto/identity'
 
@@ -30,7 +31,7 @@ export function IdentitySetup({
       await onConfirm()
     } catch (err) {
       console.error(err)
-      toast.error("Couldn't save your identity.")
+      toast.error(strings.common.errors.savingIdentity)
     } finally {
       setSubmitting(false)
     }
@@ -38,10 +39,10 @@ export function IdentitySetup({
 
   return (
     <OnboardingStep
-      ariaLabel="Save your recovery phrase"
+      ariaLabel={strings.identity.setup.ariaLabel}
       progress={progress}
       primaryAction={{
-        label: 'Continue',
+        label: strings.common.actions.continue,
         onClick: () => void handleContinue(),
         disabled: !acknowledged,
         busy: submitting,
@@ -50,11 +51,10 @@ export function IdentitySetup({
     >
       <header className="flex flex-col items-center gap-3 text-center">
         <h1 className="text-2xl font-semibold tracking-tight">
-          Save these 24 words somewhere safe
+          {strings.identity.setup.heading}
         </h1>
         <p className="max-w-md text-sm leading-snug text-text-secondary">
-          If you lose this laptop, these words are the only way to recover this
-          identity. Pen and paper. No cloud sync.
+          {strings.identity.setup.body}
         </p>
       </header>
 

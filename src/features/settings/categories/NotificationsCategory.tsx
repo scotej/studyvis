@@ -1,6 +1,7 @@
 import { SettingsRow, SettingsSection } from '@/components/SettingsRow'
 import { Switch } from '@/components/ui/switch'
 import { useSettingsStore } from '@/stores/settingsStore'
+import { strings } from '@/strings'
 
 export function NotificationsCategory() {
   const inviteNotify = useSettingsStore(
@@ -11,32 +12,33 @@ export function NotificationsCategory() {
     (s) => s.setIncomingInviteNotificationEnabled
   )
   const setMinimizeToTray = useSettingsStore((s) => s.setMinimizeToTrayOnClose)
+  const copy = strings.settings.notifications
 
   return (
-    <SettingsSection heading="Notifications">
+    <SettingsSection heading={copy.heading}>
       <SettingsRow
-        label="Incoming invite notifications"
-        help="OS-level prompt when a friend invites you to study. The in-app toast always fires."
+        label={copy.invites.label}
+        help={copy.invites.help}
         control={
           <Switch
             checked={inviteNotify}
             onCheckedChange={(checked) =>
               void setInviteNotify(Boolean(checked))
             }
-            aria-label="Incoming invite notifications"
+            aria-label={copy.invites.ariaLabel}
           />
         }
       />
       <SettingsRow
-        label="Minimize to tray on close"
-        help="When on, closing the window keeps StudyVis in the tray so friends can still reach you. When off, closing exits the app."
+        label={copy.tray.label}
+        help={copy.tray.help}
         control={
           <Switch
             checked={minimizeToTray}
             onCheckedChange={(checked) =>
               void setMinimizeToTray(Boolean(checked))
             }
-            aria-label="Minimize to tray on close"
+            aria-label={copy.tray.ariaLabel}
           />
         }
       />

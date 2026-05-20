@@ -3,6 +3,7 @@ import { toast } from 'sonner'
 
 import { useIdentity } from '@/features/identity'
 import { useFriendsStore } from '@/stores/friendsStore'
+import { strings } from '@/strings'
 
 import {
   generatePairingCode,
@@ -80,16 +81,21 @@ export function AddFriendDialog({ open, onOpenChange }: AddFriendDialogProps) {
           friend.name,
           Date.now()
         )
-        setPhase({ kind: 'success', name: friend.name || 'your friend' })
+        setPhase({
+          kind: 'success',
+          name: friend.name || strings.friends.addDialog.defaultFriendName,
+        })
         successCloseRef.current = setTimeout(() => {
           successCloseRef.current = null
           handleOpenChange(false)
         }, 1500)
       } catch (err) {
         const message =
-          err instanceof Error ? err.message : "Couldn't save your new friend."
+          err instanceof Error
+            ? err.message
+            : strings.friends.addDialog.errors.savingFriend
         setPhase({ kind: 'error', message })
-        toast.error("Couldn't save your new friend.")
+        toast.error(strings.friends.addDialog.errors.savingFriend)
       }
     },
     [addFriend, handleOpenChange]
@@ -130,9 +136,12 @@ export function AddFriendDialog({ open, onOpenChange }: AddFriendDialogProps) {
       if (err instanceof PairTimeoutError) {
         setPhase({ kind: 'host-timeout', words })
       } else {
-        const message = err instanceof Error ? err.message : 'Pairing failed.'
+        const message =
+          err instanceof Error
+            ? err.message
+            : strings.friends.addDialog.errors.pairingFailed
         setPhase({ kind: 'error', message })
-        toast.error('Pairing failed.')
+        toast.error(strings.friends.addDialog.errors.pairingFailed)
       }
     } finally {
       if (abortRef.current === ctrl) abortRef.current = null
@@ -164,9 +173,12 @@ export function AddFriendDialog({ open, onOpenChange }: AddFriendDialogProps) {
         if (err instanceof PairTimeoutError) {
           setPhase({ kind: 'join-timeout' })
         } else {
-          const message = err instanceof Error ? err.message : 'Pairing failed.'
+          const message =
+            err instanceof Error
+              ? err.message
+              : strings.friends.addDialog.errors.pairingFailed
           setPhase({ kind: 'error', message })
-          toast.error('Pairing failed.')
+          toast.error(strings.friends.addDialog.errors.pairingFailed)
         }
       } finally {
         if (abortRef.current === ctrl) abortRef.current = null
@@ -180,7 +192,7 @@ export function AddFriendDialog({ open, onOpenChange }: AddFriendDialogProps) {
       await navigator.clipboard.writeText(words.join(' '))
       return true
     } catch {
-      toast.error("Couldn't copy to clipboard.")
+      toast.error(strings.common.errors.copyToClipboard)
       return false
     }
   }, [])

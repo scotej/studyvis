@@ -1,4 +1,5 @@
 @import 'tailwindcss';
+@import 'tw-animate-css';
 
 :root {
   --bg-base: #17130c;
@@ -151,6 +152,25 @@
   --ease-out-token: var(--ease-token-out);
   --ease-in-out-token: var(--ease-token-in-out);
   --ease-spring: var(--ease-token-spring);
+
+  /* Tailwind v4 reads these as the `duration-*` utility scale, so
+     `duration-fast`, `duration-base`, `duration-slow`, `duration-reveal`
+     all resolve to the §6 motion tokens. V3-P8 wires this up so the
+     shadcn primitives can stop carrying raw `duration-200`/`-300`/`-500`
+     literals and reference the §6 named durations instead. */
+  --duration-fast: 150ms;
+  --duration-base: 200ms;
+  --duration-slow: 300ms;
+  --duration-reveal: 450ms;
+
+  /* tw-animate-css reads `--tw-enter-duration` and `--tw-exit-duration`
+     for its `animate-in` / `animate-out` utility families. We point both
+     at the §6 fast/base scale so dialog/popover/tooltip/dropdown enter
+     at `fast` (150ms) by default and `Sheet` overrides to `base` (200ms)
+     via its own class. The reduce-motion kill switch (`[data-reduce
+     -motion='true']` in @layer base) collapses these to 1ms automatically. */
+  --tw-enter-duration: var(--duration-fast);
+  --tw-exit-duration: var(--duration-fast);
 }
 
 @layer base {

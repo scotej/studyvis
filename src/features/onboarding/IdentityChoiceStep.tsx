@@ -3,6 +3,7 @@ import {
   type OnboardingStepProgress,
 } from '@/components/OnboardingStep'
 import { Button } from '@/components/ui/button'
+import { strings } from '@/strings'
 
 export type IdentityChoiceStepProps = {
   progress?: OnboardingStepProgress
@@ -19,23 +20,25 @@ export function IdentityChoiceStep({
   onRecover,
 }: IdentityChoiceStepProps) {
   return (
-    <OnboardingStep ariaLabel="Set up your identity" progress={progress}>
+    <OnboardingStep
+      ariaLabel={strings.onboarding.identityChoice.ariaLabel}
+      progress={progress}
+    >
       <header className="flex flex-col items-center gap-3 text-center">
         <h1 className="text-2xl font-semibold tracking-tight">
-          Set up your identity
+          {strings.onboarding.identityChoice.heading}
         </h1>
         <p className="max-w-md text-sm leading-snug text-text-secondary">
-          New to StudyVis, or moving to a new device? Either way, no account and
-          no server.
+          {strings.onboarding.identityChoice.body}
         </p>
       </header>
 
       <div className="flex w-full max-w-xs flex-col gap-3">
         <Button size="lg" onClick={onCreate}>
-          Create a new identity
+          {strings.onboarding.identityChoice.createCta}
         </Button>
         <Button size="lg" variant="outline" onClick={onRecover}>
-          I have a 24-word backup
+          {strings.onboarding.identityChoice.recoverCta}
         </Button>
       </div>
     </OnboardingStep>

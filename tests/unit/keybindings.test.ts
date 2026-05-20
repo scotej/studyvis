@@ -8,7 +8,6 @@ import {
   comboToKbdLabels,
   DEFAULT_PTT_AI_COMBO,
   DEFAULT_PTT_FRIENDS_COMBO,
-  describeConflict,
   isModifierCode,
   parseAccelerator,
   PTT_AI_DEFAULT_ACCELERATOR,
@@ -17,6 +16,7 @@ import {
   validateCombo,
   type Combo,
 } from '@/lib/keybindings'
+import { describeConflict } from '@/lib/keybindings-copy'
 import {
   __resetSettingsStoreDeps,
   __setSettingsStoreDeps,

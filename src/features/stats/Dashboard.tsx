@@ -16,6 +16,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { SettingsSection } from '@/components/SettingsRow'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
+import { Skeleton } from '@/components/ui/skeleton'
 import { tokens } from '@/design/tokens'
 import { listFriends, type Friend } from '@/lib/db/friends'
 import { listSessions, type SessionRecord } from '@/lib/db/sessions'
@@ -28,6 +29,8 @@ import {
   XAxis,
   YAxis,
 } from 'recharts'
+
+import { strings } from '@/strings'
 
 import {
   computeStats,
@@ -88,7 +91,9 @@ export function Dashboard({ __loader, now }: DashboardProps) {
         setStatus({
           kind: 'error',
           message:
-            err instanceof Error ? err.message : "Couldn't load your stats.",
+            err instanceof Error
+              ? err.message
+              : strings.stats.loadErrorFallback,
         })
       })
     return () => {
@@ -98,28 +103,28 @@ export function Dashboard({ __loader, now }: DashboardProps) {
 
   if (status.kind === 'loading') {
     return (
-      <SettingsSection heading="Stats">
+      <SettingsSection heading={strings.stats.heading}>
         <div
           role="status"
-          aria-label="Loading stats"
-          className="flex animate-pulse flex-col gap-3 py-3"
+          aria-label={strings.stats.loadingAriaLabel}
+          className="flex flex-col gap-3 py-3"
         >
-          <div className="h-4 w-1/3 rounded-md bg-bg-raised" />
-          <div className="h-32 w-full rounded-md bg-bg-raised" />
+          <Skeleton className="h-4 w-1/3" />
+          <Skeleton className="h-32 w-full" />
         </div>
       </SettingsSection>
     )
   }
   if (status.kind === 'error') {
     return (
-      <SettingsSection heading="Stats">
+      <SettingsSection heading={strings.stats.heading}>
         <div
           role="alert"
           className="flex items-center justify-between gap-3 rounded-md border border-dashed border-border-subtle bg-bg-surface px-3 py-3 text-sm text-text-muted"
         >
           <span>{status.message}</span>
           <Button variant="ghost" size="sm" onClick={retry}>
-            Retry
+            {strings.common.actions.retry}
           </Button>
         </div>
       </SettingsSection>
@@ -137,40 +142,35 @@ export function DashboardView({ summary }: DashboardViewProps) {
   const topPartners = partners.slice(0, TOP_PARTNERS_LIMIT)
 
   return (
-    <SettingsSection heading="Stats">
-      <p className="pb-4 text-xs text-text-muted">
-        Computed on this device from your local session history. Nothing is sent
-        anywhere.
-      </p>
+    <SettingsSection heading={strings.stats.heading}>
+      <p className="pb-4 text-xs text-text-muted">{strings.stats.disclaimer}</p>
 
       {totalSessions === 0 ? (
-        <Empty message="No stats yet. Study with a friend for at least a few minutes and your history will show up here." />
+        <Empty message={strings.stats.empty} />
       ) : (
-        <div className="flex flex-col gap-6">
+        <div className="flex flex-col gap-8">
           <div className="grid grid-cols-2 gap-4">
             <StatTile
               value={String(streak)}
-              unit={streak === 1 ? 'day' : 'days'}
-              label="Current streak"
-              help={`Days in a row with a session of ${STREAK_MIN_MINUTES}+ min`}
+              unit={strings.stats.streak.unit(streak)}
+              label={strings.stats.streak.label}
+              help={strings.stats.streak.help(STREAK_MIN_MINUTES)}
             />
             <StatTile
               value={score.average == null ? '—' : String(score.average)}
-              unit={score.average == null ? '' : '/ 100'}
-              label="Average score"
+              unit={score.average == null ? '' : strings.stats.avgScore.unit}
+              label={strings.stats.avgScore.label}
               help={
                 score.scoredSessions === 0
-                  ? 'No scored sessions yet'
-                  : `Across ${score.scoredSessions} scored ${
-                      score.scoredSessions === 1 ? 'session' : 'sessions'
-                    }`
+                  ? strings.stats.avgScore.helpNoScores
+                  : strings.stats.avgScore.help(score.scoredSessions)
               }
             />
           </div>
 
           <section className="flex flex-col gap-3">
             <h3 className="text-sm font-medium tracking-tight text-text-secondary uppercase">
-              Focused minutes · last 30 days
+              {strings.stats.focused.heading}
             </h3>
             <Card className="gap-0 py-4">
               <div className="h-56 w-full px-2">
@@ -181,10 +181,10 @@ export function DashboardView({ summary }: DashboardViewProps) {
 
           <section className="flex flex-col gap-3">
             <h3 className="text-sm font-medium tracking-tight text-text-secondary uppercase">
-              Top study partners
+              {strings.stats.partners.heading}
             </h3>
             {topPartners.length === 0 ? (
-              <Empty message="No study partners yet. Solo sessions still count toward your streak." />
+              <Empty message={strings.stats.partners.empty} />
             ) : (
               <ul className="m-0 flex list-none flex-col gap-2 p-0">
                 {topPartners.map((p) => (
@@ -196,7 +196,7 @@ export function DashboardView({ summary }: DashboardViewProps) {
                       {p.name}
                     </span>
                     <span className="shrink-0 text-xs font-medium tabular-nums text-text-muted">
-                      {p.sessions} {p.sessions === 1 ? 'session' : 'sessions'}
+                      {strings.stats.partners.sessions(p.sessions)}
                     </span>
                   </li>
                 ))}
@@ -275,6 +275,7 @@ function FocusChart({ daily }: { daily: DailyFocus[] }) {
           fill="var(--accent-default)"
           radius={[tokens.radius.sm, tokens.radius.sm, 0, 0]}
           maxBarSize={16}
+          isAnimationActive={false}
         />
       </BarChart>
     </ResponsiveContainer>
@@ -293,7 +294,7 @@ function FocusTooltip({ active, payload }: FocusTooltipProps) {
     <div className="rounded-md border border-border-default bg-bg-raised px-3 py-2 text-xs shadow-md">
       <div className="font-medium text-text-primary">{point.day}</div>
       <div className="text-text-secondary tabular-nums">
-        {point.minutes} {point.minutes === 1 ? 'minute' : 'minutes'}
+        {strings.stats.focused.minutes(point.minutes)}
       </div>
     </div>
   )

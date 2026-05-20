@@ -13,6 +13,7 @@ import {
 } from '@/lib/keybindings'
 import { isMacLikePlatform } from '@/lib/utils'
 import { useSettingsStore } from '@/stores/settingsStore'
+import { strings } from '@/strings'
 
 function detectPlatform(): Platform {
   return isMacLikePlatform() ? 'mac' : 'other'
@@ -34,6 +35,7 @@ export function ShortcutsCategory() {
   const resetShortcutsToDefaults = useSettingsStore(
     (s) => s.resetShortcutsToDefaults
   )
+  const copy = strings.settings.shortcuts
 
   // Memoize the parsed combos so KeybindCapture's `otherCombo` reference is
   // stable across renders (its keydown-listener effect depends on it).
@@ -75,10 +77,10 @@ export function ShortcutsCategory() {
   const p = detectPlatform()
 
   return (
-    <SettingsSection heading="Shortcuts">
+    <SettingsSection heading={copy.heading}>
       <SettingsRow
-        label="Push to talk · friends"
-        help="Hold to unmute your microphone for everyone in the session."
+        label={copy.pttFriends.label}
+        help={copy.pttFriends.help}
         control={
           <KeybindCapture
             action="ptt-friends"
@@ -91,12 +93,8 @@ export function ShortcutsCategory() {
         }
       />
       <SettingsRow
-        label="Talk to AI"
-        help={
-          aiFeaturesEnabled
-            ? 'Opens the floating AI dialog over any app.'
-            : 'Active when AI features are on.'
-        }
+        label={copy.pttAi.label}
+        help={aiFeaturesEnabled ? copy.pttAi.helpOn : copy.pttAi.helpOff}
         control={
           <KeybindCapture
             action="ptt-ai"
@@ -109,11 +107,11 @@ export function ShortcutsCategory() {
         }
       />
       <SettingsRow
-        label="Reset to defaults"
-        help="Restores the original combos for both shortcuts."
+        label={copy.reset.label}
+        help={copy.reset.help}
         control={
           <Button type="button" size="sm" variant="ghost" onClick={handleReset}>
-            Reset
+            {copy.reset.cta}
           </Button>
         }
       />

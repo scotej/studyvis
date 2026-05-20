@@ -33,6 +33,7 @@ import {
 import { getHfTokenRuntime } from './hfToken'
 import { SUPPORTED_MODELS, type ModelSpec } from './models'
 import { useModelStore } from './modelStore'
+import { strings } from '@/strings'
 
 type CardState = PickerStateForModel
 
@@ -222,7 +223,7 @@ export function ModelPickerContainer() {
           errorMessage: null,
         })
         toast.success(
-          `${spec.displayName} ready. Speed on your machine: ${result.p95Sec.toFixed(1)} s/check.`
+          strings.ai.picker.readyToast(spec.displayName, result.p95Sec)
         )
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err)
@@ -254,21 +255,23 @@ export function ModelPickerContainer() {
           if (head.status === 401 || head.status === 403) {
             throw new Error(
               spec.gated
-                ? `Hugging Face rejected the download (HTTP ${head.status}). Accept the terms at huggingface.co/${spec.hfRepo} and paste a valid token.`
-                : `Hugging Face rejected the download (HTTP ${head.status}).`
+                ? strings.ai.picker.hfRejectedDetailed(head.status, spec.hfRepo)
+                : strings.ai.picker.hfRejected(head.status)
             )
           }
           if (head.status >= 400) {
-            throw new Error(
-              `HEAD ${file.url} returned HTTP ${head.status}. The model manifest may be stale.`
-            )
+            throw new Error(strings.ai.picker.headBadUrl(file.url, head.status))
           }
           if (
             head.content_length != null &&
             head.content_length !== file.size_bytes
           ) {
             throw new Error(
-              `Server reported ${head.content_length} bytes for ${file.kind} but the manifest expects ${file.size_bytes}. The model manifest may be stale.`
+              strings.ai.picker.sizeMismatch(
+                head.content_length,
+                file.kind,
+                file.size_bytes
+              )
             )
           }
         }
@@ -355,10 +358,12 @@ export function ModelPickerContainer() {
             downloadProgress: null,
             errorMessage: null,
           })
-          toast.success(`Removed ${spec.displayName}.`)
+          toast.success(strings.ai.picker.removedToast(spec.displayName))
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err)
-          toast.error(`Couldn't remove ${spec.displayName}: ${message}`)
+          toast.error(
+            strings.ai.picker.removeErrorToast(spec.displayName, message)
+          )
         }
       })()
     },
@@ -370,10 +375,10 @@ export function ModelPickerContainer() {
       try {
         await getHfTokenRuntime().save(token)
         setHfTokenPresent(true)
-        toast.success('Token saved to your keychain.')
+        toast.success(strings.settings.ai.hfToken.savedToast)
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err)
-        toast.error(`Couldn't save the token: ${message}`)
+        toast.error(`${strings.settings.ai.hfToken.saveErrorPrefix}${message}`)
       }
     })()
   }, [])
@@ -383,10 +388,12 @@ export function ModelPickerContainer() {
       try {
         await getHfTokenRuntime().clear()
         setHfTokenPresent(false)
-        toast.success('Token forgotten.')
+        toast.success(strings.settings.ai.hfToken.removedToast)
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err)
-        toast.error(`Couldn't clear the token: ${message}`)
+        toast.error(
+          `${strings.settings.ai.hfToken.removeErrorPrefix}${message}`
+        )
       }
     })()
   }, [])

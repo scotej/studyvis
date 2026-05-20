@@ -5,6 +5,7 @@ import {
   type SettingsCategoryDescriptor,
 } from '@/components/SettingsLayout'
 import { useSettingsStore } from '@/stores/settingsStore'
+import { strings } from '@/strings'
 
 import { AboutCategory } from './categories/AboutCategory'
 import { AdvancedCategory } from './categories/AdvancedCategory'
@@ -34,17 +35,17 @@ export type SettingsCategoryId =
 const CATEGORIES: ReadonlyArray<
   SettingsCategoryDescriptor<SettingsCategoryId>
 > = [
-  { id: 'identity', label: 'Identity' },
-  { id: 'friends', label: 'Friends' },
-  { id: 'sessions', label: 'Sessions' },
-  { id: 'stats', label: 'Stats' },
-  { id: 'appearance', label: 'Appearance' },
-  { id: 'notifications', label: 'Notifications' },
-  { id: 'shortcuts', label: 'Shortcuts' },
-  { id: 'ai', label: 'AI' },
-  { id: 'network', label: 'Network' },
-  { id: 'advanced', label: 'Advanced' },
-  { id: 'about', label: 'About' },
+  { id: 'identity', label: strings.settings.nav.identity },
+  { id: 'friends', label: strings.settings.nav.friends },
+  { id: 'sessions', label: strings.settings.nav.sessions },
+  { id: 'stats', label: strings.settings.nav.stats },
+  { id: 'appearance', label: strings.settings.nav.appearance },
+  { id: 'notifications', label: strings.settings.nav.notifications },
+  { id: 'shortcuts', label: strings.settings.nav.shortcuts },
+  { id: 'ai', label: strings.settings.nav.ai },
+  { id: 'network', label: strings.settings.nav.network },
+  { id: 'advanced', label: strings.settings.nav.advanced },
+  { id: 'about', label: strings.settings.nav.about },
 ]
 
 export type SettingsProps = {

@@ -18,6 +18,8 @@
 // tells the model the constraints so its recommendation usually aligns,
 // reducing user-visible surprise when the rule layer overrides.
 
+import { strings } from '@/strings'
+
 import { useSidecarStore } from './sidecar'
 
 export const AGENT_REQUEST_TIMEOUT_MS = 60_000
@@ -188,10 +190,7 @@ export async function handleUserText(
   }
   const port = runtime.getSidecarPort()
   if (port == null) {
-    throw new AiAgentError(
-      'sidecar_unavailable',
-      "AI isn't running yet. Turn it on in Settings → AI, then try again."
-    )
+    throw new AiAgentError('sidecar_unavailable', strings.ai.agent.sidecarOff)
   }
 
   const userContent = buildUserContext({
@@ -226,7 +225,7 @@ export async function handleUserText(
     )
   } catch (err) {
     if (err instanceof DOMException && err.name === 'AbortError') {
-      throw new AiAgentError('timeout', 'the assistant took too long.')
+      throw new AiAgentError('timeout', strings.ai.agent.timeout)
     }
     throw new AiAgentError(
       'http_error',
@@ -239,7 +238,7 @@ export async function handleUserText(
   if (!response.ok) {
     throw new AiAgentError(
       'http_error',
-      `assistant returned HTTP ${response.status}`
+      strings.ai.agent.httpStatus(response.status)
     )
   }
   const json = (await response.json()) as ChatCompletionResponse
@@ -291,7 +290,7 @@ export function parseAgentReply(raw: string): AgentReply {
   return {
     intent: 'unknown',
     payload: {},
-    reply_text: "I didn't catch that. Say it another way?",
+    reply_text: strings.ai.agent.parseFallback,
   }
 }
 
@@ -317,7 +316,7 @@ function normaliseAgentReply(raw: unknown): AgentReply | null {
     return {
       intent: 'topic_change',
       payload: { new_topic: newTopic },
-      reply_text: replyText || `Topic updated to ${newTopic}.`,
+      reply_text: replyText || strings.ai.agent.topicUpdated(newTopic),
     }
   }
   if (intent === 'break_request') {
@@ -335,14 +334,14 @@ function normaliseAgentReply(raw: unknown): AgentReply | null {
       intent: 'break_request',
       payload: { duration_sec: durationSec, recommendation, reasoning },
       reply_text:
-        replyText || `Considering a ${Math.round(durationSec / 60)}-min break.`,
+        replyText || strings.ai.agent.considering(Math.round(durationSec / 60)),
     }
   }
   if (intent === 'question') {
     return {
       intent: 'question',
       payload: {},
-      reply_text: replyText || '(no reply)',
+      reply_text: replyText || strings.ai.agent.noReply,
     }
   }
   if (intent === 'unknown') {
