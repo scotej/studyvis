@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useCallback, useState } from 'react'
 
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Badge } from '@/components/ui/badge'
@@ -38,8 +38,14 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip'
 import { BipBackupPanel } from '@/components/BipBackupPanel'
+import { KeybindCapture } from '@/components/KeybindCapture'
 import { Logo } from '@/components/Logo'
 import { useTheme } from '@/design/theme-context'
+import {
+  DEFAULT_PTT_AI_COMBO,
+  DEFAULT_PTT_FRIENDS_COMBO,
+  type Combo,
+} from '@/lib/keybindings'
 import { toast } from 'sonner'
 
 import { IdentitySetup } from '@/features/identity/IdentitySetup'
@@ -114,6 +120,16 @@ function Section({
 export function StyleGuide() {
   const { mode, setMode } = useTheme()
   const [progress] = useState(60)
+  const [demoFriendsCombo, setDemoFriendsCombo] = useState<Combo>(
+    DEFAULT_PTT_FRIENDS_COMBO
+  )
+  const [demoAiCombo, setDemoAiCombo] = useState<Combo>(DEFAULT_PTT_AI_COMBO)
+  const handleDemoFriends = useCallback(async (next: Combo) => {
+    setDemoFriendsCombo(next)
+  }, [])
+  const handleDemoAi = useCallback(async (next: Combo) => {
+    setDemoAiCombo(next)
+  }, [])
 
   return (
     <TooltipProvider>
@@ -436,6 +452,40 @@ export function StyleGuide() {
                 <Kbd>Ctrl</Kbd>
                 <Kbd>[</Kbd>
                 <span>Push to talk · friends</span>
+              </div>
+            </div>
+          </Section>
+
+          <Section title="KeybindCapture">
+            <p className="text-sm text-text-secondary">
+              Click Rebind, press a modifier+key combo to capture, or Esc to
+              cancel. The rebound combo is local to this preview and does not
+              touch the real Settings → Shortcuts pane.
+            </p>
+            <div className="flex flex-col gap-3">
+              <div className="flex items-center justify-between gap-4">
+                <span className="text-sm text-text-primary">
+                  Push to talk · friends
+                </span>
+                <KeybindCapture
+                  action="ptt-friends"
+                  combo={demoFriendsCombo}
+                  otherCombo={demoAiCombo}
+                  otherAction="ptt-ai"
+                  platform="mac"
+                  onCommit={handleDemoFriends}
+                />
+              </div>
+              <div className="flex items-center justify-between gap-4">
+                <span className="text-sm text-text-primary">Talk to AI</span>
+                <KeybindCapture
+                  action="ptt-ai"
+                  combo={demoAiCombo}
+                  otherCombo={demoFriendsCombo}
+                  otherAction="ptt-friends"
+                  platform="mac"
+                  onCommit={handleDemoAi}
+                />
               </div>
             </div>
           </Section>

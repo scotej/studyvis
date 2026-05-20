@@ -30,7 +30,8 @@ use commands::sidecar::{sidecar_start, sidecar_status, sidecar_stop, SidecarStat
 use commands::system::{
     autostart_is_enabled, autostart_set_enabled, system_ai_features_set_enabled, system_battery,
     system_minimize_to_tray_set_enabled, system_open_data_folder, system_open_releases,
-    system_open_screen_capture_settings, AiFeaturesFlag, MinimizeToTrayFlag, QuitFlag,
+    system_open_screen_capture_settings, system_set_global_shortcut, AiFeaturesFlag,
+    MinimizeToTrayFlag, QuitFlag, ShortcutBindings,
 };
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -84,6 +85,8 @@ pub fn run() {
         system_open_releases,
         #[cfg(desktop)]
         system_open_screen_capture_settings,
+        #[cfg(desktop)]
+        system_set_global_shortcut,
         #[cfg(desktop)]
         system_battery,
         #[cfg(desktop)]
@@ -154,6 +157,9 @@ pub fn run() {
                 let initial_ai_features =
                     read_ai_features_from_settings(app.handle()).unwrap_or(false);
                 app.manage(AiFeaturesFlag::new(initial_ai_features));
+                let (initial_ptt_friends, initial_ptt_ai) =
+                    read_shortcut_accelerators_from_settings(app.handle());
+                app.manage(ShortcutBindings::new(&initial_ptt_friends, &initial_ptt_ai));
                 app.manage(SidecarState::new());
                 app.manage(DownloadState::new());
                 setup_desktop(app)?;
@@ -218,17 +224,57 @@ fn read_ai_features_from_settings<R: tauri::Runtime>(app: &tauri::AppHandle<R>) 
     value.get(KEY_AI_FEATURES)?.as_bool()
 }
 
+// One-shot read of the persisted accelerator strings (V3-P3). Any missing
+// or malformed value falls back to the shipped defaults — same defaults
+// `DEFAULT_SETTINGS` uses on the JS side, so the first registration always
+// matches what the user sees in Settings → Shortcuts before they touch
+// anything.
+#[cfg(desktop)]
+fn read_shortcut_accelerators_from_settings<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+) -> (String, String) {
+    const SETTINGS_FILE: &str = "settings.json";
+    const KEY_PTT_FRIENDS: &str = "ptt_friends_accelerator";
+    const KEY_PTT_AI: &str = "ptt_ai_accelerator";
+    const DEFAULT_PTT_FRIENDS: &str = "CmdOrCtrl+[";
+    const DEFAULT_PTT_AI: &str = "CmdOrCtrl+]";
+    let read = || -> Option<serde_json::Value> {
+        let dir = app.path().app_data_dir().ok()?;
+        let bytes = std::fs::read(dir.join(SETTINGS_FILE)).ok()?;
+        serde_json::from_slice(&bytes).ok()
+    };
+    let value = read();
+    // `.filter(|s| !s.is_empty())` collapses a persisted empty string into
+    // the same "missing" branch as a non-string value, so boot registration
+    // never fails on a manually-edited `settings.json` with an empty
+    // accelerator. The JS hydrator already treats `""` as missing; mirror
+    // that here.
+    let friends = value
+        .as_ref()
+        .and_then(|v| v.get(KEY_PTT_FRIENDS))
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .map(str::to_owned)
+        .unwrap_or_else(|| DEFAULT_PTT_FRIENDS.to_owned());
+    let ai = value
+        .as_ref()
+        .and_then(|v| v.get(KEY_PTT_AI))
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .map(str::to_owned)
+        .unwrap_or_else(|| DEFAULT_PTT_AI.to_owned());
+    (friends, ai)
+}
+
 #[cfg(desktop)]
 fn setup_desktop(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
-    use std::str::FromStr;
-
     use tauri::{
         include_image,
         menu::{MenuBuilder, MenuItemBuilder, PredefinedMenuItem},
         tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
         Emitter,
     };
-    use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
+    use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 
     app.handle().plugin(tauri_plugin_autostart::init(
         tauri_plugin_autostart::MacosLauncher::LaunchAgent,
@@ -238,20 +284,21 @@ fn setup_desktop(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>>
     // updater registration deferred to V3 — friends-only V1 ships without
     // auto-update; see V1-P12 scope decision.
 
-    // `CmdOrCtrl` resolves to Cmd on macOS and Ctrl elsewhere via the
-    // accelerator parser, which avoids the SUPER/META ambiguity in the
-    // Modifiers bitflags. Comparing in the handler against the same parsed
-    // Shortcut value is stable because the runtime fires events using the
-    // exact Modifiers+Code we registered.
-    let ptt_friends = Shortcut::from_str("CmdOrCtrl+[")?;
-    let ptt_ai = Shortcut::from_str("CmdOrCtrl+]")?;
-
-    let ptt_friends_handle = ptt_friends;
-    let ptt_ai_handle = ptt_ai;
+    // Active shortcuts live in `ShortcutBindings::Mutex<Shortcut>` so the
+    // V3-P3 `system_set_global_shortcut` command can swap them at runtime.
+    // The handler locks the same Mutex on every press/release — Mutex
+    // contention is per-keystroke and trivial.
+    let (initial_ptt_friends, initial_ptt_ai) = {
+        let bindings = app.state::<ShortcutBindings>();
+        (bindings.ptt_friends(), bindings.ptt_ai())
+    };
     app.handle().plugin(
         tauri_plugin_global_shortcut::Builder::new()
             .with_handler(move |app, shortcut, event| {
-                if shortcut == &ptt_friends_handle {
+                let bindings = app.state::<ShortcutBindings>();
+                let ptt_friends = bindings.ptt_friends();
+                let ptt_ai = bindings.ptt_ai();
+                if shortcut == &ptt_friends {
                     match event.state() {
                         ShortcutState::Pressed => {
                             let _ = app.emit("ptt-friends-pressed", ());
@@ -260,7 +307,7 @@ fn setup_desktop(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>>
                             let _ = app.emit("ptt-friends-released", ());
                         }
                     }
-                } else if shortcut == &ptt_ai_handle {
+                } else if shortcut == &ptt_ai {
                     // V2-P7 wires this shortcut to the floating Ctrl+] AI
                     // dialog window. Fire only on key-down so a press/release
                     // pair doesn't open then immediately close. V2-P9 gates it
@@ -276,7 +323,7 @@ fn setup_desktop(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>>
             .build(),
     )?;
     app.global_shortcut()
-        .register_multiple(vec![ptt_friends, ptt_ai])?;
+        .register_multiple(vec![initial_ptt_friends, initial_ptt_ai])?;
 
     let tray_icon = include_image!("icons/tray/22x22.png");
     let open_item = MenuItemBuilder::with_id("tray-open", "Open StudyVis").build(app)?;

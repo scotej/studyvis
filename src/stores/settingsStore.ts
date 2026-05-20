@@ -2,6 +2,12 @@ import { create } from 'zustand'
 import { invoke } from '@tauri-apps/api/core'
 import { LazyStore } from '@tauri-apps/plugin-store'
 
+import {
+  PTT_AI_DEFAULT_ACCELERATOR,
+  PTT_FRIENDS_DEFAULT_ACCELERATOR,
+  type ShortcutAction,
+} from '@/lib/keybindings'
+
 export type ThemeMode = 'dark' | 'light' | 'auto'
 export type TurnPreference = 'auto' | 'always' | 'never'
 
@@ -28,6 +34,12 @@ export type SettingsValues = {
   // sample loop clamps it to the model's measured floor so the user can only
   // slow sampling down, never push it below what the machine can sustain.
   sampleIntervalSec: number | null
+  // V3-P3 custom keybindings. Persisted as tauri-plugin-global-shortcut
+  // accelerator strings ("CmdOrCtrl+["). The defaults match DESIGN-SYSTEM
+  // §17. The Rust side parses these via `Shortcut::from_str`, so the JS
+  // side and the Rust handler agree on the wire shape.
+  pttFriendsAccelerator: string
+  pttAiAccelerator: string
 }
 
 export const SETTINGS_FILE = 'settings.json'
@@ -42,6 +54,8 @@ export const SETTINGS_KEY_AI_FEATURES = 'ai_features_enabled'
 export const SETTINGS_KEY_WARNING_THRESHOLD = 'warning_threshold'
 export const SETTINGS_KEY_ALERT_THRESHOLD = 'alert_threshold'
 export const SETTINGS_KEY_SAMPLE_INTERVAL = 'sample_interval_s'
+export const SETTINGS_KEY_PTT_FRIENDS_ACCELERATOR = 'ptt_friends_accelerator'
+export const SETTINGS_KEY_PTT_AI_ACCELERATOR = 'ptt_ai_accelerator'
 
 // Defaults match the V1 acceptance criteria + DESIGN-SYSTEM.md §8.5: dark
 // theme on, reduce-motion off, OS notification on for invites, minimize-to-
@@ -58,6 +72,8 @@ export const DEFAULT_SETTINGS: SettingsValues = {
   warningThreshold: 2,
   alertThreshold: 4,
   sampleIntervalSec: null,
+  pttFriendsAccelerator: PTT_FRIENDS_DEFAULT_ACCELERATOR,
+  pttAiAccelerator: PTT_AI_DEFAULT_ACCELERATOR,
 }
 
 export type SettingsStatus = 'loading' | 'ready' | 'error'
@@ -78,6 +94,20 @@ type SettingsState = {
   setAlertThreshold: (count: number) => Promise<void>
   // `null` clears the override, falling back to the model benchmark cadence.
   setSampleIntervalSec: (seconds: number | null) => Promise<void>
+  // V3-P3 — set the accelerator for one of the two global shortcuts. The
+  // order intentionally inverts `setMinimizeToTrayOnClose` because shortcut
+  // semantics are binary: registration must succeed before persistence is
+  // committed, otherwise the on-disk value would disagree with the live OS
+  // binding. So: optimistic in-memory set → runtime push (Rust unregister +
+  // register) → on success persist via writeKey; on failure roll back the
+  // in-memory value, surface the message in `error`, and rethrow so the
+  // KeybindCapture stays armed for retry.
+  setShortcutAccelerator: (
+    action: ShortcutAction,
+    accelerator: string
+  ) => Promise<void>
+  // Reset both accelerators to their DESIGN-SYSTEM §17 defaults.
+  resetShortcutsToDefaults: () => Promise<void>
 }
 
 export type StoreLike = {
@@ -106,6 +136,15 @@ export type RuntimeBridge = {
   // can no-op when AI is off (the floating dialog is an AI surface). Same
   // best-effort contract as `pushMinimizeToTray`.
   pushAiFeaturesEnabled: (enabled: boolean) => Promise<void>
+  // V3-P3 — re-registers a global shortcut via the Rust command. Awaited so
+  // a registration failure (busy combo on the OS side, parse error) can be
+  // surfaced in the store's `error` field and the rejecting setter can
+  // unwind. Rust uses the V1-P7 interior-mutability pattern (`Mutex<Shortcut>`
+  // in `ShortcutBindings`) to swap the live shortcut without restart.
+  setGlobalShortcut: (
+    action: ShortcutAction,
+    accelerator: string
+  ) => Promise<void>
 }
 
 export type SettingsStoreDeps = {
@@ -164,6 +203,10 @@ const defaultDeps: SettingsStoreDeps = {
       if (!isTauriRuntime()) return
       await invoke('system_ai_features_set_enabled', { enabled })
     },
+    setGlobalShortcut: async (action, accelerator) => {
+      if (!isTauriRuntime()) return
+      await invoke('system_set_global_shortcut', { action, accelerator })
+    },
   },
 }
 
@@ -198,6 +241,8 @@ export async function hydrateValuesFromStore(
     warning: await store.get(SETTINGS_KEY_WARNING_THRESHOLD),
     alert: await store.get(SETTINGS_KEY_ALERT_THRESHOLD),
     sampleInterval: await store.get(SETTINGS_KEY_SAMPLE_INTERVAL),
+    pttFriends: await store.get(SETTINGS_KEY_PTT_FRIENDS_ACCELERATOR),
+    pttAi: await store.get(SETTINGS_KEY_PTT_AI_ACCELERATOR),
   }
 
   let theme: ThemeMode = isThemeMode(stored.theme)
@@ -250,9 +295,27 @@ export async function hydrateValuesFromStore(
       ),
       alertThreshold: readNumber(stored.alert, DEFAULT_SETTINGS.alertThreshold),
       sampleIntervalSec: readNullableNumber(stored.sampleInterval),
+      pttFriendsAccelerator: readAccelerator(
+        stored.pttFriends,
+        DEFAULT_SETTINGS.pttFriendsAccelerator
+      ),
+      pttAiAccelerator: readAccelerator(
+        stored.pttAi,
+        DEFAULT_SETTINGS.pttAiAccelerator
+      ),
     },
     wroteMigration,
   }
+}
+
+// Rejects any persisted value that isn't a non-empty string. A
+// `parseAccelerator(...) === null` check would let us reject malformed
+// strings too, but that's a runtime concern: an unparseable accelerator
+// will fail at Rust-side register-time with a specific error, surfaced
+// through the store's normal error field. Treat hydration leniently and
+// validate-on-write.
+function readAccelerator(v: unknown, fallback: string): string {
+  return typeof v === 'string' && v.length > 0 ? v : fallback
 }
 
 function readNumber(v: unknown, fallback: number): number {
@@ -416,5 +479,35 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   setSampleIntervalSec: async (seconds) => {
     set((s) => ({ values: { ...s.values, sampleIntervalSec: seconds } }))
     await writeKey(set, SETTINGS_KEY_SAMPLE_INTERVAL, seconds)
+  },
+
+  setShortcutAccelerator: async (action, accelerator) => {
+    const key =
+      action === 'ptt-friends'
+        ? SETTINGS_KEY_PTT_FRIENDS_ACCELERATOR
+        : SETTINGS_KEY_PTT_AI_ACCELERATOR
+    const valuesKey =
+      action === 'ptt-friends' ? 'pttFriendsAccelerator' : 'pttAiAccelerator'
+    const previous = get().values[valuesKey]
+    set((s) => ({ values: { ...s.values, [valuesKey]: accelerator } }))
+    try {
+      await activeDeps.runtime.setGlobalShortcut(action, accelerator)
+    } catch (err) {
+      // Runtime registration failed (parse error, OS-reserved combo, etc.).
+      // Roll back the optimistic update and surface the message so the
+      // rebind UI can render a refusal next to the row.
+      set((s) => ({
+        values: { ...s.values, [valuesKey]: previous },
+        error: err instanceof Error ? err.message : String(err),
+      }))
+      throw err
+    }
+    await writeKey(set, key, accelerator)
+  },
+
+  resetShortcutsToDefaults: async () => {
+    const setter = get().setShortcutAccelerator
+    await setter('ptt-friends', PTT_FRIENDS_DEFAULT_ACCELERATOR)
+    await setter('ptt-ai', PTT_AI_DEFAULT_ACCELERATOR)
   },
 }))
