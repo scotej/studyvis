@@ -70,11 +70,16 @@ export function Home() {
           },
         })
         toast.success(
-          `Invite sent to ${friend.display_name?.trim() || strings.friends.addDialog.defaultFriendName}.`
+          strings.friends.inviteSent(
+            friend.display_name?.trim() ||
+              strings.friends.addDialog.defaultFriendName
+          )
         )
       } catch (err) {
         const message =
-          err instanceof Error ? err.message : "Couldn't send the invite."
+          err instanceof Error
+            ? err.message
+            : strings.friends.inviteSendErrorFallback
         toast.error(message)
       }
     },
@@ -93,7 +98,7 @@ export function Home() {
       joinSession(invite.payload.session_topic, invite.payload.session_password)
     } catch (err) {
       const message =
-        err instanceof Error ? err.message : "Couldn't join the session."
+        err instanceof Error ? err.message : strings.friends.joinErrorFallback
       toast.error(message)
     }
   }, [])

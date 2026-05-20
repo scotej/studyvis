@@ -5,8 +5,6 @@
 
 import type { JsonValue } from 'trystero'
 
-import { strings } from '@/strings'
-
 // Audit-log event kinds (ARCHITECTURE.md §9). V1 carried only the
 // presence/break/pomodoro kinds; V2-P6 extended the set with `ai_warning`
 // (local-only emit — never broadcast) and `ai_alert` (broadcast). V2-P7
@@ -40,12 +38,6 @@ export const AUDIT_ACTION = 'audit'
 // constrained to JSON-safe shapes. Keep detail small and string/number-typed
 // — the audit log is a UI surface, not a structured event log.
 export type AuditEventDetail = { [key: string]: JsonValue }
-
-// User-facing action label for each kind. Values come from the centralized
-// strings module (V3-P8); the typed Record here keeps downstream callers
-// switch-statement-ergonomic.
-export const AUDIT_KIND_LABELS: Record<AuditEventKind, string> =
-  strings.audit.kindLabels
 
 // Wire shape: `who` is the sender's ed_pubkey hex, `sig` is hex(64), but
 // receivers MUST authenticate via the peerId→ed_pubkey map established by

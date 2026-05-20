@@ -58,21 +58,29 @@ function lineColFromIndex(text: string, index: number) {
 }
 
 // A toast() / notification call where the argument is a *bare string
-// literal* — single, double, or untemplated backtick. We allow:
-//   - template strings with interpolation (those carry runtime values)
-//   - variable references (most callers pass `message` or
-//     `strings.x.y`)
-//   - objects (`toast.warning({ ... })`)
+// literal* — single quote, double quote, or untemplated backtick (no
+// `${...}` substitutions; an interpolated template is permitted because
+// it carries runtime values). Allowed alternatives:
+//   - template strings with at least one `${...}`
+//   - variable references (most callers pass `message` or `strings.x.y`)
+//   - object literals (`toast.warning({ ... })`)
 //   - identifiers starting with `strings.` (the centralised module)
-//   - identifiers like `SESSION_FULL_MESSAGE` (module-level constants
-//     that are themselves declared in strings.ts)
+//   - module-level constants whose value is itself declared in strings.ts
+//
+// Backslash inside a literal (e.g. `\"`, `\'`) is tolerated by allowing
+// any escape sequence inside the body.
 const TOAST_RULE: WholeFileRule = {
   name: 'inline-toast-literal',
   scan: (text) => {
     const out: Array<{ index: number; match: string }> = []
     // toast(  toast.error(  toast.warning(  toast.success(  toast.message(
-    const re =
-      /(?<![A-Za-z0-9_$.])toast(?:\.(?:error|warning|success|message))?\s*\(\s*(['"])([^'"\n\\]+?)\1/g
+    // Three alternations cover the three literal flavours: '…', "…", `…`
+    // (the backtick form rejects templates by excluding `${`).
+    const quoted = `(?:'(?:\\\\.|[^'\\\\\\n])+'|"(?:\\\\.|[^"\\\\\\n])+"|\`(?:\\\\.|[^\`\\\\$]|\\$(?!\\{))+\`)`
+    const re = new RegExp(
+      `(?<![A-Za-z0-9_$.])toast(?:\\.(?:error|warning|success|message))?\\s*\\(\\s*${quoted}`,
+      'g'
+    )
     let m: RegExpExecArray | null
     while ((m = re.exec(text))) {
       out.push({ index: m.index, match: m[0] })
@@ -86,9 +94,12 @@ const NOTIFICATION_RULE: WholeFileRule = {
   scan: (text) => {
     const out: Array<{ index: number; match: string }> = []
     // sendNotification({ title: '...', body: '...' })  → flag string-literal
-    // title or body. Skip the strings.ts file itself.
-    const re =
-      /sendNotification\s*\(\s*\{[\s\S]*?(?:title|body)\s*:\s*(['"])([^'"\n\\]+?)\1[\s\S]*?\}\s*\)/g
+    // title or body. Same three-flavour literal matcher as TOAST_RULE.
+    const quoted = `(?:'(?:\\\\.|[^'\\\\\\n])+'|"(?:\\\\.|[^"\\\\\\n])+"|\`(?:\\\\.|[^\`\\\\$]|\\$(?!\\{))+\`)`
+    const re = new RegExp(
+      `sendNotification\\s*\\(\\s*\\{[\\s\\S]*?(?:title|body)\\s*:\\s*${quoted}[\\s\\S]*?\\}\\s*\\)`,
+      'g'
+    )
     let m: RegExpExecArray | null
     while ((m = re.exec(text))) {
       out.push({ index: m.index, match: m[0].slice(0, 80) })

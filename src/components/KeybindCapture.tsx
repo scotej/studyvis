@@ -5,13 +5,13 @@ import { Kbd } from '@/components/ui/kbd'
 import {
   comboFromKeyboardEvent,
   comboToKbdLabels,
-  describeConflict,
   isModifierCode,
   validateCombo,
   type Combo,
   type Platform,
   type ShortcutAction,
 } from '@/lib/keybindings'
+import { describeConflict } from '@/lib/keybindings-copy'
 import { cn } from '@/lib/utils'
 import { strings } from '@/strings'
 

@@ -60,7 +60,6 @@ import {
 
 import {
   AUDIT_ACTION,
-  AUDIT_KIND_LABELS,
   type AuditEvent,
   type AuditEventDetail,
   type AuditEventKind,
@@ -1002,7 +1001,7 @@ function mapAuditEntries(
   return events.map((e) => ({
     seq: e.seq,
     name: byEdPubkey.get(e.who) ?? strings.session.peerFallback(e.who),
-    description: AUDIT_KIND_LABELS[e.kind],
+    description: strings.audit.kindLabels[e.kind],
     ts: e.ts,
     hoverDetail: hoverDetailFor(e.kind, e.detail),
     iconKind: e.kind,

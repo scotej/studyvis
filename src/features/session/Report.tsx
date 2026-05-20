@@ -23,11 +23,7 @@ import { ScoreGauge } from '@/components/ScoreGauge'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { tokens } from '@/design/tokens'
-import {
-  AUDIT_KIND_LABELS,
-  type AuditEventKind,
-  isAuditEventKind,
-} from '@/lib/audit-types'
+import { type AuditEventKind, isAuditEventKind } from '@/lib/audit-types'
 import {
   auditEventsListForSession,
   type AuditEventRecord,
@@ -490,7 +486,7 @@ function describeRow(
   const kind = isAuditEventKind(row.kind)
     ? row.kind
     : (row.kind as AuditEventKind)
-  const label = AUDIT_KIND_LABELS[kind as AuditEventKind] ?? row.kind
+  const label = strings.audit.kindLabels[kind as AuditEventKind] ?? row.kind
   if (kind === 'topic_change') {
     const previous =
       typeof detail.previous_topic === 'string' ? detail.previous_topic : '?'

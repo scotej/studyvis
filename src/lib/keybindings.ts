@@ -1,5 +1,3 @@
-import { strings } from '@/strings'
-
 // V3-P3 — combo serialization, display, validation, and the per-platform
 // reserved-combo denylist for the Settings → Shortcuts rebind flow.
 //
@@ -384,24 +382,8 @@ export function validateCombo(
   return null
 }
 
-export function describeConflict(
-  combo: Combo,
-  reason: ConflictReason,
-  platform: Platform
-): string {
-  const inline = comboToInlineDisplay(combo, platform)
-  const conflicts = strings.keybindings.conflicts
-  switch (reason.kind) {
-    case 'modifier_only':
-      return conflicts.modifierOnly
-    case 'no_modifier':
-      return conflicts.noModifier
-    case 'self_conflict':
-      return conflicts.selfConflict(
-        inline,
-        strings.keybindings.actionLabels[reason.otherAction]
-      )
-    case 'reserved':
-      return conflicts.reserved(inline)
-  }
-}
+// `describeConflict` lives in `src/lib/keybindings-copy.ts`. It reads from
+// the centralised strings module, so it can't live here without dragging
+// that module into every importer of these pure utilities (notably the
+// settings store). Callers that need the user-facing copy import the
+// adapter directly.

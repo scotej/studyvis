@@ -280,6 +280,9 @@ export const strings = {
       inviteBody: (name: string) => `${name} invites you to study`,
       acceptAction: 'Accept',
     },
+    inviteSent: (name: string) => `Invite sent to ${name}.`,
+    inviteSendErrorFallback: "Couldn't send the invite.",
+    joinErrorFallback: "Couldn't join the session.",
   },
 
   session: {

@@ -27,7 +27,6 @@ export {
 export {
   AUDIT_ACTION,
   AUDIT_EVENT_VERSION,
-  AUDIT_KIND_LABELS,
   isAuditEvent,
   isAuditEventKind,
   serializeAuditForSig,
