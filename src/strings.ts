@@ -295,7 +295,30 @@ export const strings = {
     footerHoldBefore: 'Hold ',
     footerHoldAfter: ' to talk.',
     mainAriaLabel: 'Active session',
-    mediaErrorPrefix: "Couldn't access camera or microphone: ",
+    mediaErrors: {
+      denied: {
+        title: 'Camera and mic access is blocked.',
+        body: 'StudyVis needs your camera and microphone to share your study session. Allow access, then try again.',
+      },
+      notFound: {
+        title: 'No camera or microphone found.',
+        body: "We couldn't find a camera or microphone. Connect one, then try again.",
+      },
+      inUse: {
+        title: 'Your camera or mic is busy.',
+        body: 'Another app is using your camera or microphone. Close it, then try again.',
+      },
+      overconstrained: {
+        title: "Your devices don't meet the requirements.",
+        body: "Your camera or microphone doesn't support what this session needs. Try a different device, then try again.",
+      },
+      generic: {
+        title: "We couldn't reach your camera or mic.",
+        body: 'Something stopped StudyVis from using your camera and microphone. Try again.',
+      },
+      tryAgainCta: 'Try again',
+      openSettingsCta: 'Open settings',
+    },
     leaveCta: 'Leave',
     escLeaveHint: 'Press Esc again to leave.',
     peerFallback: (id: string) => `Peer ${id.slice(0, 6)}`,
