@@ -58,6 +58,8 @@ import {
   snapshotBreakState,
 } from './break'
 
+import { ESC_LEAVE_WINDOW_MS, shouldLeaveOnEsc } from './escLeave'
+
 import {
   AUDIT_ACTION,
   type AuditEvent,
@@ -170,6 +172,10 @@ export function SessionView() {
   // exist) and read by the sample-loop effect through this ref. Matches
   // the existing pomodoroStartRef / emitAuditRef pattern.
   const aiAlertDispatcherRef = useRef<AiAlertDispatcher | null>(null)
+
+  // Two-tap Esc-to-leave: the timestamp of the last "armed" Esc. A ref
+  // (not state) so updating it never re-attaches the keydown listener.
+  const escLeaveArmedAtRef = useRef<number | null>(null)
 
   // Capture the camera + mic once per active session and add the resulting
   // MediaStream to the trystero room. trystero forwards new tracks to all
@@ -709,6 +715,8 @@ export function SessionView() {
   // because the splash teardown is already in flight. Native-DOM listener
   // (not a Radix Dialog) so it works regardless of whether a popover is
   // open — the audit panel + footer are the focus owners 99% of the time.
+  // Leaving is irreversible, so a single Esc only arms: a second Esc inside
+  // ESC_LEAVE_WINDOW_MS leaves; otherwise it re-arms.
   useEffect(() => {
     if (status !== 'active') return
     const onKeyDown = (e: KeyboardEvent) => {
@@ -721,7 +729,20 @@ export function SessionView() {
         return
       }
       e.preventDefault()
-      handleLeave()
+      const now = Date.now()
+      if (
+        shouldLeaveOnEsc(escLeaveArmedAtRef.current, now, ESC_LEAVE_WINDOW_MS)
+      ) {
+        escLeaveArmedAtRef.current = null
+        toast.dismiss('esc-leave-hint')
+        handleLeave()
+        return
+      }
+      escLeaveArmedAtRef.current = now
+      toast(strings.session.escLeaveHint, {
+        id: 'esc-leave-hint',
+        duration: ESC_LEAVE_WINDOW_MS,
+      })
     }
     window.addEventListener('keydown', onKeyDown)
     return () => {
