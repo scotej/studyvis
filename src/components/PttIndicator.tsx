@@ -8,9 +8,9 @@ export type PttIndicatorProps = {
 }
 
 export function PttIndicator({ active, className }: PttIndicatorProps) {
-  // Decorative: parent surfaces (VideoTile, audit log) already announce PTT
-  // state via the peer-row label and audit events. Keeping aria-hidden stable
-  // avoids screen readers tracking the opacity-faded element across toggles.
+  // Decorative color+icon affordance: the local user holding the key already
+  // knows they're transmitting, and narrating every peer's PTT toggle would
+  // flood a screen reader. aria-hidden keeps it out of the accessibility tree.
   return (
     <span
       aria-hidden="true"
