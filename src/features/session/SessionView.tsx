@@ -930,7 +930,7 @@ export function SessionView() {
           {strings.session.leaveCta}
         </Button>
       </footer>
-      {selfWarning ? (
+      {selfWarning && !onBreak ? (
         <SelfWarningBadge reasoning={selfWarning.reasoning} />
       ) : null}
       {onBreak ? <BreakCountdownBadge endsAt={breakEndsAt} /> : null}
