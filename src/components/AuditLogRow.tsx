@@ -1,3 +1,5 @@
+import { useId } from 'react'
+
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import {
   AUDIT_ICONS,
@@ -47,6 +49,7 @@ export function AuditLogRow({
   const hover = hoverDetail?.trim() || undefined
   const Icon = iconKind ? AUDIT_ICONS[iconKind] : null
   const tone: AuditIconTone = iconKind ? AUDIT_ICON_TONE[iconKind] : 'default'
+  const descId = useId()
   return (
     <li
       className={cn(
@@ -56,7 +59,7 @@ export function AuditLogRow({
       )}
       data-testid="audit-log-row"
       title={hover}
-      aria-description={hover}
+      aria-describedby={hover ? descId : undefined}
     >
       {Icon ? (
         <span
@@ -85,6 +88,11 @@ export function AuditLogRow({
           {formatAgo(ts, now)}
         </time>
       </div>
+      {hover ? (
+        <span id={descId} className="sr-only">
+          {hover}
+        </span>
+      ) : null}
     </li>
   )
 }
