@@ -29,9 +29,10 @@ use commands::sidecar::{sidecar_start, sidecar_status, sidecar_stop, SidecarStat
 #[cfg(desktop)]
 use commands::system::{
     autostart_is_enabled, autostart_set_enabled, system_ai_features_set_enabled, system_battery,
-    system_minimize_to_tray_set_enabled, system_open_data_folder, system_open_releases,
-    system_open_screen_capture_settings, system_relaunch_app, system_set_global_shortcut,
-    AiFeaturesFlag, MinimizeToTrayFlag, QuitFlag, ShortcutBindings,
+    system_minimize_to_tray_set_enabled, system_open_camera_settings, system_open_data_folder,
+    system_open_microphone_settings, system_open_releases, system_open_screen_capture_settings,
+    system_relaunch_app, system_set_global_shortcut, AiFeaturesFlag, MinimizeToTrayFlag, QuitFlag,
+    ShortcutBindings,
 };
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -85,6 +86,10 @@ pub fn run() {
         system_open_releases,
         #[cfg(desktop)]
         system_open_screen_capture_settings,
+        #[cfg(desktop)]
+        system_open_camera_settings,
+        #[cfg(desktop)]
+        system_open_microphone_settings,
         #[cfg(desktop)]
         system_set_global_shortcut,
         #[cfg(desktop)]

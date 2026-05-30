@@ -77,6 +77,7 @@ export function DisplayNameStep({
           {error ? (
             <p
               id="onboarding-display-name-error"
+              role="alert"
               className="text-xs text-status-alerted"
             >
               {error}

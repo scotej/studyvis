@@ -5,6 +5,7 @@ import {
   type OnboardingStepProgress,
 } from '@/components/OnboardingStep'
 import { Button } from '@/components/ui/button'
+import { isMacLikePlatform } from '@/lib/utils'
 import { strings } from '@/strings'
 
 export type PermissionId = 'camera' | 'microphone' | 'notifications'
@@ -17,6 +18,7 @@ export type PermissionsStepViewProps = {
   state: PermissionsState
   progress?: OnboardingStepProgress
   onGrant: (id: PermissionId) => void
+  onOpenSettings: (id: PermissionId) => void
   onContinue: () => void
 }
 
@@ -50,9 +52,16 @@ export function PermissionsStepView({
   state,
   progress,
   onGrant,
+  onOpenSettings,
   onContinue,
 }: PermissionsStepViewProps) {
   const anyDenied = ROWS.some((r) => state[r.id] === 'denied')
+  // A camera/mic grant flipped on in System Settings only takes effect after a
+  // relaunch (macOS TCC is process-cached), so the deep-linked denied state
+  // needs an explicit reopen hint the generic note doesn't give.
+  const mediaDeniedOnMac =
+    isMacLikePlatform() &&
+    ROWS.some((r) => r.id !== 'notifications' && state[r.id] === 'denied')
 
   return (
     <OnboardingStep
@@ -70,6 +79,9 @@ export function PermissionsStepView({
         <p className="max-w-md text-sm leading-snug text-text-secondary">
           {strings.onboarding.permissions.body}
         </p>
+        <p className="max-w-md text-xs text-text-muted">
+          {strings.onboarding.permissions.privacyNote}
+        </p>
       </header>
 
       <ul
@@ -85,6 +97,7 @@ export function PermissionsStepView({
             Icon={row.Icon}
             state={state[row.id]}
             onGrant={() => onGrant(row.id)}
+            onOpenSettings={() => onOpenSettings(row.id)}
           />
         ))}
       </ul>
@@ -93,7 +106,14 @@ export function PermissionsStepView({
         {strings.onboarding.permissions.headphonesHint}
       </p>
 
-      {anyDenied ? (
+      {mediaDeniedOnMac ? (
+        <p
+          role="status"
+          className="max-w-md text-center text-xs text-text-secondary"
+        >
+          {strings.onboarding.permissions.reopenHint}
+        </p>
+      ) : anyDenied ? (
         <p
           role="status"
           className="max-w-md text-center text-xs text-text-secondary"
@@ -112,6 +132,7 @@ function PermissionRow({
   Icon,
   state,
   onGrant,
+  onOpenSettings,
 }: {
   id: PermissionId
   title: string
@@ -119,10 +140,17 @@ function PermissionRow({
   Icon: typeof CameraIcon
   state: PermissionState
   onGrant: () => void
+  onOpenSettings: () => void
 }) {
   const granted = state === 'granted'
   const requesting = state === 'requesting'
   const denied = state === 'denied'
+  // A hard-denied camera/mic grant won't re-prompt from getUserMedia, so the
+  // denied state routes to System Settings instead of a no-op retry. The
+  // deep-link is macOS-only (matching system_open_screen_capture_settings), so
+  // off-mac and notifications fall back to "Try again".
+  const deniedRoutesToSettings =
+    denied && id !== 'notifications' && isMacLikePlatform()
 
   return (
     <li
@@ -146,6 +174,10 @@ function PermissionRow({
             <CheckIcon className="size-4" aria-hidden />{' '}
             {strings.onboarding.permissions.grantedLabel}
           </span>
+        ) : deniedRoutesToSettings ? (
+          <Button variant="outline" size="sm" onClick={onOpenSettings}>
+            {strings.onboarding.permissions.openSettingsCta}
+          </Button>
         ) : (
           <Button
             variant={denied ? 'outline' : 'default'}

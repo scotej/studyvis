@@ -345,7 +345,7 @@ Everything else — layout, transform, and decorative motion — is instant. No 
 
 ## 8. Wireframes (ASCII)
 
-### 8.1 Onboarding — step 3 of 5 (BIP39 backup)
+### 8.1 Onboarding — step 3 of 6 (BIP39 backup)
 
 ```
 ┌──────────────────────────────────────────────────────────────────────┐

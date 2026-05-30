@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useState } from 'react'
+import { invoke } from '@tauri-apps/api/core'
 import {
   isPermissionGranted,
   requestPermission,
 } from '@tauri-apps/plugin-notification'
+import { toast } from 'sonner'
 
 import {
   PermissionsStepView,
@@ -11,6 +13,7 @@ import {
   type PermissionsState,
 } from './PermissionsStepView'
 import type { OnboardingStepProgress } from '@/components/OnboardingStep'
+import { strings } from '@/strings'
 
 export type PermissionsStepProps = {
   progress?: OnboardingStepProgress
@@ -79,11 +82,25 @@ export function PermissionsStep({
     [update]
   )
 
+  const openSettings = useCallback(async (id: PermissionId) => {
+    if (id === 'notifications') return
+    const command =
+      id === 'camera'
+        ? 'system_open_camera_settings'
+        : 'system_open_microphone_settings'
+    try {
+      await invoke(command)
+    } catch {
+      toast.error(strings.onboarding.permissions.openSettingsErrorFallback)
+    }
+  }, [])
+
   return (
     <PermissionsStepView
       state={state}
       progress={progress}
       onGrant={(id) => void handleGrant(id)}
+      onOpenSettings={(id) => void openSettings(id)}
       onContinue={onContinue}
     />
   )

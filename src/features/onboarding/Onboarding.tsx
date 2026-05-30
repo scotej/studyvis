@@ -1,5 +1,6 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 
+import { Skeleton } from '@/components/ui/skeleton'
 import { useIdentity } from '@/features/identity'
 import { strings } from '@/strings'
 
@@ -23,7 +24,6 @@ const STEPS = [
   'tutorial',
 ] as const
 type StepId = (typeof STEPS)[number]
-const TOTAL_STEPS = STEPS.length
 
 // Top-level orchestrator for the V1 onboarding flow (PLAN.md §5):
 //   welcome → permissions → identity → display name → add friend → tutorial.
@@ -37,24 +37,47 @@ export function Onboarding({ onComplete }: OnboardingProps) {
   const [nameSubmitting, setNameSubmitting] = useState(false)
   const [nameError, setNameError] = useState<string | null>(null)
 
+  // Freeze identity/name visibility at the first resolved (non-loading) render.
+  // These steps are skipped only for users who already had keys / a name when
+  // onboarding began; recomputing live would shrink the progress-dot count as a
+  // new user creates them mid-flow (status flips to "ready").
+  const [frozenSkips, setFrozenSkips] = useState<{
+    identity: boolean
+    name: boolean
+  } | null>(null)
+
+  useEffect(() => {
+    if (frozenSkips !== null || status === 'loading') return
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- one-shot snapshot of the optional steps a returning user skips, latched once identity status resolves; idempotent
+    setFrozenSkips({
+      identity: status === 'ready',
+      name: Boolean(identity?.display_name),
+    })
+  }, [frozenSkips, status, identity?.display_name])
+
+  const skips = frozenSkips ?? {
+    identity: status === 'ready',
+    name: Boolean(identity?.display_name),
+  }
+
+  const isStepVisible = useCallback(
+    (id: StepId) => {
+      if (id === 'identity' && skips.identity) return false
+      if (id === 'name' && skips.name) return false
+      return true
+    },
+    [skips.identity, skips.name]
+  )
+
   const advance = useCallback(() => {
     setStepIndex((cur) => {
       let next = cur + 1
-      while (next < STEPS.length) {
-        const id = STEPS[next]
-        if (id === 'identity' && status === 'ready') {
-          next += 1
-          continue
-        }
-        if (id === 'name' && identity?.display_name) {
-          next += 1
-          continue
-        }
-        break
+      while (next < STEPS.length && !isStepVisible(STEPS[next])) {
+        next += 1
       }
       return Math.min(next, STEPS.length - 1)
     })
-  }, [identity?.display_name, status])
+  }, [isStepVisible])
 
   const finish = useCallback(() => {
     void onComplete()
@@ -81,7 +104,12 @@ export function Onboarding({ onComplete }: OnboardingProps) {
   )
 
   const id: StepId = STEPS[stepIndex]
-  const progress = { current: stepIndex + 1, total: TOTAL_STEPS }
+  const visibleSteps = STEPS.filter(isStepVisible)
+  const reached = STEPS.slice(0, stepIndex + 1).filter(isStepVisible).length
+  const progress = {
+    current: Math.min(visibleSteps.length, Math.max(1, reached)),
+    total: visibleSteps.length,
+  }
 
   if (status === 'loading') {
     return (
@@ -90,6 +118,18 @@ export function Onboarding({ onComplete }: OnboardingProps) {
         aria-busy="true"
       >
         <span className="sr-only">{strings.common.loading}</span>
+        <div
+          aria-hidden
+          className="flex w-full max-w-md flex-col items-center gap-6"
+        >
+          <Skeleton className="size-12 rounded-full" />
+          <div className="flex w-full flex-col items-center gap-3">
+            <Skeleton className="h-7 w-48" />
+            <Skeleton className="h-4 w-64" />
+            <Skeleton className="h-4 w-56" />
+          </div>
+          <Skeleton className="h-10 w-40" />
+        </div>
       </main>
     )
   }

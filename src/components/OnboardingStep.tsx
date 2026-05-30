@@ -59,8 +59,7 @@ export function OnboardingStep({
       {primaryAction || secondaryAction ? (
         <footer
           data-slot="onboarding-actions"
-          className="mx-auto mt-8 flex w-full items-center justify-end gap-3"
-          style={{ maxWidth: tokens.sizes.contentMaxWidth }}
+          className="mx-auto mt-8 flex w-full max-w-md items-center justify-center gap-3"
         >
           {secondaryAction ? (
             <Button

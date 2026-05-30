@@ -48,6 +48,7 @@ export const PermissionsAllUnknown: Story = {
         notifications: 'unknown',
       }}
       onGrant={() => undefined}
+      onOpenSettings={() => undefined}
       onContinue={() => undefined}
     />
   ),
@@ -63,6 +64,7 @@ export const PermissionsMixed: Story = {
         notifications: 'denied',
       }}
       onGrant={() => undefined}
+      onOpenSettings={() => undefined}
       onContinue={() => undefined}
     />
   ),
@@ -78,6 +80,7 @@ export const PermissionsAllGranted: Story = {
         notifications: 'granted',
       }}
       onGrant={() => undefined}
+      onOpenSettings={() => undefined}
       onContinue={() => undefined}
     />
   ),
@@ -101,6 +104,7 @@ export const PermissionsInteractive: Story = {
               [id]: cur[id] === 'granted' ? 'denied' : 'granted',
             }))
           }
+          onOpenSettings={() => undefined}
           onContinue={() => undefined}
         />
       )

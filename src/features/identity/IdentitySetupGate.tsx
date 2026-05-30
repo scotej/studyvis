@@ -8,6 +8,7 @@ import type { CreatedIdentity } from './useIdentity'
 export type IdentitySetupGateProps = {
   create: () => CreatedIdentity
   progress?: OnboardingStepProgress
+  onBack?: () => void
   onConfirmed?: () => void | Promise<void>
 }
 
@@ -17,6 +18,7 @@ export type IdentitySetupGateProps = {
 export function IdentitySetupGate({
   create,
   progress,
+  onBack,
   onConfirmed,
 }: IdentitySetupGateProps) {
   const [created] = useState<CreatedIdentity>(create)
@@ -24,6 +26,7 @@ export function IdentitySetupGate({
     <IdentitySetup
       mnemonic={created.mnemonic}
       progress={progress}
+      onBack={onBack}
       onConfirm={async () => {
         await created.commit()
         if (onConfirmed) await onConfirmed()

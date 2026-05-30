@@ -67,7 +67,7 @@ export const strings = {
   onboarding: {
     welcome: {
       ariaLabel: 'Welcome',
-      cta: "Let's set you up",
+      cta: 'Set up StudyVis',
       heading: "Let's set you up.",
       body: 'StudyVis is a quiet place to study with friends. No account, no server, no audience. Just you, your friends, and the work.',
     },
@@ -89,14 +89,20 @@ export const strings = {
       ariaLabel: 'Permissions',
       heading: 'A few permissions to study together',
       body: 'StudyVis only asks for what a session needs. You can change any of these later in Settings.',
+      privacyNote:
+        'Video and audio go straight to your friends. Nothing is recorded, nothing touches a server.',
       listAriaLabel: 'Permission list',
       headphonesHint:
         'Use headphones if you can. Built-in mics and speakers tend to echo once a few friends are talking.',
       denialNote: 'You can grant any of these later in Settings.',
+      reopenHint:
+        'After you allow camera or microphone in System Settings, reopen StudyVis so it takes effect.',
       grantedAriaLabel: (title: string) => `${title} permission granted`,
       grantedLabel: 'Granted',
       grantCta: 'Grant',
       tryAgainCta: 'Try again',
+      openSettingsCta: 'Open settings',
+      openSettingsErrorFallback: "Couldn't open System Settings.",
       rows: {
         camera: {
           title: 'Camera',

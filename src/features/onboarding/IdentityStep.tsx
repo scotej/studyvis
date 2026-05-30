@@ -24,6 +24,7 @@ export function IdentityStep({ progress, onComplete }: IdentityStepProps) {
       <IdentitySetupGate
         progress={progress}
         create={actions.create}
+        onBack={() => setMode('choice')}
         onConfirmed={onComplete}
       />
     )

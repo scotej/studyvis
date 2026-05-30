@@ -67,7 +67,7 @@ export function AddFriendStepView({
               </p>
             </header>
             <Button onClick={onAdd}>
-              <UserPlus2Icon /> {strings.onboarding.addFriend.addCta}
+              {strings.onboarding.addFriend.addCta}
             </Button>
           </>
         )}

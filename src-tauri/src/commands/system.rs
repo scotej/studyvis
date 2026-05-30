@@ -310,3 +310,40 @@ pub fn system_open_screen_capture_settings<R: Runtime>(app: AppHandle<R>) -> Res
         Err("not supported on this platform".to_string())
     }
 }
+
+// Same per-app Privacy pane jump for Camera. A hard-denied camera grant won't
+// re-prompt from getUserMedia, so the onboarding "Open settings" button routes
+// the user straight to System Settings → Privacy & Security → Camera.
+#[tauri::command]
+pub fn system_open_camera_settings<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        const URL: &str = "x-apple.systempreferences:com.apple.preference.security?Privacy_Camera";
+        app.opener()
+            .open_url(URL, None::<&str>)
+            .map_err(|e| e.to_string())
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = app;
+        Err("not supported on this platform".to_string())
+    }
+}
+
+// Same per-app Privacy pane jump for Microphone.
+#[tauri::command]
+pub fn system_open_microphone_settings<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        const URL: &str =
+            "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone";
+        app.opener()
+            .open_url(URL, None::<&str>)
+            .map_err(|e| e.to_string())
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = app;
+        Err("not supported on this platform".to_string())
+    }
+}

@@ -34,7 +34,7 @@ export function IdentityChoiceStep({
       </header>
 
       <div className="flex w-full max-w-xs flex-col gap-3">
-        <Button size="lg" onClick={onCreate}>
+        <Button size="lg" autoFocus onClick={onCreate}>
           {strings.onboarding.identityChoice.createCta}
         </Button>
         <Button size="lg" variant="outline" onClick={onRecover}>

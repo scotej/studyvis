@@ -13,12 +13,14 @@ import type { Mnemonic } from '@/lib/crypto/identity'
 export type IdentitySetupProps = {
   mnemonic: Mnemonic
   onConfirm: () => void | Promise<void>
+  onBack?: () => void
   progress?: OnboardingStepProgress
 }
 
 export function IdentitySetup({
   mnemonic,
   onConfirm,
+  onBack,
   progress,
 }: IdentitySetupProps) {
   const [acknowledged, setAcknowledged] = useState(false)
@@ -41,6 +43,11 @@ export function IdentitySetup({
     <OnboardingStep
       ariaLabel={strings.identity.setup.ariaLabel}
       progress={progress}
+      secondaryAction={
+        onBack
+          ? { label: strings.common.actions.back, onClick: onBack }
+          : undefined
+      }
       primaryAction={{
         label: strings.common.actions.continue,
         onClick: () => void handleContinue(),
