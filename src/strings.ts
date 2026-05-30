@@ -297,6 +297,7 @@ export const strings = {
     mainAriaLabel: 'Active session',
     mediaErrorPrefix: "Couldn't access camera or microphone: ",
     leaveCta: 'Leave',
+    escLeaveHint: 'Press Esc again to leave.',
     peerFallback: (id: string) => `Peer ${id.slice(0, 6)}`,
     selfFallback: 'You',
     broadcasterSelf: 'you',
