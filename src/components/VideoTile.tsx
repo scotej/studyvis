@@ -75,7 +75,7 @@ export function VideoTile({
           role="note"
           aria-label="Off-task reasoning"
           data-testid="alert-reasoning"
-          className="pointer-events-none absolute inset-x-0 top-0 bg-status-alerted/85 px-4 py-2 text-xs font-medium text-text-inverse"
+          className="pointer-events-none absolute inset-x-0 top-0 bg-status-alerted/85 px-4 py-2 text-xs font-medium text-text-inverse line-clamp-2"
         >
           {alertReasoning}
         </div>

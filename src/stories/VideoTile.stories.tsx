@@ -124,3 +124,16 @@ export const SelfWarning: Story = {
     </div>
   ),
 }
+
+export const AlertedLongReasoning: Story = {
+  render: () => (
+    <div className="w-full max-w-md">
+      <MockedTile
+        name="Alice"
+        color={tokens.color.status.alerted}
+        state="alerted"
+        alertReasoning="Looking at unrelated tabs, scrolling a social feed, and a long video that has nothing to do with the declared topic for several minutes now, well past the gentle nudge."
+      />
+    </div>
+  ),
+}
