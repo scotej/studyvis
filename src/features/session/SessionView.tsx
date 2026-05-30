@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { invoke } from '@tauri-apps/api/core'
 import { emitTo, listen } from '@tauri-apps/api/event'
 import { toast } from 'sonner'
 import { useShallow } from 'zustand/react/shallow'
@@ -7,6 +8,7 @@ import { AudioDevicePicker } from '@/components/AudioDevicePicker'
 import { AuditLogPanel, type AuditLogEntry } from '@/components/AuditLogPanel'
 import { BreakCountdownBadge } from '@/components/BreakCountdownBadge'
 import type { FocusState } from '@/components/FocusIndicator'
+import { MediaErrorBanner } from '@/components/MediaErrorBanner'
 import { ScreenCapturePermissionOverlay } from '@/components/ScreenCapturePermissionOverlay'
 import { SelfWarningBadge } from '@/components/SelfWarningBadge'
 import { SessionTimer } from '@/components/SessionTimer'
@@ -37,6 +39,7 @@ import {
 import { useIdentity } from '@/features/identity'
 import { signWithKeyring } from '@/lib/db/identity'
 import type { PomodoroPreset } from '@/lib/pomodoro-types'
+import { mediaErrorKind } from '@/lib/mediaError'
 import { isMacLikePlatform } from '@/lib/utils'
 import {
   buildAuditEvent,
@@ -117,7 +120,12 @@ export function SessionView() {
   )
 
   const [localStream, setLocalStream] = useState<MediaStream | null>(null)
-  const [mediaError, setMediaError] = useState<string | null>(null)
+  // Holds the failed getUserMedia DOMException `name` (e.g.
+  // 'NotAllowedError'), not the raw message — MediaErrorBanner maps the
+  // name to calm, specific copy. Bumping mediaRetryNonce re-runs the
+  // acquisition effect when the user clicks "Try again".
+  const [mediaErrorName, setMediaErrorName] = useState<string | null>(null)
+  const [mediaRetryNonce, setMediaRetryNonce] = useState(0)
   const [remoteStreams, setRemoteStreams] = useState<
     Record<string, MediaStream>
   >({})
@@ -202,9 +210,15 @@ export function SessionView() {
           stream.getAudioTracks()[0]?.getSettings().deviceId ?? null
         setActiveAudioDeviceId(initialDeviceId)
       } catch (err) {
-        const message =
-          err instanceof Error ? err.message : 'camera / mic unavailable'
-        setMediaError(message)
+        if (cancelled) return
+        // Read `.name` off the rejection directly: getUserMedia rejects with
+        // a DOMException, and OverconstrainedError isn't an `instanceof Error`
+        // in every engine — gating on Error would drop that branch.
+        const name =
+          typeof err === 'object' && err !== null && 'name' in err
+            ? String((err as { name: unknown }).name)
+            : ''
+        setMediaErrorName(name)
       }
     })()
     return () => {
@@ -220,7 +234,7 @@ export function SessionView() {
       localStreamRef.current = null
       setLocalStream(null)
     }
-  }, [room])
+  }, [room, mediaRetryNonce])
 
   // Bind peer streams to per-peer state. trystero replays existing peers when
   // we register the stream callback, so this works for both already-present
@@ -766,6 +780,26 @@ export function SessionView() {
     pomodoroStopRef.current?.()
   }, [])
 
+  // "Try again" — clear the error and bump the nonce so the acquisition
+  // effect (keyed on [room, mediaRetryNonce]) re-runs getUserMedia.
+  const handleMediaRetry = useCallback(() => {
+    setMediaErrorName(null)
+    setMediaRetryNonce((n) => n + 1)
+  }, [])
+
+  // Only offered for the permission-denied case. Jumps to the OS camera
+  // privacy pane via the same Rust opener the onboarding step uses. macOS is
+  // the only target with a stable deep link, matching PermissionsStep.
+  const handleOpenMediaSettings = useCallback(() => {
+    void (async () => {
+      try {
+        await invoke('system_open_camera_settings')
+      } catch {
+        toast.error(strings.onboarding.permissions.openSettingsErrorFallback)
+      }
+    })()
+  }, [])
+
   // V2-P5 carry-forward: re-grant + resume after a mid-session screen-capture
   // denial. The overlay closes itself before calling this; on success we
   // reset the focus score (the dead loop's last samples shouldn't count) and
@@ -843,15 +877,17 @@ export function SessionView() {
       <h1 className="sr-only">{strings.app.sessionSrHeading}</h1>
       <div className="flex min-h-0 flex-1">
         <div className="flex-1 px-6 py-6">
-          {mediaError ? (
-            <div
-              role="alert"
-              aria-live="assertive"
-              className="mb-4 rounded-md border border-status-alerted bg-bg-surface px-4 py-3 text-sm text-status-alerted"
-            >
-              {strings.session.mediaErrorPrefix}
-              {mediaError}
-            </div>
+          {mediaErrorName !== null ? (
+            <MediaErrorBanner
+              errorName={mediaErrorName}
+              onRetry={handleMediaRetry}
+              onOpenSettings={
+                mediaErrorKind(mediaErrorName) === 'denied' &&
+                isMacLikePlatform()
+                  ? handleOpenMediaSettings
+                  : undefined
+              }
+            />
           ) : null}
           <VideoGrid>
             <VideoTile
