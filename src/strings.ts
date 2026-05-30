@@ -352,6 +352,16 @@ export const strings = {
       breakTitle: 'On a break',
       breakRemaining: (label: string) => `${label} remaining`,
     },
+    aiStatus: {
+      off: 'AI off',
+      active: 'AI watching',
+      paused: 'AI paused',
+      error: 'AI error',
+    },
+    elapsed: {
+      label: 'Elapsed',
+      ariaLabel: (time: string) => `Time elapsed ${time}`,
+    },
     audio: {
       systemDefault: 'System default',
       micAriaLabel: (label: string) => `Microphone, currently ${label}`,

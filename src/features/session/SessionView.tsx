@@ -4,6 +4,7 @@ import { emitTo, listen } from '@tauri-apps/api/event'
 import { toast } from 'sonner'
 import { useShallow } from 'zustand/react/shallow'
 
+import { AiStatusChip, type AiStatus } from '@/components/AiStatusChip'
 import { AudioDevicePicker } from '@/components/AudioDevicePicker'
 import { AuditLogPanel, type AuditLogEntry } from '@/components/AuditLogPanel'
 import { BreakCountdownBadge } from '@/components/BreakCountdownBadge'
@@ -145,6 +146,13 @@ export function SessionView() {
   // overlay but leaves the loop dead for this session; only a successful
   // retry clears `captureDenied` and remounts the loop.
   const [captureOverlayOpen, setCaptureOverlayOpen] = useState(false)
+  // Persistent AI-runtime status for the footer chip. The sample-loop
+  // callbacks below set this alongside their existing toasts so "is the
+  // camera being analyzed?" is answerable at a glance, not only from a
+  // transient toast. The off/active distinction is derived from
+  // aiFeaturesEnabled + activeModelId + localStream; this state only tracks
+  // the paused/error/resumed transitions within a running loop.
+  const [aiRuntimeStatus, setAiRuntimeStatus] = useState<AiStatus>('active')
   const localStreamRef = useRef<MediaStream | null>(null)
   const pttSendRef = useRef<((payload: PttPayload) => Promise<void[]>) | null>(
     null
@@ -472,6 +480,8 @@ export function SessionView() {
     useBreakStore.getState().reset(startedAt)
     useAuditStore.getState().reset()
     usePomodoroStore.getState().reset()
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- one-shot per-session reset of the AI-runtime latch, keyed on startedAt alongside the store resets above; idempotent on re-run
+    setAiRuntimeStatus('active')
     return () => {
       cancelActiveBreakTimer((handle) => window.clearTimeout(handle as number))
     }
@@ -521,6 +531,7 @@ export function SessionView() {
         // resumes) rather than a dead-end toast.
         setCaptureDenied(true)
         setCaptureOverlayOpen(true)
+        setAiRuntimeStatus('error')
       },
       onCaptureError: (err) => {
         toast.error(strings.session.errors.aiCaptureError(err.message))
@@ -531,12 +542,15 @@ export function SessionView() {
             ? strings.session.errors.aiCrashedDetail(lastError)
             : strings.session.errors.aiCrashed
         )
+        setAiRuntimeStatus('error')
       },
       onBatteryPause: (info) => {
         toast.warning(strings.session.errors.aiPausedForBattery(info.percent))
+        setAiRuntimeStatus('paused')
       },
       onBatteryResume: () => {
         toast.success(strings.session.errors.aiResumed)
+        setAiRuntimeStatus('active')
       },
     })
     return () => {
@@ -831,6 +845,7 @@ export function SessionView() {
         await requestScreenCapturePermission()
         useFocusStore.getState().reset()
         setCaptureDenied(false)
+        setAiRuntimeStatus('active')
       } catch (err) {
         if (
           err instanceof CaptureError &&
@@ -873,6 +888,15 @@ export function SessionView() {
   const selfAlertReasoning = myEdPubkey
     ? (alertedPeers[myEdPubkey]?.reasoning ?? undefined)
     : undefined
+
+  // The off-check wins over the runtime status so a stale 'error'/'paused'
+  // from a prior loop never lies once AI is disabled, the model is cleared,
+  // or the camera track drops. Otherwise the runtime state (set by the
+  // sample-loop callbacks) is the truth for the running loop.
+  const aiChipStatus: AiStatus =
+    !aiFeaturesEnabled || !activeModelId || !localStream
+      ? 'off'
+      : aiRuntimeStatus
 
   if (!room) return null
 
@@ -965,8 +989,16 @@ export function SessionView() {
           />
         </span>
         <span className="flex items-center gap-4">
-          <span className="font-mono tabular-nums text-text-secondary">
-            {elapsed}
+          <AiStatusChip status={aiChipStatus} />
+          <span
+            role="img"
+            className="flex items-center gap-1.5 text-text-secondary"
+            aria-label={strings.session.elapsed.ariaLabel(elapsed)}
+          >
+            <span aria-hidden="true">{strings.session.elapsed.label}</span>
+            <span className="font-mono tabular-nums" aria-hidden="true">
+              {elapsed}
+            </span>
           </span>
           <SessionTimer
             phase={pomodoroSnapshot.phase}
