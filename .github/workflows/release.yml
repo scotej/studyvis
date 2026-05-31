@@ -24,11 +24,6 @@ jobs:
             rust-targets: aarch64-apple-darwin
             args: --target aarch64-apple-darwin --bundles app,dmg
             llama-triples: aarch64-apple-darwin
-          - label: macOS (Intel)
-            platform: macos-latest
-            rust-targets: x86_64-apple-darwin
-            args: --target x86_64-apple-darwin --bundles app,dmg
-            llama-triples: x86_64-apple-darwin
           - label: Windows
             platform: windows-latest
             rust-targets: ''
@@ -77,6 +72,6 @@ jobs:
 
             StudyVis does not auto-update. Download a new version here when one drops.
           releaseDraft: true
-          prerelease: false
+          prerelease: true
           includeUpdaterJson: false
           args: ${{ matrix.args }}
