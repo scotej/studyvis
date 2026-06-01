@@ -3,25 +3,29 @@ import { toast } from 'sonner'
 
 import { useIdentity } from '@/features/identity'
 import { useFriendsStore } from '@/stores/friendsStore'
+import { useSettingsStore } from '@/stores/settingsStore'
 import { strings } from '@/strings'
 
 import {
   generatePairingCode,
   hostPairing,
   joinPairing,
-  PairTimeoutError,
   type PairedFriend,
   type PairingContext,
 } from './pair'
+import { encodePairLink } from './pairLink'
 import {
   AddFriendDialogView,
   type AddFriendPhase,
   type AddFriendTab,
 } from './AddFriendDialogView'
 
-// 90s gives a comfortable margin over typical Nostr relay rendezvous (~5–15s)
-// while still surfacing a clear failure when the peer never arrives.
-const PAIR_TIMEOUT_MS = 90_000
+// Pairing no longer fails on a deadline — the room stays open until the user
+// cancels, because carrying a code to a second device routinely takes longer
+// than any sane timeout (the old 90s cutoff raced the user and silently lost).
+// After this long with no peer, we surface a gentle "still searching" hint
+// rather than giving up.
+const LONG_WAIT_HINT_MS = 30_000
 
 export type AddFriendDialogProps = {
   open: boolean
@@ -34,6 +38,7 @@ export type AddFriendDialogProps = {
 export function AddFriendDialog({ open, onOpenChange }: AddFriendDialogProps) {
   const { identity, actions: identityActions } = useIdentity()
   const addFriend = useFriendsStore((s) => s.add)
+  const turnPreference = useSettingsStore((s) => s.values.turnPreference)
   const hasDisplayName = Boolean(identity?.display_name?.trim())
 
   const [tab, setTab] = useState<AddFriendTab>('host')
@@ -50,6 +55,31 @@ export function AddFriendDialog({ open, onOpenChange }: AddFriendDialogProps) {
       }
     }
   }, [])
+
+  // After a while waiting with no peer, flip on a soft hint nudging the user to
+  // check the other device. This is guidance, not a failure — the pairing keeps
+  // running until the user cancels.
+  const isWaiting =
+    phase.kind === 'host-waiting' || phase.kind === 'join-progress'
+  const peerArrived =
+    (phase.kind === 'host-waiting' || phase.kind === 'join-progress') &&
+    phase.peerArrived
+  const longWait =
+    (phase.kind === 'host-waiting' || phase.kind === 'join-progress') &&
+    phase.longWait === true
+  useEffect(() => {
+    if (!isWaiting || peerArrived || longWait) return
+    const id = setTimeout(() => {
+      setPhase((cur) =>
+        (cur.kind === 'host-waiting' || cur.kind === 'join-progress') &&
+        !cur.peerArrived &&
+        !cur.longWait
+          ? { ...cur, longWait: true }
+          : cur
+      )
+    }, LONG_WAIT_HINT_MS)
+    return () => clearTimeout(id)
+  }, [isWaiting, peerArrived, longWait])
 
   const handleOpenChange = useCallback(
     (next: boolean) => {
@@ -121,7 +151,7 @@ export function AddFriendDialog({ open, onOpenChange }: AddFriendDialogProps) {
     try {
       const friend = await hostPairing(words, ctx, {
         signal: ctrl.signal,
-        timeoutMs: PAIR_TIMEOUT_MS,
+        turnPreference,
         onPeerJoinedTopic: () => {
           setPhase((current) =>
             current.kind === 'host-waiting'
@@ -133,20 +163,16 @@ export function AddFriendDialog({ open, onOpenChange }: AddFriendDialogProps) {
       await persistAndFinish(friend)
     } catch (err) {
       if (ctrl.signal.aborted) return
-      if (err instanceof PairTimeoutError) {
-        setPhase({ kind: 'host-timeout', words })
-      } else {
-        const message =
-          err instanceof Error
-            ? err.message
-            : strings.friends.addDialog.errors.pairingFailed
-        setPhase({ kind: 'error', message })
-        toast.error(strings.friends.addDialog.errors.pairingFailed)
-      }
+      const message =
+        err instanceof Error
+          ? err.message
+          : strings.friends.addDialog.errors.pairingFailed
+      setPhase({ kind: 'error', message })
+      toast.error(strings.friends.addDialog.errors.pairingFailed)
     } finally {
       if (abortRef.current === ctrl) abortRef.current = null
     }
-  }, [buildCtx, persistAndFinish])
+  }, [buildCtx, persistAndFinish, turnPreference])
 
   const startJoin = useCallback(
     async (words: string[]) => {
@@ -158,7 +184,7 @@ export function AddFriendDialog({ open, onOpenChange }: AddFriendDialogProps) {
       try {
         const friend = await joinPairing(words, ctx, {
           signal: ctrl.signal,
-          timeoutMs: PAIR_TIMEOUT_MS,
+          turnPreference,
           onPeerJoinedTopic: () => {
             setPhase((current) =>
               current.kind === 'join-progress'
@@ -170,26 +196,24 @@ export function AddFriendDialog({ open, onOpenChange }: AddFriendDialogProps) {
         await persistAndFinish(friend)
       } catch (err) {
         if (ctrl.signal.aborted) return
-        if (err instanceof PairTimeoutError) {
-          setPhase({ kind: 'join-timeout' })
-        } else {
-          const message =
-            err instanceof Error
-              ? err.message
-              : strings.friends.addDialog.errors.pairingFailed
-          setPhase({ kind: 'error', message })
-          toast.error(strings.friends.addDialog.errors.pairingFailed)
-        }
+        const message =
+          err instanceof Error
+            ? err.message
+            : strings.friends.addDialog.errors.pairingFailed
+        setPhase({ kind: 'error', message })
+        toast.error(strings.friends.addDialog.errors.pairingFailed)
       } finally {
         if (abortRef.current === ctrl) abortRef.current = null
       }
     },
-    [buildCtx, persistAndFinish]
+    [buildCtx, persistAndFinish, turnPreference]
   )
 
-  const handleCopyWords = useCallback(async (words: string[]) => {
+  // Copies the pairing LINK (studyvis://pair?c=…), not the raw words: it pastes
+  // back into all 12 slots in one shot and is the same payload the QR encodes.
+  const handleCopyLink = useCallback(async (words: string[]) => {
     try {
-      await navigator.clipboard.writeText(words.join(' '))
+      await navigator.clipboard.writeText(encodePairLink(words))
       return true
     } catch {
       toast.error(strings.common.errors.copyToClipboard)
@@ -208,7 +232,7 @@ export function AddFriendDialog({ open, onOpenChange }: AddFriendDialogProps) {
       onStartHost={() => void startHost()}
       onJoinSubmit={(words) => void startJoin(words)}
       onCancel={cancel}
-      onCopyWords={handleCopyWords}
+      onCopyLink={handleCopyLink}
     />
   )
 }

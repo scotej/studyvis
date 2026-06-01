@@ -10,6 +10,7 @@ import {
 import { cn } from '@/lib/utils'
 import { strings } from '@/strings'
 
+import { decodePairLink } from './pairLink'
 import {
   BIP39_WORDLIST,
   isBip39Word,
@@ -81,6 +82,14 @@ export function PairWordInput({
   const handlePaste = useCallback(
     (index: number, e: ClipboardEvent<HTMLInputElement>) => {
       const text = e.clipboardData.getData('text')
+      // A full pairing link fills every slot from the start, regardless of which
+      // box received the paste.
+      const fromLink = decodePairLink(text)
+      if (fromLink) {
+        e.preventDefault()
+        distributeFrom(0, fromLink)
+        return
+      }
       const tokens = tokenizePairWords(text)
       if (tokens.length <= 1) return // single word paste — let default handler run
       e.preventDefault()
