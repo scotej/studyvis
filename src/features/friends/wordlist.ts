@@ -1,3 +1,4 @@
+import { validateMnemonic } from '@scure/bip39'
 import { wordlist as englishWordlist } from '@scure/bip39/wordlists/english.js'
 
 // Re-export the BIP39 English wordlist as a flat array (2048 entries) and as
@@ -33,11 +34,21 @@ export function tokenizePairWords(raw: string): string[] {
 }
 
 // True iff every slot is in the BIP39 wordlist and the slot count matches.
-// Used by the join form to enable the Connect button.
+// Used by the join form to gate per-word validity (the "X / 12 valid" count).
 export function pairWordsAreComplete(
   words: string[],
   expectedCount: number
 ): boolean {
   if (words.length !== expectedCount) return false
   return words.every((w) => isBip39Word(w))
+}
+
+// True iff the words form a checksum-valid BIP39 mnemonic. Pair codes are
+// generated with a valid checksum (generateMnemonic), so this is the second
+// gate on the Connect button: it catches the silent failure where a slip onto a
+// different-but-valid word (able→cable) passes the per-word check yet derives a
+// different pairing topic, so the two devices never rendezvous. ~15/16 of
+// single-word slips break the checksum and are caught here before submit.
+export function pairCodeChecksumValid(words: string[]): boolean {
+  return validateMnemonic(words.join(' '), englishWordlist)
 }

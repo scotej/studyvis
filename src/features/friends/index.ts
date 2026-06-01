@@ -58,8 +58,10 @@ export {
 export {
   BIP39_WORDLIST,
   isBip39Word,
+  pairCodeChecksumValid,
   pairWordsAreComplete,
   sanitizePairWordInput,
   tokenizePairWords,
 } from './wordlist'
+export { encodePairLink, decodePairLink } from './pairLink'
 export { PairWordInput, type PairWordInputProps } from './PairWordInput'

@@ -48,7 +48,7 @@ function Harness({ initialTab, phase, missingDisplayName }: StoryArgs) {
           // no-op for story
         }}
         onCancel={() => setOpen(false)}
-        onCopyWords={async () => true}
+        onCopyLink={async () => true}
       />
       <Toaster position="bottom-right" />
     </>
@@ -96,10 +96,23 @@ export const HostPeerJoined: Story = {
   },
 }
 
-export const HostTimeout: Story = {
+export const HostStillWaiting: Story = {
   args: {
     initialTab: 'host',
-    phase: { kind: 'host-timeout', words: MOCK_WORDS },
+    phase: {
+      kind: 'host-waiting',
+      words: MOCK_WORDS,
+      peerArrived: false,
+      longWait: true,
+    },
+    missingDisplayName: false,
+  },
+}
+
+export const JoinForm: Story = {
+  args: {
+    initialTab: 'join',
+    phase: { kind: 'idle' },
     missingDisplayName: false,
   },
 }
@@ -120,10 +133,10 @@ export const JoinPeerJoined: Story = {
   },
 }
 
-export const JoinTimeout: Story = {
+export const JoinStillSearching: Story = {
   args: {
     initialTab: 'join',
-    phase: { kind: 'join-timeout' },
+    phase: { kind: 'join-progress', peerArrived: false, longWait: true },
     missingDisplayName: false,
   },
 }

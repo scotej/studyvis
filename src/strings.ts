@@ -243,13 +243,15 @@ export const strings = {
       },
       host: {
         codeAriaLabel: 'One-time pairing code',
-        copyAriaLabel: 'Copy code to clipboard',
-        copyCta: 'Copy',
+        qrAlt: 'QR code containing your one-time pairing link',
+        qrCaption: 'Have your friend scan this — or send them the link below.',
+        copyAriaLabel: 'Copy pairing link to clipboard',
+        copyCta: 'Copy link',
         copiedCta: 'Copied',
-        timeout: "Couldn't reach your friend within 90 seconds.",
         connected: 'Friend joined. Exchanging keys.',
         waiting: 'Waiting for your friend to enter the code.',
-        tryNewCodeCta: 'Try with a new code',
+        stillWaiting:
+          'Still waiting. Make sure your friend opened the Enter-code tab and typed this exact code.',
         introBody: (wordCount: number) =>
           `We'll generate ${wordCount} words. Send them to your friend over any messenger; they enter them on the other tab.`,
         generateCta: 'Generate code',
@@ -261,15 +263,25 @@ export const strings = {
         connected: 'Friend joined. Exchanging keys.',
         searching: 'Looking for your friend on the network.',
         hint: (wordCount: number) =>
-          `Type or paste the ${wordCount} words. Only words from the BIP39 list work; anything else is flagged as you type.`,
+          `Type the ${wordCount} words, or paste the code or link your friend sent. Only BIP39 words work; anything else is flagged as you type.`,
         validCount: (valid: number, total: number) =>
           `${valid} / ${total} valid`,
         notInWordlist: (count: number) => `${count} not in wordlist`,
-        timeout:
-          "Couldn't reach your friend within 90 seconds. Make sure both of you are online and entered the same words, then try again.",
+        checksumHint:
+          "These are all real words, but they don't form a valid code — check for a mistyped or swapped word.",
+        pasteFailed:
+          "Couldn't read a code from the clipboard. Paste it into a box instead.",
+        scanCta: 'Scan QR',
+        scanHint: "Point your camera at the QR code on your friend's screen.",
+        scanAria: 'Camera preview for scanning a pairing QR code',
+        scanNotRecognized: "That QR isn't a StudyVis pairing code.",
+        cameraFailed:
+          "Couldn't open the camera. Check its permission, or paste the code instead.",
+        stillSearching:
+          'Still searching. Make sure the other device generated this exact code and is online.',
         clearCta: 'Clear',
+        pasteCta: 'Paste',
         connectCta: 'Connect',
-        tryAgainCta: 'Try again',
       },
       success: {
         title: (name: string) => `Paired with ${name}.`,

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { AlertCircleIcon, CheckIcon, CopyIcon } from 'lucide-react'
+import { CheckIcon, CopyIcon } from 'lucide-react'
+import { toast } from 'sonner'
 
 import { Button } from '@/components/ui/button'
 import {
@@ -11,21 +12,33 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Skeleton } from '@/components/ui/skeleton'
+import { PairQrCode } from '@/components/PairQrCode'
+import { PairQrScanner } from '@/components/PairQrScanner'
 import { strings } from '@/strings'
 
 import { PAIR_WORD_COUNT } from './pair'
+import { decodePairLink, encodePairLink } from './pairLink'
 import { PairWordInput } from './PairWordInput'
-import { isBip39Word, pairWordsAreComplete } from './wordlist'
+import {
+  isBip39Word,
+  pairCodeChecksumValid,
+  pairWordsAreComplete,
+  sanitizePairWordInput,
+  tokenizePairWords,
+} from './wordlist'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 
 export type AddFriendTab = 'host' | 'join'
 
 export type AddFriendPhase =
   | { kind: 'idle' }
-  | { kind: 'host-waiting'; words: string[]; peerArrived: boolean }
-  | { kind: 'host-timeout'; words: string[] }
-  | { kind: 'join-progress'; peerArrived: boolean }
-  | { kind: 'join-timeout' }
+  | {
+      kind: 'host-waiting'
+      words: string[]
+      peerArrived: boolean
+      longWait?: boolean
+    }
+  | { kind: 'join-progress'; peerArrived: boolean; longWait?: boolean }
   | { kind: 'success'; name: string }
   | { kind: 'error'; message: string }
 
@@ -39,7 +52,7 @@ export type AddFriendDialogViewProps = {
   onStartHost: () => void
   onJoinSubmit: (words: string[]) => void
   onCancel: () => void
-  onCopyWords: (words: string[]) => Promise<boolean>
+  onCopyLink: (words: string[]) => Promise<boolean>
 }
 
 export function AddFriendDialogView({
@@ -52,7 +65,7 @@ export function AddFriendDialogView({
   onStartHost,
   onJoinSubmit,
   onCancel,
-  onCopyWords,
+  onCopyLink,
 }: AddFriendDialogViewProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -67,7 +80,7 @@ export function AddFriendDialogView({
             onStartHost={onStartHost}
             onJoinSubmit={onJoinSubmit}
             onCancel={onCancel}
-            onCopyWords={onCopyWords}
+            onCopyLink={onCopyLink}
           />
         )}
       </DialogContent>
@@ -99,7 +112,7 @@ function PairingStep({
   onStartHost,
   onJoinSubmit,
   onCancel,
-  onCopyWords,
+  onCopyLink,
 }: {
   tab: AddFriendTab
   onTabChange: (tab: AddFriendTab) => void
@@ -107,7 +120,7 @@ function PairingStep({
   onStartHost: () => void
   onJoinSubmit: (words: string[]) => void
   onCancel: () => void
-  onCopyWords: (words: string[]) => Promise<boolean>
+  onCopyLink: (words: string[]) => Promise<boolean>
 }) {
   const pair = strings.friends.addDialog.pair
   return (
@@ -132,7 +145,7 @@ function PairingStep({
               phase={phase}
               onStart={onStartHost}
               onCancel={onCancel}
-              onCopyWords={onCopyWords}
+              onCopyLink={onCopyLink}
             />
           </TabsContent>
           <TabsContent value="join" className="mt-4">
@@ -152,12 +165,12 @@ function HostPanel({
   phase,
   onStart,
   onCancel,
-  onCopyWords,
+  onCopyLink,
 }: {
   phase: AddFriendPhase
   onStart: () => void
   onCancel: () => void
-  onCopyWords: (words: string[]) => Promise<boolean>
+  onCopyLink: (words: string[]) => Promise<boolean>
 }) {
   const [copied, setCopied] = useState(false)
   const copiedTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -170,10 +183,10 @@ function HostPanel({
     []
   )
 
-  if (phase.kind === 'host-waiting' || phase.kind === 'host-timeout') {
+  if (phase.kind === 'host-waiting') {
     const words = phase.words
     const handleCopy = async () => {
-      const ok = await onCopyWords(words)
+      const ok = await onCopyLink(words)
       if (!ok) return
       setCopied(true)
       if (copiedTimer.current !== null) clearTimeout(copiedTimer.current)
@@ -181,6 +194,10 @@ function HostPanel({
     }
     return (
       <div className="flex flex-col gap-5">
+        <div className="flex flex-col items-center gap-2">
+          <PairQrCode value={encodePairLink(words)} label={host.qrAlt} />
+          <p className="text-xs text-text-muted">{host.qrCaption}</p>
+        </div>
         <ol
           aria-label={host.codeAriaLabel}
           className="grid grid-cols-3 gap-x-6 gap-y-2 rounded-lg border border-border-default bg-bg-surface p-4 font-mono text-sm leading-snug"
@@ -215,9 +232,6 @@ function HostPanel({
         </div>
         <ErrorBanner phase={phase} />
         <DialogFooter>
-          {phase.kind === 'host-timeout' ? (
-            <Button onClick={onStart}>{host.tryNewCodeCta}</Button>
-          ) : null}
           <Button variant="outline" onClick={onCancel}>
             {strings.common.actions.cancel}
           </Button>
@@ -241,14 +255,6 @@ function HostPanel({
 
 function HostStatusLine({ phase }: { phase: AddFriendPhase }) {
   const host = strings.friends.addDialog.host
-  if (phase.kind === 'host-timeout') {
-    return (
-      <p className="flex items-center gap-2 text-sm text-status-alerted">
-        <AlertCircleIcon className="size-4" aria-hidden />
-        {host.timeout}
-      </p>
-    )
-  }
   if (phase.kind === 'host-waiting' && phase.peerArrived) {
     return (
       <p className="text-sm text-text-secondary" aria-live="polite">
@@ -257,9 +263,14 @@ function HostStatusLine({ phase }: { phase: AddFriendPhase }) {
     )
   }
   return (
-    <p className="text-sm text-text-secondary" aria-live="polite">
-      {host.waiting}
-    </p>
+    <div className="flex flex-col gap-1">
+      <p className="text-sm text-text-secondary" aria-live="polite">
+        {host.waiting}
+      </p>
+      {phase.kind === 'host-waiting' && phase.longWait ? (
+        <p className="text-xs text-text-muted">{host.stillWaiting}</p>
+      ) : null}
+    </div>
   )
 }
 
@@ -277,21 +288,71 @@ function JoinPanel({
   onCancel: () => void
 }) {
   const [words, setWords] = useState<string[]>(() => emptyWords())
-  const valid = pairWordsAreComplete(words, PAIR_WORD_COUNT)
+  const allInWordlist = pairWordsAreComplete(words, PAIR_WORD_COUNT)
+  // Connect is gated on the BIP39 checksum, not just per-word validity, so a
+  // slip onto a different-but-valid word is caught here instead of silently
+  // landing both devices in different rooms.
+  const valid = allInWordlist && pairCodeChecksumValid(words)
   const inProgress = phase.kind === 'join-progress'
-  const isTimeout = phase.kind === 'join-timeout'
   const join = strings.friends.addDialog.join
 
   const handleClear = useCallback(() => {
     setWords(emptyWords())
   }, [])
 
+  const handlePasteCode = useCallback(async () => {
+    try {
+      const text = await navigator.clipboard.readText()
+      const decoded = decodePairLink(text) ?? tokenizePairWords(text)
+      if (decoded.length === 0) throw new Error('nothing to paste')
+      setWords(
+        Array.from({ length: PAIR_WORD_COUNT }, (_, i) =>
+          sanitizePairWordInput(decoded[i] ?? '')
+        )
+      )
+    } catch {
+      toast.error(join.pasteFailed)
+    }
+  }, [join.pasteFailed])
+
+  const [scanning, setScanning] = useState(false)
+
+  const handleScanDecode = useCallback(
+    (text: string) => {
+      setScanning(false)
+      const decoded = decodePairLink(text)
+      if (!decoded) {
+        toast.error(join.scanNotRecognized)
+        return
+      }
+      const filled = Array.from(
+        { length: PAIR_WORD_COUNT },
+        (_, i) => decoded[i] ?? ''
+      )
+      setWords(filled)
+      // A real pairing QR always carries a valid checksum, so connect straight
+      // away; on the off chance it doesn't, just fill and let the user submit.
+      if (pairCodeChecksumValid(filled)) onSubmit(filled)
+    },
+    [join.scanNotRecognized, onSubmit]
+  )
+
+  const handleScanError = useCallback(() => {
+    setScanning(false)
+    toast.error(join.cameraFailed)
+  }, [join.cameraFailed])
+
   if (inProgress) {
     return (
       <div className="flex flex-col gap-5">
-        <p className="text-sm text-text-secondary" aria-live="polite">
-          {phase.peerArrived ? join.connected : join.searching}
-        </p>
+        <div className="flex flex-col gap-1">
+          <p className="text-sm text-text-secondary" aria-live="polite">
+            {phase.peerArrived ? join.connected : join.searching}
+          </p>
+          {!phase.peerArrived && phase.longWait ? (
+            <p className="text-xs text-text-muted">{join.stillSearching}</p>
+          ) : null}
+        </div>
         <div
           aria-hidden="true"
           className="flex flex-col gap-2 rounded-lg border border-border-default bg-bg-surface p-4"
@@ -301,6 +362,24 @@ function JoinPanel({
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onCancel}>
+            {strings.common.actions.cancel}
+          </Button>
+        </DialogFooter>
+      </div>
+    )
+  }
+
+  if (scanning) {
+    return (
+      <div className="flex flex-col gap-4">
+        <p className="text-sm text-text-secondary">{join.scanHint}</p>
+        <PairQrScanner
+          onDecode={handleScanDecode}
+          onError={handleScanError}
+          label={join.scanAria}
+        />
+        <DialogFooter>
+          <Button variant="outline" onClick={() => setScanning(false)}>
             {strings.common.actions.cancel}
           </Button>
         </DialogFooter>
@@ -343,26 +422,37 @@ function JoinPanel({
             ? ` · ${join.notInWordlist(filledCount - validCount)}`
             : ''}
         </p>
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          onClick={handleClear}
-          disabled={filledCount === 0}
-        >
-          {join.clearCta}
-        </Button>
+        <div className="flex items-center gap-1">
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={() => setScanning(true)}
+          >
+            {join.scanCta}
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={() => void handlePasteCode()}
+          >
+            {join.pasteCta}
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={handleClear}
+            disabled={filledCount === 0}
+          >
+            {join.clearCta}
+          </Button>
+        </div>
       </div>
-      {isTimeout ? (
-        <p
-          role="alert"
-          className="rounded-md border border-status-alerted/40 bg-status-alerted/10 px-3 py-2 text-sm text-status-alerted"
-        >
-          <AlertCircleIcon
-            className="mr-1 inline size-4 -translate-y-px"
-            aria-hidden
-          />
-          {join.timeout}
+      {allInWordlist && !valid ? (
+        <p className="text-xs text-status-alerted" role="alert">
+          {join.checksumHint}
         </p>
       ) : null}
       <ErrorBanner phase={phase} />
@@ -371,7 +461,7 @@ function JoinPanel({
           {strings.common.actions.cancel}
         </Button>
         <Button type="submit" disabled={!valid} aria-disabled={!valid}>
-          {isTimeout ? join.tryAgainCta : join.connectCta}
+          {join.connectCta}
         </Button>
       </DialogFooter>
     </form>

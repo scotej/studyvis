@@ -2,7 +2,9 @@ import { describe, expect, test } from 'vitest'
 
 import {
   BIP39_WORDLIST,
+  generatePairingCode,
   isBip39Word,
+  pairCodeChecksumValid,
   pairWordsAreComplete,
   sanitizePairWordInput,
   tokenizePairWords,
@@ -83,5 +85,25 @@ describe('pairWordsAreComplete', () => {
   test('false when any slot is empty or invalid', () => {
     expect(pairWordsAreComplete(['abandon', '', 'able'], 3)).toBe(false)
     expect(pairWordsAreComplete(['abandon', 'zzzzz', 'able'], 3)).toBe(false)
+  })
+})
+
+describe('pairCodeChecksumValid', () => {
+  test('accepts a freshly generated pairing code', () => {
+    expect(pairCodeChecksumValid(generatePairingCode())).toBe(true)
+  })
+
+  test('accepts the canonical all-zero-entropy mnemonic', () => {
+    const allZero = `${'abandon '.repeat(11)}about`.split(' ')
+    expect(pairCodeChecksumValid(allZero)).toBe(true)
+  })
+
+  test('rejects 12 valid words with a broken checksum', () => {
+    // All real BIP39 words, but the checksum word is wrong.
+    expect(pairCodeChecksumValid(Array(12).fill('abandon'))).toBe(false)
+  })
+
+  test('rejects a wrong word count', () => {
+    expect(pairCodeChecksumValid(['abandon'])).toBe(false)
   })
 })
