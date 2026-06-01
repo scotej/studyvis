@@ -127,12 +127,14 @@ The `trystero` package uses Nostr by default — a network of public WebSocket r
 - `room.makeAction(type)` for typed application messages.
 - `room.onPeerJoin` / `onPeerLeave` for presence on the topic.
 
-### Strategies (in order of preference)
-1. **Nostr** (default, `trystero` package) — public Nostr relay network, no auth required, small message footprint.
-2. **BitTorrent trackers** (`@trystero-p2p/torrent`) — fallback if Nostr relays misbehave.
-3. **MQTT** (`@trystero-p2p/mqtt`) — last resort.
+### Strategies
+1. **Nostr** (default, `trystero` package) — public Nostr relay network, no auth required, small message footprint. This is the only strategy currently wired.
+2. **BitTorrent trackers** (`@trystero-p2p/torrent`) and **MQTT** (`@trystero-p2p/mqtt`) — available in the library as fallbacks if Nostr relays misbehave, but **not yet wired**; strategy-racing is deferred.
 
 We never ship Firebase or Supabase strategies; both require keys we'd own (= backend we operate).
+
+### Relay selection
+Trystero does **not** pick relays at random per peer. Its Nostr strategy shuffles its bundled relay list with a seed derived **only from the `appId`** (`'studyvis'`) and takes the first `redundancy` (default 5) — so every peer on the same version deterministically targets the *identical* relays. Discovery overlap between two peers is therefore 100% by construction; the failure mode is not "no shared relay" but the chosen relays being low-uptime or unreachable from a given network, with no per-peer diversity to fall back on. We therefore **pin a curated `relayConfig.urls`** (`src/lib/trystero/relays.ts`) of relays verified to speak Nostr and accept anonymous ephemeral events, applied to every room rendezvous via `joinTopic`. Passing `urls` makes trystero use the entire list (its `redundancy` knob is then ignored).
 
 ### Topic derivations
 
@@ -144,7 +146,7 @@ All topics are 32-byte SHA-256 hashes serialized as hex.
 
 ### TURN
 
-Public Open Relay (`relay1.expressturn.com:3478` and similar — verify current endpoints when integrating). Default config attempts STUN-only, falls back to TURN automatically if direct P2P fails. Documented in onboarding: "if you regularly connect from a corporate / school network and sessions are choppy, this is why."
+Connections are **STUN-only by default**: no public TURN server currently ships (`PUBLIC_TURN_SERVERS` in `src/lib/trystero/ice.ts` is empty — the old free public TURN endpoints are dead and a zero-config public TURN no longer exists). The TURN path is fully wired — `iceOptionsFor` maps the user's Network preference (`auto`/`always`/`never`) to ICE config and takes effect the instant a server is added — but until one is configured there is **no relay fallback**, so the ~15% of connections behind symmetric/CGNAT/strict-firewall networks that need a relay can fail to establish. Adding a server is gated on a cost/ownership decision: a long-lived credential baked into a distributed binary is extractable (quota/billing abuse), and safe short-lived credentials require a backend we don't operate. Onboarding documents the symptom: "if you regularly connect from a corporate / school network and sessions are choppy, this is why."
 
 ## 5. Friend pairing flow
 

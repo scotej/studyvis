@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'vitest'
+import { describe, expect, test, vi } from 'vitest'
 import type { TurnServerConfig } from 'trystero'
 
 import {
@@ -31,11 +31,24 @@ describe('iceOptionsFor (with TURN servers configured)', () => {
 
 describe('iceOptionsFor (no TURN servers)', () => {
   test('every preference degrades to STUN-only — even "always"', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     // Forcing relay-only with zero relays would guarantee a failed connection,
     // so it must NOT be honored when the server list is empty.
     expect(iceOptionsFor('auto', [])).toEqual({})
     expect(iceOptionsFor('always', [])).toEqual({})
     expect(iceOptionsFor('never', [])).toEqual({})
+    warn.mockRestore()
+  })
+
+  test("warns when 'always' is dropped for lack of TURN, not for auto/never", () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    iceOptionsFor('auto', [])
+    iceOptionsFor('never', [])
+    expect(warn).not.toHaveBeenCalled()
+    iceOptionsFor('always', [])
+    expect(warn).toHaveBeenCalledTimes(1)
+    expect(warn.mock.calls[0]?.[0]).toMatch(/relay-only.*ignored/i)
+    warn.mockRestore()
   })
 })
 

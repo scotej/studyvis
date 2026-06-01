@@ -33,12 +33,26 @@ export type IceOptions = {
 // the logic is testable independent of the shipped server list. With no TURN
 // servers there is nothing to relay through, so every preference degrades to
 // STUN-only — in particular 'always' (relay-only) is deliberately NOT honored,
-// since forcing relay transport with zero relays guarantees a failed connection.
+// since forcing relay transport with zero relays guarantees a failed
+// connection. We warn rather than silently discard that intent, so a user who
+// set relay-only and a maintainer who shipped an empty list both have a thread
+// to pull when connections fail.
 export function iceOptionsFor(
   pref: TurnPreference,
   servers: TurnServerConfig[]
 ): IceOptions {
-  if (servers.length === 0 || pref === 'never') return {}
+  if (servers.length === 0) {
+    if (pref === 'always') {
+      console.warn(
+        "TURN preference 'always' (relay-only) ignored: no TURN servers are " +
+          'configured, so forcing relay-only transport would guarantee a failed ' +
+          'connection. Falling back to STUN-only. Configure PUBLIC_TURN_SERVERS ' +
+          'in src/lib/trystero/ice.ts to honor this preference.'
+      )
+    }
+    return {}
+  }
+  if (pref === 'never') return {}
   if (pref === 'always') {
     return { turnConfig: servers, rtcConfig: { iceTransportPolicy: 'relay' } }
   }

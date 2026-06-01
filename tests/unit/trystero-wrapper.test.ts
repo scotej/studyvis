@@ -44,6 +44,7 @@ vi.mock('trystero', () => ({
 }))
 
 const { joinTopic } = await import('@/lib/trystero')
+const { DEFAULT_RELAY_URLS } = await import('@/lib/trystero/relays')
 
 beforeEach(() => {
   captured.onPeerJoin = null
@@ -127,5 +128,18 @@ describe('trystero joinTopic ICE forwarding', () => {
     joinTopic({ topic: 't', password: 'p' })
     expect(captured.config?.turnConfig).toBeUndefined()
     expect(captured.config?.rtcConfig).toBeUndefined()
+  })
+})
+
+describe('trystero joinTopic relay config', () => {
+  test('pins DEFAULT_RELAY_URLS when the caller provides no relayConfig', () => {
+    joinTopic({ topic: 't', password: 'p' })
+    expect(captured.config?.relayConfig).toEqual({ urls: DEFAULT_RELAY_URLS })
+  })
+
+  test('forwards a caller-provided relayConfig unchanged', () => {
+    const relayConfig = { urls: ['wss://relay.example.test'], redundancy: 3 }
+    joinTopic({ topic: 't', password: 'p', relayConfig })
+    expect(captured.config?.relayConfig).toBe(relayConfig)
   })
 })
