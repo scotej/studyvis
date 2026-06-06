@@ -6,6 +6,7 @@
 import { describe, expect, test } from 'vitest'
 
 import {
+  deriveBreaksSummary,
   deriveTopDistractions,
   deriveTopicTimeline,
   formatOffset,
@@ -223,5 +224,46 @@ describe('formatOffset', () => {
 
   test('clamps negative offsets to zero', () => {
     expect(formatOffset(START_TS - 1000, START_TS)).toBe('00:00')
+  })
+})
+
+describe('deriveBreaksSummary', () => {
+  test('returns empty when there are no approved breaks', () => {
+    const events: AuditEventRecord[] = [
+      evt('A', 'joined', 0),
+      evt('A', 'break_request', 1000, { duration_sec: 300 }),
+      evt('A', 'break_denied', 2000, { reason: 'too soon' }),
+    ]
+    expect(deriveBreaksSummary(events)).toEqual([])
+  })
+
+  test('sums duration and counts per participant, approved breaks only', () => {
+    const events: AuditEventRecord[] = [
+      evt('A', 'break_approved', 0, { duration_sec: 300 }),
+      evt('A', 'break_approved', 60_000, { duration_sec: 120 }),
+      evt('A', 'break_request', 70_000, { duration_sec: 600 }),
+      evt('A', 'break_denied', 80_000, {}),
+    ]
+    expect(deriveBreaksSummary(events)).toEqual([
+      { who: 'A', count: 2, totalSec: 420 },
+    ])
+  })
+
+  test('counts a break with missing/invalid duration as 0 seconds', () => {
+    const events: AuditEventRecord[] = [
+      evt('A', 'break_approved', 0, {}),
+      evt('A', 'break_approved', 1000, { duration_sec: -5 }),
+    ]
+    expect(deriveBreaksSummary(events)).toEqual([
+      { who: 'A', count: 2, totalSec: 0 },
+    ])
+  })
+
+  test('sorts by total break time, descending', () => {
+    const events: AuditEventRecord[] = [
+      evt('A', 'break_approved', 0, { duration_sec: 60 }),
+      evt('B', 'break_approved', 1000, { duration_sec: 600 }),
+    ]
+    expect(deriveBreaksSummary(events).map((e) => e.who)).toEqual(['B', 'A'])
   })
 })

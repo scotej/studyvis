@@ -120,8 +120,9 @@ Inside:
   report and the Stats dashboard.
 - `models/` — AI model files you've downloaded (V2 features). Each
   model is 1–8 GB depending on the tier you picked.
-- `llama-server.log` — diagnostic log for the AI sidecar. Not
-  rotated; truncate manually if it grows beyond what you want.
+- `llama-server.log` — diagnostic log for the AI sidecar. Rolled to
+  `llama-server.log.1` automatically when it passes ~5 MB at the start
+  of an AI session, so it stays bounded; one previous copy is kept.
 
 You can open the data folder from Settings → Advanced.
 
@@ -176,9 +177,10 @@ right friends for StudyVis.
 There is no built-in error reporter — that would imply telemetry.
 Instead:
 
-1. **Settings → Advanced → Open data folder** to find
-   `llama-server.log` (AI errors) and the OS-provided webview console
-   if you can dump it.
+1. **Settings → Advanced → Share log.** "Open log" reveals
+   `llama-server.log` (AI errors) in your file manager; "Copy
+   diagnostics" puts your version, OS, and log path on the clipboard.
+   Nothing is uploaded — you choose what to send.
 2. **File an issue on GitHub** with the version (Settings → About),
    your OS + version, and a paste of the relevant log lines.
 3. **Crash logs** stay local — macOS routes them to
@@ -225,9 +227,6 @@ where you'd see it surface.
   `models.json`/`modelStore`). Dropping it would be trivially safe
   but a forward-only migration carries the V1→V2 upgrade-test risk we
   declined at the gate. Stays as a no-op artifact.
-- **`llama-server.log` rotation.** The AI sidecar writes diagnostic
-  logs without size or daily rotation. Most friends won't run AI
-  enough for it to matter; rotate or truncate manually if it does.
 - **Accepted deviations from the audit ledger.**
   - **`ISSUES.md` I9** — the Pomodoro broadcaster takeover allows any
     peer mid-broadcast to become the next broadcaster. Friends-only

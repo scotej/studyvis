@@ -93,6 +93,39 @@ export function deriveTopDistractions(
     .slice(0, 5)
 }
 
+export type BreakSummaryEntry = {
+  who: string
+  count: number
+  totalSec: number
+}
+
+// Per-participant approved-break aggregate for the post-session report.
+// Only `break_approved` (the broadcast, friends-visible event) is counted —
+// local-only break_request / break_denied are deliberately excluded so the
+// report never surfaces a denied request to peers. Sorted by total time, then
+// count, descending.
+export function deriveBreaksSummary(
+  events: ReadonlyArray<AuditEventRecord>
+): BreakSummaryEntry[] {
+  const byWho = new Map<string, { count: number; totalSec: number }>()
+  for (const e of events) {
+    if (e.kind !== 'break_approved') continue
+    const detail = parseAuditDetail(e.detail)
+    const dur =
+      typeof detail.duration_sec === 'number' &&
+      Number.isFinite(detail.duration_sec)
+        ? Math.max(0, detail.duration_sec)
+        : 0
+    const existing = byWho.get(e.who) ?? { count: 0, totalSec: 0 }
+    existing.count += 1
+    existing.totalSec += dur
+    byWho.set(e.who, existing)
+  }
+  return Array.from(byWho.entries())
+    .map(([who, agg]) => ({ who, ...agg }))
+    .sort((a, b) => b.totalSec - a.totalSec || b.count - a.count)
+}
+
 export type TopicTimelineEntry = {
   topic: string
   ts: number

@@ -15,6 +15,51 @@ breadth + polish) and gated by the success-criteria walkthrough in
 PR #40 (every V1 + V2 criterion explicitly met-with-evidence or
 deferred-with-reason).
 
+## Unreleased — post-1.0 fixes and feature improvements
+
+A maintenance and feature pass on top of the 1.0 line: audit-verified
+bug fixes across the session, AI, and Rust layers, plus four feature
+improvements.
+
+### Added
+
+- **Share log (Settings → Advanced).** The manual share `PLAN.md` §3
+  promised, previously only a folder opener. "Open log" reveals
+  `llama-server.log` in your file manager; "Copy diagnostics" copies
+  your version, OS, and log path. Local-only — nothing is uploaded.
+- **Bounded diagnostic log.** `llama-server.log` now rolls to
+  `llama-server.log.1` at ~5 MB at the start of an AI session, so it
+  stays small and shareable. Resolves the deferred D7 rotation.
+- **Copy session report.** The post-session report has a "Copy report"
+  button that puts a plain-text summary on the clipboard to paste to
+  the friends you studied with. Local-only, no peer broadcast.
+- **Breaks in the report.** The report now summarises approved breaks
+  per person — count and total time.
+
+### Fixed
+
+- **TURN preference applies to sessions.** Settings → Network's relay
+  setting now affects study sessions, not just friend pairing.
+- **Audit log keeps departed friends' names.** In 3+ person sessions a
+  friend who leaves no longer has their earlier rows relabelled to a
+  key fragment.
+- **Push-to-talk reliability.** PTT no longer goes silently dead after
+  a mid-hold camera/mic reacquire, and a friend who joins while you're
+  talking now sees your talk indicator.
+- **Pomodoro Stop is broadcaster-only.** Receivers no longer see a
+  no-op Stop button the next broadcast tick would undo.
+- **AI cadence respects slow models.** The sample interval can no
+  longer be capped below a model's measured floor.
+- **Backend hardening.** SQLite busy-timeout so a concurrent
+  first-launch serialises instead of failing; duplicate push-to-talk
+  accelerators no longer abort boot; the llama-server sidecar is
+  reliably killed on quit instead of orphaned; failed model downloads
+  clean up their partial temp file; disabling AI closes an open
+  Ctrl/Cmd+] dialog.
+- **UI and accessibility.** A re-opened session report no longer nests
+  a second `main` landmark; the titlebar resize listener no longer
+  leaks; the audit log pins to the newest row without a one-frame jump.
+
 ## 1.0.4 — 2026-05-20 — V3 polish, the polished 1.0
 
 The patch release that lands the V3 phase. Carries V1 + V2 + V3 in

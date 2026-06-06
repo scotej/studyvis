@@ -1,6 +1,6 @@
 import { useCallback, useState } from 'react'
 import { invoke } from '@tauri-apps/api/core'
-import { FolderOpenIcon } from 'lucide-react'
+import { CopyIcon, FileTextIcon, FolderOpenIcon } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { SettingsRow, SettingsSection } from '@/components/SettingsRow'
@@ -17,6 +17,7 @@ export function AdvancedCategory() {
   const autostart = useAutostart()
   const onboarding = useOnboardingState()
   const [openingFolder, setOpeningFolder] = useState(false)
+  const [sharingLog, setSharingLog] = useState(false)
   const [resettingOnboarding, setResettingOnboarding] = useState(false)
   const copy = strings.settings.advanced
 
@@ -32,6 +33,37 @@ export function AdvancedCategory() {
       setOpeningFolder(false)
     }
   }, [copy.dataFolder.errorFallback])
+
+  const handleCopyDiagnostics = useCallback(async () => {
+    setSharingLog(true)
+    try {
+      const info = await invoke<{ os: string; arch: string; log_path: string }>(
+        'diagnostics_info'
+      )
+      const text = copy.shareLog.summary({
+        version: __APP_VERSION__,
+        os: info.os,
+        arch: info.arch,
+        logPath: info.log_path,
+      })
+      await navigator.clipboard.writeText(text)
+      toast.success(copy.shareLog.copiedToast)
+    } catch {
+      toast.error(copy.shareLog.copyError)
+    } finally {
+      setSharingLog(false)
+    }
+  }, [copy.shareLog])
+
+  const handleRevealLog = useCallback(async () => {
+    try {
+      await invoke('diagnostics_reveal_log')
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : copy.shareLog.revealError
+      toast.error(message)
+    }
+  }, [copy.shareLog.revealError])
 
   const handleReplayOnboarding = useCallback(async () => {
     setResettingOnboarding(true)
@@ -106,6 +138,29 @@ export function AdvancedCategory() {
           >
             <FolderOpenIcon /> {copy.dataFolder.openCta}
           </Button>
+        }
+      />
+      <SettingsRow
+        label={copy.shareLog.label}
+        help={copy.shareLog.help}
+        control={
+          <div className="flex gap-2">
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => void handleCopyDiagnostics()}
+              disabled={sharingLog}
+            >
+              <CopyIcon /> {copy.shareLog.copyCta}
+            </Button>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => void handleRevealLog()}
+            >
+              <FileTextIcon /> {copy.shareLog.revealCta}
+            </Button>
+          </div>
         }
       />
       <SettingsRow

@@ -16,8 +16,9 @@
 // fresh-session-end render and the re-opened-from-Settings render are
 // byte-identical.
 
-import { useEffect, useMemo, useState } from 'react'
-import { CheckCircle2Icon, ChevronLeftIcon } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { CheckCircle2Icon, ChevronLeftIcon, CopyIcon } from 'lucide-react'
+import { toast } from 'sonner'
 
 import { ScoreGauge } from '@/components/ScoreGauge'
 import { Button } from '@/components/ui/button'
@@ -39,7 +40,9 @@ import {
 } from '@/lib/audit-icons'
 import { SEVERITY_DEDUCTIONS } from '@/features/ai/scoreMachine'
 import type { Severity } from '@/features/ai/parseJudgment'
+import { formatBreakDuration } from './break'
 import {
+  deriveBreaksSummary,
   deriveTopDistractions,
   deriveTopicTimeline,
   formatOffset,
@@ -240,6 +243,28 @@ export function ReportView({
     () => deriveTopicTimeline(session.declared_topic, auditEvents),
     [session.declared_topic, auditEvents]
   )
+  const breaksSummary = useMemo(
+    () => deriveBreaksSummary(auditEvents),
+    [auditEvents]
+  )
+
+  const [copied, setCopied] = useState(false)
+  const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(() => {
+    return () => {
+      if (copyTimer.current) clearTimeout(copyTimer.current)
+    }
+  }, [])
+  const handleCopyReport = async () => {
+    try {
+      await navigator.clipboard.writeText(serializeReportToText(data))
+      setCopied(true)
+      if (copyTimer.current) clearTimeout(copyTimer.current)
+      copyTimer.current = setTimeout(() => setCopied(false), 1500)
+    } catch {
+      toast.error(strings.common.errors.copyToClipboard)
+    }
+  }
 
   const startedAt = session.started_at
   const endedAt = session.ended_at
@@ -276,9 +301,20 @@ export function ReportView({
               {formatHeaderRange(startedAt, endedAt)}
             </span>
           </div>
-          <Button variant="secondary" size="sm" onClick={onClose}>
-            <ChevronLeftIcon /> {strings.common.actions.close}
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => void handleCopyReport()}
+              aria-label={strings.report.copyAriaLabel}
+            >
+              {copied ? <CheckCircle2Icon /> : <CopyIcon />}{' '}
+              {copied ? strings.common.actions.copied : strings.report.copyCta}
+            </Button>
+            <Button variant="secondary" size="sm" onClick={onClose}>
+              <ChevronLeftIcon /> {strings.common.actions.close}
+            </Button>
+          </div>
         </div>
       </header>
 
@@ -368,6 +404,29 @@ export function ReportView({
                     {entry.totalDeduction > 0 ? (
                       <> · −{entry.totalDeduction}</>
                     ) : null}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Section>
+
+        <Section heading={strings.report.sections.breaks.heading}>
+          {breaksSummary.length === 0 ? (
+            <Empty message={strings.report.sections.breaks.empty} />
+          ) : (
+            <ul className="m-0 flex list-none flex-col gap-2 p-0">
+              {breaksSummary.map((entry, i) => (
+                <li
+                  key={`${entry.who}-${i}`}
+                  className="flex items-start justify-between gap-3 rounded-md border border-border-subtle bg-bg-surface px-3 py-2 text-sm"
+                >
+                  <span className="text-text-primary">
+                    {labelFor(entry.who, nameByEdPubkey, myEdPubkeyHex)}
+                  </span>
+                  <span className="text-xs font-medium whitespace-nowrap text-text-muted">
+                    {strings.report.sections.breaks.count(entry.count)} ·{' '}
+                    {formatBreakDuration(entry.totalSec)}
                   </span>
                 </li>
               ))}
@@ -530,4 +589,79 @@ function formatHeaderRange(
     minute: '2-digit',
   })
   return `${datePart} · ${timePart} – ${endTime}`
+}
+
+// Serializes the report to plain text (light markdown) for the "Copy report"
+// button — mirrors the on-screen sections so a pasted summary matches what the
+// user saw. Local-only; the user pastes it wherever they choose.
+function serializeReportToText(data: ResolvedReportData): string {
+  const { session, auditEvents, nameByEdPubkey, myEdPubkeyHex } = data
+  const topicTimeline = deriveTopicTimeline(session.declared_topic, auditEvents)
+  const grouped = groupTimelineByWho(auditEvents)
+  const distractions = deriveTopDistractions(auditEvents)
+  const breaks = deriveBreaksSummary(auditEvents)
+  const totalMinutes = session.total_minutes ?? 0
+  const score = session.score ?? 100
+  const focusedPctLabel =
+    session.focused_pct == null
+      ? '—'
+      : `${Math.round(session.focused_pct * 100)}%`
+  const anchor =
+    session.started_at ??
+    (auditEvents.length > 0 ? Math.min(...auditEvents.map((e) => e.ts)) : 0)
+
+  const lines: string[] = [
+    formatTopicHeading(session.declared_topic),
+    `${strings.report.summaryPrefix}${strings.report.summaryMinutes(totalMinutes)}${strings.report.summaryMiddle}${focusedPctLabel}`,
+    strings.report.scoreLine(score),
+    '',
+    `## ${strings.report.sections.topic.heading}`,
+  ]
+  if (topicTimeline.length === 0) {
+    lines.push(strings.report.sections.topic.empty)
+  } else {
+    for (const t of topicTimeline) lines.push(`- ${t.topic} (${t.label})`)
+  }
+
+  lines.push('', `## ${strings.report.sections.timeline.heading}`)
+  if (grouped.length === 0) {
+    lines.push(strings.report.sections.timeline.empty)
+  } else {
+    for (const g of grouped) {
+      lines.push(`### ${labelFor(g.who, nameByEdPubkey, myEdPubkeyHex)}`)
+      for (const row of g.events) {
+        const detail = parseAuditDetail(row.detail)
+        const reasoning =
+          typeof detail.reasoning === 'string' && detail.reasoning
+            ? ` — ${detail.reasoning}`
+            : ''
+        lines.push(
+          `- ${formatOffset(row.ts, anchor)} ${describeRow(row, detail)}${reasoning}`
+        )
+      }
+    }
+  }
+
+  lines.push('', `## ${strings.report.sections.breaks.heading}`)
+  if (breaks.length === 0) {
+    lines.push(strings.report.sections.breaks.empty)
+  } else {
+    for (const b of breaks) {
+      lines.push(
+        `- ${labelFor(b.who, nameByEdPubkey, myEdPubkeyHex)}: ${strings.report.sections.breaks.count(b.count)} · ${formatBreakDuration(b.totalSec)}`
+      )
+    }
+  }
+
+  lines.push('', `## ${strings.report.sections.distractions.heading}`)
+  if (distractions.length === 0) {
+    lines.push(strings.report.sections.distractions.empty)
+  } else {
+    for (const d of distractions) {
+      const ded = d.totalDeduction > 0 ? ` · −${d.totalDeduction}` : ''
+      lines.push(`- ${d.reasoning} — ${d.count}×${ded}`)
+    }
+  }
+
+  return lines.join('\n')
 }
