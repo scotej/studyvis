@@ -17,34 +17,40 @@ const captured: {
   onPeerJoin: JoinHandler | null
   onPeerLeave: LeaveHandler | null
   onPeerStream: StreamHandler | null
-} = { onPeerJoin: null, onPeerLeave: null, onPeerStream: null }
+  config: Record<string, unknown> | null
+} = { onPeerJoin: null, onPeerLeave: null, onPeerStream: null, config: null }
 
 vi.mock('trystero', () => ({
   selfId: 'self-fixture',
-  joinRoom: () => ({
-    onPeerJoin: (fn: JoinHandler) => {
-      captured.onPeerJoin = fn
-    },
-    onPeerLeave: (fn: LeaveHandler) => {
-      captured.onPeerLeave = fn
-    },
-    onPeerStream: (fn: StreamHandler) => {
-      captured.onPeerStream = fn
-    },
-    makeAction: () => [vi.fn(), vi.fn()],
-    addStream: vi.fn(),
-    removeStream: vi.fn(),
-    getPeers: () => ({}),
-    leave: vi.fn(async () => {}),
-  }),
+  joinRoom: (config: Record<string, unknown>) => {
+    captured.config = config
+    return {
+      onPeerJoin: (fn: JoinHandler) => {
+        captured.onPeerJoin = fn
+      },
+      onPeerLeave: (fn: LeaveHandler) => {
+        captured.onPeerLeave = fn
+      },
+      onPeerStream: (fn: StreamHandler) => {
+        captured.onPeerStream = fn
+      },
+      makeAction: () => [vi.fn(), vi.fn()],
+      addStream: vi.fn(),
+      removeStream: vi.fn(),
+      getPeers: () => ({}),
+      leave: vi.fn(async () => {}),
+    }
+  },
 }))
 
 const { joinTopic } = await import('@/lib/trystero')
+const { DEFAULT_RELAY_URLS } = await import('@/lib/trystero/relays')
 
 beforeEach(() => {
   captured.onPeerJoin = null
   captured.onPeerLeave = null
   captured.onPeerStream = null
+  captured.config = null
 })
 
 describe('trystero wrapRoom fanout', () => {
@@ -100,5 +106,40 @@ describe('trystero wrapRoom fanout', () => {
     captured.onPeerStream?.(fakeStream, 'peer-7', undefined)
     expect(b).toHaveBeenCalledTimes(1)
     expect(a).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe('trystero joinTopic ICE forwarding', () => {
+  test('forwards turnConfig and rtcConfig to joinRoom under the studyvis appId', () => {
+    const turnConfig = [
+      { urls: 'turn:example.test:3478', username: 'u', credential: 'c' },
+    ]
+    const rtcConfig = { iceTransportPolicy: 'relay' as const }
+    joinTopic({ topic: 't', password: 'p', turnConfig, rtcConfig })
+    expect(captured.config).toMatchObject({
+      appId: 'studyvis',
+      password: 'p',
+      turnConfig,
+      rtcConfig,
+    })
+  })
+
+  test('omits TURN/rtc config when the caller provides none', () => {
+    joinTopic({ topic: 't', password: 'p' })
+    expect(captured.config?.turnConfig).toBeUndefined()
+    expect(captured.config?.rtcConfig).toBeUndefined()
+  })
+})
+
+describe('trystero joinTopic relay config', () => {
+  test('pins DEFAULT_RELAY_URLS when the caller provides no relayConfig', () => {
+    joinTopic({ topic: 't', password: 'p' })
+    expect(captured.config?.relayConfig).toEqual({ urls: DEFAULT_RELAY_URLS })
+  })
+
+  test('forwards a caller-provided relayConfig unchanged', () => {
+    const relayConfig = { urls: ['wss://relay.example.test'], redundancy: 3 }
+    joinTopic({ topic: 't', password: 'p', relayConfig })
+    expect(captured.config?.relayConfig).toBe(relayConfig)
   })
 })

@@ -72,6 +72,8 @@ jobs:
 
             StudyVis does not auto-update. Download a new version here when one drops.
           releaseDraft: true
-          prerelease: true
+          # Tags with a prerelease suffix (e.g. v1.1.0-rc.1) publish as GitHub
+          # prereleases; clean vX.Y.Z tags are full releases.
+          prerelease: ${{ contains(github.ref_name, '-') }}
           includeUpdaterJson: false
           args: ${{ matrix.args }}

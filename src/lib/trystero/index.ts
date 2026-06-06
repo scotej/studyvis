@@ -8,7 +8,10 @@ import {
   type JsonValue,
   type Room,
   type TargetPeers,
+  type TurnServerConfig,
 } from 'trystero'
+
+import { DEFAULT_RELAY_URLS } from './relays'
 
 export const APP_ID = 'studyvis'
 
@@ -22,6 +25,17 @@ export const APP_ID = 'studyvis'
 export type TopicConfig = {
   topic: string
   password: string
+  // Optional ICE config forwarded to the underlying RTCPeerConnection. When
+  // absent, trystero uses its STUN-only defaults. Callers that want TURN (so a
+  // connection survives strict NAT / firewalls) pass these — see
+  // `buildIceOptions` in ./ice.
+  turnConfig?: TurnServerConfig[]
+  rtcConfig?: RTCConfiguration
+  // Optional override for the Nostr signaling relays used for room rendezvous.
+  // When absent, joinTopic pins DEFAULT_RELAY_URLS (see ./relays) so peers don't
+  // depend on whichever relays trystero's appId-seeded shuffle happens to pick.
+  // Passing `urls` makes trystero use that entire list (`redundancy` ignored).
+  relayConfig?: { urls?: string[]; redundancy?: number }
 }
 
 export type TopicAction<T extends DataPayload> = {
@@ -65,8 +79,21 @@ export type JoinTopicFn = (
   callbacks?: JoinRoomCallbacks
 ) => TopicRoom
 
-export const joinTopic: JoinTopicFn = ({ topic, password }, callbacks) => {
-  const room: Room = joinRoom({ appId: APP_ID, password }, topic, callbacks)
+export const joinTopic: JoinTopicFn = (
+  { topic, password, turnConfig, rtcConfig, relayConfig },
+  callbacks
+) => {
+  const room: Room = joinRoom(
+    {
+      appId: APP_ID,
+      password,
+      turnConfig,
+      rtcConfig,
+      relayConfig: relayConfig ?? { urls: DEFAULT_RELAY_URLS },
+    },
+    topic,
+    callbacks
+  )
   return wrapRoom(room)
 }
 

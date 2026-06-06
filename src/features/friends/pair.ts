@@ -4,6 +4,8 @@ import { wordlist as englishWordlist } from '@scure/bip39/wordlists/english.js'
 import { bytesToHex, hexToBytes, verifyMessage } from '@/lib/crypto/identity'
 import { pairPassword, pairTopic } from '@/lib/crypto/topics'
 import { joinTopic } from '@/lib/trystero'
+import { buildIceOptions } from '@/lib/trystero/ice'
+import type { TurnPreference } from '@/stores/settingsStore'
 
 export const PAIR_WORD_COUNT = 12
 const PAIR_ENTROPY_BITS = 128
@@ -29,9 +31,14 @@ export type PairOptions = {
   // "waiting for friend" to "exchanging keys".
   onPeerJoinedTopic?: () => void
   // Reject with PairTimeoutError if the pair hasn't settled within this many
-  // milliseconds. Existing call sites that don't pass this stay timeout-less,
-  // matching pre-V1-P12-polish behavior.
+  // milliseconds. Call sites that don't pass this stay timeout-less and wait
+  // until aborted — the friend-pairing dialog relies on that so a slow code
+  // transfer between two devices doesn't race a deadline.
   timeoutMs?: number
+  // User's TURN preference (Settings → Network), mapped to ICE config via
+  // buildIceOptions. Defaults to 'auto'. Takes effect only once a TURN server
+  // is configured in lib/trystero/ice (none ships by default — see that file).
+  turnPreference?: TurnPreference
 }
 
 export type HelloPayload = {
@@ -154,6 +161,7 @@ async function runPair(
   const room = joinTopic({
     topic: pairTopic(words),
     password: pairPassword(words),
+    ...buildIceOptions(opts.turnPreference ?? 'auto'),
   })
   const action = room.makeAction<HelloPayload>(HELLO_ACTION)
 
