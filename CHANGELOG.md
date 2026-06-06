@@ -15,7 +15,7 @@ breadth + polish) and gated by the success-criteria walkthrough in
 PR #40 (every V1 + V2 criterion explicitly met-with-evidence or
 deferred-with-reason).
 
-## Unreleased — post-1.0 fixes and feature improvements
+## 1.2.0 — 2026-06-07 — post-1.0 fixes and feature improvements
 
 A maintenance and feature pass on top of the 1.0 line: audit-verified
 bug fixes across the session, AI, and Rust layers, plus four feature
