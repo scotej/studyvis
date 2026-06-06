@@ -25,7 +25,10 @@ use commands::sessions::{
     audit_event_insert, audit_events_list_for_session, sessions_get, sessions_insert, sessions_list,
 };
 #[cfg(desktop)]
-use commands::sidecar::{sidecar_start, sidecar_status, sidecar_stop, SidecarState};
+use commands::sidecar::{
+    diagnostics_info, diagnostics_reveal_log, sidecar_start, sidecar_status, sidecar_stop,
+    SidecarState,
+};
 #[cfg(desktop)]
 use commands::system::{
     autostart_is_enabled, autostart_set_enabled, system_ai_features_set_enabled, system_battery,
@@ -102,6 +105,10 @@ pub fn run() {
         sidecar_stop,
         #[cfg(desktop)]
         sidecar_status,
+        #[cfg(desktop)]
+        diagnostics_reveal_log,
+        #[cfg(desktop)]
+        diagnostics_info,
         #[cfg(desktop)]
         model_paths,
         #[cfg(desktop)]
@@ -412,8 +419,18 @@ fn setup_desktop(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>>
             })
             .build(),
     )?;
-    app.global_shortcut()
-        .register_multiple(vec![initial_ptt_friends, initial_ptt_ai])?;
+    // A hand-edited settings.json can set both PTT accelerators to the same
+    // combo. Registering an identical combo twice errors (Windows returns
+    // ERROR_HOTKEY_ALREADY_REGISTERED), which would propagate out of setup()
+    // and abort boot with no UI recourse. Register one copy when they collide;
+    // the handler still fires the friends branch and the user can rebind in
+    // Settings → Shortcuts.
+    let to_register = if initial_ptt_friends == initial_ptt_ai {
+        vec![initial_ptt_friends]
+    } else {
+        vec![initial_ptt_friends, initial_ptt_ai]
+    };
+    app.global_shortcut().register_multiple(to_register)?;
 
     let tray_icon = include_image!("icons/tray/22x22.png");
     let open_item = MenuItemBuilder::with_id("tray-open", "Open StudyVis").build(app)?;

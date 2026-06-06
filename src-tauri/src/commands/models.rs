@@ -575,11 +575,25 @@ async fn download_one<R: Runtime>(
             let _ = fs::remove_file(&tmp);
             return Err(DownloadError::Cancelled);
         }
-        let chunk = chunk_result.map_err(|e| DownloadError::Other(format!("stream chunk: {e}")))?;
+        let chunk = match chunk_result {
+            Ok(c) => c,
+            Err(e) => {
+                // Drop the handle before remove_file: Windows blocks deletion
+                // of an open file. Mirrors the cancel branch above.
+                drop(file_handle);
+                let _ = fs::remove_file(&tmp);
+                return Err(DownloadError::Other(format!("stream chunk: {e}")));
+            }
+        };
         hasher.update(&chunk);
-        file_handle
-            .write_all(&chunk)
-            .map_err(|e| DownloadError::Other(format!("write {}: {e}", tmp.display())))?;
+        if let Err(e) = file_handle.write_all(&chunk) {
+            drop(file_handle);
+            let _ = fs::remove_file(&tmp);
+            return Err(DownloadError::Other(format!(
+                "write {}: {e}",
+                tmp.display()
+            )));
+        }
         bytes_received += chunk.len() as u64;
 
         let now = Instant::now();
@@ -604,9 +618,14 @@ async fn download_one<R: Runtime>(
         }
     }
 
-    file_handle
-        .flush()
-        .map_err(|e| DownloadError::Other(format!("flush {}: {e}", tmp.display())))?;
+    if let Err(e) = file_handle.flush() {
+        drop(file_handle);
+        let _ = fs::remove_file(&tmp);
+        return Err(DownloadError::Other(format!(
+            "flush {}: {e}",
+            tmp.display()
+        )));
+    }
     drop(file_handle);
 
     // Verifying phase: emit one event so the UI can show "verifying" state

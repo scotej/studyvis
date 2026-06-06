@@ -8,6 +8,7 @@ use std::time::{Duration, Instant};
 use serde::Serialize;
 use tauri::async_runtime::Mutex;
 use tauri::{path::BaseDirectory, AppHandle, Manager, Runtime, State};
+use tauri_plugin_opener::OpenerExt;
 use tauri_plugin_shell::process::{CommandChild, CommandEvent};
 use tauri_plugin_shell::ShellExt;
 
@@ -29,6 +30,11 @@ const TARGET_TRIPLE: &str = "x86_64-unknown-linux-gnu";
 const SIDECAR_NAME: &str = "binaries/llama-server";
 const LOG_DIR: &str = "logs";
 const LOG_FILE: &str = "llama-server.log";
+// Cap the diagnostic log at 5 MiB, keeping a single previous generation as
+// `llama-server.log.1`. The magnitude is a judgement call: large enough to
+// hold a long AI session's stdout/stderr, small enough to stay shareable via
+// Settings → Advanced → Share log. Bounds total on-disk log to ~2× this.
+const LOG_MAX_BYTES: u64 = 5 * 1024 * 1024;
 
 // Restart policy: cap automatic respawns so a permanently broken binary
 // doesn't spam the log file. After RESTART_BUDGET attempts inside
@@ -59,18 +65,31 @@ impl SidecarState {
         Self(Arc::new(Mutex::new(SidecarInner::default())))
     }
 
-    // Synchronous shutdown used during app exit. Doesn't await the watcher;
-    // the OS will reap the child once the parent process exits, but explicit
-    // kill() unblocks any sockets immediately so a relaunch isn't ECONNREFUSED.
+    // Synchronous shutdown used during app exit. This explicit kill is the
+    // ONLY thing that stops the sidecar: neither Windows (no job object is
+    // configured) nor macOS terminates a child when the parent exits, and
+    // tauri-plugin-shell's CommandChild does not kill on drop — so without
+    // this a multi-GB llama-server would outlive the app, holding its model
+    // file and port until the user kills it by hand. The exit callback runs
+    // on the main thread (not an async-runtime worker), so a brief bounded
+    // spin to acquire the lock is safe and avoids skipping the kill on lock
+    // contention; the bound keeps a wedged holder from hanging quit.
     pub fn kill_blocking<R: Runtime>(app: &AppHandle<R>) {
         let Some(state) = app.try_state::<SidecarState>() else {
             return;
         };
         let arc = state.0.clone();
-        // Try to acquire without blocking the runtime; on contention skip,
-        // since exit handlers shouldn't deadlock on a held lock.
-        let Ok(mut guard) = arc.try_lock() else {
-            return;
+        let deadline = Instant::now() + Duration::from_millis(500);
+        let mut guard = loop {
+            match arc.try_lock() {
+                Ok(g) => break g,
+                Err(_) => {
+                    if Instant::now() >= deadline {
+                        return;
+                    }
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+            }
         };
         guard.generation = guard.generation.wrapping_add(1);
         if let Some(child) = guard.child.take() {
@@ -121,6 +140,9 @@ pub async fn sidecar_start<R: Runtime>(
     let generation = guard.generation;
     let runtime_dir = resolve_runtime_dir(&app)?;
     let log_path = ensure_log_path(&app)?;
+    // Roll the log before opening for append, while it has no open writer (only
+    // one sidecar runs at a time). Keeps the diagnostic log size-bounded (D7).
+    rotate_log_if_needed(&log_path, LOG_MAX_BYTES);
 
     let (rx, child) = spawn_llama(
         &app,
@@ -202,6 +224,48 @@ pub async fn sidecar_status(state: State<'_, SidecarState>) -> Result<SidecarSta
     })
 }
 
+#[derive(Serialize)]
+pub struct DiagnosticsInfo {
+    pub os: String,
+    pub arch: String,
+    pub log_path: String,
+}
+
+// Reveal the AI diagnostic log in the OS file manager so a user can attach it
+// to a bug report (PLAN §3 "Share Log"). The log file is absent until the
+// sidecar runs once, so fall back to revealing its parent dir, which
+// ensure_log_path creates. Strictly local — nothing is uploaded.
+#[tauri::command]
+pub fn diagnostics_reveal_log<R: Runtime>(app: AppHandle<R>) -> Result<String, String> {
+    let log_path = ensure_log_path(&app)?;
+    let reveal_target = if log_path.is_file() {
+        log_path.clone()
+    } else {
+        log_path
+            .parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| log_path.clone())
+    };
+    let reveal_str = reveal_target.to_string_lossy().into_owned();
+    app.opener()
+        .reveal_item_in_dir(&reveal_str)
+        .map_err(|e| e.to_string())?;
+    Ok(log_path.to_string_lossy().into_owned())
+}
+
+// Plaintext diagnostics for a manual bug report. Deliberately PII-free: OS,
+// arch, and the log path only — no pubkey, display name, friends, or mnemonic.
+// The app version is added JS-side from __APP_VERSION__.
+#[tauri::command]
+pub fn diagnostics_info<R: Runtime>(app: AppHandle<R>) -> Result<DiagnosticsInfo, String> {
+    let log_path = ensure_log_path(&app)?;
+    Ok(DiagnosticsInfo {
+        os: std::env::consts::OS.to_string(),
+        arch: std::env::consts::ARCH.to_string(),
+        log_path: log_path.to_string_lossy().into_owned(),
+    })
+}
+
 fn pick_unused_port() -> Result<u16, String> {
     // Bind to 0 to let the OS hand us an ephemeral port, then drop the listener
     // and pass the same number to llama-server. There's a tiny TOCTOU window
@@ -241,6 +305,25 @@ fn open_log_file(path: &PathBuf) -> Result<File, String> {
         .append(true)
         .open(path)
         .map_err(|e| format!("open log file {}: {e}", path.display()))
+}
+
+fn should_rotate(current_len: u64, max_bytes: u64) -> bool {
+    current_len >= max_bytes
+}
+
+// Single-generation roll: when the live log has reached the cap, move it to
+// `<name>.1` (overwriting any prior generation). Best-effort — a failed
+// metadata read or rename must never block the AI session, so errors are
+// swallowed; the worst case is the prior unbounded-append behaviour.
+fn rotate_log_if_needed(path: &Path, max_bytes: u64) {
+    let Ok(meta) = fs::metadata(path) else {
+        return;
+    };
+    if !should_rotate(meta.len(), max_bytes) {
+        return;
+    }
+    let rolled = path.with_extension("log.1");
+    let _ = fs::rename(path, rolled);
 }
 
 fn spawn_llama<R: Runtime>(
@@ -461,5 +544,22 @@ async fn watch<R: Runtime>(
         guard.port = Some(port);
         drop(guard);
         rx = new_rx;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rotates_at_or_above_cap() {
+        assert!(should_rotate(LOG_MAX_BYTES, LOG_MAX_BYTES));
+        assert!(should_rotate(LOG_MAX_BYTES + 1, LOG_MAX_BYTES));
+    }
+
+    #[test]
+    fn keeps_small_log() {
+        assert!(!should_rotate(0, LOG_MAX_BYTES));
+        assert!(!should_rotate(LOG_MAX_BYTES - 1, LOG_MAX_BYTES));
     }
 }
