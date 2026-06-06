@@ -209,9 +209,7 @@ pub fn system_ai_features_set_enabled<R: Runtime>(
     // dialog. The shortcut to close it is itself gated on the flag, so without
     // this the window would be orphaned (only Esc/blur could dismiss it).
     if !enabled {
-        if let Some(dialog) =
-            app.get_webview_window(crate::commands::ai_dialog::AI_DIALOG_LABEL)
-        {
+        if let Some(dialog) = app.get_webview_window(crate::commands::ai_dialog::AI_DIALOG_LABEL) {
             let _ = dialog.destroy();
         }
     }
