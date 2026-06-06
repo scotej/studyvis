@@ -157,4 +157,4 @@ Explicit so we don't pretend.
 - `PLAN.md` (this file) — vision, scope, principles, footprint disclosure.
 - `ARCHITECTURE.md` — system design, identity, discovery, AI pipeline, file layout, state machines.
 - `DESIGN-SYSTEM.md` — Calm Dark direction, tokens, stack, components, wireframes, six consistency rules.
-- `BUILD-PROMPTS.md` — sequenced, copy-pasteable prompts for Claude Code, V0 → V3.
+- `BUILD-PROMPTS.md` — sequenced, copy-pasteable prompts for Claude Code, V0 → V3, terminating with the V3-P10 cold-eyes acceptance pass driven by a desktop-control MCP.

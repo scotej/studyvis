@@ -500,7 +500,8 @@ studyvis/
 ├─ tests/
 │  ├─ unit/
 │  ├─ integration/                # paired peer harness
-│  └─ ai-eval/                    # labelled screenshots for prompt tuning (V2+)
+│  ├─ ai-eval/                    # labelled screenshots for prompt tuning (V2+)
+│  └─ uat/                        # V3-P10 cold-eyes acceptance-pass artefacts (screenshots, issue log)
 │
 ├─ PLAN.md
 ├─ ARCHITECTURE.md                # this file
