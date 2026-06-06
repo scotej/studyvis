@@ -78,6 +78,11 @@ type SessionState = {
   // auto-end path (where `peers` is already empty by the time the handler
   // snapshots) still records who we studied with. Cleared by begin/reset.
   seenPeerEdPubkeys: string[]
+  // Cumulative ed_pubkey_hex → display_name observed via signed-hello this
+  // session, never pruned by peerLeft (mirrors seenPeerEdPubkeys). The audit
+  // panel reads this so a peer who leaves a still-running 3+ person session
+  // keeps their name on past rows instead of falling back to a hex fragment.
+  seenPeerNames: Record<string, string>
   begin: (init: SessionInit) => void
   setPendingInitialTopic: (topic: string | null) => void
   setDeclaredStudyTopic: (next: string) => void
@@ -114,6 +119,7 @@ const INITIAL: Pick<
   | 'initialDeclaredTopic'
   | 'pendingInitialTopic'
   | 'seenPeerEdPubkeys'
+  | 'seenPeerNames'
 > = {
   status: 'idle',
   sessionTopic: null,
@@ -128,6 +134,7 @@ const INITIAL: Pick<
   initialDeclaredTopic: DEFAULT_DECLARED_STUDY_TOPIC,
   pendingInitialTopic: null,
   seenPeerEdPubkeys: [],
+  seenPeerNames: {},
 }
 
 export const useSessionStore = create<SessionState>((set, get) => ({
@@ -153,6 +160,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         initialDeclaredTopic: topic,
         pendingInitialTopic: null,
         seenPeerEdPubkeys: [],
+        seenPeerNames: {},
       }
     }),
   setPendingInitialTopic: (topic) => set({ pendingInitialTopic: topic }),
@@ -208,6 +216,10 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         : [...s.seenPeerEdPubkeys, hello.ed_pubkey_hex]
       return {
         seenPeerEdPubkeys: seen,
+        seenPeerNames: {
+          ...s.seenPeerNames,
+          [hello.ed_pubkey_hex]: hello.display_name,
+        },
         peers: {
           ...s.peers,
           [peerId]: {

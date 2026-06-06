@@ -92,6 +92,7 @@ export function SessionView() {
   const startedAt = useSessionStore((s) => s.startedAt)
   const peers = useSessionStore((s) => s.peers)
   const setPeerHello = useSessionStore((s) => s.setPeerHello)
+  const seenPeerNames = useSessionStore((s) => s.seenPeerNames)
   const aiFeaturesEnabled = useSettingsStore((s) => s.values.aiFeaturesEnabled)
   const activeModelId = useModelStore((s) => s.activeModelId)
   const selfWarning = useAlertsUiStore((s) => s.selfWarning)
@@ -210,9 +211,14 @@ export function SessionView() {
           return
         }
         acquiredStream = stream
-        // Default-muted (PLAN.md §5: "Default-muted; PTT key unmutes only
-        // while held."). The PTT effect below toggles enabled-ness.
-        for (const t of stream.getAudioTracks()) t.enabled = false
+        // Default-muted unless PTT is currently held (PLAN.md §5: "Default-
+        // muted; PTT key unmutes only while held."). Read the live PTT state
+        // imperatively so a stream re-acquire mid-hold (e.g. clicking
+        // MediaErrorBanner "Try again" while pressing the key) comes up
+        // unmuted — the PTT effect only re-fires on change and would
+        // otherwise leave the fresh track silently muted.
+        const pttHeld = usePttStore.getState().active
+        for (const t of stream.getAudioTracks()) t.enabled = pttHeld
         room.addStream(stream)
         setLocalStream(stream)
         localStreamRef.current = stream
@@ -293,7 +299,14 @@ export function SessionView() {
       setPeerPtt((cur) => ({ ...cur, [peerId]: active }))
       useSessionStore.getState().setPeerPtt(peerId, active)
     })
+    // trystero actions aren't replayed to late joiners, so a peer who joins
+    // while we're mid-transmit would never light our PTT indicator until we
+    // re-press. Send our current state directly to each new peer on join.
+    const offJoin = room.onPeerJoin((peerId) => {
+      void action.send({ active: usePttStore.getState().active }, peerId)
+    })
     return () => {
+      offJoin()
       pttSendRef.current = null
     }
   }, [room])
@@ -327,7 +340,15 @@ export function SessionView() {
       myDisplayName,
       selfJoinedAt: startedAt,
       sign,
-      onPeerHello: (peerId, hello) => setPeerHello(peerId, hello),
+      onPeerHello: (peerId, hello) => {
+        // Ignore hellos from peers the room never admitted (e.g. a 4th peer
+        // the host cap bounced before its hello landed) so they don't
+        // pollute seenPeerEdPubkeys → markStudied. An admitted peer always
+        // has a peers[peerId] entry by the time its hello arrives.
+        if (useSessionStore.getState().peers[peerId]) {
+          setPeerHello(peerId, hello)
+        }
+      },
       onPeerLeave: () => {
         // The session store's peerLeft handler drops the binding via
         // `peers` map mutation; nothing to do here beyond the existing
@@ -657,7 +678,7 @@ export function SessionView() {
             emitToDialog(AI_DIALOG_BREAK_RESPONSE, {
               nonce: payload.nonce,
               verdict: 'denied',
-              reason: 'session not ready',
+              reason: strings.ai.dialog.sessionNotReady,
             } satisfies BreakResponsePayload)
             return
           }
@@ -703,7 +724,10 @@ export function SessionView() {
               emitToDialog(AI_DIALOG_BREAK_RESPONSE, {
                 nonce: payload.nonce,
                 verdict: 'denied',
-                reason: err instanceof Error ? err.message : 'unexpected error',
+                reason:
+                  err instanceof Error
+                    ? err.message
+                    : strings.ai.dialog.unexpectedError,
               } satisfies BreakResponsePayload)
             })
         }
@@ -865,8 +889,8 @@ export function SessionView() {
 
   const elapsed = useElapsed(startedAt)
   const auditEntries = useMemo(
-    () => mapAuditEntries(auditEvents, identity, peers),
-    [auditEvents, identity, peers]
+    () => mapAuditEntries(auditEvents, identity, peers, seenPeerNames),
+    [auditEvents, identity, peers, seenPeerNames]
   )
 
   const myEdPubkey = identity?.ed_pubkey_hex ?? null
@@ -1074,11 +1098,17 @@ function mapAuditEntries(
   peers: Record<
     string,
     { edPubkeyHex: string | null; displayName: string | null }
-  >
+  >,
+  seenPeerNames: Record<string, string>
 ): AuditLogEntry[] {
-  // Build a one-shot ed_pubkey → name map. The local user's own identity
-  // wins for self entries; peers with bindings supply their own names.
+  // Build a one-shot ed_pubkey → name map. Resolution order (last write
+  // wins): cumulative seen names (so a departed peer's past rows keep their
+  // name) < the local user's own identity < live peer bindings (a fresh
+  // name still wins over a stale cached one).
   const byEdPubkey = new Map<string, string>()
+  for (const [ed, name] of Object.entries(seenPeerNames)) {
+    byEdPubkey.set(ed, name)
+  }
   if (identity) {
     byEdPubkey.set(identity.ed_pubkey_hex, identity.display_name)
   }

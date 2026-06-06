@@ -39,7 +39,7 @@ export const Friends: Story = {
 }
 
 export const Sessions: Story = {
-  render: () => <SessionsCategory />,
+  render: () => <SessionsCategory onOpenSession={() => {}} />,
 }
 
 export const Appearance: Story = {

@@ -211,7 +211,9 @@ describe('handleUserText (intent classification end-to-end)', () => {
     expect(body.messages[0].role).toBe('system')
     expect(body.messages[0].content).toBe(AGENT_SYSTEM_PROMPT)
     expect(body.messages[1].role).toBe('user')
-    expect(body.messages[1].content).toContain('Declared topic: maths')
+    expect(body.messages[1].content).toContain(
+      '<declared_topic>\nmaths\n</declared_topic>'
+    )
     expect(body.messages[1].content).toContain(
       'Recent session events: joined, pomodoro_start'
     )

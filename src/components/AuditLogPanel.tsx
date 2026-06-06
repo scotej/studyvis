@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from 'react'
+import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
 
 import { AuditLogRow } from '@/components/AuditLogRow'
 import { tokens } from '@/design/tokens'
@@ -55,7 +55,10 @@ export function AuditLogPanel({ events, now, className }: AuditLogPanelProps) {
     return () => clearInterval(handle)
   }, [now])
 
-  useEffect(() => {
+  // Pin-to-bottom is a layout read-then-write; run it before paint so a new
+  // row doesn't flash at the old scroll position for one frame in this live
+  // (role="log") region.
+  useLayoutEffect(() => {
     const el = scrollRef.current
     if (!el) return
     if (pinnedToBottom) el.scrollTop = el.scrollHeight

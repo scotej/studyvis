@@ -9,6 +9,7 @@ import {
   AddFriendDialog,
   FriendsList,
   InboxBoot,
+  InviteTimeoutError,
   type PresenceMap,
 } from '@/features/friends'
 import type { ValidInvite } from '@/features/friends'
@@ -16,6 +17,7 @@ import { useIdentity } from '@/features/identity'
 import { Onboarding, useOnboardingState } from '@/features/onboarding'
 import {
   inviteToCurrentSession,
+  InviteWhileGuestError,
   joinSession,
   Report,
   SessionView,
@@ -77,9 +79,13 @@ export function Home() {
         )
       } catch (err) {
         const message =
-          err instanceof Error
-            ? err.message
-            : strings.friends.inviteSendErrorFallback
+          err instanceof InviteTimeoutError
+            ? strings.friends.inviteTimeout
+            : err instanceof InviteWhileGuestError
+              ? strings.friends.inviteWhileGuest
+              : err instanceof Error
+                ? err.message
+                : strings.friends.inviteSendErrorFallback
         toast.error(message)
       }
     },

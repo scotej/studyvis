@@ -110,17 +110,25 @@ export function SessionTimer({
                     )}
               </p>
             </div>
-            <Separator />
-            <Button
-              variant="destructive"
-              size="sm"
-              onClick={() => {
-                onStop()
-                setOpen(false)
-              }}
-            >
-              {strings.pomodoro.stopCta}
-            </Button>
+            {/* Single-driver model: only the broadcaster can stop the shared
+                timer. For receivers the stop() controller call is a no-op the
+                broadcaster's next tick would resurrect within 5s, so we show
+                a read-only active view (title + "driven by") instead. */}
+            {iAmBroadcaster && (
+              <>
+                <Separator />
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  onClick={() => {
+                    onStop()
+                    setOpen(false)
+                  }}
+                >
+                  {strings.pomodoro.stopCta}
+                </Button>
+              </>
+            )}
           </div>
         ) : (
           <div className="flex flex-col gap-3">

@@ -89,7 +89,12 @@ export const joinTopic: JoinTopicFn = (
       password,
       turnConfig,
       rtcConfig,
-      relayConfig: relayConfig ?? { urls: DEFAULT_RELAY_URLS },
+      // Default-merge so the curated relay pin always applies when a caller
+      // omits `urls`. A caller passing only `{ redundancy }` (no urls) would
+      // otherwise short-circuit the pin and fall back to trystero's
+      // appId-seeded shuffle of its bundled pool — see ARCHITECTURE.md
+      // "Relay selection". An explicit `urls`/`redundancy` still wins.
+      relayConfig: { urls: DEFAULT_RELAY_URLS, ...relayConfig },
     },
     topic,
     callbacks

@@ -137,9 +137,19 @@ describe('trystero joinTopic relay config', () => {
     expect(captured.config?.relayConfig).toEqual({ urls: DEFAULT_RELAY_URLS })
   })
 
-  test('forwards a caller-provided relayConfig unchanged', () => {
+  test('forwards a caller-provided relayConfig (explicit urls win over the default)', () => {
     const relayConfig = { urls: ['wss://relay.example.test'], redundancy: 3 }
     joinTopic({ topic: 't', password: 'p', relayConfig })
-    expect(captured.config?.relayConfig).toBe(relayConfig)
+    expect(captured.config?.relayConfig).toEqual(relayConfig)
+  })
+
+  test('default-merges the curated urls when the caller omits them', () => {
+    // A partial relayConfig (e.g. redundancy only) must NOT bypass the pin —
+    // urls always defaults to the curated list when absent.
+    joinTopic({ topic: 't', password: 'p', relayConfig: { redundancy: 3 } })
+    expect(captured.config?.relayConfig).toEqual({
+      urls: DEFAULT_RELAY_URLS,
+      redundancy: 3,
+    })
   })
 })

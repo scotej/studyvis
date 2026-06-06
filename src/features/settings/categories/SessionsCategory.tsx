@@ -3,17 +3,21 @@ import { useCallback, useEffect, useState } from 'react'
 import { SettingsRow, SettingsSection } from '@/components/SettingsRow'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
-import { Report } from '@/features/session'
 import { listSessions, type SessionRecord } from '@/lib/db/sessions'
 import { strings } from '@/strings'
 
 type LoadStatus = 'idle' | 'loading' | 'ready' | 'error'
 
-export function SessionsCategory() {
+export type SessionsCategoryProps = {
+  // Settings owns the open-report state so the Report can replace the whole
+  // settings shell (avoids a nested <main> landmark — see Settings.tsx).
+  onOpenSession: (id: string) => void
+}
+
+export function SessionsCategory({ onOpenSession }: SessionsCategoryProps) {
   const [sessions, setSessions] = useState<SessionRecord[]>([])
   const [status, setStatus] = useState<LoadStatus>('idle')
   const [error, setError] = useState<string | null>(null)
-  const [selectedId, setSelectedId] = useState<string | null>(null)
   const copy = strings.settings.sessions
 
   const load = useCallback(async () => {
@@ -32,13 +36,6 @@ export function SessionsCategory() {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- one-shot mount load: load awaits the Tauri command before any setState fires (same suppression as useIdentity.refresh).
     void load()
   }, [load])
-
-  // Re-opened report uses the same Report shell that the fresh-session-end
-  // mount in Home.tsx uses; the Close handler returns to this list rather
-  // than firing sessionStore.reset (which has no state to clear here).
-  if (selectedId) {
-    return <Report sessionId={selectedId} onClose={() => setSelectedId(null)} />
-  }
 
   return (
     <SettingsSection heading={copy.heading}>
@@ -65,7 +62,7 @@ export function SessionsCategory() {
               key={session.id}
               type="button"
               className="text-left transition-colors outline-none hover:bg-bg-raised focus-visible:bg-bg-raised focus-visible:ring-3 focus-visible:ring-accent-ring"
-              onClick={() => setSelectedId(session.id)}
+              onClick={() => onOpenSession(session.id)}
             >
               <SettingsRow
                 label={formatStartedAt(session.started_at)}

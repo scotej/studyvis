@@ -4,6 +4,7 @@ import {
   SettingsLayout,
   type SettingsCategoryDescriptor,
 } from '@/components/SettingsLayout'
+import { Report } from '@/features/session'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { strings } from '@/strings'
 
@@ -57,11 +58,25 @@ export type SettingsProps = {
 export function Settings({ onClose }: SettingsProps) {
   const [activeCategoryId, setActiveCategoryId] =
     useState<SettingsCategoryId>('identity')
+  // A re-opened report must replace the settings shell entirely — rendering it
+  // inside SettingsLayout would nest a second <main> landmark and squeeze the
+  // report into the content column. Lift the selection here and branch above
+  // the layout, mirroring Home.tsx's fresh-session-end mount.
+  const [openSessionId, setOpenSessionId] = useState<string | null>(null)
   const hydrate = useSettingsStore((s) => s.hydrate)
 
   useEffect(() => {
     void hydrate()
   }, [hydrate])
+
+  if (openSessionId) {
+    return (
+      <Report
+        sessionId={openSessionId}
+        onClose={() => setOpenSessionId(null)}
+      />
+    )
+  }
 
   return (
     <SettingsLayout
@@ -72,7 +87,9 @@ export function Settings({ onClose }: SettingsProps) {
     >
       {activeCategoryId === 'identity' ? <IdentityCategory /> : null}
       {activeCategoryId === 'friends' ? <FriendsCategory /> : null}
-      {activeCategoryId === 'sessions' ? <SessionsCategory /> : null}
+      {activeCategoryId === 'sessions' ? (
+        <SessionsCategory onOpenSession={setOpenSessionId} />
+      ) : null}
       {activeCategoryId === 'stats' ? <StatsCategory /> : null}
       {activeCategoryId === 'appearance' ? <AppearanceCategory /> : null}
       {activeCategoryId === 'notifications' ? <NotificationsCategory /> : null}

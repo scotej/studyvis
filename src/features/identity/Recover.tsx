@@ -68,10 +68,14 @@ export function Recover({
     setError(null)
     try {
       pendingCommit.current = recover(classified.words).commit
-    } catch {
-      // classifyMnemonic already passed, so a throw here is unexpected; treat
-      // it as a checksum failure rather than crashing the flow.
-      setError('invalid')
+    } catch (err) {
+      // classifyMnemonic already validated length + checksum, so deriving keys
+      // shouldn't throw on these words. A throw here is genuinely unexpected
+      // (e.g. a crypto-lib internal failure); surface the generic recovery
+      // error instead of the misleading "invalid mnemonic" inline message,
+      // and log it for diagnosis. Mirrors the commit() failure path.
+      console.error(err)
+      toast.error(strings.common.errors.savingIdentity)
       return
     }
     if (identityExists) {

@@ -82,6 +82,14 @@ export function startPresence(ctx: PresenceContext): PresenceSubscription {
   rooms.push(ownRoom)
   const ownAction = ownRoom.makeAction<HeartbeatPayload>(HEARTBEAT_ACTION)
   heartbeatSenders.push((p) => ownAction.send(p))
+  // Send a fresh heartbeat the moment a friend subscribes to our presence
+  // topic. Nostr doesn't buffer for peers who weren't on the topic yet, so
+  // without this a friend who comes online between our interval ticks waits
+  // up to HEARTBEAT_INTERVAL_MS to see us as online. This only triggers a
+  // send; the receiver still derives "online" from its own clock (above).
+  const ownJoinUnsub = ownRoom.onPeerJoin(() => {
+    void ownAction.send({ ts: now() })
+  })
 
   // Friends' rooms: listen for their heartbeats and keep a `lastSeenAt` map.
   for (const friend of ctx.friends) {
@@ -126,6 +134,7 @@ export function startPresence(ctx: PresenceContext): PresenceSubscription {
 
   return {
     leave: async () => {
+      ownJoinUnsub()
       clearInterval(heartbeatHandle)
       clearInterval(sweepHandle)
       await Promise.all(

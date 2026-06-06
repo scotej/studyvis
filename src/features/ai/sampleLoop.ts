@@ -101,7 +101,12 @@ export function effectiveIntervalSec(
   if (userOverrideSec == null || !Number.isFinite(userOverrideSec)) {
     return floor
   }
-  return Math.min(MAX_SAMPLE_INTERVAL_SEC, Math.max(floor, userOverrideSec))
+  // Clamp the override into [floor, ceiling], but the floor wins when a slow
+  // model's measured floor exceeds the ceiling (e.g. a 7B model with p95 ~30s
+  // → floor 31s). The cadence must never drop below the model's floor
+  // (ARCHITECTURE.md §8); applying the ceiling last would cap it at 30s and
+  // force every tick to skip on the in-flight guard.
+  return Math.max(floor, Math.min(MAX_SAMPLE_INTERVAL_SEC, userOverrideSec))
 }
 
 export type SampleLoopRuntime = {

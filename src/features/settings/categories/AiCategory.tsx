@@ -229,7 +229,9 @@ export function AiCategory() {
                 <Slider
                   className="w-full"
                   min={measuredFloor}
-                  max={MAX_SAMPLE_INTERVAL_SEC}
+                  // Keep the Radix range valid when a slow model's measured
+                  // floor exceeds the ceiling (min must never be > max).
+                  max={Math.max(measuredFloor, MAX_SAMPLE_INTERVAL_SEC)}
                   step={1}
                   value={[effectiveInterval]}
                   onValueChange={([v]) =>

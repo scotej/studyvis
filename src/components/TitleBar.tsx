@@ -84,6 +84,13 @@ export function TitleBar({
             // ignore — see the outer catch
           }
         })
+        // If we unmounted while onResized was in flight, the cleanup below
+        // already ran (cleanup was still undefined, a no-op), so tear the
+        // listener down here instead of leaking it for the process lifetime.
+        if (cancelled) {
+          unlisten()
+          return
+        }
         cleanup = unlisten
       } catch {
         // Not a Tauri runtime (Storybook / vitest): leave the local state

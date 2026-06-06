@@ -43,9 +43,12 @@ export type InviteOptions = {
   sendTimeoutMs?: number
 }
 
+// Message is developer-facing only; the user-facing copy lives in
+// strings.friends.inviteTimeout and is mapped by type at the call site
+// (Home.tsx) so no UI string leaks out of the feature layer.
 export class InviteTimeoutError extends Error {
   constructor() {
-    super("Your friend didn't pick up. They may be offline.")
+    super('invite send timed out')
     this.name = 'InviteTimeoutError'
   }
 }

@@ -14,9 +14,11 @@ export type InviteToSessionArgs = {
   options?: InviteOptions
 }
 
+// Developer-facing message; user-facing copy is strings.friends.inviteWhileGuest,
+// mapped by type at the call site (Home.tsx).
 export class InviteWhileGuestError extends Error {
   constructor() {
-    super('Only the host can invite others to this session.')
+    super('cannot invite while a guest')
     this.name = 'InviteWhileGuestError'
   }
 }

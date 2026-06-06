@@ -301,6 +301,8 @@ export const strings = {
     inviteSent: (name: string) => `Invite sent to ${name}.`,
     inviteSendErrorFallback: "Couldn't send the invite.",
     joinErrorFallback: "Couldn't join the session.",
+    inviteTimeout: "Your friend didn't pick up. They may be offline.",
+    inviteWhileGuest: 'Only the host can invite others to this session.',
   },
 
   session: {
@@ -451,11 +453,19 @@ export const strings = {
         heading: 'Top distractions',
         empty: 'No distractions detected. Nice work.',
       },
+      breaks: {
+        heading: 'Breaks',
+        empty: 'No breaks were taken.',
+        count: (n: number) => `${n} ${n === 1 ? 'break' : 'breaks'}`,
+      },
     },
     studiedFallback: 'Studied',
     studiedWithTopic: (topic: string) => `Studied ${topic}`,
     detailsFallback: 'Session details',
     error: "Couldn't load the report.",
+    scoreLine: (n: number) => `Score: ${n}/100`,
+    copyCta: 'Copy report',
+    copyAriaLabel: 'Copy session report to clipboard',
   },
 
   audit: {
@@ -740,6 +750,22 @@ export const strings = {
         openCta: 'Open',
         errorFallback: "Couldn't open the data folder.",
       },
+      shareLog: {
+        label: 'Share log',
+        help: 'When the AI misbehaves, copy a short diagnostics summary or open the log file, then send it to a friend or paste it into a GitHub issue. Nothing is uploaded — sharing is always manual.',
+        copyCta: 'Copy diagnostics',
+        revealCta: 'Open log',
+        copiedToast: 'Diagnostics copied to the clipboard.',
+        copyError: "Couldn't copy the diagnostics.",
+        revealError: "Couldn't open the log file.",
+        summary: (v: {
+          version: string
+          os: string
+          arch: string
+          logPath: string
+        }) =>
+          `StudyVis ${v.version}\nOS: ${v.os} (${v.arch})\nLog: ${v.logPath}`,
+      },
       replayOnboarding: {
         label: 'Replay onboarding',
         help: 'Restarts the welcome → permissions → tutorial flow from the beginning. Your identity and friends are kept.',
@@ -898,6 +924,8 @@ export const strings = {
       timeoutFallback: "Couldn't reach the session.",
       catchFallback: "That didn't go through. Try again?",
       closedReason: 'Dialog closed before a verdict arrived.',
+      sessionNotReady: "The session isn't ready yet. Give it a moment.",
+      unexpectedError: 'Something went wrong. Try again?',
     },
     agent: {
       sidecarOff:

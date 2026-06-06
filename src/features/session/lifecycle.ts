@@ -5,9 +5,11 @@ import { sessionTopic as deriveSessionTopic } from '@/lib/crypto/topics'
 import { sessionsInsert } from '@/lib/db/sessions'
 import { bytesToBase64 } from '@/lib/encoding'
 import { joinTopic, type TopicRoom } from '@/lib/trystero'
+import { buildIceOptions } from '@/lib/trystero/ice'
 import { useAuditStore } from '@/stores/auditStore'
 import { useFriendsStore } from '@/stores/friendsStore'
 import { useSessionStore } from '@/stores/sessionStore'
+import { useSettingsStore } from '@/stores/settingsStore'
 import { strings } from '@/strings'
 
 export const SESSION_FULL_ACTION = 'session-full'
@@ -48,12 +50,17 @@ export function createHostRoom(): RoomInit {
   crypto.getRandomValues(passwordBytes)
   const password = bytesToBase64(passwordBytes)
   const topic = deriveSessionTopic(sessionId)
-  const room = joinTopic({ topic, password })
+  // Honor the Settings → Network TURN preference on the actual study session,
+  // not just the pairing handshake (mirrors runPair). Takes effect the instant
+  // a TURN server is configured in ./ice; STUN-only otherwise.
+  const ice = buildIceOptions(useSettingsStore.getState().values.turnPreference)
+  const room = joinTopic({ topic, password, ...ice })
   return { room, topic, password }
 }
 
 export function createGuestRoom(topic: string, password: string): RoomInit {
-  const room = joinTopic({ topic, password })
+  const ice = buildIceOptions(useSettingsStore.getState().values.turnPreference)
+  const room = joinTopic({ topic, password, ...ice })
   return { room, topic, password }
 }
 
