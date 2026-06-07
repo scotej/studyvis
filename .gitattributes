@@ -1,0 +1,11 @@
+# Line-ending normalization. core.autocrlf=true was handing Windows checkouts
+# CRLF, which breaks prettier (endOfLine=lf) and made the husky pre-commit
+# format check fail locally — so commits bypassed the gate and Rust/format
+# issues reached CI. The repo stores LF; enforce LF in every working tree so
+# local checks match CI on all platforms.
+* text=auto eol=lf
+
+# Binary assets: never apply text or EOL filters. (.svg is XML — left as text.)
+*.png  binary
+*.ico  binary
+*.icns binary

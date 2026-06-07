@@ -3,3 +3,24 @@ npm run check-tokens
 npm run check-strings
 npm run format:check
 npm exec tsc -- --noEmit -p tsconfig.app.json
+
+# Rust formatting gate. Mirrors the CI "cargo fmt" step in
+# .github/workflows/ci.yml. Without it the frontend checks above ran but Rust
+# formatting went straight to CI — the failure that cancelled the v1.0.3,
+# v1.0.5, and v1.2.0 releases mid-build.
+CARGO="$(command -v cargo 2>/dev/null || true)"
+if [ -z "$CARGO" ] && [ -x "$HOME/.cargo/bin/cargo" ]; then
+  CARGO="$HOME/.cargo/bin/cargo"
+fi
+if [ -z "$CARGO" ]; then
+  echo "pre-commit: cargo not found on PATH or ~/.cargo/bin -" >&2
+  echo "            skipping Rust fmt check; CI still enforces 'cargo fmt'." >&2
+else
+  if ! "$CARGO" fmt --manifest-path src-tauri/Cargo.toml --check; then
+    echo "" >&2
+    echo "pre-commit: 'cargo fmt --check' failed - Rust formatting would break CI." >&2
+    echo "  Fix:  cargo fmt --manifest-path src-tauri/Cargo.toml" >&2
+    echo "  then re-stage and commit." >&2
+    exit 1
+  fi
+fi
