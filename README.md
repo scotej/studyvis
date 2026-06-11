@@ -11,7 +11,7 @@ streams anywhere — and gently nudges you when you drift off-topic.
 After the session, each of you sees a quiet report of how the time
 went.
 
-This is 1.0. It runs on macOS and Windows.
+This is the 1.x release line. It runs on macOS and Windows.
 
 ## What running StudyVis means
 
@@ -278,28 +278,32 @@ where you'd see it surface.
 - **llama-server (llama.cpp build) sidecar** for V2 vision-model
   inference. Bundled per platform, started on demand.
 
-`PLAN.md`, `ARCHITECTURE.md`, `DESIGN-SYSTEM.md`, and
-`BUILD-PROMPTS.md` are the canonical specs. Each canonical doc is
-the source of truth for its concern; this README is the
-user-facing entry point.
+`PLAN.md`, `ARCHITECTURE.md`, and `DESIGN-SYSTEM.md` are the
+canonical specs — each the source of truth for its concern.
+`CHANGELOG.md` and `ISSUES.md` track release history and the audit
+ledger; `BUILD-PROMPTS.md` is the historical build plan. This README
+is the user-facing entry point.
 
 ## Versioning
 
-1.0.x is the running release series. v1.0.0–v1.0.3 shipped as
-friends-only unsigned builds during V1/V2 + the audit pass. v1.0.4 is
-the next patch and the milestone of the V3 polish phase (recovery
-from a 24-word backup, custom keybindings, multi-monitor capture,
-light + auto themes, opt-in custom window chrome, the accessibility
-and reduced-motion pass, and the cohesion + copy pass). The version
-number lives in (and must stay consistent across):
+1.x is the running release series, all friends-only unsigned builds.
+v1.0.0–v1.0.3 shipped during V1 + V2 + the audit pass. **v1.0.5** is
+the polished 1.0 — it landed the V3 phase (recovery from a 24-word
+backup, custom keybindings, multi-monitor capture, light + auto
+themes, opt-in custom window chrome, the accessibility and
+reduced-motion pass, and the cohesion + copy pass). **v1.1.0** added
+the pairing QR redesign; **v1.2.0** is the current release (post-1.0
+maintenance fixes plus log/report sharing). Full history in
+`CHANGELOG.md`. The version number lives in (and must stay consistent
+across):
 
 - `package.json` — npm root
 - `package-lock.json` — npm lockfile (two spots: top-level + the
   studyvis package node)
 - `src-tauri/Cargo.toml` — Rust crate
 - `src-tauri/Cargo.lock` — Rust lockfile (the `studyvis` package
-  entry only; other registry crates that happen to read 1.0.x are
-  unrelated)
+  entry only; other registry crates that happen to read a 1.x
+  version are unrelated)
 - `src-tauri/tauri.conf.json` — Tauri bundle metadata (drives
   installer version)
 

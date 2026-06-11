@@ -501,13 +501,13 @@ studyvis/
 │  ├─ unit/
 │  ├─ integration/                # paired peer harness
 │  ├─ ai-eval/                    # labelled screenshots for prompt tuning (V2+)
-│  └─ uat/                        # V3-P10 cold-eyes acceptance-pass artefacts (screenshots, issue log)
+│  └─ uat/                        # acceptance-pass artefacts (screenshots, issue log)
 │
 ├─ PLAN.md
 ├─ ARCHITECTURE.md                # this file
 ├─ DESIGN-SYSTEM.md
-├─ BUILD-PROMPTS.md
-└─ README.md                      # generated last, summary + install
+├─ BUILD-PROMPTS.md               # historical build plan (archived)
+└─ README.md                      # summary + install
 ```
 
 ## 12. Permissions and entitlements

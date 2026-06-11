@@ -1,5 +1,7 @@
 # StudyVis — Build Prompts (V3: finish the product)
 
+> **Historical (archived).** V0 → V3 are all built, merged, and shipped (current line: v1.x — see `CHANGELOG.md`). This document is the original build plan, kept for provenance. It is **not** a live spec or current process — do not paste from it, and don't treat its phase scaffolding (e.g. the V3 phase invariant, the carry-forward debt ledger) as in force. For how to work in this repo today, see `CLAUDE.md`.
+
 > Sequenced, self-contained prompts you paste into Claude Code, one per working session. V0, all of V1, all of V2, and V3-P1 (stats dashboard) are **already built and merged to `main` at v1.0.3** — those prompts have been retired from this document (git history preserves them). What remains is V3: the work that takes StudyVis from *feature-complete* to *a finished product a stranger would call polished*. Run the prompts in order; later ones audit the surface earlier ones create.
 
 ## How to use this document

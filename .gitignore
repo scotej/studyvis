@@ -36,3 +36,11 @@ src-tauri/gen/schemas
 # binaries + companion dylibs/dlls are too large for source control.
 src-tauri/binaries/llama-server-*
 src-tauri/binaries/llama-runtime-*/
+
+# Agent/tool local scratch (settings.local.json already matches *.local above).
+# Worktrees and lock files are per-machine and must never be committed.
+.claude/worktrees/
+.claude/scheduled_tasks.lock
+
+# Impeccable critique-tool output (local review scratch).
+.impeccable/

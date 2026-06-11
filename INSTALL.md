@@ -1,6 +1,6 @@
 # Installing StudyVis
 
-V1 ships unsigned installers for a friends-only audience. Each OS will warn the first time you run the app — the steps below explain how to clear those warnings. After the first launch, the OS remembers your decision and stops asking.
+StudyVis ships unsigned installers for a friends-only audience. Each OS will warn the first time you run the app — the steps below explain how to clear those warnings. After the first launch, the OS remembers your decision and stops asking.
 
 > StudyVis does **not** auto-update. When a new version is available, download the latest installer from the [GitHub Releases page](https://github.com/scotej/studyvis/releases) and re-run the install steps for your OS.
 
@@ -10,7 +10,7 @@ V1 ships unsigned installers for a friends-only audience. Each OS will warn the 
 2. Double-click the `.dmg`. A window opens showing the StudyVis icon and an Applications shortcut. Drag StudyVis into Applications.
 3. Open Finder → Applications. **Right-click** (or Control-click) the StudyVis icon and choose **Open**. macOS shows: _"macOS cannot verify the developer of 'StudyVis'. Are you sure you want to open it?"_. Click **Open**.
 4. Subsequent launches do not re-prompt — double-click works normally.
-5. The first time you join a session, macOS asks for camera and microphone permission. Allow both. (StudyVis V1 does not request screen-recording permission; that arrives in V2 with AI features.)
+5. The first time you join a session, macOS asks for camera and microphone permission. Allow both. (Screen-recording permission is requested separately, and only if you turn on AI features.)
 
 ## Windows 10 / 11
 
@@ -21,7 +21,7 @@ V1 ships unsigned installers for a friends-only audience. Each OS will warn the 
 
 ## Linux
 
-Linux installers are not in V1. WebKitGTK's `getDisplayMedia` support was not validated during the V0 sanity check; Linux returns in V3 once that path is verified. If you want to try the development build today, clone the repo and run `npm run tauri dev`.
+Linux installers are not available yet. WebKitGTK's `getDisplayMedia` support was not validated during the V0 sanity check; Linux returns once that path is verified. If you want to try the development build today, clone the repo and run `npm run tauri dev`.
 
 ## Updating
 

@@ -1,0 +1,128 @@
+name: Release prep
+
+# One-click release cutting. Bumps the version across all five tracked files,
+# commits + tags on main, and kicks off the Release build (which produces a
+# draft GitHub Release for you to review and publish). Run from the Actions tab.
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_type:
+        description: 'Version bump'
+        type: choice
+        options: [patch, minor, major, custom]
+        default: patch
+      custom_version:
+        description: 'Exact version, e.g. 1.2.0 (only used when bump = custom)'
+        type: string
+        default: ''
+
+permissions:
+  contents: write # push the bump commit + tag to main
+  actions: write # dispatch release.yml
+
+concurrency:
+  group: release-prep
+  cancel-in-progress: false
+
+jobs:
+  prep:
+    name: Bump, tag, trigger build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: main
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+
+      - name: Compute next version
+        id: ver
+        env:
+          RELEASE_TYPE: ${{ inputs.release_type }}
+          CUSTOM_VERSION: ${{ inputs.custom_version }}
+        run: |
+          set -euo pipefail
+          current=$(node -p "require('./package.json').version")
+          IFS='.' read -r MA MI PA <<< "$current"
+          case "$RELEASE_TYPE" in
+            major)  NEW="$((MA + 1)).0.0" ;;
+            minor)  NEW="${MA}.$((MI + 1)).0" ;;
+            patch)  NEW="${MA}.${MI}.$((PA + 1))" ;;
+            custom) NEW="$CUSTOM_VERSION" ;;
+            *)      echo "::error::unknown release_type '$RELEASE_TYPE'"; exit 1 ;;
+          esac
+          if [[ ! "$NEW" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::computed version '$NEW' is not X.Y.Z (custom needs a value)"; exit 1
+          fi
+          if git ls-remote --exit-code --tags origin "refs/tags/v$NEW" >/dev/null 2>&1; then
+            echo "::error::tag v$NEW already exists on origin"; exit 1
+          fi
+          echo "Bumping $current -> $NEW"
+          echo "new=$NEW" >> "$GITHUB_OUTPUT"
+
+      - name: Bump version in all five files
+        env:
+          NEW: ${{ steps.ver.outputs.new }}
+        run: |
+          set -euo pipefail
+          # package.json + package-lock.json (both lock entries) in one shot.
+          npm version "$NEW" --no-git-tag-version --allow-same-version
+          # tauri.conf.json: the single top-level "version".
+          perl -0pi -e 's/("version":\s*)"[^"]*"/$1"$ENV{NEW}"/' src-tauri/tauri.conf.json
+          # Cargo.toml: only the version inside the [package] table.
+          perl -0pi -e 's/(\[package\][^\[]*?\nversion\s*=\s*)"[^"]*"/$1"$ENV{NEW}"/s' src-tauri/Cargo.toml
+          # Cargo.lock: the studyvis package's own entry.
+          perl -0pi -e 's/(name = "studyvis"\nversion = )"[^"]*"/$1"$ENV{NEW}"/' src-tauri/Cargo.lock
+          echo "Changed files:" && git --no-pager diff --name-only
+
+      - name: Commit, tag, push
+        env:
+          NEW: ${{ steps.ver.outputs.new }}
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add package.json package-lock.json \
+                  src-tauri/Cargo.toml src-tauri/tauri.conf.json src-tauri/Cargo.lock
+          git commit -m "chore(release): v$NEW"
+          git tag -a "v$NEW" -m "StudyVis v$NEW"
+          git push origin main
+          git push origin "v$NEW"
+
+      - name: Trigger Release build
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NEW: ${{ steps.ver.outputs.new }}
+        run: |
+          set -euo pipefail
+          # The tag push above used GITHUB_TOKEN, so it did not fire release.yml's
+          # push trigger. Dispatch it explicitly on the new tag ref. Retry: the
+          # ref can lag a beat behind the push.
+          for attempt in 1 2 3; do
+            if gh workflow run release.yml --ref "v$NEW"; then
+              echo "Dispatched release.yml on v$NEW"; exit 0
+            fi
+            echo "Attempt $attempt failed; retrying in 5s..."
+            sleep 5
+          done
+          echo "::error::could not dispatch release.yml; the tag v$NEW is pushed — run Release manually on it"
+          exit 1
+
+      - name: Summary
+        if: always()
+        env:
+          NEW: ${{ steps.ver.outputs.new }}
+        run: |
+          {
+            echo "### Release prep: v${NEW:-?}"
+            echo ""
+            echo "- Bumped version to **v${NEW}** and pushed tag \`v${NEW}\` to main"
+            echo "- Triggered the **Release** build (draft GitHub Release)"
+            echo ""
+            echo "Review and publish the draft once the build finishes:"
+            echo "<https://github.com/${{ github.repository }}/releases>"
+          } >> "$GITHUB_STEP_SUMMARY"

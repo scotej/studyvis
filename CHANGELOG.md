@@ -7,13 +7,16 @@ in `PLAN.md`. Each build prompt landed as a single squash-merged PR;
 the history below collapses to the user-facing story rather than the
 per-PR ledger.
 
-v1.0.0 through v1.0.3 shipped during V1 + V2 + the audit pass; v1.0.4
-is the next patch and the milestone of the V3 polish phase. It is the
-polished 1.0 `PLAN.md` set out to build — feature-complete (V1's
-study-with-friends loop, V2's on-device AI focus detection, V3's
-breadth + polish) and gated by the success-criteria walkthrough in
-PR #40 (every V1 + V2 criterion explicitly met-with-evidence or
-deferred-with-reason).
+v1.0.0 through v1.0.3 shipped during V1 + V2 + the audit pass. The V3
+polish phase landed in **v1.0.5** — the polished 1.0 `PLAN.md` set out
+to build: feature-complete (V1's study-with-friends loop, V2's
+on-device AI focus detection, V3's breadth + polish) and gated by the
+success-criteria walkthrough in PR #40 (every V1 + V2 criterion
+explicitly met-with-evidence or deferred-with-reason). **v1.1.0** and
+**v1.2.0** followed with a feature pass and post-1.0 maintenance. (The
+V3 work was drafted as v1.0.4 but shipped under the **v1.0.5** tag —
+there is no v1.0.4 tag; the section below is labelled by the tag that
+shipped it.)
 
 ## 1.2.0 — 2026-06-07 — post-1.0 fixes and feature improvements
 
@@ -60,11 +63,34 @@ improvements.
   a second `main` landmark; the titlebar resize listener no longer
   leaks; the audit log pins to the newest row without a one-frame jump.
 
-## 1.0.4 — 2026-05-20 — V3 polish, the polished 1.0
+## 1.1.0 — 2026-06-06 — Pairing QR redesign
 
-The patch release that lands the V3 phase. Carries V1 + V2 + V3 in
-one installer. See "Friends-only unsigned" install notes in
-`INSTALL.md` and the user-facing tour in `README.md`.
+### Changed
+
+- **Pairing QR redesign (#42).** Reworked the add-a-friend pairing
+  surface and its QR-code presentation for a calmer, clearer exchange
+  of the one-time 12-word code.
+
+## 1.0.5 — 2026-05-31 — V3 polish, the polished 1.0
+
+The release that lands the V3 phase (shipped under the v1.0.5 tag;
+v1.0.4 was drafted but never tagged). Carries V1 + V2 + V3 in one
+installer. See
+"Friends-only unsigned" install notes in `INSTALL.md` and the
+user-facing tour in `README.md`.
+
+### Release hardening (cut into v1.0.5)
+
+- **Session UX recovery.** Camera/mic errors recover with clear copy
+  and a retry; a persistent AI status indicator and labelled footer
+  timers; leaving a session now requires confirmation on Esc; the
+  self-warning and break badges no longer fight for one slot.
+- **Onboarding critique resolved** — control, privacy, a11y, layout,
+  and polish fixes across the onboarding flow.
+- **Accessibility.** Focus states differentiated beyond color;
+  `PttIndicator` note corrected; `aria-describedby` on audit rows.
+- **Release pipeline.** Dropped the macOS Intel build target; releases
+  are marked prerelease until reviewed.
 
 ### V3 — polish and breadth
 

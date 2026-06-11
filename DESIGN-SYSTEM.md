@@ -509,7 +509,7 @@ Every component that fetches or computes anything async ships three states:
 ## 11. Accessibility
 
 - Every interactive element keyboard-reachable (Tab order matches DOM order; `tabIndex={0}` only when needed).
-- Visible focus ring (`shadow.glow` + `border.strong`) on focused element. Implementation uses the existing tokens via per-component `focus-visible:` utilities (every primitive in `src/components/ui/` and the V3-P6 `<TitleBar />` controls ship one); the global `:focus-visible { outline: none }` reset relies on this convention. The V3-P7 axe-core gate covers DOM and ARIA semantics; pixel-level focus-indicator visibility is verified by manual walk-through (V3-P10's cold-eyes pass exercises it on the live app).
+- Visible focus ring (`shadow.glow` + `border.strong`) on focused element. Implementation uses the existing tokens via per-component `focus-visible:` utilities (every primitive in `src/components/ui/` and the V3-P6 `<TitleBar />` controls ship one); the global `:focus-visible { outline: none }` reset relies on this convention. The axe-core gate (`npm run check-a11y`) covers DOM and ARIA semantics; pixel-level focus-indicator visibility is verified by manual walk-through on the live app.
 - Icon-only buttons get `aria-label`.
 - Color contrast ≥ WCAG AA on all text + background pairings (verified by `scripts/check-contrast.ts` over both themes; V3-P5).
 - Dynamic events (audit log) use `role="log"` + `aria-live="polite"`; alerts use `role="alert"` + `aria-live="assertive"`; status surfaces (AI response bubble, self-warning badge, break countdown) use `role="status"` + `aria-live="polite"`.
