@@ -29,9 +29,10 @@ export async function saveIdentityRecord(
 
 export async function saveKeys(
   edPrivHex: string,
-  xPrivHex: string
+  xPrivHex: string,
+  overwrite: boolean
 ): Promise<void> {
-  await invoke('identity_save_keys', { edPrivHex, xPrivHex })
+  await invoke('identity_save_keys', { edPrivHex, xPrivHex, overwrite })
 }
 
 export async function signWithKeyring(

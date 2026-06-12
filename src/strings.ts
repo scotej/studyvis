@@ -159,6 +159,12 @@ export const strings = {
       ariaLabel: 'Save your recovery phrase',
       heading: 'Save these 24 words somewhere safe',
       body: 'If you lose this laptop, these words are the only way to recover this identity. Pen and paper. No cloud sync.',
+      // Shown when creating a new identity is refused because this device's
+      // keychain already holds keys (e.g. identity.json was deleted but the
+      // keychain entry survived). Creating fresh would abandon those keys, so
+      // we steer the user back to the restore-from-backup path instead.
+      keysExistError:
+        'This device already has identity keys. Go back and choose "I have a backup" to restore them.',
     },
     backup: {
       wordlistAriaLabel: '24-word recovery phrase',
@@ -186,11 +192,26 @@ export const strings = {
         body: "This writes recovered keys over the ones already here. The current identity stays only on whatever device still has it, and this can't be undone.",
         cta: 'Replace identity',
       },
+      // D5 — shown only when the typed words recompute to a DIFFERENT identity
+      // than the one already on this device. The replacement is real and
+      // friends won't recognize the new key until you re-pair, so the copy
+      // names that consequence plainly without scare tactics.
+      confirmDifferent: {
+        ariaLabel: 'Confirm replacing with a different identity',
+        heading: 'These are different words.',
+        body: "This backup is a different identity from the one on this device. Restoring it replaces your current identity — friends who know your current key won't recognize the new one until you pair with them again. This can't be undone.",
+        cta: 'Replace identity',
+      },
       done: {
         ariaLabel: 'Identity restored',
         cta: 'Continue',
         heading: 'Identity restored.',
         body: "Your friends list didn't come with it. They don't know this device is you yet, so you'll pair with them again.",
+        // D5 — same words re-committed over the identity already on this
+        // device: friends and history are untouched, so the re-pair copy
+        // above would be false here.
+        bodySame:
+          'Same identity, same device — your friends and history are untouched.',
       },
       errors: {
         empty: 'Type your 24-word backup to continue.',
@@ -201,6 +222,18 @@ export const strings = {
         invalid:
           "Those 24 words don't add up. Check for a typo or a word out of place against your written copy.",
       },
+    },
+    // D1 — shown when identity.json exists but couldn't be read. The keys are
+    // still in the keychain; this screen never offers create-new (which would
+    // overwrite them), only Retry and Recover-from-backup.
+    loadError: {
+      ariaLabel: "Couldn't read your identity",
+      heading: "We couldn't read your identity file",
+      body: "Your identity didn't load this time. Your keys are still safe in this device's keychain — this is usually a temporary read issue, so trying again often fixes it.",
+      recoverNote:
+        'Still stuck? If you have your 24-word backup, you can restore your identity from it.',
+      retryCta: 'Try again',
+      recoverCta: 'Restore from backup',
     },
   },
 
@@ -622,7 +655,41 @@ export const strings = {
       },
       recoveryPhrase: {
         label: 'Recovery phrase',
-        help: "Your 24-word backup shows once during setup and isn't saved here. Keep the original safe — it's the only way to recover this identity, by re-deriving it on a fresh install.",
+        // D4 — honest copy: the 24 words are never persisted, so they cannot be
+        // re-shown here. Offers the realistic alternatives instead of a dead row.
+        help: "Your 24-word backup is shown once during setup and never saved, so it can't be shown again here. Keep the original safe — it's the only way to move or recover this identity.",
+        restoreCta: 'Restore a different identity',
+        restoreHelp:
+          'Moving from another device, or restoring a backup? This replaces the identity on this device with your 24 words.',
+        lostNote:
+          "Lost your 24 words? They can't be recovered. You'd start fresh with a new identity and pair with your friends again.",
+      },
+      // D3 — local friends-list backup/restore, encrypted to your own key.
+      // Pairs with the 24-word recovery, which restores only the keypair.
+      friendsBackup: {
+        label: 'Friends backup',
+        help: 'Your 24 words restore your identity, but not your friends list. Save an encrypted copy to keep alongside them — only this identity can open it.',
+        exportCta: 'Export friends',
+        exportAriaLabel: 'Export your friends list to a file',
+        importCta: 'Import friends',
+        importAriaLabel: 'Import a friends list from a file',
+        fileFilterName: 'StudyVis friends backup',
+        exportDefaultName: 'studyvis-friends',
+        exportedToast: (count: number) =>
+          count === 1
+            ? 'Saved 1 friend to your backup.'
+            : `Saved ${count} friends to your backup.`,
+        exportEmptyToast: 'No friends yet — nothing to back up.',
+        exportErrorFallback: "Couldn't save your friends backup.",
+        importedToast: (imported: number, updated: number) => {
+          const added =
+            imported === 1 ? '1 friend added' : `${imported} friends added`
+          const refreshed = updated === 1 ? '1 updated' : `${updated} updated`
+          return `Imported: ${added}, ${refreshed}.`
+        },
+        importDifferentIdentity:
+          'That backup belongs to a different identity, so it stays encrypted. Use the backup you made with these 24 words.',
+        importErrorFallback: "Couldn't import that friends backup.",
       },
     },
 

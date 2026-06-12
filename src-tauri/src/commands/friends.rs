@@ -145,6 +145,12 @@ pub fn friends_export(state: State<'_, DbPool>, path: String) -> Result<u32, Str
         let conn = lock(&state)?;
         friends::list(&conn).map_err(|e| e.to_string())?
     };
+    // No friends → write nothing and report 0, so the frontend's "nothing to
+    // back up" toast doesn't contradict a file sitting on disk at the chosen
+    // path. (An empty sealed backup is harmless, just pointless.)
+    if rows.is_empty() {
+        return Ok(0);
+    }
     let my_x_priv = crate::commands::identity::load_x_priv()?;
     let my_x_pub = crypto_box::SecretKey::from(my_x_priv).public_key();
     let bytes = encode_backup(my_x_pub.as_bytes(), &rows)?;

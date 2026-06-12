@@ -65,8 +65,28 @@ pub(crate) fn load_x_priv() -> Result<[u8; X_KEY_LEN], String> {
         .map_err(|_| format!("x25519 priv key must be {PRIV_KEY_LEN} bytes"))
 }
 
+// Stable substring the frontend matches to swap the generic save-identity
+// toast for "go back and restore from your backup" steering (see KEYS_EXIST_MARKER
+// in src/features/identity/IdentitySetup.tsx). Keep the two in sync.
+pub(crate) const KEYS_EXIST_MARKER: &str = "identity keys already exist";
+
+// D1 belt-and-braces: refuse to clobber existing keychain keys unless the
+// caller explicitly opts in (`overwrite`). New-identity creation passes false,
+// so a corrupt identity.json load can never silently overwrite a still-valid
+// keypair and strand the friends who know the old pubkey; recovery — which has
+// shown the overwrite confirm — passes true.
+//
+// Idempotency carve-out: when the stored payload is byte-for-byte the incoming
+// keys, writing them again is a no-op, so we accept it even with overwrite=false.
+// This unsticks the create path when a crash lands between save_keys and
+// save_record (orphaned keychain entry, no identity.json): re-running the SAME
+// create succeeds instead of dead-ending on the refuse-to-overwrite error.
 #[tauri::command]
-pub fn identity_save_keys(ed_priv_hex: String, x_priv_hex: String) -> Result<(), String> {
+pub fn identity_save_keys(
+    ed_priv_hex: String,
+    x_priv_hex: String,
+    overwrite: bool,
+) -> Result<(), String> {
     validate_priv_hex("ed_priv_hex", &ed_priv_hex)?;
     validate_priv_hex("x_priv_hex", &x_priv_hex)?;
     let payload = serde_json::to_string(&StoredKeys {
@@ -74,9 +94,20 @@ pub fn identity_save_keys(ed_priv_hex: String, x_priv_hex: String) -> Result<(),
         x_priv_hex,
     })
     .map_err(|e| e.to_string())?;
-    keys_entry()?
-        .set_password(&payload)
-        .map_err(|e| e.to_string())?;
+    let entry = keys_entry()?;
+    if !overwrite {
+        match entry.get_password() {
+            Ok(existing) if existing == payload => return Ok(()),
+            Ok(_) => {
+                return Err(format!(
+                    "{KEYS_EXIST_MARKER}; refusing to overwrite without confirmation"
+                ))
+            }
+            Err(keyring::Error::NoEntry) => {}
+            Err(e) => return Err(e.to_string()),
+        }
+    }
+    entry.set_password(&payload).map_err(|e| e.to_string())?;
     Ok(())
 }
 

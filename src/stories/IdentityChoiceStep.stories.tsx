@@ -19,3 +19,8 @@ export default meta
 type Story = StoryObj<typeof meta>
 
 export const Default: Story = {}
+
+// U3 — the choice fork carries a [Back] to the previous onboarding step.
+export const WithBack: Story = {
+  args: { onBack: noop },
+}

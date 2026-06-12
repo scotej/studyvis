@@ -4,7 +4,11 @@ import { toast } from 'sonner'
 import { type OnboardingStepProgress } from '@/components/OnboardingStep'
 import { strings } from '@/strings'
 
-import { classifyMnemonic, normalizeMnemonicInput } from './recoverLogic'
+import {
+  classifyMnemonic,
+  decideOverwrite,
+  normalizeMnemonicInput,
+} from './recoverLogic'
 import {
   RecoverView,
   type RecoverErrorKind,
@@ -16,6 +20,11 @@ export type RecoverProps = {
   // True when identity.json / the keychain already hold an identity; gates the
   // explicit overwrite confirmation.
   identityExists: boolean
+  // D5 — the stored mnemonic_fingerprint of the identity already on this
+  // device, when one exists. Lets the flow skip the overwrite warning when the
+  // typed words recompute to the same fingerprint (a harmless re-commit) and
+  // escalate the copy when they're a different identity.
+  currentFingerprint?: string | null
   // The identityStore `recover` action: derives keys from the words and
   // returns a deferred commit that writes through the one persistence path.
   recover: (mnemonic: string[]) => { commit: () => Promise<void> }
@@ -28,6 +37,7 @@ export type RecoverProps = {
 export function Recover({
   progress,
   identityExists,
+  currentFingerprint,
   recover,
   onBack,
   onRecovered,
@@ -35,6 +45,13 @@ export function Recover({
   const [value, setValue] = useState('')
   const [phase, setPhase] = useState<RecoverPhase>('input')
   const [error, setError] = useState<RecoverErrorKind | null>(null)
+  // D5 — when the confirm is shown, whether the typed words are a DIFFERENT
+  // identity (escalated copy) or just an unknown-fingerprint legacy record
+  // (generic copy).
+  const [confirmDifferent, setConfirmDifferent] = useState(false)
+  // D5 — true when the typed words re-committed the identity already on this
+  // device, so the done screen mustn't claim friends need re-pairing.
+  const [sameIdentity, setSameIdentity] = useState(false)
   const pendingCommit = useRef<(() => Promise<void>) | null>(null)
 
   const wordCount = normalizeMnemonicInput(value).length
@@ -78,11 +95,20 @@ export function Recover({
       toast.error(strings.common.errors.savingIdentity)
       return
     }
-    if (identityExists) {
-      setPhase('confirm')
+    // D5 — skip the warning when restoring the SAME identity over itself
+    // (harmless), escalate it when the words are a DIFFERENT identity.
+    const decision = decideOverwrite(
+      classified.words,
+      identityExists,
+      currentFingerprint
+    )
+    if (decision === 'commit') {
+      setSameIdentity(identityExists)
+      void commit()
       return
     }
-    void commit()
+    setConfirmDifferent(decision === 'confirm-different')
+    setPhase('confirm')
   }
 
   return (
@@ -93,12 +119,15 @@ export function Recover({
       wordCount={wordCount}
       error={error}
       identityExists={identityExists}
+      confirmDifferent={confirmDifferent}
+      sameIdentity={sameIdentity}
       onChange={handleChange}
       onSubmit={handleSubmit}
       onBack={onBack}
       onConfirmOverwrite={() => void commit()}
       onCancelOverwrite={() => {
         pendingCommit.current = null
+        setConfirmDifferent(false)
         setPhase('input')
       }}
       onDone={onRecovered}

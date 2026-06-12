@@ -20,6 +20,7 @@ export type PermissionsStepViewProps = {
   onGrant: (id: PermissionId) => void
   onOpenSettings: (id: PermissionId) => void
   onContinue: () => void
+  onBack?: () => void
 }
 
 const ROWS: Array<{
@@ -54,6 +55,7 @@ export function PermissionsStepView({
   onGrant,
   onOpenSettings,
   onContinue,
+  onBack,
 }: PermissionsStepViewProps) {
   const anyDenied = ROWS.some((r) => state[r.id] === 'denied')
   // A camera/mic grant flipped on in System Settings only takes effect after a
@@ -67,6 +69,11 @@ export function PermissionsStepView({
     <OnboardingStep
       ariaLabel={strings.onboarding.permissions.ariaLabel}
       progress={progress}
+      secondaryAction={
+        onBack
+          ? { label: strings.common.actions.back, onClick: onBack }
+          : undefined
+      }
       primaryAction={{
         label: strings.common.actions.continue,
         onClick: onContinue,

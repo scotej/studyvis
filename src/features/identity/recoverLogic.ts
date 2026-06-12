@@ -1,4 +1,8 @@
-import { MNEMONIC_WORD_COUNT, isValidMnemonic } from '@/lib/crypto/identity'
+import {
+  MNEMONIC_WORD_COUNT,
+  isValidMnemonic,
+  mnemonicFingerprint,
+} from '@/lib/crypto/identity'
 
 // Someone retyping 24 words from paper will use newlines, double spaces, and
 // stray capitals. @scure/bip39 splits on a single ASCII space and matches the
@@ -27,4 +31,31 @@ export function classifyMnemonic(raw: string): MnemonicClass {
     kind: isValidMnemonic(words) ? 'valid' : 'invalid',
     words,
   }
+}
+
+// D5 — what the recover flow should do once a valid 24-word phrase is entered:
+//   - 'commit'      : no identity on this device, OR the typed words recompute
+//                     to the SAME fingerprint already stored. Restoring the
+//                     same keys over themselves is a harmless no-op, so we skip
+//                     the warning entirely.
+//   - 'confirm'     : an identity exists but its stored fingerprint is unknown
+//                     (legacy record). Fall back to the generic overwrite
+//                     confirm rather than risk a silent clobber.
+//   - 'confirm-different' : the typed words are a DIFFERENT identity; replacing
+//                     is destructive and friends will need the new key — show
+//                     the escalated warning.
+//
+// Pure so the decision is node-testable without the keychain or a DOM harness.
+export type OverwriteDecision = 'commit' | 'confirm' | 'confirm-different'
+
+export function decideOverwrite(
+  words: string[],
+  identityExists: boolean,
+  currentFingerprint: string | null | undefined
+): OverwriteDecision {
+  if (!identityExists) return 'commit'
+  if (!currentFingerprint) return 'confirm'
+  return mnemonicFingerprint(words) === currentFingerprint
+    ? 'commit'
+    : 'confirm-different'
 }

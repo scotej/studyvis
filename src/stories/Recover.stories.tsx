@@ -66,6 +66,16 @@ export const ConfirmOverwrite: Story = {
   },
 }
 
+// D5 — escalated confirm shown when the typed words are a DIFFERENT identity
+// than the one already on this device.
+export const ConfirmDifferentIdentity: Story = {
+  args: {
+    phase: 'confirm',
+    identityExists: true,
+    confirmDifferent: true,
+  },
+}
+
 export const Restored: Story = {
   args: { phase: 'done' },
 }

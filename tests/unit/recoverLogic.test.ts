@@ -2,9 +2,14 @@ import { describe, expect, test } from 'vitest'
 
 import {
   classifyMnemonic,
+  decideOverwrite,
   normalizeMnemonicInput,
 } from '@/features/identity/recoverLogic'
-import { bytesToHex, deriveFromMnemonic } from '@/lib/crypto/identity'
+import {
+  bytesToHex,
+  deriveFromMnemonic,
+  mnemonicFingerprint,
+} from '@/lib/crypto/identity'
 
 // Same Trezor zero-entropy vector locked in identity.test.ts. Recovery must
 // land on this exact key no matter how messily the words were typed.
@@ -55,6 +60,41 @@ describe('classifyMnemonic', () => {
     const result = classifyMnemonic(KNOWN_MNEMONIC)
     expect(result.kind).toBe('valid')
     expect(result.words).toHaveLength(24)
+  })
+})
+
+describe('decideOverwrite (D5: same vs different backup)', () => {
+  const KNOWN_WORDS = KNOWN_MNEMONIC.split(' ')
+  const KNOWN_FP = mnemonicFingerprint(KNOWN_WORDS)
+  // decideOverwrite only fingerprints the words (the caller has already
+  // validated the phrase), so any distinct 24-word array stands in for a
+  // different identity here.
+  const OTHER_WORDS = new Array(24).fill('legal')
+  const OTHER_FP = mnemonicFingerprint(OTHER_WORDS)
+
+  test('no identity on this device → commit (no warning)', () => {
+    expect(decideOverwrite(KNOWN_WORDS, false, null)).toBe('commit')
+    expect(decideOverwrite(KNOWN_WORDS, false, KNOWN_FP)).toBe('commit')
+  })
+
+  test('same words as the stored fingerprint → commit (harmless re-commit)', () => {
+    expect(decideOverwrite(KNOWN_WORDS, true, KNOWN_FP)).toBe('commit')
+  })
+
+  test('different words from the stored fingerprint → confirm-different', () => {
+    expect(decideOverwrite(KNOWN_WORDS, true, OTHER_FP)).toBe(
+      'confirm-different'
+    )
+  })
+
+  test('identity exists but fingerprint unknown (legacy) → generic confirm', () => {
+    expect(decideOverwrite(KNOWN_WORDS, true, null)).toBe('confirm')
+    expect(decideOverwrite(KNOWN_WORDS, true, undefined)).toBe('confirm')
+    expect(decideOverwrite(KNOWN_WORDS, true, '')).toBe('confirm')
+  })
+
+  test('the two reference fingerprints actually differ (guards the fixture)', () => {
+    expect(KNOWN_FP).not.toBe(OTHER_FP)
   })
 })
 

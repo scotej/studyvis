@@ -1,18 +1,42 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { CheckIcon, CopyIcon } from 'lucide-react'
+import { invoke } from '@tauri-apps/api/core'
+import { open, save } from '@tauri-apps/plugin-dialog'
+import {
+  CheckIcon,
+  CopyIcon,
+  DownloadIcon,
+  KeyRoundIcon,
+  UploadIcon,
+} from 'lucide-react'
 import { toast } from 'sonner'
 
 import { SettingsRow, SettingsSection } from '@/components/SettingsRow'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { useIdentity } from '@/features/identity'
+import { useFriendsStore } from '@/stores/friendsStore'
 import { strings } from '@/strings'
 
-export function IdentityCategory() {
+export type IdentityCategoryProps = {
+  // D4 — opens the full-screen Recover flow (lifted to Settings for the <main>
+  // landmark reason). Optional so Storybook can render the category standalone.
+  onRestoreIdentity?: () => void
+}
+
+// The backup file extension friends recognize; the Rust command writes a
+// sealed-box (SVFB v1) and ignores the extension, so this is purely a default.
+const FRIENDS_BACKUP_EXTENSION = 'svfriends'
+const DIFFERENT_IDENTITY_MARKER = 'decrypt failed'
+
+type FriendsImportResult = { imported: number; updated: number }
+
+export function IdentityCategory({ onRestoreIdentity }: IdentityCategoryProps) {
   const { identity, status, actions } = useIdentity()
+  const reloadFriends = useFriendsStore((s) => s.load)
   const [name, setName] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [copied, setCopied] = useState(false)
+  const [backupBusy, setBackupBusy] = useState(false)
   const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const copy = strings.settings.identity
 
@@ -54,6 +78,73 @@ export function IdentityCategory() {
       toast.error(strings.common.errors.copyToClipboard)
     }
   }, [identity])
+
+  const handleExportFriends = useCallback(async () => {
+    setBackupBusy(true)
+    try {
+      const path = await save({
+        defaultPath: `${copy.friendsBackup.exportDefaultName}.${FRIENDS_BACKUP_EXTENSION}`,
+        filters: [
+          {
+            name: copy.friendsBackup.fileFilterName,
+            extensions: [FRIENDS_BACKUP_EXTENSION],
+          },
+        ],
+      })
+      if (path == null) return
+      const count = await invoke<number>('friends_export', { path })
+      toast.success(
+        count === 0
+          ? copy.friendsBackup.exportEmptyToast
+          : copy.friendsBackup.exportedToast(count)
+      )
+    } catch (err) {
+      const message =
+        err instanceof Error
+          ? err.message
+          : copy.friendsBackup.exportErrorFallback
+      toast.error(message)
+    } finally {
+      setBackupBusy(false)
+    }
+  }, [copy.friendsBackup])
+
+  const handleImportFriends = useCallback(async () => {
+    setBackupBusy(true)
+    try {
+      const picked = await open({
+        multiple: false,
+        directory: false,
+        filters: [
+          {
+            name: copy.friendsBackup.fileFilterName,
+            extensions: [FRIENDS_BACKUP_EXTENSION],
+          },
+        ],
+      })
+      const path = typeof picked === 'string' ? picked : null
+      if (path == null) return
+      const result = await invoke<FriendsImportResult>('friends_import', {
+        path,
+      })
+      await reloadFriends()
+      toast.success(
+        copy.friendsBackup.importedToast(result.imported, result.updated)
+      )
+    } catch (err) {
+      // The Rust command returns "decrypt failed: this backup belongs to a
+      // different identity" when the file was sealed to another key; map that
+      // to friendly copy instead of leaking the raw string.
+      const raw = err instanceof Error ? err.message : String(err)
+      toast.error(
+        raw.includes(DIFFERENT_IDENTITY_MARKER)
+          ? copy.friendsBackup.importDifferentIdentity
+          : copy.friendsBackup.importErrorFallback
+      )
+    } finally {
+      setBackupBusy(false)
+    }
+  }, [copy.friendsBackup, reloadFriends])
 
   const dirty = name.trim() !== (identity?.display_name ?? '').trim()
   const canSave = dirty && name.trim().length > 0 && !submitting
@@ -118,7 +209,57 @@ export function IdentityCategory() {
       <SettingsRow
         label={copy.recoveryPhrase.label}
         help={copy.recoveryPhrase.help}
-        disabled
+        stack
+        control={
+          <div className="flex flex-col gap-2">
+            <div className="flex items-center gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => onRestoreIdentity?.()}
+                disabled={!onRestoreIdentity}
+              >
+                <KeyRoundIcon /> {copy.recoveryPhrase.restoreCta}
+              </Button>
+            </div>
+            <span className="text-xs text-text-secondary">
+              {copy.recoveryPhrase.restoreHelp}
+            </span>
+            <span className="text-xs text-text-muted">
+              {copy.recoveryPhrase.lostNote}
+            </span>
+          </div>
+        }
+      />
+      <SettingsRow
+        label={copy.friendsBackup.label}
+        help={copy.friendsBackup.help}
+        stack
+        control={
+          <div className="flex items-center gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => void handleExportFriends()}
+              disabled={backupBusy}
+              aria-label={copy.friendsBackup.exportAriaLabel}
+            >
+              <DownloadIcon /> {copy.friendsBackup.exportCta}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => void handleImportFriends()}
+              disabled={backupBusy}
+              aria-label={copy.friendsBackup.importAriaLabel}
+            >
+              <UploadIcon /> {copy.friendsBackup.importCta}
+            </Button>
+          </div>
+        }
       />
     </SettingsSection>
   )

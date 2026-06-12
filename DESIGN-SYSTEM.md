@@ -410,7 +410,7 @@ Mono font for the wordlist. Accent only on the active "Continue" button (disable
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
-Online dot uses `status.online`; offline uses `status.offline`. Invite button is `accent` variant; appears only on hover for online friends to keep the list calm.
+Online dot uses `status.online`; offline uses `status.offline`. The Invite button on online friend rows is always visible at reduced emphasis (`outline` variant at rest) so the action is discoverable on first look and reachable on touch, and elevates to the `accent` fill on row hover / keyboard focus to keep the list calm.
 
 ### 8.3 Session view (3 peers, AI off — V1)
 

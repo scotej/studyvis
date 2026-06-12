@@ -15,7 +15,7 @@ import {
   type PresenceMap,
 } from '@/features/friends'
 import type { ValidInvite } from '@/features/friends'
-import { useIdentity } from '@/features/identity'
+import { IdentityLoadError, useIdentity } from '@/features/identity'
 import { Onboarding, useOnboardingState } from '@/features/onboarding'
 import {
   inviteToCurrentSession,
@@ -178,6 +178,13 @@ export function Home() {
         <span className="sr-only">{strings.common.loading}</span>
       </main>
     )
+  }
+
+  // D1 — identity.json exists but couldn't be read. Never fall through to
+  // Onboarding here; its create path would overwrite the still-valid keychain
+  // keys and strand every friend who knows the old pubkey.
+  if (status === 'error') {
+    return <IdentityLoadError />
   }
 
   if (status === 'absent' || onboarding.status === 'pending') {

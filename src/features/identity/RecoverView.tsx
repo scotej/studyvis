@@ -20,6 +20,12 @@ export type RecoverViewProps = {
   wordCount: number
   error: RecoverErrorKind | null
   identityExists: boolean
+  // D5 — true when the confirm being shown is for a DIFFERENT identity (the
+  // escalated copy), false for the generic overwrite confirm.
+  confirmDifferent?: boolean
+  // D5 — true when the same identity was re-committed over itself; the done
+  // copy must not claim friends need re-pairing.
+  sameIdentity?: boolean
   onChange: (next: string) => void
   onSubmit: () => void
   onBack: () => void
@@ -52,6 +58,8 @@ export function RecoverView({
   wordCount,
   error,
   identityExists,
+  confirmDifferent = false,
+  sameIdentity = false,
   onChange,
   onSubmit,
   onBack,
@@ -60,8 +68,11 @@ export function RecoverView({
   onDone,
 }: RecoverViewProps) {
   if (phase === 'confirm') {
+    const confirmCopy = confirmDifferent
+      ? strings.identity.recover.confirmDifferent
+      : strings.identity.recover.confirm
     const primary: OnboardingStepAction = {
-      label: strings.identity.recover.confirm.cta,
+      label: confirmCopy.cta,
       onClick: onConfirmOverwrite,
     }
     const secondary: OnboardingStepAction = {
@@ -70,17 +81,17 @@ export function RecoverView({
     }
     return (
       <OnboardingStep
-        ariaLabel={strings.identity.recover.confirm.ariaLabel}
+        ariaLabel={confirmCopy.ariaLabel}
         progress={progress}
         primaryAction={primary}
         secondaryAction={secondary}
       >
         <div className="flex w-full max-w-md flex-col items-center gap-3 text-center">
           <h1 className="text-2xl font-semibold tracking-tight">
-            {strings.identity.recover.confirm.heading}
+            {confirmCopy.heading}
           </h1>
           <p className="text-sm leading-snug text-text-secondary">
-            {strings.identity.recover.confirm.body}
+            {confirmCopy.body}
           </p>
         </div>
       </OnboardingStep>
@@ -102,7 +113,9 @@ export function RecoverView({
             {strings.identity.recover.done.heading}
           </h1>
           <p className="text-sm leading-snug text-text-secondary">
-            {strings.identity.recover.done.body}
+            {sameIdentity
+              ? strings.identity.recover.done.bodySame
+              : strings.identity.recover.done.body}
           </p>
         </div>
       </OnboardingStep>

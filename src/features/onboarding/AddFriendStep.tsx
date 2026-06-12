@@ -9,13 +9,18 @@ import { AddFriendStepView } from './AddFriendStepView'
 export type AddFriendStepProps = {
   progress?: OnboardingStepProgress
   onContinue: () => void
+  onBack?: () => void
 }
 
 // The success panel only fires for friends added during this step. We snapshot
 // the baseline once the friends store finishes loading, so legacy users who
 // land here with friends already paired don't see "Paired" before they've
 // done anything — and a fast click-through that races the load doesn't either.
-export function AddFriendStep({ progress, onContinue }: AddFriendStepProps) {
+export function AddFriendStep({
+  progress,
+  onContinue,
+  onBack,
+}: AddFriendStepProps) {
   const friendCount = useFriendsStore((s) => s.friends.length)
   const friendsStatus = useFriendsStore((s) => s.status)
   // Lazy initializer captures the baseline if the store is already loaded at
@@ -42,6 +47,7 @@ export function AddFriendStep({ progress, onContinue }: AddFriendStepProps) {
         justAdded={justAdded}
         onAdd={() => setDialogOpen(true)}
         onContinue={onContinue}
+        onBack={onBack}
       />
       <AddFriendDialog open={dialogOpen} onOpenChange={setDialogOpen} />
     </>

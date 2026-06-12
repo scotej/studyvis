@@ -54,6 +54,8 @@ export const PermissionsAllUnknown: Story = {
   ),
 }
 
+// U3 — Back navigation. From step 2 onward each step carries a [Back]
+// secondary action alongside the primary; this story exercises that footer.
 export const PermissionsMixed: Story = {
   render: () => (
     <PermissionsStepView
@@ -66,6 +68,7 @@ export const PermissionsMixed: Story = {
       onGrant={() => undefined}
       onOpenSettings={() => undefined}
       onContinue={() => undefined}
+      onBack={() => undefined}
     />
   ),
 }
@@ -113,6 +116,9 @@ export const PermissionsInteractive: Story = {
   },
 }
 
+// U3 — also carries the [Back] secondary action so the two-button footer state
+// on this step is exercised by the axe-core gate (the other DisplayName stories
+// omit onBack to cover the single-button footer).
 export const DisplayName: Story = {
   render: () => (
     <DisplayNameStep
@@ -120,6 +126,7 @@ export const DisplayName: Story = {
       submitting={false}
       error={null}
       onSubmit={() => undefined}
+      onBack={() => undefined}
     />
   ),
 }
@@ -148,6 +155,9 @@ export const DisplayNameError: Story = {
   ),
 }
 
+// U3 — carries the [Back] secondary action so the two-button footer state on
+// this step is covered by the axe-core gate (AddFriendPaired omits onBack to
+// cover the single-button footer).
 export const AddFriendInitial: Story = {
   render: () => (
     <AddFriendStepView
@@ -155,6 +165,7 @@ export const AddFriendInitial: Story = {
       justAdded={false}
       onAdd={() => undefined}
       onContinue={() => undefined}
+      onBack={() => undefined}
     />
   ),
 }
@@ -175,6 +186,7 @@ export const Tutorial: Story = {
     <TutorialStep
       progress={{ current: 6, total: PROGRESS_TOTAL }}
       onContinue={() => undefined}
+      onBack={() => undefined}
     />
   ),
 }

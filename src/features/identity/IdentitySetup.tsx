@@ -17,6 +17,13 @@ export type IdentitySetupProps = {
   progress?: OnboardingStepProgress
 }
 
+// Stable substring of the Rust identity_save_keys "keys already exist" error
+// (see KEYS_EXIST_MARKER in src-tauri/src/commands/identity.rs). The create
+// path refuses to clobber an existing keychain entry; when that fires (e.g.
+// identity.json was lost but the keychain survived), steer the user to Back →
+// "I have a backup" instead of dead-ending on the generic save error.
+const KEYS_EXIST_MARKER = 'identity keys already exist'
+
 export function IdentitySetup({
   mnemonic,
   onConfirm,
@@ -33,7 +40,12 @@ export function IdentitySetup({
       await onConfirm()
     } catch (err) {
       console.error(err)
-      toast.error(strings.common.errors.savingIdentity)
+      const raw = err instanceof Error ? err.message : String(err)
+      toast.error(
+        raw.includes(KEYS_EXIST_MARKER)
+          ? strings.identity.setup.keysExistError
+          : strings.common.errors.savingIdentity
+      )
     } finally {
       setSubmitting(false)
     }

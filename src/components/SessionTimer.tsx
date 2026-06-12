@@ -7,6 +7,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from '@/components/ui/popover'
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { Separator } from '@/components/ui/separator'
 import type { PomodoroPhase, PomodoroPreset } from '@/lib/pomodoro-types'
 import { cn } from '@/lib/utils'
@@ -135,25 +136,27 @@ export function SessionTimer({
             <p className="text-sm font-medium text-text-primary">
               {strings.pomodoro.startTitle}
             </p>
-            <fieldset className="flex flex-col gap-2 text-sm">
-              <legend className="sr-only">
-                {strings.pomodoro.presetLegend}
-              </legend>
+            <RadioGroup
+              className="gap-2 text-sm"
+              aria-label={strings.pomodoro.presetLegend}
+              value={pickedPreset}
+              onValueChange={(value) =>
+                setPickedPreset(value as PomodoroPreset)
+              }
+            >
               <PresetRadio
                 value="25/5"
                 label={strings.pomodoro.presets['25/5'].label}
                 hint={strings.pomodoro.presets['25/5'].hint}
                 checked={pickedPreset === '25/5'}
-                onSelect={() => setPickedPreset('25/5')}
               />
               <PresetRadio
                 value="50/10"
                 label={strings.pomodoro.presets['50/10'].label}
                 hint={strings.pomodoro.presets['50/10'].hint}
                 checked={pickedPreset === '50/10'}
-                onSelect={() => setPickedPreset('50/10')}
               />
-            </fieldset>
+            </RadioGroup>
             <Separator />
             <Button
               size="sm"
@@ -176,16 +179,16 @@ function PresetRadio({
   label,
   hint,
   checked,
-  onSelect,
 }: {
   value: PomodoroPreset
   label: string
   hint: string
   checked: boolean
-  onSelect: () => void
 }) {
+  const id = `pomodoro-preset-${value}`
   return (
     <label
+      htmlFor={id}
       className={cn(
         'flex cursor-pointer items-start gap-3 rounded-md border px-3 py-2 transition-colors',
         checked
@@ -193,14 +196,7 @@ function PresetRadio({
           : 'border-border-default hover:bg-bg-raised'
       )}
     >
-      <input
-        type="radio"
-        name="pomodoro-preset"
-        value={value}
-        checked={checked}
-        onChange={onSelect}
-        className="mt-1 accent-accent-default"
-      />
+      <RadioGroupItem id={id} value={value} className="mt-1" />
       <span className="flex flex-col">
         <span className="font-medium text-text-primary">{label}</span>
         <span className="text-xs text-text-secondary">{hint}</span>

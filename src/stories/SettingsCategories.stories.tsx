@@ -31,7 +31,7 @@ export default meta
 type Story = StoryObj<typeof meta>
 
 export const Identity: Story = {
-  render: () => <IdentityCategory />,
+  render: () => <IdentityCategory onRestoreIdentity={() => undefined} />,
 }
 
 export const Friends: Story = {
