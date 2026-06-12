@@ -323,6 +323,13 @@ export type SampleLoopOptions = {
   // per-tick (not captured at start) so a mid-session device swap (V1-P11
   // audio swap; future video swap) lands on the same handle.
   getFaceTrack: () => MediaStreamTrack | null
+  // S3 — when the user turns their camera off mid-session the video track is
+  // disabled (still 'live', so getFaceTrack would return it and we'd analyze a
+  // black frame). Read per-tick; when it returns true the loop reschedules
+  // WITHOUT counting a sample (no skipped tally, no streak reset) and WITHOUT
+  // tearing down loop state — mirrors the onBreak / battery-pause pattern so
+  // resume is seamless. Optional; defaults to never-paused.
+  isPaused?: () => boolean
   // Override the per-tick HTTP timeout. Used by tests; production sticks
   // with REQUEST_TIMEOUT_MS.
   requestTimeoutMs?: number
@@ -653,6 +660,13 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
       return
     }
     if (useBreakStore.getState().onBreak) {
+      schedule(nextDelayMs())
+      return
+    }
+    // S3 — camera off: reschedule without counting a sample. No skipped tally
+    // (the user isn't off-task, the input is just absent) and no streak reset,
+    // so focused-time % stays honest across a camera-off window.
+    if (opts.isPaused?.()) {
       schedule(nextDelayMs())
       return
     }

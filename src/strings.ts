@@ -335,6 +335,19 @@ export const strings = {
     },
     leaveCta: 'Leave',
     escLeaveHint: 'Press Esc again to leave.',
+    // U2 — empty-peer waiting state (DESIGN-SYSTEM §10 empty-state: no
+    // spinner, calm copy) shown alongside the self tile while alone.
+    waiting: {
+      // Never-had-peers: the most common first-session moment (you just
+      // invited and are sitting alone).
+      title: 'Waiting for your friend to join…',
+      body: "Your session is live. They'll appear here as soon as they accept your invite.",
+      // Emptied-after-peers (S1 grace window): a friend who'd joined dropped.
+      // Reconnect-flavored, not invite copy — they already accepted.
+      reconnectTitle: 'Waiting for your friend to reconnect…',
+      reconnectBody:
+        "Your session is still live. They'll reappear here if they come back.",
+    },
     peerFallback: (id: string) => `Peer ${id.slice(0, 6)}`,
     selfFallback: 'You',
     broadcasterSelf: 'you',
@@ -358,6 +371,11 @@ export const strings = {
       online: 'Online',
       offline: 'Offline',
       onBreak: 'On break',
+      // F4 — WebRTC connection states surfaced on peer tiles so a mid-ICE
+      // handshake or a failed connection no longer reads as a frozen offline
+      // tile.
+      connecting: 'Connecting…',
+      failed: 'Connection failed',
     },
     badges: {
       selfWarningAriaLabel: 'Self-warning',
@@ -381,6 +399,23 @@ export const strings = {
       micAriaLabel: (label: string) => `Microphone, currently ${label}`,
       menuLabel: 'Microphone',
       empty: 'No microphones detected',
+    },
+    // S3 — local camera on/off control + the explicit peer presentation when
+    // someone has their camera off (a paused tile, never a frozen frame).
+    camera: {
+      // Constant toggle label — pairs with aria-pressed so screen readers
+      // announce "Camera, pressed/not pressed" rather than double-encoding the
+      // state ("Turn camera on, pressed").
+      toggleAriaLabel: 'Camera',
+      offTileLabel: 'Camera off',
+    },
+    // S4 — audio output device picker + per-peer volume.
+    output: {
+      menuLabel: 'Speaker',
+      ariaLabel: (label: string) => `Speaker, currently ${label}`,
+      systemDefault: 'System default',
+      empty: 'No speakers detected',
+      volumeAriaLabel: (name: string) => `Volume for ${name}`,
     },
     errors: {
       leaveFailedFallback: "Couldn't leave the session.",
@@ -406,6 +441,16 @@ export const strings = {
         'Checks are running slower than usual, so StudyVis is spacing them out to ease the load on your machine.',
     },
     full: 'This session is full (4 friends max).',
+    // N4 — quit-during-session confirm. Fired when the user tries to quit
+    // (window close with minimize-to-tray off, tray Quit, macOS Cmd+Q) while
+    // a session is live. The quit was already prevented by Rust; confirm
+    // invokes app_quit(), cancel just closes.
+    quitConfirm: {
+      title: 'Leave your session and quit?',
+      body: "You're in a live session. Quitting now drops you from the call and ends your session for everyone.",
+      cancelCta: 'Stay',
+      confirmCta: 'Leave and quit',
+    },
   },
 
   pomodoro: {
@@ -469,6 +514,14 @@ export const strings = {
     detailsFallback: 'Session details',
     error: "Couldn't load the report.",
     scoreLine: (n: number) => `Score: ${n}/100`,
+    // R1 — unscored session: no gauge, no fabricated 100. Score is null both
+    // when AI was off AND when AI ran but no sample was ever confident, so the
+    // copy stays cause-neutral rather than asserting "AI was off".
+    noScore: {
+      heading: 'No focus score',
+      body: 'No focus score was recorded for this session.',
+      copyLine: 'Score: not recorded',
+    },
     copyCta: 'Copy report',
     copyAriaLabel: 'Copy session report to clipboard',
   },

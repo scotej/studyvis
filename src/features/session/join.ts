@@ -1,3 +1,4 @@
+import { usePttStore } from '@/stores/pttStore'
 import { useSessionStore } from '@/stores/sessionStore'
 
 import {
@@ -14,6 +15,9 @@ export function joinSession(
   sessionTopic: string,
   sessionPassword: string
 ): SessionHandle {
+  // S2 — clear any PTT latched by a dropped Released event before the media-
+  // acquire effect reads it, so the first audio track never comes up live.
+  usePttStore.getState().reset()
   const { room, topic, password } = createGuestRoom(
     sessionTopic,
     sessionPassword

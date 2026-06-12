@@ -474,6 +474,43 @@ describe('startSampleLoop — happy-path tick', () => {
     await handle.stop()
   })
 
+  test('S3 — isPaused (camera off) reschedules without counting a sample, then resumes', async () => {
+    const clock = new FakeClock()
+    const fetchMock = vi.fn(async () => judgmentResponse('on_task'))
+    const captureFace = vi.fn(async () => 'face-b64')
+    const track = makeFakeTrack()
+    let paused = true
+
+    __setSampleLoopRuntime(
+      buildSampleLoopRuntime({
+        clock,
+        fetch: fetchMock as never,
+        captureFace,
+      })
+    )
+    const handle = startSampleLoop({
+      getTopic: () => 'maths',
+      modelId: 'test-model',
+      getFaceTrack: () => track,
+      isPaused: () => paused,
+    })
+
+    await flushMicrotasks(10)
+    // Camera off — the tick must reschedule WITHOUT capturing or counting.
+    await clock.advance(5000)
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect(captureFace).not.toHaveBeenCalled()
+    expect(useFocusStore.getState().totalSamples).toBe(0)
+    expect(useFocusStore.getState().skippedSamples).toBe(0)
+
+    // Camera back on — the very next tick proceeds normally; loop state intact.
+    paused = false
+    await clock.advance(5000)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(useFocusStore.getState().lastSampleAt).toBe(10000)
+    await handle.stop()
+  })
+
   test('A5 — re-reads the sidecar port after capture; bails when it changed', async () => {
     const clock = new FakeClock()
     const fetchMock = vi.fn(async () => judgmentResponse('on_task'))

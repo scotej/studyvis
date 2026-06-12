@@ -38,6 +38,14 @@ export function PttListener() {
 
     void wire()
 
+    // No blur-release failsafe: the friends shortcut is a GLOBAL shortcut whose
+    // Released event is delivered system-wide regardless of window focus, so
+    // PTT must keep transmitting while the user works in another app (the whole
+    // point of hold-to-talk during a body-doubling session). Releasing on blur
+    // would cut audio mid-sentence in exactly that scenario. The genuinely
+    // dropped-release case is covered by the store's MAX_HOLD_MS stuck-key
+    // failsafe plus the per-session reset().
+
     return () => {
       cancelled = true
       for (const u of unlisteners) u()

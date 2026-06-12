@@ -143,6 +143,10 @@ export const tokens = {
     auditPanelWidth: 320,
     videoTileMinHeight: 180,
     videoTileMaxHeight: 360,
+    // Post-session focus gauge diameter (DESIGN-SYSTEM §6 motion rule #5 hero
+    // size). Shared so the R1 no-score placeholder occupies the same footprint
+    // as the ScoreGauge it replaces and the hero layout doesn't reflow.
+    scoreGaugeSize: 192,
     // V3-P6 custom window chrome (opt-in). The TitleBar band height is shared
     // across platforms so the wordmark sits at the same vertical centre on
     // macOS (overlapped onto the system traffic-light area via

@@ -1,3 +1,4 @@
+import { usePttStore } from '@/stores/pttStore'
 import { useSessionStore } from '@/stores/sessionStore'
 
 import {
@@ -12,6 +13,9 @@ import {
 // session store so `inviteToCurrentSession` and `SessionView` can pick it up,
 // and returns a handle whose `leave` tears the room down + persists the row.
 export function hostSession(): SessionHandle {
+  // S2 — clear any PTT latched by a dropped Released event before the media-
+  // acquire effect reads it, so the first audio track never comes up live.
+  usePttStore.getState().reset()
   const { room, topic, password } = createHostRoom()
   const startedAt = Date.now()
   const leave = buildLeaveHandler({ room, topic, startedAt })

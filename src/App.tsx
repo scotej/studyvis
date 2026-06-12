@@ -5,7 +5,7 @@ import { TitleBar } from '@/components/TitleBar'
 import { Toaster } from '@/components/ui/sonner'
 import { ApplyReduceMotion } from '@/design/reduce-motion'
 import { ThemeProvider } from '@/design/theme'
-import { PttListener } from '@/features/system'
+import { PttListener, QuitConfirmListener } from '@/features/system'
 import { Home } from '@/routes/Home'
 import { StyleGuide } from '@/routes/StyleGuide'
 import { readWindowStyleBootCache } from '@/stores/settingsStore'
@@ -41,6 +41,7 @@ function App() {
     <ThemeProvider>
       <ApplyReduceMotion />
       <PttListener />
+      <QuitConfirmListener />
       <BrowserRouter>
         <ChromeAwareShell>
           <Routes>

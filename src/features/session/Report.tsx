@@ -269,7 +269,9 @@ export function ReportView({
   const startedAt = session.started_at
   const endedAt = session.ended_at
   const totalMinutes = session.total_minutes ?? 0
-  const score = session.score ?? 100
+  // R1 — a null score means AI focus detection was off (or no confident
+  // sample ran). Render the no-score state, never a fabricated 100/100 gauge.
+  const score = session.score
   const focusedPctRaw = session.focused_pct
   const focusedPctLabel =
     focusedPctRaw == null ? '—' : `${Math.round(focusedPctRaw * 100)}%`
@@ -339,7 +341,11 @@ export function ReportView({
             </p>
             <p className="text-xs text-text-muted">{strings.report.privacy}</p>
           </div>
-          <ScoreGauge score={score} animate={animateScore} />
+          {score == null ? (
+            <NoScore />
+          ) : (
+            <ScoreGauge score={score} animate={animateScore} />
+          )}
         </section>
 
         <Section heading={strings.report.sections.topic.heading}>
@@ -460,6 +466,32 @@ function Empty({ message }: { message: string }) {
     <p className="rounded-md border border-dashed border-border-subtle bg-bg-surface px-3 py-3 text-sm text-text-muted">
       {message}
     </p>
+  )
+}
+
+// R1 — calm in-place substitute for the ScoreGauge when a session has no
+// recorded focus score (AI off / no confident samples). DESIGN-SYSTEM §10
+// empty-state pattern: muted, no spinner, occupies the gauge's footprint so
+// the hero layout doesn't reflow.
+function NoScore() {
+  return (
+    <div
+      role="img"
+      aria-label={strings.report.noScore.heading}
+      className="flex flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-border-subtle bg-bg-surface px-6 py-8 text-center"
+      style={{
+        width: tokens.sizes.scoreGaugeSize,
+        height: tokens.sizes.scoreGaugeSize,
+      }}
+      data-testid="report-no-score"
+    >
+      <span className="text-sm font-medium text-text-secondary">
+        {strings.report.noScore.heading}
+      </span>
+      <span className="text-xs text-text-muted">
+        {strings.report.noScore.body}
+      </span>
+    </div>
   )
 }
 
@@ -601,7 +633,6 @@ function serializeReportToText(data: ResolvedReportData): string {
   const distractions = deriveTopDistractions(auditEvents)
   const breaks = deriveBreaksSummary(auditEvents)
   const totalMinutes = session.total_minutes ?? 0
-  const score = session.score ?? 100
   const focusedPctLabel =
     session.focused_pct == null
       ? '—'
@@ -613,7 +644,10 @@ function serializeReportToText(data: ResolvedReportData): string {
   const lines: string[] = [
     formatTopicHeading(session.declared_topic),
     `${strings.report.summaryPrefix}${strings.report.summaryMinutes(totalMinutes)}${strings.report.summaryMiddle}${focusedPctLabel}`,
-    strings.report.scoreLine(score),
+    // R1 — never emit a fabricated 100 for an unscored (AI-off) session.
+    session.score == null
+      ? strings.report.noScore.copyLine
+      : strings.report.scoreLine(session.score),
     '',
     `## ${strings.report.sections.topic.heading}`,
   ]

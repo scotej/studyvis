@@ -159,14 +159,21 @@ export const useFocusStore = create<FocusState>((set, get) => ({
 // decouples the report from that invariant and from a future StrictMode /
 // HMR double-mount.
 export type FocusSnapshot = {
-  score: number
+  // R1 — null when no confident sample ran (AI off, or a session of pure
+  // parse failures where every tick was skipped/uncertain). `totalSamples`
+  // already excludes uncertain/skipped samples (A2/A3), so this is the single
+  // gate: 0 confident samples → unscored, not a fabricated 100. Persisting a
+  // null keeps statsData.averageScore honest and lets the Report render its
+  // no-AI state instead of a fake 100/100 gauge.
+  score: number | null
   focusedPct: number | null
 }
 
 export function snapshotFocusForReport(): FocusSnapshot {
   const s = useFocusStore.getState()
+  const scored = s.totalSamples > 0
   return {
-    score: s.machine.score,
-    focusedPct: s.totalSamples > 0 ? s.onTaskSamples / s.totalSamples : null,
+    score: scored ? s.machine.score : null,
+    focusedPct: scored ? s.onTaskSamples / s.totalSamples : null,
   }
 }

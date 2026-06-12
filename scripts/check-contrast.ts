@@ -202,6 +202,13 @@ const PAIRINGS: Pairing[] = [
     bg: [tok(['bg', 'raised'])],
     kind: 'text-normal',
   },
+  {
+    id: 'text-muted on bg-sunk',
+    where: 'S3 camera-off placeholder + U2 waiting-tile body',
+    fg: tok(['text', 'muted']),
+    bg: [tok(['bg', 'sunk'])],
+    kind: 'text-normal',
+  },
 
   // ── accent on accent (button fills, badges) ─────────────────────────
   {
@@ -454,6 +461,15 @@ const PAIRINGS: Pairing[] = [
     fg: tok(['border', 'strong']),
     bg: [tok(['bg', 'sunk'])],
     kind: 'ui-component',
+    severity: 'info',
+  },
+  {
+    id: 'border-subtle on bg-sunk',
+    where:
+      'U2 WaitingTile dashed outline (also IdentityCategory / ModelPicker)',
+    fg: tok(['border', 'subtle']),
+    bg: [tok(['bg', 'sunk'])],
+    kind: 'border',
     severity: 'info',
   },
 ]

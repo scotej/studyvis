@@ -174,9 +174,27 @@ describe('useFocusStore', () => {
     expect(s.onTaskSamples).toBe(3)
   })
 
-  test('snapshotFocusForReport returns null focused_pct when no samples ran', () => {
+  test('snapshotFocusForReport returns null score AND focused_pct when no samples ran', () => {
+    // R1 — an AI-off session (or one of pure parse failures) ran no confident
+    // samples, so the report must record an UNSCORED session, not the
+    // fabricated INITIAL_SCORE.
     const snap = snapshotFocusForReport()
-    expect(snap.score).toBe(INITIAL_SCORE)
+    expect(snap.score).toBeNull()
+    expect(snap.focusedPct).toBeNull()
+  })
+
+  test('snapshotFocusForReport stays unscored when only uncertain samples ran', () => {
+    // R1 + A2 — a session where every tick was a parse failure has
+    // totalSamples === 0 (uncertain samples land in skippedSamples), so it
+    // must be unscored rather than reporting the untouched INITIAL_SCORE.
+    const state = useFocusStore.getState()
+    state.applyJudgment(UNCERTAIN)
+    state.applyJudgment(UNCERTAIN)
+    const s = useFocusStore.getState()
+    expect(s.totalSamples).toBe(0)
+    expect(s.skippedSamples).toBe(2)
+    const snap = snapshotFocusForReport()
+    expect(snap.score).toBeNull()
     expect(snap.focusedPct).toBeNull()
   })
 

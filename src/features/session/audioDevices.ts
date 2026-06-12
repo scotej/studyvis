@@ -60,6 +60,42 @@ function labelForUnnamed(deviceId: string): string {
   return `Microphone ${deviceId.slice(0, 6)}`
 }
 
+// S4 — audio OUTPUT enumeration for the speaker/headphone picker. Routing is
+// applied per-tile via HTMLMediaElement.setSinkId; see setSinkIdSupported().
+export async function listAudioOutputs(): Promise<AudioInputOption[]> {
+  if (
+    typeof navigator === 'undefined' ||
+    !navigator.mediaDevices ||
+    typeof navigator.mediaDevices.enumerateDevices !== 'function'
+  ) {
+    return []
+  }
+  const all = await navigator.mediaDevices.enumerateDevices()
+  return all
+    .filter((d) => d.kind === 'audiooutput')
+    .map((d) => ({
+      deviceId: d.deviceId,
+      label: d.label || labelForUnnamedOutput(d.deviceId),
+    }))
+}
+
+function labelForUnnamedOutput(deviceId: string): string {
+  if (deviceId === AUDIO_DEVICE_DEFAULT_ID) return 'System default'
+  return `Speaker ${deviceId.slice(0, 6)}`
+}
+
+// S4 — feature-detect HTMLMediaElement.setSinkId. macOS WKWebView does NOT
+// implement it (and WebView2 does), so the output picker must hide rather than
+// offer a control that silently no-ops. Checking the prototype avoids
+// constructing a throwaway element when the DOM is absent (Vitest/node).
+export function setSinkIdSupported(): boolean {
+  if (typeof HTMLMediaElement === 'undefined') return false
+  const proto = HTMLMediaElement.prototype as {
+    setSinkId?: (id: string) => Promise<void>
+  }
+  return typeof proto.setSinkId === 'function'
+}
+
 export async function swapAudioInput(
   nextDeviceId: string,
   deps: SwapAudioInputDeps,
