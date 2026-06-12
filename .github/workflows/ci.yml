@@ -53,6 +53,9 @@ jobs:
       - name: Token enforcement
         run: npm run check-tokens
 
+      - name: Strings-module enforcement
+        run: npm run check-strings
+
       - name: Contrast audit (WCAG AA over token pairs, both themes)
         run: npm run check-contrast
 
