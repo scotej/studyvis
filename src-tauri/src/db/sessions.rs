@@ -107,9 +107,32 @@ pub fn insert(conn: &Connection, row: &SessionRow) -> Result<()> {
     Ok(())
 }
 
+// Session deletion removes the audit_events for the same topic in the same
+// transaction: `sessions.id` IS the session topic and `audit_events.session_id`
+// references it (001_initial.sql has no FK, so the cascade is manual here).
+pub fn delete(conn: &mut Connection, id: &str) -> Result<usize> {
+    let tx = conn.transaction()?;
+    tx.execute(
+        "DELETE FROM audit_events WHERE session_id = ?1",
+        params![id],
+    )?;
+    let deleted = tx.execute("DELETE FROM sessions WHERE id = ?1", params![id])?;
+    tx.commit()?;
+    Ok(deleted)
+}
+
+pub fn clear_all(conn: &mut Connection) -> Result<usize> {
+    let tx = conn.transaction()?;
+    tx.execute("DELETE FROM audit_events", [])?;
+    let deleted = tx.execute("DELETE FROM sessions", [])?;
+    tx.commit()?;
+    Ok(deleted)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::db::audit_events::{self, AuditEventRow};
     use crate::db::migrations;
 
     fn fresh() -> Connection {
@@ -274,5 +297,65 @@ mod tests {
         let conn = fresh();
         let read = get(&conn, "nope").expect("get");
         assert!(read.is_none());
+    }
+
+    fn audit_row(session_id: &str, sig: &str) -> AuditEventRow {
+        AuditEventRow {
+            session_id: session_id.into(),
+            ts: 1_700_000_000_000,
+            who: "ed-pubkey".into(),
+            kind: "joined".into(),
+            detail: "{}".into(),
+            sig: sig.into(),
+        }
+    }
+
+    #[test]
+    fn delete_removes_session_and_its_audit_events_only() {
+        let mut conn = fresh();
+        insert(&conn, &lifecycle_row("topic-a")).expect("insert a");
+        insert(&conn, &lifecycle_row("topic-b")).expect("insert b");
+        audit_events::insert(&conn, &audit_row("topic-a", "sig-a")).expect("audit a");
+        audit_events::insert(&conn, &audit_row("topic-b", "sig-b")).expect("audit b");
+
+        let deleted = delete(&mut conn, "topic-a").expect("delete");
+        assert_eq!(deleted, 1);
+        assert!(get(&conn, "topic-a").expect("get a").is_none());
+        assert!(get(&conn, "topic-b").expect("get b").is_some());
+        assert!(audit_events::list_for_session(&conn, "topic-a")
+            .expect("list a")
+            .is_empty());
+        assert_eq!(
+            audit_events::list_for_session(&conn, "topic-b")
+                .expect("list b")
+                .len(),
+            1
+        );
+    }
+
+    #[test]
+    fn delete_unknown_id_is_a_no_op() {
+        let mut conn = fresh();
+        insert(&conn, &lifecycle_row("topic-a")).expect("insert");
+        let deleted = delete(&mut conn, "nope").expect("delete");
+        assert_eq!(deleted, 0);
+        assert!(get(&conn, "topic-a").expect("get").is_some());
+    }
+
+    #[test]
+    fn clear_all_empties_sessions_and_audit_events() {
+        let mut conn = fresh();
+        insert(&conn, &lifecycle_row("topic-a")).expect("insert a");
+        insert(&conn, &lifecycle_row("topic-b")).expect("insert b");
+        audit_events::insert(&conn, &audit_row("topic-a", "sig-a")).expect("audit a");
+        audit_events::insert(&conn, &audit_row("topic-b", "sig-b")).expect("audit b");
+
+        let deleted = clear_all(&mut conn).expect("clear");
+        assert_eq!(deleted, 2);
+        assert!(list(&conn).expect("list sessions").is_empty());
+        let remaining: i64 = conn
+            .query_row("SELECT COUNT(*) FROM audit_events", [], |r| r.get(0))
+            .expect("count audit");
+        assert_eq!(remaining, 0);
     }
 }

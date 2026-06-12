@@ -372,11 +372,10 @@ pub async fn model_download<R: Runtime>(
             Ok(())
         }
         Err(DownloadError::Cancelled) => {
-            // Best-effort cleanup: every per-file download deletes its own
-            // .tmp on cancel, but if the cancel landed between files we may
-            // already have a verified target file from an earlier file.
-            // Leave verified files in place — the UI's install_state probe
-            // will report partial install and the user can re-download.
+            // No cleanup on cancel: an in-flight file keeps its .tmp so a
+            // later attempt Range-resumes it, and an earlier file's verified
+            // target stays in place — the UI's install_state probe reports
+            // the partial install and the user can re-download.
             emit_progress(
                 &app,
                 &ProgressEvent {
@@ -499,6 +498,7 @@ async fn run_download<R: Runtime>(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn download_one<R: Runtime>(
     app: &AppHandle<R>,
     client: &reqwest::Client,
@@ -518,13 +518,37 @@ async fn download_one<R: Runtime>(
             .unwrap_or_default(),
         TMP_SUFFIX
     ));
-    if tmp.exists() {
-        let _ = fs::remove_file(&tmp);
+
+    // A4 resume: a .tmp left by an interrupted run is kept and continued via
+    // an HTTP Range request. The sha256 hasher is seeded with the bytes
+    // already on disk so end-of-stream verification still covers the whole
+    // file. A .tmp at or past the expected size can't be range-resumed (the
+    // server would answer 416 Range Not Satisfiable) — start that one over.
+    let mut hasher = Sha256::new();
+    let mut resume_offset: u64 = 0;
+    if let Ok(meta) = fs::metadata(&tmp) {
+        if meta.is_file() {
+            if file.size_bytes != 0 && meta.len() >= file.size_bytes {
+                let _ = fs::remove_file(&tmp);
+            } else if meta.len() > 0 {
+                let seed_path = tmp.clone();
+                let (seeded, hashed) =
+                    tauri::async_runtime::spawn_blocking(move || seed_hasher_blocking(&seed_path))
+                        .await
+                        .map_err(|e| DownloadError::Other(e.to_string()))?
+                        .map_err(DownloadError::Other)?;
+                hasher = seeded;
+                resume_offset = hashed;
+            }
+        }
     }
 
     let mut req = client.get(&file.url);
     if let Some(t) = token {
         req = req.bearer_auth(t);
+    }
+    if resume_offset > 0 {
+        req = req.header(reqwest::header::RANGE, format!("bytes={resume_offset}-"));
     }
     let resp = req
         .send()
@@ -543,17 +567,38 @@ async fn download_one<R: Runtime>(
             file.url, status, hint
         )));
     }
-    let total = resp.content_length().unwrap_or(file.size_bytes);
+    // A 200 despite the Range header means the server is replaying the full
+    // file — fall back to truncating and hashing from byte 0.
+    let resumed = resume_offset > 0 && resp.status() == reqwest::StatusCode::PARTIAL_CONTENT;
+    if !resumed && resume_offset > 0 {
+        hasher = Sha256::new();
+        resume_offset = 0;
+    }
+    // For a 206 the response's content_length is only the remaining range, so
+    // the manifest size keeps the UI percentage denominator stable.
+    let total = if resumed {
+        if file.size_bytes != 0 {
+            file.size_bytes
+        } else {
+            resume_offset + resp.content_length().unwrap_or(0)
+        }
+    } else {
+        resp.content_length().unwrap_or(file.size_bytes)
+    };
 
-    let mut file_handle = File::create(&tmp)
-        .map_err(|e| DownloadError::Other(format!("create {}: {e}", tmp.display())))?;
-    let mut hasher = Sha256::new();
-    let mut bytes_received: u64 = 0;
-    let mut last_event_bytes: u64 = 0;
+    let mut file_handle = if resumed {
+        fs::OpenOptions::new().append(true).open(&tmp)
+    } else {
+        File::create(&tmp)
+    }
+    .map_err(|e| DownloadError::Other(format!("open {}: {e}", tmp.display())))?;
+    let mut bytes_received: u64 = resume_offset;
+    let mut last_event_bytes: u64 = resume_offset;
     let mut last_event_at = Instant::now();
 
-    // Emit a 0-byte progress event so the UI sees the per-file phase
-    // transition immediately.
+    // Emit an immediate progress event so the UI sees the per-file phase
+    // transition; bytes_received carries the resumed offset so the
+    // percentage starts where the previous run left off.
     emit_progress(
         app,
         &ProgressEvent {
@@ -561,34 +606,29 @@ async fn download_one<R: Runtime>(
             file: file.kind.label(),
             file_index,
             file_count,
-            bytes_received: 0,
+            bytes_received,
             total_bytes: total,
             phase: ProgressPhase::Downloading,
             error: None,
         },
     );
 
+    // Cancel / stream-error / write-error paths all KEEP the .tmp: the next
+    // attempt resumes from its byte offset, which is exactly the
+    // interrupted-download case Range resume exists for.
     let mut stream = resp.bytes_stream();
     while let Some(chunk_result) = stream.next().await {
         if cancel.load(Ordering::SeqCst) {
-            drop(file_handle);
-            let _ = fs::remove_file(&tmp);
             return Err(DownloadError::Cancelled);
         }
         let chunk = match chunk_result {
             Ok(c) => c,
             Err(e) => {
-                // Drop the handle before remove_file: Windows blocks deletion
-                // of an open file. Mirrors the cancel branch above.
-                drop(file_handle);
-                let _ = fs::remove_file(&tmp);
                 return Err(DownloadError::Other(format!("stream chunk: {e}")));
             }
         };
         hasher.update(&chunk);
         if let Err(e) = file_handle.write_all(&chunk) {
-            drop(file_handle);
-            let _ = fs::remove_file(&tmp);
             return Err(DownloadError::Other(format!(
                 "write {}: {e}",
                 tmp.display()
@@ -619,8 +659,6 @@ async fn download_one<R: Runtime>(
     }
 
     if let Err(e) = file_handle.flush() {
-        drop(file_handle);
-        let _ = fs::remove_file(&tmp);
         return Err(DownloadError::Other(format!(
             "flush {}: {e}",
             tmp.display()
@@ -644,6 +682,8 @@ async fn download_one<R: Runtime>(
         },
     );
 
+    // A short read or hash mismatch means the bytes on disk are wrong —
+    // delete the .tmp so a later resume can't continue from corrupt data.
     if file.size_bytes != 0 && bytes_received != file.size_bytes {
         let _ = fs::remove_file(&tmp);
         return Err(DownloadError::Other(format!(
@@ -709,6 +749,30 @@ fn hash_file_blocking(path: &Path) -> Result<String, String> {
     Ok(hex::encode(hasher.finalize()))
 }
 
+// Seeds a Sha256 with a partial .tmp's bytes so a Range-resumed download
+// still verifies the complete file. Returns the byte count actually hashed —
+// that count (not a separately-stat'd length) is the resume offset sent in
+// the Range header, so hasher state and offset can never disagree.
+fn seed_hasher_blocking(path: &Path) -> Result<(Sha256, u64), String> {
+    use std::io::{BufReader, Read};
+    let file = File::open(path).map_err(|e| format!("open {}: {e}", path.display()))?;
+    let mut reader = BufReader::with_capacity(64 * 1024, file);
+    let mut hasher = Sha256::new();
+    let mut hashed: u64 = 0;
+    let mut buf = [0u8; 64 * 1024];
+    loop {
+        let n = reader
+            .read(&mut buf)
+            .map_err(|e| format!("read {}: {e}", path.display()))?;
+        if n == 0 {
+            break;
+        }
+        hasher.update(&buf[..n]);
+        hashed += n as u64;
+    }
+    Ok((hasher, hashed))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -728,5 +792,25 @@ mod tests {
         assert!(validate_model_id("").is_err());
         assert!(validate_model_id(&"x".repeat(65)).is_err());
         assert!(validate_model_id("with space").is_err());
+    }
+
+    #[test]
+    fn seed_hasher_matches_full_hash_when_remainder_is_appended() {
+        let path = std::env::temp_dir().join(format!("studyvis-seed-test-{}", std::process::id()));
+        let full: Vec<u8> = (0u32..100_000).map(|i| (i % 251) as u8).collect();
+        let split = 33_333;
+        fs::write(&path, &full[..split]).expect("write partial");
+
+        let (mut seeded, hashed) = seed_hasher_blocking(&path).expect("seed");
+        let _ = fs::remove_file(&path);
+        assert_eq!(hashed, split as u64);
+
+        seeded.update(&full[split..]);
+        let mut whole = Sha256::new();
+        whole.update(&full);
+        assert_eq!(
+            hex::encode(seeded.finalize()),
+            hex::encode(whole.finalize())
+        );
     }
 }

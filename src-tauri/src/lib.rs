@@ -10,6 +10,8 @@ use commands::friends::{
     friends_add, friends_get_x_pubkey, friends_list, friends_remove, friends_update_last_studied,
 };
 #[cfg(any(target_os = "macos", target_os = "windows"))]
+use commands::friends::{friends_export, friends_import};
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 use commands::identity::{
     identity_box_decrypt, identity_box_encrypt, identity_exists, identity_load_record,
     identity_save_keys, identity_save_record, identity_sign,
@@ -22,7 +24,8 @@ use commands::models::{
     model_remove, DownloadState,
 };
 use commands::sessions::{
-    audit_event_insert, audit_events_list_for_session, sessions_get, sessions_insert, sessions_list,
+    audit_event_insert, audit_events_list_for_session, sessions_clear_all, sessions_delete,
+    sessions_get, sessions_insert, sessions_list,
 };
 #[cfg(desktop)]
 use commands::sidecar::{
@@ -31,18 +34,32 @@ use commands::sidecar::{
 };
 #[cfg(desktop)]
 use commands::system::{
-    autostart_is_enabled, autostart_set_enabled, system_ai_features_set_enabled, system_battery,
+    app_quit, autostart_is_enabled, autostart_set_enabled, session_set_active,
+    system_ai_features_set_enabled, system_battery, system_fetch_latest_version,
     system_minimize_to_tray_set_enabled, system_open_camera_settings, system_open_data_folder,
     system_open_microphone_settings, system_open_releases, system_open_screen_capture_settings,
     system_relaunch_app, system_set_global_shortcut, AiFeaturesFlag, MinimizeToTrayFlag, QuitFlag,
-    ShortcutBindings,
+    SessionActiveFlag, ShortcutBindings,
 };
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let builder = tauri::Builder::default()
+    let builder = tauri::Builder::default();
+
+    // Registered first so a second launch is rejected before any other
+    // plugin (global shortcuts, tray, presence) initializes in the new
+    // process. The `deep-link` feature forwards a studyvis:// URL from the
+    // second instance's argv into the deep-link plugin's onOpenUrl stream.
+    #[cfg(desktop)]
+    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+        show_main_window(app);
+    }));
+
+    let builder = builder
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_store::Builder::new().build())
         .plugin(tauri_plugin_opener::init());
 
@@ -56,9 +73,15 @@ pub fn run() {
         friends_remove,
         friends_update_last_studied,
         friends_get_x_pubkey,
+        #[cfg(any(target_os = "macos", target_os = "windows"))]
+        friends_export,
+        #[cfg(any(target_os = "macos", target_os = "windows"))]
+        friends_import,
         sessions_insert,
         sessions_list,
         sessions_get,
+        sessions_delete,
+        sessions_clear_all,
         audit_event_insert,
         audit_events_list_for_session,
         #[cfg(any(target_os = "macos", target_os = "windows"))]
@@ -88,6 +111,8 @@ pub fn run() {
         #[cfg(desktop)]
         system_open_releases,
         #[cfg(desktop)]
+        system_fetch_latest_version,
+        #[cfg(desktop)]
         system_open_screen_capture_settings,
         #[cfg(desktop)]
         system_open_camera_settings,
@@ -99,6 +124,10 @@ pub fn run() {
         system_relaunch_app,
         #[cfg(desktop)]
         system_battery,
+        #[cfg(desktop)]
+        session_set_active,
+        #[cfg(desktop)]
+        app_quit,
         #[cfg(desktop)]
         sidecar_start,
         #[cfg(desktop)]
@@ -144,6 +173,12 @@ pub fn run() {
                     // User has opted out of close-to-tray; honor a real quit.
                     // On macOS this matches native Cmd+Q expectation; on
                     // Windows / Linux closing the window exits the process.
+                    // Exception (N4): mid-session the frontend confirms first
+                    // and calls `app_quit` (which arms QuitFlag) to finish.
+                    if SessionActiveFlag::is_active(app) {
+                        api.prevent_close();
+                        request_quit_confirmation(app);
+                    }
                     return;
                 }
                 api.prevent_close();
@@ -158,13 +193,35 @@ pub fn run() {
 
     let app = builder
         .setup(|app| {
-            let pool = db::init(app.handle())
-                .map_err(|e| -> Box<dyn std::error::Error> { format!("db init: {e}").into() })?;
-            app.manage(pool);
+            match db::init(app.handle()) {
+                Ok(outcome) => {
+                    if let Some(corrupt_file) = &outcome.recovered_from {
+                        show_db_recovered_dialog(app.handle(), corrupt_file);
+                    }
+                    app.manage(outcome.pool);
+                }
+                Err(db::DbInitError::NewerVersion(detail)) => {
+                    show_startup_error_and_exit(
+                        app.handle(),
+                        DB_NEWER_VERSION_TITLE,
+                        DB_NEWER_VERSION_BODY,
+                        &detail,
+                    );
+                }
+                Err(db::DbInitError::Unrecoverable(detail)) => {
+                    show_startup_error_and_exit(
+                        app.handle(),
+                        DB_UNRECOVERABLE_TITLE,
+                        DB_UNRECOVERABLE_BODY,
+                        &detail,
+                    );
+                }
+            }
 
             #[cfg(desktop)]
             {
                 app.manage(QuitFlag::new());
+                app.manage(SessionActiveFlag::new());
                 let initial_minimize_to_tray =
                     read_minimize_to_tray_from_settings(app.handle()).unwrap_or(true);
                 app.manage(MinimizeToTrayFlag::new(initial_minimize_to_tray));
@@ -185,11 +242,20 @@ pub fn run() {
 
     // Switching from `.run(generate_context!())` to `.build(...)?.run(|...|)`
     // gives us the RunEvent stream so we can stop the llama-server sidecar
-    // before the Tauri runtime tears down. ExitRequested fires on every
-    // requested shutdown path (tray-quit, Cmd+Q with minimize-to-tray=false,
-    // OS-initiated shutdown); Exit fires after the runtime commits to exit.
-    // Killing in either path is safe — the second hit no-ops because the
-    // child handle has already been taken.
+    // before the Tauri runtime tears down. ExitRequested fires on requested
+    // shutdowns (tray / menu quit via `app.exit(0)`, last-window-closed with
+    // minimize-to-tray off); Exit fires once the runtime commits, including
+    // macOS terminations that never emit ExitRequested. Killing in either
+    // path is safe — the second hit no-ops because the child handle has
+    // already been taken.
+    //
+    // N4 quit interception deliberately does NOT live here: every reachable
+    // quit path is confirmed upstream (CloseRequested for window close,
+    // on_menu_event for tray quit and the macOS Cmd+Q menu item). macOS
+    // Cmd+Q in particular can't be intercepted at this level — the default
+    // menu's predefined Quit maps to `NSApp.terminate:`, which AppKit
+    // commits before any RunEvent is delivered, so setup_desktop swaps it
+    // for a custom menu item instead.
     app.run(|app_handle, event| match event {
         #[cfg(desktop)]
         tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit => {
@@ -197,6 +263,59 @@ pub fn run() {
         }
         _ => {}
     });
+}
+
+// D2 / D6 — these dialogs fire before the webview exists, so the copy lives
+// here rather than `src/strings.ts` (DESIGN-SYSTEM.md §14 voice still
+// applies). All three paths replace the previous `.expect` panic on db init.
+const DB_RECOVERED_TITLE: &str = "Local data was reset";
+const DB_RECOVERED_BODY: &str = "StudyVis couldn't read its saved data, so it set the unreadable \
+     file aside and started fresh. Your identity is safe, but your friends list and session \
+     history couldn't be recovered — you'll need to pair with your friends again.";
+const DB_NEWER_VERSION_TITLE: &str = "Update needed";
+const DB_NEWER_VERSION_BODY: &str = "Your StudyVis data was saved by a newer version of the app. \
+     To keep it safe, this older build won't open it. Install the latest release, then try again.";
+const DB_UNRECOVERABLE_TITLE: &str = "Couldn't start StudyVis";
+const DB_UNRECOVERABLE_BODY: &str = "StudyVis couldn't open its saved data, and starting fresh \
+     didn't work either. Freeing up disk space or restarting your computer may help.";
+
+fn show_db_recovered_dialog<R: tauri::Runtime>(app: &tauri::AppHandle<R>, corrupt_file: &str) {
+    use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
+
+    eprintln!("[db] recovered from corrupt database; old file kept as {corrupt_file}");
+    app.dialog()
+        .message(format!(
+            "{DB_RECOVERED_BODY}\n\nThe old file was kept as {corrupt_file} in the StudyVis data \
+             folder."
+        ))
+        .title(DB_RECOVERED_TITLE)
+        .kind(MessageDialogKind::Warning)
+        .blocking_show();
+}
+
+fn show_startup_error_and_exit<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    title: &str,
+    body: &str,
+    detail: &str,
+) -> ! {
+    use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
+
+    eprintln!("[db] fatal init error: {detail}");
+    app.dialog()
+        .message(format!("{body}\n\nDetails: {detail}"))
+        .title(title)
+        .kind(MessageDialogKind::Error)
+        .blocking_show();
+    std::process::exit(1);
+}
+
+#[cfg(desktop)]
+fn request_quit_confirmation<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    use tauri::Emitter;
+
+    show_main_window(app);
+    let _ = app.emit_to("main", "quit-requested", ());
 }
 
 // Reads the persisted `minimize_to_tray_on_close` flag from
@@ -378,8 +497,15 @@ fn setup_desktop(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>>
         None::<Vec<&str>>,
     ))?;
 
-    // updater registration deferred to V3 — friends-only V1 ships without
-    // auto-update; see V1-P12 scope decision.
+    // macOS registers the studyvis:// scheme at bundle time (CFBundleURLTypes
+    // generated from `plugins.deep-link` in tauri.conf.json); Windows release
+    // builds register via the installer. Dev builds on Windows/Linux need the
+    // runtime registration to point the scheme at the current executable.
+    #[cfg(any(target_os = "linux", all(debug_assertions, windows)))]
+    {
+        use tauri_plugin_deep_link::DeepLinkExt;
+        app.deep_link().register_all()?;
+    }
 
     // Active shortcuts live in `ShortcutBindings::Mutex<Shortcut>` so the
     // V3-P3 `system_set_global_shortcut` command can swap them at runtime.
@@ -448,8 +574,12 @@ fn setup_desktop(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>>
         .on_menu_event(|app, event| match event.id().as_ref() {
             "tray-open" => show_main_window(app),
             "tray-quit" => {
-                QuitFlag::arm(app);
-                app.exit(0);
+                if SessionActiveFlag::is_active(app) {
+                    request_quit_confirmation(app);
+                } else {
+                    QuitFlag::arm(app);
+                    app.exit(0);
+                }
             }
             _ => {}
         })
@@ -475,6 +605,51 @@ fn setup_desktop(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>>
             }
         })
         .build(app)?;
+
+    // N4 — macOS Cmd+Q. The default app menu's Quit is a muda predefined
+    // item wired to native `NSApp.terminate:`; AppKit commits termination
+    // before any Rust code runs (tao implements only
+    // `applicationWillTerminate`), so neither CloseRequested nor
+    // ExitRequested can intercept it mid-session. Swap it for a custom item
+    // with the same accelerator so Cmd+Q routes through `on_menu_event` and
+    // gets the same confirmation gate as tray-quit. If the default menu's
+    // shape ever changes, the guards below leave it untouched and Cmd+Q
+    // falls back to the shipped v1.x instant quit.
+    #[cfg(target_os = "macos")]
+    {
+        const MENU_QUIT_ID: &str = "menu-quit";
+
+        if let Some(menu) = app.menu() {
+            let app_submenu = menu
+                .items()?
+                .into_iter()
+                .next()
+                .and_then(|item| item.as_submenu().cloned());
+            if let Some(app_submenu) = app_submenu {
+                let items = app_submenu.items()?;
+                if let Some(predefined_quit) =
+                    items.last().and_then(|item| item.as_predefined_menuitem())
+                {
+                    let text = predefined_quit.text().unwrap_or_else(|_| "Quit".to_owned());
+                    app_submenu.remove_at(items.len() - 1)?;
+                    let quit_item = MenuItemBuilder::with_id(MENU_QUIT_ID, text)
+                        .accelerator("CmdOrCtrl+Q")
+                        .build(app)?;
+                    app_submenu.append(&quit_item)?;
+                }
+            }
+        }
+        app.on_menu_event(|app, event| {
+            if event.id().as_ref() == MENU_QUIT_ID {
+                if SessionActiveFlag::is_active(app) {
+                    request_quit_confirmation(app);
+                } else {
+                    QuitFlag::arm(app);
+                    app.exit(0);
+                }
+            }
+        });
+    }
 
     // V3-P7 (V3-P6 carryover) — Reveal the main window now that chrome has
     // been applied. Configured `visible: false` so the prior code path

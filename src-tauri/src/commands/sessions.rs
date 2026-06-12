@@ -53,6 +53,20 @@ pub fn sessions_get(
 }
 
 #[tauri::command]
+pub fn sessions_delete(state: State<'_, DbPool>, id: String) -> Result<(), String> {
+    let mut conn = lock(&state)?;
+    sessions::delete(&mut conn, &id).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn sessions_clear_all(state: State<'_, DbPool>) -> Result<(), String> {
+    let mut conn = lock(&state)?;
+    sessions::clear_all(&mut conn).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
 pub fn audit_event_insert(
     state: State<'_, DbPool>,
     session_id: String,

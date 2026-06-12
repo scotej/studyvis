@@ -56,6 +56,15 @@ fn load_stored() -> Result<StoredKeys, String> {
     serde_json::from_str(&payload).map_err(|e| format!("parse stored keys: {e}"))
 }
 
+pub(crate) fn load_x_priv() -> Result<[u8; X_KEY_LEN], String> {
+    let stored = load_stored()?;
+    let bytes = hex::decode(&stored.x_priv_hex).map_err(|e| e.to_string())?;
+    bytes
+        .as_slice()
+        .try_into()
+        .map_err(|_| format!("x25519 priv key must be {PRIV_KEY_LEN} bytes"))
+}
+
 #[tauri::command]
 pub fn identity_save_keys(ed_priv_hex: String, x_priv_hex: String) -> Result<(), String> {
     validate_priv_hex("ed_priv_hex", &ed_priv_hex)?;

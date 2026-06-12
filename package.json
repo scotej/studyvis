@@ -30,6 +30,8 @@
     "@noble/hashes": "^2.2.0",
     "@scure/bip39": "^2.2.0",
     "@tauri-apps/api": "^2.11.0",
+    "@tauri-apps/plugin-deep-link": "^2.4.9",
+    "@tauri-apps/plugin-dialog": "^2.7.1",
     "@tauri-apps/plugin-notification": "^2.3.3",
     "@tauri-apps/plugin-store": "^2.4.3",
     "class-variance-authority": "^0.7.1",
