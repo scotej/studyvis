@@ -4,6 +4,10 @@ on:
   push:
     tags:
       - 'v*.*.*'
+  # release-prep pushes the tag with GITHUB_TOKEN, which can't fire the push
+  # trigger above (GitHub's recursive-workflow guard), so it dispatches this
+  # workflow on the tag ref instead — which requires this trigger to exist.
+  workflow_dispatch:
 
 jobs:
   publish:
