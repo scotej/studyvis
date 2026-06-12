@@ -14,12 +14,12 @@ function makeFakeRuntime({
   perCallSec,
   startThrows,
   healthThrows,
-  loadImageThrows,
+  prepareImagesThrows,
 }: {
   perCallSec: number[]
   startThrows?: Error
   healthThrows?: Error
-  loadImageThrows?: Error
+  prepareImagesThrows?: Error
 }): {
   runtime: BenchmarkRuntime
   startedWith: {
@@ -39,9 +39,16 @@ function makeFakeRuntime({
   const bodies: ChatCompletionRequest[] = []
   let stops = 0
   const runtime: BenchmarkRuntime = {
-    loadBenchmarkImage: async () => {
-      if (loadImageThrows) throw loadImageThrows
-      return { base64: 'AAAA', mimeType: 'image/png' }
+    prepareImages: async () => {
+      if (prepareImagesThrows) throw prepareImagesThrows
+      // Distinct face/screen base64 so the test can assert the two image
+      // slots carry different content (the live tick sends a camera frame +
+      // a larger screen frame, never the same image twice).
+      return {
+        faceBase64: 'FACE',
+        screenBase64: 'SCREEN',
+        mimeType: 'image/jpeg',
+      }
     },
     startSidecar: async (params) => {
       if (startThrows) throw startThrows
@@ -102,16 +109,37 @@ describe('runBenchmark', () => {
     expect(env.startedWith[0].mmprojPath).toBe('/p.gguf')
     // Stop fires unconditionally to free RAM after benchmark
     expect(env.stops).toBe(1)
-    // Warmup + 3 measured requests, each carrying the data URI
+    // Warmup + 3 measured requests, each carrying the shared focus shape.
     expect(env.bodies).toHaveLength(4)
-    const dataUriBlock = env.bodies[0].messages[0].content
-    expect(Array.isArray(dataUriBlock)).toBe(true)
-    if (Array.isArray(dataUriBlock)) {
-      const imageBlock = dataUriBlock.find((b) => b.type === 'image_url')
-      expect(imageBlock).toBeDefined()
-      if (imageBlock && imageBlock.type === 'image_url') {
-        expect(imageBlock.image_url.url).toMatch(/^data:image\/png;base64,/)
+    // A1 — the benchmark request must be shape-identical to the live tick:
+    // system prompt + a user turn with one text block and TWO image blocks,
+    // grammar-constrained 200-token decode. This is what makes the measured
+    // p95 (→ sampleIntervalSec) a sustainable cadence.
+    const body = env.bodies[0]
+    expect(body.messages[0]).toMatchObject({ role: 'system' })
+    expect(body.messages[1].role).toBe('user')
+    expect(body.max_tokens).toBe(200)
+    expect(body.temperature).toBe(0)
+    expect(body.response_format.type).toBe('json_object')
+    const userContent = body.messages[1].content
+    expect(Array.isArray(userContent)).toBe(true)
+    if (Array.isArray(userContent)) {
+      expect(userContent[0]).toMatchObject({ type: 'text' })
+      const imageBlocks = userContent.filter((b) => b.type === 'image_url')
+      expect(imageBlocks).toHaveLength(2)
+      const urls = imageBlocks.flatMap((b) =>
+        b.type === 'image_url' ? [b.image_url.url] : []
+      )
+      // Both slots are JPEG (matching the live tick), and they carry distinct
+      // content — a 384 face frame and a 1024-wide screen frame, not the same
+      // image twice (NEW-FINDING-2: the screen slot's larger area is what a
+      // dynamic-resolution ViT actually pays for, so the benchmark must send
+      // it to measure a representative p95).
+      for (const url of urls) {
+        expect(url).toMatch(/^data:image\/jpeg;base64,/)
       }
+      expect(urls[0]).toBe('data:image/jpeg;base64,FACE')
+      expect(urls[1]).toBe('data:image/jpeg;base64,SCREEN')
     }
     // Progress timeline: load-image, starting-sidecar, warmup, 3 samples, done
     const phases = events.map((e) => e.phase)

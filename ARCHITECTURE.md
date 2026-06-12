@@ -319,11 +319,12 @@ loop:
     if user_on_break:
         skip
     if user_on_battery and battery_pct < 20:
-        pause AI; show thermal-aware notice
+        pause AI; show on-battery-paused notice   # battery, not thermal
         sleep(60s); continue
 
     face_frame  = capture_camera_frame()
     screen_grab = capture_primary_display()
+    t0 = now()
     response = POST /v1/chat/completions {
       model: <user's chosen model>,
       messages: [
@@ -338,12 +339,20 @@ loop:
       temperature: 0.0,
       max_tokens: 200,
     }
+    inference_sec = now() - t0
+    update_cadence_backoff(inference_sec, benchmark_p95)   # A6, see below
     judgment = parse_json(response)
+    # A2 — a malformed/empty response is an UNCERTAIN skip (not a fabricated
+    # on_task): it neither resets an off-task streak nor counts toward
+    # focused-time %. A3 — a confident off-task call whose on_topic_confidence
+    # is at/above the user's floor is likewise skipped as uncertain.
     apply_judgment(judgment)
-    sleep(sample_interval)
+    sleep(effective_sample_interval)             # stretched while backed off
 ```
 
-`sample_interval` is set on first run of a chosen model: a 30s benchmark measures p95 inference latency, then `sample_interval = max(5s, ceil(p95 + 1s))`. User can override in settings within `[5s, 30s]`.
+`sample_interval` is set on first run of a chosen model: a 30s benchmark measures p95 inference latency, then `sample_interval = max(5s, ceil(p95 + 1s))`. User can override in settings within `[5s, 30s]`. The benchmark sends the *same* request shape as the live tick (two images — a 384×384 face frame + a ~1024-wide screen frame — the full system prompt, and the grammar-constrained 200-token decode) so its measured p95 reflects real per-tick cost (A1).
+
+**Cadence backoff (A6, local, no telemetry).** ARCHITECTURE originally promised a "thermal-aware notice" but only paused on battery <20% — which never fires on AC, exactly where a fanless laptop throttles under continuous vision inference. There is no portable OS thermal API and no telemetry, so instead the loop watches inference durations: after a few consecutive ticks whose measured inference exceeds `benchmark_p95 × 2.5`, it stretches the cadence (×2) until ticks recover, and fires a single in-voice "checks are running slower than usual" notice once per session. When no benchmark p95 exists the backoff is disabled.
 
 ### Vision model + mmproj pairing
 

@@ -12,7 +12,11 @@ Each block records:
 - Dataset count (entries actually run; subtract skips).
 - False-positive rate (target < 5 % per PLAN §5).
 - False-negative rate.
-- Confusion matrix.
+- Confusion matrix. Includes an `uncertain` predicted column (A2): a parse
+  failure now yields an UNCERTAIN skip, not a fabricated `on_task`. Uncertain
+  predictions are excluded from BOTH the FP and FN rates — an unparseable
+  response is neither a false alarm nor a missed distraction, just a dropped
+  sample — so the rates stay honest.
 - Optional notes on what changed in the prompt this iteration.
 
 V2 ships when **both** Gemma 3 4B and Qwen 2.5-VL-3B clear the FP < 5 %

@@ -95,6 +95,13 @@ function formatBytesGB(bytes: number): string {
   return `${(bytes / 1024 ** 3).toFixed(1)} GB`
 }
 
+// A4 — compact human size for the "X downloaded" resume note. Sub-GB partials
+// (interrupted early) read better in MB.
+function formatBytesHuman(bytes: number): string {
+  if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(1)} GB`
+  return `${Math.max(0, Math.round(bytes / 1024 ** 2))} MB`
+}
+
 function formatBenchmark(result: BenchmarkResult): string {
   return strings.ai.picker.speedSummary(result.p95Sec)
 }
@@ -211,6 +218,13 @@ function ModelCard({
   const isInstalled = installState.modelExists && installState.mmprojExists
   const isPartial =
     !isInstalled && (installState.modelExists || installState.mmprojExists)
+  // A4 — a known partial download (the Rust backend kept the `.tmp` and will
+  // Range-resume it). Only honest when not already installed; don't fabricate
+  // a Resume label without recorded partial state.
+  const interrupted =
+    !isInstalled && record?.interruptedDownload != null
+      ? record.interruptedDownload
+      : null
   const phaseClass = classifyPhase(phase)
   const busy = phaseClass.busy
   const showProgressBar =
@@ -261,6 +275,7 @@ function ModelCard({
           state={state}
           isInstalled={isInstalled}
           isPartial={isPartial}
+          canResume={interrupted != null}
           hfTokenPresent={hfTokenPresent}
           actions={actions}
         />
@@ -298,6 +313,14 @@ function ModelCard({
       {benchmark ? (
         <p className="flex items-center gap-2 text-sm text-status-focused">
           <GaugeIcon /> {formatBenchmark(benchmark)}
+        </p>
+      ) : null}
+
+      {interrupted && !busy ? (
+        <p className="text-xs text-text-secondary">
+          {strings.ai.picker.resumeNote(
+            formatBytesHuman(interrupted.bytesReceived)
+          )}
         </p>
       ) : null}
 
@@ -341,12 +364,16 @@ function CardActions({
   state,
   isInstalled,
   isPartial,
+  canResume,
   hfTokenPresent,
   actions,
 }: {
   state: PickerStateForModel
   isInstalled: boolean
   isPartial: boolean
+  // A4 — a partial download is known on disk; the primary action resumes it
+  // (backend Range-resumes) rather than reading as a fresh download.
+  canResume: boolean
   hfTokenPresent: boolean
   actions: PickerActions
 }) {
@@ -401,7 +428,10 @@ function CardActions({
           onClick={() => actions.onSelect(spec)}
           disabled={blocksGated}
         >
-          <DownloadIcon /> {strings.ai.picker.reDownloadCta}
+          <DownloadIcon />{' '}
+          {canResume
+            ? strings.ai.picker.resumeCta
+            : strings.ai.picker.reDownloadCta}
         </Button>
         <Button
           variant="ghost"
@@ -423,7 +453,8 @@ function CardActions({
       disabled={blocksGated}
       aria-disabled={blocksGated || undefined}
     >
-      <DownloadIcon /> {strings.ai.picker.downloadCta}
+      <DownloadIcon />{' '}
+      {canResume ? strings.ai.picker.resumeCta : strings.ai.picker.downloadCta}
     </Button>
   )
 }

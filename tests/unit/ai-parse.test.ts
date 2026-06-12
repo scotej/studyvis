@@ -17,9 +17,12 @@ const VALID: Judgment = {
 function expectFallback(result: ParseResult, raw: string): void {
   expect(result.ok).toBe(false)
   if (result.ok) return
-  expect(result.fallback.severity).toBe('on_task')
-  expect(result.fallback.on_topic_confidence).toBe(0.5)
-  expect(result.fallback.reasoning.startsWith('parse failed: ')).toBe(true)
+  // A2 — a parse failure is now an UNCERTAIN verdict, NOT a fabricated on_task.
+  // The fallback carries no severity / confidence; the consumer treats it as a
+  // skip that neither resets the streak nor counts toward focused-time %.
+  expect(result.fallback.kind).toBe('uncertain')
+  expect('severity' in result.fallback).toBe(false)
+  expect(result.fallback.reason).toBe(result.reason)
   expect(result.raw).toBe(raw)
   expect(result.reason.length).toBeGreaterThan(0)
 }

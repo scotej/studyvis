@@ -399,6 +399,11 @@ export const strings = {
       aiPausedForBattery: (percent: number) =>
         `AI paused to save battery (${percent}%). Plug in or charge above 20% to resume.`,
       aiResumed: 'AI resumed.',
+      // A6 — one-shot notice when the duration-based cadence backoff engages
+      // (the model is running slower than measured, so checks are spaced out
+      // to give your machine room to cool).
+      aiSlowedDown:
+        'Checks are running slower than usual, so StudyVis is spacing them out to ease the load on your machine.',
     },
     full: 'This session is full (4 friends max).',
   },
@@ -662,6 +667,15 @@ export const strings = {
         help: 'Consecutive off-task samples before your friends see you flagged. Always kept above the warning count.',
         ariaLabel: 'Alert peers after N off-task samples',
       },
+      // A3 — off-task sensitivity. The slider is the on-topic-confidence floor
+      // an off-task call must clear to be SKIPPED, so higher = more off-task
+      // calls survive the gate and count = more flags. Copy below reads in that
+      // (correct) direction; the code gate lives in scoreMachine.step().
+      confidenceFloor: {
+        label: 'Off-task sensitivity',
+        help: 'Higher counts more of the model’s off-task calls against you (more flags). Lower skips the calls the model only half-doubts, so only confident off-task moments count (fewer false alarms). Skipped samples are never held against you.',
+        ariaLabel: 'Off-task sensitivity',
+      },
       // D5/V3-P4 — captureDisplays. Note: sharpened to match the V3-P4
       // contract: "All displays" prompts the OS share picker once per
       // monitor at session start; switching primary→all mid-session takes
@@ -851,6 +865,11 @@ export const strings = {
       reBenchmarkCta: 'Re-benchmark',
       reDownloadCta: 'Re-download',
       downloadCta: 'Download',
+      // A4 — shown when a partial download is known on disk; the backend
+      // resumes from where it stopped via an HTTP Range request.
+      resumeCta: 'Resume download',
+      resumeNote: (received: string) =>
+        `Picks up from where it stopped (${received} downloaded).`,
       removeAriaLabel: (name: string) => `Remove ${name}`,
       speedSummary: (p95Sec: number) =>
         `Speed on your machine: ${p95Sec.toFixed(1)} seconds per check`,

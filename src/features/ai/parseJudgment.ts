@@ -8,9 +8,16 @@
 // Strategy: cheap path first (raw JSON.parse → strip markdown fences →
 // JSON.parse), fall through to a string-aware bracket scanner for embedded
 // objects. On any parse or schema failure we return a structured ok=false
-// result carrying a safe on_task fallback so the sample loop never crashes
-// on a malformed inference. Per ARCHITECTURE.md §8 the default-on-uncertainty
-// is "on_task" — false positives are worse than false negatives.
+// result carrying an UNCERTAIN verdict (A2) so the sample loop never crashes
+// on a malformed inference.
+//
+// A2 — uncertain, NOT on_task. The old fallback fabricated severity:'on_task',
+// which both reset a real in-progress off-task streak AND counted the sample
+// toward focused-time %. A flaky sidecar returning garbage during a genuine
+// distraction would then cancel the pending alert and inflate the report. The
+// uncertain verdict is a skip: it neither resets the streak nor counts toward
+// focused-time %. `'uncertain'` is internal-only and never reaches the signed
+// ai-alert wire (severity ∈ mild/moderate/blatant) or the audit vocabulary.
 //
 // Manual type-guards (matching src/features/friends/inbox.ts and
 // src/features/session/hello.ts) instead of zod: house style avoids runtime
@@ -31,14 +38,28 @@ export type Judgment = {
   on_topic_confidence: number
 }
 
+// A2 — the resolved outcome of one sample as the score machine sees it: either
+// a parsed Judgment (wire severity) or an internal uncertain skip. Used by the
+// sample loop, focusStore, and onScoreEvents so the uncertain case threads
+// end-to-end without ever fabricating a severity.
+export type SampleVerdict = Judgment | UncertainVerdict
+
 export type ParseSuccess = {
   ok: true
   value: Judgment
 }
 
+// A2 — the verdict for a sample whose model response couldn't be parsed into a
+// valid Judgment. Carries no severity: the consumer (sampleLoop → scoreMachine)
+// treats it as an internal `'uncertain'` skip, never a fabricated on_task.
+export type UncertainVerdict = {
+  kind: 'uncertain'
+  reason: string
+}
+
 export type ParseFallback = {
   ok: false
-  fallback: Judgment
+  fallback: UncertainVerdict
   reason: string
   raw: string
 }
@@ -47,6 +68,12 @@ export type ParseResult = ParseSuccess | ParseFallback
 
 function isSeverity(v: unknown): v is Severity {
   return v === 'on_task' || v === 'mild' || v === 'moderate' || v === 'blatant'
+}
+
+// Narrows a SampleVerdict to the uncertain skip (A2). A real Judgment has a
+// wire `severity`; the uncertain verdict has `kind: 'uncertain'` instead.
+export function isUncertainVerdict(v: SampleVerdict): v is UncertainVerdict {
+  return 'kind' in v && v.kind === 'uncertain'
 }
 
 function isJudgment(value: unknown): value is Judgment {
@@ -63,11 +90,7 @@ function isJudgment(value: unknown): value is Judgment {
 function buildFallback(reason: string, raw: string): ParseFallback {
   return {
     ok: false,
-    fallback: {
-      severity: 'on_task',
-      reasoning: `parse failed: ${reason}`,
-      on_topic_confidence: 0.5,
-    },
+    fallback: { kind: 'uncertain', reason },
     reason,
     raw,
   }

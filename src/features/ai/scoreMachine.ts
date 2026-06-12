@@ -52,6 +52,24 @@ export const WARNING_THRESHOLD_MAX = 8
 export const ALERT_THRESHOLD_MIN = 3
 export const ALERT_THRESHOLD_MAX = 12
 
+// A3 — confidence floor for acting on an off-task judgment. When the model
+// reports an off-task severity but its `on_topic_confidence` is at or above
+// this floor (i.e. it's confident the user is ON topic) the off-task signal
+// is too weak to trust, so the sample is treated as UNCERTAIN: it neither
+// extends the off-task streak nor counts toward focused-time %. The doc
+// guidance is "false positives are worse than false negatives" — a shaky
+// off-task call should not nudge or flag the user.
+//
+// Default 0.6: with the V2 prompt, `on_topic_confidence` is the model's
+// confidence the user is on-topic, so an off_task verdict carrying ≥0.6
+// on-topic confidence is self-contradictory enough to discard. Chosen in the
+// suggested 0.55–0.65 band and deliberately mild: a confident off-task call
+// (low on_topic_confidence) is unaffected, so steady-state behaviour for a
+// genuinely distracted user is unchanged. 0 disables the gate.
+export const DEFAULT_CONFIDENCE_FLOOR = 0.6
+export const CONFIDENCE_FLOOR_MIN = 0
+export const CONFIDENCE_FLOOR_MAX = 0.9
+
 // Deduction table keyed by severity. on_task is included for exhaustive
 // coverage but is never used (an on_task sample resets the streak instead
 // of triggering deduction).
@@ -104,14 +122,33 @@ export type ScoreEvent =
       scoreAfter: number
     }
 
+// A2/A3 — `'uncertain'` is an INTERNAL-only severity the score machine accepts
+// for samples it must not act on: a malformed/empty model response (A2) or a
+// low-confidence off-task call below the floor (A3). It never reaches the
+// signed `ai-alert` wire (which only carries mild/moderate/blatant), the audit
+// event vocabulary, or the report — it's consumed entirely inside step() +
+// focusStore. An uncertain sample is the explicit "skip" outcome: it neither
+// resets the off-task streak nor extends it.
+export type InternalSeverity = Severity | 'uncertain'
+
 export type StepInput = {
-  severity: Severity
+  severity: InternalSeverity
   reasoning: string
+  // A3 — the model's reported on-topic confidence ∈ [0,1]. Optional so callers
+  // that already resolved an `'uncertain'` severity (A2) don't have to supply
+  // one. When present alongside an off-task severity, step() applies the
+  // confidence floor below.
+  onTopicConfidence?: number
 }
 
 export type StepResult = {
   state: ScoreMachineState
   events: ScoreEvent[]
+  // A2/A3 — true when this sample was treated as uncertain (a skip): the
+  // streak was left untouched and no events fired. focusStore reads this to
+  // tally skipped samples separately from on-task / off-task ones so an
+  // uncertain sample never inflates (or deflates) focused-time %.
+  uncertain: boolean
 }
 
 export function initialScoreMachineState(): ScoreMachineState {
@@ -171,13 +208,29 @@ function clampInt(
   return rounded
 }
 
+// Clamp the confidence floor into [0, max]. Garbage / out-of-range values
+// collapse to the documented default so an unvalidated settings.json can't
+// disable the gate by accident or push it past 1.
+export function clampConfidenceFloor(n: unknown): number {
+  if (typeof n !== 'number' || !Number.isFinite(n)) {
+    return DEFAULT_CONFIDENCE_FLOOR
+  }
+  if (n < CONFIDENCE_FLOOR_MIN) return CONFIDENCE_FLOOR_MIN
+  if (n > CONFIDENCE_FLOOR_MAX) return CONFIDENCE_FLOOR_MAX
+  return n
+}
+
 export function step(
   prev: ScoreMachineState,
   input: StepInput,
   thresholds: ScoreThresholds = {
     warning: DEFAULT_WARNING_THRESHOLD,
     alert: DEFAULT_ALERT_THRESHOLD,
-  }
+  },
+  // A3 — confidence floor. An off-task severity whose `on_topic_confidence` is
+  // at or above this floor is downgraded to uncertain (a skip). Defaults to
+  // the documented floor; pass 0 to disable the gate.
+  confidenceFloor: number = DEFAULT_CONFIDENCE_FLOOR
 ): StepResult {
   // Defensive normalisation — step() is a public API (re-exported as
   // scoreMachineStep), so a caller passing thresholds straight from
@@ -188,7 +241,31 @@ export function step(
     thresholds.warning,
     thresholds.alert
   )
+  const safeFloor = clampConfidenceFloor(confidenceFloor)
   const { severity, reasoning } = input
+
+  // A2 — an uncertain sample (malformed/empty response, or already-resolved
+  // skip) leaves the streak and latches exactly as they were. It is NOT an
+  // on_task reset (a real off-task bout in progress must survive a flaky
+  // sample) and NOT an off-task increment (it can't trigger a warning/alert).
+  if (severity === 'uncertain') {
+    return { state: prev, events: [], uncertain: true }
+  }
+
+  // A3 — a confident off-task call is one carrying LOW on-topic confidence.
+  // When the model reports an off-task severity but is still ≥floor confident
+  // the user is on topic, the off-task signal is too weak to act on: treat it
+  // as uncertain rather than extend the streak (false positives are worse than
+  // false negatives).
+  if (
+    severity !== 'on_task' &&
+    typeof input.onTopicConfidence === 'number' &&
+    Number.isFinite(input.onTopicConfidence) &&
+    safeFloor > 0 &&
+    input.onTopicConfidence >= safeFloor
+  ) {
+    return { state: prev, events: [], uncertain: true }
+  }
 
   if (severity === 'on_task') {
     if (
@@ -199,7 +276,7 @@ export function step(
     ) {
       // Already in the resting state; return the same object so subscribers
       // don't re-render on a no-op.
-      return { state: prev, events: [] }
+      return { state: prev, events: [], uncertain: false }
     }
     return {
       state: {
@@ -210,9 +287,13 @@ export function step(
         lastSeverity: null,
       },
       events: [],
+      uncertain: false,
     }
   }
 
+  // Past the uncertain + on_task guards, `severity` is a confident off-task
+  // call: one of mild / moderate / blatant.
+  const offTask = severity as Exclude<Severity, 'on_task'>
   const nextCount = prev.consecutiveOffTask + 1
   const events: ScoreEvent[] = []
   let nextScore = prev.score
@@ -229,7 +310,7 @@ export function step(
     warned = true
     events.push({
       type: 'warning',
-      severity: severity as Exclude<Severity, 'on_task'>,
+      severity: offTask,
       reasoning,
     })
   }
@@ -240,11 +321,11 @@ export function step(
   // score past floor in one streak).
   if (!alerted && nextCount >= safeThresholds.alert) {
     alerted = true
-    const deduction = SEVERITY_DEDUCTIONS[severity]
+    const deduction = SEVERITY_DEDUCTIONS[offTask]
     nextScore = Math.max(SCORE_FLOOR, prev.score - deduction)
     events.push({
       type: 'alert',
-      severity: severity as Exclude<Severity, 'on_task'>,
+      severity: offTask,
       reasoning,
       deduction,
       scoreAfter: nextScore,
@@ -257,8 +338,9 @@ export function step(
       consecutiveOffTask: nextCount,
       alertedThisStreak: alerted,
       warnedThisStreak: warned,
-      lastSeverity: severity,
+      lastSeverity: offTask,
     },
     events,
+    uncertain: false,
   }
 }

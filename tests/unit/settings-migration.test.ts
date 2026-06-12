@@ -185,4 +185,36 @@ describe('hydrateValuesFromStore — V1-P11 settings migration', () => {
     const { values } = await hydrateValuesFromStore(store, migrator)
     expect(values.windowStyle).toBe('system')
   })
+
+  // A3 — offTaskConfidenceFloor round-trips through `off_task_confidence_floor`.
+  // Default 0.6 (mirrors scoreMachine.DEFAULT_CONFIDENCE_FLOOR) when missing;
+  // a persisted finite number is read back verbatim (including 0, which is the
+  // "gate disabled" sentinel — readNumber keeps it because 0 is finite).
+  test('defaults offTaskConfidenceFloor to 0.6 when missing', async () => {
+    const store = fakeStore({})
+    const migrator = makeMigrator(null)
+    const { values } = await hydrateValuesFromStore(store, migrator)
+    expect(values.offTaskConfidenceFloor).toBe(0.6)
+  })
+
+  test('reads a persisted offTaskConfidenceFloor verbatim', async () => {
+    const store = fakeStore({ off_task_confidence_floor: 0.8 })
+    const migrator = makeMigrator(null)
+    const { values } = await hydrateValuesFromStore(store, migrator)
+    expect(values.offTaskConfidenceFloor).toBe(0.8)
+  })
+
+  test('preserves a persisted offTaskConfidenceFloor of 0', async () => {
+    const store = fakeStore({ off_task_confidence_floor: 0 })
+    const migrator = makeMigrator(null)
+    const { values } = await hydrateValuesFromStore(store, migrator)
+    expect(values.offTaskConfidenceFloor).toBe(0)
+  })
+
+  test('falls back to the default when offTaskConfidenceFloor is non-numeric', async () => {
+    const store = fakeStore({ off_task_confidence_floor: 'high' })
+    const migrator = makeMigrator(null)
+    const { values } = await hydrateValuesFromStore(store, migrator)
+    expect(values.offTaskConfidenceFloor).toBe(0.6)
+  })
 })

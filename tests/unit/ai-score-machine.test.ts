@@ -16,7 +16,10 @@ import { describe, expect, test } from 'vitest'
 import {
   ALERT_THRESHOLD_MAX,
   ALERT_THRESHOLD_MIN,
+  CONFIDENCE_FLOOR_MAX,
+  CONFIDENCE_FLOOR_MIN,
   DEFAULT_ALERT_THRESHOLD,
+  DEFAULT_CONFIDENCE_FLOOR,
   DEFAULT_WARNING_THRESHOLD,
   INITIAL_SCORE,
   SCORE_FLOOR,
@@ -24,6 +27,7 @@ import {
   WARNING_THRESHOLD_MAX,
   WARNING_THRESHOLD_MIN,
   clampAlertThreshold,
+  clampConfidenceFloor,
   clampWarningThreshold,
   initialScoreMachineState,
   normaliseThresholds,
@@ -379,5 +383,128 @@ describe('V2-P5 acceptance — 10-minute simulated session', () => {
     // hit exactly the predicted value because the machine is deterministic,
     // but the ±1 margin is documented for hand-driven prompt revisions.
     expect(Math.abs(final.score - expectedScore)).toBeLessThanOrEqual(1)
+  })
+})
+
+describe('step — A2 uncertain severity (skip)', () => {
+  test('an uncertain sample at rest emits nothing and stays at rest', () => {
+    const initial = initialScoreMachineState()
+    const result = step(initial, { severity: 'uncertain', reasoning: 'r' })
+    expect(result.events).toEqual([])
+    expect(result.uncertain).toBe(true)
+    expect(result.state).toBe(initial)
+  })
+
+  test('an uncertain sample does NOT reset an in-progress off-task streak', () => {
+    let s = initialScoreMachineState()
+    s = step(s, { severity: 'mild', reasoning: 'a' }).state
+    expect(s.consecutiveOffTask).toBe(1)
+    const result = step(s, { severity: 'uncertain', reasoning: 'flaky' })
+    // Streak, latches, and score all survive the uncertain sample untouched.
+    expect(result.uncertain).toBe(true)
+    expect(result.events).toEqual([])
+    expect(result.state.consecutiveOffTask).toBe(1)
+    expect(result.state.lastSeverity).toBe('mild')
+  })
+
+  test('an uncertain sample does NOT extend the streak toward a warning', () => {
+    let s = initialScoreMachineState()
+    s = step(s, { severity: 'mild', reasoning: 'a' }).state
+    // An uncertain in place of the would-be 2nd off-task sample must NOT fire
+    // the warning (streak length stays 1, not 2).
+    const result = step(s, { severity: 'uncertain', reasoning: 'flaky' })
+    expect(result.events).toEqual([])
+    expect(result.state.consecutiveOffTask).toBe(1)
+  })
+})
+
+describe('step — A3 confidence-floor gating', () => {
+  test('a confident off-task call (low on-topic confidence) is acted on', () => {
+    let s = initialScoreMachineState()
+    // confidence 0.2 < default floor 0.6 → trusted off-task → streak grows.
+    s = step(s, {
+      severity: 'mild',
+      reasoning: 'a',
+      onTopicConfidence: 0.2,
+    }).state
+    expect(s.consecutiveOffTask).toBe(1)
+    const r = step(s, {
+      severity: 'mild',
+      reasoning: 'b',
+      onTopicConfidence: 0.2,
+    })
+    expect(r.uncertain).toBe(false)
+    expect(r.events.some((e) => e.type === 'warning')).toBe(true)
+  })
+
+  test('a shaky off-task call (on-topic confidence ≥ floor) is downgraded to uncertain', () => {
+    const s = initialScoreMachineState()
+    // confidence 0.7 ≥ default floor 0.6 → too weak to trust → skip.
+    const r = step(s, {
+      severity: 'moderate',
+      reasoning: 'maybe distracted',
+      onTopicConfidence: 0.7,
+    })
+    expect(r.uncertain).toBe(true)
+    expect(r.events).toEqual([])
+    expect(r.state.consecutiveOffTask).toBe(0)
+  })
+
+  test('the floor is applied at the boundary (>= floor downgrades)', () => {
+    const s = initialScoreMachineState()
+    const atFloor = step(
+      s,
+      { severity: 'mild', reasoning: 'r', onTopicConfidence: 0.6 },
+      undefined,
+      0.6
+    )
+    expect(atFloor.uncertain).toBe(true)
+    const justBelow = step(
+      s,
+      { severity: 'mild', reasoning: 'r', onTopicConfidence: 0.59 },
+      undefined,
+      0.6
+    )
+    expect(justBelow.uncertain).toBe(false)
+    expect(justBelow.state.consecutiveOffTask).toBe(1)
+  })
+
+  test('floor 0 disables the gate (all off-task calls are trusted)', () => {
+    const s = initialScoreMachineState()
+    const r = step(
+      s,
+      { severity: 'blatant', reasoning: 'r', onTopicConfidence: 0.99 },
+      undefined,
+      0
+    )
+    expect(r.uncertain).toBe(false)
+    expect(r.state.consecutiveOffTask).toBe(1)
+  })
+
+  test('on_task is never gated by the confidence floor', () => {
+    let s = initialScoreMachineState()
+    s = step(s, {
+      severity: 'mild',
+      reasoning: 'a',
+      onTopicConfidence: 0.1,
+    }).state
+    // A high-confidence on_task resets the streak regardless of the floor.
+    const r = step(
+      s,
+      { severity: 'on_task', reasoning: 'b', onTopicConfidence: 0.95 },
+      undefined,
+      0.6
+    )
+    expect(r.uncertain).toBe(false)
+    expect(r.state.consecutiveOffTask).toBe(0)
+  })
+
+  test('clampConfidenceFloor clamps to [min,max] and defaults on garbage', () => {
+    expect(clampConfidenceFloor(-1)).toBe(CONFIDENCE_FLOOR_MIN)
+    expect(clampConfidenceFloor(2)).toBe(CONFIDENCE_FLOOR_MAX)
+    expect(clampConfidenceFloor(0.55)).toBe(0.55)
+    expect(clampConfidenceFloor(NaN)).toBe(DEFAULT_CONFIDENCE_FLOOR)
+    expect(clampConfidenceFloor('x')).toBe(DEFAULT_CONFIDENCE_FLOOR)
+    expect(clampConfidenceFloor(undefined)).toBe(DEFAULT_CONFIDENCE_FLOOR)
   })
 })

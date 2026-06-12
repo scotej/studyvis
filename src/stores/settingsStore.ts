@@ -45,6 +45,12 @@ export type SettingsValues = {
   // are read-only and consumed by `features/ai/focusStore.ts` at apply-time.
   warningThreshold: number
   alertThreshold: number
+  // A3 — off-task confidence floor ∈ [0,1] for the score machine. An off-task
+  // judgment whose `on_topic_confidence` is at or above this floor is treated
+  // as uncertain (skipped) rather than extending the off-task streak. Read
+  // per-sample by `features/ai/focusStore.ts`; the Settings → AI slider sets
+  // it. 0 disables the gate.
+  offTaskConfidenceFloor: number
   // V2-P9 user override for the AI sample interval (seconds). `null` means
   // "use the V2-P2 benchmark's measured cadence" (the default). When set, the
   // sample loop clamps it to the model's measured floor so the user can only
@@ -80,6 +86,7 @@ export const SETTINGS_KEY_TURN_PREF = 'turn_preference'
 export const SETTINGS_KEY_AI_FEATURES = 'ai_features_enabled'
 export const SETTINGS_KEY_WARNING_THRESHOLD = 'warning_threshold'
 export const SETTINGS_KEY_ALERT_THRESHOLD = 'alert_threshold'
+export const SETTINGS_KEY_CONFIDENCE_FLOOR = 'off_task_confidence_floor'
 export const SETTINGS_KEY_SAMPLE_INTERVAL = 'sample_interval_s'
 export const SETTINGS_KEY_PTT_FRIENDS_ACCELERATOR = 'ptt_friends_accelerator'
 export const SETTINGS_KEY_PTT_AI_ACCELERATOR = 'ptt_ai_accelerator'
@@ -100,6 +107,10 @@ export const DEFAULT_SETTINGS: SettingsValues = {
   aiFeaturesEnabled: false,
   warningThreshold: 2,
   alertThreshold: 4,
+  // A3 — mirrors scoreMachine.DEFAULT_CONFIDENCE_FLOOR (0.6). Duplicated here
+  // rather than imported to keep the settings store free of any
+  // `@/features/ai` import (same boundary the threshold defaults respect).
+  offTaskConfidenceFloor: 0.6,
   sampleIntervalSec: null,
   pttFriendsAccelerator: PTT_FRIENDS_DEFAULT_ACCELERATOR,
   pttAiAccelerator: PTT_AI_DEFAULT_ACCELERATOR,
@@ -125,6 +136,10 @@ type SettingsState = {
   setAiFeaturesEnabled: (enabled: boolean) => Promise<void>
   setWarningThreshold: (count: number) => Promise<void>
   setAlertThreshold: (count: number) => Promise<void>
+  // A3 — persist the off-task confidence floor ∈ [0,1]. The slider UI clamps;
+  // focusStore re-clamps via `clampConfidenceFloor` at apply-time so an
+  // out-of-range persisted value can never break a run.
+  setOffTaskConfidenceFloor: (floor: number) => Promise<void>
   // `null` clears the override, falling back to the model benchmark cadence.
   setSampleIntervalSec: (seconds: number | null) => Promise<void>
   // V3-P3 — set the accelerator for one of the two global shortcuts. The
@@ -349,6 +364,7 @@ export async function hydrateValuesFromStore(
     ai: await store.get(SETTINGS_KEY_AI_FEATURES),
     warning: await store.get(SETTINGS_KEY_WARNING_THRESHOLD),
     alert: await store.get(SETTINGS_KEY_ALERT_THRESHOLD),
+    confidenceFloor: await store.get(SETTINGS_KEY_CONFIDENCE_FLOOR),
     sampleInterval: await store.get(SETTINGS_KEY_SAMPLE_INTERVAL),
     pttFriends: await store.get(SETTINGS_KEY_PTT_FRIENDS_ACCELERATOR),
     pttAi: await store.get(SETTINGS_KEY_PTT_AI_ACCELERATOR),
@@ -407,6 +423,10 @@ export async function hydrateValuesFromStore(
         DEFAULT_SETTINGS.warningThreshold
       ),
       alertThreshold: readNumber(stored.alert, DEFAULT_SETTINGS.alertThreshold),
+      offTaskConfidenceFloor: readNumber(
+        stored.confidenceFloor,
+        DEFAULT_SETTINGS.offTaskConfidenceFloor
+      ),
       sampleIntervalSec: readNullableNumber(stored.sampleInterval),
       pttFriendsAccelerator: readAccelerator(
         stored.pttFriends,
@@ -617,6 +637,14 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   setAlertThreshold: async (count) => {
     set((s) => ({ values: { ...s.values, alertThreshold: count } }))
     await writeKey(set, SETTINGS_KEY_ALERT_THRESHOLD, count)
+  },
+
+  // Range enforcement lives in the Settings → AI slider UI; focusStore
+  // re-clamps via `clampConfidenceFloor` at apply-time, so an out-of-range
+  // persisted value can never break a run.
+  setOffTaskConfidenceFloor: async (floor) => {
+    set((s) => ({ values: { ...s.values, offTaskConfidenceFloor: floor } }))
+    await writeKey(set, SETTINGS_KEY_CONFIDENCE_FLOOR, floor)
   },
 
   setSampleIntervalSec: async (seconds) => {

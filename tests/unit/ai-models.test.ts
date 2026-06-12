@@ -286,6 +286,87 @@ describe('useModelStore (LazyStore-backed)', () => {
     expect(state.records).toEqual({})
     expect(state.activeModelId).toBeNull()
   })
+
+  test('A4 — recordInterruptedDownload upserts a partial marker and persists', async () => {
+    const { deps, store } = makeFakeDeps()
+    __setModelStoreDeps(deps)
+    await useModelStore.getState().hydrate()
+    await useModelStore
+      .getState()
+      .recordInterruptedDownload('moondream2', 2_900_000_000)
+    const rec = useModelStore.getState().records['moondream2']
+    expect(rec?.interruptedDownload?.bytesReceived).toBe(2_900_000_000)
+    expect(rec?.installedAt).toBeNull()
+    expect(store.saved).toBe(1)
+  })
+
+  test('A4 — recordInterruptedDownload preserves an existing benchmark', async () => {
+    const { deps } = makeFakeDeps()
+    __setModelStoreDeps(deps)
+    await useModelStore.getState().hydrate()
+    await useModelStore
+      .getState()
+      .recordBenchmark(
+        'qwen2_5-vl-3b',
+        summariseBenchmark({ samplesSec: [3, 4, 5], completedAtSec: 0 })
+      )
+    await useModelStore
+      .getState()
+      .recordInterruptedDownload('qwen2_5-vl-3b', 1_000)
+    const rec = useModelStore.getState().records['qwen2_5-vl-3b']
+    expect(rec?.benchmark?.p95Sec).toBe(5)
+    expect(rec?.interruptedDownload?.bytesReceived).toBe(1_000)
+  })
+
+  test('A4 — recordInstalled clears any prior interruption marker', async () => {
+    const { deps } = makeFakeDeps()
+    __setModelStoreDeps(deps)
+    await useModelStore.getState().hydrate()
+    await useModelStore.getState().recordInterruptedDownload('moondream2', 500)
+    expect(
+      useModelStore.getState().records['moondream2']?.interruptedDownload
+    ).not.toBeNull()
+    await useModelStore.getState().recordInstalled('moondream2', 1234)
+    const rec = useModelStore.getState().records['moondream2']
+    expect(rec?.installedAt).toBe(1234)
+    expect(rec?.interruptedDownload).toBeNull()
+  })
+
+  test('A4 — recordBenchmark preserves an existing interruption marker', async () => {
+    const { deps } = makeFakeDeps()
+    __setModelStoreDeps(deps)
+    await useModelStore.getState().hydrate()
+    await useModelStore
+      .getState()
+      .recordInterruptedDownload('moondream2', 4_096)
+    await useModelStore
+      .getState()
+      .recordBenchmark(
+        'moondream2',
+        summariseBenchmark({ samplesSec: [1, 2, 3], completedAtSec: 0 })
+      )
+    const rec = useModelStore.getState().records['moondream2']
+    expect(rec?.benchmark?.p95Sec).toBe(3)
+    // Carried through rather than dropped — recordBenchmark no longer relies on
+    // recordInstalled having cleared the field first.
+    expect(rec?.interruptedDownload?.bytesReceived).toBe(4_096)
+  })
+
+  test('A4 — clearInterruptedDownload is a no-op when nothing is recorded', async () => {
+    const { deps, store } = makeFakeDeps()
+    __setModelStoreDeps(deps)
+    await useModelStore.getState().hydrate()
+    await useModelStore.getState().clearInterruptedDownload('moondream2')
+    // No record existed, so nothing persisted.
+    expect(store.saved).toBe(0)
+    await useModelStore.getState().recordInterruptedDownload('moondream2', 9)
+    const savesAfterRecord = store.saved
+    await useModelStore.getState().clearInterruptedDownload('moondream2')
+    expect(store.saved).toBe(savesAfterRecord + 1)
+    expect(
+      useModelStore.getState().records['moondream2']?.interruptedDownload
+    ).toBeNull()
+  })
 })
 
 describe('benchmark sample count', () => {

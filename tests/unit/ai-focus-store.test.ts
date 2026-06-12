@@ -13,8 +13,10 @@ import {
   initialScoreMachineState,
   useFocusStore,
 } from '@/features/ai'
-import type { Judgment } from '@/features/ai'
+import type { Judgment, SampleVerdict, UncertainVerdict } from '@/features/ai'
 import { snapshotFocusForReport } from '@/features/ai/focusStore'
+
+const UNCERTAIN: UncertainVerdict = { kind: 'uncertain', reason: 'parse fail' }
 
 function resetStore(): void {
   useFocusStore.setState({
@@ -23,6 +25,7 @@ function resetStore(): void {
     lastSampleAt: null,
     totalSamples: 0,
     onTaskSamples: 0,
+    skippedSamples: 0,
   })
 }
 
@@ -91,7 +94,11 @@ describe('useFocusStore', () => {
   test('threshold reader supplies user-overridden values per call', () => {
     let warning = 3
     let alert = 5
-    __setFocusStoreThresholdReader(() => ({ warning, alert }))
+    __setFocusStoreThresholdReader(() => ({
+      warning,
+      alert,
+      confidenceFloor: 0,
+    }))
     const state = useFocusStore.getState()
     // With warning=3/alert=5, samples 1,2 → silent; 3 → warning; 4 → silent;
     // 5 → alert.
@@ -123,6 +130,7 @@ describe('useFocusStore', () => {
     __setFocusStoreThresholdReader(() => ({
       warning: 'not a number',
       alert: undefined,
+      confidenceFloor: 0,
     }))
     const state = useFocusStore.getState()
     state.applyJudgment(makeJudgment('mild'))
@@ -184,5 +192,76 @@ describe('useFocusStore', () => {
     const snap = snapshotFocusForReport()
     expect(snap.score).toBe(useFocusStore.getState().machine.score)
     expect(snap.focusedPct).toBeCloseTo(4 / 6, 5)
+  })
+
+  test('A2 — an uncertain verdict is tallied as skipped, not toward focused_pct', () => {
+    const state = useFocusStore.getState()
+    state.applyJudgment(makeJudgment('on_task'))
+    const events = state.applyJudgment(UNCERTAIN)
+    expect(events).toEqual([])
+    const s = useFocusStore.getState()
+    // The uncertain sample is counted only as skipped.
+    expect(s.totalSamples).toBe(1)
+    expect(s.onTaskSamples).toBe(1)
+    expect(s.skippedSamples).toBe(1)
+    // focused_pct is over confident samples only: 1/1 = 1.0, not 1/2.
+    expect(snapshotFocusForReport().focusedPct).toBeCloseTo(1, 5)
+  })
+
+  test('A2 — uncertain does not reset an in-progress off-task streak', () => {
+    const state = useFocusStore.getState()
+    state.applyJudgment(makeJudgment('mild'))
+    expect(useFocusStore.getState().machine.consecutiveOffTask).toBe(1)
+    state.applyJudgment(UNCERTAIN)
+    // Streak survives the flaky sample.
+    expect(useFocusStore.getState().machine.consecutiveOffTask).toBe(1)
+    expect(useFocusStore.getState().skippedSamples).toBe(1)
+  })
+
+  test('A3 — a shaky off-task verdict (confidence ≥ floor) is treated as skipped', () => {
+    __setFocusStoreThresholdReader(() => ({
+      warning: DEFAULT_WARNING_THRESHOLD,
+      alert: DEFAULT_ALERT_THRESHOLD,
+      confidenceFloor: 0.6,
+    }))
+    const state = useFocusStore.getState()
+    const shaky: SampleVerdict = {
+      severity: 'moderate',
+      reasoning: 'maybe',
+      on_topic_confidence: 0.8,
+    }
+    const events = state.applyJudgment(shaky)
+    expect(events).toEqual([])
+    const s = useFocusStore.getState()
+    expect(s.machine.consecutiveOffTask).toBe(0)
+    expect(s.skippedSamples).toBe(1)
+    expect(s.totalSamples).toBe(0)
+  })
+
+  test('A3 — a confident off-task verdict (confidence < floor) still flags', () => {
+    __setFocusStoreThresholdReader(() => ({
+      warning: DEFAULT_WARNING_THRESHOLD,
+      alert: DEFAULT_ALERT_THRESHOLD,
+      confidenceFloor: 0.6,
+    }))
+    const state = useFocusStore.getState()
+    const confident: SampleVerdict = {
+      severity: 'mild',
+      reasoning: 'distracted',
+      on_topic_confidence: 0.2,
+    }
+    state.applyJudgment(confident)
+    const warned = state.applyJudgment(confident)
+    expect(warned[0]?.type).toBe('warning')
+    expect(useFocusStore.getState().skippedSamples).toBe(0)
+    expect(useFocusStore.getState().totalSamples).toBe(2)
+  })
+
+  test('reset() clears the skipped tally too', () => {
+    const state = useFocusStore.getState()
+    state.applyJudgment(UNCERTAIN)
+    expect(useFocusStore.getState().skippedSamples).toBe(1)
+    state.reset()
+    expect(useFocusStore.getState().skippedSamples).toBe(0)
   })
 })

@@ -26,6 +26,7 @@ import {
   AI_DIALOG_TOPIC_CHANGE,
   AI_DIALOG_WINDOW_LABEL,
   CaptureError,
+  isUncertainVerdict,
   requestScreenCapturePermission,
   startSampleLoop,
   useBreakStore,
@@ -523,7 +524,7 @@ export function SessionView() {
       getTopic: () => useSessionStore.getState().declaredStudyTopic,
       modelId: activeModelId,
       getFaceTrack: () => localStreamRef.current?.getVideoTracks()[0] ?? null,
-      onScoreEvents: async (events, judgment) => {
+      onScoreEvents: async (events, verdict) => {
         // V2-P6: route every sample's emitted events through the alert
         // dispatcher (warnings → local-only badge + ai_warning audit;
         // alerts → ai_alert audit + signed broadcast + tile highlight).
@@ -532,7 +533,12 @@ export function SessionView() {
         const dispatcher = aiAlertDispatcherRef.current
         if (!dispatcher) return
         await dispatcher.handleScoreEvents(events)
-        dispatcher.handleSeverity(judgment.severity)
+        // A2 — an uncertain sample never carries a wire severity and never
+        // clears the self-warning badge: a flaky response shouldn't cancel a
+        // pending warning. Only a confident judgment drives handleSeverity.
+        if (!isUncertainVerdict(verdict)) {
+          dispatcher.handleSeverity(verdict.severity)
+        }
       },
       onStartFail: (reason, detail) => {
         if (reason === 'no_active_model') {
@@ -572,6 +578,10 @@ export function SessionView() {
       onBatteryResume: () => {
         toast.success(strings.session.errors.aiResumed)
         setAiRuntimeStatus('active')
+      },
+      onThermalBackoff: () => {
+        // A6 — one-shot per session; the loop fires this at most once.
+        toast(strings.session.errors.aiSlowedDown)
       },
     })
     return () => {

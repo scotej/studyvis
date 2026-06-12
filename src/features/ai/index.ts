@@ -52,12 +52,13 @@ export type {
   ModelRecord,
   ModelStoreSnapshot,
   ModelStoreDeps,
+  InterruptedDownload,
 } from './modelStore'
 
 export {
   runBenchmark,
   summariseBenchmark,
-  loadBundledBenchmarkImage,
+  prepareBundledBenchmarkImages,
   __setBenchmarkRuntime,
   __resetBenchmarkRuntime,
   BENCHMARK_SAMPLE_COUNT,
@@ -66,12 +67,18 @@ export type {
   BenchmarkResult,
   BenchmarkProgress,
   BenchmarkRuntime,
+  BenchmarkImages,
   BenchmarkOptions,
   BenchmarkSamplesInput,
   ChatCompletionRequest,
-  ChatMessage,
-  ChatContentBlock,
 } from './benchmark'
+
+export {
+  buildFocusRequest,
+  topicTextBlock,
+  FOCUS_MAX_TOKENS,
+} from './focusRequest'
+export type { FocusChatRequest, FocusRequestArgs } from './focusRequest'
 
 export { captureFace, FACE_FRAME_SIZE, FACE_FRAME_QUALITY } from './captureFace'
 
@@ -116,6 +123,7 @@ export {
 
 export {
   parseJudgment,
+  isUncertainVerdict,
   SEVERITIES,
   __setParseLogger,
   __resetParseLogger,
@@ -123,6 +131,8 @@ export {
 export type {
   Severity,
   Judgment,
+  SampleVerdict,
+  UncertainVerdict,
   ParseResult,
   ParseSuccess,
   ParseFallback,
@@ -150,6 +160,7 @@ export {
   normaliseThresholds,
   clampWarningThreshold,
   clampAlertThreshold,
+  clampConfidenceFloor,
   SEVERITY_DEDUCTIONS,
   INITIAL_SCORE,
   SCORE_FLOOR,
@@ -159,6 +170,9 @@ export {
   WARNING_THRESHOLD_MAX,
   ALERT_THRESHOLD_MIN,
   ALERT_THRESHOLD_MAX,
+  DEFAULT_CONFIDENCE_FLOOR,
+  CONFIDENCE_FLOOR_MIN,
+  CONFIDENCE_FLOOR_MAX,
 } from './scoreMachine'
 export type {
   ScoreMachineState,
@@ -166,6 +180,7 @@ export type {
   ScoreEvent,
   StepInput,
   StepResult,
+  InternalSeverity,
 } from './scoreMachine'
 
 export {
@@ -255,10 +270,17 @@ export {
   FALLBACK_SAMPLE_INTERVAL_SEC,
   MAX_SAMPLE_INTERVAL_SEC,
   effectiveIntervalSec,
+  nextBackoffState,
+  initialBackoffState,
+  SLOW_TICK_FACTOR,
+  BACKOFF_ENGAGE_AFTER,
+  BACKOFF_RECOVER_AFTER,
+  BACKOFF_MULTIPLIER,
 } from './sampleLoop'
 export type {
   SampleLoopRuntime,
   SampleLoopOptions,
   SampleLoopHandle,
   SampleLoopStartReason,
+  BackoffState,
 } from './sampleLoop'
