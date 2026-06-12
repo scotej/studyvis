@@ -34,6 +34,8 @@ describe('isNewerVersion', () => {
     expect(isNewerVersion('1.2.0', 'not-a-version')).toBe(false)
     expect(isNewerVersion('garbage', '2.0.0')).toBe(false)
     expect(isNewerVersion('1.2.0', '1.2.x')).toBe(false)
+    expect(isNewerVersion('1.2.0', '1..2')).toBe(false)
+    expect(isNewerVersion('1.2.0', '1e3.0.0')).toBe(false)
     expect(isNewerVersion('1.2.0', '1.2.3.4')).toBe(false)
   })
 })

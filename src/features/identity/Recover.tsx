@@ -97,6 +97,8 @@ export function Recover({
     }
     // D5 — skip the warning when restoring the SAME identity over itself
     // (harmless), escalate it when the words are a DIFFERENT identity.
+    setSameIdentity(false)
+    setConfirmDifferent(false)
     const decision = decideOverwrite(
       classified.words,
       identityExists,
@@ -127,6 +129,7 @@ export function Recover({
       onConfirmOverwrite={() => void commit()}
       onCancelOverwrite={() => {
         pendingCommit.current = null
+        setSameIdentity(false)
         setConfirmDifferent(false)
         setPhase('input')
       }}

@@ -12,7 +12,9 @@ function parseSegments(version: string): [number, number, number] | null {
   if (parts.length === 0 || parts.length > 3) return null
   const out: number[] = [0, 0, 0]
   for (let i = 0; i < parts.length; i++) {
-    const n = Number(parts[i])
+    const part = parts[i]
+    if (!/^\d+$/.test(part)) return null
+    const n = Number(part)
     if (!Number.isInteger(n) || n < 0) return null
     out[i] = n
   }
