@@ -323,11 +323,23 @@ export function SessionView() {
       }
       localStreamRef.current = null
       setLocalStream(null)
-      // S2 — on every teardown (leave, auto-end, unmount) drop PTT so a held
-      // key at the moment the room closes can't latch active across sessions.
-      usePttStore.getState().reset()
     }
   }, [room, mediaRetryNonce])
+
+  // S2 — on a genuine session teardown (leave, auto-end, unmount) drop PTT so a
+  // held key at the moment the room closes can't latch `active` across sessions.
+  // Keyed on `[room]` ONLY, deliberately separate from the media-acquire effect
+  // above: a "Try again" re-acquire bumps `mediaRetryNonce`, and resetting PTT
+  // on that path would clobber the held state the acquire effect reads back
+  // imperatively (the "mid-hold-unmuted" contract) — the fresh track would come
+  // up muted even though the key is still down. Room changes only on real
+  // teardown, so this fires exactly when intended.
+  useEffect(() => {
+    if (!room) return
+    return () => {
+      usePttStore.getState().reset()
+    }
+  }, [room])
 
   // Bind peer streams to per-peer state. trystero replays existing peers when
   // we register the stream callback, so this works for both already-present

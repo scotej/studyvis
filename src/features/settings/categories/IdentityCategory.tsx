@@ -24,9 +24,14 @@ export type IdentityCategoryProps = {
 }
 
 // The backup file extension friends recognize; the Rust command writes a
-// sealed-box (SVFB v1) and ignores the extension, so this is purely a default.
+// signed sealed-box (SVFB v2) and ignores the extension, so this is purely a
+// default.
 const FRIENDS_BACKUP_EXTENSION = 'svfriends'
-const DIFFERENT_IDENTITY_MARKER = 'decrypt failed'
+// Both the Ed25519 authenticity failure ("this backup belongs to a different
+// identity") and the unseal failure ("decrypt failed: this backup belongs to a
+// different identity") share this substring, so a forged/wrong-identity file
+// maps to the friendly copy either way.
+const DIFFERENT_IDENTITY_MARKER = 'belongs to a different identity'
 
 type FriendsImportResult = { imported: number; updated: number }
 

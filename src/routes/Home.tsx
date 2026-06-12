@@ -42,6 +42,14 @@ export function Home() {
   const onboarding = useOnboardingState()
   const friendsStatus = useFriendsStore((s) => s.status)
   const loadFriends = useFriendsStore((s) => s.load)
+  // F3 — InboxBoot opens the boot-time presence + inbox trystero rooms, and
+  // trystero pins its relay sockets on the FIRST joinRoom for the whole
+  // process. So those rooms must not open until settings hydration has
+  // resolved, or a saved custom-relay list is silently dropped (the rooms
+  // would freeze on the default relays). Gate on hydration finishing — ready
+  // OR error (an error leaves `values` at defaults, so default relays are the
+  // only option anyway and proceeding beats never starting presence/inbox).
+  const settingsStatus = useSettingsStore((s) => s.status)
   const sessionStatus = useSessionStore((s) => s.status)
   const sessionTopic = useSessionStore((s) => s.sessionTopic)
   const [addOpen, setAddOpen] = useState(false)
@@ -196,7 +204,7 @@ export function Home() {
   // subscriptions) on every settings/session toggle. The identity-readiness
   // gate stays — only render once `useIdentity` has resolved to a record.
   const inbox =
-    identity && status === 'ready' ? (
+    identity && status === 'ready' && settingsStatus !== 'loading' ? (
       <InboxBoot
         key="inbox-boot"
         myEdPubkeyHex={identity.ed_pubkey_hex}

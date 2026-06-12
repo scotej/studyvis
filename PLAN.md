@@ -12,7 +12,7 @@ The product exists because every existing alternative either (a) routes everythi
 
 - Small groups of close friends (2–4 per session) who already know each other by name.
 - Hardware floor: 16GB RAM, mid-to-low-tier CPU, no dedicated GPU.
-- Operating systems: macOS (Apple Silicon + Intel), Windows 10/11. Linux is deferred to V3 pending V0 re-run (see §5).
+- Operating systems: macOS (Apple Silicon), Windows 10/11. Linux is deferred to V3 pending V0 re-run (see §5). (The release build ships an Apple-Silicon-only `aarch64` `.dmg` — per-arch, not universal, because the llama-server sidecar is per-arch; see §5 and ARCHITECTURE §2.)
 - Anonymous to the public internet; pseudonymous to friends (chosen display name + Ed25519 keypair).
 - May expand to wider groups later, but every design decision should pass the "would my four friends like this?" test before the "would a stranger trust this?" test.
 

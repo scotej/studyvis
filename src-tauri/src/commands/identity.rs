@@ -65,6 +65,20 @@ pub(crate) fn load_x_priv() -> Result<[u8; X_KEY_LEN], String> {
         .map_err(|_| format!("x25519 priv key must be {PRIV_KEY_LEN} bytes"))
 }
 
+// The user's own Ed25519 signing key, used to authenticate locally-produced
+// artifacts the keychain owner alone should be able to mint (e.g. the friends
+// backup). Mirrors `load_x_priv` — the keychain is the single source of truth,
+// so a backup signed here is verifiable only against this identity's pubkey.
+pub(crate) fn load_ed_signing_key() -> Result<SigningKey, String> {
+    let stored = load_stored()?;
+    let bytes = hex::decode(&stored.ed_priv_hex).map_err(|e| e.to_string())?;
+    let arr: [u8; PRIV_KEY_LEN] = bytes
+        .as_slice()
+        .try_into()
+        .map_err(|_| format!("ed25519 priv key must be {PRIV_KEY_LEN} bytes"))?;
+    Ok(SigningKey::from_bytes(&arr))
+}
+
 // Stable substring the frontend matches to swap the generic save-identity
 // toast for "go back and restore from your backup" steering (see KEYS_EXIST_MARKER
 // in src/features/identity/IdentitySetup.tsx). Keep the two in sync.

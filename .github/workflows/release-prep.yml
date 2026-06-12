@@ -61,6 +61,9 @@ jobs:
       - name: Strings-module enforcement
         run: npm run check-strings
 
+      - name: Contrast (WCAG AA) enforcement
+        run: npm run check-contrast
+
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt

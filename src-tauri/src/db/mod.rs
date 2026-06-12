@@ -54,10 +54,13 @@ pub fn init<R: Runtime>(app: &AppHandle<R>) -> Result<DbInit, DbInitError> {
         Err(OpenError::Other(detail)) => detail,
     };
 
-    // `integrity_check` passing means the file is healthy SQLite and the
-    // failure is environmental (disk full, transient lock) — recreating
-    // would destroy good data for nothing, so bail instead.
-    if integrity_ok(&path) {
+    // Only recreate when `integrity_check` DEFINITIVELY reports corruption.
+    // A healthy-but-locked DB (SQLITE_BUSY) or one we can't open read-only
+    // proves nothing about corruption — and renaming it would split-brain a
+    // double-launch that slipped past the best-effort single-instance guard.
+    // So treat anything short of an explicit non-"ok" verdict as environmental
+    // (disk full, transient lock) and bail, preserving the file.
+    if !is_definitely_corrupt(&path) {
         return Err(DbInitError::Unrecoverable(first_failure));
     }
 
@@ -107,11 +110,26 @@ fn open_and_migrate(path: &Path) -> Result<DbPool, OpenError> {
     }
 }
 
-fn integrity_ok(path: &Path) -> bool {
+// True ONLY when `integrity_check` runs and returns a verdict that is NOT
+// "ok" — i.e. the file is genuinely structurally corrupt. A failure to open
+// read-only or a query error (e.g. SQLITE_BUSY from a concurrent holder)
+// returns false: we couldn't prove corruption, so the caller must preserve the
+// file rather than rename-and-recreate over still-good data.
+fn is_definitely_corrupt(path: &Path) -> bool {
     let Ok(conn) = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY) else {
         return false;
     };
-    conn.query_row("PRAGMA integrity_check", [], |row| row.get::<_, String>(0))
-        .map(|verdict| verdict == "ok")
-        .unwrap_or(false)
+    // Block briefly on a contended lock so a healthy-but-busy DB doesn't read
+    // as a failed PRAGMA (which would otherwise leave corruption unproven).
+    if conn
+        .busy_timeout(std::time::Duration::from_secs(5))
+        .is_err()
+    {
+        return false;
+    }
+    match conn.query_row("PRAGMA integrity_check", [], |row| row.get::<_, String>(0)) {
+        Ok(verdict) => verdict != "ok",
+        // Couldn't run the check (lock, I/O error): corruption is unproven.
+        Err(_) => false,
+    }
 }
