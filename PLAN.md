@@ -24,7 +24,7 @@ Surfaced explicitly because the design implies a footprint the user should conse
 - **Network footprint**: a single long-lived WebSocket to a public Nostr relay while idle (a few KB/hour). During sessions: full-mesh WebRTC (peer-to-peer) for audio/video. Approximately 15% of network configurations require a TURN relay — public Open Relay used as fallback.
 - **Disk footprint**: app + design assets <50 MB. AI vision model GGUFs (V2+) range 1–8 GB depending on the user's choice.
 - **Camera, screen, microphone**: requested only when needed — camera + mic when joining a session, screen capture only after the user opts in to AI features (V2+).
-- **Outbound data beyond P2P + Nostr signaling**: zero. No telemetry, no crash auto-uploads. Crash logs stay local with a manual "Share Log" button.
+- **Outbound data beyond P2P + Nostr signaling**: zero, with one explicit, opt-in carve-out — when the user enables the new-version check (OFF by default), the app makes an unauthenticated GET to the public GitHub Releases API to compare release tags. The request carries no identifiers, no query parameters, and no payload; failures are silent. No telemetry, no crash auto-uploads. Crash logs stay local with a manual "Share Log" button.
 
 ## 4. Principles
 
