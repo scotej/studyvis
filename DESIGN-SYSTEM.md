@@ -291,6 +291,8 @@ These components only import from `ui/`, `design/tokens.ts`, and shared utilitie
 |-|-|
 | `VideoTile` | One peer's video + name + per-tile status dot + PTT indicator. |
 | `VideoGrid` | Mesh layout of tiles (1, 2, 3, or 4). Aspect-aware. |
+| `WaitingTile` | Calm "waiting for your friend" tile shown beside the self tile when alone in an active session. §10 empty-state pattern, no spinner. `invite` / `reconnect` variants. |
+| `AudioOutputPicker` | Speaker/headphone output selector for the session footer (`setSinkId`). Feature-detected — renders nothing where unsupported (macOS WKWebView). |
 | `FocusIndicator` | Per-tile dot: `focused` / `warning` / `alerted` / `offline`. |
 | `PttIndicator` | Visible while a peer is transmitting audio. |
 | `AuditLogPanel` | Right-rail panel listing `AuditEvent`s. |
@@ -301,8 +303,11 @@ These components only import from `ui/`, `design/tokens.ts`, and shared utilitie
 | `FriendsList` | Scrollable list of friends, online dots, last-studied label. |
 | `FriendRow` | Single friend with `Invite` button. |
 | `AddFriendDialog` | 12-word generate / paste flow. |
+| `RelayDiagnostics` | Settings → Network: live per-relay connection status (one row per signaling WebSocket, polled while mounted). Status by glyph + text, never color alone. |
+| `FocusInsights` | Cross-session focus insights for the Stats dashboard: distraction timing buckets, recurring reasons, focused-time trend. Pure presentational over computed `statsInsights` data. |
+| `IdentityLoadErrorView` | Calm "we couldn't read your identity file" screen (Retry + Restore). Deliberately offers no create-new path so a still-valid keychain identity is never abandoned. |
 | `OnboardingStep` | Full-bleed onboarding surface, single CTA, optional secondary. |
-| `BipBackupPanel` | Mono-font 24-word display + copy + "I've saved them" confirmation. *Currently inlined in `src/features/identity/IdentitySetup.tsx`; pending extraction to a standalone component (V3 polish).* |
+| `BipBackupPanel` | Mono-font 24-word display + copy + "I've saved them" confirmation. Standalone component (`src/components/BipBackupPanel.tsx`), imported by `IdentitySetup.tsx`, with its own Storybook story. |
 | `SessionTimer` | Pomodoro timer with phase indicator, broadcaster badge if you're broadcasting. |
 | `ModelPicker` | (V2) Radio cards: name, size, RAM, measured speed badge. |
 | `BenchmarkRunner` | (V2) 30-second benchmark progress display. |

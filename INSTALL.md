@@ -4,11 +4,13 @@ StudyVis ships unsigned installers for a friends-only audience. Each OS will war
 
 > StudyVis does **not** auto-update. When a new version is available, download the latest installer from the [GitHub Releases page](https://github.com/scotej/studyvis/releases) and re-run the install steps for your OS.
 
-## macOS (Apple Silicon + Intel)
+## macOS (Apple Silicon)
 
-1. From the [Releases page](https://github.com/scotej/studyvis/releases), download the `.dmg` for your Mac's chip: `StudyVis_<version>_aarch64.dmg` for Apple Silicon (M1/M2/M3/M4), or `StudyVis_<version>_x64.dmg` for Intel. (In → About This Mac, "Apple M…" = Apple Silicon, "Intel" = Intel.)
+> StudyVis ships an Apple Silicon (`aarch64`) `.dmg` only. Intel Macs are not in the release matrix. (In → About This Mac, "Apple M…" = Apple Silicon.)
+
+1. From the [Releases page](https://github.com/scotej/studyvis/releases), download `StudyVis_<version>_aarch64.dmg`.
 2. Double-click the `.dmg`. A window opens showing the StudyVis icon and an Applications shortcut. Drag StudyVis into Applications.
-3. Open Finder → Applications. **Right-click** (or Control-click) the StudyVis icon and choose **Open**. macOS shows: _"macOS cannot verify the developer of 'StudyVis'. Are you sure you want to open it?"_. Click **Open**.
+3. Open Finder → Applications. **Right-click** (or Control-click) the StudyVis icon and choose **Open**. The app is ad-hoc signed, so macOS shows the milder _"macOS cannot verify the developer of 'StudyVis'. Are you sure you want to open it?"_ prompt — not a hard block. Click **Open**.
 4. Subsequent launches do not re-prompt — double-click works normally.
 5. The first time you join a session, macOS asks for camera and microphone permission. Allow both. (Screen-recording permission is requested separately, and only if you turn on AI features.)
 
@@ -34,6 +36,6 @@ Your identity, friends list, and local session history live in your OS data dire
 
 ## Troubleshooting
 
-- **macOS, "App is damaged and can't be opened"** — this happens when the `.dmg` is downloaded with quarantine flagged but right-click → Open is skipped. From Terminal: `xattr -dr com.apple.quarantine /Applications/StudyVis.app`, then double-click again.
+- **macOS, "App is damaged and can't be opened"** — uncommon now that the app is ad-hoc signed (the usual first-run prompt is the milder "cannot verify the developer" one above), but it can still happen on a stubborn download where quarantine is flagged and right-click → Open is skipped. From Terminal: `xattr -dr com.apple.quarantine /Applications/StudyVis.app`, then double-click again.
 - **Windows, SmartScreen does not show "More info"** — make sure you're running Windows 10 1903 or later. Older builds present a different dialog.
 - **Camera or mic permission denied at first launch** — open the OS privacy panel (macOS System Settings → Privacy & Security; Windows Settings → Privacy & security → Camera/Microphone) and grant StudyVis access manually, then relaunch.

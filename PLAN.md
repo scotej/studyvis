@@ -136,7 +136,7 @@ These are decisions, not omissions. Adding any of these would change the product
 
 Explicit so we don't pretend.
 
-- **Linux WebRTC** in WebKitGTK is historically uneven, especially `getDisplayMedia`. V0 confirms or defers Linux to V3.
+- **Linux WebRTC** in WebKitGTK is historically uneven, especially `getDisplayMedia`. V0 deferred Linux on that one unverified question; the concrete unblock checklist is in §8.
 - **Prompt injection** on small local LLMs is real. Friend-group threat model mostly absorbs this — Gemma 3 4B and Qwen2.5-VL-3B handle naive injections, but a determined friend can fool them. Mitigations: structured observation prompts where possible, system-prompt manipulation patterns enumerated, no real consequence to faking your own score.
 - **Self-reported scores.** A peer can disable AI features locally and still appear in sessions; their score will simply read "AI off" to the others. No technical defense; rely on social trust.
 - **BIP39 backup is the user's responsibility.** Lose the 24 words and the laptop, you're a new identity to your friends.
@@ -151,6 +151,16 @@ Explicit so we don't pretend.
 - Multi-device same identity — pair laptops via BIP39 restore, or treat as separate identities?
 - "I lost my friend's contact" recovery — currently requires re-pairing. Acceptable.
 - Should we eventually expose a way to verify "is this still really Sam?" — Signal-style safety number comparison via voice during a session is the cheap answer.
+
+### Deferred scope with a concrete trigger
+
+These are not promises — they are scoped backlog items, parked until a named trigger fires. Listed here so the deferral stays honest rather than vague.
+
+- **Linux support** — *trigger: WebKitGTK `getDisplayMedia` re-verified on a current distro.* Linux has been gated on one unanswered question since V0; the unblock is concrete, not open-ended:
+  1. Re-run the V0 smoke test under current WebKitGTK — `getUserMedia` + `getDisplayMedia` + a trystero rendezvous between two machines.
+  2. If `getDisplayMedia` passes: add the libsecret / Secret-Service feature to `keyring` under `cfg(target_os = "linux")` (today `keyring` is gated to macOS + Windows only) and add an `.AppImage` job to `release.yml`. Confirm the battery fallback (`system_battery` already returns a safe `on_battery: false` default when UPower is absent).
+  3. If `getDisplayMedia` still fails: ship **AI-off Linux** rather than blocking the whole platform — body-doubling needs only camera + mic; screen capture is exclusively the AI loop's, so the no-AI study experience is fully available.
+- **Signing / notarization / auto-update** — *trigger: a Developer ID or EV cert is acquired.* One credential-gated roadmap item, not three quick wins; auto-update can't be verified without signed artifacts. When certs land, re-enable in lockstep: re-add the `tauri-plugin-updater` dependency (removed in this line — it was dormant), set the updater pubkey + endpoints in `tauri.conf.json`, flip `includeUpdaterJson` on in `release.yml`, wire the signing secrets, and drop the right-click-to-Open / SmartScreen "Run anyway" language from `INSTALL.md`. The cheap half — the opt-in, OFF-by-default new-version notification (§3) — already shipped; auto-download rides on signing and stays deferred.
 
 ## 9. Document map
 

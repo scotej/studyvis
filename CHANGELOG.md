@@ -18,6 +18,117 @@ V3 work was drafted as v1.0.4 but shipped under the **v1.0.5** tag —
 there is no v1.0.4 tag; the section below is labelled by the tag that
 shipped it.)
 
+## Unreleased — reliability, honesty, and quality-of-life pass
+
+A broad maintenance + feature wave across eight clusters, drawn from the
+`IMPROVEMENTS.md` backlog. Reliability of friend-finding and live
+sessions, more honest AI and stats, safer identity error paths, new
+notifications and custom pomodoro durations, a stricter accessibility
+gate, and release/CI hardening. New outbound behaviour stays opt-in and
+OFF by default; the one sanctioned outbound request is carved out in
+PLAN §3.
+
+### Added
+
+- **Connection diagnostics + your own relays/TURN (Settings → Network).**
+  A live per-relay status panel (state by glyph + text, never color
+  alone) and fields to add your own signaling relay URLs and a TURN
+  server without a new build — the one path through strict/CGNAT
+  networks now that no public TURN ships.
+- **Friends-list backup.** Export / Import friends to a sealed
+  `.svfriends` file encrypted to your own key; import upserts. The
+  recovery gap (24 words restore only the keypair) is now self-serve.
+- **Focus insights (Stats).** A local, cross-session view of when
+  distractions cluster, recurring reasons, and a focused-time trend —
+  read from `audit_events` on-device, nothing transmitted.
+- **File exports.** Save the post-session report (markdown), a raw
+  per-session audit JSON, and a stats CSV of daily study minutes +
+  partner counts.
+- **Session history management.** Delete a single session
+  (Settings → Sessions) or clear all history (Advanced), behind confirm
+  dialogs; stats and the report follow.
+- **Pomodoro break/work OS notifications** (opt-out, ON by default) and a
+  gentle phase-transition chime (opt-in, OFF by default) — so a break
+  boundary is visible while the window is in the tray.
+- **"Friend came online" notification** (opt-in, OFF by default), honest
+  about the ~60 s presence latency.
+- **Custom pomodoro durations** (5–120 work / 1–60 rest) with a
+  backward-compatible wire: explicit durations ride alongside a
+  legacy-preset fallback, so a custom-split host never strands a friend
+  on an older build.
+- **Camera on/off toggle, audio-output picker, and a per-peer volume
+  slider** in the session footer.
+- **"Waiting for your friend" tile** when you're alone in a session, and
+  per-peer connection states (connecting / failed) instead of a frozen
+  offline tile.
+- **Opt-in new-version check (Settings → About), OFF by default.** When
+  on, a single unauthenticated GET to the public GitHub Releases API
+  compares tags and shows a quiet update row; zero outbound while off,
+  silent on failure. This is the one sanctioned outbound request beyond
+  P2P + Nostr signaling — carved out in PLAN §3.
+- **`studyvis://` deep link.** A pairing link now prefills (never
+  auto-connects) the add-a-friend form; relaunching a tray-hidden app
+  focuses the existing window (single-instance guard).
+- **Quit confirmation during an active session.**
+
+### Changed
+
+- **Honest AI focus pipeline.** Malformed/empty model responses, and
+  low-confidence off-task calls below the `off_task_confidence_floor`
+  (default 0.6, with a Settings → AI slider), are now treated as
+  _uncertain_ skips — they neither reset an off-task streak nor count
+  toward focused-time %, instead of being fabricated as `on_task`. The
+  benchmark and live request are built from one shared builder so the
+  predicted cadence is achievable. A duration-based cadence backoff
+  replaces the dangling "thermal-aware notice" (engages after 2 slow
+  ticks vs the benchmark p95, recovers after 3 normal ticks). Model
+  downloads resume from a surviving `.tmp` via HTTP Range.
+- **Honest scores and labels.** AI-off sessions no longer persist a
+  fabricated `score=100` — the report shows a calm no-score state and
+  averages skip nulls. Stats' "Focused minutes" is renamed "Study
+  minutes" so "Focused" stays the AI concept; the average-score tile
+  says how many sessions it covers.
+- **Legible connection failures.** The pairing dialog distinguishes
+  "can't reach the network" (your side) from "your friend hasn't
+  arrived"; an invite to an offline friend retries when they flip online
+  (deduped) and reads differently from a relay-down failure; a
+  best-effort goodbye flips presence offline near-instantly on quit.
+- **Accessibility gate proves coverage.** `check-contrast` now scans
+  `src/` for every text/bg/border token co-occurrence and fails on any
+  pairing missing from the allowlist — not just that the listed pairs
+  pass. Surfaced previously-unlisted real pairings, all AA-verified.
+- **Always-visible invite button**, onboarding **Back** navigation, one
+  CTA on the zero-friends empty state, and the SessionTimer presets now
+  use the themed `RadioGroup` primitive.
+
+### Fixed
+
+- **Push-to-talk can no longer latch the mic open** — a dropped release
+  event or a stale latch can never bring a fresh session's first audio
+  track up live (a privacy defect); a stuck-key guard and per-session
+  reset back it up.
+- **Grace window before auto-ending.** A transient transport drop no
+  longer ends a long session instantly — a 20 s grace window cancels on
+  any rejoin.
+- **Corrupt-identity and corrupt-DB safety.** An unreadable
+  `identity.json` routes to a calm Retry/Restore screen and can never be
+  steered into new-identity onboarding that clobbers keychain keys; a
+  corrupt `app.db` is set aside and recreated with an explanatory dialog
+  instead of a startup panic; a DB written by a newer build is refused
+  distinctly. Recovery now skips the overwrite warning when you re-type
+  the same 24 words and preserves your display name.
+
+### Release / CI
+
+- **CI-green gate before release.** `release-prep` runs lint, test,
+  build, check-tokens, check-strings, and `cargo fmt --check` before any
+  version bump, tag, or push lands on `main`; `check-strings` also runs
+  in `ci.yml`.
+- **macOS ad-hoc signing** (signing identity `-`, hardened runtime off)
+  softens first-run Gatekeeper friction to the milder "unverified
+  developer" prompt. The dormant `tauri-plugin-updater` dependency was
+  removed (re-add checklist in PLAN §8).
+
 ## 1.2.0 — 2026-06-07 — post-1.0 fixes and feature improvements
 
 A maintenance and feature pass on top of the 1.0 line: audit-verified

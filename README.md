@@ -53,11 +53,11 @@ run; the steps below clear those warnings. The OS remembers your
 decision afterwards. See [`INSTALL.md`](./INSTALL.md) for the full
 walkthrough.
 
-**macOS (Apple Silicon + Intel)** — download the `.dmg` matching your
-Mac's chip from
-[Releases](https://github.com/scotej/studyvis/releases). Drag StudyVis
-into Applications. **Right-click** the app icon and choose **Open**
-the first time; macOS asks once, then remembers. The right-click is
+**macOS (Apple Silicon)** — download the `aarch64` `.dmg` from
+[Releases](https://github.com/scotej/studyvis/releases) (Apple Silicon
+only; Intel Macs aren't in the release matrix). Drag StudyVis into
+Applications. **Right-click** the app icon and choose **Open** the
+first time; macOS asks once, then remembers. The right-click is
 load-bearing — double-clicking will refuse.
 
 **Windows 10 / 11** — download the `.msi` from
