@@ -18,6 +18,7 @@ import { strings } from '@/strings'
 export type PermissionsStepProps = {
   progress?: OnboardingStepProgress
   onContinue: () => void
+  onBack?: () => void
 }
 
 const INITIAL: PermissionsState = {
@@ -33,6 +34,7 @@ const INITIAL: PermissionsState = {
 export function PermissionsStep({
   progress,
   onContinue,
+  onBack,
 }: PermissionsStepProps) {
   const [state, setState] = useState<PermissionsState>(INITIAL)
 
@@ -102,6 +104,7 @@ export function PermissionsStep({
       onGrant={(id) => void handleGrant(id)}
       onOpenSettings={(id) => void openSettings(id)}
       onContinue={onContinue}
+      onBack={onBack}
     />
   )
 }

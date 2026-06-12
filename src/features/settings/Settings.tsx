@@ -4,6 +4,7 @@ import {
   SettingsLayout,
   type SettingsCategoryDescriptor,
 } from '@/components/SettingsLayout'
+import { Recover, useIdentity } from '@/features/identity'
 import { Report } from '@/features/session'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { strings } from '@/strings'
@@ -63,11 +64,29 @@ export function Settings({ onClose }: SettingsProps) {
   // report into the content column. Lift the selection here and branch above
   // the layout, mirroring Home.tsx's fresh-session-end mount.
   const [openSessionId, setOpenSessionId] = useState<string | null>(null)
+  // D4 — "Restore a different identity" mounts the full-screen Recover flow.
+  // Lifted here (not inside IdentityCategory) for the same landmark reason as
+  // the report: OnboardingStep renders its own <main>, so it must replace the
+  // settings shell rather than nest inside it.
+  const [restoringIdentity, setRestoringIdentity] = useState(false)
+  const { identity, actions } = useIdentity()
   const hydrate = useSettingsStore((s) => s.hydrate)
 
   useEffect(() => {
     void hydrate()
   }, [hydrate])
+
+  if (restoringIdentity) {
+    return (
+      <Recover
+        identityExists
+        currentFingerprint={identity?.mnemonic_fingerprint}
+        recover={actions.recover}
+        onBack={() => setRestoringIdentity(false)}
+        onRecovered={() => setRestoringIdentity(false)}
+      />
+    )
+  }
 
   if (openSessionId) {
     return (
@@ -85,7 +104,11 @@ export function Settings({ onClose }: SettingsProps) {
       onCategorySelect={setActiveCategoryId}
       onClose={onClose}
     >
-      {activeCategoryId === 'identity' ? <IdentityCategory /> : null}
+      {activeCategoryId === 'identity' ? (
+        <IdentityCategory
+          onRestoreIdentity={() => setRestoringIdentity(true)}
+        />
+      ) : null}
       {activeCategoryId === 'friends' ? <FriendsCategory /> : null}
       {activeCategoryId === 'sessions' ? (
         <SessionsCategory onOpenSession={setOpenSessionId} />

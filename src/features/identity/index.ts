@@ -4,6 +4,11 @@ export {
   type IdentitySetupGateProps,
 } from './IdentitySetupGate'
 export { Recover, type RecoverProps } from './Recover'
+export { IdentityLoadError } from './IdentityLoadError'
+export {
+  IdentityLoadErrorView,
+  type IdentityLoadErrorViewProps,
+} from './IdentityLoadErrorView'
 export {
   useIdentity,
   type CreatedIdentity,

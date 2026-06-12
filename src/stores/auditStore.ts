@@ -47,7 +47,7 @@ type AuditState = {
 // driven without a Tauri runtime. Production calls the real Tauri command.
 let persistFn: (event: AuditEvent) => Promise<void> = async (event) => {
   await auditEventInsert({
-    sessionId: event.session_topic,
+    session_id: event.session_topic,
     ts: event.ts,
     who: event.who,
     kind: event.kind,

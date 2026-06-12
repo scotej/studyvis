@@ -10,11 +10,14 @@ import { hexToBytes } from '@/lib/crypto/identity'
 import { boxDecryptWithKeyring } from '@/lib/db/identity'
 import { getFriendXPubkey } from '@/lib/db/friends'
 import { useFriendsStore } from '@/stores/friendsStore'
+import { useSessionStore } from '@/stores/sessionStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { strings } from '@/strings'
 
+import { notifyFriendOnline } from './friendOnlineNotify'
 import { subscribeToOwnInbox, type ValidInvite } from './inbox'
-import { startPresence, type PresenceMap } from './presence'
+import { inviteRetryManager } from './invite'
+import { isOnline, startPresence, type PresenceMap } from './presence'
 
 export type InboxBootProps = {
   myEdPubkeyHex: string
@@ -83,20 +86,104 @@ export function InboxBoot({
     }
   }, [myEdPubkeyHex])
 
+  // F6 — detect offline→online presence transitions so a queued invite can be
+  // re-delivered the instant a friend comes online. The per-friend online state
+  // is derived from the presence map (last-heartbeat within the online window),
+  // compared against the previous tick. Kept in a ref so the detector survives
+  // re-renders without resubscribing.
+  const wasOnlineRef = useRef<Record<string, boolean>>({})
+  // N3 — friends whose presence has been resolved at least once since this
+  // subscription mounted. The FIRST resolution establishes a baseline only —
+  // it must not fire a "came online" notification (that's boot's initial
+  // sweep, not a transition). Reset whenever the presence subscription
+  // resubscribes (friend-set change), so a newly added friend who's already
+  // online doesn't ping on the resubscribe tick.
+  const baselineSeenRef = useRef<Set<string>>(new Set())
+
   useEffect(() => {
     const myEd = hexToBytes(myEdPubkeyHex)
     const friendIds = friendsKey
       ? friendsKey.split('|').map((ed_pubkey_hex) => ({ ed_pubkey_hex }))
       : []
+    // N3 — reset the per-friend online-state ref alongside baselineSeenRef on
+    // every resubscribe so stale state from the previous subscription can't leak
+    // a phantom transition into the new one.
+    wasOnlineRef.current = {}
+    baselineSeenRef.current = new Set()
     const presence = startPresence({
       myEdPubkey: myEd,
       friends: friendIds,
-      onPresenceChange,
+      onPresenceChange: (map) => {
+        const at = Date.now()
+        for (const friend of friendIds) {
+          const ed = friend.ed_pubkey_hex
+          const online = isOnline(map, ed, at)
+          const was = wasOnlineRef.current[ed] ?? false
+          wasOnlineRef.current[ed] = online
+          // N3 — baseline is the first time we resolve a friend ONLINE since
+          // this subscription mounted, NOT the first tick. The presence map
+          // starts empty, so a sweep (or another friend's heartbeat) can fire
+          // an offline tick for this friend before their first heartbeat lands;
+          // consuming the baseline on that offline tick would make their genuine
+          // first heartbeat look like an offline→online edge and ping spuriously
+          // (the resubscribe-churn case). Only an online resolution establishes
+          // the baseline, so an already-online friend's first heartbeat after a
+          // resubscribe is correctly treated as baseline, not a transition.
+          const hadBaseline = baselineSeenRef.current.has(ed)
+          if (online) baselineSeenRef.current.add(ed)
+          if (online && !was) {
+            // Fire-and-forget; the manager dedupes and only retries entries
+            // still inside the window.
+            void inviteRetryManager.onPresenceOnline(ed)
+            // N3 — only an offline→online edge AFTER the baseline is a real
+            // "came online" transition. Suppressing the first online resolution
+            // dodges both boot's initial sweep (a friend already online at
+            // mount) and the resubscribe tick. The debounce against flapping
+            // rides on the 60s ONLINE_WINDOW_MS: once online, brief gaps
+            // stay "online" so we don't re-fire until a true offline first.
+            if (hadBaseline) {
+              const friendRow = useFriendsStore
+                .getState()
+                .friends.find((f) => f.ed_pubkey_hex === ed)
+              void notifyFriendOnline({
+                edPubkeyHex: ed,
+                displayName: friendRow?.display_name ?? null,
+                enabled:
+                  useSettingsStore.getState().values
+                    .friendOnlineNotificationEnabled,
+              })
+            }
+          }
+        }
+        onPresenceChange(map)
+      },
     })
+    // F7 — a hard quit (tray Quit, Cmd+Q, OS terminate) tears the webview down
+    // without running React cleanup, so the goodbye in `leave()` never fires.
+    // `pagehide` is the most reliable last-gasp the webview gives us; fire the
+    // goodbye synchronously there so subscribed friends flip us offline at once.
+    const onPageHide = () => presence.sendGoodbye()
+    window.addEventListener('pagehide', onPageHide)
     return () => {
+      window.removeEventListener('pagehide', onPageHide)
       void presence.leave()
     }
   }, [myEdPubkeyHex, friendsKey, onPresenceChange])
+
+  // F6 — drop every queued retry when the local session ends (or the user
+  // cancels by leaving): a friend coming online afterward shouldn't be pulled
+  // into a session that's already over.
+  useEffect(() => {
+    let prev = useSessionStore.getState().status
+    const unsub = useSessionStore.subscribe((state) => {
+      const next = state.status
+      if (prev === 'active' && next !== 'active') {
+        inviteRetryManager.cancelAll()
+      }
+      prev = next
+    })
+    return () => unsub()
+  }, [])
 
   return null
 }

@@ -11,9 +11,14 @@ import { strings } from '@/strings'
 export type TutorialStepProps = {
   progress?: OnboardingStepProgress
   onContinue: () => void
+  onBack?: () => void
 }
 
-export function TutorialStep({ progress, onContinue }: TutorialStepProps) {
+export function TutorialStep({
+  progress,
+  onContinue,
+  onBack,
+}: TutorialStepProps) {
   const pttKey = isMacLikePlatform() ? '⌘[' : 'Ctrl+['
   const cards = strings.onboarding.tutorial.cards
 
@@ -21,6 +26,11 @@ export function TutorialStep({ progress, onContinue }: TutorialStepProps) {
     <OnboardingStep
       ariaLabel={strings.onboarding.tutorial.ariaLabel}
       progress={progress}
+      secondaryAction={
+        onBack
+          ? { label: strings.common.actions.back, onClick: onBack }
+          : undefined
+      }
       primaryAction={{
         label: strings.onboarding.tutorial.cta,
         onClick: onContinue,

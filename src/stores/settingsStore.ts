@@ -11,6 +11,15 @@ import {
 
 export type ThemeMode = 'dark' | 'light' | 'auto'
 export type TurnPreference = 'auto' | 'always' | 'never'
+// F3 — user-supplied TURN server (url/username/credential). `null` (the
+// default) means "no TURN" — every cross-network session stays STUN-only, the
+// shipped behavior. All three fields are required for the server to activate;
+// the setter rejects a partial or scheme-invalid config (see setTurnServer).
+export type CustomTurnServer = {
+  url: string
+  username: string
+  credential: string
+}
 // V3-P4 — Multi-monitor capture toggle for the AI sample loop. `'primary'`
 // (default) preserves the V2 behavior: one long-lived getDisplayMedia stream,
 // one OS picker at session start. `'all'` enumerates connected displays at
@@ -31,6 +40,22 @@ export type SettingsValues = {
   theme: ThemeMode
   reduceMotion: boolean
   incomingInviteNotificationEnabled: boolean
+  // N2 — OS notification on a LOCAL pomodoro work↔rest flip. Opt-out: ON by
+  // default (the boundary is invisible when minimized to tray, the most-wanted
+  // study nudge). Read by PomodoroNotifyListener; setter is the Notifications
+  // toggle.
+  pomodoroNotificationEnabled: boolean
+  // N6 — gentle chime on the same local transition. Opt-IN: OFF by default
+  // (the calm default IS the reduced-motion accommodation — nothing plays
+  // unless asked). Read by PomodoroNotifyListener.
+  pomodoroSoundEnabled: boolean
+  // N3 — OS notification when a friend flips offline→online. Opt-IN: OFF by
+  // default. Read by InboxBoot's presence detector; ~60s presence latency.
+  friendOnlineNotificationEnabled: boolean
+  // X4 — opt-in version check, OFF by default. The one sanctioned outbound
+  // request beyond P2P + Nostr (PLAN §3 carve-out). When OFF, AboutCategory
+  // never calls system_fetch_latest_version — zero outbound.
+  versionCheckEnabled: boolean
   minimizeToTrayOnClose: boolean
   debugLogEnabled: boolean
   turnPreference: TurnPreference
@@ -45,6 +70,12 @@ export type SettingsValues = {
   // are read-only and consumed by `features/ai/focusStore.ts` at apply-time.
   warningThreshold: number
   alertThreshold: number
+  // A3 — off-task confidence floor ∈ [0,1] for the score machine. An off-task
+  // judgment whose `on_topic_confidence` is at or above this floor is treated
+  // as uncertain (skipped) rather than extending the off-task streak. Read
+  // per-sample by `features/ai/focusStore.ts`; the Settings → AI slider sets
+  // it. 0 disables the gate.
+  offTaskConfidenceFloor: number
   // V2-P9 user override for the AI sample interval (seconds). `null` means
   // "use the V2-P2 benchmark's measured cadence" (the default). When set, the
   // sample loop clamps it to the model's measured floor so the user can only
@@ -60,6 +91,14 @@ export type SettingsValues = {
   captureDisplays: CaptureDisplaysMode
   // V3-P6 opt-in custom window chrome. See `WindowStyleMode` above.
   windowStyle: WindowStyleMode
+  // F3 — optional user-supplied Nostr signaling relays (wss:// each). Empty
+  // (the default) keeps the curated DEFAULT_RELAY_URLS. When non-empty, these
+  // replace the built-in list via relayConfig.urls — see lib/trystero. Stored
+  // already-validated (only wss:// entries survive the setter).
+  customRelayUrls: string[]
+  // F3 — optional user-supplied TURN server. `null` (default) = STUN-only.
+  // Stored already-validated (turn:/turns: url + non-empty creds).
+  turnServer: CustomTurnServer | null
 }
 
 export const SETTINGS_FILE = 'settings.json'
@@ -74,17 +113,25 @@ export const LEGACY_THEME_LOCALSTORAGE_KEY = THEME_LOCALSTORAGE_KEY
 export const SETTINGS_KEY_THEME = 'theme'
 export const SETTINGS_KEY_REDUCE_MOTION = 'reduce_motion'
 export const SETTINGS_KEY_INVITE_NOTIFY = 'incoming_invite_notification_enabled'
+export const SETTINGS_KEY_POMODORO_NOTIFY = 'pomodoro_notification_enabled'
+export const SETTINGS_KEY_POMODORO_SOUND = 'pomodoro_sound_enabled'
+export const SETTINGS_KEY_FRIEND_ONLINE_NOTIFY =
+  'friend_online_notification_enabled'
+export const SETTINGS_KEY_VERSION_CHECK = 'version_check_enabled'
 export const SETTINGS_KEY_MINIMIZE_TRAY = 'minimize_to_tray_on_close'
 export const SETTINGS_KEY_DEBUG_LOG = 'debug_log_enabled'
 export const SETTINGS_KEY_TURN_PREF = 'turn_preference'
 export const SETTINGS_KEY_AI_FEATURES = 'ai_features_enabled'
 export const SETTINGS_KEY_WARNING_THRESHOLD = 'warning_threshold'
 export const SETTINGS_KEY_ALERT_THRESHOLD = 'alert_threshold'
+export const SETTINGS_KEY_CONFIDENCE_FLOOR = 'off_task_confidence_floor'
 export const SETTINGS_KEY_SAMPLE_INTERVAL = 'sample_interval_s'
 export const SETTINGS_KEY_PTT_FRIENDS_ACCELERATOR = 'ptt_friends_accelerator'
 export const SETTINGS_KEY_PTT_AI_ACCELERATOR = 'ptt_ai_accelerator'
 export const SETTINGS_KEY_CAPTURE_DISPLAYS = 'capture_displays'
 export const SETTINGS_KEY_WINDOW_STYLE = 'window_style'
+export const SETTINGS_KEY_CUSTOM_RELAYS = 'custom_relay_urls'
+export const SETTINGS_KEY_TURN_SERVER = 'turn_server'
 
 // Defaults match the V1 acceptance criteria + DESIGN-SYSTEM.md §8.5: dark
 // theme on, reduce-motion off, OS notification on for invites, minimize-to-
@@ -94,12 +141,21 @@ export const DEFAULT_SETTINGS: SettingsValues = {
   theme: 'dark',
   reduceMotion: false,
   incomingInviteNotificationEnabled: true,
+  // N2 opt-out (on), N6 opt-in (off), N3 opt-in (off), X4 opt-in (off).
+  pomodoroNotificationEnabled: true,
+  pomodoroSoundEnabled: false,
+  friendOnlineNotificationEnabled: false,
+  versionCheckEnabled: false,
   minimizeToTrayOnClose: true,
   debugLogEnabled: false,
   turnPreference: 'auto',
   aiFeaturesEnabled: false,
   warningThreshold: 2,
   alertThreshold: 4,
+  // A3 — mirrors scoreMachine.DEFAULT_CONFIDENCE_FLOOR (0.6). Duplicated here
+  // rather than imported to keep the settings store free of any
+  // `@/features/ai` import (same boundary the threshold defaults respect).
+  offTaskConfidenceFloor: 0.6,
   sampleIntervalSec: null,
   pttFriendsAccelerator: PTT_FRIENDS_DEFAULT_ACCELERATOR,
   pttAiAccelerator: PTT_AI_DEFAULT_ACCELERATOR,
@@ -107,6 +163,10 @@ export const DEFAULT_SETTINGS: SettingsValues = {
   // System chrome is the v1.0.3 shipped behavior — keep it as the default
   // so a fresh install or a missing-key file matches what users have today.
   windowStyle: 'system',
+  // F3 — empty by default: the curated relays + STUN-only behavior is exactly
+  // what ships today, so a fresh install is unchanged.
+  customRelayUrls: [],
+  turnServer: null,
 }
 
 export type SettingsStatus = 'loading' | 'ready' | 'error'
@@ -119,12 +179,32 @@ type SettingsState = {
   setTheme: (mode: ThemeMode) => Promise<void>
   setReduceMotion: (enabled: boolean) => Promise<void>
   setIncomingInviteNotificationEnabled: (enabled: boolean) => Promise<void>
+  setPomodoroNotificationEnabled: (enabled: boolean) => Promise<void>
+  setPomodoroSoundEnabled: (enabled: boolean) => Promise<void>
+  setFriendOnlineNotificationEnabled: (enabled: boolean) => Promise<void>
+  setVersionCheckEnabled: (enabled: boolean) => Promise<void>
   setMinimizeToTrayOnClose: (enabled: boolean) => Promise<void>
   setDebugLogEnabled: (enabled: boolean) => Promise<void>
   setTurnPreference: (pref: TurnPreference) => Promise<void>
+  // F3 — persist the user's custom signaling relays. The argument is the raw
+  // textarea text; the store parses + validates + dedupes via parseRelayUrls
+  // and stores only the clean wss:// list (empty = use the built-in defaults).
+  setCustomRelayUrls: (text: string) => Promise<void>
+  // F3 — persist (or clear) the user's TURN server. Pass the three raw fields;
+  // the store normalizes them. A partial/invalid config clears the server
+  // (stores null) so an incomplete edit can never leave a dead config behind.
+  setTurnServer: (input: {
+    url?: string
+    username?: string
+    credential?: string
+  }) => Promise<void>
   setAiFeaturesEnabled: (enabled: boolean) => Promise<void>
   setWarningThreshold: (count: number) => Promise<void>
   setAlertThreshold: (count: number) => Promise<void>
+  // A3 — persist the off-task confidence floor ∈ [0,1]. The slider UI clamps;
+  // focusStore re-clamps via `clampConfidenceFloor` at apply-time so an
+  // out-of-range persisted value can never break a run.
+  setOffTaskConfidenceFloor: (floor: number) => Promise<void>
   // `null` clears the override, falling back to the model benchmark cadence.
   setSampleIntervalSec: (seconds: number | null) => Promise<void>
   // V3-P3 — set the accelerator for one of the two global shortcuts. The
@@ -319,6 +399,98 @@ export function isTurnPreference(v: unknown): v is TurnPreference {
   return v === 'auto' || v === 'always' || v === 'never'
 }
 
+// F3 — a signaling relay must be a wss:// URL (Nostr over secure WebSocket).
+// ws:// is rejected: trystero's Nostr strategy and the relays it talks to are
+// wss-only, and a plaintext relay would also break under the app's CSP.
+//
+// Validation parses with `new URL()` rather than a regex so it mirrors what
+// `new WebSocket(url)` itself will accept. A regex like /^wss:\/\/\S+$/ admits
+// values the WebSocket constructor rejects synchronously — `wss://[bad` and
+// `wss://#x` fail URL parsing (SyntaxError), and `wss://host/#frag` parses but
+// WebSocket throws on a non-empty fragment. Any of those, once persisted,
+// would throw out of trystero's first `new WebSocket()` inside `joinTopic` at
+// boot and (with no React error boundary) blank the app. We reject them here
+// so a saved relay can never brick discovery.
+export function isValidRelayUrl(v: unknown): v is string {
+  if (typeof v !== 'string') return false
+  let parsed: URL
+  try {
+    parsed = new URL(v.trim())
+  } catch {
+    return false
+  }
+  // protocol includes the trailing colon. WebSocket also forbids a fragment.
+  return parsed.protocol === 'wss:' && parsed.hash === ''
+}
+
+// F3 — split a multiline textarea into a clean, validated, deduped relay list.
+// Blank lines and anything that isn't a wss:// URL are dropped silently; the UI
+// flags "some lines were ignored" so the user isn't left guessing.
+export function parseRelayUrls(text: string): string[] {
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const raw of text.split(/[\r\n]+/)) {
+    const url = raw.trim()
+    if (!isValidRelayUrl(url)) continue
+    if (seen.has(url)) continue
+    seen.add(url)
+    out.push(url)
+  }
+  return out
+}
+
+// F3 — a TURN url must be turn:/turns: (RFC 7065). turns: is TURN-over-TLS.
+export function isValidTurnUrl(v: unknown): v is string {
+  return typeof v === 'string' && /^turns?:\S+$/i.test(v.trim())
+}
+
+// F3 — accept a TURN server only when all three fields are present and the url
+// scheme is valid. A partial config returns null so the store never persists a
+// half-built server that would silently never activate.
+export function normalizeTurnServer(input: {
+  url?: string
+  username?: string
+  credential?: string
+}): CustomTurnServer | null {
+  const url = (input.url ?? '').trim()
+  const username = (input.username ?? '').trim()
+  const credential = (input.credential ?? '').trim()
+  if (
+    !isValidTurnUrl(url) ||
+    username.length === 0 ||
+    credential.length === 0
+  ) {
+    return null
+  }
+  return { url, username, credential }
+}
+
+function isCustomTurnServer(v: unknown): v is CustomTurnServer {
+  if (!v || typeof v !== 'object') return false
+  const t = v as Partial<CustomTurnServer>
+  return (
+    isValidTurnUrl(t.url) &&
+    typeof t.username === 'string' &&
+    t.username.length > 0 &&
+    typeof t.credential === 'string' &&
+    t.credential.length > 0
+  )
+}
+
+function readCustomRelayUrls(v: unknown): string[] {
+  if (!Array.isArray(v)) return []
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const item of v) {
+    if (!isValidRelayUrl(item)) continue
+    const url = (item as string).trim()
+    if (seen.has(url)) continue
+    seen.add(url)
+    out.push(url)
+  }
+  return out
+}
+
 export function isCaptureDisplaysMode(v: unknown): v is CaptureDisplaysMode {
   return v === 'primary' || v === 'all'
 }
@@ -343,17 +515,24 @@ export async function hydrateValuesFromStore(
     theme: await store.get(SETTINGS_KEY_THEME),
     reduceMotion: await store.get(SETTINGS_KEY_REDUCE_MOTION),
     invite: await store.get(SETTINGS_KEY_INVITE_NOTIFY),
+    pomodoroNotify: await store.get(SETTINGS_KEY_POMODORO_NOTIFY),
+    pomodoroSound: await store.get(SETTINGS_KEY_POMODORO_SOUND),
+    friendOnline: await store.get(SETTINGS_KEY_FRIEND_ONLINE_NOTIFY),
+    versionCheck: await store.get(SETTINGS_KEY_VERSION_CHECK),
     tray: await store.get(SETTINGS_KEY_MINIMIZE_TRAY),
     debug: await store.get(SETTINGS_KEY_DEBUG_LOG),
     turn: await store.get(SETTINGS_KEY_TURN_PREF),
     ai: await store.get(SETTINGS_KEY_AI_FEATURES),
     warning: await store.get(SETTINGS_KEY_WARNING_THRESHOLD),
     alert: await store.get(SETTINGS_KEY_ALERT_THRESHOLD),
+    confidenceFloor: await store.get(SETTINGS_KEY_CONFIDENCE_FLOOR),
     sampleInterval: await store.get(SETTINGS_KEY_SAMPLE_INTERVAL),
     pttFriends: await store.get(SETTINGS_KEY_PTT_FRIENDS_ACCELERATOR),
     pttAi: await store.get(SETTINGS_KEY_PTT_AI_ACCELERATOR),
     captureDisplays: await store.get(SETTINGS_KEY_CAPTURE_DISPLAYS),
     windowStyle: await store.get(SETTINGS_KEY_WINDOW_STYLE),
+    customRelays: await store.get(SETTINGS_KEY_CUSTOM_RELAYS),
+    turnServer: await store.get(SETTINGS_KEY_TURN_SERVER),
   }
 
   let theme: ThemeMode = isThemeMode(stored.theme)
@@ -392,6 +571,22 @@ export async function hydrateValuesFromStore(
         stored.invite,
         DEFAULT_SETTINGS.incomingInviteNotificationEnabled
       ),
+      pomodoroNotificationEnabled: readBool(
+        stored.pomodoroNotify,
+        DEFAULT_SETTINGS.pomodoroNotificationEnabled
+      ),
+      pomodoroSoundEnabled: readBool(
+        stored.pomodoroSound,
+        DEFAULT_SETTINGS.pomodoroSoundEnabled
+      ),
+      friendOnlineNotificationEnabled: readBool(
+        stored.friendOnline,
+        DEFAULT_SETTINGS.friendOnlineNotificationEnabled
+      ),
+      versionCheckEnabled: readBool(
+        stored.versionCheck,
+        DEFAULT_SETTINGS.versionCheckEnabled
+      ),
       minimizeToTrayOnClose: readBool(
         stored.tray,
         DEFAULT_SETTINGS.minimizeToTrayOnClose
@@ -407,6 +602,10 @@ export async function hydrateValuesFromStore(
         DEFAULT_SETTINGS.warningThreshold
       ),
       alertThreshold: readNumber(stored.alert, DEFAULT_SETTINGS.alertThreshold),
+      offTaskConfidenceFloor: readNumber(
+        stored.confidenceFloor,
+        DEFAULT_SETTINGS.offTaskConfidenceFloor
+      ),
       sampleIntervalSec: readNullableNumber(stored.sampleInterval),
       pttFriendsAccelerator: readAccelerator(
         stored.pttFriends,
@@ -422,6 +621,10 @@ export async function hydrateValuesFromStore(
       windowStyle: isWindowStyleMode(stored.windowStyle)
         ? stored.windowStyle
         : DEFAULT_SETTINGS.windowStyle,
+      customRelayUrls: readCustomRelayUrls(stored.customRelays),
+      turnServer: isCustomTurnServer(stored.turnServer)
+        ? stored.turnServer
+        : DEFAULT_SETTINGS.turnServer,
     },
     wroteMigration,
   }
@@ -571,6 +774,30 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     await writeKey(set, SETTINGS_KEY_INVITE_NOTIFY, enabled)
   },
 
+  setPomodoroNotificationEnabled: async (enabled) => {
+    set((s) => ({
+      values: { ...s.values, pomodoroNotificationEnabled: enabled },
+    }))
+    await writeKey(set, SETTINGS_KEY_POMODORO_NOTIFY, enabled)
+  },
+
+  setPomodoroSoundEnabled: async (enabled) => {
+    set((s) => ({ values: { ...s.values, pomodoroSoundEnabled: enabled } }))
+    await writeKey(set, SETTINGS_KEY_POMODORO_SOUND, enabled)
+  },
+
+  setFriendOnlineNotificationEnabled: async (enabled) => {
+    set((s) => ({
+      values: { ...s.values, friendOnlineNotificationEnabled: enabled },
+    }))
+    await writeKey(set, SETTINGS_KEY_FRIEND_ONLINE_NOTIFY, enabled)
+  },
+
+  setVersionCheckEnabled: async (enabled) => {
+    set((s) => ({ values: { ...s.values, versionCheckEnabled: enabled } }))
+    await writeKey(set, SETTINGS_KEY_VERSION_CHECK, enabled)
+  },
+
   setMinimizeToTrayOnClose: async (enabled) => {
     set((s) => ({ values: { ...s.values, minimizeToTrayOnClose: enabled } }))
     await writeKey(set, SETTINGS_KEY_MINIMIZE_TRAY, enabled)
@@ -591,6 +818,18 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   setTurnPreference: async (pref) => {
     set((s) => ({ values: { ...s.values, turnPreference: pref } }))
     await writeKey(set, SETTINGS_KEY_TURN_PREF, pref)
+  },
+
+  setCustomRelayUrls: async (text) => {
+    const urls = parseRelayUrls(text)
+    set((s) => ({ values: { ...s.values, customRelayUrls: urls } }))
+    await writeKey(set, SETTINGS_KEY_CUSTOM_RELAYS, urls)
+  },
+
+  setTurnServer: async (input) => {
+    const server = normalizeTurnServer(input)
+    set((s) => ({ values: { ...s.values, turnServer: server } }))
+    await writeKey(set, SETTINGS_KEY_TURN_SERVER, server)
   },
 
   setAiFeaturesEnabled: async (enabled) => {
@@ -617,6 +856,14 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   setAlertThreshold: async (count) => {
     set((s) => ({ values: { ...s.values, alertThreshold: count } }))
     await writeKey(set, SETTINGS_KEY_ALERT_THRESHOLD, count)
+  },
+
+  // Range enforcement lives in the Settings → AI slider UI; focusStore
+  // re-clamps via `clampConfidenceFloor` at apply-time, so an out-of-range
+  // persisted value can never break a run.
+  setOffTaskConfidenceFloor: async (floor) => {
+    set((s) => ({ values: { ...s.values, offTaskConfidenceFloor: floor } }))
+    await writeKey(set, SETTINGS_KEY_CONFIDENCE_FLOOR, floor)
   },
 
   setSampleIntervalSec: async (seconds) => {

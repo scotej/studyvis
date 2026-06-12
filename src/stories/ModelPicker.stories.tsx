@@ -191,3 +191,27 @@ export const FailedDownload: Story = {
     },
   },
 }
+
+// A4 — an interrupted download with a known partial on disk: the primary
+// action reads "Resume download" (backend Range-resumes the `.tmp`) and a
+// note shows how much already landed.
+export const ResumableDownload: Story = {
+  args: {
+    installed: {},
+    hfTokenPresent: false,
+    pickerOverrides: {
+      'qwen2_5-vl-3b': {
+        phase: 'idle',
+        record: {
+          modelId: 'qwen2_5-vl-3b',
+          benchmark: null,
+          installedAt: null,
+          interruptedDownload: {
+            bytesReceived: 2_900_000_000,
+            at: Date.now(),
+          },
+        },
+      },
+    },
+  },
+}

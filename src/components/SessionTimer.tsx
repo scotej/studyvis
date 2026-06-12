@@ -2,13 +2,25 @@ import { ChevronDown, Timer } from 'lucide-react'
 import { useEffect, useState } from 'react'
 
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import {
   Popover,
   PopoverContent,
   PopoverTrigger,
 } from '@/components/ui/popover'
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { Separator } from '@/components/ui/separator'
-import type { PomodoroPhase, PomodoroPreset } from '@/lib/pomodoro-types'
+import {
+  CUSTOM_REST_MAX,
+  CUSTOM_REST_MIN,
+  CUSTOM_WORK_MAX,
+  CUSTOM_WORK_MIN,
+  clampCustomMinutes,
+  type PomodoroPhase,
+  type PomodoroPreset,
+  type PomodoroStartArgs,
+} from '@/lib/pomodoro-types'
 import { cn } from '@/lib/utils'
 import { strings } from '@/strings'
 
@@ -21,7 +33,7 @@ export type SessionTimerProps = {
   // When `iAmBroadcaster` is true this is "you"; otherwise the resolved
   // peer display name (or a fallback).
   broadcasterName: string | null
-  onStart: (preset: PomodoroPreset) => void
+  onStart: (args: PomodoroStartArgs) => void
   onStop: () => void
   className?: string
 }
@@ -47,6 +59,11 @@ export function SessionTimer({
   const [pickedPreset, setPickedPreset] = useState<PomodoroPreset>(
     preset ?? '25/5'
   )
+  // N5 — custom-split inputs, kept as raw strings so a half-typed value (an
+  // empty box, a leading digit) doesn't snap. Clamped to the bounds only at
+  // start-time via `clampCustomMinutes`.
+  const [customWork, setCustomWork] = useState('45')
+  const [customRest, setCustomRest] = useState('15')
   const remaining = useRemainingMs(endsAt)
   const active = phase !== 'idle'
   const phaseLabel = active
@@ -135,30 +152,46 @@ export function SessionTimer({
             <p className="text-sm font-medium text-text-primary">
               {strings.pomodoro.startTitle}
             </p>
-            <fieldset className="flex flex-col gap-2 text-sm">
-              <legend className="sr-only">
-                {strings.pomodoro.presetLegend}
-              </legend>
+            <RadioGroup
+              className="gap-2 text-sm"
+              aria-label={strings.pomodoro.presetLegend}
+              value={pickedPreset}
+              onValueChange={(value) =>
+                setPickedPreset(value as PomodoroPreset)
+              }
+            >
               <PresetRadio
                 value="25/5"
                 label={strings.pomodoro.presets['25/5'].label}
                 hint={strings.pomodoro.presets['25/5'].hint}
                 checked={pickedPreset === '25/5'}
-                onSelect={() => setPickedPreset('25/5')}
               />
               <PresetRadio
                 value="50/10"
                 label={strings.pomodoro.presets['50/10'].label}
                 hint={strings.pomodoro.presets['50/10'].hint}
                 checked={pickedPreset === '50/10'}
-                onSelect={() => setPickedPreset('50/10')}
               />
-            </fieldset>
+              <PresetRadio
+                value="custom"
+                label={strings.pomodoro.presets.custom.label}
+                hint={strings.pomodoro.presets.custom.hint}
+                checked={pickedPreset === 'custom'}
+              />
+            </RadioGroup>
+            {pickedPreset === 'custom' ? (
+              <CustomDurationFields
+                work={customWork}
+                rest={customRest}
+                onWorkChange={setCustomWork}
+                onRestChange={setCustomRest}
+              />
+            ) : null}
             <Separator />
             <Button
               size="sm"
               onClick={() => {
-                onStart(pickedPreset)
+                onStart(startArgsFor(pickedPreset, customWork, customRest))
                 setOpen(false)
               }}
             >
@@ -176,16 +209,16 @@ function PresetRadio({
   label,
   hint,
   checked,
-  onSelect,
 }: {
   value: PomodoroPreset
   label: string
   hint: string
   checked: boolean
-  onSelect: () => void
 }) {
+  const id = `pomodoro-preset-${value}`
   return (
     <label
+      htmlFor={id}
       className={cn(
         'flex cursor-pointer items-start gap-3 rounded-md border px-3 py-2 transition-colors',
         checked
@@ -193,20 +226,94 @@ function PresetRadio({
           : 'border-border-default hover:bg-bg-raised'
       )}
     >
-      <input
-        type="radio"
-        name="pomodoro-preset"
-        value={value}
-        checked={checked}
-        onChange={onSelect}
-        className="mt-1 accent-accent-default"
-      />
+      <RadioGroupItem id={id} value={value} className="mt-1" />
       <span className="flex flex-col">
         <span className="font-medium text-text-primary">{label}</span>
         <span className="text-xs text-text-secondary">{hint}</span>
       </span>
     </label>
   )
+}
+
+// N5 — the two numeric inputs revealed by the "Custom" preset. Raw-string
+// state lives in the parent so a half-typed value never snaps; clamping to
+// the bounds happens at start-time.
+function CustomDurationFields({
+  work,
+  rest,
+  onWorkChange,
+  onRestChange,
+}: {
+  work: string
+  rest: string
+  onWorkChange: (value: string) => void
+  onRestChange: (value: string) => void
+}) {
+  const copy = strings.pomodoro.custom
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="grid grid-cols-2 gap-3">
+        <div className="flex flex-col gap-1">
+          <Label htmlFor="pomodoro-custom-work" className="text-xs">
+            {copy.workLabel}
+          </Label>
+          <Input
+            id="pomodoro-custom-work"
+            type="number"
+            inputMode="numeric"
+            min={CUSTOM_WORK_MIN}
+            max={CUSTOM_WORK_MAX}
+            value={work}
+            onChange={(e) => onWorkChange(e.target.value)}
+            aria-label={copy.workAriaLabel}
+          />
+        </div>
+        <div className="flex flex-col gap-1">
+          <Label htmlFor="pomodoro-custom-rest" className="text-xs">
+            {copy.restLabel}
+          </Label>
+          <Input
+            id="pomodoro-custom-rest"
+            type="number"
+            inputMode="numeric"
+            min={CUSTOM_REST_MIN}
+            max={CUSTOM_REST_MAX}
+            value={rest}
+            onChange={(e) => onRestChange(e.target.value)}
+            aria-label={copy.restAriaLabel}
+          />
+        </div>
+      </div>
+      <p className="text-xs text-text-secondary">
+        {copy.bounds(
+          CUSTOM_WORK_MIN,
+          CUSTOM_WORK_MAX,
+          CUSTOM_REST_MIN,
+          CUSTOM_REST_MAX
+        )}
+      </p>
+    </div>
+  )
+}
+
+// N5 — build the controller start arg from the picked preset + the raw
+// custom-input strings. Clamps the custom split to bounds so an out-of-range
+// or non-numeric entry can never reach the broadcast.
+function startArgsFor(
+  preset: PomodoroPreset,
+  workInput: string,
+  restInput: string
+): PomodoroStartArgs {
+  if (preset !== 'custom') return { preset }
+  const { workMin, restMin } = clampCustomMinutes(
+    Number(workInput),
+    Number(restInput)
+  )
+  return {
+    preset: 'custom',
+    workMs: workMin * 60_000,
+    restMs: restMin * 60_000,
+  }
 }
 
 // Returns ms remaining until `endsAt` (or 0 when null). Drives a 1-second

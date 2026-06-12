@@ -18,7 +18,11 @@ import {
   type IdentityRecord,
 } from '@/lib/db/identity'
 
-export type IdentityStatus = 'loading' | 'absent' | 'ready'
+// 'error' (D1): identity.json exists but couldn't be read/parsed (bit-rot,
+// partial write, bad serde). The private keys are still valid in the keychain,
+// so the user must NOT be routed into new-identity onboarding (its create path
+// would overwrite them and strand every friend who knows the old pubkey).
+export type IdentityStatus = 'loading' | 'absent' | 'ready' | 'error'
 
 export type CreatedIdentity = {
   mnemonic: Mnemonic
@@ -67,30 +71,63 @@ function recordFromIdentity(id: Identity, displayName: string): IdentityRecord {
 
 export const useIdentityStore = create<IdentityState>((set, get) => {
   const refresh: IdentityActions['refresh'] = async () => {
+    // The ONLY clean route to 'absent' is identity_exists() returning false.
+    // Any throw — or a present-but-unreadable file — resolves to 'error' so a
+    // corrupt load never steers the user into create-new onboarding (D1).
+    let exists: boolean
     try {
-      const exists = await identityExists()
-      if (!exists) {
-        set({ identity: null, status: 'absent' })
-        return
-      }
-      const record = await loadIdentityRecord()
-      set({ identity: record, status: record ? 'ready' : 'absent' })
+      exists = await identityExists()
     } catch (err) {
-      // Surface to the user via console; fall back to absent so they aren't
-      // stuck on a blank loading screen. A V1-P3 corrupted-file recovery path
-      // is owed — see memory carryovers.
-      console.error('useIdentity.refresh failed:', err)
+      console.error('useIdentity.refresh: identity_exists failed:', err)
+      set({ identity: null, status: 'error' })
+      return
+    }
+    if (!exists) {
       set({ identity: null, status: 'absent' })
+      return
+    }
+    try {
+      const record = await loadIdentityRecord()
+      // File exists; a null/unparseable record is a corrupt-file signal, not a
+      // fresh user. Route to 'error', never 'absent'.
+      set(
+        record
+          ? { identity: record, status: 'ready' }
+          : { identity: null, status: 'error' }
+      )
+    } catch (err) {
+      console.error('useIdentity.refresh: identity_load_record failed:', err)
+      set({ identity: null, status: 'error' })
     }
   }
 
   // The single persistence path. Both new-identity creation and 24-word
   // recovery funnel through here so there is exactly one place that writes
   // keys to the keychain and the public record to identity.json.
-  const buildCommit = (id: Identity) => {
-    const record = recordFromIdentity(id, '')
+  //
+  // `allowOverwrite` is the D1 belt-and-braces guard: the create path passes
+  // false, so even if a corrupt-load somehow reached onboarding, the commit
+  // re-checks identity_exists() and refuses to clobber a present identity.json.
+  // Recovery passes true — it has already shown the explicit overwrite confirm.
+  // The keychain command (identity_save_keys) enforces the same on its side.
+  const buildCommit = (id: Identity, allowOverwrite: boolean) => {
+    // Preserve the existing display name across a re-commit so a Settings/D1
+    // recovery of the SAME identity (D5 harmless re-commit, no confirm shown)
+    // doesn't silently blank it. Onboarding create starts from no identity, so
+    // this degrades to '' there (DisplayNameStep sets it next); the D1 error
+    // path has an unreadable record, so there's nothing to preserve either.
+    const record = recordFromIdentity(id, get().identity?.display_name ?? '')
     const commit = async () => {
-      await saveKeys(bytesToHex(id.edPriv), bytesToHex(id.xPriv))
+      if (!allowOverwrite && (await identityExists())) {
+        throw new Error(
+          'identity already exists; refusing to overwrite without explicit confirmation'
+        )
+      }
+      await saveKeys(
+        bytesToHex(id.edPriv),
+        bytesToHex(id.xPriv),
+        allowOverwrite
+      )
       await saveIdentityRecord(record)
       set({ identity: record, status: 'ready' })
     }
@@ -99,13 +136,13 @@ export const useIdentityStore = create<IdentityState>((set, get) => {
 
   const create: IdentityActions['create'] = () => {
     const id = generateIdentity()
-    const { record, commit } = buildCommit(id)
+    const { record, commit } = buildCommit(id, false)
     return { mnemonic: id.mnemonic, record, commit }
   }
 
   const recover: IdentityActions['recover'] = (mnemonic) => {
     const id: Identity = { mnemonic, ...deriveFromMnemonic(mnemonic) }
-    return buildCommit(id)
+    return buildCommit(id, true)
   }
 
   const setDisplayName: IdentityActions['setDisplayName'] = async (name) => {

@@ -18,14 +18,16 @@ export const STREAK_MIN_MINUTES = 25
 export const FOCUS_WINDOW_DAYS = 30
 export const TOP_PARTNERS_LIMIT = 5
 
-// "Focused minutes" for a session = the minutes the user spent in the
-// study session. We deliberately use total_minutes, NOT
-// total_minutes * focused_pct: focused_pct is null for V1 / AI-off
-// sessions, the streak rule already counts raw session minutes, and the
-// body-doubling premise treats presence time as focused time. Isolated as
-// one helper so a later phase can switch to an AI-weighted definition
-// without touching the rest of this module.
-export function focusedMinutesForSession(session: SessionRecord): number {
+// R2 — "Study minutes" for a session = the minutes the user spent in the
+// study session. Deliberately raw presence time (total_minutes), NOT
+// total_minutes * focused_pct: this is a distinct concept from the report's
+// AI-derived "Focused-time %", and reserving "Focused" for the AI concept
+// keeps the two adjacent surfaces from colliding on the same word.
+// focused_pct is null for V1 / AI-off sessions, the streak rule already
+// counts raw session minutes, and the body-doubling premise treats presence
+// time as study time. Isolated as one helper so a later phase can switch to
+// an AI-weighted definition without touching the rest of this module.
+export function studyMinutesForSession(session: SessionRecord): number {
   return session.total_minutes ?? 0
 }
 
@@ -70,11 +72,11 @@ function shortDayLabel(key: string): string {
 
 export type DailyFocus = { day: string; label: string; minutes: number }
 
-// Focused minutes bucketed into the trailing FOCUS_WINDOW_DAYS calendar
+// Study minutes bucketed into the trailing FOCUS_WINDOW_DAYS calendar
 // days ending on `now`'s local day, inclusive. Always returns exactly
 // FOCUS_WINDOW_DAYS entries in chronological order; days with no sessions
 // are zero-filled so the bar chart has a continuous x-axis.
-export function focusedMinutesPerDay(
+export function studyMinutesPerDay(
   sessions: readonly SessionRecord[],
   now: number,
   timeZone?: string
@@ -83,7 +85,7 @@ export function focusedMinutesPerDay(
   for (const s of sessions) {
     if (s.started_at == null) continue
     const key = dayKey(s.started_at, timeZone)
-    totals.set(key, (totals.get(key) ?? 0) + focusedMinutesForSession(s))
+    totals.set(key, (totals.get(key) ?? 0) + studyMinutesForSession(s))
   }
   return enumerateDays(dayKey(now, timeZone), FOCUS_WINDOW_DAYS).map((day) => ({
     day,
@@ -220,9 +222,31 @@ export function computeStats(
 ): StatsSummary {
   return {
     totalSessions: sessions.length,
-    daily: focusedMinutesPerDay(sessions, now, timeZone),
+    daily: studyMinutesPerDay(sessions, now, timeZone),
     streak: computeStreak(sessions, now, timeZone),
     partners: topStudyPartners(sessions, friends),
     score: averageScore(sessions),
   }
+}
+
+// R3 — stats CSV export rows, derived entirely from a computed StatsSummary
+// (no re-query). Two sections in one file: the trailing-30-day daily
+// study-minutes series, then the all-time per-partner session counts. Pure
+// so the exact layout is unit-pinned; the view hands the result to
+// buildCsv + saveTextFile.
+export type StatsCsv = {
+  header: string[]
+  rows: (string | number)[][]
+}
+
+export function buildStatsCsvModel(summary: StatsSummary): StatsCsv {
+  const header = ['section', 'key', 'value']
+  const rows: (string | number)[][] = []
+  for (const d of summary.daily) {
+    rows.push(['daily_study_minutes', d.day, d.minutes])
+  }
+  for (const p of summary.partners) {
+    rows.push(['partner_sessions', p.name, p.sessions])
+  }
+  return { header, rows }
 }

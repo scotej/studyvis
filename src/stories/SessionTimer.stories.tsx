@@ -56,12 +56,30 @@ export const ActiveWork50Peer: Story = {
   },
 }
 
+// N5 — an active custom split (45/15). Labels as Focus/Break like the legacy
+// presets; the exact minutes ride in the snapshot, not the phase name.
+export const ActiveCustomSelf: Story = {
+  args: {
+    phase: 'work-custom',
+    preset: 'custom',
+    endsAt: NOW + 40 * 60_000,
+    iAmBroadcaster: true,
+    broadcasterName: 'you',
+  },
+}
+
 // Interactive: start + stop locally so the popover flow can be exercised
 // in Storybook without wiring the real controller.
 export const Interactive: Story = {
   render: () => {
     const [phase, setPhase] = useState<
-      'idle' | 'work-25' | 'rest-5' | 'work-50' | 'rest-10'
+      | 'idle'
+      | 'work-25'
+      | 'rest-5'
+      | 'work-50'
+      | 'rest-10'
+      | 'work-custom'
+      | 'rest-custom'
     >('idle')
     const [preset, setPreset] = useState<PomodoroPreset | null>(null)
     const [endsAt, setEndsAt] = useState<number | null>(null)
@@ -72,10 +90,15 @@ export const Interactive: Story = {
         endsAt={endsAt}
         iAmBroadcaster={phase !== 'idle'}
         broadcasterName={phase === 'idle' ? null : 'you'}
-        onStart={(p) => {
-          setPreset(p)
-          setPhase(p === '25/5' ? 'work-25' : 'work-50')
-          const work = p === '25/5' ? 25 : 50
+        onStart={(args) => {
+          setPreset(args.preset)
+          if (args.preset === 'custom') {
+            setPhase('work-custom')
+            setEndsAt(Date.now() + args.workMs)
+            return
+          }
+          setPhase(args.preset === '25/5' ? 'work-25' : 'work-50')
+          const work = args.preset === '25/5' ? 25 : 50
           setEndsAt(Date.now() + work * 60_000)
         }}
         onStop={() => {

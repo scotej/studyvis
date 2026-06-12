@@ -21,7 +21,8 @@
 
 import { hexToBytes } from '@/lib/crypto/identity'
 import { presencePassword, presenceTopic } from '@/lib/crypto/topics'
-import { joinTopic, type TopicRoom } from '@/lib/trystero'
+import { joinTopic, type TopicConfig, type TopicRoom } from '@/lib/trystero'
+import { userRelayConfig } from '@/lib/trystero/relays'
 
 export const HEARTBEAT_ACTION = 'heartbeat'
 export const HEARTBEAT_INTERVAL_MS = 30_000
@@ -33,9 +34,20 @@ export const ONLINE_WINDOW_MS = 60_000
 // window guarantees the dot flips within ~SWEEP_INTERVAL_MS of the cutoff.
 export const SWEEP_INTERVAL_MS = 15_000
 
-export type HeartbeatPayload = {
-  ts: number
-}
+// F7 — the heartbeat action now carries one of two shapes on the SAME wire:
+//   - a normal heartbeat `{ ts }` (unchanged), and
+//   - a goodbye `{ leaving: true }` sent best-effort just before room.leave().
+// Wire-compat is load-bearing in BOTH directions:
+//   - OLDER receivers parse `{ leaving: true }` and hit the `typeof ts !==
+//     'number'` guard below, so they DROP it (no stamp) and the sender ages out
+//     via the 60s ONLINE_WINDOW_MS exactly as before — no regression.
+//   - This receiver checks `leaving === true` BEFORE the ts guard and marks the
+//     pubkey offline immediately (deletes it from the map).
+// The goodbye deliberately omits `ts` so it can never refresh an older
+// receiver's last-seen timer and accidentally DELAY their offline detection.
+export type HeartbeatPayload = { ts: number }
+export type GoodbyePayload = { leaving: true }
+export type PresencePayload = HeartbeatPayload | GoodbyePayload
 
 export type PresenceMap = Record<string, number> // ed_pubkey_hex -> last seen ms
 
@@ -51,6 +63,10 @@ export type PresenceContext = {
 
 export type PresenceSubscription = {
   leave: () => Promise<void>
+  // F7 — broadcast a best-effort "leaving" flag on our own presence topic
+  // without tearing the room down. Used by the hard-quit (pagehide) path where
+  // there's no time to await a full `leave()`.
+  sendGoodbye: () => void
 }
 
 export function isOnline(
@@ -70,26 +86,48 @@ export function startPresence(ctx: PresenceContext): PresenceSubscription {
 
   const presence: PresenceMap = {}
   const rooms: TopicRoom[] = []
-  const heartbeatSenders: Array<(p: HeartbeatPayload) => Promise<void[]>> = []
+  const heartbeatSenders: Array<(p: PresencePayload) => Promise<void[]>> = []
+
+  // F3 — `joinTopic` builds the relay WebSockets synchronously, so a malformed
+  // saved relay URL throws here. `startPresence` runs in InboxBoot's mount
+  // effect with no React error boundary above it, so an unguarded throw would
+  // blank the whole app at launch. Each join is wrapped so a bad relay config
+  // degrades presence to a no-op instead of crashing the app; the user can
+  // still reach Settings → Network to fix the list.
+  const tryJoin = (config: TopicConfig): TopicRoom | null => {
+    try {
+      return joinTopic(config)
+    } catch (err) {
+      console.error('presence room join failed:', err)
+      return null
+    }
+  }
 
   // Own room: send heartbeats. We never read our own heartbeat back into the
   // presence map — "online to myself" is a tautology and would only confuse
   // the friends list.
-  const ownRoom = joinTopic({
+  let ownJoinUnsub: () => void = () => {}
+  const ownRoom = tryJoin({
     topic: presenceTopic(ctx.myEdPubkey),
     password: presencePassword(ctx.myEdPubkey),
+    relayConfig: userRelayConfig(),
+    // F1 — presence is a background channel; a join error is logged only.
+    onJoinError: (details) =>
+      console.warn('presence (own) room join error:', details.error),
   })
-  rooms.push(ownRoom)
-  const ownAction = ownRoom.makeAction<HeartbeatPayload>(HEARTBEAT_ACTION)
-  heartbeatSenders.push((p) => ownAction.send(p))
-  // Send a fresh heartbeat the moment a friend subscribes to our presence
-  // topic. Nostr doesn't buffer for peers who weren't on the topic yet, so
-  // without this a friend who comes online between our interval ticks waits
-  // up to HEARTBEAT_INTERVAL_MS to see us as online. This only triggers a
-  // send; the receiver still derives "online" from its own clock (above).
-  const ownJoinUnsub = ownRoom.onPeerJoin(() => {
-    void ownAction.send({ ts: now() })
-  })
+  if (ownRoom) {
+    rooms.push(ownRoom)
+    const ownAction = ownRoom.makeAction<PresencePayload>(HEARTBEAT_ACTION)
+    heartbeatSenders.push((p) => ownAction.send(p))
+    // Send a fresh heartbeat the moment a friend subscribes to our presence
+    // topic. Nostr doesn't buffer for peers who weren't on the topic yet, so
+    // without this a friend who comes online between our interval ticks waits
+    // up to HEARTBEAT_INTERVAL_MS to see us as online. This only triggers a
+    // send; the receiver still derives "online" from its own clock (above).
+    ownJoinUnsub = ownRoom.onPeerJoin(() => {
+      void ownAction.send({ ts: now() })
+    })
+  }
 
   // Friends' rooms: listen for their heartbeats and keep a `lastSeenAt` map.
   for (const friend of ctx.friends) {
@@ -101,14 +139,30 @@ export function startPresence(ctx: PresenceContext): PresenceSubscription {
     }
     if (edBytes.length !== 32) continue
 
-    const room = joinTopic({
+    const room = tryJoin({
       topic: presenceTopic(edBytes),
       password: presencePassword(edBytes),
+      relayConfig: userRelayConfig(),
+      onJoinError: (details) =>
+        console.warn('presence (friend) room join error:', details.error),
     })
+    if (!room) continue
     rooms.push(room)
-    const action = room.makeAction<HeartbeatPayload>(HEARTBEAT_ACTION)
+    const action = room.makeAction<PresencePayload>(HEARTBEAT_ACTION)
     action.receive((data) => {
-      if (!data || typeof (data as HeartbeatPayload).ts !== 'number') return
+      if (!data || typeof data !== 'object') return
+      // F7 — a goodbye flips the friend offline immediately. Checked BEFORE the
+      // ts guard so it works regardless of whether a `ts` rides along (it
+      // shouldn't, but be defensive). Deleting the entry makes isOnline return
+      // false this instant rather than after the 60s window.
+      if ((data as { leaving?: unknown }).leaving === true) {
+        if (friend.ed_pubkey_hex in presence) {
+          delete presence[friend.ed_pubkey_hex]
+          ctx.onPresenceChange({ ...presence })
+        }
+        return
+      }
+      if (typeof (data as HeartbeatPayload).ts !== 'number') return
       // Stamp with the RECEIVER's clock. A heartbeat that just arrived
       // means the friend is reachable now, regardless of their wall clock.
       presence[friend.ed_pubkey_hex] = now()
@@ -132,11 +186,30 @@ export function startPresence(ctx: PresenceContext): PresenceSubscription {
     ctx.onPresenceChange({ ...presence })
   }, ctx.sweepIntervalMs ?? SWEEP_INTERVAL_MS)
 
+  // F7 — best-effort goodbye on our own presence topic so friends currently
+  // subscribed flip us offline near-instantly instead of waiting out the 60s
+  // window. Fire-and-forget; a failed send must never block teardown.
+  const sendGoodbye = (): void => {
+    for (const fn of heartbeatSenders) {
+      try {
+        void fn({ leaving: true }).catch(() => {})
+      } catch {
+        /* best-effort */
+      }
+    }
+  }
+
   return {
+    sendGoodbye,
     leave: async () => {
       ownJoinUnsub()
       clearInterval(heartbeatHandle)
       clearInterval(sweepHandle)
+      // Announce departure to anyone listening to OUR presence topic before we
+      // tear the room down. We don't await — the action's underlying datachannel
+      // send is synchronous-ish, and blocking teardown on a relay round-trip
+      // would defeat the "best-effort" intent.
+      sendGoodbye()
       await Promise.all(
         rooms.map((r) =>
           r.leave().catch(() => {

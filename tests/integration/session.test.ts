@@ -237,17 +237,19 @@ describe('two in-process apps in the same room observe peer events', () => {
     await guest.leave()
     await flushMicrotasks()
 
-    // After the guest leaves, the host's set drops to 0, and the auto-end-on-
-    // empty rule (peer count drops to 1 → end) fires the host's leave handler
-    // — both the guest's explicit leave AND the host's auto-end upsert into
-    // the sessions table, both keyed on the same session_topic.
+    // S1 — after the guest leaves, the host's set drops to 0 but the auto-end
+    // is now debounced by DISCONNECT_GRACE_MS (a WiFi blip shouldn't kill a
+    // long session). Within the grace window only the guest's explicit leave
+    // has persisted; the host's auto-end is still pending.
     const insertCalls = invokeMock.mock.calls.filter(
       ([cmd]) => cmd === 'sessions_insert'
     )
-    expect(insertCalls).toHaveLength(2)
-    for (const call of insertCalls) {
-      expect(call[1]).toMatchObject({ id: host.sessionTopic })
-    }
+    expect(insertCalls).toHaveLength(1)
+    expect(insertCalls[0]?.[1]).toMatchObject({ id: host.sessionTopic })
+
+    // Cleanup — explicit host leave is idempotent with the (still-pending)
+    // grace-armed auto-end, so the host persists exactly once more.
+    await host.leave()
   })
 })
 
@@ -314,13 +316,13 @@ describe('leave handler tears down the room and persists a sessions row', () => 
     expect(args?.endedAt).toBeGreaterThanOrEqual(beforeLeaveAt)
     expect(args?.endedAt).toBeLessThanOrEqual(afterLeaveAt + 5)
     expect(args?.totalMinutes).toBeGreaterThanOrEqual(0)
-    // V2-P8: report fields are populated even when AI was off — score
-    // defaults to the INITIAL_SCORE (100) and focused_pct is null because
-    // the sample loop never ran. The declaredTopic comes from the V2-P7
-    // session-start default; generated_at == ended_at because the leave
-    // handler runs the upsert synchronously.
+    // R1: an AI-off session (the sample loop never ran) persists score=null,
+    // not a fabricated 100 — statsData.averageScore skips nulls and the
+    // Report renders its no-score state. focused_pct is likewise null. The
+    // declaredTopic comes from the V2-P7 session-start default; generated_at
+    // == ended_at because the leave handler runs the upsert synchronously.
     expect(args?.declaredTopic).toBe('Studying')
-    expect(args?.score).toBe(100)
+    expect(args?.score).toBeNull()
     expect(args?.focusedPct).toBeNull()
     expect(args?.generatedAt).toBe(args?.endedAt)
 

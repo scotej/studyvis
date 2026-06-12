@@ -12,7 +12,7 @@ The product exists because every existing alternative either (a) routes everythi
 
 - Small groups of close friends (2–4 per session) who already know each other by name.
 - Hardware floor: 16GB RAM, mid-to-low-tier CPU, no dedicated GPU.
-- Operating systems: macOS (Apple Silicon + Intel), Windows 10/11. Linux is deferred to V3 pending V0 re-run (see §5).
+- Operating systems: macOS (Apple Silicon), Windows 10/11. Linux is deferred to V3 pending V0 re-run (see §5). (The release build ships an Apple-Silicon-only `aarch64` `.dmg` — per-arch, not universal, because the llama-server sidecar is per-arch; see §5 and ARCHITECTURE §2.)
 - Anonymous to the public internet; pseudonymous to friends (chosen display name + Ed25519 keypair).
 - May expand to wider groups later, but every design decision should pass the "would my four friends like this?" test before the "would a stranger trust this?" test.
 
@@ -21,15 +21,15 @@ The product exists because every existing alternative either (a) routes everythi
 Surfaced explicitly because the design implies a footprint the user should consent to:
 
 - **Background daemon**: the app subscribes to a per-user "inbox topic" on a Trystero strategy (Nostr by default) whenever it is running, so friends can push session invites to you without a central server. To be available for invites at any time, autostart-at-login is offered (opt-in) and the app sits in the system tray.
-- **Network footprint**: a single long-lived WebSocket to a public Nostr relay while idle (a few KB/hour). During sessions: full-mesh WebRTC (peer-to-peer) for audio/video. Approximately 15% of network configurations require a TURN relay — public Open Relay used as fallback.
+- **Network footprint**: a single long-lived WebSocket to a public Nostr relay while idle (a few KB/hour). During sessions: full-mesh WebRTC (peer-to-peer) for audio/video. Approximately 15% of network configurations require a TURN relay to connect; no public TURN ships today (the old free public endpoints are dead — see §7 and ARCHITECTURE §4), so those sessions can fail until the user adds their own TURN server in Settings → Network.
 - **Disk footprint**: app + design assets <50 MB. AI vision model GGUFs (V2+) range 1–8 GB depending on the user's choice.
 - **Camera, screen, microphone**: requested only when needed — camera + mic when joining a session, screen capture only after the user opts in to AI features (V2+).
-- **Outbound data beyond P2P + Nostr signaling**: zero. No telemetry, no crash auto-uploads. Crash logs stay local with a manual "Share Log" button.
+- **Outbound data beyond P2P + Nostr signaling**: zero, with one explicit, opt-in carve-out — when the user enables the new-version check (OFF by default), the app makes an unauthenticated GET to the public GitHub Releases API to compare release tags. The request carries no identifiers, no query parameters, and no payload; failures are silent. No telemetry, no crash auto-uploads. Crash logs stay local with a manual "Share Log" button.
 
 ## 4. Principles
 
 1. **Local-first.** Personal data — keypairs, friends list, session reports, AI logs — lives only on the user's device. Never synced, never backed up to anyone's cloud.
-2. **No backend we operate.** All discovery uses public infrastructure (Nostr relays, BitTorrent trackers as fallback, public TURN). We never run servers we'd have to keep alive or pay for as the user base grows.
+2. **No backend we operate.** All discovery uses public infrastructure (Nostr relays, BitTorrent trackers as fallback). NAT traversal is STUN-only out of the box — no public TURN ships (none reliable remains), and a user who needs a relay supplies their own TURN server. We never run servers we'd have to keep alive or pay for as the user base grows.
 3. **Polished, not MVP.** Even V1 ships with full onboarding, a settings panel, autostart, and per-OS installers. We don't ship beta-feeling things even when they're functional. (Installers are unsigned for V1's friends-only audience — see §5; signing returns in a later phase if a Developer ID and code-signing cert become available.)
 4. **AI augments, doesn't surveil.** AI inference happens on-device. Camera + screen pixels are never transmitted. Only end-of-session score and real-time event flags ("on task" / "warning" / "alerted") are shared with peers.
 5. **Friends-only trust model.** No defenses against actively malicious peers. We don't try to prevent a user from disabling their own AI or fudging their own score — they can already do that, and these are their friends.
@@ -136,21 +136,31 @@ These are decisions, not omissions. Adding any of these would change the product
 
 Explicit so we don't pretend.
 
-- **Linux WebRTC** in WebKitGTK is historically uneven, especially `getDisplayMedia`. V0 confirms or defers Linux to V3.
+- **Linux WebRTC** in WebKitGTK is historically uneven, especially `getDisplayMedia`. V0 deferred Linux on that one unverified question; the concrete unblock checklist is in §8.
 - **Prompt injection** on small local LLMs is real. Friend-group threat model mostly absorbs this — Gemma 3 4B and Qwen2.5-VL-3B handle naive injections, but a determined friend can fool them. Mitigations: structured observation prompts where possible, system-prompt manipulation patterns enumerated, no real consequence to faking your own score.
 - **Self-reported scores.** A peer can disable AI features locally and still appear in sessions; their score will simply read "AI off" to the others. No technical defense; rely on social trust.
 - **BIP39 backup is the user's responsibility.** Lose the 24 words and the laptop, you're a new identity to your friends.
-- **TURN relay required for ~15% of network setups.** Public Open Relay is throttled. Heavy users on strict NATs may see degraded sessions; documented in onboarding.
+- **TURN relay required for ~15% of network setups.** No public TURN ships (the old free public endpoints are dead), so StudyVis is STUN-only by default and those sessions can fail to connect until the user adds their own TURN server (Settings → Network). Documented in onboarding and ARCHITECTURE §4.
 - **No cross-device identity.** One install = one identity. Multi-device is V3+ via BIP39 restore.
 - **Inference cadence is hardware-dependent.** A user with a slow CPU running a 7B model might only get one inference every 15–30s, not every 5s. The model picker shows realistic, measured numbers per machine.
 - **Always-on daemon means battery cost.** Negligible in practice (idle Nostr WebSocket), but not zero.
 
 ## 8. Open questions (deferred, not blocking V1)
 
-- Public TURN reliability long-term — should we eventually ship a tiny self-host option for groups that hit Open Relay limits?
+- TURN long-term — no reliable zero-config public TURN remains, so connectivity for strict-NAT users currently depends on them self-supplying a TURN server. Should we eventually ship a tiny self-host option, or bundle credentials for a paid provider, for groups that need a relay?
 - Multi-device same identity — pair laptops via BIP39 restore, or treat as separate identities?
 - "I lost my friend's contact" recovery — currently requires re-pairing. Acceptable.
 - Should we eventually expose a way to verify "is this still really Sam?" — Signal-style safety number comparison via voice during a session is the cheap answer.
+
+### Deferred scope with a concrete trigger
+
+These are not promises — they are scoped backlog items, parked until a named trigger fires. Listed here so the deferral stays honest rather than vague.
+
+- **Linux support** — *trigger: WebKitGTK `getDisplayMedia` re-verified on a current distro.* Linux has been gated on one unanswered question since V0; the unblock is concrete, not open-ended:
+  1. Re-run the V0 smoke test under current WebKitGTK — `getUserMedia` + `getDisplayMedia` + a trystero rendezvous between two machines.
+  2. If `getDisplayMedia` passes: add the libsecret / Secret-Service feature to `keyring` under `cfg(target_os = "linux")` (today `keyring` is gated to macOS + Windows only) and add an `.AppImage` job to `release.yml`. Confirm the battery fallback (`system_battery` already returns a safe `on_battery: false` default when UPower is absent).
+  3. If `getDisplayMedia` still fails: ship **AI-off Linux** rather than blocking the whole platform — body-doubling needs only camera + mic; screen capture is exclusively the AI loop's, so the no-AI study experience is fully available.
+- **Signing / notarization / auto-update** — *trigger: a Developer ID or EV cert is acquired.* One credential-gated roadmap item, not three quick wins; auto-update can't be verified without signed artifacts. When certs land, re-enable in lockstep: re-add the `tauri-plugin-updater` dependency (removed in this line — it was dormant), set the updater pubkey + endpoints in `tauri.conf.json`, flip `includeUpdaterJson` on in `release.yml`, wire the signing secrets, and drop the right-click-to-Open / SmartScreen "Run anyway" language from `INSTALL.md`. The cheap half — the opt-in, OFF-by-default new-version notification (§3) — already shipped; auto-download rides on signing and stays deferred.
 
 ## 9. Document map
 

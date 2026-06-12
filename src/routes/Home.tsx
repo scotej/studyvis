@@ -9,11 +9,13 @@ import {
   AddFriendDialog,
   FriendsList,
   InboxBoot,
+  InviteRelayError,
   InviteTimeoutError,
+  PairDeepLinkBoot,
   type PresenceMap,
 } from '@/features/friends'
 import type { ValidInvite } from '@/features/friends'
-import { useIdentity } from '@/features/identity'
+import { IdentityLoadError, useIdentity } from '@/features/identity'
 import { Onboarding, useOnboardingState } from '@/features/onboarding'
 import {
   inviteToCurrentSession,
@@ -40,9 +42,20 @@ export function Home() {
   const onboarding = useOnboardingState()
   const friendsStatus = useFriendsStore((s) => s.status)
   const loadFriends = useFriendsStore((s) => s.load)
+  // F3 — InboxBoot opens the boot-time presence + inbox trystero rooms, and
+  // trystero pins its relay sockets on the FIRST joinRoom for the whole
+  // process. So those rooms must not open until settings hydration has
+  // resolved, or a saved custom-relay list is silently dropped (the rooms
+  // would freeze on the default relays). Gate on hydration finishing — ready
+  // OR error (an error leaves `values` at defaults, so default relays are the
+  // only option anyway and proceeding beats never starting presence/inbox).
+  const settingsStatus = useSettingsStore((s) => s.status)
   const sessionStatus = useSessionStore((s) => s.status)
   const sessionTopic = useSessionStore((s) => s.sessionTopic)
   const [addOpen, setAddOpen] = useState(false)
+  // F10 — words prefilled into the Add-friend Enter-code tab from an OS deep
+  // link. Set alongside opening the dialog on the join tab; never auto-connects.
+  const [deepLinkWords, setDeepLinkWords] = useState<string[]>()
   const [presence, setPresence] = useState<PresenceMap>({})
   const [view, setView] = useState<View>('main')
   // V2-P9 — when AI is on, a session must declare a topic before it goes
@@ -78,14 +91,19 @@ export function Home() {
           )
         )
       } catch (err) {
+        // F6 — InviteTimeoutError (friend offline; retry queued) and
+        // InviteRelayError (relays unreachable; the user's own network) get
+        // distinct honest copy, separate from the generic fallback.
         const message =
-          err instanceof InviteTimeoutError
-            ? strings.friends.inviteTimeout
-            : err instanceof InviteWhileGuestError
-              ? strings.friends.inviteWhileGuest
-              : err instanceof Error
-                ? err.message
-                : strings.friends.inviteSendErrorFallback
+          err instanceof InviteRelayError
+            ? strings.friends.inviteRelayError
+            : err instanceof InviteTimeoutError
+              ? strings.friends.inviteTimeout
+              : err instanceof InviteWhileGuestError
+                ? strings.friends.inviteWhileGuest
+                : err instanceof Error
+                  ? err.message
+                  : strings.friends.inviteSendErrorFallback
         toast.error(message)
       }
     },
@@ -107,6 +125,16 @@ export function Home() {
         err instanceof Error ? err.message : strings.friends.joinErrorFallback
       toast.error(message)
     }
+  }, [])
+
+  // F10 — an OS-delivered pairing link opens the Add-friend dialog straight on
+  // the Enter-code tab with the words prefilled. We leave settings/session if
+  // they're showing so the dialog is actually visible. NEVER auto-connects —
+  // AddFriendDialog only prefills; the user still presses Connect.
+  const handlePairDeepLink = useCallback((words: string[]) => {
+    setView('main')
+    setDeepLinkWords(words)
+    setAddOpen(true)
   }, [])
 
   const aiOn = () => useSettingsStore.getState().values.aiFeaturesEnabled
@@ -160,6 +188,13 @@ export function Home() {
     )
   }
 
+  // D1 — identity.json exists but couldn't be read. Never fall through to
+  // Onboarding here; its create path would overwrite the still-valid keychain
+  // keys and strand every friend who knows the old pubkey.
+  if (status === 'error') {
+    return <IdentityLoadError />
+  }
+
   if (status === 'absent' || onboarding.status === 'pending') {
     return <Onboarding onComplete={onboarding.complete} />
   }
@@ -169,7 +204,7 @@ export function Home() {
   // subscriptions) on every settings/session toggle. The identity-readiness
   // gate stays — only render once `useIdentity` has resolved to a record.
   const inbox =
-    identity && status === 'ready' ? (
+    identity && status === 'ready' && settingsStatus !== 'loading' ? (
       <InboxBoot
         key="inbox-boot"
         myEdPubkeyHex={identity.ed_pubkey_hex}
@@ -179,9 +214,12 @@ export function Home() {
     ) : null
 
   // Gate + inbox travel together everywhere a new session can be started.
+  // PairDeepLinkBoot rides along too so an OS pairing link is caught no matter
+  // which view is showing.
   const tail = (
     <>
       {inbox}
+      <PairDeepLinkBoot onPairWords={handlePairDeepLink} />
       <TopicGateModal
         open={pendingStart !== undefined}
         onSubmit={handleTopicSubmit}
@@ -252,7 +290,15 @@ export function Home() {
           onAddFriend={() => setAddOpen(true)}
           onInvite={handleInvite}
         />
-        <AddFriendDialog open={addOpen} onOpenChange={setAddOpen} />
+        <AddFriendDialog
+          open={addOpen}
+          onOpenChange={(next) => {
+            setAddOpen(next)
+            if (!next) setDeepLinkWords(undefined)
+          }}
+          initialTab={deepLinkWords ? 'join' : undefined}
+          initialWords={deepLinkWords}
+        />
         {isDev ? (
           <div className="px-6 pb-8 text-center">
             <Link to="/style" className="text-sm text-text-secondary underline">

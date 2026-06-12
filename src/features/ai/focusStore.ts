@@ -19,11 +19,13 @@ import { create } from 'zustand'
 
 import { useSettingsStore } from '@/stores/settingsStore'
 
-import type { Judgment } from './parseJudgment'
+import { isUncertainVerdict, type SampleVerdict } from './parseJudgment'
 import {
+  clampConfidenceFloor,
   initialScoreMachineState,
   normaliseThresholds,
   step,
+  type InternalSeverity,
   type ScoreEvent,
   type ScoreMachineState,
 } from './scoreMachine'
@@ -44,9 +46,16 @@ type FocusState = {
   // off-task. We count them here instead. focused_pct = onTaskSamples /
   // totalSamples (null when no samples ran — e.g. AI features off, sidecar
   // failure, or the user never declared a topic).
+  //
+  // A2/A3 — uncertain samples (malformed/empty responses, or low-confidence
+  // off-task calls below the floor) are counted in `skippedSamples` and
+  // EXCLUDED from `totalSamples`/`onTaskSamples`, so an uncertain sample never
+  // inflates or deflates focused-time %. `totalSamples` is only confident
+  // judgments.
   totalSamples: number
   onTaskSamples: number
-  applyJudgment: (j: Judgment, ts?: number) => ReadonlyArray<ScoreEvent>
+  skippedSamples: number
+  applyJudgment: (j: SampleVerdict, ts?: number) => ReadonlyArray<ScoreEvent>
   reset: () => void
 }
 
@@ -55,6 +64,10 @@ type FocusState = {
 export type FocusStoreThresholdReader = () => {
   warning: unknown
   alert: unknown
+  // A3 — the off-task confidence floor. Read per-apply so a mid-session
+  // Settings → AI slider move takes effect on the next sample, same as the
+  // warning/alert thresholds.
+  confidenceFloor: unknown
 }
 
 const defaultThresholdReader: FocusStoreThresholdReader = () => {
@@ -62,6 +75,7 @@ const defaultThresholdReader: FocusStoreThresholdReader = () => {
   return {
     warning: v.warningThreshold,
     alert: v.alertThreshold,
+    confidenceFloor: v.offTaskConfidenceFloor,
   }
 }
 
@@ -83,24 +97,46 @@ export const useFocusStore = create<FocusState>((set, get) => ({
   lastSampleAt: null,
   totalSamples: 0,
   onTaskSamples: 0,
+  skippedSamples: 0,
 
-  applyJudgment: (judgment, ts) => {
+  applyJudgment: (verdict, ts) => {
     const raw = activeThresholdReader()
     const thresholds = normaliseThresholds(raw.warning, raw.alert)
+    const confidenceFloor = clampConfidenceFloor(raw.confidenceFloor)
+    // A2 — an uncertain verdict (parse fallback) feeds the score machine as the
+    // internal `'uncertain'` severity so it skips the streak; A3 — a confident
+    // off-task call's `on_topic_confidence` gates the streak via the floor.
+    const severity: InternalSeverity = isUncertainVerdict(verdict)
+      ? 'uncertain'
+      : verdict.severity
+    const reasoning = isUncertainVerdict(verdict)
+      ? `uncertain: ${verdict.reason}`
+      : verdict.reasoning
+    const onTopicConfidence = isUncertainVerdict(verdict)
+      ? undefined
+      : verdict.on_topic_confidence
     const result = step(
       get().machine,
-      { severity: judgment.severity, reasoning: judgment.reasoning },
-      thresholds
+      { severity, reasoning, onTopicConfidence },
+      thresholds,
+      confidenceFloor
     )
     set((prev) => ({
       machine: result.state,
       lastEvents: result.events,
       lastSampleAt: ts ?? Date.now(),
-      totalSamples: prev.totalSamples + 1,
+      // Uncertain (and A3-downgraded) samples are excluded from the focused-
+      // time tallies and counted separately.
+      totalSamples: result.uncertain
+        ? prev.totalSamples
+        : prev.totalSamples + 1,
       onTaskSamples:
-        judgment.severity === 'on_task'
+        !result.uncertain && severity === 'on_task'
           ? prev.onTaskSamples + 1
           : prev.onTaskSamples,
+      skippedSamples: result.uncertain
+        ? prev.skippedSamples + 1
+        : prev.skippedSamples,
     }))
     return result.events
   },
@@ -112,6 +148,7 @@ export const useFocusStore = create<FocusState>((set, get) => ({
       lastSampleAt: null,
       totalSamples: 0,
       onTaskSamples: 0,
+      skippedSamples: 0,
     }),
 }))
 
@@ -122,14 +159,21 @@ export const useFocusStore = create<FocusState>((set, get) => ({
 // decouples the report from that invariant and from a future StrictMode /
 // HMR double-mount.
 export type FocusSnapshot = {
-  score: number
+  // R1 — null when no confident sample ran (AI off, or a session of pure
+  // parse failures where every tick was skipped/uncertain). `totalSamples`
+  // already excludes uncertain/skipped samples (A2/A3), so this is the single
+  // gate: 0 confident samples → unscored, not a fabricated 100. Persisting a
+  // null keeps statsData.averageScore honest and lets the Report render its
+  // no-AI state instead of a fake 100/100 gauge.
+  score: number | null
   focusedPct: number | null
 }
 
 export function snapshotFocusForReport(): FocusSnapshot {
   const s = useFocusStore.getState()
+  const scored = s.totalSamples > 0
   return {
-    score: s.machine.score,
-    focusedPct: s.totalSamples > 0 ? s.onTaskSamples / s.totalSamples : null,
+    score: scored ? s.machine.score : null,
+    focusedPct: scored ? s.onTaskSamples / s.totalSamples : null,
   }
 }

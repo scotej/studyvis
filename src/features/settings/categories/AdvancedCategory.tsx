@@ -1,13 +1,27 @@
 import { useCallback, useState } from 'react'
 import { invoke } from '@tauri-apps/api/core'
-import { CopyIcon, FileTextIcon, FolderOpenIcon } from 'lucide-react'
+import {
+  CopyIcon,
+  FileTextIcon,
+  FolderOpenIcon,
+  Trash2Icon,
+} from 'lucide-react'
 import { toast } from 'sonner'
 
 import { SettingsRow, SettingsSection } from '@/components/SettingsRow'
 import { Button } from '@/components/ui/button'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import { Switch } from '@/components/ui/switch'
 import { useOnboardingState } from '@/features/onboarding'
 import { useAutostart } from '@/features/system'
+import { sessionsClearAll } from '@/lib/db/sessions'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { strings } from '@/strings'
 
@@ -19,6 +33,8 @@ export function AdvancedCategory() {
   const [openingFolder, setOpeningFolder] = useState(false)
   const [sharingLog, setSharingLog] = useState(false)
   const [resettingOnboarding, setResettingOnboarding] = useState(false)
+  const [confirmingClear, setConfirmingClear] = useState(false)
+  const [clearingHistory, setClearingHistory] = useState(false)
   const copy = strings.settings.advanced
 
   const handleOpenDataFolder = useCallback(async () => {
@@ -75,109 +91,177 @@ export function AdvancedCategory() {
     }
   }, [onboarding, copy.replayOnboarding.scheduledToast])
 
+  const handleClearHistory = useCallback(async () => {
+    setClearingHistory(true)
+    try {
+      await sessionsClearAll()
+      // Stats / Sessions / Report all read SQLite on mount, so the wipe flows
+      // through the next time any of them opens — nothing in-memory to evict.
+      toast.success(copy.clearHistory.clearedToast)
+      setConfirmingClear(false)
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : copy.clearHistory.errorFallback
+      toast.error(message)
+    } finally {
+      setClearingHistory(false)
+    }
+  }, [copy.clearHistory])
+
   const autostartDisabled =
     autostart.status === 'loading' ||
     autostart.status === 'saving' ||
     autostart.status === 'unavailable'
 
   return (
-    <SettingsSection heading={copy.heading}>
-      <SettingsRow
-        label={copy.autostart.label}
-        help={copy.autostart.help}
-        control={
-          <Switch
-            checked={autostart.enabled}
-            disabled={autostartDisabled}
-            onCheckedChange={(checked) =>
-              void autostart.toggle(Boolean(checked))
-            }
-            aria-label={copy.autostart.ariaLabel}
-          />
-        }
-      />
-      {autostart.status === 'unavailable' ? (
+    <>
+      <SettingsSection heading={copy.heading}>
         <SettingsRow
-          label={copy.autostartUnavailable.label}
-          help={copy.autostartUnavailable.help}
-        />
-      ) : null}
-      {autostart.status === 'error' && autostart.error ? (
-        <SettingsRow
-          label={copy.autostartError.label}
-          help={autostart.error}
+          label={copy.autostart.label}
+          help={copy.autostart.help}
           control={
-            <span className="text-xs text-status-alerted">
-              {autostart.error}
-            </span>
+            <Switch
+              checked={autostart.enabled}
+              disabled={autostartDisabled}
+              onCheckedChange={(checked) =>
+                void autostart.toggle(Boolean(checked))
+              }
+              aria-label={copy.autostart.ariaLabel}
+            />
           }
         />
-      ) : null}
-      <SettingsRow
-        label={copy.debugLog.label}
-        help={copy.debugLog.help}
-        control={
-          <Switch
-            checked={debugLogEnabled}
-            onCheckedChange={(checked) =>
-              void setDebugLogEnabled(Boolean(checked))
-            }
-            aria-label={copy.debugLog.ariaLabel}
+        {autostart.status === 'unavailable' ? (
+          <SettingsRow
+            label={copy.autostartUnavailable.label}
+            help={copy.autostartUnavailable.help}
           />
-        }
-      />
-      <SettingsRow
-        label={copy.dataFolder.label}
-        help={copy.dataFolder.help}
-        control={
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={() => void handleOpenDataFolder()}
-            disabled={openingFolder}
-          >
-            <FolderOpenIcon /> {copy.dataFolder.openCta}
-          </Button>
-        }
-      />
-      <SettingsRow
-        label={copy.shareLog.label}
-        help={copy.shareLog.help}
-        control={
-          <div className="flex gap-2">
+        ) : null}
+        {autostart.status === 'error' && autostart.error ? (
+          <SettingsRow
+            label={copy.autostartError.label}
+            help={autostart.error}
+            control={
+              <span className="text-xs text-status-alerted">
+                {autostart.error}
+              </span>
+            }
+          />
+        ) : null}
+        <SettingsRow
+          label={copy.debugLog.label}
+          help={copy.debugLog.help}
+          control={
+            <Switch
+              checked={debugLogEnabled}
+              onCheckedChange={(checked) =>
+                void setDebugLogEnabled(Boolean(checked))
+              }
+              aria-label={copy.debugLog.ariaLabel}
+            />
+          }
+        />
+        <SettingsRow
+          label={copy.dataFolder.label}
+          help={copy.dataFolder.help}
+          control={
             <Button
               variant="secondary"
               size="sm"
-              onClick={() => void handleCopyDiagnostics()}
-              disabled={sharingLog}
+              onClick={() => void handleOpenDataFolder()}
+              disabled={openingFolder}
             >
-              <CopyIcon /> {copy.shareLog.copyCta}
+              <FolderOpenIcon /> {copy.dataFolder.openCta}
             </Button>
+          }
+        />
+        <SettingsRow
+          label={copy.shareLog.label}
+          help={copy.shareLog.help}
+          control={
+            <div className="flex gap-2">
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => void handleCopyDiagnostics()}
+                disabled={sharingLog}
+              >
+                <CopyIcon /> {copy.shareLog.copyCta}
+              </Button>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => void handleRevealLog()}
+              >
+                <FileTextIcon /> {copy.shareLog.revealCta}
+              </Button>
+            </div>
+          }
+        />
+        <SettingsRow
+          label={copy.replayOnboarding.label}
+          help={copy.replayOnboarding.help}
+          control={
             <Button
               variant="secondary"
               size="sm"
-              onClick={() => void handleRevealLog()}
+              onClick={() => void handleReplayOnboarding()}
+              disabled={resettingOnboarding}
+              aria-disabled={resettingOnboarding ? true : undefined}
             >
-              <FileTextIcon /> {copy.shareLog.revealCta}
+              {copy.replayOnboarding.replayCta}
             </Button>
-          </div>
-        }
-      />
-      <SettingsRow
-        label={copy.replayOnboarding.label}
-        help={copy.replayOnboarding.help}
-        control={
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={() => void handleReplayOnboarding()}
-            disabled={resettingOnboarding}
-            aria-disabled={resettingOnboarding ? true : undefined}
-          >
-            {copy.replayOnboarding.replayCta}
-          </Button>
-        }
-      />
-    </SettingsSection>
+          }
+        />
+        <SettingsRow
+          label={copy.clearHistory.label}
+          help={copy.clearHistory.help}
+          control={
+            <Button
+              type="button"
+              variant="destructive"
+              size="sm"
+              onClick={() => setConfirmingClear(true)}
+            >
+              <Trash2Icon /> {copy.clearHistory.clearCta}
+            </Button>
+          }
+        />
+      </SettingsSection>
+
+      <Dialog
+        open={confirmingClear}
+        onOpenChange={(open) => {
+          if (!open) setConfirmingClear(false)
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{copy.clearHistory.confirmTitle}</DialogTitle>
+            <DialogDescription>
+              {copy.clearHistory.confirmBody}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={() => setConfirmingClear(false)}
+              disabled={clearingHistory}
+            >
+              {copy.clearHistory.cancelCta}
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              onClick={() => void handleClearHistory()}
+              disabled={clearingHistory}
+              aria-disabled={clearingHistory}
+            >
+              {copy.clearHistory.confirmCta}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   )
 }

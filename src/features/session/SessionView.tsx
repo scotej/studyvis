@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { emitTo, listen } from '@tauri-apps/api/event'
+import { VideoIcon, VideoOffIcon } from 'lucide-react'
 import { toast } from 'sonner'
 import { useShallow } from 'zustand/react/shallow'
 
 import { AiStatusChip, type AiStatus } from '@/components/AiStatusChip'
 import { AudioDevicePicker } from '@/components/AudioDevicePicker'
+import { AudioOutputPicker } from '@/components/AudioOutputPicker'
 import { AuditLogPanel, type AuditLogEntry } from '@/components/AuditLogPanel'
 import { BreakCountdownBadge } from '@/components/BreakCountdownBadge'
 import type { FocusState } from '@/components/FocusIndicator'
@@ -17,6 +19,7 @@ import { Button } from '@/components/ui/button'
 import { Kbd } from '@/components/ui/kbd'
 import { VideoGrid } from '@/components/VideoGrid'
 import { VideoTile } from '@/components/VideoTile'
+import { WaitingTile } from '@/components/WaitingTile'
 import { useAlertsUiStore } from '@/features/ai/alertsUiStore'
 import {
   AI_DIALOG_BREAK_REQUEST,
@@ -26,6 +29,7 @@ import {
   AI_DIALOG_TOPIC_CHANGE,
   AI_DIALOG_WINDOW_LABEL,
   CaptureError,
+  isUncertainVerdict,
   requestScreenCapturePermission,
   startSampleLoop,
   useBreakStore,
@@ -39,7 +43,6 @@ import {
 } from '@/features/ai'
 import { useIdentity } from '@/features/identity'
 import { signWithKeyring } from '@/lib/db/identity'
-import type { PomodoroPreset } from '@/lib/pomodoro-types'
 import { mediaErrorKind } from '@/lib/mediaError'
 import { isMacLikePlatform } from '@/lib/utils'
 import {
@@ -72,12 +75,23 @@ import {
 } from './audit'
 import { swapAudioInput } from './audioDevices'
 import { startHelloProtocol } from './hello'
-import { PTT_STATE_ACTION } from './lifecycle'
-import { startPomodoroController, type PeerOrderingEntry } from './pomodoro'
+import {
+  CAMERA_STATE_ACTION,
+  connectionFocusState,
+  PTT_STATE_ACTION,
+} from './lifecycle'
+import {
+  startPomodoroController,
+  type PeerOrderingEntry,
+  type StartArgs as PomodoroStartArgs,
+} from './pomodoro'
 
 const MEDIA_CONSTRAINTS: MediaStreamConstraints = { video: true, audio: true }
 
 type PttPayload = { active: boolean }
+type CameraPayload = { off: boolean }
+
+const DEFAULT_PEER_VOLUME = 1
 
 // Composed session feature surface (DESIGN-SYSTEM.md §8.3): tiles for self +
 // each peer, PTT-driven mute on the local audio track, an audit log right
@@ -93,6 +107,10 @@ export function SessionView() {
   const peers = useSessionStore((s) => s.peers)
   const setPeerHello = useSessionStore((s) => s.setPeerHello)
   const seenPeerNames = useSessionStore((s) => s.seenPeerNames)
+  // U2×S1 — whether a friend has ever been admitted this session, so the
+  // alone-tile shows invite copy on a never-had-peers start vs reconnect copy
+  // when everyone dropped (during the S1 grace window or after a leave).
+  const hadAnyPeer = useSessionStore((s) => s.seenPeerEdPubkeys.length > 0)
   const aiFeaturesEnabled = useSettingsStore((s) => s.values.aiFeaturesEnabled)
   const activeModelId = useModelStore((s) => s.activeModelId)
   const selfWarning = useAlertsUiStore((s) => s.selfWarning)
@@ -134,10 +152,41 @@ export function SessionView() {
     Record<string, MediaStream>
   >({})
   const [peerPtt, setPeerPtt] = useState<Record<string, boolean>>({})
+  // F4 — per-peer RTCPeerConnection.connectionState, fed from the trystero
+  // wrapper's getPeers() + a connectionstatechange subscription so a peer
+  // mid-ICE-handshake or with a failed connection no longer reads as a frozen
+  // offline tile.
+  const [peerConnState, setPeerConnState] = useState<
+    Record<string, RTCPeerConnectionState>
+  >({})
   const [activeAudioDeviceId, setActiveAudioDeviceId] = useState<string | null>(
     null
   )
   const [audioSwapping, setAudioSwapping] = useState(false)
+  // S3 — local camera on/off. Toggling flips the local video track's `enabled`
+  // flag (never replaces the stream — V2-P5's focus-reset depends on a
+  // monotonic localStream). When off, the AI sample loop pauses (getFaceTrack
+  // would otherwise read a black frame) and the state is broadcast so peers
+  // render an explicit camera-off tile.
+  const [cameraOn, setCameraOn] = useState(true)
+  const [peerCameraOff, setPeerCameraOff] = useState<Record<string, boolean>>(
+    {}
+  )
+  // S4 — chosen audio OUTPUT device (null = system default) and per-peer
+  // volume in [0, 1]. setSinkId is unsupported in macOS WKWebView, so the
+  // picker that drives `activeOutputDeviceId` is hidden there (feature-
+  // detected in AudioOutputPicker); volume is always available. Both are
+  // session-scoped, local-only — not persisted.
+  const [activeOutputDeviceId, setActiveOutputDeviceId] = useState<
+    string | null
+  >(null)
+  const [peerVolumes, setPeerVolumes] = useState<Record<string, number>>({})
+  const cameraSendRef = useRef<
+    ((payload: CameraPayload) => Promise<void[]>) | null
+  >(null)
+  // Imperative mirror of `cameraOn` so the on-join camera-state resend reads
+  // the live value without re-subscribing the action on every toggle.
+  const cameraOnRef = useRef(true)
   // V2-P9 (V2-P5 carry-forward): the long-lived screen acquire latches the
   // loop dead on denial / "Stop sharing". Mount the permission overlay; a
   // successful retry resets focus and clears this flag, which is in the
@@ -180,7 +229,7 @@ export function SessionView() {
       ) => Promise<void>)
     | null
   >(null)
-  const pomodoroStartRef = useRef<((preset: PomodoroPreset) => void) | null>(
+  const pomodoroStartRef = useRef<((args: PomodoroStartArgs) => void) | null>(
     null
   )
   const pomodoroStopRef = useRef<(() => void) | null>(null)
@@ -193,6 +242,21 @@ export function SessionView() {
   // Two-tap Esc-to-leave: the timestamp of the last "armed" Esc. A ref
   // (not state) so updating it never re-attaches the keydown listener.
   const escLeaveArmedAtRef = useRef<number | null>(null)
+
+  // N4 — single chokepoint for the Rust SessionActiveFlag. Every teardown
+  // path (Leave button, everyone-left auto-end, grace-window expiry, this
+  // component unmounting, and the boot/idle reset) funnels through `status`
+  // leaving 'active', so this effect's cleanup is the one place that flips the
+  // flag back off. While active, a quit attempt (window close with
+  // minimize-to-tray off, tray Quit, macOS Cmd+Q) is intercepted by Rust and
+  // routed to QuitConfirmListener instead of dropping peers mid-session.
+  useEffect(() => {
+    if (status !== 'active') return
+    void invoke('session_set_active', { active: true }).catch(() => {})
+    return () => {
+      void invoke('session_set_active', { active: false }).catch(() => {})
+    }
+  }, [status])
 
   // Capture the camera + mic once per active session and add the resulting
   // MediaStream to the trystero room. trystero forwards new tracks to all
@@ -219,6 +283,12 @@ export function SessionView() {
         // otherwise leave the fresh track silently muted.
         const pttHeld = usePttStore.getState().active
         for (const t of stream.getAudioTracks()) t.enabled = pttHeld
+        // S3 — a fresh track defaults to enabled; if the user re-acquires
+        // (MediaErrorBanner "Try again") while the camera is toggled off, mirror
+        // that state so the new video track doesn't come up live behind a
+        // camera-off tile. Reads the ref so it's correct without re-running on
+        // every toggle.
+        for (const t of stream.getVideoTracks()) t.enabled = cameraOnRef.current
         room.addStream(stream)
         setLocalStream(stream)
         localStreamRef.current = stream
@@ -256,6 +326,21 @@ export function SessionView() {
     }
   }, [room, mediaRetryNonce])
 
+  // S2 — on a genuine session teardown (leave, auto-end, unmount) drop PTT so a
+  // held key at the moment the room closes can't latch `active` across sessions.
+  // Keyed on `[room]` ONLY, deliberately separate from the media-acquire effect
+  // above: a "Try again" re-acquire bumps `mediaRetryNonce`, and resetting PTT
+  // on that path would clobber the held state the acquire effect reads back
+  // imperatively (the "mid-hold-unmuted" contract) — the fresh track would come
+  // up muted even though the key is still down. Room changes only on real
+  // teardown, so this fires exactly when intended.
+  useEffect(() => {
+    if (!room) return
+    return () => {
+      usePttStore.getState().reset()
+    }
+  }, [room])
+
   // Bind peer streams to per-peer state. trystero replays existing peers when
   // we register the stream callback, so this works for both already-present
   // peers and joiners. We also drop stream + PTT entries when a peer leaves
@@ -285,6 +370,58 @@ export function SessionView() {
     return () => {
       offStream()
       offLeave()
+    }
+  }, [room])
+
+  // F4 — track each peer's RTCPeerConnection.connectionState. trystero exposes
+  // the live RTCPeerConnection map via getPeers(); we read the initial state
+  // on join and subscribe to connectionstatechange, tearing the listener down
+  // on peer-leave and on unmount. A peer's connection appears slightly after
+  // onPeerJoin (the datachannel forms first), so we also re-resolve any
+  // not-yet-bound peers on each join event.
+  useEffect(() => {
+    if (!room) return
+    const subscriptions = new Map<string, () => void>()
+
+    const bind = (peerId: string): void => {
+      if (subscriptions.has(peerId)) return
+      const conn = room.getPeers()[peerId]
+      if (!conn) return
+      const update = () => {
+        setPeerConnState((cur) => ({ ...cur, [peerId]: conn.connectionState }))
+      }
+      conn.addEventListener('connectionstatechange', update)
+      subscriptions.set(peerId, () => {
+        conn.removeEventListener('connectionstatechange', update)
+      })
+      update()
+    }
+
+    const offJoin = room.onPeerJoin((peerId) => {
+      bind(peerId)
+    })
+    const offLeave = room.onPeerLeave((peerId) => {
+      const off = subscriptions.get(peerId)
+      if (off) {
+        off()
+        subscriptions.delete(peerId)
+      }
+      setPeerConnState((cur) => {
+        if (!(peerId in cur)) return cur
+        const next = { ...cur }
+        delete next[peerId]
+        return next
+      })
+    })
+    // Bind peers already present when this effect mounts (re-mount after an
+    // HMR / dependency change).
+    for (const peerId of Object.keys(room.getPeers())) bind(peerId)
+
+    return () => {
+      offJoin()
+      offLeave()
+      for (const off of subscriptions.values()) off()
+      subscriptions.clear()
     }
   }, [room])
 
@@ -321,6 +458,49 @@ export function SessionView() {
     const send = pttSendRef.current
     if (send) void send({ active: pttActive })
   }, [pttActive])
+
+  // S3 — camera-state broadcast: peers render an explicit camera-off tile
+  // (a disabled video track sends black, not a clean "off" signal). Mirrors
+  // the PTT broadcast wire pattern, including the on-join resend so a late
+  // joiner sees our current camera state immediately.
+  useEffect(() => {
+    if (!room) return
+    const action = room.makeAction<CameraPayload>(CAMERA_STATE_ACTION)
+    cameraSendRef.current = action.send
+    action.receive((data, peerId) => {
+      const off = Boolean((data as CameraPayload)?.off)
+      setPeerCameraOff((cur) => ({ ...cur, [peerId]: off }))
+    })
+    const offJoin = room.onPeerJoin((peerId) => {
+      void action.send({ off: !cameraOnRef.current }, peerId)
+    })
+    const offLeave = room.onPeerLeave((peerId) => {
+      setPeerCameraOff((cur) => {
+        if (!(peerId in cur)) return cur
+        const next = { ...cur }
+        delete next[peerId]
+        return next
+      })
+    })
+    return () => {
+      offJoin()
+      offLeave()
+      cameraSendRef.current = null
+    }
+  }, [room])
+
+  // S3 — reflect the local camera toggle on the video track's `enabled` flag
+  // (NOT a stream replace — V2-P5's focus-reset depends on a monotonic
+  // localStream) and broadcast the new state to peers.
+  useEffect(() => {
+    cameraOnRef.current = cameraOn
+    const stream = localStreamRef.current
+    if (stream) {
+      for (const t of stream.getVideoTracks()) t.enabled = cameraOn
+    }
+    const send = cameraSendRef.current
+    if (send) void send({ off: !cameraOn })
+  }, [cameraOn])
 
   // Hello + audit + pomodoro pipeline. Deps are the stable string slices of
   // identity — display-name edits do not tear the controller down, because
@@ -501,6 +681,9 @@ export function SessionView() {
     useBreakStore.getState().reset(startedAt)
     useAuditStore.getState().reset()
     usePomodoroStore.getState().reset()
+    // S2 — clear any PTT state stranded by a dropped Released event from a
+    // PRIOR session so this session's first audio track never comes up live.
+    usePttStore.getState().reset()
     // eslint-disable-next-line react-hooks/set-state-in-effect -- one-shot per-session reset of the AI-runtime latch, keyed on startedAt alongside the store resets above; idempotent on re-run
     setAiRuntimeStatus('active')
     return () => {
@@ -523,7 +706,10 @@ export function SessionView() {
       getTopic: () => useSessionStore.getState().declaredStudyTopic,
       modelId: activeModelId,
       getFaceTrack: () => localStreamRef.current?.getVideoTracks()[0] ?? null,
-      onScoreEvents: async (events, judgment) => {
+      // S3 — pause the loop while the camera is off so it never analyzes a
+      // black frame; resume is seamless (no skipped ticks, loop state intact).
+      isPaused: () => !cameraOnRef.current,
+      onScoreEvents: async (events, verdict) => {
         // V2-P6: route every sample's emitted events through the alert
         // dispatcher (warnings → local-only badge + ai_warning audit;
         // alerts → ai_alert audit + signed broadcast + tile highlight).
@@ -532,7 +718,12 @@ export function SessionView() {
         const dispatcher = aiAlertDispatcherRef.current
         if (!dispatcher) return
         await dispatcher.handleScoreEvents(events)
-        dispatcher.handleSeverity(judgment.severity)
+        // A2 — an uncertain sample never carries a wire severity and never
+        // clears the self-warning badge: a flaky response shouldn't cancel a
+        // pending warning. Only a confident judgment drives handleSeverity.
+        if (!isUncertainVerdict(verdict)) {
+          dispatcher.handleSeverity(verdict.severity)
+        }
       },
       onStartFail: (reason, detail) => {
         if (reason === 'no_active_model') {
@@ -572,6 +763,10 @@ export function SessionView() {
       onBatteryResume: () => {
         toast.success(strings.session.errors.aiResumed)
         setAiRuntimeStatus('active')
+      },
+      onThermalBackoff: () => {
+        // A6 — one-shot per session; the loop fires this at most once.
+        toast(strings.session.errors.aiSlowedDown)
       },
     })
     return () => {
@@ -832,8 +1027,23 @@ export function SessionView() {
     [audioSwapping, room]
   )
 
-  const handleStartPomodoro = useCallback((preset: PomodoroPreset) => {
-    pomodoroStartRef.current?.(preset)
+  const handleToggleCamera = useCallback(() => {
+    setCameraOn((on) => !on)
+  }, [])
+
+  const handleSelectOutputDevice = useCallback((deviceId: string) => {
+    setActiveOutputDeviceId(deviceId)
+  }, [])
+
+  const handlePeerVolumeChange = useCallback(
+    (peerId: string, volume: number) => {
+      setPeerVolumes((cur) => ({ ...cur, [peerId]: volume }))
+    },
+    []
+  )
+
+  const handleStartPomodoro = useCallback((args: PomodoroStartArgs) => {
+    pomodoroStartRef.current?.(args)
   }, [])
   const handleStopPomodoro = useCallback(() => {
     pomodoroStopRef.current?.()
@@ -965,33 +1175,44 @@ export function SessionView() {
               stream={localStream}
               ptt={pttActive}
               isLocal
+              cameraOff={!cameraOn}
               state={selfTileState}
               alertReasoning={selfAlertReasoning}
             />
+            {peerEntries.length === 0 ? (
+              <WaitingTile
+                key="waiting"
+                variant={hadAnyPeer ? 'reconnect' : 'invite'}
+              />
+            ) : null}
             {peerEntries.map((peer) => {
               const peerStream = remoteStreams[peer.peerId] ?? null
               const peerAlert = peer.edPubkeyHex
                 ? alertedPeers[peer.edPubkeyHex]
                 : undefined
-              // Peer state: alerted iff they broadcast an alert (works
-              // regardless of OUR aiFeaturesEnabled — the data channel is
-              // always wired). Otherwise defer to the tile's stream-based
-              // fallback so a peer whose tracks haven't arrived shows
-              // `offline` rather than claiming an `on task` verdict we
-              // don't actually have.
-              const peerState: FocusState | undefined = !peerStream
-                ? undefined
-                : peerAlert
+              // Peer state precedence: an off-task alert (broadcast over the
+              // always-wired data channel, regardless of OUR aiFeaturesEnabled)
+              // wins while the peer's media is up. Otherwise F4 surfaces the
+              // WebRTC transport state — 'connecting' while ICE is mid-
+              // handshake or after a transient 'disconnected', 'failed' only on
+              // a terminally dead connection — so a peer with no tracks yet no
+              // longer reads as a frozen offline tile.
+              const peerState: FocusState | undefined =
+                peerStream && peerAlert
                   ? 'alerted'
-                  : undefined
+                  : connectionFocusState(peerConnState[peer.peerId], peerStream)
               return (
                 <VideoTile
                   key={peer.peerId}
                   name={peer.displayName ?? peerLabel(peer.peerId)}
                   stream={peerStream}
                   ptt={peerPtt[peer.peerId] ?? false}
+                  cameraOff={peerCameraOff[peer.peerId] ?? false}
                   state={peerState}
                   alertReasoning={peerAlert?.reasoning}
+                  sinkId={activeOutputDeviceId ?? undefined}
+                  volume={peerVolumes[peer.peerId] ?? DEFAULT_PEER_VOLUME}
+                  onVolumeChange={(v) => handlePeerVolumeChange(peer.peerId, v)}
                 />
               )
             })}
@@ -1011,6 +1232,21 @@ export function SessionView() {
             onSelect={handleSwapAudioDevice}
             swapping={audioSwapping}
           />
+          <AudioOutputPicker
+            currentDeviceId={activeOutputDeviceId}
+            onSelect={handleSelectOutputDevice}
+          />
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={handleToggleCamera}
+            aria-pressed={!cameraOn}
+            aria-label={strings.session.camera.toggleAriaLabel}
+            className="gap-2"
+          >
+            {cameraOn ? <VideoIcon /> : <VideoOffIcon />}
+          </Button>
         </span>
         <span className="flex items-center gap-4">
           <AiStatusChip status={aiChipStatus} />

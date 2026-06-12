@@ -9,6 +9,7 @@ export type IdentityChoiceStepProps = {
   progress?: OnboardingStepProgress
   onCreate: () => void
   onRecover: () => void
+  onBack?: () => void
 }
 
 // The fork that must precede key generation: a fresh identity, or restoring
@@ -18,11 +19,17 @@ export function IdentityChoiceStep({
   progress,
   onCreate,
   onRecover,
+  onBack,
 }: IdentityChoiceStepProps) {
   return (
     <OnboardingStep
       ariaLabel={strings.onboarding.identityChoice.ariaLabel}
       progress={progress}
+      secondaryAction={
+        onBack
+          ? { label: strings.common.actions.back, onClick: onBack }
+          : undefined
+      }
     >
       <header className="flex flex-col items-center gap-3 text-center">
         <h1 className="text-2xl font-semibold tracking-tight">

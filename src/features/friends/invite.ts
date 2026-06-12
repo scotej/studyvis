@@ -1,6 +1,8 @@
 import { inboxPassword, inboxTopic } from '@/lib/crypto/topics'
 import { bytesToBase64, bytesToHex, hexToBytes } from '@/lib/encoding'
+import { relaysUnreachable } from '@/lib/relayDiagnostics'
 import { joinTopic } from '@/lib/trystero'
+import { userRelayConfig } from '@/lib/trystero/relays'
 
 import {
   INVITE_ACTION,
@@ -11,6 +13,15 @@ import {
   type InvitePayload,
   type InvitePayloadCore,
 } from './envelope'
+import { createInviteRetryManager } from './inviteRetry'
+
+// F6 — process-wide retry manager. `inviteFriend` registers a pending retry on
+// InviteTimeoutError (the friend was offline) and marks (recipient, session)
+// delivered on success; InboxBoot drives `onPresenceOnline` when a friend's
+// presence flips online, and `cancelAll` when the host's session ends.
+export const inviteRetryManager = createInviteRetryManager({
+  onRetryError: (err) => console.warn('invite retry failed:', err),
+})
 
 export type InviteRecipient = {
   edPubkeyHex: string
@@ -50,6 +61,19 @@ export class InviteTimeoutError extends Error {
   constructor() {
     super('invite send timed out')
     this.name = 'InviteTimeoutError'
+  }
+}
+
+// F1/F6 — distinct from InviteTimeoutError: no signaling relay was reachable,
+// so the failure is the user's own network, not a friend who's merely offline.
+// Reachability is read from trystero's live socket map at timeout (NOT from
+// `onJoinError`, which never fires on blocked relays — see relaysUnreachable).
+// Mapped to its own copy at the call site so we don't tell the user "they may
+// be offline" when in fact the relays are blocked.
+export class InviteRelayError extends Error {
+  constructor() {
+    super('invite send could not reach the relay')
+    this.name = 'InviteRelayError'
   }
 }
 
@@ -104,16 +128,22 @@ export async function buildInviteEnvelope(
 export async function sendInviteEnvelope(
   recipient: InviteRecipient,
   envelope: InviteEnvelope,
-  opts: { sendTimeoutMs?: number } = {}
+  opts: {
+    sendTimeoutMs?: number
+    // F1/F6 test seam — overrides the live relay-reachability read at timeout.
+    isRelayUnreachable?: () => boolean
+  } = {}
 ): Promise<void> {
   const recipientEdPub = hexToBytes(recipient.edPubkeyHex)
   if (recipientEdPub.length !== 32) {
     throw new Error('recipient ed_pubkey must decode to 32 bytes')
   }
   const timeoutMs = opts.sendTimeoutMs ?? DEFAULT_SEND_TIMEOUT_MS
+  const isRelayUnreachable = opts.isRelayUnreachable ?? relaysUnreachable
   const room = joinTopic({
     topic: inboxTopic(recipientEdPub),
     password: inboxPassword(recipientEdPub),
+    relayConfig: userRelayConfig(),
   })
   const action = room.makeAction<InviteEnvelope>(INVITE_ACTION)
 
@@ -129,7 +159,17 @@ export async function sendInviteEnvelope(
         fn()
       }
       const timer = setTimeout(() => {
-        settle(() => reject(new InviteTimeoutError()))
+        // F1/F6 — no peer arrived in time. Distinguish "the friend is offline"
+        // from "the relays are blocked" by reading the live socket map: if no
+        // relay is reachable, it's the user's own network (InviteRelayError, no
+        // retry queued); otherwise the friend is simply offline.
+        settle(() =>
+          reject(
+            isRelayUnreachable()
+              ? new InviteRelayError()
+              : new InviteTimeoutError()
+          )
+        )
       }, timeoutMs)
       // Once at least one peer is on the topic, fire the envelope to all
       // listeners and resolve. The timeout above guarantees the promise
@@ -158,7 +198,24 @@ export async function inviteFriend(
   opts: InviteOptions = {}
 ): Promise<void> {
   const envelope = await buildInviteEnvelope(sender, recipient, session, opts)
-  await sendInviteEnvelope(recipient, envelope, {
-    sendTimeoutMs: opts.sendTimeoutMs,
-  })
+  const sessionTopic = session.sessionTopic
+  const deliver = () =>
+    sendInviteEnvelope(recipient, envelope, {
+      sendTimeoutMs: opts.sendTimeoutMs,
+    })
+  try {
+    await deliver()
+    // F6 — first send landed; dedupe future retries for this (friend, session).
+    inviteRetryManager.markDelivered(recipient.edPubkeyHex, sessionTopic)
+  } catch (err) {
+    // F6 — the friend was offline (no peer ever joined their inbox topic).
+    // Hold the invite and re-attempt when their presence flips online within
+    // the retry window. A relay-unreachable failure (InviteRelayError) is the
+    // user's own network, not an offline friend, so we don't queue a retry —
+    // the same relay would be just as unreachable.
+    if (err instanceof InviteTimeoutError) {
+      inviteRetryManager.register(recipient.edPubkeyHex, sessionTopic, deliver)
+    }
+    throw err
+  }
 }

@@ -5,11 +5,20 @@ import { bytesToHex, hexToBytes, verifyMessage } from '@/lib/crypto/identity'
 import { pairPassword, pairTopic } from '@/lib/crypto/topics'
 import { joinTopic } from '@/lib/trystero'
 import { buildIceOptions } from '@/lib/trystero/ice'
+import { userRelayConfig } from '@/lib/trystero/relays'
 import type { TurnPreference } from '@/stores/settingsStore'
 
 export const PAIR_WORD_COUNT = 12
 const PAIR_ENTROPY_BITS = 128
 const HELLO_ACTION = 'hello'
+
+// F5 — after a peer is on the Nostr topic, trystero needs a WebRTC datachannel
+// to form before the signed hello can cross. On strict/symmetric NAT with no
+// TURN server the channel never establishes and the dialog sits on "Exchanging
+// keys" forever. This is how long we wait post-arrival before surfacing the
+// "couldn't establish a direct link" guidance. Longer than the typical ICE
+// gathering + DTLS handshake, short enough not to feel hung.
+export const POST_ARRIVAL_STALL_MS = 45_000
 
 export type PairingContext = {
   edPubHex: string
@@ -39,6 +48,23 @@ export type PairOptions = {
   // buildIceOptions. Defaults to 'auto'. Takes effect only once a TURN server
   // is configured in lib/trystero/ice (none ships by default — see that file).
   turnPreference?: TurnPreference
+  // F1 — fires when trystero reports a room-level join error during pairing: a
+  // peer reached the topic but its offer/answer failed to decrypt under the
+  // room password, or its handshake errored out. This is a peer-present-but-
+  // the-link-failed signal — NOT "the relays are unreachable" (trystero never
+  // reports that here; the dialog reads relay reachability from the socket map
+  // instead). Best-effort: the pairing keeps running, so the user can keep
+  // waiting or cancel.
+  onJoinError?: () => void
+  // F5 — fires when a peer has been on the topic for `stallMs` without the
+  // pairing settling (no datachannel formed → no signed hello exchanged).
+  // Surfaces the "connected to the network but couldn't establish a direct
+  // link" guidance. Best-effort and one-shot; pairing keeps running.
+  onPostArrivalStall?: () => void
+  // F5 — how long after a peer arrives to wait before firing onPostArrivalStall.
+  // Defaults to POST_ARRIVAL_STALL_MS; injectable so the unit test drives it
+  // with fake timers.
+  stallMs?: number
 }
 
 export type HelloPayload = {
@@ -161,12 +187,23 @@ async function runPair(
   const room = joinTopic({
     topic: pairTopic(words),
     password: pairPassword(words),
+    relayConfig: userRelayConfig(),
     ...buildIceOptions(opts.turnPreference ?? 'auto'),
+    onJoinError: () => {
+      // Best-effort signal; never let a throwing handler bubble into trystero.
+      try {
+        opts.onJoinError?.()
+      } catch {
+        // Swallow — surfacing the hint must not crash the room.
+      }
+    },
   })
   const action = room.makeAction<HelloPayload>(HELLO_ACTION)
 
+  const stallMs = opts.stallMs ?? POST_ARRIVAL_STALL_MS
   let onAbort: (() => void) | null = null
   let timeoutHandle: ReturnType<typeof setTimeout> | null = null
+  let stallHandle: ReturnType<typeof setTimeout> | null = null
   let unsubscribePeerJoin: () => void = () => {}
   try {
     return await new Promise<PairedFriend>((resolve, reject) => {
@@ -175,6 +212,10 @@ async function runPair(
       const settle = (fn: () => void) => {
         if (settled) return
         settled = true
+        if (stallHandle !== null) {
+          clearTimeout(stallHandle)
+          stallHandle = null
+        }
         fn()
       }
       onAbort = () => settle(() => reject(new PairAbortedError()))
@@ -208,6 +249,21 @@ async function runPair(
           } catch {
             // Swallow notification errors — they shouldn't fail the pair.
           }
+          // F5 — arm the post-arrival stall timer. The peer is on the topic;
+          // if no hello crosses within stallMs the WebRTC channel never formed
+          // (strict NAT without TURN), so nudge the user toward a relay/TURN.
+          // One-shot — never re-armed on a duplicate onPeerJoin.
+          if (stallHandle === null && stallMs > 0) {
+            stallHandle = setTimeout(() => {
+              stallHandle = null
+              if (settled) return
+              try {
+                opts.onPostArrivalStall?.()
+              } catch {
+                // Swallow — the hint must not fail the pair.
+              }
+            }, stallMs)
+          }
         }
         try {
           const hello = await buildHello(words, ctx)
@@ -219,6 +275,7 @@ async function runPair(
     })
   } finally {
     if (timeoutHandle !== null) clearTimeout(timeoutHandle)
+    if (stallHandle !== null) clearTimeout(stallHandle)
     if (opts.signal && onAbort) {
       opts.signal.removeEventListener('abort', onAbort)
     }

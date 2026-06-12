@@ -12,6 +12,7 @@ import {
   ALERT_THRESHOLD_MAX,
   ALERT_THRESHOLD_MIN,
   CaptureError,
+  CONFIDENCE_FLOOR_MAX,
   DEFAULT_CTX_SIZE,
   effectiveIntervalSec,
   FALLBACK_SAMPLE_INTERVAL_SEC,
@@ -32,6 +33,15 @@ import {
 } from '@/stores/settingsStore'
 import { strings } from '@/strings'
 
+// A3 — the off-task-sensitivity slider's lowest user-reachable value. The
+// programmatic floor CONFIDENCE_FLOOR_MIN is 0, which is the special "gate
+// disabled / trust every off-task call" value; exposing it on the slider would
+// make a full drag-left jump discontinuously from "skip almost every off-task
+// call" (0.05) to "count every off-task call" (0) — the opposite of the
+// fewer-false-alarms direction the user is dragging toward. We keep 0 as the
+// internal disable and start the UI at 0.05.
+const CONFIDENCE_FLOOR_UI_MIN = 0.05
+
 // V2-P9 — the master AI gate plus the tuning controls prior phases left as
 // read-only stubs. When the toggle is off the only thing rendered is the
 // toggle itself: no picker, no sliders, no sidecar affordances. When it's on
@@ -44,8 +54,14 @@ export function AiCategory() {
   const warningThreshold = useSettingsStore((s) => s.values.warningThreshold)
   const alertThreshold = useSettingsStore((s) => s.values.alertThreshold)
   const sampleIntervalSec = useSettingsStore((s) => s.values.sampleIntervalSec)
+  const offTaskConfidenceFloor = useSettingsStore(
+    (s) => s.values.offTaskConfidenceFloor
+  )
   const setWarningThreshold = useSettingsStore((s) => s.setWarningThreshold)
   const setAlertThreshold = useSettingsStore((s) => s.setAlertThreshold)
+  const setOffTaskConfidenceFloor = useSettingsStore(
+    (s) => s.setOffTaskConfidenceFloor
+  )
   const setSampleIntervalSec = useSettingsStore((s) => s.setSampleIntervalSec)
   const debugLogEnabled = useSettingsStore((s) => s.values.debugLogEnabled)
   const setDebugLogEnabled = useSettingsStore((s) => s.setDebugLogEnabled)
@@ -298,6 +314,37 @@ export function AiCategory() {
                 />
                 <span className="w-16 shrink-0 text-right text-sm tabular-nums text-text-secondary">
                   {alertThreshold}
+                </span>
+              </div>
+            }
+          />
+
+          <SettingsRow
+            label={copy.confidenceFloor.label}
+            stack
+            help={copy.confidenceFloor.help}
+            control={
+              <div className="flex items-center gap-4">
+                <Slider
+                  className="w-full"
+                  min={CONFIDENCE_FLOOR_UI_MIN}
+                  max={CONFIDENCE_FLOOR_MAX}
+                  step={0.05}
+                  // Clamp the displayed value up to the UI min so a 0 persisted
+                  // by an older build (or a hand-edited settings.json) can't
+                  // park the thumb past the slider's left edge.
+                  value={[
+                    Math.max(CONFIDENCE_FLOOR_UI_MIN, offTaskConfidenceFloor),
+                  ]}
+                  onValueChange={([v]) => void setOffTaskConfidenceFloor(v)}
+                  aria-label={copy.confidenceFloor.ariaLabel}
+                />
+                <span className="w-16 shrink-0 text-right text-sm tabular-nums text-text-secondary">
+                  {Math.round(
+                    Math.max(CONFIDENCE_FLOOR_UI_MIN, offTaskConfidenceFloor) *
+                      100
+                  )}
+                  %
                 </span>
               </div>
             }

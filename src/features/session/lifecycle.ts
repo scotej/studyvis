@@ -6,6 +6,7 @@ import { sessionsInsert } from '@/lib/db/sessions'
 import { bytesToBase64 } from '@/lib/encoding'
 import { joinTopic, type TopicRoom } from '@/lib/trystero'
 import { buildIceOptions } from '@/lib/trystero/ice'
+import { userRelayConfig } from '@/lib/trystero/relays'
 import { useAuditStore } from '@/stores/auditStore'
 import { useFriendsStore } from '@/stores/friendsStore'
 import { useSessionStore } from '@/stores/sessionStore'
@@ -14,6 +15,10 @@ import { strings } from '@/strings'
 
 export const SESSION_FULL_ACTION = 'session-full'
 export const PTT_STATE_ACTION = 'ptt-state'
+// S3 — broadcast the local camera on/off state so peers render an explicit
+// "camera off" tile instead of the frozen last frame a disabled video track
+// leaves behind. Mirrors the PTT_STATE_ACTION wire pattern.
+export const CAMERA_STATE_ACTION = 'camera-state'
 // 4-user mesh hard cap (host + 3 peers, ARCHITECTURE.md §7).
 export const MAX_REMOTE_PEERS = 3
 export const SESSION_FULL_MESSAGE = strings.session.full
@@ -22,6 +27,39 @@ export const SESSION_FULL_MESSAGE = strings.session.full
 // Report's Close button → useSessionStore.reset()), not on a timer. The
 // constant + auto-reset timer have been retired; the V2-P3 splash was
 // always documented as a placeholder for this report.
+
+// F4 — maps an RTCPeerConnection.connectionState to the VideoTile focus state.
+// Returns undefined when the tile should fall back to its stream-based default
+// (`stream ? 'online' : 'offline'`): a connected peer with media up reads as
+// `online`, and an unknown/absent connectionState defers to that fallback too.
+//   - 'new' | 'connecting'        → 'connecting' (mid-ICE handshake)
+//   - 'disconnected'              → 'connecting' (TRANSIENT: brief packet loss
+//                                   on an otherwise-healthy link flickers
+//                                   through this and self-heals to 'connected'
+//                                   — never the terminal "Connection failed",
+//                                   consistent with the S1 grace-window stance)
+//   - 'failed'                    → 'failed'     (terminal: dead / dropped link)
+//   - 'connected' | 'closed' | …  → undefined    (defer to stream fallback)
+// Pure + exported so it's unit-testable without React.
+export function connectionFocusState(
+  connectionState: RTCPeerConnectionState | undefined,
+  stream: MediaStream | null
+): 'connecting' | 'failed' | undefined {
+  switch (connectionState) {
+    case 'failed':
+      return 'failed'
+    case 'new':
+    case 'connecting':
+    case 'disconnected':
+      // Once media is flowing the tile is effectively live even if the
+      // connectionState lags; let the stream fallback render 'online'.
+      // 'disconnected' is recoverable, so it reads as 'connecting', not
+      // 'failed', when media has dropped.
+      return stream ? undefined : 'connecting'
+    default:
+      return undefined
+  }
+}
 
 export type SessionHandle = {
   sessionTopic: string
@@ -54,14 +92,35 @@ export function createHostRoom(): RoomInit {
   // not just the pairing handshake (mirrors runPair). Takes effect the instant
   // a TURN server is configured in ./ice; STUN-only otherwise.
   const ice = buildIceOptions(useSettingsStore.getState().values.turnPreference)
-  const room = joinTopic({ topic, password, ...ice })
+  const room = joinTopic({
+    topic,
+    password,
+    relayConfig: userRelayConfig(),
+    ...ice,
+    onJoinError: logJoinError,
+  })
   return { room, topic, password }
 }
 
 export function createGuestRoom(topic: string, password: string): RoomInit {
   const ice = buildIceOptions(useSettingsStore.getState().values.turnPreference)
-  const room = joinTopic({ topic, password, ...ice })
+  const room = joinTopic({
+    topic,
+    password,
+    relayConfig: userRelayConfig(),
+    ...ice,
+    onJoinError: logJoinError,
+  })
   return { room, topic, password }
+}
+
+// F1 — the session grid already surfaces per-peer connection state (F4), so a
+// join error here just gets logged for diagnostics rather than driving a new UI
+// surface. A guest whose offer never decrypts (impossible for a legitimate
+// invite, since both sides share the session password) or a peer handshake
+// timeout reads through here.
+function logJoinError(details: { error: string }): void {
+  console.warn('session room join error:', details.error)
 }
 
 // Single teardown path: leaves trystero, generates the V2-P8 post-session
@@ -158,21 +217,70 @@ export type RoomLifecycle = {
   peers: () => readonly string[]
 }
 
+// S1 — grace window before the everyone-else-left auto-end fires. A WiFi blip
+// drops the transport to every peer at once and trystero fires onPeerLeave for
+// each, crashing the count to 0; without a debounce a 5-second hiccup
+// irreversibly ends a 90-minute session. We arm a timer when the room empties
+// and only run the leave handler if it's STILL empty when the timer expires.
+// trystero re-fires onPeerJoin on reconnect (and the cumulative
+// seenPeerEdPubkeys set in the session store survives the gap, so the report
+// still records who we studied with). Injectable scheduler so the unit tests
+// can drive it with a fake clock; production uses window timers.
+export const DISCONNECT_GRACE_MS = 20_000
+
+export type GraceScheduler = {
+  setTimeout: (handler: () => void, ms: number) => number
+  clearTimeout: (handle: number) => void
+}
+
+const defaultGraceScheduler: GraceScheduler = {
+  setTimeout: (handler, ms) =>
+    (globalThis.setTimeout as Window['setTimeout'])(handler, ms),
+  clearTimeout: (handle) =>
+    (globalThis.clearTimeout as Window['clearTimeout'])(handle),
+}
+
 // Wires onPeerJoin / onPeerLeave / 'session-full' on the trystero room. The
 // host enforces the 4-user cap here (rejects the 4th remote peer); guests
 // listen for 'session-full' and tear down with a toast. Both sides auto-end
-// when peer count drops to 0 after at least one peer was present.
+// when peer count stays at 0 for DISCONNECT_GRACE_MS after at least one peer
+// was present.
 export function wireSessionRoom(
   room: TopicRoom,
-  hooks: WireHooks
+  hooks: WireHooks,
+  options?: { scheduler?: GraceScheduler; graceMs?: number }
 ): RoomLifecycle {
+  const scheduler = options?.scheduler ?? defaultGraceScheduler
+  const graceMs = options?.graceMs ?? DISCONNECT_GRACE_MS
   const peers = new Set<string>()
   let hadAny = false
+  let graceHandle: number | null = null
   const sessionFull = room.makeAction<null>(SESSION_FULL_ACTION)
+
+  const cancelGrace = (): void => {
+    if (graceHandle !== null) {
+      scheduler.clearTimeout(graceHandle)
+      graceHandle = null
+    }
+  }
+
+  const armGrace = (): void => {
+    if (graceHandle !== null) return
+    graceHandle = scheduler.setTimeout(() => {
+      graceHandle = null
+      // Only auto-end if the room is STILL empty — a reconnect within the
+      // window cancels this via cancelGrace(). The leave handler is itself
+      // idempotent, so an explicit user-leave racing the timer is safe.
+      if (peers.size === 0) {
+        void hooks.leave()
+      }
+    }, graceMs)
+  }
 
   if (!hooks.isHost) {
     sessionFull.receive(() => {
       toast.error(SESSION_FULL_MESSAGE)
+      cancelGrace()
       void hooks.leave()
     })
   }
@@ -194,6 +302,9 @@ export function wireSessionRoom(
       }
       return
     }
+    // A (re)join cancels a pending auto-end: the transport recovered before
+    // the grace window expired.
+    cancelGrace()
     peers.add(peerId)
     hadAny = true
     useSessionStore.getState().peerJoined(peerId)
@@ -204,7 +315,7 @@ export function wireSessionRoom(
     peers.delete(peerId)
     useSessionStore.getState().peerLeft(peerId)
     if (peers.size === 0 && hadAny) {
-      void hooks.leave()
+      armGrace()
     }
   })
 

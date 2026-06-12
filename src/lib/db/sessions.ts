@@ -54,3 +54,14 @@ export async function listSessions(): Promise<SessionRecord[]> {
 export async function sessionsGet(id: string): Promise<SessionRecord | null> {
   return invoke<SessionRecord | null>('sessions_get', { id })
 }
+
+// R4 — deletes the session row + its audit_events in one Rust transaction.
+// `id` is the session topic.
+export async function sessionsDelete(id: string): Promise<void> {
+  await invoke('sessions_delete', { id })
+}
+
+// R4 — clears every session row and all audit_events in one Rust transaction.
+export async function sessionsClearAll(): Promise<void> {
+  await invoke('sessions_clear_all')
+}

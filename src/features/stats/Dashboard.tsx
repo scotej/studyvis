@@ -12,6 +12,8 @@
 // nothing is transmitted (PLAN.md §4 principle 1, §6 non-goal "telemetry").
 
 import { useCallback, useEffect, useState } from 'react'
+import { DownloadIcon } from 'lucide-react'
+import { toast } from 'sonner'
 
 import { SettingsSection } from '@/components/SettingsRow'
 import { Button } from '@/components/ui/button'
@@ -19,7 +21,14 @@ import { Card } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { tokens } from '@/design/tokens'
 import { listFriends, type Friend } from '@/lib/db/friends'
+import { auditEventsListAll, type AuditEventRecord } from '@/lib/db/audit'
 import { listSessions, type SessionRecord } from '@/lib/db/sessions'
+import {
+  buildCsv,
+  fileDateStamp,
+  saveTextFile,
+  type SaveTextFileResult,
+} from '@/lib/fileExport'
 import {
   Bar,
   BarChart,
@@ -33,22 +42,32 @@ import {
 import { strings } from '@/strings'
 
 import {
+  buildStatsCsvModel,
   computeStats,
   STREAK_MIN_MINUTES,
   TOP_PARTNERS_LIMIT,
   type DailyFocus,
   type StatsSummary,
 } from './statsData'
+import { FocusInsights } from './FocusInsights'
+import {
+  computeInsights,
+  type FocusInsights as FocusInsightsData,
+} from './statsInsights'
 
-export type DashboardLoader = () => Promise<{
+export type DashboardData = {
   sessions: SessionRecord[]
   friends: Friend[]
-}>
+  // R7 — all audit events across sessions, for the focus-insights section.
+  auditEvents: AuditEventRecord[]
+}
+
+export type DashboardLoader = () => Promise<DashboardData>
 
 export type DashboardProps = {
   // Storybook / test hook so a story can drive the data path without
   // Tauri. Production omits it; the shell falls through to the live
-  // sessions_list + friends_list invocations.
+  // sessions_list + friends_list + audit_events_list_all invocations.
   __loader?: DashboardLoader
   // Injectable clock so the trailing-30-day window + streak grace are
   // deterministic in stories. Production uses Date.now().
@@ -58,14 +77,15 @@ export type DashboardProps = {
 type Status =
   | { kind: 'loading' }
   | { kind: 'error'; message: string }
-  | { kind: 'ready'; summary: StatsSummary }
+  | { kind: 'ready'; summary: StatsSummary; insights: FocusInsightsData }
 
-async function defaultLoader(): Promise<{
-  sessions: SessionRecord[]
-  friends: Friend[]
-}> {
-  const [sessions, friends] = await Promise.all([listSessions(), listFriends()])
-  return { sessions, friends }
+async function defaultLoader(): Promise<DashboardData> {
+  const [sessions, friends, auditEvents] = await Promise.all([
+    listSessions(),
+    listFriends(),
+    auditEventsListAll(),
+  ])
+  return { sessions, friends, auditEvents }
 }
 
 export function Dashboard({ __loader, now }: DashboardProps) {
@@ -79,11 +99,12 @@ export function Dashboard({ __loader, now }: DashboardProps) {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- one-shot load (re-armed by reloadKey on Retry); the loader awaits the Tauri commands before the productive setState (same suppression as SessionsCategory / Report).
     setStatus({ kind: 'loading' })
     loader()
-      .then(({ sessions, friends }) => {
+      .then(({ sessions, friends, auditEvents }) => {
         if (cancelled) return
         setStatus({
           kind: 'ready',
           summary: computeStats(sessions, friends, now ?? Date.now()),
+          insights: computeInsights(sessions, auditEvents),
         })
       })
       .catch((err: unknown) => {
@@ -130,20 +151,62 @@ export function Dashboard({ __loader, now }: DashboardProps) {
       </SettingsSection>
     )
   }
-  return <DashboardView summary={status.summary} />
+  return <DashboardView summary={status.summary} insights={status.insights} />
 }
 
 export type DashboardViewProps = {
   summary: StatsSummary
+  // R7 — optional so stories that only exercise the core tiles can omit it;
+  // when present the focus-insights section renders below the partners list.
+  insights?: FocusInsightsData
+  // Injectable file date stamp + export seam keep the CSV export
+  // deterministic and Tauri-free under test/Storybook.
+  now?: number
 }
 
-export function DashboardView({ summary }: DashboardViewProps) {
+export function DashboardView({ summary, insights, now }: DashboardViewProps) {
   const { totalSessions, daily, streak, partners, score } = summary
+
+  const [exporting, setExporting] = useState(false)
+  const handleExportCsv = async () => {
+    setExporting(true)
+    try {
+      const model = buildStatsCsvModel(summary)
+      const csv = buildCsv(model.header, model.rows)
+      const stamp = fileDateStamp(now ?? Date.now())
+      const result: SaveTextFileResult = await saveTextFile(csv, {
+        defaultPath: `studyvis-stats-${stamp}.csv`,
+        filters: [
+          { name: strings.stats.export.filterName, extensions: ['csv'] },
+        ],
+      })
+      if (result.kind === 'saved')
+        toast.success(strings.stats.export.savedToast)
+    } catch {
+      toast.error(strings.stats.export.errorToast)
+    } finally {
+      setExporting(false)
+    }
+  }
   const topPartners = partners.slice(0, TOP_PARTNERS_LIMIT)
 
   return (
     <SettingsSection heading={strings.stats.heading}>
-      <p className="pb-4 text-xs text-text-muted">{strings.stats.disclaimer}</p>
+      <div className="flex items-start justify-between gap-3 pb-4">
+        <p className="text-xs text-text-muted">{strings.stats.disclaimer}</p>
+        {totalSessions > 0 ? (
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => void handleExportCsv()}
+            disabled={exporting}
+            aria-label={strings.stats.export.ariaLabel}
+            className="shrink-0"
+          >
+            <DownloadIcon /> {strings.stats.export.cta}
+          </Button>
+        ) : null}
+      </div>
 
       {totalSessions === 0 ? (
         <Empty message={strings.stats.empty} />
@@ -156,21 +219,16 @@ export function DashboardView({ summary }: DashboardViewProps) {
               label={strings.stats.streak.label}
               help={strings.stats.streak.help(STREAK_MIN_MINUTES)}
             />
-            <StatTile
-              value={score.average == null ? '—' : String(score.average)}
-              unit={score.average == null ? '' : strings.stats.avgScore.unit}
-              label={strings.stats.avgScore.label}
-              help={
-                score.scoredSessions === 0
-                  ? strings.stats.avgScore.helpNoScores
-                  : strings.stats.avgScore.help(score.scoredSessions)
-              }
+            <ScoreTile
+              average={score.average}
+              scoredSessions={score.scoredSessions}
+              totalSessions={totalSessions}
             />
           </div>
 
           <section className="flex flex-col gap-3">
             <h3 className="text-sm font-medium tracking-tight text-text-secondary uppercase">
-              {strings.stats.focused.heading}
+              {strings.stats.studyMinutes.heading}
             </h3>
             <Card className="gap-0 py-4">
               <div className="h-56 w-full px-2">
@@ -203,9 +261,58 @@ export function DashboardView({ summary }: DashboardViewProps) {
               </ul>
             )}
           </section>
+
+          {insights ? <FocusInsights insights={insights} /> : null}
         </div>
       )}
     </SettingsSection>
+  )
+}
+
+// R6 — average-score tile. Once R1 lands, the average is over the AI-scored
+// subset only, so the denominator matters. Three states:
+//   - no scored sessions   → muted "Limited data", em-dash value, no over-read
+//   - small scored share   → coverage line "From 2 of 40 sessions" up front
+//   - majority scored       → the plain "Across N scored sessions" help
+// "Small share" = fewer than half the sessions carry a score.
+const SCORE_COVERAGE_THRESHOLD = 0.5
+
+function ScoreTile({
+  average,
+  scoredSessions,
+  totalSessions,
+}: {
+  average: number | null
+  scoredSessions: number
+  totalSessions: number
+}) {
+  const copy = strings.stats.avgScore
+  if (scoredSessions === 0) {
+    return (
+      <StatTile
+        value="—"
+        unit=""
+        label={copy.label}
+        help={copy.helpNoScores}
+        eyebrow={copy.limitedData}
+      />
+    )
+  }
+  const smallShare =
+    totalSessions > 0 &&
+    scoredSessions / totalSessions < SCORE_COVERAGE_THRESHOLD
+  return (
+    <StatTile
+      value={average == null ? '—' : String(average)}
+      unit={average == null ? '' : copy.unit}
+      label={copy.label}
+      help={
+        smallShare
+          ? copy.coverage(scoredSessions, totalSessions)
+          : copy.help(scoredSessions)
+      }
+      helpEmphasis={smallShare}
+    />
   )
 }
 
@@ -214,15 +321,28 @@ function StatTile({
   unit,
   label,
   help,
+  eyebrow,
+  helpEmphasis = false,
 }: {
   value: string
   unit: string
   label: string
   help: string
+  // Optional muted tag above the value (R6 "Limited data" for an all-unscored
+  // average-score tile).
+  eyebrow?: string
+  // Renders the help line at higher contrast (R6 coverage denominator, so the
+  // "from 2 of 40 sessions" caveat reads as primary text, not a faint hint).
+  helpEmphasis?: boolean
 }) {
   return (
     <Card className="gap-2 py-4">
       <div className="flex flex-col gap-1 px-4">
+        {eyebrow ? (
+          <span className="text-xs font-medium tracking-wide text-text-muted uppercase">
+            {eyebrow}
+          </span>
+        ) : null}
         <div className="flex items-baseline gap-1">
           <span className="text-2xl font-semibold tracking-tight text-text-primary tabular-nums">
             {value}
@@ -232,7 +352,15 @@ function StatTile({
           ) : null}
         </div>
         <span className="text-sm font-medium text-text-primary">{label}</span>
-        <span className="text-xs text-text-muted">{help}</span>
+        <span
+          className={
+            helpEmphasis
+              ? 'text-xs font-medium text-text-secondary'
+              : 'text-xs text-text-muted'
+          }
+        >
+          {help}
+        </span>
       </div>
     </Card>
   )
@@ -294,7 +422,7 @@ function FocusTooltip({ active, payload }: FocusTooltipProps) {
     <div className="rounded-md border border-border-default bg-bg-raised px-3 py-2 text-xs shadow-md">
       <div className="font-medium text-text-primary">{point.day}</div>
       <div className="text-text-secondary tabular-nums">
-        {strings.stats.focused.minutes(point.minutes)}
+        {strings.stats.studyMinutes.minutes(point.minutes)}
       </div>
     </div>
   )

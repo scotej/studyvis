@@ -8,7 +8,7 @@
 // The presenter (`ModelPicker.tsx`) stays pure; this file is the only
 // place that touches Tauri command runtimes.
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 
 import { ModelGuide } from './ModelGuide'
@@ -44,6 +44,9 @@ export function ModelPickerContainer() {
   const hydrate = useModelStore((s) => s.hydrate)
   const recordInstalled = useModelStore((s) => s.recordInstalled)
   const recordBenchmark = useModelStore((s) => s.recordBenchmark)
+  const recordInterruptedDownload = useModelStore(
+    (s) => s.recordInterruptedDownload
+  )
   const forget = useModelStore((s) => s.forget)
   const status = useModelStore((s) => s.status)
 
@@ -52,6 +55,15 @@ export function ModelPickerContainer() {
   )
   const [hfTokenPresent, setHfTokenPresent] = useState(false)
   const [hfTokenChecked, setHfTokenChecked] = useState(false)
+
+  // A4 — the latest `bytes_received` seen on a 'downloading' event per model.
+  // The Rust terminal failed/cancelled events hardcode bytes_received: 0 (they
+  // report the all-files summary, not the in-flight byte count), so we stash
+  // the running value from the streaming events and use it when the download
+  // ends abnormally. This is the same offset the Rust side Range-resumes from
+  // (the running count includes any prior resume offset), so the "X
+  // downloaded" resume label stays honest.
+  const lastDownloadBytes = useRef<Record<string, number>>({})
 
   const updateCard = useCallback((modelId: string, patch: CardUpdate) => {
     setCards((prev) => {
@@ -114,10 +126,29 @@ export function ModelPickerContainer() {
     }
   }, [])
 
+  // A4 — record an interruption from the last streaming byte count we saw for
+  // this model. No-op when we never observed any bytes (the picker keeps the
+  // plain "Download"/"Re-download" CTA rather than fabricating a resume label).
+  const recordPartialFromLastSeen = useCallback(
+    (modelId: string) => {
+      const bytes = lastDownloadBytes.current[modelId]
+      if (typeof bytes === 'number' && bytes > 0) {
+        void recordInterruptedDownload(modelId, bytes)
+      }
+    },
+    [recordInterruptedDownload]
+  )
+
   const handleProgress = useCallback(
     (evt: ProgressEvent) => {
       const next = progressEventToPhase(evt)
       if (next) {
+        // A4 — only the streaming 'downloading' events carry a real byte
+        // count; stash the running value so a later terminal failed/cancelled
+        // event (which reports 0) can record an honest resume offset.
+        if (evt.phase === 'downloading' && evt.bytes_received > 0) {
+          lastDownloadBytes.current[evt.model_id] = evt.bytes_received
+        }
         const fraction = downloadFraction(evt)
         updateCard(evt.model_id, {
           phase: next,
@@ -132,6 +163,12 @@ export function ModelPickerContainer() {
           downloadProgress: null,
           errorMessage: evt.error ?? 'Download failed.',
         })
+        // A4 — the backend keeps the `.tmp` on a stream/write error, so the
+        // next download Range-resumes. The terminal event itself carries
+        // bytes_received: 0 (it's the all-files summary), so use the running
+        // count stashed from the last 'downloading' event. Record the partial
+        // so the picker reads as "Resume download".
+        recordPartialFromLastSeen(evt.model_id)
         return
       }
       if (evt.phase === 'cancelled') {
@@ -140,13 +177,25 @@ export function ModelPickerContainer() {
           downloadProgress: null,
           errorMessage: null,
         })
+        // A4 — cancel also keeps the `.tmp` (Rust comment), so a cancelled
+        // download is resumable too. Same byte-count caveat as 'failed'.
+        recordPartialFromLastSeen(evt.model_id)
         return
       }
-      // 'done' is handled by the in-flight Select / Rebenchmark coordinators
-      // — we don't transition phase here because the next step is the
-      // benchmark, not "back to idle".
+      if (evt.phase === 'done' && evt.file === 'all') {
+        // The whole download finished (the terminal all-files summary); any
+        // stale partial marker is cleared by recordInstalled. Drop the running
+        // byte count so a future download of the same model starts its resume
+        // accounting clean. Per-file 'done' events (file === 'model'/'mmproj')
+        // are NOT terminal — the next file's 'downloading' events will refresh
+        // the running count — so we leave the stash alone for those.
+        delete lastDownloadBytes.current[evt.model_id]
+      }
+      // 'done' is otherwise handled by the in-flight Select / Rebenchmark
+      // coordinators — we don't transition phase here because the next step is
+      // the benchmark, not "back to idle".
     },
-    [updateCard]
+    [updateCard, recordPartialFromLastSeen]
   )
 
   // Subscribe to download progress events. Cleanup on unmount.

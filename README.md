@@ -27,10 +27,12 @@ A few honest disclosures, in the spirit of "no surprises":
   invites. The traffic is small — kilobytes per hour — and the relay
   cannot read it.
 - **WebRTC during a session.** Audio and video go directly
-  peer-to-peer when your network allows it. On strict corporate or
-  school networks, traffic relays through a public TURN server (Open
-  Relay) which only sees encrypted bytes. About 15% of network
-  configurations land on the relay path.
+  peer-to-peer. This works on most home networks. Some networks
+  (corporate firewalls, strict NATs, locked-down school Wi-Fi) block
+  direct connections — about 15% of setups — and those sessions can
+  fail to connect. StudyVis ships with no relay fallback today; to get
+  through such networks you can add your own TURN relay in Settings →
+  Network (it only ever sees encrypted bytes).
 - **Camera and microphone permission** are requested the first time
   you join a session. They live with the OS, not with StudyVis — you
   can revoke them in your OS privacy panel any time.
@@ -51,11 +53,11 @@ run; the steps below clear those warnings. The OS remembers your
 decision afterwards. See [`INSTALL.md`](./INSTALL.md) for the full
 walkthrough.
 
-**macOS (Apple Silicon + Intel)** — download the `.dmg` matching your
-Mac's chip from
-[Releases](https://github.com/scotej/studyvis/releases). Drag StudyVis
-into Applications. **Right-click** the app icon and choose **Open**
-the first time; macOS asks once, then remembers. The right-click is
+**macOS (Apple Silicon)** — download the `aarch64` `.dmg` from
+[Releases](https://github.com/scotej/studyvis/releases) (Apple Silicon
+only; Intel Macs aren't in the release matrix). Drag StudyVis into
+Applications. **Right-click** the app icon and choose **Open** the
+first time; macOS asks once, then remembers. The right-click is
 load-bearing — double-clicking will refuse.
 
 **Windows 10 / 11** — download the `.msi` from

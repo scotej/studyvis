@@ -2,6 +2,7 @@ import { verifyMessage } from '@/lib/crypto/identity'
 import { inboxPassword, inboxTopic } from '@/lib/crypto/topics'
 import { base64ToBytes, hexToBytes } from '@/lib/encoding'
 import { joinTopic, type TopicRoom } from '@/lib/trystero'
+import { userRelayConfig } from '@/lib/trystero/relays'
 
 import {
   INVITE_ACTION,
@@ -147,10 +148,29 @@ export async function validateInviteEnvelope(
 }
 
 export function subscribeToOwnInbox(ctx: InboxContext): InboxSubscription {
-  const room: TopicRoom = joinTopic({
-    topic: inboxTopic(ctx.myEdPubkey),
-    password: inboxPassword(ctx.myEdPubkey),
-  })
+  // F3 — `joinTopic` constructs the relay WebSockets synchronously, so a
+  // malformed saved relay URL (one that slipped past validation, e.g. a
+  // hand-edited settings.json) throws here. This runs in InboxBoot's mount
+  // effect, which has no React error boundary above it, so an unguarded throw
+  // would blank the whole app at launch. Swallow it: a dead inbox subscriber
+  // is a degraded-but-running app; the user can still reach Settings → Network
+  // to fix the relay list.
+  let room: TopicRoom
+  try {
+    room = joinTopic({
+      topic: inboxTopic(ctx.myEdPubkey),
+      password: inboxPassword(ctx.myEdPubkey),
+      relayConfig: userRelayConfig(),
+      // F1 — the inbox is a long-lived background subscriber with no dialog to
+      // drive, so a join error is logged for diagnostics only. A real relay
+      // outage surfaces to the user through the pairing/invite flows instead.
+      onJoinError: (details) =>
+        console.warn('inbox room join error:', details.error),
+    })
+  } catch (err) {
+    console.error('inbox room join failed:', err)
+    return { leave: async () => {} }
+  }
   const action = room.makeAction<InviteEnvelope>(INVITE_ACTION)
 
   action.receive((data) => {

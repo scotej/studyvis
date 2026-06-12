@@ -75,6 +75,28 @@ impl AiFeaturesFlag {
     }
 }
 
+// N4 quit-confirm gate. The JS session store pushes the live-session state
+// via `session_set_active` so every real-quit path in lib.rs (window close
+// with minimize-to-tray off, tray Quit, macOS Cmd+Q) can intercept with a
+// "quit-requested" event instead of dropping peers mid-session. Relaxed
+// ordering matches the flags above: last-write-wins, and a stale read costs
+// at most one unnecessary (or skipped) confirm.
+pub struct SessionActiveFlag(pub AtomicBool);
+
+impl SessionActiveFlag {
+    pub fn new() -> Self {
+        Self(AtomicBool::new(false))
+    }
+
+    pub fn set<R: Runtime>(app: &AppHandle<R>, active: bool) {
+        app.state::<Self>().0.store(active, Ordering::Relaxed);
+    }
+
+    pub fn is_active<R: Runtime>(app: &AppHandle<R>) -> bool {
+        app.state::<Self>().0.load(Ordering::Relaxed)
+    }
+}
+
 // V3-P3 — runtime-mutable global shortcut bindings. The two `Mutex<Shortcut>`
 // fields are the V1-P7 interior-mutability pattern: the handler locks the
 // same Mutex per keystroke to compare against the *current* shortcut, and
@@ -191,6 +213,22 @@ pub fn autostart_is_enabled<R: Runtime>(app: AppHandle<R>) -> Result<bool, Strin
 }
 
 #[tauri::command]
+pub fn session_set_active<R: Runtime>(app: AppHandle<R>, active: bool) -> Result<(), String> {
+    SessionActiveFlag::set(&app, active);
+    Ok(())
+}
+
+// Unconditional quit, called by the frontend after the user confirms the
+// "quit-requested" prompt. Arming QuitFlag first keeps the CloseRequested
+// handler from re-intercepting the teardown, exactly like tray-quit.
+#[tauri::command]
+pub fn app_quit<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
+    QuitFlag::arm(&app);
+    app.exit(0);
+    Ok(())
+}
+
+#[tauri::command]
 pub fn system_minimize_to_tray_set_enabled<R: Runtime>(
     app: AppHandle<R>,
     enabled: bool,
@@ -216,6 +254,20 @@ pub fn system_ai_features_set_enabled<R: Runtime>(
     Ok(())
 }
 
+// R3 — write a user-chosen file for the report/stats export. The
+// destination path comes from the dialog plugin's `save()` picker (the user
+// explicitly selected it), so this only performs the write the dialog plugin
+// itself cannot do. We add this small command instead of pulling in
+// `@tauri-apps/plugin-fs`: the only file write the app needs is "the path the
+// user just picked," and a single targeted command keeps the JS-callable
+// surface narrower than a general filesystem plugin (least-new-surface, same
+// rationale as the single-destination `system_open_releases`). The contents
+// are UTF-8 text (markdown / CSV / JSON), so a plain write_string suffices.
+#[tauri::command]
+pub fn system_write_text_file(path: String, contents: String) -> Result<(), String> {
+    std::fs::write(&path, contents.as_bytes()).map_err(|e| format!("Couldn't write {path}: {e}"))
+}
+
 #[tauri::command]
 pub fn system_open_data_folder<R: Runtime>(app: AppHandle<R>) -> Result<String, String> {
     let dir = data_dir(&app)?;
@@ -236,6 +288,50 @@ pub fn system_open_releases<R: Runtime>(app: AppHandle<R>) -> Result<(), String>
     app.opener()
         .open_url(RELEASES_URL, None::<&str>)
         .map_err(|e| e.to_string())
+}
+
+// X4 — opt-in version check, the one sanctioned outbound request beyond P2P +
+// Nostr signaling (PLAN §3 carve-out). A bare unauthenticated GET of the
+// public GitHub Releases API: no identifiers, no query params, and a static
+// User-Agent only because GitHub rejects UA-less requests. Failures return
+// Err for the frontend to silently ignore. The owner/repo pair is derived
+// from RELEASES_URL so the two release-facing commands can't drift apart.
+fn latest_release_api_url() -> String {
+    let repo = RELEASES_URL
+        .trim_start_matches("https://github.com/")
+        .trim_end_matches("/releases");
+    format!("https://api.github.com/repos/{repo}/releases/latest")
+}
+
+#[tauri::command]
+pub async fn system_fetch_latest_version() -> Result<String, String> {
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .user_agent("studyvis")
+        .build()
+        .map_err(|e| format!("build http client: {e}"))?;
+    let resp = client
+        .get(latest_release_api_url())
+        .send()
+        .await
+        .map_err(|e| format!("GET releases/latest: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(format!(
+            "GitHub API returned HTTP {}",
+            resp.status().as_u16()
+        ));
+    }
+    let bytes = resp
+        .bytes()
+        .await
+        .map_err(|e| format!("read response: {e}"))?;
+    let body: serde_json::Value =
+        serde_json::from_slice(&bytes).map_err(|e| format!("parse response: {e}"))?;
+    let tag = body
+        .get("tag_name")
+        .and_then(|v| v.as_str())
+        .ok_or("response missing tag_name")?;
+    Ok(tag.strip_prefix('v').unwrap_or(tag).to_string())
 }
 
 // V2-P5 battery awareness for the AI sample loop. ARCHITECTURE.md §8: "if
@@ -353,5 +449,18 @@ pub fn system_open_microphone_settings<R: Runtime>(app: AppHandle<R>) -> Result<
     {
         let _ = app;
         Err("not supported on this platform".to_string())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::latest_release_api_url;
+
+    #[test]
+    fn latest_release_api_url_derives_owner_repo_from_releases_url() {
+        assert_eq!(
+            latest_release_api_url(),
+            "https://api.github.com/repos/scotej/studyvis/releases/latest"
+        );
     }
 }

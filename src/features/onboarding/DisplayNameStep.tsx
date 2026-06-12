@@ -14,6 +14,7 @@ export type DisplayNameStepProps = {
   submitting: boolean
   error: string | null
   onSubmit: (name: string) => void
+  onBack?: () => void
 }
 
 const MAX_LENGTH = 64
@@ -24,6 +25,7 @@ export function DisplayNameStep({
   submitting,
   error,
   onSubmit,
+  onBack,
 }: DisplayNameStepProps) {
   const [value, setValue] = useState(initialValue)
   const trimmed = value.trim()
@@ -33,6 +35,15 @@ export function DisplayNameStep({
     <OnboardingStep
       ariaLabel={strings.onboarding.displayName.ariaLabel}
       progress={progress}
+      secondaryAction={
+        onBack
+          ? {
+              label: strings.common.actions.back,
+              onClick: onBack,
+              disabled: submitting,
+            }
+          : undefined
+      }
       primaryAction={{
         label: strings.common.actions.continue,
         onClick: () => {

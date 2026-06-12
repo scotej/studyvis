@@ -28,7 +28,7 @@ function event(
   detail: Record<string, unknown> = {}
 ): AuditEventRecord {
   return {
-    sessionId: 'mock-session',
+    session_id: 'mock-session',
     ts: STARTED_AT + offsetMs,
     who,
     kind,
@@ -161,15 +161,15 @@ export const MostlyOffTask: Story = {
   },
 }
 
-// No-AI baseline: lifecycle events only. Verifies the report still renders
-// usefully when the user ran a V1-style session (AI features disabled),
-// so focused_pct is null and the Top distractions section shows the
-// "Nice work" empty state.
+// No-AI baseline (R1): lifecycle events only. AI focus detection was off, so
+// score AND focused_pct are null — the hero renders the calm "No focus score"
+// placeholder instead of a fabricated 100/100 gauge, and the Top distractions
+// section shows the "Nice work" empty state.
 export const NoAiBaseline: Story = {
   args: {
     data: buildData(
       baseSession({
-        score: 100,
+        score: null,
         focused_pct: null,
         declared_topic: null,
       }),

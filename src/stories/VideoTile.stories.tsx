@@ -137,3 +137,69 @@ export const AlertedLongReasoning: Story = {
     </div>
   ),
 }
+
+// F4 — a peer mid-ICE-handshake (or one that flickered to a transient,
+// recoverable 'disconnected') reads as "Connecting…" rather than a frozen
+// offline tile or a terminal "Connection failed".
+export const Connecting: Story = {
+  render: () => (
+    <div className="w-full max-w-md">
+      <VideoTile name="Mei" stream={null} state="connecting" />
+    </div>
+  ),
+}
+
+// F4 — a peer whose WebRTC connection terminally failed (e.g. strict NAT under
+// STUN-only) reads as "Connection failed". The transient 'disconnected' state
+// is NOT shown here — it maps to "Connecting…" since it self-heals.
+export const ConnectionFailed: Story = {
+  render: () => (
+    <div className="w-full max-w-md">
+      <VideoTile name="Mei" stream={null} state="failed" />
+    </div>
+  ),
+}
+
+// S3 — the local user turned their camera off: an explicit "Camera off"
+// placeholder, never a frozen last frame.
+export const CameraOffLocal: Story = {
+  render: () => (
+    <div className="w-full max-w-md">
+      <MockedTile
+        name="You"
+        color={tokens.color.accent.default}
+        isLocal
+        cameraOff
+      />
+    </div>
+  ),
+}
+
+// S3 — a peer with their camera off renders the same calm placeholder.
+export const CameraOffPeer: Story = {
+  render: () => (
+    <div className="w-full max-w-md">
+      <MockedTile name="Bo" color={tokens.color.accent.muted} cameraOff />
+    </div>
+  ),
+}
+
+// S4 — a peer tile with the per-tile (local-only) volume slider.
+export const WithVolume: Story = {
+  render: () => {
+    const VolumeDemo = () => {
+      const [volume, setVolume] = useState(0.6)
+      return (
+        <div className="w-full max-w-md">
+          <MockedTile
+            name="Alice"
+            color={tokens.color.status.focused}
+            volume={volume}
+            onVolumeChange={setVolume}
+          />
+        </div>
+      )
+    }
+    return <VolumeDemo />
+  },
+}

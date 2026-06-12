@@ -141,6 +141,50 @@ export const JoinStillSearching: Story = {
   },
 }
 
+// F1 — network-trouble hint (blames the user's network, not the friend).
+export const HostNetworkTrouble: Story = {
+  args: {
+    initialTab: 'host',
+    phase: {
+      kind: 'host-waiting',
+      words: MOCK_WORDS,
+      peerArrived: false,
+      networkTrouble: true,
+    },
+    missingDisplayName: false,
+  },
+}
+
+// F5 — peer arrived but no direct link formed (strict NAT, no TURN).
+export const HostLinkStalled: Story = {
+  args: {
+    initialTab: 'host',
+    phase: {
+      kind: 'host-waiting',
+      words: MOCK_WORDS,
+      peerArrived: true,
+      linkStalled: true,
+    },
+    missingDisplayName: false,
+  },
+}
+
+export const JoinNetworkTrouble: Story = {
+  args: {
+    initialTab: 'join',
+    phase: { kind: 'join-progress', peerArrived: false, networkTrouble: true },
+    missingDisplayName: false,
+  },
+}
+
+export const JoinLinkStalled: Story = {
+  args: {
+    initialTab: 'join',
+    phase: { kind: 'join-progress', peerArrived: true, linkStalled: true },
+    missingDisplayName: false,
+  },
+}
+
 export const Success: Story = {
   args: {
     initialTab: 'host',

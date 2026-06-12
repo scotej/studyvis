@@ -9,13 +9,15 @@
                                   │  Public infrastructure (NOT us)│
                                   │                                │
                                   │   ┌──────────┐   ┌──────────┐  │
-                                  │   │ Nostr    │   │ Open     │  │
-                                  │   │ relays   │   │ Relay    │  │
-                                  │   │ (signal) │   │ (TURN)   │  │
+                                  │   │ Nostr    │   │ TURN     │  │
+                                  │   │ relays   │   │ (user-   │  │
+                                  │   │ (signal) │   │ supplied)│  │
                                   │   └────┬─────┘   └────┬─────┘  │
                                   └────────┼──────────────┼────────┘
                                            │              │
                               signaling ◀──┘              │ ~15% of conns
+                                           │              │ (none ships;
+                                           │              │  see §4)
                                            ▲              ▼
                   ┌──────────────────────  │  ────────────────────────────┐
                   │                                                       │
@@ -66,13 +68,17 @@ Pinned versions are the floor; bump as needed but never silently downgrade.
 ### Tauri plugins (all v2.x)
 - **tauri-plugin-shell** — required for sidecar binaries (llama-server).
 - **tauri-plugin-global-shortcut** — system-wide PTT and AI-dialog hotkeys.
-- **tauri-plugin-notification** — incoming-invite notifications.
+- **tauri-plugin-notification** — incoming-invite + pomodoro / friend-online notifications.
 - **tauri-plugin-autostart** — opt-in launch-at-login.
-- **tauri-plugin-updater** — listed for completeness; **dormant in V1** (registration commented out). V1 ships unsigned installers per the friends-only direction in PLAN.md §5, so no signed update artifacts can be verified. The plugin is left in `Cargo.toml` so future phases (post-signing-credentials) can re-enable it without a dependency change.
+- **tauri-plugin-single-instance** (with the `deep-link` feature) — registered first, so relaunching a hidden (close-to-tray) app focuses the existing window instead of spawning a second process; its callback also forwards any `studyvis://` argv from the second instance into the deep-link stream.
+- **tauri-plugin-deep-link** — registers the `studyvis://` scheme; an inbound `studyvis://pair?c=<code>` prefills (never auto-connects) the add-a-friend join form.
+- **tauri-plugin-dialog** — native message dialogs for the unrecoverable startup paths (corrupt-DB set-aside, newer-version refusal) and the file save pickers (report / audit / CSV export).
 - **tauri-plugin-store** — small key/value config (separate from SQLite for hot config).
 
+The **`tauri-plugin-updater`** dependency that earlier sat dormant in `Cargo.toml` was **removed** (X6) — it had zero runtime effect, and re-enabling it is gated on signing credentials anyway. The full re-add checklist lives in PLAN §8 ("Signing / notarization / auto-update"); it returns as a single coordinated change when a Developer ID / EV cert is acquired.
+
 ### AI inference (V2+)
-- **llama-server** (binary from llama.cpp build) — bundled per-platform as Tauri sidecar (`mac-arm64`, `mac-x64`, `win-x64`, `linux-x64`).
+- **llama-server** (binary from llama.cpp build) — Tauri sidecar. The release matrix bundles `mac-arm64` + `win-x64` (matching the Apple-Silicon/Windows-only install story in INSTALL.md / README.md); `mac-x64` and `linux-x64` remain fetchable for local dev (`scripts/fetch-llama-server.sh` supports all four triples — see the Linux unblock trigger in PLAN §8).
 - App spawns sidecar on demand, communicates via OpenAI-compatible HTTP on `127.0.0.1:<random-port>`. Exact request shape (image content block field names, multipart vs. base64) verified against the pinned llama-server build at V2-P1 time; the sample-loop pseudocode in §8 is illustrative.
 - Vision models loaded with paired `--mmproj` projector files.
 
@@ -248,6 +254,13 @@ Sam (host)                                                  Alice (invited frien
 
 Multi-friend invites (1:3, 1:4): Sam runs steps 1–7 once per invitee, all using the **same** session_topic + session_password. Alice, Bob, Carol each independently arrive on the topic; trystero's mesh forms peer connections between all of them.
 
+### Delivery failures and retry (F6)
+
+Nostr relays don't buffer for an absent peer, so an invite to a closed app can't be delivered later by itself. Two failure modes are now distinguished so the host sees the real cause:
+
+- **Friend offline** (`InviteTimeoutError`): no peer arrived on the inbox topic within the send window. The invite is held and **re-attempted automatically when that friend's presence flips online inside the retry window**, deduped per `(recipient, session)` so a friend can never receive the same invite twice.
+- **Relay down** (`InviteRelayError`): no signaling relay was reachable at all, determined from the live relay-socket check (`relaysUnreachable`), not from trystero's `onJoinError` (which never fires for blocked relays). This is the host's own network, so no retry is queued — re-sending against dead relays would never connect.
+
 ## 7. WebRTC topology
 
 Full mesh for 2–4 users. Each peer holds 1, 2, or 3 RTCPeerConnections. Audio and video tracks per peer; one shared data channel used for the audit log + score events + Pomodoro sync messages.
@@ -277,10 +290,26 @@ type DataMessage =
     }
   | { type: "topic_change"; new_topic: string; ts: number; sig: string }
   | { type: "break"; status: "started" | "ended"; ts: number; sig: string }
-  | { type: "pomodoro"; phase: "work" | "rest"; preset: "25/5" | "50/10"; ends_at: number; stopped?: true; ts: number; sig: string }
+  | {
+      type: "pomodoro"
+      phase: "work" | "rest"          // strictly-legacy 2-state wire form
+      preset: "25/5" | "50/10"        // strictly-legacy; a custom split sends its closest legacy approximation
+      work_ms?: number                // N5 — explicit durations; present on every NEW broadcaster's message
+      rest_ms?: number                //      absent from older senders, who only ever send the legacy preset
+      ends_at: number
+      stopped?: true
+      ts: number
+      sig: string
+    }
   //   `stopped: true` is the broadcaster's deliberate-stop signal: receivers
   //   reset to idle instead of treating the ensuing silence as a disconnect
   //   and handing over. Absent on every normal tick.
+  //   N5: `work_ms`/`rest_ms` are a backward-compatible addition. A NEW
+  //   receiver prefers them; an OLDER receiver ignores the unknown fields and
+  //   renders the legacy `preset` (so a 90/20 custom host still shows work/rest
+  //   on an old build, never the literal "custom"). A NEW broadcaster always
+  //   sends a *valid* legacy `preset` alongside, so the wire never carries a
+  //   value an old parser would reject.
   | { type: "score_final"; score: number; sig: string }   // RESERVED — see note
 ```
 
@@ -292,6 +321,13 @@ type DataMessage =
 > or consumer should be added in V2 (audit finding I10).
 
 Every message signed with the sender's Ed25519 key. Audit + alert messages sign canonical-JSON serialisations pinned in `lib/audit-types.ts` and `features/session/aiAlerts.ts` (key order matters for the round-trip). Receivers verify against the peerId↔ed_pubkey binding established by the V1-P9 signed hello. Unsigned or invalid-signature messages are dropped.
+
+### Other typed actions (not on the audit data channel)
+
+Two presence-style signals ride trystero `makeAction`s on their own channels rather than the audit data channel. Both are backward-compatible additions — an older peer that never sends or recognizes them is unaffected:
+
+- **`camera-state`** `{ off: boolean }` — on the **session room** (S3). Broadcast on every local camera toggle, and re-sent to a peer on its `onPeerJoin` so a late joiner learns the current state. A disabled video track sends black, not a clean "off" signal, so this drives the explicit camera-off tile. An older peer simply never receives it and keeps rendering the (black) frame; no protocol break.
+- **presence goodbye** `{ leaving: true }` — on the **presence channel** (F7), an alternate shape of the existing `heartbeat` action. Sent best-effort just before `room.leave()` so subscribers flip the leaver offline immediately instead of waiting out the 60 s `ONLINE_WINDOW_MS`. It deliberately omits `ts`: an older receiver hits the `typeof ts !== 'number'` guard, drops it, and ages the peer out via the window exactly as before (the I2 receiver-clock model is untouched); a new receiver checks `leaving === true` first and marks the pubkey offline at once.
 
 ## 8. AI inference pipeline (V2+)
 
@@ -319,11 +355,12 @@ loop:
     if user_on_break:
         skip
     if user_on_battery and battery_pct < 20:
-        pause AI; show thermal-aware notice
+        pause AI; show on-battery-paused notice   # battery, not thermal
         sleep(60s); continue
 
     face_frame  = capture_camera_frame()
     screen_grab = capture_primary_display()
+    t0 = now()
     response = POST /v1/chat/completions {
       model: <user's chosen model>,
       messages: [
@@ -338,12 +375,21 @@ loop:
       temperature: 0.0,
       max_tokens: 200,
     }
+    inference_sec = now() - t0
+    update_cadence_backoff(inference_sec, benchmark_p95)   # A6, see below
     judgment = parse_json(response)
+    # A2 — a malformed/empty response is an UNCERTAIN skip (not a fabricated
+    # on_task): it neither resets an off-task streak nor counts toward
+    # focused-time % (tracked in a separate skipped tally). A3 — a confident
+    # off-task call whose on_topic_confidence is at/above the user's floor
+    # (`off_task_confidence_floor`, default 0.6) is likewise an uncertain skip.
     apply_judgment(judgment)
-    sleep(sample_interval)
+    sleep(effective_sample_interval)             # stretched while backed off
 ```
 
-`sample_interval` is set on first run of a chosen model: a 30s benchmark measures p95 inference latency, then `sample_interval = max(5s, ceil(p95 + 1s))`. User can override in settings within `[5s, 30s]`.
+`sample_interval` is set on first run of a chosen model: a 30s benchmark measures p95 inference latency, then `sample_interval = max(5s, ceil(p95 + 1s))`. User can override in settings within `[5s, 30s]`. The benchmark sends the *same* request shape as the live tick (two images — a 384×384 face frame + a ~1024-wide screen frame — the full system prompt, and the grammar-constrained 200-token decode) so its measured p95 reflects real per-tick cost (A1).
+
+**Cadence backoff (A6, local, no telemetry).** ARCHITECTURE originally promised a "thermal-aware notice" but only paused on battery <20% — which never fires on AC, exactly where a fanless laptop throttles under continuous vision inference. There is no portable OS thermal API and no telemetry, so instead the loop watches inference durations: after **2** consecutive ticks whose measured inference exceeds `benchmark_p95 × 2.5`, it engages — doubling the effective sample interval — and recovers after **3** consecutive normal ticks. It fires a single in-voice "checks are running slower than usual" notice once per session (one-shot, on the engaging tick). The battery pause above is unchanged. When no benchmark p95 exists the backoff is disabled (no baseline to compare against).
 
 ### Vision model + mmproj pairing
 
@@ -440,11 +486,14 @@ What's **broadcast in real time**: the kinds above. Peers see "Sam: ai_warning (
 
 Audit log is also written to local SQLite per session for the post-session report and (V3) stats.
 
+The Stats dashboard's **focus-insights** section (R7) reads the full `audit_events` table cross-session via the `audit_events_list_all` command — when-distractions-cluster timing, recurring distraction reasons, and a focused-time trend, all derived from the same `ai_warning`/`ai_alert` reasoning the single-session report already shows. The numeric stats tiles (`statsData`) remain **sessions-table-only** (they never query `audit_events`); the cross-session insight transforms live in the pure `features/stats/statsInsights.ts` seam. Strictly local — nothing here transmits.
+
 ## 10. Pomodoro sync
 
 One peer is the "broadcaster" — by default, whoever started the timer.
 
 - Broadcaster sends `{ type: "pomodoro", phase, preset, ends_at }` on the data channel every 5 s while a phase is active. `phase` is the 2-state wire form (`"work" | "rest"`); `preset` (`"25/5" | "50/10"`) lets receivers label the active phase without inferring duration. The internal state machine remains 5-state (idle / work-25 / rest-5 / work-50 / rest-10); `(phase, preset)` reconstructs the right UI label on the receiver side. Receivers display the phase; clock skew under 1 s is treated as zero (same Pomodoro phase by definition).
+- **Custom durations (N5).** Splits beyond 25/5 and 50/10 (e.g. 45/15, 90/20) ride alongside the legacy fields as optional `work_ms`/`rest_ms` (see §7). A new broadcaster always also sends the closest legacy `preset`, so an older receiver renders sane work/rest timings and never sees a "custom" it can't parse; a new receiver prefers the explicit durations. This keeps a custom-duration host from stranding a friend on an older build.
 - On broadcaster disconnect: each peer waits 10 s; if no `pomodoro` message arrives, the next-oldest peer (by `joined_at`) takes over and resumes from the same `ends_at`.
 - Phase transitions ("work" → "rest" → "work") are unicast only by the broadcaster; receivers don't transition autonomously, they wait for the message. This avoids drift.
 
@@ -455,7 +504,7 @@ studyvis/
 ├─ src-tauri/                     # Rust side
 │  ├─ Cargo.toml
 │  ├─ tauri.conf.json
-│  ├─ binaries/                   # bundled sidecars
+│  ├─ binaries/                   # sidecars (release bundles mac-arm64 + win-x64; mac-x64/linux-x64 are dev-fetchable)
 │  │  ├─ llama-server-mac-arm64
 │  │  ├─ llama-server-mac-x64
 │  │  ├─ llama-server-win-x64.exe
@@ -509,6 +558,14 @@ studyvis/
 ├─ BUILD-PROMPTS.md               # historical build plan (archived)
 └─ README.md                      # summary + install
 ```
+
+The `commands/` tree above is illustrative; the actual command modules are `identity.rs`, `friends.rs`, `models.rs`, `sessions.rs`, and `system.rs`. Commands added in the maintenance/feature line, by concern:
+
+- **Local data management:** `sessions_delete`, `sessions_clear_all` (each tx-scoped, deleting the session row and its `audit_events` together), `audit_events_list_all` (the cross-session read backing the focus-insights view), and `system_write_text_file` (the report / audit-JSON / stats-CSV save path — no fs-plugin surface added).
+- **Friends backup:** `friends_export` / `friends_import` (sealed-box to the user's own X25519 key, SVFB v1 format; import upserts on `ON CONFLICT(ed_pubkey_hex)`).
+- **Lifecycle:** `session_set_active` (drives the Rust `SessionActiveFlag` for the quit-confirm path) and `app_quit` (arms the quit and exits after the in-app confirm).
+- **Version check:** `system_fetch_latest_version` (a bare, unauthenticated GET behind the OFF-by-default opt-in; no identifiers, 10 s timeout).
+- `identity_save_keys` gained an `overwrite: bool` argument — create-new passes `false` (so a corrupt-`identity.json` load can never clobber still-valid keychain keys), and the explicit Recover/Restore path passes `true` after its own confirm.
 
 ## 12. Permissions and entitlements
 
@@ -623,10 +680,11 @@ The `Ctrl+]` AI dialog is a separate Tauri window with:
 | Friend impersonates another friend on Nostr | Ed25519 signatures on every event. Receivers verify against saved pubkey. | Very low. |
 | Prompt injection of vision model via on-screen text | System prompt enumerates patterns; small models still fail sometimes. | Friend-acceptable; V3 may add structured-observation alternative. |
 | Lost laptop, no BIP39 backup | Re-pair with friends as a new identity. | User-bears. |
-| Public TURN throttled | Document; recommend running headphones / wired internet. | Low frequency. |
+| Strict NAT / firewall blocks direct connection | No public TURN ships (STUN-only by default — see §4); user can add their own TURN server in Settings → Network. Document the symptom in onboarding. | ~15% of network setups; sessions may fail to connect until a TURN server is configured. |
 | Linux WebKitGTK getDisplayMedia broken | V0 verifies; if broken, Linux deferred to V3. | Known. |
 | Battery drain from continuous inference | Auto-pause on battery <20%. | Low. |
 | Inference cadence stalls UI | Sample loop runs in worker; HTTP request is async. UI never blocks on AI. | Low if implemented correctly. |
+| Local data files read by anyone with disk access | Private keys live in the OS keychain. `app.db` (friends' pubkeys, full session history, signed audit log) and `identity.json` (public keys + display name) are **plaintext at rest by design** — confidentiality relies on the OS account boundary, not on-disk encryption. | Acceptable under friends-only (no public users, no synced cloud copy). SQLCipher-style encryption of the social graph is a deliberate flagged future scope, not a shipped guarantee. |
 
 ## 15. Versioning, schemas, and forward compatibility
 

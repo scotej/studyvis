@@ -79,6 +79,29 @@ export function Onboarding({ onComplete }: OnboardingProps) {
     })
   }, [isStepVisible])
 
+  // U3 — Back navigation (DESIGN-SYSTEM §8.1's [Back] [Continue] wireframe).
+  // Steps the wrong way to a *previous* visible step; the welcome step (first
+  // visible) has no Back. Identity creation is the point of no return: once
+  // the create path commits a mnemonic, status flips to 'ready' while the
+  // identity step was part of this flow (it wasn't skipped at start), so Back
+  // is suppressed — returning to the identity step would mint a *new* mnemonic
+  // and silently abandon the just-created keypair. Recovery commits the same
+  // way, so the same suppression protects a freshly recovered identity.
+  const back = useCallback(() => {
+    setStepIndex((cur) => {
+      let prev = cur - 1
+      while (prev > 0 && !isStepVisible(STEPS[prev])) {
+        prev -= 1
+      }
+      return Math.max(prev, 0)
+    })
+  }, [isStepVisible])
+
+  const mnemonicCommitted = status === 'ready' && !skips.identity
+  const firstVisibleIndex = STEPS.findIndex(isStepVisible)
+  const canGoBack = stepIndex > firstVisibleIndex && !mnemonicCommitted
+  const onBack = canGoBack ? back : undefined
+
   const finish = useCallback(() => {
     void onComplete()
   }, [onComplete])
@@ -138,10 +161,18 @@ export function Onboarding({ onComplete }: OnboardingProps) {
     return <WelcomeStep progress={progress} onContinue={advance} />
   }
   if (id === 'permissions') {
-    return <PermissionsStep progress={progress} onContinue={advance} />
+    return (
+      <PermissionsStep
+        progress={progress}
+        onContinue={advance}
+        onBack={onBack}
+      />
+    )
   }
   if (id === 'identity') {
-    return <IdentityStep progress={progress} onComplete={advance} />
+    return (
+      <IdentityStep progress={progress} onComplete={advance} onBack={onBack} />
+    )
   }
   if (id === 'name') {
     return (
@@ -151,11 +182,16 @@ export function Onboarding({ onComplete }: OnboardingProps) {
         submitting={nameSubmitting}
         error={nameError}
         onSubmit={(name) => void handleSetDisplayName(name)}
+        onBack={onBack}
       />
     )
   }
   if (id === 'friend') {
-    return <AddFriendStep progress={progress} onContinue={advance} />
+    return (
+      <AddFriendStep progress={progress} onContinue={advance} onBack={onBack} />
+    )
   }
-  return <TutorialStep progress={progress} onContinue={finish} />
+  return (
+    <TutorialStep progress={progress} onContinue={finish} onBack={onBack} />
+  )
 }

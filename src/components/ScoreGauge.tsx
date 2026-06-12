@@ -20,7 +20,7 @@ export type ScoreGaugeProps = {
   className?: string
 }
 
-const DEFAULT_SIZE = 192
+const DEFAULT_SIZE = tokens.sizes.scoreGaugeSize
 
 // Post-session arc gauge from DESIGN-SYSTEM.md §4 ("Post-session arc gauge
 // from 0–100") + §6 motion rule #5 ("Post-session score reveal: `reveal`

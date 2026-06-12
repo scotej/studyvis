@@ -22,6 +22,9 @@ export function FriendsListView({
   now,
 }: FriendsListViewProps) {
   if (friends.length === 0) {
+    // U4 — the centered card is the sole CTA in the empty state (it carries the
+    // explanatory copy); the header [+ Add friend] is dropped here to honor
+    // §10's one-primary-action rule, and returns in the non-empty state below.
     return (
       <section
         aria-labelledby="friends-heading"
@@ -35,9 +38,6 @@ export function FriendsListView({
           >
             {strings.friends.list.heading}
           </h2>
-          <Button onClick={onAddFriend} variant="default" size="sm">
-            <PlusIcon /> {strings.friends.list.addCta}
-          </Button>
         </header>
         <div className="rounded-lg border border-border-default bg-bg-surface p-8 text-center">
           <p className="text-sm text-text-secondary">
@@ -116,12 +116,17 @@ function FriendRow({ friend, online, now, onInvite }: FriendRowProps) {
           {last}
         </span>
         {online ? (
+          // U1 — always-visible at reduced emphasis (outline) so the primary
+          // action is discoverable on first look and reachable on touch, then
+          // elevates to the accent fill on row hover / keyboard focus. Was
+          // opacity-0/pointer-events-none until group-hover, which made invite
+          // invisible at rest and impossible without a pointer.
           <Button
-            variant="default"
+            variant="outline"
             size="sm"
             onClick={onInvite}
             aria-label={strings.friends.list.inviteAriaLabel(name)}
-            className="pointer-events-none opacity-0 transition-opacity duration-fast group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100 focus-visible:pointer-events-auto focus-visible:opacity-100"
+            className="group-hover:border-transparent group-hover:bg-accent-default group-hover:text-text-inverse group-hover:hover:bg-accent-hover group-focus-within:border-transparent group-focus-within:bg-accent-default group-focus-within:text-text-inverse"
           >
             {strings.friends.list.inviteCta}
           </Button>

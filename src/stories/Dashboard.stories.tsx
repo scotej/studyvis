@@ -1,6 +1,7 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
 
-import { computeStats, DashboardView } from '@/features/stats'
+import { computeInsights, computeStats, DashboardView } from '@/features/stats'
+import type { AuditEventRecord } from '@/lib/db/audit'
 import type { Friend } from '@/lib/db/friends'
 import type { SessionRecord } from '@/lib/db/sessions'
 
@@ -63,12 +64,34 @@ const friends: Friend[] = [
   },
 ]
 
-// 0 sessions — the calm empty state (DESIGN-SYSTEM.md §10).
-export const Empty: Story = {
-  args: { summary: computeStats([], [], NOW, 'UTC') },
+function distraction(
+  sessionId: string,
+  sessionStart: number,
+  offsetMin: number,
+  reasoning: string,
+  kind: 'ai_warning' | 'ai_alert' = 'ai_alert'
+): AuditEventRecord {
+  return {
+    session_id: sessionId,
+    ts: sessionStart + offsetMin * 60_000,
+    who: ALICE,
+    kind,
+    detail: JSON.stringify({ severity: 'moderate', reasoning }),
+    sig: `${sessionId}-${kind}-${offsetMin}`,
+  }
 }
 
-// 1 session — a single bar, a one-day streak, one partner, one score.
+// 0 sessions — the calm empty state (DESIGN-SYSTEM.md §10).
+export const Empty: Story = {
+  args: {
+    summary: computeStats([], [], NOW, 'UTC'),
+    insights: computeInsights([], []),
+  },
+}
+
+// 1 session — a single bar, a one-day streak, one partner, one score. AI ran
+// but logged no distractions, so the focus-insights section shows its own
+// empty state.
 export const SingleSession: Story = {
   args: {
     summary: computeStats(
@@ -84,27 +107,68 @@ export const SingleSession: Story = {
       NOW,
       'UTC'
     ),
+    insights: computeInsights([], []),
   },
 }
 
 // 30+ sessions — a busy month: a session most days (some days double),
 // alternating partners, ~70% scored. Verifies the full chart + axis
-// thinning at the production width.
+// thinning at the production width, plus the populated focus-insights
+// section (timing buckets, recurring reasons, focus trend line).
+const busyMonthSessions = Array.from({ length: 38 }, (_, i) => {
+  const daysBack = Math.floor(i / 1.4) // some days get two sessions
+  const startedAt = NOW - daysBack * DAY
+  const focused = i % 3 === 0 ? null : 0.6 + ((i * 5) % 30) / 100
+  return session({
+    id: `month-${i}`,
+    total_minutes: 20 + ((i * 7) % 45),
+    started_at: startedAt,
+    score: i % 3 === 0 ? null : 70 + ((i * 5) % 30),
+    focused_pct: focused,
+    peer_pubkeys: JSON.stringify([i % 2 === 0 ? ALICE : BO]),
+  })
+})
+
+const busyMonthAudit: AuditEventRecord[] = busyMonthSessions.flatMap((s, i) =>
+  s.started_at == null
+    ? []
+    : [
+        distraction(s.id, s.started_at, 5, 'scrolling social media'),
+        ...(i % 2 === 0
+          ? [distraction(s.id, s.started_at, 30, 'watching a video')]
+          : []),
+        ...(i % 5 === 0
+          ? [distraction(s.id, s.started_at, 50, 'phone notifications')]
+          : []),
+      ]
+)
+
 export const PopulatedMonth: Story = {
   args: {
+    summary: computeStats(busyMonthSessions, friends, NOW, 'UTC'),
+    insights: computeInsights(busyMonthSessions, busyMonthAudit),
+  },
+}
+
+// R6 — most sessions are unscored: "Average" over 2 of 40 sessions. The
+// score tile surfaces the denominator prominently instead of letting "87"
+// over-read.
+export const SparselyScored: Story = {
+  args: {
     summary: computeStats(
-      Array.from({ length: 38 }, (_, i) => {
-        const daysBack = Math.floor(i / 1.4) // some days get two sessions
-        return session({
-          total_minutes: 20 + ((i * 7) % 45),
-          started_at: NOW - daysBack * DAY,
-          score: i % 3 === 0 ? null : 70 + ((i * 5) % 30),
-          peer_pubkeys: JSON.stringify([i % 2 === 0 ? ALICE : BO]),
+      Array.from({ length: 40 }, (_, i) =>
+        session({
+          id: `sparse-${i}`,
+          total_minutes: 30,
+          started_at: NOW - i * DAY,
+          score: i < 2 ? 87 : null,
+          peer_pubkeys: JSON.stringify([ALICE]),
         })
-      }),
+      ),
       friends,
       NOW,
       'UTC'
     ),
+    insights: computeInsights([], []),
   },
 }

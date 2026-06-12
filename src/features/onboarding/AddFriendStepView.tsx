@@ -12,6 +12,7 @@ export type AddFriendStepViewProps = {
   justAdded: boolean
   onAdd: () => void
   onContinue: () => void
+  onBack?: () => void
 }
 
 // Presentational shell for the "add first friend" step. The container in
@@ -23,11 +24,17 @@ export function AddFriendStepView({
   justAdded,
   onAdd,
   onContinue,
+  onBack,
 }: AddFriendStepViewProps) {
   return (
     <OnboardingStep
       ariaLabel={strings.onboarding.addFriend.ariaLabel}
       progress={progress}
+      secondaryAction={
+        onBack
+          ? { label: strings.common.actions.back, onClick: onBack }
+          : undefined
+      }
       // Label is intentionally state-aware; the handler is uniform because both
       // states semantically mean "advance onboarding." Pre-pair, the user is
       // skipping; post-pair, the user is continuing — same exit, honest copy.

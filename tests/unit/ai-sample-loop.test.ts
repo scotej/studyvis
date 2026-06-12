@@ -6,8 +6,13 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 
 import {
+  BACKOFF_ENGAGE_AFTER,
+  BACKOFF_RECOVER_AFTER,
   BATTERY_POLL_INTERVAL_MS,
   CaptureError,
+  initialBackoffState,
+  nextBackoffState,
+  SLOW_TICK_FACTOR,
   __resetBatteryRuntime,
   __resetCaptureRuntime,
   __resetFocusStoreThresholdReader,
@@ -112,6 +117,9 @@ function resetAllStores(): void {
     machine: initialScoreMachineState(),
     lastEvents: [],
     lastSampleAt: null,
+    totalSamples: 0,
+    onTaskSamples: 0,
+    skippedSamples: 0,
   })
   useBreakStore.getState().reset(null)
   useSettingsStore.setState((s) => ({
@@ -466,6 +474,78 @@ describe('startSampleLoop — happy-path tick', () => {
     await handle.stop()
   })
 
+  test('S3 — isPaused (camera off) reschedules without counting a sample, then resumes', async () => {
+    const clock = new FakeClock()
+    const fetchMock = vi.fn(async () => judgmentResponse('on_task'))
+    const captureFace = vi.fn(async () => 'face-b64')
+    const track = makeFakeTrack()
+    let paused = true
+
+    __setSampleLoopRuntime(
+      buildSampleLoopRuntime({
+        clock,
+        fetch: fetchMock as never,
+        captureFace,
+      })
+    )
+    const handle = startSampleLoop({
+      getTopic: () => 'maths',
+      modelId: 'test-model',
+      getFaceTrack: () => track,
+      isPaused: () => paused,
+    })
+
+    await flushMicrotasks(10)
+    // Camera off — the tick must reschedule WITHOUT capturing or counting.
+    await clock.advance(5000)
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect(captureFace).not.toHaveBeenCalled()
+    expect(useFocusStore.getState().totalSamples).toBe(0)
+    expect(useFocusStore.getState().skippedSamples).toBe(0)
+
+    // Camera back on — the very next tick proceeds normally; loop state intact.
+    paused = false
+    await clock.advance(5000)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(useFocusStore.getState().lastSampleAt).toBe(10000)
+    await handle.stop()
+  })
+
+  test('A5 — re-reads the sidecar port after capture; bails when it changed', async () => {
+    const clock = new FakeClock()
+    const fetchMock = vi.fn(async () => judgmentResponse('on_task'))
+    // During the capture await, simulate the Rust watcher respawning the
+    // sidecar on a NEW ephemeral port. The tick must not POST to the stale
+    // port (a guaranteed failure) — it bails and reschedules instead.
+    const captureFace = vi.fn(async () => {
+      useSidecarStore.setState({ port: 12345 })
+      return 'face-b64'
+    })
+    __setSampleLoopRuntime(
+      buildSampleLoopRuntime({
+        clock,
+        fetch: fetchMock as never,
+        captureFace,
+      })
+    )
+    const handle = startSampleLoop({
+      getTopic: () => 't',
+      modelId: 'test-model',
+      getFaceTrack: () => makeFakeTrack(),
+    })
+    await flushMicrotasks(10)
+    await clock.advance(5000)
+    expect(captureFace).toHaveBeenCalledTimes(1)
+    // Port moved during capture → no POST this tick.
+    expect(fetchMock).not.toHaveBeenCalled()
+    // The loop rescheduled; next tick (port now stable at 12345) fires.
+    await clock.advance(5000)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    const url = (fetchMock.mock.calls[0] as unknown as [string])[0]
+    expect(url).toBe('http://127.0.0.1:12345/v1/chat/completions')
+    await handle.stop()
+  })
+
   test('skip-if-busy: a tick fired while inference is in-flight does not schedule a parallel inference', async () => {
     const clock = new FakeClock()
     let resolveFetch: ((res: Response) => void) | null = null
@@ -509,10 +589,10 @@ describe('startSampleLoop — happy-path tick', () => {
     await handle.stop()
   })
 
-  test('parseJudgment fallback feeds on_task into the score machine (never crashes)', async () => {
+  test('A2 — malformed response is an uncertain skip, not a fabricated on_task', async () => {
     const clock = new FakeClock()
-    // Model returns malformed JSON: parseJudgment falls back to on_task,
-    // applyJudgment is called with the safe fallback.
+    // Model returns malformed JSON: parseJudgment falls back to UNCERTAIN, so
+    // applyJudgment neither resets the streak nor counts toward focused-time %.
     const fetchMock = vi.fn(async () =>
       jsonResponse({
         choices: [{ message: { content: 'total nonsense' } }],
@@ -533,9 +613,42 @@ describe('startSampleLoop — happy-path tick', () => {
     await clock.advance(5000)
     expect(fetchMock).toHaveBeenCalledTimes(1)
     const focus = useFocusStore.getState()
-    // No off-task event despite malformed response.
+    // No off-task event despite malformed response, and no on_task tally.
     expect(focus.machine.consecutiveOffTask).toBe(0)
     expect(focus.lastSampleAt).not.toBeNull()
+    // A2 — the sample is counted as skipped, NOT toward focused-time %.
+    expect(focus.skippedSamples).toBe(1)
+    expect(focus.totalSamples).toBe(0)
+    expect(focus.onTaskSamples).toBe(0)
+    await handle.stop()
+  })
+
+  test('A2 — an uncertain sample mid off-task streak does not reset the streak', async () => {
+    const clock = new FakeClock()
+    // First a real off-task call, then a malformed (uncertain) one: the streak
+    // must survive the flaky sample.
+    let call = 0
+    const fetchMock = vi.fn(async () => {
+      call += 1
+      return call === 1
+        ? judgmentResponse('mild')
+        : jsonResponse({ choices: [{ message: { content: 'garbage' } }] })
+    })
+    __setSampleLoopRuntime(
+      buildSampleLoopRuntime({ clock, fetch: fetchMock as never })
+    )
+    const handle = startSampleLoop({
+      getTopic: () => 't',
+      modelId: 'test-model',
+      getFaceTrack: () => makeFakeTrack(),
+    })
+    await flushMicrotasks(10)
+    await clock.advance(5000)
+    expect(useFocusStore.getState().machine.consecutiveOffTask).toBe(1)
+    await clock.advance(5000)
+    // The uncertain sample left the off-task streak untouched (still 1, not 0).
+    expect(useFocusStore.getState().machine.consecutiveOffTask).toBe(1)
+    expect(useFocusStore.getState().skippedSamples).toBe(1)
     await handle.stop()
   })
 })
@@ -1006,5 +1119,225 @@ describe('startSampleLoop — sidecar lifecycle', () => {
     await clock.advance(1_000)
     expect(fetchMock).toHaveBeenCalledTimes(1)
     await handle.stop()
+  })
+})
+
+describe('startSampleLoop — A6 cadence backoff', () => {
+  beforeEach(() => {
+    resetAllStores()
+    __resetSampleLoopRuntime()
+  })
+  afterEach(() => {
+    __resetSampleLoopRuntime()
+  })
+
+  // The default test-model benchmark has p95Sec=3, so the slow threshold is
+  // 3 * SLOW_TICK_FACTOR (2.5) = 7.5 s. We inject the loop's `now` (used to
+  // measure inference duration) separately from the FakeClock that drives
+  // scheduling. The duration is `now()` after the fetch minus `now()` before
+  // it, so the fetch itself bumps a private counter by `perTickDurationMs` —
+  // making each tick's measured inference exactly that. BACKOFF_ENGAGE_AFTER
+  // is 2 consecutive slow ticks; base interval 5 s, BACKOFF_MULTIPLIER 2.
+  function buildBackoffRuntime(
+    clock: FakeClock,
+    // A fixed per-tick inference duration, or a function called once per fetch
+    // (0-indexed by completed-tick count) so a test can vary slow/fast ticks.
+    perTickDurationMs: number | ((tickIndex: number) => number)
+  ): { runtime: SampleLoopRuntime; fetchMock: ReturnType<typeof vi.fn> } {
+    let virtualNow = 0
+    let tickIndex = 0
+    const fetchMock = vi.fn(async () => {
+      const dur =
+        typeof perTickDurationMs === 'function'
+          ? perTickDurationMs(tickIndex)
+          : perTickDurationMs
+      tickIndex += 1
+      virtualNow += dur
+      return judgmentResponse('on_task')
+    })
+    const base = buildSampleLoopRuntime({ clock, fetch: fetchMock as never })
+    return {
+      runtime: { ...base, now: () => virtualNow },
+      fetchMock,
+    }
+  }
+
+  test('engages after sustained slow ticks, fires onThermalBackoff once, stretches cadence', async () => {
+    const clock = new FakeClock()
+    const onThermalBackoff = vi.fn()
+    const { runtime, fetchMock } = buildBackoffRuntime(clock, 8_000)
+    __setSampleLoopRuntime(runtime)
+    const handle = startSampleLoop({
+      getTopic: () => 't',
+      modelId: 'test-model',
+      getFaceTrack: () => makeFakeTrack(),
+      onThermalBackoff,
+    })
+    await flushMicrotasks(10)
+
+    // Tick 1: slow (8 s > 7.5 s), but engage needs 2 consecutive slow ticks.
+    await clock.advance(5_000)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(handle.__state().backoff.engaged).toBe(false)
+    expect(onThermalBackoff).not.toHaveBeenCalled()
+
+    // Tick 2: slow → backoff engages, one-shot notice fires.
+    await clock.advance(5_000)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(handle.__state().backoff.engaged).toBe(true)
+    expect(onThermalBackoff).toHaveBeenCalledTimes(1)
+
+    // Cadence is now stretched: 5 s base * 2 = 10 s. At +5 s, no new tick.
+    await clock.advance(5_000)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    await clock.advance(5_000)
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+    // Notice never spams.
+    expect(onThermalBackoff).toHaveBeenCalledTimes(1)
+    await handle.stop()
+  })
+
+  test('onThermalBackoff fires at most once even when backoff recovers and re-engages', async () => {
+    // Durations by completed-tick index. SLOW=8s (>7.5s threshold), FAST=2s.
+    // Sequence: SLOW,SLOW → engage (justEngaged #1); then 3 FAST → recover;
+    // then SLOW,SLOW → re-engage (justEngaged #2). The pure machine fires
+    // justEngaged twice; the loop's one-shot latch must keep the notice to 1.
+    const slow = 8_000
+    const fast = 2_000
+    const durations = [slow, slow, fast, fast, fast, slow, slow]
+    const clock = new FakeClock()
+    const onThermalBackoff = vi.fn()
+    const { runtime, fetchMock } = buildBackoffRuntime(
+      clock,
+      (i) => durations[i] ?? fast
+    )
+    __setSampleLoopRuntime(runtime)
+    const handle = startSampleLoop({
+      getTopic: () => 't',
+      modelId: 'test-model',
+      getFaceTrack: () => makeFakeTrack(),
+      onThermalBackoff,
+    })
+    await flushMicrotasks(10)
+
+    // Drive exactly the 7-step sequence. Advance by the 5s base interval each
+    // step: when disengaged that fires one tick, and when engaged (10s stretched
+    // cadence) the next tick lands two steps out — so no single advance ever
+    // overshoots more than one tick. Stop once all 7 durations have been
+    // consumed so the run ends on the re-engaging (slow) tick.
+    let guard = 0
+    while (fetchMock.mock.calls.length < durations.length && guard < 50) {
+      await clock.advance(5_000)
+      guard += 1
+    }
+
+    // The pure machine engaged twice (verified separately in the
+    // nextBackoffState suite) — the loop's last two ticks were slow, so it ends
+    // re-engaged — but the loop latch caps the user-facing notice at 1.
+    expect(fetchMock.mock.calls.length).toBe(durations.length)
+    expect(handle.__state().backoff.engaged).toBe(true)
+    expect(handle.__state().thermalNoticeShown).toBe(true)
+    expect(onThermalBackoff).toHaveBeenCalledTimes(1)
+    await handle.stop()
+  })
+
+  test('does not engage when ticks stay near the measured p95', async () => {
+    const clock = new FakeClock()
+    const onThermalBackoff = vi.fn()
+    // 2 s inference < 7.5 s threshold: never slow.
+    const { runtime, fetchMock } = buildBackoffRuntime(clock, 2_000)
+    __setSampleLoopRuntime(runtime)
+    const handle = startSampleLoop({
+      getTopic: () => 't',
+      modelId: 'test-model',
+      getFaceTrack: () => makeFakeTrack(),
+      onThermalBackoff,
+    })
+    await flushMicrotasks(10)
+    for (let i = 0; i < 4; i += 1) {
+      await clock.advance(5_000)
+    }
+    expect(fetchMock.mock.calls.length).toBeGreaterThanOrEqual(3)
+    expect(handle.__state().backoff.engaged).toBe(false)
+    expect(onThermalBackoff).not.toHaveBeenCalled()
+    await handle.stop()
+  })
+})
+
+describe('nextBackoffState — A6 pure transition', () => {
+  const P95 = 4 // slow threshold = 4 * SLOW_TICK_FACTOR (2.5) = 10s
+  const SLOW = P95 * SLOW_TICK_FACTOR + 1
+  const FAST = P95
+
+  function runDurations(durations: number[], p95 = P95) {
+    let s = initialBackoffState()
+    const states = durations.map((d) => {
+      s = nextBackoffState(s, d, p95)
+      return s
+    })
+    return states
+  }
+
+  test('engages only after BACKOFF_ENGAGE_AFTER consecutive slow ticks', () => {
+    const states = runDurations(Array(BACKOFF_ENGAGE_AFTER).fill(SLOW))
+    expect(states[BACKOFF_ENGAGE_AFTER - 2]?.engaged ?? false).toBe(false)
+    const last = states[BACKOFF_ENGAGE_AFTER - 1]
+    expect(last.engaged).toBe(true)
+    expect(last.justEngaged).toBe(true)
+  })
+
+  test('justEngaged is true exactly once across a sustained slow run', () => {
+    const states = runDurations(Array(BACKOFF_ENGAGE_AFTER + 4).fill(SLOW))
+    expect(states.filter((s) => s.justEngaged)).toHaveLength(1)
+    expect(states.at(-1)?.engaged).toBe(true)
+  })
+
+  test('one fast tick resets the slow counter before engage', () => {
+    // SLOW, FAST, SLOW → never two consecutive slow → never engages.
+    const states = runDurations([SLOW, FAST, SLOW])
+    expect(states.every((s) => !s.engaged)).toBe(true)
+  })
+
+  test('recovers after BACKOFF_RECOVER_AFTER consecutive normal ticks', () => {
+    const durations = [
+      ...Array(BACKOFF_ENGAGE_AFTER).fill(SLOW),
+      ...Array(BACKOFF_RECOVER_AFTER).fill(FAST),
+    ]
+    const states = runDurations(durations)
+    // Engaged right after the slow run...
+    expect(states[BACKOFF_ENGAGE_AFTER - 1].engaged).toBe(true)
+    // ...still engaged until the recover threshold is reached...
+    expect(states.at(-2)?.engaged ?? true).toBe(true)
+    // ...then disengaged on the final recovering tick.
+    expect(states.at(-1)?.engaged).toBe(false)
+  })
+
+  test('justEngaged fires again on a recover-then-re-engage cycle', () => {
+    // The pure machine is an engagement-edge signal: it re-sets justEngaged on
+    // every disengaged→engaged transition. SLOW,SLOW (engage) → 3 FAST
+    // (recover) → SLOW,SLOW (re-engage) yields justEngaged twice. The
+    // once-per-session policy is the loop's latch, not the machine's job.
+    const durations = [
+      ...Array(BACKOFF_ENGAGE_AFTER).fill(SLOW),
+      ...Array(BACKOFF_RECOVER_AFTER).fill(FAST),
+      ...Array(BACKOFF_ENGAGE_AFTER).fill(SLOW),
+    ]
+    const states = runDurations(durations)
+    expect(states.filter((s) => s.justEngaged)).toHaveLength(2)
+    expect(states.at(-1)?.engaged).toBe(true)
+  })
+
+  test('disables (rests) when p95 is unknown / non-positive', () => {
+    const s = nextBackoffState(
+      {
+        engaged: true,
+        consecutiveSlow: 5,
+        consecutiveNormal: 0,
+        justEngaged: false,
+      },
+      9999,
+      0
+    )
+    expect(s).toEqual(initialBackoffState())
   })
 })

@@ -1,8 +1,10 @@
 // First-run benchmark: spin up the sidecar with the chosen model, send 3
-// fixed chat-completions requests with a bundled 384×384 PNG, measure
-// per-request latency. Results feed `useModelStore.recordBenchmark` so the
-// picker can show "Speed on your machine" and the AI sample loop (V2-P5)
-// can pick a `sample_interval = max(5, ceil(p95 + 1))`.
+// fixed chat-completions requests built from a bundled desk image (re-encoded
+// into a 384×384 face JPEG + a 1024×576 screen JPEG so the two slots mirror the
+// live tick's real prefill cost), measure per-request latency. Results feed
+// `useModelStore.recordBenchmark` so the picker can show "Speed on your
+// machine" and the AI sample loop (V2-P5) can pick a
+// `sample_interval = max(5, ceil(p95 + 1))`.
 //
 // `p50` and `p95` from 3 samples are coarse — we document this explicitly
 // rather than pretending 3 samples produce true percentiles. The number is
@@ -10,13 +12,34 @@
 // (~25 s/check), which is the only call the user is making.
 
 import benchmarkImageUrl from './assets/benchmark-desk.png'
+import { FACE_FRAME_QUALITY, FACE_FRAME_SIZE } from './captureFace'
+import { SCREEN_FRAME_MAX_WIDTH, SCREEN_FRAME_QUALITY } from './captureScreen'
+import { getCaptureRuntime, type CaptureFrame } from './captureShared'
+import { buildFocusRequest, type FocusChatRequest } from './focusRequest'
 import type { ModelSpec } from './models'
 import { useSidecarStore } from './sidecar'
 
 export const BENCHMARK_SAMPLE_COUNT = 3
-const BENCHMARK_PROMPT =
-  'Describe the desk scene in this picture in one short sentence.'
-const BENCHMARK_MAX_TOKENS = 32
+
+// A1/NEW-FINDING-2 — the live screen frame is downscaled to up to
+// SCREEN_FRAME_MAX_WIDTH (1024) wide; the bundled benchmark asset is only
+// 384×384. For a fixed-grid ViT (Moondream2, Gemma) image area is irrelevant,
+// but Qwen2.5-VL is a dynamic-resolution ViT in llama.cpp — its vision-token
+// count scales with image area, so a 384-wide screen slot costs ~3-4× less
+// prefill than a real 1024-wide screen frame. That makes p95 → sampleIntervalSec
+// understate live cost (and over-trips A6's backoff, which also keys off this
+// p95). So the benchmark letterboxes the bundled asset onto a 1024×576 (16:9)
+// screen-sized JPEG for the SCREEN slot — close to a typical real screen frame's
+// area — while the FACE slot stays at the live 384×384. Both slots are JPEG
+// (matching the live tick); only the pixels are synthetic.
+const BENCHMARK_SCREEN_WIDTH = SCREEN_FRAME_MAX_WIDTH
+const BENCHMARK_SCREEN_HEIGHT = Math.round((SCREEN_FRAME_MAX_WIDTH * 9) / 16)
+// A1 — the benchmark now sends the SAME request shape as the live focus tick
+// (two images, the full FOCUS_SYSTEM_PROMPT, grammar-constrained 200-token
+// decode) via `buildFocusRequest`, so the p95 it measures reflects real
+// per-tick cost. A representative topic keeps the prompt prefill identical in
+// structure to a real session.
+const BENCHMARK_TOPIC = 'Studying'
 
 export type BenchmarkResult = {
   // Wall-clock seconds per chat-completion request, in invocation order.
@@ -39,8 +62,18 @@ export type BenchmarkProgress =
   | { phase: 'sample'; index: number; total: number }
   | { phase: 'done'; result: BenchmarkResult }
 
+// A1/NEW-FINDING-2 — the two image slots the benchmark request carries. The
+// FACE slot mirrors the live 384×384 camera frame; the SCREEN slot mirrors the
+// live ~1024-wide screen frame so the measured p95 reflects real prefill cost
+// on a dynamic-resolution ViT (Qwen2.5-VL). Both are JPEG, like the live tick.
+export type BenchmarkImages = {
+  faceBase64: string
+  screenBase64: string
+  mimeType: string
+}
+
 export type BenchmarkRuntime = {
-  loadBenchmarkImage: () => Promise<{ base64: string; mimeType: string }>
+  prepareImages: () => Promise<BenchmarkImages>
   startSidecar: (params: {
     modelPath: string
     mmprojPath: string | null
@@ -61,31 +94,22 @@ export type BenchmarkRuntime = {
   now: () => number
 }
 
-export type ChatCompletionRequest = {
-  model: string
-  messages: ChatMessage[]
-  max_tokens: number
-  temperature: number
-}
-
-export type ChatMessage = {
-  role: 'system' | 'user' | 'assistant'
-  content: ChatContentBlock[] | string
-}
-
-export type ChatContentBlock =
-  | { type: 'text'; text: string }
-  | { type: 'image_url'; image_url: { url: string } }
+// A1 — the benchmark request body is now the shared focus request shape, so
+// the runtime carries the same type the live loop + eval harness send.
+export type ChatCompletionRequest = FocusChatRequest
 
 const HEALTH_TIMEOUT_MS = 90_000 // covers cold-start projector load on CPU
 
-export async function loadBundledBenchmarkImage(): Promise<{
-  base64: string
-  mimeType: string
-}> {
-  // Vite resolves the import to a URL we fetch at runtime; the PNG is
-  // bundled into dist as a hashed asset, so this works equivalently in dev,
-  // production, and Storybook.
+// Decode the bundled desk PNG and re-encode it into the two JPEG slots the
+// live tick sends: a 384×384 face frame and a 1024×576 screen frame. Routing
+// through the shared CaptureRuntime encoder keeps the screen slot's area (and
+// thus Qwen vision-token cost) representative of a real session. Uses
+// createImageBitmap + OffscreenCanvas, so it only runs in the real
+// app/Storybook DOM — unit tests stub `prepareImages` (same as the old
+// `loadBenchmarkImage`).
+export async function prepareBundledBenchmarkImages(): Promise<BenchmarkImages> {
+  // Vite resolves the import to a URL we fetch at runtime; the PNG is bundled
+  // into dist as a hashed asset, so this works in dev, production, Storybook.
   const response = await fetch(benchmarkImageUrl)
   if (!response.ok) {
     throw new Error(
@@ -93,18 +117,34 @@ export async function loadBundledBenchmarkImage(): Promise<{
     )
   }
   const blob = await response.blob()
-  const ab = await blob.arrayBuffer()
-  const bytes = new Uint8Array(ab)
-  let bin = ''
-  for (let i = 0; i < bytes.length; i += 1) {
-    bin += String.fromCharCode(bytes[i])
+  const bitmap = await createImageBitmap(blob)
+  const frame: CaptureFrame = {
+    bitmap,
+    sourceWidth: bitmap.width,
+    sourceHeight: bitmap.height,
   }
-  const base64 = btoa(bin)
-  return { base64, mimeType: blob.type || 'image/png' }
+  const cap = getCaptureRuntime()
+  try {
+    const faceBase64 = await cap.encodeJpegBase64({
+      frame,
+      targetWidth: FACE_FRAME_SIZE,
+      targetHeight: FACE_FRAME_SIZE,
+      quality: FACE_FRAME_QUALITY,
+    })
+    const screenBase64 = await cap.encodeJpegBase64({
+      frame,
+      targetWidth: BENCHMARK_SCREEN_WIDTH,
+      targetHeight: BENCHMARK_SCREEN_HEIGHT,
+      quality: SCREEN_FRAME_QUALITY,
+    })
+    return { faceBase64, screenBase64, mimeType: 'image/jpeg' }
+  } finally {
+    cap.disposeFrame(frame)
+  }
 }
 
 const defaultRuntime: BenchmarkRuntime = {
-  loadBenchmarkImage: loadBundledBenchmarkImage,
+  prepareImages: prepareBundledBenchmarkImages,
   startSidecar: async ({ modelPath, mmprojPath, ctxSize }) => {
     const port = await useSidecarStore
       .getState()
@@ -231,7 +271,7 @@ export async function runBenchmark(
   const runtime = activeRuntime
   const onProgress = opts.onProgress ?? (() => {})
   onProgress({ phase: 'loading-image' })
-  const image = await runtime.loadBenchmarkImage()
+  const images = await runtime.prepareImages()
 
   onProgress({ phase: 'starting-sidecar' })
 
@@ -244,21 +284,18 @@ export async function runBenchmark(
     })
     await runtime.waitForHealthy(port, HEALTH_TIMEOUT_MS)
 
-    const dataUri = `data:${image.mimeType};base64,${image.base64}`
-    const requestBody = {
-      model: spec.id,
-      messages: [
-        {
-          role: 'user' as const,
-          content: [
-            { type: 'text' as const, text: BENCHMARK_PROMPT },
-            { type: 'image_url' as const, image_url: { url: dataUri } },
-          ],
-        },
-      ],
-      max_tokens: BENCHMARK_MAX_TOKENS,
-      temperature: 0,
-    }
+    // A1 — mirror the live tick's two-image shape (a camera frame + a screen
+    // frame). NEW-FINDING-2: the two slots now carry distinct re-encodes of the
+    // bundled asset — a 384×384 face and a 1024×576 screen — so the measured
+    // p95 reflects the real per-tick prefill cost (the screen slot's larger
+    // area is what a dynamic-resolution ViT like Qwen2.5-VL actually pays for).
+    const requestBody = buildFocusRequest({
+      modelId: spec.id,
+      topic: BENCHMARK_TOPIC,
+      faceBase64: images.faceBase64,
+      screenBase64: images.screenBase64,
+      imageMimeType: images.mimeType,
+    })
 
     // Discard one cold-start sample before measuring. Model load + first
     // inference is dramatically slower than steady state (CPU 7B warmup

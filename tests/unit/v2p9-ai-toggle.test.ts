@@ -171,6 +171,15 @@ describe('settingsStore — V2-P9 setters', () => {
     expect(useSettingsStore.getState().values.sampleIntervalSec).toBeNull()
     expect(saved['sample_interval_s']).toBeNull()
   })
+
+  // A3 — setOffTaskConfidenceFloor persists the raw value under
+  // `off_task_confidence_floor`, matching the threshold setters. Pairs with the
+  // hydrate round-trip in settings-migration.test.ts.
+  test('setOffTaskConfidenceFloor persists the raw value', async () => {
+    await useSettingsStore.getState().setOffTaskConfidenceFloor(0.75)
+    expect(useSettingsStore.getState().values.offTaskConfidenceFloor).toBe(0.75)
+    expect(saved['off_task_confidence_floor']).toBe(0.75)
+  })
 })
 
 // The sample-interval slider is documented as taking effect mid-session

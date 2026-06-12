@@ -119,6 +119,8 @@ import {
   verifyHello,
   type PairingContext,
 } from '@/features/friends/pair'
+import { pairPassword, pairTopic } from '@/lib/crypto/topics'
+import { joinTopic } from '@/lib/trystero'
 
 beforeEach(async () => {
   const mod = (await import('@/lib/trystero')) as unknown as {
@@ -253,6 +255,55 @@ describe('round-trip pairing (in-process two instances)', () => {
     const assertion = expect(promise).rejects.toBeInstanceOf(PairTimeoutError)
     await vi.advanceTimersByTimeAsync(1_500)
     await assertion
+  })
+
+  test('F5: onPostArrivalStall fires when a peer arrives but no hello settles', async () => {
+    vi.useFakeTimers()
+    const words = generatePairingCode()
+    const sam = makeCtx('Sam')
+    const ctrl = new AbortController()
+    let stalled = false
+    let peerArrived = false
+
+    // Host pairing with a short stall window and NO real timeout (the dialog
+    // never deadlines). A bare room joins the same topic so the host sees a
+    // peer arrive, but it never sends a hello → the channel-never-formed path.
+    const promise = hostPairing(words, sam, {
+      signal: ctrl.signal,
+      stallMs: 45_000,
+      onPeerJoinedTopic: () => {
+        peerArrived = true
+      },
+      onPostArrivalStall: () => {
+        stalled = true
+      },
+    })
+    // Keep the rejection observed up front so aborting later doesn't warn.
+    const settled = expect(promise).rejects.toBeInstanceOf(PairAbortedError)
+
+    // A second (bare) participant on the topic triggers the host's onPeerJoin.
+    const bare = joinTopic({
+      topic: pairTopic(words),
+      password: pairPassword(words),
+    })
+
+    // Let the join microtask flush so onPeerJoin (and the stall arming) runs.
+    await vi.advanceTimersByTimeAsync(0)
+    expect(peerArrived).toBe(true)
+    expect(stalled).toBe(false)
+
+    // Just before the window: still no stall.
+    await vi.advanceTimersByTimeAsync(44_999)
+    expect(stalled).toBe(false)
+
+    // Crossing the window fires the one-shot stall hint.
+    await vi.advanceTimersByTimeAsync(2)
+    expect(stalled).toBe(true)
+
+    // Abort to settle the still-open pairing promise; tear down the bare room.
+    ctrl.abort()
+    await bare.leave()
+    await settled
   })
 
   test('onPeerJoinedTopic fires once on each side before the hello settles', async () => {

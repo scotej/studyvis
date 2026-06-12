@@ -1,9 +1,11 @@
 import {
+  getRelaySockets,
   joinRoom,
   selfId,
   type ActionReceiver,
   type ActionSender,
   type DataPayload,
+  type JoinError,
   type JoinRoomCallbacks,
   type JsonValue,
   type Room,
@@ -14,6 +16,32 @@ import {
 import { DEFAULT_RELAY_URLS } from './relays'
 
 export const APP_ID = 'studyvis'
+
+export type { JoinError }
+
+// F1 — surface trystero's join-error stream to consumers. The underlying
+// callback fires on a room-level failure (a peer's offer/answer fails to
+// decrypt under the room password, or a peer handshake errors out) — distinct
+// from "the relays are unreachable", which F2 reads from getRelaySockets. A
+// thrown handler must never crash the room, so the wrapper wraps each fan-out
+// call in a try/catch the same way onPeerJoinedTopic notifications are guarded.
+export type JoinErrorHandler = (details: JoinError) => void
+
+// F2 — live per-relay socket map for the connection-diagnostics panel. Keyed by
+// relay URL; each value is the raw WebSocket whose `readyState` (0 CONNECTING,
+// 1 OPEN, 2 CLOSING, 3 CLOSED) drives the per-relay dot. trystero types this as
+// `any`; we narrow it to the shape the panel actually reads. Pure local read —
+// no telemetry, no network call of our own.
+export type RelaySocketMap = Record<string, { readyState: number; url: string }>
+
+export function getRelaySocketMap(): RelaySocketMap {
+  try {
+    return (getRelaySockets() as RelaySocketMap | undefined) ?? {}
+  } catch {
+    // trystero throws if no room was ever joined; treat as "nothing connected".
+    return {}
+  }
+}
 
 // Trystero's `selfId` is a process-global string (one trystero instance per
 // Tauri webview), so production `wrapRoom` exposes that module-global value
@@ -36,6 +64,12 @@ export type TopicConfig = {
   // depend on whichever relays trystero's appId-seeded shuffle happens to pick.
   // Passing `urls` makes trystero use that entire list (`redundancy` ignored).
   relayConfig?: { urls?: string[]; redundancy?: number }
+  // F1 — fires on a trystero room-level join error (offer/answer decrypt
+  // failure under the room password, or a peer handshake error). Forwarded to
+  // trystero's `onJoinError` callback. Callers that omit it stay on the prior
+  // behavior (errors are swallowed). Distinct from relay-down, which the
+  // diagnostics panel reads from getRelaySocketMap.
+  onJoinError?: JoinErrorHandler
 }
 
 export type TopicAction<T extends DataPayload> = {
@@ -80,9 +114,16 @@ export type JoinTopicFn = (
 ) => TopicRoom
 
 export const joinTopic: JoinTopicFn = (
-  { topic, password, turnConfig, rtcConfig, relayConfig },
+  { topic, password, turnConfig, rtcConfig, relayConfig, onJoinError },
   callbacks
 ) => {
+  // Merge the config-level onJoinError (the ergonomic call-site path) with any
+  // explicit `callbacks` object (used by tests / advanced callers). The config
+  // form wins when both are present; either alone works.
+  const mergedCallbacks: JoinRoomCallbacks | undefined =
+    onJoinError || callbacks
+      ? { ...callbacks, ...(onJoinError ? { onJoinError } : {}) }
+      : undefined
   const room: Room = joinRoom(
     {
       appId: APP_ID,
@@ -97,7 +138,7 @@ export const joinTopic: JoinTopicFn = (
       relayConfig: { urls: DEFAULT_RELAY_URLS, ...relayConfig },
     },
     topic,
-    callbacks
+    mergedCallbacks
   )
   return wrapRoom(room)
 }

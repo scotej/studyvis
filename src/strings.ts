@@ -159,6 +159,12 @@ export const strings = {
       ariaLabel: 'Save your recovery phrase',
       heading: 'Save these 24 words somewhere safe',
       body: 'If you lose this laptop, these words are the only way to recover this identity. Pen and paper. No cloud sync.',
+      // Shown when creating a new identity is refused because this device's
+      // keychain already holds keys (e.g. identity.json was deleted but the
+      // keychain entry survived). Creating fresh would abandon those keys, so
+      // we steer the user back to the restore-from-backup path instead.
+      keysExistError:
+        'This device already has identity keys. Go back and choose "I have a backup" to restore them.',
     },
     backup: {
       wordlistAriaLabel: '24-word recovery phrase',
@@ -186,11 +192,26 @@ export const strings = {
         body: "This writes recovered keys over the ones already here. The current identity stays only on whatever device still has it, and this can't be undone.",
         cta: 'Replace identity',
       },
+      // D5 — shown only when the typed words recompute to a DIFFERENT identity
+      // than the one already on this device. The replacement is real and
+      // friends won't recognize the new key until you re-pair, so the copy
+      // names that consequence plainly without scare tactics.
+      confirmDifferent: {
+        ariaLabel: 'Confirm replacing with a different identity',
+        heading: 'These are different words.',
+        body: "This backup is a different identity from the one on this device. Restoring it replaces your current identity — friends who know your current key won't recognize the new one until you pair with them again. This can't be undone.",
+        cta: 'Replace identity',
+      },
       done: {
         ariaLabel: 'Identity restored',
         cta: 'Continue',
         heading: 'Identity restored.',
         body: "Your friends list didn't come with it. They don't know this device is you yet, so you'll pair with them again.",
+        // D5 — same words re-committed over the identity already on this
+        // device: friends and history are untouched, so the re-pair copy
+        // above would be false here.
+        bodySame:
+          'Same identity, same device — your friends and history are untouched.',
       },
       errors: {
         empty: 'Type your 24-word backup to continue.',
@@ -201,6 +222,18 @@ export const strings = {
         invalid:
           "Those 24 words don't add up. Check for a typo or a word out of place against your written copy.",
       },
+    },
+    // D1 — shown when identity.json exists but couldn't be read. The keys are
+    // still in the keychain; this screen never offers create-new (which would
+    // overwrite them), only Retry and Recover-from-backup.
+    loadError: {
+      ariaLabel: "Couldn't read your identity",
+      heading: "We couldn't read your identity file",
+      body: "Your identity didn't load this time. Your keys are still safe in this device's keychain — this is usually a temporary read issue, so trying again often fixes it.",
+      recoverNote:
+        'Still stuck? If you have your 24-word backup, you can restore your identity from it.',
+      retryCta: 'Try again',
+      recoverCta: 'Restore from backup',
     },
   },
 
@@ -245,6 +278,9 @@ export const strings = {
         codeAriaLabel: 'One-time pairing code',
         qrAlt: 'QR code containing your one-time pairing link',
         qrCaption: 'Have your friend scan this — or send them the link below.',
+        // F9 — the ~10-minute one-time-use lifetime is otherwise invisible.
+        freshnessNote:
+          'One-time use. If a while has passed, close and reopen this to generate a fresh code.',
         copyAriaLabel: 'Copy pairing link to clipboard',
         copyCta: 'Copy link',
         copiedCta: 'Copied',
@@ -252,6 +288,14 @@ export const strings = {
         waiting: 'Waiting for your friend to enter the code.',
         stillWaiting:
           'Still waiting. Make sure your friend opened the Enter-code tab and typed this exact code.',
+        // F1 — distinct from stillWaiting: this blames the network, not the
+        // friend. Shown when trystero reports a join error (e.g. the relays
+        // are unreachable, or the other side is on a different code).
+        networkTrouble:
+          'Trouble reaching the network. Check your connection — some school or office networks block it. You can see relay status in Settings → Network.',
+        // F5 — peer arrived but no direct link formed (strict NAT, no TURN).
+        linkStalled:
+          "Connected to the network, but couldn't open a direct link to your friend. A strict firewall or NAT may be in the way — add a relay or TURN server in Settings → Network and try again.",
         introBody: (wordCount: number) =>
           `We'll generate ${wordCount} words. Send them to your friend over any messenger; they enter them on the other tab.`,
         generateCta: 'Generate code',
@@ -279,6 +323,13 @@ export const strings = {
           "Couldn't open the camera. Check its permission, or paste the code instead.",
         stillSearching:
           'Still searching. Make sure the other device generated this exact code and is online.',
+        // F1 — network-trouble variant of stillSearching (blames the network,
+        // not the other device).
+        networkTrouble:
+          'Trouble reaching the network. Check your connection — some school or office networks block it. You can see relay status in Settings → Network.',
+        // F5 — peer found but no direct link formed (strict NAT, no TURN).
+        linkStalled:
+          "Found your friend, but couldn't open a direct link. A strict firewall or NAT may be in the way — add a relay or TURN server in Settings → Network and try again.",
         clearCta: 'Clear',
         pasteCta: 'Paste',
         connectCta: 'Connect',
@@ -301,7 +352,16 @@ export const strings = {
     inviteSent: (name: string) => `Invite sent to ${name}.`,
     inviteSendErrorFallback: "Couldn't send the invite.",
     joinErrorFallback: "Couldn't join the session.",
-    inviteTimeout: "Your friend didn't pick up. They may be offline.",
+    // F6 — friend was offline; we couldn't deliver now, but the invite is held
+    // and re-sent automatically the moment they come online (within a few
+    // minutes). Distinct from inviteRelayError below, which blames the network.
+    inviteTimeout:
+      "Your friend looks offline. We'll deliver this the moment they come online — keep your session open.",
+    // F1/F6 — the relays themselves were unreachable, so this is the user's own
+    // network, not an offline friend. No retry is queued (the relay would be
+    // just as unreachable), so the copy points at the network, not the friend.
+    inviteRelayError:
+      "Couldn't reach the network to send the invite. Check your connection — see relay status in Settings → Network.",
     inviteWhileGuest: 'Only the host can invite others to this session.',
   },
 
@@ -335,6 +395,19 @@ export const strings = {
     },
     leaveCta: 'Leave',
     escLeaveHint: 'Press Esc again to leave.',
+    // U2 — empty-peer waiting state (DESIGN-SYSTEM §10 empty-state: no
+    // spinner, calm copy) shown alongside the self tile while alone.
+    waiting: {
+      // Never-had-peers: the most common first-session moment (you just
+      // invited and are sitting alone).
+      title: 'Waiting for your friend to join…',
+      body: "Your session is live. They'll appear here as soon as they accept your invite.",
+      // Emptied-after-peers (S1 grace window): a friend who'd joined dropped.
+      // Reconnect-flavored, not invite copy — they already accepted.
+      reconnectTitle: 'Waiting for your friend to reconnect…',
+      reconnectBody:
+        "Your session is still live. They'll reappear here if they come back.",
+    },
     peerFallback: (id: string) => `Peer ${id.slice(0, 6)}`,
     selfFallback: 'You',
     broadcasterSelf: 'you',
@@ -358,6 +431,11 @@ export const strings = {
       online: 'Online',
       offline: 'Offline',
       onBreak: 'On break',
+      // F4 — WebRTC connection states surfaced on peer tiles so a mid-ICE
+      // handshake or a failed connection no longer reads as a frozen offline
+      // tile.
+      connecting: 'Connecting…',
+      failed: 'Connection failed',
     },
     badges: {
       selfWarningAriaLabel: 'Self-warning',
@@ -382,6 +460,23 @@ export const strings = {
       menuLabel: 'Microphone',
       empty: 'No microphones detected',
     },
+    // S3 — local camera on/off control + the explicit peer presentation when
+    // someone has their camera off (a paused tile, never a frozen frame).
+    camera: {
+      // Constant toggle label — pairs with aria-pressed so screen readers
+      // announce "Camera, pressed/not pressed" rather than double-encoding the
+      // state ("Turn camera on, pressed").
+      toggleAriaLabel: 'Camera',
+      offTileLabel: 'Camera off',
+    },
+    // S4 — audio output device picker + per-peer volume.
+    output: {
+      menuLabel: 'Speaker',
+      ariaLabel: (label: string) => `Speaker, currently ${label}`,
+      systemDefault: 'System default',
+      empty: 'No speakers detected',
+      volumeAriaLabel: (name: string) => `Volume for ${name}`,
+    },
     errors: {
       leaveFailedFallback: "Couldn't leave the session.",
       switchMicFailedFallback: "Couldn't switch microphone.",
@@ -399,8 +494,23 @@ export const strings = {
       aiPausedForBattery: (percent: number) =>
         `AI paused to save battery (${percent}%). Plug in or charge above 20% to resume.`,
       aiResumed: 'AI resumed.',
+      // A6 — one-shot notice when the duration-based cadence backoff engages
+      // (the model is running slower than measured, so checks are spaced out
+      // to give your machine room to cool).
+      aiSlowedDown:
+        'Checks are running slower than usual, so StudyVis is spacing them out to ease the load on your machine.',
     },
     full: 'This session is full (4 friends max).',
+    // N4 — quit-during-session confirm. Fired when the user tries to quit
+    // (window close with minimize-to-tray off, tray Quit, macOS Cmd+Q) while
+    // a session is live. The quit was already prevented by Rust; confirm
+    // invokes app_quit(), cancel just closes.
+    quitConfirm: {
+      title: 'Leave your session and quit?',
+      body: "You're in a live session. Quitting now drops you from the call and ends your session for everyone.",
+      cancelCta: 'Stay',
+      confirmCta: 'Leave and quit',
+    },
   },
 
   pomodoro: {
@@ -410,6 +520,8 @@ export const strings = {
       'rest-5': 'Break',
       'work-50': 'Focus',
       'rest-10': 'Break',
+      'work-custom': 'Focus',
+      'rest-custom': 'Break',
     },
     triggerAriaLabel: (phaseLabel: string, time: string) =>
       `Pomodoro ${phaseLabel} ${time}`,
@@ -431,6 +543,22 @@ export const strings = {
         label: '50 / 10',
         hint: '50-minute focus, 10-minute break',
       },
+      custom: {
+        label: 'Custom',
+        hint: 'Pick your own focus and break lengths',
+      },
+    },
+    custom: {
+      workLabel: 'Focus (min)',
+      restLabel: 'Break (min)',
+      workAriaLabel: 'Custom focus length in minutes',
+      restAriaLabel: 'Custom break length in minutes',
+      bounds: (
+        workMin: number,
+        workMax: number,
+        restMin: number,
+        restMax: number
+      ) => `Focus ${workMin}–${workMax} min · break ${restMin}–${restMax} min`,
     },
     startCta: 'Start',
   },
@@ -464,8 +592,27 @@ export const strings = {
     detailsFallback: 'Session details',
     error: "Couldn't load the report.",
     scoreLine: (n: number) => `Score: ${n}/100`,
+    // R1 — unscored session: no gauge, no fabricated 100. Score is null both
+    // when AI was off AND when AI ran but no sample was ever confident, so the
+    // copy stays cause-neutral rather than asserting "AI was off".
+    noScore: {
+      heading: 'No focus score',
+      body: 'No focus score was recorded for this session.',
+      copyLine: 'Score: not recorded',
+    },
     copyCta: 'Copy report',
     copyAriaLabel: 'Copy session report to clipboard',
+    export: {
+      saveCta: 'Save as…',
+      saveAriaLabel: 'Save session report to a file',
+      auditCta: 'Audit log (JSON)',
+      auditAriaLabel: 'Save raw audit log for this session as JSON',
+      reportFilterName: 'Markdown',
+      auditFilterName: 'JSON',
+      savedToast: 'Report saved.',
+      auditSavedToast: 'Audit log saved.',
+      errorToast: "Couldn't save the file.",
+    },
   },
 
   audit: {
@@ -526,7 +673,41 @@ export const strings = {
       },
       recoveryPhrase: {
         label: 'Recovery phrase',
-        help: "Your 24-word backup shows once during setup and isn't saved here. Keep the original safe — it's the only way to recover this identity, by re-deriving it on a fresh install.",
+        // D4 — honest copy: the 24 words are never persisted, so they cannot be
+        // re-shown here. Offers the realistic alternatives instead of a dead row.
+        help: "Your 24-word backup is shown once during setup and never saved, so it can't be shown again here. Keep the original safe — it's the only way to move or recover this identity.",
+        restoreCta: 'Restore a different identity',
+        restoreHelp:
+          'Moving from another device, or restoring a backup? This replaces the identity on this device with your 24 words.',
+        lostNote:
+          "Lost your 24 words? They can't be recovered. You'd start fresh with a new identity and pair with your friends again.",
+      },
+      // D3 — local friends-list backup/restore, encrypted to your own key.
+      // Pairs with the 24-word recovery, which restores only the keypair.
+      friendsBackup: {
+        label: 'Friends backup',
+        help: 'Your 24 words restore your identity, but not your friends list. Save an encrypted copy to keep alongside them — only this identity can open it.',
+        exportCta: 'Export friends',
+        exportAriaLabel: 'Export your friends list to a file',
+        importCta: 'Import friends',
+        importAriaLabel: 'Import a friends list from a file',
+        fileFilterName: 'StudyVis friends backup',
+        exportDefaultName: 'studyvis-friends',
+        exportedToast: (count: number) =>
+          count === 1
+            ? 'Saved 1 friend to your backup.'
+            : `Saved ${count} friends to your backup.`,
+        exportEmptyToast: 'No friends yet — nothing to back up.',
+        exportErrorFallback: "Couldn't save your friends backup.",
+        importedToast: (imported: number, updated: number) => {
+          const added =
+            imported === 1 ? '1 friend added' : `${imported} friends added`
+          const refreshed = updated === 1 ? '1 updated' : `${updated} updated`
+          return `Imported: ${added}, ${refreshed}.`
+        },
+        importDifferentIdentity:
+          'That backup belongs to a different identity, so it stays encrypted. Use the backup you made with these 24 words.',
+        importErrorFallback: "Couldn't import that friends backup.",
       },
     },
 
@@ -562,6 +743,20 @@ export const strings = {
         manyFriends: (n: number) => `${n} friends`,
         minutes: (n: number) => `${n} min`,
         score: (n: number) => `${n} / 100`,
+      },
+      // R4 — per-session delete behind an AlertDialog confirm, mirroring the
+      // Friends remove pattern. Deleting removes the session row and its
+      // audit events; stats/report read SQLite, so the change flows through.
+      delete: {
+        cta: 'Delete',
+        ariaLabel: (when: string) => `Delete session from ${when}`,
+        confirmTitle: 'Delete this session?',
+        confirmBody:
+          'This removes the session and its focus history from this device. It cannot be undone.',
+        confirmCta: 'Delete',
+        cancelCta: 'Cancel',
+        deletedToast: 'Session deleted.',
+        errorFallback: "Couldn't delete the session.",
       },
     },
 
@@ -607,6 +802,26 @@ export const strings = {
         label: 'Minimize to tray on close',
         help: 'When on, closing the window keeps StudyVis in the tray so friends can still reach you. When off, closing exits the app.',
         ariaLabel: 'Minimize to tray on close',
+      },
+      // N2 — opt-out: ON by default. The boundary is invisible when the
+      // window is minimized to the tray, so this is the most-wanted nudge.
+      pomodoro: {
+        label: 'Pomodoro break notifications',
+        help: "OS prompt when your focus block flips to a break, and back. Skipped while you're looking at the timer.",
+        ariaLabel: 'Pomodoro break notifications',
+      },
+      // N6 — opt-in: OFF by default (the calm default IS the accommodation;
+      // no extra reduced-motion gate needed since nothing plays unless asked).
+      pomodoroSound: {
+        label: 'Pomodoro chime',
+        help: 'Plays a short, quiet chime when your focus block flips to a break, and back. Off by default.',
+        ariaLabel: 'Pomodoro chime',
+      },
+      // N3 — opt-in: OFF by default. Honest about the ~60s presence latency.
+      friendOnline: {
+        label: 'Friend-online notifications',
+        help: "OS prompt when a friend comes online — a good moment to invite them. Off by default; can lag a friend's arrival by up to a minute.",
+        ariaLabel: 'Friend-online notifications',
       },
     },
 
@@ -662,6 +877,15 @@ export const strings = {
         help: 'Consecutive off-task samples before your friends see you flagged. Always kept above the warning count.',
         ariaLabel: 'Alert peers after N off-task samples',
       },
+      // A3 — off-task sensitivity. The slider is the on-topic-confidence floor
+      // an off-task call must clear to be SKIPPED, so higher = more off-task
+      // calls survive the gate and count = more flags. Copy below reads in that
+      // (correct) direction; the code gate lives in scoreMachine.step().
+      confidenceFloor: {
+        label: 'Off-task sensitivity',
+        help: 'Higher counts more of the model’s off-task calls against you (more flags). Lower skips the calls the model only half-doubts, so only confident off-task moments count (fewer false alarms). Skipped samples are never held against you.',
+        ariaLabel: 'Off-task sensitivity',
+      },
       // D5/V3-P4 — captureDisplays. Note: sharpened to match the V3-P4
       // contract: "All displays" prompts the OS share picker once per
       // monitor at session start; switching primary→all mid-session takes
@@ -710,17 +934,64 @@ export const strings = {
     network: {
       heading: 'Network',
       about: {
-        label: 'About TURN',
-        help: "StudyVis connects you to friends directly when it can. Some networks (corporate firewalls, strict NATs) block that, so a relay server passes the traffic along instead. It's still encrypted end-to-end; the relay only ever sees encrypted bytes.",
+        label: 'About connections',
+        // F8 — STUN-only by default. No TURN relay ships, so the old "a relay
+        // passes the traffic along" promise was untrue on a fresh install. Be
+        // honest: direct only, unless YOU add a TURN server (F3, below).
+        help: 'StudyVis connects you to friends directly. That works on most home networks, but some (corporate firewalls, strict NATs, locked-down school Wi-Fi) block direct connections, and those sessions can fail to connect. To get through them, add your own TURN relay below — traffic stays end-to-end encrypted; a relay only ever sees encrypted bytes.',
       },
       preference: {
         label: 'TURN preference',
-        help: 'Auto is recommended. Always-on burns more bandwidth on the public relay but can stabilize choppy connections. Never disables relay fallback entirely; sessions may fail to connect on strict networks.',
+        // F8 — the help no longer claims a relay that doesn't exist. The
+        // preference only does anything once a TURN server is configured (F3);
+        // with none, every option is STUN-only.
+        help: 'Only takes effect once you add a TURN server below. Auto uses your TURN relay as a fallback when a direct connection fails. Always routes every connection through it (more reliable on strict networks, more bandwidth). Never ignores it. With no TURN server configured, all three are direct-only.',
         ariaLabel: 'TURN preference',
         options: {
-          auto: 'Auto (fall back when direct fails)',
-          always: 'Always on',
-          never: 'Never',
+          auto: 'Auto (use TURN when direct fails)',
+          always: 'Always route through TURN',
+          never: 'Never use TURN',
+        },
+      },
+      // F2 — connection-diagnostics panel (per-relay live status).
+      diagnostics: {
+        label: 'Connection',
+        help: 'Live status of the signaling relays StudyVis uses to find your friends. This is a local read — nothing is sent anywhere.',
+        empty: 'No relay connections yet. They open a moment after launch.',
+        status: {
+          connected: 'Connected',
+          connecting: 'Connecting…',
+          down: 'Not connected',
+        },
+        // Screen-reader summary of the per-relay dot (color is never the only
+        // signal — the text label above carries the same meaning visually).
+        dotAriaLabel: (url: string, status: string) => `${url}: ${status}`,
+      },
+      // F3 — Advanced disclosure for user-supplied relay URLs + one TURN server.
+      advanced: {
+        toggleLabel: 'Advanced connection settings',
+        toggleHelp:
+          'Add your own Nostr relays and a TURN server. Most people never need these — leave them empty to use the built-in defaults.',
+        relays: {
+          label: 'Custom signaling relays',
+          help: 'One wss:// URL per line. These fully replace the built-in relays StudyVis uses to find your friends, so everyone you study with must use the same relay list — otherwise you won’t find each other. Leave empty to use the defaults. Restart StudyVis to apply a change.',
+          placeholder: 'wss://relay.example.com',
+          ariaLabel: 'Custom signaling relay URLs, one per line',
+          invalid:
+            'Each line must be a wss:// URL. Lines that aren’t were ignored.',
+        },
+        turn: {
+          label: 'TURN server',
+          help: 'A TURN relay gets you through strict firewalls and NATs. Self-host coturn, or use a provider. All three fields are required to enable it.',
+          urlLabel: 'TURN URL',
+          urlPlaceholder: 'turn:turn.example.com:3478',
+          urlAriaLabel: 'TURN server URL',
+          usernameLabel: 'Username',
+          usernameAriaLabel: 'TURN username',
+          credentialLabel: 'Password',
+          credentialAriaLabel: 'TURN password',
+          invalidUrl: 'TURN URL must start with turn: or turns:',
+          active: 'TURN server active — the preference above now applies.',
         },
       },
     },
@@ -772,6 +1043,21 @@ export const strings = {
         replayCta: 'Replay',
         scheduledToast: 'Onboarding will play on the next launch.',
       },
+      // R4 — destructive "Clear all history" with a stronger confirm than the
+      // per-session delete. Wipes every session row and all audit events;
+      // identity and friends are untouched (different tables / the keychain).
+      clearHistory: {
+        label: 'Clear all session history',
+        help: 'Permanently deletes every past session and its focus history from this device. Your identity and friends are kept.',
+        clearCta: 'Clear history',
+        confirmTitle: 'Clear all session history?',
+        confirmBody:
+          'This permanently deletes every past session and all focus history on this device. Your identity and friends are kept. This cannot be undone.',
+        confirmCta: 'Clear everything',
+        cancelCta: 'Cancel',
+        clearedToast: 'Session history cleared.',
+        errorFallback: "Couldn't clear your history.",
+      },
     },
 
     about: {
@@ -792,6 +1078,19 @@ export const strings = {
         help: "StudyVis doesn't auto-update. Check here when a new version drops.",
         openCta: 'Open',
         errorFallback: "Couldn't open the Releases page.",
+      },
+      // X4 — opt-in version check, OFF by default. The toggle is the one
+      // sanctioned outbound request (PLAN §3 carve-out); off means zero calls.
+      versionCheck: {
+        label: 'Check for new versions',
+        help: 'Off by default. When on, StudyVis asks GitHub once on this screen whether a newer release exists. It sends no data about you.',
+        ariaLabel: 'Check for new versions',
+      },
+      // X4 — quiet "newer version available" row, shown only when the check
+      // succeeds and finds a newer tag.
+      updateAvailable: {
+        label: 'Update available',
+        help: (latest: string) => `Version ${latest} is available.`,
       },
     },
   },
@@ -818,9 +1117,15 @@ export const strings = {
         `Across ${scoredSessions} scored ${
           scoredSessions === 1 ? 'session' : 'sessions'
         }`,
+      // R6 — when only a small share of sessions are AI-scored, the average
+      // over-reads. Surface the denominator prominently ("from 2 of 40
+      // sessions") so the number is read honestly.
+      coverage: (scored: number, total: number) =>
+        `From ${scored} of ${total} ${total === 1 ? 'session' : 'sessions'}`,
+      limitedData: 'Limited data',
     },
-    focused: {
-      heading: 'Focused minutes · last 30 days',
+    studyMinutes: {
+      heading: 'Study minutes · last 30 days',
       minutes: (n: number) => `${n} ${n === 1 ? 'minute' : 'minutes'}`,
     },
     partners: {
@@ -828,6 +1133,44 @@ export const strings = {
       empty:
         'No study partners yet. Solo sessions still count toward your streak.',
       sessions: (n: number) => `${n} ${n === 1 ? 'session' : 'sessions'}`,
+    },
+    export: {
+      cta: 'Export CSV',
+      ariaLabel: 'Export stats as a CSV file',
+      filterName: 'CSV',
+      savedToast: 'Stats exported.',
+      errorToast: "Couldn't export your stats.",
+    },
+    insights: {
+      heading: 'Focus insights',
+      subheading:
+        'Computed on this device from your AI-scored sessions. Nothing is sent anywhere.',
+      empty:
+        'No focus insights yet. Study a few sessions with AI focus detection on and patterns will show up here.',
+      timing: {
+        heading: 'When distractions happen',
+        help: 'Across all your sessions, grouped by how far into a session each distraction landed.',
+        empty: 'No distractions to place on a timeline yet. Nice work.',
+        buckets: {
+          early: 'First 15 min',
+          mid: '15–45 min',
+          late: 'After 45 min',
+        },
+        count: (n: number) =>
+          `${n} ${n === 1 ? 'distraction' : 'distractions'}`,
+      },
+      reasons: {
+        heading: 'Recurring distractions',
+        help: 'The same reasons, tallied across every session — not just the last one.',
+        empty: 'No recurring distractions yet. Nice work.',
+        count: (n: number) => `${n}×`,
+      },
+      trend: {
+        heading: 'Focus over time',
+        help: 'Focused-time % for each AI-scored session, oldest to newest.',
+        empty: 'Finish a couple of AI-scored sessions to see your trend.',
+        point: (pct: number) => `${pct}% focused`,
+      },
     },
   },
 
@@ -851,6 +1194,11 @@ export const strings = {
       reBenchmarkCta: 'Re-benchmark',
       reDownloadCta: 'Re-download',
       downloadCta: 'Download',
+      // A4 — shown when a partial download is known on disk; the backend
+      // resumes from where it stopped via an HTTP Range request.
+      resumeCta: 'Resume download',
+      resumeNote: (received: string) =>
+        `Picks up from where it stopped (${received} downloaded).`,
       removeAriaLabel: (name: string) => `Remove ${name}`,
       speedSummary: (p95Sec: number) =>
         `Speed on your machine: ${p95Sec.toFixed(1)} seconds per check`,
@@ -1030,6 +1378,19 @@ export const strings = {
     invite: {
       title: 'StudyVis',
       // Body comes from friends.inbox.inviteBody — sender-dependent.
+    },
+    // N2 — pomodoro work↔rest transition copy, both directions. §14 voice:
+    // warm, brief, second person.
+    pomodoro: {
+      breakTitle: 'Time for a break',
+      breakBody: 'Step away and rest your eyes for a bit.',
+      workTitle: 'Back to work',
+      workBody: 'Break over — settle back into your focus block.',
+    },
+    // N3 — "friend came online" copy. Body carries the friend's display name.
+    friendOnline: {
+      title: 'StudyVis',
+      body: (name: string) => `${name} is now online`,
     },
   },
 

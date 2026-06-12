@@ -111,6 +111,79 @@ describe('isOnline', () => {
   })
 })
 
+describe('startPresence goodbye (F7)', () => {
+  test('a goodbye flips the friend offline immediately on receipt', async () => {
+    const me = generateIdentity()
+    const friend = generateIdentity()
+    const meHex = bytesToHex(me.edPub)
+    const friendHex = bytesToHex(friend.edPub)
+
+    const myMaps: PresenceMap[] = []
+    const myPresence = startPresence({
+      myEdPubkey: me.edPub,
+      friends: [{ ed_pubkey_hex: friendHex }],
+      onPresenceChange: (m) => myMaps.push(m),
+      intervalMs: 60_000,
+      sweepIntervalMs: 60_000,
+    })
+    // The friend runs their own presence daemon (sends heartbeats on THEIR
+    // topic, which `me` subscribes to).
+    const friendPresence = startPresence({
+      myEdPubkey: friend.edPub,
+      friends: [{ ed_pubkey_hex: meHex }],
+      onPresenceChange: () => {},
+      intervalMs: 60_000,
+      sweepIntervalMs: 60_000,
+    })
+
+    // Flush the immediate first heartbeat both sides send on start.
+    await vi.advanceTimersByTimeAsync(0)
+    const afterHeartbeat = myMaps.at(-1) ?? {}
+    expect(typeof afterHeartbeat[friendHex]).toBe('number')
+
+    // Friend says goodbye → my map should drop them this instant.
+    friendPresence.sendGoodbye()
+    await vi.advanceTimersByTimeAsync(0)
+    const afterGoodbye = myMaps.at(-1) ?? {}
+    expect(afterGoodbye[friendHex]).toBeUndefined()
+
+    await myPresence.leave()
+    await friendPresence.leave()
+  })
+
+  test('leave() broadcasts a goodbye before tearing the rooms down', async () => {
+    const me = generateIdentity()
+    const friend = generateIdentity()
+    const meHex = bytesToHex(me.edPub)
+    const friendHex = bytesToHex(friend.edPub)
+
+    const myMaps: PresenceMap[] = []
+    const myPresence = startPresence({
+      myEdPubkey: me.edPub,
+      friends: [{ ed_pubkey_hex: friendHex }],
+      onPresenceChange: (m) => myMaps.push(m),
+      intervalMs: 60_000,
+      sweepIntervalMs: 60_000,
+    })
+    const friendPresence = startPresence({
+      myEdPubkey: friend.edPub,
+      friends: [{ ed_pubkey_hex: meHex }],
+      onPresenceChange: () => {},
+      intervalMs: 60_000,
+      sweepIntervalMs: 60_000,
+    })
+
+    await vi.advanceTimersByTimeAsync(0)
+    expect(typeof (myMaps.at(-1) ?? {})[friendHex]).toBe('number')
+
+    await friendPresence.leave()
+    await vi.advanceTimersByTimeAsync(0)
+    expect((myMaps.at(-1) ?? {})[friendHex]).toBeUndefined()
+
+    await myPresence.leave()
+  })
+})
+
 describe('startPresence sweep', () => {
   test('re-emits the presence map on a sweep tick so the UI re-evaluates isOnline', async () => {
     const me = generateIdentity()

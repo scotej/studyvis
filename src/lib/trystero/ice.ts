@@ -1,6 +1,10 @@
 import type { TurnServerConfig } from 'trystero'
 
-import type { TurnPreference } from '@/stores/settingsStore'
+import {
+  useSettingsStore,
+  type CustomTurnServer,
+  type TurnPreference,
+} from '@/stores/settingsStore'
 
 // Public TURN servers for NAT traversal when a direct WebRTC connection can't
 // form (symmetric / carrier-grade NAT, AP isolation, strict firewalls). These
@@ -59,13 +63,33 @@ export function iceOptionsFor(
   return { turnConfig: servers }
 }
 
+// F3 — map a persisted user TURN server (Settings → Network → Advanced) into
+// trystero's TurnServerConfig shape. Returns [] when none is configured.
+export function userTurnServers(
+  server: CustomTurnServer | null
+): TurnServerConfig[] {
+  if (!server) return []
+  return [
+    {
+      urls: server.url,
+      username: server.username,
+      credential: server.credential,
+    },
+  ]
+}
+
 // Translates the user's TURN preference (Settings → Network) into trystero ICE
-// config against the configured TURN servers. Until now this preference was
-// decorative — read by the UI, consumed by nothing. This is where it finally
-// takes effect (the instant PUBLIC_TURN_SERVERS is non-empty):
-// - 'auto'   : STUN first, public TURN as fallback when NAT/firewall blocks it.
+// config against the configured TURN servers. The preference takes effect the
+// instant a TURN server exists — which, since F3, the user can supply in
+// Settings → Network → Advanced even though PUBLIC_TURN_SERVERS still ships
+// empty:
+// - 'auto'   : STUN first, TURN as fallback when NAT/firewall blocks it.
 // - 'always' : force relay-only (iceTransportPolicy 'relay') through TURN.
 // - 'never'  : STUN only — no TURN, no relay fallback.
+// The user's TURN server takes precedence over (and is concatenated ahead of)
+// the shipped list, so a friend self-hosting coturn unblocks their group.
 export function buildIceOptions(pref: TurnPreference): IceOptions {
-  return iceOptionsFor(pref, PUBLIC_TURN_SERVERS)
+  const userServer = useSettingsStore.getState().values.turnServer
+  const servers = [...userTurnServers(userServer), ...PUBLIC_TURN_SERVERS]
+  return iceOptionsFor(pref, servers)
 }
