@@ -24,8 +24,8 @@ use commands::models::{
     model_remove, DownloadState,
 };
 use commands::sessions::{
-    audit_event_insert, audit_events_list_for_session, sessions_clear_all, sessions_delete,
-    sessions_get, sessions_insert, sessions_list,
+    audit_event_insert, audit_events_list_all, audit_events_list_for_session, sessions_clear_all,
+    sessions_delete, sessions_get, sessions_insert, sessions_list,
 };
 #[cfg(desktop)]
 use commands::sidecar::{
@@ -38,8 +38,8 @@ use commands::system::{
     system_ai_features_set_enabled, system_battery, system_fetch_latest_version,
     system_minimize_to_tray_set_enabled, system_open_camera_settings, system_open_data_folder,
     system_open_microphone_settings, system_open_releases, system_open_screen_capture_settings,
-    system_relaunch_app, system_set_global_shortcut, AiFeaturesFlag, MinimizeToTrayFlag, QuitFlag,
-    SessionActiveFlag, ShortcutBindings,
+    system_relaunch_app, system_set_global_shortcut, system_write_text_file, AiFeaturesFlag,
+    MinimizeToTrayFlag, QuitFlag, SessionActiveFlag, ShortcutBindings,
 };
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -84,6 +84,7 @@ pub fn run() {
         sessions_clear_all,
         audit_event_insert,
         audit_events_list_for_session,
+        audit_events_list_all,
         #[cfg(any(target_os = "macos", target_os = "windows"))]
         identity_save_keys,
         #[cfg(any(target_os = "macos", target_os = "windows"))]
@@ -108,6 +109,8 @@ pub fn run() {
         system_ai_features_set_enabled,
         #[cfg(desktop)]
         system_open_data_folder,
+        #[cfg(desktop)]
+        system_write_text_file,
         #[cfg(desktop)]
         system_open_releases,
         #[cfg(desktop)]

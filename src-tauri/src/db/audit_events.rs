@@ -1,6 +1,10 @@
 use rusqlite::{params, Connection, Result};
 use serde::{Deserialize, Serialize};
 
+// No `#[serde(rename_all)]`: serde serializes these fields verbatim, so the
+// `*_list_*` commands return snake_case keys. The TS contract (AuditEventRecord
+// in src/lib/db/audit.ts) mirrors them in snake_case — keep them aligned if you
+// edit this struct (same convention as SessionRow ↔ SessionRecord).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuditEventRow {
     pub session_id: String,
@@ -42,6 +46,30 @@ pub fn list_for_session(conn: &Connection, session_id: &str) -> Result<Vec<Audit
          ORDER BY ts ASC, id ASC",
     )?;
     let rows = stmt.query_map([session_id], |row| {
+        Ok(AuditEventRow {
+            session_id: row.get(0)?,
+            ts: row.get(1)?,
+            who: row.get(2)?,
+            kind: row.get(3)?,
+            detail: row.get(4)?,
+            sig: row.get(5)?,
+        })
+    })?;
+    rows.collect()
+}
+
+// R7 — every audit event across all sessions, for the cross-session focus
+// insights view. Ordered by session then ts so the JS side can bucket each
+// event against its own session without a second sort. The per-session
+// `list_for_session` stays the report's source; this is the multi-session
+// counterpart. Read-only and local, like the rest of this module.
+pub fn list_all(conn: &Connection) -> Result<Vec<AuditEventRow>> {
+    let mut stmt = conn.prepare(
+        "SELECT session_id, ts, who, kind, detail, sig
+         FROM audit_events
+         ORDER BY session_id ASC, ts ASC, id ASC",
+    )?;
+    let rows = stmt.query_map([], |row| {
         Ok(AuditEventRow {
             session_id: row.get(0)?,
             ts: row.get(1)?,
@@ -134,5 +162,51 @@ mod tests {
         assert_eq!(read.len(), 2);
         assert_eq!(read[0].sig, "earlier");
         assert_eq!(read[1].sig, "later");
+    }
+
+    #[test]
+    fn list_all_returns_every_session_ordered_by_session_then_ts() {
+        let conn = fresh();
+        insert(
+            &conn,
+            &AuditEventRow {
+                session_id: "topic-b".into(),
+                ts: 100,
+                sig: "b1".into(),
+                ..sample("b1")
+            },
+        )
+        .expect("insert b1");
+        insert(
+            &conn,
+            &AuditEventRow {
+                session_id: "topic-a".into(),
+                ts: 300,
+                sig: "a2".into(),
+                ..sample("a2")
+            },
+        )
+        .expect("insert a2");
+        insert(
+            &conn,
+            &AuditEventRow {
+                session_id: "topic-a".into(),
+                ts: 200,
+                sig: "a1".into(),
+                ..sample("a1")
+            },
+        )
+        .expect("insert a1");
+        let read = list_all(&conn).expect("list all");
+        assert_eq!(
+            read.iter().map(|r| r.sig.as_str()).collect::<Vec<_>>(),
+            vec!["a1", "a2", "b1"]
+        );
+    }
+
+    #[test]
+    fn list_all_is_empty_with_no_rows() {
+        let conn = fresh();
+        assert!(list_all(&conn).expect("list all").is_empty());
     }
 }

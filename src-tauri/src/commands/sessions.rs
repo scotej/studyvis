@@ -96,3 +96,14 @@ pub fn audit_events_list_for_session(
     let conn = lock(&state)?;
     audit_events::list_for_session(&conn, &session_id).map_err(|e| e.to_string())
 }
+
+// R7 — cross-session audit events for the local focus-insights view. The
+// frontend shapes them in the pure statsInsights seam; this command only
+// reads.
+#[tauri::command]
+pub fn audit_events_list_all(
+    state: State<'_, DbPool>,
+) -> Result<Vec<audit_events::AuditEventRow>, String> {
+    let conn = lock(&state)?;
+    audit_events::list_all(&conn).map_err(|e| e.to_string())
+}

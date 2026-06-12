@@ -551,6 +551,17 @@ export const strings = {
     },
     copyCta: 'Copy report',
     copyAriaLabel: 'Copy session report to clipboard',
+    export: {
+      saveCta: 'Save as…',
+      saveAriaLabel: 'Save session report to a file',
+      auditCta: 'Audit log (JSON)',
+      auditAriaLabel: 'Save raw audit log for this session as JSON',
+      reportFilterName: 'Markdown',
+      auditFilterName: 'JSON',
+      savedToast: 'Report saved.',
+      auditSavedToast: 'Audit log saved.',
+      errorToast: "Couldn't save the file.",
+    },
   },
 
   audit: {
@@ -647,6 +658,20 @@ export const strings = {
         manyFriends: (n: number) => `${n} friends`,
         minutes: (n: number) => `${n} min`,
         score: (n: number) => `${n} / 100`,
+      },
+      // R4 — per-session delete behind an AlertDialog confirm, mirroring the
+      // Friends remove pattern. Deleting removes the session row and its
+      // audit events; stats/report read SQLite, so the change flows through.
+      delete: {
+        cta: 'Delete',
+        ariaLabel: (when: string) => `Delete session from ${when}`,
+        confirmTitle: 'Delete this session?',
+        confirmBody:
+          'This removes the session and its focus history from this device. It cannot be undone.',
+        confirmCta: 'Delete',
+        cancelCta: 'Cancel',
+        deletedToast: 'Session deleted.',
+        errorFallback: "Couldn't delete the session.",
       },
     },
 
@@ -913,6 +938,21 @@ export const strings = {
         replayCta: 'Replay',
         scheduledToast: 'Onboarding will play on the next launch.',
       },
+      // R4 — destructive "Clear all history" with a stronger confirm than the
+      // per-session delete. Wipes every session row and all audit events;
+      // identity and friends are untouched (different tables / the keychain).
+      clearHistory: {
+        label: 'Clear all session history',
+        help: 'Permanently deletes every past session and its focus history from this device. Your identity and friends are kept.',
+        clearCta: 'Clear history',
+        confirmTitle: 'Clear all session history?',
+        confirmBody:
+          'This permanently deletes every past session and all focus history on this device. Your identity and friends are kept. This cannot be undone.',
+        confirmCta: 'Clear everything',
+        cancelCta: 'Cancel',
+        clearedToast: 'Session history cleared.',
+        errorFallback: "Couldn't clear your history.",
+      },
     },
 
     about: {
@@ -959,9 +999,15 @@ export const strings = {
         `Across ${scoredSessions} scored ${
           scoredSessions === 1 ? 'session' : 'sessions'
         }`,
+      // R6 — when only a small share of sessions are AI-scored, the average
+      // over-reads. Surface the denominator prominently ("from 2 of 40
+      // sessions") so the number is read honestly.
+      coverage: (scored: number, total: number) =>
+        `From ${scored} of ${total} ${total === 1 ? 'session' : 'sessions'}`,
+      limitedData: 'Limited data',
     },
-    focused: {
-      heading: 'Focused minutes · last 30 days',
+    studyMinutes: {
+      heading: 'Study minutes · last 30 days',
       minutes: (n: number) => `${n} ${n === 1 ? 'minute' : 'minutes'}`,
     },
     partners: {
@@ -969,6 +1015,44 @@ export const strings = {
       empty:
         'No study partners yet. Solo sessions still count toward your streak.',
       sessions: (n: number) => `${n} ${n === 1 ? 'session' : 'sessions'}`,
+    },
+    export: {
+      cta: 'Export CSV',
+      ariaLabel: 'Export stats as a CSV file',
+      filterName: 'CSV',
+      savedToast: 'Stats exported.',
+      errorToast: "Couldn't export your stats.",
+    },
+    insights: {
+      heading: 'Focus insights',
+      subheading:
+        'Computed on this device from your AI-scored sessions. Nothing is sent anywhere.',
+      empty:
+        'No focus insights yet. Study a few sessions with AI focus detection on and patterns will show up here.',
+      timing: {
+        heading: 'When distractions happen',
+        help: 'Across all your sessions, grouped by how far into a session each distraction landed.',
+        empty: 'No distractions to place on a timeline yet. Nice work.',
+        buckets: {
+          early: 'First 15 min',
+          mid: '15–45 min',
+          late: 'After 45 min',
+        },
+        count: (n: number) =>
+          `${n} ${n === 1 ? 'distraction' : 'distractions'}`,
+      },
+      reasons: {
+        heading: 'Recurring distractions',
+        help: 'The same reasons, tallied across every session — not just the last one.',
+        empty: 'No recurring distractions yet. Nice work.',
+        count: (n: number) => `${n}×`,
+      },
+      trend: {
+        heading: 'Focus over time',
+        help: 'Focused-time % for each AI-scored session, oldest to newest.',
+        empty: 'Finish a couple of AI-scored sessions to see your trend.',
+        point: (pct: number) => `${pct}% focused`,
+      },
     },
   },
 

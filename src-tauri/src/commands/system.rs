@@ -254,6 +254,20 @@ pub fn system_ai_features_set_enabled<R: Runtime>(
     Ok(())
 }
 
+// R3 — write a user-chosen file for the report/stats export. The
+// destination path comes from the dialog plugin's `save()` picker (the user
+// explicitly selected it), so this only performs the write the dialog plugin
+// itself cannot do. We add this small command instead of pulling in
+// `@tauri-apps/plugin-fs`: the only file write the app needs is "the path the
+// user just picked," and a single targeted command keeps the JS-callable
+// surface narrower than a general filesystem plugin (least-new-surface, same
+// rationale as the single-destination `system_open_releases`). The contents
+// are UTF-8 text (markdown / CSV / JSON), so a plain write_string suffices.
+#[tauri::command]
+pub fn system_write_text_file(path: String, contents: String) -> Result<(), String> {
+    std::fs::write(&path, contents.as_bytes()).map_err(|e| format!("Couldn't write {path}: {e}"))
+}
+
 #[tauri::command]
 pub fn system_open_data_folder<R: Runtime>(app: AppHandle<R>) -> Result<String, String> {
     let dir = data_dir(&app)?;

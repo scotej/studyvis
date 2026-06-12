@@ -28,7 +28,7 @@ function event(
   detail: Record<string, unknown> = {}
 ): AuditEventRecord {
   return {
-    sessionId: 'mock-session',
+    session_id: 'mock-session',
     ts: STARTED_AT + offsetMs,
     who,
     kind,

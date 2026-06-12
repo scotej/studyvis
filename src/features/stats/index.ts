@@ -1,22 +1,41 @@
 export {
   Dashboard,
   DashboardView,
+  type DashboardData,
   type DashboardLoader,
   type DashboardProps,
   type DashboardViewProps,
 } from './Dashboard'
+export { FocusInsights, type FocusInsightsViewProps } from './FocusInsights'
+export {
+  computeInsights,
+  computeRecurringReasons,
+  computeTiming,
+  computeTrend,
+  bucketForOffsetMin,
+  EARLY_MAX_MIN,
+  MID_MAX_MIN,
+  INSIGHTS_REASON_LIMIT,
+  type FocusInsights as FocusInsightsData,
+  type RecurringReason,
+  type TimingBucket,
+  type TimingDistribution,
+  type TrendPoint,
+} from './statsInsights'
 export {
   averageScore,
+  buildStatsCsvModel,
   computeStats,
   computeStreak,
-  focusedMinutesForSession,
-  focusedMinutesPerDay,
+  studyMinutesForSession,
+  studyMinutesPerDay,
   topStudyPartners,
   FOCUS_WINDOW_DAYS,
   STREAK_MIN_MINUTES,
   TOP_PARTNERS_LIMIT,
   type DailyFocus,
   type ScoreSummary,
+  type StatsCsv,
   type StatsSummary,
   type StudyPartner,
 } from './statsData'

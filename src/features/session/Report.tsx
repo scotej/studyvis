@@ -17,20 +17,32 @@
 // byte-identical.
 
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { CheckCircle2Icon, ChevronLeftIcon, CopyIcon } from 'lucide-react'
+import {
+  BracesIcon,
+  CheckCircle2Icon,
+  ChevronLeftIcon,
+  CopyIcon,
+  DownloadIcon,
+} from 'lucide-react'
 import { toast } from 'sonner'
 
 import { ScoreGauge } from '@/components/ScoreGauge'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { tokens } from '@/design/tokens'
-import { type AuditEventKind, isAuditEventKind } from '@/lib/audit-types'
+import { isAuditEventKind } from '@/lib/audit-types'
 import {
   auditEventsListForSession,
   type AuditEventRecord,
 } from '@/lib/db/audit'
+import {
+  fileDateStamp,
+  saveTextFile,
+  slugify,
+  type SaveTextFileResult,
+} from '@/lib/fileExport'
 import { listFriends, type Friend } from '@/lib/db/friends'
-import { sessionsGet, type SessionRecord } from '@/lib/db/sessions'
+import { sessionsGet } from '@/lib/db/sessions'
 import { useIdentity } from '@/features/identity'
 import { strings } from '@/strings'
 import {
@@ -49,6 +61,15 @@ import {
   groupTimelineByWho,
   parseAuditDetail,
 } from './reportData'
+import {
+  describeRow,
+  formatTopicHeading,
+  labelFor,
+  serializeReportToText,
+  type ResolvedReportData,
+} from './reportSerialize'
+
+export type { ResolvedReportData } from './reportSerialize'
 
 export type ReportProps = {
   sessionId: string
@@ -66,17 +87,6 @@ export type ReportProps = {
 export type ReportDataLoader = (
   sessionId: string
 ) => Promise<ResolvedReportData>
-
-export type ResolvedReportData = {
-  session: SessionRecord
-  auditEvents: AuditEventRecord[]
-  // ed_pubkey_hex → display name. Local user's own pubkey is also keyed
-  // here so the timeline can render "You" for self-emitted rows.
-  nameByEdPubkey: Record<string, string>
-  // ed_pubkey_hex of the local user. The Report uses it to label self-
-  // rows as "You" and to surface "your" score / focused-time copy.
-  myEdPubkeyHex: string | null
-}
 
 type Status =
   | { kind: 'loading' }
@@ -266,6 +276,63 @@ export function ReportView({
     }
   }
 
+  const [exporting, setExporting] = useState(false)
+  const exportCopy = strings.report.export
+
+  // The default filename stem ties the file to its session: the topic (or a
+  // generic fallback) plus the start date, so a folder of exports stays
+  // self-describing.
+  const fileStem = `studyvis-${slugify(session.declared_topic ?? 'session')}-${
+    session.started_at != null ? fileDateStamp(session.started_at) : 'session'
+  }`
+
+  const runExport = async (
+    build: () => string,
+    options: {
+      defaultPath: string
+      filterName: string
+      extension: string
+    },
+    savedToast: string
+  ) => {
+    setExporting(true)
+    try {
+      const result: SaveTextFileResult = await saveTextFile(build(), {
+        defaultPath: options.defaultPath,
+        filters: [
+          { name: options.filterName, extensions: [options.extension] },
+        ],
+      })
+      if (result.kind === 'saved') toast.success(savedToast)
+    } catch {
+      toast.error(exportCopy.errorToast)
+    } finally {
+      setExporting(false)
+    }
+  }
+
+  const handleSaveReport = () =>
+    runExport(
+      () => serializeReportToText(data),
+      {
+        defaultPath: `${fileStem}.md`,
+        filterName: exportCopy.reportFilterName,
+        extension: 'md',
+      },
+      exportCopy.savedToast
+    )
+
+  const handleSaveAuditLog = () =>
+    runExport(
+      () => JSON.stringify(auditEvents, null, 2),
+      {
+        defaultPath: `${fileStem}-audit.json`,
+        filterName: exportCopy.auditFilterName,
+        extension: 'json',
+      },
+      exportCopy.auditSavedToast
+    )
+
   const startedAt = session.started_at
   const endedAt = session.ended_at
   const totalMinutes = session.total_minutes ?? 0
@@ -303,7 +370,7 @@ export function ReportView({
               {formatHeaderRange(startedAt, endedAt)}
             </span>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center justify-end gap-2">
             <Button
               variant="secondary"
               size="sm"
@@ -312,6 +379,24 @@ export function ReportView({
             >
               {copied ? <CheckCircle2Icon /> : <CopyIcon />}{' '}
               {copied ? strings.common.actions.copied : strings.report.copyCta}
+            </Button>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => void handleSaveReport()}
+              disabled={exporting}
+              aria-label={exportCopy.saveAriaLabel}
+            >
+              <DownloadIcon /> {exportCopy.saveCta}
+            </Button>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => void handleSaveAuditLog()}
+              disabled={exporting}
+              aria-label={exportCopy.auditAriaLabel}
+            >
+              <BracesIcon /> {exportCopy.auditCta}
             </Button>
             <Button variant="secondary" size="sm" onClick={onClose}>
               <ChevronLeftIcon /> {strings.common.actions.close}
@@ -558,47 +643,6 @@ function toneClassName(tone: AuditIconTone): string {
   }
 }
 
-function labelFor(
-  edPubkeyHex: string,
-  nameByEdPubkey: Record<string, string>,
-  myEdPubkeyHex: string | null
-): string {
-  if (myEdPubkeyHex && edPubkeyHex === myEdPubkeyHex)
-    return strings.session.selfFallback
-  const friend = nameByEdPubkey[edPubkeyHex]
-  if (friend) return friend
-  return strings.session.peerFallback(edPubkeyHex)
-}
-
-function describeRow(
-  row: AuditEventRecord,
-  detail: Record<string, unknown>
-): string {
-  const kind = isAuditEventKind(row.kind)
-    ? row.kind
-    : (row.kind as AuditEventKind)
-  const label = strings.audit.kindLabels[kind as AuditEventKind] ?? row.kind
-  if (kind === 'topic_change') {
-    const previous =
-      typeof detail.previous_topic === 'string' ? detail.previous_topic : '?'
-    const next = typeof detail.new_topic === 'string' ? detail.new_topic : '?'
-    return `topic: ${previous} → ${next}`
-  }
-  if (kind === 'topic_set' && typeof detail.topic === 'string') {
-    return `topic: ${detail.topic}`
-  }
-  if (kind === 'break_approved' || kind === 'break_denied') {
-    const reason = typeof detail.reason === 'string' ? `: ${detail.reason}` : ''
-    return `${label}${reason}`
-  }
-  return label
-}
-
-function formatTopicHeading(topic: string | null): string {
-  if (!topic || !topic.trim()) return strings.report.studiedFallback
-  return strings.report.studiedWithTopic(topic)
-}
-
 function formatHeaderRange(
   startedAt: number | null,
   endedAt: number | null
@@ -621,81 +665,4 @@ function formatHeaderRange(
     minute: '2-digit',
   })
   return `${datePart} · ${timePart} – ${endTime}`
-}
-
-// Serializes the report to plain text (light markdown) for the "Copy report"
-// button — mirrors the on-screen sections so a pasted summary matches what the
-// user saw. Local-only; the user pastes it wherever they choose.
-function serializeReportToText(data: ResolvedReportData): string {
-  const { session, auditEvents, nameByEdPubkey, myEdPubkeyHex } = data
-  const topicTimeline = deriveTopicTimeline(session.declared_topic, auditEvents)
-  const grouped = groupTimelineByWho(auditEvents)
-  const distractions = deriveTopDistractions(auditEvents)
-  const breaks = deriveBreaksSummary(auditEvents)
-  const totalMinutes = session.total_minutes ?? 0
-  const focusedPctLabel =
-    session.focused_pct == null
-      ? '—'
-      : `${Math.round(session.focused_pct * 100)}%`
-  const anchor =
-    session.started_at ??
-    (auditEvents.length > 0 ? Math.min(...auditEvents.map((e) => e.ts)) : 0)
-
-  const lines: string[] = [
-    formatTopicHeading(session.declared_topic),
-    `${strings.report.summaryPrefix}${strings.report.summaryMinutes(totalMinutes)}${strings.report.summaryMiddle}${focusedPctLabel}`,
-    // R1 — never emit a fabricated 100 for an unscored (AI-off) session.
-    session.score == null
-      ? strings.report.noScore.copyLine
-      : strings.report.scoreLine(session.score),
-    '',
-    `## ${strings.report.sections.topic.heading}`,
-  ]
-  if (topicTimeline.length === 0) {
-    lines.push(strings.report.sections.topic.empty)
-  } else {
-    for (const t of topicTimeline) lines.push(`- ${t.topic} (${t.label})`)
-  }
-
-  lines.push('', `## ${strings.report.sections.timeline.heading}`)
-  if (grouped.length === 0) {
-    lines.push(strings.report.sections.timeline.empty)
-  } else {
-    for (const g of grouped) {
-      lines.push(`### ${labelFor(g.who, nameByEdPubkey, myEdPubkeyHex)}`)
-      for (const row of g.events) {
-        const detail = parseAuditDetail(row.detail)
-        const reasoning =
-          typeof detail.reasoning === 'string' && detail.reasoning
-            ? ` — ${detail.reasoning}`
-            : ''
-        lines.push(
-          `- ${formatOffset(row.ts, anchor)} ${describeRow(row, detail)}${reasoning}`
-        )
-      }
-    }
-  }
-
-  lines.push('', `## ${strings.report.sections.breaks.heading}`)
-  if (breaks.length === 0) {
-    lines.push(strings.report.sections.breaks.empty)
-  } else {
-    for (const b of breaks) {
-      lines.push(
-        `- ${labelFor(b.who, nameByEdPubkey, myEdPubkeyHex)}: ${strings.report.sections.breaks.count(b.count)} · ${formatBreakDuration(b.totalSec)}`
-      )
-    }
-  }
-
-  lines.push('', `## ${strings.report.sections.distractions.heading}`)
-  if (distractions.length === 0) {
-    lines.push(strings.report.sections.distractions.empty)
-  } else {
-    for (const d of distractions) {
-      const ded = d.totalDeduction > 0 ? ` · −${d.totalDeduction}` : ''
-      lines.push(`- ${d.reasoning} — ${d.count}×${ded}`)
-    }
-  }
-
-  return lines.join('\n')
 }

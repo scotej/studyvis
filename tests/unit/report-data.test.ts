@@ -24,7 +24,7 @@ function evt(
   detail: Record<string, unknown> = {}
 ): AuditEventRecord {
   return {
-    sessionId: 'topic-hex',
+    session_id: 'topic-hex',
     ts: START_TS + offsetMs,
     who,
     kind,

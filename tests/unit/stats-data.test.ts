@@ -19,8 +19,8 @@ import {
   computeStats,
   computeStreak,
   dayKey,
-  focusedMinutesForSession,
-  focusedMinutesPerDay,
+  studyMinutesForSession,
+  studyMinutesPerDay,
   topStudyPartners,
 } from '@/features/stats/statsData'
 
@@ -70,16 +70,16 @@ describe('dayKey / addDays', () => {
   })
 })
 
-describe('focusedMinutesForSession', () => {
+describe('studyMinutesForSession', () => {
   test('uses total_minutes; null becomes 0', () => {
-    expect(focusedMinutesForSession(session({ total_minutes: 42 }))).toBe(42)
-    expect(focusedMinutesForSession(session({ total_minutes: null }))).toBe(0)
+    expect(studyMinutesForSession(session({ total_minutes: 42 }))).toBe(42)
+    expect(studyMinutesForSession(session({ total_minutes: null }))).toBe(0)
   })
 })
 
-describe('focusedMinutesPerDay', () => {
+describe('studyMinutesPerDay', () => {
   test('0 sessions → 30 zero-filled days, chronological, ending today', () => {
-    const daily = focusedMinutesPerDay([], NOW, TZ)
+    const daily = studyMinutesPerDay([], NOW, TZ)
     expect(daily).toHaveLength(30)
     expect(daily[0].day).toBe(KEY(29)) // 2026-04-19, oldest in window
     expect(daily[29].day).toBe(KEY(0)) // 2026-05-18, today
@@ -88,7 +88,7 @@ describe('focusedMinutesPerDay', () => {
   })
 
   test('1 session today → only the last bar is non-zero', () => {
-    const daily = focusedMinutesPerDay(
+    const daily = studyMinutesPerDay(
       [session({ total_minutes: 25, started_at: NOW })],
       NOW,
       TZ
@@ -106,7 +106,7 @@ describe('focusedMinutesPerDay', () => {
       session({ total_minutes: 99, started_at: dayAgo(30) }), // just outside
       session({ total_minutes: 10, started_at: null }), // unplaceable
     ]
-    const daily = focusedMinutesPerDay(sessions, NOW, TZ)
+    const daily = studyMinutesPerDay(sessions, NOW, TZ)
     const byDay = Object.fromEntries(daily.map((d) => [d.day, d.minutes]))
     expect(byDay[KEY(2)]).toBe(55)
     expect(byDay[KEY(29)]).toBe(50)
@@ -121,7 +121,7 @@ describe('focusedMinutesPerDay', () => {
     const sessions = Array.from({ length: 35 }, (_, n) =>
       session({ total_minutes: n + 1, started_at: dayAgo(n) })
     )
-    const daily = focusedMinutesPerDay(sessions, NOW, TZ)
+    const daily = studyMinutesPerDay(sessions, NOW, TZ)
     expect(daily).toHaveLength(30)
     for (let n = 0; n <= 29; n++) {
       const bar = daily.find((d) => d.day === KEY(n))
