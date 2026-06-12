@@ -6,6 +6,7 @@ import { sessionsInsert } from '@/lib/db/sessions'
 import { bytesToBase64 } from '@/lib/encoding'
 import { joinTopic, type TopicRoom } from '@/lib/trystero'
 import { buildIceOptions } from '@/lib/trystero/ice'
+import { userRelayConfig } from '@/lib/trystero/relays'
 import { useAuditStore } from '@/stores/auditStore'
 import { useFriendsStore } from '@/stores/friendsStore'
 import { useSessionStore } from '@/stores/sessionStore'
@@ -91,14 +92,35 @@ export function createHostRoom(): RoomInit {
   // not just the pairing handshake (mirrors runPair). Takes effect the instant
   // a TURN server is configured in ./ice; STUN-only otherwise.
   const ice = buildIceOptions(useSettingsStore.getState().values.turnPreference)
-  const room = joinTopic({ topic, password, ...ice })
+  const room = joinTopic({
+    topic,
+    password,
+    relayConfig: userRelayConfig(),
+    ...ice,
+    onJoinError: logJoinError,
+  })
   return { room, topic, password }
 }
 
 export function createGuestRoom(topic: string, password: string): RoomInit {
   const ice = buildIceOptions(useSettingsStore.getState().values.turnPreference)
-  const room = joinTopic({ topic, password, ...ice })
+  const room = joinTopic({
+    topic,
+    password,
+    relayConfig: userRelayConfig(),
+    ...ice,
+    onJoinError: logJoinError,
+  })
   return { room, topic, password }
+}
+
+// F1 — the session grid already surfaces per-peer connection state (F4), so a
+// join error here just gets logged for diagnostics rather than driving a new UI
+// surface. A guest whose offer never decrypts (impossible for a legitimate
+// invite, since both sides share the session password) or a peer handshake
+// timeout reads through here.
+function logJoinError(details: { error: string }): void {
+  console.warn('session room join error:', details.error)
 }
 
 // Single teardown path: leaves trystero, generates the V2-P8 post-session

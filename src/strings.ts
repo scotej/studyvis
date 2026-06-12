@@ -245,6 +245,9 @@ export const strings = {
         codeAriaLabel: 'One-time pairing code',
         qrAlt: 'QR code containing your one-time pairing link',
         qrCaption: 'Have your friend scan this — or send them the link below.',
+        // F9 — the ~10-minute one-time-use lifetime is otherwise invisible.
+        freshnessNote:
+          'One-time use. If a while has passed, close and reopen this to generate a fresh code.',
         copyAriaLabel: 'Copy pairing link to clipboard',
         copyCta: 'Copy link',
         copiedCta: 'Copied',
@@ -252,6 +255,14 @@ export const strings = {
         waiting: 'Waiting for your friend to enter the code.',
         stillWaiting:
           'Still waiting. Make sure your friend opened the Enter-code tab and typed this exact code.',
+        // F1 — distinct from stillWaiting: this blames the network, not the
+        // friend. Shown when trystero reports a join error (e.g. the relays
+        // are unreachable, or the other side is on a different code).
+        networkTrouble:
+          'Trouble reaching the network. Check your connection — some school or office networks block it. You can see relay status in Settings → Network.',
+        // F5 — peer arrived but no direct link formed (strict NAT, no TURN).
+        linkStalled:
+          "Connected to the network, but couldn't open a direct link to your friend. A strict firewall or NAT may be in the way — add a relay or TURN server in Settings → Network and try again.",
         introBody: (wordCount: number) =>
           `We'll generate ${wordCount} words. Send them to your friend over any messenger; they enter them on the other tab.`,
         generateCta: 'Generate code',
@@ -279,6 +290,13 @@ export const strings = {
           "Couldn't open the camera. Check its permission, or paste the code instead.",
         stillSearching:
           'Still searching. Make sure the other device generated this exact code and is online.',
+        // F1 — network-trouble variant of stillSearching (blames the network,
+        // not the other device).
+        networkTrouble:
+          'Trouble reaching the network. Check your connection — some school or office networks block it. You can see relay status in Settings → Network.',
+        // F5 — peer found but no direct link formed (strict NAT, no TURN).
+        linkStalled:
+          "Found your friend, but couldn't open a direct link. A strict firewall or NAT may be in the way — add a relay or TURN server in Settings → Network and try again.",
         clearCta: 'Clear',
         pasteCta: 'Paste',
         connectCta: 'Connect',
@@ -301,7 +319,16 @@ export const strings = {
     inviteSent: (name: string) => `Invite sent to ${name}.`,
     inviteSendErrorFallback: "Couldn't send the invite.",
     joinErrorFallback: "Couldn't join the session.",
-    inviteTimeout: "Your friend didn't pick up. They may be offline.",
+    // F6 — friend was offline; we couldn't deliver now, but the invite is held
+    // and re-sent automatically the moment they come online (within a few
+    // minutes). Distinct from inviteRelayError below, which blames the network.
+    inviteTimeout:
+      "Your friend looks offline. We'll deliver this the moment they come online — keep your session open.",
+    // F1/F6 — the relays themselves were unreachable, so this is the user's own
+    // network, not an offline friend. No retry is queued (the relay would be
+    // just as unreachable), so the copy points at the network, not the friend.
+    inviteRelayError:
+      "Couldn't reach the network to send the invite. Check your connection — see relay status in Settings → Network.",
     inviteWhileGuest: 'Only the host can invite others to this session.',
   },
 
@@ -777,17 +804,64 @@ export const strings = {
     network: {
       heading: 'Network',
       about: {
-        label: 'About TURN',
-        help: "StudyVis connects you to friends directly when it can. Some networks (corporate firewalls, strict NATs) block that, so a relay server passes the traffic along instead. It's still encrypted end-to-end; the relay only ever sees encrypted bytes.",
+        label: 'About connections',
+        // F8 — STUN-only by default. No TURN relay ships, so the old "a relay
+        // passes the traffic along" promise was untrue on a fresh install. Be
+        // honest: direct only, unless YOU add a TURN server (F3, below).
+        help: 'StudyVis connects you to friends directly. That works on most home networks, but some (corporate firewalls, strict NATs, locked-down school Wi-Fi) block direct connections, and those sessions can fail to connect. To get through them, add your own TURN relay below — traffic stays end-to-end encrypted; a relay only ever sees encrypted bytes.',
       },
       preference: {
         label: 'TURN preference',
-        help: 'Auto is recommended. Always-on burns more bandwidth on the public relay but can stabilize choppy connections. Never disables relay fallback entirely; sessions may fail to connect on strict networks.',
+        // F8 — the help no longer claims a relay that doesn't exist. The
+        // preference only does anything once a TURN server is configured (F3);
+        // with none, every option is STUN-only.
+        help: 'Only takes effect once you add a TURN server below. Auto uses your TURN relay as a fallback when a direct connection fails. Always routes every connection through it (more reliable on strict networks, more bandwidth). Never ignores it. With no TURN server configured, all three are direct-only.',
         ariaLabel: 'TURN preference',
         options: {
-          auto: 'Auto (fall back when direct fails)',
-          always: 'Always on',
-          never: 'Never',
+          auto: 'Auto (use TURN when direct fails)',
+          always: 'Always route through TURN',
+          never: 'Never use TURN',
+        },
+      },
+      // F2 — connection-diagnostics panel (per-relay live status).
+      diagnostics: {
+        label: 'Connection',
+        help: 'Live status of the signaling relays StudyVis uses to find your friends. This is a local read — nothing is sent anywhere.',
+        empty: 'No relay connections yet. They open a moment after launch.',
+        status: {
+          connected: 'Connected',
+          connecting: 'Connecting…',
+          down: 'Not connected',
+        },
+        // Screen-reader summary of the per-relay dot (color is never the only
+        // signal — the text label above carries the same meaning visually).
+        dotAriaLabel: (url: string, status: string) => `${url}: ${status}`,
+      },
+      // F3 — Advanced disclosure for user-supplied relay URLs + one TURN server.
+      advanced: {
+        toggleLabel: 'Advanced connection settings',
+        toggleHelp:
+          'Add your own Nostr relays and a TURN server. Most people never need these — leave them empty to use the built-in defaults.',
+        relays: {
+          label: 'Custom signaling relays',
+          help: 'One wss:// URL per line. These fully replace the built-in relays StudyVis uses to find your friends, so everyone you study with must use the same relay list — otherwise you won’t find each other. Leave empty to use the defaults. Restart StudyVis to apply a change.',
+          placeholder: 'wss://relay.example.com',
+          ariaLabel: 'Custom signaling relay URLs, one per line',
+          invalid:
+            'Each line must be a wss:// URL. Lines that aren’t were ignored.',
+        },
+        turn: {
+          label: 'TURN server',
+          help: 'A TURN relay gets you through strict firewalls and NATs. Self-host coturn, or use a provider. All three fields are required to enable it.',
+          urlLabel: 'TURN URL',
+          urlPlaceholder: 'turn:turn.example.com:3478',
+          urlAriaLabel: 'TURN server URL',
+          usernameLabel: 'Username',
+          usernameAriaLabel: 'TURN username',
+          credentialLabel: 'Password',
+          credentialAriaLabel: 'TURN password',
+          invalidUrl: 'TURN URL must start with turn: or turns:',
+          active: 'TURN server active — the preference above now applies.',
         },
       },
     },

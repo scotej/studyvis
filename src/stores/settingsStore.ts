@@ -11,6 +11,15 @@ import {
 
 export type ThemeMode = 'dark' | 'light' | 'auto'
 export type TurnPreference = 'auto' | 'always' | 'never'
+// F3 — user-supplied TURN server (url/username/credential). `null` (the
+// default) means "no TURN" — every cross-network session stays STUN-only, the
+// shipped behavior. All three fields are required for the server to activate;
+// the setter rejects a partial or scheme-invalid config (see setTurnServer).
+export type CustomTurnServer = {
+  url: string
+  username: string
+  credential: string
+}
 // V3-P4 — Multi-monitor capture toggle for the AI sample loop. `'primary'`
 // (default) preserves the V2 behavior: one long-lived getDisplayMedia stream,
 // one OS picker at session start. `'all'` enumerates connected displays at
@@ -66,6 +75,14 @@ export type SettingsValues = {
   captureDisplays: CaptureDisplaysMode
   // V3-P6 opt-in custom window chrome. See `WindowStyleMode` above.
   windowStyle: WindowStyleMode
+  // F3 — optional user-supplied Nostr signaling relays (wss:// each). Empty
+  // (the default) keeps the curated DEFAULT_RELAY_URLS. When non-empty, these
+  // replace the built-in list via relayConfig.urls — see lib/trystero. Stored
+  // already-validated (only wss:// entries survive the setter).
+  customRelayUrls: string[]
+  // F3 — optional user-supplied TURN server. `null` (default) = STUN-only.
+  // Stored already-validated (turn:/turns: url + non-empty creds).
+  turnServer: CustomTurnServer | null
 }
 
 export const SETTINGS_FILE = 'settings.json'
@@ -92,6 +109,8 @@ export const SETTINGS_KEY_PTT_FRIENDS_ACCELERATOR = 'ptt_friends_accelerator'
 export const SETTINGS_KEY_PTT_AI_ACCELERATOR = 'ptt_ai_accelerator'
 export const SETTINGS_KEY_CAPTURE_DISPLAYS = 'capture_displays'
 export const SETTINGS_KEY_WINDOW_STYLE = 'window_style'
+export const SETTINGS_KEY_CUSTOM_RELAYS = 'custom_relay_urls'
+export const SETTINGS_KEY_TURN_SERVER = 'turn_server'
 
 // Defaults match the V1 acceptance criteria + DESIGN-SYSTEM.md §8.5: dark
 // theme on, reduce-motion off, OS notification on for invites, minimize-to-
@@ -118,6 +137,10 @@ export const DEFAULT_SETTINGS: SettingsValues = {
   // System chrome is the v1.0.3 shipped behavior — keep it as the default
   // so a fresh install or a missing-key file matches what users have today.
   windowStyle: 'system',
+  // F3 — empty by default: the curated relays + STUN-only behavior is exactly
+  // what ships today, so a fresh install is unchanged.
+  customRelayUrls: [],
+  turnServer: null,
 }
 
 export type SettingsStatus = 'loading' | 'ready' | 'error'
@@ -133,6 +156,18 @@ type SettingsState = {
   setMinimizeToTrayOnClose: (enabled: boolean) => Promise<void>
   setDebugLogEnabled: (enabled: boolean) => Promise<void>
   setTurnPreference: (pref: TurnPreference) => Promise<void>
+  // F3 — persist the user's custom signaling relays. The argument is the raw
+  // textarea text; the store parses + validates + dedupes via parseRelayUrls
+  // and stores only the clean wss:// list (empty = use the built-in defaults).
+  setCustomRelayUrls: (text: string) => Promise<void>
+  // F3 — persist (or clear) the user's TURN server. Pass the three raw fields;
+  // the store normalizes them. A partial/invalid config clears the server
+  // (stores null) so an incomplete edit can never leave a dead config behind.
+  setTurnServer: (input: {
+    url?: string
+    username?: string
+    credential?: string
+  }) => Promise<void>
   setAiFeaturesEnabled: (enabled: boolean) => Promise<void>
   setWarningThreshold: (count: number) => Promise<void>
   setAlertThreshold: (count: number) => Promise<void>
@@ -334,6 +369,98 @@ export function isTurnPreference(v: unknown): v is TurnPreference {
   return v === 'auto' || v === 'always' || v === 'never'
 }
 
+// F3 — a signaling relay must be a wss:// URL (Nostr over secure WebSocket).
+// ws:// is rejected: trystero's Nostr strategy and the relays it talks to are
+// wss-only, and a plaintext relay would also break under the app's CSP.
+//
+// Validation parses with `new URL()` rather than a regex so it mirrors what
+// `new WebSocket(url)` itself will accept. A regex like /^wss:\/\/\S+$/ admits
+// values the WebSocket constructor rejects synchronously — `wss://[bad` and
+// `wss://#x` fail URL parsing (SyntaxError), and `wss://host/#frag` parses but
+// WebSocket throws on a non-empty fragment. Any of those, once persisted,
+// would throw out of trystero's first `new WebSocket()` inside `joinTopic` at
+// boot and (with no React error boundary) blank the app. We reject them here
+// so a saved relay can never brick discovery.
+export function isValidRelayUrl(v: unknown): v is string {
+  if (typeof v !== 'string') return false
+  let parsed: URL
+  try {
+    parsed = new URL(v.trim())
+  } catch {
+    return false
+  }
+  // protocol includes the trailing colon. WebSocket also forbids a fragment.
+  return parsed.protocol === 'wss:' && parsed.hash === ''
+}
+
+// F3 — split a multiline textarea into a clean, validated, deduped relay list.
+// Blank lines and anything that isn't a wss:// URL are dropped silently; the UI
+// flags "some lines were ignored" so the user isn't left guessing.
+export function parseRelayUrls(text: string): string[] {
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const raw of text.split(/[\r\n]+/)) {
+    const url = raw.trim()
+    if (!isValidRelayUrl(url)) continue
+    if (seen.has(url)) continue
+    seen.add(url)
+    out.push(url)
+  }
+  return out
+}
+
+// F3 — a TURN url must be turn:/turns: (RFC 7065). turns: is TURN-over-TLS.
+export function isValidTurnUrl(v: unknown): v is string {
+  return typeof v === 'string' && /^turns?:\S+$/i.test(v.trim())
+}
+
+// F3 — accept a TURN server only when all three fields are present and the url
+// scheme is valid. A partial config returns null so the store never persists a
+// half-built server that would silently never activate.
+export function normalizeTurnServer(input: {
+  url?: string
+  username?: string
+  credential?: string
+}): CustomTurnServer | null {
+  const url = (input.url ?? '').trim()
+  const username = (input.username ?? '').trim()
+  const credential = (input.credential ?? '').trim()
+  if (
+    !isValidTurnUrl(url) ||
+    username.length === 0 ||
+    credential.length === 0
+  ) {
+    return null
+  }
+  return { url, username, credential }
+}
+
+function isCustomTurnServer(v: unknown): v is CustomTurnServer {
+  if (!v || typeof v !== 'object') return false
+  const t = v as Partial<CustomTurnServer>
+  return (
+    isValidTurnUrl(t.url) &&
+    typeof t.username === 'string' &&
+    t.username.length > 0 &&
+    typeof t.credential === 'string' &&
+    t.credential.length > 0
+  )
+}
+
+function readCustomRelayUrls(v: unknown): string[] {
+  if (!Array.isArray(v)) return []
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const item of v) {
+    if (!isValidRelayUrl(item)) continue
+    const url = (item as string).trim()
+    if (seen.has(url)) continue
+    seen.add(url)
+    out.push(url)
+  }
+  return out
+}
+
 export function isCaptureDisplaysMode(v: unknown): v is CaptureDisplaysMode {
   return v === 'primary' || v === 'all'
 }
@@ -370,6 +497,8 @@ export async function hydrateValuesFromStore(
     pttAi: await store.get(SETTINGS_KEY_PTT_AI_ACCELERATOR),
     captureDisplays: await store.get(SETTINGS_KEY_CAPTURE_DISPLAYS),
     windowStyle: await store.get(SETTINGS_KEY_WINDOW_STYLE),
+    customRelays: await store.get(SETTINGS_KEY_CUSTOM_RELAYS),
+    turnServer: await store.get(SETTINGS_KEY_TURN_SERVER),
   }
 
   let theme: ThemeMode = isThemeMode(stored.theme)
@@ -442,6 +571,10 @@ export async function hydrateValuesFromStore(
       windowStyle: isWindowStyleMode(stored.windowStyle)
         ? stored.windowStyle
         : DEFAULT_SETTINGS.windowStyle,
+      customRelayUrls: readCustomRelayUrls(stored.customRelays),
+      turnServer: isCustomTurnServer(stored.turnServer)
+        ? stored.turnServer
+        : DEFAULT_SETTINGS.turnServer,
     },
     wroteMigration,
   }
@@ -611,6 +744,18 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   setTurnPreference: async (pref) => {
     set((s) => ({ values: { ...s.values, turnPreference: pref } }))
     await writeKey(set, SETTINGS_KEY_TURN_PREF, pref)
+  },
+
+  setCustomRelayUrls: async (text) => {
+    const urls = parseRelayUrls(text)
+    set((s) => ({ values: { ...s.values, customRelayUrls: urls } }))
+    await writeKey(set, SETTINGS_KEY_CUSTOM_RELAYS, urls)
+  },
+
+  setTurnServer: async (input) => {
+    const server = normalizeTurnServer(input)
+    set((s) => ({ values: { ...s.values, turnServer: server } }))
+    await writeKey(set, SETTINGS_KEY_TURN_SERVER, server)
   },
 
   setAiFeaturesEnabled: async (enabled) => {

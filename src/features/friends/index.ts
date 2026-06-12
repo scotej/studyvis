@@ -9,8 +9,15 @@ export { FriendsList, type FriendsListProps } from './FriendsList'
 export { FriendsListView, type FriendsListViewProps } from './FriendsListView'
 export { InboxBoot, type InboxBootProps } from './InboxBoot'
 export {
+  PairDeepLinkBoot,
+  type PairDeepLinkBootProps,
+} from './PairDeepLinkBoot'
+export { subscribePairDeepLink } from './pairDeepLink'
+export {
   buildInviteEnvelope,
   buildInvitePayload,
+  InviteRelayError,
+  inviteRetryManager,
   InviteTimeoutError,
   inviteFriend,
   sendInviteEnvelope,
@@ -20,6 +27,11 @@ export {
   type InviteSender,
   type SessionInvite,
 } from './invite'
+export {
+  createInviteRetryManager,
+  RETRY_WINDOW_MS,
+  type InviteRetryManager,
+} from './inviteRetry'
 export {
   subscribeToOwnInbox,
   validateInviteEnvelope,

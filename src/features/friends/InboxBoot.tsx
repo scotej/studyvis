@@ -10,11 +10,13 @@ import { hexToBytes } from '@/lib/crypto/identity'
 import { boxDecryptWithKeyring } from '@/lib/db/identity'
 import { getFriendXPubkey } from '@/lib/db/friends'
 import { useFriendsStore } from '@/stores/friendsStore'
+import { useSessionStore } from '@/stores/sessionStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { strings } from '@/strings'
 
 import { subscribeToOwnInbox, type ValidInvite } from './inbox'
-import { startPresence, type PresenceMap } from './presence'
+import { inviteRetryManager } from './invite'
+import { isOnline, startPresence, type PresenceMap } from './presence'
 
 export type InboxBootProps = {
   myEdPubkeyHex: string
@@ -83,6 +85,13 @@ export function InboxBoot({
     }
   }, [myEdPubkeyHex])
 
+  // F6 — detect offline→online presence transitions so a queued invite can be
+  // re-delivered the instant a friend comes online. The per-friend online state
+  // is derived from the presence map (last-heartbeat within the online window),
+  // compared against the previous tick. Kept in a ref so the detector survives
+  // re-renders without resubscribing.
+  const wasOnlineRef = useRef<Record<string, boolean>>({})
+
   useEffect(() => {
     const myEd = hexToBytes(myEdPubkeyHex)
     const friendIds = friendsKey
@@ -91,12 +100,48 @@ export function InboxBoot({
     const presence = startPresence({
       myEdPubkey: myEd,
       friends: friendIds,
-      onPresenceChange,
+      onPresenceChange: (map) => {
+        const at = Date.now()
+        for (const friend of friendIds) {
+          const ed = friend.ed_pubkey_hex
+          const online = isOnline(map, ed, at)
+          const was = wasOnlineRef.current[ed] ?? false
+          wasOnlineRef.current[ed] = online
+          if (online && !was) {
+            // Fire-and-forget; the manager dedupes and only retries entries
+            // still inside the window.
+            void inviteRetryManager.onPresenceOnline(ed)
+          }
+        }
+        onPresenceChange(map)
+      },
     })
+    // F7 — a hard quit (tray Quit, Cmd+Q, OS terminate) tears the webview down
+    // without running React cleanup, so the goodbye in `leave()` never fires.
+    // `pagehide` is the most reliable last-gasp the webview gives us; fire the
+    // goodbye synchronously there so subscribed friends flip us offline at once.
+    const onPageHide = () => presence.sendGoodbye()
+    window.addEventListener('pagehide', onPageHide)
     return () => {
+      window.removeEventListener('pagehide', onPageHide)
       void presence.leave()
     }
   }, [myEdPubkeyHex, friendsKey, onPresenceChange])
+
+  // F6 — drop every queued retry when the local session ends (or the user
+  // cancels by leaving): a friend coming online afterward shouldn't be pulled
+  // into a session that's already over.
+  useEffect(() => {
+    let prev = useSessionStore.getState().status
+    const unsub = useSessionStore.subscribe((state) => {
+      const next = state.status
+      if (prev === 'active' && next !== 'active') {
+        inviteRetryManager.cancelAll()
+      }
+      prev = next
+    })
+    return () => unsub()
+  }, [])
 
   return null
 }

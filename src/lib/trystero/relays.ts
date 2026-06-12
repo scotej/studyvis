@@ -1,3 +1,5 @@
+import { useSettingsStore } from '@/stores/settingsStore'
+
 // Curated Nostr signaling relays for trystero room rendezvous.
 //
 // Trystero's default Nostr strategy does NOT pick relays at random per peer: it
@@ -34,3 +36,23 @@ export const DEFAULT_RELAY_URLS: string[] = [
   'wss://relay.0xchat.com',
   'wss://purplerelay.com',
 ]
+
+// F3 — resolve the relay override from the user's Settings → Network → Advanced
+// list. Returns `{ urls }` only when the user configured at least one custom
+// wss:// relay; otherwise `undefined`, so joinTopic falls through to its
+// DEFAULT_RELAY_URLS pin. Passing `urls` makes trystero use that ENTIRE list
+// (its `redundancy` knob is ignored) — same contract as the default pin.
+//
+// Read lazily from the store at call time, but note that in practice a relay
+// change does NOT take effect until the app is relaunched: trystero constructs
+// its relay sockets once per process (its `init` runs only when the FIRST room
+// is joined and is not re-run while any room stays open), and the inbox +
+// presence rooms open at boot and never close. So this is only re-read for
+// rooms opened in a fresh process. The Settings copy tells the user to restart
+// to apply a relay change. (The TURN server, by contrast, is per-RTCPeer-
+// connection via buildIceOptions, so it does apply on the next pairing/session
+// without a restart.)
+export function userRelayConfig(): { urls: string[] } | undefined {
+  const urls = useSettingsStore.getState().values.customRelayUrls
+  return urls.length > 0 ? { urls } : undefined
+}

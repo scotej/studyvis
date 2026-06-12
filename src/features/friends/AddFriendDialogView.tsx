@@ -37,8 +37,21 @@ export type AddFriendPhase =
       words: string[]
       peerArrived: boolean
       longWait?: boolean
+      // F1 — set when the long wait elapsed AND no signaling relay is reachable
+      // (read from the live socket map, not trystero's onJoinError, which never
+      // fires on blocked relays). Blames the user's own network, not the friend.
+      networkTrouble?: boolean
+      // F5 — peer arrived but no direct link formed within the stall window;
+      // also where a trystero handshake/decrypt error (onJoinError) lands.
+      linkStalled?: boolean
     }
-  | { kind: 'join-progress'; peerArrived: boolean; longWait?: boolean }
+  | {
+      kind: 'join-progress'
+      peerArrived: boolean
+      longWait?: boolean
+      networkTrouble?: boolean
+      linkStalled?: boolean
+    }
   | { kind: 'success'; name: string }
   | { kind: 'error'; message: string }
 
@@ -53,6 +66,9 @@ export type AddFriendDialogViewProps = {
   onJoinSubmit: (words: string[]) => void
   onCancel: () => void
   onCopyLink: (words: string[]) => Promise<boolean>
+  // F10 — words to prefill into the Enter-code form (from an OS deep link).
+  // Prefill only; never auto-submits.
+  initialWords?: string[]
 }
 
 export function AddFriendDialogView({
@@ -66,6 +82,7 @@ export function AddFriendDialogView({
   onJoinSubmit,
   onCancel,
   onCopyLink,
+  initialWords,
 }: AddFriendDialogViewProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -81,6 +98,7 @@ export function AddFriendDialogView({
             onJoinSubmit={onJoinSubmit}
             onCancel={onCancel}
             onCopyLink={onCopyLink}
+            initialWords={initialWords}
           />
         )}
       </DialogContent>
@@ -113,6 +131,7 @@ function PairingStep({
   onJoinSubmit,
   onCancel,
   onCopyLink,
+  initialWords,
 }: {
   tab: AddFriendTab
   onTabChange: (tab: AddFriendTab) => void
@@ -121,6 +140,7 @@ function PairingStep({
   onJoinSubmit: (words: string[]) => void
   onCancel: () => void
   onCopyLink: (words: string[]) => Promise<boolean>
+  initialWords?: string[]
 }) {
   const pair = strings.friends.addDialog.pair
   return (
@@ -150,9 +170,11 @@ function PairingStep({
           </TabsContent>
           <TabsContent value="join" className="mt-4">
             <JoinPanel
+              key={`join-${(initialWords ?? []).join('-')}`}
               phase={phase}
               onSubmit={onJoinSubmit}
               onCancel={onCancel}
+              initialWords={initialWords}
             />
           </TabsContent>
         </Tabs>
@@ -197,6 +219,9 @@ function HostPanel({
         <div className="flex flex-col items-center gap-2">
           <PairQrCode value={encodePairLink(words)} label={host.qrAlt} />
           <p className="text-xs text-text-muted">{host.qrCaption}</p>
+          <p className="text-center text-xs text-text-muted">
+            {host.freshnessNote}
+          </p>
         </div>
         <ol
           aria-label={host.codeAriaLabel}
@@ -255,7 +280,20 @@ function HostPanel({
 
 function HostStatusLine({ phase }: { phase: AddFriendPhase }) {
   const host = strings.friends.addDialog.host
-  if (phase.kind === 'host-waiting' && phase.peerArrived) {
+  if (phase.kind !== 'host-waiting') return null
+  // F5 — peer arrived but no direct link formed: the most actionable failure.
+  if (phase.linkStalled) {
+    return (
+      <p
+        className="text-sm text-status-warning"
+        aria-live="polite"
+        role="alert"
+      >
+        {host.linkStalled}
+      </p>
+    )
+  }
+  if (phase.peerArrived) {
     return (
       <p className="text-sm text-text-secondary" aria-live="polite">
         {host.connected}
@@ -267,7 +305,13 @@ function HostStatusLine({ phase }: { phase: AddFriendPhase }) {
       <p className="text-sm text-text-secondary" aria-live="polite">
         {host.waiting}
       </p>
-      {phase.kind === 'host-waiting' && phase.longWait ? (
+      {/* F1 — a network join error blames the user's own connection, not the
+          friend; it takes precedence over the friend-blaming still-waiting hint. */}
+      {phase.networkTrouble ? (
+        <p className="text-xs text-status-warning" role="alert">
+          {host.networkTrouble}
+        </p>
+      ) : phase.longWait ? (
         <p className="text-xs text-text-muted">{host.stillWaiting}</p>
       ) : null}
     </div>
@@ -278,16 +322,30 @@ function emptyWords(): string[] {
   return Array.from({ length: PAIR_WORD_COUNT }, () => '')
 }
 
+function fillWords(source: string[] | undefined): string[] {
+  return Array.from({ length: PAIR_WORD_COUNT }, (_, i) =>
+    sanitizePairWordInput(source?.[i] ?? '')
+  )
+}
+
 function JoinPanel({
   phase,
   onSubmit,
   onCancel,
+  initialWords,
 }: {
   phase: AddFriendPhase
   onSubmit: (words: string[]) => void
   onCancel: () => void
+  initialWords?: string[]
 }) {
-  const [words, setWords] = useState<string[]>(() => emptyWords())
+  // F10 — initialized from the deep-link words (prefill ONLY: the user reviews
+  // and presses Connect, so a page firing the scheme can never start a pairing
+  // without an explicit click). `initialWords` is latched by AddFriendDialog on
+  // the open transition and won't change while the dialog stays open, so the
+  // `key` PairingStep derives from it is stable — a late re-delivery can't
+  // remount this panel and discard a half-typed code. Seeded once at mount.
+  const [words, setWords] = useState<string[]>(() => fillWords(initialWords))
   const allInWordlist = pairWordsAreComplete(words, PAIR_WORD_COUNT)
   // Connect is gated on the BIP39 checksum, not just per-word validity, so a
   // slip onto a different-but-valid word is caught here instead of silently
@@ -346,12 +404,29 @@ function JoinPanel({
     return (
       <div className="flex flex-col gap-5">
         <div className="flex flex-col gap-1">
-          <p className="text-sm text-text-secondary" aria-live="polite">
-            {phase.peerArrived ? join.connected : join.searching}
-          </p>
-          {!phase.peerArrived && phase.longWait ? (
-            <p className="text-xs text-text-muted">{join.stillSearching}</p>
-          ) : null}
+          {phase.linkStalled ? (
+            <p
+              className="text-sm text-status-warning"
+              aria-live="polite"
+              role="alert"
+            >
+              {join.linkStalled}
+            </p>
+          ) : (
+            <>
+              <p className="text-sm text-text-secondary" aria-live="polite">
+                {phase.peerArrived ? join.connected : join.searching}
+              </p>
+              {/* F1 network-trouble hint outranks the still-searching one. */}
+              {!phase.peerArrived && phase.networkTrouble ? (
+                <p className="text-xs text-status-warning" role="alert">
+                  {join.networkTrouble}
+                </p>
+              ) : !phase.peerArrived && phase.longWait ? (
+                <p className="text-xs text-text-muted">{join.stillSearching}</p>
+              ) : null}
+            </>
+          )}
         </div>
         <div
           aria-hidden="true"

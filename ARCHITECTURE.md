@@ -9,13 +9,15 @@
                                   │  Public infrastructure (NOT us)│
                                   │                                │
                                   │   ┌──────────┐   ┌──────────┐  │
-                                  │   │ Nostr    │   │ Open     │  │
-                                  │   │ relays   │   │ Relay    │  │
-                                  │   │ (signal) │   │ (TURN)   │  │
+                                  │   │ Nostr    │   │ TURN     │  │
+                                  │   │ relays   │   │ (user-   │  │
+                                  │   │ (signal) │   │ supplied)│  │
                                   │   └────┬─────┘   └────┬─────┘  │
                                   └────────┼──────────────┼────────┘
                                            │              │
                               signaling ◀──┘              │ ~15% of conns
+                                           │              │ (none ships;
+                                           │              │  see §4)
                                            ▲              ▼
                   ┌──────────────────────  │  ────────────────────────────┐
                   │                                                       │
@@ -632,7 +634,7 @@ The `Ctrl+]` AI dialog is a separate Tauri window with:
 | Friend impersonates another friend on Nostr | Ed25519 signatures on every event. Receivers verify against saved pubkey. | Very low. |
 | Prompt injection of vision model via on-screen text | System prompt enumerates patterns; small models still fail sometimes. | Friend-acceptable; V3 may add structured-observation alternative. |
 | Lost laptop, no BIP39 backup | Re-pair with friends as a new identity. | User-bears. |
-| Public TURN throttled | Document; recommend running headphones / wired internet. | Low frequency. |
+| Strict NAT / firewall blocks direct connection | No public TURN ships (STUN-only by default — see §4); user can add their own TURN server in Settings → Network. Document the symptom in onboarding. | ~15% of network setups; sessions may fail to connect until a TURN server is configured. |
 | Linux WebKitGTK getDisplayMedia broken | V0 verifies; if broken, Linux deferred to V3. | Known. |
 | Battery drain from continuous inference | Auto-pause on battery <20%. | Low. |
 | Inference cadence stalls UI | Sample loop runs in worker; HTTP request is async. UI never blocks on AI. | Low if implemented correctly. |

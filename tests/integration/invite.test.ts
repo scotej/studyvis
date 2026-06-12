@@ -92,7 +92,12 @@ vi.mock('@/lib/trystero', () => {
     }
   }
 
-  return { joinTopic, __resetBus: () => buses.clear() }
+  return {
+    joinTopic,
+    __resetBus: () => {
+      buses.clear()
+    },
+  }
 })
 
 import {
@@ -107,6 +112,7 @@ import {
 import {
   buildInviteEnvelope,
   inviteFriend,
+  InviteRelayError,
   InviteTimeoutError,
   sendInviteEnvelope,
   subscribeToOwnInbox,
@@ -357,13 +363,38 @@ describe('invite envelope round-trip', () => {
       SAMPLE_SESSION
     )
     // No `subscribeToOwnInbox` for alice → no peer ever joins sam's send room.
+    // Relays are reachable (the friend is simply offline), so the timeout maps
+    // to InviteTimeoutError, not InviteRelayError.
     await expect(
       sendInviteEnvelope(
         { edPubkeyHex: alice.edHex, xPubkeyHex: alice.xHex },
         envelope,
-        { sendTimeoutMs: 50 }
+        { sendTimeoutMs: 50, isRelayUnreachable: () => false }
       )
     ).rejects.toBeInstanceOf(InviteTimeoutError)
+  })
+
+  test('F1/F6: sendInviteEnvelope rejects with InviteRelayError when no relay is reachable', async () => {
+    const sam = makeApp('Sam')
+    const alice = makeApp('Alice')
+    const envelope = await buildInviteEnvelope(
+      sam.sender,
+      { edPubkeyHex: alice.edHex, xPubkeyHex: alice.xHex },
+      SAMPLE_SESSION
+    )
+    // No subscriber for alice → no peer arrives → timeout fires. With the live
+    // socket map reporting every relay unreachable, the timeout maps to
+    // InviteRelayError (the user's own network) rather than InviteTimeoutError
+    // (the friend is offline). This mirrors the real signal — trystero's
+    // onJoinError never fires on blocked relays, so relay-down is read from the
+    // socket map, injected here for determinism.
+    await expect(
+      sendInviteEnvelope(
+        { edPubkeyHex: alice.edHex, xPubkeyHex: alice.xHex },
+        envelope,
+        { sendTimeoutMs: 50, isRelayUnreachable: () => true }
+      )
+    ).rejects.toBeInstanceOf(InviteRelayError)
   })
 
   test('expired invite is dropped', async () => {

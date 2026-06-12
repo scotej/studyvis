@@ -5,6 +5,7 @@ import {
   buildIceOptions,
   iceOptionsFor,
   PUBLIC_TURN_SERVERS,
+  userTurnServers,
 } from '@/lib/trystero/ice'
 
 const FIXTURE: TurnServerConfig[] = [
@@ -54,9 +55,29 @@ describe('iceOptionsFor (no TURN servers)', () => {
 
 describe('buildIceOptions (shipped server list)', () => {
   test('delegates to iceOptionsFor against PUBLIC_TURN_SERVERS', () => {
+    // With no user TURN server configured (default settings) and an empty
+    // shipped list, every preference degrades to STUN-only.
     expect(buildIceOptions('auto')).toEqual(
       iceOptionsFor('auto', PUBLIC_TURN_SERVERS)
     )
+  })
+})
+
+describe('F3 userTurnServers', () => {
+  test('returns [] when no server is configured', () => {
+    expect(userTurnServers(null)).toEqual([])
+  })
+
+  test('maps a configured server into trystero TurnServerConfig shape', () => {
+    expect(
+      userTurnServers({
+        url: 'turn:turn.example:3478',
+        username: 'u',
+        credential: 'c',
+      })
+    ).toEqual([
+      { urls: 'turn:turn.example:3478', username: 'u', credential: 'c' },
+    ])
   })
 })
 

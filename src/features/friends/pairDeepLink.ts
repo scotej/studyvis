@@ -10,6 +10,13 @@ function isTauriRuntime(): boolean {
   )
 }
 
+// The launch URL (`getCurrent()`) is the SAME value every time it's read, so a
+// component that re-mounts (view switches re-mount the boot, like InboxBoot)
+// would otherwise re-open the dialog with the launch link after the user
+// already dismissed it. Consume it once per process; runtime links via
+// `onOpenUrl` are unaffected and always deliver.
+let launchConsumed = false
+
 // F10 — routes an OS-delivered `studyvis://pair?c=<code>` into the add-friend
 // accept flow. `getCurrent()` covers a launch triggered by the link (macOS
 // Apple event, Windows argv); `onOpenUrl` covers links clicked while the app
@@ -39,9 +46,12 @@ export function subscribePairDeepLink(
     }
   }
 
-  getCurrent()
-    .then(deliver)
-    .catch(() => {})
+  if (!launchConsumed) {
+    launchConsumed = true
+    getCurrent()
+      .then(deliver)
+      .catch(() => {})
+  }
   onOpenUrl(deliver)
     .then((fn) => {
       if (disposed) fn()

@@ -18,12 +18,27 @@ const captured: {
   onPeerLeave: LeaveHandler | null
   onPeerStream: StreamHandler | null
   config: Record<string, unknown> | null
-} = { onPeerJoin: null, onPeerLeave: null, onPeerStream: null, config: null }
+  callbacks: Record<string, unknown> | null
+} = {
+  onPeerJoin: null,
+  onPeerLeave: null,
+  onPeerStream: null,
+  config: null,
+  callbacks: null,
+}
+
+const fakeSockets: Record<string, { readyState: number; url: string }> = {}
 
 vi.mock('trystero', () => ({
   selfId: 'self-fixture',
-  joinRoom: (config: Record<string, unknown>) => {
+  getRelaySockets: () => fakeSockets,
+  joinRoom: (
+    config: Record<string, unknown>,
+    _topic: string,
+    callbacks: Record<string, unknown> | undefined
+  ) => {
     captured.config = config
+    captured.callbacks = callbacks ?? null
     return {
       onPeerJoin: (fn: JoinHandler) => {
         captured.onPeerJoin = fn
@@ -43,7 +58,7 @@ vi.mock('trystero', () => ({
   },
 }))
 
-const { joinTopic } = await import('@/lib/trystero')
+const { joinTopic, getRelaySocketMap } = await import('@/lib/trystero')
 const { DEFAULT_RELAY_URLS } = await import('@/lib/trystero/relays')
 
 beforeEach(() => {
@@ -51,6 +66,8 @@ beforeEach(() => {
   captured.onPeerLeave = null
   captured.onPeerStream = null
   captured.config = null
+  captured.callbacks = null
+  for (const k of Object.keys(fakeSockets)) delete fakeSockets[k]
 })
 
 describe('trystero wrapRoom fanout', () => {
@@ -151,5 +168,45 @@ describe('trystero joinTopic relay config', () => {
       urls: DEFAULT_RELAY_URLS,
       redundancy: 3,
     })
+  })
+})
+
+describe('F1: joinTopic onJoinError forwarding', () => {
+  test('forwards a config-level onJoinError to trystero callbacks', () => {
+    const onJoinError = vi.fn()
+    joinTopic({ topic: 't', password: 'p', onJoinError })
+    expect(captured.callbacks?.onJoinError).toBe(onJoinError)
+  })
+
+  test('omits callbacks entirely when no onJoinError is provided', () => {
+    joinTopic({ topic: 't', password: 'p' })
+    expect(captured.callbacks).toBeNull()
+  })
+
+  test('the forwarded handler receives trystero JoinError details', () => {
+    const onJoinError = vi.fn()
+    joinTopic({ topic: 't', password: 'p', onJoinError })
+    const details = {
+      error: 'incorrect room password',
+      appId: 'studyvis',
+      roomId: 't',
+      peerId: 'peer-x',
+    }
+    ;(captured.callbacks?.onJoinError as (d: unknown) => void)(details)
+    expect(onJoinError).toHaveBeenCalledWith(details)
+  })
+})
+
+describe('F2: getRelaySocketMap', () => {
+  test('returns the live trystero socket map', () => {
+    fakeSockets['wss://relay.a'] = { readyState: 1, url: 'wss://relay.a' }
+    fakeSockets['wss://relay.b'] = { readyState: 0, url: 'wss://relay.b' }
+    const map = getRelaySocketMap()
+    expect(map['wss://relay.a']?.readyState).toBe(1)
+    expect(map['wss://relay.b']?.readyState).toBe(0)
+  })
+
+  test('returns an empty object when there are no sockets', () => {
+    expect(getRelaySocketMap()).toEqual({})
   })
 })

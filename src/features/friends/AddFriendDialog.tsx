@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 
 import { useIdentity } from '@/features/identity'
+import { relaysUnreachable } from '@/lib/relayDiagnostics'
 import { useFriendsStore } from '@/stores/friendsStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { strings } from '@/strings'
@@ -30,12 +31,25 @@ const LONG_WAIT_HINT_MS = 30_000
 export type AddFriendDialogProps = {
   open: boolean
   onOpenChange: (open: boolean) => void
+  // F10 — when opened from an OS-delivered studyvis://pair link, start on the
+  // Enter-code tab with the words prefilled. NEVER auto-connects: the user
+  // still reviews the prefilled code and presses Connect. Both `initialTab`
+  // and `initialWords` are consumed once on the closed→open transition;
+  // subsequent prop changes while the dialog stays open are ignored so a late
+  // re-delivery can't yank a half-typed code out from under the user.
+  initialTab?: AddFriendTab
+  initialWords?: string[]
 }
 
 // V1-P10 invariant: the dialog is only opened with a non-empty display name —
 // onboarding step 4 collects it. We still defensively bail here in case a
 // caller forgets, so we never start a pairing with an empty display_name.
-export function AddFriendDialog({ open, onOpenChange }: AddFriendDialogProps) {
+export function AddFriendDialog({
+  open,
+  onOpenChange,
+  initialTab,
+  initialWords,
+}: AddFriendDialogProps) {
   const { identity, actions: identityActions } = useIdentity()
   const addFriend = useFriendsStore((s) => s.add)
   const turnPreference = useSettingsStore((s) => s.values.turnPreference)
@@ -43,9 +57,33 @@ export function AddFriendDialog({ open, onOpenChange }: AddFriendDialogProps) {
 
   const [tab, setTab] = useState<AddFriendTab>('host')
   const [phase, setPhase] = useState<AddFriendPhase>({ kind: 'idle' })
+  // F10 — the prefill words latched on the closed→open transition. Mirrors the
+  // `tab` latch so a second deep link arriving while the dialog is already open
+  // can't change the JoinPanel `key` and remount it, discarding a half-typed
+  // code. Updated ONLY when the dialog opens.
+  const [latchedWords, setLatchedWords] = useState<string[] | undefined>(
+    undefined
+  )
 
   const abortRef = useRef<AbortController | null>(null)
   const successCloseRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // F10 — apply the deep-link tab + words once, on the closed→open transition,
+  // so a link opens straight onto Enter-code with the code prefilled. Adjusted
+  // during render (React's documented "adjust state when a prop changes"
+  // pattern: compare against the previous `open` held in state). The latch
+  // fires exactly when open flips false→true; mutating initialTab/initialWords
+  // while the dialog stays open does nothing until the next open transition, so
+  // a late deep-link re-delivery can't retarget the user's tab or replace their
+  // half-typed code.
+  const [prevOpen, setPrevOpen] = useState(open)
+  if (open !== prevOpen) {
+    setPrevOpen(open)
+    if (open) {
+      if (initialTab) setTab(initialTab)
+      setLatchedWords(initialWords)
+    }
+  }
 
   useEffect(() => {
     return () => {
@@ -70,11 +108,19 @@ export function AddFriendDialog({ open, onOpenChange }: AddFriendDialogProps) {
   useEffect(() => {
     if (!isWaiting || peerArrived || longWait) return
     const id = setTimeout(() => {
+      // F1 — after a long wait with no peer, decide WHICH hint to show. The
+      // honest relay-down signal is the live socket map, not trystero's
+      // `onJoinError` (which never fires on unreachable relays). If no relay is
+      // reachable, blame the network; otherwise fall back to the friend-side
+      // "still waiting" nudge.
+      const networkDown = relaysUnreachable()
       setPhase((cur) =>
         (cur.kind === 'host-waiting' || cur.kind === 'join-progress') &&
         !cur.peerArrived &&
         !cur.longWait
-          ? { ...cur, longWait: true }
+          ? networkDown
+            ? { ...cur, longWait: true, networkTrouble: true }
+            : { ...cur, longWait: true }
           : cur
       )
     }, LONG_WAIT_HINT_MS)
@@ -159,6 +205,25 @@ export function AddFriendDialog({ open, onOpenChange }: AddFriendDialogProps) {
               : current
           )
         },
+        onJoinError: () => {
+          // F1 — trystero's onJoinError means a peer reached the topic but the
+          // handshake/decrypt failed (NOT that relays are unreachable — that's
+          // detected from the socket map in the long-wait effect above). On the
+          // pairing topic that's the same dead-end as a post-arrival stall, so
+          // surface the actionable "couldn't open a direct link" guidance.
+          setPhase((current) =>
+            current.kind === 'host-waiting'
+              ? { ...current, linkStalled: true }
+              : current
+          )
+        },
+        onPostArrivalStall: () => {
+          setPhase((current) =>
+            current.kind === 'host-waiting'
+              ? { ...current, linkStalled: true }
+              : current
+          )
+        },
       })
       await persistAndFinish(friend)
     } catch (err) {
@@ -189,6 +254,23 @@ export function AddFriendDialog({ open, onOpenChange }: AddFriendDialogProps) {
             setPhase((current) =>
               current.kind === 'join-progress'
                 ? { ...current, peerArrived: true }
+                : current
+            )
+          },
+          onJoinError: () => {
+            // F1 — see startHost: onJoinError is a handshake/decrypt failure
+            // (peer present, link couldn't form), not relays-unreachable, so
+            // route it to the same "couldn't open a direct link" guidance.
+            setPhase((current) =>
+              current.kind === 'join-progress'
+                ? { ...current, linkStalled: true }
+                : current
+            )
+          },
+          onPostArrivalStall: () => {
+            setPhase((current) =>
+              current.kind === 'join-progress'
+                ? { ...current, linkStalled: true }
                 : current
             )
           },
@@ -233,6 +315,7 @@ export function AddFriendDialog({ open, onOpenChange }: AddFriendDialogProps) {
       onJoinSubmit={(words) => void startJoin(words)}
       onCancel={cancel}
       onCopyLink={handleCopyLink}
+      initialWords={open ? latchedWords : undefined}
     />
   )
 }

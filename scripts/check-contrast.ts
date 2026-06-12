@@ -297,6 +297,21 @@ const PAIRINGS: Pairing[] = [
     bg: [tok(['bg', 'surface'])],
     kind: 'text-normal',
   },
+  // F2 — RelayDiagnostics per-relay status text labels sit on the sunk row fill.
+  {
+    id: 'text-status-focused on bg-sunk',
+    where: 'F2 RelayDiagnostics "Connected" label on the sunk relay row',
+    fg: tok(['status', 'focused']),
+    bg: [tok(['bg', 'sunk'])],
+    kind: 'text-normal',
+  },
+  {
+    id: 'text-status-warning on bg-sunk',
+    where: 'F2 RelayDiagnostics "Connecting…" label on the sunk relay row',
+    fg: tok(['status', 'warning']),
+    bg: [tok(['bg', 'sunk'])],
+    kind: 'text-normal',
+  },
 
   // ── status colors as TEXT on tinted same-color backgrounds (audit row
   // icon chips, report event rows). The chip is `bg-status-X/15` composited
@@ -405,6 +420,30 @@ const PAIRINGS: Pairing[] = [
     kind: 'ui-component',
     // Offline is a deliberately quiet "this is not here" — paired with the
     // ○ ring shape per DESIGN-SYSTEM §11, not color-alone. Informational.
+    severity: 'info',
+  },
+  // F2 — RelayDiagnostics per-relay dots sit on the sunk relay-row fill. Each
+  // dot is paired with a text status label + aria-label, never color-alone.
+  {
+    id: 'status-focused dot on bg-sunk',
+    where: 'F2 RelayDiagnostics connected dot',
+    fg: tok(['status', 'focused']),
+    bg: [tok(['bg', 'sunk'])],
+    kind: 'ui-component',
+  },
+  {
+    id: 'status-warning dot on bg-sunk',
+    where: 'F2 RelayDiagnostics connecting dot',
+    fg: tok(['status', 'warning']),
+    bg: [tok(['bg', 'sunk'])],
+    kind: 'ui-component',
+  },
+  {
+    id: 'status-offline dot on bg-sunk',
+    where: 'F2 RelayDiagnostics down dot (○ ring shape, not color-alone)',
+    fg: tok(['status', 'offline']),
+    bg: [tok(['bg', 'sunk'])],
+    kind: 'ui-component',
     severity: 'info',
   },
   {
