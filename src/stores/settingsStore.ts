@@ -40,6 +40,22 @@ export type SettingsValues = {
   theme: ThemeMode
   reduceMotion: boolean
   incomingInviteNotificationEnabled: boolean
+  // N2 — OS notification on a LOCAL pomodoro work↔rest flip. Opt-out: ON by
+  // default (the boundary is invisible when minimized to tray, the most-wanted
+  // study nudge). Read by PomodoroNotifyListener; setter is the Notifications
+  // toggle.
+  pomodoroNotificationEnabled: boolean
+  // N6 — gentle chime on the same local transition. Opt-IN: OFF by default
+  // (the calm default IS the reduced-motion accommodation — nothing plays
+  // unless asked). Read by PomodoroNotifyListener.
+  pomodoroSoundEnabled: boolean
+  // N3 — OS notification when a friend flips offline→online. Opt-IN: OFF by
+  // default. Read by InboxBoot's presence detector; ~60s presence latency.
+  friendOnlineNotificationEnabled: boolean
+  // X4 — opt-in version check, OFF by default. The one sanctioned outbound
+  // request beyond P2P + Nostr (PLAN §3 carve-out). When OFF, AboutCategory
+  // never calls system_fetch_latest_version — zero outbound.
+  versionCheckEnabled: boolean
   minimizeToTrayOnClose: boolean
   debugLogEnabled: boolean
   turnPreference: TurnPreference
@@ -97,6 +113,11 @@ export const LEGACY_THEME_LOCALSTORAGE_KEY = THEME_LOCALSTORAGE_KEY
 export const SETTINGS_KEY_THEME = 'theme'
 export const SETTINGS_KEY_REDUCE_MOTION = 'reduce_motion'
 export const SETTINGS_KEY_INVITE_NOTIFY = 'incoming_invite_notification_enabled'
+export const SETTINGS_KEY_POMODORO_NOTIFY = 'pomodoro_notification_enabled'
+export const SETTINGS_KEY_POMODORO_SOUND = 'pomodoro_sound_enabled'
+export const SETTINGS_KEY_FRIEND_ONLINE_NOTIFY =
+  'friend_online_notification_enabled'
+export const SETTINGS_KEY_VERSION_CHECK = 'version_check_enabled'
 export const SETTINGS_KEY_MINIMIZE_TRAY = 'minimize_to_tray_on_close'
 export const SETTINGS_KEY_DEBUG_LOG = 'debug_log_enabled'
 export const SETTINGS_KEY_TURN_PREF = 'turn_preference'
@@ -120,6 +141,11 @@ export const DEFAULT_SETTINGS: SettingsValues = {
   theme: 'dark',
   reduceMotion: false,
   incomingInviteNotificationEnabled: true,
+  // N2 opt-out (on), N6 opt-in (off), N3 opt-in (off), X4 opt-in (off).
+  pomodoroNotificationEnabled: true,
+  pomodoroSoundEnabled: false,
+  friendOnlineNotificationEnabled: false,
+  versionCheckEnabled: false,
   minimizeToTrayOnClose: true,
   debugLogEnabled: false,
   turnPreference: 'auto',
@@ -153,6 +179,10 @@ type SettingsState = {
   setTheme: (mode: ThemeMode) => Promise<void>
   setReduceMotion: (enabled: boolean) => Promise<void>
   setIncomingInviteNotificationEnabled: (enabled: boolean) => Promise<void>
+  setPomodoroNotificationEnabled: (enabled: boolean) => Promise<void>
+  setPomodoroSoundEnabled: (enabled: boolean) => Promise<void>
+  setFriendOnlineNotificationEnabled: (enabled: boolean) => Promise<void>
+  setVersionCheckEnabled: (enabled: boolean) => Promise<void>
   setMinimizeToTrayOnClose: (enabled: boolean) => Promise<void>
   setDebugLogEnabled: (enabled: boolean) => Promise<void>
   setTurnPreference: (pref: TurnPreference) => Promise<void>
@@ -485,6 +515,10 @@ export async function hydrateValuesFromStore(
     theme: await store.get(SETTINGS_KEY_THEME),
     reduceMotion: await store.get(SETTINGS_KEY_REDUCE_MOTION),
     invite: await store.get(SETTINGS_KEY_INVITE_NOTIFY),
+    pomodoroNotify: await store.get(SETTINGS_KEY_POMODORO_NOTIFY),
+    pomodoroSound: await store.get(SETTINGS_KEY_POMODORO_SOUND),
+    friendOnline: await store.get(SETTINGS_KEY_FRIEND_ONLINE_NOTIFY),
+    versionCheck: await store.get(SETTINGS_KEY_VERSION_CHECK),
     tray: await store.get(SETTINGS_KEY_MINIMIZE_TRAY),
     debug: await store.get(SETTINGS_KEY_DEBUG_LOG),
     turn: await store.get(SETTINGS_KEY_TURN_PREF),
@@ -536,6 +570,22 @@ export async function hydrateValuesFromStore(
       incomingInviteNotificationEnabled: readBool(
         stored.invite,
         DEFAULT_SETTINGS.incomingInviteNotificationEnabled
+      ),
+      pomodoroNotificationEnabled: readBool(
+        stored.pomodoroNotify,
+        DEFAULT_SETTINGS.pomodoroNotificationEnabled
+      ),
+      pomodoroSoundEnabled: readBool(
+        stored.pomodoroSound,
+        DEFAULT_SETTINGS.pomodoroSoundEnabled
+      ),
+      friendOnlineNotificationEnabled: readBool(
+        stored.friendOnline,
+        DEFAULT_SETTINGS.friendOnlineNotificationEnabled
+      ),
+      versionCheckEnabled: readBool(
+        stored.versionCheck,
+        DEFAULT_SETTINGS.versionCheckEnabled
       ),
       minimizeToTrayOnClose: readBool(
         stored.tray,
@@ -722,6 +772,30 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       values: { ...s.values, incomingInviteNotificationEnabled: enabled },
     }))
     await writeKey(set, SETTINGS_KEY_INVITE_NOTIFY, enabled)
+  },
+
+  setPomodoroNotificationEnabled: async (enabled) => {
+    set((s) => ({
+      values: { ...s.values, pomodoroNotificationEnabled: enabled },
+    }))
+    await writeKey(set, SETTINGS_KEY_POMODORO_NOTIFY, enabled)
+  },
+
+  setPomodoroSoundEnabled: async (enabled) => {
+    set((s) => ({ values: { ...s.values, pomodoroSoundEnabled: enabled } }))
+    await writeKey(set, SETTINGS_KEY_POMODORO_SOUND, enabled)
+  },
+
+  setFriendOnlineNotificationEnabled: async (enabled) => {
+    set((s) => ({
+      values: { ...s.values, friendOnlineNotificationEnabled: enabled },
+    }))
+    await writeKey(set, SETTINGS_KEY_FRIEND_ONLINE_NOTIFY, enabled)
+  },
+
+  setVersionCheckEnabled: async (enabled) => {
+    set((s) => ({ values: { ...s.values, versionCheckEnabled: enabled } }))
+    await writeKey(set, SETTINGS_KEY_VERSION_CHECK, enabled)
   },
 
   setMinimizeToTrayOnClose: async (enabled) => {

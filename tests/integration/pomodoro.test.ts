@@ -186,7 +186,7 @@ describe('pomodoro broadcaster handover on disconnect', () => {
     // timer would fire. We deliberately do NOT use runOnlyPendingTimers
     // here — that would also fire the 25-minute phase-transition timeout.
     vi.setSystemTime(10_000)
-    alice.start('25/5')
+    alice.start({ preset: '25/5' })
 
     const aliceFirst = lastSnapshot(aliceSnaps)
     expect(aliceFirst.iAmBroadcaster).toBe(true)
@@ -284,7 +284,7 @@ describe('pomodoro deliberate stop propagates (regression: I1)', () => {
     })
 
     vi.setSystemTime(10_000)
-    alice.start('25/5')
+    alice.start({ preset: '25/5' })
     expect(lastSnapshot(bobSnaps).phase).toBe('work-25')
     expect(lastSnapshot(bobSnaps).broadcasterEdPubkey).toBe(ED.alice)
 
@@ -305,6 +305,80 @@ describe('pomodoro deliberate stop propagates (regression: I1)', () => {
     expect(bobFinal.iAmBroadcaster).toBe(false)
 
     alice.teardown()
+    bob.teardown()
+  })
+})
+
+describe('N5 custom-duration handover carries the split forward', () => {
+  test('the new broadcaster resumes the custom split, not a legacy preset', async () => {
+    const bus = new Bus()
+    const aliceRoom = new BusRoom(bus, 'peer-a')
+    const bobRoom = new BusRoom(bus, 'peer-b')
+
+    const peerList = [
+      { ed_pubkey_hex: ED.alice, joined_at: 1_000 },
+      { ed_pubkey_hex: ED.bob, joined_at: 2_000 },
+    ]
+    const senderEd: Record<string, string> = {
+      'peer-a': ED.alice,
+      'peer-b': ED.bob,
+    }
+    const resolveSenderEdPubkey = (peerId: string): string | null =>
+      senderEd[peerId] ?? null
+
+    const bobSnaps: PomodoroSnapshot[] = []
+
+    const alice = startPomodoroController({
+      room: aliceRoom.asTopicRoom(),
+      myEdPubkeyHex: ED.alice,
+      selfJoinedAt: 1_000,
+      getAllPeerOrdering: () => peerList,
+      resolveSenderEdPubkey,
+      onSnapshot: () => {},
+      onPomodoroStart: () => {},
+      onPomodoroEnd: () => {},
+    })
+    const bob = startPomodoroController({
+      room: bobRoom.asTopicRoom(),
+      myEdPubkeyHex: ED.bob,
+      selfJoinedAt: 2_000,
+      getAllPeerOrdering: () => peerList,
+      resolveSenderEdPubkey,
+      onSnapshot: (s) => bobSnaps.push(s),
+      onPomodoroStart: () => {},
+      onPomodoroEnd: () => {},
+    })
+
+    // Alice broadcasts a 90/20 custom split. Bob receives the explicit
+    // durations, so when he takes over he must carry 90/20 forward — a
+    // handover that fell back to the legacy preset would silently retime the
+    // session to 50/10.
+    vi.setSystemTime(10_000)
+    alice.start({ preset: 'custom', workMs: 90 * 60_000, restMs: 20 * 60_000 })
+
+    const bobBefore = lastSnapshot(bobSnaps)
+    expect(bobBefore.phase).toBe('work-custom')
+    expect(bobBefore.preset).toBe('custom')
+    expect(bobBefore.workMs).toBe(90 * 60_000)
+    expect(bobBefore.restMs).toBe(20 * 60_000)
+    const initialEndsAt = bobBefore.endsAt
+    expect(initialEndsAt).toBe(10_000 + 90 * 60_000)
+
+    // Alice drops; Bob (only remaining peer) takes over after the silence.
+    aliceRoom.closed = true
+    alice.teardown()
+    vi.setSystemTime(10_000 + HANDOVER_SILENCE_MS + 100)
+    await vi.advanceTimersByTimeAsync(HANDOVER_SILENCE_MS + 100)
+
+    const bobAfter = lastSnapshot(bobSnaps)
+    expect(bobAfter.iAmBroadcaster).toBe(true)
+    expect(bobAfter.broadcasterEdPubkey).toBe(ED.bob)
+    expect(bobAfter.phase).toBe('work-custom')
+    expect(bobAfter.preset).toBe('custom')
+    expect(bobAfter.workMs).toBe(90 * 60_000)
+    expect(bobAfter.restMs).toBe(20 * 60_000)
+    expect(bobAfter.endsAt).toBe(initialEndsAt)
+
     bob.teardown()
   })
 })

@@ -22,11 +22,22 @@
 // label the active phase as 25/5 vs 50/10. The internal state machine still
 // tracks the 5-state model (idle | work-25 | rest-5 | work-50 | rest-10)
 // requested by the V1-P9 prompt; the wire layer is just less granular.
+//
+// N5 wire-compat (custom durations): the cross-version contract is the
+// `phase: 'work'|'rest'` + legacy `preset: '25/5'|'50/10'` pair. A new
+// broadcaster running a CUSTOM split still sends a *valid legacy preset*
+// (whichever 25/5-or-50/10 split is closest) so an OLDER receiver renders
+// work/rest at a sane timing without crashing, AND carries explicit
+// `work_ms`/`rest_ms` alongside it. A NEW receiver prefers the explicit
+// durations when present and falls back to the preset otherwise. Older
+// senders simply omit `work_ms`/`rest_ms`; our `isPomodoroMessage` treats
+// both fields as optional, so old→new is unchanged.
 
 import type {
   PomodoroPhase,
   PomodoroPreset,
   PomodoroSnapshot,
+  PomodoroStartArgs,
 } from '@/lib/pomodoro-types'
 import type { TopicRoom } from '@/lib/trystero'
 
@@ -34,30 +45,72 @@ export type {
   PomodoroPhase,
   PomodoroPreset,
   PomodoroSnapshot,
+  PomodoroStartArgs,
 } from '@/lib/pomodoro-types'
+
+// N5 — the controller's user-initiated start arg. Aliased to the shared
+// `PomodoroStartArgs` (kept in `lib/` for the components-layer boundary).
+export type StartArgs = PomodoroStartArgs
 
 export const POMODORO_ACTION = 'pomodoro'
 export const BROADCAST_INTERVAL_MS = 5_000
 export const HANDOVER_SILENCE_MS = 10_000
 
 export type WirePhase = 'work' | 'rest'
+// N5 — only the two legacy presets ever ride on the wire's `preset` field, so
+// an older receiver's `isPomodoroMessage` (which rejects anything else) keeps
+// accepting our messages. `custom` lives only in the local snapshot.
+export type WirePreset = '25/5' | '50/10'
 
-const PRESET_DURATIONS: Record<PomodoroPreset, { work: number; rest: number }> =
-  {
-    '25/5': { work: 25 * 60_000, rest: 5 * 60_000 },
-    '50/10': { work: 50 * 60_000, rest: 10 * 60_000 },
+const PRESET_DURATIONS: Record<WirePreset, { work: number; rest: number }> = {
+  '25/5': { work: 25 * 60_000, rest: 5 * 60_000 },
+  '50/10': { work: 50 * 60_000, rest: 10 * 60_000 },
+}
+
+// N5 — the legacy preset that best approximates an arbitrary work split. Used
+// as the wire fallback so an OLDER peer renders a sensible work/rest length
+// (it ignores our explicit `work_ms`/`rest_ms`). The threshold sits between
+// the two presets' work lengths.
+function legacyPresetFor(workMs: number): WirePreset {
+  const midpointMs = 37.5 * 60_000
+  return workMs >= midpointMs ? '50/10' : '25/5'
+}
+
+// N5 — resolve the (work, rest) durations for a preset choice. `custom`
+// requires an explicit split; the legacy presets read the fixed table.
+export function durationsForPreset(
+  preset: PomodoroPreset,
+  custom?: { workMs: number; restMs: number }
+): { workMs: number; restMs: number } {
+  if (preset === 'custom') {
+    if (!custom) throw new Error('custom preset requires explicit durations')
+    return { workMs: custom.workMs, restMs: custom.restMs }
   }
+  const dur = PRESET_DURATIONS[preset]
+  return { workMs: dur.work, restMs: dur.rest }
+}
 
 export type PomodoroMessage = {
   v: 1
   phase: WirePhase
-  preset: PomodoroPreset
+  // Always a legacy preset (cross-version contract). For a custom split this
+  // is the closest legacy approximation; the real split is in work_ms/rest_ms.
+  preset: WirePreset
   ends_at: number
+  // N5 — explicit phase durations (ms). Present on every message a NEW
+  // broadcaster sends (legacy or custom); absent from OLDER senders. A new
+  // receiver prefers these; an old receiver ignores the unknown keys.
+  work_ms?: number
+  rest_ms?: number
   // Set by the broadcaster's `stop()` so receivers can distinguish a
   // deliberate stop from a disconnect. Silence alone is ambiguous (it
   // triggers handover), so the terminal transition needs an explicit
   // signal — see ARCHITECTURE.md §7.
   stopped?: true
+}
+
+function isPositiveFinite(v: unknown): v is number {
+  return typeof v === 'number' && Number.isFinite(v) && v > 0
 }
 
 export function isPomodoroMessage(value: unknown): value is PomodoroMessage {
@@ -68,21 +121,57 @@ export function isPomodoroMessage(value: unknown): value is PomodoroMessage {
     (v.phase === 'work' || v.phase === 'rest') &&
     (v.preset === '25/5' || v.preset === '50/10') &&
     (v.stopped === undefined || v.stopped === true) &&
+    // N5 — optional explicit durations; if present they must be valid (a
+    // NaN/Infinity duration would poison the countdown + transition math).
+    (v.work_ms === undefined || isPositiveFinite(v.work_ms)) &&
+    (v.rest_ms === undefined || isPositiveFinite(v.rest_ms)) &&
     // NaN / Infinity would poison the countdown math
     // (`Math.max(0, endsAt - now)` returns NaN), so require a finite
     // positive timestamp.
-    typeof v.ends_at === 'number' &&
-    Number.isFinite(v.ends_at) &&
-    v.ends_at > 0
+    isPositiveFinite(v.ends_at)
   )
+}
+
+// N5 — derive the snapshot phase + durations a receiver should adopt from a
+// wire message. Prefers explicit `work_ms`/`rest_ms` when present; otherwise
+// falls back to the named preset's fixed table. A message whose explicit
+// durations don't match the named preset is treated as a custom split (the
+// phase label reflects that, and the durations drive the local transition if
+// this peer later takes over as broadcaster).
+export function resolveWirePhase(msg: PomodoroMessage): {
+  phase: Exclude<PomodoroPhase, 'idle'>
+  preset: PomodoroPreset
+  workMs: number
+  restMs: number
+} {
+  const legacy = PRESET_DURATIONS[msg.preset]
+  const workMs = msg.work_ms ?? legacy.work
+  const restMs = msg.rest_ms ?? legacy.rest
+  const isCustom =
+    (msg.work_ms !== undefined && msg.work_ms !== legacy.work) ||
+    (msg.rest_ms !== undefined && msg.rest_ms !== legacy.rest)
+  if (isCustom) {
+    return {
+      phase: msg.phase === 'work' ? 'work-custom' : 'rest-custom',
+      preset: 'custom',
+      workMs,
+      restMs,
+    }
+  }
+  return {
+    phase: fullPhase(msg.phase, msg.preset),
+    preset: msg.preset,
+    workMs,
+    restMs,
+  }
 }
 
 // Returns the 5-state phase from wire (phase, preset). Used by the UI to
 // label the active interval.
 export function fullPhase(
   wire: WirePhase,
-  preset: PomodoroPreset
-): Exclude<PomodoroPhase, 'idle'> {
+  preset: WirePreset
+): Exclude<PomodoroPhase, 'idle' | 'work-custom' | 'rest-custom'> {
   if (preset === '25/5') return wire === 'work' ? 'work-25' : 'rest-5'
   return wire === 'work' ? 'work-50' : 'rest-10'
 }
@@ -136,7 +225,7 @@ export type ControllerArgs = {
 }
 
 export type PomodoroController = {
-  start: (preset: PomodoroPreset) => void
+  start: (args: StartArgs) => void
   stop: () => void
   teardown: () => void
 }
@@ -163,6 +252,8 @@ export function startPomodoroController(
     phase: 'idle',
     endsAt: null,
     preset: null,
+    workMs: null,
+    restMs: null,
     broadcasterEdPubkey: null,
     iAmBroadcaster: false,
   }
@@ -196,15 +287,28 @@ export function startPomodoroController(
     }
   }
 
+  const isWorkPhase = (phase: PomodoroPhase): boolean =>
+    phase.startsWith('work')
+
+  // N5 — the wire `preset` fallback for the current state. Custom splits send
+  // the closest legacy preset so an older peer still renders a sane work/rest.
+  const wirePresetFor = (): WirePreset => {
+    if (state.preset === '25/5' || state.preset === '50/10') return state.preset
+    return legacyPresetFor(state.workMs ?? PRESET_DURATIONS['25/5'].work)
+  }
+
   const broadcastTick = () => {
     if (state.phase === 'idle' || !state.preset || state.endsAt == null) return
-    const wire: WirePhase = state.phase.startsWith('work') ? 'work' : 'rest'
+    const wire: WirePhase = isWorkPhase(state.phase) ? 'work' : 'rest'
     const msg: PomodoroMessage = {
       v: 1,
       phase: wire,
-      preset: state.preset,
+      preset: wirePresetFor(),
       ends_at: state.endsAt,
     }
+    // N5 — carry explicit durations so a new receiver renders the exact split.
+    if (state.workMs != null) msg.work_ms = state.workMs
+    if (state.restMs != null) msg.rest_ms = state.restMs
     void action.send(msg).catch(() => {
       // best-effort; the next tick or the receiver's own silence timer
       // will catch any single dropped message.
@@ -223,17 +327,13 @@ export function startPomodoroController(
 
   const advancePhaseLocal = () => {
     if (!state.iAmBroadcaster) return
-    if (state.phase === 'idle' || !state.preset) return
-    const dur = PRESET_DURATIONS[state.preset]
-    const isWork = state.phase.startsWith('work')
-    const nextPhase: PomodoroPhase = isWork
-      ? state.preset === '25/5'
-        ? 'rest-5'
-        : 'rest-10'
-      : state.preset === '25/5'
-        ? 'work-25'
-        : 'work-50'
-    const nextDur = isWork ? dur.rest : dur.work
+    const phase = state.phase
+    if (phase === 'idle' || !state.preset) return
+    const isWork = isWorkPhase(phase)
+    const nextPhase = nextPhaseFor(phase)
+    const nextDur = isWork
+      ? (state.restMs ?? PRESET_DURATIONS['25/5'].rest)
+      : (state.workMs ?? PRESET_DURATIONS['25/5'].work)
     state = {
       ...state,
       phase: nextPhase,
@@ -247,20 +347,21 @@ export function startPomodoroController(
   // Locally start broadcasting (called by the user-initiated start AND by
   // the handover takeover path, which carries forward the existing endsAt
   // and preset rather than resetting).
-  const becomeBroadcaster = (preset: PomodoroPreset, endsAt: number) => {
+  const becomeBroadcaster = (
+    snapshot: Pick<PomodoroSnapshot, 'phase' | 'preset' | 'workMs' | 'restMs'>,
+    endsAt: number
+  ) => {
     cancelSilenceTimer()
     const isPostHandover =
       state.phase !== 'idle' &&
-      state.preset === preset &&
+      state.preset === snapshot.preset &&
       state.endsAt === endsAt
     state = {
-      phase: isPostHandover
-        ? state.phase
-        : preset === '25/5'
-          ? 'work-25'
-          : 'work-50',
+      phase: isPostHandover ? state.phase : snapshot.phase,
       endsAt,
-      preset,
+      preset: snapshot.preset,
+      workMs: snapshot.workMs,
+      restMs: snapshot.restMs,
       broadcasterEdPubkey: args.myEdPubkeyHex,
       iAmBroadcaster: true,
     }
@@ -288,22 +389,28 @@ export function startPomodoroController(
       // (no one to receive) and no audit hook (we are not the broadcaster
       // emitting an end event).
       stopBroadcasting()
-      state = {
-        phase: 'idle',
-        endsAt: null,
-        preset: null,
-        broadcasterEdPubkey: null,
-        iAmBroadcaster: false,
-      }
+      resetToIdle()
       pushSnapshot()
       return
     }
     if (next === args.myEdPubkeyHex) {
-      becomeBroadcaster(state.preset, state.endsAt)
+      becomeBroadcaster(state, state.endsAt)
     } else {
       // Wait for the new broadcaster's first message; arm a fresh silence
       // timer so a chain of disconnects keeps cascading.
       resetSilenceTimer()
+    }
+  }
+
+  const resetToIdle = () => {
+    state = {
+      phase: 'idle',
+      endsAt: null,
+      preset: null,
+      workMs: null,
+      restMs: null,
+      broadcasterEdPubkey: null,
+      iAmBroadcaster: false,
     }
   }
 
@@ -326,13 +433,7 @@ export function startPomodoroController(
       // never arms the silence cascade.
       stopBroadcasting()
       cancelSilenceTimer()
-      state = {
-        phase: 'idle',
-        endsAt: null,
-        preset: null,
-        broadcasterEdPubkey: null,
-        iAmBroadcaster: false,
-      }
+      resetToIdle()
       pushSnapshot()
       return
     }
@@ -340,11 +441,13 @@ export function startPomodoroController(
     // reconnection — treat the most recent sender as broadcaster (advisor
     // note #8). If the message is from the broadcaster we already track,
     // this is just a normal tick + silence-timer reset.
-    const fullPhaseLocal = fullPhase(data.phase, data.preset)
+    const resolved = resolveWirePhase(data)
     state = {
-      phase: fullPhaseLocal,
+      phase: resolved.phase,
       endsAt: data.ends_at,
-      preset: data.preset,
+      preset: resolved.preset,
+      workMs: resolved.workMs,
+      restMs: resolved.restMs,
       broadcasterEdPubkey: senderEd,
       iAmBroadcaster: senderEd === args.myEdPubkeyHex,
     }
@@ -363,20 +466,33 @@ export function startPomodoroController(
   })
 
   return {
-    start: (preset) => {
-      const dur = PRESET_DURATIONS[preset].work
-      const endsAt = now() + dur
+    start: (startArgs) => {
+      const { workMs, restMs } = durationsForPreset(
+        startArgs.preset,
+        startArgs.preset === 'custom'
+          ? { workMs: startArgs.workMs, restMs: startArgs.restMs }
+          : undefined
+      )
+      const endsAt = now() + workMs
+      const phase: PomodoroPhase =
+        startArgs.preset === 'custom'
+          ? 'work-custom'
+          : startArgs.preset === '25/5'
+            ? 'work-25'
+            : 'work-50'
       // Reset state to a fresh start regardless of any prior state.
       state = {
-        phase: preset === '25/5' ? 'work-25' : 'work-50',
+        phase,
         endsAt,
-        preset,
+        preset: startArgs.preset,
+        workMs,
+        restMs,
         broadcasterEdPubkey: args.myEdPubkeyHex,
         iAmBroadcaster: true,
       }
       cancelSilenceTimer()
       pushSnapshot()
-      args.onPomodoroStart(preset)
+      args.onPomodoroStart(startArgs.preset)
       broadcastTick()
       if (broadcastInterval !== null) clearIntervalFn(broadcastInterval)
       broadcastInterval = setIntervalFn(broadcastTick, BROADCAST_INTERVAL_MS)
@@ -389,29 +505,24 @@ export function startPomodoroController(
       // phase/preset/endsAt are still valid, so receivers go idle instead
       // of treating the ensuing silence as a disconnect and handing over.
       if (wasBroadcaster && state.preset && state.endsAt != null) {
-        const wire: WirePhase = state.phase.startsWith('work') ? 'work' : 'rest'
-        void action
-          .send({
-            v: 1,
-            phase: wire,
-            preset: state.preset,
-            ends_at: state.endsAt,
-            stopped: true,
-          })
-          .catch(() => {
-            // best-effort; a dropped stop falls back to the receiver's
-            // silence timer (handover), which is the pre-fix behavior.
-          })
+        const wire: WirePhase = isWorkPhase(state.phase) ? 'work' : 'rest'
+        const stopMsg: PomodoroMessage = {
+          v: 1,
+          phase: wire,
+          preset: wirePresetFor(),
+          ends_at: state.endsAt,
+          stopped: true,
+        }
+        if (state.workMs != null) stopMsg.work_ms = state.workMs
+        if (state.restMs != null) stopMsg.rest_ms = state.restMs
+        void action.send(stopMsg).catch(() => {
+          // best-effort; a dropped stop falls back to the receiver's
+          // silence timer (handover), which is the pre-fix behavior.
+        })
       }
       stopBroadcasting()
       cancelSilenceTimer()
-      state = {
-        phase: 'idle',
-        endsAt: null,
-        preset: null,
-        broadcasterEdPubkey: null,
-        iAmBroadcaster: false,
-      }
+      resetToIdle()
       pushSnapshot()
       if (wasBroadcaster) args.onPomodoroEnd()
     },
@@ -421,5 +532,26 @@ export function startPomodoroController(
       stopBroadcasting()
       cancelSilenceTimer()
     },
+  }
+}
+
+// N5 — the next phase in a preset cycle. Work → rest → work, preserving the
+// custom-vs-legacy phase family so the UI label stays correct across flips.
+function nextPhaseFor(
+  phase: Exclude<PomodoroPhase, 'idle'>
+): Exclude<PomodoroPhase, 'idle'> {
+  switch (phase) {
+    case 'work-25':
+      return 'rest-5'
+    case 'rest-5':
+      return 'work-25'
+    case 'work-50':
+      return 'rest-10'
+    case 'rest-10':
+      return 'work-50'
+    case 'work-custom':
+      return 'rest-custom'
+    case 'rest-custom':
+      return 'work-custom'
   }
 }

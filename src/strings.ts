@@ -520,6 +520,8 @@ export const strings = {
       'rest-5': 'Break',
       'work-50': 'Focus',
       'rest-10': 'Break',
+      'work-custom': 'Focus',
+      'rest-custom': 'Break',
     },
     triggerAriaLabel: (phaseLabel: string, time: string) =>
       `Pomodoro ${phaseLabel} ${time}`,
@@ -541,6 +543,22 @@ export const strings = {
         label: '50 / 10',
         hint: '50-minute focus, 10-minute break',
       },
+      custom: {
+        label: 'Custom',
+        hint: 'Pick your own focus and break lengths',
+      },
+    },
+    custom: {
+      workLabel: 'Focus (min)',
+      restLabel: 'Break (min)',
+      workAriaLabel: 'Custom focus length in minutes',
+      restAriaLabel: 'Custom break length in minutes',
+      bounds: (
+        workMin: number,
+        workMax: number,
+        restMin: number,
+        restMax: number
+      ) => `Focus ${workMin}–${workMax} min · break ${restMin}–${restMax} min`,
     },
     startCta: 'Start',
   },
@@ -784,6 +802,26 @@ export const strings = {
         label: 'Minimize to tray on close',
         help: 'When on, closing the window keeps StudyVis in the tray so friends can still reach you. When off, closing exits the app.',
         ariaLabel: 'Minimize to tray on close',
+      },
+      // N2 — opt-out: ON by default. The boundary is invisible when the
+      // window is minimized to the tray, so this is the most-wanted nudge.
+      pomodoro: {
+        label: 'Pomodoro break notifications',
+        help: "OS prompt when your focus block flips to a break, and back. Skipped while you're looking at the timer.",
+        ariaLabel: 'Pomodoro break notifications',
+      },
+      // N6 — opt-in: OFF by default (the calm default IS the accommodation;
+      // no extra reduced-motion gate needed since nothing plays unless asked).
+      pomodoroSound: {
+        label: 'Pomodoro chime',
+        help: 'Plays a short, quiet chime when your focus block flips to a break, and back. Off by default.',
+        ariaLabel: 'Pomodoro chime',
+      },
+      // N3 — opt-in: OFF by default. Honest about the ~60s presence latency.
+      friendOnline: {
+        label: 'Friend-online notifications',
+        help: "OS prompt when a friend comes online — a good moment to invite them. Off by default; can lag a friend's arrival by up to a minute.",
+        ariaLabel: 'Friend-online notifications',
       },
     },
 
@@ -1040,6 +1078,19 @@ export const strings = {
         help: "StudyVis doesn't auto-update. Check here when a new version drops.",
         openCta: 'Open',
         errorFallback: "Couldn't open the Releases page.",
+      },
+      // X4 — opt-in version check, OFF by default. The toggle is the one
+      // sanctioned outbound request (PLAN §3 carve-out); off means zero calls.
+      versionCheck: {
+        label: 'Check for new versions',
+        help: 'Off by default. When on, StudyVis asks GitHub once on this screen whether a newer release exists. It sends no data about you.',
+        ariaLabel: 'Check for new versions',
+      },
+      // X4 — quiet "newer version available" row, shown only when the check
+      // succeeds and finds a newer tag.
+      updateAvailable: {
+        label: 'Update available',
+        help: (latest: string) => `Version ${latest} is available.`,
       },
     },
   },
@@ -1327,6 +1378,19 @@ export const strings = {
     invite: {
       title: 'StudyVis',
       // Body comes from friends.inbox.inviteBody — sender-dependent.
+    },
+    // N2 — pomodoro work↔rest transition copy, both directions. §14 voice:
+    // warm, brief, second person.
+    pomodoro: {
+      breakTitle: 'Time for a break',
+      breakBody: 'Step away and rest your eyes for a bit.',
+      workTitle: 'Back to work',
+      workBody: 'Break over — settle back into your focus block.',
+    },
+    // N3 — "friend came online" copy. Body carries the friend's display name.
+    friendOnline: {
+      title: 'StudyVis',
+      body: (name: string) => `${name} is now online`,
     },
   },
 

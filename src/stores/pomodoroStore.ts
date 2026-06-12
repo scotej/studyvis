@@ -6,6 +6,8 @@ const INITIAL: PomodoroSnapshot = {
   phase: 'idle',
   endsAt: null,
   preset: null,
+  workMs: null,
+  restMs: null,
   broadcasterEdPubkey: null,
   iAmBroadcaster: false,
 }

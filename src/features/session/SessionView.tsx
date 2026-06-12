@@ -43,7 +43,6 @@ import {
 } from '@/features/ai'
 import { useIdentity } from '@/features/identity'
 import { signWithKeyring } from '@/lib/db/identity'
-import type { PomodoroPreset } from '@/lib/pomodoro-types'
 import { mediaErrorKind } from '@/lib/mediaError'
 import { isMacLikePlatform } from '@/lib/utils'
 import {
@@ -81,7 +80,11 @@ import {
   connectionFocusState,
   PTT_STATE_ACTION,
 } from './lifecycle'
-import { startPomodoroController, type PeerOrderingEntry } from './pomodoro'
+import {
+  startPomodoroController,
+  type PeerOrderingEntry,
+  type StartArgs as PomodoroStartArgs,
+} from './pomodoro'
 
 const MEDIA_CONSTRAINTS: MediaStreamConstraints = { video: true, audio: true }
 
@@ -226,7 +229,7 @@ export function SessionView() {
       ) => Promise<void>)
     | null
   >(null)
-  const pomodoroStartRef = useRef<((preset: PomodoroPreset) => void) | null>(
+  const pomodoroStartRef = useRef<((args: PomodoroStartArgs) => void) | null>(
     null
   )
   const pomodoroStopRef = useRef<(() => void) | null>(null)
@@ -1027,8 +1030,8 @@ export function SessionView() {
     []
   )
 
-  const handleStartPomodoro = useCallback((preset: PomodoroPreset) => {
-    pomodoroStartRef.current?.(preset)
+  const handleStartPomodoro = useCallback((args: PomodoroStartArgs) => {
+    pomodoroStartRef.current?.(args)
   }, [])
   const handleStopPomodoro = useCallback(() => {
     pomodoroStopRef.current?.()
