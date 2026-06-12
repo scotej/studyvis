@@ -18,7 +18,7 @@ V3 work was drafted as v1.0.4 but shipped under the **v1.0.5** tag —
 there is no v1.0.4 tag; the section below is labelled by the tag that
 shipped it.)
 
-## Unreleased — reliability, honesty, and quality-of-life pass
+## 1.2.1 — 2026-06-13 — reliability, honesty, and quality-of-life pass
 
 A broad maintenance + feature wave across eight clusters, drawn from the
 `IMPROVEMENTS.md` backlog. Reliability of friend-finding and live
