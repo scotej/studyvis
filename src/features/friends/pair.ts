@@ -188,6 +188,12 @@ async function runPair(
     topic: pairTopic(words),
     password: pairPassword(words),
     relayConfig: userRelayConfig(),
+    // Race Nostr + MQTT so the pair rendezvouses if EITHER transport connects.
+    // Nostr alone strands the pair when the curated relays are unreachable from
+    // a friend's network, or when one peer's clock skew trips trystero's Nostr
+    // `since: now()` event filter (invisible-forever, even on the same LAN).
+    // MQTT shares neither failure mode. See joinTopic/mergeRooms in lib/trystero.
+    strategies: ['nostr', 'mqtt'],
     ...buildIceOptions(opts.turnPreference ?? 'auto'),
     onJoinError: () => {
       // Best-effort signal; never let a throwing handler bubble into trystero.

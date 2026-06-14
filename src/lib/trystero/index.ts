@@ -1,3 +1,4 @@
+import { joinRoom as joinRoomMqtt } from '@trystero-p2p/mqtt'
 import {
   getRelaySockets,
   joinRoom,
@@ -16,6 +17,13 @@ import {
 import { DEFAULT_RELAY_URLS } from './relays'
 
 export const APP_ID = 'studyvis'
+
+// Discovery transports trystero can rendezvous over. 'nostr' is the default
+// (curated relay pin in ./relays); 'mqtt' uses @trystero-p2p/mqtt's public
+// brokers and is raced alongside Nostr for pairing so a single failing layer
+// (dead relays, blocked relay hostnames, or a clock-skewed peer) doesn't strand
+// the pair. Both share one @trystero-p2p/core, hence one peerId per peer.
+export type Strategy = 'nostr' | 'mqtt'
 
 export type { JoinError }
 
@@ -63,7 +71,21 @@ export type TopicConfig = {
   // When absent, joinTopic pins DEFAULT_RELAY_URLS (see ./relays) so peers don't
   // depend on whichever relays trystero's appId-seeded shuffle happens to pick.
   // Passing `urls` makes trystero use that entire list (`redundancy` ignored).
+  // Only consumed by the Nostr strategy — it is NOT forwarded to MQTT (those are
+  // Nostr wss relays, not MQTT brokers).
   relayConfig?: { urls?: string[]; redundancy?: number }
+  // Discovery transports to race. Defaults to ['nostr'] (the prior behavior).
+  // Passing more than one opens one room per strategy on the SAME topic +
+  // password and merges them, so rendezvous succeeds if ANY transport connects.
+  // This is how pairing survives a dark/blocked Nostr relay set OR a clock-skewed
+  // peer: trystero's Nostr strategy filters incoming announces on `since: now()`
+  // over ephemeral (never-replayed) events, so a peer whose system clock is
+  // behind is silently invisible forever — the MQTT strategy has no such
+  // time filter and rides entirely separate infrastructure, so the two fail
+  // independently. Every strategy shares the one @trystero-p2p/core instance, so
+  // a peer keeps a single stable `selfId`/peerId across transports and the merge
+  // dedups joins by peerId. See mergeRooms.
+  strategies?: Strategy[]
   // F1 — fires on a trystero room-level join error (offer/answer decrypt
   // failure under the room password, or a peer handshake error). Forwarded to
   // trystero's `onJoinError` callback. Callers that omit it stay on the prior
@@ -114,7 +136,15 @@ export type JoinTopicFn = (
 ) => TopicRoom
 
 export const joinTopic: JoinTopicFn = (
-  { topic, password, turnConfig, rtcConfig, relayConfig, onJoinError },
+  {
+    topic,
+    password,
+    turnConfig,
+    rtcConfig,
+    relayConfig,
+    onJoinError,
+    strategies = ['nostr'],
+  },
   callbacks
 ) => {
   // Merge the config-level onJoinError (the ergonomic call-site path) with any
@@ -124,23 +154,108 @@ export const joinTopic: JoinTopicFn = (
     onJoinError || callbacks
       ? { ...callbacks, ...(onJoinError ? { onJoinError } : {}) }
       : undefined
-  const room: Room = joinRoom(
-    {
-      appId: APP_ID,
-      password,
-      turnConfig,
-      rtcConfig,
-      // Default-merge so the curated relay pin always applies when a caller
-      // omits `urls`. A caller passing only `{ redundancy }` (no urls) would
-      // otherwise short-circuit the pin and fall back to trystero's
-      // appId-seeded shuffle of its bundled pool — see ARCHITECTURE.md
-      // "Relay selection". An explicit `urls`/`redundancy` still wins.
-      relayConfig: { urls: DEFAULT_RELAY_URLS, ...relayConfig },
+
+  const rooms = strategies.map((strategy): TopicRoom => {
+    if (strategy === 'mqtt') {
+      // MQTT rendezvouses over @trystero-p2p/mqtt's own broker list — the Nostr
+      // `relayConfig` is deliberately NOT forwarded (wss Nostr relays are not
+      // MQTT brokers). turnConfig/rtcConfig still apply: the WebRTC leg is the
+      // same regardless of which strategy carried the signaling.
+      const mqttRoom: Room = joinRoomMqtt(
+        { appId: APP_ID, password, turnConfig, rtcConfig },
+        topic,
+        mergedCallbacks
+      )
+      return wrapRoom(mqttRoom)
+    }
+    const nostrRoom: Room = joinRoom(
+      {
+        appId: APP_ID,
+        password,
+        turnConfig,
+        rtcConfig,
+        // Default-merge so the curated relay pin always applies when a caller
+        // omits `urls`. A caller passing only `{ redundancy }` (no urls) would
+        // otherwise short-circuit the pin and fall back to trystero's
+        // appId-seeded shuffle of its bundled pool — see ARCHITECTURE.md
+        // "Relay selection". An explicit `urls`/`redundancy` still wins.
+        relayConfig: { urls: DEFAULT_RELAY_URLS, ...relayConfig },
+      },
+      topic,
+      mergedCallbacks
+    )
+    return wrapRoom(nostrRoom)
+  })
+
+  return rooms.length === 1 ? rooms[0] : mergeRooms(rooms)
+}
+
+// Fan a single TopicRoom API out over several underlying transport rooms (one
+// per strategy) joined on the same topic/password. Discovery succeeds the moment
+// ANY transport sees the peer. Because every strategy shares the one
+// @trystero-p2p/core, a peer has the SAME peerId on each transport, so:
+//   - onPeerJoin is deduped by peerId (first transport to see the peer wins; the
+//     other transport's duplicate join for that peerId is swallowed),
+//   - makeAction sends on every transport and receives from every transport.
+// Intended for short-lived PAIRING rooms, where racing two transports and then
+// leaving both is cheap and the duplicate datachannel (if both transports
+// connect) is torn down on leave. Long-lived rooms (session mesh, presence) stay
+// single-strategy to avoid duplicate peer connections — they pass no `strategies`
+// and never reach this path.
+function mergeRooms(rooms: TopicRoom[]): TopicRoom {
+  const joinedPeers = new Set<string>()
+
+  return {
+    selfId: rooms[0].selfId,
+    makeAction<T extends DataPayload>(namespace: string): TopicAction<T> {
+      const actions = rooms.map((r) => r.makeAction<T>(namespace))
+      const send = ((data, targetPeers, metadata, onProgress) =>
+        Promise.all(
+          actions.map((a) => a.send(data, targetPeers, metadata, onProgress))
+        ).then((results) => results.flat())) as ActionSender<T>
+      const receive = ((onData) => {
+        for (const a of actions) a.receive(onData)
+      }) as ActionReceiver<T>
+      return { send, receive }
     },
-    topic,
-    mergedCallbacks
-  )
-  return wrapRoom(room)
+    onPeerJoin: (fn) => {
+      const unsubs = rooms.map((r) =>
+        r.onPeerJoin((peerId) => {
+          if (joinedPeers.has(peerId)) return
+          joinedPeers.add(peerId)
+          fn(peerId)
+        })
+      )
+      return () => {
+        for (const u of unsubs) u()
+      }
+    },
+    onPeerLeave: (fn) => {
+      const unsubs = rooms.map((r) =>
+        r.onPeerLeave((peerId) => {
+          joinedPeers.delete(peerId)
+          fn(peerId)
+        })
+      )
+      return () => {
+        for (const u of unsubs) u()
+      }
+    },
+    onPeerStream: (fn) => {
+      const unsubs = rooms.map((r) => r.onPeerStream(fn))
+      return () => {
+        for (const u of unsubs) u()
+      }
+    },
+    addStream: (stream, targetPeers, metadata) => {
+      for (const r of rooms) r.addStream(stream, targetPeers, metadata)
+    },
+    removeStream: (stream, targetPeers) => {
+      for (const r of rooms) r.removeStream(stream, targetPeers)
+    },
+    getPeers: () => Object.assign({}, ...rooms.map((r) => r.getPeers())),
+    leave: () => Promise.all(rooms.map((r) => r.leave())).then(() => {}),
+  }
 }
 
 function wrapRoom(room: Room): TopicRoom {
