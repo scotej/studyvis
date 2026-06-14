@@ -18,6 +18,27 @@ V3 work was drafted as v1.0.4 but shipped under the **v1.0.5** tag —
 there is no v1.0.4 tag; the section below is labelled by the tag that
 shipped it.)
 
+## 1.2.2 — 2026-06-14 — pairing discovery reliability
+
+Adding a friend could hang forever on "waiting for friend" — the two
+sides never found each other on the signaling relays, sometimes even on
+the same network. Pairing now races a second, independent discovery
+transport, so a friend is reachable if either path works.
+
+### Fixed
+
+- **Friend pairing races Nostr + MQTT for discovery.** The pairing
+  handshake previously rendezvoused only over Nostr relays, so a dark or
+  network-blocked relay set — or a peer whose system clock was skewed,
+  which silently drops Nostr's time-stamped rendezvous events — left both
+  sides stuck on "waiting for friend" with no recovery. Pairing now opens
+  the room over Nostr **and** MQTT at once and proceeds on whichever
+  connects first. The two transports share no infrastructure and no
+  clock-sensitivity, so one failing no longer strands the pair. The
+  pairing flow is unchanged (same code entry, same UX); both friends must
+  be on v1.2.2+ for the MQTT path to engage. Sessions, inbox, and presence
+  are unchanged.
+
 ## 1.2.1 — 2026-06-13 — reliability, honesty, and quality-of-life pass
 
 A broad maintenance + feature wave across eight clusters, drawn from the
