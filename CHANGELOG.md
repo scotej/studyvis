@@ -430,7 +430,8 @@ WebKitGTK was the open question; Linux deferred to V3.
 
 ## What's intentionally not in 1.0
 
-See the matching section in `README.md`. Briefly: Linux installers,
+The substantive deferrals live in `PLAN.md` §6–§8 (non-goals, known
+limitations, deferred-with-a-trigger); the full inventory is: Linux installers,
 signed installers + auto-update, additional theme variants (sepia /
 high-contrast), AI-weighted focused-minutes, a tile-alert-duration
 control, a rolling 2-hour break window, the `sessions.breaks_taken`
