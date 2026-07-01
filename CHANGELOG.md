@@ -18,7 +18,7 @@ V3 work was drafted as v1.0.4 but shipped under the **v1.0.5** tag —
 there is no v1.0.4 tag; the section below is labelled by the tag that
 shipped it.)
 
-## Unreleased — offline friend codes
+## 1.3.1 — 2026-07-01 — offline friend codes
 
 Adding a friend no longer depends on a live connection at all. The v1.2.2
 Nostr+MQTT race made the rendezvous more reliable, but pairing still needed
