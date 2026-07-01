@@ -18,6 +18,30 @@ V3 work was drafted as v1.0.4 but shipped under the **v1.0.5** tag —
 there is no v1.0.4 tag; the section below is labelled by the tag that
 shipped it.)
 
+## Unreleased — offline friend codes
+
+Adding a friend no longer depends on a live connection at all. The v1.2.2
+Nostr+MQTT race made the rendezvous more reliable, but pairing still needed
+both friends online at once on a working discovery relay _and_ a WebRTC
+datachannel — either failing left you stuck. The information that actually
+needs to cross is tiny and static (two public keys + a name), so it no
+longer travels over a live channel.
+
+### Added
+
+- **Offline friend codes (ContactCard).** Your friend code is now a
+  self-contained, self-signed card carrying your public keys and name. Swap
+  codes with a friend — scan each other's QR in person, or paste a
+  `studyvis://add#…` code into any chat — and each side imports the other.
+  Importing is a pure local step: **no relays, no WebRTC, no waiting**, so it
+  works even when one of you is offline or behind a strict firewall. Before a
+  friend is added over a pasted/linked code, a **safety number** is shown to
+  compare out-of-band (on a call or in person), which catches a tampered or
+  impersonated code. Sharing a code is safe — it holds only public keys.
+- **Legacy 12-word pairing is retained** behind a "friend on an older
+  StudyVis?" link, so you can still pair with anyone on v1.2.x. Old builds
+  ignore the new code format cleanly, and no stored friend data changes.
+
 ## 1.2.2 — 2026-06-14 — pairing discovery reliability
 
 Adding a friend could hang forever on "waiting for friend" — the two

@@ -11,13 +11,15 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import { Separator } from '@/components/ui/separator'
 import { Skeleton } from '@/components/ui/skeleton'
+import { Textarea } from '@/components/ui/textarea'
 import { PairQrCode } from '@/components/PairQrCode'
 import { PairQrScanner } from '@/components/PairQrScanner'
 import { strings } from '@/strings'
 
 import { PAIR_WORD_COUNT } from './pair'
-import { decodePairLink, encodePairLink } from './pairLink'
+import { decodePairLink, encodePairLink, interpretImportText } from './pairLink'
 import { PairWordInput } from './PairWordInput'
 import {
   isBip39Word,
@@ -29,6 +31,8 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 
 export type AddFriendTab = 'host' | 'join'
+export type AddFriendMode = 'card' | 'legacy'
+export type ImportSource = 'qr' | 'remote'
 
 export type AddFriendPhase =
   | { kind: 'idle' }
@@ -58,39 +62,59 @@ export type AddFriendPhase =
 export type AddFriendDialogViewProps = {
   open: boolean
   onOpenChange: (open: boolean) => void
+  // 'card' is the primary, offline ContactCard surface; 'legacy' is the retained
+  // 12-word live-pairing flow for a friend who is still on an older build.
+  mode: AddFriendMode
+  onModeChange: (mode: AddFriendMode) => void
+  missingDisplayName: boolean
+  // Card surface. `myCardLink` is null while it is being built (needs a keyring
+  // signature); `cardBuildError` marks a build failure.
+  myCardLink: string | null
+  cardBuildError: boolean
+  onCopyCard: () => Promise<boolean>
+  // Hands raw scanned/pasted/typed text up to the container, which routes it
+  // (contact card → import confirm; legacy code → the word flow). `source`
+  // decides whether the safety number is required downstream.
+  onImportText: (text: string, source: ImportSource) => void
+  // Legacy surface (unchanged 12-word live pairing).
   tab: AddFriendTab
   onTabChange: (tab: AddFriendTab) => void
   phase: AddFriendPhase
-  missingDisplayName: boolean
   onStartHost: () => void
   onJoinSubmit: (words: string[]) => void
-  onCancel: () => void
   onCopyLink: (words: string[]) => Promise<boolean>
-  // F10 — words to prefill into the Enter-code form (from an OS deep link).
-  // Prefill only; never auto-submits.
+  // F10 — words to prefill into the legacy Enter-code form (from an OS deep
+  // link). Prefill only; never auto-submits.
   initialWords?: string[]
+  onCancel: () => void
 }
 
 export function AddFriendDialogView({
   open,
   onOpenChange,
+  mode,
+  onModeChange,
+  missingDisplayName,
+  myCardLink,
+  cardBuildError,
+  onCopyCard,
+  onImportText,
   tab,
   onTabChange,
   phase,
-  missingDisplayName,
   onStartHost,
   onJoinSubmit,
-  onCancel,
   onCopyLink,
   initialWords,
+  onCancel,
 }: AddFriendDialogViewProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-xl">
         {missingDisplayName ? (
           <MissingDisplayNamePanel onCancel={onCancel} />
-        ) : (
-          <PairingStep
+        ) : mode === 'legacy' ? (
+          <LegacyStep
             tab={tab}
             onTabChange={onTabChange}
             phase={phase}
@@ -99,6 +123,16 @@ export function AddFriendDialogView({
             onCancel={onCancel}
             onCopyLink={onCopyLink}
             initialWords={initialWords}
+            onBack={() => onModeChange('card')}
+          />
+        ) : (
+          <CardSurface
+            myCardLink={myCardLink}
+            cardBuildError={cardBuildError}
+            onCopyCard={onCopyCard}
+            onImportText={onImportText}
+            onCancel={onCancel}
+            onUseLegacy={() => onModeChange('legacy')}
           />
         )}
       </DialogContent>
@@ -123,7 +157,216 @@ function MissingDisplayNamePanel({ onCancel }: { onCancel: () => void }) {
   )
 }
 
-function PairingStep({
+function CardSurface({
+  myCardLink,
+  cardBuildError,
+  onCopyCard,
+  onImportText,
+  onCancel,
+  onUseLegacy,
+}: {
+  myCardLink: string | null
+  cardBuildError: boolean
+  onCopyCard: () => Promise<boolean>
+  onImportText: (text: string, source: ImportSource) => void
+  onCancel: () => void
+  onUseLegacy: () => void
+}) {
+  const card = strings.friends.addDialog.card
+  const [scanning, setScanning] = useState(false)
+  const [copied, setCopied] = useState(false)
+  const [pasteValue, setPasteValue] = useState('')
+  const copiedTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  useEffect(
+    () => () => {
+      if (copiedTimer.current !== null) clearTimeout(copiedTimer.current)
+    },
+    []
+  )
+
+  const handleCopy = useCallback(async () => {
+    const ok = await onCopyCard()
+    if (!ok) return
+    setCopied(true)
+    if (copiedTimer.current !== null) clearTimeout(copiedTimer.current)
+    copiedTimer.current = setTimeout(() => setCopied(false), 1500)
+  }, [onCopyCard])
+
+  const handlePasteClipboard = useCallback(async () => {
+    try {
+      const text = await navigator.clipboard.readText()
+      if (!text.trim()) throw new Error('empty clipboard')
+      onImportText(text, 'remote')
+    } catch {
+      toast.error(card.pasteFailed)
+    }
+  }, [card.pasteFailed, onImportText])
+
+  const handleAddTyped = useCallback(() => {
+    if (!pasteValue.trim()) return
+    onImportText(pasteValue, 'remote')
+  }, [pasteValue, onImportText])
+
+  const handleScanDecode = useCallback(
+    (text: string) => {
+      setScanning(false)
+      onImportText(text, 'qr')
+    },
+    [onImportText]
+  )
+
+  const handleScanError = useCallback(() => {
+    setScanning(false)
+    toast.error(card.cameraFailed)
+  }, [card.cameraFailed])
+
+  if (scanning) {
+    return (
+      <div className="flex flex-col gap-4">
+        <DialogHeader>
+          <DialogTitle>{card.addHeading}</DialogTitle>
+          <DialogDescription>{card.scanHint}</DialogDescription>
+        </DialogHeader>
+        <PairQrScanner
+          onDecode={handleScanDecode}
+          onError={handleScanError}
+          label={card.scanAria}
+          accept={(text) => interpretImportText(text) !== null}
+        />
+        <DialogFooter>
+          <Button variant="outline" onClick={() => setScanning(false)}>
+            {strings.common.actions.cancel}
+          </Button>
+        </DialogFooter>
+      </div>
+    )
+  }
+
+  return (
+    <div className="flex flex-col gap-5">
+      <DialogHeader>
+        <DialogTitle>{card.title}</DialogTitle>
+        <DialogDescription>{card.description}</DialogDescription>
+      </DialogHeader>
+
+      <section className="flex flex-col items-center gap-2">
+        <h3 className="self-start text-sm font-medium text-text-primary">
+          {card.yourCodeHeading}
+        </h3>
+        {cardBuildError ? (
+          <p role="alert" className="text-sm text-status-alerted">
+            {card.codeError}
+          </p>
+        ) : myCardLink ? (
+          <>
+            {/* Larger than the legacy word QR (224): the card is a denser
+                ~200-char byte-mode payload, so more px-per-module keeps it
+                scannable from a laptop camera across a desk. */}
+            <PairQrCode value={myCardLink} label={card.qrAlt} size={320} />
+            <p className="text-center text-xs text-text-muted">
+              {card.qrCaption}
+            </p>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => void handleCopy()}
+              aria-label={card.copyAriaLabel}
+            >
+              {copied ? (
+                <>
+                  <CheckIcon /> {card.copiedCta}
+                </>
+              ) : (
+                <>
+                  <CopyIcon /> {card.copyCta}
+                </>
+              )}
+            </Button>
+            <p className="text-center text-xs text-text-muted">
+              {card.yourCodeCaption}
+            </p>
+          </>
+        ) : (
+          <div
+            className="flex flex-col items-center gap-2"
+            aria-busy="true"
+            aria-label={card.codeBuilding}
+          >
+            <Skeleton className="aspect-square w-56 rounded-lg" />
+            <p className="text-xs text-text-muted">{card.codeBuilding}</p>
+          </div>
+        )}
+      </section>
+
+      <Separator />
+
+      <section className="flex flex-col gap-3">
+        <div className="flex flex-col gap-1">
+          <h3 className="text-sm font-medium text-text-primary">
+            {card.addHeading}
+          </h3>
+          <p className="text-xs text-text-muted">{card.addBody}</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => setScanning(true)}
+          >
+            {card.scanCta}
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => void handlePasteClipboard()}
+          >
+            {card.pasteCta}
+          </Button>
+        </div>
+        <Textarea
+          value={pasteValue}
+          onChange={(e) => setPasteValue(e.target.value)}
+          aria-label={card.inputAriaLabel}
+          rows={2}
+          autoCapitalize="none"
+          autoCorrect="off"
+          spellCheck={false}
+          className="font-mono text-xs"
+        />
+        <div className="flex justify-end">
+          <Button
+            type="button"
+            size="sm"
+            onClick={handleAddTyped}
+            disabled={!pasteValue.trim()}
+          >
+            {card.addCta}
+          </Button>
+        </div>
+      </section>
+
+      <DialogFooter className="flex-col items-stretch gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="justify-start text-text-secondary"
+          onClick={onUseLegacy}
+        >
+          {card.legacyLink}
+        </Button>
+        <Button variant="outline" onClick={onCancel}>
+          {strings.common.actions.cancel}
+        </Button>
+      </DialogFooter>
+    </div>
+  )
+}
+
+function LegacyStep({
   tab,
   onTabChange,
   phase,
@@ -132,6 +375,7 @@ function PairingStep({
   onCancel,
   onCopyLink,
   initialWords,
+  onBack,
 }: {
   tab: AddFriendTab
   onTabChange: (tab: AddFriendTab) => void
@@ -141,6 +385,7 @@ function PairingStep({
   onCancel: () => void
   onCopyLink: (words: string[]) => Promise<boolean>
   initialWords?: string[]
+  onBack: () => void
 }) {
   const pair = strings.friends.addDialog.pair
   return (
@@ -155,29 +400,43 @@ function PairingStep({
       {phase.kind === 'success' ? (
         <SuccessPanel name={phase.name} />
       ) : (
-        <Tabs value={tab} onValueChange={(v) => onTabChange(v as AddFriendTab)}>
-          <TabsList>
-            <TabsTrigger value="host">{pair.tabs.generate}</TabsTrigger>
-            <TabsTrigger value="join">{pair.tabs.enter}</TabsTrigger>
-          </TabsList>
-          <TabsContent value="host" className="mt-4">
-            <HostPanel
-              phase={phase}
-              onStart={onStartHost}
-              onCancel={onCancel}
-              onCopyLink={onCopyLink}
-            />
-          </TabsContent>
-          <TabsContent value="join" className="mt-4">
-            <JoinPanel
-              key={`join-${(initialWords ?? []).join('-')}`}
-              phase={phase}
-              onSubmit={onJoinSubmit}
-              onCancel={onCancel}
-              initialWords={initialWords}
-            />
-          </TabsContent>
-        </Tabs>
+        <>
+          <Tabs
+            value={tab}
+            onValueChange={(v) => onTabChange(v as AddFriendTab)}
+          >
+            <TabsList>
+              <TabsTrigger value="host">{pair.tabs.generate}</TabsTrigger>
+              <TabsTrigger value="join">{pair.tabs.enter}</TabsTrigger>
+            </TabsList>
+            <TabsContent value="host" className="mt-4">
+              <HostPanel
+                phase={phase}
+                onStart={onStartHost}
+                onCancel={onCancel}
+                onCopyLink={onCopyLink}
+              />
+            </TabsContent>
+            <TabsContent value="join" className="mt-4">
+              <JoinPanel
+                key={`join-${(initialWords ?? []).join('-')}`}
+                phase={phase}
+                onSubmit={onJoinSubmit}
+                onCancel={onCancel}
+                initialWords={initialWords}
+              />
+            </TabsContent>
+          </Tabs>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="self-start text-text-secondary"
+            onClick={onBack}
+          >
+            {strings.friends.addDialog.card.backToCards}
+          </Button>
+        </>
       )}
     </div>
   )
@@ -343,7 +602,7 @@ function JoinPanel({
   // and presses Connect, so a page firing the scheme can never start a pairing
   // without an explicit click). `initialWords` is latched by AddFriendDialog on
   // the open transition and won't change while the dialog stays open, so the
-  // `key` PairingStep derives from it is stable — a late re-delivery can't
+  // `key` LegacyStep derives from it is stable — a late re-delivery can't
   // remount this panel and discard a half-typed code. Seeded once at mount.
   const [words, setWords] = useState<string[]>(() => fillWords(initialWords))
   const allInWordlist = pairWordsAreComplete(words, PAIR_WORD_COUNT)

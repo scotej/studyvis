@@ -4,9 +4,15 @@ import type { Meta, StoryObj } from '@storybook/react-vite'
 import { Toaster } from '@/components/ui/sonner'
 import {
   AddFriendDialogView,
+  type AddFriendMode,
   type AddFriendPhase,
   type AddFriendTab,
 } from '@/features/friends/AddFriendDialogView'
+
+// A representative (fake) ContactCard link so the QR renders in card stories.
+const MOCK_CARD_LINK =
+  'studyvis://add#AhESM0RVZneImaq7zN3u_wARIjNEVWZ3iJmqu8zd7v8AESIzRFVmd4iZBkFsaWNl' +
+  'x1p2q3r4s5t6u7v8w9x0y1z2a3b4c5d6e7f8g9h0iJkLmNoPqRsTuVwXyZ012345'
 
 const MOCK_WORDS = [
   'ocean',
@@ -25,22 +31,41 @@ const MOCK_WORDS = [
 
 type StoryArgs = {
   initialTab: AddFriendTab
+  initialMode?: AddFriendMode
   phase: AddFriendPhase
   missingDisplayName: boolean
+  myCardLink?: string | null
+  cardBuildError?: boolean
 }
 
-function Harness({ initialTab, phase, missingDisplayName }: StoryArgs) {
+function Harness({
+  initialTab,
+  initialMode = 'legacy',
+  phase,
+  missingDisplayName,
+  myCardLink = MOCK_CARD_LINK,
+  cardBuildError = false,
+}: StoryArgs) {
   const [open, setOpen] = useState(true)
   const [tab, setTab] = useState<AddFriendTab>(initialTab)
+  const [mode, setMode] = useState<AddFriendMode>(initialMode)
   return (
     <>
       <AddFriendDialogView
         open={open}
         onOpenChange={setOpen}
+        mode={mode}
+        onModeChange={setMode}
         tab={tab}
         onTabChange={setTab}
         phase={phase}
         missingDisplayName={missingDisplayName}
+        myCardLink={myCardLink}
+        cardBuildError={cardBuildError}
+        onCopyCard={async () => true}
+        onImportText={() => {
+          // no-op for story
+        }}
         onStartHost={() => {
           // no-op for story
         }}
@@ -64,9 +89,41 @@ const meta = {
 export default meta
 type Story = StoryObj<typeof meta>
 
+// The primary offline surface: your ContactCard (QR + copy) plus the import box.
+export const CardSurface: Story = {
+  args: {
+    initialTab: 'host',
+    initialMode: 'card',
+    phase: { kind: 'idle' },
+    missingDisplayName: false,
+  },
+}
+
+export const CardBuilding: Story = {
+  args: {
+    initialTab: 'host',
+    initialMode: 'card',
+    phase: { kind: 'idle' },
+    missingDisplayName: false,
+    myCardLink: null,
+  },
+}
+
+export const CardBuildError: Story = {
+  args: {
+    initialTab: 'host',
+    initialMode: 'card',
+    phase: { kind: 'idle' },
+    missingDisplayName: false,
+    cardBuildError: true,
+  },
+}
+
+// Legacy 12-word live-pairing surface (reached via the "older StudyVis?" link).
 export const PreState: Story = {
   args: {
     initialTab: 'host',
+    initialMode: 'legacy',
     phase: { kind: 'idle' },
     missingDisplayName: false,
   },

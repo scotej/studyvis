@@ -7,11 +7,13 @@ import { Button } from '@/components/ui/button'
 import { tokens } from '@/design/tokens'
 import {
   AddFriendDialog,
+  ContactImportDialog,
   FriendsList,
   InboxBoot,
   InviteRelayError,
   InviteTimeoutError,
   PairDeepLinkBoot,
+  type ContactImportSource,
   type PresenceMap,
 } from '@/features/friends'
 import type { ValidInvite } from '@/features/friends'
@@ -56,6 +58,12 @@ export function Home() {
   // F10 — words prefilled into the Add-friend Enter-code tab from an OS deep
   // link. Set alongside opening the dialog on the join tab; never auto-connects.
   const [deepLinkWords, setDeepLinkWords] = useState<string[]>()
+  // Offline ContactCard import — raw bytes located by a scan/paste (via the
+  // AddFriendDialog) or an OS studyvis://add# deep link, plus how they arrived
+  // (drives whether the safety number is required in the confirm sheet).
+  const [importCard, setImportCard] = useState<Uint8Array>()
+  const [importSource, setImportSource] =
+    useState<ContactImportSource>('remote')
   const [presence, setPresence] = useState<PresenceMap>({})
   const [view, setView] = useState<View>('main')
   // V2-P9 — when AI is on, a session must declare a topic before it goes
@@ -136,6 +144,31 @@ export function Home() {
     setDeepLinkWords(words)
     setAddOpen(true)
   }, [])
+
+  // A studyvis://add# ContactCard arrived via the OS. Open the import confirm
+  // sheet (remote path → safety number required). Never auto-adds. Closes the
+  // Add-friend dialog first (like handleImportCard) so two modals can't stack
+  // and any in-flight legacy pairing room is torn down rather than orphaned.
+  const handleContactDeepLink = useCallback((cardBytes: Uint8Array) => {
+    setView('main')
+    setAddOpen(false)
+    setDeepLinkWords(undefined)
+    setImportSource('remote')
+    setImportCard(cardBytes)
+  }, [])
+
+  // A friend's ContactCard was scanned/pasted inside the Add-friend dialog. Hand
+  // off to the import confirm sheet, closing the add dialog so a single modal is
+  // visible. 'qr' relaxes the safety-number gate (physical presence).
+  const handleImportCard = useCallback(
+    (cardBytes: Uint8Array, source: ContactImportSource) => {
+      setAddOpen(false)
+      setDeepLinkWords(undefined)
+      setImportSource(source)
+      setImportCard(cardBytes)
+    },
+    []
+  )
 
   const aiOn = () => useSettingsStore.getState().values.aiFeaturesEnabled
 
@@ -219,7 +252,18 @@ export function Home() {
   const tail = (
     <>
       {inbox}
-      <PairDeepLinkBoot onPairWords={handlePairDeepLink} />
+      <PairDeepLinkBoot
+        onPairWords={handlePairDeepLink}
+        onContactCard={handleContactDeepLink}
+      />
+      <ContactImportDialog
+        open={importCard !== undefined}
+        cardBytes={importCard ?? null}
+        source={importSource}
+        onOpenChange={(next) => {
+          if (!next) setImportCard(undefined)
+        }}
+      />
       <TopicGateModal
         open={pendingStart !== undefined}
         onSubmit={handleTopicSubmit}
@@ -298,6 +342,7 @@ export function Home() {
           }}
           initialTab={deepLinkWords ? 'join' : undefined}
           initialWords={deepLinkWords}
+          onImportCard={handleImportCard}
         />
         {isDev ? (
           <div className="px-6 pb-8 text-center">

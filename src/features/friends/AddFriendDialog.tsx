@@ -7,6 +7,7 @@ import { useFriendsStore } from '@/stores/friendsStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { strings } from '@/strings'
 
+import { buildContactCard } from './contactCard'
 import {
   generatePairingCode,
   hostPairing,
@@ -14,11 +15,17 @@ import {
   type PairedFriend,
   type PairingContext,
 } from './pair'
-import { encodePairLink } from './pairLink'
+import {
+  encodeContactLink,
+  encodePairLink,
+  interpretImportText,
+} from './pairLink'
 import {
   AddFriendDialogView,
+  type AddFriendMode,
   type AddFriendPhase,
   type AddFriendTab,
+  type ImportSource,
 } from './AddFriendDialogView'
 
 // Pairing no longer fails on a deadline — the room stays open until the user
@@ -32,56 +39,63 @@ export type AddFriendDialogProps = {
   open: boolean
   onOpenChange: (open: boolean) => void
   // F10 — when opened from an OS-delivered studyvis://pair link, start on the
-  // Enter-code tab with the words prefilled. NEVER auto-connects: the user
-  // still reviews the prefilled code and presses Connect. Both `initialTab`
-  // and `initialWords` are consumed once on the closed→open transition;
-  // subsequent prop changes while the dialog stays open are ignored so a late
-  // re-delivery can't yank a half-typed code out from under the user.
+  // legacy Enter-code flow with the words prefilled. NEVER auto-connects.
+  // Consumed once on the closed→open transition.
   initialTab?: AddFriendTab
   initialWords?: string[]
+  // Hands a decoded friend ContactCard up to the app so the import confirm sheet
+  // (safety-number check) can open. The dialog never adds a friend itself on the
+  // card path — it only locates the bytes.
+  onImportCard?: (cardBytes: Uint8Array, source: ImportSource) => void
 }
 
 // V1-P10 invariant: the dialog is only opened with a non-empty display name —
 // onboarding step 4 collects it. We still defensively bail here in case a
-// caller forgets, so we never start a pairing with an empty display_name.
+// caller forgets, so we never build a card or start a pairing with an empty
+// display_name.
 export function AddFriendDialog({
   open,
   onOpenChange,
   initialTab,
   initialWords,
+  onImportCard,
 }: AddFriendDialogProps) {
   const { identity, actions: identityActions } = useIdentity()
   const addFriend = useFriendsStore((s) => s.add)
   const turnPreference = useSettingsStore((s) => s.values.turnPreference)
   const hasDisplayName = Boolean(identity?.display_name?.trim())
 
+  const [mode, setMode] = useState<AddFriendMode>('card')
   const [tab, setTab] = useState<AddFriendTab>('host')
   const [phase, setPhase] = useState<AddFriendPhase>({ kind: 'idle' })
-  // F10 — the prefill words latched on the closed→open transition. Mirrors the
-  // `tab` latch so a second deep link arriving while the dialog is already open
-  // can't change the JoinPanel `key` and remount it, discarding a half-typed
-  // code. Updated ONLY when the dialog opens.
   const [latchedWords, setLatchedWords] = useState<string[] | undefined>(
     undefined
   )
+  const [myCardLink, setMyCardLink] = useState<string | null>(null)
+  const [cardBuildError, setCardBuildError] = useState(false)
 
   const abortRef = useRef<AbortController | null>(null)
   const successCloseRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  // F10 — apply the deep-link tab + words once, on the closed→open transition,
-  // so a link opens straight onto Enter-code with the code prefilled. Adjusted
-  // during render (React's documented "adjust state when a prop changes"
-  // pattern: compare against the previous `open` held in state). The latch
-  // fires exactly when open flips false→true; mutating initialTab/initialWords
-  // while the dialog stays open does nothing until the next open transition, so
-  // a late deep-link re-delivery can't retarget the user's tab or replace their
-  // half-typed code.
+  // Apply the deep-link tab/words + pick the starting mode once, on the
+  // closed→open transition (React's "adjust state when a prop changes" pattern).
+  // A legacy pairing deep link opens straight onto the word flow; otherwise the
+  // card surface leads. Mutating initialWords while the dialog stays open does
+  // nothing until the next open transition, so a late re-delivery can't retarget
+  // the user's surface or replace their half-typed code.
   const [prevOpen, setPrevOpen] = useState(open)
   if (open !== prevOpen) {
     setPrevOpen(open)
     if (open) {
-      if (initialTab) setTab(initialTab)
-      setLatchedWords(initialWords)
+      if (initialWords && initialWords.length > 0) {
+        setMode('legacy')
+        setTab(initialTab ?? 'join')
+        setLatchedWords(initialWords)
+      } else {
+        setMode('card')
+        setTab(initialTab ?? 'host')
+        setLatchedWords(undefined)
+      }
     }
   }
 
@@ -93,6 +107,34 @@ export function AddFriendDialog({
       }
     }
   }, [])
+
+  // Build our own ContactCard (studyvis://add#… link) while the dialog is open.
+  // It needs a keyring signature, so it's async — the surface shows a skeleton
+  // until it resolves and an error banner if signing fails (e.g. outside Tauri).
+  // State is only set in the async callbacks: ed25519 signing is deterministic,
+  // so a link left over from a prior open is byte-identical and shows instantly
+  // on reopen (no skeleton flash) until the fresh build resolves over it.
+  useEffect(() => {
+    if (!open || !identity || !identity.display_name) return
+    let cancelled = false
+    buildContactCard(
+      identity.ed_pubkey_hex,
+      identity.x_pubkey_hex,
+      identity.display_name,
+      identityActions.signWithKeyring
+    )
+      .then((bytes) => {
+        if (cancelled) return
+        setMyCardLink(encodeContactLink(bytes))
+        setCardBuildError(false)
+      })
+      .catch(() => {
+        if (!cancelled) setCardBuildError(true)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [open, identity, identityActions.signWithKeyring])
 
   // After a while waiting with no peer, flip on a soft hint nudging the user to
   // check the other device. This is guidance, not a failure — the pairing keeps
@@ -136,6 +178,7 @@ export function AddFriendDialog({
           clearTimeout(successCloseRef.current)
           successCloseRef.current = null
         }
+        setMode('card')
         setTab('host')
         setPhase({ kind: 'idle' })
       }
@@ -206,11 +249,6 @@ export function AddFriendDialog({
           )
         },
         onJoinError: () => {
-          // F1 — trystero's onJoinError means a peer reached the topic but the
-          // handshake/decrypt failed (NOT that relays are unreachable — that's
-          // detected from the socket map in the long-wait effect above). On the
-          // pairing topic that's the same dead-end as a post-arrival stall, so
-          // surface the actionable "couldn't open a direct link" guidance.
           setPhase((current) =>
             current.kind === 'host-waiting'
               ? { ...current, linkStalled: true }
@@ -258,9 +296,6 @@ export function AddFriendDialog({
             )
           },
           onJoinError: () => {
-            // F1 — see startHost: onJoinError is a handshake/decrypt failure
-            // (peer present, link couldn't form), not relays-unreachable, so
-            // route it to the same "couldn't open a direct link" guidance.
             setPhase((current) =>
               current.kind === 'join-progress'
                 ? { ...current, linkStalled: true }
@@ -291,8 +326,7 @@ export function AddFriendDialog({
     [buildCtx, persistAndFinish, turnPreference]
   )
 
-  // Copies the pairing LINK (studyvis://pair?c=…), not the raw words: it pastes
-  // back into all 12 slots in one shot and is the same payload the QR encodes.
+  // Copies the pairing LINK (studyvis://pair?c=…) for the legacy word flow.
   const handleCopyLink = useCallback(async (words: string[]) => {
     try {
       await navigator.clipboard.writeText(encodePairLink(words))
@@ -303,19 +337,57 @@ export function AddFriendDialog({
     }
   }, [])
 
+  const handleCopyCard = useCallback(async () => {
+    if (!myCardLink) return false
+    try {
+      await navigator.clipboard.writeText(myCardLink)
+      return true
+    } catch {
+      toast.error(strings.common.errors.copyToClipboard)
+      return false
+    }
+  }, [myCardLink])
+
+  // Routes scanned/pasted/typed text: a friend's ContactCard opens the import
+  // confirm sheet; a legacy pairing code drops the user into the word flow with
+  // it prefilled (they still press Connect); anything else is a soft error.
+  const handleImportText = useCallback(
+    (text: string, source: ImportSource) => {
+      const interp = interpretImportText(text)
+      if (!interp) {
+        toast.error(strings.friends.addDialog.card.notRecognized)
+        return
+      }
+      if (interp.kind === 'contact') {
+        onImportCard?.(interp.card, source)
+        return
+      }
+      setMode('legacy')
+      setTab('join')
+      setLatchedWords(interp.words)
+    },
+    [onImportCard]
+  )
+
   return (
     <AddFriendDialogView
       open={open}
       onOpenChange={handleOpenChange}
+      mode={mode}
+      onModeChange={setMode}
+      missingDisplayName={!hasDisplayName}
+      myCardLink={myCardLink}
+      cardBuildError={cardBuildError}
+      onCopyCard={handleCopyCard}
+      onImportText={handleImportText}
       tab={tab}
       onTabChange={setTab}
       phase={phase}
-      missingDisplayName={!hasDisplayName}
       onStartHost={() => void startHost()}
       onJoinSubmit={(words) => void startJoin(words)}
-      onCancel={cancel}
       onCopyLink={handleCopyLink}
       initialWords={open ? latchedWords : undefined}
+      onCancel={cancel}
     />
   )
 }

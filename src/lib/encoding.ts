@@ -34,3 +34,37 @@ export function base64ToBytes(b64: string): Uint8Array {
   for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i)
   return out
 }
+
+// URL-safe base64 (RFC 4648 §5), no padding. A SEPARATE helper from the
+// standard pair above — the file header forbids branching those. Used only for
+// the ContactCard payload embedded in `studyvis://add#…`, which travels through
+// URLs, QR codes, and chat apps; `-`/`_` avoid `+`/`/` mangling and dropping
+// `=` keeps the QR a touch smaller.
+export function bytesToBase64Url(bytes: Uint8Array): string {
+  return bytesToBase64(bytes)
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '')
+}
+
+// STRICT decoder: returns null (never throws) on anything that isn't clean
+// base64url. Rejects `+`, `/`, `=`, and any other stray char; only ASCII
+// whitespace (which chat/QR round-trips can inject) is stripped first. We
+// deliberately do NOT tolerate standard-base64 input — our encoder only ever
+// emits base64url, so a `+`/`/` means the payload was corrupted in transit and
+// failing loud beats a silent mis-decode into a wrong-but-valid card.
+export function base64UrlToBytes(b64url: string): Uint8Array | null {
+  const cleaned = b64url.replace(/\s+/g, '')
+  if (cleaned.length === 0) return null
+  if (!/^[A-Za-z0-9_-]+$/.test(cleaned)) return null
+  // A base64 group is 4 chars → 3 bytes; a remainder of exactly 1 char is
+  // never producible and marks a truncated payload.
+  if (cleaned.length % 4 === 1) return null
+  const b64 = cleaned.replace(/-/g, '+').replace(/_/g, '/')
+  const padded = b64 + '='.repeat((4 - (b64.length % 4)) % 4)
+  try {
+    return base64ToBytes(padded)
+  } catch {
+    return null
+  }
+}

@@ -156,7 +156,32 @@ Connections are **STUN-only by default**: no public TURN server currently ships 
 
 ## 5. Friend pairing flow
 
-One-time per friend pair. After completion, the 12-word secret is discarded; persistent identity is a saved Ed25519 public key.
+There are two paths. The **offline ContactCard exchange (§5.1) is the default** — it removes the live rendezvous entirely and is what a user actually sees work. The **legacy live pairing (§5.2)** is retained unchanged so a friend on an older build can still pair.
+
+### 5.1 Offline ContactCard exchange (default)
+
+The information needed to become friends is tiny and static — each side's Ed25519 pubkey, X25519 pubkey, and display name. The ContactCard carries it directly, so importing is a pure local parse + insert: **no signaling topic, no WebRTC, no relays, no simultaneous presence** on the pairing path. This structurally eliminates the two failure layers that stranded live pairing (clock-skewed Nostr `since:now()` rendezvous, and STUN-only WebRTC on strict NAT).
+
+**ContactCard binary** (`src/features/friends/contactCard.ts`), base64url-packed into `studyvis://add#<b64u>` and also shown as a QR + copyable code:
+
+```
+byte 0        version = 0x02
+bytes 1..33   Ed25519 pubkey (32B)   — canonical identity
+bytes 33..65  X25519 pubkey  (32B)   — invite box-encryption target
+byte 65       name_len (u8, 0..=32)
+bytes 66..66+L display_name (UTF-8, L = name_len)
+next 64 bytes Ed25519 self-signature over bytes[0 .. 66+L]
+```
+
+Total = `130 + name_len`. The signature covers the version and name_len too, so a downgrade or any field tamper — notably an **x-only swap** that would redirect a friend's future encrypted invites — fails verification. The card carries only public keys, so a leaked card is harmless (unlike the legacy words, which are a secret).
+
+**Flow:** each friend shows their card (QR when co-located, or copies `studyvis://add#…` into any chat) and imports the other's. Import runs `readContactCard` = structural parse → signature verify (against the *embedded* ed key) → self-guard (reject own ed), then shows a confirm sheet with a **safety number** `pairFingerprint(localEd, cardEd)` = 20 grouped digits derived from both Ed25519 keys (sorted, so both sides compute the same). Because the self-signature only proves the minter holds the ed private key — not that the ed is really your friend — the safety number is the man-in-the-middle defense and is **required-to-affirm on the remote (paste/link/deep-link) path** (compared out-of-band, on a call or in person), and optional on the in-person QR path where physical presence authenticates. On confirm → `friends_add(ed, x, name, now)` (UPSERTs on ed conflict → idempotent re-import). This is a **one-directional** add: each side imports the other, and the UI says so honestly ("send them your code so they add you back") rather than faking a mutual "connected".
+
+Cards carry no timestamp/expiry — safe only because the ed key is mnemonic-derived and immutable (V3 recovery re-derives the same keys). The `0x02` version byte is the forward-compat lever if that ever changes.
+
+### 5.2 Legacy live pairing (retained)
+
+One-time per friend pair. After completion, the 12-word secret is discarded; persistent identity is a saved Ed25519 public key. An old build receiving a `studyvis://add#` link drops it cleanly (its `decodePairLink` requires the `pair?c=` prefix), and a new build still completes this flow with a v1.x friend.
 
 ```
 Sam (initiator)                                              Alice (joiner)

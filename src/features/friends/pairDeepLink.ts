@@ -1,7 +1,7 @@
 import { getCurrent, onOpenUrl } from '@tauri-apps/plugin-deep-link'
 import type { UnlistenFn } from '@tauri-apps/api/event'
 
-import { decodePairLink } from './pairLink'
+import { routeDeepLinkUrl } from './pairLink'
 
 function isTauriRuntime(): boolean {
   return (
@@ -17,17 +17,22 @@ function isTauriRuntime(): boolean {
 // `onOpenUrl` are unaffected and always deliver.
 let launchConsumed = false
 
-// F10 — routes an OS-delivered `studyvis://pair?c=<code>` into the add-friend
-// accept flow. `getCurrent()` covers a launch triggered by the link (macOS
-// Apple event, Windows argv); `onOpenUrl` covers links clicked while the app
-// is already running (the single-instance plugin's `deep-link` feature
-// forwards the second instance's argv into that stream). `decodePairLink` is
-// the validator — anything that isn't a well-formed pair link is dropped
-// silently, since any web page can fire the scheme without user intent. For
-// the same reason the callback should only PREFILL the join form, never
-// auto-connect. No-op outside the Tauri runtime (`npm run dev`).
+// F10 — routes an OS-delivered `studyvis://` link into the add-friend flow.
+// `getCurrent()` covers a launch triggered by the link (macOS Apple event,
+// Windows argv); `onOpenUrl` covers links clicked while the app is already
+// running (the single-instance plugin's `deep-link` feature forwards the second
+// instance's argv into that stream). Two link shapes are handled from this ONE
+// subscribe pass (a second getCurrent() would race the module-global
+// launchConsumed and drop a launch link): a legacy `studyvis://pair?c=<code>`
+// pairing code → onPairWords, and a self-contained `studyvis://add#<card>`
+// ContactCard → onContactCard. Both are validated by routeDeepLinkUrl and drop
+// silently on anything malformed, since any web page can fire the scheme without
+// user intent. For the same reason neither callback may auto-add — they only
+// PREFILL / open a confirm surface the user still acts on. No-op outside the
+// Tauri runtime (`npm run dev`).
 export function subscribePairDeepLink(
-  onPairWords: (words: string[]) => void
+  onPairWords: (words: string[]) => void,
+  onContactCard: (cardBytes: Uint8Array) => void
 ): () => void {
   if (!isTauriRuntime()) {
     return () => {}
@@ -38,11 +43,11 @@ export function subscribePairDeepLink(
   const deliver = (urls: string[] | null) => {
     if (disposed) return
     for (const url of urls ?? []) {
-      const words = decodePairLink(url)
-      if (words) {
-        onPairWords(words)
-        return
-      }
+      const route = routeDeepLinkUrl(url)
+      if (!route) continue
+      if (route.kind === 'add') onContactCard(route.card)
+      else onPairWords(route.words)
+      return
     }
   }
 
