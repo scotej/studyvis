@@ -343,6 +343,65 @@ export const strings = {
         pairingFailed: "Couldn't pair. Try again?",
       },
       defaultFriendName: 'your friend',
+      // Offline ContactCard surface — the primary way to add a friend. You swap
+      // self-contained codes (each carries only public keys) instead of meeting
+      // live on a relay, so it works even when one of you is offline.
+      card: {
+        title: 'Add a friend',
+        description:
+          'Swap codes with your friend — no waiting for a connection, and it works even if one of you is offline.',
+        yourCodeHeading: 'Your code',
+        yourCodeCaption:
+          'Send this to your friend so they can add you. It only holds your public keys — safe to share anywhere.',
+        qrAlt: 'QR code containing your StudyVis friend code',
+        qrCaption: 'Have your friend scan this, or send them the code below.',
+        copyAriaLabel: 'Copy your friend code to clipboard',
+        copyCta: 'Copy code',
+        copiedCta: 'Copied',
+        codeBuilding: 'Preparing your code…',
+        codeError:
+          "Couldn't prepare your code. Close and reopen this window to try again.",
+        addHeading: "Add your friend's code",
+        addBody: 'Scan their QR, or paste the code they sent you.',
+        scanCta: 'Scan QR',
+        pasteCta: 'Paste',
+        addCta: 'Add',
+        inputAriaLabel: "Your friend's code",
+        scanHint: "Point your camera at the QR code on your friend's screen.",
+        scanAria: 'Camera preview for scanning a friend code',
+        notRecognized: "That isn't a StudyVis friend code.",
+        cameraFailed:
+          "Couldn't open the camera. Check its permission, or paste the code instead.",
+        pasteFailed:
+          "Couldn't read a code from the clipboard. Paste it into the box instead.",
+        legacyLink: 'Friend on an older StudyVis? Use a pairing code',
+        backToCards: '← Back',
+      },
+      // Confirm sheet shown after a friend's code is decoded — the safety-number
+      // check is the man-in-the-middle defense on the remote (paste/link) path.
+      importCard: {
+        title: 'Add this friend?',
+        body: (name: string) => `This code is for ${name}.`,
+        idLabel: 'ID',
+        fingerprintLabel: 'Safety number',
+        fingerprintInstruction:
+          'Check these digits match on both screens — read them aloud on a call or in person, not over the same chat that carried the code.',
+        fingerprintConfirmLabel: 'These digits match on both screens',
+        errorTitle: "Can't add this friend",
+        addCta: 'Add friend',
+        addedTitle: (name: string) => `Added ${name}.`,
+        addedBody: 'Now send them your code so they can add you back.',
+        fallbackName: 'your friend',
+        selfError: "That's your own code — share it with a friend instead.",
+        futureVersionError:
+          'Update StudyVis to add this friend — their code uses a newer format.',
+        corruptError:
+          'This code is corrupt or unsupported. Ask your friend for a fresh one.',
+        tamperError:
+          'This code looks damaged or altered. Ask your friend to send it again.',
+        savingError: "Couldn't save your new friend.",
+        closeCta: 'Close',
+      },
     },
     inbox: {
       senderFallback: 'A friend',

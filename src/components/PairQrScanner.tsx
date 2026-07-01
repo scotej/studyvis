@@ -4,11 +4,16 @@ import jsQR from 'jsqr'
 import { openWebcamStream, stopMediaStream } from '@/lib/media'
 
 export type PairQrScannerProps = {
-  // Called once with the raw decoded QR text on the first successful read.
+  // Called once with the raw decoded QR text on the first ACCEPTED read.
   onDecode: (text: string) => void
   // Called if the camera can't be opened (no device, permission denied).
   onError: () => void
   label: string
+  // Optional gate: only latch (stop + fire onDecode + release the camera) on a
+  // payload this returns true for. A frame it rejects is ignored and scanning
+  // continues, so an unrelated QR that happens into view doesn't abort the scan.
+  // Omitted → accept the first decode of any kind (prior behavior).
+  accept?: (text: string) => boolean
 }
 
 // Opens the webcam and scans each frame for a QR code, firing onDecode with the
@@ -19,16 +24,19 @@ export function PairQrScanner({
   onDecode,
   onError,
   label,
+  accept,
 }: PairQrScannerProps) {
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const onDecodeRef = useRef(onDecode)
   const onErrorRef = useRef(onError)
+  const acceptRef = useRef(accept)
 
   // Keep the latest callbacks in refs — updated in an effect, never during
   // render — so a parent re-render doesn't tear down and reopen the camera.
   useEffect(() => {
     onDecodeRef.current = onDecode
     onErrorRef.current = onError
+    acceptRef.current = accept
   })
 
   useEffect(() => {
@@ -54,9 +62,12 @@ export function PairQrScanner({
             inversionAttempts: 'dontInvert',
           })
           if (result?.data) {
-            stopped = true
-            onDecodeRef.current(result.data)
-            return
+            const gate = acceptRef.current
+            if (!gate || gate(result.data)) {
+              stopped = true
+              onDecodeRef.current(result.data)
+              return
+            }
           }
         }
       }

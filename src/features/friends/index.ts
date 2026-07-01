@@ -2,9 +2,21 @@ export { AddFriendDialog, type AddFriendDialogProps } from './AddFriendDialog'
 export {
   AddFriendDialogView,
   type AddFriendDialogViewProps,
+  type AddFriendMode,
   type AddFriendPhase,
   type AddFriendTab,
+  type ImportSource,
 } from './AddFriendDialogView'
+export {
+  ContactImportDialog,
+  type ContactImportDialogProps,
+  type ContactImportSource,
+} from './ContactImportDialog'
+export {
+  ContactImportView,
+  type ContactImportOutcome,
+  type ContactImportViewProps,
+} from './ContactImportView'
 export { FriendsList, type FriendsListProps } from './FriendsList'
 export { FriendsListView, type FriendsListViewProps } from './FriendsListView'
 export { InboxBoot, type InboxBootProps } from './InboxBoot'
@@ -75,5 +87,28 @@ export {
   sanitizePairWordInput,
   tokenizePairWords,
 } from './wordlist'
-export { encodePairLink, decodePairLink } from './pairLink'
+export {
+  encodePairLink,
+  decodePairLink,
+  encodeContactLink,
+  decodeContactLink,
+  routeDeepLinkUrl,
+  interpretImportText,
+  CONTACT_LINK_PREFIX,
+  type DeepLinkRoute,
+  type ImportInterpretation,
+} from './pairLink'
+export {
+  buildContactCard,
+  parseContactCard,
+  verifyContactCard,
+  readContactCard,
+  isSelfCard,
+  sanitizeDisplayName,
+  CARD_VERSION,
+  NAME_CAP,
+  type ParsedContactCard,
+  type ContactCardResult,
+  type CardParseError,
+} from './contactCard'
 export { PairWordInput, type PairWordInputProps } from './PairWordInput'
