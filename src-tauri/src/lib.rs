@@ -181,6 +181,19 @@ pub fn run() {
                     if SessionActiveFlag::is_active(app) {
                         api.prevent_close();
                         request_quit_confirmation(app);
+                        return;
+                    }
+                    // Destroy the floating AI dialog too. It's a separate
+                    // WebviewWindow, so if it's open when main is destroyed the
+                    // process stays alive with only the dialog — and the tray's
+                    // "Open StudyVis" / left-click both no-op (show_main_window
+                    // finds no "main" window to reveal), leaving the app running
+                    // but unreachable. Closing it here lets the window set empty
+                    // and the runtime exit cleanly.
+                    if let Some(dialog) =
+                        app.get_webview_window(commands::ai_dialog::AI_DIALOG_LABEL)
+                    {
+                        let _ = dialog.destroy();
                     }
                     return;
                 }
@@ -559,7 +572,19 @@ fn setup_desktop(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>>
     } else {
         vec![initial_ptt_friends, initial_ptt_ai]
     };
-    app.global_shortcut().register_multiple(to_register)?;
+    // Register best-effort. An OS-level conflict — another app already holds
+    // Ctrl+[ / Ctrl+] globally (Windows returns ERROR_HOTKEY_ALREADY_REGISTERED),
+    // or a hand-edited settings.json accelerator the OS rejects — must NOT
+    // propagate out of setup(): that `?` would bubble to `.build().expect(...)`
+    // and panic the whole app before the window ever paints, with no recourse.
+    // A failed binding just means that shortcut is inert until the user rebinds
+    // it in Settings → Shortcuts; the app still boots.
+    let manager = app.global_shortcut();
+    for shortcut in to_register {
+        if let Err(err) = manager.register(shortcut) {
+            eprintln!("[global-shortcut] couldn't register {shortcut:?}: {err} — rebind in Settings → Shortcuts");
+        }
+    }
 
     let tray_icon = include_image!("icons/tray/22x22.png");
     let open_item = MenuItemBuilder::with_id("tray-open", "Open StudyVis").build(app)?;

@@ -171,22 +171,33 @@ pub fn system_set_global_shortcut<R: Runtime>(
     let new_shortcut = Shortcut::from_str(&accelerator)
         .map_err(|e| format!("Couldn't read {accelerator}: {e}"))?;
     let bindings = app.state::<ShortcutBindings>();
-    let old_shortcut = match action.as_str() {
-        "ptt-friends" => bindings.ptt_friends(),
-        "ptt-ai" => bindings.ptt_ai(),
+    let (old_shortcut, other_shortcut) = match action.as_str() {
+        "ptt-friends" => (bindings.ptt_friends(), bindings.ptt_ai()),
+        "ptt-ai" => (bindings.ptt_ai(), bindings.ptt_friends()),
         _ => return Err(format!("unknown shortcut action: {action}")),
     };
     if old_shortcut == new_shortcut {
         return Ok(());
     }
     let manager = app.global_shortcut();
-    manager
-        .unregister(old_shortcut)
-        .map_err(|e| format!("Couldn't unregister the old shortcut: {e}"))?;
+    // Only unregister the old combo if the OTHER action isn't still bound to it.
+    // When both actions shared one combo (only reachable via a hand-edited
+    // settings.json — the UI rejects equal accelerators), that combo has a
+    // single OS registration; unregistering it here would silently kill the
+    // other action's still-live binding until the next restart.
+    let old_is_shared = other_shortcut == old_shortcut;
+    if !old_is_shared {
+        manager
+            .unregister(old_shortcut)
+            .map_err(|e| format!("Couldn't unregister the old shortcut: {e}"))?;
+    }
     if let Err(err) = manager.register(new_shortcut) {
-        // Best-effort: try to put the old one back so the user isn't left
-        // with no PTT binding while their UI shows the rejected new one.
-        let _ = manager.register(old_shortcut);
+        // Best-effort: put the old one back (only if we actually removed it) so
+        // the user isn't left with no PTT binding while their UI shows the
+        // rejected new one.
+        if !old_is_shared {
+            let _ = manager.register(old_shortcut);
+        }
         return Err(format!("Couldn't register {accelerator}: {err}"));
     }
     match action.as_str() {
@@ -390,6 +401,12 @@ fn no_battery_fallback() -> BatteryInfo {
 // kept for `#[tauri::command]` ergonomics and the value never resolves.
 #[tauri::command]
 pub fn system_relaunch_app<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
+    // `app.restart()` on the main thread goes straight to
+    // `cleanup_before_exit()` + `process::restart()` and SKIPS RunEvent::Exit,
+    // where the sidecar's only kill lives — so a live llama-server would be
+    // orphaned (holding its port and, on Windows, its model.gguf). Kill it
+    // first; kill_blocking is synchronous and idempotent.
+    crate::commands::sidecar::SidecarState::kill_blocking(&app);
     app.restart()
 }
 
