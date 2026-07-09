@@ -52,6 +52,8 @@ describe('csvCell', () => {
     // Leading tab is also a trigger; the prefixed cell has no comma/quote/CR/LF
     // so it is not additionally quoted.
     expect(csvCell('\t=cmd')).toBe("'\t=cmd")
+    // Leading newline: prefixed, then CSV-quoted because it contains a newline.
+    expect(csvCell('\n=cmd')).toBe('"\'\n=cmd"')
     // A negative NUMBER must not be corrupted (stays numeric, no quote prefix).
     expect(csvCell(-5)).toBe('-5')
   })

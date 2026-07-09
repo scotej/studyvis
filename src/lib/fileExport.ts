@@ -88,8 +88,10 @@ export function csvCell(value: string | number): string {
   // (a friend display name flows verbatim into the stats CSV) beginning with a
   // formula trigger would execute when the file is opened in Excel / LibreOffice
   // / Google Sheets — data exfiltration via =HYPERLINK, command execution via a
-  // =cmd|'/c …'!A1 DDE payload. Prefixing a single quote makes the cell text.
-  if (/^[=+\-@\t\r]/.test(s)) {
+  // =cmd|'/c …'!A1 DDE payload. Leading whitespace (tab / CR / LF) counts too:
+  // a spreadsheet that trims it re-exposes a following trigger. Prefixing a
+  // single quote makes the cell text.
+  if (/^[=+\-@\t\r\n]/.test(s)) {
     s = `'${s}`
   }
   return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s

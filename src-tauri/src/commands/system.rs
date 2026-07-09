@@ -180,13 +180,17 @@ pub fn system_set_global_shortcut<R: Runtime>(
         return Ok(());
     }
     let manager = app.global_shortcut();
-    // Only unregister the old combo if the OTHER action isn't still bound to it.
-    // When both actions shared one combo (only reachable via a hand-edited
-    // settings.json — the UI rejects equal accelerators), that combo has a
-    // single OS registration; unregistering it here would silently kill the
-    // other action's still-live binding until the next restart.
+    // Only unregister the old combo if it's ACTUALLY registered at the OS level
+    // AND the other action isn't still bound to it. Two ways the stored binding
+    // can point at a combo that was never OS-registered: (1) both actions shared
+    // one combo (hand-edited settings.json — the UI rejects equal accelerators),
+    // so it has a single registration the other action still needs; (2) the
+    // boot-time registration failed (OS conflict; PR-8 registers best-effort),
+    // leaving ShortcutBindings holding an unregistered combo. Calling unregister
+    // on an unregistered shortcut errors and would wedge the rebind, so gate it.
     let old_is_shared = other_shortcut == old_shortcut;
-    if !old_is_shared {
+    let should_unregister_old = !old_is_shared && manager.is_registered(old_shortcut);
+    if should_unregister_old {
         manager
             .unregister(old_shortcut)
             .map_err(|e| format!("Couldn't unregister the old shortcut: {e}"))?;
@@ -195,7 +199,7 @@ pub fn system_set_global_shortcut<R: Runtime>(
         // Best-effort: put the old one back (only if we actually removed it) so
         // the user isn't left with no PTT binding while their UI shows the
         // rejected new one.
-        if !old_is_shared {
+        if should_unregister_old {
             let _ = manager.register(old_shortcut);
         }
         return Err(format!("Couldn't register {accelerator}: {err}"));

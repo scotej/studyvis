@@ -76,10 +76,22 @@ pub fn init<R: Runtime>(app: &AppHandle<R>) -> Result<DbInit, DbInitError> {
     })?;
     // Remove the rollback-journal / WAL sidecars of the corrupt DB. Left in
     // place next to a freshly-created app.db they'd be mis-associated with the
-    // new file and could corrupt it in turn. Best-effort — a missing sidecar is
-    // the normal case.
+    // new file and could corrupt it in turn (SQLite would try to apply a stale
+    // WAL to a fresh DB). A missing sidecar is the normal case, but a sidecar we
+    // CAN'T delete (permission / lock / I/O) must abort recovery — recreating
+    // app.db over a live sidecar is exactly the corruption we're avoiding.
     for sidecar in ["-journal", "-wal", "-shm"] {
-        let _ = fs::remove_file(path.with_file_name(format!("{DB_FILE}{sidecar}")));
+        let sidecar_path = path.with_file_name(format!("{DB_FILE}{sidecar}"));
+        match fs::remove_file(&sidecar_path) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => {
+                return Err(DbInitError::Unrecoverable(format!(
+                    "{first_failure}; renamed to {corrupt_name}, but couldn't remove {}: {e}",
+                    sidecar_path.display()
+                )));
+            }
+        }
     }
 
     match open_and_migrate(&path) {

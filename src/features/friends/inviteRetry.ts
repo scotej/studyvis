@@ -39,10 +39,10 @@ export type InviteRetryDeps = {
   // PR-9 — guard a queued retry against a session the host has already left.
   // A retry is registered only after the up-to-15s send times out, so a
   // session that ended DURING that window escapes cancelAll and would later
-  // yank the friend into a dead room. Checked at delivery time (and at
-  // registration) so a retry never fires for a session that isn't the host's
-  // current live one. Omitted → no guard (the pure unit tests drive delivery
-  // directly).
+  // yank the friend into a dead room. Checked at delivery time (in
+  // onPresenceOnline, before each send) so a retry never fires for a session
+  // that isn't the host's current live one. Omitted → no guard (the pure unit
+  // tests drive delivery directly).
   isSessionLive?: (sessionTopic: string) => boolean
 }
 
