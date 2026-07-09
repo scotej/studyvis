@@ -273,10 +273,17 @@ export function Home() {
   )
 
   if (sessionStatus === 'active') {
+    // PR-23 — render the full tail (not just {inbox}) so PairDeepLinkBoot's
+    // onOpenUrl listener and the contact-import dialog stay mounted during a
+    // live session. Rendering only {inbox} tore the deep-link subscriber down,
+    // so a studyvis:// link clicked mid-session was delivered to zero JS
+    // listeners and silently dropped. TopicGateModal stays closed (no pending
+    // start during an active session); a contact link opens the import dialog
+    // over the session, which is a pure local friend import.
     return (
       <>
         <SessionView />
-        {inbox}
+        {tail}
       </>
     )
   }

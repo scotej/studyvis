@@ -3,6 +3,7 @@ import { bytesToBase64, bytesToHex, hexToBytes } from '@/lib/encoding'
 import { relaysUnreachable } from '@/lib/relayDiagnostics'
 import { joinTopic } from '@/lib/trystero'
 import { userRelayConfig } from '@/lib/trystero/relays'
+import { useSessionStore } from '@/stores/sessionStore'
 
 import {
   INVITE_ACTION,
@@ -21,6 +22,13 @@ import { createInviteRetryManager } from './inviteRetry'
 // presence flips online, and `cancelAll` when the host's session ends.
 export const inviteRetryManager = createInviteRetryManager({
   onRetryError: (err) => console.warn('invite retry failed:', err),
+  // PR-9 — only ever retry-deliver an invite for the session the host is still
+  // in. A retry queued for a session that has since ended must not pull the
+  // friend into an empty room.
+  isSessionLive: (sessionTopic) => {
+    const s = useSessionStore.getState()
+    return s.status === 'active' && s.sessionTopic === sessionTopic
+  },
 })
 
 export type InviteRecipient = {

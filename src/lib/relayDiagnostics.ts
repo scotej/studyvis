@@ -1,4 +1,4 @@
-import { getRelaySocketMap } from '@/lib/trystero'
+import { getMqttRelaySocketMap, getRelaySocketMap } from '@/lib/trystero'
 
 // F2 — pure helpers behind the Settings → Network connection panel. Kept out of
 // the component file so the React fast-refresh boundary stays component-only.
@@ -38,4 +38,22 @@ export function relaysUnreachable(): boolean {
   const rows = snapshotRelayRows()
   if (rows.length === 0) return false
   return rows.every((row) => row.status !== 'connected')
+}
+
+// PR-21 — transport-aware reachability for the PAIRING dialog, which races
+// Nostr + MQTT (see joinTopic strategies). `relaysUnreachable()` above reads
+// only the Nostr socket map, so on a network that blocks every curated Nostr
+// relay but allows MQTT — the exact case the dual-transport race was added to
+// survive — it wrongly reports the network down and pushes the user to cancel a
+// pairing that MQTT would complete. Judge both transports: the network is down
+// only when at least one socket exists across Nostr OR MQTT and NONE of them is
+// OPEN. Returns false when neither transport has opened a socket yet (nothing to
+// judge). The Nostr-only signal is kept for the invite path, which doesn't race
+// MQTT.
+export function pairingRelaysUnreachable(): boolean {
+  const nostr = getRelaySocketMap()
+  const mqtt = getMqttRelaySocketMap()
+  const sockets = [...Object.values(nostr), ...Object.values(mqtt)]
+  if (sockets.length === 0) return false
+  return sockets.every((socket) => (socket?.readyState ?? 3) !== 1)
 }

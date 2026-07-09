@@ -1,4 +1,7 @@
-import { joinRoom as joinRoomMqtt } from '@trystero-p2p/mqtt'
+import {
+  getRelaySockets as getMqttRelaySockets,
+  joinRoom as joinRoomMqtt,
+} from '@trystero-p2p/mqtt'
 import {
   getRelaySockets,
   joinRoom,
@@ -47,6 +50,19 @@ export function getRelaySocketMap(): RelaySocketMap {
     return (getRelaySockets() as RelaySocketMap | undefined) ?? {}
   } catch {
     // trystero throws if no room was ever joined; treat as "nothing connected".
+    return {}
+  }
+}
+
+// PR-21 — the MQTT strategy's live broker-socket map. Pairing races Nostr + MQTT
+// (see joinTopic/mergeRooms), so a "network down" verdict must consider BOTH
+// transports: when every curated Nostr relay is blocked but MQTT connects,
+// pairing still completes and the user must not be told their network is down.
+// Empty when no MQTT room has ever been joined (e.g. during a Nostr-only invite).
+export function getMqttRelaySocketMap(): RelaySocketMap {
+  try {
+    return (getMqttRelaySockets() as RelaySocketMap | undefined) ?? {}
+  } catch {
     return {}
   }
 }

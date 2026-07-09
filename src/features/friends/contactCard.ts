@@ -188,3 +188,15 @@ export function sanitizeDisplayName(name: string): string {
     )
     .trim()
 }
+
+// Cap + sanitize a display name that arrived from an untrusted peer, for
+// storage and display. The offline ContactCard path already bounds names to
+// NAME_CAP bytes at parse and runs sanitizeDisplayName at import; the legacy
+// 12-word pairing hello carries an UNSIGNED display_name with neither guard
+// (PR-29), so it reuses the exact same two operations here \u2014 a multi-kilobyte
+// name can't bloat the DB / break the friends-list layout, and a bidi-override
+// or zero-width name can't visually spoof another friend's row.
+export function normalizeUntrustedName(name: string): string {
+  const capped = new TextDecoder().decode(truncateUtf8(name ?? '', NAME_CAP))
+  return sanitizeDisplayName(capped)
+}

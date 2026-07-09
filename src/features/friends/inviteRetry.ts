@@ -36,6 +36,14 @@ export type InviteRetryDeps = {
   windowMs?: number
   // Surfaced when a retry attempt itself fails (developer-facing log only).
   onRetryError?: (err: unknown) => void
+  // PR-9 — guard a queued retry against a session the host has already left.
+  // A retry is registered only after the up-to-15s send times out, so a
+  // session that ended DURING that window escapes cancelAll and would later
+  // yank the friend into a dead room. Checked at delivery time (and at
+  // registration) so a retry never fires for a session that isn't the host's
+  // current live one. Omitted → no guard (the pure unit tests drive delivery
+  // directly).
+  isSessionLive?: (sessionTopic: string) => boolean
 }
 
 export type InviteRetryManager = {
@@ -104,6 +112,13 @@ export function createInviteRetryManager(
         if (entry.recipientEdPubkeyHex !== recipientEdPubkeyHex) continue
         if (entry.delivered || entry.inFlight) continue
         if (isExpired(entry)) {
+          pending.delete(keyOf(entry.recipientEdPubkeyHex, entry.sessionTopic))
+          continue
+        }
+        // PR-9 — the host may have left this session while the retry sat
+        // pending. Never deliver an invite for a session that is no longer the
+        // host's live one — that would drop the friend into an empty room.
+        if (deps.isSessionLive && !deps.isSessionLive(entry.sessionTopic)) {
           pending.delete(keyOf(entry.recipientEdPubkeyHex, entry.sessionTopic))
           continue
         }

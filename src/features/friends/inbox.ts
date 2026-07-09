@@ -7,6 +7,7 @@ import { userRelayConfig } from '@/lib/trystero/relays'
 import {
   INVITE_ACTION,
   INVITE_ENVELOPE_VERSION,
+  INVITE_TTL_MS,
   serializePayloadForSig,
   type InviteEnvelope,
   type InvitePayload,
@@ -173,10 +174,26 @@ export function subscribeToOwnInbox(ctx: InboxContext): InboxSubscription {
   }
   const action = room.makeAction<InviteEnvelope>(INVITE_ACTION)
 
+  // PR-18 — replay guard. The inbox topic + password derive solely from the
+  // recipient's PUBLIC ed pubkey (topics.ts), so a stranger holding a contact
+  // card can join this topic and re-broadcast a captured, still-unexpired
+  // envelope to re-fire the invite toast + OS notification (prompt spam). The
+  // NaCl-box nonce is unique per envelope, so (from_ed_pubkey, nonce) uniquely
+  // identifies one invite; drop repeats. Kept only until the invite TTL, after
+  // which validateInviteEnvelope's expiry check drops the envelope anyway.
+  const seen = new Map<string, number>()
   action.receive((data) => {
     void (async () => {
       const valid = await validateInviteEnvelope(data, ctx)
-      if (valid) ctx.onValidInvite(valid)
+      if (!valid) return
+      const now = ctx.now ? ctx.now() : Date.now()
+      for (const [key, seenAt] of seen) {
+        if (now - seenAt > INVITE_TTL_MS) seen.delete(key)
+      }
+      const replayKey = `${valid.from_ed_pubkey}:${data.nonce}`
+      if (seen.has(replayKey)) return
+      seen.set(replayKey, now)
+      ctx.onValidInvite(valid)
     })()
   })
 
