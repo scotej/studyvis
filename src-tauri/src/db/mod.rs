@@ -74,6 +74,25 @@ pub fn init<R: Runtime>(app: &AppHandle<R>) -> Result<DbInit, DbInitError> {
             "{first_failure}; rename to {corrupt_name} failed: {e}"
         ))
     })?;
+    // Remove the rollback-journal / WAL sidecars of the corrupt DB. Left in
+    // place next to a freshly-created app.db they'd be mis-associated with the
+    // new file and could corrupt it in turn (SQLite would try to apply a stale
+    // WAL to a fresh DB). A missing sidecar is the normal case, but a sidecar we
+    // CAN'T delete (permission / lock / I/O) must abort recovery — recreating
+    // app.db over a live sidecar is exactly the corruption we're avoiding.
+    for sidecar in ["-journal", "-wal", "-shm"] {
+        let sidecar_path = path.with_file_name(format!("{DB_FILE}{sidecar}"));
+        match fs::remove_file(&sidecar_path) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => {
+                return Err(DbInitError::Unrecoverable(format!(
+                    "{first_failure}; renamed to {corrupt_name}, but couldn't remove {}: {e}",
+                    sidecar_path.display()
+                )));
+            }
+        }
+    }
 
     match open_and_migrate(&path) {
         Ok(pool) => Ok(DbInit {
@@ -110,11 +129,17 @@ fn open_and_migrate(path: &Path) -> Result<DbPool, OpenError> {
     }
 }
 
-// True ONLY when `integrity_check` runs and returns a verdict that is NOT
-// "ok" — i.e. the file is genuinely structurally corrupt. A failure to open
-// read-only or a query error (e.g. SQLITE_BUSY from a concurrent holder)
-// returns false: we couldn't prove corruption, so the caller must preserve the
-// file rather than rename-and-recreate over still-good data.
+// True when the file is provably structurally corrupt. Two signals count:
+//   1. `integrity_check` runs and returns a verdict that is NOT "ok".
+//   2. `integrity_check` ITSELF errors with a corruption error code — this is
+//      the common real-world case: a file truncated by a power-loss/force-kill
+//      mid-write surfaces `SQLITE_CORRUPT`, and a damaged/garbage header
+//      surfaces `SQLITE_NOTADB`. Treating those Errs as "unproven" (the old
+//      behavior) meant recovery never fired for exactly the corruption it was
+//      built for, permanently bricking startup.
+// A failure to open read-only or an ambiguous error (SQLITE_BUSY from a
+// concurrent holder, an I/O fault) returns false: corruption is unproven, so
+// the caller preserves the file rather than rename-and-recreate over good data.
 fn is_definitely_corrupt(path: &Path) -> bool {
     let Ok(conn) = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY) else {
         return false;
@@ -129,7 +154,90 @@ fn is_definitely_corrupt(path: &Path) -> bool {
     }
     match conn.query_row("PRAGMA integrity_check", [], |row| row.get::<_, String>(0)) {
         Ok(verdict) => verdict != "ok",
-        // Couldn't run the check (lock, I/O error): corruption is unproven.
-        Err(_) => false,
+        Err(e) => is_corruption_error(&e),
+    }
+}
+
+// Whether a rusqlite error's SQLite result code proves on-disk corruption
+// (as opposed to an environmental fault like a lock or transient I/O error we
+// must not destroy the file over).
+fn is_corruption_error(e: &rusqlite::Error) -> bool {
+    matches!(
+        e,
+        rusqlite::Error::SqliteFailure(err, _)
+            if err.code == rusqlite::ErrorCode::DatabaseCorrupt
+                || err.code == rusqlite::ErrorCode::NotADatabase
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+
+    fn temp_path(name: &str) -> PathBuf {
+        let mut dir = std::env::temp_dir();
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        dir.push(format!("studyvis-dbtest-{unique}-{name}"));
+        dir
+    }
+
+    // A real (small) SQLite DB whose file is then truncated mid-body surfaces
+    // SQLITE_CORRUPT from integrity_check — must classify as corrupt so
+    // recovery fires instead of the app bricking on every launch.
+    #[test]
+    fn truncated_db_is_definitely_corrupt() {
+        let path = temp_path("truncated.db");
+        {
+            let conn = Connection::open(&path).unwrap();
+            conn.execute_batch(
+                "PRAGMA page_size=4096; CREATE TABLE t(a TEXT); \
+                 INSERT INTO t(a) VALUES ('x'),('y'),('z');",
+            )
+            .unwrap();
+        }
+        let full = fs::read(&path).unwrap();
+        assert!(full.len() > 4096, "expected a multi-page db");
+        // Keep the header + first page but lop off the rest of the body.
+        let mut f = fs::OpenOptions::new().write(true).open(&path).unwrap();
+        f.set_len(4096 + 100).unwrap();
+        drop(f);
+        assert!(is_definitely_corrupt(&path));
+        let _ = fs::remove_file(&path);
+    }
+
+    // A file with a garbage (non-SQLite) header surfaces SQLITE_NOTADB.
+    #[test]
+    fn bad_magic_header_is_definitely_corrupt() {
+        let path = temp_path("badmagic.db");
+        {
+            let mut f = fs::File::create(&path).unwrap();
+            f.write_all(&[0xDE; 8192]).unwrap();
+        }
+        assert!(is_definitely_corrupt(&path));
+        let _ = fs::remove_file(&path);
+    }
+
+    // A healthy DB must NOT be classified as corrupt (never destroy good data).
+    #[test]
+    fn healthy_db_is_not_corrupt() {
+        let path = temp_path("healthy.db");
+        {
+            let conn = Connection::open(&path).unwrap();
+            conn.execute_batch("CREATE TABLE t(a TEXT); INSERT INTO t(a) VALUES ('ok');")
+                .unwrap();
+        }
+        assert!(!is_definitely_corrupt(&path));
+        let _ = fs::remove_file(&path);
+    }
+
+    // An absent / unopenable file is unproven, not corrupt.
+    #[test]
+    fn missing_file_is_not_definitely_corrupt() {
+        let path = temp_path("missing.db");
+        assert!(!is_definitely_corrupt(&path));
     }
 }

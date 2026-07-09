@@ -266,6 +266,7 @@ export function SessionView() {
     if (!room) return
     let cancelled = false
     let acquiredStream: MediaStream | null = null
+    let detachTrackEnded: (() => void) | null = null
     void (async () => {
       try {
         const stream =
@@ -289,6 +290,29 @@ export function SessionView() {
         // camera-off tile. Reads the ref so it's correct without re-running on
         // every toggle.
         for (const t of stream.getVideoTracks()) t.enabled = cameraOnRef.current
+        // Recover from a mid-session device loss. A live track can end at any
+        // time — camera unplugged, disabled in OS settings, privacy permission
+        // revoked, or (common on Windows, where camera access is often
+        // exclusive) grabbed by another app. Without this the peers see a
+        // frozen tile for the rest of the session and the AI face path reads a
+        // dead track, all with zero feedback. Surface the same recovery banner
+        // ("Try again" re-runs getUserMedia + room.addStream) the initial
+        // acquisition failure uses; 'NotReadableError' maps to the device
+        // in-use / unavailable copy bucket.
+        const handleTrackEnded = () => {
+          if (cancelled) return
+          if (localStreamRef.current !== stream) return
+          setMediaErrorName('NotReadableError')
+        }
+        const endedTracks = stream.getTracks()
+        for (const t of endedTracks) {
+          t.addEventListener('ended', handleTrackEnded)
+        }
+        detachTrackEnded = () => {
+          for (const t of endedTracks) {
+            t.removeEventListener('ended', handleTrackEnded)
+          }
+        }
         room.addStream(stream)
         setLocalStream(stream)
         localStreamRef.current = stream
@@ -313,6 +337,7 @@ export function SessionView() {
     })()
     return () => {
       cancelled = true
+      detachTrackEnded?.()
       if (acquiredStream) {
         try {
           room.removeStream(acquiredStream)

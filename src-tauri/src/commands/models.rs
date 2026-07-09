@@ -31,11 +31,20 @@ const PROGRESS_EVENT_BYTES: u64 = 1024 * 1024;
 const PROGRESS_EVENT_INTERVAL: Duration = Duration::from_millis(250);
 // reqwest's `timeout()` is a TOTAL request timeout — applying it to streaming
 // multi-GB GETs would reliably abort downloads on normal connections (5 GB at
-// 10 MB/s ≈ 8 minutes). We use `connect_timeout` for the TCP/TLS handshake
-// only and rely on the per-chunk `AtomicBool` cancel flag + manual streaming
-// loop to bound long-running downloads. HEAD checks reuse the same client and
-// are small enough that the absent total timeout doesn't matter.
+// 10 MB/s ≈ 8 minutes). We use `connect_timeout` for the TCP/TLS handshake and
+// `read_timeout` for the idle-between-reads bound, then rely on the per-chunk
+// `AtomicBool` cancel flag + manual streaming loop for the rest. HEAD checks
+// reuse the same client and are small enough that the absent total timeout
+// doesn't matter.
 const HTTP_CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
+// Per-read idle timeout (reqwest 0.12.5+). A mid-stream network stall (laptop
+// sleep, NAT rebind, silently dropped socket with no RST) otherwise blocks
+// `bytes_stream().next()` forever: the cancel flag is only polled AFTER a chunk
+// yields, so the download future never returns, the UI freezes, Cancel no-ops,
+// and the model_id stays permanently locked (`download already in flight`).
+// Bounding each read turns the stall into a normal stream error — the `.tmp`
+// is kept for Range resume and the model_id is released.
+const HTTP_READ_TIMEOUT: Duration = Duration::from_secs(60);
 
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 const KEYRING_SERVICE: &str = "com.studyvis.app";
@@ -151,6 +160,7 @@ pub struct HeadResult {
 fn build_client() -> Result<reqwest::Client, String> {
     reqwest::Client::builder()
         .connect_timeout(HTTP_CONNECT_TIMEOUT)
+        .read_timeout(HTTP_READ_TIMEOUT)
         .user_agent(concat!(
             "studyvis/",
             env!("CARGO_PKG_VERSION"),

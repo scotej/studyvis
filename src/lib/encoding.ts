@@ -13,11 +13,15 @@ export function bytesToHex(bytes: Uint8Array): string {
 
 export function hexToBytes(hex: string): Uint8Array {
   if (hex.length % 2 !== 0) throw new Error('hex must be even-length')
+  // PR-34 — validate the WHOLE string up front. parseInt() silently accepts a
+  // valid prefix and a leading sign/whitespace ('1g' → 0x01, '-a' → wraps,
+  // ' a' → 0x0a), so a malformed-but-partially-valid hex pubkey would decode
+  // to wrong-but-length-32 bytes instead of failing loud. In a key-custodial
+  // wire format that must fail closed.
+  if (!/^[0-9a-fA-F]*$/.test(hex)) throw new Error('invalid hex')
   const out = new Uint8Array(hex.length / 2)
   for (let i = 0; i < out.length; i++) {
-    const byte = parseInt(hex.slice(i * 2, i * 2 + 2), 16)
-    if (Number.isNaN(byte)) throw new Error('invalid hex')
-    out[i] = byte
+    out[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16)
   }
   return out
 }

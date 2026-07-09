@@ -140,6 +140,16 @@ export function Home() {
   // they're showing so the dialog is actually visible. NEVER auto-connects —
   // AddFriendDialog only prefills; the user still presses Connect.
   const handlePairDeepLink = useCallback((words: string[]) => {
+    // AddFriendDialog only mounts in the main view, not during an active
+    // session, so setting addOpen here mid-session would render nothing now AND
+    // pop the dialog open with stale words after the session ends. Guard the
+    // same way as the invite/join paths — legacy live pairing needs a live
+    // rendezvous with the friend anyway, so ask the user to leave first. (The
+    // contact-card deep link is fine mid-session — it's a pure local import.)
+    if (useSessionStore.getState().status === 'active') {
+      toast.error(strings.errors.leaveSessionFirst)
+      return
+    }
     setView('main')
     setDeepLinkWords(words)
     setAddOpen(true)
@@ -273,10 +283,17 @@ export function Home() {
   )
 
   if (sessionStatus === 'active') {
+    // PR-23 — render the full tail (not just {inbox}) so PairDeepLinkBoot's
+    // onOpenUrl listener and the contact-import dialog stay mounted during a
+    // live session. Rendering only {inbox} tore the deep-link subscriber down,
+    // so a studyvis:// link clicked mid-session was delivered to zero JS
+    // listeners and silently dropped. TopicGateModal stays closed (no pending
+    // start during an active session); a contact link opens the import dialog
+    // over the session, which is a pure local friend import.
     return (
       <>
         <SessionView />
-        {inbox}
+        {tail}
       </>
     )
   }

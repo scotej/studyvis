@@ -29,6 +29,11 @@ export const strings = {
     name: 'StudyVis',
     homeSrHeading: 'StudyVis',
     sessionSrHeading: 'Studying with friends',
+    error: {
+      title: 'Something went wrong',
+      body: 'A part of StudyVis ran into an unexpected error. Your identity, friends, and history are safe.',
+      retry: 'Try again',
+    },
   },
 
   common: {
@@ -913,7 +918,7 @@ export const strings = {
         "While the AI is sampling, your operating system's screen-recording indicator stays on for the whole session. That's expected — it turns off when you leave. On macOS, screen-recording access is granted and revoked only in System Settings → Privacy & Security → Screen Recording; StudyVis can open it for you when needed.",
       enable: {
         label: 'Enable AI features',
-        help: "Off by default. When off, StudyVis is a plain study room — no model, no capture, no scoring. We'll ask for screen access when you start your first session.",
+        help: "Off by default. When off, StudyVis is a plain study room — no model, no capture, no scoring. We'll ask for screen access when you turn AI on.",
         ariaLabel: 'Enable AI features',
       },
       modelOff: {
@@ -986,7 +991,7 @@ export const strings = {
         requestErrorFallback: "Couldn't request access.",
         // D5 — onboarding/first-session prompt before screen access exists.
         pickModelFirstBody:
-          "Pick and download a model now. We'll ask for screen access when you start a session — your OS recording indicator will stay lit for the whole session.",
+          'Pick and download a model now. StudyVis asks for screen access when AI is on — your OS recording indicator will stay lit for the whole session.',
       },
     },
 

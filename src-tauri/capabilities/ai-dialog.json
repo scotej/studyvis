@@ -3,5 +3,5 @@
   "identifier": "ai-dialog",
   "description": "Floating Ctrl+] AI dialog window — core only (event/window IPC). No plugin (notification/store) surface per ARCHITECTURE.md §12 least-privilege.",
   "windows": ["ai-dialog"],
-  "permissions": ["core:default"]
+  "permissions": ["core:default", "core:window:allow-close"]
 }

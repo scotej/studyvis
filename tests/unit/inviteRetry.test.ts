@@ -23,6 +23,33 @@ describe('createInviteRetryManager', () => {
     expect(mgr.pendingCount()).toBe(0)
   })
 
+  test('PR-9: does not deliver a retry for a session that is no longer live', async () => {
+    const deliver = vi.fn(async () => {})
+    let live = true
+    const mgr = createInviteRetryManager({
+      isSessionLive: (topic) => live && topic === SESSION,
+    })
+    mgr.register(FRIEND, SESSION, deliver)
+    expect(mgr.pendingCount()).toBe(1)
+
+    // Host left the session before the friend came back online.
+    live = false
+    await mgr.onPresenceOnline(FRIEND)
+    expect(deliver).not.toHaveBeenCalled()
+    // The dead entry is dropped, not left dangling.
+    expect(mgr.pendingCount()).toBe(0)
+  })
+
+  test('PR-9: still delivers while the session is live', async () => {
+    const deliver = vi.fn(async () => {})
+    const mgr = createInviteRetryManager({
+      isSessionLive: (topic) => topic === SESSION,
+    })
+    mgr.register(FRIEND, SESSION, deliver)
+    await mgr.onPresenceOnline(FRIEND)
+    expect(deliver).toHaveBeenCalledTimes(1)
+  })
+
   test('a different friend coming online does not trigger the retry', async () => {
     const deliver = vi.fn(async () => {})
     const mgr = createInviteRetryManager()

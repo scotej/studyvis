@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 
 import { useIdentity } from '@/features/identity'
-import { relaysUnreachable } from '@/lib/relayDiagnostics'
+import { pairingRelaysUnreachable } from '@/lib/relayDiagnostics'
 import { useFriendsStore } from '@/stores/friendsStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { strings } from '@/strings'
@@ -96,6 +96,11 @@ export function AddFriendDialog({
         setTab(initialTab ?? 'host')
         setLatchedWords(undefined)
       }
+    } else {
+      // PR-11 — a close (user- OR parent-driven) resets the phase so a reopen
+      // never shows a stale "waiting" surface. The imperative teardown of an
+      // in-flight pairing (abort + timer) happens in the effect below.
+      setPhase({ kind: 'idle' })
     }
   }
 
@@ -107,6 +112,25 @@ export function AddFriendDialog({
       }
     }
   }, [])
+
+  // PR-11 — Radix's controlled Dialog only calls onOpenChange for USER-driven
+  // closes; when the PARENT flips `open` to false it fires nothing. A
+  // contact-card deep link arriving mid-pairing does exactly that
+  // (Home.handleContactDeepLink → setAddOpen(false)) while this wrapper stays
+  // mounted, so handleOpenChange never runs and the in-flight pairing's
+  // trystero room + Nostr/MQTT relay sockets are orphaned: the AbortController
+  // is never aborted and runPair's finally (room.leave) never executes. Abort
+  // on any close, from either path — idempotent (the phase reset rides the
+  // render-phase transition above so no setState happens in this effect).
+  useEffect(() => {
+    if (open) return
+    abortRef.current?.abort()
+    abortRef.current = null
+    if (successCloseRef.current !== null) {
+      clearTimeout(successCloseRef.current)
+      successCloseRef.current = null
+    }
+  }, [open])
 
   // Build our own ContactCard (studyvis://add#… link) while the dialog is open.
   // It needs a keyring signature, so it's async — the surface shows a skeleton
@@ -152,10 +176,12 @@ export function AddFriendDialog({
     const id = setTimeout(() => {
       // F1 — after a long wait with no peer, decide WHICH hint to show. The
       // honest relay-down signal is the live socket map, not trystero's
-      // `onJoinError` (which never fires on unreachable relays). If no relay is
-      // reachable, blame the network; otherwise fall back to the friend-side
-      // "still waiting" nudge.
-      const networkDown = relaysUnreachable()
+      // `onJoinError` (which never fires on unreachable relays). Pairing races
+      // Nostr + MQTT, so PR-21 judges BOTH transports: only blame the network
+      // when neither Nostr nor MQTT has an open socket — otherwise pairing can
+      // still complete over the transport that IS up, and we fall back to the
+      // friend-side "still waiting" nudge.
+      const networkDown = pairingRelaysUnreachable()
       setPhase((cur) =>
         (cur.kind === 'host-waiting' || cur.kind === 'join-progress') &&
         !cur.peerArrived &&

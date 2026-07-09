@@ -54,6 +54,13 @@ struct SidecarInner {
     // generation increments on every explicit start so a stale watcher from a
     // previous run knows to exit instead of re-incarnating the process.
     generation: u64,
+    // Set once by kill_blocking at app exit / relaunch. The crash-restart
+    // watcher re-checks this after its backoff sleep and bails BEFORE spawning,
+    // so a sidecar that died in the restart window can't be respawned after the
+    // exit path already ran kill_blocking (which would orphan it — the
+    // post-spawn generation check only fires if the watcher task gets another
+    // scheduling quantum before the process tears down).
+    shutting_down: bool,
     errored: bool,
     last_error: Option<String>,
 }
@@ -92,6 +99,7 @@ impl SidecarState {
             }
         };
         guard.generation = guard.generation.wrapping_add(1);
+        guard.shutting_down = true;
         if let Some(child) = guard.child.take() {
             let _ = child.kill();
         }
@@ -489,6 +497,18 @@ async fn watch<R: Runtime>(
             std::thread::sleep(RESTART_BACKOFF);
         })
         .await;
+
+        // Re-check after the backoff: an explicit stop, a newer start, or an
+        // app-exit/relaunch kill_blocking during the sleep means we must not
+        // respawn. Bailing BEFORE pick_unused_port/spawn_llama is what keeps a
+        // sidecar that crashed in the restart window from being orphaned at
+        // quit time (kill_blocking already ran; it found no child to kill).
+        {
+            let guard = state.lock().await;
+            if guard.generation != generation || guard.shutting_down {
+                return;
+            }
+        }
 
         let port = match pick_unused_port() {
             Ok(p) => p,

@@ -60,9 +60,25 @@ jobs:
         run: npm run check-contrast
 
   rust:
-    name: Rust
-    runs-on: macos-latest
-    timeout-minutes: 25
+    name: Rust (${{ matrix.label }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      # PR-17 — compile BOTH shipped host targets on every push/PR. Building
+      # only aarch64-apple-darwin left every #[cfg(target_os = "windows")] path
+      # (custom-chrome set_decorations, the sidecar PATH block, the
+      # windows-native keyring backend) uncompiled until release.yml's
+      # windows-latest job — which runs AFTER release-prep has already pushed
+      # the immutable vX.Y.Z tag, so a Windows-only break burned a version.
+      fail-fast: false
+      matrix:
+        include:
+          - label: macOS
+            os: macos-latest
+            llama-triple: aarch64-apple-darwin
+          - label: Windows
+            os: windows-latest
+            llama-triple: x86_64-pc-windows-msvc
     steps:
       - uses: actions/checkout@v6
 
@@ -74,12 +90,14 @@ jobs:
         with:
           workspaces: src-tauri -> target
 
-      # tauri.conf.json's bundle.externalBin entry requires the file to exist
-      # on disk during the cargo build script (V2-P1). The Rust job runs on
-      # macos-latest which is Apple Silicon, so the host triple matches the
-      # only one we need for cargo check.
+      # tauri.conf.json's bundle.externalBin entry requires the file to exist on
+      # disk during the cargo build script (V2-P1). Each runner is its own host
+      # triple (macos-latest = Apple Silicon, windows-latest = x86_64-msvc), so
+      # cargo check/test build natively for the shipped target. `shell: bash`
+      # runs the fetch script identically on the Windows runner.
       - name: Fetch llama-server prebuild
-        run: bash scripts/fetch-llama-server.sh --triple aarch64-apple-darwin
+        shell: bash
+        run: bash scripts/fetch-llama-server.sh --triple ${{ matrix.llama-triple }}
 
       - name: cargo fmt
         working-directory: src-tauri

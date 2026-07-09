@@ -452,15 +452,62 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
     return state.backoff.engaged ? baseMs * BACKOFF_MULTIPLIER : baseMs
   }
 
-  // The user clicked the OS "Stop sharing" pill (or the display went away).
-  // Latch like a denial so the loop stops scheduling fresh ticks; a fresh
-  // start() (after re-grant via the permission overlay) is required to
-  // resume — same contract as screen_capture_denied.
-  function onScreenTrackEnded(): void {
+  // A screen track ended — the user clicked the OS "Stop sharing" pill, or a
+  // display went away (undock / sleep / unplug). In 'all' mode we hold several
+  // long-lived displays; losing ONE while others stay live must NOT tear down
+  // all AI capture and pop the screen-permission overlay (misleading — no
+  // permission was revoked). Drop just the dead display and keep compositing
+  // the rest. Only when the LAST live display is gone do we latch like a
+  // denial, requiring a fresh start() (via the overlay) to resume — same
+  // contract as screen_capture_denied.
+  function onScreenTrackEnded(event: Event): void {
     if (state.stopped) return
     if (state.captureDenied) return
+    const endedTrack =
+      event.target instanceof MediaStreamTrack ? event.target : null
+    // Count tracks still live after this 'ended' (the ended track's readyState
+    // is already 'ended' when the event fires).
+    const liveRemaining = state.screenTracks.filter(
+      (t) => t.readyState !== 'ended'
+    ).length
+    if (liveRemaining > 0) {
+      if (endedTrack) dropScreenTrack(endedTrack)
+      return
+    }
     state.captureDenied = true
     opts.onCaptureDenied?.()
+  }
+
+  // Remove one dead display from the tracked set: unhook its listener, stop its
+  // stream, and splice it out of the parallel screenTracks/screenStreams arrays
+  // so snapshotScreens composites only the survivors.
+  function dropScreenTrack(track: MediaStreamTrack): void {
+    try {
+      track.removeEventListener('ended', onScreenTrackEnded)
+    } catch {
+      // best-effort
+    }
+    const idx = state.screenTracks.indexOf(track)
+    if (idx === -1) {
+      try {
+        track.stop()
+      } catch {
+        // ignore
+      }
+      return
+    }
+    const stream = state.screenStreams[idx]
+    if (stream) {
+      for (const t of stream.getTracks()) {
+        try {
+          t.stop()
+        } catch {
+          // ignore
+        }
+      }
+    }
+    state.screenTracks.splice(idx, 1)
+    state.screenStreams.splice(idx, 1)
   }
 
   async function stopSidecarBestEffort(): Promise<void> {

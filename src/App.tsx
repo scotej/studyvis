@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from 'react'
 import { BrowserRouter, Route, Routes } from 'react-router'
 
+import { ErrorBoundary } from '@/components/ErrorBoundary'
 import { TitleBar } from '@/components/TitleBar'
 import { Toaster } from '@/components/ui/sonner'
 import { ApplyReduceMotion } from '@/design/reduce-motion'
@@ -49,10 +50,12 @@ function App() {
       <PomodoroNotifyListener />
       <BrowserRouter>
         <ChromeAwareShell>
-          <Routes>
-            <Route path="/" element={<Home />} />
-            {isDev ? <Route path="/style" element={<StyleGuide />} /> : null}
-          </Routes>
+          <ErrorBoundary surface="routes">
+            <Routes>
+              <Route path="/" element={<Home />} />
+              {isDev ? <Route path="/style" element={<StyleGuide />} /> : null}
+            </Routes>
+          </ErrorBoundary>
         </ChromeAwareShell>
         <Toaster position="bottom-right" />
       </BrowserRouter>

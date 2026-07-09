@@ -246,12 +246,13 @@ export function ReportView({
     [auditEvents]
   )
   const topDistractions = useMemo(
-    () => deriveTopDistractions(auditEvents),
-    [auditEvents]
+    () => deriveTopDistractions(auditEvents, myEdPubkeyHex),
+    [auditEvents, myEdPubkeyHex]
   )
   const topicTimeline = useMemo(
-    () => deriveTopicTimeline(session.declared_topic, auditEvents),
-    [session.declared_topic, auditEvents]
+    () =>
+      deriveTopicTimeline(session.declared_topic, auditEvents, myEdPubkeyHex),
+    [session.declared_topic, auditEvents, myEdPubkeyHex]
   )
   const breaksSummary = useMemo(
     () => deriveBreaksSummary(auditEvents),

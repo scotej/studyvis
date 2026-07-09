@@ -2,6 +2,7 @@ import { generateMnemonic } from '@scure/bip39'
 import { wordlist as englishWordlist } from '@scure/bip39/wordlists/english.js'
 
 import { bytesToHex, hexToBytes, verifyMessage } from '@/lib/crypto/identity'
+import { normalizeUntrustedName } from '@/features/friends/contactCard'
 import { pairPassword, pairTopic } from '@/lib/crypto/topics'
 import { joinTopic } from '@/lib/trystero'
 import { buildIceOptions } from '@/lib/trystero/ice'
@@ -173,7 +174,10 @@ export function verifyHello(
   return {
     edPubkey: hello.ed_pubkey,
     xPubkey: hello.x_pubkey,
-    name: hello.display_name,
+    // PR-29 — the display_name is NOT covered by the pairing signature, so
+    // cap + sanitize it exactly as the offline ContactCard path does before it
+    // reaches the DB / friends list. Identity is the ed key, not the name.
+    name: normalizeUntrustedName(hello.display_name),
   }
 }
 

@@ -134,8 +134,9 @@ The `trystero` package uses Nostr by default — a network of public WebSocket r
 - `room.onPeerJoin` / `onPeerLeave` for presence on the topic.
 
 ### Strategies
-1. **Nostr** (default, `trystero` package) — public Nostr relay network, no auth required, small message footprint. This is the only strategy currently wired.
-2. **BitTorrent trackers** (`@trystero-p2p/torrent`) and **MQTT** (`@trystero-p2p/mqtt`) — available in the library as fallbacks if Nostr relays misbehave, but **not yet wired**; strategy-racing is deferred.
+1. **Nostr** (default, `trystero` package) — public Nostr relay network, no auth required, small message footprint. It carries all long-lived rooms (inbox, presence, session mesh).
+2. **MQTT** (`@trystero-p2p/mqtt`) — wired since v1.2.2 for **pairing only**, raced alongside Nostr. `joinTopic` opens one room per strategy on the same topic + password over a single shared `@trystero-p2p/core`, so a peer keeps one stable `selfId`/peerId across transports; joins are deduped by peerId and both rooms are torn down on `leave` (see `src/lib/trystero/index.ts` `mergeRooms`). This survives a dark/blocked Nostr relay set **or** a clock-skewed peer (Nostr filters ephemeral announces on `since: now()`; MQTT has no time filter and shares no infrastructure). Only pairing races transports — long-lived rooms stay single-strategy (Nostr) to avoid duplicate peer connections.
+3. **BitTorrent trackers** (`@trystero-p2p/torrent`) — available in the library as a further fallback but **not wired**.
 
 We never ship Firebase or Supabase strategies; both require keys we'd own (= backend we operate).
 
@@ -700,6 +701,9 @@ The `Ctrl+]` AI dialog is a separate Tauri window with:
 |-|-|-|
 | Stranger spams my inbox | Drop messages from non-friends silently. Public Nostr relays absorb the load. | Low. |
 | Stranger who learned my Ed25519 pubkey writes to my inbox topic | Inbox-topic password also derives from my pubkey, so they can write encrypted-at-the-trystero-layer junk; we still drop after decrypt + signature check. | Wasted bandwidth only — invite payloads are *additionally* NaCl-box-encrypted to my X25519 pubkey, so the stranger can't actually read or forge real invites. Acceptable for friend-only model; consider per-friend-pair shared-secret topics in V3 if abused. |
+| Stranger replays a captured invite envelope to re-fire my invite toast/notification | The inbox receiver dedups on `(from_ed_pubkey, box nonce)` within the invite TTL, so a replayed envelope is dropped after the first delivery. | Low — one genuine invite still shows once; a stranger cannot manufacture new invites (they're signed + boxed). |
+| Stranger camped on my inbox topic is seen by the sender as "delivered" (or silently drops my invite) | A peer joining the pubkey-derived inbox topic is treated as delivery, and the sender can't distinguish the real recipient from an eavesdropper on that shared topic. | **Accepted** under friends-only — the envelope is still NaCl-box-sealed to the recipient's X25519 key, so a stranger can't read it; the worst case is a suppressed offline-retry (the host re-clicks Invite). A signed application-level invite-ACK is a flagged future hardening. |
+| Stranger who learned a friend's Ed25519 pubkey forges that friend's presence (online/offline) | Presence topic + password derive from the target's public pubkey and the heartbeat/goodbye payloads are unauthenticated (unlike invites, which are boxed + signed). | **Accepted** under friends-only — presence is soft UX state (a dot + invite affordance), not a data or session compromise; the worst case is a spurious "came online" notification or a griefed offline dot. Signing heartbeats would break cross-version presence (older peers send unsigned), so it's deferred rather than enforced. |
 | Stranger eavesdrops on Nostr | All topic messages are password-encrypted by trystero. Pairing words / inbox derivation are not on-the-wire. | Negligible for friend-only model. |
 | Friend disables their own AI / fakes score | Not defended. Social trust. | Accepted. |
 | Friend impersonates another friend on Nostr | Ed25519 signatures on every event. Receivers verify against saved pubkey. | Very low. |
