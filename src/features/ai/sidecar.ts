@@ -164,6 +164,15 @@ export const useSidecarStore = create<SidecarState>((set, get) => ({
     set({ status: 'starting', lastError: null })
     try {
       const port = await activeRuntime.start({ modelPath, mmprojPath, ctxSize })
+      // PR-13 — a stop() may have run while we awaited (session teardown, a
+      // localStream re-acquire, or a model change firing the sample-loop effect
+      // cleanup). It would have transitioned us out of 'starting'; don't clobber
+      // that back to 'running' with a port whose process the interleaved stop
+      // already killed. Tear down what we just started and bail.
+      if (get().status !== 'starting') {
+        await activeRuntime.stop().catch(() => {})
+        return null
+      }
       set({
         status: 'running',
         port,

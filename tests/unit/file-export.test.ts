@@ -41,6 +41,20 @@ describe('csvCell', () => {
     expect(csvCell('line1\nline2')).toBe('"line1\nline2"')
     expect(csvCell(42)).toBe('42')
   })
+
+  test('PR-10: neutralizes formula-injection triggers in string cells', () => {
+    expect(csvCell('=HYPERLINK("http://evil","x")')).toBe(
+      '"\'=HYPERLINK(""http://evil"",""x"")"'
+    )
+    expect(csvCell('+1+1')).toBe("'+1+1")
+    expect(csvCell('-cmd')).toBe("'-cmd")
+    expect(csvCell('@SUM(A1)')).toBe("'@SUM(A1)")
+    // Leading tab is also a trigger; the prefixed cell has no comma/quote/CR/LF
+    // so it is not additionally quoted.
+    expect(csvCell('\t=cmd')).toBe("'\t=cmd")
+    // A negative NUMBER must not be corrupted (stays numeric, no quote prefix).
+    expect(csvCell(-5)).toBe('-5')
+  })
 })
 
 describe('buildCsv', () => {

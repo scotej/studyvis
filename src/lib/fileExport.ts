@@ -74,13 +74,25 @@ export function fileDateStamp(ts: number, timeZone?: string): string {
 }
 
 // RFC-4180-ish CSV cell escaping: wrap in quotes and double internal quotes
-// when the value contains a comma, quote, or newline.
+// when the value contains a comma, quote, or newline. String cells are also
+// guarded against spreadsheet formula injection (PR-10).
 export function csvCell(value: string | number): string {
-  const s = String(value)
-  if (/[",\n\r]/.test(s)) {
-    return `"${s.replace(/"/g, '""')}"`
+  // Numeric cells are our own data, never a user-controlled formula — and a
+  // negative number legitimately begins with '-', so it must NOT be prefixed.
+  if (typeof value === 'number') {
+    const n = String(value)
+    return /[",\n\r]/.test(n) ? `"${n.replace(/"/g, '""')}"` : n
   }
-  return s
+  let s = value
+  // PR-10 — neutralize CSV/formula injection. A peer- or stranger-chosen string
+  // (a friend display name flows verbatim into the stats CSV) beginning with a
+  // formula trigger would execute when the file is opened in Excel / LibreOffice
+  // / Google Sheets — data exfiltration via =HYPERLINK, command execution via a
+  // =cmd|'/c …'!A1 DDE payload. Prefixing a single quote makes the cell text.
+  if (/^[=+\-@\t\r]/.test(s)) {
+    s = `'${s}`
+  }
+  return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
 }
 
 // Builds a CSV string from a header row + body rows. Cells are escaped; rows

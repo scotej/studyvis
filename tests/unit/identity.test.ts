@@ -285,4 +285,17 @@ describe('hex utilities', () => {
   test('hexToBytes rejects odd-length input', () => {
     expect(() => hexToBytes('abc')).toThrow()
   })
+
+  test('PR-34: hexToBytes rejects malformed hex instead of silently mis-decoding', () => {
+    // parseInt would accept a valid prefix or a leading sign/space; strict
+    // validation must reject all of these (each is even-length).
+    expect(() => hexToBytes('1g')).toThrow()
+    expect(() => hexToBytes('-a')).toThrow()
+    expect(() => hexToBytes('+f')).toThrow()
+    expect(() => hexToBytes(' a')).toThrow()
+    expect(() => hexToBytes('a!')).toThrow()
+    expect(() => hexToBytes('1g'.repeat(32))).toThrow()
+    // Uppercase remains valid.
+    expect(Array.from(hexToBytes('AB'))).toEqual([0xab])
+  })
 })

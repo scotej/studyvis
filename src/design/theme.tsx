@@ -62,11 +62,22 @@ export function ThemeProvider({
 
   const resolved: 'dark' | 'light' = mode === 'auto' ? system : mode
 
+  // PR-28 — before the persistent store hydrates (production has no
+  // `defaultMode`), `mode` falls back to 'dark'. Writing that here would strip
+  // the `light` class the index.html pre-paint script already set from the
+  // theme boot cache, flashing dark for light/auto-on-light users until
+  // hydration lands. So only touch the class once we have an authoritative
+  // mode: the store is ready, or a defaultMode was passed (Storybook). Until
+  // then, defer to the boot script's class.
+  const hasAuthoritativeMode =
+    settingsStatus === 'ready' || defaultMode !== undefined
+
   const useIsoLayoutEffect =
     typeof window === 'undefined' ? useEffect : useLayoutEffect
   useIsoLayoutEffect(() => {
+    if (!hasAuthoritativeMode) return
     applyClass(resolved)
-  }, [resolved])
+  }, [resolved, hasAuthoritativeMode])
 
   const setMode = useCallback(
     (next: ThemeMode) => {
