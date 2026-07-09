@@ -15,6 +15,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { DownloadIcon } from 'lucide-react'
 import { toast } from 'sonner'
 
+import { useIdentity } from '@/features/identity'
 import { SettingsSection } from '@/components/SettingsRow'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
@@ -92,6 +93,11 @@ export function Dashboard({ __loader, now }: DashboardProps) {
   const [status, setStatus] = useState<Status>({ kind: 'loading' })
   const [reloadKey, setReloadKey] = useState(0)
   const retry = useCallback(() => setReloadKey((k) => k + 1), [])
+  const { identity } = useIdentity()
+  // Scope focus-insights to the local user so peers' broadcast ai_alert rows
+  // (persisted locally under the same session_id) aren't tallied as the user's
+  // own distractions — consistent with the self-only focused-time trend.
+  const myEdPubkeyHex = identity?.ed_pubkey_hex ?? null
 
   useEffect(() => {
     let cancelled = false
@@ -104,7 +110,7 @@ export function Dashboard({ __loader, now }: DashboardProps) {
         setStatus({
           kind: 'ready',
           summary: computeStats(sessions, friends, now ?? Date.now()),
-          insights: computeInsights(sessions, auditEvents),
+          insights: computeInsights(sessions, auditEvents, myEdPubkeyHex),
         })
       })
       .catch((err: unknown) => {
@@ -120,7 +126,7 @@ export function Dashboard({ __loader, now }: DashboardProps) {
     return () => {
       cancelled = true
     }
-  }, [__loader, now, reloadKey])
+  }, [__loader, now, reloadKey, myEdPubkeyHex])
 
   if (status.kind === 'loading') {
     return (

@@ -147,6 +147,28 @@ describe('deriveTopDistractions', () => {
     const distractions = deriveTopDistractions(events)
     expect(distractions.map((d) => d.reasoning)).toEqual(['r3', 'r2', 'r1'])
   })
+
+  test('PR-5: filterWho restricts to the local user, excluding peers', () => {
+    const events: AuditEventRecord[] = [
+      evt('me', 'ai_alert', 0, { severity: 'moderate', reasoning: 'phone' }),
+      // A peer's broadcast alerts are persisted locally under the same
+      // session but must not count toward the local user's distractions.
+      evt('peer', 'ai_alert', 1000, {
+        severity: 'blatant',
+        reasoning: 'games',
+      }),
+      evt('peer', 'ai_alert', 2000, {
+        severity: 'blatant',
+        reasoning: 'games',
+      }),
+    ]
+    const mine = deriveTopDistractions(events, 'me')
+    expect(mine.map((d) => d.reasoning)).toEqual(['phone'])
+    // Case-insensitive on the ed_pubkey hex.
+    expect(deriveTopDistractions(events, 'ME')).toEqual(mine)
+    // Omitting the filter keeps the raw all-signers behavior.
+    expect(deriveTopDistractions(events).length).toBe(2)
+  })
 })
 
 describe('deriveTopicTimeline', () => {
@@ -211,6 +233,25 @@ describe('deriveTopicTimeline', () => {
     ]
     const timeline = deriveTopicTimeline(null, events)
     expect(timeline.map((e) => e.topic)).toEqual(['Coding'])
+  })
+
+  test('PR-5: filterWho ignores a peer topic_change (no phantom local switch)', () => {
+    const events: AuditEventRecord[] = [
+      evt('me', 'joined', 0),
+      // A peer declares a different topic; broadcast + persisted locally. It
+      // must NOT appear as the local user switching topics.
+      evt('peer', 'topic_set', 3 * 60_000, { topic: 'Spanish' }),
+      evt('me', 'topic_change', 8 * 60_000, {
+        previous_topic: 'Calculus',
+        new_topic: 'Linear Algebra',
+      }),
+    ]
+    const mine = deriveTopicTimeline('Calculus', events, 'me')
+    expect(mine.map((e) => e.topic)).toEqual(['Calculus', 'Linear Algebra'])
+    // Without the filter, the peer's topic leaks into the walk.
+    expect(deriveTopicTimeline('Calculus', events).map((e) => e.topic)).toEqual(
+      ['Calculus', 'Spanish', 'Linear Algebra']
+    )
   })
 })
 

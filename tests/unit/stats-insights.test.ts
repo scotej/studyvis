@@ -150,6 +150,30 @@ describe('computeRecurringReasons', () => {
       'beta',
     ])
   })
+
+  test('PR-5: filterWho excludes a peer’s broadcast distraction reasons', () => {
+    const mine = {
+      ...evt('A', 'ai_alert', 1, { reasoning: 'my phone' }),
+      who: 'me',
+    }
+    const peer1 = {
+      ...evt('A', 'ai_alert', 2, { reasoning: 'their youtube' }),
+      who: 'peer',
+    }
+    const peer2 = {
+      ...evt('A', 'ai_alert', 3, { reasoning: 'their youtube' }),
+      who: 'peer',
+    }
+    const events = [mine, peer1, peer2]
+    expect(computeRecurringReasons(events, 'me')).toEqual([
+      { reasoning: 'my phone', count: 1 },
+    ])
+    // Unfiltered, the peer's reason dominates — the bug this guards.
+    expect(computeRecurringReasons(events)[0]).toEqual({
+      reasoning: 'their youtube',
+      count: 2,
+    })
+  })
 })
 
 describe('computeTrend', () => {

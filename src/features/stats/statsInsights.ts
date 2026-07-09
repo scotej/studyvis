@@ -81,13 +81,22 @@ function startedAtBySession(
   return map
 }
 
+// `filterWho` restricts distraction events to a single signer — the Dashboard
+// passes the LOCAL user's ed_pubkey so a peer's broadcast `ai_alert` rows
+// (persisted locally under the same session_id) aren't tallied into the local
+// user's cross-session insights, matching the self-only `computeTrend`. Omitted
+// → counts every signer (raw-transform tests).
 export function computeTiming(
   sessions: readonly SessionRecord[],
-  events: readonly AuditEventRecord[]
+  events: readonly AuditEventRecord[],
+  filterWho?: string | null
 ): TimingDistribution {
+  const only =
+    filterWho && filterWho.length > 0 ? filterWho.toLowerCase() : null
   const startedAt = startedAtBySession(sessions)
   const dist: TimingDistribution = { early: 0, mid: 0, late: 0, total: 0 }
   for (const e of events) {
+    if (only && e.who.toLowerCase() !== only) continue
     if (!isDistraction(e.kind)) continue
     const detail = parseAuditDetail(e.detail)
     const reasoning =
@@ -108,10 +117,14 @@ export function computeTiming(
 // per-session, here at the multi-session scale. Sorted by count desc, then
 // reasoning asc for a stable order; capped at INSIGHTS_REASON_LIMIT.
 export function computeRecurringReasons(
-  events: readonly AuditEventRecord[]
+  events: readonly AuditEventRecord[],
+  filterWho?: string | null
 ): RecurringReason[] {
+  const only =
+    filterWho && filterWho.length > 0 ? filterWho.toLowerCase() : null
   const counts = new Map<string, number>()
   for (const e of events) {
+    if (only && e.who.toLowerCase() !== only) continue
     if (!isDistraction(e.kind)) continue
     const detail = parseAuditDetail(e.detail)
     const reasoning =
@@ -147,10 +160,11 @@ export function computeTrend(sessions: readonly SessionRecord[]): TrendPoint[] {
 
 export function computeInsights(
   sessions: readonly SessionRecord[],
-  events: readonly AuditEventRecord[]
+  events: readonly AuditEventRecord[],
+  filterWho?: string | null
 ): FocusInsights {
-  const timing = computeTiming(sessions, events)
-  const reasons = computeRecurringReasons(events)
+  const timing = computeTiming(sessions, events, filterWho)
+  const reasons = computeRecurringReasons(events, filterWho)
   const trend = computeTrend(sessions)
   return {
     hasData: timing.total > 0 || reasons.length > 0 || trend.length > 0,

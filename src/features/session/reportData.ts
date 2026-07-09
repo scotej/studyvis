@@ -64,11 +64,21 @@ export type TopDistraction = {
 // contribute their deduction (from SEVERITY_DEDUCTIONS) to the group
 // total so the user sees how much score the distraction cost. Top 5 by
 // count, then by total deduction.
+// `filterWho` restricts the aggregation to a single signer's events — the
+// report passes the LOCAL user's ed_pubkey so peers' broadcast `ai_alert` rows
+// (persisted locally under the same session_id) don't inflate the local user's
+// distraction list and −deduction total, keeping this consistent with the
+// local-only score gauge beside it. Omitted → aggregates every signer (the raw
+// transform tests exercise this form).
 export function deriveTopDistractions(
-  events: ReadonlyArray<AuditEventRecord>
+  events: ReadonlyArray<AuditEventRecord>,
+  filterWho?: string | null
 ): TopDistraction[] {
+  const only =
+    filterWho && filterWho.length > 0 ? filterWho.toLowerCase() : null
   const groups = new Map<string, { count: number; totalDeduction: number }>()
   for (const e of events) {
+    if (only && e.who.toLowerCase() !== only) continue
     if (e.kind !== 'ai_warning' && e.kind !== 'ai_alert') continue
     const detail = parseAuditDetail(e.detail)
     const reasoning =
@@ -141,12 +151,23 @@ export type TopicTimelineEntry = {
 // The walk is by ts; consecutive identical topics collapse (audit-event
 // dedup at the wire level is not guaranteed for topic_set, which V2-P9
 // will produce).
+// `filterWho` restricts the topic walk to a single signer — the report passes
+// the LOCAL user's ed_pubkey so a peer's broadcast `topic_set`/`topic_change`
+// (persisted locally) doesn't render as a phantom topic-change in the local
+// user's own timeline. The anchor (initialTopic) is already the local declared
+// topic and the start offset uses the whole session's first event (shared
+// session start), so only the change rows need scoping. Omitted → walks every
+// signer's topic events (raw-transform tests).
 export function deriveTopicTimeline(
   initialTopic: string | null,
-  events: ReadonlyArray<AuditEventRecord>
+  events: ReadonlyArray<AuditEventRecord>,
+  filterWho?: string | null
 ): TopicTimelineEntry[] {
+  const only =
+    filterWho && filterWho.length > 0 ? filterWho.toLowerCase() : null
   const topicEvents = events
     .filter((e) => e.kind === 'topic_change' || e.kind === 'topic_set')
+    .filter((e) => !only || e.who.toLowerCase() === only)
     .sort((a, b) => a.ts - b.ts)
   const anchor =
     initialTopic && initialTopic.trim().length > 0

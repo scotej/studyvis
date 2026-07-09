@@ -80,9 +80,13 @@ export function formatTopicHeading(topic: string | null): string {
 // wherever they choose. The single source of truth for the export text.
 export function serializeReportToText(data: ResolvedReportData): string {
   const { session, auditEvents, nameByEdPubkey, myEdPubkeyHex } = data
-  const topicTimeline = deriveTopicTimeline(session.declared_topic, auditEvents)
+  const topicTimeline = deriveTopicTimeline(
+    session.declared_topic,
+    auditEvents,
+    myEdPubkeyHex
+  )
   const grouped = groupTimelineByWho(auditEvents)
-  const distractions = deriveTopDistractions(auditEvents)
+  const distractions = deriveTopDistractions(auditEvents, myEdPubkeyHex)
   const breaks = deriveBreaksSummary(auditEvents)
   const totalMinutes = session.total_minutes ?? 0
   const focusedPctLabel =
