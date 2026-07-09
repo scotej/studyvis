@@ -309,9 +309,11 @@ user-facing tour in `README.md`.
   greys + amber with the warm-honey canvas that `DESIGN-SYSTEM` §1
   now describes as "Calm Dark — Linear × Things 3, warm not
   corporate".
-- Per-arch macOS DMGs — the release workflow builds `aarch64` and
+- Per-arch macOS DMGs — the release workflow built `aarch64` and
   `x86_64` separately rather than producing a universal binary,
-  because the llama-server sidecar is per-arch.
+  because the llama-server sidecar is per-arch. (Superseded later in
+  v1.0.5 by the "Dropped the macOS Intel build target" note above:
+  the shipped matrix is now Apple Silicon `aarch64` only.)
 - Audit pass (`audit/sev1-sev2-fixes` then `audit/sev3-sev4-fixes`)
   closed Sev1 → Sev3 findings. See `ISSUES.md` for the full ledger;
   I9 (Pomodoro broadcaster takeover) and I18 (sidecar model-path

@@ -22,10 +22,10 @@ A few honest disclosures, in the spirit of "no surprises":
   Settings → Advanced), it stays in the system tray so friends can
   invite you to study without you having to find and open the app
   first. Right-click the tray icon to quit fully.
-- **One long-lived encrypted WebSocket** to a public Nostr relay
-  while you're idle. That's the channel friends use to send you
-  invites. The traffic is small — kilobytes per hour — and the relay
-  cannot read it.
+- **A handful of long-lived encrypted WebSockets** to a small curated
+  set of public Nostr relays while you're idle. That's the channel
+  friends use to send you invites. The traffic is small — kilobytes
+  per hour — and the relays cannot read it.
 - **WebRTC during a session.** Audio and video go directly
   peer-to-peer. This works on most home networks. Some networks
   (corporate firewalls, strict NATs, locked-down school Wi-Fi) block
@@ -90,10 +90,16 @@ There is no auto-update. Re-run the install for a new version.
 4. **Display name.** Pick anything — your name, a nickname, an emoji.
    Friends see it next to your tile. Change it any time in
    Settings → Identity.
-5. **Add a friend (or skip).** You and a friend each tap **Add
-   friend**, generate a one-time 12-word code, paste each other's
-   code, and you're paired. Send the code over any chat app — once
-   used it's discarded.
+5. **Add a friend (or skip).** Tap **Add friend** and you each get a
+   friend code — a `studyvis://add#…` link (also shown as a QR). Swap
+   codes over any chat app or scan each other's QR in person; each side
+   imports the other. It works even if one of you is offline (no relay,
+   no live connection needed). When you paste a code, compare the
+   **safety number** it shows out-of-band (say it on a call) before
+   confirming — that catches a tampered or impersonated code. The code
+   holds only your public keys, so it's safe to share. (Pairing with a
+   friend still on an older StudyVis? A "friend on an older StudyVis?"
+   link falls back to the one-time 12-word code.)
 6. **Tutorial.** Three sentences on how a session works. Optional.
 
 Once you're past onboarding you land on your friends list. Click an
@@ -132,7 +138,7 @@ You can open the data folder from Settings → Advanced.
 
 Disabled by default. Settings → AI to turn on. The first time you
 enable it, StudyVis asks for screen-recording permission and offers
-you a model picker — three tiers between fast/small and slow/thorough,
+you a model picker — four tiers between fast/small and slow/thorough,
 with measured speed on your machine after a 30-second benchmark.
 Models download from Hugging Face directly to your computer; the
 "gated" tier (Gemma) needs a one-time HF token paste, stored in your
@@ -269,9 +275,14 @@ where you'd see it surface.
   / spacing / motion values live. Two-layer component split:
   `src/components/ui/` is the only place Radix primitives are
   allowed.
-- **trystero (Nostr default)** for peer rendezvous over public
-  relays. WebRTC mesh (max 4 peers) for media + an encrypted data
-  channel for audit events.
+- **trystero (Nostr default, MQTT raced for pairing)** for peer
+  rendezvous over public relays — the channel for invites, presence,
+  and session signaling. WebRTC mesh (max 4 peers) for media + an
+  encrypted data channel for audit events. Adding a friend needs no
+  rendezvous at all: it's a self-signed **friend code** (public keys +
+  name) each side imports offline, with an out-of-band **safety
+  number** to compare before trusting a pasted code. The legacy live
+  12-word pairing is retained for friends on older builds.
 - **@noble/ed25519 + @noble/curves + @scure/bip39** for identity.
   Two keypairs (Ed25519 for signing, X25519 for NaCl-box invite
   envelopes), both deterministically derived from one 24-word BIP39
@@ -294,9 +305,10 @@ the polished 1.0 — it landed the V3 phase (recovery from a 24-word
 backup, custom keybindings, multi-monitor capture, light + auto
 themes, opt-in custom window chrome, the accessibility and
 reduced-motion pass, and the cohesion + copy pass). **v1.1.0** added
-the pairing QR redesign; **v1.2.0** is the current release (post-1.0
-maintenance fixes plus log/report sharing). Full history in
-`CHANGELOG.md`. The version number lives in (and must stay consistent
+the pairing QR redesign; **v1.2.x** brought a maintenance + feature
+wave and more reliable pairing discovery; **v1.3.1** is the current
+release (offline friend codes — see `CHANGELOG.md` for the full
+history). The version number lives in (and must stay consistent
 across):
 
 - `package.json` — npm root
