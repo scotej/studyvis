@@ -64,6 +64,17 @@ jobs:
       - name: Contrast (WCAG AA) enforcement
         run: npm run check-contrast
 
+      # PR-19 — the a11y gate (a CLAUDE.md quality gate that ci.yml runs) was
+      # missing here, so a release could be cut over an axe-core regression.
+      - name: Storybook build
+        run: npm run build-storybook
+
+      - name: Install Playwright (Chromium)
+        run: npx playwright install --with-deps chromium
+
+      - name: Accessibility audit (axe-core over every Storybook story)
+        run: npm run check-a11y
+
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt
@@ -71,6 +82,28 @@ jobs:
       - name: cargo fmt
         working-directory: src-tauri
         run: cargo fmt --check
+
+      # PR-19 — compiling the Rust targets (both macOS + Windows legs) on this
+      # ubuntu gate is impractical, and shipping a release over a clippy or
+      # cargo-test failure the pre-commit hook can silently miss is the exact
+      # gap this closes. Require that CI (which DOES compile/clippy/test both
+      # host targets and runs check-a11y) has gone green on the precise main SHA
+      # being tagged, so the irreversible bump+tag+push can't outrun it.
+      - name: Require CI success on this main commit
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          sha=$(git rev-parse HEAD)
+          echo "Requiring a successful CI run for main @ $sha"
+          run=$(gh api \
+            "repos/${{ github.repository }}/actions/workflows/ci.yml/runs?head_sha=$sha&per_page=1" \
+            --jq '.workflow_runs[0] | "\(.status):\(.conclusion)"' 2>/dev/null || echo "none")
+          echo "CI run for $sha: $run"
+          if [ "$run" != "completed:success" ]; then
+            echo "::error::CI has not passed on main @ $sha (got '$run'). Push the fix, wait for CI to go green, then re-run Release prep."
+            exit 1
+          fi
 
   prep:
     name: Bump, tag, trigger build
