@@ -353,6 +353,21 @@ fn rotate_log_if_needed(path: &Path, max_bytes: u64) {
     let _ = fs::rename(path, rolled);
 }
 
+// #47 D2 — Metal offload on Apple Silicon. The bundled macos-arm64 llama.cpp
+// b9095 build is Metal-enabled (scripts/build-llama-server.sh sets
+// -DGGML_METAL=ON), yet inference ran CPU-only via an unconditional
+// "--n-gpu-layers 0" — a direct contributor to the 2–30s p95 latencies in
+// ARCHITECTURE §8 and the heat the cadence-backoff machinery exists to
+// absorb. 99 offloads every layer of the 2–7B catalog models (verified on an
+// M2: 27/27 layers offloaded, Metal init clean). The win-cpu-x64 prebuild has
+// no GPU backend, so 0 stays there. If GPU contention with the WebRTC tiles
+// ever materializes, gate this behind a Settings → AI toggle rather than
+// reverting to CPU-only for everyone.
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+const N_GPU_LAYERS: &str = "99";
+#[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
+const N_GPU_LAYERS: &str = "0";
+
 fn spawn_llama<R: Runtime>(
     app: &AppHandle<R>,
     model_path: &str,
@@ -373,7 +388,7 @@ fn spawn_llama<R: Runtime>(
             "--ctx-size",
             &ctx_size.to_string(),
             "--n-gpu-layers",
-            "0",
+            N_GPU_LAYERS,
             "--model",
             model_path,
         ]);
