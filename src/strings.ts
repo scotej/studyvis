@@ -1039,7 +1039,7 @@ export const strings = {
           'Add your own Nostr relays and a TURN server. Most people never need these — leave them empty to use the built-in defaults.',
         relays: {
           label: 'Custom signaling relays',
-          help: 'One wss:// URL per line. These fully replace the built-in relays StudyVis uses to find your friends, so everyone you study with must use the same relay list — otherwise you won’t find each other. Leave empty to use the defaults. Restart StudyVis to apply a change.',
+          help: 'One wss:// URL per line. StudyVis uses these in addition to its built-in relays, so adding your own never cuts you off from friends on the defaults. Leave empty to use just the defaults. Restart StudyVis to apply a change.',
           placeholder: 'wss://relay.example.com',
           ariaLabel: 'Custom signaling relay URLs, one per line',
           invalid:
