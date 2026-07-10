@@ -24,20 +24,37 @@ export default meta
 type Story = StoryObj<typeof meta>
 
 const ALL_CONNECTED: RelayRow[] = [
-  { url: 'wss://nos.lol', status: 'connected' },
-  { url: 'wss://relay.primal.net', status: 'connected' },
-  { url: 'wss://relay.snort.social', status: 'connected' },
+  { url: 'wss://nos.lol', status: 'connected', transport: 'nostr' },
+  { url: 'wss://relay.primal.net', status: 'connected', transport: 'nostr' },
+  { url: 'wss://relay.snort.social', status: 'connected', transport: 'nostr' },
 ]
 
 const MIXED: RelayRow[] = [
-  { url: 'wss://nos.lol', status: 'connected' },
-  { url: 'wss://offchain.pub', status: 'connecting' },
-  { url: 'wss://purplerelay.com', status: 'down' },
+  { url: 'wss://nos.lol', status: 'connected', transport: 'nostr' },
+  { url: 'wss://offchain.pub', status: 'connecting', transport: 'nostr' },
+  { url: 'wss://purplerelay.com', status: 'down', transport: 'nostr' },
 ]
 
 const ALL_DOWN: RelayRow[] = [
-  { url: 'wss://nos.lol', status: 'down' },
-  { url: 'wss://relay.primal.net', status: 'down' },
+  { url: 'wss://nos.lol', status: 'down', transport: 'nostr' },
+  { url: 'wss://relay.primal.net', status: 'down', transport: 'nostr' },
+]
+
+// #47 C3 — the case the MQTT section exists for: every curated Nostr relay
+// blocked while the pairing-time MQTT brokers connect fine.
+const NOSTR_BLOCKED_MQTT_UP: RelayRow[] = [
+  { url: 'wss://nos.lol', status: 'down', transport: 'nostr' },
+  { url: 'wss://relay.primal.net', status: 'down', transport: 'nostr' },
+  {
+    url: 'wss://broker.emqx.io:8084/mqtt',
+    status: 'connected',
+    transport: 'mqtt',
+  },
+  {
+    url: 'wss://broker.hivemq.com:8884/mqtt',
+    status: 'connected',
+    transport: 'mqtt',
+  },
 ]
 
 export const AllConnected: Story = {
@@ -50,6 +67,10 @@ export const Mixed: Story = {
 
 export const AllDown: Story = {
   args: { rows: ALL_DOWN },
+}
+
+export const NostrBlockedMqttConnected: Story = {
+  args: { rows: NOSTR_BLOCKED_MQTT_UP },
 }
 
 export const Empty: Story = {

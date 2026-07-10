@@ -1067,6 +1067,12 @@ export const strings = {
         label: 'Connection',
         help: 'Live status of the signaling relays StudyVis uses to find your friends. This is a local read — nothing is sent anywhere.',
         empty: 'No relay connections yet. They open a moment after launch.',
+        // #47 C3 — pairing races two transports; label each group so a
+        // Nostr-blocked/MQTT-working network reads honestly.
+        transport: {
+          nostr: 'Nostr relays',
+          mqtt: 'MQTT brokers (used while pairing)',
+        },
         status: {
           connected: 'Connected',
           connecting: 'Connecting…',
