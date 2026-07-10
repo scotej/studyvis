@@ -51,7 +51,10 @@ export function AppearanceCategory() {
           <RadioGroup
             value={mode}
             onValueChange={handleThemeChange}
-            className="grid-cols-1 gap-3 sm:grid-flow-col sm:auto-cols-max sm:gap-6"
+            // sm:grid-cols-none: without it the grid-cols-1 track (1fr)
+            // persists into the sm: column flow, stretching the first option
+            // full-width and shoving the rest to the far right edge.
+            className="grid-cols-1 gap-3 sm:grid-cols-none sm:grid-flow-col sm:auto-cols-max sm:gap-6"
             aria-label={copy.theme.ariaLabel}
           >
             <div className="flex items-center gap-2">
@@ -82,7 +85,7 @@ export function AppearanceCategory() {
             <RadioGroup
               value={windowStyle}
               onValueChange={handleWindowStyleChange}
-              className="grid-cols-1 gap-3 sm:grid-flow-col sm:auto-cols-max sm:gap-6"
+              className="grid-cols-1 gap-3 sm:grid-cols-none sm:grid-flow-col sm:auto-cols-max sm:gap-6"
               aria-label={copy.windowStyle.ariaLabel}
             >
               <div className="flex items-center gap-2">

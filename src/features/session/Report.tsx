@@ -166,7 +166,7 @@ export function Report({ sessionId, onClose, __loader }: ReportProps) {
     // error renders a calm inline banner with a Retry button.
     return (
       <main
-        className="flex min-h-screen flex-col bg-bg-base text-text-primary"
+        className="flex min-h-full flex-col bg-bg-base text-text-primary"
         aria-label={strings.report.ariaLabel}
       >
         <header className="border-b border-border-subtle px-4 py-4 sm:px-6">
@@ -355,7 +355,7 @@ export function ReportView({
 
   return (
     <main
-      className="flex min-h-screen flex-col bg-bg-base text-text-primary"
+      className="flex min-h-full flex-col bg-bg-base text-text-primary"
       aria-label={strings.report.ariaLabel}
     >
       <header className="border-b border-border-subtle px-4 py-4 sm:px-6">
@@ -539,7 +539,7 @@ function Section({
 }) {
   return (
     <section className="flex flex-col gap-3">
-      <h2 className="text-sm font-medium tracking-tight text-text-secondary uppercase">
+      <h2 className="text-sm font-medium tracking-wide text-text-secondary uppercase">
         {heading}
       </h2>
       {children}
@@ -549,7 +549,7 @@ function Section({
 
 function Empty({ message }: { message: string }) {
   return (
-    <p className="rounded-md border border-dashed border-border-subtle bg-bg-surface px-3 py-3 text-sm text-text-muted">
+    <p className="rounded-md border border-dashed border-border-subtle bg-bg-surface px-3 py-3 text-sm text-text-secondary">
       {message}
     </p>
   )

@@ -24,11 +24,13 @@ export function IdentityLoadErrorView({
   return (
     <main
       aria-label={copy.ariaLabel}
-      className="flex min-h-screen flex-col items-center justify-center bg-bg-base px-4 py-4 text-text-primary sm:px-6 sm:py-6"
+      className="flex min-h-full flex-col items-center justify-center bg-bg-base px-4 py-4 text-text-primary sm:px-6 sm:py-6"
     >
       <div
         className="flex w-full flex-col items-center gap-6 text-center"
-        style={{ maxWidth: tokens.sizes.contentMaxWidth }}
+        // Text-dense centered card → the §12 reading measure, not the wide
+        // onboarding measure.
+        style={{ maxWidth: tokens.sizes.readingMaxWidth }}
       >
         <div className="flex size-12 items-center justify-center rounded-full bg-bg-raised text-text-secondary">
           <AlertTriangleIcon className="size-6" aria-hidden />

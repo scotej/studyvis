@@ -215,3 +215,17 @@ export const ResumableDownload: Story = {
     },
   },
 }
+
+// The guide expanded: collapsed <details> content is skipped by axe-core,
+// so this story keeps the comparison-table markup inside the a11y gate.
+export const GuideExpanded: Story = {
+  args: {
+    installed: {},
+    hfTokenPresent: false,
+  },
+  render: () => (
+    <div className="mx-auto max-w-4xl bg-bg-base p-6 text-text-primary">
+      <ModelGuide records={{}} defaultOpen />
+    </div>
+  ),
+}

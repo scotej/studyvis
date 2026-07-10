@@ -1,5 +1,6 @@
 import { useState } from 'react'
 
+import { Disclosure } from '@/components/Disclosure'
 import { RelayDiagnostics } from '@/components/RelayDiagnostics'
 import { SettingsRow, SettingsSection } from '@/components/SettingsRow'
 import { Input } from '@/components/ui/input'
@@ -76,18 +77,23 @@ export function NetworkCategory() {
 function AdvancedConnectionRow() {
   const copy = strings.settings.network.advanced
   return (
-    <details className="group border-b border-border-subtle py-4 last:border-b-0">
-      <summary className="flex cursor-pointer list-none flex-col gap-1">
-        <span className="text-sm font-medium text-text-primary">
-          {copy.toggleLabel}
+    <Disclosure
+      className="border-b border-border-subtle py-4 last:border-b-0"
+      summaryClassName="rounded-md"
+      summary={
+        <span className="flex flex-col gap-1">
+          <span className="text-sm font-medium text-text-primary">
+            {copy.toggleLabel}
+          </span>
+          <span className="text-xs text-text-secondary">{copy.toggleHelp}</span>
         </span>
-        <span className="text-xs text-text-secondary">{copy.toggleHelp}</span>
-      </summary>
+      }
+    >
       <div className="mt-4 flex flex-col gap-6">
         <CustomRelaysField />
         <TurnServerField />
       </div>
-    </details>
+    </Disclosure>
   )
 }
 

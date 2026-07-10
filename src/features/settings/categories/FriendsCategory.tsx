@@ -49,26 +49,32 @@ export function FriendsCategory() {
         {friends.length === 0 ? (
           <SettingsRow label={copy.emptyLabel} help={copy.emptyHelp} />
         ) : (
-          friends.map((friend) => (
-            <SettingsRow
-              key={friend.ed_pubkey_hex}
-              label={friend.display_name?.trim() || shortPubkey(friend)}
-              help={shortPubkey(friend)}
-              control={
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setPendingRemoval(friend)}
-                  aria-label={copy.removeAriaLabel(
-                    friend.display_name?.trim() || copy.defaultFriendName
-                  )}
-                >
-                  <Trash2Icon /> {copy.removeCta}
-                </Button>
-              }
-            />
-          ))
+          friends.map((friend) => {
+            const name = friend.display_name?.trim()
+            const pubkey = shortPubkey(friend)
+            return (
+              <SettingsRow
+                key={friend.ed_pubkey_hex}
+                label={name || pubkey}
+                // A nameless friend's label already falls back to the pubkey —
+                // no help line, or the same string would stack twice.
+                help={name ? pubkey : undefined}
+                control={
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setPendingRemoval(friend)}
+                    aria-label={copy.removeAriaLabel(
+                      name || copy.defaultFriendName
+                    )}
+                  >
+                    <Trash2Icon /> {copy.removeCta}
+                  </Button>
+                }
+              />
+            )
+          })
         )}
       </SettingsSection>
 

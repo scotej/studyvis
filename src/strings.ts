@@ -737,14 +737,11 @@ export const strings = {
       },
       recoveryPhrase: {
         label: 'Recovery phrase',
-        // D4 — honest copy: the 24 words are never persisted, so they cannot be
-        // re-shown here. Offers the realistic alternatives instead of a dead row.
-        help: "Your 24-word backup is shown once during setup and never saved, so it can't be shown again here. Keep the original safe — it's the only way to move or recover this identity.",
+        // D4 — honest copy: the 24 words are never persisted, so they cannot
+        // be re-shown here and lost words are unrecoverable by design.
+        // Replacement semantics live in the Restore flow.
+        help: "Your 24 words were shown once during setup and never saved — keep the original safe. Lost words can't be recovered; you'd start fresh and pair with your friends again.",
         restoreCta: 'Restore a different identity',
-        restoreHelp:
-          'Moving from another device, or restoring a backup? This replaces the identity on this device with your 24 words.',
-        lostNote:
-          "Lost your 24 words? They can't be recovered. You'd start fresh with a new identity and pair with your friends again.",
       },
       // D3 — local friends-list backup/restore, encrypted to your own key.
       // Pairs with the 24-word recovery, which restores only the keypair.
@@ -909,11 +906,13 @@ export const strings = {
 
     ai: {
       heading: 'AI',
+      // One privacy statement for the pane; the enable row's help and the
+      // model row already say what turning AI on unlocks.
       intro:
-        'The vision model runs on this machine and only looks at your camera and screen. Nothing leaves your computer. Turn AI on to pick a model, benchmark it, and let StudyVis nudge you when you drift off-task.',
-      // D5 — canonical screen-recording indicator note. Reused by the
-      // ScreenCapturePermissionOverlay so the user reads the same words
-      // wherever the topic surfaces.
+        'The vision model runs on this machine and only looks at your camera and screen. Nothing leaves your computer.',
+      // D5 — canonical screen-recording indicator note: the OS indicator
+      // stays lit while sampling, and macOS grant/revoke lives in System
+      // Settings. Rendered only while the AI gate is on.
       screenIndicatorNote:
         "While the AI is sampling, your operating system's screen-recording indicator stays on for the whole session. That's expected — it turns off when you leave. On macOS, screen-recording access is granted and revoked only in System Settings → Privacy & Security → Screen Recording; StudyVis can open it for you when needed.",
       enable: {
@@ -1002,14 +1001,16 @@ export const strings = {
         // F8 — STUN-only by default. No TURN relay ships, so the old "a relay
         // passes the traffic along" promise was untrue on a fresh install. Be
         // honest: direct only, unless YOU add a TURN server (F3, below).
-        help: 'StudyVis connects you to friends directly. That works on most home networks, but some (corporate firewalls, strict NATs, locked-down school Wi-Fi) block direct connections, and those sessions can fail to connect. To get through them, add your own TURN relay below — traffic stays end-to-end encrypted; a relay only ever sees encrypted bytes.',
+        help: 'StudyVis connects you to friends directly. If a strict network (corporate firewall, locked-down Wi-Fi) blocks that, add your own TURN relay below — traffic stays end-to-end encrypted either way.',
       },
       preference: {
         label: 'TURN preference',
         // F8 — the help no longer claims a relay that doesn't exist. The
         // preference only does anything once a TURN server is configured (F3);
         // with none, every option is STUN-only.
-        help: 'Only takes effect once you add a TURN server below. Auto uses your TURN relay as a fallback when a direct connection fails. Always routes every connection through it (more reliable on strict networks, more bandwidth). Never ignores it. With no TURN server configured, all three are direct-only.',
+        // The radio labels below spell out what each option does; the help
+        // carries only what the labels can't — the no-server caveat.
+        help: 'Only takes effect once you add a TURN server below; with none configured, every option is direct-only.',
         ariaLabel: 'TURN preference',
         options: {
           auto: 'Auto (use TURN when direct fails)',
@@ -1207,8 +1208,9 @@ export const strings = {
     },
     insights: {
       heading: 'Focus insights',
-      subheading:
-        'Computed on this device from your AI-scored sessions. Nothing is sent anywhere.',
+      // No subheading: the pane-level stats.disclaimer carries the on-device
+      // privacy note and trend.help scopes the data to AI-scored sessions.
+      noDistractions: 'No distractions recorded yet. Nice work.',
       empty:
         'No focus insights yet. Study a few sessions with AI focus detection on and patterns will show up here.',
       timing: {

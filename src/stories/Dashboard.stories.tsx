@@ -90,24 +90,22 @@ export const Empty: Story = {
 }
 
 // 1 session — a single bar, a one-day streak, one partner, one score. AI ran
-// but logged no distractions, so the focus-insights section shows its own
-// empty state.
+// but logged no distractions, so focus insights shows the shared
+// no-distractions card over a one-point trend.
+const singleSession = [
+  session({
+    total_minutes: 25,
+    started_at: NOW,
+    score: 88,
+    focused_pct: 0.88,
+    peer_pubkeys: JSON.stringify([ALICE]),
+  }),
+]
+
 export const SingleSession: Story = {
   args: {
-    summary: computeStats(
-      [
-        session({
-          total_minutes: 25,
-          started_at: NOW,
-          score: 88,
-          peer_pubkeys: JSON.stringify([ALICE]),
-        }),
-      ],
-      friends,
-      NOW,
-      'UTC'
-    ),
-    insights: computeInsights([], []),
+    summary: computeStats(singleSession, friends, NOW, 'UTC'),
+    insights: computeInsights(singleSession, []),
   },
 }
 

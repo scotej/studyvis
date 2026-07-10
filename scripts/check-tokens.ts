@@ -35,6 +35,11 @@ const PER_FILE_RULE_EXEMPTIONS: Record<string, ReadonlySet<string>> = {
   // own tokens via var(--*). Allowed as a single carve-out because Sonner's
   // theming hook is its public API.
   'src/components/ui/sonner.tsx': new Set(['inline-style-string-literal']),
+  // The AI dialog is its own chromeless webview window — the raw viewport
+  // IS its slot, so h-screen/w-screen are correct there. (Storybook's
+  // fullscreen frame also uses h-dvh, but it lives in .storybook/ outside
+  // this scan.)
+  'src/features/ai/AiDialogWindow.tsx': new Set(['viewport-height-class']),
 }
 
 type Violation = {
@@ -226,6 +231,27 @@ const RULES: WholeFileRule[] = [
         if (PX_PATTERN.test(inner)) {
           out.push({ index: m.index, match: m[0] })
         }
+      }
+      return out
+    },
+  },
+  {
+    // Viewport-height utilities size to the raw window, so they overflow the
+    // reduced slot ChromeAwareShell leaves under the opt-in custom title bar
+    // (V3-P6) by exactly the title-bar height. Route shells must size with
+    // h-full / min-h-full against the shell's bounded slot instead.
+    name: 'viewport-height-class',
+    scan: (text) => {
+      const out: Array<{ index: number; match: string }> = []
+      const re =
+        /\b(?:min-h-screen|max-h-screen|h-screen|min-h-dvh|max-h-dvh|h-dvh|min-h-svh|max-h-svh|h-svh|min-h-lvh|max-h-lvh|h-lvh)\b/g
+      let m: RegExpExecArray | null
+      while ((m = re.exec(text))) {
+        const lineStart = text.lastIndexOf('\n', m.index - 1) + 1
+        const linePrefix = text.slice(lineStart, m.index)
+        if (/(^|[^:])\/\//.test(linePrefix)) continue
+        if (/^\s*\*/.test(linePrefix)) continue
+        out.push({ index: m.index, match: m[0] })
       }
       return out
     },

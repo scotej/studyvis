@@ -223,7 +223,7 @@ export function Home() {
   if (status === 'loading' || onboarding.status === 'loading') {
     return (
       <main
-        className="flex min-h-screen items-center justify-center bg-bg-base text-text-secondary"
+        className="flex min-h-full items-center justify-center bg-bg-base text-text-secondary"
         aria-busy="true"
       >
         <span className="sr-only">{strings.common.loading}</span>
@@ -327,7 +327,7 @@ export function Home() {
 
   return (
     <>
-      <main className="min-h-screen bg-bg-base text-text-primary">
+      <main className="min-h-full bg-bg-base text-text-primary">
         {/* V3-P7 — Visually-hidden top-level heading. The visible heading on
             this route is "Friends" (h2 inside FriendsListView, used as the
             section's aria-labelledby anchor); add an h1 so SR users see a

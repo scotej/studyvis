@@ -41,7 +41,7 @@ export function OnboardingStep({
     <main
       data-slot="onboarding-step"
       aria-label={ariaLabel}
-      className="relative flex min-h-screen flex-col bg-bg-base px-4 py-4 text-text-primary sm:px-6 sm:py-6"
+      className="relative flex min-h-full flex-col bg-bg-base px-4 py-4 text-text-primary sm:px-6 sm:py-6"
     >
       {progress ? (
         <ProgressDots

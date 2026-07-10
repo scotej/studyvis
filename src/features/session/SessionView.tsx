@@ -1171,7 +1171,7 @@ export function SessionView() {
 
   return (
     <main
-      className="flex min-h-screen flex-col bg-bg-base text-text-primary"
+      className="flex min-h-full flex-col bg-bg-base text-text-primary"
       aria-label={strings.session.mainAriaLabel}
     >
       {/* V3-P7 — Visually-hidden top-level heading so SR users have a clean

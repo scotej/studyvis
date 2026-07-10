@@ -529,8 +529,9 @@ V3 ships: full screen-reader pass, reduced-motion mode, axe-core CI gate over ev
 
 - **Window minimum**: 1024 × 640.
 - **Window default on first launch**: 1280 × 800.
-- **Content max width** (settings panes, onboarding): 1200 (`sizes.contentMaxWidth`).
-- **Reading max width** (Home/FriendsList, Report, other text-dense screens): 896 (`sizes.readingMaxWidth`). A 1200-wide measure on a list of friends or a report timeline hurts readability; these screens share one narrower measure instead of the page max. Both come from `tokens.sizes` — no hard-coded `1200`/`896` literals anywhere in app code.
+- **Content max width** (onboarding): 1200 (`sizes.contentMaxWidth`).
+- **Reading max width** (Home/FriendsList, Report, other text-dense screens): 896 (`sizes.readingMaxWidth`). A 1200-wide measure on a list of friends or a report timeline hurts readability; these screens share one narrower measure instead of the page max.
+- **Settings max width** (settings pane content): 768 (`sizes.settingsMaxWidth`). Settings rows pair a left label with a right-aligned control; at 1200 the control sat ~700 px from its label at the window minimum, so settings use a tighter measure than onboarding. All three come from `tokens.sizes` — no hard-coded `1200`/`896`/`768` literals anywhere in app code.
 - **Audit log panel**: fixed 320 wide, full height of session view.
 - **Sidebar (settings)**: fixed 280 wide.
 - **Video grid**: flex; tiles maintain a minimum aspect 16:9 and a clamped height (180–360 px).

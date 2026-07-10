@@ -214,38 +214,26 @@ export function IdentityCategory({ onRestoreIdentity }: IdentityCategoryProps) {
       <SettingsRow
         label={copy.recoveryPhrase.label}
         help={copy.recoveryPhrase.help}
-        stack
         control={
-          <div className="flex flex-col gap-2">
-            <div className="flex items-center gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => onRestoreIdentity?.()}
-                disabled={!onRestoreIdentity}
-              >
-                <KeyRoundIcon /> {copy.recoveryPhrase.restoreCta}
-              </Button>
-            </div>
-            <span className="text-xs text-text-secondary">
-              {copy.recoveryPhrase.restoreHelp}
-            </span>
-            <span className="text-xs text-text-muted">
-              {copy.recoveryPhrase.lostNote}
-            </span>
-          </div>
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            onClick={() => onRestoreIdentity?.()}
+            disabled={!onRestoreIdentity}
+          >
+            <KeyRoundIcon /> {copy.recoveryPhrase.restoreCta}
+          </Button>
         }
       />
       <SettingsRow
         label={copy.friendsBackup.label}
         help={copy.friendsBackup.help}
-        stack
         control={
           <div className="flex items-center gap-2">
             <Button
               type="button"
-              variant="outline"
+              variant="secondary"
               size="sm"
               onClick={() => void handleExportFriends()}
               disabled={backupBusy}
@@ -255,7 +243,7 @@ export function IdentityCategory({ onRestoreIdentity }: IdentityCategoryProps) {
             </Button>
             <Button
               type="button"
-              variant="outline"
+              variant="secondary"
               size="sm"
               onClick={() => void handleImportFriends()}
               disabled={backupBusy}

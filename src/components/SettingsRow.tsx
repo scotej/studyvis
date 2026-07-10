@@ -33,8 +33,13 @@ export function SettingsRow({
       data-slot="settings-row"
       data-disabled={disabled || undefined}
       className={cn(
-        'flex gap-6 border-b border-border-subtle py-4 last:border-b-0',
-        stack ? 'flex-col' : 'flex-row items-center justify-between',
+        'flex border-b border-border-subtle py-4 last:border-b-0',
+        // §12 gaps per orientation: 24px keeps an inline control clear of its
+        // label; stacked controls belong to the label directly above, so the
+        // inline gap (12px) reads as one unit instead of a detached block.
+        stack
+          ? 'flex-col gap-3'
+          : 'flex-row items-center justify-between gap-6',
         disabled && 'opacity-60',
         className
       )}

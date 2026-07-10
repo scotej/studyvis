@@ -134,11 +134,16 @@ export const tokens = {
 
   sizes: {
     contentMaxWidth: 1200,
-    // Reading/list screens (Report, FriendsListView). DESIGN-SYSTEM §12 only
-    // specifies a measure for settings/onboarding (contentMaxWidth: 1200); a
+    // Reading/list screens (Report, FriendsListView). DESIGN-SYSTEM §12
+    // specifies the wide measure for onboarding (contentMaxWidth: 1200); a
     // 1200-wide line length hurts readability on text-dense screens, so these
     // screens share one narrower measure instead of the page max.
     readingMaxWidth: 896,
+    // Settings pane measure (DESIGN-SYSTEM §12). Rows pair a left label with
+    // a right-aligned control; at the old 1200 measure the control sat ~700px
+    // from its label at the window minimum. 768 keeps label and control in
+    // one eye span and helper text at a readable line length.
+    settingsMaxWidth: 768,
     sidebarWidth: 280,
     auditPanelWidth: 320,
     videoTileMinHeight: 180,

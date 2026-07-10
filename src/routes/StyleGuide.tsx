@@ -134,7 +134,7 @@ export function StyleGuide() {
 
   return (
     <TooltipProvider>
-      <main className="min-h-screen bg-bg-base text-text-primary">
+      <main className="min-h-full bg-bg-base text-text-primary">
         <div className="mx-auto flex max-w-5xl flex-col gap-8 p-8">
           <header className="flex items-center justify-between">
             <div className="flex items-center gap-3">

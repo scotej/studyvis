@@ -207,10 +207,6 @@ export function AiCategory() {
   return (
     <SettingsSection heading={copy.heading}>
       <p className="mb-3 text-sm text-text-secondary">{copy.intro}</p>
-      {/* D5 — canonical screen-recording indicator note. */}
-      <p className="mb-3 text-sm text-text-secondary">
-        {copy.screenIndicatorNote}
-      </p>
 
       <SettingsRow
         label={copy.enable.label}
@@ -229,6 +225,13 @@ export function AiCategory() {
         <SettingsRow label={copy.modelOff.label} help={copy.modelOff.help} />
       ) : (
         <>
+          {/* D5 — canonical screen-recording indicator note. Below the
+              enable row (not above it) so toggling doesn't shift the switch
+              under the cursor; only meaningful while AI can sample. */}
+          <p className="pt-4 text-sm text-text-secondary">
+            {copy.screenIndicatorNote}
+          </p>
+
           <div className="pt-4">
             <ModelPickerContainer />
           </div>
@@ -362,7 +365,7 @@ export function AiCategory() {
                     void setCaptureDisplays(value as CaptureDisplaysMode)
                   }
                 }}
-                className="grid-cols-1 gap-3 sm:grid-flow-col sm:auto-cols-max sm:gap-6"
+                className="grid-cols-1 gap-3 sm:grid-cols-none sm:grid-flow-col sm:auto-cols-max sm:gap-6"
                 aria-label={copy.captureDisplays.ariaLabel}
               >
                 <div className="flex items-center gap-2">

@@ -24,9 +24,11 @@ import { useSettingsStore } from '../src/stores/settingsStore'
 // circuits the provider's `defaultMode` fallback.
 function ThemedStoryFrame({
   theme,
+  fullscreen,
   children,
 }: {
   theme: 'dark' | 'light'
+  fullscreen: boolean
   children: React.ReactNode
 }) {
   useEffect(() => {
@@ -38,8 +40,20 @@ function ThemedStoryFrame({
   return (
     <ThemeProvider defaultMode={theme}>
       {/* Wrapper inherits bg-bg-base so the canvas behind each story tracks
-          the toolbar, independent of Storybook's own background addon. */}
-      <div className="bg-bg-base p-4 text-text-primary">{children}</div>
+          the toolbar, independent of Storybook's own background addon.
+          Fullscreen stories get a viewport-height frame: route shells size
+          with h-full/min-h-full against the app's bounded slot, and this
+          frame plays that role in Storybook (Storybook's own #storybook-root
+          has no height). */}
+      <div
+        className={
+          fullscreen
+            ? 'h-dvh bg-bg-base text-text-primary'
+            : 'bg-bg-base p-4 text-text-primary'
+        }
+      >
+        {children}
+      </div>
     </ThemeProvider>
   )
 }
@@ -47,7 +61,10 @@ function ThemedStoryFrame({
 const withTheme: Decorator = (Story, context) => {
   const theme = (context.globals.theme as 'dark' | 'light') ?? 'dark'
   return (
-    <ThemedStoryFrame theme={theme}>
+    <ThemedStoryFrame
+      theme={theme}
+      fullscreen={context.parameters?.layout === 'fullscreen'}
+    >
       <Story />
     </ThemedStoryFrame>
   )
