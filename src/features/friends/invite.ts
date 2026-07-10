@@ -1,7 +1,7 @@
 import { verifyMessage } from '@/lib/crypto/identity'
 import { inboxPassword, inboxTopic } from '@/lib/crypto/topics'
 import { bytesToBase64, bytesToHex, hexToBytes } from '@/lib/encoding'
-import { relaysUnreachable } from '@/lib/relayDiagnostics'
+import { pairingRelaysUnreachable } from '@/lib/relayDiagnostics'
 import { joinTopic } from '@/lib/trystero'
 import { userRelayConfig } from '@/lib/trystero/relays'
 import { useSessionStore } from '@/stores/sessionStore'
@@ -171,11 +171,19 @@ export async function sendInviteEnvelope(
     throw new Error('recipient ed_pubkey must decode to 32 bytes')
   }
   const timeoutMs = opts.sendTimeoutMs ?? DEFAULT_SEND_TIMEOUT_MS
-  const isRelayUnreachable = opts.isRelayUnreachable ?? relaysUnreachable
+  // #47 C1 — the send path now races both transports, so the network-down
+  // verdict at timeout must consider both socket maps (the same PR-21
+  // rationale as pairing).
+  const isRelayUnreachable = opts.isRelayUnreachable ?? pairingRelaysUnreachable
   const room = joinTopic({
     topic: inboxTopic(recipientEdPub),
     password: inboxPassword(recipientEdPub),
     relayConfig: userRelayConfig(),
+    // #47 C1 — a recipient behind a Nostr-blocking firewall is reachable over
+    // MQTT; the merged room's onPeerJoin fires on whichever transport sees
+    // them first, and the ACK listener latches a boolean so duplicate
+    // delivery is harmless.
+    strategies: ['nostr', 'mqtt'],
   })
   const action = room.makeAction<InviteEnvelope>(INVITE_ACTION)
 
