@@ -425,6 +425,16 @@ export const strings = {
       senderFallback: 'A friend',
       inviteBody: (name: string) => `${name} invites you to study`,
       acceptAction: 'Accept',
+      // #47 B1 — persistent pending-invite rows on the main view (invites
+      // are valid 5 minutes; the toast alone was missable).
+      pending: {
+        listAriaLabel: 'Pending invites',
+        expiresIn: (min: number) => `Expires in ${min} min`,
+        dismissCta: 'Dismiss',
+        dismissAriaLabel: (name: string) => `Dismiss the invite from ${name}`,
+        acceptAriaLabel: (name: string) => `Accept the invite from ${name}`,
+        expired: 'That invite expired. Ask your friend to invite you again.',
+      },
     },
     inviteSent: (name: string) => `Invite sent to ${name}.`,
     inviteSendErrorFallback: "Couldn't send the invite.",

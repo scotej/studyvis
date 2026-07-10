@@ -16,6 +16,7 @@ import { strings } from '@/strings'
 
 import { notifyFriendOnline } from './friendOnlineNotify'
 import { subscribeToOwnInbox, type ValidInvite } from './inbox'
+import { usePendingInvitesStore } from './pendingInvitesStore'
 import { inviteRetryManager } from './invite'
 import { isOnline, startPresence, type PresenceMap } from './presence'
 
@@ -196,6 +197,10 @@ async function handleValidInvite(
     invite.payload.our_display_name?.trim() ||
     strings.friends.inbox.senderFallback
   const message = strings.friends.inbox.inviteBody(senderName)
+
+  // #47 B1 — hold the invite on the persistent main-view surface for its
+  // full 5-minute validity; the toast below is just the immediate nudge.
+  usePendingInvitesStore.getState().add(invite)
 
   toast(message, {
     action: {

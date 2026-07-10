@@ -21,6 +21,17 @@ export { FriendsList, type FriendsListProps } from './FriendsList'
 export { FriendsListView, type FriendsListViewProps } from './FriendsListView'
 export { InboxBoot, type InboxBootProps } from './InboxBoot'
 export {
+  PendingInvites,
+  PendingInvitesView,
+  type PendingInvitesProps,
+  type PendingInvitesViewProps,
+} from './PendingInvites'
+export {
+  pendingInviteKey,
+  usePendingInvitesStore,
+  type PendingInviteEntry,
+} from './pendingInvitesStore'
+export {
   PairDeepLinkBoot,
   type PairDeepLinkBootProps,
 } from './PairDeepLinkBoot'
