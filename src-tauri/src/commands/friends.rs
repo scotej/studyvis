@@ -1,3 +1,9 @@
+//! Friends commands: thin sync wrappers over `db::friends`, plus the
+//! encrypted `.svfb` friends-list backup (export/import, macOS/Windows only —
+//! it needs the keychain identity). The backup's authenticity envelope is
+//! security-critical; see the banner above `BACKUP_MAGIC` before touching the
+//! format.
+
 use serde::Serialize;
 use tauri::State;
 

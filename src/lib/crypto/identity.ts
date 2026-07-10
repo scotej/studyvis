@@ -1,3 +1,23 @@
+// Identity crypto: 24-word BIP39 mnemonic → Ed25519 (signing) + X25519 (box
+// encryption) keypairs, Ed25519 sign/verify, and a NaCl `crypto_box`
+// implementation. Everything here is a CROSS-VERSION CONTRACT (ARCHITECTURE
+// §3):
+//
+// - The derivation path — mnemonicToSeedSync(phrase, '') then HKDF-SHA256
+//   with the salt/info constants below — deterministically reproduces a
+//   user's keys from their 24 words. Changing any constant re-derives
+//   different keys for every existing user, breaking their identity and
+//   every friend's saved pubkeys. Never edit; introduce ':v2' infos behind
+//   an explicit migration if a change is ever needed.
+// - boxEncrypt/boxDecrypt must stay byte-compatible with libsodium's
+//   crypto_box_easy and the Rust side (src-tauri/src/crypto.rs), which opens
+//   these envelopes via the keychain path. A shared libsodium test vector is
+//   pinned in tests/unit/identity.test.ts and src-tauri/tests/.
+//
+// Do not send raw bytes elsewhere for signing: peers verify signatures
+// against pubkeys exchanged at pairing, so signature/format drift strands
+// older builds.
+
 import * as ed from '@noble/ed25519'
 import { x25519 } from '@noble/curves/ed25519.js'
 import { xsalsa20poly1305, hsalsa } from '@noble/ciphers/salsa.js'
@@ -11,6 +31,9 @@ import {
 } from '@scure/bip39'
 import { wordlist as englishWordlist } from '@scure/bip39/wordlists/english.js'
 
+// Load-bearing module side effect, not a dead assignment: @noble/ed25519 v3
+// ships hash-less and throws from sign/getPublicKey until an sha512 impl is
+// installed. Must run before any ed.* call in this module.
 ed.hashes.sha512 = sha512
 
 const HKDF_SALT = new TextEncoder().encode('studyvis')
@@ -90,6 +113,10 @@ export function verifyMessage(
   }
 }
 
+// NaCl box key derivation (crypto_box_beforenm): X25519 ECDH, then HSalsa20
+// keyed with the "expand 32-byte k" sigma constant and a 16-byte zero nonce.
+// Hand-rolled because @noble/ciphers exposes the primitives but not the box
+// composition; byte-compatible with libsodium — verified by the pinned vector.
 const SIGMA = new Uint32Array([0x61707865, 0x3320646e, 0x79622d32, 0x6b206574])
 
 function bytesToU32LE(bytes: Uint8Array, count: number): Uint32Array {
@@ -143,6 +170,10 @@ export function boxDecrypt(
   return xsalsa20poly1305(key, nonce).decrypt(ciphertext)
 }
 
+// Fingerprint of the SECRET phrase (sha256 of the space-joined words, first
+// 16 bytes as hex) — not a pubkey fingerprint. Persisted to identity.json so
+// the recovery flow can tell "same identity re-entered" from "different
+// mnemonic"; it reveals nothing recoverable about the words themselves.
 export function mnemonicFingerprint(mnemonic: Mnemonic): string {
   const phrase = mnemonic.join(' ')
   const digest = sha256(new TextEncoder().encode(phrase))

@@ -1,3 +1,8 @@
+// Zustand store mirroring the SQLite friends table. `add` re-lists from the
+// DB after insert (canonical ordering); `remove` filters locally
+// (optimistic); `markStudied` is best-effort and lets a failed re-list
+// resync on the next load.
+
 import { create } from 'zustand'
 
 import {

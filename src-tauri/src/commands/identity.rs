@@ -1,3 +1,17 @@
+//! Identity commands: keychain custody of the private keys, the public
+//! `identity.json` record, and keyring-backed sign / box-encrypt / decrypt.
+//!
+//! Key custody model: the Ed25519 + X25519 private keys (both HKDF-derived
+//! from the 24-word mnemonic on the JS side — see `src/lib/crypto/identity.ts`)
+//! are handed to Rust exactly once at save time and live in the OS keychain
+//! (service `com.studyvis.app`, user `identity-keys`) — never on plaintext
+//! disk. JS asks Rust to sign/open-box on its behalf afterwards. The module is
+//! macOS/Windows-only because `keyring` has no Linux backend wired
+//! (`commands/mod.rs`).
+//!
+//! `identity.json` (public keys + display name + fingerprint) lives in the
+//! SQLite data dir, NOT the Tauri `app_data_dir` that holds `settings.json`.
+
 use std::fs;
 use std::path::PathBuf;
 

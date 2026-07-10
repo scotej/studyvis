@@ -1,3 +1,9 @@
+// Pure presentational surface for the add-a-friend dialog: the default
+// ContactCard mode (show my code as QR + copyable link, paste/scan theirs)
+// and the legacy 12-word host/join tabs, with the F1/F5 connection-status
+// hints. All pairing state arrives via the `AddFriendPhase` discriminated
+// union from the AddFriendDialog container — no trystero, no stores here.
+
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { CheckIcon, CopyIcon } from 'lucide-react'
 import { toast } from 'sonner'

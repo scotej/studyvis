@@ -1,3 +1,9 @@
+// Typed wrappers over the Rust `friends_*` commands (local SQLite friends
+// list). `Friend` mirrors serde's snake_case response verbatim (same
+// convention as SessionRecord / AuditEventRecord); `ed_pubkey_hex` is the
+// canonical identity and `addFriend` upserts on it Rust-side, so re-import
+// of a known friend is idempotent.
+
 import { invoke } from '@tauri-apps/api/core'
 
 export type Friend = {

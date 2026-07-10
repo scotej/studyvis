@@ -1,3 +1,12 @@
+// Container for the add-a-friend dialog: owns the pairing lifecycle (card
+// mode by default; legacy 12-word host/join under a fallback link), the
+// abort/cleanup of the live trystero pairing room, and the routing of pasted
+// or scanned input via `interpretImportText`. All rendering is delegated to
+// the pure AddFriendDialogView. Cleanup subtlety: Radix only fires
+// onOpenChange on user-initiated closes, so a parent-driven close (deep link
+// arriving mid-pairing) is caught by a separate `[open]` effect that aborts
+// the orphaned room.
+
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 

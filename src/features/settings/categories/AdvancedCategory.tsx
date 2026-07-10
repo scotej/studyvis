@@ -1,3 +1,9 @@
+// Settings → Advanced: autostart toggle, diagnostics (reveal llama-server
+// log, copy version/OS/log-path to clipboard — nothing uploads), open the
+// data folder, replay onboarding, and clear-all-session-history behind a
+// confirm dialog. Everything here rides Tauri `invoke`; outside the desktop
+// runtime the rows render but the actions fail into toasts.
+
 import { useCallback, useState } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import {

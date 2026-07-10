@@ -1,3 +1,23 @@
+// Zustand store for every persisted user setting, backed by Tauri's
+// `LazyStore` file `settings.json` (in Tauri's app_data_dir — NOT
+// localStorage, and a different directory from the SQLite data dir). Setters
+// update memory optimistically and write through to disk; per-key validators
+// fail closed where a bad persisted value would brick the app at boot.
+//
+// Two coupling patterns to keep in mind when editing:
+// - Boot caches: theme, windowStyle, and reduceMotion are ALSO mirrored to
+//   localStorage ('studyvis.theme', 'studyvis.windowStyle', …) because inline
+//   pre-paint scripts in index.html / ai-dialog.html read them synchronously
+//   to avoid a first-paint flash. Dropping a mirror write reintroduces FOUC.
+// - Rust push-downs: some keys must reach Rust to take effect
+//   (minimize-to-tray, AI-features flag, shortcut accelerators — the latter
+//   registers with the OS before persisting and rolls back on failure).
+//   `lib.rs` also reads this file directly at boot, before JS hydrates.
+//
+// Not everything applies live: relay-URL changes need an app relaunch (rooms
+// open at boot and never close), windowStyle applies at next process start,
+// captureDisplays at the next sample-loop boot.
+
 import { create } from 'zustand'
 import { invoke } from '@tauri-apps/api/core'
 import { LazyStore } from '@tauri-apps/plugin-store'

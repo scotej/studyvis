@@ -1,3 +1,13 @@
+//! Forward-only, versioned schema migrations.
+//!
+//! Friends install releases manually and out of order in time, so the schema
+//! is a cross-version compatibility surface: **never edit a shipped migration
+//! in place** (001 was amended pre-release; that door is closed). To change
+//! the schema, add `migrations/NNN_name.sql` and append a `(NNN, include_str!)`
+//! tuple to `MIGRATIONS` — `MAX_KNOWN_VERSION` derives from the last entry.
+//! There are no down migrations. Write DDL idempotently (`IF NOT EXISTS`) and
+//! add an upgrade test alongside the existing ones below.
+
 use rusqlite::{Connection, TransactionBehavior};
 
 const MIGRATION_001_INITIAL: &str = include_str!("migrations/001_initial.sql");

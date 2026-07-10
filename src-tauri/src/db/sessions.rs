@@ -1,3 +1,12 @@
+//! `sessions` table queries, backing the post-session report and Stats.
+//!
+//! `insert` is a split-semantics upsert: the lifecycle fields (`started_at`,
+//! `ended_at`, `total_minutes`) overwrite authoritatively so a re-summarize
+//! can correct them, while the report fields coalesce (a partial upsert never
+//! clobbers an earlier value). There is no FK to `audit_events` — `delete` /
+//! `clear_all` cascade manually inside one transaction. Serde emits verbatim
+//! snake_case, mirrored by the TS `SessionRecord`; keep them aligned.
+
 use rusqlite::{params, Connection, OptionalExtension, Result};
 use serde::{Deserialize, Serialize};
 

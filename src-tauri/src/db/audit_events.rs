@@ -1,3 +1,8 @@
+//! `audit_events` table queries — the per-session signed event log, plus the
+//! cross-session read (`list_all`) behind the Stats focus-insights view.
+//! Inserts are idempotent on `sig`; rows are only ever deleted via the
+//! session cascade in `sessions.rs`.
+
 use rusqlite::{params, Connection, Result};
 use serde::{Deserialize, Serialize};
 

@@ -1,3 +1,18 @@
+//! Local SQLite bootstrap: open `app.db` under `path::data_dir()/studyvis/`,
+//! run forward-only migrations, and recover from proven corruption.
+//!
+//! All persistence goes through here — the frontend never opens a DB handle;
+//! it calls the thin command wrappers in `commands/{friends,sessions}.rs`,
+//! which query via the submodules below. The data directory is `studyvis`
+//! under the OS data dir (NOT the `com.studyvis.app` bundle identifier — that
+//! names the keychain service and a *different* Tauri `app_data_dir` used for
+//! `settings.json`).
+//!
+//! Failure policy on open: `NewerVersion` (schema from a future build) shows a
+//! blocking "update needed" dialog and exits, leaving the file untouched; only
+//! DEFINITIVE corruption (see `is_definitely_corrupt`) sets the file aside as
+//! `app.db.corrupt-<ts>` and recreates. A merely locked/busy DB is preserved.
+
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -11,6 +26,10 @@ pub mod friends;
 pub mod migrations;
 pub mod sessions;
 
+/// The app's single shared connection behind a `Mutex` (not an actual pool),
+/// managed as Tauri state in `lib.rs`. Commands lock it synchronously for
+/// their whole body — keep command fns non-async so a caller can never hold
+/// the guard across an `.await`.
 pub struct DbPool(pub Arc<Mutex<Connection>>);
 
 pub struct DbInit {

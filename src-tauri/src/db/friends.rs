@@ -1,3 +1,9 @@
+//! `friends` table queries. `ed_pubkey_hex` is the primary key and canonical
+//! identity; `add` is an upsert on it (re-pairing refreshes `x_pubkey_hex` /
+//! `display_name` / `paired_at` but never resets `last_studied_with`). Serde
+//! emits field names verbatim (snake_case) — the TS `Friend` type in
+//! `src/lib/db/friends.ts` mirrors them; keep the two aligned.
+
 use rusqlite::{params, Connection, OptionalExtension, Result};
 use serde::{Deserialize, Serialize};
 

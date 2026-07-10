@@ -1,3 +1,22 @@
+//! App spine: builds the Tauri app — plugin registration, the full
+//! `generate_handler!` command table, managed state, window/run-event
+//! handlers, and `setup_desktop` (tray, shortcuts, boot reads, menu).
+//!
+//! Ordering and teardown rules that are easy to break from a distance:
+//! - The single-instance plugin is registered FIRST, before anything else
+//!   initializes in a second process.
+//! - Every `#[tauri::command]` must appear in the `generate_handler!` table
+//!   below under a `#[cfg]` matching its module's gate in `commands/mod.rs`.
+//! - Close-requested on the main window is intercepted by a quit state
+//!   machine over `QuitFlag` / `MinimizeToTrayFlag` / `SessionActiveFlag`
+//!   (mid-session close emits `quit-requested` to JS for the confirm sheet).
+//! - The llama-server sidecar is killed only in `RunEvent::ExitRequested |
+//!   Exit` — keep that arm intact (see `commands/sidecar.rs` for why).
+//! - Boot reads (`settings.json` via Tauri's `app_data_dir`) happen here
+//!   before JS hydrates; the main window ships `visible: false` in
+//!   `tauri.conf.json` and is only shown at the end of `setup_desktop`, after
+//!   `apply_window_style`, to avoid a one-frame native-chrome flash.
+
 mod commands;
 pub mod crypto;
 pub mod db;

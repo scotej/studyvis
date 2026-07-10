@@ -294,8 +294,62 @@ where you'd see it surface.
 `PLAN.md`, `ARCHITECTURE.md`, and `DESIGN-SYSTEM.md` are the
 canonical specs — each the source of truth for its concern.
 `CHANGELOG.md` and `ISSUES.md` track release history and the audit
-ledger; `BUILD-PROMPTS.md` is the historical build plan. This README
+ledger; `IMPROVEMENTS.md` is a retired backlog snapshot;
+`BUILD-PROMPTS.md` is the historical build plan. `CLAUDE.md` is the
+working agreement for contributors and AI coding agents. This README
 is the user-facing entry point.
+
+## Developing
+
+The stack is Tauri 2 + React 19 + Vite 8 + TypeScript strict. You
+need Node 20.19+ (or 22.12+ — Vite 8's floor), npm, and a Rust stable
+toolchain with the Tauri 2 platform prerequisites for your OS
+(<https://tauri.app/start/prerequisites/>).
+
+```sh
+npm install                      # frontend + tooling deps
+scripts/fetch-llama-server.sh    # one-time: AI sidecar binaries (gitignored;
+                                 #   `tauri dev`/`tauri build` need them present)
+npm run tauri dev                # full desktop app — React UI + Rust shell
+```
+
+Two lighter loops when you don't need the desktop shell:
+
+- `npm run dev` — Vite frontend only. Fast UI iteration; Tauri APIs
+  are absent, so identity, DB, P2P-adjacent commands, and the AI
+  sidecar don't function.
+- `npm run storybook` — component workbench at
+  <http://localhost:6006>. Every primitive and feature component has
+  a story; a dev-only primitive gallery also lives at `/style` in the
+  running app.
+
+Before opening a PR, all gates must pass (husky pre-commit enforces
+only a subset — lint, prettier, `tsc --noEmit`, token/string guards,
+`cargo fmt --check`):
+
+```sh
+npm run build && npm run lint && npm run test
+npm run check-tokens && npm run check-strings && npm run check-contrast
+npm run build-storybook && npm run check-a11y
+(cd src-tauri && cargo test && cargo fmt --check && cargo clippy)
+```
+
+**Read before changing code.** `CLAUDE.md` (repo root) is the
+working agreement — house rules, doc map, quality gates — for human
+contributors and AI coding agents alike. The load-bearing rules, in
+one breath: every design value comes from `src/design/tokens.ts`;
+user-facing copy lives in `src/strings.ts`; Radix/shadcn primitives
+are imported only inside `src/components/ui/`; SQLite migrations are
+forward-only; peer wire formats and identity derivation are
+cross-version compatibility contracts (friends update manually and
+at different times); accessibility (WCAG AA, axe-clean stories,
+reduced-motion) is a gate, not a nicety; and no telemetry, ever.
+
+`ISSUES.md` entries `I9` and `I18` are accepted deviations under the
+friends-only threat model — leave them unless explicitly asked.
+`IMPROVEMENTS.md` is a retired 2026-06 backlog snapshot — a code
+audit found essentially all of it shipped (see its Status block);
+don't pick items up from it as open work.
 
 ## Versioning
 

@@ -16,10 +16,22 @@ Supporting references:
 
 - **`CHANGELOG.md`** — release history by version era (V1 / V2 / V3). Keep it current when you ship a release.
 - **`ISSUES.md`** — the audit ledger (Sev1–Sev4). **`I9` (Pomodoro broadcaster takeover) and `I18` (sidecar model-path sandbox) are accepted deviations** under the friends-only threat model — do not "fix" them without an explicit request.
-- **`README.md`** / **`INSTALL.md`** — user-facing entry point and install walkthrough.
+- **`IMPROVEMENTS.md`** — a **retired** backlog snapshot (2026-06, v1.2.0-era): a 2026-07 code audit found 55 of its 56 items shipped and only P1 (Linux) partially open — see its Status block. Its item IDs (`F6`, `A2`, …) live on as comment tags at the implementing code sites; do not treat item text as open work.
+- **`README.md`** / **`INSTALL.md`** — user-facing entry point (plus a Developing section) and install walkthrough.
 - **`BUILD-PROMPTS.md`** — **historical**. The sequenced prompts that originally built V0→V3, kept for provenance. It is *not* a live spec; do not paste from it or treat its phase scaffolding as current process.
 
 If a request conflicts with PLAN / ARCHITECTURE / DESIGN-SYSTEM, surface the conflict; don't silently deviate.
+
+### Comment shorthand used throughout the code
+
+Inline comments cite compact tags instead of restating history. Decode them as:
+
+- **`V1-P4` / `V2-P7` / `V3-P3`** — build phases from `BUILD-PROMPTS.md` (provenance only; the referenced behavior is described where the tag appears).
+- **`I9`, `I16`, …** — entries in the `ISSUES.md` audit ledger.
+- **`F6`, `U4`, `S2`, `A2`, `D1`, `R7`, `X4`, `N5`, …** — items from the `IMPROVEMENTS.md` backlog, letter = section (F friend-finding/connection, U UI/UX/a11y, S session robustness, A AI quality, D data/identity/recovery, R stats/report, X release/distribution, N new features/lifecycle).
+- **`PR-27`** — a finding from that pull request's review, addressed in code.
+
+The tag is a pointer to the fuller story; the comment beside it should already carry what you need to edit safely. When you fix something traceable to one of these, keep the tag convention.
 
 ## Working agreement
 

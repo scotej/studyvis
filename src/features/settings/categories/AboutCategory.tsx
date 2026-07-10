@@ -1,3 +1,9 @@
+// Settings → About: version (from Vite's __APP_VERSION__ define), a link to
+// the GitHub releases page, and the X4 opt-in new-version check. The check is
+// OFF by default and this component is the zero-outbound guarantee: while the
+// toggle is off, `system_fetch_latest_version` is never invoked — the one
+// sanctioned outbound request beyond P2P/Nostr (PLAN §3) only fires when on.
+
 import { useCallback, useEffect, useState } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { ExternalLinkIcon } from 'lucide-react'
