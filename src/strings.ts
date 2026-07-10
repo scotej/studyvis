@@ -1123,6 +1123,22 @@ export const strings = {
           credentialAriaLabel: 'TURN password',
           invalidUrl: 'TURN URL must start with turn: or turns:',
           active: 'TURN server active — the preference above now applies.',
+          // #47 C5 — reachability probe: a throwaway relay-only
+          // RTCPeerConnection against the user's own server, so a typo'd
+          // credential is distinguishable from a network problem before a
+          // session depends on it.
+          test: {
+            cta: 'Test connection',
+            testing: `Testing${'…'}`,
+            ariaLabel: 'Test the TURN server connection',
+            success: (seconds: string) =>
+              `Relay candidate gathered in ${seconds}s — your TURN server works from this network.`,
+            timeout:
+              'No relay candidate within 10 seconds. Check the URL and that the server is reachable from this network.',
+            noRelay:
+              'The server answered but allocated no relay — this usually means the username or password is wrong.',
+            errorFallback: "Couldn't run the test on this device.",
+          },
         },
       },
     },
