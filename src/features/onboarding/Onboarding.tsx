@@ -137,7 +137,7 @@ export function Onboarding({ onComplete }: OnboardingProps) {
   if (status === 'loading') {
     return (
       <main
-        className="flex min-h-screen items-center justify-center bg-bg-base text-text-secondary"
+        className="flex min-h-full items-center justify-center bg-bg-base text-text-secondary"
         aria-busy="true"
       >
         <span className="sr-only">{strings.common.loading}</span>

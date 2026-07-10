@@ -28,9 +28,10 @@ const isDev = import.meta.env.DEV
 function ChromeAwareShell({ children }: { children: ReactNode }) {
   const [bootedStyle] = useState(readWindowStyleBootCache)
   if (bootedStyle !== 'custom') {
-    // Native chrome — keep the original mount unchanged so any route
-    // component that relies on `min-h-screen` etc. behaves identically
-    // to the v1.0.3 shipped layout.
+    // Native chrome — keep the original mount unchanged. Route shells size
+    // with `min-h-full`/`h-full` against the height:100% html/body/#root
+    // chain, so this equals the v1.0.3 shipped min-h-screen layout here while
+    // also fitting the reduced slot when the custom TitleBar is on.
     return <>{children}</>
   }
   return (
