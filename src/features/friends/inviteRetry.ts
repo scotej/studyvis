@@ -20,7 +20,9 @@
 
 export const RETRY_WINDOW_MS = 3 * 60 * 1000
 
-export type InviteDeliver = () => Promise<void>
+// The retry path ignores the resolved value (#47 C2 made delivery return
+// an ack result); only settlement vs. rejection matters here.
+export type InviteDeliver = () => Promise<unknown>
 
 type PendingEntry = {
   recipientEdPubkeyHex: string

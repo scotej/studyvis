@@ -173,6 +173,8 @@ function makeApp(displayName: string): App {
       },
       boxDecrypt: async (theirXPub, nonce, ciphertext) =>
         boxDecrypt(theirXPub, identity.xPriv, nonce, ciphertext),
+      // #47 C2 — production passes signWithKeyring; the test signs in-process.
+      signAck: async (msg) => signMessage(identity.edPriv, msg),
       onValidInvite,
     }),
   }
@@ -210,11 +212,14 @@ describe('invite envelope round-trip', () => {
 
     const inbox = await awaitInvite(alice, sam.edHex, [sam])
 
-    await inviteFriend(
+    // #47 C2 — Alice's inbox answers with a signed delivery ACK, so Sam's
+    // send resolves confirmed.
+    const result = await inviteFriend(
       sam.sender,
       { edPubkeyHex: alice.edHex, xPubkeyHex: alice.xHex },
       SAMPLE_SESSION
     )
+    expect(result.acked).toBe(true)
 
     const invite = await inbox.receive
     expect(invite.from_ed_pubkey).toBe(sam.edHex)
@@ -243,11 +248,17 @@ describe('invite envelope round-trip', () => {
       },
     })
 
-    await inviteFriend(
+    // #47 C2 — Bob's inbox drops the non-friend envelope without decrypting,
+    // so no ACK ever comes back: exactly the "didn't add you back" case the
+    // ack exists to surface. Short window so the test doesn't sit out the 5s
+    // production default.
+    const result = await inviteFriend(
       carol.sender,
       { edPubkeyHex: bob.edHex, xPubkeyHex: bob.xHex },
-      SAMPLE_SESSION
+      SAMPLE_SESSION,
+      { ackTimeoutMs: 50 }
     )
+    expect(result.acked).toBe(false)
     // Settle scheduled microtasks.
     await new Promise((r) => setTimeout(r, 5))
 

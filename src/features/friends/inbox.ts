@@ -1,14 +1,19 @@
 import { verifyMessage } from '@/lib/crypto/identity'
 import { inboxPassword, inboxTopic } from '@/lib/crypto/topics'
-import { base64ToBytes, hexToBytes } from '@/lib/encoding'
+import { base64ToBytes, bytesToHex, hexToBytes } from '@/lib/encoding'
 import { joinTopic, type TopicRoom } from '@/lib/trystero'
 import { userRelayConfig } from '@/lib/trystero/relays'
 
 import {
+  INVITE_ACK_ACTION,
+  INVITE_ACK_VERSION,
   INVITE_ACTION,
   INVITE_ENVELOPE_VERSION,
   INVITE_TTL_MS,
+  serializeAckForSig,
   serializePayloadForSig,
+  type InviteAck,
+  type InviteAckCore,
   type InviteEnvelope,
   type InvitePayload,
 } from './envelope'
@@ -41,6 +46,11 @@ export type InboxContext = {
   lookupFriendXPub: FriendXPubLookup
   boxDecrypt: BoxDecryptFn
   onValidInvite: (invite: ValidInvite) => void
+  // #47 C2 — when present, each validated invite is answered with a signed
+  // delivery ACK on this same inbox topic, targeted at the delivering peer.
+  // Optional so the ack capability degrades to the pre-C2 wire (no ack) when
+  // signing is unavailable.
+  signAck?: (message: Uint8Array) => Promise<Uint8Array>
   now?: () => number
 }
 
@@ -173,6 +183,10 @@ export function subscribeToOwnInbox(ctx: InboxContext): InboxSubscription {
     return { leave: async () => {} }
   }
   const action = room.makeAction<InviteEnvelope>(INVITE_ACTION)
+  // #47 C2 — the delivery-ack sender. Created unconditionally (cheap); only
+  // used when ctx.signAck is provided.
+  const ackAction = room.makeAction<InviteAck>(INVITE_ACK_ACTION)
+  const myEdPubkeyHex = bytesToHex(ctx.myEdPubkey)
 
   // PR-18 — replay guard. The inbox topic + password derive solely from the
   // recipient's PUBLIC ed pubkey (topics.ts), so a stranger holding a contact
@@ -182,7 +196,7 @@ export function subscribeToOwnInbox(ctx: InboxContext): InboxSubscription {
   // identifies one invite; drop repeats. Kept only until the invite TTL, after
   // which validateInviteEnvelope's expiry check drops the envelope anyway.
   const seen = new Map<string, number>()
-  action.receive((data) => {
+  action.receive((data, peerId) => {
     void (async () => {
       const valid = await validateInviteEnvelope(data, ctx)
       if (!valid) return
@@ -194,6 +208,29 @@ export function subscribeToOwnInbox(ctx: InboxContext): InboxSubscription {
       if (seen.has(replayKey)) return
       seen.set(replayKey, now)
       ctx.onValidInvite(valid)
+      // #47 C2 — answer with a signed delivery ACK, targeted at the peer that
+      // delivered the envelope (the inviter is still on our inbox topic
+      // awaiting it). Best-effort: an ack failure must never affect the
+      // invite itself; replay-dropped envelopes above are deliberately NOT
+      // acked (they're suppressed as spam).
+      if (!ctx.signAck) return
+      const core: InviteAckCore = {
+        session_topic: valid.payload.session_topic,
+        to_ed_pubkey: valid.from_ed_pubkey,
+        ts: now,
+      }
+      try {
+        const sig = await ctx.signAck(serializeAckForSig(core))
+        const ack: InviteAck = {
+          v: INVITE_ACK_VERSION,
+          from_ed_pubkey: myEdPubkeyHex,
+          ...core,
+          sig: bytesToHex(sig),
+        }
+        void ackAction.send(ack, peerId).catch(() => {})
+      } catch {
+        // ack is best-effort
+      }
     })()
   })
 

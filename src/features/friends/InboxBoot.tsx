@@ -7,7 +7,7 @@ import {
 } from '@tauri-apps/plugin-notification'
 
 import { hexToBytes } from '@/lib/crypto/identity'
-import { boxDecryptWithKeyring } from '@/lib/db/identity'
+import { boxDecryptWithKeyring, signWithKeyring } from '@/lib/db/identity'
 import { getFriendXPubkey } from '@/lib/db/friends'
 import { useFriendsStore } from '@/stores/friendsStore'
 import { useSessionStore } from '@/stores/sessionStore'
@@ -80,6 +80,9 @@ export function InboxBoot({
         return getFriendXPubkey(edPubkeyHex)
       },
       boxDecrypt: boxDecryptWithKeyring,
+      // #47 C2 — answer validated invites with a signed delivery ACK so the
+      // inviter can tell "delivered" from "their inbox dropped me".
+      signAck: signWithKeyring,
       onValidInvite: (invite) => {
         if (cancelled) return
         void handleValidInvite(invite, (i) => onInviteAcceptedRef.current(i))
