@@ -1028,7 +1028,7 @@ export function SessionView() {
       if (!stream || audioSwapping) return
       setAudioSwapping(true)
       try {
-        await swapAudioInput(
+        const newTrack = await swapAudioInput(
           nextDeviceId,
           {
             getUserMedia: (constraints) =>
@@ -1038,6 +1038,17 @@ export function SessionView() {
           },
           usePttStore.getState().active
         )
+        // #47 A3 — re-attach the I42 device-loss recovery to the swapped-in
+        // track: the acquire effect's 'ended' listeners only cover tracks
+        // present at acquisition, so without this the exact churn the swap
+        // exists for (USB/Bluetooth headset unplugged mid-session) fails
+        // silently — no banner, peers keep a dead sender, PTT toggles a dead
+        // track. Same live-stream guard as the acquire-time handler; after
+        // teardown localStreamRef is null so a late 'ended' no-ops.
+        newTrack.addEventListener('ended', () => {
+          if (localStreamRef.current !== stream) return
+          setMediaErrorName('NotReadableError')
+        })
         setActiveAudioDeviceId(nextDeviceId)
       } catch (err) {
         const message =
