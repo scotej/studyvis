@@ -66,6 +66,14 @@ jobs:
       - name: Contrast (WCAG AA) enforcement
         run: npm run check-contrast
 
+      # #47 C4 — non-blocking: dead pinned relays degrade default-config
+      # discovery for every install at once, and fixing the list means
+      # shipping a release — so surface rot at exactly the moment a release
+      # is being cut, without gating on third-party relay uptime.
+      - name: Signaling-relay health (non-blocking)
+        continue-on-error: true
+        run: npm run check-relays
+
       # PR-19 — the a11y gate (a CLAUDE.md quality gate that ci.yml runs) was
       # missing here, so a release could be cut over an axe-core regression.
       - name: Storybook build
