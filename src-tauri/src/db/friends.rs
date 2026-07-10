@@ -53,6 +53,38 @@ pub fn add(
     Ok(())
 }
 
+// #47 A4 — backup-import upsert: restore what's missing, never rewind what's
+// fresher locally. A months-old .svfb is the realistic import, so for an
+// existing row keep the local x_pubkey_hex (re-pairing may have rotated it
+// since the backup was written — rewinding it would break the invite
+// channel), keep a non-empty local display_name and a non-null paired_at,
+// and take the later of the two last_studied_with values (NULL-preserving so
+// a never-studied pair doesn't gain a bogus epoch-0 timestamp). New rows
+// insert the backup verbatim. Contrast with `add`, whose overwrite semantics
+// are correct for live re-pairing and must stay that way.
+pub fn import_merge(conn: &Connection, f: &Friend) -> Result<()> {
+    conn.execute(
+        "INSERT INTO friends (ed_pubkey_hex, x_pubkey_hex, display_name, paired_at, last_studied_with)
+         VALUES (?1, ?2, ?3, ?4, ?5)
+         ON CONFLICT(ed_pubkey_hex) DO UPDATE SET
+             display_name      = COALESCE(NULLIF(friends.display_name, ''), excluded.display_name),
+             paired_at         = COALESCE(friends.paired_at, excluded.paired_at),
+             last_studied_with = CASE
+                 WHEN friends.last_studied_with IS NULL THEN excluded.last_studied_with
+                 WHEN excluded.last_studied_with IS NULL THEN friends.last_studied_with
+                 ELSE MAX(friends.last_studied_with, excluded.last_studied_with)
+             END",
+        params![
+            f.ed_pubkey_hex,
+            f.x_pubkey_hex,
+            f.display_name,
+            f.paired_at,
+            f.last_studied_with
+        ],
+    )?;
+    Ok(())
+}
+
 pub fn remove(conn: &Connection, ed_pubkey_hex: &str) -> Result<usize> {
     conn.execute(
         "DELETE FROM friends WHERE ed_pubkey_hex = ?1",
