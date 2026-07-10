@@ -1,7 +1,9 @@
 // Hook wrapping the OS launch-at-login toggle. The OS registry is the source
-// of truth (state is re-read after every write); a request-id guard makes
-// rapid toggles last-write-wins instead of interleaving. Reports
-// 'unavailable' outside the Tauri runtime so Storybook renders a disabled row.
+// of truth: initial state is read from it at mount, and a successful toggle
+// sets local state from the requested value (no post-write re-read). A
+// request-id guard makes rapid toggles last-write-wins instead of
+// interleaving. Reports 'unavailable' outside the Tauri runtime so Storybook
+// renders a disabled row.
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 

@@ -3,9 +3,11 @@
 //!
 //! Key custody model: the Ed25519 + X25519 private keys (both HKDF-derived
 //! from the 24-word mnemonic on the JS side — see `src/lib/crypto/identity.ts`)
-//! are handed to Rust exactly once at save time and live in the OS keychain
-//! (service `com.studyvis.app`, user `identity-keys`) — never on plaintext
-//! disk. JS asks Rust to sign/open-box on its behalf afterwards. The module is
+//! are submitted to Rust at save/recovery time (`identity_save_keys` accepts
+//! idempotent retries and, on the confirmed recovery path, explicit
+//! overwrites) and are retained in the OS keychain (service
+//! `com.studyvis.app`, user `identity-keys`) — never on plaintext disk. JS
+//! asks Rust to sign/open-box on its behalf afterwards. The module is
 //! macOS/Windows-only because `keyring` has no Linux backend wired
 //! (`commands/mod.rs`).
 //!

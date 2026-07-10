@@ -21,11 +21,14 @@ pub const AI_DIALOG_LABEL: &str = "ai-dialog";
 const DIALOG_WIDTH: f64 = 460.0;
 const DIALOG_HEIGHT: f64 = 220.0;
 
-/// Toggles the dialog: destroys it if already open (`destroy()`, not
-/// `close()`, so the close-requested interception in `lib.rs` can't veto a
-/// toggle), otherwise creates it. Not a `#[tauri::command]` — invoked from
-/// the global-shortcut handler in `lib.rs`, which `let _ =`-captures the
-/// Result to keep the app responsive on builder failure.
+/// Toggles the dialog: destroys it if already open, otherwise creates it.
+/// `destroy()` rather than `close()` because a toggle wants immediate,
+/// unconditional teardown — `close()` goes through the asynchronous
+/// close-requested roundtrip (interceptable machinery this window doesn't
+/// need; `lib.rs`'s handler only acts on the `main` window anyway). Not a
+/// `#[tauri::command]` — invoked from the global-shortcut handler in
+/// `lib.rs`, which `let _ =`-captures the Result to keep the app responsive
+/// on builder failure.
 pub fn toggle_ai_dialog<R: Runtime>(app: &AppHandle<R>) -> Result<(), tauri::Error> {
     if let Some(existing) = app.get_webview_window(AI_DIALOG_LABEL) {
         existing.destroy()?;

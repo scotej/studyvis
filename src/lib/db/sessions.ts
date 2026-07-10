@@ -1,8 +1,8 @@
 // Typed wrappers over the Rust `sessions_*` commands (local SQLite session
 // history). Two near-identical shapes on purpose: `SessionRow` (camelCase) is
-// the JS→Rust INSERT input — Tauri auto-camelCases invoke args — while
-// `SessionRecord` (snake_case) is serde's response shape on reads. Don't
-// merge them.
+// the JS→Rust INSERT input — Tauri's invoke layer expects camelCase keys and
+// matches them to the command's snake_case parameters — while `SessionRecord`
+// (snake_case) is serde's response shape on reads. Don't merge them.
 
 import { invoke } from '@tauri-apps/api/core'
 

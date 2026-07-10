@@ -1,7 +1,8 @@
 // Onboarding-completion flag, persisted as `onboarding_completed_at` in the
 // Tauri store file `app-state.json` (separate from settings.json). Outside a
-// Tauri runtime (Storybook / node tests) the read resolves to 'pending' and
-// writes no-op, so onboarding simply renders.
+// Tauri runtime (Storybook / node tests) `readOnboardingCompletedAt()`
+// resolves to null and the writes no-op; `useOnboardingState()` maps that to
+// a 'pending' status, so onboarding simply renders.
 
 import { useCallback, useEffect, useState } from 'react'
 import { LazyStore } from '@tauri-apps/plugin-store'
