@@ -45,6 +45,8 @@ function baseSession(over: Partial<SessionRecord> = {}): SessionRecord {
     score: 80,
     focused_pct: 0.9,
     generated_at: START_TS + 25 * 60_000,
+    confident_samples: null,
+    skipped_samples: null,
     ...over,
   }
 }

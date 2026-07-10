@@ -674,6 +674,11 @@ export const strings = {
     // #47 B3 — shown only after an S1 grace-window auto-end, where the room
     // may still be live without you.
     rejoinCta: 'Rejoin session',
+    // #47 D5 — calm data-quality caveat when a material share of AI checks
+    // couldn't be read (see sampleQualitySummary): the focused-time % above
+    // it was computed over fewer checks than the session ran.
+    dataQuality: (skipped: number, total: number) =>
+      `${skipped} of ${total} AI checks couldn't be read and don't count toward focused time.`,
     loading: `Loading report${ELLIPSIS}`,
     ariaLabel: 'Session report',
     eyebrow: 'Session report',

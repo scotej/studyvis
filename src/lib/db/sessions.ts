@@ -22,6 +22,10 @@ export type SessionRow = {
   score?: number | null
   focusedPct?: number | null
   generatedAt?: number | null
+  // #47 D5 — AI data-quality counters (003 migration); null = counts unknown
+  // (AI off, or a row written by an older build).
+  confidentSamples?: number | null
+  skippedSamples?: number | null
 }
 
 // Shape returned by `sessions_list` / `sessions_get`. Tauri auto-camelCases
@@ -37,6 +41,8 @@ export type SessionRecord = {
   score: number | null
   focused_pct: number | null
   generated_at: number | null
+  confident_samples: number | null
+  skipped_samples: number | null
 }
 
 export async function sessionsInsert(row: SessionRow): Promise<void> {
@@ -50,6 +56,8 @@ export async function sessionsInsert(row: SessionRow): Promise<void> {
     score: row.score ?? null,
     focusedPct: row.focusedPct ?? null,
     generatedAt: row.generatedAt ?? null,
+    confidentSamples: row.confidentSamples ?? null,
+    skippedSamples: row.skippedSamples ?? null,
   })
 }
 

@@ -12,8 +12,13 @@ use rusqlite::{Connection, TransactionBehavior};
 
 const MIGRATION_001_INITIAL: &str = include_str!("migrations/001_initial.sql");
 const MIGRATION_002_V2: &str = include_str!("migrations/002_v2.sql");
+const MIGRATION_003_SAMPLE_COUNTS: &str = include_str!("migrations/003_sample_counts.sql");
 
-const MIGRATIONS: &[(u32, &str)] = &[(1, MIGRATION_001_INITIAL), (2, MIGRATION_002_V2)];
+const MIGRATIONS: &[(u32, &str)] = &[
+    (1, MIGRATION_001_INITIAL),
+    (2, MIGRATION_002_V2),
+    (3, MIGRATION_003_SAMPLE_COUNTS),
+];
 
 pub const MAX_KNOWN_VERSION: u32 = MIGRATIONS[MIGRATIONS.len() - 1].0;
 
@@ -105,7 +110,7 @@ mod tests {
         .unwrap_or(0)
     }
 
-    const LATEST_VERSION: u32 = 2;
+    const LATEST_VERSION: u32 = 3;
 
     #[test]
     fn applies_full_schema_on_empty_db() {
@@ -188,6 +193,46 @@ mod tests {
             topic, "Calculus",
             "V1 session data must survive the upgrade"
         );
+    }
+
+    // #47 D5 acceptance: 003 runs cleanly on a database already at
+    // schema_version 2 with real session rows — the columns appear and the
+    // pre-migration rows read back NULL counts ("unknown", not zero).
+    #[test]
+    fn upgrades_v2_db_to_v3_with_null_counts_on_old_rows() {
+        let mut conn = Connection::open_in_memory().expect("open in-memory");
+        {
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS schema_version (version INTEGER PRIMARY KEY)",
+                [],
+            )
+            .expect("schema_version");
+            let tx = conn.transaction().expect("tx");
+            tx.execute_batch(MIGRATION_001_INITIAL).expect("apply 001");
+            tx.execute_batch(MIGRATION_002_V2).expect("apply 002");
+            tx.execute("INSERT INTO schema_version (version) VALUES (1), (2)", [])
+                .expect("record v2");
+            tx.commit().expect("commit v2");
+        }
+        conn.execute(
+            "INSERT INTO sessions (id, started_at, score) VALUES ('s1', 1, 90)",
+            [],
+        )
+        .expect("insert session");
+        assert_eq!(current_version(&conn), 2);
+
+        let applied = run_migrations(&mut conn).expect("upgrade run");
+        assert_eq!(applied, LATEST_VERSION);
+
+        let (confident, skipped): (Option<i64>, Option<i64>) = conn
+            .query_row(
+                "SELECT confident_samples, skipped_samples FROM sessions WHERE id = 's1'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .expect("read counts");
+        assert_eq!(confident, None, "pre-003 rows must read as unknown");
+        assert_eq!(skipped, None);
     }
 
     #[test]

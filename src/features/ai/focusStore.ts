@@ -167,13 +167,22 @@ export type FocusSnapshot = {
   // no-AI state instead of a fake 100/100 gauge.
   score: number | null
   focusedPct: number | null
+  // #47 D5 — data-quality counts persisted to the sessions row so the report
+  // can say how much of the session the focused-time % actually saw. Null
+  // when AI never ran a single check (off / no model), so an AI-off session
+  // doesn't render as "0 checks skipped".
+  confidentSamples: number | null
+  skippedSamples: number | null
 }
 
 export function snapshotFocusForReport(): FocusSnapshot {
   const s = useFocusStore.getState()
   const scored = s.totalSamples > 0
+  const ranAnyCheck = s.totalSamples > 0 || s.skippedSamples > 0
   return {
     score: scored ? s.machine.score : null,
     focusedPct: scored ? s.onTaskSamples / s.totalSamples : null,
+    confidentSamples: ranAnyCheck ? s.totalSamples : null,
+    skippedSamples: ranAnyCheck ? s.skippedSamples : null,
   }
 }

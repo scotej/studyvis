@@ -48,6 +48,8 @@ function baseSession(overrides: Partial<SessionRecord> = {}): SessionRecord {
     score: 100,
     focused_pct: 1,
     generated_at: ENDED_AT,
+    confident_samples: null,
+    skipped_samples: null,
     ...overrides,
   }
 }
@@ -113,6 +115,29 @@ export const AutoEndedWithRejoin: Story = {
     onRejoin: () => {
       // no-op for stories
     },
+  },
+}
+
+// #47 D5 — a material share of AI checks were unreadable: the summary block
+// carries a calm data-quality caveat under the focused-time line.
+export const MaterialSkippedChecks: Story = {
+  args: {
+    ...MostlyOnTask.args,
+    data: buildData(
+      baseSession({
+        score: 88,
+        focused_pct: 18 / 20,
+        declared_topic: 'Linear algebra problem set',
+        confident_samples: 20,
+        skipped_samples: 13,
+      }),
+      [
+        event(ME, 'joined', 0),
+        event(ALICE, 'joined', 2_000),
+        event(ME, 'left', 25 * 60_000),
+        event(ALICE, 'left', 25 * 60_000),
+      ]
+    ),
   },
 }
 

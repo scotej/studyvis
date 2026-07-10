@@ -27,6 +27,8 @@ pub fn sessions_insert(
     score: Option<i64>,
     focused_pct: Option<f64>,
     generated_at: Option<i64>,
+    confident_samples: Option<i64>,
+    skipped_samples: Option<i64>,
 ) -> Result<(), String> {
     let conn = lock(&state)?;
     let row = sessions::SessionRow {
@@ -39,6 +41,8 @@ pub fn sessions_insert(
         score,
         focused_pct,
         generated_at,
+        confident_samples,
+        skipped_samples,
     };
     sessions::insert(&conn, &row).map_err(|e| e.to_string())
 }

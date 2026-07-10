@@ -13,6 +13,28 @@ import { SEVERITY_DEDUCTIONS } from '@/features/ai/scoreMachine'
 import type { Severity } from '@/features/ai/parseJudgment'
 import type { AuditEventRecord } from '@/lib/db/audit'
 
+// #47 D5 — when is the skipped-check count worth a data-quality line? A
+// couple of unparseable checks in a long session is noise; a session where a
+// meaningful share of checks were skipped renders the same confident
+// focused-time % as a clean one, and that deserves a calm caveat. Material =
+// at least 3 skips AND at least 15% of all checks. Null counts (AI off, or a
+// row written before the 003 migration) → no line.
+export const SKIPPED_SAMPLES_MIN = 3
+export const SKIPPED_SAMPLES_MIN_RATIO = 0.15
+
+export function sampleQualitySummary(session: {
+  confident_samples: number | null
+  skipped_samples: number | null
+}): { skipped: number; totalChecks: number } | null {
+  const confident = session.confident_samples
+  const skipped = session.skipped_samples
+  if (confident == null || skipped == null) return null
+  const totalChecks = confident + skipped
+  if (totalChecks === 0 || skipped < SKIPPED_SAMPLES_MIN) return null
+  if (skipped / totalChecks < SKIPPED_SAMPLES_MIN_RATIO) return null
+  return { skipped, totalChecks }
+}
+
 export function parseAuditDetail(raw: string): Record<string, unknown> {
   if (!raw) return {}
   try {

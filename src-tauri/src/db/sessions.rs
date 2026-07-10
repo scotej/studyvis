@@ -29,12 +29,17 @@ pub struct SessionRow {
     pub score: Option<i64>,
     pub focused_pct: Option<f64>,
     pub generated_at: Option<i64>,
+    // #47 D5 — AI data-quality counters (003 migration). NULL on pre-003 rows
+    // and AI-off sessions; the report treats NULL as "counts unknown".
+    pub confident_samples: Option<i64>,
+    pub skipped_samples: Option<i64>,
 }
 
 pub fn list(conn: &Connection) -> Result<Vec<SessionRow>> {
     let mut stmt = conn.prepare(
         "SELECT id, started_at, ended_at, total_minutes, peer_pubkeys,
-                declared_topic, score, focused_pct, generated_at
+                declared_topic, score, focused_pct, generated_at,
+                confident_samples, skipped_samples
          FROM sessions
          ORDER BY started_at DESC, id ASC",
     )?;
@@ -49,6 +54,8 @@ pub fn list(conn: &Connection) -> Result<Vec<SessionRow>> {
             score: row.get(6)?,
             focused_pct: row.get(7)?,
             generated_at: row.get(8)?,
+            confident_samples: row.get(9)?,
+            skipped_samples: row.get(10)?,
         })
     })?;
     rows.collect()
@@ -57,7 +64,8 @@ pub fn list(conn: &Connection) -> Result<Vec<SessionRow>> {
 pub fn get(conn: &Connection, id: &str) -> Result<Option<SessionRow>> {
     let mut stmt = conn.prepare(
         "SELECT id, started_at, ended_at, total_minutes, peer_pubkeys,
-                declared_topic, score, focused_pct, generated_at
+                declared_topic, score, focused_pct, generated_at,
+                confident_samples, skipped_samples
          FROM sessions
          WHERE id = ?1",
     )?;
@@ -72,6 +80,8 @@ pub fn get(conn: &Connection, id: &str) -> Result<Option<SessionRow>> {
             score: row.get(6)?,
             focused_pct: row.get(7)?,
             generated_at: row.get(8)?,
+            confident_samples: row.get(9)?,
+            skipped_samples: row.get(10)?,
         })
     })
     .optional()
@@ -90,8 +100,9 @@ pub fn insert(conn: &Connection, row: &SessionRow) -> Result<()> {
     conn.execute(
         "INSERT INTO sessions
              (id, started_at, ended_at, total_minutes, peer_pubkeys,
-              declared_topic, score, focused_pct, generated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+              declared_topic, score, focused_pct, generated_at,
+              confident_samples, skipped_samples)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
          ON CONFLICT(id) DO UPDATE SET
              started_at     = excluded.started_at,
              ended_at       = excluded.ended_at,
@@ -100,7 +111,9 @@ pub fn insert(conn: &Connection, row: &SessionRow) -> Result<()> {
              declared_topic = COALESCE(excluded.declared_topic, sessions.declared_topic),
              score          = COALESCE(excluded.score, sessions.score),
              focused_pct    = COALESCE(excluded.focused_pct, sessions.focused_pct),
-             generated_at   = COALESCE(excluded.generated_at, sessions.generated_at)",
+             generated_at   = COALESCE(excluded.generated_at, sessions.generated_at),
+             confident_samples = COALESCE(excluded.confident_samples, sessions.confident_samples),
+             skipped_samples   = COALESCE(excluded.skipped_samples, sessions.skipped_samples)",
         params![
             row.id,
             row.started_at,
@@ -111,6 +124,8 @@ pub fn insert(conn: &Connection, row: &SessionRow) -> Result<()> {
             row.score,
             row.focused_pct,
             row.generated_at,
+            row.confident_samples,
+            row.skipped_samples,
         ],
     )?;
     Ok(())
@@ -161,6 +176,8 @@ mod tests {
             score: None,
             focused_pct: None,
             generated_at: None,
+            confident_samples: None,
+            skipped_samples: None,
         }
     }
 
@@ -246,6 +263,8 @@ mod tests {
             score: None,
             focused_pct: None,
             generated_at: None,
+            confident_samples: None,
+            skipped_samples: None,
         };
         insert(&conn, &row).expect("insert 1");
         let again = SessionRow {
@@ -258,6 +277,8 @@ mod tests {
             score: None,
             focused_pct: None,
             generated_at: None,
+            confident_samples: None,
+            skipped_samples: None,
         };
         insert(&conn, &again).expect("insert 2");
         let read = get(&conn, "topic-hex").expect("get").expect("present");
@@ -283,6 +304,8 @@ mod tests {
             score: Some(87),
             focused_pct: Some(0.91),
             generated_at: Some(1_700_000_300_500),
+            confident_samples: Some(24),
+            skipped_samples: Some(2),
         };
         insert(&conn, &report_row).expect("insert report");
         let read = get(&conn, "topic-hex").expect("get").expect("present");
