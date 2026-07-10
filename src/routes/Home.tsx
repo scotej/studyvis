@@ -43,7 +43,8 @@ import {
   SessionView,
   TopicGateModal,
 } from '@/features/session'
-import { Settings } from '@/features/settings'
+import { Settings, SettingsOverlay } from '@/features/settings'
+import type { SettingsCategoryId } from '@/features/settings'
 import type { Friend } from '@/lib/db/friends'
 import { boxEncryptWithKeyring } from '@/lib/db/identity'
 import { useFriendsStore } from '@/stores/friendsStore'
@@ -82,6 +83,12 @@ export function Home() {
     useState<ContactImportSource>('remote')
   const [presence, setPresence] = useState<PresenceMap>({})
   const [view, setView] = useState<View>('main')
+  // #47 B2 — Settings hosted over a live session (null = closed). Distinct
+  // from `view`: SessionView stays mounted underneath so media, peers, and
+  // the AI loop keep running. Cleared whenever the session stops being
+  // active so a stale overlay can't greet the next session.
+  const [sessionSettingsCategory, setSessionSettingsCategory] =
+    useState<SettingsCategoryId | null>(null)
   // V2-P9 — when AI is on, a session must declare a topic before it goes
   // live. We queue the start request and run it only after the modal
   // resolves; the discriminated union keeps the host/guest payloads distinct.
@@ -195,6 +202,21 @@ export function Home() {
     },
     []
   )
+
+  // Adjust-state-during-render (the TopicGateModal pattern, not an effect):
+  // when the session stops being active the overlay unmounts with the session
+  // branch, but the category state must not survive into the NEXT session.
+  const [wasSessionActive, setWasSessionActive] = useState(
+    sessionStatus === 'active'
+  )
+  if ((sessionStatus === 'active') !== wasSessionActive) {
+    setWasSessionActive(sessionStatus === 'active')
+    if (sessionStatus !== 'active') setSessionSettingsCategory(null)
+  }
+
+  const openSessionSettings = useCallback((category?: SettingsCategoryId) => {
+    setSessionSettingsCategory(category ?? 'identity')
+  }, [])
 
   const aiOn = () => useSettingsStore.getState().values.aiFeaturesEnabled
 
@@ -312,10 +334,23 @@ export function Home() {
             session toward the 4-user mesh. Deliberately runHostInvite, not
             handleInvite: the session already declared its topic at start, so
             the AI topic gate must not re-prompt for a mid-session invite. */}
-        <SessionView
-          presence={presence}
-          onInviteFriend={(friend) => void runHostInvite(friend)}
-        />
+        {/* #47 B2 — display:contents keeps the wrapper out of layout while
+            `inert` removes the session UI from focus + the a11y tree while
+            the settings overlay is up (media keeps flowing — inert only
+            blocks interaction). */}
+        <div inert={sessionSettingsCategory !== null} className="contents">
+          <SessionView
+            presence={presence}
+            onInviteFriend={(friend) => void runHostInvite(friend)}
+            onOpenSettings={openSessionSettings}
+          />
+        </div>
+        {sessionSettingsCategory !== null ? (
+          <SettingsOverlay
+            initialCategory={sessionSettingsCategory}
+            onClose={() => setSessionSettingsCategory(null)}
+          />
+        ) : null}
         {tail}
       </>
     )

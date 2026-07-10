@@ -52,13 +52,18 @@ const CATEGORIES: ReadonlyArray<
 
 export type SettingsProps = {
   onClose?: () => void
+  // #47 B2 — deep-link the initial pane (e.g. the in-session AI error toasts
+  // open straight to 'ai'). Initial only: later prop changes don't re-route
+  // an open Settings the user is navigating.
+  initialCategory?: SettingsCategoryId
 }
 
 // Container: owns the active-category state and subscribes the settings
 // store. Each category sub-component reads what it needs.
-export function Settings({ onClose }: SettingsProps) {
-  const [activeCategoryId, setActiveCategoryId] =
-    useState<SettingsCategoryId>('identity')
+export function Settings({ onClose, initialCategory }: SettingsProps) {
+  const [activeCategoryId, setActiveCategoryId] = useState<SettingsCategoryId>(
+    initialCategory ?? 'identity'
+  )
   // A re-opened report must replace the settings shell entirely — rendering it
   // inside SettingsLayout would nest a second <main> landmark and squeeze the
   // report into the content column. Lift the selection here and branch above

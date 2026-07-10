@@ -1,7 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { emitTo, listen } from '@tauri-apps/api/event'
-import { UserPlusIcon, VideoIcon, VideoOffIcon } from 'lucide-react'
+import {
+  Settings2Icon,
+  UserPlusIcon,
+  VideoIcon,
+  VideoOffIcon,
+} from 'lucide-react'
 import { toast } from 'sonner'
 import { useShallow } from 'zustand/react/shallow'
 
@@ -43,6 +48,7 @@ import {
 } from '@/features/ai'
 import { isOnline, type PresenceMap } from '@/features/friends/presence'
 import { useIdentity } from '@/features/identity'
+import type { SettingsCategoryId } from '@/features/settings'
 import type { Friend } from '@/lib/db/friends'
 import { signWithKeyring } from '@/lib/db/identity'
 import { mediaErrorKind } from '@/lib/mediaError'
@@ -109,9 +115,18 @@ export type SessionViewProps = {
   // hides the invite affordance entirely.
   presence?: PresenceMap
   onInviteFriend?: (friend: Friend) => void
+  // #47 B2 — open the Home-hosted settings overlay (optionally deep-linked
+  // to a category) WITHOUT unmounting the session. Shipped error copy sends
+  // users to "Settings → AI"; before this, following it meant leaving — and
+  // in a 2-person session, ending it for everyone.
+  onOpenSettings?: (category?: SettingsCategoryId) => void
 }
 
-export function SessionView({ presence, onInviteFriend }: SessionViewProps) {
+export function SessionView({
+  presence,
+  onInviteFriend,
+  onOpenSettings,
+}: SessionViewProps) {
   const status = useSessionStore((s) => s.status)
   const room = useSessionStore((s) => s.room)
   const isHost = useSessionStore((s) => s.isHost)
@@ -180,6 +195,24 @@ export function SessionView({ presence, onInviteFriend }: SessionViewProps) {
   // #47 A2 — mid-session invite picker (host only; see the footer button).
   const [inviteOpen, setInviteOpen] = useState(false)
   const friends = useFriendsStore((s) => s.friends)
+  // #47 B2 — ref so the sample-loop effect's toast callbacks reach the
+  // current opener without adding it to the effect deps (same pattern as
+  // emitAuditRef): a re-render must not tear down the AI loop.
+  const onOpenSettingsRef = useRef(onOpenSettings)
+  useEffect(() => {
+    onOpenSettingsRef.current = onOpenSettings
+  })
+  const aiSettingsToastAction = () => {
+    const open = onOpenSettingsRef.current
+    return open
+      ? {
+          action: {
+            label: strings.session.errors.openSettingsAction,
+            onClick: () => open('ai'),
+          },
+        }
+      : undefined
+  }
   // S3 — local camera on/off. Toggling flips the local video track's `enabled`
   // flag (never replaces the stream — V2-P5's focus-reset depends on a
   // monotonic localStream). When off, the AI sample loop pauses (getFaceTrack
@@ -769,9 +802,14 @@ export function SessionView({ presence, onInviteFriend }: SessionViewProps) {
       },
       onStartFail: (reason, detail) => {
         if (reason === 'no_active_model') {
-          toast.error(strings.session.errors.pickModel)
+          // #47 B2 — the copy names "Settings → AI"; the action takes the
+          // user there without leaving the session.
+          toast.error(strings.session.errors.pickModel, aiSettingsToastAction())
         } else if (reason === 'model_files_missing') {
-          toast.error(strings.session.errors.modelFilesMissing)
+          toast.error(
+            strings.session.errors.modelFilesMissing,
+            aiSettingsToastAction()
+          )
         } else {
           toast.error(
             detail
@@ -794,7 +832,8 @@ export function SessionView({ presence, onInviteFriend }: SessionViewProps) {
         toast.error(
           lastError
             ? strings.session.errors.aiCrashedDetail(lastError)
-            : strings.session.errors.aiCrashed
+            : strings.session.errors.aiCrashed,
+          aiSettingsToastAction()
         )
         setAiRuntimeStatus('error')
       },
@@ -1015,6 +1054,12 @@ export function SessionView({ presence, onInviteFriend }: SessionViewProps) {
       const target = e.target as HTMLElement | null
       const tag = target?.tagName
       if (tag === 'INPUT' || tag === 'TEXTAREA' || target?.isContentEditable) {
+        return
+      }
+      // #47 B2 — any open modal (the settings overlay, Radix dialogs) owns
+      // Esc. Arming leave-on-Esc underneath one risks an invisible
+      // second-Esc ending the session for everyone.
+      if (document.querySelector('[aria-modal="true"]')) {
         return
       }
       e.preventDefault()
@@ -1312,6 +1357,18 @@ export function SessionView({ presence, onInviteFriend }: SessionViewProps) {
           >
             {cameraOn ? <VideoIcon /> : <VideoOffIcon />}
           </Button>
+          {onOpenSettings ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => onOpenSettings()}
+              aria-haspopup="dialog"
+              aria-label={strings.settings.openAriaLabel}
+            >
+              <Settings2Icon />
+            </Button>
+          ) : null}
         </span>
         <span className="flex items-center gap-4">
           <AiStatusChip status={aiChipStatus} />

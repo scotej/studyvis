@@ -573,6 +573,9 @@ export const strings = {
       leaveFailedFallback: "Couldn't leave the session.",
       switchMicFailedFallback: "Couldn't switch microphone.",
       requestAccessFallback: "Couldn't request access.",
+      // #47 B2 — toast action that opens the in-session settings overlay at
+      // the AI category (the copy above names it; the button honors it).
+      openSettingsAction: 'Open settings',
       pickModel: 'Pick a model in Settings → AI.',
       modelFilesMissing:
         'Model files are missing. Re-download them in Settings → AI.',
