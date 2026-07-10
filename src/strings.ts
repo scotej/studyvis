@@ -526,6 +526,16 @@ export const strings = {
       panelHeading: 'Session log',
       empty: 'Events will appear here as people join, leave, and take breaks.',
     },
+    // #47 B6 — quiet in-session text notes. Ephemeral by design: nothing is
+    // recorded or persisted (PLAN §6 non-goal), notes die with the session.
+    notes: {
+      heading: 'Notes',
+      empty:
+        'Quiet notes to your friends — a quick "brb 5" or a link — without breaking the silence. Nothing is saved.',
+      placeholder: 'Type a note…',
+      inputAriaLabel: 'Note to your session',
+      sendAriaLabel: 'Send the note',
+    },
     focusStates: {
       focused: 'On task',
       warning: 'Self-warning',
