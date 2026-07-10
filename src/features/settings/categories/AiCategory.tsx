@@ -207,10 +207,15 @@ export function AiCategory() {
   return (
     <SettingsSection heading={copy.heading}>
       <p className="mb-3 text-sm text-text-secondary">{copy.intro}</p>
-      {/* D5 — canonical screen-recording indicator note. */}
-      <p className="mb-3 text-sm text-text-secondary">
-        {copy.screenIndicatorNote}
-      </p>
+      {/* D5 — canonical screen-recording indicator note. Only meaningful once
+          AI can actually sample; with the gate off nothing records, so the
+          three-sentence OS-indicator explainer would be noise above the only
+          control on the pane. */}
+      {aiFeaturesEnabled ? (
+        <p className="mb-3 text-sm text-text-secondary">
+          {copy.screenIndicatorNote}
+        </p>
+      ) : null}
 
       <SettingsRow
         label={copy.enable.label}
@@ -362,7 +367,7 @@ export function AiCategory() {
                     void setCaptureDisplays(value as CaptureDisplaysMode)
                   }
                 }}
-                className="grid-cols-1 gap-3 sm:grid-flow-col sm:auto-cols-max sm:gap-6"
+                className="grid-cols-1 gap-3 sm:grid-cols-none sm:grid-flow-col sm:auto-cols-max sm:gap-6"
                 aria-label={copy.captureDisplays.ariaLabel}
               >
                 <div className="flex items-center gap-2">
