@@ -15,6 +15,11 @@
 // `curl https://huggingface.co/api/models/<repo>` (.sha) and update
 // hfRevision + sizeBytes + sha256 together (verified 2026-07-10 for all four
 // tiers: LFS oids at each pinned revision match the sha256 below).
+//
+// #47 D4 — a Qwen3-VL-generation refresh is verified and staged in
+// tests/ai-eval/RESULTS.md ("Catalog-refresh prep"), deliberately gated on
+// the first recorded eval run (D1): swapping models the eval has never
+// measured would trade a known-unmeasured catalog for an unknown one.
 
 export type ModelTier = 'fastest' | 'balanced' | 'best' | 'heaviest'
 

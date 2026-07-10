@@ -63,3 +63,46 @@ Paste the harness's report block below this paragraph, prefixed with
   qwen2_5-vl-3b + gemma3-4b via `npm run` / `tsx tests/ai-eval/run.ts`,
   append Run 1 here. Every other AI change (prompt, catalog — see #47 D4)
   stays blind until that run exists.
+
+---
+
+## Catalog-refresh prep — Qwen3-VL generation, verified and ready, gated on Run 1 (2026-07-10, #47 D4)
+
+#47 D4 proposes refreshing the four-tier catalog (`src/features/ai/models.ts`,
+verified 2026-05-10) to the Qwen3-VL generation and **gates the swap on eval
+data (D1)**. Fixtures don't exist yet (see Run 0.5 above), so the swap is not
+shipped; everything mechanical was verified today so it lands as a
+copy-paste manifest change the moment Run 1 clears it.
+
+**Verified live on this machine (2026-07-10):**
+
+- The bundled b9095 `llama-server-aarch64-apple-darwin` loads
+  Qwen3-VL-2B-Instruct Q4_K_M + its Q8_0 mmproj (`general.architecture =
+qwen3vl`), offloads to Metal, and answers a real vision query correctly
+  (64×64 red test image → "red"). The pinned sidecar needs **no rebuild**.
+- Both HF repos are ungated; manifest data fetched from the HF API and
+  size/oid-verified at the revisions below.
+
+**Ready-to-apply manifest (update `hfRevision` + files together, D3 style):**
+
+- Fastest-tier replacement (vs Moondream2 f16's ~3.7 GB pair — this is
+  ~1.55 GB, ~41% of the download, with newer-generation vision quality):
+  - repo `Qwen/Qwen3-VL-2B-Instruct-GGUF`
+    @ `52d6c8ffea26cc873ac5ad116f8631268d7eb503`
+  - `Qwen3VL-2B-Instruct-Q4_K_M.gguf` — 1,107,409,952 B —
+    sha256 `089d75c52f4b7ffc56ba998ffc50aae89fcafc755f9e7208aacca281dca6c2ae`
+  - `mmproj-Qwen3VL-2B-Instruct-Q8_0.gguf` — 445,053,216 B —
+    sha256 `f9a68fabba69c3b81e153367b2c7521030b0fa8bb0de400c9599c8e6725f9c82`
+- Candidate 7B-tier replacement (reportedly outbenchmarks Qwen2.5-VL-7B at
+  roughly half the size):
+  - repo `Qwen/Qwen3-VL-4B-Instruct-GGUF`
+    @ `1cd86afb9a95c410a6038ab3b40d8b578c892266`
+  - `Qwen3VL-4B-Instruct-Q4_K_M.gguf` — 2,497,281,664 B —
+    sha256 `66358cb18bb6b3b1b6675aa412c7a88ef01d228f481184d13668e5201c730a0a`
+  - `mmproj-Qwen3VL-4B-Instruct-Q8_0.gguf` — 453,974,304 B —
+    sha256 `30ba2c7dd3127a4561b6cba9d13d0f711c91bdb38742e2f56d73c8cb596bd06d`
+
+**Swap checklist (once Run 1 exists and includes these models):** new
+ModelSpec ids (keep `moondream2` / `qwen2_5-vl-7b` valid — install state is
+per-id, so installed models keep working), ARCHITECTURE §8 table in
+lockstep, re-benchmark note in the release CHANGELOG.
