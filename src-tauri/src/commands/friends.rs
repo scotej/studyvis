@@ -195,16 +195,10 @@ fn import_rows(
             rusqlite::params![f.ed_pubkey_hex],
             |row| row.get(0),
         )?;
-        friends::add(
-            &tx,
-            &f.ed_pubkey_hex,
-            &f.x_pubkey_hex,
-            f.display_name.as_deref().unwrap_or(""),
-            f.paired_at.unwrap_or(0),
-        )?;
-        if let Some(ts) = f.last_studied_with {
-            friends::update_last_studied(&tx, &f.ed_pubkey_hex, ts)?;
-        }
+        // #47 A4 — merge, don't overwrite: `add`'s re-pairing semantics would
+        // let a months-old backup rewind fresher local rows (display_name,
+        // paired_at, x_pubkey_hex) and degrade last_studied_with ordering.
+        friends::import_merge(&tx, f)?;
         if exists {
             updated += 1;
         } else {
@@ -232,7 +226,15 @@ pub fn friends_export(state: State<'_, DbPool>, path: String) -> Result<u32, Str
     let my_x_pub = crypto_box::SecretKey::from(my_x_priv).public_key();
     let signing_key = crate::commands::identity::load_ed_signing_key()?;
     let bytes = encode_backup(&signing_key, my_x_pub.as_bytes(), &rows)?;
-    std::fs::write(&path, &bytes).map_err(|e| format!("write {path}: {e}"))?;
+    // #47 A4 — atomic like identity_save_record's tmp+rename (I16 pattern): a
+    // crash mid-write must not leave a truncated .svfb at the chosen path
+    // that a later import would reject as corrupt.
+    let tmp = format!("{path}.tmp");
+    std::fs::write(&tmp, &bytes).map_err(|e| format!("write {tmp}: {e}"))?;
+    std::fs::rename(&tmp, &path).map_err(|e| {
+        let _ = std::fs::remove_file(&tmp);
+        format!("rename {tmp} -> {path}: {e}")
+    })?;
     Ok(rows.len() as u32)
 }
 
@@ -397,11 +399,12 @@ mod tests {
     }
 
     #[test]
-    fn import_rows_counts_new_and_updated_and_upserts_fields() {
+    fn import_rows_counts_new_and_updated_and_fills_missing_fields() {
         let mut conn = fresh();
         let aa = key_hex(0xaa);
-        let x_aa = key_hex(0xaa ^ 0xff);
-        friends::add(&conn, &aa, "x-old", "Old Name", 1).expect("preexisting");
+
+        // Sparse local row: empty display_name, never studied together.
+        friends::add(&conn, &aa, "x-local", "", 1).expect("preexisting");
 
         let result = import_rows(
             &mut conn,
@@ -417,10 +420,70 @@ mod tests {
             .iter()
             .find(|f| f.ed_pubkey_hex == aa)
             .expect("aa present");
+        // Gaps fill from the backup…
         assert_eq!(row.display_name.as_deref(), Some("Alex"));
-        assert_eq!(row.x_pubkey_hex, x_aa);
-        assert_eq!(row.paired_at, Some(1_700_000_000_000));
         assert_eq!(row.last_studied_with, Some(1_700_000_100_000));
+        // …but fields the local row already has are kept (#47 A4).
+        assert_eq!(row.x_pubkey_hex, "x-local");
+        assert_eq!(row.paired_at, Some(1));
+
+        // The brand-new row lands verbatim from the backup.
+        let fresh_row = listed
+            .iter()
+            .find(|f| f.ed_pubkey_hex == key_hex(0xbb))
+            .expect("bb present");
+        assert_eq!(fresh_row.x_pubkey_hex, key_hex(0xbb ^ 0xff));
+        assert_eq!(fresh_row.display_name.as_deref(), Some("Blake"));
+        assert_eq!(fresh_row.paired_at, Some(1_700_000_000_000));
+    }
+
+    // #47 A4 — the realistic import is a months-old backup over a live list:
+    // re-paired keys, renamed friends, and more recent study timestamps must
+    // all survive the import untouched.
+    #[test]
+    fn import_rows_never_rewinds_fresher_local_data() {
+        let mut conn = fresh();
+        let aa = key_hex(0xaa);
+        friends::add(&conn, &aa, "x-repaired", "Fresh Name", 2_000).expect("local");
+        friends::update_last_studied(&conn, &aa, 2_000_000).expect("studied");
+
+        let mut stale = friend(0xaa, Some("Stale Name"));
+        stale.x_pubkey_hex = key_hex(0x11);
+        stale.paired_at = Some(1_000);
+        stale.last_studied_with = Some(1_000_000);
+        let result = import_rows(&mut conn, &[stale]).expect("import");
+        assert_eq!(result.imported, 0);
+        assert_eq!(result.updated, 1);
+
+        let listed = friends::list(&conn).expect("list");
+        let row = listed
+            .iter()
+            .find(|f| f.ed_pubkey_hex == aa)
+            .expect("aa present");
+        assert_eq!(row.x_pubkey_hex, "x-repaired");
+        assert_eq!(row.display_name.as_deref(), Some("Fresh Name"));
+        assert_eq!(row.paired_at, Some(2_000));
+        assert_eq!(row.last_studied_with, Some(2_000_000));
+    }
+
+    // NULL-preservation: a pair that has never studied together must not gain
+    // a bogus timestamp from the merge's MAX arithmetic.
+    #[test]
+    fn import_rows_keeps_never_studied_as_null() {
+        let mut conn = fresh();
+        let aa = key_hex(0xaa);
+        friends::add(&conn, &aa, "x-local", "Alex", 1).expect("local");
+
+        let mut backup = friend(0xaa, Some("Alex"));
+        backup.last_studied_with = None;
+        import_rows(&mut conn, &[backup]).expect("import");
+
+        let listed = friends::list(&conn).expect("list");
+        let row = listed
+            .iter()
+            .find(|f| f.ed_pubkey_hex == aa)
+            .expect("aa present");
+        assert_eq!(row.last_studied_with, None);
     }
 
     #[test]
