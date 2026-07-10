@@ -146,6 +146,8 @@ export const tokens = {
     settingsMaxWidth: 768,
     sidebarWidth: 280,
     auditPanelWidth: 320,
+    // #47 B6 — cap on the in-session notes list before it scrolls internally.
+    sessionNotesListMaxHeight: 180,
     videoTileMinHeight: 180,
     videoTileMaxHeight: 360,
     // Post-session focus gauge diameter (DESIGN-SYSTEM §6 motion rule #5 hero

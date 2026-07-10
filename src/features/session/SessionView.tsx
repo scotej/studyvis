@@ -46,6 +46,7 @@ import {
   type BreakResponsePayload,
   type SampleLoopHandle,
 } from '@/features/ai'
+import { tokens } from '@/design/tokens'
 import { isOnline, type PresenceMap } from '@/features/friends/presence'
 import { useIdentity } from '@/features/identity'
 import type { SettingsCategoryId } from '@/features/settings'
@@ -91,6 +92,14 @@ import {
   PTT_STATE_ACTION,
 } from './lifecycle'
 import { SessionInviteDialog } from './SessionInviteDialog'
+import {
+  buildNotePayload,
+  NOTE_ACTION,
+  verifyIncomingNote,
+  type NotePayload,
+} from './notes'
+import { useNotesStore, type SessionNote } from './notesStore'
+import { SessionNotesPanel } from './SessionNotesPanel'
 import {
   startPomodoroController,
   type PeerOrderingEntry,
@@ -171,6 +180,10 @@ export function SessionView({
   const myXPubkeyHex = identity?.x_pubkey_hex ?? null
   const pttActive = usePttStore((s) => s.active)
   const auditEvents = useAuditStore((s) => s.events)
+  // #47 B6 — the ephemeral note feed + the wire sender owned by the
+  // hello/audit effect (same ref pattern as emitAuditRef).
+  const sessionNotes = useNotesStore((s) => s.notes)
+  const sendNoteRef = useRef<((text: string) => Promise<void>) | null>(null)
   // useShallow stops the hello+audit+pomodoro effect from re-firing on every
   // 5-second broadcaster tick: without it the selector returns a fresh
   // object literal each store mutation, which would re-render SessionView
@@ -695,6 +708,45 @@ export function SessionView({
       useAuditStore.getState().append(verified)
     })
 
+    // #47 B6 — quiet text notes on the same signed-channel trust wiring as
+    // audit events: authenticate against the hello binding, drop cross-
+    // session payloads, never persist.
+    const noteAction = room.makeAction<NotePayload>(NOTE_ACTION)
+    noteAction.receive((data, peerId) => {
+      const expectedEd =
+        useSessionStore.getState().peers[peerId]?.edPubkeyHex ?? null
+      const verified = verifyIncomingNote(data, expectedEd, sessionTopic)
+      if (!verified) return
+      useNotesStore.getState().append({
+        fromEdPubkeyHex: verified.from_ed_pubkey,
+        mine: false,
+        text: verified.text,
+        ts: verified.ts,
+      })
+    })
+    sendNoteRef.current = async (text: string) => {
+      const payload = await buildNotePayload({
+        sessionTopic,
+        myEdPubkeyHex,
+        text,
+        sign,
+      })
+      if (payload.text.length === 0) return
+      // Append local first so the sender sees their note even if the
+      // broadcast fails (matches emitAudit's ordering).
+      useNotesStore.getState().append({
+        fromEdPubkeyHex: myEdPubkeyHex,
+        mine: true,
+        text: payload.text,
+        ts: payload.ts,
+      })
+      try {
+        await noteAction.send(payload)
+      } catch (err) {
+        console.error('note broadcast failed:', err)
+      }
+    }
+
     const dispatcher = startAiAlertDispatcher({
       room,
       sessionTopic,
@@ -777,6 +829,9 @@ export function SessionView({
     useBreakStore.getState().reset(startedAt)
     useAuditStore.getState().reset()
     usePomodoroStore.getState().reset()
+    // #47 B6 — notes are session-scoped; a new session starts with a clean
+    // feed (ephemeral by design, PLAN §6).
+    useNotesStore.getState().reset()
     // S2 — clear any PTT state stranded by a dropped Released event from a
     // PRIOR session so this session's first audio track never comes up live.
     usePttStore.getState().reset()
@@ -1179,6 +1234,28 @@ export function SessionView({
     []
   )
 
+  // #47 B6 — panel callbacks. Send goes through the effect-owned wire ref;
+  // names resolve exactly like the audit panel's (self label for mine,
+  // cumulative seenPeerNames for peers so a departed peer keeps their name).
+  const handleSendNote = useCallback((text: string) => {
+    void sendNoteRef.current?.(text)
+  }, [])
+  const resolveNoteName = useCallback(
+    (note: SessionNote) => {
+      if (note.mine) {
+        return (
+          useIdentityStore.getState().identity?.display_name?.trim() ||
+          strings.session.selfFallback
+        )
+      }
+      return (
+        seenPeerNames[note.fromEdPubkeyHex] ??
+        strings.session.peerFallback(note.fromEdPubkeyHex)
+      )
+    },
+    [seenPeerNames]
+  )
+
   const handleStartPomodoro = useCallback((args: PomodoroStartArgs) => {
     pomodoroStartRef.current?.(args)
   }, [])
@@ -1373,7 +1450,20 @@ export function SessionView({
             })}
           </VideoGrid>
         </div>
-        <AuditLogPanel events={auditEntries} />
+        <div
+          className="flex min-h-0 flex-col"
+          style={{ width: tokens.sizes.auditPanelWidth }}
+        >
+          <AuditLogPanel
+            events={auditEntries}
+            className="h-auto min-h-0 flex-1"
+          />
+          <SessionNotesPanel
+            notes={sessionNotes}
+            resolveName={resolveNoteName}
+            onSend={handleSendNote}
+          />
+        </div>
       </div>
       <footer className="flex items-center justify-between gap-4 border-t border-border-subtle bg-bg-surface px-6 py-4 text-sm">
         <span className="flex items-center gap-3 text-text-secondary">
