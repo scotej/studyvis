@@ -67,7 +67,7 @@ export const Empty: Story = {
 }
 
 // A few sessions with focus scores but no logged distractions — the trend
-// renders while both distraction sections show their own empties.
+// renders under the single shared no-distractions card.
 export const TrendOnly: Story = {
   args: {
     insights: computeInsights(

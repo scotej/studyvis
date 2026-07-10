@@ -549,7 +549,7 @@ function Section({
 
 function Empty({ message }: { message: string }) {
   return (
-    <p className="rounded-md border border-dashed border-border-subtle bg-bg-surface px-3 py-3 text-sm text-text-muted">
+    <p className="rounded-md border border-dashed border-border-subtle bg-bg-surface px-3 py-3 text-sm text-text-secondary">
       {message}
     </p>
   )

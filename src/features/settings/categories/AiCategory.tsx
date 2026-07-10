@@ -207,15 +207,6 @@ export function AiCategory() {
   return (
     <SettingsSection heading={copy.heading}>
       <p className="mb-3 text-sm text-text-secondary">{copy.intro}</p>
-      {/* D5 — canonical screen-recording indicator note. Only meaningful once
-          AI can actually sample; with the gate off nothing records, so the
-          three-sentence OS-indicator explainer would be noise above the only
-          control on the pane. */}
-      {aiFeaturesEnabled ? (
-        <p className="mb-3 text-sm text-text-secondary">
-          {copy.screenIndicatorNote}
-        </p>
-      ) : null}
 
       <SettingsRow
         label={copy.enable.label}
@@ -234,6 +225,13 @@ export function AiCategory() {
         <SettingsRow label={copy.modelOff.label} help={copy.modelOff.help} />
       ) : (
         <>
+          {/* D5 — canonical screen-recording indicator note. Below the
+              enable row (not above it) so toggling doesn't shift the switch
+              under the cursor; only meaningful while AI can sample. */}
+          <p className="pt-4 text-sm text-text-secondary">
+            {copy.screenIndicatorNote}
+          </p>
+
           <div className="pt-4">
             <ModelPickerContainer />
           </div>

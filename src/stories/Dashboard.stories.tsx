@@ -90,8 +90,8 @@ export const Empty: Story = {
 }
 
 // 1 session — a single bar, a one-day streak, one partner, one score. AI ran
-// but logged no distractions, so the focus-insights section shows its own
-// empty state.
+// but logged no distractions, so focus insights shows the shared
+// no-distractions card.
 export const SingleSession: Story = {
   args: {
     summary: computeStats(

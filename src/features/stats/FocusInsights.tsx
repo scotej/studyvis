@@ -43,17 +43,18 @@ export function FocusInsights({ insights }: FocusInsightsViewProps) {
 
       {!insights.hasData ? (
         <Empty message={copy.empty} />
-      ) : insights.timing.total === 0 && insights.reasons.length === 0 ? (
-        // Scored sessions but zero distractions: one shared empty card
-        // instead of two stacked near-identical ones under two headings.
-        <div className="flex flex-col gap-8">
-          <Empty message={copy.noDistractions} />
-          <TrendSection trend={insights.trend} />
-        </div>
       ) : (
         <div className="flex flex-col gap-8">
-          <TimingSection timing={insights.timing} />
-          <ReasonsSection reasons={insights.reasons} />
+          {insights.timing.total === 0 && insights.reasons.length === 0 ? (
+            // Scored sessions but zero distractions: both sections would
+            // show the same empty state, so one shared card covers them.
+            <Empty message={copy.noDistractions} />
+          ) : (
+            <>
+              <TimingSection timing={insights.timing} />
+              <ReasonsSection reasons={insights.reasons} />
+            </>
+          )}
           <TrendSection trend={insights.trend} />
         </div>
       )}

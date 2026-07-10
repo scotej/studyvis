@@ -28,7 +28,9 @@ export function IdentityLoadErrorView({
     >
       <div
         className="flex w-full flex-col items-center gap-6 text-center"
-        style={{ maxWidth: tokens.sizes.contentMaxWidth }}
+        // Text-dense centered card → the §12 reading measure, not the wide
+        // onboarding measure.
+        style={{ maxWidth: tokens.sizes.readingMaxWidth }}
       >
         <div className="flex size-12 items-center justify-center rounded-full bg-bg-raised text-text-secondary">
           <AlertTriangleIcon className="size-6" aria-hidden />

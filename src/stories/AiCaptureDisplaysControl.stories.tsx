@@ -30,7 +30,7 @@ function CaptureDisplaysControl({
           <RadioGroup
             value={value}
             onValueChange={(v) => onChange(v as CaptureDisplaysMode)}
-            className="grid-cols-1 gap-3 sm:grid-flow-col sm:auto-cols-max sm:gap-6"
+            className="grid-cols-1 gap-3 sm:grid-cols-none sm:grid-flow-col sm:auto-cols-max sm:gap-6"
             aria-label="Capture displays"
           >
             <div className="flex items-center gap-2">

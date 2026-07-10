@@ -40,6 +40,17 @@ export function AboutCategory() {
     }
   }, [copy.releases.errorFallback])
 
+  const openReleasesButton = (
+    <Button
+      variant="secondary"
+      size="sm"
+      onClick={() => void handleOpenReleases()}
+      disabled={opening}
+    >
+      <ExternalLinkIcon /> {copy.releases.openCta}
+    </Button>
+  )
+
   // X4 — opt-in version check. ZERO outbound while the toggle is off: the
   // effect bails before any invoke. When on, it runs once per mount (the
   // simpler honest option than a daily timer — the user has to open this
@@ -93,38 +104,20 @@ export function AboutCategory() {
           />
         }
       />
+      {/* One row, one CTA: both rows open the same Releases page, so the
+          update-available variant replaces the generic one instead of
+          stacking a second identical button under it. */}
       {versionCheckEnabled && latestNewer ? (
         <SettingsRow
           label={copy.updateAvailable.label}
           help={copy.updateAvailable.help(latestNewer)}
-          control={
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={() => void handleOpenReleases()}
-              disabled={opening}
-            >
-              <ExternalLinkIcon /> {copy.releases.openCta}
-            </Button>
-          }
+          control={openReleasesButton}
         />
-      ) : null}
-      {versionCheckEnabled && latestNewer ? null : (
-        // The update-available row above carries the identical button to the
-        // identical destination; showing both rows doubled the CTA.
+      ) : (
         <SettingsRow
           label={copy.releases.label}
           help={copy.releases.help}
-          control={
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={() => void handleOpenReleases()}
-              disabled={opening}
-            >
-              <ExternalLinkIcon /> {copy.releases.openCta}
-            </Button>
-          }
+          control={openReleasesButton}
         />
       )}
     </SettingsSection>

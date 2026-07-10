@@ -85,10 +85,16 @@ export function SettingsLayout<TId extends string = string>({
           </ul>
         </nav>
         <section
+          // Keyed so switching category remounts the scroll container —
+          // otherwise a pane opened after scrolling a tall one starts
+          // pre-scrolled with its heading above the fold.
+          key={activeCategoryId}
           aria-label={strings.settings.sectionAriaLabel(
             activeCategoryLabel(categories, activeCategoryId)
           )}
-          className="min-w-0 flex-1 overflow-y-auto px-4 py-4 sm:px-6 sm:py-6"
+          // scrollbar-gutter keeps the centered column from shifting when a
+          // tall pane adds a classic (non-overlay) scrollbar on Windows.
+          className="min-w-0 flex-1 overflow-y-auto px-4 py-4 [scrollbar-gutter:stable] sm:px-6 sm:py-6"
         >
           <div
             className="mx-auto flex w-full flex-col gap-8"

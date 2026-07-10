@@ -137,12 +137,15 @@ export function AdvancedCategory() {
           />
         ) : null}
         {autostart.status === 'error' && autostart.error ? (
-          // The error renders once, via help — it lives in the min-w-0 column
-          // and wraps; a copy in the shrink-0 control slot both duplicated the
-          // sentence and let a long backend string force the row wide.
+          // help, not the control slot: help wraps in the min-w-0 column,
+          // while the shrink-0 control slot would let a long backend error
+          // force the row wide. The status color marks it as an error, the
+          // row label carries the same information without color.
           <SettingsRow
             label={copy.autostartError.label}
-            help={autostart.error}
+            help={
+              <span className="text-status-alerted">{autostart.error}</span>
+            }
           />
         ) : null}
         <SettingsRow

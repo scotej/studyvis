@@ -737,10 +737,10 @@ export const strings = {
       },
       recoveryPhrase: {
         label: 'Recovery phrase',
-        // D4 — honest copy: the 24 words are never persisted, so they cannot be
-        // re-shown here. The Restore flow explains the replacement semantics,
-        // so this row carries one tight help line instead of three blocks.
-        help: "Your 24 words were shown once during setup and never saved. Keep the original safe — it's the only way to move or recover this identity.",
+        // D4 — honest copy: the 24 words are never persisted, so they cannot
+        // be re-shown here and lost words are unrecoverable by design.
+        // Replacement semantics live in the Restore flow.
+        help: "Your 24 words were shown once during setup and never saved — keep the original safe. Lost words can't be recovered; you'd start fresh and pair with your friends again.",
         restoreCta: 'Restore a different identity',
       },
       // D3 — local friends-list backup/restore, encrypted to your own key.
@@ -910,9 +910,9 @@ export const strings = {
       // model row already say what turning AI on unlocks.
       intro:
         'The vision model runs on this machine and only looks at your camera and screen. Nothing leaves your computer.',
-      // D5 — canonical screen-recording indicator note. Reused by the
-      // ScreenCapturePermissionOverlay so the user reads the same words
-      // wherever the topic surfaces.
+      // D5 — canonical screen-recording indicator note: the OS indicator
+      // stays lit while sampling, and macOS grant/revoke lives in System
+      // Settings. Rendered only while the AI gate is on.
       screenIndicatorNote:
         "While the AI is sampling, your operating system's screen-recording indicator stays on for the whole session. That's expected — it turns off when you leave. On macOS, screen-recording access is granted and revoked only in System Settings → Privacy & Security → Screen Recording; StudyVis can open it for you when needed.",
       enable: {
@@ -1208,9 +1208,8 @@ export const strings = {
     },
     insights: {
       heading: 'Focus insights',
-      // The pane-level stats.disclaimer already covers the on-device privacy
-      // note, and trend.help scopes the data to AI-scored sessions — a
-      // subheading repeating both was the same sentence twice per screen.
+      // No subheading: the pane-level stats.disclaimer carries the on-device
+      // privacy note and trend.help scopes the data to AI-scored sessions.
       noDistractions: 'No distractions recorded yet. Nice work.',
       empty:
         'No focus insights yet. Study a few sessions with AI focus detection on and patterns will show up here.',
