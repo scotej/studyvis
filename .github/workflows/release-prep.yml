@@ -164,6 +164,22 @@ jobs:
           echo "Bumping $current -> $NEW"
           echo "new=$NEW" >> "$GITHUB_OUTPUT"
 
+      # #47 F2 — CLAUDE.md requires a CHANGELOG entry per release and the
+      # Releases page is the update channel friends actually read, but nothing
+      # enforced it: every draft shipped with static install boilerplate only.
+      # Fail BEFORE the irreversible bump+tag+push; release.yml's preflight
+      # then extracts this section into the draft release body.
+      - name: Require a CHANGELOG section for the new version
+        env:
+          NEW: ${{ steps.ver.outputs.new }}
+        run: |
+          set -euo pipefail
+          esc=$(printf '%s' "$NEW" | sed 's/\./\\./g')
+          if ! grep -Eq "^## ${esc}([^0-9.]|$)" CHANGELOG.md; then
+            echo "::error::CHANGELOG.md has no '## $NEW' section. Write the release notes, merge to main, then re-run Release prep."
+            exit 1
+          fi
+
       - name: Bump version in all five files
         env:
           NEW: ${{ steps.ver.outputs.new }}
@@ -178,6 +194,14 @@ jobs:
           # Cargo.lock: the studyvis package's own entry.
           perl -0pi -e 's/(name = "studyvis"\nversion = )"[^"]*"/$1"$ENV{NEW}"/' src-tauri/Cargo.lock
           echo "Changed files:" && git --no-pager diff --name-only
+
+      # #47 F1 — `perl -0pi` exits 0 whether or not its pattern matched, so a
+      # regex drift would bake a silent partial bump into an immutable tag.
+      # Re-read all five files and require the bump actually landed.
+      - name: Verify the bump landed in all five files
+        env:
+          NEW: ${{ steps.ver.outputs.new }}
+        run: bash scripts/check-version-lockstep.sh "$NEW"
 
       - name: Commit, tag, push
         env:
