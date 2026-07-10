@@ -67,6 +67,13 @@ export type PresenceSubscription = {
   // without tearing the room down. Used by the hard-quit (pagehide) path where
   // there's no time to await a full `leave()`.
   sendGoodbye: () => void
+  // #47 C6 (I49) — diff the friend set in place: join rooms for added
+  // friends, leave rooms for removed ones, and NEVER touch the own room or
+  // its heartbeat cadence. The old teardown+rebuild on any list edit
+  // broadcast a goodbye that flickered our dot offline→online on every
+  // friend's screen — which, since the opt-in "friend came online" OS
+  // notification (N3), could ping desktops on every ContactCard import.
+  updateFriends: (friends: ReadonlyArray<{ ed_pubkey_hex: string }>) => void
 }
 
 export function isOnline(
@@ -85,7 +92,9 @@ export function startPresence(ctx: PresenceContext): PresenceSubscription {
   const now = () => (ctx.now ? ctx.now() : Date.now())
 
   const presence: PresenceMap = {}
-  const rooms: TopicRoom[] = []
+  // Own room separate from the per-friend map so friend churn can never
+  // touch it (#47 C6 / I49).
+  const friendRooms = new Map<string, TopicRoom>()
   const heartbeatSenders: Array<(p: PresencePayload) => Promise<void[]>> = []
 
   // F3 — `joinTopic` builds the relay WebSockets synchronously, so a malformed
@@ -116,7 +125,6 @@ export function startPresence(ctx: PresenceContext): PresenceSubscription {
       console.warn('presence (own) room join error:', details.error),
   })
   if (ownRoom) {
-    rooms.push(ownRoom)
     const ownAction = ownRoom.makeAction<PresencePayload>(HEARTBEAT_ACTION)
     heartbeatSenders.push((p) => ownAction.send(p))
     // Send a fresh heartbeat the moment a friend subscribes to our presence
@@ -130,14 +138,17 @@ export function startPresence(ctx: PresenceContext): PresenceSubscription {
   }
 
   // Friends' rooms: listen for their heartbeats and keep a `lastSeenAt` map.
-  for (const friend of ctx.friends) {
+  // Idempotent per friend so updateFriends can call it for the whole next
+  // set and only genuinely new friends join a room.
+  const subscribeFriend = (friend: { ed_pubkey_hex: string }): void => {
+    if (friendRooms.has(friend.ed_pubkey_hex)) return
     let edBytes: Uint8Array
     try {
       edBytes = hexToBytes(friend.ed_pubkey_hex)
     } catch {
-      continue
+      return
     }
-    if (edBytes.length !== 32) continue
+    if (edBytes.length !== 32) return
 
     const room = tryJoin({
       topic: presenceTopic(edBytes),
@@ -146,8 +157,8 @@ export function startPresence(ctx: PresenceContext): PresenceSubscription {
       onJoinError: (details) =>
         console.warn('presence (friend) room join error:', details.error),
     })
-    if (!room) continue
-    rooms.push(room)
+    if (!room) return
+    friendRooms.set(friend.ed_pubkey_hex, room)
     const action = room.makeAction<PresencePayload>(HEARTBEAT_ACTION)
     action.receive((data) => {
       if (!data || typeof data !== 'object') return
@@ -168,6 +179,33 @@ export function startPresence(ctx: PresenceContext): PresenceSubscription {
       presence[friend.ed_pubkey_hex] = now()
       ctx.onPresenceChange({ ...presence })
     })
+  }
+
+  for (const friend of ctx.friends) subscribeFriend(friend)
+
+  // #47 C6 — leave the removed friend's room and drop their dot at once (a
+  // removed friend must not linger "online" for up to ONLINE_WINDOW_MS).
+  const unsubscribeFriend = (edPubkeyHex: string): void => {
+    const room = friendRooms.get(edPubkeyHex)
+    if (!room) return
+    friendRooms.delete(edPubkeyHex)
+    void room.leave().catch(() => {
+      /* best-effort */
+    })
+    if (edPubkeyHex in presence) {
+      delete presence[edPubkeyHex]
+      ctx.onPresenceChange({ ...presence })
+    }
+  }
+
+  const updateFriends = (
+    nextFriends: ReadonlyArray<{ ed_pubkey_hex: string }>
+  ): void => {
+    const nextKeys = new Set(nextFriends.map((f) => f.ed_pubkey_hex))
+    for (const existing of [...friendRooms.keys()]) {
+      if (!nextKeys.has(existing)) unsubscribeFriend(existing)
+    }
+    for (const friend of nextFriends) subscribeFriend(friend)
   }
 
   // Send the first heartbeat immediately so paired peers don't wait the full
@@ -201,6 +239,7 @@ export function startPresence(ctx: PresenceContext): PresenceSubscription {
 
   return {
     sendGoodbye,
+    updateFriends,
     leave: async () => {
       ownJoinUnsub()
       clearInterval(heartbeatHandle)
@@ -210,8 +249,9 @@ export function startPresence(ctx: PresenceContext): PresenceSubscription {
       // send is synchronous-ish, and blocking teardown on a relay round-trip
       // would defeat the "best-effort" intent.
       sendGoodbye()
+      const allRooms = [...(ownRoom ? [ownRoom] : []), ...friendRooms.values()]
       await Promise.all(
-        rooms.map((r) =>
+        allRooms.map((r) =>
           r.leave().catch(() => {
             /* best-effort */
           })

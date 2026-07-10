@@ -212,3 +212,124 @@ describe('startPresence sweep', () => {
     await presence.leave()
   })
 })
+
+// #47 C6 (I49) — incremental friend churn: only the changed friend's room
+// joins/leaves; the own room (and therefore the goodbye broadcast) stays
+// untouched, so a list edit can no longer flicker our dot on friends'
+// screens.
+describe('startPresence updateFriends (#47 C6)', () => {
+  test('an added friend starts resolving without touching the own room', async () => {
+    const me = generateIdentity()
+    const friend = generateIdentity()
+    const watcher = generateIdentity()
+    const meHex = bytesToHex(me.edPub)
+    const friendHex = bytesToHex(friend.edPub)
+
+    // Watcher subscribes to MY presence topic — the flicker detector: any
+    // goodbye from my own room would drop me from their map.
+    const watcherMaps: PresenceMap[] = []
+    const watcherPresence = startPresence({
+      myEdPubkey: watcher.edPub,
+      friends: [{ ed_pubkey_hex: meHex }],
+      onPresenceChange: (m) => watcherMaps.push(m),
+      intervalMs: 60_000,
+      sweepIntervalMs: 60_000,
+    })
+
+    const myMaps: PresenceMap[] = []
+    const myPresence = startPresence({
+      myEdPubkey: me.edPub,
+      friends: [],
+      onPresenceChange: (m) => myMaps.push(m),
+      intervalMs: 60_000,
+      sweepIntervalMs: 60_000,
+    })
+    await vi.advanceTimersByTimeAsync(0)
+    expect(typeof (watcherMaps.at(-1) ?? {})[meHex]).toBe('number')
+
+    // Add the friend AFTER subscribing; their next heartbeat must land.
+    myPresence.updateFriends([{ ed_pubkey_hex: friendHex }])
+    const friendPresence = startPresence({
+      myEdPubkey: friend.edPub,
+      friends: [],
+      onPresenceChange: () => {},
+      intervalMs: 60_000,
+      sweepIntervalMs: 60_000,
+    })
+    await vi.advanceTimersByTimeAsync(0)
+    expect(typeof (myMaps.at(-1) ?? {})[friendHex]).toBe('number')
+
+    // The watcher never saw us drop: no goodbye crossed the own room.
+    expect(watcherMaps.every((m) => typeof m[meHex] === 'number')).toBe(true)
+
+    await myPresence.leave()
+    await friendPresence.leave()
+    await watcherPresence.leave()
+  })
+
+  test('a removed friend is dropped from the map immediately and stops resolving', async () => {
+    const me = generateIdentity()
+    const friend = generateIdentity()
+    const friendHex = bytesToHex(friend.edPub)
+
+    const myMaps: PresenceMap[] = []
+    const myPresence = startPresence({
+      myEdPubkey: me.edPub,
+      friends: [{ ed_pubkey_hex: friendHex }],
+      onPresenceChange: (m) => myMaps.push(m),
+      intervalMs: 60_000,
+      sweepIntervalMs: 60_000,
+    })
+    const friendPresence = startPresence({
+      myEdPubkey: friend.edPub,
+      friends: [],
+      onPresenceChange: () => {},
+      intervalMs: 60_000,
+      sweepIntervalMs: 60_000,
+    })
+    await vi.advanceTimersByTimeAsync(0)
+    expect(typeof (myMaps.at(-1) ?? {})[friendHex]).toBe('number')
+
+    myPresence.updateFriends([])
+    expect((myMaps.at(-1) ?? {})[friendHex]).toBeUndefined()
+
+    // Their later heartbeats no longer land (room left).
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect((myMaps.at(-1) ?? {})[friendHex]).toBeUndefined()
+
+    await myPresence.leave()
+    await friendPresence.leave()
+  })
+
+  test('updateFriends with the same set is a no-op', async () => {
+    const me = generateIdentity()
+    const friend = generateIdentity()
+    const friendHex = bytesToHex(friend.edPub)
+
+    const myMaps: PresenceMap[] = []
+    const myPresence = startPresence({
+      myEdPubkey: me.edPub,
+      friends: [{ ed_pubkey_hex: friendHex }],
+      onPresenceChange: (m) => myMaps.push(m),
+      intervalMs: 60_000,
+      sweepIntervalMs: 60_000,
+    })
+    const friendPresence = startPresence({
+      myEdPubkey: friend.edPub,
+      friends: [],
+      onPresenceChange: () => {},
+      intervalMs: 60_000,
+      sweepIntervalMs: 60_000,
+    })
+    await vi.advanceTimersByTimeAsync(0)
+    expect(typeof (myMaps.at(-1) ?? {})[friendHex]).toBe('number')
+
+    // Same set → the friend's room must survive (their heartbeats keep landing).
+    myPresence.updateFriends([{ ed_pubkey_hex: friendHex }])
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(typeof (myMaps.at(-1) ?? {})[friendHex]).toBe('number')
+
+    await myPresence.leave()
+    await friendPresence.leave()
+  })
+})
