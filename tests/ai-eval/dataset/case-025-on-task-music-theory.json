@@ -1,0 +1,9 @@
+{
+  "id": "case-025-on-task-music-theory",
+  "declared_topic": "Analysing the harmony in a Bach chorale",
+  "face_path": "fixtures/case-025-face.jpg",
+  "screen_path": "fixtures/case-025-screen.jpg",
+  "expected_severity": "on_task",
+  "scenario": "The screen shows music-notation software with a four-part chorale score and Roman-numeral annotations under the staves.",
+  "notes": "#47 D1(b) \u2014 non-STEM bucket. Notation software is visually unlike any document/IDE case in the starter set."
+}

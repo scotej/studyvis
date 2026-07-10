@@ -1,0 +1,9 @@
+{
+  "id": "case-027-on-task-tutorial-video",
+  "declared_topic": "Following a React hooks tutorial",
+  "face_path": "fixtures/case-027-face.jpg",
+  "screen_path": "fixtures/case-027-screen.jpg",
+  "expected_severity": "on_task",
+  "scenario": "Split screen: a YouTube coding tutorial on React hooks on the left (code visible in the video), the user's own editor with matching code on the right.",
+  "notes": "#47 D1(b) \u2014 on-topic-video bucket. YouTube chrome around study content is the classic false-positive trap."
+}

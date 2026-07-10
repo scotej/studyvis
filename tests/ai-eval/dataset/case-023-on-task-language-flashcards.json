@@ -1,0 +1,9 @@
+{
+  "id": "case-023-on-task-language-flashcards",
+  "declared_topic": "Japanese vocabulary \u2014 JLPT N4 prep",
+  "face_path": "fixtures/case-023-face.jpg",
+  "screen_path": "fixtures/case-023-screen.jpg",
+  "expected_severity": "on_task",
+  "scenario": "User faces the screen; an Anki-style flashcard app shows a Japanese vocabulary card with kana and an English gloss.",
+  "notes": "#47 D1(b) \u2014 non-STEM bucket. Flashcard drilling looks superficially like casual clicking; the model must map it to the declared language-study topic."
+}

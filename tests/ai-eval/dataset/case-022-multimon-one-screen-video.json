@@ -1,0 +1,9 @@
+{
+  "id": "case-022-multimon-one-screen-video",
+  "declared_topic": "Writing unit tests for a Python parser",
+  "face_path": "fixtures/case-022-face.jpg",
+  "screen_path": "fixtures/case-022-screen.jpg",
+  "expected_severity": "moderate",
+  "scenario": "Two-monitor composite strip. Left monitor shows pytest output and an editor; right monitor plays an unrelated sitcom episode in a large video player window.",
+  "notes": "#47 D1(b) \u2014 multi-monitor bucket. Off-task content on the SECOND monitor must still be flagged even though the first monitor is on-task."
+}

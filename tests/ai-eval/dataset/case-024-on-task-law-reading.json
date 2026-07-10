@@ -1,0 +1,9 @@
+{
+  "id": "case-024-on-task-law-reading",
+  "declared_topic": "Reading contract law cases for tomorrow's seminar",
+  "face_path": "fixtures/case-024-face.jpg",
+  "screen_path": "fixtures/case-024-screen.jpg",
+  "expected_severity": "on_task",
+  "scenario": "User reads attentively; the screen shows a dense legal-database page (a court opinion with case citation header and numbered paragraphs).",
+  "notes": "#47 D1(b) \u2014 non-STEM bucket. Long-form legal prose, no code or math anywhere on screen."
+}

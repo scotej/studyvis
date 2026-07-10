@@ -1,0 +1,9 @@
+{
+  "id": "case-026-on-task-lecture-video",
+  "declared_topic": "Watching my linear algebra lecture recording \u2014 eigenvalues",
+  "face_path": "fixtures/case-026-face.jpg",
+  "screen_path": "fixtures/case-026-screen.jpg",
+  "expected_severity": "on_task",
+  "scenario": "A video player fills the screen showing a recorded university lecture: a professor at a whiteboard covered in eigenvalue derivations, with a paused timeline visible.",
+  "notes": "#47 D1(b) \u2014 on-topic-video bucket. A fullscreen video must NOT be reflexively flagged when it matches the declared topic."
+}
