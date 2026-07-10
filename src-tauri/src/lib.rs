@@ -548,9 +548,9 @@ fn setup_desktop(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>>
     // V3-P3 `system_set_global_shortcut` command can swap them at runtime.
     // The handler locks the same Mutex on every press/release — Mutex
     // contention is per-keystroke and trivial.
-    let (initial_ptt_friends, initial_ptt_ai) = {
+    let initial_ptt_ai = {
         let bindings = app.state::<ShortcutBindings>();
-        (bindings.ptt_friends(), bindings.ptt_ai())
+        bindings.ptt_ai()
     };
     app.handle().plugin(
         tauri_plugin_global_shortcut::Builder::new()
@@ -582,29 +582,26 @@ fn setup_desktop(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>>
             })
             .build(),
     )?;
-    // A hand-edited settings.json can set both PTT accelerators to the same
-    // combo. Registering an identical combo twice errors (Windows returns
-    // ERROR_HOTKEY_ALREADY_REGISTERED), which would propagate out of setup()
-    // and abort boot with no UI recourse. Register one copy when they collide;
-    // the handler still fires the friends branch and the user can rebind in
-    // Settings → Shortcuts.
-    let to_register = if initial_ptt_friends == initial_ptt_ai {
-        vec![initial_ptt_friends]
-    } else {
-        vec![initial_ptt_friends, initial_ptt_ai]
-    };
+    // #47 B5 — only the AI shortcut is registered for the app's lifetime
+    // (already gated by AiFeaturesFlag in the handler). The friends-PTT combo
+    // registers on session start and unregisters on session end (see
+    // `apply_ptt_friends_registration`, driven by `session_set_active`), so a
+    // tray-idle StudyVis no longer swallows Cmd+[ system-wide (Back in
+    // Safari/Finder, outdent in editors). When a hand-edited settings.json
+    // collides the two accelerators, this single registration serves both —
+    // the handler's friends branch matches it first, and the session-start
+    // register / session-end unregister both no-op on the shared combo.
+    //
     // Register best-effort. An OS-level conflict — another app already holds
-    // Ctrl+[ / Ctrl+] globally (Windows returns ERROR_HOTKEY_ALREADY_REGISTERED),
+    // the combo globally (Windows returns ERROR_HOTKEY_ALREADY_REGISTERED),
     // or a hand-edited settings.json accelerator the OS rejects — must NOT
     // propagate out of setup(): that `?` would bubble to `.build().expect(...)`
     // and panic the whole app before the window ever paints, with no recourse.
     // A failed binding just means that shortcut is inert until the user rebinds
     // it in Settings → Shortcuts; the app still boots.
     let manager = app.global_shortcut();
-    for shortcut in to_register {
-        if let Err(err) = manager.register(shortcut) {
-            eprintln!("[global-shortcut] couldn't register {shortcut:?}: {err} — rebind in Settings → Shortcuts");
-        }
+    if let Err(err) = manager.register(initial_ptt_ai) {
+        eprintln!("[global-shortcut] couldn't register {initial_ptt_ai:?}: {err} — rebind in Settings → Shortcuts");
     }
 
     let tray_icon = include_image!("icons/tray/22x22.png");
