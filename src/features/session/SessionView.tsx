@@ -97,7 +97,19 @@ import {
   type StartArgs as PomodoroStartArgs,
 } from './pomodoro'
 
-const MEDIA_CONSTRAINTS: MediaStreamConstraints = { video: true, audio: true }
+// #47 B4 — honor the persisted mic pick on acquisition. `ideal` (never
+// `exact`) so an unplugged/renamed device falls back to the OS default
+// instead of failing the whole getUserMedia.
+function mediaConstraints(
+  preferredAudioDeviceId: string | null
+): MediaStreamConstraints {
+  return {
+    video: true,
+    audio: preferredAudioDeviceId
+      ? { deviceId: { ideal: preferredAudioDeviceId } }
+      : true,
+  }
+}
 
 type PttPayload = { active: boolean }
 type CameraPayload = { off: boolean }
@@ -141,6 +153,9 @@ export function SessionView({
   // when everyone dropped (during the S1 grace window or after a leave).
   const hadAnyPeer = useSessionStore((s) => s.seenPeerEdPubkeys.length > 0)
   const aiFeaturesEnabled = useSettingsStore((s) => s.values.aiFeaturesEnabled)
+  // #47 B4 — persisted per-friend volumes (ed_pubkey → 0..1); the fallback
+  // when this session hasn't touched a peer's slider yet.
+  const persistedPeerVolumes = useSettingsStore((s) => s.values.peerVolumes)
   const activeModelId = useModelStore((s) => s.activeModelId)
   const selfWarning = useAlertsUiStore((s) => s.selfWarning)
   const alertedPeers = useAlertsUiStore((s) => s.alertedPeers)
@@ -225,11 +240,14 @@ export function SessionView({
   // S4 — chosen audio OUTPUT device (null = system default) and per-peer
   // volume in [0, 1]. setSinkId is unsupported in macOS WKWebView, so the
   // picker that drives `activeOutputDeviceId` is hidden there (feature-
-  // detected in AudioOutputPicker); volume is always available. Both are
-  // session-scoped, local-only — not persisted.
+  // detected in AudioOutputPicker); volume is always available. #47 B4:
+  // both now persist — the output pick seeds from settings and per-friend
+  // volumes fall back to the ed_pubkey-keyed persisted map (a vanished
+  // persisted device degrades silently: VideoTile swallows setSinkId
+  // failures, so playback stays on the OS default).
   const [activeOutputDeviceId, setActiveOutputDeviceId] = useState<
     string | null
-  >(null)
+  >(() => useSettingsStore.getState().values.audioOutputDeviceId)
   const [peerVolumes, setPeerVolumes] = useState<Record<string, number>>({})
   const cameraSendRef = useRef<
     ((payload: CameraPayload) => Promise<void[]>) | null
@@ -319,8 +337,11 @@ export function SessionView({
     let detachTrackEnded: (() => void) | null = null
     void (async () => {
       try {
-        const stream =
-          await navigator.mediaDevices.getUserMedia(MEDIA_CONSTRAINTS)
+        const stream = await navigator.mediaDevices.getUserMedia(
+          mediaConstraints(
+            useSettingsStore.getState().values.audioInputDeviceId
+          )
+        )
         if (cancelled) {
           stopTracks(stream)
           return
@@ -1112,6 +1133,9 @@ export function SessionView({
           setMediaErrorName('NotReadableError')
         })
         setActiveAudioDeviceId(nextDeviceId)
+        // #47 B4 — an explicit pick persists across sessions (the OS-default
+        // id surfaced at acquisition deliberately does not).
+        void useSettingsStore.getState().setAudioInputDeviceId(nextDeviceId)
       } catch (err) {
         const message =
           err instanceof Error
@@ -1131,11 +1155,26 @@ export function SessionView({
 
   const handleSelectOutputDevice = useCallback((deviceId: string) => {
     setActiveOutputDeviceId(deviceId)
+    // #47 B4 — headset users shouldn't re-pick every session.
+    void useSettingsStore.getState().setAudioOutputDeviceId(deviceId)
   }, [])
 
+  // #47 B4 — persist per-friend volume keyed by the signed-hello ed_pubkey
+  // binding (peerIds are per-session). Trailing debounce so a slider drag
+  // doesn't write settings.json per tick; the in-memory value updates
+  // immediately.
+  const volumePersistTimersRef = useRef<Record<string, number>>({})
   const handlePeerVolumeChange = useCallback(
     (peerId: string, volume: number) => {
       setPeerVolumes((cur) => ({ ...cur, [peerId]: volume }))
+      const edPubkeyHex =
+        useSessionStore.getState().peers[peerId]?.edPubkeyHex ?? null
+      if (!edPubkeyHex) return
+      const timers = volumePersistTimersRef.current
+      clearTimeout(timers[edPubkeyHex])
+      timers[edPubkeyHex] = setTimeout(() => {
+        void useSettingsStore.getState().setPeerVolume(edPubkeyHex, volume)
+      }, 500) as unknown as number
     },
     []
   )
@@ -1321,7 +1360,13 @@ export function SessionView({
                   state={peerState}
                   alertReasoning={peerAlert?.reasoning}
                   sinkId={activeOutputDeviceId ?? undefined}
-                  volume={peerVolumes[peer.peerId] ?? DEFAULT_PEER_VOLUME}
+                  volume={
+                    peerVolumes[peer.peerId] ??
+                    (peer.edPubkeyHex
+                      ? persistedPeerVolumes[peer.edPubkeyHex]
+                      : undefined) ??
+                    DEFAULT_PEER_VOLUME
+                  }
                   onVolumeChange={(v) => handlePeerVolumeChange(peer.peerId, v)}
                 />
               )

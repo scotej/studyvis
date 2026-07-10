@@ -119,6 +119,13 @@ export type SettingsValues = {
   // F3 — optional user-supplied TURN server. `null` (default) = STUN-only.
   // Stored already-validated (turn:/turns: url + non-empty creds).
   turnServer: CustomTurnServer | null
+  // #47 B4 — audio preferences that used to reset every session. Device ids
+  // persist the user's last explicit pick (null = OS default; acquisition
+  // uses `ideal` so an unplugged device falls back gracefully). peerVolumes
+  // is keyed by friend ed_pubkey_hex (peerIds are per-session), clamped 0..1.
+  audioInputDeviceId: string | null
+  audioOutputDeviceId: string | null
+  peerVolumes: Record<string, number>
 }
 
 export const SETTINGS_FILE = 'settings.json'
@@ -152,6 +159,9 @@ export const SETTINGS_KEY_CAPTURE_DISPLAYS = 'capture_displays'
 export const SETTINGS_KEY_WINDOW_STYLE = 'window_style'
 export const SETTINGS_KEY_CUSTOM_RELAYS = 'custom_relay_urls'
 export const SETTINGS_KEY_TURN_SERVER = 'turn_server'
+export const SETTINGS_KEY_AUDIO_INPUT_DEVICE = 'audio_input_device_id'
+export const SETTINGS_KEY_AUDIO_OUTPUT_DEVICE = 'audio_output_device_id'
+export const SETTINGS_KEY_PEER_VOLUMES = 'peer_volumes'
 
 // Defaults match the V1 acceptance criteria + DESIGN-SYSTEM.md §8.5: dark
 // theme on, reduce-motion off, OS notification on for invites, minimize-to-
@@ -187,6 +197,10 @@ export const DEFAULT_SETTINGS: SettingsValues = {
   // what ships today, so a fresh install is unchanged.
   customRelayUrls: [],
   turnServer: null,
+  // #47 B4 — no persisted device/volume prefs until the user picks some.
+  audioInputDeviceId: null,
+  audioOutputDeviceId: null,
+  peerVolumes: {},
 }
 
 export type SettingsStatus = 'loading' | 'ready' | 'error'
@@ -210,6 +224,10 @@ type SettingsState = {
   // textarea text; the store parses + validates + dedupes via parseRelayUrls
   // and stores only the clean wss:// list (empty = use the built-in defaults).
   setCustomRelayUrls: (text: string) => Promise<void>
+  // #47 B4 — audio preference setters (null clears back to OS default).
+  setAudioInputDeviceId: (deviceId: string | null) => Promise<void>
+  setAudioOutputDeviceId: (deviceId: string | null) => Promise<void>
+  setPeerVolume: (edPubkeyHex: string, volume: number) => Promise<void>
   // F3 — persist (or clear) the user's TURN server. Pass the three raw fields;
   // the store normalizes them. A partial/invalid config clears the server
   // (stores null) so an incomplete edit can never leave a dead config behind.
@@ -523,6 +541,24 @@ function readBool(v: unknown, fallback: boolean): boolean {
   return typeof v === 'boolean' ? v : fallback
 }
 
+// #47 B4 — `null`/absent/garbage all collapse to null ("OS default").
+function readNullableString(v: unknown): string | null {
+  return typeof v === 'string' && v.length > 0 ? v : null
+}
+
+// #47 B4 — per-friend volumes: keep only finite numeric entries, clamped to
+// the 0..1 range VideoTile's volume prop expects.
+function readPeerVolumes(v: unknown): Record<string, number> {
+  if (typeof v !== 'object' || v === null || Array.isArray(v)) return {}
+  const out: Record<string, number> = {}
+  for (const [key, value] of Object.entries(v)) {
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      out[key] = Math.min(1, Math.max(0, value))
+    }
+  }
+  return out
+}
+
 // Hydrates `values` from persistent storage, applies the V1-P11 one-shot
 // migration of the legacy `studyvis.theme` localStorage key, and returns the
 // resolved settings + whether anything was written. Pure (deps-injected) so
@@ -553,6 +589,9 @@ export async function hydrateValuesFromStore(
     windowStyle: await store.get(SETTINGS_KEY_WINDOW_STYLE),
     customRelays: await store.get(SETTINGS_KEY_CUSTOM_RELAYS),
     turnServer: await store.get(SETTINGS_KEY_TURN_SERVER),
+    audioInput: await store.get(SETTINGS_KEY_AUDIO_INPUT_DEVICE),
+    audioOutput: await store.get(SETTINGS_KEY_AUDIO_OUTPUT_DEVICE),
+    peerVolumes: await store.get(SETTINGS_KEY_PEER_VOLUMES),
   }
 
   let theme: ThemeMode = isThemeMode(stored.theme)
@@ -645,6 +684,9 @@ export async function hydrateValuesFromStore(
       turnServer: isCustomTurnServer(stored.turnServer)
         ? stored.turnServer
         : DEFAULT_SETTINGS.turnServer,
+      audioInputDeviceId: readNullableString(stored.audioInput),
+      audioOutputDeviceId: readNullableString(stored.audioOutput),
+      peerVolumes: readPeerVolumes(stored.peerVolumes),
     },
     wroteMigration,
   }
@@ -844,6 +886,23 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     const urls = parseRelayUrls(text)
     set((s) => ({ values: { ...s.values, customRelayUrls: urls } }))
     await writeKey(set, SETTINGS_KEY_CUSTOM_RELAYS, urls)
+  },
+
+  setAudioInputDeviceId: async (deviceId) => {
+    set((s) => ({ values: { ...s.values, audioInputDeviceId: deviceId } }))
+    await writeKey(set, SETTINGS_KEY_AUDIO_INPUT_DEVICE, deviceId)
+  },
+
+  setAudioOutputDeviceId: async (deviceId) => {
+    set((s) => ({ values: { ...s.values, audioOutputDeviceId: deviceId } }))
+    await writeKey(set, SETTINGS_KEY_AUDIO_OUTPUT_DEVICE, deviceId)
+  },
+
+  setPeerVolume: async (edPubkeyHex, volume) => {
+    const clamped = Math.min(1, Math.max(0, volume))
+    const next = { ...get().values.peerVolumes, [edPubkeyHex]: clamped }
+    set((s) => ({ values: { ...s.values, peerVolumes: next } }))
+    await writeKey(set, SETTINGS_KEY_PEER_VOLUMES, next)
   },
 
   setTurnServer: async (input) => {

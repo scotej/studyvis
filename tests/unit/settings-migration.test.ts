@@ -218,3 +218,44 @@ describe('hydrateValuesFromStore — V1-P11 settings migration', () => {
     expect(values.offTaskConfidenceFloor).toBe(0.6)
   })
 })
+
+// #47 B4 — audio device + per-friend volume persistence.
+describe('hydrateValuesFromStore — audio preferences (#47 B4)', () => {
+  test('defaults: null devices, empty volume map', async () => {
+    const { values } = await hydrateValuesFromStore(
+      fakeStore(),
+      makeMigrator(null)
+    )
+    expect(values.audioInputDeviceId).toBeNull()
+    expect(values.audioOutputDeviceId).toBeNull()
+    expect(values.peerVolumes).toEqual({})
+  })
+
+  test('round-trips stored device ids and volumes', async () => {
+    const { values } = await hydrateValuesFromStore(
+      fakeStore({
+        audio_input_device_id: 'mic-usb',
+        audio_output_device_id: 'headset-1',
+        peer_volumes: { abc: 0.4 },
+      }),
+      makeMigrator(null)
+    )
+    expect(values.audioInputDeviceId).toBe('mic-usb')
+    expect(values.audioOutputDeviceId).toBe('headset-1')
+    expect(values.peerVolumes).toEqual({ abc: 0.4 })
+  })
+
+  test('rejects garbage device ids and clamps/strips volumes', async () => {
+    const { values } = await hydrateValuesFromStore(
+      fakeStore({
+        audio_input_device_id: 42,
+        audio_output_device_id: '',
+        peer_volumes: { a: 2, b: -1, c: 'loud', d: 0.7 },
+      }),
+      makeMigrator(null)
+    )
+    expect(values.audioInputDeviceId).toBeNull()
+    expect(values.audioOutputDeviceId).toBeNull()
+    expect(values.peerVolumes).toEqual({ a: 1, b: 0, d: 0.7 })
+  })
+})
