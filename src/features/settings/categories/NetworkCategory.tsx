@@ -3,6 +3,7 @@ import { useState } from 'react'
 import { Disclosure } from '@/components/Disclosure'
 import { RelayDiagnostics } from '@/components/RelayDiagnostics'
 import { SettingsRow, SettingsSection } from '@/components/SettingsRow'
+import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
@@ -14,6 +15,7 @@ import {
   useSettingsStore,
   type TurnPreference,
 } from '@/stores/settingsStore'
+import { probeTurnServer } from '@/lib/turnProbe'
 import { strings } from '@/strings'
 
 export function NetworkCategory() {
@@ -137,6 +139,14 @@ function CustomRelaysField() {
   )
 }
 
+// #47 C5 — probe outcome for the Test-connection affordance. 'idle' renders
+// nothing; the other states render a status line under the button.
+type TurnTestState =
+  | { kind: 'idle' }
+  | { kind: 'testing' }
+  | { kind: 'success'; ms: number }
+  | { kind: 'failed'; message: string }
+
 function TurnServerField() {
   const copy = strings.settings.network.advanced.turn
   const stored = useSettingsStore((s) => s.values.turnServer)
@@ -145,11 +155,35 @@ function TurnServerField() {
   const [url, setUrl] = useState(() => stored?.url ?? '')
   const [username, setUsername] = useState(() => stored?.username ?? '')
   const [credential, setCredential] = useState(() => stored?.credential ?? '')
+  const [test, setTest] = useState<TurnTestState>({ kind: 'idle' })
 
   const commit = () => void setTurnServer({ url, username, credential })
 
   const urlInvalid = url.trim().length > 0 && !isValidTurnUrl(url)
   const active = stored !== null
+  const testable =
+    isValidTurnUrl(url) &&
+    username.trim().length > 0 &&
+    credential.trim().length > 0
+
+  const handleTest = () => {
+    setTest({ kind: 'testing' })
+    void probeTurnServer({ url, username, credential }).then((result) => {
+      if (result.ok) {
+        setTest({ kind: 'success', ms: result.ms })
+        return
+      }
+      setTest({
+        kind: 'failed',
+        message:
+          result.reason === 'timeout'
+            ? copy.test.timeout
+            : result.reason === 'no-relay-candidate'
+              ? copy.test.noRelay
+              : copy.test.errorFallback,
+      })
+    })
+  }
 
   return (
     <div className="flex flex-col gap-3">
@@ -217,6 +251,30 @@ function TurnServerField() {
       {active ? (
         <p className="text-xs text-status-focused">{copy.active}</p>
       ) : null}
+      <div className="flex flex-col gap-2">
+        <div>
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            onClick={handleTest}
+            disabled={!testable || test.kind === 'testing'}
+            aria-label={copy.test.ariaLabel}
+          >
+            {test.kind === 'testing' ? copy.test.testing : copy.test.cta}
+          </Button>
+        </div>
+        {test.kind === 'success' ? (
+          <p className="text-xs text-status-focused" role="status">
+            {copy.test.success((test.ms / 1000).toFixed(1))}
+          </p>
+        ) : null}
+        {test.kind === 'failed' ? (
+          <p className="text-xs text-status-warning" role="status">
+            {test.message}
+          </p>
+        ) : null}
+      </div>
     </div>
   )
 }
