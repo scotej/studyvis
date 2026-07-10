@@ -671,6 +671,9 @@ export const strings = {
   report: {
     notFound: 'Session not found.',
     loadErrorFallback: "Couldn't load the report.",
+    // #47 B3 — shown only after an S1 grace-window auto-end, where the room
+    // may still be live without you.
+    rejoinCta: 'Rejoin session',
     loading: `Loading report${ELLIPSIS}`,
     ariaLabel: 'Session report',
     eyebrow: 'Session report',

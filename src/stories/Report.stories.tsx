@@ -104,6 +104,18 @@ export const MostlyOnTask: Story = {
   },
 }
 
+// #47 B3 — the session auto-ended (S1 grace expiry, e.g. a >20s Wi-Fi
+// blip), so the header offers Rejoin alongside Close: the room may still be
+// live without us.
+export const AutoEndedWithRejoin: Story = {
+  args: {
+    ...MostlyOnTask.args,
+    onRejoin: () => {
+      // no-op for stories
+    },
+  },
+}
+
 // Mostly-off-task: same 25-minute length but multiple AI alerts fire with
 // repeated reasoning ("scrolling social media"). The grouped Top
 // distractions section shows the dominant pattern and the cumulative

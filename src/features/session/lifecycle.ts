@@ -272,6 +272,10 @@ export function wireSessionRoom(
       // window cancels this via cancelGrace(). The leave handler is itself
       // idempotent, so an explicit user-leave racing the timer is safe.
       if (peers.size === 0) {
+        // #47 B3 — stage the reason BEFORE the leave handler runs so
+        // markEnded records this as an auto-end and the Report can offer
+        // Rejoin (the room may still be live without us after a >20s blip).
+        useSessionStore.getState().setPendingEndReason('auto')
         void hooks.leave()
       }
     }, graceMs)
