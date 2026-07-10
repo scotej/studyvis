@@ -2,6 +2,8 @@
 // picker and from Settings → AI. Renders the ARCHITECTURE.md §8 table plus
 // the user's measured speeds when available.
 
+import { ChevronRightIcon } from 'lucide-react'
+
 import { strings } from '@/strings'
 
 import {
@@ -28,25 +30,31 @@ function formatMeasured(record: ModelRecord | undefined): string {
 
 export function ModelGuide({ records, className }: ModelGuideProps) {
   const copy = strings.ai.guide
+  // Default-collapsed disclosure (same native <details> pattern as Settings →
+  // Network → Advanced): the model cards above already carry the per-model
+  // download/RAM/license/speed facts, so the comparison table is opt-in
+  // instead of ~600px of repeated data on every visit to the pane.
   return (
-    <section
+    <details
       className={
-        'flex flex-col gap-4 rounded-lg border border-border-subtle bg-bg-surface p-6' +
+        'group rounded-lg border border-border-subtle bg-bg-surface' +
         (className ? ` ${className}` : '')
       }
-      aria-labelledby="model-guide-heading"
     >
-      <header className="flex flex-col gap-2">
-        <h3
-          id="model-guide-heading"
-          className="text-lg font-semibold tracking-tight text-text-primary"
-        >
-          {copy.heading}
-        </h3>
-        <p className="text-sm text-text-secondary">{copy.body}</p>
-      </header>
+      <summary className="flex cursor-pointer list-none items-start justify-between gap-4 rounded-lg p-6 outline-none focus-visible:ring-3 focus-visible:ring-accent-ring">
+        <span className="flex flex-col gap-2">
+          <h3 className="text-lg font-semibold tracking-tight text-text-primary">
+            {copy.heading}
+          </h3>
+          <p className="text-sm text-text-secondary">{copy.body}</p>
+        </span>
+        <ChevronRightIcon
+          className="mt-1 size-4 shrink-0 text-text-secondary group-open:rotate-90"
+          aria-hidden
+        />
+      </summary>
 
-      <div className="overflow-hidden rounded-md border border-border-subtle">
+      <div className="mx-6 overflow-x-auto rounded-md border border-border-subtle">
         <table className="w-full text-left text-sm">
           <thead className="bg-bg-raised text-xs uppercase tracking-wide text-text-secondary">
             <tr>
@@ -103,7 +111,9 @@ export function ModelGuide({ records, className }: ModelGuideProps) {
         </table>
       </div>
 
-      <footer className="text-xs text-text-secondary">{copy.footer}</footer>
-    </section>
+      <footer className="p-6 pt-4 text-xs text-text-secondary">
+        {copy.footer}
+      </footer>
+    </details>
   )
 }

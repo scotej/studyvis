@@ -171,9 +171,12 @@ export function ModelPicker({
       aria-label={strings.ai.picker.ariaLabel}
     >
       <header className="flex flex-col gap-1">
-        <h2 className="text-xl font-semibold tracking-tight text-text-primary">
+        {/* h3 at text-lg: the picker mounts mid-pane under the Settings → AI
+            section h2, so its header is a sub-heading, not a rival section
+            heading at the same visual weight. */}
+        <h3 className="text-lg font-semibold tracking-tight text-text-primary">
           {strings.ai.picker.heading}
-        </h2>
+        </h3>
         <p className="text-sm text-text-secondary">{strings.ai.picker.body}</p>
       </header>
 

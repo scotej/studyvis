@@ -53,7 +53,11 @@ export function FriendsCategory() {
             <SettingsRow
               key={friend.ed_pubkey_hex}
               label={friend.display_name?.trim() || shortPubkey(friend)}
-              help={shortPubkey(friend)}
+              // A nameless friend's label already falls back to the pubkey —
+              // repeating it as help would stack the same string twice.
+              help={
+                friend.display_name?.trim() ? shortPubkey(friend) : undefined
+              }
               control={
                 <Button
                   type="button"

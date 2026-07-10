@@ -37,15 +37,19 @@ export function FocusInsights({ insights }: FocusInsightsViewProps) {
   const copy = strings.stats.insights
   return (
     <section className="flex flex-col gap-6" aria-label={copy.heading}>
-      <div className="flex flex-col gap-1">
-        <h3 className="text-sm font-medium tracking-tight text-text-secondary uppercase">
-          {copy.heading}
-        </h3>
-        <p className="text-xs text-text-muted">{copy.subheading}</p>
-      </div>
+      <h3 className="text-sm font-medium tracking-wide text-text-secondary uppercase">
+        {copy.heading}
+      </h3>
 
       {!insights.hasData ? (
         <Empty message={copy.empty} />
+      ) : insights.timing.total === 0 && insights.reasons.length === 0 ? (
+        // Scored sessions but zero distractions: one shared empty card
+        // instead of two stacked near-identical ones under two headings.
+        <div className="flex flex-col gap-8">
+          <Empty message={copy.noDistractions} />
+          <TrendSection trend={insights.trend} />
+        </div>
       ) : (
         <div className="flex flex-col gap-8">
           <TimingSection timing={insights.timing} />
@@ -222,7 +226,7 @@ function SubHeading({ title, help }: { title: string; help: string }) {
 
 function Empty({ message }: { message: string }) {
   return (
-    <p className="rounded-md border border-dashed border-border-subtle bg-bg-surface px-3 py-3 text-sm text-text-muted">
+    <p className="rounded-md border border-dashed border-border-subtle bg-bg-surface px-3 py-3 text-sm text-text-secondary">
       {message}
     </p>
   )

@@ -147,7 +147,7 @@ export function Dashboard({ __loader, now }: DashboardProps) {
       <SettingsSection heading={strings.stats.heading}>
         <div
           role="alert"
-          className="flex items-center justify-between gap-3 rounded-md border border-dashed border-border-subtle bg-bg-surface px-3 py-3 text-sm text-text-muted"
+          className="flex items-center justify-between gap-3 rounded-md border border-dashed border-border-subtle bg-bg-surface px-3 py-3 text-sm text-text-secondary"
         >
           <span>{status.message}</span>
           <Button variant="ghost" size="sm" onClick={retry}>
@@ -233,7 +233,7 @@ export function DashboardView({ summary, insights, now }: DashboardViewProps) {
           </div>
 
           <section className="flex flex-col gap-3">
-            <h3 className="text-sm font-medium tracking-tight text-text-secondary uppercase">
+            <h3 className="text-sm font-medium tracking-wide text-text-secondary uppercase">
               {strings.stats.studyMinutes.heading}
             </h3>
             <Card className="gap-0 py-4">
@@ -244,7 +244,7 @@ export function DashboardView({ summary, insights, now }: DashboardViewProps) {
           </section>
 
           <section className="flex flex-col gap-3">
-            <h3 className="text-sm font-medium tracking-tight text-text-secondary uppercase">
+            <h3 className="text-sm font-medium tracking-wide text-text-secondary uppercase">
               {strings.stats.partners.heading}
             </h3>
             {topPartners.length === 0 ? (
@@ -436,7 +436,7 @@ function FocusTooltip({ active, payload }: FocusTooltipProps) {
 
 function Empty({ message }: { message: string }) {
   return (
-    <p className="rounded-md border border-dashed border-border-subtle bg-bg-surface px-3 py-3 text-sm text-text-muted">
+    <p className="rounded-md border border-dashed border-border-subtle bg-bg-surface px-3 py-3 text-sm text-text-secondary">
       {message}
     </p>
   )

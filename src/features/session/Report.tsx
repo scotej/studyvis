@@ -539,7 +539,7 @@ function Section({
 }) {
   return (
     <section className="flex flex-col gap-3">
-      <h2 className="text-sm font-medium tracking-tight text-text-secondary uppercase">
+      <h2 className="text-sm font-medium tracking-wide text-text-secondary uppercase">
         {heading}
       </h2>
       {children}

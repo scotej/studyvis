@@ -109,20 +109,24 @@ export function AboutCategory() {
           }
         />
       ) : null}
-      <SettingsRow
-        label={copy.releases.label}
-        help={copy.releases.help}
-        control={
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={() => void handleOpenReleases()}
-            disabled={opening}
-          >
-            <ExternalLinkIcon /> {copy.releases.openCta}
-          </Button>
-        }
-      />
+      {versionCheckEnabled && latestNewer ? null : (
+        // The update-available row above carries the identical button to the
+        // identical destination; showing both rows doubled the CTA.
+        <SettingsRow
+          label={copy.releases.label}
+          help={copy.releases.help}
+          control={
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => void handleOpenReleases()}
+              disabled={opening}
+            >
+              <ExternalLinkIcon /> {copy.releases.openCta}
+            </Button>
+          }
+        />
+      )}
     </SettingsSection>
   )
 }
