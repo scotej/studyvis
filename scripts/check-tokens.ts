@@ -244,7 +244,7 @@ const RULES: WholeFileRule[] = [
     scan: (text) => {
       const out: Array<{ index: number; match: string }> = []
       const re =
-        /\b(?:min-h-screen|max-h-screen|h-screen|min-h-dvh|max-h-dvh|h-dvh|min-h-svh|h-svh|min-h-lvh|h-lvh)\b/g
+        /\b(?:min-h-screen|max-h-screen|h-screen|min-h-dvh|max-h-dvh|h-dvh|min-h-svh|max-h-svh|h-svh|min-h-lvh|max-h-lvh|h-lvh)\b/g
       let m: RegExpExecArray | null
       while ((m = re.exec(text))) {
         const lineStart = text.lastIndexOf('\n', m.index - 1) + 1
