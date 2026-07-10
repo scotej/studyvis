@@ -6,11 +6,20 @@
 //
 // SHA256s come from the Hugging Face Hub LFS oid (which is the SHA256 of the
 // raw bytes). Regenerate via `curl https://huggingface.co/api/models/<repo>/tree/main`.
+//
+// #47 D3 — downloads resolve against `hfRevision` (a repo commit hash), not
+// `main`: the manifest hard-pins sizeBytes + sha256, so an upstream re-upload
+// to main would break every new install of that tier with "sha256 mismatch"
+// until someone cuts a release. Pinning the revision makes the URL immutable.
+// To refresh a tier: take the repo's current commit from
+// `curl https://huggingface.co/api/models/<repo>` (.sha) and update
+// hfRevision + sizeBytes + sha256 together (verified 2026-07-10 for all four
+// tiers: LFS oids at each pinned revision match the sha256 below).
 
 export type ModelTier = 'fastest' | 'balanced' | 'best' | 'heaviest'
 
 export type ModelFileSpec = {
-  // Filename inside the HF repo at /resolve/main/.
+  // Filename inside the HF repo at /resolve/<hfRevision>/.
   filename: string
   // Bytes (matches the HF API tree's lfs.size field).
   sizeBytes: number
@@ -25,6 +34,10 @@ export type ModelSpec = {
   id: string
   displayName: string
   hfRepo: string
+  // Repo commit hash the manifest was verified against; both download URL
+  // builders resolve at this revision so an upstream re-upload to main can't
+  // invalidate the pinned sizeBytes/sha256 (#47 D3).
+  hfRevision: string
   // The literal quant tag (e.g. 'Q4_K_M', 'f16') for display only — the
   // actual filenames are in `model` / `mmproj`.
   quantLabel: string
@@ -45,6 +58,7 @@ const FASTEST: ModelSpec = {
   id: 'moondream2',
   displayName: 'Moondream 2',
   hfRepo: 'ggml-org/moondream2-20250414-GGUF',
+  hfRevision: '97d0efa4667189aea70998d0b1ee36a7a3214fcb',
   // moondream2-20250414-GGUF only publishes f16 weights at the time of
   // V2-P2 (2026-05-10). ARCHITECTURE.md §8's earlier "Q4_K_M ~1.5 GB" claim
   // was aspirational; the repo never carried a Q4 quant. The doc was
@@ -75,6 +89,7 @@ const BALANCED: ModelSpec = {
   id: 'qwen2_5-vl-3b',
   displayName: 'Qwen 2.5-VL 3B',
   hfRepo: 'ggml-org/Qwen2.5-VL-3B-Instruct-GGUF',
+  hfRevision: '5037fcf163dd95d1e41d1974465f0898ed108ca2',
   quantLabel: 'Q4_K_M + mmproj-Q8_0',
   modelFile: {
     filename: 'Qwen2.5-VL-3B-Instruct-Q4_K_M.gguf',
@@ -101,6 +116,7 @@ const BEST: ModelSpec = {
   id: 'gemma3-4b',
   displayName: 'Gemma 3 4B',
   hfRepo: 'ggml-org/gemma-3-4b-it-GGUF',
+  hfRevision: 'd0976223747697cb51e056d85c532013931fe52e',
   quantLabel: 'Q4_K_M',
   modelFile: {
     filename: 'gemma-3-4b-it-Q4_K_M.gguf',
@@ -127,6 +143,7 @@ const HEAVIEST: ModelSpec = {
   id: 'qwen2_5-vl-7b',
   displayName: 'Qwen 2.5-VL 7B',
   hfRepo: 'ggml-org/Qwen2.5-VL-7B-Instruct-GGUF',
+  hfRevision: '508edd0afaa66bb9e9f40587acc2184f02daf1f6',
   quantLabel: 'Q4_K_M + mmproj-Q8_0',
   modelFile: {
     filename: 'Qwen2.5-VL-7B-Instruct-Q4_K_M.gguf',
@@ -186,8 +203,16 @@ export function modelDownloadUrls(spec: ModelSpec): {
   mmproj: string
 } {
   return {
-    model: huggingfaceResolveUrl(spec.hfRepo, spec.modelFile.filename),
-    mmproj: huggingfaceResolveUrl(spec.hfRepo, spec.mmprojFile.filename),
+    model: huggingfaceResolveUrl(
+      spec.hfRepo,
+      spec.modelFile.filename,
+      spec.hfRevision
+    ),
+    mmproj: huggingfaceResolveUrl(
+      spec.hfRepo,
+      spec.mmprojFile.filename,
+      spec.hfRevision
+    ),
   }
 }
 

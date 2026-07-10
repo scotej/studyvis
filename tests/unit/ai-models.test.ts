@@ -61,12 +61,24 @@ describe('models registry', () => {
     expect(ids['moondream2']).toBe(false)
   })
 
-  test('builds resolve URLs in the canonical hf.co/<repo>/resolve/main/<file> shape', () => {
+  test('builds resolve URLs in the canonical hf.co/<repo>/resolve/<rev>/<file> shape', () => {
     expect(
-      huggingfaceResolveUrl('ggml-org/Qwen2.5-VL-3B-Instruct-GGUF', 'foo.gguf')
+      huggingfaceResolveUrl(
+        'ggml-org/Qwen2.5-VL-3B-Instruct-GGUF',
+        'foo.gguf',
+        'abc123'
+      )
     ).toBe(
-      'https://huggingface.co/ggml-org/Qwen2.5-VL-3B-Instruct-GGUF/resolve/main/foo.gguf'
+      'https://huggingface.co/ggml-org/Qwen2.5-VL-3B-Instruct-GGUF/resolve/abc123/foo.gguf'
     )
+  })
+
+  // #47 D3 — every tier pins a repo commit hash so an upstream re-upload to
+  // main can't invalidate the manifest's sizeBytes/sha256 mid-release-cycle.
+  test('every spec pins a 40-hex hfRevision', () => {
+    for (const spec of SUPPORTED_MODELS) {
+      expect(spec.hfRevision).toMatch(/^[0-9a-f]{40}$/)
+    }
   })
 
   test('totalDownloadBytes sums model + mmproj', () => {
@@ -76,11 +88,15 @@ describe('models registry', () => {
     )
   })
 
-  test('modelDownloadUrls returns one URL per file', () => {
+  test('modelDownloadUrls resolves both files at the pinned revision', () => {
     const spec = SUPPORTED_MODELS[1]
     const urls = modelDownloadUrls(spec)
-    expect(urls.model).toContain(spec.modelFile.filename)
-    expect(urls.mmproj).toContain(spec.mmprojFile.filename)
+    expect(urls.model).toBe(
+      `https://huggingface.co/${spec.hfRepo}/resolve/${spec.hfRevision}/${spec.modelFile.filename}`
+    )
+    expect(urls.mmproj).toBe(
+      `https://huggingface.co/${spec.hfRepo}/resolve/${spec.hfRevision}/${spec.mmprojFile.filename}`
+    )
   })
 })
 
