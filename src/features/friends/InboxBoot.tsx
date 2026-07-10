@@ -18,7 +18,12 @@ import { notifyFriendOnline } from './friendOnlineNotify'
 import { subscribeToOwnInbox, type ValidInvite } from './inbox'
 import { usePendingInvitesStore } from './pendingInvitesStore'
 import { inviteRetryManager } from './invite'
-import { isOnline, startPresence, type PresenceMap } from './presence'
+import {
+  isOnline,
+  startPresence,
+  type PresenceMap,
+  type PresenceSubscription,
+} from './presence'
 
 export type InboxBootProps = {
   myEdPubkeyHex: string
@@ -96,28 +101,34 @@ export function InboxBoot({
   // N3 — friends whose presence has been resolved at least once since this
   // subscription mounted. The FIRST resolution establishes a baseline only —
   // it must not fire a "came online" notification (that's boot's initial
-  // sweep, not a transition). Reset whenever the presence subscription
-  // resubscribes (friend-set change), so a newly added friend who's already
-  // online doesn't ping on the resubscribe tick.
+  // sweep, not a transition). Since #47 C6 the subscription survives friend
+  // list edits, so baselines persist across them; a removed friend's entries
+  // are pruned by the updateFriends effect below so a re-add starts fresh.
   const baselineSeenRef = useRef<Set<string>>(new Set())
+  // #47 C6 — the live subscription handle, so the friend-set effect below can
+  // diff rooms in place instead of tearing the whole subscription down.
+  const presenceRef = useRef<PresenceSubscription | null>(null)
 
   useEffect(() => {
     const myEd = hexToBytes(myEdPubkeyHex)
-    const friendIds = friendsKey
-      ? friendsKey.split('|').map((ed_pubkey_hex) => ({ ed_pubkey_hex }))
-      : []
-    // N3 — reset the per-friend online-state ref alongside baselineSeenRef on
-    // every resubscribe so stale state from the previous subscription can't leak
-    // a phantom transition into the new one.
+    // Reset the per-friend notify state on a genuine (re)subscribe — identity
+    // change or remount — so stale state can't leak a phantom transition.
     wasOnlineRef.current = {}
     baselineSeenRef.current = new Set()
     const presence = startPresence({
       myEdPubkey: myEd,
-      friends: friendIds,
+      // #47 C6 — the effect no longer keys on the friend set; seed with the
+      // current list and let updateFriends churn only what changes.
+      friends: useFriendsStore
+        .getState()
+        .friends.map((f) => ({ ed_pubkey_hex: f.ed_pubkey_hex })),
       onPresenceChange: (map) => {
         const at = Date.now()
-        for (const friend of friendIds) {
-          const ed = friend.ed_pubkey_hex
+        // Read the LIVE friend list per tick (#47 C6): the subscription now
+        // outlives list edits, so a mount-time snapshot would miss friends
+        // added since.
+        for (const row of useFriendsStore.getState().friends) {
+          const ed = row.ed_pubkey_hex
           const online = isOnline(map, ed, at)
           const was = wasOnlineRef.current[ed] ?? false
           wasOnlineRef.current[ed] = online
@@ -126,10 +137,10 @@ export function InboxBoot({
           // starts empty, so a sweep (or another friend's heartbeat) can fire
           // an offline tick for this friend before their first heartbeat lands;
           // consuming the baseline on that offline tick would make their genuine
-          // first heartbeat look like an offline→online edge and ping spuriously
-          // (the resubscribe-churn case). Only an online resolution establishes
-          // the baseline, so an already-online friend's first heartbeat after a
-          // resubscribe is correctly treated as baseline, not a transition.
+          // first heartbeat look like an offline→online edge and ping
+          // spuriously. Only an online resolution establishes the baseline, so
+          // an already-online friend's first heartbeat is correctly treated as
+          // baseline, not a transition.
           const hadBaseline = baselineSeenRef.current.has(ed)
           if (online) baselineSeenRef.current.add(ed)
           if (online && !was) {
@@ -138,17 +149,14 @@ export function InboxBoot({
             void inviteRetryManager.onPresenceOnline(ed)
             // N3 — only an offline→online edge AFTER the baseline is a real
             // "came online" transition. Suppressing the first online resolution
-            // dodges both boot's initial sweep (a friend already online at
-            // mount) and the resubscribe tick. The debounce against flapping
-            // rides on the 60s ONLINE_WINDOW_MS: once online, brief gaps
-            // stay "online" so we don't re-fire until a true offline first.
+            // dodges boot's initial sweep (a friend already online at mount).
+            // The debounce against flapping rides on the 60s ONLINE_WINDOW_MS:
+            // once online, brief gaps stay "online" so we don't re-fire until
+            // a true offline first.
             if (hadBaseline) {
-              const friendRow = useFriendsStore
-                .getState()
-                .friends.find((f) => f.ed_pubkey_hex === ed)
               void notifyFriendOnline({
                 edPubkeyHex: ed,
-                displayName: friendRow?.display_name ?? null,
+                displayName: row.display_name ?? null,
                 enabled:
                   useSettingsStore.getState().values
                     .friendOnlineNotificationEnabled,
@@ -159,6 +167,7 @@ export function InboxBoot({
         onPresenceChange(map)
       },
     })
+    presenceRef.current = presence
     // F7 — a hard quit (tray Quit, Cmd+Q, OS terminate) tears the webview down
     // without running React cleanup, so the goodbye in `leave()` never fires.
     // `pagehide` is the most reliable last-gasp the webview gives us; fire the
@@ -167,9 +176,32 @@ export function InboxBoot({
     window.addEventListener('pagehide', onPageHide)
     return () => {
       window.removeEventListener('pagehide', onPageHide)
+      presenceRef.current = null
       void presence.leave()
     }
-  }, [myEdPubkeyHex, friendsKey, onPresenceChange])
+  }, [myEdPubkeyHex, onPresenceChange])
+
+  // #47 C6 (the recorded I49 pass) — a friend add/remove churns ONLY the
+  // changed friend's room. The old effect keyed on the whole friend set, so
+  // any list edit rebuilt the own room too, broadcasting a goodbye that
+  // flickered our dot offline→online on every friend's screen — and since
+  // N3's opt-in notification, could ping their desktops. leave()'s tested
+  // goodbye semantics are untouched (the own room never churns here).
+  useEffect(() => {
+    const presence = presenceRef.current
+    if (!presence) return
+    const ids = friendsKey ? friendsKey.split('|') : []
+    presence.updateFriends(ids.map((ed_pubkey_hex) => ({ ed_pubkey_hex })))
+    // Prune notify state for removed friends so a re-add starts from a fresh
+    // baseline instead of inheriting months-old transition state.
+    const keep = new Set(ids)
+    for (const ed of Object.keys(wasOnlineRef.current)) {
+      if (!keep.has(ed)) delete wasOnlineRef.current[ed]
+    }
+    for (const ed of [...baselineSeenRef.current]) {
+      if (!keep.has(ed)) baselineSeenRef.current.delete(ed)
+    }
+  }, [friendsKey])
 
   // F6 — drop every queued retry when the local session ends (or the user
   // cancels by leaving): a friend coming online afterward shouldn't be pulled
