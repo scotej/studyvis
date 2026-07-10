@@ -23,6 +23,7 @@ import {
   ChevronLeftIcon,
   CopyIcon,
   DownloadIcon,
+  RotateCcwIcon,
 } from 'lucide-react'
 import { toast } from 'sonner'
 
@@ -78,6 +79,12 @@ export type ReportProps = {
   // closing the report drops the UI back to the friends list; the Settings
   // → Sessions re-open passes a back-to-list handler instead.
   onClose: () => void
+  // #47 B3 — present only when the session auto-ended (S1 grace expiry) and
+  // the store still holds the topic + password: a >20s blip strands a guest
+  // while the room may still be live, invites are one-shot, and the host is
+  // heads-down. Rejoining re-enters the same room; the topic-keyed sessions
+  // upsert (I17) tolerates the re-entry.
+  onRejoin?: () => void
   // Storybook hook so a story can drive the entire data path with mock
   // data and skip the Tauri calls. Production omits it; the shell falls
   // through to the live invocations.
@@ -120,7 +127,12 @@ async function defaultLoader(sessionId: string): Promise<ResolvedReportData> {
   }
 }
 
-export function Report({ sessionId, onClose, __loader }: ReportProps) {
+export function Report({
+  sessionId,
+  onClose,
+  onRejoin,
+  __loader,
+}: ReportProps) {
   const [status, setStatus] = useState<Status>({ kind: 'loading' })
   const [reloadKey, setReloadKey] = useState(0)
   const { identity } = useIdentity()
@@ -221,7 +233,7 @@ export function Report({ sessionId, onClose, __loader }: ReportProps) {
     )
   }
 
-  return <ReportView data={status.data} onClose={onClose} />
+  return <ReportView data={status.data} onClose={onClose} onRejoin={onRejoin} />
 }
 
 // Pure presentational layer — no side effects, no data fetching. Receives
@@ -230,6 +242,8 @@ export function Report({ sessionId, onClose, __loader }: ReportProps) {
 export type ReportViewProps = {
   data: ResolvedReportData
   onClose: () => void
+  // #47 B3 — see ReportProps.onRejoin.
+  onRejoin?: () => void
   // Disables the on-mount ScoreGauge sweep so Storybook snapshots stay
   // deterministic. Production callers pass true (or omit).
   animateScore?: boolean
@@ -238,6 +252,7 @@ export type ReportViewProps = {
 export function ReportView({
   data,
   onClose,
+  onRejoin,
   animateScore = true,
 }: ReportViewProps) {
   const { session, auditEvents, nameByEdPubkey, myEdPubkeyHex } = data
@@ -399,6 +414,11 @@ export function ReportView({
             >
               <BracesIcon /> {exportCopy.auditCta}
             </Button>
+            {onRejoin ? (
+              <Button variant="default" size="sm" onClick={onRejoin}>
+                <RotateCcwIcon /> {strings.report.rejoinCta}
+              </Button>
+            ) : null}
             <Button variant="secondary" size="sm" onClick={onClose}>
               <ChevronLeftIcon /> {strings.common.actions.close}
             </Button>

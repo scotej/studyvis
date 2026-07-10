@@ -71,6 +71,9 @@ export function Home() {
   const settingsStatus = useSettingsStore((s) => s.status)
   const sessionStatus = useSessionStore((s) => s.status)
   const sessionTopic = useSessionStore((s) => s.sessionTopic)
+  // #47 B3 — 'auto' (S1 grace expiry) is the one end the Report offers
+  // Rejoin for; the store keeps topic+password until the Report closes.
+  const sessionEndedBy = useSessionStore((s) => s.endedBy)
   const [addOpen, setAddOpen] = useState(false)
   // F10 — words prefilled into the Add-friend Enter-code tab from an OS deep
   // link. Set alongside opening the dialog on the join tab; never auto-connects.
@@ -220,6 +223,23 @@ export function Home() {
 
   const aiOn = () => useSettingsStore.getState().values.aiFeaturesEnabled
 
+  // #47 B3 — re-enter the still-live room after a grace-window auto-end.
+  // Reuses the already-declared topic (no AI topic-gate re-prompt) and the
+  // credentials the store holds until the Report closes; joinSession's
+  // begin() flips status to 'active', unmounting the Report.
+  const handleRejoin = useCallback(() => {
+    const s = useSessionStore.getState()
+    if (!s.sessionTopic || !s.sessionPassword) return
+    if (aiOn()) s.setPendingInitialTopic(s.declaredStudyTopic)
+    try {
+      joinSession(s.sessionTopic, s.sessionPassword)
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : strings.friends.joinErrorFallback
+      toast.error(message)
+    }
+  }, [])
+
   const handleInvite = useCallback(
     (friend: Friend) => {
       if (aiOn()) setPendingStart({ kind: 'host', friend })
@@ -368,6 +388,7 @@ export function Home() {
         <Report
           sessionId={sessionTopic}
           onClose={() => useSessionStore.getState().reset()}
+          onRejoin={sessionEndedBy === 'auto' ? handleRejoin : undefined}
         />
         {tail}
       </>
