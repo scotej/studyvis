@@ -23,3 +23,9 @@ export const Default: Story = {}
 export const Retrying: Story = {
   args: { retrying: true },
 }
+
+// #47 E1 — identity.json parsed but the keychain holds no keys: the 24-word
+// restore is the primary action (retrying can't fix an empty keychain).
+export const KeysMissing: Story = {
+  args: { variant: 'keysMissing' },
+}

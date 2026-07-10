@@ -32,8 +32,8 @@ use commands::friends::{
 use commands::friends::{friends_export, friends_import};
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 use commands::identity::{
-    identity_box_decrypt, identity_box_encrypt, identity_exists, identity_load_record,
-    identity_save_keys, identity_save_record, identity_sign,
+    identity_box_decrypt, identity_box_encrypt, identity_exists, identity_keys_present,
+    identity_load_record, identity_save_keys, identity_save_record, identity_sign,
 };
 #[cfg(all(desktop, any(target_os = "macos", target_os = "windows")))]
 use commands::models::{hf_token_clear, hf_token_present, hf_token_save};
@@ -108,6 +108,8 @@ pub fn run() {
         identity_save_keys,
         #[cfg(any(target_os = "macos", target_os = "windows"))]
         identity_exists,
+        #[cfg(any(target_os = "macos", target_os = "windows"))]
+        identity_keys_present,
         #[cfg(any(target_os = "macos", target_os = "windows"))]
         identity_save_record,
         #[cfg(any(target_os = "macos", target_os = "windows"))]

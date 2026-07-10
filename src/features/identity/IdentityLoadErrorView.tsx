@@ -5,6 +5,10 @@ import { tokens } from '@/design/tokens'
 import { strings } from '@/strings'
 
 export type IdentityLoadErrorViewProps = {
+  // 'file' (D1) — identity.json unreadable; keys presumed intact, so Retry
+  // leads. 'keysMissing' (#47 E1) — the keychain definitively holds no keys;
+  // retrying can't fix that, so the 24-word restore leads.
+  variant?: 'file' | 'keysMissing'
   retrying: boolean
   onRetry: () => void
   onRecover: () => void
@@ -12,15 +16,41 @@ export type IdentityLoadErrorViewProps = {
 
 // D1 — the calm "we couldn't read your identity file" screen. Presentational so
 // Storybook renders it without the keychain commands. It deliberately offers no
-// "create a new identity" path: the private keys are still valid in the
+// "create a new identity" path: the private keys may still be valid in the
 // keychain, and a fresh identity would abandon them and strand every friend who
 // knows the old pubkey.
 export function IdentityLoadErrorView({
+  variant = 'file',
   retrying,
   onRetry,
   onRecover,
 }: IdentityLoadErrorViewProps) {
-  const copy = strings.identity.loadError
+  const copy =
+    variant === 'keysMissing'
+      ? strings.identity.keysMissing
+      : strings.identity.loadError
+  const retryButton = (
+    <Button
+      size="lg"
+      variant={variant === 'keysMissing' ? 'outline' : 'default'}
+      autoFocus={variant === 'file'}
+      onClick={onRetry}
+      disabled={retrying}
+      aria-disabled={retrying || undefined}
+    >
+      {copy.retryCta}
+    </Button>
+  )
+  const recoverButton = (
+    <Button
+      size="lg"
+      variant={variant === 'keysMissing' ? 'default' : 'outline'}
+      autoFocus={variant === 'keysMissing'}
+      onClick={onRecover}
+    >
+      {copy.recoverCta}
+    </Button>
+  )
   return (
     <main
       aria-label={copy.ariaLabel}
@@ -47,18 +77,17 @@ export function IdentityLoadErrorView({
           {copy.recoverNote}
         </p>
         <div className="flex w-full max-w-xs flex-col gap-3">
-          <Button
-            size="lg"
-            autoFocus
-            onClick={onRetry}
-            disabled={retrying}
-            aria-disabled={retrying || undefined}
-          >
-            {copy.retryCta}
-          </Button>
-          <Button size="lg" variant="outline" onClick={onRecover}>
-            {copy.recoverCta}
-          </Button>
+          {variant === 'keysMissing' ? (
+            <>
+              {recoverButton}
+              {retryButton}
+            </>
+          ) : (
+            <>
+              {retryButton}
+              {recoverButton}
+            </>
+          )}
         </div>
       </div>
     </main>

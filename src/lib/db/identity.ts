@@ -25,6 +25,14 @@ export async function identityExists(): Promise<boolean> {
   return invoke<boolean>('identity_exists')
 }
 
+// #47 E1 — does the OS keychain hold the private keys identity.json claims
+// to describe? False only on a definitive keyring NoEntry; ambiguous keyring
+// failures (locked keychain, access denied) reject instead, and callers
+// treat the probe as inconclusive rather than steering into recovery.
+export async function identityKeysPresent(): Promise<boolean> {
+  return invoke<boolean>('identity_keys_present')
+}
+
 export async function loadIdentityRecord(): Promise<IdentityRecord | null> {
   return invoke<IdentityRecord | null>('identity_load_record')
 }

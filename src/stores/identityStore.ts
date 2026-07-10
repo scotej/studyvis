@@ -17,6 +17,7 @@ import {
 } from '@/lib/crypto/identity'
 import {
   identityExists,
+  identityKeysPresent,
   loadIdentityRecord,
   saveIdentityRecord,
   saveKeys,
@@ -30,6 +31,16 @@ import {
 // so the user must NOT be routed into new-identity onboarding (its create path
 // would overwrite them and strand every friend who knows the old pubkey).
 export type IdentityStatus = 'loading' | 'absent' | 'ready' | 'error'
+
+// Which failure produced status 'error' (#47 E1), so the load-error screen
+// can steer correctly:
+//   'file'         — identity.json unreadable/corrupt; keys presumed intact
+//                    (D1: retry first, recovery as fallback).
+//   'keys-missing' — identity.json parsed fine but the keychain definitively
+//                    holds no keys (file-level backup restore, Credential
+//                    Manager reset, the I15 residual). Every sign/decrypt
+//                    would fail; the 24-word Recover flow is the only fix.
+export type IdentityErrorKind = 'file' | 'keys-missing'
 
 export type CreatedIdentity = {
   mnemonic: Mnemonic
@@ -57,6 +68,8 @@ export type IdentityActions = {
 type IdentityState = {
   identity: IdentityRecord | null
   status: IdentityStatus
+  // Set only while status === 'error'; null otherwise.
+  errorKind: IdentityErrorKind | null
   // Stable object reference — actions never change identity across renders,
   // so consumers can safely include `actions.signWithKeyring` in dep arrays
   // without churn (the SessionView pipeline used to tear down on every
@@ -86,26 +99,44 @@ export const useIdentityStore = create<IdentityState>((set, get) => {
       exists = await identityExists()
     } catch (err) {
       console.error('useIdentity.refresh: identity_exists failed:', err)
-      set({ identity: null, status: 'error' })
+      set({ identity: null, status: 'error', errorKind: 'file' })
       return
     }
     if (!exists) {
-      set({ identity: null, status: 'absent' })
+      set({ identity: null, status: 'absent', errorKind: null })
       return
     }
+    let record: IdentityRecord | null
     try {
-      const record = await loadIdentityRecord()
-      // File exists; a null/unparseable record is a corrupt-file signal, not a
-      // fresh user. Route to 'error', never 'absent'.
-      set(
-        record
-          ? { identity: record, status: 'ready' }
-          : { identity: null, status: 'error' }
-      )
+      record = await loadIdentityRecord()
     } catch (err) {
       console.error('useIdentity.refresh: identity_load_record failed:', err)
-      set({ identity: null, status: 'error' })
+      set({ identity: null, status: 'error', errorKind: 'file' })
+      return
     }
+    // File exists; a null/unparseable record is a corrupt-file signal, not a
+    // fresh user. Route to 'error', never 'absent'.
+    if (!record) {
+      set({ identity: null, status: 'error', errorKind: 'file' })
+      return
+    }
+    // #47 E1 — the file parsing is only half the identity: the keychain must
+    // hold the private keys, or every identity_sign / identity_box_decrypt
+    // fails deep inside pairing/invites/audit signing with raw keyring
+    // errors. Only a definitive keyring NoEntry (probe resolves false) routes
+    // to the keys-missing error; a rejected probe (locked keychain, non-Tauri
+    // test env) is inconclusive and must not block boot or steer the user
+    // into the key-overwriting Recover flow.
+    try {
+      const keysPresent = await identityKeysPresent()
+      if (!keysPresent) {
+        set({ identity: null, status: 'error', errorKind: 'keys-missing' })
+        return
+      }
+    } catch (err) {
+      console.warn('useIdentity.refresh: keychain probe inconclusive:', err)
+    }
+    set({ identity: record, status: 'ready', errorKind: null })
   }
 
   // The single persistence path. Both new-identity creation and 24-word
@@ -136,7 +167,7 @@ export const useIdentityStore = create<IdentityState>((set, get) => {
         allowOverwrite
       )
       await saveIdentityRecord(record)
-      set({ identity: record, status: 'ready' })
+      set({ identity: record, status: 'ready', errorKind: null })
     }
     return { record, commit }
   }
@@ -165,6 +196,7 @@ export const useIdentityStore = create<IdentityState>((set, get) => {
   return {
     identity: null,
     status: 'loading',
+    errorKind: null,
     actions: { create, recover, signWithKeyring, refresh, setDisplayName },
   }
 })

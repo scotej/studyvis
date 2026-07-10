@@ -2,15 +2,19 @@ import {
   useIdentityStore,
   type CreatedIdentity,
   type IdentityActions,
+  type IdentityErrorKind,
   type IdentityStatus,
 } from '@/stores/identityStore'
 import { type IdentityRecord } from '@/lib/db/identity'
 
-export type { CreatedIdentity, IdentityStatus }
+export type { CreatedIdentity, IdentityErrorKind, IdentityStatus }
 
 export type UseIdentityResult = {
   identity: IdentityRecord | null
   status: IdentityStatus
+  // #47 E1 — which failure produced status 'error' ('file' vs
+  // 'keys-missing'); null outside the error state.
+  errorKind: IdentityErrorKind | null
   actions: IdentityActions
 }
 
@@ -23,6 +27,7 @@ export type UseIdentityResult = {
 export function useIdentity(): UseIdentityResult {
   const identity = useIdentityStore((s) => s.identity)
   const status = useIdentityStore((s) => s.status)
+  const errorKind = useIdentityStore((s) => s.errorKind)
   const actions = useIdentityStore((s) => s.actions)
-  return { identity, status, actions }
+  return { identity, status, errorKind, actions }
 }

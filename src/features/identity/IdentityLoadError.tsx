@@ -10,8 +10,13 @@ type Mode = 'error' | 'recover'
 // exists but couldn't be read). Retry re-runs the load; Recover mounts the
 // existing 24-word flow — which, because identity_exists() is true, goes
 // through its own overwrite confirm before committing.
+//
+// #47 E1 — the 'keys-missing' errorKind (file parsed fine but the keychain
+// definitively holds no keys) renders the same screen with recovery-first
+// copy: retrying can't fix an empty keychain, so the 24-word restore is the
+// primary action there.
 export function IdentityLoadError() {
-  const { actions } = useIdentity()
+  const { errorKind, actions } = useIdentity()
   const [mode, setMode] = useState<Mode>('error')
   const [retrying, setRetrying] = useState(false)
 
@@ -30,6 +35,7 @@ export function IdentityLoadError() {
 
   return (
     <IdentityLoadErrorView
+      variant={errorKind === 'keys-missing' ? 'keysMissing' : 'file'}
       retrying={retrying}
       onRetry={() => {
         setRetrying(true)

@@ -240,6 +240,19 @@ export const strings = {
       retryCta: 'Try again',
       recoverCta: 'Restore from backup',
     },
+    // #47 E1 — identity.json parsed fine but the keychain holds no private
+    // keys (file-level backup restore, keychain/Credential Manager reset).
+    // Signing and decrypting are impossible, so the 24-word restore leads;
+    // retrying is offered only as the check-again fallback.
+    keysMissing: {
+      ariaLabel: 'Identity keys are missing',
+      heading: 'Your identity keys are missing from this device',
+      body: "Your identity file is fine, but this device's keychain no longer has the private keys behind it — this can happen after restoring files onto a new machine or resetting the keychain. Restore from your 24-word backup to get them back.",
+      recoverNote:
+        'Restoring from your 24-word backup brings back the exact same identity — your friends and history stay intact.',
+      retryCta: 'Check again',
+      recoverCta: 'Restore from backup',
+    },
   },
 
   friends: {
