@@ -172,6 +172,10 @@ export function subscribeToOwnInbox(ctx: InboxContext): InboxSubscription {
       topic: inboxTopic(ctx.myEdPubkey),
       password: inboxPassword(ctx.myEdPubkey),
       relayConfig: userRelayConfig(),
+      // #47 C1 — race Nostr + MQTT so a friend on a Nostr-blocked network can
+      // still deliver invites. Duplicate delivery of one envelope over both
+      // transports is absorbed by the PR-18 (from, nonce) replay guard below.
+      strategies: ['nostr', 'mqtt'],
       // F1 — the inbox is a long-lived background subscriber with no dialog to
       // drive, so a join error is logged for diagnostics only. A real relay
       // outage surfaces to the user through the pairing/invite flows instead.

@@ -43,8 +43,7 @@ function rowsFromSocketMap(
 }
 
 // Snapshot trystero's live NOSTR socket map into a sorted, render-ready row
-// list. Deliberately Nostr-only: `relaysUnreachable` below feeds the invite
-// path, which signals over Nostr alone.
+// list (Nostr-only by contract; the panel uses snapshotAllRelayRows).
 export function snapshotRelayRows(): RelayRow[] {
   return rowsFromSocketMap(getRelaySocketMap(), 'nostr')
 }
@@ -82,8 +81,8 @@ export function relaysUnreachable(): boolean {
 // pairing that MQTT would complete. Judge both transports: the network is down
 // only when at least one socket exists across Nostr OR MQTT and NONE of them is
 // OPEN. Returns false when neither transport has opened a socket yet (nothing to
-// judge). The Nostr-only signal is kept for the invite path, which doesn't race
-// MQTT.
+// judge). Since #47 C1 the invite send path races MQTT too and uses this same
+// signal; the Nostr-only `relaysUnreachable` above remains for diagnostics.
 export function pairingRelaysUnreachable(): boolean {
   const nostr = getRelaySocketMap()
   const mqtt = getMqttRelaySocketMap()

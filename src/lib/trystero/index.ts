@@ -3,10 +3,13 @@
 // onPeerJoin/Leave/Stream to MULTIPLE subscribers — raw trystero rooms are
 // last-listener-wins, so calling room.onPeerJoin directly silently clobbers
 // every other subscriber — and (b) can race several discovery transports
-// (Nostr + MQTT) on one topic and merge them, deduping peers by their shared
-// peerId. Merged rooms are for short-lived pairing only; long-lived rooms
-// (inbox, presence, session) stay single-strategy Nostr to avoid duplicate
-// peer connections.
+// (Nostr + MQTT) on one topic and merge them, with refcounted per-peer
+// transport tracking (#47 C1) so a peer counts as joined while ANY transport
+// holds them. Data-only rooms (pairing, presence, inbox, invite send) race
+// both transports; the media-carrying SESSION room stays single-strategy
+// Nostr — a peer connected over two transport rooms would open duplicate
+// RTCPeerConnections and double every video stream (needs its own design
+// pass).
 
 import {
   getRelaySockets as getMqttRelaySockets,
@@ -219,17 +222,54 @@ export const joinTopic: JoinTopicFn = (
 // Fan a single TopicRoom API out over several underlying transport rooms (one
 // per strategy) joined on the same topic/password. Discovery succeeds the moment
 // ANY transport sees the peer. Because every strategy shares the one
-// @trystero-p2p/core, a peer has the SAME peerId on each transport, so:
-//   - onPeerJoin is deduped by peerId (first transport to see the peer wins; the
-//     other transport's duplicate join for that peerId is swallowed),
-//   - makeAction sends on every transport and receives from every transport.
-// Intended for short-lived PAIRING rooms, where racing two transports and then
-// leaving both is cheap and the duplicate datachannel (if both transports
-// connect) is torn down on leave. Long-lived rooms (session mesh, presence) stay
-// single-strategy to avoid duplicate peer connections — they pass no `strategies`
-// and never reach this path.
+// @trystero-p2p/core, a peer has the SAME peerId on each transport, so joins and
+// leaves can be refcounted per peer across transports (see below) and
+// makeAction sends on every transport / receives from every transport. Used by
+// every DATA-ONLY room that races transports (#47 C1: pairing, presence, inbox,
+// invite send). The media-carrying session room never reaches this path — two
+// transport rooms would open duplicate RTCPeerConnections and double video.
 function mergeRooms(rooms: TopicRoom[]): TopicRoom {
-  const joinedPeers = new Set<string>()
+  // #47 C1 — refcounted per-peer transport tracking, registered ONCE at
+  // construction and fanned out to subscribers (mirrors wrapRoom). The old
+  // shared-dedup-set approach fired the consumer's onPeerLeave when ONE
+  // transport dropped even though the peer was still connected on the other
+  // — tolerable for a short-lived pairing room, wrong for the long-lived
+  // presence/inbox rooms that now race transports: join fires when the FIRST
+  // transport sees the peer, leave only when the LAST transport loses them.
+  //
+  // Duplicate delivery note: makeAction sends on every transport and
+  // receives from every transport, so a peer connected over BOTH may deliver
+  // one logical message twice. Every dual-strategy consumer is idempotent by
+  // construction: presence stamps last-seen (re-stamp is harmless), the
+  // inbox has the PR-18 (from, nonce) replay guard, the invite ACK latches a
+  // boolean, and pairing's handshake tolerates replays.
+  const peerTransports = new Map<string, Set<number>>()
+  const joinSubs = new Set<(peerId: string) => void>()
+  const leaveSubs = new Set<(peerId: string) => void>()
+
+  rooms.forEach((room, index) => {
+    room.onPeerJoin((peerId) => {
+      let transports = peerTransports.get(peerId)
+      const isFirst = !transports || transports.size === 0
+      if (!transports) {
+        transports = new Set()
+        peerTransports.set(peerId, transports)
+      }
+      transports.add(index)
+      if (isFirst) {
+        for (const fn of joinSubs) fn(peerId)
+      }
+    })
+    room.onPeerLeave((peerId) => {
+      const transports = peerTransports.get(peerId)
+      if (!transports || !transports.has(index)) return
+      transports.delete(index)
+      if (transports.size === 0) {
+        peerTransports.delete(peerId)
+        for (const fn of leaveSubs) fn(peerId)
+      }
+    })
+  })
 
   return {
     selfId: rooms[0].selfId,
@@ -245,26 +285,15 @@ function mergeRooms(rooms: TopicRoom[]): TopicRoom {
       return { send, receive }
     },
     onPeerJoin: (fn) => {
-      const unsubs = rooms.map((r) =>
-        r.onPeerJoin((peerId) => {
-          if (joinedPeers.has(peerId)) return
-          joinedPeers.add(peerId)
-          fn(peerId)
-        })
-      )
+      joinSubs.add(fn)
       return () => {
-        for (const u of unsubs) u()
+        joinSubs.delete(fn)
       }
     },
     onPeerLeave: (fn) => {
-      const unsubs = rooms.map((r) =>
-        r.onPeerLeave((peerId) => {
-          joinedPeers.delete(peerId)
-          fn(peerId)
-        })
-      )
+      leaveSubs.add(fn)
       return () => {
-        for (const u of unsubs) u()
+        leaveSubs.delete(fn)
       }
     },
     onPeerStream: (fn) => {

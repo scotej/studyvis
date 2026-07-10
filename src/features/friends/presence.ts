@@ -120,6 +120,11 @@ export function startPresence(ctx: PresenceContext): PresenceSubscription {
     topic: presenceTopic(ctx.myEdPubkey),
     password: presencePassword(ctx.myEdPubkey),
     relayConfig: userRelayConfig(),
+    // #47 C1 — race Nostr + MQTT like pairing does: a friend behind a
+    // Nostr-blocking firewall could be ADDED (offline ContactCard) but then
+    // showed permanently offline. Heartbeats are idempotent, so the merged
+    // room's duplicate delivery is harmless (re-stamp of last-seen).
+    strategies: ['nostr', 'mqtt'],
     // F1 — presence is a background channel; a join error is logged only.
     onJoinError: (details) =>
       console.warn('presence (own) room join error:', details.error),
@@ -154,6 +159,8 @@ export function startPresence(ctx: PresenceContext): PresenceSubscription {
       topic: presenceTopic(edBytes),
       password: presencePassword(edBytes),
       relayConfig: userRelayConfig(),
+      // #47 C1 — see the own-room note above.
+      strategies: ['nostr', 'mqtt'],
       onJoinError: (details) =>
         console.warn('presence (friend) room join error:', details.error),
     })

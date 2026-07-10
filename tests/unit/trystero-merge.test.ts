@@ -147,6 +147,51 @@ describe('joinTopic multi-strategy race + mergeRooms', () => {
     expect(joined).toHaveBeenCalledTimes(2)
   })
 
+  // #47 C1 — refcounted peer tracking for long-lived dual-strategy rooms.
+  test('one transport dropping does NOT fire leave while the other still holds the peer', () => {
+    const room = joinTopic({
+      topic: 't',
+      password: 'p',
+      strategies: ['nostr', 'mqtt'],
+    })
+    const joined = vi.fn()
+    const left = vi.fn()
+    room.onPeerJoin(joined)
+    room.onPeerLeave(left)
+
+    byStrategy('nostr').emitJoin('peer-1')
+    byStrategy('mqtt').emitJoin('peer-1')
+    expect(joined).toHaveBeenCalledTimes(1)
+
+    // Nostr blips away — the peer is still on MQTT, so no leave...
+    byStrategy('nostr').emitLeave('peer-1')
+    expect(left).not.toHaveBeenCalled()
+
+    // ...and the LAST transport dropping fires exactly one leave.
+    byStrategy('mqtt').emitLeave('peer-1')
+    expect(left).toHaveBeenCalledTimes(1)
+    expect(left).toHaveBeenCalledWith('peer-1')
+
+    // A rejoin on either transport counts as a fresh join.
+    byStrategy('mqtt').emitJoin('peer-1')
+    expect(joined).toHaveBeenCalledTimes(2)
+  })
+
+  test('multiple subscribers all receive join/leave (construction-time fan-out)', () => {
+    const room = joinTopic({
+      topic: 't',
+      password: 'p',
+      strategies: ['nostr', 'mqtt'],
+    })
+    const joinedA = vi.fn()
+    const joinedB = vi.fn()
+    room.onPeerJoin(joinedA)
+    room.onPeerJoin(joinedB)
+    byStrategy('nostr').emitJoin('peer-1')
+    expect(joinedA).toHaveBeenCalledTimes(1)
+    expect(joinedB).toHaveBeenCalledTimes(1)
+  })
+
   test('makeAction send broadcasts to every transport; receive registers on every transport', async () => {
     const room = joinTopic({
       topic: 't',
