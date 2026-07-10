@@ -1,3 +1,9 @@
+// Settings → Sessions: lists past sessions from SQLite, opens a session's
+// Report (lifted into Settings.tsx so it replaces the shell), and deletes a
+// single session behind a confirm — the Rust command drops the session row
+// and its audit_events in one transaction, then the list re-reads SQLite so
+// what's shown always matches what's stored.
+
 import { useCallback, useEffect, useState } from 'react'
 import { Trash2Icon } from 'lucide-react'
 import { toast } from 'sonner'

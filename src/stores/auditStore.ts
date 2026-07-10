@@ -1,3 +1,11 @@
+// Zustand store for the live session's verified audit events (the shared
+// panel), plus best-effort persistence to SQLite and the two protocol
+// helpers: `buildAuditEvent` (sign over the canonical bytes) and
+// `verifyIncomingAuditEvent` (verify against the signed-hello peer binding —
+// never against the wire's own `who` field). Callers must `flushPending()`
+// before reading audit rows back for the report, so in-flight persists land
+// first.
+
 import { create } from 'zustand'
 
 import {

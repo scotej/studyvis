@@ -1,33 +1,36 @@
-// V2-P7 — Floating Ctrl+] AI dialog window.
-//
-// The PTT-AI shortcut handler calls `toggle_ai_dialog` which either
-// creates the second WebviewWindow (transparent, alwaysOnTop, no
-// decorations, skipTaskbar, focused) or destroys the existing one. The
-// macOS-only branch sets the NSWindowCollectionBehavior to
-// `canJoinAllSpaces | fullScreenAuxiliary` so the dialog appears over
-// fullscreen apps (ARCHITECTURE.md §12).
-//
-// Transparent windows on macOS require `app.macOSPrivateApi: true` in
-// tauri.conf.json — that flag is added in this slice. It locks the app
-// out of the Mac App Store, but V1's friends-only distribution (PLAN.md
-// §5) already retired that path.
+//! Floating Ctrl+] AI dialog window (V2-P7).
+//!
+//! The PTT-AI shortcut handler calls `toggle_ai_dialog` which either
+//! creates the second WebviewWindow (transparent, alwaysOnTop, no
+//! decorations, skipTaskbar, focused) or destroys the existing one. The
+//! macOS-only branch sets the NSWindowCollectionBehavior to
+//! `canJoinAllSpaces | fullScreenAuxiliary` so the dialog appears over
+//! fullscreen apps (ARCHITECTURE.md §12).
+//!
+//! Transparent windows on macOS require `app.macOSPrivateApi: true` in
+//! tauri.conf.json. That flag locks the app out of the Mac App Store, but
+//! V1's friends-only distribution (PLAN.md §5) already retired that path.
 
 use tauri::{AppHandle, Manager, Runtime, WebviewUrl, WebviewWindowBuilder};
 
+/// Label for the dialog webview. Referenced from `lib.rs` (quit teardown) and
+/// `system.rs` (AI-features-off teardown), and scoped by
+/// `capabilities/ai-dialog.json` — renaming it breaks all three.
 pub const AI_DIALOG_LABEL: &str = "ai-dialog";
 
 const DIALOG_WIDTH: f64 = 460.0;
 const DIALOG_HEIGHT: f64 = 220.0;
 
-// Toggles the dialog: closes it if already open, otherwise creates a new
-// one. The handler returns Result so any window-builder failure can
-// propagate up through the shortcut handler's `let _ =` capture (which
-// logs in dev but keeps the app responsive).
+/// Toggles the dialog: destroys it if already open, otherwise creates it.
+/// `destroy()` rather than `close()` because a toggle wants immediate,
+/// unconditional teardown — `close()` goes through the asynchronous
+/// close-requested roundtrip (interceptable machinery this window doesn't
+/// need; `lib.rs`'s handler only acts on the `main` window anyway). Not a
+/// `#[tauri::command]` — invoked from the global-shortcut handler in
+/// `lib.rs`, which `let _ =`-captures the Result to keep the app responsive
+/// on builder failure.
 pub fn toggle_ai_dialog<R: Runtime>(app: &AppHandle<R>) -> Result<(), tauri::Error> {
     if let Some(existing) = app.get_webview_window(AI_DIALOG_LABEL) {
-        // Window already open — destroy it. `close()` would let Tauri's
-        // close-requested handler intercept; `destroy()` is the
-        // unconditional teardown we want for a toggle.
         existing.destroy()?;
         return Ok(());
     }

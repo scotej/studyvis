@@ -1,3 +1,11 @@
+// Typed wrappers over the Rust `identity_*` commands. `IdentityRecord` is the
+// on-disk identity.json schema (snake_case; renaming a field breaks load).
+// The `*WithKeyring` functions are the KEYCHAIN twin of the pure crypto in
+// @/lib/crypto/identity.ts: same byte formats, but the private key never
+// enters JS — Rust reads it from the OS keychain. Post-onboarding code should
+// use these; the pure variants exist for derivation-time use, when the
+// mnemonic (and thus the keys) are legitimately in memory.
+
 import { invoke } from '@tauri-apps/api/core'
 
 import { base64ToBytes, bytesToBase64, bytesToHex } from '@/lib/encoding'

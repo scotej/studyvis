@@ -1,3 +1,14 @@
+// Deterministic trystero room-topic + password derivations (inbox, pairing,
+// session, presence), plus the pairing safety number. Every topic is
+// hex(sha256(label + payload)) where the version-tagged label
+// ('studyvis:<kind>:v1:') is a RENDEZVOUS WIRE CONTRACT: two peers meet only
+// if they derive the identical string, so changing a label, a payload
+// encoding, or the digest strands every peer on an older build. The payload
+// encoding is part of that contract and deliberately differs per kind —
+// pubkey-derived topics hash the base64 of the key, sessionTopic hashes the
+// hex of the id, pair topics hash the words joined by '-'. Bump the :v1:
+// suffix (and coordinate both sides) rather than editing a derivation.
+
 import { sha256 } from '@noble/hashes/sha2.js'
 
 import { bytesToBase64, bytesToHex, hexToBytes } from '@/lib/encoding'

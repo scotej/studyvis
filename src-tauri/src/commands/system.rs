@@ -1,3 +1,19 @@
+//! System commands and the app's managed runtime flags.
+//!
+//! Defines the atomic flag types (`QuitFlag`, `MinimizeToTrayFlag`,
+//! `AiFeaturesFlag`, `SessionActiveFlag`, `ShortcutBindings`) that `lib.rs`
+//! `manage()`s at setup and consults in the window/run-event handlers, plus
+//! assorted commands: autostart, global-shortcut rebinding, quit/relaunch,
+//! text-file export, opening OS settings panes (macOS-only deep links), the
+//! battery probe, and the opt-in GitHub release check. All flags use
+//! `Ordering::Relaxed` deliberately — last-write-wins between the JS setters
+//! and the event handlers is fine, and no flag guards memory another thread
+//! publishes.
+//!
+//! Gotcha: `system_relaunch_app` must kill the sidecar itself before calling
+//! `app.restart()` — restart skips `RunEvent::Exit`, so the normal sidecar
+//! teardown in `lib.rs` never runs on that path.
+
 use std::str::FromStr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
@@ -10,6 +26,8 @@ use tauri_plugin_opener::OpenerExt;
 
 use crate::db::data_dir;
 
+/// Armed by `app_quit` after the in-app confirm; `lib.rs`'s close-requested
+/// handler lets the window close once armed.
 pub struct QuitFlag(pub AtomicBool);
 
 impl QuitFlag {

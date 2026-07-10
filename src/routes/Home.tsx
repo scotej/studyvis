@@ -1,3 +1,19 @@
+// Top-level view orchestrator: switches between loading / identity-error /
+// onboarding / active-session / report / settings / friends-list, and owns
+// the flows that must survive any of those views — the add-friend dialog,
+// contact-card import, deep-link routing, and the AI topic gate that queues a
+// host/guest session start behind the "what are you working on?" prompt.
+//
+// Mount-structure invariants, easy to break by "simplifying" the render:
+// - `InboxBoot` renders exactly ONCE, outside the view switch, so the
+//   always-on inbox + presence subscriptions never unmount on a view change.
+// - The `tail` block (inbox boot, deep-link boot, import dialog, topic gate)
+//   travels with EVERY view including the active session, so a deep link or
+//   invite arriving mid-session isn't dropped.
+// - The identity 'error' status renders IdentityLoadError and must never
+//   fall through to Onboarding — its create path would overwrite still-valid
+//   keychain keys (D1).
+
 import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router'
 import { Settings2Icon } from 'lucide-react'

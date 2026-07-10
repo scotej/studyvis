@@ -1,3 +1,10 @@
+// Zustand store owning the local identity lifecycle. `create()`/`recover()`
+// persist NOTHING — they return `{ record, commit }` and keys reach the
+// keychain only when `commit()` runs (after the user confirms their backup),
+// so an abandoned onboarding never mints a half-saved identity. The mnemonic
+// itself is never persisted anywhere. Note the module-load side effect at the
+// bottom of this file: importing the store fires the initial `refresh()`.
+
 import { create } from 'zustand'
 
 import {

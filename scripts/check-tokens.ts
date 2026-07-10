@@ -1,4 +1,13 @@
 #!/usr/bin/env tsx
+// Design-token guard (DESIGN-SYSTEM.md §7 rule 1): every color, px value, and
+// easing must come from src/design/tokens.ts, so this script walks src/ and
+// fails on hardcoded visual values — raw hex, inline cubic-bezier, px inside
+// style props, and Tailwind arbitrary-bracket px/ring/hex utilities.
+// tokens.ts itself is allowlisted; a few vendored shadcn primitives carry
+// per-rule exemptions below. Runs in pre-commit, CI, and the release-prep
+// gate (`npm run check-tokens`); exits 1 with file:line:col per violation.
+// Its siblings check-strings.ts / check-contrast.ts follow the same shape.
+
 import { readFile, readdir } from 'node:fs/promises'
 import { resolve, relative, join, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'

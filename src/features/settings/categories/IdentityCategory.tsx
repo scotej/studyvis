@@ -1,3 +1,11 @@
+// Settings → Identity: display-name edit, public-key copy, the
+// restore-from-24-words entry point (the Recover flow itself is lifted into
+// Settings.tsx so it can replace the whole shell), and the encrypted
+// friends-list backup — `friends_export` / `friends_import` Tauri commands
+// writing/reading a sealed `.svfriends` file only this identity can mint or
+// open (see src-tauri/src/commands/friends.rs for the format's security
+// envelope).
+
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { open, save } from '@tauri-apps/plugin-dialog'

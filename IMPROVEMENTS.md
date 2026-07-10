@@ -1,8 +1,22 @@
 # StudyVis improvement backlog
 
-A forward-looking backlog of concrete, code-grounded improvements for StudyVis (shipped, feature-complete v1.2.0). Distinct from [`ISSUES.md`](ISSUES.md), which is the _audit ledger_ of already-found-and-fixed (or deliberately deferred) defects — this document is the menu of work still worth doing.
+A point-in-time backlog of concrete, code-grounded improvements for StudyVis, written against v1.2.0. Distinct from [`ISSUES.md`](ISSUES.md), which is the _audit ledger_ of already-found-and-fixed (or deliberately deferred) defects.
 
-**Produced:** 2026-06-11, from a multi-agent survey that read the real source across all eight subsystems (friend discovery, sessions/WebRTC, AI pipeline, UI/design system, settings/stats/report, identity/crypto/DB, build/release, and the docs/threat-model), deduped to themes, and pressure-tested with a completeness critic. Every item cites the files it touches; nothing here is implemented yet.
+**Produced:** 2026-06-11, from a multi-agent survey that read the real source across all eight subsystems (friend discovery, sessions/WebRTC, AI pipeline, UI/design system, settings/stats/report, identity/crypto/DB, build/release, and the docs/threat-model), deduped to themes, and pressure-tested with a completeness critic. Every item cites the files it touches; nothing here was implemented at the time of writing.
+
+> ## Status — implemented (2026-07 audit)
+>
+> **This backlog is retired, not live.** A code-level audit on 2026-07-10 verified every item against the current source: **55 of 56 shipped** (largely in v1.2.1, with v1.2.2 and v1.3.1 following), **1 partial (P1)**, **0 open**. The item IDs (`F1`, `A5`, `D5`, …) now appear as comment tags at the exact code sites that implemented them — see the comment-shorthand legend in `CLAUDE.md`.
+>
+> Exceptions and judgment calls, so nobody re-litigates them from the item text alone:
+>
+> - **P1 (Linux deferral checklist) — partial.** Its literal ask shipped — the deferral now has a concrete trigger + unblock checklist (PLAN §8) — but the Linux work the checklist describes (keyring feature, `.AppImage` job, smoke-test re-run) has not started.
+> - **X2** shipped via its sanctioned alternative: the Intel-Mac claim was dropped from the docs rather than adding an `x64.dmg` build.
+> - **X7** shipped as the documented triage (ISSUES.md I19); the "when convenient" dev-dep bumps remain untaken by design.
+> - **S2** closed the privacy defect with a stuck-key guard (120 s, not ~30 s) + per-session reset; the suggested blur-release was considered and deliberately rejected (`PttListener.tsx`) because the PTT shortcut is system-wide.
+> - **N3** shipped as a global toggle only (no per-friend mute). **S4**'s output picker is inoperative on macOS WKWebView (`setSinkId` unsupported — documented in code); per-peer volume works everywhere.
+>
+> Item descriptions below state the **v1.2.0-era gap** they were written against — line numbers and "currently…" claims describe that snapshot, not today's code. Read them as historical rationale for the shipped behavior, not as open work.
 
 ## Scope & constraints
 

@@ -1,3 +1,11 @@
+// Zustand store for the live study-session lifecycle: status, the peers map,
+// the declared-topic trio (see the three per-field comments below — they have
+// distinct lifetimes), and the cumulative seen-peer sets that survive
+// `peerLeft` on purpose so session history stays correct on the
+// everyone-else-leaves auto-end path. Mutated by `features/session/*`
+// (host/join/lifecycle/hello); read by SessionView, the AI sample loop, and
+// the leave handler.
+
 import { create } from 'zustand'
 
 import type { TopicRoom } from '@/lib/trystero'

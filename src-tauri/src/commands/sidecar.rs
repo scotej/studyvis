@@ -1,3 +1,22 @@
+//! llama-server sidecar lifecycle: spawn on demand on `127.0.0.1:<random
+//! port>`, crash-restart within a budget, and kill explicitly at exit.
+//!
+//! Lifecycle invariants (the highest-risk area in the Rust tree):
+//! - `SidecarState::kill_blocking` is the ONLY thing that stops the process.
+//!   Neither OS kills the child when the parent exits, and `CommandChild`
+//!   does not kill on drop — every exit path (`RunEvent::Exit*` in `lib.rs`,
+//!   `system_relaunch_app`) must reach it or a multi-GB llama-server outlives
+//!   the app holding its port and model file.
+//! - The `generation` counter + `shutting_down` flag (below) keep the
+//!   crash-restart watcher honest: a stale watcher must never re-incarnate a
+//!   process that a newer start or an exit already superseded.
+//! - `TARGET_TRIPLE` / `SIDECAR_NAME` couple to `scripts/fetch-llama-server.sh`
+//!   output and `tauri.conf.json`'s `externalBin` + `resources` globs.
+//!
+//! JS drives this via `sidecar_start` / `sidecar_stop` / `sidecar_status`
+//! (`src/features/ai/sidecar.ts`) and talks to the spawned server directly
+//! over OpenAI-compatible HTTP.
+
 use std::fs::{self, File, OpenOptions};
 use std::io::Write;
 use std::net::TcpListener;

@@ -1,3 +1,10 @@
+// Mounted once in App.tsx: wires the Rust global-shortcut PTT events
+// (`ptt-friends-pressed` / `-released`) to the PTT store. Deliberately has NO
+// window-blur release failsafe — the shortcut is system-wide, so PTT must
+// keep transmitting while the user holds the key in another app; a dropped
+// release is covered by the store's stuck-key guard and per-session reset
+// (S2). No-op outside the Tauri runtime.
+
 import { useEffect } from 'react'
 
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'

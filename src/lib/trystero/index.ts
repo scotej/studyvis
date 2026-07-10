@@ -1,3 +1,13 @@
+// Wrapper over trystero's joinRoom: every room in the app goes through
+// `joinTopic`, which returns a `TopicRoom` that (a) fans out
+// onPeerJoin/Leave/Stream to MULTIPLE subscribers — raw trystero rooms are
+// last-listener-wins, so calling room.onPeerJoin directly silently clobbers
+// every other subscriber — and (b) can race several discovery transports
+// (Nostr + MQTT) on one topic and merge them, deduping peers by their shared
+// peerId. Merged rooms are for short-lived pairing only; long-lived rooms
+// (inbox, presence, session) stay single-strategy Nostr to avoid duplicate
+// peer connections.
+
 import {
   getRelaySockets as getMqttRelaySockets,
   joinRoom as joinRoomMqtt,

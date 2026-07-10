@@ -1,3 +1,17 @@
+//! GGUF model-file management on disk under `<data>/studyvis/models/<id>/`:
+//! resumable downloads from Hugging Face, install-state checks, removal, and
+//! keychain custody of the optional HF token (gated-model tier).
+//!
+//! Notes for editors:
+//! - `validate_model_id` is a path-traversal guard — every path-building fn
+//!   funnels through it because the JS-supplied id becomes a directory name.
+//! - Downloads stream sequentially with SHA-256 verification, resume from a
+//!   kept `.tmp` via HTTP Range, and rename atomically on success; per-model
+//!   cancellation rides an `AtomicBool` in `DownloadState`.
+//! - Install state lives on the FILESYSTEM (and `models.json` on the JS
+//!   side), not in SQLite — the `models` table from migration 002 is a
+//!   currently-unused placeholder.
+
 use std::collections::HashMap;
 use std::fs::{self, File};
 use std::io::Write;

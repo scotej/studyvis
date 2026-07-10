@@ -1,3 +1,9 @@
+//! Session + audit-event commands: thin sync wrappers over `db::sessions` and
+//! `db::audit_events` (same held-guard, no-async locking pattern as
+//! `commands/friends.rs`). Upsert/cascade semantics live in the `db` layer;
+//! the TS callers are `src/lib/db/sessions.ts` and `src/lib/db/audit.ts`
+//! (camelCase invoke args in, snake_case serde rows out).
+
 use tauri::State;
 
 use crate::db::{audit_events, sessions, DbPool};

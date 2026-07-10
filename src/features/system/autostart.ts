@@ -1,3 +1,7 @@
+// Thin bridge to the Rust autostart commands (tauri-plugin-autostart).
+// Tauri-only — callers go through useAutostart, which reports 'unavailable'
+// outside the desktop runtime.
+
 import { invoke } from '@tauri-apps/api/core'
 
 export async function setAutostartEnabled(enabled: boolean): Promise<void> {
