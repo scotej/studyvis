@@ -57,10 +57,14 @@ type SessionState = {
   status: SessionStatus
   // See SessionEndReason. Set by markEnded, cleared by begin/reset.
   endedBy: SessionEndReason | null
-  // One-shot reason staged by the auto-end path (wireSessionRoom's grace
-  // expiry) just before it invokes the leave handler; markEnded consumes it
-  // and defaults to 'user' when nothing was staged.
-  pendingEndReason: 'auto' | null
+  // One-shot reason staged before the leave handler runs; markEnded consumes
+  // it and defaults to 'user' when nothing was staged. FIRST writer wins
+  // (see setPendingEndReason): the user path stages 'user' synchronously at
+  // the top of buildLeaveHandler and the grace expiry stages 'auto' before
+  // invoking it, so whichever path genuinely initiated the end owns the
+  // attribution — a grace timer firing while a deliberate Leave's async
+  // teardown is mid-flight can no longer rewrite it to 'auto'.
+  pendingEndReason: SessionEndReason | null
   sessionTopic: string | null
   sessionPassword: string | null
   isHost: boolean
@@ -116,7 +120,7 @@ type SessionState = {
   // observed via signed-hello in this session. Used by the leave handler to
   // populate sessions.peer_pubkeys. NULL until at least one hello arrived.
   collectPeerPubkeys: () => string | null
-  setPendingEndReason: (reason: 'auto' | null) => void
+  setPendingEndReason: (reason: SessionEndReason) => void
   // Flip status to 'ended' so Home.tsx can mount the post-session Report
   // (V2-P8). The Report queries SQLite for the just-persisted sessions
   // row + audit_events; the in-memory peers / displayNames aren't
@@ -267,7 +271,10 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     const sorted = [...new Set(seen)].sort()
     return JSON.stringify(sorted)
   },
-  setPendingEndReason: (reason) => set({ pendingEndReason: reason }),
+  setPendingEndReason: (reason) =>
+    set((s) =>
+      s.pendingEndReason === null ? { pendingEndReason: reason } : s
+    ),
   markEnded: () =>
     set((s) =>
       s.status === 'active'

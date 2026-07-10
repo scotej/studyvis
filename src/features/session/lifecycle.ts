@@ -145,6 +145,11 @@ export function buildLeaveHandler(args: {
   return async () => {
     if (alreadyLeft) return
     alreadyLeft = true
+    // #47 B3 follow-up — claim the end-reason SYNCHRONOUSLY, before the first
+    // await: staging is first-writer-wins, so a deliberate Leave locks in
+    // 'user' even if the grace deadline lands mid-teardown (the auto-end path
+    // stages 'auto' before invoking this handler, so it still wins there).
+    useSessionStore.getState().setPendingEndReason('user')
     const endedAt = Date.now()
     // Snapshot every store field the report needs BEFORE room.leave so a
     // mid-teardown StrictMode / HMR double-mount can't wipe the values
@@ -274,9 +279,10 @@ export function wireSessionRoom(
       // window cancels this via cancelGrace(). The leave handler is itself
       // idempotent, so an explicit user-leave racing the timer is safe.
       if (peers.size === 0) {
-        // #47 B3 — stage the reason BEFORE the leave handler runs so
-        // markEnded records this as an auto-end and the Report can offer
-        // Rejoin (the room may still be live without us after a >20s blip).
+        // #47 B3 — stage the reason BEFORE the leave handler runs (first
+        // writer wins; the handler itself stages 'user') so markEnded
+        // records this as an auto-end and the Report can offer Rejoin (the
+        // room may still be live without us after a >20s blip).
         useSessionStore.getState().setPendingEndReason('auto')
         void hooks.leave()
       }

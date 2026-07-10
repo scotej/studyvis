@@ -113,8 +113,10 @@ export type SettingsValues = {
   windowStyle: WindowStyleMode
   // F3 — optional user-supplied Nostr signaling relays (wss:// each). Empty
   // (the default) keeps the curated DEFAULT_RELAY_URLS. When non-empty, these
-  // replace the built-in list via relayConfig.urls — see lib/trystero. Stored
-  // already-validated (only wss:// entries survive the setter).
+  // EXTEND the built-in list (#47 A5: union via mergedRelayUrls, custom
+  // first — never a replacement, which would sever discovery with friends on
+  // the defaults). Stored already-validated (only wss:// entries survive the
+  // setter).
   customRelayUrls: string[]
   // F3 — optional user-supplied TURN server. `null` (default) = STUN-only.
   // Stored already-validated (turn:/turns: url + non-empty creds).

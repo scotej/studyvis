@@ -52,6 +52,29 @@ describe('session end reason (#47 B3)', () => {
     expect(useSessionStore.getState().endedBy).toBeNull()
   })
 
+  // The mid-teardown interleaving: buildLeaveHandler stages 'user'
+  // synchronously, then awaits IPC round-trips; if the grace deadline lands
+  // inside that window its 'auto' staging must NOT overwrite the deliberate
+  // Leave (first writer wins).
+  test('a grace expiry firing during a user leave in flight cannot rewrite the reason', () => {
+    begin()
+    useSessionStore.getState().setPendingEndReason('user')
+    useSessionStore.getState().setPendingEndReason('auto')
+    useSessionStore.getState().markEnded()
+    expect(useSessionStore.getState().endedBy).toBe('user')
+  })
+
+  // And the inverse ordering keeps the auto path intact: the grace timer
+  // stages 'auto' before invoking the handler, whose own 'user' staging must
+  // then no-op.
+  test('the auto path survives the handler staging after the timer', () => {
+    begin()
+    useSessionStore.getState().setPendingEndReason('auto')
+    useSessionStore.getState().setPendingEndReason('user')
+    useSessionStore.getState().markEnded()
+    expect(useSessionStore.getState().endedBy).toBe('auto')
+  })
+
   test('reset clears the reason', () => {
     begin()
     useSessionStore.getState().markEnded()
