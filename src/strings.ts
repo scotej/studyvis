@@ -895,6 +895,22 @@ export const strings = {
 
     notifications: {
       heading: 'Notifications',
+      // #47 B7 — surface the OS-level permission so denied-but-toggled-on
+      // stops being an invisible dead end (all three send paths silently
+      // drop when the system permission is denied, and macOS never
+      // re-prompts after a hard denial).
+      systemPermission: {
+        label: 'System permission',
+        grantedHelp: 'Your system is allowing StudyVis notifications.',
+        grantedBadge: 'Allowed',
+        deniedHelp:
+          "Your system is blocking StudyVis notifications, so none of the alerts below will appear — even when they're switched on.",
+        requestCta: 'Request permission',
+        openSettingsCta: 'Open system settings',
+        stillDenied:
+          'Still blocked. Allow StudyVis under your system notification settings, then come back.',
+        openErrorFallback: "Couldn't open your system's notification settings.",
+      },
       invites: {
         label: 'Incoming invite notifications',
         help: 'OS-level prompt when a friend invites you to study. The in-app toast always fires.',
