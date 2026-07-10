@@ -43,6 +43,8 @@ function session(over: Partial<SessionRecord> = {}): SessionRecord {
     score: null,
     focused_pct: null,
     generated_at: null,
+    confident_samples: null,
+    skipped_samples: null,
     ...over,
   }
 }

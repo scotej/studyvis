@@ -60,6 +60,7 @@ import {
   deriveTopicTimeline,
   formatOffset,
   groupTimelineByWho,
+  sampleQualitySummary,
   parseAuditDetail,
 } from './reportData'
 import {
@@ -273,6 +274,8 @@ export function ReportView({
     () => deriveBreaksSummary(auditEvents),
     [auditEvents]
   )
+  // #47 D5 — non-null only when a material share of AI checks were skipped.
+  const sampleQuality = sampleQualitySummary(session)
 
   const [copied, setCopied] = useState(false)
   const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -445,6 +448,14 @@ export function ReportView({
                 {focusedPctLabel}
               </span>
             </p>
+            {sampleQuality ? (
+              <p className="text-xs text-text-muted">
+                {strings.report.dataQuality(
+                  sampleQuality.skipped,
+                  sampleQuality.totalChecks
+                )}
+              </p>
+            ) : null}
             <p className="text-xs text-text-muted">{strings.report.privacy}</p>
           </div>
           {score == null ? (

@@ -12,6 +12,7 @@ import {
   formatOffset,
   groupTimelineByWho,
   parseAuditDetail,
+  sampleQualitySummary,
 } from '@/features/session/reportData'
 import type { AuditEventRecord } from '@/lib/db/audit'
 
@@ -306,5 +307,41 @@ describe('deriveBreaksSummary', () => {
       evt('B', 'break_approved', 1000, { duration_sec: 600 }),
     ]
     expect(deriveBreaksSummary(events).map((e) => e.who)).toEqual(['B', 'A'])
+  })
+})
+
+// #47 D5 — the data-quality line fires only when skips are material.
+describe('sampleQualitySummary', () => {
+  test('null counts (AI off / pre-003 row) stay silent', () => {
+    expect(
+      sampleQualitySummary({ confident_samples: null, skipped_samples: null })
+    ).toBeNull()
+    expect(
+      sampleQualitySummary({ confident_samples: 20, skipped_samples: null })
+    ).toBeNull()
+  })
+
+  test('a couple of skips in a long session stay silent', () => {
+    expect(
+      sampleQualitySummary({ confident_samples: 50, skipped_samples: 2 })
+    ).toBeNull()
+    expect(
+      sampleQualitySummary({ confident_samples: 96, skipped_samples: 4 })
+    ).toBeNull()
+  })
+
+  test('a material share of skips surfaces the counts', () => {
+    expect(
+      sampleQualitySummary({ confident_samples: 30, skipped_samples: 20 })
+    ).toEqual({ skipped: 20, totalChecks: 50 })
+    expect(
+      sampleQualitySummary({ confident_samples: 17, skipped_samples: 3 })
+    ).toEqual({ skipped: 3, totalChecks: 20 })
+  })
+
+  test('zero checks overall stays silent', () => {
+    expect(
+      sampleQualitySummary({ confident_samples: 0, skipped_samples: 0 })
+    ).toBeNull()
   })
 })

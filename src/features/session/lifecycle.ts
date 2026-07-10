@@ -189,6 +189,8 @@ export function buildLeaveHandler(args: {
         score: focusSnapshot.score,
         focusedPct: focusSnapshot.focusedPct,
         generatedAt: endedAt,
+        confidentSamples: focusSnapshot.confidentSamples,
+        skippedSamples: focusSnapshot.skippedSamples,
       })
     } catch (err) {
       console.error('sessions_insert failed:', err)
