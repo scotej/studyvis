@@ -11,6 +11,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import { leaveBeforeQuit } from '@/features/system/quitLeave'
 import { useSessionStore } from '@/stores/sessionStore'
 import { strings } from '@/strings'
 
@@ -63,9 +64,17 @@ export function QuitConfirmListener() {
     }
   }, [])
 
+  // #47 A1 — persist the session (leave handler: audit flush + sessions row +
+  // markStudied) before quitting; app_quit alone is QuitFlag::arm + exit(0)
+  // and would drop the whole record. leaveBeforeQuit bounds the wait so a
+  // hung teardown can't block the quit; the leave handler is idempotent, so
+  // racing an in-flight auto-end is safe.
   const confirmQuit = () => {
     setOpen(false)
-    void invoke('app_quit').catch(() => {})
+    void (async () => {
+      await leaveBeforeQuit(useSessionStore.getState().leave)
+      await invoke('app_quit').catch(() => {})
+    })()
   }
 
   return (
