@@ -147,6 +147,23 @@ pub fn identity_exists(app: AppHandle) -> Result<bool, String> {
     Ok(path.exists())
 }
 
+// #47 E1 — cheap boot probe (mirrors hf_token_present): does the keychain
+// actually hold this identity's private keys? `identity.json` alone proving
+// 'ready' let a restored file over a wiped/reset keychain boot normally and
+// then fail deep inside pairing/invites/audit signing with raw keyring
+// errors. Only `NoEntry` maps to false — any other keyring error (locked
+// keychain, access denied) is NOT "keys absent" and must not steer the user
+// toward the key-overwriting Recover flow, so it surfaces as Err and the
+// caller treats the probe as inconclusive.
+#[tauri::command]
+pub fn identity_keys_present() -> Result<bool, String> {
+    match keys_entry()?.get_password() {
+        Ok(_) => Ok(true),
+        Err(keyring::Error::NoEntry) => Ok(false),
+        Err(e) => Err(format!("keyring get: {e}")),
+    }
+}
+
 #[tauri::command]
 pub fn identity_save_record(app: AppHandle, record: IdentityRecord) -> Result<(), String> {
     let path = identity_path(&app)?;
