@@ -437,6 +437,11 @@ export const strings = {
       },
     },
     inviteSent: (name: string) => `Invite sent to ${name}.`,
+    // #47 C2 — sent but no signed delivery confirmation came back: an older
+    // build, a slow answer, or a friend who never added you back (their
+    // inbox silently drops envelopes from non-friends).
+    inviteSentUnconfirmed: (name: string) =>
+      `Invite sent to ${name} — no confirmation from their app yet. If nothing happens, make sure they've added you back.`,
     inviteSendErrorFallback: "Couldn't send the invite.",
     joinErrorFallback: "Couldn't join the session.",
     // F6 — friend was offline; we couldn't deliver now, but the invite is held

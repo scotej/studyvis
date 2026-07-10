@@ -112,7 +112,7 @@ export function Home() {
     async (friend: Friend) => {
       if (!identity || !identity.display_name) return
       try {
-        await inviteToCurrentSession({
+        const result = await inviteToCurrentSession({
           friend,
           sender: {
             edPubkeyHex: identity.ed_pubkey_hex,
@@ -121,12 +121,17 @@ export function Home() {
             encryptTo: boxEncryptWithKeyring,
           },
         })
-        toast.success(
-          strings.friends.inviteSent(
-            friend.display_name?.trim() ||
-              strings.friends.addDialog.defaultFriendName
-          )
-        )
+        const name =
+          friend.display_name?.trim() ||
+          strings.friends.addDialog.defaultFriendName
+        // #47 C2 — a verified delivery ACK earns the confident toast; no ACK
+        // gets the honest soft copy (older build, slow answer, or a friend
+        // who never added you back).
+        if (result.acked) {
+          toast.success(strings.friends.inviteSent(name))
+        } else {
+          toast(strings.friends.inviteSentUnconfirmed(name))
+        }
       } catch (err) {
         // F6 — InviteTimeoutError (friend offline; retry queued) and
         // InviteRelayError (relays unreachable; the user's own network) get

@@ -1,3 +1,4 @@
+import { verifyMessage } from '@/lib/crypto/identity'
 import { inboxPassword, inboxTopic } from '@/lib/crypto/topics'
 import { bytesToBase64, bytesToHex, hexToBytes } from '@/lib/encoding'
 import { relaysUnreachable } from '@/lib/relayDiagnostics'
@@ -6,10 +7,14 @@ import { userRelayConfig } from '@/lib/trystero/relays'
 import { useSessionStore } from '@/stores/sessionStore'
 
 import {
+  INVITE_ACK_ACTION,
+  INVITE_ACK_VERSION,
   INVITE_ACTION,
   INVITE_ENVELOPE_VERSION,
   INVITE_TTL_MS,
+  serializeAckForSig,
   serializePayloadForSig,
+  type InviteAck,
   type InviteEnvelope,
   type InvitePayload,
   type InvitePayloadCore,
@@ -60,6 +65,9 @@ export type InviteOptions = {
   // feedback instead of a stuck-forever toast. Caller may override via
   // AbortSignal in a later phase (V1-P8/P10).
   sendTimeoutMs?: number
+  // #47 C2 — how long to linger for the signed delivery ACK after a
+  // successful send (default 5s).
+  ackTimeoutMs?: number
 }
 
 // Message is developer-facing only; the user-facing copy lives in
@@ -86,6 +94,18 @@ export class InviteRelayError extends Error {
 }
 
 const DEFAULT_SEND_TIMEOUT_MS = 15_000
+// #47 C2 — how long the sender lingers on the recipient's inbox topic after a
+// successful send, waiting for the signed delivery ACK. Recipients answer
+// automatically (no user action), so a healthy round-trip is fast; older
+// builds never answer, and the caller falls back to unconfirmed copy.
+const DEFAULT_ACK_TIMEOUT_MS = 5_000
+
+// #47 C2 — the send outcome: `acked` is true only when the recipient's build
+// confirmed delivery with a signature that verifies against their known ed
+// pubkey. False means "sent, unconfirmed": an older build, a slow answer, or
+// — the case this exists to surface — a friend who never added you back, so
+// their inbox silently dropped the envelope.
+export type InviteSendResult = { acked: boolean }
 
 export type SessionInvite = {
   sessionTopic: string
@@ -138,10 +158,14 @@ export async function sendInviteEnvelope(
   envelope: InviteEnvelope,
   opts: {
     sendTimeoutMs?: number
+    // #47 C2 — session topic the delivery ACK must name; when provided the
+    // sender lingers ackTimeoutMs for a verified ACK and reports it.
+    ackSessionTopic?: string
+    ackTimeoutMs?: number
     // F1/F6 test seam — overrides the live relay-reachability read at timeout.
     isRelayUnreachable?: () => boolean
   } = {}
-): Promise<void> {
+): Promise<InviteSendResult> {
   const recipientEdPub = hexToBytes(recipient.edPubkeyHex)
   if (recipientEdPub.length !== 32) {
     throw new Error('recipient ed_pubkey must decode to 32 bytes')
@@ -154,6 +178,40 @@ export async function sendInviteEnvelope(
     relayConfig: userRelayConfig(),
   })
   const action = room.makeAction<InviteEnvelope>(INVITE_ACTION)
+
+  // #47 C2 — register the ACK listener BEFORE sending so a fast answer can't
+  // slip past. Resolves true on the first ack that (a) names our session,
+  // (b) is addressed to us, (c) comes from the recipient we invited, and
+  // (d) verifies against their known ed pubkey.
+  let ackReceived: () => boolean = () => false
+  if (opts.ackSessionTopic !== undefined) {
+    let acked = false
+    ackReceived = () => acked
+    const expectedTopic = opts.ackSessionTopic
+    const ackAction = room.makeAction<InviteAck>(INVITE_ACK_ACTION)
+    ackAction.receive((data) => {
+      if (acked || !data || typeof data !== 'object') return
+      if (data.v !== INVITE_ACK_VERSION) return
+      if (data.session_topic !== expectedTopic) return
+      if (data.to_ed_pubkey !== envelope.from_ed_pubkey) return
+      if (data.from_ed_pubkey !== recipient.edPubkeyHex) return
+      if (typeof data.sig !== 'string' || typeof data.ts !== 'number') return
+      let sig: Uint8Array
+      try {
+        sig = hexToBytes(data.sig)
+      } catch {
+        return
+      }
+      if (sig.length !== 64) return
+      const signed = serializeAckForSig({
+        session_topic: data.session_topic,
+        to_ed_pubkey: data.to_ed_pubkey,
+        ts: data.ts,
+      })
+      if (!verifyMessage(recipientEdPub, signed, sig)) return
+      acked = true
+    })
+  }
 
   try {
     await new Promise<void>((resolve, reject) => {
@@ -190,6 +248,17 @@ export async function sendInviteEnvelope(
           .catch((err) => settle(() => reject(err)))
       })
     })
+    // #47 C2 — linger for the delivery ACK. Poll the flag on a short tick
+    // rather than restructuring the receive callback into a promise: the
+    // window is bounded and small.
+    if (opts.ackSessionTopic !== undefined && !ackReceived()) {
+      const ackDeadline =
+        Date.now() + (opts.ackTimeoutMs ?? DEFAULT_ACK_TIMEOUT_MS)
+      while (!ackReceived() && Date.now() < ackDeadline) {
+        await new Promise((r) => setTimeout(r, 100))
+      }
+    }
+    return { acked: ackReceived() }
   } finally {
     try {
       await room.leave()
@@ -204,17 +273,20 @@ export async function inviteFriend(
   recipient: InviteRecipient,
   session: SessionInvite,
   opts: InviteOptions = {}
-): Promise<void> {
+): Promise<InviteSendResult> {
   const envelope = await buildInviteEnvelope(sender, recipient, session, opts)
   const sessionTopic = session.sessionTopic
   const deliver = () =>
     sendInviteEnvelope(recipient, envelope, {
       sendTimeoutMs: opts.sendTimeoutMs,
+      ackSessionTopic: sessionTopic,
+      ackTimeoutMs: opts.ackTimeoutMs,
     })
   try {
-    await deliver()
+    const result = await deliver()
     // F6 — first send landed; dedupe future retries for this (friend, session).
     inviteRetryManager.markDelivered(recipient.edPubkeyHex, sessionTopic)
+    return result
   } catch (err) {
     // F6 — the friend was offline (no peer ever joined their inbox topic).
     // Hold the invite and re-attempt when their presence flips online within

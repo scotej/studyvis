@@ -1,6 +1,7 @@
 import {
   inviteFriend,
   type InviteOptions,
+  type InviteSendResult,
   type InviteSender,
 } from '@/features/friends/invite'
 import type { Friend } from '@/lib/db/friends'
@@ -32,7 +33,7 @@ export async function inviteToCurrentSession({
   friend,
   sender,
   options,
-}: InviteToSessionArgs): Promise<void> {
+}: InviteToSessionArgs): Promise<InviteSendResult> {
   let topic: string
   let password: string
   const state = useSessionStore.getState()
@@ -47,7 +48,7 @@ export async function inviteToCurrentSession({
     topic = hosted.sessionTopic
     password = hosted.sessionPassword
   }
-  await inviteFriend(
+  return inviteFriend(
     sender,
     {
       edPubkeyHex: friend.ed_pubkey_hex,
