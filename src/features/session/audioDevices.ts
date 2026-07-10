@@ -96,11 +96,16 @@ export function setSinkIdSupported(): boolean {
   return typeof proto.setSinkId === 'function'
 }
 
+// Returns the swapped-in track so the caller can re-attach the I42
+// device-loss recovery listener (#47 A3): the acquire-time 'ended' handlers
+// only cover tracks present at acquisition, and stop() on the old track
+// never fires 'ended' — without re-attaching, a swapped-in headset that
+// unplugs mid-session fails silently.
 export async function swapAudioInput(
   nextDeviceId: string,
   deps: SwapAudioInputDeps,
   pttActive: boolean
-): Promise<void> {
+): Promise<MediaStreamTrack> {
   const constraints: MediaStreamConstraints = {
     audio: nextDeviceId ? { deviceId: { exact: nextDeviceId } } : true,
   }
@@ -156,6 +161,7 @@ export async function swapAudioInput(
     }
   }
   deps.localStream.addTrack(newTrack)
+  return newTrack
 }
 
 function stopAllTracks(stream: MediaStream): void {
