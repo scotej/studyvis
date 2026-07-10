@@ -32,16 +32,6 @@ const CATEGORIES: ReadonlyArray<SettingsCategoryDescriptor<CategoryId>> = [
 const meta = {
   title: 'Components/SettingsLayout',
   parameters: { layout: 'fullscreen' },
-  // The shell sizes itself with h-full (app mounts give it a bounded
-  // ancestor); Storybook's frame doesn't, so bound it here or the nav rail
-  // collapses to content height.
-  decorators: [
-    (Story) => (
-      <div className="h-dvh">
-        <Story />
-      </div>
-    ),
-  ],
 } satisfies Meta
 
 export default meta

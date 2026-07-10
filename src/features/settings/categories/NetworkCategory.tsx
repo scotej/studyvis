@@ -1,6 +1,6 @@
 import { useState } from 'react'
-import { ChevronRightIcon } from 'lucide-react'
 
+import { Disclosure } from '@/components/Disclosure'
 import { RelayDiagnostics } from '@/components/RelayDiagnostics'
 import { SettingsRow, SettingsSection } from '@/components/SettingsRow'
 import { Input } from '@/components/ui/input'
@@ -77,24 +77,23 @@ export function NetworkCategory() {
 function AdvancedConnectionRow() {
   const copy = strings.settings.network.advanced
   return (
-    <details className="group border-b border-border-subtle py-4 last:border-b-0">
-      <summary className="flex cursor-pointer list-none items-start justify-between gap-4 rounded-md outline-none focus-visible:ring-3 focus-visible:ring-accent-ring">
+    <Disclosure
+      className="border-b border-border-subtle py-4 last:border-b-0"
+      summaryClassName="rounded-md"
+      summary={
         <span className="flex flex-col gap-1">
           <span className="text-sm font-medium text-text-primary">
             {copy.toggleLabel}
           </span>
           <span className="text-xs text-text-secondary">{copy.toggleHelp}</span>
         </span>
-        <ChevronRightIcon
-          className="mt-0.5 size-4 shrink-0 text-text-secondary group-open:rotate-90"
-          aria-hidden
-        />
-      </summary>
+      }
+    >
       <div className="mt-4 flex flex-col gap-6">
         <CustomRelaysField />
         <TurnServerField />
       </div>
-    </details>
+    </Disclosure>
   )
 }
 
