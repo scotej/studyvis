@@ -223,7 +223,16 @@ pub fn system_set_global_shortcut<R: Runtime>(
         return Err(format!("Couldn't register {accelerator}: {err}"));
     }
     match action.as_str() {
-        "ptt-friends" => bindings.store_ptt_friends(new_shortcut),
+        "ptt-friends" => {
+            bindings.store_ptt_friends(new_shortcut);
+            // #47 B5 — the register above validated the OS accepts the combo,
+            // but friends-PTT only lives while a session is active. Outside
+            // one, release it right away (never when the AI action shares the
+            // combo — that registration must survive).
+            if !SessionActiveFlag::is_active(&app) && new_shortcut != other_shortcut {
+                let _ = manager.unregister(new_shortcut);
+            }
+        }
         "ptt-ai" => bindings.store_ptt_ai(new_shortcut),
         _ => unreachable!("action validated above"),
     }
@@ -248,7 +257,35 @@ pub fn autostart_is_enabled<R: Runtime>(app: AppHandle<R>) -> Result<bool, Strin
 #[tauri::command]
 pub fn session_set_active<R: Runtime>(app: AppHandle<R>, active: bool) -> Result<(), String> {
     SessionActiveFlag::set(&app, active);
+    // #47 B5 — the friends-PTT global shortcut only exists while a session is
+    // live; boot registers just the AI shortcut (see lib.rs).
+    apply_ptt_friends_registration(&app, active);
     Ok(())
+}
+
+// #47 B5 — register the friends-PTT combo on session start, release it on
+// session end. Best-effort on both edges: a failed register leaves PTT inert
+// for this session (rebind in Settings → Shortcuts fixes it); a failed
+// unregister costs one more idle session of a swallowed combo. Guards:
+//   - is_registered: a shared friends/ai combo (hand-edited settings.json)
+//     is already held by the boot-time AI registration — skip; and never
+//     unregister a combo the AI shortcut still needs.
+fn apply_ptt_friends_registration<R: Runtime>(app: &AppHandle<R>, active: bool) {
+    let bindings = app.state::<ShortcutBindings>();
+    let friends = bindings.ptt_friends();
+    let ai = bindings.ptt_ai();
+    let manager = app.global_shortcut();
+    if active {
+        if !manager.is_registered(friends) {
+            if let Err(err) = manager.register(friends) {
+                eprintln!("[global-shortcut] couldn't register PTT for the session: {err}");
+            }
+        }
+    } else if friends != ai && manager.is_registered(friends) {
+        if let Err(err) = manager.unregister(friends) {
+            eprintln!("[global-shortcut] couldn't release PTT after the session: {err}");
+        }
+    }
 }
 
 // Unconditional quit, called by the frontend after the user confirms the
