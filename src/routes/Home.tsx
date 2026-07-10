@@ -29,6 +29,9 @@ import {
   InviteRelayError,
   InviteTimeoutError,
   PairDeepLinkBoot,
+  PendingInvites,
+  pendingInviteKey,
+  usePendingInvitesStore,
   type ContactImportSource,
   type PresenceMap,
 } from '@/features/friends'
@@ -137,11 +140,21 @@ export function Home() {
   const runGuestJoin = useCallback((invite: ValidInvite) => {
     // Joining while already in a session would tear down the existing one;
     // refuse — the user explicitly leaves first. (Moved here from InboxBoot
-    // so the gate + guard share one decision point.)
+    // so the gate + guard share one decision point.) The invite stays on the
+    // #47 B1 pending surface for after they leave.
     if (useSessionStore.getState().status === 'active') {
       toast.error(strings.errors.leaveSessionFirst)
       return
     }
+    // #47 B1 — re-check expiry at accept time: the toast/banner row may be
+    // minutes old, and joining a dead session would strand the user on a
+    // waiting tile.
+    if (invite.payload.expires_at <= Date.now()) {
+      usePendingInvitesStore.getState().remove(pendingInviteKey(invite))
+      toast.error(strings.friends.inbox.pending.expired)
+      return
+    }
+    usePendingInvitesStore.getState().remove(pendingInviteKey(invite))
     try {
       joinSession(invite.payload.session_topic, invite.payload.session_password)
     } catch (err) {
@@ -369,6 +382,10 @@ export function Home() {
             <Settings2Icon /> {strings.settings.heading}
           </Button>
         </div>
+        {/* #47 B1 — pending incoming invites persist here for their full
+            5-minute validity; accepting funnels through the same topic-gated
+            path as the toast. */}
+        <PendingInvites onAccept={handleInviteAccepted} />
         <FriendsList
           presence={presence}
           onAddFriend={() => setAddOpen(true)}
