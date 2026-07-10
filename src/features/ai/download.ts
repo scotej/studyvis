@@ -5,7 +5,7 @@
 import { invoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 
-import type { ModelSpec } from './models'
+import { modelDownloadUrls, type ModelSpec } from './models'
 
 export type ModelFileKind = 'model' | 'mmproj'
 
@@ -101,15 +101,19 @@ export function getDownloadRuntime(): DownloadRuntime {
 }
 
 export function specToFileRequests(spec: ModelSpec): DownloadFileRequest[] {
+  // #47 D3 — resolve at the manifest's pinned revision (via modelDownloadUrls),
+  // never `main`: an upstream re-upload would fail the sha256 gate on every
+  // new install of the tier until a release refreshed the manifest.
+  const urls = modelDownloadUrls(spec)
   return [
     {
-      url: `https://huggingface.co/${spec.hfRepo}/resolve/main/${spec.modelFile.filename}`,
+      url: urls.model,
       size_bytes: spec.modelFile.sizeBytes,
       sha256_hex: spec.modelFile.sha256,
       kind: 'model',
     },
     {
-      url: `https://huggingface.co/${spec.hfRepo}/resolve/main/${spec.mmprojFile.filename}`,
+      url: urls.mmproj,
       size_bytes: spec.mmprojFile.sizeBytes,
       sha256_hex: spec.mmprojFile.sha256,
       kind: 'mmproj',
