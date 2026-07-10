@@ -32,10 +32,15 @@ export function SettingsLayout<TId extends string = string>({
   return (
     <main
       data-slot="settings-layout"
-      className="flex min-h-screen flex-col bg-bg-base text-text-primary"
+      // h-full (not min-h-screen) so the pane below actually bounds and
+      // scrolls internally — min-h-screen let tall panes grow the page,
+      // scrolling the header + nav rail away. The html/body/#root chain is
+      // height:100%, and the custom-chrome shell sizes its scroll wrapper,
+      // so 100% resolves correctly under both window styles.
+      className="flex h-full flex-col bg-bg-base text-text-primary"
       aria-label={strings.settings.layoutAriaLabel}
     >
-      <header className="flex items-center gap-4 border-b border-border-subtle px-6 py-4">
+      <header className="flex shrink-0 items-center gap-4 border-b border-border-subtle px-6 py-4">
         {onClose ? (
           <Button
             variant="ghost"
@@ -46,14 +51,14 @@ export function SettingsLayout<TId extends string = string>({
             <ChevronLeftIcon /> {strings.common.actions.back}
           </Button>
         ) : null}
-        <h1 className="text-lg font-semibold tracking-tight">
+        <h1 className="text-2xl font-semibold tracking-tight">
           {strings.settings.heading}
         </h1>
       </header>
-      <div className="flex flex-1">
+      <div className="flex min-h-0 flex-1">
         <nav
           aria-label={strings.settings.navAriaLabel}
-          className="shrink-0 border-r border-border-subtle bg-bg-surface px-3 py-6"
+          className="shrink-0 overflow-y-auto border-r border-border-subtle bg-bg-surface px-3 py-6"
           style={{ width: tokens.sizes.sidebarWidth }}
         >
           <ul className="flex flex-col gap-1">
@@ -87,7 +92,7 @@ export function SettingsLayout<TId extends string = string>({
         >
           <div
             className="mx-auto flex w-full flex-col gap-8"
-            style={{ maxWidth: tokens.sizes.contentMaxWidth }}
+            style={{ maxWidth: tokens.sizes.settingsMaxWidth }}
           >
             {children}
           </div>
