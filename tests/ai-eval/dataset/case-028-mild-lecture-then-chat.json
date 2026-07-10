@@ -1,0 +1,9 @@
+{
+  "id": "case-028-mild-lecture-then-chat",
+  "declared_topic": "Watching my linear algebra lecture recording \u2014 eigenvalues",
+  "face_path": "fixtures/case-028-face.jpg",
+  "screen_path": "fixtures/case-028-screen.jpg",
+  "expected_severity": "mild",
+  "scenario": "The lecture video from case-026 is still playing, but a messaging sidebar is open on top with the user mid-typing a short reply.",
+  "notes": "#47 D1(b) \u2014 on-topic-video bucket, threshold case: briefly answering a message during an on-topic video is mild, not moderate."
+}

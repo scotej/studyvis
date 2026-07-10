@@ -58,6 +58,11 @@ Fixtures must match the format the sample loop will send in production
   `FACE_FRAME_QUALITY`).
 - **screen**: ≤ 1024 px wide JPEG, quality 0.7, aspect preserved
   (`SCREEN_FRAME_MAX_WIDTH` / `SCREEN_FRAME_QUALITY`).
+- **multi-monitor cases** (`case-021`/`case-022`): the screen fixture must be
+  a V3-P4 composite strip — every display side by side in ONE wide JPEG,
+  downscaled to ≤ `COMPOSITE_MAX_WIDTH` (see `src/features/ai/composite.ts` /
+  `snapshotAllScreens` in `sampleLoop.ts`). Capture with the app's
+  Settings → AI → "capture all displays" mode rather than stitching by hand.
 
 Mismatched formats won't crash the harness, but they will skew the eval
 result toward what the model thinks of _your_ compression — not what it
@@ -66,8 +71,10 @@ and webcam frames, then resize/encode with the same constants.
 
 ## Starter set
 
-20 scenarios ship with this directory; **fixtures are not committed**. You
-populate them as you curate the set toward the 100 PLAN §5 calls for.
+28 scenario definitions ship with this directory (the original 20 + the
+#47 D1(b) buckets: multi-monitor composite strips, non-STEM topics, and
+on-topic video lectures — cases 021–028); **fixtures are not committed**.
+You populate them as you curate the set toward the 100 PLAN §5 calls for.
 Replace `fixtures/.gitkeep` with the real JPEGs (keep them out of git LFS —
 text-document repo). A balanced 100 item set looks roughly like:
 
@@ -79,7 +86,19 @@ text-document repo). A balanced 100 item set looks roughly like:
 | `blatant` (games, TikTok, twitch, anime streaming)           | 12    | Active entertainment — the model should flag confidently.         |
 | Manipulation patterns ("ignore prior instructions" overlays) | 8     | Per ARCHITECTURE.md §8 must map to `moderate`.                    |
 
-The starter 20 sample this distribution at ~⅕ scale.
+The starter 20 sample this distribution at ~⅕ scale. Cases 021–028 add the
+buckets the original set missed entirely: multi-monitor composite strips (the
+`snapshotAllScreens` wire format), non-STEM subjects (language drilling, law,
+music theory), and on-topic video (a fullscreen lecture must not be
+reflexively flagged) — grow these proportionally on the way to 100.
+
+## Harness tests
+
+The pure logic (CLI parsing, dataset validation, the fixture-path traversal
+guard, and the confusion-matrix / FP–FN math) lives in `evalCore.ts` and is
+locked by `tests/unit/ai-eval-core.test.ts` in the normal vitest run — the
+harness can't silently rot while fixture capture catches up. `run.ts` is the
+orchestration shell (sidecar HTTP + report printing).
 
 ## Running
 

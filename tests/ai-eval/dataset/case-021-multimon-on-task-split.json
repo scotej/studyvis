@@ -1,0 +1,9 @@
+{
+  "id": "case-021-multimon-on-task-split",
+  "declared_topic": "Debugging a Rust ownership error in my compiler project",
+  "face_path": "fixtures/case-021-face.jpg",
+  "screen_path": "fixtures/case-021-screen.jpg",
+  "expected_severity": "on_task",
+  "scenario": "Two-monitor composite strip (V3-P4 snapshotAllScreens format: both screens side by side in one wide JPEG). Left monitor shows a Rust file with a borrow-checker error; right monitor shows the compiler's error output in a terminal.",
+  "notes": "#47 D1(b) \u2014 multi-monitor bucket. The composite-strip format was previously uncovered by any case; the model must treat both panes as one workspace and read split-but-related work as on_task."
+}

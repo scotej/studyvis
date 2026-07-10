@@ -40,3 +40,26 @@ The first numbered run starts when an operator has:
 
 Paste the harness's report block below this paragraph, prefixed with
 `## Run 1 — <model id> — <YYYY-MM-DD>`, and keep this Run 0 block on top.
+
+---
+
+## Run 0.5 — harness hardened, dataset widened; fixtures still owed (2026-07-10, #47 D1)
+
+- **Prompt version**: 2 (the I11 topic-injection hardening bumped it WITHOUT
+  a recorded run — flagged here so the debt is visible; the README's
+  "re-run before merging" rule applies from the first fixtured run onward).
+- **Status**: no model run yet — `dataset/fixtures/` still holds only
+  `.gitkeep`. Fixture capture is deliberately human-gated: fixtures must be
+  real webcam frames + screenshots encoded with the production constants
+  (see README), and synthetic images would skew the eval toward the
+  generator, not toward what StudyVis actually sends.
+- **What landed instead** (#47 D1 b/c):
+  - `evalCore.ts` extraction + `tests/unit/ai-eval-core.test.ts` (12 tests:
+    confusion-matrix math incl. the A2 uncertain-exclusion rules, dataset
+    validation, fixture-path traversal guard, CLI parsing).
+  - Cases 021–028: multi-monitor composite strips (the `snapshotAllScreens`
+    format no prior case covered), non-STEM topics, on-topic video lectures.
+- **Next (human-gated)**: capture fixtures for the 28 cases, run
+  qwen2_5-vl-3b + gemma3-4b via `npm run` / `tsx tests/ai-eval/run.ts`,
+  append Run 1 here. Every other AI change (prompt, catalog — see #47 D4)
+  stays blind until that run exists.
