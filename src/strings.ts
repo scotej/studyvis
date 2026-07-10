@@ -459,6 +459,21 @@ export const strings = {
     },
     leaveCta: 'Leave',
     escLeaveHint: 'Press Esc again to leave.',
+    // #47 A2 — mid-session invite (host only). Without it the first Invite
+    // click locked the host into a 1:1 session; the 4-user mesh was
+    // unreachable from the UI.
+    invite: {
+      cta: 'Invite',
+      ctaAriaLabel: 'Invite a friend to this session',
+      dialogTitle: 'Invite a friend',
+      dialogDescription:
+        'Online friends can join this session right away. Up to 4 people can study together.',
+      emptyOnline: 'No friends online right now.',
+      listAriaLabel: 'Online friends',
+      rowCta: 'Invite',
+      invitedLabel: 'Invited',
+      rowInviteAriaLabel: (name: string) => `Invite ${name} to this session`,
+    },
     // U2 — empty-peer waiting state (DESIGN-SYSTEM §10 empty-state: no
     // spinner, calm copy) shown alongside the self tile while alone.
     waiting: {

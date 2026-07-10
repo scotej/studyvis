@@ -1,7 +1,12 @@
 export { hostSession } from './host'
 export { joinSession } from './join'
 export { inviteToCurrentSession, InviteWhileGuestError } from './invite'
-export { SessionView } from './SessionView'
+export { SessionView, type SessionViewProps } from './SessionView'
+export {
+  SessionInviteDialog,
+  type SessionInviteDialogProps,
+} from './SessionInviteDialog'
+export { invitableFriends } from './invitableFriends'
 export { TopicGateModal, type TopicGateModalProps } from './TopicGateModal'
 export {
   MAX_REMOTE_PEERS,

@@ -308,7 +308,14 @@ export function Home() {
     // over the session, which is a pure local friend import.
     return (
       <>
-        <SessionView />
+        {/* #47 A2 — presence + the invite sender let the host grow a live
+            session toward the 4-user mesh. Deliberately runHostInvite, not
+            handleInvite: the session already declared its topic at start, so
+            the AI topic gate must not re-prompt for a mid-session invite. */}
+        <SessionView
+          presence={presence}
+          onInviteFriend={(friend) => void runHostInvite(friend)}
+        />
         {tail}
       </>
     )

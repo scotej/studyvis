@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { emitTo, listen } from '@tauri-apps/api/event'
-import { VideoIcon, VideoOffIcon } from 'lucide-react'
+import { UserPlusIcon, VideoIcon, VideoOffIcon } from 'lucide-react'
 import { toast } from 'sonner'
 import { useShallow } from 'zustand/react/shallow'
 
@@ -41,7 +41,9 @@ import {
   type BreakResponsePayload,
   type SampleLoopHandle,
 } from '@/features/ai'
+import { isOnline, type PresenceMap } from '@/features/friends/presence'
 import { useIdentity } from '@/features/identity'
+import type { Friend } from '@/lib/db/friends'
 import { signWithKeyring } from '@/lib/db/identity'
 import { mediaErrorKind } from '@/lib/mediaError'
 import { isMacLikePlatform } from '@/lib/utils'
@@ -50,6 +52,7 @@ import {
   useAuditStore,
   verifyIncomingAuditEvent,
 } from '@/stores/auditStore'
+import { useFriendsStore } from '@/stores/friendsStore'
 import { useIdentityStore } from '@/stores/identityStore'
 import { usePomodoroStore } from '@/stores/pomodoroStore'
 import { useSessionStore } from '@/stores/sessionStore'
@@ -78,8 +81,10 @@ import { startHelloProtocol } from './hello'
 import {
   CAMERA_STATE_ACTION,
   connectionFocusState,
+  MAX_REMOTE_PEERS,
   PTT_STATE_ACTION,
 } from './lifecycle'
+import { SessionInviteDialog } from './SessionInviteDialog'
 import {
   startPomodoroController,
   type PeerOrderingEntry,
@@ -98,9 +103,18 @@ const DEFAULT_PEER_VOLUME = 1
 // rail, a Pomodoro timer in the bottom bar, and a Leave button. Mounted
 // only while the session store reports an active session — Home.tsx
 // switches to the V2-P8 Report view as soon as status flips to 'ended'.
-export function SessionView() {
+export type SessionViewProps = {
+  // #47 A2 — presence + invite sender injected by Home so the host can grow
+  // a live session toward the 4-user mesh. Both omitted in tests, which
+  // hides the invite affordance entirely.
+  presence?: PresenceMap
+  onInviteFriend?: (friend: Friend) => void
+}
+
+export function SessionView({ presence, onInviteFriend }: SessionViewProps) {
   const status = useSessionStore((s) => s.status)
   const room = useSessionStore((s) => s.room)
+  const isHost = useSessionStore((s) => s.isHost)
   const sessionLeave = useSessionStore((s) => s.leave)
   const sessionTopic = useSessionStore((s) => s.sessionTopic)
   const startedAt = useSessionStore((s) => s.startedAt)
@@ -163,6 +177,9 @@ export function SessionView() {
     null
   )
   const [audioSwapping, setAudioSwapping] = useState(false)
+  // #47 A2 — mid-session invite picker (host only; see the footer button).
+  const [inviteOpen, setInviteOpen] = useState(false)
+  const friends = useFriendsStore((s) => s.friends)
   // S3 — local camera on/off. Toggling flips the local video track's `enabled`
   // flag (never replaces the stream — V2-P5's focus-reset depends on a
   // monotonic localStream). When off, the AI sample loop pauses (getFaceTrack
@@ -1171,6 +1188,18 @@ export function SessionView() {
   if (!room) return null
 
   const peerEntries = Object.values(peers)
+  // #47 A2 — the invite affordance renders only for the host (a guest's
+  // invite would throw InviteWhileGuestError) and only when Home injected
+  // presence + a sender. Friends already in the session are filtered by
+  // their signed-hello ed_pubkey binding; the picker shows the full-session
+  // notice once the live remote-peer count hits the host-enforced cap.
+  const canInvite = isHost && onInviteFriend !== undefined
+  const inSessionEdPubkeys = new Set(
+    peerEntries.flatMap((p) => (p.edPubkeyHex ? [p.edPubkeyHex] : []))
+  )
+  const sessionFull = peerEntries.length >= MAX_REMOTE_PEERS
+  const presenceCheck = (edPubkeyHex: string) =>
+    presence !== undefined && isOnline(presence, edPubkeyHex)
   const youName = identity?.display_name?.trim() || strings.session.selfFallback
   const broadcasterName = pomodoroSnapshot.iAmBroadcaster
     ? strings.session.broadcasterSelf
@@ -1306,14 +1335,29 @@ export function SessionView() {
             onStop={handleStopPomodoro}
           />
         </span>
-        <Button
-          variant="secondary"
-          size="sm"
-          onClick={handleLeave}
-          aria-keyshortcuts="Escape"
-        >
-          {strings.session.leaveCta}
-        </Button>
+        <span className="flex items-center gap-2">
+          {canInvite ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => setInviteOpen(true)}
+              aria-haspopup="dialog"
+              aria-label={strings.session.invite.ctaAriaLabel}
+              className="gap-2"
+            >
+              <UserPlusIcon /> {strings.session.invite.cta}
+            </Button>
+          ) : null}
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={handleLeave}
+            aria-keyshortcuts="Escape"
+          >
+            {strings.session.leaveCta}
+          </Button>
+        </span>
       </footer>
       {selfWarning && !onBreak ? (
         <SelfWarningBadge reasoning={selfWarning.reasoning} />
@@ -1324,6 +1368,17 @@ export function SessionView() {
         onOpenChange={setCaptureOverlayOpen}
         onRetry={handleCaptureRetry}
       />
+      {canInvite ? (
+        <SessionInviteDialog
+          open={inviteOpen}
+          onOpenChange={setInviteOpen}
+          friends={friends}
+          isOnline={presenceCheck}
+          inSessionEdPubkeys={inSessionEdPubkeys}
+          full={sessionFull}
+          onInvite={onInviteFriend}
+        />
+      ) : null}
     </main>
   )
 }
