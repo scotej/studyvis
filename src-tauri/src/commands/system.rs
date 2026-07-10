@@ -510,6 +510,32 @@ pub fn system_open_camera_settings<R: Runtime>(app: AppHandle<R>) -> Result<(), 
     }
 }
 
+// #47 B7 — jump to the OS notification settings so a user whose system-level
+// permission is denied (macOS never re-prompts after a hard denial) can fix
+// the state the Settings → Notifications status row diagnoses. macOS opens
+// the Notifications pane; Windows opens ms-settings:notifications.
+#[tauri::command]
+pub fn system_open_notification_settings<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        const URL: &str = "x-apple.systempreferences:com.apple.preference.notifications";
+        app.opener()
+            .open_url(URL, None::<&str>)
+            .map_err(|e| e.to_string())
+    }
+    #[cfg(target_os = "windows")]
+    {
+        app.opener()
+            .open_url("ms-settings:notifications", None::<&str>)
+            .map_err(|e| e.to_string())
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        let _ = app;
+        Err("not supported on this platform".to_string())
+    }
+}
+
 // Same per-app Privacy pane jump for Microphone.
 #[tauri::command]
 pub fn system_open_microphone_settings<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {

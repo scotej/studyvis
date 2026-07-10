@@ -56,9 +56,10 @@ use commands::system::{
     app_quit, autostart_is_enabled, autostart_set_enabled, session_set_active,
     system_ai_features_set_enabled, system_battery, system_fetch_latest_version,
     system_minimize_to_tray_set_enabled, system_open_camera_settings, system_open_data_folder,
-    system_open_microphone_settings, system_open_releases, system_open_screen_capture_settings,
-    system_relaunch_app, system_set_global_shortcut, system_write_text_file, AiFeaturesFlag,
-    MinimizeToTrayFlag, QuitFlag, SessionActiveFlag, ShortcutBindings,
+    system_open_microphone_settings, system_open_notification_settings, system_open_releases,
+    system_open_screen_capture_settings, system_relaunch_app, system_set_global_shortcut,
+    system_write_text_file, AiFeaturesFlag, MinimizeToTrayFlag, QuitFlag, SessionActiveFlag,
+    ShortcutBindings,
 };
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -142,6 +143,8 @@ pub fn run() {
         system_open_camera_settings,
         #[cfg(desktop)]
         system_open_microphone_settings,
+        #[cfg(desktop)]
+        system_open_notification_settings,
         #[cfg(desktop)]
         system_set_global_shortcut,
         #[cfg(desktop)]
