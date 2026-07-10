@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 
 import { cn } from '@/lib/utils'
 import {
-  snapshotRelayRows,
+  snapshotAllRelayRows,
   type RelayRow,
   type RelayStatus,
 } from '@/lib/relayDiagnostics'
@@ -31,7 +31,7 @@ export function RelayDiagnostics({ rows, snapshot }: RelayDiagnosticsProps) {
 }
 
 function LiveRelayList({ snapshot }: { snapshot?: () => RelayRow[] }) {
-  const take = snapshot ?? snapshotRelayRows
+  const take = snapshot ?? snapshotAllRelayRows
   const [live, setLive] = useState<RelayRow[]>(take)
 
   useEffect(() => {
@@ -51,32 +51,60 @@ function RelayList({ rows }: { rows: RelayRow[] }) {
   if (rows.length === 0) {
     return <p className="text-xs text-text-muted">{copy.empty}</p>
   }
+  // #47 C3 — group by transport so the MQTT broker sockets (raced alongside
+  // Nostr for pairing, PR-21) are visible: on a Nostr-blocked/MQTT-working
+  // network the panel used to show everything down while pairing succeeded.
+  const nostr = rows.filter((row) => row.transport === 'nostr')
+  const mqtt = rows.filter((row) => row.transport === 'mqtt')
   return (
-    <ul className="flex flex-col gap-2">
-      {rows.map((row) => (
-        <li
-          key={row.url}
-          className="flex items-center gap-3 rounded-md border border-border-subtle bg-bg-sunk px-3 py-2"
-        >
-          <RelayDot status={row.status} url={row.url} />
-          <span className="min-w-0 flex-1 truncate font-mono text-xs text-text-secondary">
-            {row.url}
-          </span>
-          <span
-            className={cn(
-              'shrink-0 text-xs',
-              row.status === 'connected'
-                ? 'text-status-focused'
-                : row.status === 'connecting'
-                  ? 'text-status-warning'
-                  : 'text-text-muted'
-            )}
+    <div className="flex flex-col gap-3">
+      {nostr.length > 0 ? (
+        <TransportGroup heading={copy.transport.nostr} rows={nostr} />
+      ) : null}
+      {mqtt.length > 0 ? (
+        <TransportGroup heading={copy.transport.mqtt} rows={mqtt} />
+      ) : null}
+    </div>
+  )
+}
+
+function TransportGroup({
+  heading,
+  rows,
+}: {
+  heading: string
+  rows: RelayRow[]
+}) {
+  const copy = strings.settings.network.diagnostics
+  return (
+    <div className="flex flex-col gap-2">
+      <p className="text-xs font-medium text-text-muted">{heading}</p>
+      <ul className="flex flex-col gap-2" aria-label={heading}>
+        {rows.map((row) => (
+          <li
+            key={row.url}
+            className="flex items-center gap-3 rounded-md border border-border-subtle bg-bg-sunk px-3 py-2"
           >
-            {copy.status[row.status]}
-          </span>
-        </li>
-      ))}
-    </ul>
+            <RelayDot status={row.status} url={row.url} />
+            <span className="min-w-0 flex-1 truncate font-mono text-xs text-text-secondary">
+              {row.url}
+            </span>
+            <span
+              className={cn(
+                'shrink-0 text-xs',
+                row.status === 'connected'
+                  ? 'text-status-focused'
+                  : row.status === 'connecting'
+                    ? 'text-status-warning'
+                    : 'text-text-muted'
+              )}
+            >
+              {copy.status[row.status]}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </div>
   )
 }
 

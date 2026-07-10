@@ -1,11 +1,26 @@
-import { getMqttRelaySocketMap, getRelaySocketMap } from '@/lib/trystero'
+import {
+  getMqttRelaySocketMap,
+  getRelaySocketMap,
+  type RelaySocketMap,
+} from '@/lib/trystero'
 
 // F2 — pure helpers behind the Settings → Network connection panel. Kept out of
 // the component file so the React fast-refresh boundary stays component-only.
 
 export type RelayStatus = 'connected' | 'connecting' | 'down'
 
-export type RelayRow = { url: string; status: RelayStatus }
+// #47 C3 — rows carry their discovery transport so the diagnostics panel can
+// show the MQTT broker sockets alongside the Nostr relays. Pairing races both
+// (PR-21), so on a Nostr-blocked/MQTT-working network the panel previously
+// showed everything down while pairing succeeded — the exact case the I31
+// failure hint sends users here to diagnose.
+export type RelayTransport = 'nostr' | 'mqtt'
+
+export type RelayRow = {
+  url: string
+  status: RelayStatus
+  transport: RelayTransport
+}
 
 // WebSocket.readyState: 0 CONNECTING, 1 OPEN, 2 CLOSING, 3 CLOSED.
 export function readyStateToStatus(readyState: number): RelayStatus {
@@ -14,15 +29,34 @@ export function readyStateToStatus(readyState: number): RelayStatus {
   return 'down'
 }
 
-// Snapshot trystero's live socket map into a sorted, render-ready row list.
-export function snapshotRelayRows(): RelayRow[] {
-  const map = getRelaySocketMap()
+function rowsFromSocketMap(
+  map: RelaySocketMap,
+  transport: RelayTransport
+): RelayRow[] {
   return Object.entries(map)
     .map(([url, socket]) => ({
       url,
       status: readyStateToStatus(socket?.readyState ?? 3),
+      transport,
     }))
     .sort((a, b) => a.url.localeCompare(b.url))
+}
+
+// Snapshot trystero's live NOSTR socket map into a sorted, render-ready row
+// list. Deliberately Nostr-only: `relaysUnreachable` below feeds the invite
+// path, which signals over Nostr alone.
+export function snapshotRelayRows(): RelayRow[] {
+  return rowsFromSocketMap(getRelaySocketMap(), 'nostr')
+}
+
+// #47 C3 — both transports, for the diagnostics panel. The MQTT group is
+// empty until an MQTT room has been joined (pairing is the only dual-strategy
+// site today), so the panel renders it only when present.
+export function snapshotAllRelayRows(): RelayRow[] {
+  return [
+    ...rowsFromSocketMap(getRelaySocketMap(), 'nostr'),
+    ...rowsFromSocketMap(getMqttRelaySocketMap(), 'mqtt'),
+  ]
 }
 
 // F1/F6 — the real "the network is unreachable" signal. trystero's
