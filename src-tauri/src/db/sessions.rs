@@ -93,7 +93,10 @@ pub fn insert(conn: &Connection, row: &SessionRow) -> Result<()> {
     //    the sole caller (lifecycle.ts leave handler) always supplies real
     //    values in one call, and a later re-summarize MUST be able to
     //    correct them. COALESCE here would silently swallow a legitimate
-    //    update, so it is intentionally NOT used.
+    //    update, so it is intentionally NOT used. On a re-entry into the
+    //    same room (Rejoin / re-invite) that caller accumulates across
+    //    stints before writing (mergeSessionStints), so the overwrite
+    //    corrects the row upward instead of rewinding it to the tail stint.
     //  - the optional report columns (peer_pubkeys, declared_topic, score,
     //    focused_pct, generated_at) are additive via COALESCE so a partial
     //    upsert that omits them does not clobber a prior call's values.
