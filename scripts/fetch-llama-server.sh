@@ -144,7 +144,13 @@ fetch_one() (
   trap 'rm -rf "$tmp"' EXIT
   archive="${tmp}/${asset}"
   echo "fetch-llama-server: downloading $asset ..."
-  curl -fL --progress-bar -o "$archive" "${LLAMA_RELEASE_BASE}/${asset}"
+  # Retries absorb transient GitHub blips: this runs cold in both CI Rust
+  # legs on every push and inside the release publish job AFTER the immutable
+  # tag exists, where a single-shot failure forces a manual re-run of the
+  # whole release build. The pinned SHA256 check below remains the integrity
+  # gate ordering.
+  curl -fL --progress-bar --retry 5 --retry-delay 2 --retry-all-errors \
+    --connect-timeout 30 -o "$archive" "${LLAMA_RELEASE_BASE}/${asset}"
   verify_sha256 "$archive" "$sha"
 
   extract_dir="${tmp}/extracted"
