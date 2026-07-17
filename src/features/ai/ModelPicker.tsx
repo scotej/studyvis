@@ -88,6 +88,14 @@ export type ModelPickerProps = {
   // Surfaces the "What model should I pick?" guide as a sibling render.
   guide: ReactNode
   actions: PickerActions
+  // Settings is reachable during a live session (#47 B2), but the picker's
+  // mutating actions share the sample loop's sidecar: stopping it for a
+  // re-benchmark silently kills live focus detection (the loop has no
+  // restart path and the AI chip keeps saying "active"), a benchmark run
+  // concurrent with loop ticks contaminates the measured p95, and removing
+  // a model deletes files a running llama-server holds open. Download /
+  // Re-benchmark / Remove are disabled while a session is active.
+  actionsLocked?: boolean
   className?: string
 }
 
@@ -163,6 +171,7 @@ export function ModelPicker({
   hfTokenPresent,
   guide,
   actions,
+  actionsLocked = false,
   className,
 }: ModelPickerProps) {
   return (
@@ -178,6 +187,11 @@ export function ModelPicker({
           {strings.ai.picker.heading}
         </h3>
         <p className="text-sm text-text-secondary">{strings.ai.picker.body}</p>
+        {actionsLocked ? (
+          <p className="text-sm text-text-secondary">
+            {strings.ai.picker.lockedDuringSession}
+          </p>
+        ) : null}
       </header>
 
       <div className="flex flex-col gap-4">
@@ -198,6 +212,7 @@ export function ModelPicker({
               state={state}
               hfTokenPresent={hfTokenPresent}
               actions={actions}
+              actionsLocked={actionsLocked}
             />
           )
         })}
@@ -212,10 +227,12 @@ function ModelCard({
   state,
   hfTokenPresent,
   actions,
+  actionsLocked,
 }: {
   state: PickerStateForModel
   hfTokenPresent: boolean
   actions: PickerActions
+  actionsLocked: boolean
 }) {
   const { spec, installState, record, phase, errorMessage } = state
   const isInstalled = installState.modelExists && installState.mmprojExists
@@ -281,6 +298,7 @@ function ModelCard({
           canResume={interrupted != null}
           hfTokenPresent={hfTokenPresent}
           actions={actions}
+          actionsLocked={actionsLocked}
         />
       </div>
 
@@ -370,6 +388,7 @@ function CardActions({
   canResume,
   hfTokenPresent,
   actions,
+  actionsLocked,
 }: {
   state: PickerStateForModel
   isInstalled: boolean
@@ -379,6 +398,7 @@ function CardActions({
   canResume: boolean
   hfTokenPresent: boolean
   actions: PickerActions
+  actionsLocked: boolean
 }) {
   const { spec, phase } = state
   const phaseClass = classifyPhase(phase)
@@ -407,6 +427,7 @@ function CardActions({
           variant="secondary"
           size="sm"
           onClick={() => actions.onRebenchmark(spec)}
+          disabled={actionsLocked}
         >
           <RefreshCwIcon /> {strings.ai.picker.reBenchmarkCta}
         </Button>
@@ -415,6 +436,7 @@ function CardActions({
           size="icon-sm"
           aria-label={strings.ai.picker.removeAriaLabel(spec.displayName)}
           onClick={() => actions.onRemove(spec)}
+          disabled={actionsLocked}
         >
           <Trash2Icon />
         </Button>
@@ -429,7 +451,7 @@ function CardActions({
           variant="default"
           size="sm"
           onClick={() => actions.onSelect(spec)}
-          disabled={blocksGated}
+          disabled={blocksGated || actionsLocked}
         >
           <DownloadIcon />{' '}
           {canResume
@@ -441,6 +463,7 @@ function CardActions({
           size="icon-sm"
           aria-label={strings.ai.picker.removeAriaLabel(spec.displayName)}
           onClick={() => actions.onRemove(spec)}
+          disabled={actionsLocked}
         >
           <Trash2Icon />
         </Button>
@@ -453,8 +476,8 @@ function CardActions({
       variant="default"
       size="sm"
       onClick={() => actions.onSelect(spec)}
-      disabled={blocksGated}
-      aria-disabled={blocksGated || undefined}
+      disabled={blocksGated || actionsLocked}
+      aria-disabled={blocksGated || actionsLocked || undefined}
     >
       <DownloadIcon />{' '}
       {canResume ? strings.ai.picker.resumeCta : strings.ai.picker.downloadCta}

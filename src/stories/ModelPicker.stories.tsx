@@ -30,9 +30,15 @@ type StoryArgs = {
   installed: Record<string, ModelRecord | null>
   hfTokenPresent: boolean
   pickerOverrides?: Record<string, Partial<PickerStateForModel>>
+  actionsLocked?: boolean
 }
 
-function Harness({ installed, hfTokenPresent, pickerOverrides }: StoryArgs) {
+function Harness({
+  installed,
+  hfTokenPresent,
+  pickerOverrides,
+  actionsLocked,
+}: StoryArgs) {
   const [hfPresent, setHfPresent] = useState(hfTokenPresent)
   const baseline = emptyPickerState()
   const perModel: Record<string, PickerStateForModel> = Object.fromEntries(
@@ -62,6 +68,7 @@ function Harness({ installed, hfTokenPresent, pickerOverrides }: StoryArgs) {
       <ModelPicker
         perModel={perModel}
         hfTokenPresent={hfPresent}
+        actionsLocked={actionsLocked}
         guide={<ModelGuide records={records} />}
         actions={{
           onSelect: () => undefined,
@@ -122,6 +129,22 @@ export const AllInstalledWithSpeeds: Story = {
       },
     },
     hfTokenPresent: true,
+  },
+}
+
+// #47 B2 made Settings reachable mid-session; the picker's mutating actions
+// are locked while a session is live so a re-benchmark can't stomp the live
+// sample loop's sidecar.
+export const LockedDuringSession: Story = {
+  args: {
+    installed: {
+      'qwen2_5-vl-3b': {
+        ...makeRecord(8.4, 7.1),
+        modelId: 'qwen2_5-vl-3b',
+      },
+    },
+    hfTokenPresent: false,
+    actionsLocked: true,
   },
 }
 

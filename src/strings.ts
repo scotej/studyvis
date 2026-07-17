@@ -1347,6 +1347,11 @@ export const strings = {
       ariaLabel: 'Vision model picker',
       heading: 'Pick a vision model',
       body: 'The model runs on your own machine and judges only your camera and screen. Smaller is faster; bigger is more thorough.',
+      // Settings is reachable mid-session (#47 B2); the mutating picker
+      // actions share the live sample loop's sidecar, so they stay locked
+      // until the session ends.
+      lockedDuringSession:
+        'Model changes unlock after your session ends — re-measuring or removing a model now would interrupt live focus checks.',
       pills: {
         gated: 'Gated',
         installed: 'Installed',

@@ -33,6 +33,7 @@ import {
 import { getHfTokenRuntime } from './hfToken'
 import { SUPPORTED_MODELS, type ModelSpec } from './models'
 import { useModelStore } from './modelStore'
+import { useSessionStore } from '@/stores/sessionStore'
 import { strings } from '@/strings'
 
 type CardState = PickerStateForModel
@@ -49,6 +50,9 @@ export function ModelPickerContainer() {
   )
   const forget = useModelStore((s) => s.forget)
   const status = useModelStore((s) => s.status)
+  // Settings is reachable mid-session (#47 B2); lock the mutating picker
+  // actions while a session is live — see ModelPickerProps.actionsLocked.
+  const sessionActive = useSessionStore((s) => s.status === 'active')
 
   const [cards, setCards] = useState<Record<string, CardState>>(() =>
     emptyPickerState()
@@ -473,6 +477,7 @@ export function ModelPickerContainer() {
       onSaveHfToken,
       onClearHfToken,
     },
+    actionsLocked: sessionActive,
   }
 
   return <ModelPicker {...props} />
