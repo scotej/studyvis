@@ -230,7 +230,12 @@ export function startPresence(ctx: PresenceContext): PresenceSubscription {
   // interval before either side flips to "online".
   const send = () => {
     const payload: HeartbeatPayload = { ts: now() }
-    for (const fn of heartbeatSenders) void fn(payload)
+    for (const fn of heartbeatSenders) {
+      // The merged room's send is a Promise.all across transports; a
+      // datachannel dying mid-send must not surface as an unhandled
+      // rejection every 30 seconds. Mirrors sendGoodbye below.
+      void fn(payload).catch(() => {})
+    }
   }
   send()
   const heartbeatHandle = setInterval(send, intervalMs)
