@@ -859,7 +859,16 @@ export function SessionView({
       getFaceTrack: () => localStreamRef.current?.getVideoTracks()[0] ?? null,
       // S3 — pause the loop while the camera is off so it never analyzes a
       // black frame; resume is seamless (no skipped ticks, loop state intact).
-      isPaused: () => !cameraOnRef.current,
+      // Also paused during a synced pomodoro rest phase: the app just told
+      // everyone to take a break (rest notification + chime), so scoring
+      // rest-window browsing as off-task contradicted its own timer. Same
+      // honest semantics as camera-off — no skipped tally, no streak reset,
+      // focused-time % unaffected by the rest window. A peer parking the
+      // shared timer in rest to dodge scoring is friends-only-accepted
+      // (PLAN §4 principle 5 — you can already disable your own AI).
+      isPaused: () =>
+        !cameraOnRef.current ||
+        usePomodoroStore.getState().phase.startsWith('rest'),
       onScoreEvents: async (events, verdict) => {
         // V2-P6: route every sample's emitted events through the alert
         // dispatcher (warnings → local-only badge + ai_warning audit;
