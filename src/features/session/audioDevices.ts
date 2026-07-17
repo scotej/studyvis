@@ -104,7 +104,14 @@ export function setSinkIdSupported(): boolean {
 export async function swapAudioInput(
   nextDeviceId: string,
   deps: SwapAudioInputDeps,
-  pttActive: boolean
+  // A getter, not a snapshot: the swap spans getUserMedia + replaceTrack
+  // awaits (~100-500ms), and a PTT press/release inside that window is
+  // applied to the OLD track only (the PTT effect fires on pttActive
+  // changes). A pre-await snapshot left the swapped-in mic LIVE after a
+  // mid-swap release — peers hear everything while the self tile shows
+  // not-transmitting. Mirrors the acquire path's read-after-await rule
+  // (SessionView media effect).
+  pttActive: () => boolean
 ): Promise<MediaStreamTrack> {
   const constraints: MediaStreamConstraints = {
     audio: nextDeviceId ? { deviceId: { exact: nextDeviceId } } : true,
@@ -130,7 +137,7 @@ export async function swapAudioInput(
   }
   // Inherit the session's current mute-state: muted-by-default with PTT
   // toggling enabled. The fresh track starts enabled, so we mirror.
-  newTrack.enabled = pttActive
+  newTrack.enabled = pttActive()
 
   const oldTrack = deps.localStream.getAudioTracks()[0] ?? null
 
@@ -161,6 +168,10 @@ export async function swapAudioInput(
     }
   }
   deps.localStream.addTrack(newTrack)
+  // Final re-read after every await: a PTT transition that landed during
+  // replaceTrack was applied to the old (now stopped) track; this closes the
+  // window to microseconds, and the next PTT transition heals any residue.
+  newTrack.enabled = pttActive()
   return newTrack
 }
 

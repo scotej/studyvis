@@ -1183,7 +1183,7 @@ export function SessionView({
             room,
             localStream: stream,
           },
-          usePttStore.getState().active
+          () => usePttStore.getState().active
         )
         // #47 A3 — re-attach the I42 device-loss recovery to the swapped-in
         // track: the acquire effect's 'ended' listeners only cover tracks

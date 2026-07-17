@@ -70,7 +70,7 @@ describe('swapAudioInput (#47 A3)', () => {
     const returned = await swapAudioInput(
       'mic-2',
       depsWith({ fresh: fakeFreshStream([newTrack]), local }),
-      false
+      () => false
     )
     expect(returned).toBe(newTrack as unknown as MediaStreamTrack)
   })
@@ -87,7 +87,7 @@ describe('swapAudioInput (#47 A3)', () => {
         local,
         senders: [{ track: old, replaceTrack }],
       }),
-      false
+      () => false
     )
     expect(replaceTrack).toHaveBeenCalledWith(newTrack)
     expect(old.stop).toHaveBeenCalled()
@@ -100,7 +100,31 @@ describe('swapAudioInput (#47 A3)', () => {
     await swapAudioInput(
       'mic-2',
       depsWith({ fresh: fakeFreshStream([newTrack]), local }),
-      false
+      () => false
+    )
+    expect(newTrack.enabled).toBe(false)
+  })
+
+  // The swap spans two awaits; a PTT release inside that window used to
+  // leave the swapped-in mic silently hot (pre-await snapshot). The getter
+  // is re-read after the awaits, so the track lands with the CURRENT state.
+  test('a PTT release mid-swap lands on the fresh track (no hot mic)', async () => {
+    const newTrack = fakeTrack()
+    const old = fakeTrack()
+    const local = fakeLocalStream([old])
+    let ptt = true
+    const replaceTrack = vi.fn(async () => {
+      // Release happens while replaceTrack is in flight.
+      ptt = false
+    })
+    await swapAudioInput(
+      'mic-2',
+      depsWith({
+        fresh: fakeFreshStream([newTrack]),
+        local,
+        senders: [{ track: old, replaceTrack }],
+      }),
+      () => ptt
     )
     expect(newTrack.enabled).toBe(false)
   })
@@ -112,7 +136,7 @@ describe('swapAudioInput (#47 A3)', () => {
       swapAudioInput(
         'mic-2',
         depsWith({ fresh: fakeFreshStream([stray]), local }),
-        false
+        () => false
       )
     ).rejects.toThrow(/no audio tracks/)
     expect(stray.stop).toHaveBeenCalled()
