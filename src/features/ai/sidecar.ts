@@ -198,6 +198,15 @@ export const useSidecarStore = create<SidecarState>((set, get) => ({
     stopPolling()
     try {
       await activeRuntime.stop()
+      // Mirror of the PR-13 guard in start(): a newer start() may have run
+      // while we awaited (the sample-loop effect tears the old loop down and
+      // boots a new one in the same React commit on a localStream swap). Once
+      // it wrote 'starting' it owns the state machine — writing 'idle' here
+      // would make its own PR-13 guard kill the child it just spawned and
+      // toast "AI failed to start". The Rust side is already consistent:
+      // sidecar_stop killed the old child before sidecar_start spawned the
+      // new one.
+      if (get().status !== 'stopping') return
       set({
         status: 'idle',
         port: null,
@@ -209,6 +218,7 @@ export const useSidecarStore = create<SidecarState>((set, get) => ({
         lastError: null,
       })
     } catch (err) {
+      if (get().status !== 'stopping') return
       const message = err instanceof Error ? err.message : String(err)
       set({ status: 'errored', lastError: message })
     }

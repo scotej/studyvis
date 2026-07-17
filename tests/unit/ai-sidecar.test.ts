@@ -295,3 +295,80 @@ describe('useSidecarStore.refreshStatus', () => {
     expect(scheduled).not.toBeNull()
   })
 })
+
+// The other direction of the PR-13/I38 interleave family: an old loop's
+// stop() continuation landing AFTER a newer start() claimed the state
+// machine must not clobber 'starting' — otherwise start's own PR-13 guard
+// kills the child it just spawned and the session toasts "AI failed to
+// start" with no recovery path (the live trigger is the sample-loop restart
+// on a localStream swap: cleanup stop() and setup start() run in one React
+// commit).
+describe('useSidecarStore.stop racing a newer start', () => {
+  beforeEach(() => {
+    resetStore()
+  })
+  afterEach(() => {
+    __resetSidecarRuntime()
+  })
+
+  test("stop's late continuation does not clobber the newer start", async () => {
+    let resolveStop!: () => void
+    let resolveStart!: (port: number) => void
+    let stopCalls = 0
+    const runtime: SidecarRuntime = {
+      start: () =>
+        new Promise<number>((res) => {
+          resolveStart = res
+        }),
+      stop: () => {
+        stopCalls += 1
+        return new Promise<void>((res) => {
+          resolveStop = res
+        })
+      },
+      status: async () => ({
+        running: false,
+        port: null,
+        model: null,
+        mmproj: null,
+        ctx_size: null,
+        errored: false,
+        last_error: null,
+      }),
+      fetchHealth: async () => true,
+      setInterval: () => 1,
+      clearInterval: () => {},
+      getAiFeaturesEnabled: () => true,
+    }
+    __setSidecarRuntime(runtime)
+    useSidecarStore.setState({
+      status: 'running',
+      port: 9000,
+      model: '/old.gguf',
+    })
+
+    const stopPromise = useSidecarStore.getState().stop()
+    expect(useSidecarStore.getState().status).toBe('stopping')
+
+    // The new loop boots while the stop IPC is still in flight; start()
+    // proceeds from 'stopping' and takes ownership by writing 'starting'.
+    const startPromise = useSidecarStore
+      .getState()
+      .start({ modelPath: '/new.gguf' })
+    expect(useSidecarStore.getState().status).toBe('starting')
+
+    // The stop IPC response lands late — it must leave the state alone.
+    resolveStop()
+    await stopPromise
+    expect(useSidecarStore.getState().status).toBe('starting')
+
+    resolveStart(9200)
+    await expect(startPromise).resolves.toBe(9200)
+    const state = useSidecarStore.getState()
+    expect(state.status).toBe('running')
+    expect(state.port).toBe(9200)
+    // Exactly the old child was killed; start's PR-13 guard did not fire a
+    // second stop against the fresh one.
+    expect(stopCalls).toBe(1)
+  })
+})
