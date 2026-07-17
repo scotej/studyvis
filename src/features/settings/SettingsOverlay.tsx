@@ -42,12 +42,33 @@ export function SettingsOverlay({
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [onClose])
 
+  // Dialog-pattern focus contract (WCAG 2.4.3): Home marks the session
+  // subtree inert while this overlay is up, which silently drops focus to
+  // <body> — a keyboard/SR user got no announcement the dialog opened and
+  // had to Tab from the document top; on close, focus landed back at the
+  // top instead of on the gear button that opened it. Capture the opener,
+  // move focus onto the dialog root, restore on unmount. Home removes the
+  // overlay and the inert attribute in the same commit, so by the time this
+  // cleanup runs the opener is un-inerted again; a disconnected opener (a
+  // dismissed error toast's "Open settings" action) is skipped.
+  useEffect(() => {
+    const opener =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null
+    rootRef.current?.focus()
+    return () => {
+      if (opener && opener.isConnected) opener.focus()
+    }
+  }, [])
+
   return (
     <div
       ref={rootRef}
       role="dialog"
       aria-modal="true"
       aria-label={strings.settings.heading}
+      tabIndex={-1}
       className="fixed inset-0 overflow-y-auto bg-bg-base"
       style={{ zIndex: tokens.zIndex.overlay }}
     >
