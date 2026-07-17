@@ -175,26 +175,19 @@ jobs:
       # #47 F2 — CLAUDE.md requires a CHANGELOG entry per release and the
       # Releases page is the update channel friends actually read, but nothing
       # enforced it: every draft shipped with static install boilerplate only.
-      # Fail BEFORE the irreversible bump+tag+push. This mirrors release.yml's
-      # preflight extraction EXACTLY (heading present AND non-empty body):
-      # a heading-only placeholder passing here but failing there would strand
-      # a pushed tag + bump commit with no release — the very outcome the
-      # fail-before-push promise exists to prevent.
+      # Fail BEFORE the irreversible bump+tag+push. Shares one extraction
+      # script with release.yml's preflight (heading present AND non-empty
+      # body) so the two gates cannot drift: a heading-only placeholder
+      # passing here but failing there would strand a pushed tag + bump
+      # commit with no release — exactly the drift class #74 already fixed
+      # by hand once.
       - name: Require a non-empty CHANGELOG section for the new version
         env:
           NEW: ${{ steps.ver.outputs.new }}
         run: |
-          set -euo pipefail
-          section=$(awk -v ver="$NEW" '
-            BEGIN { gsub(/\./, "\\.", ver); re = "^## " ver "([^0-9.]|$)" }
-            !hit && $0 ~ re { hit = 1; next }
-            hit && /^## /   { exit }
-            hit             { print }
-          ' CHANGELOG.md)
-          if [ -z "$(printf '%s' "$section" | tr -d '[:space:]')" ]; then
-            echo "::error::CHANGELOG.md has no '## $NEW' section with actual notes. Write the release notes, merge to main, then re-run Release prep."
-            exit 1
-          fi
+          bash scripts/changelog-section.sh "$NEW" \
+            "Write the release notes, merge to main, then re-run Release prep." \
+            > /dev/null
 
       - name: Bump version in all five files
         env:

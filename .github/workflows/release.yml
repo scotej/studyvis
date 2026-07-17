@@ -47,19 +47,10 @@ jobs:
         run: |
           set -euo pipefail
           ver="${GITHUB_REF_NAME#v}"
-          # Section = lines between '## <ver>' and the next '## ' heading.
-          # Anchored regex (dots escaped, boundary after) so 1.3.1 cannot
-          # match a 1.3.10 heading.
-          section=$(awk -v ver="$ver" '
-            BEGIN { gsub(/\./, "\\.", ver); re = "^## " ver "([^0-9.]|$)" }
-            !hit && $0 ~ re { hit = 1; next }
-            hit && /^## /   { exit }
-            hit             { print }
-          ' CHANGELOG.md)
-          if [ -z "$(printf '%s' "$section" | tr -d '[:space:]')" ]; then
-            echo "::error::CHANGELOG.md has no '## $ver' section. Write the release notes on main, re-tag, and re-run — the Releases page is the update channel."
-            exit 1
-          fi
+          # Shared with release-prep's gate (scripts/changelog-section.sh)
+          # so the two checks cannot drift — see the script header.
+          section=$(bash scripts/changelog-section.sh "$ver" \
+            "Write the release notes on main, re-tag, and re-run — the Releases page is the update channel.")
           boiler='Friends-only release — the macOS app is ad-hoc signed (not notarized);
           the Windows installer is unsigned. See INSTALL.md for first-run steps:
           macOS users right-click the app and choose Open the first time;
