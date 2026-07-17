@@ -23,9 +23,10 @@ A few honest disclosures, in the spirit of "no surprises":
   invite you to study without you having to find and open the app
   first. Right-click the tray icon to quit fully.
 - **A handful of long-lived encrypted WebSockets** to a small curated
-  set of public Nostr relays while you're idle. That's the channel
-  friends use to send you invites. The traffic is small — kilobytes
-  per hour — and the relays cannot read it.
+  set of public Nostr relays — plus a few public MQTT brokers raced as
+  a second transport — while you're idle. That's the channel friends
+  use to send you invites. The traffic is small — kilobytes per hour —
+  and neither the relays nor the brokers can read it.
 - **WebRTC during a session.** Audio and video go directly
   peer-to-peer. This works on most home networks. Some networks
   (corporate firewalls, strict NATs, locked-down school Wi-Fi) block
@@ -43,8 +44,11 @@ A few honest disclosures, in the spirit of "no surprises":
   System Settings → Privacy & Security → Screen Recording; StudyVis
   can open that pane for you when needed.
 - **Zero outbound data beyond the above.** No telemetry, no crash
-  uploads, no analytics. If something goes wrong, share the log file
-  manually (Settings → Advanced → Open data folder).
+  uploads, no analytics. One opt-in exception: the OFF-by-default
+  new-version check (Settings → About) makes an unauthenticated GET to
+  the public GitHub Releases API, carrying no identifiers. If something
+  goes wrong, share the log file manually (Settings → Advanced → Open
+  data folder).
 
 ## Install
 
@@ -123,7 +127,7 @@ Inside:
 - `identity.json` — your public key + display name + creation
   timestamp. Private keys are in the OS keychain (macOS Keychain /
   Windows Credential Manager), not in this file.
-- `studyvis.db` — local SQLite with your friends list, session
+- `app.db` — local SQLite with your friends list, session
   history, and audit log per session. Used for the post-session
   report and the Stats dashboard.
 - `models/` — AI model files you've downloaded (V2 features). Each
@@ -275,7 +279,7 @@ where you'd see it surface.
   / spacing / motion values live. Two-layer component split:
   `src/components/ui/` is the only place Radix primitives are
   allowed.
-- **trystero (Nostr default, MQTT raced for pairing)** for peer
+- **trystero (Nostr default, MQTT raced for pairing, presence, inbox, and invites)** for peer
   rendezvous over public relays — the channel for invites, presence,
   and session signaling. WebRTC mesh (max 4 peers) for media + an
   encrypted data channel for audit events. Adding a friend needs no

@@ -578,13 +578,13 @@ Period at the end of full sentences, none on labels, none on button text. Use co
 
 ## 17. Keybindings
 
-V1 ships two global shortcuts. Both are registered in the system layer via `tauri-plugin-global-shortcut` and fire even when the StudyVis window is not focused — that is the point.
+Two global shortcuts, registered in the system layer via `tauri-plugin-global-shortcut` so they fire even when the StudyVis window is not focused. Their registration windows differ (#47 B5):
 
-| Action | macOS | Windows / Linux | State (V1) |
+| Action | macOS | Windows / Linux | Registered |
 | --- | --- | --- | --- |
-| Push to talk · friends | `⌘ [` | `Ctrl [` | Press unmutes mic, release mutes; the audio path lands in V1-P8. |
-| Talk to AI | `⌘ ]` | `Ctrl ]` | Registered (key reserved on the user's machine) but the handler is a no-op. V2-P7 wires it to the floating AI dialog window. |
+| Push to talk · friends | `⌘ [` | `Ctrl [` | Only while a session is live — registered on session start, released on end, so a tray-idle StudyVis never swallows `⌘ [` ("back" in Safari/Finder/IDEs) system-wide. |
+| Talk to AI | `⌘ ]` | `Ctrl ]` | For the app's lifetime, gated by the AI-features flag; opens the floating AI dialog window (V2-P7). |
 
-**Conflicts to know about.** `⌘ [` is "back" in many macOS apps (Safari, Finder, IDEs). When the StudyVis window has focus, the global shortcut wins and our PTT fires instead of the app-level back action. This is intentional: PTT must be reliable mid-session regardless of which app is foreground. Users who can't live with the conflict can rebind in Settings → Shortcuts (lands in V1-P11). Until then, the binding is fixed.
+**Conflicts to know about.** During a session, the friends-PTT shortcut wins over app-level `⌘ [` bindings in whatever app is foreground. This is intentional: PTT must be reliable mid-session regardless of focus. Both shortcuts are rebindable in Settings → Shortcuts (V3-P3).
 
-**Surface in the UI.** Show the active binding via `<Kbd>` in any session-time UI that mentions PTT (the wireframe footer in §8.3, the temporary debug panel that ships before V1-P11). Use `⌘` glyph on macOS, the literal `Ctrl` on other platforms — match the OS-native rendering convention.
+**Surface in the UI.** Show the active binding via `<Kbd>` in any session-time UI that mentions PTT (the wireframe footer in §8.3, the onboarding tutorial). The label derives from the persisted binding — never hardcode the default. Use the `⌘` glyph on macOS, the literal `Ctrl` on other platforms — match the OS-native rendering convention.
