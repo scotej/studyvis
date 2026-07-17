@@ -17,9 +17,12 @@ on:
         type: string
         default: ''
 
+# Job-scoped (not workflow-level) so the gate job — which runs the
+# third-party toolchain action — never holds a write token; only prep pushes
+# the bump commit + tag and dispatches release.yml. Third-party actions are
+# SHA-pinned; see ci.yml's pinning note.
 permissions:
-  contents: write # push the bump commit + tag to main
-  actions: write # dispatch release.yml
+  contents: read
 
 concurrency:
   group: release-prep
@@ -30,6 +33,9 @@ jobs:
   # pushed. rustfmt is the only Rust check here — no compilation, so the
   # ubuntu runner needs no llama-server prebuild.
   gate:
+    permissions:
+      contents: read
+      actions: read # the "Require CI success" step queries the runs API
     name: Quality gate
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -85,8 +91,10 @@ jobs:
       - name: Accessibility audit (axe-core over every Storybook story)
         run: npm run check-a11y
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable branch
         with:
+          # The @ref used to select the toolchain; a SHA pin must say it.
+          toolchain: stable
           components: rustfmt
 
       - name: cargo fmt
@@ -118,6 +126,9 @@ jobs:
           fi
 
   prep:
+    permissions:
+      contents: write # push the bump commit + tag to main
+      actions: write # dispatch release.yml
     name: Bump, tag, trigger build
     needs: gate
     runs-on: ubuntu-latest

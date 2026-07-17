@@ -10,6 +10,17 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# The workflows that mint and gate the only update channel for unsigned
+# installers must not trust mutable third-party refs: a moved tag/branch on
+# any of these executes attacker code in jobs whose artifacts friends install
+# with SmartScreen/Gatekeeper already bypassed. Third-party actions are
+# SHA-pinned (trailing comment = the tag the SHA was resolved from; refresh
+# manually — there is no dependabot config); actions/* stay on major tags
+# (GitHub-owned). GITHUB_TOKEN is scoped read-only as drift-proofing against
+# a future repo/org default change.
+permissions:
+  contents: read
+
 jobs:
   frontend:
     name: Frontend
@@ -82,11 +93,13 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable branch
         with:
+          # The @ref used to select the toolchain; a SHA pin must say it.
+          toolchain: stable
           components: rustfmt, clippy
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
         with:
           workspaces: src-tauri -> target
 

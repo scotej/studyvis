@@ -9,6 +9,12 @@ on:
   # workflow on the tag ref instead — which requires this trigger to exist.
   workflow_dispatch:
 
+# See ci.yml's pinning note: third-party actions are SHA-pinned because this
+# workflow mints the unsigned installers friends manually install. The
+# publish job re-declares the contents: write it needs.
+permissions:
+  contents: read
+
 jobs:
   # #47 F1/F2 — fail fast before any build minutes are spent:
   #   - workflow_dispatch defaults to main, and 'main' flowing into
@@ -98,11 +104,13 @@ jobs:
           cache: 'npm'
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable branch
         with:
+          # The @ref used to select the toolchain; a SHA pin must say it.
+          toolchain: stable
           targets: ${{ matrix.rust-targets }}
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
         with:
           workspaces: src-tauri -> target
 
@@ -117,7 +125,7 @@ jobs:
           done
 
       - name: Build & publish via tauri-action
-        uses: tauri-apps/tauri-action@v0.6.2
+        uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # v0.6.2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
