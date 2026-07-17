@@ -267,4 +267,65 @@ mod tests {
             .expect("count friends");
         assert_eq!(count, 1, "existing friends row should survive a re-run");
     }
+
+    // The header's "never edit a shipped migration in place" rule had no
+    // enforcement, and every test above is structurally blind to an in-place
+    // edit: they simulate old databases by applying the SAME constants, so
+    // editing 002 instead of adding 004 keeps this file green while fresh
+    // installs and already-migrated friends' disks diverge — the app then
+    // errors at some SELECT only on their machines. Pin the shipped bytes.
+    //
+    // Appending a NEW migration: add its hash here. Changing an EXISTING
+    // hash is exactly the mistake this test exists to catch — write a new
+    // migration instead. (Whitespace-only reformats of shipped .sql pay the
+    // same toll on purpose.)
+    #[test]
+    fn shipped_migrations_are_immutable() {
+        use sha2::{Digest, Sha256};
+        // (version, sha256 of the CRLF-normalized file). Normalization is
+        // belt-and-braces against a .gitattributes regression on Windows
+        // checkouts (`* text=auto eol=lf` currently guarantees LF bytes).
+        const PINNED: &[(u32, &str)] = &[
+            (
+                1,
+                "d19c380c48d5986806f36eedd72332f2d96e57390ce92ed839fbffe51bc8300e",
+            ),
+            (
+                2,
+                "f01897d50e1d448a0995ace633c04c82b454c32c0e792a94964a81ae46031685",
+            ),
+            (
+                3,
+                "a1ef24581336a04ecb9f9636afe3d0c574d9e47072f88ffccd1ff3c9aefffa42",
+            ),
+        ];
+        assert_eq!(
+            MIGRATIONS.len(),
+            PINNED.len(),
+            "a new migration needs its hash pinned here (never change an existing one)"
+        );
+        let mut previous_version = 0;
+        for ((version, sql), (pinned_version, pinned_hash)) in MIGRATIONS.iter().zip(PINNED.iter())
+        {
+            assert_eq!(version, pinned_version, "migration order must be stable");
+            assert!(
+                *version > previous_version,
+                "migration versions must be strictly ascending"
+            );
+            previous_version = *version;
+            let normalized = sql.replace("\r\n", "\n");
+            let digest = Sha256::digest(normalized.as_bytes());
+            let hex = digest
+                .iter()
+                .map(|b| format!("{b:02x}"))
+                .collect::<String>();
+            assert_eq!(
+                &hex, pinned_hash,
+                "shipped migration {version} was edited in place — friends already \
+                 at this schema version will never re-run it; add a new migration \
+                 instead (see the module header)"
+            );
+        }
+        assert_eq!(MAX_KNOWN_VERSION, previous_version);
+    }
 }
