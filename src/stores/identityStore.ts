@@ -70,6 +70,15 @@ type IdentityState = {
   status: IdentityStatus
   // Set only while status === 'error'; null otherwise.
   errorKind: IdentityErrorKind | null
+  // The successfully PARSED identity.json backing a 'keys-missing' error
+  // (#47 E1 follow-up). Kept separate from `identity` — consumers treat
+  // `identity` as usable, and these keys are gone — so the Recover flow can
+  // still (a) recognize the user's own 24 words via the stored fingerprint
+  // (no false "replace identity?" scare, correct "friends stay intact" done
+  // copy) and (b) preserve the display name across the restore instead of
+  // silently blanking it (a blank name never re-prompts — onboarding is
+  // already complete — and silently disables invite sending).
+  staleRecord: IdentityRecord | null
   // Stable object reference — actions never change identity across renders,
   // so consumers can safely include `actions.signWithKeyring` in dep arrays
   // without churn (the SessionView pipeline used to tear down on every
@@ -99,11 +108,21 @@ export const useIdentityStore = create<IdentityState>((set, get) => {
       exists = await identityExists()
     } catch (err) {
       console.error('useIdentity.refresh: identity_exists failed:', err)
-      set({ identity: null, status: 'error', errorKind: 'file' })
+      set({
+        identity: null,
+        status: 'error',
+        errorKind: 'file',
+        staleRecord: null,
+      })
       return
     }
     if (!exists) {
-      set({ identity: null, status: 'absent', errorKind: null })
+      set({
+        identity: null,
+        status: 'absent',
+        errorKind: null,
+        staleRecord: null,
+      })
       return
     }
     let record: IdentityRecord | null
@@ -111,13 +130,23 @@ export const useIdentityStore = create<IdentityState>((set, get) => {
       record = await loadIdentityRecord()
     } catch (err) {
       console.error('useIdentity.refresh: identity_load_record failed:', err)
-      set({ identity: null, status: 'error', errorKind: 'file' })
+      set({
+        identity: null,
+        status: 'error',
+        errorKind: 'file',
+        staleRecord: null,
+      })
       return
     }
     // File exists; a null/unparseable record is a corrupt-file signal, not a
     // fresh user. Route to 'error', never 'absent'.
     if (!record) {
-      set({ identity: null, status: 'error', errorKind: 'file' })
+      set({
+        identity: null,
+        status: 'error',
+        errorKind: 'file',
+        staleRecord: null,
+      })
       return
     }
     // #47 E1 — the file parsing is only half the identity: the keychain must
@@ -130,13 +159,25 @@ export const useIdentityStore = create<IdentityState>((set, get) => {
     try {
       const keysPresent = await identityKeysPresent()
       if (!keysPresent) {
-        set({ identity: null, status: 'error', errorKind: 'keys-missing' })
+        // Keep the parsed record: its fingerprint + display name drive the
+        // Recover flow's same-identity fast path (see IdentityState).
+        set({
+          identity: null,
+          status: 'error',
+          errorKind: 'keys-missing',
+          staleRecord: record,
+        })
         return
       }
     } catch (err) {
       console.warn('useIdentity.refresh: keychain probe inconclusive:', err)
     }
-    set({ identity: record, status: 'ready', errorKind: null })
+    set({
+      identity: record,
+      status: 'ready',
+      errorKind: null,
+      staleRecord: null,
+    })
   }
 
   // The single persistence path. Both new-identity creation and 24-word
@@ -152,9 +193,14 @@ export const useIdentityStore = create<IdentityState>((set, get) => {
     // Preserve the existing display name across a re-commit so a Settings/D1
     // recovery of the SAME identity (D5 harmless re-commit, no confirm shown)
     // doesn't silently blank it. Onboarding create starts from no identity, so
-    // this degrades to '' there (DisplayNameStep sets it next); the D1 error
-    // path has an unreadable record, so there's nothing to preserve either.
-    const record = recordFromIdentity(id, get().identity?.display_name ?? '')
+    // this degrades to '' there (DisplayNameStep sets it next). On the
+    // keys-missing path (#47 E1) the record parsed fine — staleRecord carries
+    // its display name through the restore; only the truly-unreadable 'file'
+    // path has nothing to preserve.
+    const record = recordFromIdentity(
+      id,
+      get().identity?.display_name ?? get().staleRecord?.display_name ?? ''
+    )
     const commit = async () => {
       if (!allowOverwrite && (await identityExists())) {
         throw new Error(
@@ -167,7 +213,12 @@ export const useIdentityStore = create<IdentityState>((set, get) => {
         allowOverwrite
       )
       await saveIdentityRecord(record)
-      set({ identity: record, status: 'ready', errorKind: null })
+      set({
+        identity: record,
+        status: 'ready',
+        errorKind: null,
+        staleRecord: null,
+      })
     }
     return { record, commit }
   }
@@ -197,6 +248,7 @@ export const useIdentityStore = create<IdentityState>((set, get) => {
     identity: null,
     status: 'loading',
     errorKind: null,
+    staleRecord: null,
     actions: { create, recover, signWithKeyring, refresh, setDisplayName },
   }
 })

@@ -16,7 +16,7 @@ type Mode = 'error' | 'recover'
 // copy: retrying can't fix an empty keychain, so the 24-word restore is the
 // primary action there.
 export function IdentityLoadError() {
-  const { errorKind, actions } = useIdentity()
+  const { errorKind, staleRecord, actions } = useIdentity()
   const [mode, setMode] = useState<Mode>('error')
   const [retrying, setRetrying] = useState(false)
 
@@ -24,6 +24,13 @@ export function IdentityLoadError() {
     return (
       <Recover
         identityExists
+        // On keys-missing the record parsed fine: its fingerprint lets the
+        // D5 same-words fast path fire, so typing your OWN 24 words commits
+        // without the "replace identity?" scare (as keysMissing.recoverNote
+        // promises), while different words still get the escalated warning.
+        // The 'file' variant has no readable record — this stays null and
+        // the flow falls back to the generic confirm, as before.
+        currentFingerprint={staleRecord?.mnemonic_fingerprint ?? null}
         recover={actions.recover}
         onBack={() => setMode('error')}
         // After a successful recovery the store status is already 'ready'; a
