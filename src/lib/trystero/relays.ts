@@ -27,9 +27,10 @@ export function mergedRelayUrls(custom: string[]): string[] {
 // is joined and is not re-run while any room stays open), and the inbox +
 // presence rooms open at boot and never close. So this is only re-read for
 // rooms opened in a fresh process. The Settings copy tells the user to restart
-// to apply a relay change. (The TURN server, by contrast, is per-RTCPeer-
-// connection via buildIceOptions, so it does apply on the next pairing/session
-// without a restart.)
+// to apply a relay change. (The TURN server via buildIceOptions is captured
+// per room-join, so it applies to the next pairing/session/invite send without
+// a restart — but the always-on inbox + presence rooms only pick up a TURN
+// change on relaunch, same as relays.)
 export function userRelayConfig(): { urls: string[] } | undefined {
   const custom = useSettingsStore.getState().values.customRelayUrls
   return custom.length > 0 ? { urls: mergedRelayUrls(custom) } : undefined

@@ -1133,7 +1133,7 @@ export const strings = {
         },
         turn: {
           label: 'TURN server',
-          help: 'A TURN relay gets you through strict firewalls and NATs. Self-host coturn, or use a provider. All three fields are required to enable it.',
+          help: 'A TURN relay gets you through strict firewalls and NATs. Self-host coturn, or use a provider. All three fields are required to enable it. Sessions, pairing, and invites use it right away; presence and invite delivery pick it up after a restart.',
           urlLabel: 'TURN URL',
           urlPlaceholder: 'turn:turn.example.com:3478',
           urlAriaLabel: 'TURN server URL',

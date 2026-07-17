@@ -13,6 +13,7 @@ vi.mock('@/lib/trystero', () => {
   }
 
   const buses = new Map<string, Bus>()
+  const joinConfigs: Array<Record<string, unknown>> = []
   let nextPeer = 0
 
   function getBus(key: string): Bus {
@@ -24,7 +25,11 @@ vi.mock('@/lib/trystero', () => {
     return bus
   }
 
-  function joinTopic({ topic, password }: { topic: string; password: string }) {
+  function joinTopic(
+    config: { topic: string; password: string } & Record<string, unknown>
+  ) {
+    joinConfigs.push(config)
+    const { topic, password } = config
     const key = `${topic}|${password}`
     const bus = getBus(key)
     const peerId = `peer-${++nextPeer}`
@@ -96,7 +101,9 @@ vi.mock('@/lib/trystero', () => {
     joinTopic,
     __resetBus: () => {
       buses.clear()
+      joinConfigs.length = 0
     },
+    __getJoinConfigs: () => joinConfigs,
   }
 })
 
@@ -424,6 +431,59 @@ describe('invite envelope round-trip', () => {
         boxDecrypt(theirXPub, alice.identity.xPriv, nonce, ct),
     })
     expect(result).toBeNull()
+  })
+
+  // The inbox (receive) and per-send rooms carry invites over WebRTC
+  // datachannels, so both must forward the user's TURN server — without it a
+  // TURN-configured user on a strict NAT can neither receive invites nor have
+  // a send's onPeerJoin ever fire (misreported as "friend may be offline").
+  test('inbox and invite-send rooms forward the configured TURN server', async () => {
+    const { useSettingsStore } = await import('@/stores/settingsStore')
+    const prevValues = useSettingsStore.getState().values
+    useSettingsStore.setState({
+      values: {
+        ...prevValues,
+        turnPreference: 'auto',
+        turnServer: {
+          url: 'turn:turn.example.test:3478',
+          username: 'u',
+          credential: 'c',
+        },
+      },
+    })
+    try {
+      const sam = makeApp('Sam')
+      const alice = makeApp('Alice')
+      const inviteArrived = await awaitInvite(alice, sam.edHex, [sam])
+      const envelope = await buildInviteEnvelope(
+        sam.sender,
+        { edPubkeyHex: alice.edHex, xPubkeyHex: alice.xHex },
+        SAMPLE_SESSION
+      )
+      await sendInviteEnvelope(
+        { edPubkeyHex: alice.edHex, xPubkeyHex: alice.xHex },
+        envelope,
+        { sendTimeoutMs: 1_000 }
+      )
+      await inviteArrived.receive
+      const mod = (await import('@/lib/trystero')) as unknown as {
+        __getJoinConfigs: () => Array<Record<string, unknown>>
+      }
+      const configs = mod.__getJoinConfigs()
+      expect(configs.length).toBeGreaterThanOrEqual(2)
+      for (const config of configs) {
+        expect(config.turnConfig).toEqual([
+          {
+            urls: 'turn:turn.example.test:3478',
+            username: 'u',
+            credential: 'c',
+          },
+        ])
+      }
+      await inviteArrived.leave()
+    } finally {
+      useSettingsStore.setState({ values: prevValues })
+    }
   })
 })
 

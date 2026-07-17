@@ -3,8 +3,10 @@ import { inboxPassword, inboxTopic } from '@/lib/crypto/topics'
 import { bytesToBase64, bytesToHex, hexToBytes } from '@/lib/encoding'
 import { pairingRelaysUnreachable } from '@/lib/relayDiagnostics'
 import { joinTopic } from '@/lib/trystero'
+import { buildIceOptions } from '@/lib/trystero/ice'
 import { userRelayConfig } from '@/lib/trystero/relays'
 import { useSessionStore } from '@/stores/sessionStore'
+import { useSettingsStore } from '@/stores/settingsStore'
 
 import {
   INVITE_ACK_ACTION,
@@ -184,6 +186,11 @@ export async function sendInviteEnvelope(
     // them first, and the ACK listener latches a boolean so duplicate
     // delivery is harmless.
     strategies: ['nostr', 'mqtt'],
+    // onPeerJoin fires only after the WebRTC handshake, so a strict-NAT send
+    // without the user's TURN server times out and misreports "friend may be
+    // offline" — the exact case the TURN setting exists to fix. This room is
+    // per-send, so a TURN change applies on the next invite, no restart.
+    ...buildIceOptions(useSettingsStore.getState().values.turnPreference),
   })
   const action = room.makeAction<InviteEnvelope>(INVITE_ACTION)
 
