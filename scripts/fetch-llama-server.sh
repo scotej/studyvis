@@ -17,7 +17,9 @@
 #
 # Pinned to llama.cpp release tag b9095 (commit f3c3e0e9a087835639733485b8900b195ba4ca47).
 # Bump LLAMA_RELEASE_TAG below + refresh SHA256s after running this script
-# against fresh artifacts.
+# against fresh artifacts. A new build changes measured inference speed, so
+# also bump INFERENCE_ENGINE_FINGERPRINT in src/features/ai/benchmark.ts —
+# it flags persisted benchmarks as stale in the model picker.
 #
 # macOS ships bash 3.2 which has no associative arrays, so this script uses
 # case statements for the per-triple metadata.

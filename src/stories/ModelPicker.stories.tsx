@@ -6,6 +6,7 @@ import {
   ModelPicker,
   ModelGuide,
   emptyPickerState,
+  INFERENCE_ENGINE_FINGERPRINT,
   SUPPORTED_MODELS,
   type PickerStateForModel,
   type ModelRecord,
@@ -21,6 +22,7 @@ function makeRecord(p95Sec: number, p50Sec = p95Sec * 0.85): ModelRecord {
       p95Sec,
       sampleIntervalSec: Math.max(5, Math.ceil(p95Sec + 1)),
       completedAtSec: Math.floor(Date.now() / 1000),
+      engineFingerprint: INFERENCE_ENGINE_FINGERPRINT,
     },
     installedAt: Date.now(),
   }
@@ -129,6 +131,25 @@ export const AllInstalledWithSpeeds: Story = {
       },
     },
     hfTokenPresent: true,
+  },
+}
+
+// A benchmark persisted before the current engine (no/other fingerprint —
+// e.g. CPU-era numbers after the Metal-offload update) renders with the
+// re-measure hint instead of presenting the speed as current.
+export const StaleBenchmark: Story = {
+  args: {
+    installed: {
+      'qwen2_5-vl-3b': {
+        ...makeRecord(26.0, 22.5),
+        modelId: 'qwen2_5-vl-3b',
+        benchmark: {
+          ...makeRecord(26.0, 22.5).benchmark!,
+          engineFingerprint: undefined,
+        },
+      },
+    },
+    hfTokenPresent: false,
   },
 }
 

@@ -26,7 +26,7 @@ import { Progress } from '@/components/ui/progress'
 import { Skeleton } from '@/components/ui/skeleton'
 import { strings } from '@/strings'
 
-import { type BenchmarkResult } from './benchmark'
+import { isBenchmarkStale, type BenchmarkResult } from './benchmark'
 import {
   type ModelSpec,
   SUPPORTED_MODELS,
@@ -332,9 +332,21 @@ function ModelCard({
       </dl>
 
       {benchmark ? (
-        <p className="flex items-center gap-2 text-sm text-status-focused">
-          <GaugeIcon /> {formatBenchmark(benchmark)}
-        </p>
+        isBenchmarkStale(benchmark) ? (
+          // Measured on an older engine build/flags (e.g. pre-Metal-offload
+          // CPU numbers on Apple Silicon): still shown, but not presented as
+          // current — the Re-benchmark button above is the fix.
+          <p className="flex items-start gap-2 text-sm text-text-secondary">
+            <GaugeIcon className="mt-0.5 shrink-0" />
+            <span>
+              {formatBenchmark(benchmark)} {strings.ai.picker.staleBenchmark}
+            </span>
+          </p>
+        ) : (
+          <p className="flex items-center gap-2 text-sm text-status-focused">
+            <GaugeIcon /> {formatBenchmark(benchmark)}
+          </p>
+        )
       ) : null}
 
       {interrupted && !busy ? (

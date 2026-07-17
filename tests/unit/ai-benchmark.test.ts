@@ -3,7 +3,10 @@ import { afterEach, beforeEach, describe, expect, test } from 'vitest'
 import {
   __resetBenchmarkRuntime,
   __setBenchmarkRuntime,
+  INFERENCE_ENGINE_FINGERPRINT,
+  isBenchmarkStale,
   runBenchmark,
+  summariseBenchmark,
   SUPPORTED_MODELS,
   type BenchmarkProgress,
   type BenchmarkRuntime,
@@ -190,5 +193,33 @@ describe('runBenchmark', () => {
     // No samples, but stop is still called via the finally block.
     expect(env.stops).toBe(1)
     expect(env.bodies).toHaveLength(0)
+  })
+})
+
+// A persisted benchmark from a different engine build/flags (or predating
+// the stamp entirely — every pre-Metal-offload record) must read as stale so
+// the picker shows the re-measure hint instead of presenting CPU-era numbers
+// as current.
+describe('engine fingerprint staleness', () => {
+  test('summariseBenchmark stamps the current engine fingerprint', () => {
+    const result = summariseBenchmark({
+      samplesSec: [3, 5, 8],
+      completedAtSec: 1_700_000_000,
+    })
+    expect(result.engineFingerprint).toBe(INFERENCE_ENGINE_FINGERPRINT)
+    expect(isBenchmarkStale(result)).toBe(false)
+  })
+
+  test('a record without a fingerprint (pre-stamp build) is stale', () => {
+    const result = summariseBenchmark({
+      samplesSec: [3],
+      completedAtSec: 1_700_000_000,
+    })
+    expect(isBenchmarkStale({ ...result, engineFingerprint: undefined })).toBe(
+      true
+    )
+    expect(
+      isBenchmarkStale({ ...result, engineFingerprint: 'b8000-ngl0' })
+    ).toBe(true)
   })
 })

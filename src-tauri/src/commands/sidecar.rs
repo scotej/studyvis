@@ -363,6 +363,10 @@ fn rotate_log_if_needed(path: &Path, max_bytes: u64) {
 // no GPU backend, so 0 stays there. If GPU contention with the WebRTC tiles
 // ever materializes, gate this behind a Settings → AI toggle rather than
 // reverting to CPU-only for everyone.
+//
+// Changing this value changes measured inference speed: bump
+// INFERENCE_ENGINE_FINGERPRINT in src/features/ai/benchmark.ts so persisted
+// benchmarks read as stale and users get the re-measure hint.
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 const N_GPU_LAYERS: &str = "99";
 #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]

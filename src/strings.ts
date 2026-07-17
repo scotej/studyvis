@@ -1352,6 +1352,11 @@ export const strings = {
       // until the session ends.
       lockedDuringSession:
         'Model changes unlock after your session ends — re-measuring or removing a model now would interrupt live focus checks.',
+      // Shown when a persisted benchmark predates the current inference
+      // engine (INFERENCE_ENGINE_FINGERPRINT) — e.g. CPU-era numbers after
+      // the Metal-offload update.
+      staleBenchmark:
+        'Measured on an older StudyVis — re-run the benchmark for current numbers.',
       pills: {
         gated: 'Gated',
         installed: 'Installed',
