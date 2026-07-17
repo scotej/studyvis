@@ -1495,7 +1495,7 @@ export function SessionView({
             variant="ghost"
             size="sm"
             onClick={handleToggleCamera}
-            aria-pressed={!cameraOn}
+            aria-pressed={cameraOn}
             aria-label={strings.session.camera.toggleAriaLabel}
             className="gap-2"
           >
