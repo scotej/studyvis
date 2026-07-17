@@ -58,16 +58,42 @@ pub fn data_dir<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, String> {
     Ok(dir)
 }
 
+// Best-effort adoption of audit_events whose session died with the app
+// (crash / power-loss / force-kill) before the leave handler could write a
+// sessions row — see sessions::synthesize_from_orphaned_audit_events. The
+// local pubkey (to exclude self from peer_pubkeys) comes from a minimal
+// identity.json read; either being unavailable degrades to synthesis with
+// all who-values kept or to skipping, never to a failed boot.
+fn adopt_orphaned_sessions<R: Runtime>(app: &AppHandle<R>, pool: &DbPool) {
+    let local_ed = local_ed_pubkey(app);
+    let Ok(mut conn) = pool.0.lock() else {
+        return;
+    };
+    match sessions::synthesize_from_orphaned_audit_events(&mut conn, local_ed.as_deref()) {
+        Ok(0) => {}
+        Ok(n) => eprintln!("db: adopted {n} crash-orphaned session(s) from audit events"),
+        Err(e) => eprintln!("db: orphaned-session synthesis failed (continuing): {e}"),
+    }
+}
+
+fn local_ed_pubkey<R: Runtime>(app: &AppHandle<R>) -> Option<String> {
+    let path = data_dir(app).ok()?.join("identity.json");
+    let raw = fs::read_to_string(path).ok()?;
+    let value: serde_json::Value = serde_json::from_str(&raw).ok()?;
+    Some(value.get("ed_pubkey_hex")?.as_str()?.to_owned())
+}
+
 pub fn init<R: Runtime>(app: &AppHandle<R>) -> Result<DbInit, DbInitError> {
     let path = data_dir(app)
         .map_err(DbInitError::Unrecoverable)?
         .join(DB_FILE);
     let first_failure = match open_and_migrate(&path) {
         Ok(pool) => {
+            adopt_orphaned_sessions(app, &pool);
             return Ok(DbInit {
                 pool,
                 recovered_from: None,
-            })
+            });
         }
         Err(OpenError::NewerSchema(detail)) => return Err(DbInitError::NewerVersion(detail)),
         Err(OpenError::Other(detail)) => detail,
