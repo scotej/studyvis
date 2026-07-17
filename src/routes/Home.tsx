@@ -403,6 +403,12 @@ export function Home() {
   if (sessionStatus === 'ended' && sessionTopic) {
     return (
       <>
+        {/* #47 B1 follow-up — invites arriving while the report is up (the
+            realistic case: a friend re-invites right after a grace-window
+            auto-end) used to exist only as a ~4s toast here; the persistent
+            rows rendered solely on the main view. Accepting is valid in this
+            state (runGuestJoin refuses only status 'active'). */}
+        <PendingInvites onAccept={handleInviteAccepted} />
         <Report
           sessionId={sessionTopic}
           onClose={() => useSessionStore.getState().reset()}
@@ -416,6 +422,8 @@ export function Home() {
   if (view === 'settings') {
     return (
       <>
+        {/* #47 B1 follow-up — see the report branch above. */}
+        <PendingInvites onAccept={handleInviteAccepted} />
         <Settings onClose={() => setView('main')} />
         {tail}
       </>
