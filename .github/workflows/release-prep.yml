@@ -91,9 +91,10 @@ jobs:
       - name: Accessibility audit (axe-core over every Storybook story)
         run: npm run check-a11y
 
-      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable branch
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master; the toolchain input selects the channel
         with:
-          # The @ref used to select the toolchain; a SHA pin must say it.
+          # With a master pin the ref no longer selects the toolchain; this
+          # input does.
           toolchain: stable
           components: rustfmt
 

@@ -147,7 +147,9 @@ export function startPresence(ctx: PresenceContext): PresenceSubscription {
     // up to HEARTBEAT_INTERVAL_MS to see us as online. This only triggers a
     // send; the receiver still derives "online" from its own clock (above).
     ownJoinUnsub = ownRoom.onPeerJoin(() => {
-      void ownAction.send({ ts: now() })
+      // Same rejection guard as the interval sender below — a merged-room
+      // send is a Promise.all across transports.
+      void ownAction.send({ ts: now() }).catch(() => {})
     })
   }
 

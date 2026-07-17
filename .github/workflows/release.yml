@@ -104,13 +104,14 @@ jobs:
           cache: 'npm'
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable branch
+        uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master; the toolchain input selects the channel
         with:
-          # The @ref used to select the toolchain; a SHA pin must say it.
+          # With a master pin the ref no longer selects the toolchain; this
+          # input does.
           toolchain: stable
           targets: ${{ matrix.rust-targets }}
 
-      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
         with:
           workspaces: src-tauri -> target
 

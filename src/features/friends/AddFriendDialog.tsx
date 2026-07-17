@@ -417,9 +417,12 @@ export function AddFriendDialog({
   const handleModeChange = useCallback((next: AddFriendMode) => {
     // 'Back to cards' must not leave an invisible legacy pairing running —
     // the card mode has no surface that could ever complete or cancel it.
+    // Phase resets too: without it, returning to legacy resurfaces a
+    // host-waiting/join-progress screen for a pairing that is already dead.
     if (next === 'card') {
       abortRef.current?.abort()
       abortRef.current = null
+      setPhase({ kind: 'idle' })
     }
     setMode(next)
   }, [])

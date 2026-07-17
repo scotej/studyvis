@@ -23,6 +23,7 @@ export function SettingsOverlay({
   onClose,
 }: SettingsOverlayProps) {
   const rootRef = useRef<HTMLDivElement | null>(null)
+  const openerRef = useRef<HTMLElement | null>(null)
 
   // Esc closes the overlay — but only when no OTHER modal is open: a Radix
   // dialog inside Settings (confirm sheets, etc.) portals to <body> and owns
@@ -52,12 +53,22 @@ export function SettingsOverlay({
   // cleanup runs the opener is un-inerted again; a disconnected opener (a
   // dismissed error toast's "Open settings" action) is skipped.
   useEffect(() => {
-    const opener =
-      document.activeElement instanceof HTMLElement
-        ? document.activeElement
-        : null
+    // Capture-once via ref: StrictMode's dev double-invoke re-runs this
+    // setup after the first run already moved focus onto the dialog, so a
+    // per-run capture would record the dialog itself (or <body>) as the
+    // opener and restore focus nowhere. The ref survives the remount; the
+    // contains() guard skips any capture that already landed inside the
+    // overlay.
+    if (
+      !openerRef.current &&
+      document.activeElement instanceof HTMLElement &&
+      !rootRef.current?.contains(document.activeElement)
+    ) {
+      openerRef.current = document.activeElement
+    }
     rootRef.current?.focus()
     return () => {
+      const opener = openerRef.current
       if (opener && opener.isConnected) opener.focus()
     }
   }, [])

@@ -194,6 +194,18 @@ pub fn synthesize_from_orphaned_audit_events(
                     .join(",")
             ))
         };
+        // Mirror the live leave path's markStudied for the adopted peers —
+        // but monotonic: the crashed session may predate sessions studied
+        // since, and rewinding last_studied_with would corrupt friends-list
+        // ordering. A non-friend peer simply matches no row.
+        for peer in &peers {
+            tx.execute(
+                "UPDATE friends SET last_studied_with = ?2
+                 WHERE ed_pubkey_hex = ?1
+                   AND (last_studied_with IS NULL OR last_studied_with < ?2)",
+                params![peer, ended_at],
+            )?;
+        }
         insert(
             &tx,
             &SessionRow {
@@ -476,14 +488,18 @@ mod tests {
         assert_eq!(remaining, 0);
     }
 
-    fn audit_row(session_id: &str, ts: i64, who: &str, kind: &str) -> AuditEventRow {
+    // Distinct name from the 2-arg `audit_row` fixture above (same module —
+    // Rust has no overloading), and a UNIQUE per-row sig: audit_events::insert
+    // dedups table-wide on sig (silently — it returns Ok either way), so a
+    // shared placeholder would drop every fixture after the first.
+    fn orphan_audit_row(session_id: &str, ts: i64, who: &str, kind: &str) -> AuditEventRow {
         AuditEventRow {
             session_id: session_id.into(),
             ts,
             who: who.into(),
             kind: kind.into(),
             detail: "{}".into(),
-            sig: "00".into(),
+            sig: format!("{session_id}-{ts}-{who}-{kind}"),
         }
     }
 
@@ -500,23 +516,23 @@ mod tests {
         insert(&conn, &lifecycle_row("kept-topic")).expect("insert kept");
         audit_events::insert(
             &conn,
-            &audit_row("kept-topic", 1_700_000_000_000, &me, "joined"),
+            &orphan_audit_row("kept-topic", 1_700_000_000_000, &me, "joined"),
         )
         .expect("kept audit");
         // A crashed session: audit events only, no sessions row.
         audit_events::insert(
             &conn,
-            &audit_row("orphan-topic", 1_700_000_060_000, &me, "joined"),
+            &orphan_audit_row("orphan-topic", 1_700_000_060_000, &me, "joined"),
         )
         .expect("orphan a");
         audit_events::insert(
             &conn,
-            &audit_row("orphan-topic", 1_700_000_120_000, &friend, "joined"),
+            &orphan_audit_row("orphan-topic", 1_700_000_120_000, &friend, "joined"),
         )
         .expect("orphan b");
         audit_events::insert(
             &conn,
-            &audit_row("orphan-topic", 1_700_002_760_000, &friend, "left"),
+            &orphan_audit_row("orphan-topic", 1_700_002_760_000, &friend, "left"),
         )
         .expect("orphan c");
 
@@ -547,7 +563,7 @@ mod tests {
         let mut conn = fresh();
         audit_events::insert(
             &conn,
-            &audit_row("blip-topic", 1_700_000_000_000, &hex64("aa"), "joined"),
+            &orphan_audit_row("blip-topic", 1_700_000_000_000, &hex64("aa"), "joined"),
         )
         .expect("insert");
         let adopted = synthesize_from_orphaned_audit_events(&mut conn, None).expect("synthesize");
@@ -558,13 +574,45 @@ mod tests {
     }
 
     #[test]
+    fn synthesize_bumps_last_studied_with_monotonically() {
+        let mut conn = fresh();
+        let stale = hex64("bb");
+        let fresh_friend = hex64("cc");
+        crate::db::friends::add(&conn, &stale, "x1", "Stale", 100).expect("add stale");
+        crate::db::friends::update_last_studied(&conn, &stale, 1_000).expect("seed stale");
+        crate::db::friends::add(&conn, &fresh_friend, "x2", "Fresh", 100).expect("add fresh");
+        crate::db::friends::update_last_studied(&conn, &fresh_friend, 9_999_999_999_999)
+            .expect("seed fresh");
+        for (i, who) in [&stale, &fresh_friend].into_iter().enumerate() {
+            audit_events::insert(
+                &conn,
+                &orphan_audit_row("crash-topic", 1_700_000_000_000 + i as i64, who, "joined"),
+            )
+            .expect("insert event");
+        }
+        synthesize_from_orphaned_audit_events(&mut conn, None).expect("synthesize");
+        let friends = crate::db::friends::list(&conn).expect("list");
+        let by_key = |k: &str| {
+            friends
+                .iter()
+                .find(|f| f.ed_pubkey_hex == k)
+                .expect("friend present")
+                .last_studied_with
+        };
+        // Older stored value bumps to the adopted session's end...
+        assert_eq!(by_key(&stale), Some(1_700_000_000_001));
+        // ...but a newer one is never rewound by an old crashed session.
+        assert_eq!(by_key(&fresh_friend), Some(9_999_999_999_999));
+    }
+
+    #[test]
     fn synthesize_drops_malformed_who_values_from_peers() {
         let mut conn = fresh();
         // Non-64-hex who values (malformed / unverified rows) must not reach
         // the peers JSON.
         audit_events::insert(
             &conn,
-            &audit_row("odd-topic", 1_700_000_000_000, "not-a-pubkey", "joined"),
+            &orphan_audit_row("odd-topic", 1_700_000_000_000, "not-a-pubkey", "joined"),
         )
         .expect("insert");
         let adopted = synthesize_from_orphaned_audit_events(&mut conn, None).expect("synthesize");

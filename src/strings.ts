@@ -1360,6 +1360,10 @@ export const strings = {
       // the Metal-offload update.
       staleBenchmark:
         'Measured on an older StudyVis — re-run the benchmark for current numbers.',
+      // A download that resolves mid-session must not chain into the
+      // benchmark (it would stop the live sample loop's sidecar).
+      benchmarkAfterSession:
+        'Model installed. Run its benchmark after your session ends — measuring now would interrupt live focus checks.',
       pills: {
         gated: 'Gated',
         installed: 'Installed',
