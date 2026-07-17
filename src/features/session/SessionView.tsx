@@ -53,6 +53,11 @@ import type { SettingsCategoryId } from '@/features/settings'
 import type { Friend } from '@/lib/db/friends'
 import { signWithKeyring } from '@/lib/db/identity'
 import { mediaErrorKind } from '@/lib/mediaError'
+import {
+  comboToInlineDisplay,
+  DEFAULT_PTT_FRIENDS_COMBO,
+  parseAccelerator,
+} from '@/lib/keybindings'
 import { isMacLikePlatform } from '@/lib/utils'
 import {
   buildAuditEvent,
@@ -162,6 +167,16 @@ export function SessionView({
   // when everyone dropped (during the S1 grace window or after a leave).
   const hadAnyPeer = useSessionStore((s) => s.seenPeerEdPubkeys.length > 0)
   const aiFeaturesEnabled = useSettingsStore((s) => s.values.aiFeaturesEnabled)
+  // The footer hint must show the PERSISTED binding: rebinding shipped in
+  // V3-P3, and a hardcoded default lied every session to exactly the users
+  // who rebound because CmdOrCtrl+[ clashed with another app.
+  const pttFriendsAccelerator = useSettingsStore(
+    (s) => s.values.pttFriendsAccelerator
+  )
+  const pttFriendsLabel = comboToInlineDisplay(
+    parseAccelerator(pttFriendsAccelerator) ?? DEFAULT_PTT_FRIENDS_COMBO,
+    isMacLikePlatform() ? 'mac' : 'other'
+  )
   // #47 B4 — persisted per-friend volumes (ed_pubkey → 0..1); the fallback
   // when this session hasn't touched a peer's slider yet.
   const persistedPeerVolumes = useSettingsStore((s) => s.values.peerVolumes)
@@ -1478,7 +1493,7 @@ export function SessionView({
         <span className="flex items-center gap-3 text-text-secondary">
           <span className="flex items-center gap-2">
             {strings.session.footerHoldBefore}
-            <Kbd>{isMacLikePlatform() ? '⌘[' : 'Ctrl+['}</Kbd>
+            <Kbd>{pttFriendsLabel}</Kbd>
             {strings.session.footerHoldAfter}
           </span>
           <AudioDevicePicker

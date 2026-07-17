@@ -5,7 +5,13 @@ import {
   type OnboardingStepProgress,
 } from '@/components/OnboardingStep'
 import { Kbd } from '@/components/ui/kbd'
+import {
+  comboToInlineDisplay,
+  DEFAULT_PTT_FRIENDS_COMBO,
+  parseAccelerator,
+} from '@/lib/keybindings'
 import { isMacLikePlatform } from '@/lib/utils'
+import { useSettingsStore } from '@/stores/settingsStore'
 import { strings } from '@/strings'
 
 export type TutorialStepProps = {
@@ -19,7 +25,15 @@ export function TutorialStep({
   onContinue,
   onBack,
 }: TutorialStepProps) {
-  const pttKey = isMacLikePlatform() ? '⌘[' : 'Ctrl+['
+  // The tutorial is replayable from Settings → Advanced after a rebind, so
+  // it must show the persisted binding, not the shipped default.
+  const pttFriendsAccelerator = useSettingsStore(
+    (s) => s.values.pttFriendsAccelerator
+  )
+  const pttKey = comboToInlineDisplay(
+    parseAccelerator(pttFriendsAccelerator) ?? DEFAULT_PTT_FRIENDS_COMBO,
+    isMacLikePlatform() ? 'mac' : 'other'
+  )
   const cards = strings.onboarding.tutorial.cards
 
   return (
