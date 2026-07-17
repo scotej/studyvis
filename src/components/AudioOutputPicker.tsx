@@ -14,6 +14,8 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
@@ -87,15 +89,19 @@ export function AudioOutputPicker({
           {strings.session.output.menuLabel}
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
-        {devices.map((d) => (
-          <DropdownMenuItem
-            key={d.deviceId}
-            onSelect={() => onSelect(d.deviceId)}
-            data-active={d.deviceId === currentDeviceId ? 'true' : undefined}
-          >
-            <span className="truncate">{d.label}</span>
-          </DropdownMenuItem>
-        ))}
+        {/* See AudioDevicePicker — radio semantics replace the dead
+            data-active attribute; unpinned (OS default) shows no checked
+            row deliberately. */}
+        <DropdownMenuRadioGroup
+          value={currentDeviceId ?? ''}
+          onValueChange={(deviceId) => onSelect(deviceId)}
+        >
+          {devices.map((d) => (
+            <DropdownMenuRadioItem key={d.deviceId} value={d.deviceId}>
+              <span className="truncate">{d.label}</span>
+            </DropdownMenuRadioItem>
+          ))}
+        </DropdownMenuRadioGroup>
         {devices.length === 0 ? (
           <DropdownMenuItem disabled>
             {strings.session.output.empty}

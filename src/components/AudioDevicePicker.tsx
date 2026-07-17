@@ -14,6 +14,8 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
@@ -92,15 +94,22 @@ export function AudioDevicePicker({
       <DropdownMenuContent align="end" className="min-w-[16rem]">
         <DropdownMenuLabel>{strings.session.audio.menuLabel}</DropdownMenuLabel>
         <DropdownMenuSeparator />
-        {devices.map((d) => (
-          <DropdownMenuItem
-            key={d.deviceId}
-            onSelect={() => void onSelect(d.deviceId)}
-            data-active={d.deviceId === currentDeviceId ? 'true' : undefined}
-          >
-            <span className="truncate">{d.label}</span>
-          </DropdownMenuItem>
-        ))}
+        {/* Radio semantics (menuitemradio + aria-checked + dot indicator):
+            with two identically-named devices ("USB Audio Device") the open
+            menu is otherwise the only place selection can be told apart —
+            and it used to carry a dead data-active attribute no CSS ever
+            consumed. An unpinned session (OS-default mic) has no checked
+            row, deliberately: we don't know which device the OS resolved. */}
+        <DropdownMenuRadioGroup
+          value={currentDeviceId ?? ''}
+          onValueChange={(deviceId) => void onSelect(deviceId)}
+        >
+          {devices.map((d) => (
+            <DropdownMenuRadioItem key={d.deviceId} value={d.deviceId}>
+              <span className="truncate">{d.label}</span>
+            </DropdownMenuRadioItem>
+          ))}
+        </DropdownMenuRadioGroup>
         {devices.length === 0 ? (
           <DropdownMenuItem disabled>
             {strings.session.audio.empty}
