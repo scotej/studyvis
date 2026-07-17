@@ -269,6 +269,14 @@ export function AddFriendDialog({
     const ctx = buildCtx()
     if (!ctx) return
     const words = generatePairingCode()
+    // Displace-then-own: whatever pairing was already running (the classic
+    // both-friends-hit-Generate confusion, then one switches to "Enter code")
+    // loses its only owner the moment abortRef is reassigned — every cleanup
+    // path aborts abortRef.current only. Unaborted, runPair waits forever,
+    // holds its Nostr+MQTT room open for the process lifetime, and a friend
+    // completing the old code hours later still runs persistAndFinish with
+    // the dialog long closed.
+    abortRef.current?.abort()
     const ctrl = new AbortController()
     abortRef.current = ctrl
     setPhase({ kind: 'host-waiting', words, peerArrived: false })
@@ -316,6 +324,8 @@ export function AddFriendDialog({
     async (words: string[]) => {
       const ctx = buildCtx()
       if (!ctx) return
+      // See startHost — never orphan a still-running pairing.
+      abortRef.current?.abort()
       const ctrl = new AbortController()
       abortRef.current = ctrl
       setPhase({ kind: 'join-progress', peerArrived: false })
@@ -404,12 +414,22 @@ export function AddFriendDialog({
     [onImportCard]
   )
 
+  const handleModeChange = useCallback((next: AddFriendMode) => {
+    // 'Back to cards' must not leave an invisible legacy pairing running —
+    // the card mode has no surface that could ever complete or cancel it.
+    if (next === 'card') {
+      abortRef.current?.abort()
+      abortRef.current = null
+    }
+    setMode(next)
+  }, [])
+
   return (
     <AddFriendDialogView
       open={open}
       onOpenChange={handleOpenChange}
       mode={mode}
-      onModeChange={setMode}
+      onModeChange={handleModeChange}
       missingDisplayName={!hasDisplayName}
       myCardLink={myCardLink}
       cardBuildError={cardBuildError}
