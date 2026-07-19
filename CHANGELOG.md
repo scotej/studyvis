@@ -18,13 +18,11 @@ V3 work was drafted as v1.0.4 but shipped under the **v1.0.5** tag —
 there is no v1.0.4 tag; the section below is labelled by the tag that
 shipped it.)
 
-## Unreleased
+## 1.4.0 — 2026-07-19 — multi-friend sessions, faster AI, and the verified backlog
 
 Everything merged since v1.3.1: a production-readiness audit, a settings
 GUI pass, the 26-item verified improvement backlog (#47, PRs #49–#74), and
-a follow-up wave of verified fixes. Rename this heading to the release
-version before running Release prep — both release gates require a
-non-empty section for the exact version being cut.
+a follow-up wave of verified fixes.
 
 > **After updating on Apple Silicon:** re-run the benchmark in
 > Settings → AI. Inference now uses the GPU (Metal) and is typically
