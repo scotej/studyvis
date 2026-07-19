@@ -156,13 +156,49 @@ pub fn model_install_state<R: Runtime>(
     })
 }
 
+// Removal must consult the sidecar: a running llama-server memory-maps the
+// model it serves, so deleting the directory out from under it fails partway
+// on Windows (sharing violation → broken partial install + raw OS error) and
+// on macOS "succeeds" while the unlinked multi-GB file stays alive on disk
+// and the sidecar keeps serving a model the UI says is gone. Sibling of the
+// I25/I35 lifecycle-hygiene fixes.
 #[tauri::command]
-pub fn model_remove<R: Runtime>(app: AppHandle<R>, model_id: String) -> Result<(), String> {
+pub async fn model_remove<R: Runtime>(
+    app: AppHandle<R>,
+    sidecar: State<'_, crate::commands::sidecar::SidecarState>,
+    model_id: String,
+) -> Result<(), String> {
     let dir = model_dir(&app, &model_id)?;
-    if dir.exists() {
-        fs::remove_dir_all(&dir).map_err(|e| format!("remove model dir: {e}"))?;
+    let stopped = crate::commands::sidecar::stop_if_serving_under(&sidecar, &dir).await?;
+    if !dir.exists() {
+        return Ok(());
     }
-    Ok(())
+    tauri::async_runtime::spawn_blocking(move || {
+        // On Windows, kill() (TerminateProcess) returns before the OS has
+        // necessarily released the child's file mappings, so the first unlink
+        // after a stop can still hit a sharing violation — retry briefly on
+        // the just-stopped path instead of surfacing a raw OS error for a
+        // transient state.
+        let attempts = if stopped { 10 } else { 1 };
+        let mut last: Option<std::io::Error> = None;
+        for i in 0..attempts {
+            match fs::remove_dir_all(&dir) {
+                Ok(()) => return Ok(()),
+                Err(e) => {
+                    last = Some(e);
+                    if i + 1 < attempts {
+                        std::thread::sleep(Duration::from_millis(100));
+                    }
+                }
+            }
+        }
+        Err(format!(
+            "remove model dir: {}",
+            last.expect("at least one attempt ran")
+        ))
+    })
+    .await
+    .map_err(|e| format!("remove model dir task: {e}"))?
 }
 
 #[derive(Serialize)]

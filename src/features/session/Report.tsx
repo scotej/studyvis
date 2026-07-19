@@ -83,8 +83,9 @@ export type ReportProps = {
   // #47 B3 — present only when the session auto-ended (S1 grace expiry) and
   // the store still holds the topic + password: a >20s blip strands a guest
   // while the room may still be live, invites are one-shot, and the host is
-  // heads-down. Rejoining re-enters the same room; the topic-keyed sessions
-  // upsert (I17) tolerates the re-entry.
+  // heads-down. Rejoining re-enters the same room; the second leave cycle
+  // merges into the topic-keyed row (mergeSessionStints in lifecycle.ts),
+  // so the report after a rejoin shows accumulated whole-session totals.
   onRejoin?: () => void
   // Storybook hook so a story can drive the entire data path with mock
   // data and skip the Tauri calls. Production omits it; the shell falls

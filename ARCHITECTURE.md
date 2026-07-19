@@ -134,7 +134,7 @@ The `trystero` package uses Nostr by default — a network of public WebSocket r
 - `room.onPeerJoin` / `onPeerLeave` for presence on the topic.
 
 ### Strategies
-1. **Nostr** (default, `trystero` package) — public Nostr relay network, no auth required, small message footprint. It carries all long-lived rooms (inbox, presence, session mesh).
+1. **Nostr** (default, `trystero` package) — public Nostr relay network, no auth required, small message footprint. The media-carrying session mesh is Nostr-only; the long-lived inbox + presence rooms ride it alongside the raced MQTT leg below.
 2. **MQTT** (`@trystero-p2p/mqtt`) — raced alongside Nostr for every **data-only** room: pairing (since v1.2.2) and, since the post-v1.3.1 line, presence, the inbox, and the invite send path. `joinTopic` opens one room per strategy on the same topic + password over a single shared `@trystero-p2p/core`, so a peer keeps one stable `selfId`/peerId across transports; joins/leaves are **refcounted per peer across transports** (join fires on the first transport that sees the peer, leave only when the last one loses them) and both rooms are torn down on `leave` (see `src/lib/trystero/index.ts` `mergeRooms`). This survives a dark/blocked Nostr relay set **or** a clock-skewed peer (Nostr filters ephemeral announces on `since: now()`; MQTT has no time filter and shares no infrastructure) — without it, a friend added via offline ContactCard behind a Nostr-blocking firewall showed permanently offline and every invite died. Duplicate delivery over both transports is absorbed per consumer (idempotent heartbeats, the inbox nonce replay guard, the latched invite-ACK). The media-carrying **session room stays single-strategy Nostr**: a peer connected over two transport rooms would open duplicate `RTCPeerConnection`s and double every video stream; racing it needs a dedicated design pass.
 3. **BitTorrent trackers** (`@trystero-p2p/torrent`) — available in the library as a further fallback but **not wired**.
 
@@ -153,7 +153,7 @@ All topics are 32-byte SHA-256 hashes serialized as hex.
 
 ### TURN
 
-Connections are **STUN-only by default**: no public TURN server currently ships (`PUBLIC_TURN_SERVERS` in `src/lib/trystero/ice.ts` is empty — the old free public TURN endpoints are dead and a zero-config public TURN no longer exists). The TURN path is fully wired — `iceOptionsFor` maps the user's Network preference (`auto`/`always`/`never`) to ICE config and takes effect the instant a server is added — but until one is configured there is **no relay fallback**, so the ~15% of connections behind symmetric/CGNAT/strict-firewall networks that need a relay can fail to establish. Adding a server is gated on a cost/ownership decision: a long-lived credential baked into a distributed binary is extractable (quota/billing abuse), and safe short-lived credentials require a backend we don't operate. Onboarding documents the symptom: "if you regularly connect from a corporate / school network and sessions are choppy, this is why."
+Connections are **STUN-only by default**: no public TURN server currently ships (`PUBLIC_TURN_SERVERS` in `src/lib/trystero/ice.ts` is empty — the old free public TURN endpoints are dead and a zero-config public TURN no longer exists). The TURN path is fully wired into **every** room that carries WebRTC traffic — pairing, session rooms, the per-send invite room, and the always-on inbox + presence rooms — via `iceOptionsFor`, which maps the user's Network preference (`auto`/`always`/`never`) to ICE config. It applies to the next pairing/session/invite send the instant a server is added; the always-on inbox + presence rooms capture it at join and pick a change up on relaunch (same caveat as relays). Until a server is configured there is **no relay fallback**, so the ~15% of connections behind symmetric/CGNAT/strict-firewall networks that need a relay can fail to establish. Adding a server is gated on a cost/ownership decision: a long-lived credential baked into a distributed binary is extractable (quota/billing abuse), and safe short-lived credentials require a backend we don't operate. Onboarding documents the symptom: "if you regularly connect from a corporate / school network and sessions are choppy, this is why."
 
 ## 5. Friend pairing flow
 
@@ -287,6 +287,8 @@ Nostr relays don't buffer for an absent peer, so an invite to a closed app can't
 - **Friend offline** (`InviteTimeoutError`): no peer arrived on the inbox topic within the send window. The invite is held and **re-attempted automatically when that friend's presence flips online inside the retry window**, deduped per `(recipient, session)` so a friend can never receive the same invite twice.
 - **Relay down** (`InviteRelayError`): no signaling relay was reachable at all, determined from the live relay-socket check (`relaysUnreachable`), not from trystero's `onJoinError` (which never fires for blocked relays). This is the host's own network, so no retry is queued — re-sending against dead relays would never connect.
 
+After a successful send the host lingers briefly for the recipient-signed **`invite-ack`** (#47 C2, see §7's typed-action list): a verified ACK confirms real delivery, while its absence — an older build, a slow answer, or a friend who never added you back so their inbox silently drops envelopes — renders "sent, unconfirmed" copy with a nudge to make sure they've added you back. Concurrent sends to the same friend are serialized per inbox topic (trystero's core dedupes rooms per topic, so overlapping sends would otherwise share and then destroy one raw room).
+
 ## 7. WebRTC topology
 
 Full mesh for 2–4 users. Each peer holds 1, 2, or 3 RTCPeerConnections. Audio and video tracks per peer; one shared data channel used for the audit log + score events + Pomodoro sync messages.
@@ -350,9 +352,12 @@ Every message signed with the sender's Ed25519 key. Audit + alert messages sign 
 
 ### Other typed actions (not on the audit data channel)
 
-Two presence-style signals ride trystero `makeAction`s on their own channels rather than the audit data channel. Both are backward-compatible additions — an older peer that never sends or recognizes them is unaffected:
+Several signals ride trystero `makeAction`s on their own channels rather than the audit data channel. All are backward-compatible additions — an older peer that never sends or recognizes them is unaffected:
 
 - **`camera-state`** `{ off: boolean }` — on the **session room** (S3). Broadcast on every local camera toggle, and re-sent to a peer on its `onPeerJoin` so a late joiner learns the current state. A disabled video track sends black, not a clean "off" signal, so this drives the explicit camera-off tile. An older peer simply never receives it and keeps rendering the (black) frame; no protocol break.
+- **`ptt-state`** and **`session-full`** — on the **session room** (V1-era): the not-transmitting indicator on peer tiles, and the host-enforced 4-user cap eviction notice.
+- **`session-note`** `{ v, session_topic, from_ed_pubkey, text, ts, sig }` — on the **session room** (#47 B6). Quiet in-session text notes ("brb 5", a link) so a short message doesn't break the silence or force a messenger switch. Signed over canonical bytes like audit events and verified against the signed-hello peer binding; replay-guarded by `session_topic`; text hard-capped at 500 chars; deliberately **never persisted** (stays clear of the PLAN §6 recording non-goal). Older builds never register the action and are unaffected.
+- **`invite-ack`** — on the **inbox topic** (#47 C2, recipient-signed). A delivery confirmation the sender lingers ~5 s for after an invite send; no verified ACK within the window renders honest "sent, unconfirmed" copy instead of a false "Invite sent". Wire-compatible with v1.2.x: older recipients simply never answer. This is UX legibility only — the §14 inbox-eavesdropper acceptance stands.
 - **presence goodbye** `{ leaving: true }` — on the **presence channel** (F7), an alternate shape of the existing `heartbeat` action. Sent best-effort just before `room.leave()` so subscribers flip the leaver offline immediately instead of waiting out the 60 s `ONLINE_WINDOW_MS`. It deliberately omits `ts`: an older receiver hits the `typeof ts !== 'number'` guard, drops it, and ages the peer out via the window exactly as before (the I2 receiver-clock model is untouched); a new receiver checks `leaving === true` first and marks the pubkey offline at once.
 
 ## 8. AI inference pipeline (V2+)
@@ -380,6 +385,9 @@ loop:
         skip this tick                           # never queue
     if user_on_break:
         skip
+    if camera_off or pomodoro_phase is rest:     # paused, not skipped: no
+        skip                                     # tally, no streak reset —
+                                                 # the app told you to rest
     if user_on_battery and battery_pct < 20:
         pause AI; show on-battery-paused notice   # battery, not thermal
         sleep(60s); continue
@@ -522,6 +530,7 @@ One peer is the "broadcaster" — by default, whoever started the timer.
 - **Custom durations (N5).** Splits beyond 25/5 and 50/10 (e.g. 45/15, 90/20) ride alongside the legacy fields as optional `work_ms`/`rest_ms` (see §7). A new broadcaster always also sends the closest legacy `preset`, so an older receiver renders sane work/rest timings and never sees a "custom" it can't parse; a new receiver prefers the explicit durations. This keeps a custom-duration host from stranding a friend on an older build.
 - On broadcaster disconnect: each peer waits 10 s; if no `pomodoro` message arrives, the next-oldest peer (by `joined_at`) takes over and resumes from the same `ends_at`.
 - Phase transitions ("work" → "rest" → "work") are unicast only by the broadcaster; receivers don't transition autonomously, they wait for the message. This avoids drift.
+- During a synced **rest** phase the local AI sample loop pauses (same semantics as camera-off: no sample, no skipped tally, no streak reset) — the app prescribes the break, so it doesn't score what you do during it. A peer parking the shared timer in rest to dodge scoring is accepted under the friends-only trust model (PLAN §4 principle 5).
 
 ## 11. File / module layout
 
@@ -686,14 +695,26 @@ The `Ctrl+]` AI dialog is a separate Tauri window with:
                                                     take break (V2)
                                                     leave]
                                                    │
-                                          peer count drops to 1
+                                          room empties (peer count 1)
                                                    │
                                                    ▼
-                                         [generate report]
-                                                   │
-                                                   ▼
+                                     [20 s grace window (S1)]
+                                        │                │
+                        a peer reconnects              expires
+                                        │                │
+                                        ▼                ▼
+                                  [media live]   [auto-end: persist row,
+                                     (resume)     generate report]
+                                                         │
+                                          Report offers Rejoin (#47 B3,
+                                          auto-ends only; re-entry merges
+                                          into the same sessions row)
+                                                         │
+                                                         ▼
                                          [tear down, return to idle]
 ```
+
+A deliberate local Leave skips the grace window: it persists and reports immediately with reason `user` (no Rejoin offer).
 
 ## 14. Threat model & known limitations
 
@@ -702,7 +723,7 @@ The `Ctrl+]` AI dialog is a separate Tauri window with:
 | Stranger spams my inbox | Drop messages from non-friends silently. Public Nostr relays absorb the load. | Low. |
 | Stranger who learned my Ed25519 pubkey writes to my inbox topic | Inbox-topic password also derives from my pubkey, so they can write encrypted-at-the-trystero-layer junk; we still drop after decrypt + signature check. | Wasted bandwidth only — invite payloads are *additionally* NaCl-box-encrypted to my X25519 pubkey, so the stranger can't actually read or forge real invites. Acceptable for friend-only model; consider per-friend-pair shared-secret topics in V3 if abused. |
 | Stranger replays a captured invite envelope to re-fire my invite toast/notification | The inbox receiver dedups on `(from_ed_pubkey, box nonce)` within the invite TTL, so a replayed envelope is dropped after the first delivery. | Low — one genuine invite still shows once; a stranger cannot manufacture new invites (they're signed + boxed). |
-| Stranger camped on my inbox topic is seen by the sender as "delivered" (or silently drops my invite) | A peer joining the pubkey-derived inbox topic is treated as delivery, and the sender can't distinguish the real recipient from an eavesdropper on that shared topic. | **Accepted** under friends-only — the envelope is still NaCl-box-sealed to the recipient's X25519 key, so a stranger can't read it; the worst case is a suppressed offline-retry (the host re-clicks Invite). A signed application-level invite-ACK is a flagged future hardening. |
+| Stranger camped on my inbox topic is seen by the sender as "delivered" (or silently drops my invite) | A peer joining the pubkey-derived inbox topic is treated as delivery, and the sender can't distinguish the real recipient from an eavesdropper on that shared topic. | **Accepted** under friends-only — the envelope is still NaCl-box-sealed to the recipient's X25519 key, so a stranger can't read it; the worst case is a suppressed offline-retry (the host re-clicks Invite). The signed invite-ACK shipped in #47 C2 makes delivery legible ("sent, unconfirmed" without a verified ACK) but is a UX signal, not a defense — this acceptance stands. |
 | Stranger who learned a friend's Ed25519 pubkey forges that friend's presence (online/offline) | Presence topic + password derive from the target's public pubkey and the heartbeat/goodbye payloads are unauthenticated (unlike invites, which are boxed + signed). | **Accepted** under friends-only — presence is soft UX state (a dot + invite affordance), not a data or session compromise; the worst case is a spurious "came online" notification or a griefed offline dot. Signing heartbeats would break cross-version presence (older peers send unsigned), so it's deferred rather than enforced. |
 | Stranger eavesdrops on Nostr | All topic messages are password-encrypted by trystero. Pairing words / inbox derivation are not on-the-wire. | Negligible for friend-only model. |
 | Friend disables their own AI / fakes score | Not defended. Social trust. | Accepted. |

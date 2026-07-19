@@ -17,9 +17,12 @@ on:
         type: string
         default: ''
 
+# Job-scoped (not workflow-level) so the gate job — which runs the
+# third-party toolchain action — never holds a write token; only prep pushes
+# the bump commit + tag and dispatches release.yml. Third-party actions are
+# SHA-pinned; see ci.yml's pinning note.
 permissions:
-  contents: write # push the bump commit + tag to main
-  actions: write # dispatch release.yml
+  contents: read
 
 concurrency:
   group: release-prep
@@ -30,6 +33,9 @@ jobs:
   # pushed. rustfmt is the only Rust check here — no compilation, so the
   # ubuntu runner needs no llama-server prebuild.
   gate:
+    permissions:
+      contents: read
+      actions: read # the "Require CI success" step queries the runs API
     name: Quality gate
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -85,8 +91,11 @@ jobs:
       - name: Accessibility audit (axe-core over every Storybook story)
         run: npm run check-a11y
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master; the toolchain input selects the channel
         with:
+          # With a master pin the ref no longer selects the toolchain; this
+          # input does.
+          toolchain: stable
           components: rustfmt
 
       - name: cargo fmt
@@ -118,6 +127,9 @@ jobs:
           fi
 
   prep:
+    permissions:
+      contents: write # push the bump commit + tag to main
+      actions: write # dispatch release.yml
     name: Bump, tag, trigger build
     needs: gate
     runs-on: ubuntu-latest
@@ -175,26 +187,19 @@ jobs:
       # #47 F2 — CLAUDE.md requires a CHANGELOG entry per release and the
       # Releases page is the update channel friends actually read, but nothing
       # enforced it: every draft shipped with static install boilerplate only.
-      # Fail BEFORE the irreversible bump+tag+push. This mirrors release.yml's
-      # preflight extraction EXACTLY (heading present AND non-empty body):
-      # a heading-only placeholder passing here but failing there would strand
-      # a pushed tag + bump commit with no release — the very outcome the
-      # fail-before-push promise exists to prevent.
+      # Fail BEFORE the irreversible bump+tag+push. Shares one extraction
+      # script with release.yml's preflight (heading present AND non-empty
+      # body) so the two gates cannot drift: a heading-only placeholder
+      # passing here but failing there would strand a pushed tag + bump
+      # commit with no release — exactly the drift class #74 already fixed
+      # by hand once.
       - name: Require a non-empty CHANGELOG section for the new version
         env:
           NEW: ${{ steps.ver.outputs.new }}
         run: |
-          set -euo pipefail
-          section=$(awk -v ver="$NEW" '
-            BEGIN { gsub(/\./, "\\.", ver); re = "^## " ver "([^0-9.]|$)" }
-            !hit && $0 ~ re { hit = 1; next }
-            hit && /^## /   { exit }
-            hit             { print }
-          ' CHANGELOG.md)
-          if [ -z "$(printf '%s' "$section" | tr -d '[:space:]')" ]; then
-            echo "::error::CHANGELOG.md has no '## $NEW' section with actual notes. Write the release notes, merge to main, then re-run Release prep."
-            exit 1
-          fi
+          bash scripts/changelog-section.sh "$NEW" \
+            "Write the release notes, merge to main, then re-run Release prep." \
+            > /dev/null
 
       - name: Bump version in all five files
         env:

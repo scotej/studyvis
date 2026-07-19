@@ -27,7 +27,11 @@ Linux installers are not available yet. WebKitGTK's `getDisplayMedia` support wa
 
 ## Updating
 
-There is no in-app update prompt. To upgrade:
+StudyVis never updates itself, but it can tell you when an update
+exists: Settings → About has an optional, off-by-default new-version
+check that compares against the GitHub Releases page (an anonymous
+lookup — no identifiers sent). Downloading and installing stays
+manual. To upgrade:
 
 - **macOS:** download the new `.dmg` and drag StudyVis to Applications, replacing the existing app.
 - **Windows:** download the new `.msi` and run it; it upgrades the existing install in place.

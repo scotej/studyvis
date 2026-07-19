@@ -2,7 +2,9 @@ import { verifyMessage } from '@/lib/crypto/identity'
 import { inboxPassword, inboxTopic } from '@/lib/crypto/topics'
 import { base64ToBytes, bytesToHex, hexToBytes } from '@/lib/encoding'
 import { joinTopic, type TopicRoom } from '@/lib/trystero'
+import { buildIceOptions } from '@/lib/trystero/ice'
 import { userRelayConfig } from '@/lib/trystero/relays'
+import { useSettingsStore } from '@/stores/settingsStore'
 
 import {
   INVITE_ACK_ACTION,
@@ -176,6 +178,11 @@ export function subscribeToOwnInbox(ctx: InboxContext): InboxSubscription {
       // still deliver invites. Duplicate delivery of one envelope over both
       // transports is absorbed by the PR-18 (from, nonce) replay guard below.
       strategies: ['nostr', 'mqtt'],
+      // Invite delivery arrives over a WebRTC datachannel, so the receiving
+      // side needs the user's TURN server on strict NATs just like sessions
+      // do — otherwise a TURN-configured user still can't RECEIVE invites.
+      // Captured at join time; applies after a restart (see relays.ts).
+      ...buildIceOptions(useSettingsStore.getState().values.turnPreference),
       // F1 — the inbox is a long-lived background subscriber with no dialog to
       // drive, so a join error is logged for diagnostics only. A real relay
       // outage surfaces to the user through the pairing/invite flows instead.

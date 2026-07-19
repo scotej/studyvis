@@ -48,9 +48,10 @@ export function snapshotRelayRows(): RelayRow[] {
   return rowsFromSocketMap(getRelaySocketMap(), 'nostr')
 }
 
-// #47 C3 — both transports, for the diagnostics panel. The MQTT group is
-// empty until an MQTT room has been joined (pairing is the only dual-strategy
-// site today), so the panel renders it only when present.
+// #47 C3 — both transports, for the diagnostics panel. Since #47 C1 the
+// always-on inbox + presence rooms race MQTT too, so the MQTT group
+// populates moments after launch (it was pairing-only when this shipped);
+// the panel still renders it only when present.
 export function snapshotAllRelayRows(): RelayRow[] {
   return [
     ...rowsFromSocketMap(getRelaySocketMap(), 'nostr'),

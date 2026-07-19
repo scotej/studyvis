@@ -59,6 +59,8 @@ export {
   runBenchmark,
   summariseBenchmark,
   prepareBundledBenchmarkImages,
+  isBenchmarkStale,
+  INFERENCE_ENGINE_FINGERPRINT,
   __setBenchmarkRuntime,
   __resetBenchmarkRuntime,
   BENCHMARK_SAMPLE_COUNT,

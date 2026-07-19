@@ -13,6 +13,8 @@ vi.mock('@/lib/trystero', () => {
   }
 
   const buses = new Map<string, Bus>()
+  const joinConfigs: Array<Record<string, unknown>> = []
+  const events: Array<{ type: 'join' | 'leave'; topic: string }> = []
   let nextPeer = 0
 
   function getBus(key: string): Bus {
@@ -24,7 +26,12 @@ vi.mock('@/lib/trystero', () => {
     return bus
   }
 
-  function joinTopic({ topic, password }: { topic: string; password: string }) {
+  function joinTopic(
+    config: { topic: string; password: string } & Record<string, unknown>
+  ) {
+    joinConfigs.push(config)
+    events.push({ type: 'join', topic: config.topic })
+    const { topic, password } = config
     const key = `${topic}|${password}`
     const bus = getBus(key)
     const peerId = `peer-${++nextPeer}`
@@ -84,6 +91,7 @@ vi.mock('@/lib/trystero', () => {
       leave: async (): Promise<void> => {
         if (room.left) return
         room.left = true
+        events.push({ type: 'leave', topic })
         bus.rooms.delete(peerId)
         for (const other of bus.rooms.values()) {
           for (const fn of other.onLeave) fn(peerId)
@@ -96,7 +104,11 @@ vi.mock('@/lib/trystero', () => {
     joinTopic,
     __resetBus: () => {
       buses.clear()
+      joinConfigs.length = 0
+      events.length = 0
     },
+    __getJoinConfigs: () => joinConfigs,
+    __getEvents: () => events,
   }
 })
 
@@ -109,6 +121,7 @@ import {
   signMessage,
   type Identity,
 } from '@/lib/crypto/identity'
+import { inboxTopic } from '@/lib/crypto/topics'
 import {
   buildInviteEnvelope,
   inviteFriend,
@@ -424,6 +437,108 @@ describe('invite envelope round-trip', () => {
         boxDecrypt(theirXPub, alice.identity.xPriv, nonce, ct),
     })
     expect(result).toBeNull()
+  })
+
+  // Trystero's core dedupes rooms per (appId, topic): two concurrent sends
+  // to the same friend used to share one raw room — the second's last-wins
+  // listener registration deafened the first, and the first leave()
+  // destroyed the room under the still-flying second (realistic trigger:
+  // the F6 offline-retry auto-firing on a presence flip while the host
+  // clicks Invite manually). Sends to one inbox topic are now serialized:
+  // the second send's room must not open until the first's closed.
+  test('concurrent sends to the same friend are serialized per inbox topic', async () => {
+    const sam = makeApp('Sam')
+    const alice = makeApp('Alice')
+    const inviteArrived = await awaitInvite(alice, sam.edHex, [sam])
+    const envelope = await buildInviteEnvelope(
+      sam.sender,
+      { edPubkeyHex: alice.edHex, xPubkeyHex: alice.xHex },
+      SAMPLE_SESSION
+    )
+    const [r1, r2] = await Promise.all([
+      sendInviteEnvelope(
+        { edPubkeyHex: alice.edHex, xPubkeyHex: alice.xHex },
+        envelope,
+        { sendTimeoutMs: 1_000 }
+      ),
+      sendInviteEnvelope(
+        { edPubkeyHex: alice.edHex, xPubkeyHex: alice.xHex },
+        envelope,
+        { sendTimeoutMs: 1_000 }
+      ),
+    ])
+    expect(r1).toBeTruthy()
+    expect(r2).toBeTruthy()
+    await inviteArrived.receive
+    const mod = (await import('@/lib/trystero')) as unknown as {
+      __getEvents: () => Array<{ type: 'join' | 'leave'; topic: string }>
+    }
+    // Events on Alice's inbox topic: the subscriber's join, then strictly
+    // send-join → send-leave → send-join → send-leave.
+    const topicEvents = mod
+      .__getEvents()
+      .filter((e) => e.topic === inboxTopic(alice.identity.edPub))
+    expect(topicEvents.map((e) => e.type)).toEqual([
+      'join', // Alice's inbox subscriber
+      'join',
+      'leave',
+      'join',
+      'leave',
+    ])
+    await inviteArrived.leave()
+  })
+
+  // The inbox (receive) and per-send rooms carry invites over WebRTC
+  // datachannels, so both must forward the user's TURN server — without it a
+  // TURN-configured user on a strict NAT can neither receive invites nor have
+  // a send's onPeerJoin ever fire (misreported as "friend may be offline").
+  test('inbox and invite-send rooms forward the configured TURN server', async () => {
+    const { useSettingsStore } = await import('@/stores/settingsStore')
+    const prevValues = useSettingsStore.getState().values
+    useSettingsStore.setState({
+      values: {
+        ...prevValues,
+        turnPreference: 'auto',
+        turnServer: {
+          url: 'turn:turn.example.test:3478',
+          username: 'u',
+          credential: 'c',
+        },
+      },
+    })
+    try {
+      const sam = makeApp('Sam')
+      const alice = makeApp('Alice')
+      const inviteArrived = await awaitInvite(alice, sam.edHex, [sam])
+      const envelope = await buildInviteEnvelope(
+        sam.sender,
+        { edPubkeyHex: alice.edHex, xPubkeyHex: alice.xHex },
+        SAMPLE_SESSION
+      )
+      await sendInviteEnvelope(
+        { edPubkeyHex: alice.edHex, xPubkeyHex: alice.xHex },
+        envelope,
+        { sendTimeoutMs: 1_000 }
+      )
+      await inviteArrived.receive
+      const mod = (await import('@/lib/trystero')) as unknown as {
+        __getJoinConfigs: () => Array<Record<string, unknown>>
+      }
+      const configs = mod.__getJoinConfigs()
+      expect(configs.length).toBeGreaterThanOrEqual(2)
+      for (const config of configs) {
+        expect(config.turnConfig).toEqual([
+          {
+            urls: 'turn:turn.example.test:3478',
+            username: 'u',
+            credential: 'c',
+          },
+        ])
+      }
+      await inviteArrived.leave()
+    } finally {
+      useSettingsStore.setState({ values: prevValues })
+    }
   })
 })
 

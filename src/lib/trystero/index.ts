@@ -257,7 +257,7 @@ function mergeRooms(rooms: TopicRoom[]): TopicRoom {
       }
       transports.add(index)
       if (isFirst) {
-        for (const fn of joinSubs) fn(peerId)
+        guardedFanout(joinSubs, peerId)
       }
     })
     room.onPeerLeave((peerId) => {
@@ -266,7 +266,7 @@ function mergeRooms(rooms: TopicRoom[]): TopicRoom {
       transports.delete(index)
       if (transports.size === 0) {
         peerTransports.delete(peerId)
-        for (const fn of leaveSubs) fn(peerId)
+        guardedFanout(leaveSubs, peerId)
       }
     })
   })
@@ -313,19 +313,38 @@ function mergeRooms(rooms: TopicRoom[]): TopicRoom {
   }
 }
 
+// F1 contract (see JoinErrorHandler above): a thrown subscriber must never
+// crash the room or starve subscribers registered after it. These fan-outs
+// are invoked from trystero's own internals, so an unguarded throw would
+// propagate there AND skip every later subscriber for that event (the
+// session room's cap-evict, hello re-send, and stream-binding subscribers
+// all share them). Log-and-continue per subscriber.
+function guardedFanout<Args extends unknown[]>(
+  subs: Iterable<(...args: Args) => void>,
+  ...args: Args
+): void {
+  for (const fn of subs) {
+    try {
+      fn(...args)
+    } catch (err) {
+      console.error('trystero subscriber threw:', err)
+    }
+  }
+}
+
 function wrapRoom(room: Room): TopicRoom {
   const joinSubs = new Set<(peerId: string) => void>()
   const leaveSubs = new Set<(peerId: string) => void>()
   const streamSubs = new Set<PeerStreamHandler>()
 
   room.onPeerJoin((peerId) => {
-    for (const fn of joinSubs) fn(peerId)
+    guardedFanout(joinSubs, peerId)
   })
   room.onPeerLeave((peerId) => {
-    for (const fn of leaveSubs) fn(peerId)
+    guardedFanout(leaveSubs, peerId)
   })
   room.onPeerStream((stream, peerId, metadata) => {
-    for (const fn of streamSubs) fn(stream, peerId, metadata)
+    guardedFanout(streamSubs, stream, peerId, metadata)
   })
 
   return {

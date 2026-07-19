@@ -17,7 +17,9 @@
 #
 # Pinned to llama.cpp release tag b9095 (commit f3c3e0e9a087835639733485b8900b195ba4ca47).
 # Bump LLAMA_RELEASE_TAG below + refresh SHA256s after running this script
-# against fresh artifacts.
+# against fresh artifacts. A new build changes measured inference speed, so
+# also bump INFERENCE_ENGINE_FINGERPRINT in src/features/ai/benchmark.ts —
+# it flags persisted benchmarks as stale in the model picker.
 #
 # macOS ships bash 3.2 which has no associative arrays, so this script uses
 # case statements for the per-triple metadata.
@@ -142,7 +144,13 @@ fetch_one() (
   trap 'rm -rf "$tmp"' EXIT
   archive="${tmp}/${asset}"
   echo "fetch-llama-server: downloading $asset ..."
-  curl -fL --progress-bar -o "$archive" "${LLAMA_RELEASE_BASE}/${asset}"
+  # Retries absorb transient GitHub blips: this runs cold in both CI Rust
+  # legs on every push and inside the release publish job AFTER the immutable
+  # tag exists, where a single-shot failure forces a manual re-run of the
+  # whole release build. The pinned SHA256 check below remains the integrity
+  # gate ordering.
+  curl -fL --progress-bar --retry 5 --retry-delay 2 --retry-all-errors \
+    --connect-timeout 30 -o "$archive" "${LLAMA_RELEASE_BASE}/${asset}"
   verify_sha256 "$archive" "$sha"
 
   extract_dir="${tmp}/extracted"

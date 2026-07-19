@@ -33,6 +33,7 @@ import {
 import { getHfTokenRuntime } from './hfToken'
 import { SUPPORTED_MODELS, type ModelSpec } from './models'
 import { useModelStore } from './modelStore'
+import { useSessionStore } from '@/stores/sessionStore'
 import { strings } from '@/strings'
 
 type CardState = PickerStateForModel
@@ -49,6 +50,9 @@ export function ModelPickerContainer() {
   )
   const forget = useModelStore((s) => s.forget)
   const status = useModelStore((s) => s.status)
+  // Settings is reachable mid-session (#47 B2); lock the mutating picker
+  // actions while a session is live — see ModelPickerProps.actionsLocked.
+  const sessionActive = useSessionStore((s) => s.status === 'active')
 
   const [cards, setCards] = useState<Record<string, CardState>>(() =>
     emptyPickerState()
@@ -239,6 +243,21 @@ export function ModelPickerContainer() {
 
   const runBenchmarkFor = useCallback(
     async (spec: ModelSpec) => {
+      // Re-checked HERE, not just via the disabled buttons: a download
+      // started before the session can resolve minutes into it and chain
+      // straight into this benchmark, whose first act stops the sidecar the
+      // live sample loop is using (the loop has no restart path). The model
+      // stays installed; the card returns to idle with a Re-benchmark
+      // affordance that unlocks when the session ends.
+      if (useSessionStore.getState().status === 'active') {
+        updateCard(spec.id, {
+          phase: 'idle',
+          downloadProgress: null,
+          errorMessage: null,
+        })
+        toast.info(strings.ai.picker.benchmarkAfterSession)
+        return
+      }
       const runtime = getDownloadRuntime()
       updateCard(spec.id, {
         phase: 'benchmark-starting',
@@ -473,6 +492,7 @@ export function ModelPickerContainer() {
       onSaveHfToken,
       onClearHfToken,
     },
+    actionsLocked: sessionActive,
   }
 
   return <ModelPicker {...props} />

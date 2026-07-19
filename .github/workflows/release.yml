@@ -9,6 +9,12 @@ on:
   # workflow on the tag ref instead — which requires this trigger to exist.
   workflow_dispatch:
 
+# See ci.yml's pinning note: third-party actions are SHA-pinned because this
+# workflow mints the unsigned installers friends manually install. The
+# publish job re-declares the contents: write it needs.
+permissions:
+  contents: read
+
 jobs:
   # #47 F1/F2 — fail fast before any build minutes are spent:
   #   - workflow_dispatch defaults to main, and 'main' flowing into
@@ -47,19 +53,10 @@ jobs:
         run: |
           set -euo pipefail
           ver="${GITHUB_REF_NAME#v}"
-          # Section = lines between '## <ver>' and the next '## ' heading.
-          # Anchored regex (dots escaped, boundary after) so 1.3.1 cannot
-          # match a 1.3.10 heading.
-          section=$(awk -v ver="$ver" '
-            BEGIN { gsub(/\./, "\\.", ver); re = "^## " ver "([^0-9.]|$)" }
-            !hit && $0 ~ re { hit = 1; next }
-            hit && /^## /   { exit }
-            hit             { print }
-          ' CHANGELOG.md)
-          if [ -z "$(printf '%s' "$section" | tr -d '[:space:]')" ]; then
-            echo "::error::CHANGELOG.md has no '## $ver' section. Write the release notes on main, re-tag, and re-run — the Releases page is the update channel."
-            exit 1
-          fi
+          # Shared with release-prep's gate (scripts/changelog-section.sh)
+          # so the two checks cannot drift — see the script header.
+          section=$(bash scripts/changelog-section.sh "$ver" \
+            "Write the release notes on main, re-tag, and re-run — the Releases page is the update channel.")
           boiler='Friends-only release — the macOS app is ad-hoc signed (not notarized);
           the Windows installer is unsigned. See INSTALL.md for first-run steps:
           macOS users right-click the app and choose Open the first time;
@@ -107,11 +104,14 @@ jobs:
           cache: 'npm'
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master; the toolchain input selects the channel
         with:
+          # With a master pin the ref no longer selects the toolchain; this
+          # input does.
+          toolchain: stable
           targets: ${{ matrix.rust-targets }}
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
         with:
           workspaces: src-tauri -> target
 
@@ -126,7 +126,7 @@ jobs:
           done
 
       - name: Build & publish via tauri-action
-        uses: tauri-apps/tauri-action@v0.6.2
+        uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # v0.6.2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:

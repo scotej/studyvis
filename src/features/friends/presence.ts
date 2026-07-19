@@ -22,7 +22,9 @@
 import { hexToBytes } from '@/lib/crypto/identity'
 import { presencePassword, presenceTopic } from '@/lib/crypto/topics'
 import { joinTopic, type TopicConfig, type TopicRoom } from '@/lib/trystero'
+import { buildIceOptions } from '@/lib/trystero/ice'
 import { userRelayConfig } from '@/lib/trystero/relays'
+import { useSettingsStore } from '@/stores/settingsStore'
 
 export const HEARTBEAT_ACTION = 'heartbeat'
 export const HEARTBEAT_INTERVAL_MS = 30_000
@@ -125,6 +127,13 @@ export function startPresence(ctx: PresenceContext): PresenceSubscription {
     // showed permanently offline. Heartbeats are idempotent, so the merged
     // room's duplicate delivery is harmless (re-stamp of last-seen).
     strategies: ['nostr', 'mqtt'],
+    // Heartbeats ride WebRTC datachannels, so behind a symmetric/CGNAT
+    // network they need the user's TURN server exactly like sessions do —
+    // without it every friend shows permanently offline even after the user
+    // configured TURN to fix precisely that network. Captured at join time:
+    // this room lives for the whole process, so a TURN change applies here
+    // after a restart (same caveat as relays; see lib/trystero/relays.ts).
+    ...buildIceOptions(useSettingsStore.getState().values.turnPreference),
     // F1 — presence is a background channel; a join error is logged only.
     onJoinError: (details) =>
       console.warn('presence (own) room join error:', details.error),
@@ -138,7 +147,9 @@ export function startPresence(ctx: PresenceContext): PresenceSubscription {
     // up to HEARTBEAT_INTERVAL_MS to see us as online. This only triggers a
     // send; the receiver still derives "online" from its own clock (above).
     ownJoinUnsub = ownRoom.onPeerJoin(() => {
-      void ownAction.send({ ts: now() })
+      // Same rejection guard as the interval sender below — a merged-room
+      // send is a Promise.all across transports.
+      void ownAction.send({ ts: now() }).catch(() => {})
     })
   }
 
@@ -161,6 +172,8 @@ export function startPresence(ctx: PresenceContext): PresenceSubscription {
       relayConfig: userRelayConfig(),
       // #47 C1 — see the own-room note above.
       strategies: ['nostr', 'mqtt'],
+      // TURN for the datachannel leg — see the own-room note above.
+      ...buildIceOptions(useSettingsStore.getState().values.turnPreference),
       onJoinError: (details) =>
         console.warn('presence (friend) room join error:', details.error),
     })
@@ -219,7 +232,12 @@ export function startPresence(ctx: PresenceContext): PresenceSubscription {
   // interval before either side flips to "online".
   const send = () => {
     const payload: HeartbeatPayload = { ts: now() }
-    for (const fn of heartbeatSenders) void fn(payload)
+    for (const fn of heartbeatSenders) {
+      // The merged room's send is a Promise.all across transports; a
+      // datachannel dying mid-send must not surface as an unhandled
+      // rejection every 30 seconds. Mirrors sendGoodbye below.
+      void fn(payload).catch(() => {})
+    }
   }
   send()
   const heartbeatHandle = setInterval(send, intervalMs)

@@ -15,6 +15,9 @@ export type UseIdentityResult = {
   // #47 E1 — which failure produced status 'error' ('file' vs
   // 'keys-missing'); null outside the error state.
   errorKind: IdentityErrorKind | null
+  // The parsed identity.json behind a 'keys-missing' error — carries the
+  // fingerprint + display name the Recover flow preserves. Null otherwise.
+  staleRecord: IdentityRecord | null
   actions: IdentityActions
 }
 
@@ -28,6 +31,7 @@ export function useIdentity(): UseIdentityResult {
   const identity = useIdentityStore((s) => s.identity)
   const status = useIdentityStore((s) => s.status)
   const errorKind = useIdentityStore((s) => s.errorKind)
+  const staleRecord = useIdentityStore((s) => s.staleRecord)
   const actions = useIdentityStore((s) => s.actions)
-  return { identity, status, errorKind, actions }
+  return { identity, status, errorKind, staleRecord, actions }
 }

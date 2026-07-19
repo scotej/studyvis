@@ -3,8 +3,10 @@ import { inboxPassword, inboxTopic } from '@/lib/crypto/topics'
 import { bytesToBase64, bytesToHex, hexToBytes } from '@/lib/encoding'
 import { pairingRelaysUnreachable } from '@/lib/relayDiagnostics'
 import { joinTopic } from '@/lib/trystero'
+import { buildIceOptions } from '@/lib/trystero/ice'
 import { userRelayConfig } from '@/lib/trystero/relays'
 import { useSessionStore } from '@/stores/sessionStore'
+import { useSettingsStore } from '@/stores/settingsStore'
 
 import {
   INVITE_ACK_ACTION,
@@ -150,26 +152,60 @@ export async function buildInviteEnvelope(
   }
 }
 
+type SendEnvelopeOpts = {
+  sendTimeoutMs?: number
+  // #47 C2 — session topic the delivery ACK must name; when provided the
+  // sender lingers ackTimeoutMs for a verified ACK and reports it.
+  ackSessionTopic?: string
+  ackTimeoutMs?: number
+  // F1/F6 test seam — overrides the live relay-reachability read at timeout.
+  isRelayUnreachable?: () => boolean
+}
+
+// Two concurrent sends to the same friend collide inside trystero: its core
+// dedupes rooms per (appId, topic), so the second joinTopic gets the SAME
+// raw room whose last-wins listener registration disconnects the first
+// send's onPeerJoin/ACK handlers, and whichever send finishes first calls
+// room.leave() — destroying the shared room under the other mid-flight. The
+// realistic trigger is the F6 offline-retry auto-firing on a presence flip
+// at the moment the host clicks Invite manually. Serialize per inbox topic:
+// each send awaits the previous one's FULL lifecycle (its finally closes
+// the room before the promise settles).
+const sendChains = new Map<string, Promise<unknown>>()
+
 // Joins the recipient's inbox topic, sends one invite envelope as
 // makeAction(INVITE_ACTION), then leaves. Caller awaits the full lifecycle —
 // the room is fully closed when the promise settles, including on timeout.
 export async function sendInviteEnvelope(
   recipient: InviteRecipient,
   envelope: InviteEnvelope,
-  opts: {
-    sendTimeoutMs?: number
-    // #47 C2 — session topic the delivery ACK must name; when provided the
-    // sender lingers ackTimeoutMs for a verified ACK and reports it.
-    ackSessionTopic?: string
-    ackTimeoutMs?: number
-    // F1/F6 test seam — overrides the live relay-reachability read at timeout.
-    isRelayUnreachable?: () => boolean
-  } = {}
+  opts: SendEnvelopeOpts = {}
 ): Promise<InviteSendResult> {
   const recipientEdPub = hexToBytes(recipient.edPubkeyHex)
   if (recipientEdPub.length !== 32) {
     throw new Error('recipient ed_pubkey must decode to 32 bytes')
   }
+  const chainKey = inboxTopic(recipientEdPub)
+  const prev = sendChains.get(chainKey) ?? Promise.resolve()
+  const run = prev.then(() =>
+    sendInviteEnvelopeNow(recipientEdPub, recipient, envelope, opts)
+  )
+  // The chain tail swallows this send's outcome so a failed send never
+  // poisons the next one; the map entry is dropped once the topic is idle.
+  const tail = run.catch(() => {})
+  sendChains.set(chainKey, tail)
+  void tail.then(() => {
+    if (sendChains.get(chainKey) === tail) sendChains.delete(chainKey)
+  })
+  return run
+}
+
+async function sendInviteEnvelopeNow(
+  recipientEdPub: Uint8Array,
+  recipient: InviteRecipient,
+  envelope: InviteEnvelope,
+  opts: SendEnvelopeOpts
+): Promise<InviteSendResult> {
   const timeoutMs = opts.sendTimeoutMs ?? DEFAULT_SEND_TIMEOUT_MS
   // #47 C1 — the send path now races both transports, so the network-down
   // verdict at timeout must consider both socket maps (the same PR-21
@@ -184,6 +220,11 @@ export async function sendInviteEnvelope(
     // them first, and the ACK listener latches a boolean so duplicate
     // delivery is harmless.
     strategies: ['nostr', 'mqtt'],
+    // onPeerJoin fires only after the WebRTC handshake, so a strict-NAT send
+    // without the user's TURN server times out and misreports "friend may be
+    // offline" — the exact case the TURN setting exists to fix. This room is
+    // per-send, so a TURN change applies on the next invite, no restart.
+    ...buildIceOptions(useSettingsStore.getState().values.turnPreference),
   })
   const action = room.makeAction<InviteEnvelope>(INVITE_ACTION)
 

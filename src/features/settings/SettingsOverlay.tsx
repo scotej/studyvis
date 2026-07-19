@@ -23,6 +23,7 @@ export function SettingsOverlay({
   onClose,
 }: SettingsOverlayProps) {
   const rootRef = useRef<HTMLDivElement | null>(null)
+  const openerRef = useRef<HTMLElement | null>(null)
 
   // Esc closes the overlay — but only when no OTHER modal is open: a Radix
   // dialog inside Settings (confirm sheets, etc.) portals to <body> and owns
@@ -42,12 +43,43 @@ export function SettingsOverlay({
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [onClose])
 
+  // Dialog-pattern focus contract (WCAG 2.4.3): Home marks the session
+  // subtree inert while this overlay is up, which silently drops focus to
+  // <body> — a keyboard/SR user got no announcement the dialog opened and
+  // had to Tab from the document top; on close, focus landed back at the
+  // top instead of on the gear button that opened it. Capture the opener,
+  // move focus onto the dialog root, restore on unmount. Home removes the
+  // overlay and the inert attribute in the same commit, so by the time this
+  // cleanup runs the opener is un-inerted again; a disconnected opener (a
+  // dismissed error toast's "Open settings" action) is skipped.
+  useEffect(() => {
+    // Capture-once via ref: StrictMode's dev double-invoke re-runs this
+    // setup after the first run already moved focus onto the dialog, so a
+    // per-run capture would record the dialog itself (or <body>) as the
+    // opener and restore focus nowhere. The ref survives the remount; the
+    // contains() guard skips any capture that already landed inside the
+    // overlay.
+    if (
+      !openerRef.current &&
+      document.activeElement instanceof HTMLElement &&
+      !rootRef.current?.contains(document.activeElement)
+    ) {
+      openerRef.current = document.activeElement
+    }
+    rootRef.current?.focus()
+    return () => {
+      const opener = openerRef.current
+      if (opener && opener.isConnected) opener.focus()
+    }
+  }, [])
+
   return (
     <div
       ref={rootRef}
       role="dialog"
       aria-modal="true"
       aria-label={strings.settings.heading}
+      tabIndex={-1}
       className="fixed inset-0 overflow-y-auto bg-bg-base"
       style={{ zIndex: tokens.zIndex.overlay }}
     >

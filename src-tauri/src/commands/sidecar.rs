@@ -211,14 +211,12 @@ pub async fn sidecar_start<R: Runtime>(
     Ok(port)
 }
 
-#[tauri::command]
-pub async fn sidecar_stop(state: State<'_, SidecarState>) -> Result<(), String> {
-    let arc = state.0.clone();
-    let mut guard = arc.lock().await;
-    // Bumping the generation tells the in-flight watcher to exit instead of
-    // restarting on the upcoming Terminated event. We wipe every field
-    // sidecar_status reports so a follow-up status() doesn't return stale
-    // model/mmproj metadata while running=false.
+// Bumping the generation tells the in-flight watcher to exit instead of
+// restarting on the upcoming Terminated event. We wipe every field
+// sidecar_status reports so a follow-up status() doesn't return stale
+// model/mmproj metadata while running=false. Shared by sidecar_stop and the
+// model_remove serving-check so the two teardown paths can't drift.
+fn take_child_and_wipe(guard: &mut SidecarInner) -> Option<CommandChild> {
     guard.generation = guard.generation.wrapping_add(1);
     let child = guard.child.take();
     guard.port = None;
@@ -227,6 +225,14 @@ pub async fn sidecar_stop(state: State<'_, SidecarState>) -> Result<(), String> 
     guard.ctx_size = None;
     guard.errored = false;
     guard.last_error = None;
+    child
+}
+
+#[tauri::command]
+pub async fn sidecar_stop(state: State<'_, SidecarState>) -> Result<(), String> {
+    let arc = state.0.clone();
+    let mut guard = arc.lock().await;
+    let child = take_child_and_wipe(&mut guard);
     drop(guard);
     if let Some(child) = child {
         child
@@ -234,6 +240,36 @@ pub async fn sidecar_stop(state: State<'_, SidecarState>) -> Result<(), String> 
             .map_err(|e| format!("kill llama-server: {e}"))?;
     }
     Ok(())
+}
+
+// model_remove's pre-delete check: when the running sidecar is serving a
+// file under `dir` (its model or mmproj — both recorded at spawn), stop it
+// first and report true. The check lives in Rust because SidecarInner is the
+// truth about the child process — the JS sidecar store can lag the
+// crash-restart watcher's respawns. Paths compare via starts_with on the
+// same model_dir-built prefix the spawn path came from (no canonicalize: the
+// dir is about to be deleted, and Windows canonicalize returns \\?\-prefixed
+// paths that would break the comparison). An advanced user's custom GGUF
+// outside the models root never matches, by design.
+pub async fn stop_if_serving_under(state: &SidecarState, dir: &Path) -> Result<bool, String> {
+    let arc = state.0.clone();
+    let mut guard = arc.lock().await;
+    let serving = guard
+        .model
+        .iter()
+        .chain(guard.mmproj.iter())
+        .any(|p| Path::new(p).starts_with(dir));
+    if !serving {
+        return Ok(false);
+    }
+    let child = take_child_and_wipe(&mut guard);
+    drop(guard);
+    if let Some(child) = child {
+        child
+            .kill()
+            .map_err(|e| format!("kill llama-server: {e}"))?;
+    }
+    Ok(true)
 }
 
 #[tauri::command]
@@ -363,6 +399,10 @@ fn rotate_log_if_needed(path: &Path, max_bytes: u64) {
 // no GPU backend, so 0 stays there. If GPU contention with the WebRTC tiles
 // ever materializes, gate this behind a Settings → AI toggle rather than
 // reverting to CPU-only for everyone.
+//
+// Changing this value changes measured inference speed: bump
+// INFERENCE_ENGINE_FINGERPRINT in src/features/ai/benchmark.ts so persisted
+// benchmarks read as stale and users get the re-measure hint.
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 const N_GPU_LAYERS: &str = "99";
 #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]

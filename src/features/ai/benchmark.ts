@@ -41,6 +41,18 @@ const BENCHMARK_SCREEN_HEIGHT = Math.round((SCREEN_FRAME_MAX_WIDTH * 9) / 16)
 // structure to a real session.
 const BENCHMARK_TOPIC = 'Studying'
 
+// Identifies the inference engine a benchmark measured: the pinned
+// llama.cpp build (scripts/fetch-llama-server.sh LLAMA_RELEASE_TAG /
+// build-llama-server.sh) + the spawn flags that change throughput
+// (N_GPU_LAYERS in src-tauri/src/commands/sidecar.rs). Bump this whenever
+// either changes materially — a persisted benchmark from a different engine
+// is then flagged stale in the picker so the user re-measures (e.g. the D2
+// Metal-offload change made pre-existing Apple Silicon numbers 5-10x too
+// slow, silently locking cadence to the CPU-era floor). Deliberately NOT
+// __APP_VERSION__: most releases don't touch the engine, and nagging every
+// update would train users to ignore the hint.
+export const INFERENCE_ENGINE_FINGERPRINT = 'b9095-ngl99'
+
 export type BenchmarkResult = {
   // Wall-clock seconds per chat-completion request, in invocation order.
   samplesSec: number[]
@@ -53,6 +65,19 @@ export type BenchmarkResult = {
   sampleIntervalSec: number
   // Unix epoch seconds when the benchmark completed.
   completedAtSec: number
+  // INFERENCE_ENGINE_FINGERPRINT at measurement time. Absent on records
+  // written before the field existed — all of which predate the Metal
+  // offload, so absence correctly reads as stale. Additive JSON: older
+  // builds ignore it.
+  engineFingerprint?: string
+}
+
+// A persisted benchmark measured on a different engine build/flags (or one
+// predating the stamp). Its numbers still drive cadence — a stale floor is
+// conservative and safe — but the picker shows a re-measure hint instead of
+// presenting the speed as current.
+export function isBenchmarkStale(result: BenchmarkResult): boolean {
+  return result.engineFingerprint !== INFERENCE_ENGINE_FINGERPRINT
 }
 
 export type BenchmarkProgress =
@@ -257,7 +282,14 @@ export function summariseBenchmark({
     sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid]
   const p95Sec = sorted[sorted.length - 1]
   const sampleIntervalSec = Math.max(5, Math.ceil(p95Sec + 1))
-  return { samplesSec, p50Sec, p95Sec, sampleIntervalSec, completedAtSec }
+  return {
+    samplesSec,
+    p50Sec,
+    p95Sec,
+    sampleIntervalSec,
+    completedAtSec,
+    engineFingerprint: INFERENCE_ENGINE_FINGERPRINT,
+  }
 }
 
 // Turns a label like "model.gguf" path into a stable model-string for the

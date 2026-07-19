@@ -2,7 +2,11 @@ import { toast } from 'sonner'
 
 import { snapshotFocusForReport } from '@/features/ai/focusStore'
 import { sessionTopic as deriveSessionTopic } from '@/lib/crypto/topics'
-import { sessionsInsert } from '@/lib/db/sessions'
+import {
+  sessionsGet,
+  sessionsInsert,
+  type SessionRecord,
+} from '@/lib/db/sessions'
 import { bytesToBase64 } from '@/lib/encoding'
 import { joinTopic, type TopicRoom } from '@/lib/trystero'
 import { buildIceOptions } from '@/lib/trystero/ice'
@@ -123,6 +127,53 @@ function logJoinError(details: { error: string }): void {
   console.warn('session room join error:', details.error)
 }
 
+// Re-entering the same room — Rejoin after a grace-window auto-end (#47 B3)
+// or a guest re-invited to a live session they left earlier — runs a second
+// leave cycle against the SAME topic-keyed sessions row. The Rust upsert is
+// authoritative-overwrite for started_at/ended_at/total_minutes (I17: a
+// re-summarize must be able to correct them), so persisting the tail stint
+// verbatim would rewind the row: a 60-minute stint plus a 10-minute rejoin
+// recorded 10 minutes starting at the rejoin, under-counting daily stats,
+// silently breaking streaks, and collapsing stint-1 audit events into the
+// timeline's 00:00. The one caller merges instead: earliest start, summed
+// minutes (the between-stint gap is deliberately not studied time), union
+// of peers. score/focused_pct stay last-scored-stint-wins via the Rust
+// COALESCE — score continuity across a rejoin is a separate, larger change.
+export function mergeSessionStints(
+  prior: Pick<
+    SessionRecord,
+    'started_at' | 'total_minutes' | 'peer_pubkeys'
+  > | null,
+  stint: { startedAt: number; totalMinutes: number; peerPubkeys: string | null }
+): { startedAt: number; totalMinutes: number; peerPubkeys: string | null } {
+  if (!prior) return stint
+  return {
+    startedAt: Math.min(prior.started_at ?? stint.startedAt, stint.startedAt),
+    totalMinutes: (prior.total_minutes ?? 0) + stint.totalMinutes,
+    peerPubkeys: unionPeerPubkeys(prior.peer_pubkeys, stint.peerPubkeys),
+  }
+}
+
+function parsePeerList(json: string | null): string[] {
+  if (!json) return []
+  try {
+    const arr: unknown = JSON.parse(json)
+    return Array.isArray(arr)
+      ? arr.filter((x): x is string => typeof x === 'string')
+      : []
+  } catch {
+    return []
+  }
+}
+
+// Union in the canonical shape sessionStore.collectPeerPubkeys produces:
+// sorted, deduped, NULL when empty (a peerless stint must not erase peers
+// the prior stint saw — matching the Rust COALESCE's null-preserving intent).
+function unionPeerPubkeys(a: string | null, b: string | null): string | null {
+  const union = [...new Set([...parsePeerList(a), ...parsePeerList(b)])].sort()
+  return union.length > 0 ? JSON.stringify(union) : null
+}
+
 // Single teardown path: leaves trystero, generates the V2-P8 post-session
 // report by snapshotting per-user score / focused-time / declared topic
 // from in-memory stores BEFORE reset() clears anything, and upserts a
@@ -183,13 +234,24 @@ export function buildLeaveHandler(args: {
       console.error('audit flushPending failed:', err)
     }
 
+    // A prior row for this topic can only be an earlier stint of this same
+    // session (the topic derives from 32 random bytes) — merge rather than
+    // rewind it. Read failure degrades to stint-only values (pre-merge
+    // behavior) instead of blocking persistence.
+    let merged = { startedAt: args.startedAt, totalMinutes, peerPubkeys }
+    try {
+      merged = mergeSessionStints(await sessionsGet(args.topic), merged)
+    } catch (err) {
+      console.error('sessions_get for the re-entry merge failed:', err)
+    }
+
     try {
       await sessionsInsert({
         id: args.topic,
-        startedAt: args.startedAt,
+        startedAt: merged.startedAt,
         endedAt,
-        totalMinutes,
-        peerPubkeys,
+        totalMinutes: merged.totalMinutes,
+        peerPubkeys: merged.peerPubkeys,
         declaredTopic: initialDeclaredTopic,
         score: focusSnapshot.score,
         focusedPct: focusSnapshot.focusedPct,

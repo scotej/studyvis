@@ -94,6 +94,26 @@ describe('trystero wrapRoom fanout', () => {
     expect(b).toHaveBeenCalledWith('peer-2')
   })
 
+  // F1 contract: the JoinErrorHandler comment promises a thrown handler
+  // never crashes the room — which also means one throwing subscriber must
+  // not starve the subscribers registered after it (cap-evict, hello
+  // re-send, and stream binding share these fan-outs).
+  test('a throwing subscriber does not starve later subscribers or the room', () => {
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const room = joinTopic({ topic: 't', password: 'p' })
+    const boom = vi.fn(() => {
+      throw new Error('subscriber exploded')
+    })
+    const after = vi.fn()
+    room.onPeerJoin(boom)
+    room.onPeerJoin(after)
+    expect(() => captured.onPeerJoin?.('peer-3')).not.toThrow()
+    expect(boom).toHaveBeenCalled()
+    expect(after).toHaveBeenCalledWith('peer-3')
+    expect(errSpy).toHaveBeenCalled()
+    errSpy.mockRestore()
+  })
+
   test('onPeerLeave fans out and unsubscribe is independent of onPeerJoin', () => {
     const room = joinTopic({ topic: 't', password: 'p' })
     const left = vi.fn()

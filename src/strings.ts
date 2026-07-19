@@ -1103,11 +1103,14 @@ export const strings = {
         label: 'Connection',
         help: 'Live status of the signaling relays StudyVis uses to find your friends. This is a local read — nothing is sent anywhere.',
         empty: 'No relay connections yet. They open a moment after launch.',
-        // #47 C3 — pairing races two transports; label each group so a
-        // Nostr-blocked/MQTT-working network reads honestly.
+        // #47 C3 — two transports, labelled so a Nostr-blocked/MQTT-working
+        // network reads honestly. Since #47 C1 the MQTT brokers back
+        // presence, invites, and pairing alongside the Nostr relays, so
+        // these sockets are open from launch — the old '(used while
+        // pairing)' qualifier misdescribed what the user was looking at.
         transport: {
           nostr: 'Nostr relays',
-          mqtt: 'MQTT brokers (used while pairing)',
+          mqtt: 'MQTT brokers',
         },
         status: {
           connected: 'Connected',
@@ -1133,7 +1136,7 @@ export const strings = {
         },
         turn: {
           label: 'TURN server',
-          help: 'A TURN relay gets you through strict firewalls and NATs. Self-host coturn, or use a provider. All three fields are required to enable it.',
+          help: 'A TURN relay gets you through strict firewalls and NATs. Self-host coturn, or use a provider. All three fields are required to enable it. Sessions, pairing, and invites use it right away; presence and invite delivery pick it up after a restart.',
           urlLabel: 'TURN URL',
           urlPlaceholder: 'turn:turn.example.com:3478',
           urlAriaLabel: 'TURN server URL',
@@ -1347,6 +1350,20 @@ export const strings = {
       ariaLabel: 'Vision model picker',
       heading: 'Pick a vision model',
       body: 'The model runs on your own machine and judges only your camera and screen. Smaller is faster; bigger is more thorough.',
+      // Settings is reachable mid-session (#47 B2); the mutating picker
+      // actions share the live sample loop's sidecar, so they stay locked
+      // until the session ends.
+      lockedDuringSession:
+        'Model changes unlock after your session ends — re-measuring or removing a model now would interrupt live focus checks.',
+      // Shown when a persisted benchmark predates the current inference
+      // engine (INFERENCE_ENGINE_FINGERPRINT) — e.g. CPU-era numbers after
+      // the Metal-offload update.
+      staleBenchmark:
+        'Measured on an older StudyVis — re-run the benchmark for current numbers.',
+      // A download that resolves mid-session must not chain into the
+      // benchmark (it would stop the live sample loop's sidecar).
+      benchmarkAfterSession:
+        'Model installed. Run its benchmark after your session ends — measuring now would interrupt live focus checks.',
       pills: {
         gated: 'Gated',
         installed: 'Installed',

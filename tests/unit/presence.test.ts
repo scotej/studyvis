@@ -12,6 +12,7 @@ vi.mock('@/lib/trystero', () => {
     left: boolean
   }
   const buses = new Map<string, Bus>()
+  const joinConfigs: Array<Record<string, unknown>> = []
   let nextPeer = 0
 
   function getBus(key: string): Bus {
@@ -23,7 +24,11 @@ vi.mock('@/lib/trystero', () => {
     return bus
   }
 
-  function joinTopic({ topic, password }: { topic: string; password: string }) {
+  function joinTopic(
+    config: { topic: string; password: string } & Record<string, unknown>
+  ) {
+    joinConfigs.push(config)
+    const { topic, password } = config
     const key = `${topic}|${password}`
     const bus = getBus(key)
     const peerId = `peer-${++nextPeer}`
@@ -72,7 +77,14 @@ vi.mock('@/lib/trystero', () => {
       },
     }
   }
-  return { joinTopic, __resetBus: () => buses.clear() }
+  return {
+    joinTopic,
+    __resetBus: () => {
+      buses.clear()
+      joinConfigs.length = 0
+    },
+    __getJoinConfigs: () => joinConfigs,
+  }
 })
 
 import { generateIdentity, bytesToHex } from '@/lib/crypto/identity'
@@ -331,5 +343,54 @@ describe('startPresence updateFriends (#47 C6)', () => {
 
     await myPresence.leave()
     await friendPresence.leave()
+  })
+})
+
+// The presence datachannels need the user's TURN server on strict NATs just
+// like sessions do — a STUN-only presence room shows every friend permanently
+// offline for exactly the user who configured TURN to fix that network.
+describe('startPresence TURN forwarding', () => {
+  test('own and friend rooms carry the configured TURN server', async () => {
+    const { useSettingsStore } = await import('@/stores/settingsStore')
+    const prevValues = useSettingsStore.getState().values
+    useSettingsStore.setState({
+      values: {
+        ...prevValues,
+        turnPreference: 'auto',
+        turnServer: {
+          url: 'turn:turn.example.test:3478',
+          username: 'u',
+          credential: 'c',
+        },
+      },
+    })
+    try {
+      const me = generateIdentity()
+      const friend = generateIdentity()
+      const presence = startPresence({
+        myEdPubkey: me.edPub,
+        friends: [{ ed_pubkey_hex: bytesToHex(friend.edPub) }],
+        onPresenceChange: () => {},
+        intervalMs: 60_000,
+        sweepIntervalMs: 60_000,
+      })
+      const mod = (await import('@/lib/trystero')) as unknown as {
+        __getJoinConfigs: () => Array<Record<string, unknown>>
+      }
+      const configs = mod.__getJoinConfigs()
+      expect(configs.length).toBe(2) // own room + one friend room
+      for (const config of configs) {
+        expect(config.turnConfig).toEqual([
+          {
+            urls: 'turn:turn.example.test:3478',
+            username: 'u',
+            credential: 'c',
+          },
+        ])
+      }
+      await presence.leave()
+    } finally {
+      useSettingsStore.setState({ values: prevValues })
+    }
   })
 })

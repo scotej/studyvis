@@ -18,6 +18,102 @@ V3 work was drafted as v1.0.4 but shipped under the **v1.0.5** tag —
 there is no v1.0.4 tag; the section below is labelled by the tag that
 shipped it.)
 
+## Unreleased
+
+Everything merged since v1.3.1: a production-readiness audit, a settings
+GUI pass, the 26-item verified improvement backlog (#47, PRs #49–#74), and
+a follow-up wave of verified fixes. Rename this heading to the release
+version before running Release prep — both release gates require a
+non-empty section for the exact version being cut.
+
+> **After updating on Apple Silicon:** re-run the benchmark in
+> Settings → AI. Inference now uses the GPU (Metal) and is typically
+> 5–10× faster; the app flags the old measurement as stale, and
+> re-benchmarking lets it check your focus more often.
+
+### Added
+
+- **Study together, 3–4 people.** An Invite button in the session footer
+  opens an online-friends picker, so multi-friend sessions are reachable
+  (inviting a second friend used to lock the host into a 1:1 session).
+- **Quiet in-session notes.** A small text panel for "brb 5" or dropping a
+  link without breaking the silence or switching to a messenger. Notes are
+  signed, capped, and never saved; friends on older versions simply don't
+  see them.
+- **Settings during a session.** The gear button (and error messages that
+  point at Settings) now open Settings over the live session — video,
+  friends, and AI keep running underneath.
+- **Rejoin after a drop.** If a network blip ends a session for you, the
+  report offers Rejoin while the room is still live — and rejoining now
+  adds to the same session's history instead of overwriting the minutes
+  you'd already studied.
+- **Invites you can actually catch.** Incoming invites persist as an
+  accept row for their full validity (previously a ~4-second toast), and
+  they now show on the report and Settings views too. "Invite sent" is
+  honest: delivery is confirmed by the friend's app, and unconfirmed sends
+  say so with a nudge to check they've added you back.
+- **Connectivity that survives blocked networks.** Presence, invites, and
+  the invite inbox race Nostr + MQTT (previously pairing only), so a friend
+  behind a Nostr-blocking firewall no longer shows permanently offline with
+  undeliverable invites. Your own TURN server (Settings → Network) now
+  applies to presence and invite delivery too, with a Test-connection
+  button to verify it before a session depends on it.
+- **Faster AI on Apple Silicon.** Inference runs on the GPU via Metal
+  (it was CPU-only). Re-run the benchmark after updating — see above.
+- **AI honesty in the report.** Sessions where many AI checks were skipped
+  now say so instead of presenting a confident focused-time percentage.
+- **Audio that remembers.** Your microphone/speaker picks and per-friend
+  volumes persist across sessions, and the device menus mark which device
+  is actually selected.
+- **Notification health.** Settings → Notifications shows the OS-level
+  permission state with a fix path, so toggles can't look on while the OS
+  silently drops every notification.
+- **Study time survives crashes.** If StudyVis (or your machine) dies
+  mid-session, the next launch reconstructs the session's study time from
+  its activity log — previously the whole session vanished from history.
+
+### Fixed
+
+- **Study history integrity.** Quitting mid-session via the confirm dialog
+  persists the session; re-entering a room merges rather than rewinds the
+  record; stats and streaks stop under-counting after rejoins.
+- **Pomodoro rest is actually a break.** Focus detection pauses during
+  synced rest phases — the app no longer tells you to rest and then flags
+  you for resting.
+- **Push-to-talk correctness.** Swapping microphones mid-session keeps
+  device-loss recovery armed and applies your current talk/mute state to
+  the new mic (no more silently hot mic); the PTT hint shows your actual
+  binding after a rebind; the global shortcut is only registered while a
+  session is live, so an idle StudyVis no longer swallows Cmd+[ system-wide.
+- **Identity recovery.** A restored machine whose keychain lost its keys is
+  detected at boot and steered to the 24-word restore — which now
+  recognizes your own words (no scary "replace identity?" warning), keeps
+  your display name, and no longer silently breaks invite sending.
+- **AI model management.** Download/Re-benchmark/Remove are locked during a
+  live session (a mid-session re-benchmark silently killed focus detection
+  and corrupted the measurement); removing a model stops the AI process
+  serving it first (no more failed deletes on Windows or gigabytes of
+  invisible disk on macOS); model downloads are pinned to verified
+  revisions so an upstream re-upload can't break new installs.
+- **Friend pairing and presence.** Starting a second pairing cancels the
+  first instead of leaving it invisibly live; editing your friends list no
+  longer flickers your online dot on friends' screens; importing a friends
+  backup merges instead of rewinding fresher local data.
+- Assorted accessibility fixes: the camera toggle no longer announces the
+  inverted state to screen readers, the in-session Settings overlay manages
+  keyboard focus properly, and device menus expose selection to assistive
+  tech.
+
+### Release & data safety (mostly invisible)
+
+- Database corruption from a power loss no longer bricks the app; recovery
+  sets the damaged file aside and starts clean.
+- Release pipeline hardening: version/tag lockstep is enforced before
+  anything irreversible, release notes are required and become the GitHub
+  Release body, third-party CI actions are pinned to exact commits, shipped
+  database migrations are checksummed against silent edits, and the pinned
+  signaling relays _and_ MQTT brokers get a health check at release time.
+
 ## 1.3.1 — 2026-07-01 — offline friend codes
 
 Adding a friend no longer depends on a live connection at all. The v1.2.2
