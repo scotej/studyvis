@@ -93,6 +93,13 @@ jobs:
       contents: write
     strategy:
       fail-fast: false
+      # X6 — serialized deliberately. Both jobs append their platform's entry
+      # to the SAME `latest.json` on the release, and tauri-action does that
+      # as a read-merge-write with no locking: run in parallel and the slower
+      # job can overwrite the faster one's entry, silently stranding a whole
+      # platform on the old version with no error anywhere. Serializing costs
+      # one build's wall-clock on a workflow that runs a few times a year.
+      max-parallel: 1
       matrix:
         include:
           # Per-arch, not universal: the llama-server sidecar (externalBin)
