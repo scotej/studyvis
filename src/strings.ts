@@ -788,6 +788,78 @@ export const strings = {
       advanced: 'Advanced',
       about: 'About',
     },
+    search: {
+      placeholder: 'Search settings',
+      ariaLabel: 'Search settings',
+      clearAriaLabel: 'Clear search',
+      noResults: 'No settings match.',
+      resultCount: (n: number) =>
+        n === 1 ? '1 setting matches' : `${n} settings match`,
+    },
+    // Extra terms the nav search matches beyond each pane's label + group, so
+    // a setting is findable by the concept it owns rather than the pane name.
+    // Keyed by SettingsCategoryId; kept here with the other settings copy.
+    searchKeywords: {
+      identity: [
+        'name',
+        'display name',
+        'public key',
+        'recovery phrase',
+        'friends backup',
+        'restore',
+      ],
+      friends: ['manage', 'remove', 'pair'],
+      sessions: ['history', 'past', 'report', 'delete'],
+      stats: [
+        'statistics',
+        'dashboard',
+        'streak',
+        'focus',
+        'partners',
+        'insights',
+        'export',
+        'csv',
+      ],
+      appearance: [
+        'theme',
+        'dark',
+        'light',
+        'mode',
+        'reduce motion',
+        'window',
+        'size',
+        'position',
+        'chrome',
+        'title bar',
+      ],
+      notifications: ['invite', 'pomodoro', 'sound', 'friend online', 'alerts'],
+      shortcuts: [
+        'keybindings',
+        'push to talk',
+        'ptt',
+        'accelerator',
+        'hotkey',
+      ],
+      ai: [
+        'focus detection',
+        'model',
+        'threshold',
+        'warning',
+        'alert',
+        'confidence',
+        'sample interval',
+        'on-device',
+      ],
+      network: ['relay', 'turn', 'signaling', 'connection', 'diagnostics'],
+      advanced: [
+        'debug log',
+        'tray',
+        'minimize',
+        'capture displays',
+        'auto-update',
+      ],
+      about: ['version', 'license', 'github', 'releases', 'update'],
+    },
 
     identity: {
       heading: 'Identity',

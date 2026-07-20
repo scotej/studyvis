@@ -47,67 +47,84 @@ function navIcon(Icon: typeof UserRoundIcon) {
 // depends on it).
 const nav = strings.settings.nav
 const groups = strings.settings.navGroups
+const keywords = strings.settings.searchKeywords
 const CATEGORIES: ReadonlyArray<SettingsCategoryDescriptor<CategoryId>> = [
   {
     id: 'identity',
     label: nav.identity,
     icon: navIcon(UserRoundIcon),
     group: groups.you,
+    keywords: keywords.identity,
   },
   {
     id: 'friends',
     label: nav.friends,
     icon: navIcon(UsersIcon),
     group: groups.you,
+    keywords: keywords.friends,
   },
   {
     id: 'sessions',
     label: nav.sessions,
     icon: navIcon(HistoryIcon),
     group: groups.study,
+    keywords: keywords.sessions,
   },
   {
     id: 'stats',
     label: nav.stats,
     icon: navIcon(ChartLineIcon),
     group: groups.study,
+    keywords: keywords.stats,
   },
-  { id: 'ai', label: nav.ai, icon: navIcon(SparklesIcon), group: groups.study },
+  {
+    id: 'ai',
+    label: nav.ai,
+    icon: navIcon(SparklesIcon),
+    group: groups.study,
+    keywords: keywords.ai,
+  },
   {
     id: 'appearance',
     label: nav.appearance,
     icon: navIcon(PaletteIcon),
     group: groups.app,
+    keywords: keywords.appearance,
   },
   {
     id: 'notifications',
     label: nav.notifications,
     icon: navIcon(BellIcon),
     group: groups.app,
+    keywords: keywords.notifications,
   },
   {
     id: 'shortcuts',
     label: nav.shortcuts,
     icon: navIcon(KeyboardIcon),
     group: groups.app,
+    keywords: keywords.shortcuts,
   },
   {
     id: 'network',
     label: nav.network,
     icon: navIcon(GlobeIcon),
     group: groups.system,
+    keywords: keywords.network,
   },
   {
     id: 'advanced',
     label: nav.advanced,
     icon: navIcon(SlidersHorizontalIcon),
     group: groups.system,
+    keywords: keywords.advanced,
   },
   {
     id: 'about',
     label: nav.about,
     icon: navIcon(InfoIcon),
     group: groups.system,
+    keywords: keywords.about,
   },
 ]
 
@@ -192,6 +209,43 @@ export const MinimumWindow: Story = {
           <DemoPane active={active} />
         </SettingsLayout>
       </div>
+    )
+  },
+}
+
+// Nav search filtering the rail to the panes whose label, group, or keywords
+// match the query — here 'window', which hits Appearance's keywords.
+export const SearchFiltered: Story = {
+  render: () => {
+    const [active, setActive] = useState<CategoryId>('appearance')
+    return (
+      <SettingsLayout
+        categories={CATEGORIES}
+        activeCategoryId={active}
+        onCategorySelect={(id) => setActive(id as CategoryId)}
+        onClose={() => {}}
+        initialQuery="window"
+      >
+        <DemoPane active={active} />
+      </SettingsLayout>
+    )
+  },
+}
+
+// The empty state when nothing matches — a calm line, no rail items.
+export const SearchNoResults: Story = {
+  render: () => {
+    const [active, setActive] = useState<CategoryId>('identity')
+    return (
+      <SettingsLayout
+        categories={CATEGORIES}
+        activeCategoryId={active}
+        onCategorySelect={(id) => setActive(id as CategoryId)}
+        onClose={() => {}}
+        initialQuery="qwerty"
+      >
+        <DemoPane active={active} />
+      </SettingsLayout>
     )
   },
 }
