@@ -2,7 +2,7 @@
 
 Auto-loaded by Claude Code at the start of every session in this repo. It summarizes how to work here and points to the canonical docs. Read the relevant ones in full at the start of any non-trivial session — they are the source of truth, not training data.
 
-StudyVis is **shipped and feature-complete**: a peer-to-peer desktop study app for friends (body-doubling video + optional on-device AI focus detection), released friends-only and unsigned for macOS + Windows. The current line is **v1.x** (see `CHANGELOG.md`). Work is now **maintenance and new features**, not a from-scratch build. There are real installed builds but no auto-update and no public users — friends pull releases manually.
+StudyVis is **shipped and feature-complete**: a peer-to-peer desktop study app for friends (body-doubling video + optional on-device AI focus detection), released friends-only and unsigned for macOS + Windows. The current line is **v1.x** (see `CHANGELOG.md`). Work is now **maintenance and new features**, not a from-scratch build. There are real installed builds and no public users. As of **v1.5.0** the app self-updates in-app (tauri-plugin-updater, tag X6): background download + signature-verified restart, defaults ON — only the *first* install is manual. Builds remain unsigned for OS code-signing purposes, so friends still clear the Gatekeeper/SmartScreen warning on that first install.
 
 ## Canonical documents
 

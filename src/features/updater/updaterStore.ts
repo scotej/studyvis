@@ -15,12 +15,22 @@
 // ad-hoc-signed builds — an attacker who controls the release page still
 // can't hand this app a payload it will install.
 //
-// Session safety is NOT enforced here — `UpdaterBoot` owns it, because the
-// rule is about when to surface and act, not about what the updater knows.
+// Session safety is split. `UpdaterBoot` owns *scheduling* — it doesn't
+// start a check while a session is active. But a check is network-bound, so a
+// session can begin between UpdaterBoot's decision to check and the download
+// actually starting; the timer teardown can't reach into an already-running
+// `checkNow`. So the check→download boundary re-reads session state here (via
+// the `isSessionActive` dep) and defers the download if a session slipped in.
+// The one residual gap the plugin makes unfixable: a download already in
+// flight when a session starts cannot be aborted — this plugin version's
+// `download()` takes no AbortSignal. That window is narrow (only on a launch
+// where a release is newly found, mid-download) and self-limiting.
 
 import { invoke } from '@tauri-apps/api/core'
 import { check, type Update } from '@tauri-apps/plugin-updater'
 import { create } from 'zustand'
+
+import { useSessionStore } from '@/stores/sessionStore'
 
 export type UpdaterStatus =
   | 'idle'
@@ -32,16 +42,21 @@ export type UpdaterStatus =
 
 export type UpdaterDeps = {
   check: () => Promise<Update | null>
-  // Split out so tests can drive the flow without a Tauri host. Both are
+  // Split out so tests can drive the flow without a Tauri host. All three are
   // thin passthroughs in production.
   stopSidecar: () => Promise<void>
   relaunch: () => Promise<void>
+  // Read at the check→download boundary so a session that started *during*
+  // the (network-bound) check aborts before any installer bytes move. See
+  // the note in checkNow.
+  isSessionActive: () => boolean
 }
 
 export const defaultUpdaterDeps: UpdaterDeps = {
   check: () => check(),
   stopSidecar: () => invoke('sidecar_stop'),
   relaunch: () => invoke('system_relaunch_app'),
+  isSessionActive: () => useSessionStore.getState().status === 'active',
 }
 
 let deps: UpdaterDeps = defaultUpdaterDeps
@@ -114,6 +129,16 @@ export const useUpdaterStore = create<UpdaterState>((set, get) => ({
 
     if (!update) {
       set({ status: 'upToDate', version: null, notes: null })
+      return
+    }
+
+    // A session may have started during the check above. Don't pull an
+    // installer onto a live WebRTC mesh — reset to idle (nothing staged) and
+    // let UpdaterBoot's post-session check re-find and download it. A
+    // user-initiated check is exempt: the user asked for it, and the Settings
+    // screen isn't reachable to press "Check now" mid-session anyway.
+    if (!userInitiated && deps.isSessionActive()) {
+      set({ status: 'idle' })
       return
     }
 

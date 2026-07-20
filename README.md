@@ -66,11 +66,14 @@ Applications. **Right-click** the app icon and choose **Open** the
 first time; macOS asks once, then remembers. The right-click is
 load-bearing — double-clicking will refuse.
 
-**Windows 10 / 11** — download the `.msi` from
+**Windows 10 / 11** — download `StudyVis_<version>_x64-setup.exe` from
 [Releases](https://github.com/scotej/studyvis/releases). Double-click
 to install. SmartScreen will warn ("Windows protected your PC") —
 click **More info** → **Run anyway**. StudyVis lands in your Start
-menu.
+menu. **Upgrading from v1.4.0 or earlier?** Those shipped as an
+`.msi`; uninstall the old StudyVis from Settings → Apps first, or
+Windows lists two copies. Your data is untouched. (This is a one-time
+step — from v1.5.0 on, updates are automatic.)
 
 **Linux** — not in 1.0. WebKitGTK's `getDisplayMedia` support was not
 validated; Linux returns when the V0 sanity pass is re-run on it. If
@@ -373,10 +376,11 @@ backup, custom keybindings, multi-monitor capture, light + auto
 themes, opt-in custom window chrome, the accessibility and
 reduced-motion pass, and the cohesion + copy pass). **v1.1.0** added
 the pairing QR redesign; **v1.2.x** brought a maintenance + feature
-wave and more reliable pairing discovery; **v1.3.1** is the current
-release (offline friend codes — see `CHANGELOG.md` for the full
-history). The version number lives in (and must stay consistent
-across):
+wave and more reliable pairing discovery; **v1.3.1** brought offline
+friend codes; **v1.4.0** added multi-friend sessions, faster AI, and
+the verified backlog; **v1.5.0** is the current release, adding in-app
+auto-update (see `CHANGELOG.md` for the full history). The version
+number lives in (and must stay consistent across):
 
 - `package.json` — npm root
 - `package-lock.json` — npm lockfile (two spots: top-level + the

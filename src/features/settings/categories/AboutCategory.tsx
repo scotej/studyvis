@@ -68,12 +68,14 @@ export function AboutCategory() {
   )
 
   // One row that changes shape with the updater's state, rather than four
-  // rows that are empty most of the time. Rendered only while auto-update is
-  // on — with it off there is no state to report and offering "Check now"
-  // would contradict the toggle sitting right above it.
+  // rows that are empty most of the time.
   const updateStatusRow = () => {
-    if (!autoUpdateEnabled) return null
-
+    // The "ready" row is shown regardless of the toggle: once bytes are
+    // downloaded and signature-verified they're local and installable, and
+    // hiding the restart here while the Home banner still offers it would let
+    // the two surfaces disagree. The toggle governs *future* checks, not an
+    // update already staged. (Turning it off mid-download is covered too:
+    // that download finishes and lands here as "ready".)
     if (status === 'ready' && pendingVersion) {
       return (
         <SettingsRow
@@ -91,6 +93,10 @@ export function AboutCategory() {
         />
       )
     }
+
+    // Below here is live-check status. With auto-update off there's nothing to
+    // report and offering "Check now" would contradict the toggle above it.
+    if (!autoUpdateEnabled) return null
 
     if (status === 'downloading' && pendingVersion) {
       return (

@@ -182,6 +182,36 @@ describe('checkNow', () => {
 
     expect(useUpdaterStore.getState().dismissed).toBe(false)
   })
+
+  test('a session that started during the check defers the download', async () => {
+    const update = fakeUpdate({ version: '2.2.0' })
+    setUpdaterDeps({
+      check: async () => update as never,
+      // Models a session that began while check() was in flight.
+      isSessionActive: () => true,
+    })
+
+    await useUpdaterStore.getState().checkNow()
+
+    // No bytes moved, nothing staged — back to idle for the next post-session
+    // check to re-find and download.
+    expect(update.download).not.toHaveBeenCalled()
+    expect(useUpdaterStore.getState().status).toBe('idle')
+    expect(useUpdaterStore.getState().pending).toBeNull()
+  })
+
+  test('a user-initiated check downloads even during a session', async () => {
+    const update = fakeUpdate({ version: '2.3.0' })
+    setUpdaterDeps({
+      check: async () => update as never,
+      isSessionActive: () => true,
+    })
+
+    await useUpdaterStore.getState().checkNow({ userInitiated: true })
+
+    expect(update.download).toHaveBeenCalledOnce()
+    expect(useUpdaterStore.getState().status).toBe('ready')
+  })
 })
 
 describe('installAndRestart', () => {

@@ -627,7 +627,7 @@ When code-signing credentials become available (V3 or later), an `Entitlements.p
 
 ### Windows
 - WebView2 handles camera/mic/screen prompts natively.
-- V1 ships an unsigned `.msi`. Windows SmartScreen will warn on first launch ("Windows protected your PC") — friends click "More info" → "Run anyway". A code-signing certificate (and ideally an EV cert for instant SmartScreen reputation) would remove the warning; deferred until creds are available.
+- Ships an unsigned NSIS `-setup.exe` (per-user; the MSI target was dropped at X6 — see the updater section's "Windows packaging" note for why). Windows SmartScreen will warn on first launch ("Windows protected your PC") — friends click "More info" → "Run anyway". A code-signing certificate (and ideally an EV cert for instant SmartScreen reputation) would remove the warning; deferred until creds are available. Note this governs only the *first* install — X6 auto-update carries its own minisign signature, independent of Authenticode.
 
 ### Linux (deferred)
 Linux is not part of the V1 release matrix — V0 deferred WebKitGTK `getDisplayMedia` validation, and the friends-only V1 audience is macOS + Windows only (`keyring` is gated to those two platforms; the V1-P12 release workflow excludes Linux). When V0 is re-run on Linux and passes, V3 lights up Linux:
