@@ -48,6 +48,20 @@ jobs:
       - name: Assert the tag matches all five version files
         run: bash scripts/check-version-lockstep.sh "${GITHUB_REF_NAME#v}"
 
+      # X6 — an unsigned update artifact is worse than no release: it uploads
+      # fine, publishes fine, and then every installed client silently refuses
+      # it. Catch the missing secret here rather than an hour of build minutes
+      # later. Only presence is checked; the value never reaches the log.
+      - name: Assert the updater signing key is configured
+        env:
+          KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${KEY}" ]]; then
+            echo "::error::TAURI_SIGNING_PRIVATE_KEY is not set. Update artifacts would ship unsigned and every client would reject them. Add the secret (see PLAN §8) and re-run."
+            exit 1
+          fi
+
       - name: Extract this version's CHANGELOG section for the release body
         id: notes
         run: |
@@ -62,7 +76,10 @@ jobs:
           macOS users right-click the app and choose Open the first time;
           Windows users click "More info" → "Run anyway" on the SmartScreen warning.
 
-          StudyVis does not auto-update. Download a new version here when one drops.'
+          If you are already on StudyVis 1.5.0 or newer, you do not need to download
+          anything — the app picks this up on its own and offers to restart into it.
+          Auto-update reads `latest.json` from the LATEST published release, so this
+          draft has to be published before anyone receives it.'
           {
             echo "body<<CHANGELOG_SECTION_EOF"
             printf '%s\n\n---\n\n%s\n' "$section" "$boiler"
@@ -88,10 +105,16 @@ jobs:
             rust-targets: aarch64-apple-darwin
             args: --target aarch64-apple-darwin --bundles app,dmg
             llama-triples: aarch64-apple-darwin
+          # X6 — NSIS, not MSI. The updater re-runs the installer to apply an
+          # update, and an MSI needs msiexec elevation every single time,
+          # which turns "auto-update" into a UAC prompt per release. NSIS
+          # installs per-user (bundle.windows.nsis.installMode) and supports
+          # the passive install mode the updater config asks for, so the
+          # update applies with a progress bar and no interaction.
           - label: Windows
             platform: windows-latest
             rust-targets: ''
-            args: --bundles msi
+            args: --bundles nsis
             llama-triples: x86_64-pc-windows-msvc
     runs-on: ${{ matrix.platform }}
     timeout-minutes: 60
@@ -129,6 +152,13 @@ jobs:
         uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # v0.6.2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # X6 — the minisign keypair that signs update artifacts. This is
+          # NOT Apple/Windows code signing: it's the updater's own integrity
+          # chain, verified in-app against `plugins.updater.pubkey`. Without
+          # these two the bundler emits unsigned artifacts and every client
+          # rejects the update, so the build fails loudly instead (below).
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           tagName: ${{ github.ref_name }}
           releaseName: 'StudyVis ${{ github.ref_name }}'
@@ -139,5 +169,9 @@ jobs:
           # Tags with a prerelease suffix (e.g. v1.1.0-rc.1) publish as GitHub
           # prereleases; clean vX.Y.Z tags are full releases.
           prerelease: ${{ contains(github.ref_name, '-') }}
-          includeUpdaterJson: false
+          # X6 — both matrix jobs write `latest.json` on the same release;
+          # tauri-action merges each platform's entry into the existing file
+          # rather than overwriting it, so the published release ends up with
+          # both darwin-aarch64 and windows-x86_64.
+          includeUpdaterJson: true
           args: ${{ matrix.args }}

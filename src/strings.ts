@@ -1245,22 +1245,17 @@ export const strings = {
       },
       releases: {
         label: 'Releases',
-        help: "StudyVis doesn't auto-update. Check here when a new version drops.",
+        help: 'Release notes for every version, and installers if you ever need one by hand.',
         openCta: 'Open',
         errorFallback: "Couldn't open the Releases page.",
       },
-      // X4 — opt-in version check, OFF by default. The toggle is the one
-      // sanctioned outbound request (PLAN §3 carve-out); off means zero calls.
-      versionCheck: {
-        label: 'Check for new versions',
-        help: 'Off by default. When on, StudyVis asks GitHub once on this screen whether a newer release exists. It sends no data about you.',
-        ariaLabel: 'Check for new versions',
-      },
-      // X4 — quiet "newer version available" row, shown only when the check
-      // succeeds and finds a newer tag.
-      updateAvailable: {
-        label: 'Update available',
-        help: (latest: string) => `Version ${latest} is available.`,
+      // X6 — auto-update replaces X4's opt-in tag check. ON by default (the
+      // widened PLAN §3 carve-out); off means zero outbound, same guarantee
+      // the X4 toggle used to carry.
+      autoUpdate: {
+        label: 'Automatic updates',
+        help: 'StudyVis checks GitHub for new releases, downloads them in the background, and installs on restart. It sends no data about you. Turn this off and nothing goes out.',
+        ariaLabel: 'Automatic updates',
       },
     },
   },
@@ -1576,6 +1571,48 @@ export const strings = {
     friendOnline: {
       title: 'StudyVis',
       body: (name: string) => `${name} is now online`,
+    },
+  },
+
+  // X6 — auto-update. The banner is the only place an update ever interrupts
+  // you, and it only appears once the new version is already downloaded and
+  // verified, so "Restart now" is instant. Nothing here fires mid-session.
+  updater: {
+    banner: {
+      ariaLabel: 'Update ready',
+      title: (version: string) => `StudyVis ${version} is ready`,
+      body: 'Downloaded and verified. Restart to finish — it takes a couple of seconds.',
+      restartCta: 'Restart now',
+      laterCta: 'Later',
+      dismissAriaLabel: 'Dismiss until next launch',
+      notesCta: 'Release notes',
+      installing: 'Installing…',
+    },
+    settings: {
+      // Mirrors the banner in Settings → About so the update is reachable
+      // after the banner is dismissed.
+      readyLabel: 'Update ready',
+      readyHelp: (version: string) =>
+        `Version ${version} is downloaded and waiting. Restart to finish.`,
+      downloadingLabel: 'Downloading update',
+      downloadingHelp: (version: string, percent: number) =>
+        `Version ${version} — ${percent}%`,
+      checkingHelp: 'Checking for updates…',
+      upToDateHelp: (version: string) => `You're on ${version}, the latest.`,
+      checkCta: 'Check now',
+      restartCta: 'Restart now',
+    },
+    errors: {
+      // Surfaced only on a user-initiated check / restart. Background failures
+      // stay silent — a flaky network shouldn't nag anyone mid-study.
+      checkFailed: "Couldn't reach GitHub to check for updates.",
+      downloadFailed:
+        "Couldn't download the update. StudyVis will retry later.",
+      // macOS: the app bundle has to be writable to swap itself out. Living in
+      // a root-owned /Applications, or still running from the .dmg, both land
+      // here.
+      installFailed:
+        "Couldn't install the update. Download the installer from the Releases page instead.",
     },
   },
 

@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "main-window permissions (ARCHITECTURE.md §12: scoped to main). V3-P6 adds the four window-control IPC bindings (start-dragging / minimize / toggle-maximize / close) used by the opt-in custom titlebar; gated to the main window so the AI dialog stays on least-privilege.",
+  "description": "main-window permissions (ARCHITECTURE.md §12: scoped to main). V3-P6 adds the four window-control IPC bindings (start-dragging / minimize / toggle-maximize / close) used by the opt-in custom titlebar; gated to the main window so the AI dialog stays on least-privilege. X6 adds updater:default — check/download/install are driven only from the main window's updater feature, so the AI dialog can't reach them.",
   "windows": ["main"],
   "permissions": [
     "core:default",
@@ -9,6 +9,7 @@
     "store:default",
     "dialog:default",
     "deep-link:default",
+    "updater:default",
     "core:window:allow-start-dragging",
     "core:window:allow-minimize",
     "core:window:allow-toggle-maximize",

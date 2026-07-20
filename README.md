@@ -44,9 +44,11 @@ A few honest disclosures, in the spirit of "no surprises":
   System Settings → Privacy & Security → Screen Recording; StudyVis
   can open that pane for you when needed.
 - **Zero outbound data beyond the above.** No telemetry, no crash
-  uploads, no analytics. One opt-in exception: the OFF-by-default
-  new-version check (Settings → About) makes an unauthenticated GET to
-  the public GitHub Releases API, carrying no identifiers. If something
+  uploads, no analytics. One exception: auto-update (Settings → About,
+  ON by default) fetches the release manifest from GitHub and downloads
+  new versions. Those requests are unauthenticated and carry no
+  identifiers and no payload — nothing about you, your friends, or your
+  sessions. Turn the toggle off for literal zero outbound. If something
   goes wrong, share the log file manually (Settings → Advanced → Open
   data folder).
 
@@ -75,7 +77,10 @@ validated; Linux returns when the V0 sanity pass is re-run on it. If
 you want to try the dev build today, clone the repo and run
 `npm run tauri dev`.
 
-There is no auto-update. Re-run the install for a new version.
+StudyVis keeps itself up to date. It checks for new releases in the
+background, downloads them, and offers a "Restart now" button when one is
+ready — never during a session. Only your first install is manual. You can
+turn this off in Settings → About.
 
 ## First run
 
@@ -209,11 +214,15 @@ where you'd see it surface.
   that pass runs again. (PLAN §5, V3.) Includes the Linux keyring
   `sync-secret-service` feature and any Linux-side
   `identity_box_decrypt` hardening.
-- **Signed installers + auto-update.** No code-signing credentials.
-  macOS notarization, Windows code-signing, and the
-  `tauri-plugin-updater` re-enable all wait for a Developer ID and an
-  EV cert. Today, friends right-click → Open on macOS and click
-  through SmartScreen on Windows.
+- **Signed installers.** No code-signing credentials. macOS
+  notarization and Windows code-signing wait for a Developer ID and an
+  EV cert, so friends still right-click → Open on macOS and click
+  through SmartScreen on Windows _on the first install_. Auto-update
+  itself shipped in v1.5.0 — it has its own signature check and doesn't
+  need those certs. One consequence of staying unsigned on macOS: an
+  update can reset the camera / mic / screen-recording permissions,
+  because macOS ties them to a code identity an ad-hoc build doesn't
+  have.
 - **Sepia / high-contrast theme variants.** Dark + light + auto are
   the V3 set. Additional themes are a small-but-not-zero token-pair
   - contrast effort that didn't make 1.0.

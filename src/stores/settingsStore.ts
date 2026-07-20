@@ -72,10 +72,12 @@ export type SettingsValues = {
   // N3 — OS notification when a friend flips offline→online. Opt-IN: OFF by
   // default. Read by InboxBoot's presence detector; ~60s presence latency.
   friendOnlineNotificationEnabled: boolean
-  // X4 — opt-in version check, OFF by default. The one sanctioned outbound
-  // request beyond P2P + Nostr (PLAN §3 carve-out). When OFF, AboutCategory
-  // never calls system_fetch_latest_version — zero outbound.
-  versionCheckEnabled: boolean
+  // X6 — auto-update, ON by default. Widens PLAN §3's carve-out from X4's
+  // opt-in tag check to a recurring check + background download against
+  // GitHub Releases. Still no identifiers, no payload, no telemetry. When
+  // OFF, `features/updater` never calls check() — zero outbound, the same
+  // guarantee the X4 toggle carried.
+  autoUpdateEnabled: boolean
   minimizeToTrayOnClose: boolean
   debugLogEnabled: boolean
   turnPreference: TurnPreference
@@ -146,7 +148,11 @@ export const SETTINGS_KEY_POMODORO_NOTIFY = 'pomodoro_notification_enabled'
 export const SETTINGS_KEY_POMODORO_SOUND = 'pomodoro_sound_enabled'
 export const SETTINGS_KEY_FRIEND_ONLINE_NOTIFY =
   'friend_online_notification_enabled'
+// X4's opt-in tag check. X6 superseded it with the real updater; the key is
+// still READ (never written) so a friend who deliberately turned the old
+// check OFF doesn't get outbound traffic switched back on by the upgrade.
 export const SETTINGS_KEY_VERSION_CHECK = 'version_check_enabled'
+export const SETTINGS_KEY_AUTO_UPDATE = 'auto_update_enabled'
 export const SETTINGS_KEY_MINIMIZE_TRAY = 'minimize_to_tray_on_close'
 export const SETTINGS_KEY_DEBUG_LOG = 'debug_log_enabled'
 export const SETTINGS_KEY_TURN_PREF = 'turn_preference'
@@ -173,11 +179,11 @@ export const DEFAULT_SETTINGS: SettingsValues = {
   theme: 'dark',
   reduceMotion: false,
   incomingInviteNotificationEnabled: true,
-  // N2 opt-out (on), N6 opt-in (off), N3 opt-in (off), X4 opt-in (off).
+  // N2 opt-out (on), N6 opt-in (off), N3 opt-in (off), X6 opt-out (on).
   pomodoroNotificationEnabled: true,
   pomodoroSoundEnabled: false,
   friendOnlineNotificationEnabled: false,
-  versionCheckEnabled: false,
+  autoUpdateEnabled: true,
   minimizeToTrayOnClose: true,
   debugLogEnabled: false,
   turnPreference: 'auto',
@@ -218,7 +224,7 @@ type SettingsState = {
   setPomodoroNotificationEnabled: (enabled: boolean) => Promise<void>
   setPomodoroSoundEnabled: (enabled: boolean) => Promise<void>
   setFriendOnlineNotificationEnabled: (enabled: boolean) => Promise<void>
-  setVersionCheckEnabled: (enabled: boolean) => Promise<void>
+  setAutoUpdateEnabled: (enabled: boolean) => Promise<void>
   setMinimizeToTrayOnClose: (enabled: boolean) => Promise<void>
   setDebugLogEnabled: (enabled: boolean) => Promise<void>
   setTurnPreference: (pref: TurnPreference) => Promise<void>
@@ -577,6 +583,7 @@ export async function hydrateValuesFromStore(
     pomodoroSound: await store.get(SETTINGS_KEY_POMODORO_SOUND),
     friendOnline: await store.get(SETTINGS_KEY_FRIEND_ONLINE_NOTIFY),
     versionCheck: await store.get(SETTINGS_KEY_VERSION_CHECK),
+    autoUpdate: await store.get(SETTINGS_KEY_AUTO_UPDATE),
     tray: await store.get(SETTINGS_KEY_MINIMIZE_TRAY),
     debug: await store.get(SETTINGS_KEY_DEBUG_LOG),
     turn: await store.get(SETTINGS_KEY_TURN_PREF),
@@ -644,9 +651,15 @@ export async function hydrateValuesFromStore(
         stored.friendOnline,
         DEFAULT_SETTINGS.friendOnlineNotificationEnabled
       ),
-      versionCheckEnabled: readBool(
-        stored.versionCheck,
-        DEFAULT_SETTINGS.versionCheckEnabled
+      // X6 one-way migration, evaluated newest-key-first:
+      //   auto_update_enabled set        → honor it;
+      //   only the X4 version_check key  → honor that (an explicit OFF stays
+      //                                    OFF — we don't switch outbound
+      //                                    traffic back on behind their back);
+      //   neither                        → default ON.
+      autoUpdateEnabled: readBool(
+        stored.autoUpdate,
+        readBool(stored.versionCheck, DEFAULT_SETTINGS.autoUpdateEnabled)
       ),
       minimizeToTrayOnClose: readBool(
         stored.tray,
@@ -857,9 +870,9 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     await writeKey(set, SETTINGS_KEY_FRIEND_ONLINE_NOTIFY, enabled)
   },
 
-  setVersionCheckEnabled: async (enabled) => {
-    set((s) => ({ values: { ...s.values, versionCheckEnabled: enabled } }))
-    await writeKey(set, SETTINGS_KEY_VERSION_CHECK, enabled)
+  setAutoUpdateEnabled: async (enabled) => {
+    set((s) => ({ values: { ...s.values, autoUpdateEnabled: enabled } }))
+    await writeKey(set, SETTINGS_KEY_AUTO_UPDATE, enabled)
   },
 
   setMinimizeToTrayOnClose: async (enabled) => {

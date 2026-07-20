@@ -18,6 +18,43 @@ V3 work was drafted as v1.0.4 but shipped under the **v1.0.5** tag —
 there is no v1.0.4 tag; the section below is labelled by the tag that
 shipped it.)
 
+## Unreleased
+
+### Added
+
+- **StudyVis updates itself.** It checks for new releases in the
+  background, downloads them, and shows a "StudyVis X.Y.Z is ready"
+  banner with a Restart now button — the restart is a couple of seconds
+  because the download already happened. Nothing checks, downloads, or
+  interrupts during a session. Dismissing with "Later" leaves the update
+  waiting in Settings → About.
+
+  Each update is signature-verified before it is installed, so a tampered
+  download is rejected. This does not require the code-signing
+  certificates StudyVis still lacks — the updater carries its own key.
+
+### Changed
+
+- **Automatic updates are ON by default** (Settings → About). This widens
+  the privacy stance: previously the only outbound request beyond P2P was
+  an opt-in, OFF-by-default version check. The requests are still
+  anonymous fetches of a public file with no identifiers and no payload,
+  and turning the toggle off restores zero outbound. If you had
+  deliberately turned the old version check off, that choice carries over
+  and auto-update stays off.
+- **The Windows installer is now `-setup.exe` (NSIS), not `.msi`.**
+  Applying an MSI update needs an administrator prompt every single time,
+  which defeats the point. **Upgrading from 1.4.0 or earlier: uninstall
+  the old StudyVis from Settings → Apps first**, then run the new
+  installer — otherwise Windows lists two copies. Your data is untouched.
+
+### Known issue
+
+- **macOS may re-ask for camera / microphone / screen-recording
+  permission after an update.** macOS ties those grants to a signed app
+  identity, and StudyVis is not yet notarized. Granting again is safe.
+  A Developer ID certificate would remove this.
+
 ## 1.4.0 — 2026-07-19 — multi-friend sessions, faster AI, and the verified backlog
 
 Everything merged since v1.3.1: a production-readiness audit, a settings

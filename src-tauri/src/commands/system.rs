@@ -4,9 +4,10 @@
 //! `AiFeaturesFlag`, `SessionActiveFlag`, `ShortcutBindings`) that `lib.rs`
 //! `manage()`s at setup and consults in the window/run-event handlers, plus
 //! assorted commands: autostart, global-shortcut rebinding, quit/relaunch,
-//! text-file export, opening OS settings panes (macOS-only deep links), the
-//! battery probe, and the opt-in GitHub release check. All flags use
-//! `Ordering::Relaxed` deliberately — last-write-wins between the JS setters
+//! text-file export, opening OS settings panes (macOS-only deep links), and
+//! the battery probe. (X6 retired the hand-rolled GitHub tag check that used
+//! to live here — tauri-plugin-updater owns update discovery now.) All flags
+//! use `Ordering::Relaxed` deliberately — last-write-wins between the JS setters
 //! and the event handlers is fine, and no flag guards memory another thread
 //! publishes.
 //!
@@ -360,50 +361,6 @@ pub fn system_open_releases<R: Runtime>(app: AppHandle<R>) -> Result<(), String>
         .map_err(|e| e.to_string())
 }
 
-// X4 — opt-in version check, the one sanctioned outbound request beyond P2P +
-// Nostr signaling (PLAN §3 carve-out). A bare unauthenticated GET of the
-// public GitHub Releases API: no identifiers, no query params, and a static
-// User-Agent only because GitHub rejects UA-less requests. Failures return
-// Err for the frontend to silently ignore. The owner/repo pair is derived
-// from RELEASES_URL so the two release-facing commands can't drift apart.
-fn latest_release_api_url() -> String {
-    let repo = RELEASES_URL
-        .trim_start_matches("https://github.com/")
-        .trim_end_matches("/releases");
-    format!("https://api.github.com/repos/{repo}/releases/latest")
-}
-
-#[tauri::command]
-pub async fn system_fetch_latest_version() -> Result<String, String> {
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(10))
-        .user_agent("studyvis")
-        .build()
-        .map_err(|e| format!("build http client: {e}"))?;
-    let resp = client
-        .get(latest_release_api_url())
-        .send()
-        .await
-        .map_err(|e| format!("GET releases/latest: {e}"))?;
-    if !resp.status().is_success() {
-        return Err(format!(
-            "GitHub API returned HTTP {}",
-            resp.status().as_u16()
-        ));
-    }
-    let bytes = resp
-        .bytes()
-        .await
-        .map_err(|e| format!("read response: {e}"))?;
-    let body: serde_json::Value =
-        serde_json::from_slice(&bytes).map_err(|e| format!("parse response: {e}"))?;
-    let tag = body
-        .get("tag_name")
-        .and_then(|v| v.as_str())
-        .ok_or("response missing tag_name")?;
-    Ok(tag.strip_prefix('v').unwrap_or(tag).to_string())
-}
-
 // V2-P5 battery awareness for the AI sample loop. ARCHITECTURE.md §8: "if
 // user_on_battery and battery_pct < 20: pause AI". Returned shape matches
 // the `RawBattery` interface in `src/features/ai/battery.ts`.
@@ -556,13 +513,14 @@ pub fn system_open_microphone_settings<R: Runtime>(app: AppHandle<R>) -> Result<
 
 #[cfg(test)]
 mod tests {
-    use super::latest_release_api_url;
+    use super::RELEASES_URL;
 
+    // X6 replaced the X4 tag check with tauri-plugin-updater, whose endpoint
+    // is derived from this same repo in tauri.conf.json. Pin the constant so
+    // an edit here can't silently point the About card's "Releases" button at
+    // a different repo than the one the updater pulls from.
     #[test]
-    fn latest_release_api_url_derives_owner_repo_from_releases_url() {
-        assert_eq!(
-            latest_release_api_url(),
-            "https://api.github.com/repos/scotej/studyvis/releases/latest"
-        );
+    fn releases_url_points_at_the_studyvis_repo() {
+        assert_eq!(RELEASES_URL, "https://github.com/scotej/studyvis/releases");
     }
 }

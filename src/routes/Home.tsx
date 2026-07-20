@@ -19,6 +19,7 @@ import { Link } from 'react-router'
 import { Settings2Icon } from 'lucide-react'
 import { toast } from 'sonner'
 
+import { UpdateReadyBanner } from '@/components/UpdateReadyBanner'
 import { Button } from '@/components/ui/button'
 import { tokens } from '@/design/tokens'
 import {
@@ -451,6 +452,10 @@ export function Home() {
             <Settings2Icon /> {strings.settings.heading}
           </Button>
         </div>
+        {/* X6 — the staged-update banner lives only on the dashboard: it's
+            the one view where restarting costs nothing. The component
+            self-hides mid-session and while nothing is staged. */}
+        <UpdateReadyBanner />
         {/* #47 B1 — pending incoming invites persist here for their full
             5-minute validity; accepting funnels through the same topic-gated
             path as the toast. */}
