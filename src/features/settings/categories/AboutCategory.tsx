@@ -1,18 +1,20 @@
 // Settings → About: version (from Vite's __APP_VERSION__ define), a link to
-// the GitHub releases page, and the X4 opt-in new-version check. The check is
-// OFF by default and this component is the zero-outbound guarantee: while the
-// toggle is off, `system_fetch_latest_version` is never invoked — the one
-// sanctioned outbound request beyond P2P/Nostr (PLAN §3) only fires when on.
+// the GitHub releases page, and the X6 auto-update controls.
+//
+// The toggle is the zero-outbound guarantee: while it's off, `UpdaterBoot`
+// never schedules a check and nothing here calls one either. X4's opt-in tag
+// check used to live in this file; the updater subsumed it, so there is one
+// update mechanism instead of two overlapping ones.
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useState } from 'react'
 import { invoke } from '@tauri-apps/api/core'
-import { ExternalLinkIcon } from 'lucide-react'
+import { ExternalLinkIcon, RotateCcwIcon, SearchIcon } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { SettingsRow, SettingsSection } from '@/components/SettingsRow'
 import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
-import { isNewerVersion } from '@/lib/version'
+import { useUpdaterStore } from '@/features/updater'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { strings } from '@/strings'
 
@@ -22,16 +24,24 @@ const COPYRIGHT_LINE = strings.settings.about.copyright.line(
 
 export function AboutCategory() {
   const [opening, setOpening] = useState(false)
-  // X4 — the latest release tag when a NEWER version is found, else null.
-  // Stays null on every failure (silent) and while the toggle is off.
-  const [latestNewer, setLatestNewer] = useState<string | null>(null)
-  const versionCheckEnabled = useSettingsStore(
-    (s) => s.values.versionCheckEnabled
-  )
-  const setVersionCheckEnabled = useSettingsStore(
-    (s) => s.setVersionCheckEnabled
-  )
+  const autoUpdateEnabled = useSettingsStore((s) => s.values.autoUpdateEnabled)
+  const setAutoUpdateEnabled = useSettingsStore((s) => s.setAutoUpdateEnabled)
+
+  const status = useUpdaterStore((s) => s.status)
+  const pendingVersion = useUpdaterStore((s) => s.version)
+  const percent = useUpdaterStore((s) => s.percent)
+  const installing = useUpdaterStore((s) => s.installing)
+  const errorKind = useUpdaterStore((s) => s.errorKind)
+  const checkNow = useUpdaterStore((s) => s.checkNow)
+  const installAndRestart = useUpdaterStore((s) => s.installAndRestart)
+
   const copy = strings.settings.about
+  const updaterCopy = strings.updater.settings
+
+  const handleRestart = useCallback(async () => {
+    const ok = await installAndRestart()
+    if (!ok) toast.error(strings.updater.errors.installFailed)
+  }, [installAndRestart])
 
   const handleOpenReleases = useCallback(async () => {
     setOpening(true)
@@ -60,33 +70,75 @@ export function AboutCategory() {
     </Button>
   )
 
-  // X4 — opt-in version check. ZERO outbound while the toggle is off: the
-  // effect bails before any invoke. When on, it runs once per mount (the
-  // simpler honest option than a daily timer — the user has to open this
-  // screen anyway, and it's the natural place to see the result). Silent on
-  // every failure path. The latest tag is compared semver-ishly to the
-  // baked-in __APP_VERSION__; only a strictly-newer tag surfaces a row.
-  useEffect(() => {
-    // ZERO outbound while off: bail before any invoke. A stale `latestNewer`
-    // from a prior on-session is harmless — the row's render is gated on
-    // `versionCheckEnabled` too, so nothing shows while off.
-    if (!versionCheckEnabled) return
-    let cancelled = false
-    void (async () => {
-      try {
-        const latest = await invoke<string>('system_fetch_latest_version')
-        if (cancelled) return
-        setLatestNewer(isNewerVersion(__APP_VERSION__, latest) ? latest : null)
-      } catch {
-        // Best-effort: a network failure, blocked request, or unparseable
-        // tag all leave the row hidden. No toast, no log surfaced to the user.
-        if (!cancelled) setLatestNewer(null)
-      }
-    })()
-    return () => {
-      cancelled = true
+  // One row that changes shape with the updater's state, rather than four
+  // rows that are empty most of the time.
+  const updateStatusRow = () => {
+    // The "ready" row is shown regardless of the toggle: once bytes are
+    // downloaded and signature-verified they're local and installable, and
+    // hiding the restart here while the Home banner still offers it would let
+    // the two surfaces disagree. The toggle governs *future* checks, not an
+    // update already staged. (Turning it off mid-download is covered too:
+    // that download finishes and lands here as "ready".)
+    if (status === 'ready' && pendingVersion) {
+      return (
+        <SettingsRow
+          label={updaterCopy.readyLabel}
+          help={updaterCopy.readyHelp(pendingVersion)}
+          control={
+            <Button
+              size="sm"
+              onClick={() => void handleRestart()}
+              disabled={installing}
+            >
+              <RotateCcwIcon /> {updaterCopy.restartCta}
+            </Button>
+          }
+        />
+      )
     }
-  }, [versionCheckEnabled])
+
+    // Below here is live-check status. With auto-update off there's nothing to
+    // report and offering "Check now" would contradict the toggle above it.
+    if (!autoUpdateEnabled) return null
+
+    if (status === 'downloading' && pendingVersion) {
+      return (
+        <SettingsRow
+          label={updaterCopy.downloadingLabel}
+          help={updaterCopy.downloadingHelp(
+            pendingVersion,
+            Math.round(percent)
+          )}
+        />
+      )
+    }
+
+    const help =
+      status === 'checking'
+        ? updaterCopy.checkingHelp
+        : errorKind === 'check'
+          ? strings.updater.errors.checkFailed
+          : errorKind === 'download'
+            ? strings.updater.errors.downloadFailed
+            : updaterCopy.upToDateHelp(__APP_VERSION__)
+
+    return (
+      <SettingsRow
+        label={copy.version.label}
+        help={help}
+        control={
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => void checkNow({ userInitiated: true })}
+            disabled={status === 'checking'}
+          >
+            <SearchIcon /> {updaterCopy.checkCta}
+          </Button>
+        }
+      />
+    )
+  }
 
   return (
     <SettingsSection heading={copy.heading}>
@@ -109,34 +161,24 @@ export function AboutCategory() {
         }
       />
       <SettingsRow
-        label={copy.versionCheck.label}
-        help={copy.versionCheck.help}
+        label={copy.autoUpdate.label}
+        help={copy.autoUpdate.help}
         control={
           <Switch
-            checked={versionCheckEnabled}
+            checked={autoUpdateEnabled}
             onCheckedChange={(checked) =>
-              void setVersionCheckEnabled(Boolean(checked))
+              void setAutoUpdateEnabled(Boolean(checked))
             }
-            aria-label={copy.versionCheck.ariaLabel}
+            aria-label={copy.autoUpdate.ariaLabel}
           />
         }
       />
-      {/* One row, one CTA: both rows open the same Releases page, so the
-          update-available variant replaces the generic one instead of
-          stacking a second identical button under it. */}
-      {versionCheckEnabled && latestNewer ? (
-        <SettingsRow
-          label={copy.updateAvailable.label}
-          help={copy.updateAvailable.help(latestNewer)}
-          control={openReleasesButton}
-        />
-      ) : (
-        <SettingsRow
-          label={copy.releases.label}
-          help={copy.releases.help}
-          control={openReleasesButton}
-        />
-      )}
+      {updateStatusRow()}
+      <SettingsRow
+        label={copy.releases.label}
+        help={copy.releases.help}
+        control={openReleasesButton}
+      />
     </SettingsSection>
   )
 }

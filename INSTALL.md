@@ -2,7 +2,7 @@
 
 StudyVis ships unsigned installers for a friends-only audience. Each OS will warn the first time you run the app — the steps below explain how to clear those warnings. After the first launch, the OS remembers your decision and stops asking.
 
-> StudyVis does **not** auto-update. When a new version is available, download the latest installer from the [GitHub Releases page](https://github.com/scotej/studyvis/releases) and re-run the install steps for your OS.
+> **You only have to do this once.** From v1.5.0 on, StudyVis updates itself — see [Updating](#updating) below.
 
 ## macOS (Apple Silicon)
 
@@ -16,10 +16,12 @@ StudyVis ships unsigned installers for a friends-only audience. Each OS will war
 
 ## Windows 10 / 11
 
-1. From the [Releases page](https://github.com/scotej/studyvis/releases), download `StudyVis_<version>_x64_en-US.msi`.
-2. Double-click the `.msi`. **SmartScreen** intercepts: _"Windows protected your PC"_. Click **More info**, then **Run anyway**.
+1. From the [Releases page](https://github.com/scotej/studyvis/releases), download `StudyVis_<version>_x64-setup.exe`.
+2. Double-click the installer. **SmartScreen** intercepts: _"Windows protected your PC"_. Click **More info**, then **Run anyway**.
 3. Step through the installer (defaults are fine). StudyVis lands in your Start menu and Programs list.
 4. The first time you join a session, Windows asks for camera and microphone permission via WebView2. Allow both.
+
+> **Coming from StudyVis 1.4.0 or earlier?** Those shipped as an `.msi`. Uninstall the old StudyVis from Settings → Apps first, then run this installer — otherwise Windows lists two copies. Your identity, friends, and history are untouched by the uninstall; they live in your user data directory, not the program folder.
 
 ## Linux
 
@@ -27,16 +29,31 @@ Linux installers are not available yet. WebKitGTK's `getDisplayMedia` support wa
 
 ## Updating
 
-StudyVis never updates itself, but it can tell you when an update
-exists: Settings → About has an optional, off-by-default new-version
-check that compares against the GitHub Releases page (an anonymous
-lookup — no identifiers sent). Downloading and installing stays
-manual. To upgrade:
+StudyVis updates itself. It checks GitHub for new releases shortly after
+launch and every few hours after that, downloads one in the background when
+it finds it, and then shows a **"StudyVis X.Y.Z is ready"** banner with a
+**Restart now** button. Clicking it takes a couple of seconds — the download
+already happened.
+
+It will not interrupt you: no check, no download, and no banner while you are
+in a session. Dismissing the banner with **Later** keeps the update waiting;
+it stays available in Settings → About until you restart.
+
+Nothing about you is sent in any of this — the requests are anonymous
+fetches of a public file. Each update is signature-checked before it is
+installed, so a tampered download is rejected. To opt out entirely, turn
+**Automatic updates** off in Settings → About; StudyVis then makes no
+outbound requests at all beyond connecting you to friends.
+
+**If you ever need to install by hand** — you're on a build older than
+v1.5.0, or an update failed:
 
 - **macOS:** download the new `.dmg` and drag StudyVis to Applications, replacing the existing app.
-- **Windows:** download the new `.msi` and run it; it upgrades the existing install in place.
+- **Windows:** download the new `-setup.exe` and run it; it upgrades the existing install in place.
 
-Your identity, friends list, and local session history live in your OS data directory — they are preserved across reinstalls.
+Your identity, friends list, and local session history live in your OS data directory — they are preserved across updates and reinstalls.
+
+> **macOS permission re-prompts.** Because the app is not yet signed with an Apple Developer ID, macOS may treat an updated StudyVis as a new app and ask for camera / microphone / screen-recording permission again after an update. Granting it again is safe; this goes away if the app is ever properly signed.
 
 ## Troubleshooting
 

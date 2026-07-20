@@ -18,9 +18,28 @@ V3 work was drafted as v1.0.4 but shipped under the **v1.0.5** tag —
 there is no v1.0.4 tag; the section below is labelled by the tag that
 shipped it.)
 
-## Unreleased
+## 1.5.0 — 2026-07-21 — auto-update + a window-size settings pass
 
-### Settings GUI pass: window sizes first-class everywhere
+> **This is the last version you install by hand.** From here on StudyVis
+> updates itself. **Windows:** this release switched installer format —
+> uninstall your existing StudyVis from Settings → Apps _before_ running the
+> new `-setup.exe`, or Windows will list two copies. Your identity, friends,
+> and history are untouched. **macOS:** after a self-update, macOS may ask
+> for camera / microphone / screen-recording permission again (the app isn't
+> notarized yet); granting it is safe.
+
+### Added
+
+- **StudyVis updates itself.** It checks for new releases in the
+  background, downloads them, and shows a "StudyVis X.Y.Z is ready"
+  banner with a Restart now button — the restart is a couple of seconds
+  because the download already happened. Nothing checks, downloads, or
+  interrupts during a session. Dismissing with "Later" leaves the update
+  waiting in Settings → About.
+
+  Each update is signature-verified before it is installed, so a tampered
+  download is rejected. This does not require the code-signing
+  certificates StudyVis still lacks — the updater carries its own key.
 
 - **Remember window size and position** (Settings → Appearance → Window,
   on by default): the window reopens where you left it — size, position,
@@ -28,6 +47,21 @@ shipped it.)
   there's no resize flash. Geometry saved on an unplugged monitor falls
   back to centering instead of opening off-screen. A **Reset** row returns
   the window to the default 1280 × 800, centered.
+
+### Changed
+
+- **Automatic updates are ON by default** (Settings → About). This widens
+  the privacy stance: previously the only outbound request beyond P2P was
+  an opt-in, OFF-by-default version check. The requests are still
+  anonymous fetches of a public file with no identifiers and no payload,
+  and turning the toggle off restores zero outbound. If you had
+  deliberately turned the old version check off, that choice carries over
+  and auto-update stays off.
+- **The Windows installer is now `-setup.exe` (NSIS), not `.msi`.**
+  Applying an MSI update needs an administrator prompt every single time,
+  which defeats the point. **Upgrading from 1.4.0 or earlier: uninstall
+  the old StudyVis from Settings → Apps first**, then run the new
+  installer — otherwise Windows lists two copies. Your data is untouched.
 - Settings nav rework: the eleven categories are grouped (You / Study /
   App / System) with lucide icons and an accent edge on the active item;
   the rail is now fluid (`clamp(224px, 22vw, 280px)`) so narrow windows
@@ -48,6 +82,13 @@ shipped it.)
   remove; button sizing and icon placement unified across panes; the
   About pane's copyright line sits beside the version it belongs to; the
   two stats charts share one left plot edge.
+
+### Known issue
+
+- **macOS may re-ask for camera / microphone / screen-recording
+  permission after an update.** macOS ties those grants to a signed app
+  identity, and StudyVis is not yet notarized. Granting again is safe.
+  A Developer ID certificate would remove this.
 
 ## 1.4.0 — 2026-07-19 — multi-friend sessions, faster AI, and the verified backlog
 

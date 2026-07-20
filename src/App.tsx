@@ -12,6 +12,7 @@ import {
   QuitConfirmListener,
   WindowLayoutListener,
 } from '@/features/system'
+import { UpdaterBoot } from '@/features/updater'
 import { Home } from '@/routes/Home'
 import { StyleGuide } from '@/routes/StyleGuide'
 import { readWindowStyleBootCache } from '@/stores/settingsStore'
@@ -52,6 +53,7 @@ function App() {
       <QuitConfirmListener />
       <PomodoroNotifyListener />
       <WindowLayoutListener />
+      <UpdaterBoot />
       <BrowserRouter>
         <ChromeAwareShell>
           <ErrorBoundary surface="routes">

@@ -55,12 +55,11 @@ use commands::sidecar::{
 #[cfg(desktop)]
 use commands::system::{
     app_quit, autostart_is_enabled, autostart_set_enabled, session_set_active,
-    system_ai_features_set_enabled, system_battery, system_fetch_latest_version,
-    system_minimize_to_tray_set_enabled, system_open_camera_settings, system_open_data_folder,
-    system_open_microphone_settings, system_open_notification_settings, system_open_releases,
-    system_open_screen_capture_settings, system_relaunch_app, system_set_global_shortcut,
-    system_write_text_file, AiFeaturesFlag, MinimizeToTrayFlag, QuitFlag, SessionActiveFlag,
-    ShortcutBindings,
+    system_ai_features_set_enabled, system_battery, system_minimize_to_tray_set_enabled,
+    system_open_camera_settings, system_open_data_folder, system_open_microphone_settings,
+    system_open_notification_settings, system_open_releases, system_open_screen_capture_settings,
+    system_relaunch_app, system_set_global_shortcut, system_write_text_file, AiFeaturesFlag,
+    MinimizeToTrayFlag, QuitFlag, SessionActiveFlag, ShortcutBindings,
 };
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -83,6 +82,19 @@ pub fn run() {
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_store::Builder::new().build())
         .plugin(tauri_plugin_opener::init());
+
+    // X6 — auto-update. Registering the plugin does NOT itself make a
+    // request: every check is driven from JS (`features/updater`), which
+    // stays silent while the `auto_update_enabled` setting is off. That's
+    // what keeps PLAN §3's "zero unsolicited outbound" claim honest.
+    //
+    // Update integrity rides on the minisign keypair in
+    // `plugins.updater.pubkey` (tauri.conf.json), which is independent of
+    // Apple/Windows code signing — an ad-hoc-signed bundle still can't be
+    // handed a tampered update, because the payload signature is checked
+    // against the baked-in public key before anything is unpacked.
+    #[cfg(desktop)]
+    let builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
 
     // `tauri::generate_handler!` accepts outer attributes on individual
     // entries (each becomes a match arm in the generated dispatcher), so a
@@ -136,8 +148,6 @@ pub fn run() {
         system_write_text_file,
         #[cfg(desktop)]
         system_open_releases,
-        #[cfg(desktop)]
-        system_fetch_latest_version,
         #[cfg(desktop)]
         system_open_screen_capture_settings,
         #[cfg(desktop)]

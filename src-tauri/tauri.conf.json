@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "StudyVis",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "identifier": "com.studyvis.app",
   "build": {
     "frontendDist": "../dist",
@@ -32,11 +32,21 @@
       "desktop": {
         "schemes": ["studyvis"]
       }
+    },
+    "updater": {
+      "endpoints": [
+        "https://github.com/scotej/studyvis/releases/latest/download/latest.json"
+      ],
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDY1MURFQkUxOUMyRUNBODAKUldTQXlpNmM0ZXNkWlNpdVRVNHlCbnd5RUxrNmlsMFFCZnVNMExCQjRScmpGWUEzRGp4YUdMOEYK",
+      "windows": {
+        "installMode": "passive"
+      }
     }
   },
   "bundle": {
     "active": true,
-    "targets": ["app", "dmg", "msi"],
+    "createUpdaterArtifacts": true,
+    "targets": ["app", "dmg", "nsis"],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -49,6 +59,11 @@
     "macOS": {
       "signingIdentity": "-",
       "hardenedRuntime": false
+    },
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser"
+      }
     },
     "android": {
       "debugApplicationIdSuffix": ".debug"
