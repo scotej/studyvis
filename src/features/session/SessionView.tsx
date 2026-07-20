@@ -1339,7 +1339,6 @@ export function SessionView({
     })()
   }, [])
 
-  const elapsed = useElapsed(startedAt)
   const auditEntries = useMemo(
     () => mapAuditEntries(auditEvents, identity, peers, seenPeerNames),
     [auditEvents, identity, peers, seenPeerNames]
@@ -1535,16 +1534,7 @@ export function SessionView({
         </span>
         <span className="flex items-center gap-4">
           <AiStatusChip status={aiChipStatus} />
-          <span
-            role="img"
-            className="flex items-center gap-1.5 text-text-secondary"
-            aria-label={strings.session.elapsed.ariaLabel(elapsed)}
-          >
-            <span aria-hidden="true">{strings.session.elapsed.label}</span>
-            <span className="font-mono tabular-nums" aria-hidden="true">
-              {elapsed}
-            </span>
-          </span>
+          <ElapsedTime startedAt={startedAt} />
           <SessionTimer
             phase={pomodoroSnapshot.phase}
             preset={pomodoroSnapshot.preset}
@@ -1740,4 +1730,24 @@ function useElapsed(startedAt: number | null): string {
   const m = Math.floor(seconds / 60)
   const s = seconds % 60
   return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
+}
+
+// Leaf that owns the 1-second elapsed tick so the whole-session clock updates
+// in the footer without re-rendering SessionView — mirrors SessionTimer's
+// useRemainingMs isolation. The `now` state lives here, not in SessionView's
+// render body, so the interval only reconciles this one span.
+function ElapsedTime({ startedAt }: { startedAt: number | null }) {
+  const elapsed = useElapsed(startedAt)
+  return (
+    <span
+      role="img"
+      className="flex items-center gap-1.5 text-text-secondary"
+      aria-label={strings.session.elapsed.ariaLabel(elapsed)}
+    >
+      <span aria-hidden="true">{strings.session.elapsed.label}</span>
+      <span className="font-mono tabular-nums" aria-hidden="true">
+        {elapsed}
+      </span>
+    </span>
+  )
 }
