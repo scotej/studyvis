@@ -769,6 +769,12 @@ export const strings = {
     fallbackLabel: 'Settings',
     sectionAriaLabel: (category: string) => `${category} settings`,
     navAriaLabel: 'Settings categories',
+    navGroups: {
+      you: 'You',
+      study: 'Study',
+      app: 'App',
+      system: 'System',
+    },
     nav: {
       identity: 'Identity',
       friends: 'Friends',
@@ -812,10 +818,13 @@ export const strings = {
       friendsBackup: {
         label: 'Friends backup',
         help: 'Your 24 words restore your identity, but not your friends list. Save an encrypted copy to keep alongside them — only this identity can open it.',
+        // Aria labels start with the visible button text (WCAG 2.5.3
+        // label-in-name) so voice-control users can target them by what
+        // they read.
         exportCta: 'Export friends',
-        exportAriaLabel: 'Export your friends list to a file',
+        exportAriaLabel: 'Export friends to an encrypted backup file',
         importCta: 'Import friends',
-        importAriaLabel: 'Import a friends list from a file',
+        importAriaLabel: 'Import friends from a backup file',
         fileFilterName: 'StudyVis friends backup',
         exportDefaultName: 'studyvis-friends',
         exportedToast: (count: number) =>
@@ -914,6 +923,23 @@ export const strings = {
         help: 'Collapses transitions and animations to a fade. Picks this up automatically if your OS already has reduce-motion on.',
         ariaLabel: 'Reduce motion',
       },
+      window: {
+        heading: 'Window',
+        remember: {
+          label: 'Remember size and position',
+          help: 'Reopens the window where you left it.',
+          ariaLabel: 'Remember window size and position',
+        },
+        reset: {
+          label: 'Window size',
+          help: 'Back to the default size, centered on your screen.',
+          resetCta: 'Reset',
+          // Starts with the visible button text (WCAG 2.5.3 label-in-name).
+          resetAriaLabel: 'Reset window size and position',
+          resetToast: 'Window size reset.',
+          resetError: "Couldn't reset the window size.",
+        },
+      },
     },
 
     notifications: {
@@ -923,6 +949,7 @@ export const strings = {
       // drop when the system permission is denied, and macOS never
       // re-prompts after a hard denial).
       systemPermission: {
+        checkingAriaLabel: 'Checking notification permission',
         label: 'System permission',
         grantedHelp: 'Your system is allowing StudyVis notifications.',
         grantedBadge: 'Allowed',

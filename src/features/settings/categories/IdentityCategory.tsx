@@ -188,7 +188,6 @@ export function IdentityCategory({ onRestoreIdentity }: IdentityCategoryProps) {
             <Button
               type="submit"
               variant="default"
-              size="sm"
               disabled={!canSave}
               aria-disabled={!canSave}
             >
@@ -203,13 +202,13 @@ export function IdentityCategory({ onRestoreIdentity }: IdentityCategoryProps) {
         stack
         control={
           <div className="flex items-center gap-2">
-            <code className="block max-w-full overflow-x-auto rounded-md border border-border-subtle bg-bg-sunk px-3 py-2 font-mono text-xs text-text-secondary">
+            <code className="block max-w-full rounded-md border border-border-subtle bg-bg-sunk px-3 py-2 font-mono text-xs break-all select-all text-text-secondary">
               {identity?.ed_pubkey_hex ?? '…'}
             </code>
             <Button
               type="button"
               variant="ghost"
-              size="sm"
+              size="icon-sm"
               onClick={() => void handleCopy()}
               disabled={!identity}
               aria-label={copy.publicKey.copyAriaLabel}

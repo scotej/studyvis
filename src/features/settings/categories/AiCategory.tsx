@@ -244,7 +244,7 @@ export function AiCategory() {
               MAX_SAMPLE_INTERVAL_SEC
             )}
             control={
-              <div className="flex items-center gap-4">
+              <div className="flex max-w-md items-center gap-4">
                 <Slider
                   className="w-full"
                   min={measuredFloor}
@@ -270,7 +270,7 @@ export function AiCategory() {
             stack
             help={copy.warnAfter.help}
             control={
-              <div className="flex items-center gap-4">
+              <div className="flex max-w-md items-center gap-4">
                 <Slider
                   className="w-full"
                   min={WARNING_THRESHOLD_MIN}
@@ -300,7 +300,7 @@ export function AiCategory() {
             stack
             help={copy.alertAfter.help}
             control={
-              <div className="flex items-center gap-4">
+              <div className="flex max-w-md items-center gap-4">
                 <Slider
                   className="w-full"
                   min={ALERT_THRESHOLD_MIN}
@@ -327,7 +327,7 @@ export function AiCategory() {
             stack
             help={copy.confidenceFloor.help}
             control={
-              <div className="flex items-center gap-4">
+              <div className="flex max-w-md items-center gap-4">
                 <Slider
                   className="w-full"
                   min={CONFIDENCE_FLOOR_UI_MIN}
@@ -365,7 +365,7 @@ export function AiCategory() {
                     void setCaptureDisplays(value as CaptureDisplaysMode)
                   }
                 }}
-                className="grid-cols-1 gap-3 sm:grid-cols-none sm:grid-flow-col sm:auto-cols-max sm:gap-6"
+                className="grid-flow-col auto-cols-max gap-6"
                 aria-label={copy.captureDisplays.ariaLabel}
               >
                 <div className="flex items-center gap-2">

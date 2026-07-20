@@ -35,16 +35,13 @@ use crate::db::data_dir;
 
 // Rust target triple matches the suffix scripts/fetch-llama-server.sh writes
 // to src-tauri/binaries/ and the path under bundle.resources where companion
-// dylibs/dlls land. Update both the script and these arms in lockstep when
-// adding a new platform.
-#[cfg(all(target_arch = "aarch64", target_os = "macos"))]
-const TARGET_TRIPLE: &str = "aarch64-apple-darwin";
-#[cfg(all(target_arch = "x86_64", target_os = "macos"))]
-const TARGET_TRIPLE: &str = "x86_64-apple-darwin";
-#[cfg(all(target_arch = "x86_64", target_os = "windows"))]
-const TARGET_TRIPLE: &str = "x86_64-pc-windows-msvc";
-#[cfg(all(target_arch = "x86_64", target_os = "linux"))]
-const TARGET_TRIPLE: &str = "x86_64-unknown-linux-gnu";
+// dylibs/dlls land. tauri_build::build() emits this from cargo's TARGET, so it
+// always names the triple actually being built. The hand-written #[cfg] arms
+// this replaces left the const undefined on any unlisted triple (aarch64
+// Linux, the dev host) — an E0425 raised far from its cause. The lockstep that
+// matters is unaffected: tauri-build still fails the build outright when
+// binaries/llama-server-<triple> is missing.
+const TARGET_TRIPLE: &str = env!("TAURI_ENV_TARGET_TRIPLE");
 
 const SIDECAR_NAME: &str = "binaries/llama-server";
 const LOG_DIR: &str = "logs";

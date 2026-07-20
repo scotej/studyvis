@@ -23,6 +23,7 @@ import { Card } from '@/components/ui/card'
 import { tokens } from '@/design/tokens'
 import { strings } from '@/strings'
 
+import { CHART_Y_AXIS_WIDTH } from './statsData'
 import type {
   FocusInsights as FocusInsightsData,
   TimingDistribution,
@@ -36,7 +37,7 @@ export type FocusInsightsViewProps = {
 export function FocusInsights({ insights }: FocusInsightsViewProps) {
   const copy = strings.stats.insights
   return (
-    <section className="flex flex-col gap-6" aria-label={copy.heading}>
+    <section className="flex flex-col gap-3" aria-label={copy.heading}>
       <h3 className="text-sm font-medium tracking-wide text-text-secondary uppercase">
         {copy.heading}
       </h3>
@@ -121,7 +122,9 @@ function ReasonsSection({
               key={r.reasoning}
               className="flex items-start justify-between gap-3 rounded-md border border-border-subtle bg-bg-surface px-3 py-2 text-sm"
             >
-              <span className="text-text-primary">{r.reasoning}</span>
+              <span className="min-w-0 wrap-anywhere text-text-primary">
+                {r.reasoning}
+              </span>
               <span className="shrink-0 text-xs font-medium tabular-nums text-text-muted">
                 {copy.count(r.count)}
               </span>
@@ -174,7 +177,7 @@ function TrendChart({ trend }: { trend: TrendPoint[] }) {
           tickMargin={6}
         />
         <YAxis
-          width={36}
+          width={CHART_Y_AXIS_WIDTH}
           domain={[0, 100]}
           allowDecimals={false}
           tickLine={false}

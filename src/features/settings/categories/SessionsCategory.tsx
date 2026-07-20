@@ -82,7 +82,7 @@ export function SessionsCategory({ onOpenSession }: SessionsCategoryProps) {
     <>
       <SettingsSection heading={copy.heading}>
         {status === 'loading' || status === 'idle' ? (
-          <SessionRowSkeleton />
+          <SessionListSkeleton />
         ) : null}
         {status === 'error' ? (
           <SettingsRow
@@ -193,15 +193,27 @@ function formatSessionMeta(session: SessionRecord): string {
   return `${meta.minutes(minutes)} · ${peerLabel}${scoreLabel}`
 }
 
+// Mirrors a ready SettingsRow's silhouette (py-4 + gap-1 label column,
+// border-b, an h-8 bar where the Delete button sits) so resolving from
+// loading to ready swaps content without a jump or a border pop-in.
 function SessionRowSkeleton() {
   return (
-    <div
-      role="status"
-      aria-label={strings.settings.sessions.loadingAriaLabel}
-      className="flex flex-col gap-2 py-3"
-    >
-      <Skeleton className="h-4 w-1/3" />
-      <Skeleton className="h-3 w-1/4" />
+    <div className="flex items-center justify-between gap-6 border-b border-border-subtle py-4 last:border-b-0">
+      <div className="flex min-w-0 flex-1 flex-col gap-1">
+        <Skeleton className="h-4 w-1/3" />
+        <Skeleton className="h-3 w-1/4" />
+      </div>
+      <Skeleton className="h-8 w-20 shrink-0" />
+    </div>
+  )
+}
+
+function SessionListSkeleton() {
+  return (
+    <div role="status" aria-label={strings.settings.sessions.loadingAriaLabel}>
+      <SessionRowSkeleton />
+      <SessionRowSkeleton />
+      <SessionRowSkeleton />
     </div>
   )
 }

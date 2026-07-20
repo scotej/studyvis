@@ -47,7 +47,14 @@ export function SettingsRow({
       <div className="flex min-w-0 flex-col gap-1">
         <span className="text-sm font-medium text-text-primary">{label}</span>
         {help ? (
-          <span className="text-xs text-text-secondary">{help}</span>
+          // break-words: several panes surface raw backend errors here
+          // (autostart, sidecar, session history), and those routinely embed
+          // unbreakable tokens — absolute paths, registry keys, URLs. Without
+          // a wrap guard one long token widens the row past the content
+          // column and puts a horizontal scrollbar on the whole pane.
+          <span className="text-xs break-words text-text-secondary">
+            {help}
+          </span>
         ) : null}
       </div>
       {control ? (

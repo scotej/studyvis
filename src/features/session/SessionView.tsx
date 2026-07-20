@@ -1156,10 +1156,14 @@ export function SessionView({
       if (tag === 'INPUT' || tag === 'TEXTAREA' || target?.isContentEditable) {
         return
       }
-      // #47 B2 — any open modal (the settings overlay, Radix dialogs) owns
-      // Esc. Arming leave-on-Esc underneath one risks an invisible
-      // second-Esc ending the session for everyone.
-      if (document.querySelector('[aria-modal="true"]')) {
+      // #47 B2 — any open modal (Radix dialogs) or the settings overlay
+      // (role=dialog, intentionally not aria-modal so the custom-chrome
+      // TitleBar stays AT-reachable) owns Esc. Arming leave-on-Esc
+      // underneath one risks an invisible second-Esc ending the session
+      // for everyone.
+      if (
+        document.querySelector('[aria-modal="true"], [data-settings-overlay]')
+      ) {
         return
       }
       e.preventDefault()

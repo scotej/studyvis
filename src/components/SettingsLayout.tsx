@@ -9,6 +9,14 @@ import { strings } from '@/strings'
 export type SettingsCategoryDescriptor<TId extends string = string> = {
   id: TId
   label: string
+  // Optional 16px lucide glyph rendered before the label (DESIGN-SYSTEM §9:
+  // stroke 1.5, currentColor). Supplied by the container so this layout
+  // stays free of feature knowledge.
+  icon?: ReactNode
+  // Optional group heading. The list stays flat; a heading is rendered
+  // above an item whenever its group differs from the previous item's, so
+  // one array remains the single source of order and grouping.
+  group?: string
 }
 
 export type SettingsLayoutProps<TId extends string = string> = {
@@ -58,25 +66,53 @@ export function SettingsLayout<TId extends string = string>({
       <div className="flex min-h-0 flex-1">
         <nav
           aria-label={strings.settings.navAriaLabel}
-          className="shrink-0 overflow-y-auto border-r border-border-subtle bg-bg-surface px-3 py-6"
-          style={{ width: tokens.sizes.sidebarWidth }}
+          // Fluid rail: clamp(settingsRailMinWidth, 22vw, sidebarWidth) via
+          // --settings-rail-width (src/design/index.css) — a fixed 280 was
+          // 27% of the window at the 1024 minimum and starved the content
+          // column below its 768 measure. py-4 (not py-6) keeps all eleven
+          // grouped items visible at the 640px window-height minimum.
+          className="w-(--settings-rail-width) shrink-0 overflow-y-auto border-r border-border-subtle bg-bg-surface px-3 py-4"
         >
-          <ul className="flex flex-col gap-1">
-            {categories.map((category) => {
+          <ul className="flex flex-col gap-0.5">
+            {categories.map((category, index) => {
               const active = category.id === activeCategoryId
+              const previousGroup =
+                index > 0 ? categories[index - 1].group : undefined
+              const showGroup =
+                category.group !== undefined && category.group !== previousGroup
               return (
                 <li key={category.id}>
+                  {showGroup ? (
+                    <div
+                      className={cn(
+                        'px-3 pb-1 text-xs font-medium tracking-wide text-text-muted uppercase',
+                        index > 0 && 'pt-3'
+                      )}
+                    >
+                      {category.group}
+                    </div>
+                  ) : null}
                   <button
                     type="button"
                     onClick={() => onCategorySelect(category.id)}
                     aria-current={active ? 'page' : undefined}
                     className={cn(
-                      'flex w-full items-center justify-start rounded-md px-3 py-2 text-left text-sm transition-colors outline-none focus-visible:ring-3 focus-visible:ring-accent-ring',
+                      'relative flex w-full items-center gap-3 rounded-md px-3 py-1.5 text-left text-sm transition-colors outline-none focus-visible:ring-3 focus-visible:ring-accent-ring',
                       active
                         ? 'bg-bg-raised font-medium text-text-primary'
                         : 'text-text-secondary hover:bg-bg-raised hover:text-text-primary'
                     )}
                   >
+                    {active ? (
+                      // Accent edge on top of the bg + weight treatment —
+                      // additive, so the active state never rides color
+                      // alone (§11).
+                      <span
+                        aria-hidden="true"
+                        className="absolute inset-y-1 left-0 w-0.5 rounded-full bg-accent-default"
+                      />
+                    ) : null}
+                    {category.icon}
                     {category.label}
                   </button>
                 </li>
@@ -92,9 +128,11 @@ export function SettingsLayout<TId extends string = string>({
           aria-label={strings.settings.sectionAriaLabel(
             activeCategoryLabel(categories, activeCategoryId)
           )}
-          // scrollbar-gutter keeps the centered column from shifting when a
-          // tall pane adds a classic (non-overlay) scrollbar on Windows.
-          className="min-w-0 flex-1 overflow-y-auto px-4 py-4 [scrollbar-gutter:stable] sm:px-6 sm:py-6"
+          // scrollbar-gutter reserves space on BOTH edges so the centered
+          // column neither shifts when a tall pane adds a classic
+          // (non-overlay) scrollbar on Windows nor sits off the header's
+          // optical center while the gutter is reserved.
+          className="min-w-0 flex-1 overflow-y-auto px-6 py-6 [scrollbar-gutter:stable_both-edges]"
         >
           <div
             className="mx-auto flex w-full flex-col gap-8"

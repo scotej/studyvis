@@ -17,6 +17,10 @@ import type { SessionRecord } from '@/lib/db/sessions'
 export const STREAK_MIN_MINUTES = 25
 export const FOCUS_WINDOW_DAYS = 30
 export const TOP_PARTNERS_LIMIT = 5
+// Shared by the Study-minutes bar chart (Dashboard) and the Focus-over-time
+// line chart (FocusInsights): they stack in the same column, so a differing
+// YAxis width would misalign their left plot edges by that difference.
+export const CHART_Y_AXIS_WIDTH = 36
 
 // R2 — "Study minutes" for a session = the minutes the user spent in the
 // study session. Deliberately raw presence time (total_minutes), NOT

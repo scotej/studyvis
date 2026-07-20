@@ -81,6 +81,7 @@ export function ShortcutsCategory() {
       <SettingsRow
         label={copy.pttFriends.label}
         help={copy.pttFriends.help}
+        className="items-start"
         control={
           <KeybindCapture
             action="ptt-friends"
@@ -95,6 +96,7 @@ export function ShortcutsCategory() {
       <SettingsRow
         label={copy.pttAi.label}
         help={aiFeaturesEnabled ? copy.pttAi.helpOn : copy.pttAi.helpOff}
+        className="items-start"
         control={
           <KeybindCapture
             action="ptt-ai"

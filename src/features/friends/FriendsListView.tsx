@@ -6,6 +6,8 @@ import { cn } from '@/lib/utils'
 import { strings } from '@/strings'
 import type { Friend } from '@/lib/db/friends'
 
+import { shortPubkey } from './shortPubkey'
+
 export type FriendsListViewProps = {
   friends: ReadonlyArray<Friend>
   isOnline: (edPubkeyHex: string) => boolean
@@ -148,11 +150,6 @@ function PresenceDot({ online }: { online: boolean }) {
       )}
     />
   )
-}
-
-function shortPubkey(hex: string): string {
-  if (hex.length <= 10) return hex
-  return `${hex.slice(0, 8)}…`
 }
 
 function formatLastTogether(

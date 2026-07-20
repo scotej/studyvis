@@ -10,6 +10,7 @@ import {
   PomodoroNotifyListener,
   PttListener,
   QuitConfirmListener,
+  WindowLayoutListener,
 } from '@/features/system'
 import { UpdaterBoot } from '@/features/updater'
 import { Home } from '@/routes/Home'
@@ -51,6 +52,7 @@ function App() {
       <PttListener />
       <QuitConfirmListener />
       <PomodoroNotifyListener />
+      <WindowLayoutListener />
       <UpdaterBoot />
       <BrowserRouter>
         <ChromeAwareShell>

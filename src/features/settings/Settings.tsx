@@ -1,4 +1,17 @@
 import { useEffect, useState } from 'react'
+import {
+  BellIcon,
+  ChartLineIcon,
+  GlobeIcon,
+  HistoryIcon,
+  InfoIcon,
+  KeyboardIcon,
+  PaletteIcon,
+  SlidersHorizontalIcon,
+  SparklesIcon,
+  UserRoundIcon,
+  UsersIcon,
+} from 'lucide-react'
 
 import {
   SettingsLayout,
@@ -34,20 +47,83 @@ export type SettingsCategoryId =
   | 'advanced'
   | 'about'
 
+// Nav glyphs are 16px stroke-1.5 (DESIGN-SYSTEM §9) and decorative — the
+// label carries the meaning, so every icon is aria-hidden.
+function navIcon(Icon: typeof UserRoundIcon) {
+  return (
+    <Icon size={16} strokeWidth={1.5} aria-hidden="true" className="shrink-0" />
+  )
+}
+
 const CATEGORIES: ReadonlyArray<
   SettingsCategoryDescriptor<SettingsCategoryId>
 > = [
-  { id: 'identity', label: strings.settings.nav.identity },
-  { id: 'friends', label: strings.settings.nav.friends },
-  { id: 'sessions', label: strings.settings.nav.sessions },
-  { id: 'stats', label: strings.settings.nav.stats },
-  { id: 'appearance', label: strings.settings.nav.appearance },
-  { id: 'notifications', label: strings.settings.nav.notifications },
-  { id: 'shortcuts', label: strings.settings.nav.shortcuts },
-  { id: 'ai', label: strings.settings.nav.ai },
-  { id: 'network', label: strings.settings.nav.network },
-  { id: 'advanced', label: strings.settings.nav.advanced },
-  { id: 'about', label: strings.settings.nav.about },
+  {
+    id: 'identity',
+    label: strings.settings.nav.identity,
+    icon: navIcon(UserRoundIcon),
+    group: strings.settings.navGroups.you,
+  },
+  {
+    id: 'friends',
+    label: strings.settings.nav.friends,
+    icon: navIcon(UsersIcon),
+    group: strings.settings.navGroups.you,
+  },
+  {
+    id: 'sessions',
+    label: strings.settings.nav.sessions,
+    icon: navIcon(HistoryIcon),
+    group: strings.settings.navGroups.study,
+  },
+  {
+    id: 'stats',
+    label: strings.settings.nav.stats,
+    icon: navIcon(ChartLineIcon),
+    group: strings.settings.navGroups.study,
+  },
+  {
+    id: 'ai',
+    label: strings.settings.nav.ai,
+    icon: navIcon(SparklesIcon),
+    group: strings.settings.navGroups.study,
+  },
+  {
+    id: 'appearance',
+    label: strings.settings.nav.appearance,
+    icon: navIcon(PaletteIcon),
+    group: strings.settings.navGroups.app,
+  },
+  {
+    id: 'notifications',
+    label: strings.settings.nav.notifications,
+    icon: navIcon(BellIcon),
+    group: strings.settings.navGroups.app,
+  },
+  {
+    id: 'shortcuts',
+    label: strings.settings.nav.shortcuts,
+    icon: navIcon(KeyboardIcon),
+    group: strings.settings.navGroups.app,
+  },
+  {
+    id: 'network',
+    label: strings.settings.nav.network,
+    icon: navIcon(GlobeIcon),
+    group: strings.settings.navGroups.system,
+  },
+  {
+    id: 'advanced',
+    label: strings.settings.nav.advanced,
+    icon: navIcon(SlidersHorizontalIcon),
+    group: strings.settings.navGroups.system,
+  },
+  {
+    id: 'about',
+    label: strings.settings.nav.about,
+    icon: navIcon(InfoIcon),
+    group: strings.settings.navGroups.system,
+  },
 ]
 
 export type SettingsProps = {

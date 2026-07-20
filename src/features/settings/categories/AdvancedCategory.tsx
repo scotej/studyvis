@@ -10,6 +10,7 @@ import {
   CopyIcon,
   FileTextIcon,
   FolderOpenIcon,
+  RotateCcwIcon,
   Trash2Icon,
 } from 'lucide-react'
 import { toast } from 'sonner'
@@ -124,7 +125,14 @@ export function AdvancedCategory() {
       <SettingsSection heading={copy.heading}>
         <SettingsRow
           label={copy.autostart.label}
-          help={copy.autostart.help}
+          // One row per setting: when autostart is unavailable the note
+          // replaces this row's help instead of appearing as a separate
+          // control-less pseudo-row below it.
+          help={
+            autostart.status === 'unavailable'
+              ? copy.autostartUnavailable.help
+              : copy.autostart.help
+          }
           control={
             <Switch
               checked={autostart.enabled}
@@ -136,12 +144,6 @@ export function AdvancedCategory() {
             />
           }
         />
-        {autostart.status === 'unavailable' ? (
-          <SettingsRow
-            label={copy.autostartUnavailable.label}
-            help={copy.autostartUnavailable.help}
-          />
-        ) : null}
         {autostart.status === 'error' && autostart.error ? (
           // help, not the control slot: help wraps in the min-w-0 column,
           // while the shrink-0 control slot would let a long backend error
@@ -215,7 +217,7 @@ export function AdvancedCategory() {
               disabled={resettingOnboarding}
               aria-disabled={resettingOnboarding ? true : undefined}
             >
-              {copy.replayOnboarding.replayCta}
+              <RotateCcwIcon /> {copy.replayOnboarding.replayCta}
             </Button>
           }
         />

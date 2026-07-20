@@ -18,7 +18,7 @@ V3 work was drafted as v1.0.4 but shipped under the **v1.0.5** tag —
 there is no v1.0.4 tag; the section below is labelled by the tag that
 shipped it.)
 
-## 1.5.0 — 2026-07-21 — auto-update
+## 1.5.0 — 2026-07-21 — auto-update + a window-size settings pass
 
 > **This is the last version you install by hand.** From here on StudyVis
 > updates itself. **Windows:** this release switched installer format —
@@ -41,6 +41,13 @@ shipped it.)
   download is rejected. This does not require the code-signing
   certificates StudyVis still lacks — the updater carries its own key.
 
+- **Remember window size and position** (Settings → Appearance → Window,
+  on by default): the window reopens where you left it — size, position,
+  and maximized state — restored by Rust before the window is shown, so
+  there's no resize flash. Geometry saved on an unplugged monitor falls
+  back to centering instead of opening off-screen. A **Reset** row returns
+  the window to the default 1280 × 800, centered.
+
 ### Changed
 
 - **Automatic updates are ON by default** (Settings → About). This widens
@@ -55,6 +62,26 @@ shipped it.)
   which defeats the point. **Upgrading from 1.4.0 or earlier: uninstall
   the old StudyVis from Settings → Apps first**, then run the new
   installer — otherwise Windows lists two copies. Your data is untouched.
+- Settings nav rework: the eleven categories are grouped (You / Study /
+  App / System) with lucide icons and an accent edge on the active item;
+  the rail is now fluid (`clamp(224px, 22vw, 280px)`) so narrow windows
+  give the freed width back to the content column.
+- Settings over a live session no longer covers the custom title bar's
+  window controls (custom window style only).
+- Overflow hardening across every pane: raw backend errors (autostart,
+  AI sidecar, session history, model downloads) and long URLs now wrap
+  instead of forcing a horizontal scrollbar; relay URLs show the full
+  value on hover, and your public key wraps in place — one click selects
+  the whole thing to copy.
+- Layout-shift fixes: notification-permission and sessions/stats loading
+  skeletons now match their resolved shape; the window-style Relaunch
+  button, TURN status line, and shortcut-rebind controls no longer move
+  mid-interaction.
+- Consistency: friend fingerprints render mono and use the same 8-char
+  truncation as the friends list; remove buttons name the friend they
+  remove; button sizing and icon placement unified across panes; the
+  About pane's copyright line sits beside the version it belongs to; the
+  two stats charts share one left plot edge.
 
 ### Known issue
 
