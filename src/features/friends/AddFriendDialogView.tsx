@@ -4,7 +4,7 @@
 // hints. All pairing state arrives via the `AddFriendPhase` discriminated
 // union from the AddFriendDialog container — no trystero, no stores here.
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react'
 import { CheckIcon, CopyIcon } from 'lucide-react'
 import { toast } from 'sonner'
 
@@ -20,8 +20,19 @@ import {
 import { Separator } from '@/components/ui/separator'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Textarea } from '@/components/ui/textarea'
-import { PairQrCode } from '@/components/PairQrCode'
-import { PairQrScanner } from '@/components/PairQrScanner'
+// The QR encoder (qrcode) and scanner (jsqr) are moderate vendor deps used
+// only inside this pairing dialog, never on a launch path. Lazy-load them so
+// both land in a chunk fetched when the dialog opens, out of the cold-start
+// bundle. PairQrCode already renders its own Skeleton while generating, so the
+// Suspense fallbacks below match its shape and the two chain seamlessly.
+const PairQrCode = lazy(() =>
+  import('@/components/PairQrCode').then((m) => ({ default: m.PairQrCode }))
+)
+const PairQrScanner = lazy(() =>
+  import('@/components/PairQrScanner').then((m) => ({
+    default: m.PairQrScanner,
+  }))
+)
 import { strings } from '@/strings'
 
 import { PAIR_WORD_COUNT } from './pair'
@@ -234,12 +245,16 @@ function CardSurface({
           <DialogTitle>{card.addHeading}</DialogTitle>
           <DialogDescription>{card.scanHint}</DialogDescription>
         </DialogHeader>
-        <PairQrScanner
-          onDecode={handleScanDecode}
-          onError={handleScanError}
-          label={card.scanAria}
-          accept={(text) => interpretImportText(text) !== null}
-        />
+        <Suspense
+          fallback={<Skeleton className="aspect-square w-full rounded-lg" />}
+        >
+          <PairQrScanner
+            onDecode={handleScanDecode}
+            onError={handleScanError}
+            label={card.scanAria}
+            accept={(text) => interpretImportText(text) !== null}
+          />
+        </Suspense>
         <DialogFooter>
           <Button variant="outline" onClick={() => setScanning(false)}>
             {strings.common.actions.cancel}
@@ -269,7 +284,11 @@ function CardSurface({
             {/* Larger than the legacy word QR (224): the card is a denser
                 ~200-char byte-mode payload, so more px-per-module keeps it
                 scannable from a laptop camera across a desk. */}
-            <PairQrCode value={myCardLink} label={card.qrAlt} size={320} />
+            <Suspense
+              fallback={<Skeleton className="aspect-square w-80 rounded-lg" />}
+            >
+              <PairQrCode value={myCardLink} label={card.qrAlt} size={320} />
+            </Suspense>
             <p className="text-center text-xs text-text-muted">
               {card.qrCaption}
             </p>
@@ -482,7 +501,11 @@ function HostPanel({
     return (
       <div className="flex flex-col gap-5">
         <div className="flex flex-col items-center gap-2">
-          <PairQrCode value={encodePairLink(words)} label={host.qrAlt} />
+          <Suspense
+            fallback={<Skeleton className="aspect-square w-56 rounded-lg" />}
+          >
+            <PairQrCode value={encodePairLink(words)} label={host.qrAlt} />
+          </Suspense>
           <p className="text-xs text-text-muted">{host.qrCaption}</p>
           <p className="text-center text-xs text-text-muted">
             {host.freshnessNote}
@@ -713,11 +736,15 @@ function JoinPanel({
     return (
       <div className="flex flex-col gap-4">
         <p className="text-sm text-text-secondary">{join.scanHint}</p>
-        <PairQrScanner
-          onDecode={handleScanDecode}
-          onError={handleScanError}
-          label={join.scanAria}
-        />
+        <Suspense
+          fallback={<Skeleton className="aspect-square w-full rounded-lg" />}
+        >
+          <PairQrScanner
+            onDecode={handleScanDecode}
+            onError={handleScanError}
+            label={join.scanAria}
+          />
+        </Suspense>
         <DialogFooter>
           <Button variant="outline" onClick={() => setScanning(false)}>
             {strings.common.actions.cancel}
