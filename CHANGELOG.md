@@ -18,7 +18,15 @@ V3 work was drafted as v1.0.4 but shipped under the **v1.0.5** tag —
 there is no v1.0.4 tag; the section below is labelled by the tag that
 shipped it.)
 
-## Unreleased
+## 1.5.0 — 2026-07-21 — auto-update
+
+> **This is the last version you install by hand.** From here on StudyVis
+> updates itself. **Windows:** this release switched installer format —
+> uninstall your existing StudyVis from Settings → Apps _before_ running the
+> new `-setup.exe`, or Windows will list two copies. Your identity, friends,
+> and history are untouched. **macOS:** after a self-update, macOS may ask
+> for camera / microphone / screen-recording permission again (the app isn't
+> notarized yet); granting it is safe.
 
 ### Added
 
