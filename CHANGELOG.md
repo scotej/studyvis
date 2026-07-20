@@ -18,6 +18,33 @@ V3 work was drafted as v1.0.4 but shipped under the **v1.0.5** tag —
 there is no v1.0.4 tag; the section below is labelled by the tag that
 shipped it.)
 
+## 1.6.0 — 2026-07-21 — a searchable settings rail, lighter and faster
+
+The first update that installs itself. Nothing changes about your
+identity, friends, or history, and there's nothing to do after updating.
+
+### Added
+
+- **Search your settings.** The settings nav rail gains a search box:
+  type "camera", "relay", "shortcut", or any category name and the rail
+  filters to the matching panes as you go — no more remembering which of
+  the eleven categories a control lives under. It matches pane names,
+  group headings, and concept keywords, and it's keyboard-first: arrow
+  down into the results, Enter opens the first match, Esc clears. The
+  grouping, icons, and active-item accent are unchanged when the box is
+  empty.
+
+### Changed
+
+- **Smoother sessions.** The session view no longer re-renders itself
+  every second just to advance the elapsed-time clock; the video and
+  status surfaces update without the extra churn.
+- **Faster startup.** Split the startup bundle so roughly 500 KB of code
+  (the stats charts and the pairing QR reader) is fetched only when you
+  open those screens instead of up front, trimming what the app parses
+  before the first screen appears. Nothing moved or changed — only when
+  its code loads did.
+
 ## 1.5.0 — 2026-07-21 — auto-update + a window-size settings pass
 
 > **This is the last version you install by hand.** From here on StudyVis
