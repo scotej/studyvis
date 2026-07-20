@@ -247,7 +247,7 @@ mod tests {
         let full = fs::read(&path).unwrap();
         assert!(full.len() > 4096, "expected a multi-page db");
         // Keep the header + first page but lop off the rest of the body.
-        let mut f = fs::OpenOptions::new().write(true).open(&path).unwrap();
+        let f = fs::OpenOptions::new().write(true).open(&path).unwrap();
         f.set_len(4096 + 100).unwrap();
         drop(f);
         assert!(is_definitely_corrupt(&path));
