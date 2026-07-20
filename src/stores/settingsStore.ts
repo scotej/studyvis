@@ -55,6 +55,27 @@ export type CaptureDisplaysMode = 'primary' | 'all'
 // relaunch because live decoration swaps are unreliable on macOS (see
 // tauri-apps/tauri#9673, #12042).
 export type WindowStyleMode = 'system' | 'custom'
+// Floating-window geometry in physical pixels — the units Tauri's
+// onResized/onMoved payloads and getters report. `maximized` is tracked
+// separately from the floating rect: while maximized only the flag
+// updates, so unmaximizing after a relaunch returns to the remembered
+// floating size instead of the maximized one. Rust reads this at boot
+// (before the hidden window is shown) and re-validates against the
+// connected monitors, so a stale rect from an unplugged display can never
+// strand the window off-screen.
+export type WindowLayout = {
+  width: number
+  height: number
+  x: number
+  y: number
+  // Scale factor of the display the geometry was captured on. Physical
+  // pixels are only meaningful relative to a scale: restoring them through
+  // a differently-scaled monitor (retina laptop + 1x external is the
+  // textbook Mac setup) would resize or misplace the window, so Rust uses
+  // this to convert into the space each platform restores correctly.
+  scaleFactor: number
+  maximized: boolean
+}
 
 export type SettingsValues = {
   theme: ThemeMode
@@ -111,6 +132,14 @@ export type SettingsValues = {
   captureDisplays: CaptureDisplaysMode
   // V3-P6 opt-in custom window chrome. See `WindowStyleMode` above.
   windowStyle: WindowStyleMode
+  // Remember the window's size and position across launches. On by default:
+  // reopening where you left off is the expected desktop behavior, and a
+  // fresh install is unaffected until the user actually moves or resizes
+  // the window. Rust gates its boot-time restore on this flag.
+  rememberWindowLayout: boolean
+  // Last observed floating geometry (see `WindowLayout` above). `null` until
+  // the first tracked move/resize; written debounced by WindowLayoutListener.
+  windowLayout: WindowLayout | null
   // F3 — optional user-supplied Nostr signaling relays (wss:// each). Empty
   // (the default) keeps the curated DEFAULT_RELAY_URLS. When non-empty, these
   // EXTEND the built-in list (#47 A5: union via mergedRelayUrls, custom
@@ -159,6 +188,8 @@ export const SETTINGS_KEY_PTT_FRIENDS_ACCELERATOR = 'ptt_friends_accelerator'
 export const SETTINGS_KEY_PTT_AI_ACCELERATOR = 'ptt_ai_accelerator'
 export const SETTINGS_KEY_CAPTURE_DISPLAYS = 'capture_displays'
 export const SETTINGS_KEY_WINDOW_STYLE = 'window_style'
+export const SETTINGS_KEY_REMEMBER_WINDOW_LAYOUT = 'remember_window_layout'
+export const SETTINGS_KEY_WINDOW_LAYOUT = 'window_layout'
 export const SETTINGS_KEY_CUSTOM_RELAYS = 'custom_relay_urls'
 export const SETTINGS_KEY_TURN_SERVER = 'turn_server'
 export const SETTINGS_KEY_AUDIO_INPUT_DEVICE = 'audio_input_device_id'
@@ -195,6 +226,11 @@ export const DEFAULT_SETTINGS: SettingsValues = {
   // System chrome is the v1.0.3 shipped behavior — keep it as the default
   // so a fresh install or a missing-key file matches what users have today.
   windowStyle: 'system',
+  // On by default (see the field comment): no visible change until the user
+  // moves or resizes the window, after which reopening in place is the
+  // behavior every other desktop app trained them to expect.
+  rememberWindowLayout: true,
+  windowLayout: null,
   // F3 — empty by default: the curated relays + STUN-only behavior is exactly
   // what ships today, so a fresh install is unchanged.
   customRelayUrls: [],
@@ -269,6 +305,16 @@ type SettingsState = {
   // / title-bar style before the window paints). The Appearance row exposes
   // a "Relaunch now" button that calls the runtime bridge.
   setWindowStyle: (mode: WindowStyleMode) => Promise<void>
+  // Toggle boot-time window-geometry restore. The tracked layout is kept
+  // when this flips off — Rust gates the restore on the flag, and flipping
+  // back on re-captures the live geometry immediately (WindowLayoutListener
+  // does a capture whenever the flag becomes true).
+  setRememberWindowLayout: (enabled: boolean) => Promise<void>
+  // Persist the latest observed geometry. Called debounced by
+  // WindowLayoutListener — never from UI code.
+  saveWindowLayout: (layout: WindowLayout) => Promise<void>
+  // Forget the remembered geometry (the Appearance → Window reset row).
+  clearWindowLayout: () => Promise<void>
   // V3-P6 — Relaunch the app via the Rust runtime bridge. Used by the
   // Appearance row after a chrome toggle. Resolves immediately so the UI
   // can disarm; the process is replaced before the resolved promise is
@@ -539,6 +585,32 @@ export function isWindowStyleMode(v: unknown): v is WindowStyleMode {
   return v === 'system' || v === 'custom'
 }
 
+// Fail closed on any malformed persisted geometry: Rust re-validates against
+// live monitors at boot, but the JS side also refuses to hydrate garbage so
+// a hand-edited settings.json can't feed NaN/negative sizes back into the
+// tracker's merge path. Positions may legitimately be negative (a monitor
+// left of or above the primary), sizes may not.
+export function isWindowLayout(v: unknown): v is WindowLayout {
+  if (!v || typeof v !== 'object') return false
+  const l = v as Partial<WindowLayout>
+  return (
+    typeof l.width === 'number' &&
+    Number.isFinite(l.width) &&
+    l.width > 0 &&
+    typeof l.height === 'number' &&
+    Number.isFinite(l.height) &&
+    l.height > 0 &&
+    typeof l.x === 'number' &&
+    Number.isFinite(l.x) &&
+    typeof l.y === 'number' &&
+    Number.isFinite(l.y) &&
+    typeof l.scaleFactor === 'number' &&
+    Number.isFinite(l.scaleFactor) &&
+    l.scaleFactor > 0 &&
+    typeof l.maximized === 'boolean'
+  )
+}
+
 function readBool(v: unknown, fallback: boolean): boolean {
   return typeof v === 'boolean' ? v : fallback
 }
@@ -589,6 +661,8 @@ export async function hydrateValuesFromStore(
     pttAi: await store.get(SETTINGS_KEY_PTT_AI_ACCELERATOR),
     captureDisplays: await store.get(SETTINGS_KEY_CAPTURE_DISPLAYS),
     windowStyle: await store.get(SETTINGS_KEY_WINDOW_STYLE),
+    rememberWindowLayout: await store.get(SETTINGS_KEY_REMEMBER_WINDOW_LAYOUT),
+    windowLayout: await store.get(SETTINGS_KEY_WINDOW_LAYOUT),
     customRelays: await store.get(SETTINGS_KEY_CUSTOM_RELAYS),
     turnServer: await store.get(SETTINGS_KEY_TURN_SERVER),
     audioInput: await store.get(SETTINGS_KEY_AUDIO_INPUT_DEVICE),
@@ -682,6 +756,13 @@ export async function hydrateValuesFromStore(
       windowStyle: isWindowStyleMode(stored.windowStyle)
         ? stored.windowStyle
         : DEFAULT_SETTINGS.windowStyle,
+      rememberWindowLayout: readBool(
+        stored.rememberWindowLayout,
+        DEFAULT_SETTINGS.rememberWindowLayout
+      ),
+      windowLayout: isWindowLayout(stored.windowLayout)
+        ? stored.windowLayout
+        : DEFAULT_SETTINGS.windowLayout,
       customRelayUrls: readCustomRelayUrls(stored.customRelays),
       turnServer: isCustomTurnServer(stored.turnServer)
         ? stored.turnServer
@@ -1001,6 +1082,21 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     set((s) => ({ values: { ...s.values, windowStyle: mode } }))
     writeWindowStyleBootCache(mode)
     await writeKey(set, SETTINGS_KEY_WINDOW_STYLE, mode)
+  },
+
+  setRememberWindowLayout: async (enabled) => {
+    set((s) => ({ values: { ...s.values, rememberWindowLayout: enabled } }))
+    await writeKey(set, SETTINGS_KEY_REMEMBER_WINDOW_LAYOUT, enabled)
+  },
+
+  saveWindowLayout: async (layout) => {
+    set((s) => ({ values: { ...s.values, windowLayout: layout } }))
+    await writeKey(set, SETTINGS_KEY_WINDOW_LAYOUT, layout)
+  },
+
+  clearWindowLayout: async () => {
+    set((s) => ({ values: { ...s.values, windowLayout: null } }))
+    await writeKey(set, SETTINGS_KEY_WINDOW_LAYOUT, null)
   },
 
   relaunchApp: async () => {

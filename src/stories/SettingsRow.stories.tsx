@@ -16,7 +16,7 @@ type Story = StoryObj<typeof meta>
 
 export const SwitchRow: Story = {
   render: () => (
-    <div className="mx-auto w-full max-w-2xl">
+    <div className="mx-auto w-full max-w-3xl">
       <SettingsSection heading="Notifications">
         <SettingsRow
           label="Incoming invite notifications"
@@ -35,7 +35,7 @@ export const SwitchRow: Story = {
 
 export const RadioGroupRow: Story = {
   render: () => (
-    <div className="mx-auto w-full max-w-2xl">
+    <div className="mx-auto w-full max-w-3xl">
       <SettingsSection heading="Appearance">
         <SettingsRow
           label="Theme"
@@ -69,7 +69,7 @@ export const RadioGroupRow: Story = {
 
 export const Disabled: Story = {
   render: () => (
-    <div className="mx-auto w-full max-w-2xl">
+    <div className="mx-auto w-full max-w-3xl">
       <SettingsSection heading="Identity">
         <SettingsRow
           label="Recovery phrase"
@@ -83,7 +83,7 @@ export const Disabled: Story = {
 
 export const ShortcutDisplay: Story = {
   render: () => (
-    <div className="mx-auto w-full max-w-2xl">
+    <div className="mx-auto w-full max-w-3xl">
       <SettingsSection heading="Shortcuts">
         <SettingsRow
           label="Push to talk · friends"

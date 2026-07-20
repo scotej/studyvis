@@ -8,6 +8,7 @@ import { toast } from 'sonner'
 
 import { SettingsRow, SettingsSection } from '@/components/SettingsRow'
 import { Button } from '@/components/ui/button'
+import { Skeleton } from '@/components/ui/skeleton'
 import { Switch } from '@/components/ui/switch'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { strings } from '@/strings'
@@ -38,7 +39,26 @@ function SystemPermissionRow() {
     }
   }, [])
 
-  if (permission === 'checking' || permission === 'unavailable') return null
+  if (permission === 'unavailable') return null
+  if (permission === 'checking') {
+    // Matches the granted row's silhouette exactly — h-4 = the text-xs
+    // help line box, h-5 = the text-sm badge — so on the common path
+    // (permission already granted) resolving the async read shifts
+    // nothing. The denied outcome is taller (stacked buttons); that
+    // first-run transition still moves the rows below, which is
+    // unavoidable without predicting the answer.
+    return (
+      <SettingsRow
+        label={copy.label}
+        help={<Skeleton className="h-4 w-48 max-w-full" />}
+        control={
+          <div role="status" aria-label={copy.checkingAriaLabel}>
+            <Skeleton className="h-5 w-16" />
+          </div>
+        }
+      />
+    )
+  }
 
   const handleRequest = () => {
     void (async () => {
@@ -80,6 +100,7 @@ function SystemPermissionRow() {
     <SettingsRow
       label={copy.label}
       help={copy.deniedHelp}
+      stack
       control={
         <span className="flex items-center gap-2">
           <Button

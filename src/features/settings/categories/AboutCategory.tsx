@@ -53,7 +53,10 @@ export function AboutCategory() {
       onClick={() => void handleOpenReleases()}
       disabled={opening}
     >
-      <ExternalLinkIcon /> {copy.releases.openCta}
+      {/* Trailing glyph: the external-link arrow annotates where the action
+          leads, so it follows the label ("Open ↗") like every other
+          leaves-the-app affordance. */}
+      {copy.releases.openCta} <ExternalLinkIcon />
     </Button>
   )
 
@@ -96,7 +99,15 @@ export function AboutCategory() {
           </span>
         }
       />
-      <SettingsRow label={copy.copyright.label} help={COPYRIGHT_LINE} />
+      {/* Value in the control slot to match the Version row above — two
+          read-only fact rows shouldn't place their values at opposite
+          edges. */}
+      <SettingsRow
+        label={copy.copyright.label}
+        control={
+          <span className="text-sm text-text-secondary">{COPYRIGHT_LINE}</span>
+        }
+      />
       <SettingsRow
         label={copy.versionCheck.label}
         help={copy.versionCheck.help}

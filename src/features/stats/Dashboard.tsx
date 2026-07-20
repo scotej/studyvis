@@ -44,6 +44,7 @@ import { strings } from '@/strings'
 
 import {
   buildStatsCsvModel,
+  CHART_Y_AXIS_WIDTH,
   computeStats,
   STREAK_MIN_MINUTES,
   TOP_PARTNERS_LIMIT,
@@ -134,10 +135,14 @@ export function Dashboard({ __loader, now }: DashboardProps) {
         <div
           role="status"
           aria-label={strings.stats.loadingAriaLabel}
-          className="flex flex-col gap-3 py-3"
+          className="flex flex-col gap-4 py-3"
         >
           <Skeleton className="h-4 w-1/3" />
-          <Skeleton className="h-32 w-full" />
+          <div className="grid grid-cols-2 gap-4">
+            <Skeleton className="h-28 w-full" />
+            <Skeleton className="h-28 w-full" />
+          </div>
+          <Skeleton className="h-56 w-full" />
         </div>
       </SettingsSection>
     )
@@ -198,7 +203,7 @@ export function DashboardView({ summary, insights, now }: DashboardViewProps) {
 
   return (
     <SettingsSection heading={strings.stats.heading}>
-      <div className="flex items-start justify-between gap-3 pb-4">
+      <div className="flex items-center justify-between gap-3 pb-4">
         <p className="text-xs text-text-muted">{strings.stats.disclaimer}</p>
         {totalSessions > 0 ? (
           <Button
@@ -394,7 +399,7 @@ function FocusChart({ daily }: { daily: DailyFocus[] }) {
           tickMargin={6}
         />
         <YAxis
-          width={32}
+          width={CHART_Y_AXIS_WIDTH}
           allowDecimals={false}
           tickLine={false}
           axisLine={false}

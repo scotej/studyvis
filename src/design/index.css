@@ -62,6 +62,13 @@
   --z-toast: 500;
   --z-tooltip: 600;
   --z-ai-dialog: 700;
+
+  /* Fluid settings nav rail (DESIGN-SYSTEM §12). Endpoints mirror
+     tokens.sizes.settingsRailMinWidth (224) and tokens.sizes.sidebarWidth
+     (280) — keep in lockstep with src/design/tokens.ts. Lives here as a
+     variable because clamp() can't be expressed through the numeric
+     style-prop pattern the other size tokens use. */
+  --settings-rail-width: clamp(224px, 22vw, 280px);
 }
 
 :root.light {

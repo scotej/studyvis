@@ -186,6 +186,76 @@ describe('hydrateValuesFromStore — V1-P11 settings migration', () => {
     expect(values.windowStyle).toBe('system')
   })
 
+  // Remember-window-layout hydrates from `remember_window_layout` (default
+  // ON) and `window_layout` (geometry object, default null). Malformed or
+  // partial geometry fails closed to null — Rust re-validates at boot, but
+  // hydration must never feed half a rect back into the tracker's merge.
+  test('defaults rememberWindowLayout on and windowLayout null when missing', async () => {
+    const store = fakeStore({})
+    const migrator = makeMigrator(null)
+    const { values } = await hydrateValuesFromStore(store, migrator)
+    expect(values.rememberWindowLayout).toBe(true)
+    expect(values.windowLayout).toBeNull()
+  })
+
+  test('reads a persisted window layout', async () => {
+    const layout = {
+      width: 1600,
+      height: 900,
+      x: -1920,
+      y: 40,
+      scaleFactor: 1.25,
+      maximized: true,
+    }
+    const store = fakeStore({
+      remember_window_layout: false,
+      window_layout: layout,
+    })
+    const migrator = makeMigrator(null)
+    const { values } = await hydrateValuesFromStore(store, migrator)
+    expect(values.rememberWindowLayout).toBe(false)
+    expect(values.windowLayout).toEqual(layout)
+  })
+
+  test('rejects malformed window layouts', async () => {
+    for (const bad of [
+      { width: 1600, height: 900, x: 0 },
+      // scaleFactor missing (hand-edited or pre-scale-aware file).
+      { width: 1600, height: 900, x: 0, y: 0, maximized: false },
+      {
+        width: '1600',
+        height: 900,
+        x: 0,
+        y: 0,
+        scaleFactor: 1,
+        maximized: false,
+      },
+      { width: 0, height: 900, x: 0, y: 0, scaleFactor: 1, maximized: false },
+      {
+        width: Number.NaN,
+        height: 900,
+        x: 0,
+        y: 0,
+        scaleFactor: 1,
+        maximized: false,
+      },
+      {
+        width: 1600,
+        height: 900,
+        x: 0,
+        y: 0,
+        scaleFactor: 0,
+        maximized: false,
+      },
+      'wide',
+    ]) {
+      const store = fakeStore({ window_layout: bad })
+      const migrator = makeMigrator(null)
+      const { values } = await hydrateValuesFromStore(store, migrator)
+      expect(values.windowLayout).toBeNull()
+    }
+  })
+
   // A3 — offTaskConfidenceFloor round-trips through `off_task_confidence_floor`.
   // Default 0.6 (mirrors scoreMachine.DEFAULT_CONFIDENCE_FLOOR) when missing;
   // a persisted finite number is read back verbatim (including 0, which is the

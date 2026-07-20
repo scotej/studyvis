@@ -476,24 +476,25 @@ This window:
 ┌──────────────────────────────────────────────────────────────────────┐
 │  Settings                                              ─  □  ✕      │
 ├────────────────┬─────────────────────────────────────────────────────┤
-│                │                                                     │
-│  Identity      │   Appearance                                        │
-│  Friends       │   ───────────                                       │
-│  Sessions      │                                                     │
-│  Stats         │   Theme                                             │
-│ ▶ Appearance   │     ○  Dark   ○  Light   ●  Auto (follow system)    │
-│  Notifications │                                                     │
-│  Shortcuts     │   Reduce motion           [  ◐  ]                   │
-│  AI            │     Replaces transitions with fades.                │
-│  Network       │                                                     │
-│  Advanced      │                                                     │
-│  About         │                                                     │
-│                │                                                     │
-│                │                                                     │
+│  YOU           │                                                     │
+│  ◦ Identity    │   Appearance                                        │
+│  ◦ Friends     │   ───────────                                       │
+│  STUDY         │                                                     │
+│  ◦ Sessions    │   Theme                                             │
+│  ◦ Stats       │     ○  Dark   ○  Light   ●  Auto (follow system)    │
+│  ◦ AI          │                                                     │
+│  APP           │   Reduce motion           [  ◐  ]                   │
+│ ▌◦ Appearance  │     Replaces transitions with fades.                │
+│  ◦ Notificat…  │                                                     │
+│  ◦ Shortcuts   │   Window                                            │
+│  SYSTEM        │   ───────                                           │
+│  ◦ Network     │   Window style   ● System  ○ Custom                 │
+│  ◦ Advanced    │   Remember size and position   [  ◐  ]              │
+│  ◦ About       │   Window size                       [ Reset ]       │
 └────────────────┴─────────────────────────────────────────────────────┘
 ```
 
-Settings categories visible: Identity, Friends, Sessions, Stats (V3), Appearance, Notifications, Shortcuts, AI (V2), Network, Advanced, About. AI is hidden in V1. Stats (added in V3-P1) is a local-only dashboard computed from the on-device sessions + friends tables; it transmits nothing. About shows app version + license string + a link to GitHub Releases (added in V1-P12).
+Settings categories: eleven panes in four nav groups — **You** (Identity, Friends), **Study** (Sessions, Stats, AI), **App** (Appearance, Notifications, Shortcuts), **System** (Network, Advanced, About). Each nav item carries a 16px stroke-1.5 lucide glyph (`◦` above); the active item gets `bg.raised` + medium weight + a 2px accent edge (`▌`), never color alone. AI is hidden in V1. Stats (added in V3-P1) is a local-only dashboard computed from the on-device sessions + friends tables; it transmits nothing. About shows app version + license string + a link to GitHub Releases (added in V1-P12). The Appearance pane hosts a second **Window** section: window style (V3-P6 custom chrome), remember-window-layout (on by default; geometry restored by Rust at boot before `show()`), and reset-to-default-size.
 
 ## 9. Iconography
 
@@ -533,9 +534,9 @@ V3 ships: full screen-reader pass, reduced-motion mode, axe-core CI gate over ev
 - **Reading max width** (Home/FriendsList, Report, other text-dense screens): 896 (`sizes.readingMaxWidth`). A 1200-wide measure on a list of friends or a report timeline hurts readability; these screens share one narrower measure instead of the page max.
 - **Settings max width** (settings pane content): 768 (`sizes.settingsMaxWidth`). Settings rows pair a left label with a right-aligned control; at 1200 the control sat ~700 px from its label at the window minimum, so settings use a tighter measure than onboarding. All three come from `tokens.sizes` — no hard-coded `1200`/`896`/`768` literals anywhere in app code.
 - **Audit log panel**: fixed 320 wide, full height of session view.
-- **Sidebar (settings)**: fixed 280 wide.
+- **Sidebar (settings)**: fluid — `clamp(224px, 22vw, 280px)` (`sizes.settingsRailMinWidth` → `sizes.sidebarWidth`, expressed as `--settings-rail-width` in `src/design/index.css`). A fixed 280 was 27% of the window at the 1024 minimum and squeezed the content column below its 768 measure; wide windows still get the full 280.
 - **Video grid**: flex; tiles maintain a minimum aspect 16:9 and a clamped height (180–360 px).
-- **Spacing**: page padding `space.5` (24); section gap `space.6` (32); inline gap `space.3` (12). The route shells (Home, Onboarding, Report, Settings pane) use `px-4 py-4 sm:px-6 sm:py-6` so the page padding steps down to `space.4` (16) below the `sm` breakpoint — a deliberate responsive concession; ≥ `sm` (the realistic minimum window) is on-grid at `space.5`.
+- **Spacing**: page padding `space.5` (24); section gap `space.6` (32); inline gap `space.3` (12). The route shells (Home, Onboarding, Report) use `px-4 py-4 sm:px-6 sm:py-6` so the page padding steps down to `space.4` (16) below the `sm` breakpoint — a deliberate responsive concession; ≥ `sm` (the realistic minimum window) is on-grid at `space.5`. The Settings pane uses a constant `px-6 py-6`: its `sm:` step-down could never trigger inside the 1024-minimum window, and dead phone branches mislead edits (the same rationale removed the `sm:` variants inside the settings categories and the dialog/input primitives).
 - **Custom titlebar (V3-P6, opt-in)**: 38 px tall (`sizes.titleBarHeight`). macOS reserves 78 px on the left (`sizes.titleBarMacInset`) for the system traffic-light cluster; the wordmark sits to its right. Windows hosts the app-painted min/restore/close cluster on the right edge. Native chrome is the default; this row of the grid only applies when the user has opted in.
 
 ## 13. Sound

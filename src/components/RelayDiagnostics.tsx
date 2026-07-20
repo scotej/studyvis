@@ -86,7 +86,12 @@ function TransportGroup({
             className="flex items-center gap-3 rounded-md border border-border-subtle bg-bg-sunk px-3 py-2"
           >
             <RelayDot status={row.status} url={row.url} />
-            <span className="min-w-0 flex-1 truncate font-mono text-xs text-text-secondary">
+            {/* title: two long custom relay URLs can truncate identically;
+                hover reveals the full value without widening the row. */}
+            <span
+              className="min-w-0 flex-1 truncate font-mono text-xs text-text-secondary"
+              title={row.url}
+            >
               {row.url}
             </span>
             <span

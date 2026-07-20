@@ -20,6 +20,7 @@
 mod commands;
 pub mod crypto;
 pub mod db;
+pub mod window_layout;
 
 use tauri::Manager;
 
@@ -531,6 +532,12 @@ fn setup_desktop(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>>
     // one-frame native-frame flash by deferring `window.show()` to the
     // end of this setup, after `apply_window_style` has had its say.
     apply_window_style(app.handle());
+
+    // Remembered window geometry rides the same hidden-window slot: applied
+    // after the chrome, before `window.show()`, so the restore never paints
+    // an intermediate default-sized frame. No-op unless the user left
+    // remember-window-layout on AND a tracked layout exists.
+    window_layout::apply_saved_window_layout(app.handle());
 
     app.handle().plugin(tauri_plugin_autostart::init(
         tauri_plugin_autostart::MacosLauncher::LaunchAgent,

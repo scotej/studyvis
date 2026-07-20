@@ -1,9 +1,20 @@
 import { useEffect, useRef } from 'react'
 
 import { tokens } from '@/design/tokens'
+import { titleBarHeightPx } from '@/lib/windowChrome'
+import { readWindowStyleBootCache } from '@/stores/settingsStore'
 import { strings } from '@/strings'
 
 import { Settings, type SettingsCategoryId } from './Settings'
+
+// Frozen at module import — imports run at boot, before any Appearance
+// toggle can rewrite the localStorage cache. Reading the cache per render
+// would desync the inset from the chrome actually applied this process the
+// moment the user flips Window style with the relaunch still pending
+// (re-covering the custom titlebar's window controls — the exact defect
+// the inset exists to fix). A useState initializer isn't enough here: the
+// overlay remounts on every open.
+const BOOTED_WINDOW_STYLE = readWindowStyleBootCache()
 
 export type SettingsOverlayProps = {
   initialCategory?: SettingsCategoryId
@@ -25,18 +36,16 @@ export function SettingsOverlay({
   const rootRef = useRef<HTMLDivElement | null>(null)
   const openerRef = useRef<HTMLElement | null>(null)
 
-  // Esc closes the overlay — but only when no OTHER modal is open: a Radix
+  // Esc closes the overlay — but only when no Radix modal is open: a
   // dialog inside Settings (confirm sheets, etc.) portals to <body> and owns
   // that Esc; closing the whole overlay underneath it would be jarring.
+  // (This root is not aria-modal, so it never appears in the query.)
   // SessionView's Esc-to-leave independently ignores Esc while any
-  // aria-modal element is present.
+  // aria-modal element or this overlay is present.
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return
-      const modals = document.querySelectorAll('[aria-modal="true"]')
-      for (const modal of modals) {
-        if (modal !== rootRef.current) return
-      }
+      if (document.querySelector('[aria-modal="true"]')) return
       onClose()
     }
     window.addEventListener('keydown', onKeyDown)
@@ -73,15 +82,30 @@ export function SettingsOverlay({
     }
   }, [])
 
+  // Under the opt-in custom chrome the 38px TitleBar band must stay visible
+  // and interactive above this overlay — covering it hides the min/restore/
+  // close cluster and the drag region for as long as Settings is open.
+  const chromeInsetTop =
+    BOOTED_WINDOW_STYLE === 'custom' ? titleBarHeightPx() : 0
+
   return (
     <div
       ref={rootRef}
       role="dialog"
-      aria-modal="true"
+      // Deliberately NOT aria-modal: the session subtree is already inert
+      // (Home sets it — that is the real modality fence), and under custom
+      // chrome the TitleBar band above this overlay stays interactive;
+      // aria-modal would tell AT to ignore window controls sighted users
+      // can click. SessionView's Esc guard matches data-settings-overlay.
+      data-settings-overlay=""
       aria-label={strings.settings.heading}
       tabIndex={-1}
-      className="fixed inset-0 overflow-y-auto bg-bg-base"
-      style={{ zIndex: tokens.zIndex.overlay }}
+      // overflow-y-auto: SettingsLayout is h-full and scrolls internally,
+      // but the Report and Recover views that REPLACE the settings shell
+      // (see Settings.tsx) size to content and need this ancestor scroll
+      // container.
+      className="fixed inset-x-0 bottom-0 overflow-y-auto bg-bg-base"
+      style={{ top: chromeInsetTop, zIndex: tokens.zIndex.overlay }}
     >
       <Settings initialCategory={initialCategory} onClose={onClose} />
     </div>

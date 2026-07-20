@@ -10,6 +10,7 @@ import {
   PomodoroNotifyListener,
   PttListener,
   QuitConfirmListener,
+  WindowLayoutListener,
 } from '@/features/system'
 import { Home } from '@/routes/Home'
 import { StyleGuide } from '@/routes/StyleGuide'
@@ -50,6 +51,7 @@ function App() {
       <PttListener />
       <QuitConfirmListener />
       <PomodoroNotifyListener />
+      <WindowLayoutListener />
       <BrowserRouter>
         <ChromeAwareShell>
           <ErrorBoundary surface="routes">

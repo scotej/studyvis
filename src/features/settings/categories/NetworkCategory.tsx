@@ -213,7 +213,7 @@ function TurnServerField() {
           </p>
         ) : null}
       </div>
-      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+      <div className="grid grid-cols-2 gap-3">
         <div className="flex flex-col gap-2">
           <Label
             htmlFor="turn-username"
@@ -248,9 +248,6 @@ function TurnServerField() {
           />
         </div>
       </div>
-      {active ? (
-        <p className="text-xs text-status-focused">{copy.active}</p>
-      ) : null}
       <div className="flex flex-col gap-2">
         <div>
           <Button
@@ -273,6 +270,12 @@ function TurnServerField() {
           <p className="text-xs text-status-warning" role="status">
             {test.message}
           </p>
+        ) : null}
+        {/* Below the button with the test results: all status feedback in
+            one stable place, so completing the third credential field never
+            shifts the button while the pointer is heading for it. */}
+        {active ? (
+          <p className="text-xs text-status-focused">{copy.active}</p>
         ) : null}
       </div>
     </div>

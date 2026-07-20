@@ -20,7 +20,7 @@ const meta = {
   parameters: { layout: 'padded' },
   decorators: [
     (Story) => (
-      <div className="mx-auto w-full max-w-2xl rounded-lg border border-border-subtle bg-bg-base px-8 py-8">
+      <div className="mx-auto w-full max-w-3xl rounded-lg border border-border-subtle bg-bg-base px-8 py-8">
         <Story />
       </div>
     ),

@@ -302,7 +302,7 @@ function ModelCard({
         />
       </div>
 
-      <dl className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm sm:grid-cols-4">
+      <dl className="grid grid-cols-4 gap-x-6 gap-y-2 text-sm">
         <div className="flex flex-col">
           <dt className="text-xs uppercase tracking-wide text-text-muted">
             {strings.ai.picker.dataLabels.download}
@@ -378,7 +378,7 @@ function ModelCard({
           className="flex items-start gap-2 rounded-md border border-status-alerted bg-bg-raised p-3 text-sm text-status-alerted"
         >
           <AlertCircleIcon className="mt-0.5 shrink-0" />
-          <span>{errorMessage}</span>
+          <span className="min-w-0 break-words">{errorMessage}</span>
         </p>
       ) : null}
 

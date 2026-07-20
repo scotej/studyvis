@@ -145,6 +145,15 @@ export const tokens = {
     // one eye span and helper text at a readable line length.
     settingsMaxWidth: 768,
     sidebarWidth: 280,
+    // Floor of the fluid settings nav rail (DESIGN-SYSTEM §12). The rail is
+    // clamp(settingsRailMinWidth, 22vw, sidebarWidth) — at the 1024 window
+    // minimum a fixed 280 rail ate 27% of the window and squeezed the content
+    // column below its 768 measure; 22vw hands that slack back while wide
+    // windows keep the full 280. 224 still clears the longest label
+    // ("Notifications") plus icon and paddings. The clamp itself lives in
+    // --settings-rail-width (src/design/index.css) because a functional value
+    // can't ride a numeric style prop; keep the two endpoints in lockstep.
+    settingsRailMinWidth: 224,
     auditPanelWidth: 320,
     // #47 B6 — cap on the in-session notes list before it scrolls internally.
     sessionNotesListMaxHeight: 180,

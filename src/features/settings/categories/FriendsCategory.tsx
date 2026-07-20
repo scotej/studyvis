@@ -12,6 +12,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import { shortPubkey } from '@/features/friends'
 import type { Friend } from '@/lib/db/friends'
 import { useFriendsStore } from '@/stores/friendsStore'
 import { strings } from '@/strings'
@@ -51,23 +52,28 @@ export function FriendsCategory() {
         ) : (
           friends.map((friend) => {
             const name = friend.display_name?.trim()
-            const pubkey = shortPubkey(friend)
+            const pubkey = shortPubkey(friend.ed_pubkey_hex)
+            // Key material renders mono everywhere else in the app (Identity
+            // pane, pairing dialogs) — the fingerprint here should match.
+            const pubkeyChip = <span className="font-mono">{pubkey}</span>
             return (
               <SettingsRow
                 key={friend.ed_pubkey_hex}
-                label={name || pubkey}
+                label={name || pubkeyChip}
                 // A nameless friend's label already falls back to the pubkey —
                 // no help line, or the same string would stack twice.
-                help={name ? pubkey : undefined}
+                help={name ? pubkeyChip : undefined}
                 control={
                   <Button
                     type="button"
                     variant="ghost"
                     size="sm"
                     onClick={() => setPendingRemoval(friend)}
-                    aria-label={copy.removeAriaLabel(
-                      name || copy.defaultFriendName
-                    )}
+                    // The visible row label must appear in the accessible
+                    // name (WCAG 2.5.3) — for a nameless friend that's the
+                    // fingerprint, which also keeps the Remove buttons
+                    // distinguishable to a screen reader.
+                    aria-label={copy.removeAriaLabel(name || pubkey)}
                   >
                     <Trash2Icon /> {copy.removeCta}
                   </Button>
@@ -119,8 +125,4 @@ export function FriendsCategory() {
       </Dialog>
     </>
   )
-}
-
-function shortPubkey(friend: Friend): string {
-  return `${friend.ed_pubkey_hex.slice(0, 12)}…`
 }

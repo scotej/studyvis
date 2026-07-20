@@ -136,6 +136,10 @@ export function KeybindCapture({
           ref={buttonRef}
           type="button"
           size="sm"
+          // The armed 'secondary' variant has no border while idle
+          // 'outline' does; a transparent border keeps the intrinsic width
+          // identical across the swap so the chips beside it never move.
+          className={cn(armed && 'border border-transparent')}
           variant={armed ? 'secondary' : 'outline'}
           onClick={handleClick}
           aria-pressed={armed}
@@ -148,15 +152,38 @@ export function KeybindCapture({
           disabled={disabled}
           data-state={armed ? 'armed' : 'idle'}
         >
-          {armed ? capture.pressKey : capture.rebind}
+          {/* Both labels grid-stacked in one cell with the inactive one
+              invisible: the button's width is the max of the two, so the
+              idle↔armed swap ("Rebind" / "Press a key…") never nudges the
+              Kbd chips beside it. */}
+          <span className="grid text-center">
+            <span
+              className={cn('col-start-1 row-start-1', armed && 'invisible')}
+              aria-hidden={armed || undefined}
+            >
+              {capture.rebind}
+            </span>
+            <span
+              className={cn('col-start-1 row-start-1', !armed && 'invisible')}
+              aria-hidden={!armed || undefined}
+            >
+              {capture.pressKey}
+            </span>
+          </span>
         </Button>
       </div>
       {error ? (
-        <span id={errorId} role="alert" className="text-xs text-status-alerted">
+        <span
+          id={errorId}
+          role="alert"
+          className="max-w-[36ch] text-right text-xs break-words text-status-alerted"
+        >
           {error}
         </span>
       ) : armed ? (
-        <span className="text-xs text-text-muted">{capture.help}</span>
+        <span className="max-w-[36ch] text-right text-xs text-text-muted">
+          {capture.help}
+        </span>
       ) : null}
     </div>
   )
