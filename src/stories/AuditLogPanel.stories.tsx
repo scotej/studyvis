@@ -32,6 +32,16 @@ const POPULATED: AuditLogEntry[] = [
   { seq: 8, name: 'Bo', description: 'returned', ts: NOW - 5_000 },
 ]
 
+// The Populated set sits right at the 480px frame's boundary and never
+// scrolls, so axe's `scrollable-region-focusable` rule has nothing to assert
+// on. Twenty rows overflow it and keep the scroller's tab stop honest.
+const OVERFLOWING: AuditLogEntry[] = Array.from({ length: 20 }, (_, i) => ({
+  seq: i + 1,
+  name: ['You', 'Alice', 'Bo'][i % 3],
+  description: i % 2 === 0 ? 'took a break' : 'returned',
+  ts: NOW - (20 - i) * 60_000,
+}))
+
 const meta = {
   title: 'Components/AuditLogPanel',
   component: AuditLogPanel,
@@ -56,6 +66,16 @@ export const Populated: Story = {
     <div style={{ height: 480 }} className="flex bg-bg-base">
       <div className="flex-1" />
       <AuditLogPanel events={POPULATED} now={NOW} />
+    </div>
+  ),
+}
+
+// Long enough to actually scroll — the keyboard-reachability case.
+export const Overflowing: Story = {
+  render: () => (
+    <div style={{ height: 480 }} className="flex bg-bg-base">
+      <div className="flex-1" />
+      <AuditLogPanel events={OVERFLOWING} now={NOW} />
     </div>
   ),
 }

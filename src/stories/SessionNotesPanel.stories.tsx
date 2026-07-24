@@ -51,6 +51,22 @@ export const Empty: Story = {
   args: { notes: [] },
 }
 
+// Past the 180px list cap, so the scroller actually scrolls — the case
+// axe's `scrollable-region-focusable` rule needs to see, and the one where
+// the list's own tab stop earns its keep.
+export const Overflowing: Story = {
+  args: {
+    notes: Array.from({ length: 12 }, (_, i) =>
+      note(
+        i + 1,
+        i % 2 === 0 ? 'alice' : 'me',
+        i % 2 !== 0,
+        `checkpoint ${i + 1}`
+      )
+    ),
+  },
+}
+
 // A long note wraps instead of breaking the fixed-width rail.
 export const LongNote: Story = {
   args: {

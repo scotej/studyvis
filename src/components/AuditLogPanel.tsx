@@ -90,10 +90,17 @@ export function AuditLogPanel({ events, now, className }: AuditLogPanelProps) {
       >
         {strings.session.audit.panelHeading}
       </header>
+      {/* The rows hold no button or link, so without a tab stop of its own
+          this scroller is reachable by pointer only and the read-back the
+          panel is built for is unavailable to a keyboard (WCAG 2.1.1).
+          WebView2 auto-focuses childless scrollers, WKWebView does not.
+          `ring-inset` because the pane's own overflow box clips a normal
+          ring. */}
       <div
         ref={scrollRef}
         onScroll={onScroll}
-        className="flex-1 overflow-y-auto"
+        tabIndex={0}
+        className="flex-1 overflow-y-auto outline-none focus-visible:ring-3 focus-visible:ring-inset focus-visible:ring-accent-ring"
       >
         {events.length === 0 ? (
           <p className="px-4 py-3 text-sm text-text-secondary">

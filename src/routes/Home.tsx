@@ -7,6 +7,9 @@
 // Mount-structure invariants, easy to break by "simplifying" the render:
 // - `InboxBoot` renders exactly ONCE, outside the view switch, so the
 //   always-on inbox + presence subscriptions never unmount on a view change.
+//   The `key="app-tail"` on the `tail` fragment is what ENFORCES that — see
+//   the note at its definition; without it, rendering it once here is not
+//   enough.
 // - The `tail` block (inbox boot, deep-link boot, import dialog, topic gate)
 //   travels with EVERY view including the active session, so a deep link or
 //   invite arriving mid-session isn't dropped.
@@ -14,7 +17,7 @@
 //   fall through to Onboarding — its create path would overwrite still-valid
 //   keychain keys (D1).
 
-import { useCallback, useEffect, useState } from 'react'
+import { Fragment, useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router'
 import { Settings2Icon } from 'lucide-react'
 import { toast } from 'sonner'
@@ -336,8 +339,19 @@ export function Home() {
   // Gate + inbox travel together everywhere a new session can be started.
   // PairDeepLinkBoot rides along too so an OS pairing link is caught no matter
   // which view is showing.
+  //
+  // The `key` is load-bearing, not decoration. Each branch below returns a
+  // different number of children before the tail (main: 1, settings/report/
+  // session: 2), and React matches UNKEYED children by position — so an
+  // unkeyed tail lands in a slot occupied by `<Settings/>`, the element types
+  // differ, and the whole subtree is deleted and rebuilt. That remount tears
+  // down presence + the inbox: a `{leaving:true}` goodbye goes out (friends
+  // see an offline blip and an N3 "came online" ping), the presence map
+  // restarts empty so Invite buttons vanish for up to a sweep, and an invite
+  // arriving in the gap is lost. A key makes the slot stable, so the fiber is
+  // reused across every branch. Do not remove it when editing these returns.
   const tail = (
-    <>
+    <Fragment key="app-tail">
       {inbox}
       <PairDeepLinkBoot
         onPairWords={handlePairDeepLink}
@@ -356,7 +370,7 @@ export function Home() {
         onSubmit={handleTopicSubmit}
         onCancel={() => setPendingStart(undefined)}
       />
-    </>
+    </Fragment>
   )
 
   if (sessionStatus === 'active') {

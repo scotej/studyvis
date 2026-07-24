@@ -134,10 +134,11 @@ export const useUpdaterStore = create<UpdaterState>((set, get) => ({
 
     // A session may have started during the check above. Don't pull an
     // installer onto a live WebRTC mesh — reset to idle (nothing staged) and
-    // let UpdaterBoot's post-session check re-find and download it. A
-    // user-initiated check is exempt: the user asked for it, and the Settings
-    // screen isn't reachable to press "Check now" mid-session anyway.
-    if (!userInitiated && deps.isSessionActive()) {
+    // let UpdaterBoot's post-session check re-find and download it. This holds
+    // user-initiated too: Settings → About is reachable mid-session (#47 B2),
+    // and installer bytes over a live call are the exact bandwidth cost this
+    // guard exists to avoid, whoever pressed the button.
+    if (deps.isSessionActive()) {
       set({ status: 'idle' })
       return
     }
@@ -191,6 +192,11 @@ export const useUpdaterStore = create<UpdaterState>((set, get) => ({
   installAndRestart: async () => {
     const { pending, installing } = get()
     if (!pending || installing) return false
+    // Defense-in-depth behind the disabled button: restarting mid-session is an
+    // unconfirmed quit that bypasses leaveBeforeQuit (quitLeave.ts) and the
+    // lib.rs CloseRequested confirm, so the session's audit flush / sessions
+    // upsert / markStudied never run and the session is lost.
+    if (deps.isSessionActive()) return false
     set({ installing: true, errorKind: null })
 
     // The sidecar has to die before the bundle is swapped. On Windows the

@@ -196,7 +196,12 @@ export function sanitizeDisplayName(name: string): string {
 // (PR-29), so it reuses the exact same two operations here \u2014 a multi-kilobyte
 // name can't bloat the DB / break the friends-list layout, and a bidi-override
 // or zero-width name can't visually spoof another friend's row.
-export function normalizeUntrustedName(name: string): string {
-  const capped = new TextDecoder().decode(truncateUtf8(name ?? '', NAME_CAP))
+// `maxBytes` defaults to the card's NAME_CAP; callers whose name never reaches
+// a card (the session hello) pass their own bound.
+export function normalizeUntrustedName(
+  name: string,
+  maxBytes = NAME_CAP
+): string {
+  const capped = new TextDecoder().decode(truncateUtf8(name ?? '', maxBytes))
   return sanitizeDisplayName(capped)
 }

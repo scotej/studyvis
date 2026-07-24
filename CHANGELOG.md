@@ -18,6 +18,91 @@ V3 work was drafted as v1.0.4 but shipped under the **v1.0.5** tag —
 there is no v1.0.4 tag; the section below is labelled by the tag that
 shipped it.)
 
+## Unreleased — a correctness-and-accessibility maintenance pass
+
+A verified round of fixes across sessions, friend presence, the AI focus
+loop, accessibility, settings, and the updater — the third improvement
+wave. Nothing changes about your identity, friends, or history.
+
+### Fixed
+
+- **Study time no longer counts the hours your laptop was asleep.** Ending
+  a session by closing the lid used to persist the entire span until wake —
+  a 45-minute session slept on could show up as a ~10-hour bar and a free
+  streak day. Elapsed time is now measured on a clock that stops while the
+  machine is suspended, so the recorded minutes match the minutes you were
+  actually there. (Sessions already recorded stay as they were — the fix
+  isn't retroactive.)
+
+- **Opening Settings or starting a session no longer flickers you offline
+  to your friends.** A view switch was tearing down and rebuilding the
+  always-on presence connection, which broadcast a spurious "left" and
+  blanked your friends list for up to 30 seconds — occasionally firing a
+  phantom "came online" ping and dropping an invite that arrived in the gap.
+  The connection now persists across every screen change.
+
+- **When a friend clicks Leave, the session ends right away** instead of
+  sitting on "Waiting for your friend to reconnect…" for 20 seconds and
+  then offering to rejoin a room nobody is in. A genuine connection blip
+  still gets the full grace window — including when another friend joins or
+  leaves in the meantime.
+
+- **A friend's first arrival of the day now notifies you.** The "friend
+  came online" notification was suppressing every friend's first online
+  moment after launch — the one event it exists for.
+
+- **The pending-invite countdown is honest on the first glance.** A row that
+  appeared after the app sat idle briefly showed a wildly wrong "expires in"
+  time for its first ten seconds.
+
+- **A dead webcam no longer floods the session with error toasts.** If a
+  camera is unplugged or grabbed by another app mid-session, the AI focus
+  loop reports it once and quietly skips checks until it's back, instead of
+  a fresh toast every few seconds.
+
+- **The keyboard focus ring is visible.** The ring that marks the focused
+  control fell below the contrast floor in both themes — nearly invisible in
+  light mode. It's now measured against the surfaces it's actually drawn on
+  and clears the bar.
+
+- **Dropdown and menu rows highlight the one you're on.** The highlight
+  painted the same color as the menu, so keyboard and mouse users had no
+  cue — most visible in the in-session microphone and speaker pickers.
+
+- **The session log and notes are reachable by keyboard.** Both scrolling
+  panels can now be focused and scrolled without a mouse.
+
+- **Settings search finds what it promises.** Typing "tray", "minimize",
+  "capture displays", or "auto-update" landed on a pane that doesn't hold
+  those settings; "launch at login", "clear history", and "onboarding" found
+  nothing. Each now opens the pane that owns it.
+
+- **"Reset shortcuts to defaults" always works** — a shortcut collision used
+  to make it silently do nothing, with no error.
+
+- **Settings → About won't restart the app mid-session.** The Restart-now
+  and Check-now buttons there now defer during a live session, matching the
+  update banner, so a stray click can't drop you (and your friend) out of a
+  session. About also stops claiming "you're on the latest" before any
+  update check has actually run.
+
+### Added
+
+- **A failed 24-word recovery names the words that aren't real.** Mistype one
+  word restoring your identity and the error now tells you which word(s)
+  aren't in the wordlist, instead of rejecting all 24 at once.
+
+- **The stats CSV export leads with your headline numbers** — total
+  sessions, streak, average score — which it previously omitted entirely.
+
+- **The focus-over-time chart's tooltip shows the day** each point belongs
+  to, so a dip is anchorable to a date.
+
+- **The corrupt-data recovery dialog points at the friends backup.** If
+  StudyVis ever has to reset unreadable local data, the dialog now tells you
+  to restore from a friends backup if you made one, instead of only "pair
+  again".
+
 ## 1.6.0 — 2026-07-21 — a searchable settings rail, lighter and faster
 
 The first update that installs itself. Nothing changes about your

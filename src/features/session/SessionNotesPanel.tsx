@@ -57,9 +57,13 @@ export function SessionNotesPanel({
       >
         {copy.heading}
       </header>
+      {/* Same tab stop as AuditLogPanel's scroller, and for the same reason:
+          the note rows are plain text, the form below is a sibling, so a
+          keyboard has nothing to focus inside the capped list. */}
       <div
         ref={scrollRef}
-        className="overflow-y-auto"
+        tabIndex={0}
+        className="overflow-y-auto outline-none focus-visible:ring-3 focus-visible:ring-inset focus-visible:ring-accent-ring"
         style={{ maxHeight: tokens.sizes.sessionNotesListMaxHeight }}
       >
         {notes.length === 0 ? (

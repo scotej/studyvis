@@ -532,7 +532,7 @@ What's **broadcast in real time**: the kinds above. Peers see "Sam: ai_warning (
 
 Audit log is also written to local SQLite per session for the post-session report and (V3) stats.
 
-The Stats dashboard's **focus-insights** section (R7) reads the full `audit_events` table cross-session via the `audit_events_list_all` command — when-distractions-cluster timing, recurring distraction reasons, and a focused-time trend, all derived from the same `ai_warning`/`ai_alert` reasoning the single-session report already shows. The numeric stats tiles (`statsData`) remain **sessions-table-only** (they never query `audit_events`); the cross-session insight transforms live in the pure `features/stats/statsInsights.ts` seam. Strictly local — nothing here transmits.
+The Stats dashboard's **focus-insights** section (R7) reads the cross-session `ai_warning`/`ai_alert` audit rows via the `audit_events_list_all` command — when-distractions-cluster timing, recurring distraction reasons, and a focused-time trend, all derived from the same `ai_warning`/`ai_alert` reasoning the single-session report already shows. The command narrows the read to those two kinds (insights ignore every other kind), so the whole table never crosses IPC. The numeric stats tiles (`statsData`) remain **sessions-table-only** (they never query `audit_events`); the cross-session insight transforms live in the pure `features/stats/statsInsights.ts` seam. Strictly local — nothing here transmits.
 
 ## 10. Pomodoro sync
 
@@ -557,7 +557,8 @@ studyvis/
 │  │  ├─ llama-server-win-x64.exe
 │  │  └─ llama-server-linux-x64
 │  ├─ capabilities/
-│  │  └─ default.json             # Tauri 2 ACL
+│  │  ├─ default.json             # Tauri 2 ACL — main window
+│  │  └─ ai-dialog.json           # scoped ACL — floating AI dialog
 │  └─ src/
 │     ├─ main.rs                  # builder + plugin registration
 │     ├─ commands/                # Tauri commands callable from JS
@@ -611,7 +612,7 @@ The `commands/` tree above is illustrative; the actual command modules are `iden
 - **Local data management:** `sessions_delete`, `sessions_clear_all` (each tx-scoped, deleting the session row and its `audit_events` together), `audit_events_list_all` (the cross-session read backing the focus-insights view), and `system_write_text_file` (the report / audit-JSON / stats-CSV save path — no fs-plugin surface added).
 - **Friends backup:** `friends_export` / `friends_import` (sealed-box to the user's own X25519 key, SVFB v1 format; import upserts on `ON CONFLICT(ed_pubkey_hex)`).
 - **Lifecycle:** `session_set_active` (drives the Rust `SessionActiveFlag` for the quit-confirm path) and `app_quit` (arms the quit and exits after the in-app confirm).
-- **Version check:** `system_fetch_latest_version` (a bare, unauthenticated GET behind the OFF-by-default opt-in; no identifiers, 10 s timeout).
+- **Update check:** none — X6's `tauri-plugin-updater` owns this end to end (see §2 "Auto-update"); the X4 `system_fetch_latest_version` command was removed in v1.5.0. The `version_check_enabled` store key is still read (never written) as the fallback that carries an explicit X4 opt-out onto `auto_update_enabled`.
 - `identity_save_keys` gained an `overwrite: bool` argument — create-new passes `false` (so a corrupt-`identity.json` load can never clobber still-valid keychain keys), and the explicit Recover/Restore path passes `true` after its own confirm.
 
 ## 12. Permissions and entitlements
@@ -635,7 +636,13 @@ Linux is not part of the V1 release matrix — V0 deferred WebKitGTK `getDisplay
 - Distribution: `.AppImage` (no install, no sudo); `.deb`/`.rpm` only if there's a clear friends-need.
 
 ### Tauri capabilities
-`src-tauri/capabilities/default.json` permits the specific plugins we use: shell (sidecar exec only for our bundled binaries), notification, global-shortcut, autostart, store. Permissions are scoped to the main window.
+
+`src-tauri/capabilities/` holds two ACL files, each scoped to a single window:
+
+- `default.json` (`windows: ["main"]`) grants `core:default`, `notification:default`, `store:default`, `dialog:default`, `deep-link:default`, `updater:default`, plus seven `core:window:*` bindings — `start-dragging` / `minimize` / `toggle-maximize` / `close` for the opt-in custom titlebar, and `set-size` / `center` / `unmaximize` for the Settings → Appearance → Window reset.
+- `ai-dialog.json` (`windows: ["ai-dialog"]`) grants `core:default` + `core:window:allow-close` only, with no plugin surface. Confining the floating dialog to its own core-only capability is what keeps every plugin grant on the main window — the "scoped to the main window" invariant §12 relies on.
+
+Plugins driven only from Rust need no ACL entry: the Tauri 2 ACL gates webview IPC, so `shell` (sidecar spawn, `commands/sidecar.rs`), `global-shortcut`, `autostart`, `opener`, and `single-instance` are registered in `lib.rs` and reached from Rust or through our own `invoke_handler` commands, none of which the ACL mediates. Correspondingly they ship no `@tauri-apps/plugin-*` JS package — package.json's five plugin packages (`deep-link`, `dialog`, `notification`, `store`, `updater`) map 1:1 to the five non-core plugin grants above.
 
 ### Always-on-top floating windows (AI text dialog)
 The `Ctrl+]` AI dialog is a separate Tauri window with:
@@ -709,24 +716,30 @@ The `Ctrl+]` AI dialog is a separate Tauri window with:
                                                    │
                                           room empties (peer count 1)
                                                    │
-                                                   ▼
-                                     [20 s grace window (S1)]
-                                        │                │
-                        a peer reconnects              expires
-                                        │                │
-                                        ▼                ▼
-                                  [media live]   [auto-end: persist row,
-                                     (resume)     generate report]
-                                                         │
-                                          Report offers Rejoin (#47 B3,
-                                          auto-ends only; re-entry merges
-                                          into the same sessions row)
-                                                         │
-                                                         ▼
-                                         [tear down, return to idle]
+                     ┌─────────────────────────────┤
+                     │  every departure explained  │
+                     │  (each peer broadcast a     │
+                     │  signed `left` first)       ▼
+                     │               [20 s grace window (S1)]
+                     │                  │                │
+                     │  a peer reconnects              expires
+                     │                  │                │
+                     ▼                  ▼                ▼
+       [end now: persist row,     [media live]   [auto-end: persist row,
+        generate report,             (resume)     generate report]
+        reason `peer`]                                   │
+                     │                    Report offers Rejoin (#47 B3,
+                     │                    auto-ends only; re-entry merges
+                     │                    into the same sessions row)
+                     │                                   │
+                     └──────────────────┬────────────────┘
+                                        ▼
+                           [tear down, return to idle]
 ```
 
 A deliberate local Leave skips the grace window: it persists and reports immediately with reason `user` (no Rejoin offer).
+
+A deliberate *remote* Leave skips it too. `handleLeave` broadcasts a signed `left` audit event and awaits it before `room.leave()`; both ride the same ordered data channel, so the receiver has the peer marked as departed before trystero reports the departure. When the room empties and **every** departure since the last join was marked that way, the session ends immediately with reason `peer` — no waiting for a friend who isn't coming back, and no Rejoin button into a room nobody is in. Any unmarked departure (crash, kill, tray-quit, transport drop) keeps the full grace window and the `auto` + Rejoin path, and a peer re-invited into the still-live session clears their mark on rejoin so a later blip of theirs is debounced again.
 
 ## 14. Threat model & known limitations
 

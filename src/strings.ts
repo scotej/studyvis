@@ -226,6 +226,21 @@ export const strings = {
           `That's ${wordCount} words. A backup has exactly 24.`,
         invalid:
           "Those 24 words don't add up. Check for a typo or a word out of place against your written copy.",
+        // `shown` is the (up to 3) named tokens, `total` the full count of
+        // words that aren't in the backup wordlist. Reads correctly at
+        // total = 24 (a comma-paste where every token is flagged).
+        unknownWords: (shown: string[], total: number) => {
+          const quoted = shown.map((w) => `"${w}"`)
+          if (total === 1) {
+            return `${quoted[0]} isn't a backup word — check it against your written copy.`
+          }
+          const remaining = total - shown.length
+          const named =
+            remaining > 0
+              ? `${quoted.join(', ')}, and ${remaining} more`
+              : quoted.join(', ')
+          return `${named} aren't backup words — check them against your written copy.`
+        },
       },
     },
     // D1 — shown when identity.json exists but couldn't be read. The keys are
@@ -832,7 +847,15 @@ export const strings = {
         'chrome',
         'title bar',
       ],
-      notifications: ['invite', 'pomodoro', 'sound', 'friend online', 'alerts'],
+      notifications: [
+        'invite',
+        'pomodoro',
+        'sound',
+        'friend online',
+        'alerts',
+        'tray',
+        'minimize',
+      ],
       shortcuts: [
         'keybindings',
         'push to talk',
@@ -849,16 +872,30 @@ export const strings = {
         'confidence',
         'sample interval',
         'on-device',
+        'capture displays',
+        'multi-monitor',
+        'screens',
       ],
       network: ['relay', 'turn', 'signaling', 'connection', 'diagnostics'],
       advanced: [
         'debug log',
-        'tray',
-        'minimize',
-        'capture displays',
-        'auto-update',
+        'autostart',
+        'launch at login',
+        'startup',
+        'data folder',
+        'replay onboarding',
+        'clear history',
+        'share log',
       ],
-      about: ['version', 'license', 'github', 'releases', 'update'],
+      about: [
+        'version',
+        'license',
+        'github',
+        'releases',
+        'update',
+        'auto-update',
+        'automatic updates',
+      ],
     },
 
     identity: {
@@ -1080,6 +1117,8 @@ export const strings = {
         label: 'Reset to defaults',
         help: 'Restores the original combos for both shortcuts.',
         cta: 'Reset',
+        resetError: (message: string) =>
+          `Couldn't reset both shortcuts: ${message}`,
       },
     },
 
@@ -1698,8 +1737,27 @@ export const strings = {
         `Version ${version} — ${percent}%`,
       checkingHelp: 'Checking for updates…',
       upToDateHelp: (version: string) => `You're on ${version}, the latest.`,
+      // Label for the state-driven status row, so it stops duplicating the
+      // read-only Version row.
+      statusLabel: 'Updates',
+      // Step-agnostic on purpose: a background check failure and a background
+      // download failure both land in (error, null), and this row must not
+      // name a step it can't distinguish.
+      lastCheckFailedHelp:
+        "The last update check didn't finish. Press Check now to retry.",
+      // For idle before the first check (and the session-deferral reset) — no
+      // claim of currency, and no false "not checked yet" (idle is also
+      // reached after a check that ran).
+      unknownHelp: 'Update status unknown — press Check now.',
       checkCta: 'Check now',
       restartCta: 'Restart now',
+      // Mid-session lock, mirroring strings.ai.picker.lockedDuringSession:
+      // restarting into an update tears down the live mesh, so the affordance
+      // is disabled with the reason stated (no info by color alone).
+      lockedDuringSession: (version: string) =>
+        `Version ${version} is downloaded and waiting — updating restarts StudyVis, so it unlocks after your session ends.`,
+      checkLockedDuringSession:
+        'Update checks pause during a session so the download stays off your call.',
     },
     errors: {
       // Surfaced only on a user-initiated check / restart. Background failures

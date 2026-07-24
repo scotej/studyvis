@@ -381,6 +381,12 @@ type InternalState = {
   inFlight: boolean
   captureDenied: boolean
   sidecarErrorReported: boolean
+  // Report-once latch for `onCaptureError`, cleared by the next successful
+  // tick. A persistent capture failure (a dead camera, a screen frame grab
+  // that keeps failing) throws every tick, and the consumer toast is not
+  // deduped — without this the user gets the same toast every 5-30 s for the
+  // rest of the session. Mirrors `sidecarErrorReported`.
+  captureErrorReported: boolean
   battery: BatteryInfo
   batteryNoticeShown: boolean
   // The model's measured cadence floor (V2-P2 benchmark). The effective
@@ -422,6 +428,7 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
     inFlight: false,
     captureDenied: false,
     sidecarErrorReported: false,
+    captureErrorReported: false,
     battery: { onBattery: false, percent: 100 },
     batteryNoticeShown: false,
     modelFloorSec: FALLBACK_SAMPLE_INTERVAL_SEC,
@@ -765,9 +772,11 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
     }
 
     const track = opts.getFaceTrack()
-    if (!track) {
-      // SessionView's media-acquire effect is still spinning up. Try again
-      // next tick.
+    if (!track || track.readyState === 'ended') {
+      // Either SessionView's media-acquire effect is still spinning up, or the
+      // camera died mid-session (I42). Both are "input absent": reschedule
+      // without counting a sample. SessionView's MediaErrorBanner owns the
+      // recovery affordance for the ended case.
       schedule(nextDelayMs())
       return
     }
@@ -864,6 +873,7 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
         state.thermalNoticeShown = true
         opts.onThermalBackoff?.()
       }
+      state.captureErrorReported = false
       const events = useFocusStore
         .getState()
         .applyJudgment(verdict, runtime.now())
@@ -883,7 +893,10 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
           opts.onCaptureDenied?.()
           return
         }
-        opts.onCaptureError?.(err)
+        if (!state.captureErrorReported) {
+          state.captureErrorReported = true
+          opts.onCaptureError?.(err)
+        }
         return
       }
       if (err instanceof DOMException && err.name === 'AbortError') {

@@ -53,11 +53,17 @@ const LOG_FILE: &str = "llama-server.log";
 const LOG_MAX_BYTES: u64 = 5 * 1024 * 1024;
 
 // Restart policy: cap automatic respawns so a permanently broken binary
-// doesn't spam the log file. After RESTART_BUDGET attempts inside
-// RESTART_WINDOW, the watcher gives up and surfaces `errored = true`; the JS
-// side then has to call sidecar_stop + sidecar_start to retry deliberately.
+// doesn't spam the log file. `restart_attempts` counts CONSECUTIVE respawns
+// that each died before reaching MIN_HEALTHY_UPTIME; a child that ran at least
+// that long is treated as a durable server and resets the streak, so a sidecar
+// that self-heals after a long clean run is never starved. Once more than
+// RESTART_BUDGET such short-lived children pile up (four in a row), the watcher
+// gives up and surfaces `errored = true`; the JS side then has to call
+// sidecar_stop + sidecar_start to retry deliberately. MIN_HEALTHY_UPTIME must
+// comfortably exceed worst-case model load (a 7B Q4 off a cold disk) so a
+// broken model that dies just after loading still trips the budget.
 const RESTART_BUDGET: u32 = 3;
-const RESTART_WINDOW: Duration = Duration::from_secs(30);
+const MIN_HEALTHY_UPTIME: Duration = Duration::from_secs(120);
 const RESTART_BACKOFF: Duration = Duration::from_millis(500);
 
 #[derive(Default)]
@@ -167,6 +173,7 @@ pub async fn sidecar_start<R: Runtime>(
     // Roll the log before opening for append, while it has no open writer (only
     // one sidecar runs at a time). Keeps the diagnostic log size-bounded (D7).
     rotate_log_if_needed(&log_path, LOG_MAX_BYTES);
+    let log_file = open_log_file(&log_path)?;
 
     let (rx, child) = spawn_llama(
         &app,
@@ -176,7 +183,6 @@ pub async fn sidecar_start<R: Runtime>(
         port,
         runtime_dir.as_deref(),
     )?;
-    let log_file = open_log_file(&log_path)?;
 
     guard.child = Some(child);
     guard.port = Some(port);
@@ -479,6 +485,17 @@ fn spawn_llama<R: Runtime>(
         .map_err(|e| format!("spawn llama-server: {e}"))
 }
 
+// Consecutive respawns that each died before MIN_HEALTHY_UPTIME accumulate
+// toward RESTART_BUDGET; a child that ran at least that long is a durable
+// server, so its later death starts the streak over at 1.
+fn next_attempts(prev: u32, uptime: Duration) -> u32 {
+    if uptime >= MIN_HEALTHY_UPTIME {
+        1
+    } else {
+        prev + 1
+    }
+}
+
 async fn watch<R: Runtime>(
     app: AppHandle<R>,
     state: Arc<Mutex<SidecarInner>>,
@@ -491,7 +508,7 @@ async fn watch<R: Runtime>(
 ) {
     let mut log = log_file;
     let mut restart_attempts: u32 = 0;
-    let mut window_started_at: Option<Instant> = None;
+    let mut child_started_at = Instant::now();
 
     loop {
         let mut last_exit: Option<String> = None;
@@ -535,17 +552,8 @@ async fn watch<R: Runtime>(
         guard.child = None;
         guard.port = None;
 
-        // Track restart attempts within RESTART_WINDOW.
-        let now = Instant::now();
-        match window_started_at {
-            Some(start) if now.duration_since(start) <= RESTART_WINDOW => {
-                restart_attempts += 1;
-            }
-            _ => {
-                window_started_at = Some(now);
-                restart_attempts = 1;
-            }
-        }
+        // Count consecutive short-lived deaths; a durable child resets to 1.
+        restart_attempts = next_attempts(restart_attempts, child_started_at.elapsed());
         if restart_attempts > RESTART_BUDGET {
             guard.errored = true;
             guard.last_error = last_exit
@@ -635,6 +643,7 @@ async fn watch<R: Runtime>(
         guard.port = Some(port);
         drop(guard);
         rx = new_rx;
+        child_started_at = Instant::now();
     }
 }
 
@@ -652,5 +661,21 @@ mod tests {
     fn keeps_small_log() {
         assert!(!should_rotate(0, LOG_MAX_BYTES));
         assert!(!should_rotate(LOG_MAX_BYTES - 1, LOG_MAX_BYTES));
+    }
+
+    #[test]
+    fn short_lived_child_increments_toward_budget() {
+        assert_eq!(next_attempts(3, Duration::from_secs(5)), 4);
+        assert!(next_attempts(3, Duration::from_secs(5)) > RESTART_BUDGET);
+    }
+
+    #[test]
+    fn durable_child_resets_streak() {
+        assert_eq!(next_attempts(3, MIN_HEALTHY_UPTIME), 1);
+    }
+
+    #[test]
+    fn first_crash_starts_at_one() {
+        assert_eq!(next_attempts(0, Duration::from_secs(1)), 1);
     }
 }

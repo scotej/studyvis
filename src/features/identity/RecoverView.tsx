@@ -19,6 +19,10 @@ export type RecoverViewProps = {
   value: string
   wordCount: number
   error: RecoverErrorKind | null
+  // The tokens from the last attempt that aren't in the BIP39 wordlist; names
+  // them in the 'invalid' error so a misread word can be hunted down. Empty on
+  // a checksum-only failure, where no single word can be pointed at.
+  unknownWords?: string[]
   identityExists: boolean
   // D5 — true when the confirm being shown is for a DIFFERENT identity (the
   // escalated copy), false for the generic overwrite confirm.
@@ -34,7 +38,11 @@ export type RecoverViewProps = {
   onDone: () => void
 }
 
-function errorMessage(kind: RecoverErrorKind, wordCount: number): string {
+function errorMessage(
+  kind: RecoverErrorKind,
+  wordCount: number,
+  unknownWords: string[]
+): string {
   const errs = strings.identity.recover.errors
   switch (kind) {
     case 'empty':
@@ -44,7 +52,9 @@ function errorMessage(kind: RecoverErrorKind, wordCount: number): string {
     case 'long':
       return errs.long(wordCount)
     case 'invalid':
-      return errs.invalid
+      return unknownWords.length > 0
+        ? errs.unknownWords(unknownWords.slice(0, 3), unknownWords.length)
+        : errs.invalid
   }
 }
 
@@ -57,6 +67,7 @@ export function RecoverView({
   value,
   wordCount,
   error,
+  unknownWords = [],
   identityExists,
   confirmDifferent = false,
   sameIdentity = false,
@@ -193,7 +204,7 @@ export function RecoverView({
               role="alert"
               className="text-xs text-status-alerted"
             >
-              {errorMessage(error, wordCount)}
+              {errorMessage(error, wordCount, unknownWords)}
             </p>
           ) : null}
         </div>

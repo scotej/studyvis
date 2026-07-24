@@ -200,7 +200,10 @@ describe('checkNow', () => {
     expect(useUpdaterStore.getState().pending).toBeNull()
   })
 
-  test('a user-initiated check downloads even during a session', async () => {
+  test('a user-initiated check also defers during a session — no installer bytes over a live mesh', async () => {
+    // Settings → About is reachable mid-session (#47 B2), so the old
+    // userInitiated exemption pulled a download onto the call. It now defers
+    // like the background path: nothing moves, back to idle.
     const update = fakeUpdate({ version: '2.3.0' })
     setUpdaterDeps({
       check: async () => update as never,
@@ -209,8 +212,9 @@ describe('checkNow', () => {
 
     await useUpdaterStore.getState().checkNow({ userInitiated: true })
 
-    expect(update.download).toHaveBeenCalledOnce()
-    expect(useUpdaterStore.getState().status).toBe('ready')
+    expect(update.download).not.toHaveBeenCalled()
+    expect(useUpdaterStore.getState().status).toBe('idle')
+    expect(useUpdaterStore.getState().pending).toBeNull()
   })
 })
 
@@ -285,5 +289,26 @@ describe('installAndRestart', () => {
 
     expect(ok).toBe(false)
     expect(stopSidecar).not.toHaveBeenCalled()
+  })
+
+  test('refuses to restart during a session — an unconfirmed quit would lose the session', async () => {
+    const update = fakeUpdate()
+    const stopSidecar = vi.fn(async () => {})
+    setUpdaterDeps({
+      check: async () => update as never,
+      stopSidecar,
+      relaunch: async () => {},
+    })
+
+    // Stage an update while no session is running, then a session begins.
+    await useUpdaterStore.getState().checkNow()
+    expect(useUpdaterStore.getState().status).toBe('ready')
+    setUpdaterDeps({ isSessionActive: () => true })
+
+    const ok = await useUpdaterStore.getState().installAndRestart()
+
+    expect(ok).toBe(false)
+    expect(stopSidecar).not.toHaveBeenCalled()
+    expect(update.install).not.toHaveBeenCalled()
   })
 })

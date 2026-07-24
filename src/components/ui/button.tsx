@@ -14,7 +14,7 @@ const buttonVariants = cva(
           'bg-status-alerted text-text-inverse hover:bg-status-alerted focus-visible:ring-status-alerted ',
         outline:
           'border bg-bg-base shadow-xs hover:bg-bg-raised hover:text-text-primary ',
-        secondary: 'bg-bg-raised text-text-primary hover:bg-bg-raised',
+        secondary: 'bg-bg-raised text-text-primary hover:bg-bg-surface',
         ghost: 'hover:bg-bg-raised hover:text-text-primary ',
         link: 'text-accent-default underline-offset-4 hover:underline',
       },

@@ -14,10 +14,12 @@ export type SessionStatus = 'idle' | 'active' | 'ended'
 
 // #47 B3 — why the last session ended. 'auto' = the S1 grace window expired
 // (a >20s connection blip), which is the one case where the room may still
-// be live without us — the Report offers Rejoin there. 'user' covers every
-// deliberate path (Leave click, double-Esc, confirmed quit, session-full
-// eviction). null until a session has ended.
-export type SessionEndReason = 'user' | 'auto'
+// be live without us — the Report offers Rejoin there. 'peer' = every peer
+// that left broadcast a signed 'left' first, so the room is provably empty
+// and Rejoin would land in a dead room. 'user' covers every deliberate local
+// path (Leave click, double-Esc, confirmed quit, session-full eviction).
+// null until a session has ended.
+export type SessionEndReason = 'user' | 'auto' | 'peer'
 
 // Mirrors the validated payload shape returned by the V1-P9 signed-hello
 // handshake. Inlined here so the store does not import a feature module
@@ -44,6 +46,9 @@ export type SessionInit = {
   sessionPassword: string
   isHost: boolean
   startedAt: number
+  // performance.now() taken alongside startedAt. Optional so non-production
+  // callers (tests, stories) can omit it; consumers fall back to wall clock.
+  startedAtMono?: number
   room: TopicRoom
   leave: () => Promise<void>
 }
@@ -69,6 +74,9 @@ type SessionState = {
   sessionPassword: string | null
   isHost: boolean
   startedAt: number | null
+  // Monotonic origin for the same session start, so the live elapsed clock
+  // (and the persisted total) can ignore time the machine spent asleep.
+  startedAtMono: number | null
   hadAnyPeer: boolean
   peers: Record<string, PeerSnapshot>
   room: TopicRoom | null
@@ -108,11 +116,18 @@ type SessionState = {
   // panel reads this so a peer who leaves a still-running 3+ person session
   // keeps their name on past rows instead of falling back to a hex fragment.
   seenPeerNames: Record<string, string>
+  // trystero peerIds that broadcast a verified 'left' audit event this
+  // session — the departures we can explain. The lifecycle wiring reads this
+  // to skip the S1 grace window when the room empties for a deliberate
+  // departure; `peerJoined` drops an id again so a re-invited peer's later
+  // blip still gets the window. Cleared by begin/reset.
+  departedPeerIds: string[]
   begin: (init: SessionInit) => void
   setPendingInitialTopic: (topic: string | null) => void
   setDeclaredStudyTopic: (next: string) => void
   peerJoined: (peerId: string) => void
   peerLeft: (peerId: string) => void
+  markPeerDeparted: (peerId: string) => void
   setPeerStream: (peerId: string, hasStream: boolean) => void
   setPeerPtt: (peerId: string, active: boolean) => void
   setPeerHello: (peerId: string, hello: PeerHello) => void
@@ -139,6 +154,7 @@ const INITIAL: Pick<
   | 'sessionPassword'
   | 'isHost'
   | 'startedAt'
+  | 'startedAtMono'
   | 'hadAnyPeer'
   | 'peers'
   | 'room'
@@ -148,6 +164,7 @@ const INITIAL: Pick<
   | 'pendingInitialTopic'
   | 'seenPeerEdPubkeys'
   | 'seenPeerNames'
+  | 'departedPeerIds'
 > = {
   status: 'idle',
   endedBy: null,
@@ -156,6 +173,7 @@ const INITIAL: Pick<
   sessionPassword: null,
   isHost: false,
   startedAt: null,
+  startedAtMono: null,
   hadAnyPeer: false,
   peers: {},
   room: null,
@@ -165,6 +183,7 @@ const INITIAL: Pick<
   pendingInitialTopic: null,
   seenPeerEdPubkeys: [],
   seenPeerNames: {},
+  departedPeerIds: [],
 }
 
 export const useSessionStore = create<SessionState>((set, get) => ({
@@ -184,6 +203,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         sessionPassword: init.sessionPassword,
         isHost: init.isHost,
         startedAt: init.startedAt,
+        startedAtMono: init.startedAtMono ?? null,
         hadAnyPeer: false,
         peers: {},
         room: init.room,
@@ -193,6 +213,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         pendingInitialTopic: null,
         seenPeerEdPubkeys: [],
         seenPeerNames: {},
+        departedPeerIds: [],
       }
     }),
   setPendingInitialTopic: (topic) => set({ pendingInitialTopic: topic }),
@@ -200,6 +221,13 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   peerJoined: (peerId) =>
     set((s) => ({
       hadAnyPeer: true,
+      // trystero's peerId is process-stable, so a peer re-invited into the
+      // same live session returns under the id they departed with. Drop the
+      // mark on (re)join or their next genuine blip would skip the grace
+      // window and kill the session instantly.
+      departedPeerIds: s.departedPeerIds.includes(peerId)
+        ? s.departedPeerIds.filter((id) => id !== peerId)
+        : s.departedPeerIds,
       peers: {
         ...s.peers,
         [peerId]: {
@@ -219,6 +247,12 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       delete next[peerId]
       return { peers: next }
     }),
+  markPeerDeparted: (peerId) =>
+    set((s) =>
+      s.departedPeerIds.includes(peerId)
+        ? s
+        : { departedPeerIds: [...s.departedPeerIds, peerId] }
+    ),
   setPeerStream: (peerId, hasStream) =>
     set((s) => {
       const cur = s.peers[peerId]
