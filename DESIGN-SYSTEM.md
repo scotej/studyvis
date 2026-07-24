@@ -51,7 +51,7 @@ export const tokens = {
       hover:   '#F8C079',
       active:  '#D9974A',
       muted:   '#A07043',   // accent pill fill (ModelPicker "Gated"); V3-P5 lightened from #7A5C32 to clear inverse-text contrast
-      ring:    '#F2B05A66', // 40% alpha — focus ring
+      ring:    '#F2B05A99', // 60% alpha — focus ring; composited ≥3.9:1 on every surface (WCAG 1.4.11)
     },
     status: {
       focused: '#84B061',   // sage green — "user is on task" tile dot
@@ -124,7 +124,7 @@ export const tokens = {
     sm:   '0 1px 2px rgba(0,0,0,0.30)',
     md:   '0 4px 12px rgba(0,0,0,0.40)',
     lg:   '0 12px 32px rgba(0,0,0,0.50)',
-    glow: '0 0 0 4px var(--accent-ring)', // focus ring glow
+    glow: '0 0 0 3px var(--accent-ring)', // focus ring glow
   },
 
   motion: {
@@ -209,7 +209,7 @@ export const lightTokens: Tokens = {
       hover:   '#774511',
       active:  '#683C0E',   // explicit override — inherited dark #D9974A is too light for inverse text on light
       muted:   '#7A5C32',   // explicit override — keep light's inverse text legible after dark muted lightened
-      ring:    '#8C521566', // light accent at 40% alpha; the dark ring color is washed out over light
+      ring:    '#8C5215CC', // light accent at 80% alpha; the dark ring color is washed out over light, and light needs more of it to clear 3:1
     },
     status: {
       ...tokens.color.status,
@@ -515,7 +515,7 @@ Every component that fetches or computes anything async ships three states:
 ## 11. Accessibility
 
 - Every interactive element keyboard-reachable (Tab order matches DOM order; `tabIndex={0}` only when needed).
-- Visible focus ring (`shadow.glow` + `border.strong`) on focused element. Implementation uses the existing tokens via per-component `focus-visible:` utilities (every primitive in `src/components/ui/` and the V3-P6 `<TitleBar />` controls ship one); the global `:focus-visible { outline: none }` reset relies on this convention. The axe-core gate (`npm run check-a11y`) covers DOM and ARIA semantics; pixel-level focus-indicator visibility is verified by manual walk-through on the live app.
+- Visible focus ring on the focused element, painted by `focus-visible:ring-3 focus-visible:ring-accent-ring` (the `shadow.glow` token describes the same 3px/`accent.ring` geometry but is not what the primitives use). Implementation uses the existing tokens via per-component `focus-visible:` utilities (every primitive in `src/components/ui/` and the V3-P6 `<TitleBar />` controls ship one); the global `:focus-visible { outline: none }` reset relies on this convention. The axe-core gate (`npm run check-a11y`) covers DOM and ARIA semantics; pixel-level focus-indicator visibility is verified by manual walk-through on the live app.
 - Icon-only buttons get `aria-label`.
 - Color contrast ≥ WCAG AA on all text + background pairings (verified by `scripts/check-contrast.ts` over both themes; V3-P5).
 - Dynamic events (audit log) use `role="log"` + `aria-live="polite"`; alerts use `role="alert"` + `aria-live="assertive"`; status surfaces (AI response bubble, self-warning badge, break countdown) use `role="status"` + `aria-live="polite"`.
