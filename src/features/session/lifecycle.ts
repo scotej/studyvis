@@ -344,6 +344,12 @@ export function wireSessionRoom(
   const graceMs = options?.graceMs ?? DISCONNECT_GRACE_MS
   const peers = new Set<string>()
   let hadAny = false
+  // True once a peer vanished WITHOUT the signed 'left' broadcast a
+  // deliberate Leave sends first. The grace window is skipped only when
+  // every departure since the last join is explained: in a 3-way session
+  // where one peer leaves on purpose and another blips at the same moment
+  // we still wait, which is the safe way to be wrong.
+  let sawUnexplainedLeave = false
   let graceHandle: number | null = null
   const sessionFull = room.makeAction<null>(SESSION_FULL_ACTION)
 
@@ -400,6 +406,7 @@ export function wireSessionRoom(
     // A (re)join cancels a pending auto-end: the transport recovered before
     // the grace window expired.
     cancelGrace()
+    sawUnexplainedLeave = false
     peers.add(peerId)
     hadAny = true
     useSessionStore.getState().peerJoined(peerId)
@@ -408,9 +415,22 @@ export function wireSessionRoom(
   room.onPeerLeave((peerId) => {
     if (!peers.has(peerId)) return
     peers.delete(peerId)
-    useSessionStore.getState().peerLeft(peerId)
+    const store = useSessionStore.getState()
+    if (!store.departedPeerIds.includes(peerId)) sawUnexplainedLeave = true
+    store.peerLeft(peerId)
     if (peers.size === 0 && hadAny) {
-      armGrace()
+      if (sawUnexplainedLeave) {
+        armGrace()
+      } else {
+        // Every peer that left told us so first, so the room is provably
+        // empty: end now instead of showing "waiting for your friend to
+        // reconnect" for 20 s about someone who isn't coming back. 'peer'
+        // (not 'auto') keeps the Report from offering Rejoin into a room
+        // nobody is in.
+        cancelGrace()
+        store.setPendingEndReason('peer')
+        void hooks.leave()
+      }
     }
   })
 

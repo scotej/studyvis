@@ -38,6 +38,18 @@ describe('session end reason (#47 B3)', () => {
     expect(s.pendingEndReason).toBeNull()
   })
 
+  // Every peer broadcast a signed 'left' before tearing down, so the room is
+  // provably empty: the reason must be distinguishable from 'auto', which is
+  // the only one Home offers Rejoin for.
+  test("a staged peer-departure reason survives the leave handler's own staging", () => {
+    begin()
+    useSessionStore.getState().setPendingEndReason('peer')
+    useSessionStore.getState().setPendingEndReason('user')
+    useSessionStore.getState().markEnded()
+    expect(useSessionStore.getState().endedBy).toBe('peer')
+    expect(useSessionStore.getState().endedBy).not.toBe('auto')
+  })
+
   test('a user leave that raced the grace timer stays user-attributed', () => {
     begin()
     useSessionStore.getState().markEnded()

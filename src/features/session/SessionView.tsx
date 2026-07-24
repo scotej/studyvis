@@ -722,6 +722,14 @@ export function SessionView({
       // mirrors the ai-alert path's replay guard (aiAlerts.ts). (I8)
       if (verified.session_topic !== sessionTopic) return
       useAuditStore.getState().append(verified)
+      // This mark is what lets the lifecycle layer tell a deliberate
+      // departure from a WiFi blip, and it is reliable only because
+      // handleLeave awaits this broadcast before room.leave() and both ride
+      // the same single ordered data channel — the mark always lands before
+      // trystero's own leave notification. Don't drop that await.
+      if (verified.kind === 'left') {
+        useSessionStore.getState().markPeerDeparted(peerId)
+      }
     })
 
     // #47 B6 — quiet text notes on the same signed-channel trust wiring as

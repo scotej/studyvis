@@ -174,6 +174,84 @@ describe('S1 disconnect grace window', () => {
     )
   })
 
+  test("a peer that broadcast 'left' ends the session at once, with no grace window", () => {
+    const { room, join, leave } = fakeRoom()
+    const sched = fakeScheduler()
+    const onLeave = vi.fn(async () => {})
+
+    wireSessionRoom(
+      room,
+      { isHost: true, leave: onLeave },
+      { scheduler: sched.scheduler }
+    )
+
+    join('peer-a')
+    // SessionView marks the peer when their signed 'left' audit event lands,
+    // which is always before trystero's own leave notification.
+    useSessionStore.getState().markPeerDeparted('peer-a')
+    leave('peer-a')
+    expect(onLeave).toHaveBeenCalledTimes(1)
+    expect(sched.pending()).toBe(0)
+    // 'peer' (not 'auto') so the Report suppresses Rejoin into a dead room.
+    expect(useSessionStore.getState().pendingEndReason).toBe('peer')
+  })
+
+  test('a deliberate departure alongside an unexplained one still waits out the window', () => {
+    const { room, join, leave } = fakeRoom()
+    const sched = fakeScheduler()
+    const onLeave = vi.fn(async () => {})
+
+    wireSessionRoom(
+      room,
+      { isHost: true, leave: onLeave },
+      { scheduler: sched.scheduler }
+    )
+
+    join('peer-a')
+    join('peer-b')
+    // peer-b drops off the network; peer-a then leaves on purpose. The room
+    // empties on an explained departure, but peer-b may still be blipping.
+    leave('peer-b')
+    useSessionStore.getState().markPeerDeparted('peer-a')
+    leave('peer-a')
+    expect(onLeave).not.toHaveBeenCalled()
+    expect(sched.pending()).toBe(1)
+    sched.advance(DISCONNECT_GRACE_MS)
+    expect(onLeave).toHaveBeenCalledTimes(1)
+    expect(useSessionStore.getState().pendingEndReason).toBe('auto')
+  })
+
+  test('a peer re-invited after a deliberate leave gets the grace window back', () => {
+    const { room, join, leave } = fakeRoom()
+    const sched = fakeScheduler()
+    const onLeave = vi.fn(async () => {})
+
+    wireSessionRoom(
+      room,
+      { isHost: true, leave: onLeave },
+      { scheduler: sched.scheduler }
+    )
+
+    join('peer-a')
+    join('peer-b')
+    useSessionStore.getState().markPeerDeparted('peer-a')
+    leave('peer-a')
+    // Re-invited into the still-live session: trystero's peerId is process-
+    // stable, so peer-a returns under the same id and the mark must clear.
+    join('peer-a')
+    expect(useSessionStore.getState().departedPeerIds).not.toContain('peer-a')
+    useSessionStore.getState().markPeerDeparted('peer-b')
+    leave('peer-b')
+    expect(onLeave).not.toHaveBeenCalled()
+    // peer-a now genuinely blips. A stale mark would end the session here.
+    leave('peer-a')
+    expect(onLeave).not.toHaveBeenCalled()
+    expect(sched.pending()).toBe(1)
+    sched.advance(DISCONNECT_GRACE_MS)
+    expect(onLeave).toHaveBeenCalledTimes(1)
+    expect(useSessionStore.getState().pendingEndReason).toBe('auto')
+  })
+
   test('an explicit user leave racing the grace timer fires the handler at most once', async () => {
     const { room, join, leave } = fakeRoom()
     const sched = fakeScheduler()
