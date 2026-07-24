@@ -44,6 +44,9 @@ export type SessionInit = {
   sessionPassword: string
   isHost: boolean
   startedAt: number
+  // performance.now() taken alongside startedAt. Optional so non-production
+  // callers (tests, stories) can omit it; consumers fall back to wall clock.
+  startedAtMono?: number
   room: TopicRoom
   leave: () => Promise<void>
 }
@@ -69,6 +72,9 @@ type SessionState = {
   sessionPassword: string | null
   isHost: boolean
   startedAt: number | null
+  // Monotonic origin for the same session start, so the live elapsed clock
+  // (and the persisted total) can ignore time the machine spent asleep.
+  startedAtMono: number | null
   hadAnyPeer: boolean
   peers: Record<string, PeerSnapshot>
   room: TopicRoom | null
@@ -139,6 +145,7 @@ const INITIAL: Pick<
   | 'sessionPassword'
   | 'isHost'
   | 'startedAt'
+  | 'startedAtMono'
   | 'hadAnyPeer'
   | 'peers'
   | 'room'
@@ -156,6 +163,7 @@ const INITIAL: Pick<
   sessionPassword: null,
   isHost: false,
   startedAt: null,
+  startedAtMono: null,
   hadAnyPeer: false,
   peers: {},
   room: null,
@@ -184,6 +192,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         sessionPassword: init.sessionPassword,
         isHost: init.isHost,
         startedAt: init.startedAt,
+        startedAtMono: init.startedAtMono ?? null,
         hadAnyPeer: false,
         peers: {},
         room: init.room,

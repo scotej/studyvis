@@ -174,6 +174,10 @@ function unionPeerPubkeys(a: string | null, b: string | null): string | null {
   return union.length > 0 ? JSON.stringify(union) : null
 }
 
+// Injectable so the unit tests can drive a suspended machine without one;
+// production reads the webview's monotonic clock.
+const defaultMonotonicNow = (): number => performance.now()
+
 // Single teardown path: leaves trystero, generates the V2-P8 post-session
 // report by snapshotting per-user score / focused-time / declared topic
 // from in-memory stores BEFORE reset() clears anything, and upserts a
@@ -191,7 +195,10 @@ export function buildLeaveHandler(args: {
   room: TopicRoom
   topic: string
   startedAt: number
+  startedAtMono?: number
+  monotonicNow?: () => number
 }): () => Promise<void> {
+  const monotonicNow = args.monotonicNow ?? defaultMonotonicNow
   let alreadyLeft = false
   return async () => {
     if (alreadyLeft) return
@@ -214,9 +221,23 @@ export function buildLeaveHandler(args: {
     const peerEdPubkeys = [...new Set(sessionState.seenPeerEdPubkeys)]
     const initialDeclaredTopic = sessionState.initialDeclaredTopic
     const focusSnapshot = snapshotFocusForReport()
+    // Persisted study minutes are the SHORTER of wall-clock and monotonic
+    // elapsed. A laptop slept mid-session advances Date.now() across the whole
+    // overnight span, so a 45-minute session ended by closing the lid used to
+    // persist ~600 minutes — a fabricated streak day and a nonsense report.
+    // performance.now() advances on demand rather than per tick, so a hidden
+    // or throttled webview still reads the real awake span (no ticker to
+    // starve), and min() can only ever shrink an inflated number: on a
+    // platform whose monotonic clock does include suspend this degrades to
+    // exactly the old wall-clock value instead of under-counting real study.
+    const wallMs = endedAt - args.startedAt
+    const monoMs =
+      args.startedAtMono === undefined
+        ? wallMs
+        : monotonicNow() - args.startedAtMono
     const totalMinutes = Math.max(
       0,
-      Math.floor((endedAt - args.startedAt) / 60_000)
+      Math.floor(Math.min(wallMs, monoMs) / 60_000)
     )
 
     try {

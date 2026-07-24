@@ -23,12 +23,14 @@ export function joinSession(
     sessionPassword
   )
   const startedAt = Date.now()
-  const leave = buildLeaveHandler({ room, topic, startedAt })
+  const startedAtMono = performance.now()
+  const leave = buildLeaveHandler({ room, topic, startedAt, startedAtMono })
   useSessionStore.getState().begin({
     sessionTopic: topic,
     sessionPassword: password,
     isHost: false,
     startedAt,
+    startedAtMono,
     room,
     leave,
   })

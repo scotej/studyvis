@@ -58,12 +58,20 @@ function fakeRoom(): TopicRoom {
   return { leave: async () => {} } as unknown as TopicRoom
 }
 
-async function runStint(startedAt: number, endedAt: number): Promise<void> {
+// `mono`, when given, models the monotonic clock: awake elapsed in ms, which
+// on a machine that slept mid-session is far less than endedAt - startedAt.
+async function runStint(
+  startedAt: number,
+  endedAt: number,
+  mono?: { awakeMs: number }
+): Promise<void> {
+  const startedAtMono = 5_000
   useSessionStore.getState().begin({
     sessionTopic: 'topic-1',
     sessionPassword: 'pw',
     isHost: false,
     startedAt,
+    startedAtMono: mono ? startedAtMono : undefined,
     room: fakeRoom(),
     leave: async () => {},
   })
@@ -71,6 +79,8 @@ async function runStint(startedAt: number, endedAt: number): Promise<void> {
     room: fakeRoom(),
     topic: 'topic-1',
     startedAt,
+    startedAtMono: mono ? startedAtMono : undefined,
+    monotonicNow: mono ? () => startedAtMono + mono.awakeMs : undefined,
   })
   vi.setSystemTime(endedAt)
   await leave()
@@ -100,6 +110,50 @@ describe('re-entry merge across leave cycles', () => {
       startedAt: T0, // earliest stint anchors the report timeline
       totalMinutes: 55, // 45 + 10 — the 2-minute gap is not studied time
       endedAt: t2 + 10 * MIN,
+    })
+  })
+})
+
+// Wall-clock alone counted OS-sleep as study time: closing the lid on a
+// 45-minute session and ending it in the morning persisted the whole
+// overnight span, fabricating a streak day.
+describe('study minutes ignore time the machine spent asleep', () => {
+  beforeEach(() => {
+    db.clear()
+    useSessionStore.getState().reset()
+    vi.useFakeTimers()
+    return () => vi.useRealTimers()
+  })
+
+  test('an awake session records the full wall-clock span', async () => {
+    await runStint(T0, T0 + 45 * MIN, { awakeMs: 45 * MIN })
+    expect(db.get('topic-1')).toMatchObject({ totalMinutes: 45 })
+  })
+
+  test('a slept-through session records only the awake span', async () => {
+    // 43 minutes of study, lid closed, ended 612 wall-clock minutes later.
+    await runStint(T0, T0 + 612 * MIN, { awakeMs: 43 * MIN })
+    expect(db.get('topic-1')).toMatchObject({ totalMinutes: 43 })
+  })
+
+  test('a wall clock stepped backward never yields negative minutes', async () => {
+    // monotonic > wall (NTP correction mid-session): wall wins, clamped at 0.
+    await runStint(T0, T0 - 5 * MIN, { awakeMs: 45 * MIN })
+    expect(db.get('topic-1')).toMatchObject({ totalMinutes: 0 })
+  })
+
+  test('no monotonic origin falls back to the wall-clock span', async () => {
+    await runStint(T0, T0 + 45 * MIN)
+    expect(db.get('topic-1')).toMatchObject({ totalMinutes: 45 })
+  })
+
+  test('a slept-through rejoin stint still sums onto the prior stint', async () => {
+    await runStint(T0, T0 + 45 * MIN, { awakeMs: 45 * MIN })
+    const t2 = T0 + 47 * MIN
+    await runStint(t2, t2 + 600 * MIN, { awakeMs: 10 * MIN })
+    expect(db.get('topic-1')).toMatchObject({
+      startedAt: T0,
+      totalMinutes: 55,
     })
   })
 })

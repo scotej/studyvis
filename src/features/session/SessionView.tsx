@@ -159,6 +159,7 @@ export function SessionView({
   const sessionLeave = useSessionStore((s) => s.leave)
   const sessionTopic = useSessionStore((s) => s.sessionTopic)
   const startedAt = useSessionStore((s) => s.startedAt)
+  const startedAtMono = useSessionStore((s) => s.startedAtMono)
   const peers = useSessionStore((s) => s.peers)
   const setPeerHello = useSessionStore((s) => s.setPeerHello)
   const seenPeerNames = useSessionStore((s) => s.seenPeerNames)
@@ -1534,7 +1535,7 @@ export function SessionView({
         </span>
         <span className="flex items-center gap-4">
           <AiStatusChip status={aiChipStatus} />
-          <ElapsedTime startedAt={startedAt} />
+          <ElapsedTime startedAt={startedAt} startedAtMono={startedAtMono} />
           <SessionTimer
             phase={pomodoroSnapshot.phase}
             preset={pomodoroSnapshot.preset}
@@ -1719,14 +1720,31 @@ function hoverDetailFor(
   }
 }
 
-function useElapsed(startedAt: number | null): string {
-  const [now, setNow] = useState(() => Date.now())
+function useElapsed(
+  startedAt: number | null,
+  startedAtMono: number | null
+): string {
+  const [tick, setTick] = useState(() => ({
+    wall: Date.now(),
+    mono: performance.now(),
+  }))
   useEffect(() => {
-    const handle = setInterval(() => setNow(Date.now()), 1000)
+    const handle = setInterval(
+      () => setTick({ wall: Date.now(), mono: performance.now() }),
+      1000
+    )
     return () => clearInterval(handle)
   }, [])
   if (!startedAt) return '00:00'
-  const seconds = Math.max(0, Math.floor((now - startedAt) / 1000))
+  // Same min(wall, monotonic) rule the persisted total uses (see
+  // buildLeaveHandler), so the footer and the report row agree after the
+  // machine has been asleep instead of the footer reading 612:34 on wake.
+  const wallMs = tick.wall - startedAt
+  const elapsedMs =
+    startedAtMono === null
+      ? wallMs
+      : Math.min(wallMs, tick.mono - startedAtMono)
+  const seconds = Math.max(0, Math.floor(elapsedMs / 1000))
   const m = Math.floor(seconds / 60)
   const s = seconds % 60
   return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
@@ -1734,10 +1752,16 @@ function useElapsed(startedAt: number | null): string {
 
 // Leaf that owns the 1-second elapsed tick so the whole-session clock updates
 // in the footer without re-rendering SessionView — mirrors SessionTimer's
-// useRemainingMs isolation. The `now` state lives here, not in SessionView's
+// useRemainingMs isolation. The `tick` state lives here, not in SessionView's
 // render body, so the interval only reconciles this one span.
-function ElapsedTime({ startedAt }: { startedAt: number | null }) {
-  const elapsed = useElapsed(startedAt)
+function ElapsedTime({
+  startedAt,
+  startedAtMono,
+}: {
+  startedAt: number | null
+  startedAtMono: number | null
+}) {
+  const elapsed = useElapsed(startedAt, startedAtMono)
   return (
     <span
       role="img"
