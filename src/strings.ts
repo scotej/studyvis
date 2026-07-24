@@ -1724,6 +1724,13 @@ export const strings = {
       upToDateHelp: (version: string) => `You're on ${version}, the latest.`,
       checkCta: 'Check now',
       restartCta: 'Restart now',
+      // Mid-session lock, mirroring strings.ai.picker.lockedDuringSession:
+      // restarting into an update tears down the live mesh, so the affordance
+      // is disabled with the reason stated (no info by color alone).
+      lockedDuringSession: (version: string) =>
+        `Version ${version} is downloaded and waiting — updating restarts StudyVis, so it unlocks after your session ends.`,
+      checkLockedDuringSession:
+        'Update checks pause during a session so the download stays off your call.',
     },
     errors: {
       // Surfaced only on a user-initiated check / restart. Background failures
