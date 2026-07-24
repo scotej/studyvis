@@ -378,8 +378,9 @@ reduced-motion pass, and the cohesion + copy pass). **v1.1.0** added
 the pairing QR redesign; **v1.2.x** brought a maintenance + feature
 wave and more reliable pairing discovery; **v1.3.1** brought offline
 friend codes; **v1.4.0** added multi-friend sessions, faster AI, and
-the verified backlog; **v1.5.0** is the current release, adding in-app
-auto-update (see `CHANGELOG.md` for the full history). The version
+the verified backlog; **v1.5.0** brought in-app auto-update; **v1.6.0**
+a searchable settings rail and a lighter, faster startup. `CHANGELOG.md`
+has the full history, including whatever shipped most recently. The version
 number lives in (and must stay consistent across):
 
 - `package.json` — npm root
