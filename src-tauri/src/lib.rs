@@ -322,7 +322,8 @@ pub fn run() {
 const DB_RECOVERED_TITLE: &str = "Local data was reset";
 const DB_RECOVERED_BODY: &str = "StudyVis couldn't read its saved data, so it set the unreadable \
      file aside and started fresh. Your identity is safe, but your friends list and session \
-     history couldn't be recovered — you'll need to pair with your friends again.";
+     history couldn't be recovered. If you saved a friends backup, restore it from Settings → \
+     Identity → Import friends; otherwise you'll need to pair with your friends again.";
 const DB_NEWER_VERSION_TITLE: &str = "Update needed";
 const DB_NEWER_VERSION_BODY: &str = "Your StudyVis data was saved by a newer version of the app. \
      To keep it safe, this older build won't open it. Install the latest release, then try again.";
