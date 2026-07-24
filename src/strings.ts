@@ -1102,6 +1102,8 @@ export const strings = {
         label: 'Reset to defaults',
         help: 'Restores the original combos for both shortcuts.',
         cta: 'Reset',
+        resetError: (message: string) =>
+          `Couldn't reset both shortcuts: ${message}`,
       },
     },
 

@@ -1072,8 +1072,30 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
 
   resetShortcutsToDefaults: async () => {
     const setter = get().setShortcutAccelerator
-    await setter('ptt-friends', PTT_FRIENDS_DEFAULT_ACCELERATOR)
-    await setter('ptt-ai', PTT_AI_DEFAULT_ACCELERATOR)
+    // Reset the action currently squatting on the *other* action's default
+    // combo first, so that combo is free before we re-register it — a fixed
+    // order collides in the single-swap case (AI holding the friends default).
+    // Wrap each call so an OS registration refusal on one binding still lets
+    // the other reset, then rethrow the last failure so the UI can surface it.
+    const steps: ReadonlyArray<[ShortcutAction, string]> =
+      get().values.pttAiAccelerator === PTT_FRIENDS_DEFAULT_ACCELERATOR
+        ? [
+            ['ptt-ai', PTT_AI_DEFAULT_ACCELERATOR],
+            ['ptt-friends', PTT_FRIENDS_DEFAULT_ACCELERATOR],
+          ]
+        : [
+            ['ptt-friends', PTT_FRIENDS_DEFAULT_ACCELERATOR],
+            ['ptt-ai', PTT_AI_DEFAULT_ACCELERATOR],
+          ]
+    let lastError: unknown = null
+    for (const [action, accelerator] of steps) {
+      try {
+        await setter(action, accelerator)
+      } catch (err) {
+        lastError = err
+      }
+    }
+    if (lastError !== null) throw lastError
   },
 
   setCaptureDisplays: async (mode) => {
