@@ -274,6 +274,7 @@ These are the only components allowed to read raw HTML / Radix primitives. Modif
 | `Avatar` | With fallback initials. Always circular, sizes 24/32/48. |
 | `Badge` | Pill. Variants: `default`, `secondary`, `destructive`, `outline`, `ghost`, `link`. Status-toned variants (focused / warning / alerted) are V2 polish. |
 | `Switch` | |
+| `Checkbox` | Square check control (distinct from `Switch`; boolean opt-in). |
 | `Slider` | |
 | `RadioGroup` | One-of-N selection. Used by Settings → Appearance (theme) and Settings → Network (TURN preference). |
 | `Tabs` | |
@@ -281,6 +282,7 @@ These are the only components allowed to read raw HTML / Radix primitives. Modif
 | `Separator` | |
 | `Card` | |
 | `Progress` | |
+| `Skeleton` | Loading placeholder block — the app's only sanctioned loading affordance, no spinners (§6, §10). |
 | `Kbd` | Inline keyboard-cap rendering for shortcut hints. |
 
 ### `src/components/` — app-specific (composed, never raw)
@@ -293,27 +295,35 @@ These components only import from `ui/`, `design/tokens.ts`, and shared utilitie
 | `VideoGrid` | Mesh layout of tiles (1, 2, 3, or 4). Aspect-aware. |
 | `WaitingTile` | Calm "waiting for your friend" tile shown beside the self tile when alone in an active session. §10 empty-state pattern, no spinner. `invite` / `reconnect` variants. |
 | `AudioOutputPicker` | Speaker/headphone output selector for the session footer (`setSinkId`). Feature-detected — renders nothing where unsupported (macOS WKWebView). |
+| `AudioDevicePicker` | Session-footer dropdown that swaps the active microphone mid-session without renegotiating SDP; refreshes on `devicechange`. |
 | `FocusIndicator` | Per-tile dot: `focused` / `warning` / `alerted` / `offline`. |
 | `PttIndicator` | Visible while a peer is transmitting audio. |
+| `SelfWarningBadge` | Silent, off-task-user-only warning surface, fixed bottom-right above the audit panel; `aria-live=polite`, presentational (TTL owned by the alerts store). |
+| `BreakCountdownBadge` | Fixed bottom-right countdown badge while an approved break is active; ticks mm:ss once per second. |
+| `MediaErrorBanner` | Inline recovery banner when camera/mic acquisition fails at session join; calm copy keyed on the error name + "Try again". |
+| `ScreenCapturePermissionOverlay` | Dialog tutorial for the macOS screen-recording grant when `getDisplayMedia` is denied; deep-links to System Settings, textual fallback elsewhere. |
 | `AuditLogPanel` | Right-rail panel listing `AuditEvent`s. |
 | `AuditLogRow` | Single event with avatar + action + timestamp. |
+| `AiStatusChip` | Persistent read-out of whether the camera is being analyzed (`off` / `active` / `paused` / `error`); status by icon + label, never color alone. |
 | `AiTextBox` | Floating dialog for `Ctrl+]` AI input. Renders in always-on-top window. |
 | `AiResponseBubble` | AI's text reply in the same dialog. |
 | `ScoreGauge` | Post-session arc gauge from 0–100. |
-| `FriendsList` | Scrollable list of friends, online dots, last-studied label. |
-| `FriendRow` | Single friend with `Invite` button. |
-| `AddFriendDialog` | 12-word generate / paste flow. |
+| `SessionTimer` | Pomodoro timer with phase indicator, broadcaster badge if you're broadcasting. |
+| `PairQrCode` | Renders an arbitrary string as a scannable QR image (`Skeleton` placeholder while encoding). Generic — knows nothing about pairing. |
+| `PairQrScanner` | Opens the webcam and scans each frame for a QR code, firing `onDecode` with the raw payload; releases the camera on unmount / first decode. |
 | `RelayDiagnostics` | Settings → Network: live per-relay connection status (one row per signaling WebSocket, polled while mounted). Status by glyph + text, never color alone. |
-| `FocusInsights` | Cross-session focus insights for the Stats dashboard: distraction timing buckets, recurring reasons, focused-time trend. Pure presentational over computed `statsInsights` data. |
-| `IdentityLoadErrorView` | Calm "we couldn't read your identity file" screen (Retry + Restore). Deliberately offers no create-new path so a still-valid keychain identity is never abandoned. |
 | `OnboardingStep` | Full-bleed onboarding surface, single CTA, optional secondary. |
 | `BipBackupPanel` | Mono-font 24-word display + copy + "I've saved them" confirmation. Standalone component (`src/components/BipBackupPanel.tsx`), imported by `IdentitySetup.tsx`, with its own Storybook story. |
-| `SessionTimer` | Pomodoro timer with phase indicator, broadcaster badge if you're broadcasting. |
-| `ModelPicker` | (V2) Radio cards: name, size, RAM, measured speed badge. |
-| `BenchmarkRunner` | (V2) 30-second benchmark progress display. |
 | `SettingsLayout` | Left rail + right pane shell. |
 | `SettingsRow` | Label + control + helper text. |
 | `KeybindCapture` | Listens for next key combo, displays `Kbd`s. |
+| `Disclosure` | Native default-collapsed `<details>` disclosure (Settings → Network → Advanced, AI model guide); instant chevron rotation, no transition. |
+| `TitleBar` | Opt-in custom window chrome: §15 wordmark left, OS-correct controls (macOS keeps the native traffic lights, Windows renders min / restore / close), drag region between. |
+| `UpdateReadyBanner` | Quiet "update ready" banner (X6) shown once the new version is downloaded and signature-verified; `Restart now` / `Later`, never mid-session. |
+| `ErrorBoundary` | Class-component render-fault boundary: catches an uncaught render throw, keeps the app shell mounted, offers a retry that remounts the subtree. |
+| `Logo` | App mark: rounded square + focus dot, sizes 24/32/48/96, `monochrome` variant. |
+
+Feature-owned surfaces — the friends list, the add-friend flow, the model picker (its download and benchmark progress render inline on the card, not as a separate component), cross-session focus insights, the identity-load-error screen, and the onboarding / settings / session views — live under `src/features/*`, obey the same wall (`eslint.config.js` applies the Radix restriction tree-wide), and are exhibited in Storybook rather than enumerated here.
 
 ## 5. Themes
 
@@ -344,7 +354,7 @@ Everything else — layout, transform, and decorative motion — is instant. No 
 1. **All color, spacing, font, radius, shadow, motion values come from `tokens.ts`.** No hex codes, no `px` literals, no `cubic-bezier` strings outside the tokens file. Pre-commit: `scripts/check-tokens.ts` greps the codebase and fails the build on violations.
 2. **All primitives come from `src/components/ui/`.** Application code imports from `components/`, `components/` imports from `ui/`. Reverse imports are an ESLint error.
 3. **One typeface, one accent.** A new design that needs a second accent color or a third font is a redesign — open a discussion, not a hex value.
-4. **Every component has a Storybook story.** Adding a component without a story fails the PR check (V1-P2 sets up Storybook + the lint rule).
+4. **Every primitive and composed component gets a Storybook story** (V1-P2 sets up Storybook + the lint rule). `npm run check-a11y` runs axe-core over every story that exists in CI, but there is no automated coverage gate — a component that ships without a story is caught in review, not by a build check.
 5. **`/style` dev route shows every `ui/` primitive and every status state side by side.** Smoke-check before each release; visible in dev builds, hidden in production. Keeps primitive-layer drift visible. Composed app components (`src/components/*`, the AI dialog, the audit panel, ScoreGauge, etc.) live in Storybook stories — that's the canonical exhibit for the composed layer, and the same a11y / visual axe-core gate runs against it (`npm run check-a11y`). Reducing `/style`'s scope to `ui/` keeps the dev route fast to walk without losing coverage.
 6. **No inline `style={...}` with raw values.** All styling is Tailwind classes (which derive from the token map) or component variants. Inline `style` allowed only for genuinely dynamic numeric values (e.g. video tile aspect ratio); ESLint rule forbids string literals in `style`.
 
