@@ -532,7 +532,7 @@ What's **broadcast in real time**: the kinds above. Peers see "Sam: ai_warning (
 
 Audit log is also written to local SQLite per session for the post-session report and (V3) stats.
 
-The Stats dashboard's **focus-insights** section (R7) reads the full `audit_events` table cross-session via the `audit_events_list_all` command — when-distractions-cluster timing, recurring distraction reasons, and a focused-time trend, all derived from the same `ai_warning`/`ai_alert` reasoning the single-session report already shows. The numeric stats tiles (`statsData`) remain **sessions-table-only** (they never query `audit_events`); the cross-session insight transforms live in the pure `features/stats/statsInsights.ts` seam. Strictly local — nothing here transmits.
+The Stats dashboard's **focus-insights** section (R7) reads the cross-session `ai_warning`/`ai_alert` audit rows via the `audit_events_list_all` command — when-distractions-cluster timing, recurring distraction reasons, and a focused-time trend, all derived from the same `ai_warning`/`ai_alert` reasoning the single-session report already shows. The command narrows the read to those two kinds (insights ignore every other kind), so the whole table never crosses IPC. The numeric stats tiles (`statsData`) remain **sessions-table-only** (they never query `audit_events`); the cross-session insight transforms live in the pure `features/stats/statsInsights.ts` seam. Strictly local — nothing here transmits.
 
 ## 10. Pomodoro sync
 

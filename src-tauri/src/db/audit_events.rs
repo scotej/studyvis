@@ -1,5 +1,6 @@
 //! `audit_events` table queries — the per-session signed event log, plus the
-//! cross-session read (`list_all`) behind the Stats focus-insights view.
+//! cross-session read (`list_ai_distractions_all`) behind the Stats
+//! focus-insights view.
 //! Inserts are idempotent on `sig`; rows are only ever deleted via the
 //! session cascade in `sessions.rs`.
 
@@ -63,15 +64,23 @@ pub fn list_for_session(conn: &Connection, session_id: &str) -> Result<Vec<Audit
     rows.collect()
 }
 
-// R7 — every audit event across all sessions, for the cross-session focus
-// insights view. Ordered by session then ts so the JS side can bucket each
-// event against its own session without a second sort. The per-session
-// `list_for_session` stays the report's source; this is the multi-session
-// counterpart. Read-only and local, like the rest of this module.
-pub fn list_all(conn: &Connection) -> Result<Vec<AuditEventRow>> {
+// R7 — the AI-distraction audit events across all sessions, for the
+// cross-session focus-insights view. Ordered by session then ts so the JS side
+// can bucket each event against its own session without a second sort. The
+// per-session `list_for_session` stays the report's source; this is the
+// multi-session counterpart. Read-only and local, like the rest of this module.
+pub fn list_ai_distractions_all(conn: &Connection) -> Result<Vec<AuditEventRow>> {
+    // The `kind IN (...)` list is the SQL twin of TS `isDistraction`
+    // (src/features/stats/statsInsights.ts:60-62) and the report's own filter
+    // (src/features/session/reportData.ts:104): insights only ever consume
+    // ai_warning/ai_alert rows that carry `reasoning`. Narrowing here instead of
+    // shipping the whole table cuts the IPC payload ~4x. WHY this earns a
+    // comment: a new distraction kind added on the TS side alone would silently
+    // vanish from cross-session insights, with no type-level link to catch it.
     let mut stmt = conn.prepare(
         "SELECT session_id, ts, who, kind, detail, sig
          FROM audit_events
+         WHERE kind IN ('ai_warning', 'ai_alert')
          ORDER BY session_id ASC, ts ASC, id ASC",
     )?;
     let rows = stmt.query_map([], |row| {
@@ -170,13 +179,14 @@ mod tests {
     }
 
     #[test]
-    fn list_all_returns_every_session_ordered_by_session_then_ts() {
+    fn list_ai_distractions_all_returns_every_session_ordered_by_session_then_ts() {
         let conn = fresh();
         insert(
             &conn,
             &AuditEventRow {
                 session_id: "topic-b".into(),
                 ts: 100,
+                kind: "ai_alert".into(),
                 sig: "b1".into(),
                 ..sample("b1")
             },
@@ -187,6 +197,7 @@ mod tests {
             &AuditEventRow {
                 session_id: "topic-a".into(),
                 ts: 300,
+                kind: "ai_warning".into(),
                 sig: "a2".into(),
                 ..sample("a2")
             },
@@ -197,12 +208,13 @@ mod tests {
             &AuditEventRow {
                 session_id: "topic-a".into(),
                 ts: 200,
+                kind: "ai_alert".into(),
                 sig: "a1".into(),
                 ..sample("a1")
             },
         )
         .expect("insert a1");
-        let read = list_all(&conn).expect("list all");
+        let read = list_ai_distractions_all(&conn).expect("list");
         assert_eq!(
             read.iter().map(|r| r.sig.as_str()).collect::<Vec<_>>(),
             vec!["a1", "a2", "b1"]
@@ -210,8 +222,29 @@ mod tests {
     }
 
     #[test]
-    fn list_all_is_empty_with_no_rows() {
+    fn list_ai_distractions_all_excludes_non_distraction_kinds() {
         let conn = fresh();
-        assert!(list_all(&conn).expect("list all").is_empty());
+        // `sample()` defaults to kind "joined", which is not a distraction.
+        insert(&conn, &sample("joined-sig")).expect("insert joined");
+        insert(
+            &conn,
+            &AuditEventRow {
+                kind: "ai_alert".into(),
+                sig: "alert-sig".into(),
+                ..sample("alert-sig")
+            },
+        )
+        .expect("insert ai_alert");
+        let read = list_ai_distractions_all(&conn).expect("list");
+        assert_eq!(
+            read.iter().map(|r| r.sig.as_str()).collect::<Vec<_>>(),
+            vec!["alert-sig"]
+        );
+    }
+
+    #[test]
+    fn list_ai_distractions_all_is_empty_with_no_rows() {
+        let conn = fresh();
+        assert!(list_ai_distractions_all(&conn).expect("list").is_empty());
     }
 }
