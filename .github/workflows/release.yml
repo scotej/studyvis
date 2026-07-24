@@ -10,8 +10,9 @@ on:
   workflow_dispatch:
 
 # See ci.yml's pinning note: third-party actions are SHA-pinned because this
-# workflow mints the unsigned installers friends manually install. The
-# publish job re-declares the contents: write it needs.
+# workflow mints the unsigned installers friends manually install. The publish
+# and verify-updater-manifest jobs each re-declare the contents: write they
+# need, scoped to the job so the write token never widens to the whole workflow.
 permissions:
   contents: read
 
@@ -182,3 +183,81 @@ jobs:
           # both darwin-aarch64 and windows-x86_64.
           includeUpdaterJson: true
           args: ${{ matrix.args }}
+
+  # X6 — a human publishes the draft, and a draft can exist with only the
+  # platform whose build leg survived (the other tripped on fetch-llama-server,
+  # a clippy break, a runner timeout — fail-fast is off above). Publishing that
+  # half-built draft strands every friend on the missing platform: their
+  # updater rejects a latest.json with no matching key. Nothing else asserts
+  # the manifest is complete, so this job stamps the draft's own title — where
+  # the publish button is — when a platform key is missing, and also catches a
+  # tauri-action bump regressing the unlocked read-merge-write the design leans
+  # on. It fails hard only on a genuinely missing platform key; its own
+  # gh/transport errors stay non-blocking so a chronically-red gate never
+  # trains the one reviewer to publish past it.
+  verify-updater-manifest:
+    name: Verify draft latest.json carries every platform
+    needs: publish
+    # !cancelled(), not always(): still run when a build leg failed, but handle
+    # "both legs died before any draft existed" as its own no-release branch
+    # below rather than reporting it as "latest.json is missing a platform".
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Scoped to this job, never the workflow. Reading a DRAFT release — and the
+    # draft-title edit below — needs push access: GitHub lists drafts only to
+    # push users and gh's by-tag draft lookup goes through the same rule, so
+    # contents: read would 404 on every release.
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      TAG: ${{ github.ref_name }}
+    steps:
+      - name: Assert every platform is present before the draft can be published
+        shell: bash
+        run: |
+          set -uo pipefail
+
+          stamp_and_fail() {
+            echo "::error::$1"
+            echo "- $1" >> "$GITHUB_STEP_SUMMARY"
+            # Put the warning where the publish button is; the ::error:: and the
+            # step summary above are only visible on the already-red run page.
+            gh release edit "$TAG" --draft \
+              --title "StudyVis $TAG — INCOMPLETE, DO NOT PUBLISH" || true
+            exit 1
+          }
+
+          # No-release branch: both build legs can fail before tauri-action
+          # creates any draft. There is nothing to publish and nothing to
+          # stamp — the failed publish job already reddens the run.
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            echo "No draft release '$TAG' was created — nothing to verify." \
+              | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          # gh transport errors (or a wholly absent asset) must not redden the
+          # gate; only a genuinely missing platform key does.
+          if ! gh release download "$TAG" --pattern latest.json --clobber; then
+            echo "::warning::Could not fetch latest.json for '$TAG' (gh transport error or asset absent) — skipping the completeness check." \
+              | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          # Assert the two base keys the plugin resolves. The file also carries
+          # darwin-aarch64-app and windows-x86_64-nsis, so do not assume an
+          # exact entry count — check membership only.
+          if jq -e '.platforms | has("darwin-aarch64") and has("windows-x86_64")' latest.json >/dev/null; then
+            echo "latest.json carries darwin-aarch64 and windows-x86_64." \
+              | tee -a "$GITHUB_STEP_SUMMARY"
+            # A prior failed run may have stamped the title; a good run clears it
+            # back to the name tauri-action used, or a fixed release stays
+            # labelled DO NOT PUBLISH.
+            gh release edit "$TAG" --draft --title "StudyVis $TAG" || true
+            exit 0
+          fi
+
+          keys="$(jq -c '.platforms | keys' latest.json 2>/dev/null || echo '?')"
+          stamp_and_fail "Draft release '$TAG' latest.json is missing a platform: has $keys, needs darwin-aarch64 and windows-x86_64. Do NOT publish — re-run the failed build leg, then re-run this workflow."
