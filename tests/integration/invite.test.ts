@@ -121,9 +121,11 @@ import {
   signMessage,
   type Identity,
 } from '@/lib/crypto/identity'
-import { inboxTopic } from '@/lib/crypto/topics'
+import { inboxPassword, inboxTopic } from '@/lib/crypto/topics'
+import { joinTopic } from '@/lib/trystero'
 import {
   buildInviteEnvelope,
+  INVITE_ACTION,
   inviteFriend,
   InviteRelayError,
   InviteTimeoutError,
@@ -131,6 +133,7 @@ import {
   subscribeToOwnInbox,
   validateInviteEnvelope,
   type InboxContext,
+  type InviteEnvelope,
   type InviteSender,
   type ValidInvite,
 } from '@/features/friends'
@@ -539,6 +542,78 @@ describe('invite envelope round-trip', () => {
     } finally {
       useSettingsStore.setState({ values: prevValues })
     }
+  })
+
+  // #47 C1 / PR-18 replay guard (inbox.ts:202-221). The inbox races Nostr +
+  // MQTT, so one envelope is delivered twice on the SAME room — the everyday
+  // path, not just the captured-envelope spam vector. The guard is the sole
+  // idempotency mechanism (trystero/index.ts:240-245); without it a friend on
+  // both transports gets a double toast + double OS notification per invite.
+  // Two concurrent sends interleave across `await validateInviteEnvelope`, so
+  // this is the only shape that catches an await slipping between the has/set
+  // pair — sendInviteEnvelope serializes per inbox topic and never exercises
+  // it.
+  test('#47 C1: one envelope delivered twice on the same room fires onValidInvite once', async () => {
+    const sam = makeApp('Sam')
+    const alice = makeApp('Alice')
+    const dispatched: ValidInvite[] = []
+    const sub = subscribeToOwnInbox(
+      alice.inboxCtx(
+        (i) => {
+          dispatched.push(i)
+        },
+        [sam]
+      )
+    )
+    const envelope = await buildInviteEnvelope(
+      sam.sender,
+      { edPubkeyHex: alice.edHex, xPubkeyHex: alice.xHex },
+      SAMPLE_SESSION
+    )
+    const room = joinTopic({
+      topic: inboxTopic(alice.identity.edPub),
+      password: inboxPassword(alice.identity.edPub),
+    })
+    const action = room.makeAction<InviteEnvelope>(INVITE_ACTION)
+    await Promise.all([action.send(envelope), action.send(envelope)])
+    await new Promise((r) => setTimeout(r, 50))
+    expect(dispatched.length).toBe(1)
+    await room.leave()
+    await sub.leave()
+  })
+
+  // The replay key is (from_ed_pubkey, nonce), not from_ed_pubkey alone: two
+  // genuinely distinct invites from the same friend must both dispatch. Pins
+  // against an over-broad key that would swallow a legitimate second invite.
+  test('two distinct-nonce invites from the same friend both dispatch', async () => {
+    const sam = makeApp('Sam')
+    const alice = makeApp('Alice')
+    const dispatched: ValidInvite[] = []
+    const sub = subscribeToOwnInbox(
+      alice.inboxCtx(
+        (i) => {
+          dispatched.push(i)
+        },
+        [sam]
+      )
+    )
+    const room = joinTopic({
+      topic: inboxTopic(alice.identity.edPub),
+      password: inboxPassword(alice.identity.edPub),
+    })
+    const action = room.makeAction<InviteEnvelope>(INVITE_ACTION)
+    for (let i = 0; i < 2; i++) {
+      const envelope = await buildInviteEnvelope(
+        sam.sender,
+        { edPubkeyHex: alice.edHex, xPubkeyHex: alice.xHex },
+        SAMPLE_SESSION
+      )
+      await action.send(envelope)
+    }
+    await new Promise((r) => setTimeout(r, 50))
+    expect(dispatched.length).toBe(2)
+    await room.leave()
+    await sub.leave()
   })
 })
 
