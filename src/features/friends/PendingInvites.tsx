@@ -114,6 +114,13 @@ export function PendingInvites({ onAccept }: PendingInvitesProps) {
   // Home's runGuestJoin, so a stale row can never join a dead session.
   useEffect(() => {
     if (pending.length === 0) return
+    // Not redundant with the interval below: the list sits empty for the app's
+    // whole tray-resident uptime, so by the time a row first renders the
+    // mount-time `now` is hours stale and a 5-minute invite reads "Expires in
+    // 214 min" — for the full 10s until the first tick, which is exactly the
+    // window the arrival toast summons the user to look in.
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- one-shot reseed of the display clock on the 0 -> n transition; Date.now() is impure so it can't be an adjust-during-render, and idempotent under StrictMode
+    setNow(Date.now())
     const id = setInterval(() => {
       setNow(Date.now())
       usePendingInvitesStore.getState().prune()
