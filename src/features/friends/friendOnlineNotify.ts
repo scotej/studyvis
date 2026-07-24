@@ -15,7 +15,17 @@ import {
 
 import { strings } from '@/strings'
 
-import { ONLINE_WINDOW_MS } from './presence'
+// How long after we start watching a friend before their FIRST online
+// resolution counts as a genuine arrival rather than boot-sweep noise. This is
+// deliberately NOT the 60s presence-heartbeat window (ONLINE_WINDOW_MS): a
+// friend who was online the whole time can take tens of seconds to resolve
+// online here (their presence room's WebRTC handshake plus one heartbeat, worse
+// on a congested relay or a cold launch), and reusing the 60s window let that
+// slow resolve read as an arrival — the exact boot-sweep false positive the
+// baseline exists to prevent. Sized well above realistic establishment latency
+// so an already-online friend resolves inside it; the cost is only that a
+// genuine arrival in the first few minutes after launch waits for the next edge.
+export const NOTIFY_SETTLE_MS = 180_000
 
 export type ShouldNotifyFriendOnlineArgs = {
   // This tick's resolved presence for the friend, and the previous tick's.
@@ -37,7 +47,7 @@ export type ShouldNotifyFriendOnlineArgs = {
 // can't tell that apart from a friend who was genuinely offline at subscribe
 // and walked in hours later, which is the single event this feature exists
 // for (the app parks in the tray all day). So the suppression is bounded to
-// one ONLINE_WINDOW_MS per friend: inside their settle window we still need
+// one NOTIFY_SETTLE_MS per friend: inside their settle window we still need
 // the baseline, past it a first arrival is a real arrival.
 export function shouldNotifyFriendOnline({
   online,
@@ -48,7 +58,7 @@ export function shouldNotifyFriendOnline({
 }: ShouldNotifyFriendOnlineArgs): boolean {
   if (!online || was) return false
   if (hadBaseline) return true
-  return now - (watchStartedAt ?? now) >= ONLINE_WINDOW_MS
+  return now - (watchStartedAt ?? now) >= NOTIFY_SETTLE_MS
 }
 
 export type NotifyFriendOnlineArgs = {

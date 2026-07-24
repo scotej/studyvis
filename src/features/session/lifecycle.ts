@@ -344,12 +344,13 @@ export function wireSessionRoom(
   const graceMs = options?.graceMs ?? DISCONNECT_GRACE_MS
   const peers = new Set<string>()
   let hadAny = false
-  // True once a peer vanished WITHOUT the signed 'left' broadcast a
-  // deliberate Leave sends first. The grace window is skipped only when
-  // every departure since the last join is explained: in a 3-way session
-  // where one peer leaves on purpose and another blips at the same moment
-  // we still wait, which is the safe way to be wrong.
-  let sawUnexplainedLeave = false
+  // Peers that vanished WITHOUT the signed 'left' broadcast a deliberate Leave
+  // sends first, and haven't returned. Tracked per-peer (not a single flag) so
+  // an intervening join by a DIFFERENT peer can't erase the memory of one still
+  // absent: the grace window is skipped only when this set is empty. In a
+  // 3-way session where one peer leaves on purpose and another blips we still
+  // wait, which is the safe way to be wrong.
+  const unexplainedAbsent = new Set<string>()
   let graceHandle: number | null = null
   const sessionFull = room.makeAction<null>(SESSION_FULL_ACTION)
 
@@ -406,7 +407,7 @@ export function wireSessionRoom(
     // A (re)join cancels a pending auto-end: the transport recovered before
     // the grace window expired.
     cancelGrace()
-    sawUnexplainedLeave = false
+    unexplainedAbsent.delete(peerId)
     peers.add(peerId)
     hadAny = true
     useSessionStore.getState().peerJoined(peerId)
@@ -416,10 +417,10 @@ export function wireSessionRoom(
     if (!peers.has(peerId)) return
     peers.delete(peerId)
     const store = useSessionStore.getState()
-    if (!store.departedPeerIds.includes(peerId)) sawUnexplainedLeave = true
+    if (!store.departedPeerIds.includes(peerId)) unexplainedAbsent.add(peerId)
     store.peerLeft(peerId)
     if (peers.size === 0 && hadAny) {
-      if (sawUnexplainedLeave) {
+      if (unexplainedAbsent.size > 0) {
         armGrace()
       } else {
         // Every peer that left told us so first, so the room is provably

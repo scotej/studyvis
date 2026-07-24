@@ -4,8 +4,10 @@
 
 import { describe, expect, test } from 'vitest'
 
-import { shouldNotifyFriendOnline } from '@/features/friends/friendOnlineNotify'
-import { ONLINE_WINDOW_MS } from '@/features/friends/presence'
+import {
+  NOTIFY_SETTLE_MS,
+  shouldNotifyFriendOnline,
+} from '@/features/friends/friendOnlineNotify'
 
 const NOW = 1_700_000_000_000
 
@@ -76,7 +78,22 @@ describe('shouldNotifyFriendOnline', () => {
     ).toBe(false)
   })
 
-  test('the settle bound is exactly ONLINE_WINDOW_MS', () => {
+  test('a slow-connecting friend who was online all along stays silent', () => {
+    // Their presence handshake resolves online for the first time ~90s after
+    // subscribe — past the old 60s window but inside NOTIFY_SETTLE_MS, so it
+    // reads as boot's sweep (which it is), not an arrival.
+    expect(
+      shouldNotifyFriendOnline({
+        online: true,
+        was: false,
+        hadBaseline: false,
+        watchStartedAt: NOW - 90_000,
+        now: NOW,
+      })
+    ).toBe(false)
+  })
+
+  test('the settle bound is exactly NOTIFY_SETTLE_MS', () => {
     const base = {
       online: true,
       was: false,
@@ -86,13 +103,13 @@ describe('shouldNotifyFriendOnline', () => {
     expect(
       shouldNotifyFriendOnline({
         ...base,
-        watchStartedAt: NOW - ONLINE_WINDOW_MS + 1,
+        watchStartedAt: NOW - NOTIFY_SETTLE_MS + 1,
       })
     ).toBe(false)
     expect(
       shouldNotifyFriendOnline({
         ...base,
-        watchStartedAt: NOW - ONLINE_WINDOW_MS,
+        watchStartedAt: NOW - NOTIFY_SETTLE_MS,
       })
     ).toBe(true)
   })

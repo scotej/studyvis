@@ -16,11 +16,13 @@ import type { TopicRoom } from '@/lib/trystero'
 export const HELLO_ACTION = 'session-hello'
 export const HELLO_VERSION = 1 as const
 
-// Receive-side bound on a peer's display_name, in UTF-8 bytes. 64 mirrors the
-// 64-char `maxLength` our own name inputs enforce (DisplayNameStep,
-// IdentityCategory), so every name a stock build can produce survives intact
-// while a hand-modified sender can't push an unbounded string.
-export const HELLO_NAME_CAP = 64
+// Receive-side bound on a peer's display_name, in UTF-8 bytes. Our own name
+// inputs cap at 64 `maxLength` UTF-16 code units (DisplayNameStep,
+// IdentityCategory), and one such unit can be a 3-byte BMP character (CJK), so
+// a legitimate 64-unit name reaches up to 192 UTF-8 bytes. Sizing the cap to
+// that worst case lets every name a stock build can produce survive intact
+// while a hand-modified sender still can't push an unbounded string.
+export const HELLO_NAME_CAP = 192
 
 export type HelloCore = {
   v: typeof HELLO_VERSION

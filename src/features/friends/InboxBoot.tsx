@@ -165,11 +165,11 @@ export function InboxBoot({
             void inviteRetryManager.onPresenceOnline(ed)
             // N3 — an offline→online edge is a real "came online" transition
             // once it can't be boot's initial sweep. The baseline only
-            // suppresses inside this friend's own settle window; past it, a
-            // first online resolution is someone who genuinely walked in while
-            // we were watching. The debounce against flapping rides on the same
-            // 60s ONLINE_WINDOW_MS: once online, brief gaps stay "online" so we
-            // don't re-fire until a true offline first.
+            // suppresses inside this friend's own NOTIFY_SETTLE_MS window; past
+            // it, a first online resolution is someone who genuinely walked in
+            // while we were watching. Distinct from the flap debounce, which
+            // rides the 60s ONLINE_WINDOW_MS: once online, brief gaps stay
+            // "online" so we don't re-fire until a true offline first.
             if (
               shouldNotifyFriendOnline({
                 online,

@@ -252,6 +252,38 @@ describe('S1 disconnect grace window', () => {
     expect(useSessionStore.getState().pendingEndReason).toBe('auto')
   })
 
+  test("an intervening join by a different peer doesn't erase a still-absent blipper", () => {
+    const { room, join, leave } = fakeRoom()
+    const sched = fakeScheduler()
+    const onLeave = vi.fn(async () => {})
+
+    wireSessionRoom(
+      room,
+      { isHost: true, leave: onLeave },
+      { scheduler: sched.scheduler }
+    )
+
+    join('peer-a')
+    join('peer-b')
+    // peer-a blips off the network (unexplained — no markPeerDeparted).
+    leave('peer-a')
+    // A third peer is invited mid-session and joins. peer-a is still absent
+    // and may be mid-reconnect; this join must not clear the memory of it.
+    join('peer-c')
+    // Everyone still present now leaves deliberately.
+    useSessionStore.getState().markPeerDeparted('peer-b')
+    leave('peer-b')
+    useSessionStore.getState().markPeerDeparted('peer-c')
+    leave('peer-c')
+    // The room is empty but peer-a's departure was never explained, so we must
+    // wait out the window rather than kill the room instantly.
+    expect(onLeave).not.toHaveBeenCalled()
+    expect(sched.pending()).toBe(1)
+    sched.advance(DISCONNECT_GRACE_MS)
+    expect(onLeave).toHaveBeenCalledTimes(1)
+    expect(useSessionStore.getState().pendingEndReason).toBe('auto')
+  })
+
   test('an explicit user leave racing the grace timer fires the handler at most once', async () => {
     const { room, join, leave } = fakeRoom()
     const sched = fakeScheduler()

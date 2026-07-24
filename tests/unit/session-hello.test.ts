@@ -55,6 +55,21 @@ describe('session hello display_name normalization (item 35)', () => {
     const validated = validateHelloPayload(makeHello(name), PEER_ID)
     expect(validated?.display_name).toBe(name)
   })
+
+  test('leaves a multibyte name a stock 64-unit input can produce intact', () => {
+    // 40 CJK characters: within the 64-`maxLength` UTF-16 cap our own inputs
+    // enforce, but 120 UTF-8 bytes — a 64-byte cap would have silently cut it.
+    const name = '学'.repeat(40)
+    expect(name).toHaveLength(40)
+    expect(byteLength(name)).toBe(120)
+    const validated = validateHelloPayload(makeHello(name), PEER_ID)
+    expect(validated?.display_name).toBe(name)
+  })
+
+  test('still sanitizes a multibyte name carrying a bidi override', () => {
+    const validated = validateHelloPayload(makeHello('学生‮gro'), PEER_ID)
+    expect(validated?.display_name).toBe('学生gro')
+  })
 })
 
 // Signs a hello for `identity`, then layers `overrides` on top AFTER signing —
