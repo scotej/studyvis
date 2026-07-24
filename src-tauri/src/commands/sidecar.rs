@@ -167,6 +167,7 @@ pub async fn sidecar_start<R: Runtime>(
     // Roll the log before opening for append, while it has no open writer (only
     // one sidecar runs at a time). Keeps the diagnostic log size-bounded (D7).
     rotate_log_if_needed(&log_path, LOG_MAX_BYTES);
+    let log_file = open_log_file(&log_path)?;
 
     let (rx, child) = spawn_llama(
         &app,
@@ -176,7 +177,6 @@ pub async fn sidecar_start<R: Runtime>(
         port,
         runtime_dir.as_deref(),
     )?;
-    let log_file = open_log_file(&log_path)?;
 
     guard.child = Some(child);
     guard.port = Some(port);
