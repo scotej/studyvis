@@ -14,7 +14,10 @@ import { useSessionStore } from '@/stores/sessionStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { strings } from '@/strings'
 
-import { notifyFriendOnline } from './friendOnlineNotify'
+import {
+  notifyFriendOnline,
+  shouldNotifyFriendOnline,
+} from './friendOnlineNotify'
 import { subscribeToOwnInbox, type ValidInvite } from './inbox'
 import { usePendingInvitesStore } from './pendingInvitesStore'
 import { inviteRetryManager } from './invite'
@@ -108,6 +111,11 @@ export function InboxBoot({
   // list edits, so baselines persist across them; a removed friend's entries
   // are pruned by the updateFriends effect below so a re-add starts fresh.
   const baselineSeenRef = useRef<Set<string>>(new Set())
+  // When we started watching each friend: the presence subscribe for the seed
+  // set, the add for anyone imported later. Bounds the baseline suppression to
+  // one settle window per friend, so a friend who genuinely arrives long after
+  // we subscribed still pings (see shouldNotifyFriendOnline).
+  const watchStartedAtRef = useRef<Record<string, number>>({})
   // #47 C6 — the live subscription handle, so the friend-set effect below can
   // diff rooms in place instead of tearing the whole subscription down.
   const presenceRef = useRef<PresenceSubscription | null>(null)
@@ -118,13 +126,18 @@ export function InboxBoot({
     // change or remount — so stale state can't leak a phantom transition.
     wasOnlineRef.current = {}
     baselineSeenRef.current = new Set()
+    // #47 C6 — the effect no longer keys on the friend set; seed with the
+    // current list and let updateFriends churn only what changes.
+    const seedFriends = useFriendsStore
+      .getState()
+      .friends.map((f) => ({ ed_pubkey_hex: f.ed_pubkey_hex }))
+    const watchStartedAt = Date.now()
+    watchStartedAtRef.current = Object.fromEntries(
+      seedFriends.map((f) => [f.ed_pubkey_hex, watchStartedAt])
+    )
     const presence = startPresence({
       myEdPubkey: myEd,
-      // #47 C6 — the effect no longer keys on the friend set; seed with the
-      // current list and let updateFriends churn only what changes.
-      friends: useFriendsStore
-        .getState()
-        .friends.map((f) => ({ ed_pubkey_hex: f.ed_pubkey_hex })),
+      friends: seedFriends,
       onPresenceChange: (map) => {
         const at = Date.now()
         // Read the LIVE friend list per tick (#47 C6): the subscription now
@@ -136,7 +149,7 @@ export function InboxBoot({
           const was = wasOnlineRef.current[ed] ?? false
           wasOnlineRef.current[ed] = online
           // N3 — baseline is the first time we resolve a friend ONLINE since
-          // this subscription mounted, NOT the first tick. The presence map
+          // we started watching them, NOT the first tick. The presence map
           // starts empty, so a sweep (or another friend's heartbeat) can fire
           // an offline tick for this friend before their first heartbeat lands;
           // consuming the baseline on that offline tick would make their genuine
@@ -150,13 +163,22 @@ export function InboxBoot({
             // Fire-and-forget; the manager dedupes and only retries entries
             // still inside the window.
             void inviteRetryManager.onPresenceOnline(ed)
-            // N3 — only an offline→online edge AFTER the baseline is a real
-            // "came online" transition. Suppressing the first online resolution
-            // dodges boot's initial sweep (a friend already online at mount).
-            // The debounce against flapping rides on the 60s ONLINE_WINDOW_MS:
-            // once online, brief gaps stay "online" so we don't re-fire until
-            // a true offline first.
-            if (hadBaseline) {
+            // N3 — an offline→online edge is a real "came online" transition
+            // once it can't be boot's initial sweep. The baseline only
+            // suppresses inside this friend's own settle window; past it, a
+            // first online resolution is someone who genuinely walked in while
+            // we were watching. The debounce against flapping rides on the same
+            // 60s ONLINE_WINDOW_MS: once online, brief gaps stay "online" so we
+            // don't re-fire until a true offline first.
+            if (
+              shouldNotifyFriendOnline({
+                online,
+                was,
+                hadBaseline,
+                watchStartedAt: watchStartedAtRef.current[ed],
+                now: at,
+              })
+            ) {
               void notifyFriendOnline({
                 edPubkeyHex: ed,
                 displayName: row.display_name ?? null,
@@ -203,6 +225,16 @@ export function InboxBoot({
     }
     for (const ed of [...baselineSeenRef.current]) {
       if (!keep.has(ed)) baselineSeenRef.current.delete(ed)
+    }
+    // A friend added mid-session starts their own settle window, so importing
+    // a ContactCard for someone already online stays silent instead of pinging
+    // the moment their first heartbeat lands.
+    const addedAt = Date.now()
+    for (const ed of ids) {
+      watchStartedAtRef.current[ed] ??= addedAt
+    }
+    for (const ed of Object.keys(watchStartedAtRef.current)) {
+      if (!keep.has(ed)) delete watchStartedAtRef.current[ed]
     }
   }, [friendsKey])
 
