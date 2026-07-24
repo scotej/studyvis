@@ -123,15 +123,19 @@ export function AboutCategory() {
       ? updaterCopy.checkLockedDuringSession
       : status === 'checking'
         ? updaterCopy.checkingHelp
-        : errorKind === 'check'
-          ? strings.updater.errors.checkFailed
-          : errorKind === 'download'
-            ? strings.updater.errors.downloadFailed
-            : updaterCopy.upToDateHelp(__APP_VERSION__)
+        : status === 'upToDate'
+          ? updaterCopy.upToDateHelp(__APP_VERSION__)
+          : errorKind === 'check'
+            ? strings.updater.errors.checkFailed
+            : errorKind === 'download'
+              ? strings.updater.errors.downloadFailed
+              : status === 'error'
+                ? updaterCopy.lastCheckFailedHelp
+                : updaterCopy.unknownHelp
 
     return (
       <SettingsRow
-        label={copy.version.label}
+        label={updaterCopy.statusLabel}
         help={help}
         control={
           <Button

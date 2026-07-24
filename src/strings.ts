@@ -1722,6 +1722,18 @@ export const strings = {
         `Version ${version} — ${percent}%`,
       checkingHelp: 'Checking for updates…',
       upToDateHelp: (version: string) => `You're on ${version}, the latest.`,
+      // Label for the state-driven status row, so it stops duplicating the
+      // read-only Version row.
+      statusLabel: 'Updates',
+      // Step-agnostic on purpose: a background check failure and a background
+      // download failure both land in (error, null), and this row must not
+      // name a step it can't distinguish.
+      lastCheckFailedHelp:
+        "The last update check didn't finish. Press Check now to retry.",
+      // For idle before the first check (and the session-deferral reset) — no
+      // claim of currency, and no false "not checked yet" (idle is also
+      // reached after a check that ran).
+      unknownHelp: 'Update status unknown — press Check now.',
       checkCta: 'Check now',
       restartCta: 'Restart now',
       // Mid-session lock, mirroring strings.ai.picker.lockedDuringSession:
