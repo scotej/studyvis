@@ -557,7 +557,8 @@ studyvis/
 │  │  ├─ llama-server-win-x64.exe
 │  │  └─ llama-server-linux-x64
 │  ├─ capabilities/
-│  │  └─ default.json             # Tauri 2 ACL
+│  │  ├─ default.json             # Tauri 2 ACL — main window
+│  │  └─ ai-dialog.json           # scoped ACL — floating AI dialog
 │  └─ src/
 │     ├─ main.rs                  # builder + plugin registration
 │     ├─ commands/                # Tauri commands callable from JS
@@ -611,7 +612,7 @@ The `commands/` tree above is illustrative; the actual command modules are `iden
 - **Local data management:** `sessions_delete`, `sessions_clear_all` (each tx-scoped, deleting the session row and its `audit_events` together), `audit_events_list_all` (the cross-session read backing the focus-insights view), and `system_write_text_file` (the report / audit-JSON / stats-CSV save path — no fs-plugin surface added).
 - **Friends backup:** `friends_export` / `friends_import` (sealed-box to the user's own X25519 key, SVFB v1 format; import upserts on `ON CONFLICT(ed_pubkey_hex)`).
 - **Lifecycle:** `session_set_active` (drives the Rust `SessionActiveFlag` for the quit-confirm path) and `app_quit` (arms the quit and exits after the in-app confirm).
-- **Version check:** `system_fetch_latest_version` (a bare, unauthenticated GET behind the OFF-by-default opt-in; no identifiers, 10 s timeout).
+- **Update check:** none — X6's `tauri-plugin-updater` owns this end to end (see §2 "Auto-update"); the X4 `system_fetch_latest_version` command was removed in v1.5.0. The `version_check_enabled` store key is still read (never written) as the fallback that carries an explicit X4 opt-out onto `auto_update_enabled`.
 - `identity_save_keys` gained an `overwrite: bool` argument — create-new passes `false` (so a corrupt-`identity.json` load can never clobber still-valid keychain keys), and the explicit Recover/Restore path passes `true` after its own confirm.
 
 ## 12. Permissions and entitlements
@@ -635,7 +636,13 @@ Linux is not part of the V1 release matrix — V0 deferred WebKitGTK `getDisplay
 - Distribution: `.AppImage` (no install, no sudo); `.deb`/`.rpm` only if there's a clear friends-need.
 
 ### Tauri capabilities
-`src-tauri/capabilities/default.json` permits the specific plugins we use: shell (sidecar exec only for our bundled binaries), notification, global-shortcut, autostart, store. Permissions are scoped to the main window.
+
+`src-tauri/capabilities/` holds two ACL files, each scoped to a single window:
+
+- `default.json` (`windows: ["main"]`) grants `core:default`, `notification:default`, `store:default`, `dialog:default`, `deep-link:default`, `updater:default`, plus seven `core:window:*` bindings — `start-dragging` / `minimize` / `toggle-maximize` / `close` for the opt-in custom titlebar, and `set-size` / `center` / `unmaximize` for the Settings → Appearance → Window reset.
+- `ai-dialog.json` (`windows: ["ai-dialog"]`) grants `core:default` + `core:window:allow-close` only, with no plugin surface. Confining the floating dialog to its own core-only capability is what keeps every plugin grant on the main window — the "scoped to the main window" invariant §12 relies on.
+
+Plugins driven only from Rust need no ACL entry: the Tauri 2 ACL gates webview IPC, so `shell` (sidecar spawn, `commands/sidecar.rs`), `global-shortcut`, `autostart`, `opener`, and `single-instance` are registered in `lib.rs` and reached from Rust or through our own `invoke_handler` commands, none of which the ACL mediates. Correspondingly they ship no `@tauri-apps/plugin-*` JS package — package.json's five plugin packages (`deep-link`, `dialog`, `notification`, `store`, `updater`) map 1:1 to the five non-core plugin grants above.
 
 ### Always-on-top floating windows (AI text dialog)
 The `Ctrl+]` AI dialog is a separate Tauri window with:
