@@ -226,6 +226,21 @@ export const strings = {
           `That's ${wordCount} words. A backup has exactly 24.`,
         invalid:
           "Those 24 words don't add up. Check for a typo or a word out of place against your written copy.",
+        // `shown` is the (up to 3) named tokens, `total` the full count of
+        // words that aren't in the backup wordlist. Reads correctly at
+        // total = 24 (a comma-paste where every token is flagged).
+        unknownWords: (shown: string[], total: number) => {
+          const quoted = shown.map((w) => `"${w}"`)
+          if (total === 1) {
+            return `${quoted[0]} isn't a backup word — check it against your written copy.`
+          }
+          const remaining = total - shown.length
+          const named =
+            remaining > 0
+              ? `${quoted.join(', ')}, and ${remaining} more`
+              : quoted.join(', ')
+          return `${named} aren't backup words — check them against your written copy.`
+        },
       },
     },
     // D1 — shown when identity.json exists but couldn't be read. The keys are
