@@ -29,7 +29,12 @@ export const tokens = {
       // Light theme explicitly re-pins the original darker value (see
       // lightTokens) so the inverted text-inverse there stays legible.
       muted: '#A07043',
-      ring: '#F2B05A66',
+      // 60% alpha. The `:focus-visible { outline: none }` reset makes this
+      // ring the only focus affordance on most primitives, so the composited
+      // ring must clear WCAG 2.2 SC 1.4.11's 3:1 floor against every surface
+      // it lands on; 40% measured 2.5-2.6:1. Mirror any change into
+      // src/design/index.css (--accent-ring) — the two are hand-kept in sync.
+      ring: '#F2B05A99',
     },
     status: {
       focused: '#84B061',
@@ -224,9 +229,10 @@ export const lightTokens: Tokens = {
       // theme. Light theme needs the original darker brown so light
       // text-inverse stays legible on the "Gated" pill.
       muted: '#7A5C32',
-      // Light accent at 40% alpha — the dark ring color (#F2B05A66) is
-      // washed out over a light surface.
-      ring: '#8C521566',
+      // Light accent at 80% alpha — the dark ring color is washed out over a
+      // light surface, and the light canvas needs more of it than the dark
+      // one to clear 3:1 (40% measured 1.8:1, effectively invisible).
+      ring: '#8C5215CC',
     },
     status: {
       ...tokens.color.status,

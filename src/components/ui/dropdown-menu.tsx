@@ -57,6 +57,12 @@ function DropdownMenuGroup({
   )
 }
 
+// The highlighted row is marked with an inset accent ring, not a fill: the
+// menu surface is already `bg-bg-raised`, so the shadcn default
+// `focus:bg-bg-raised` painted 1.00:1 of nothing. `ring-inset` because
+// DropdownMenuContent clips (`overflow-x-hidden`), and `focus:` rather than
+// `focus-visible:` because Radix moves DOM focus on pointer-move — this is
+// the hover affordance too.
 function DropdownMenuItem({
   className,
   inset,
@@ -72,7 +78,7 @@ function DropdownMenuItem({
       data-inset={inset}
       data-variant={variant}
       className={cn(
-        "relative flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-hidden select-none focus:bg-bg-raised focus:text-text-primary data-[disabled]:pointer-events-none data-[disabled]:opacity-50 data-[inset]:pl-8 data-[variant=destructive]:text-status-alerted data-[variant=destructive]:focus:bg-status-alerted/10 data-[variant=destructive]:focus:text-status-alerted [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 [&_svg:not([class*='text-'])]:text-text-secondary data-[variant=destructive]:*:[svg]:text-status-alerted!",
+        "relative flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-hidden select-none focus:text-text-primary focus:ring-3 focus:ring-inset focus:ring-accent-default data-[disabled]:pointer-events-none data-[disabled]:opacity-50 data-[inset]:pl-8 data-[variant=destructive]:text-status-alerted data-[variant=destructive]:focus:bg-status-alerted/10 data-[variant=destructive]:focus:text-status-alerted data-[variant=destructive]:focus:ring-status-alerted [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 [&_svg:not([class*='text-'])]:text-text-secondary data-[variant=destructive]:*:[svg]:text-status-alerted!",
         className
       )}
       {...props}
@@ -104,7 +110,7 @@ function DropdownMenuRadioItem({
     <DropdownMenuPrimitive.RadioItem
       data-slot="dropdown-menu-radio-item"
       className={cn(
-        "relative flex cursor-default items-center gap-2 rounded-sm py-1.5 pr-2 pl-8 text-sm outline-hidden select-none focus:bg-bg-raised focus:text-text-primary data-[disabled]:pointer-events-none data-[disabled]:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+        "relative flex cursor-default items-center gap-2 rounded-sm py-1.5 pr-2 pl-8 text-sm outline-hidden select-none focus:text-text-primary focus:ring-3 focus:ring-inset focus:ring-accent-default data-[disabled]:pointer-events-none data-[disabled]:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
         className
       )}
       {...props}

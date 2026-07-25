@@ -45,6 +45,10 @@ export function Recover({
   const [value, setValue] = useState('')
   const [phase, setPhase] = useState<RecoverPhase>('input')
   const [error, setError] = useState<RecoverErrorKind | null>(null)
+  // Held beside `error` so the 'invalid' message can name the words that
+  // aren't in the wordlist; cleared on edit so a later checksum-only failure
+  // doesn't render stale words.
+  const [unknownWords, setUnknownWords] = useState<string[]>([])
   // D5 — when the confirm is shown, whether the typed words are a DIFFERENT
   // identity (escalated copy) or just an unknown-fingerprint legacy record
   // (generic copy).
@@ -59,6 +63,7 @@ export function Recover({
   function handleChange(next: string) {
     setValue(next)
     if (error) setError(null)
+    if (unknownWords.length > 0) setUnknownWords([])
   }
 
   async function commit() {
@@ -80,9 +85,11 @@ export function Recover({
     const classified = classifyMnemonic(value)
     if (classified.kind !== 'valid') {
       setError(classified.kind)
+      setUnknownWords(classified.unknownWords)
       return
     }
     setError(null)
+    setUnknownWords([])
     try {
       pendingCommit.current = recover(classified.words).commit
     } catch (err) {
@@ -120,6 +127,7 @@ export function Recover({
       value={value}
       wordCount={wordCount}
       error={error}
+      unknownWords={unknownWords}
       identityExists={identityExists}
       confirmDifferent={confirmDifferent}
       sameIdentity={sameIdentity}

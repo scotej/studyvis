@@ -55,6 +55,11 @@ function navIcon(Icon: typeof UserRoundIcon) {
   )
 }
 
+// Compile-time guard: every SettingsCategoryId must own a keyword bucket, so a
+// new pane without one fails `tsc` here rather than silently searching nothing.
+const searchKeywords: Record<SettingsCategoryId, readonly string[]> =
+  strings.settings.searchKeywords
+
 const CATEGORIES: ReadonlyArray<
   SettingsCategoryDescriptor<SettingsCategoryId>
 > = [
@@ -63,77 +68,77 @@ const CATEGORIES: ReadonlyArray<
     label: strings.settings.nav.identity,
     icon: navIcon(UserRoundIcon),
     group: strings.settings.navGroups.you,
-    keywords: strings.settings.searchKeywords.identity,
+    keywords: searchKeywords.identity,
   },
   {
     id: 'friends',
     label: strings.settings.nav.friends,
     icon: navIcon(UsersIcon),
     group: strings.settings.navGroups.you,
-    keywords: strings.settings.searchKeywords.friends,
+    keywords: searchKeywords.friends,
   },
   {
     id: 'sessions',
     label: strings.settings.nav.sessions,
     icon: navIcon(HistoryIcon),
     group: strings.settings.navGroups.study,
-    keywords: strings.settings.searchKeywords.sessions,
+    keywords: searchKeywords.sessions,
   },
   {
     id: 'stats',
     label: strings.settings.nav.stats,
     icon: navIcon(ChartLineIcon),
     group: strings.settings.navGroups.study,
-    keywords: strings.settings.searchKeywords.stats,
+    keywords: searchKeywords.stats,
   },
   {
     id: 'ai',
     label: strings.settings.nav.ai,
     icon: navIcon(SparklesIcon),
     group: strings.settings.navGroups.study,
-    keywords: strings.settings.searchKeywords.ai,
+    keywords: searchKeywords.ai,
   },
   {
     id: 'appearance',
     label: strings.settings.nav.appearance,
     icon: navIcon(PaletteIcon),
     group: strings.settings.navGroups.app,
-    keywords: strings.settings.searchKeywords.appearance,
+    keywords: searchKeywords.appearance,
   },
   {
     id: 'notifications',
     label: strings.settings.nav.notifications,
     icon: navIcon(BellIcon),
     group: strings.settings.navGroups.app,
-    keywords: strings.settings.searchKeywords.notifications,
+    keywords: searchKeywords.notifications,
   },
   {
     id: 'shortcuts',
     label: strings.settings.nav.shortcuts,
     icon: navIcon(KeyboardIcon),
     group: strings.settings.navGroups.app,
-    keywords: strings.settings.searchKeywords.shortcuts,
+    keywords: searchKeywords.shortcuts,
   },
   {
     id: 'network',
     label: strings.settings.nav.network,
     icon: navIcon(GlobeIcon),
     group: strings.settings.navGroups.system,
-    keywords: strings.settings.searchKeywords.network,
+    keywords: searchKeywords.network,
   },
   {
     id: 'advanced',
     label: strings.settings.nav.advanced,
     icon: navIcon(SlidersHorizontalIcon),
     group: strings.settings.navGroups.system,
-    keywords: strings.settings.searchKeywords.advanced,
+    keywords: searchKeywords.advanced,
   },
   {
     id: 'about',
     label: strings.settings.nav.about,
     icon: navIcon(InfoIcon),
     group: strings.settings.navGroups.system,
-    keywords: strings.settings.searchKeywords.about,
+    keywords: searchKeywords.about,
   },
 ]
 

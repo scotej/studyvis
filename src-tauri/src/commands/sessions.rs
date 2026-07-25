@@ -115,5 +115,5 @@ pub fn audit_events_list_all(
     state: State<'_, DbPool>,
 ) -> Result<Vec<audit_events::AuditEventRow>, String> {
     let conn = lock(&state)?;
-    audit_events::list_all(&conn).map_err(|e| e.to_string())
+    audit_events::list_ai_distractions_all(&conn).map_err(|e| e.to_string())
 }

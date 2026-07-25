@@ -1,4 +1,5 @@
 import { useCallback, useMemo } from 'react'
+import { toast } from 'sonner'
 
 import { KeybindCapture } from '@/components/KeybindCapture'
 import { SettingsRow, SettingsSection } from '@/components/SettingsRow'
@@ -64,13 +65,16 @@ export function ShortcutsCategory() {
   )
 
   const handleReset = useCallback(() => {
-    // `resetShortcutsToDefaults` awaits each setShortcutAccelerator and a
-    // setter rethrows on runtime registration refusal. Catch here so a
-    // (rare) defaults re-registration failure doesn't surface as an
-    // unhandled promise rejection — the rolled-back values and the
-    // store's `error` field are what the UI consumes.
+    // `resetShortcutsToDefaults` attempts both bindings and rethrows the last
+    // runtime-registration refusal. Surface it as a toast so a residual
+    // collision (e.g. a fully-swapped pair, which no reset order can break)
+    // isn't a silent no-op — the store's `error` field is rendered nowhere.
     void resetShortcutsToDefaults().catch((err) => {
-      console.error('resetShortcutsToDefaults failed:', err)
+      toast.error(
+        strings.settings.shortcuts.reset.resetError(
+          err instanceof Error ? err.message : String(err)
+        )
+      )
     })
   }, [resetShortcutsToDefaults])
 

@@ -50,10 +50,24 @@ describe('classifyMnemonic', () => {
     )
   })
 
-  test('24 words with a bad checksum → invalid', () => {
-    expect(classifyMnemonic(new Array(24).fill('abandon').join(' ')).kind).toBe(
-      'invalid'
-    )
+  test('24 real words with a bad checksum → invalid, no unknown words', () => {
+    const result = classifyMnemonic(new Array(24).fill('abandon').join(' '))
+    expect(result.kind).toBe('invalid')
+    expect(result.unknownWords).toEqual([])
+  })
+
+  test('a single non-wordlist word → invalid, exactly that word flagged', () => {
+    const words = new Array(24).fill('abandon')
+    words[5] = 'cactas'
+    const result = classifyMnemonic(words.join(' '))
+    expect(result.kind).toBe('invalid')
+    expect(result.unknownWords).toEqual(['cactas'])
+  })
+
+  test('a comma-suffixed retype flags every token (plural copy path)', () => {
+    const result = classifyMnemonic(new Array(24).fill('abandon,').join(' '))
+    expect(result.kind).toBe('invalid')
+    expect(result.unknownWords).toHaveLength(24)
   })
 
   test('a valid 24-word phrase → valid with 24 normalized words', () => {

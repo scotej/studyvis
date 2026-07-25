@@ -117,15 +117,45 @@ describe('buildStatsCsvModel', () => {
     )
     const model = buildStatsCsvModel(summary)
     expect(model.header).toEqual(['section', 'key', 'value'])
-    // 30 daily rows + 1 partner row.
+    // 4 summary rows, 30 daily rows, 1 partner row.
+    const summaryRows = model.rows.filter((r) => r[0] === 'summary')
     const dailyRows = model.rows.filter((r) => r[0] === 'daily_study_minutes')
     const partnerRows = model.rows.filter((r) => r[0] === 'partner_sessions')
+    expect(summaryRows).toEqual([
+      ['summary', 'total_sessions', 1],
+      ['summary', 'streak_days', 1],
+      ['summary', 'average_score', ''],
+      ['summary', 'scored_sessions', 0],
+    ])
     expect(dailyRows).toHaveLength(30)
     expect(partnerRows).toEqual([['partner_sessions', 'Alice', 1]])
     // The today bucket carries the 25 charted minutes.
     expect(dailyRows.some((r) => r[1] === '2026-05-18' && r[2] === 25)).toBe(
       true
     )
+  })
+
+  test('reports a non-null average score and scored-session count', () => {
+    const now = Date.UTC(2026, 4, 18, 12)
+    const summary = computeStats(
+      [
+        session({ id: 's1', score: 90, focused_pct: 0.7 }),
+        session({ id: 's2', score: 70, focused_pct: 0.5 }),
+        session({ id: 's3', score: null }),
+      ],
+      [],
+      now,
+      'UTC'
+    )
+    const summaryRows = buildStatsCsvModel(summary).rows.filter(
+      (r) => r[0] === 'summary'
+    )
+    expect(summaryRows).toEqual([
+      ['summary', 'total_sessions', 3],
+      ['summary', 'streak_days', 1],
+      ['summary', 'average_score', 80],
+      ['summary', 'scored_sessions', 2],
+    ])
   })
 })
 

@@ -51,6 +51,15 @@ export const InvalidChecksum: Story = {
   },
 }
 
+export const UnknownWord: Story = {
+  args: {
+    value: new Array(23).fill('abandon').concat('cactas').join(' '),
+    wordCount: 24,
+    error: 'invalid',
+    unknownWords: ['cactas'],
+  },
+}
+
 export const Submitting: Story = {
   args: {
     value: new Array(24).fill('abandon').join(' '),

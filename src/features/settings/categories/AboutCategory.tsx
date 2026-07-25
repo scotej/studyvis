@@ -15,6 +15,7 @@ import { SettingsRow, SettingsSection } from '@/components/SettingsRow'
 import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
 import { useUpdaterStore } from '@/features/updater'
+import { useSessionStore } from '@/stores/sessionStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { strings } from '@/strings'
 
@@ -34,6 +35,7 @@ export function AboutCategory() {
   const errorKind = useUpdaterStore((s) => s.errorKind)
   const checkNow = useUpdaterStore((s) => s.checkNow)
   const installAndRestart = useUpdaterStore((s) => s.installAndRestart)
+  const sessionActive = useSessionStore((s) => s.status === 'active')
 
   const copy = strings.settings.about
   const updaterCopy = strings.updater.settings
@@ -83,12 +85,16 @@ export function AboutCategory() {
       return (
         <SettingsRow
           label={updaterCopy.readyLabel}
-          help={updaterCopy.readyHelp(pendingVersion)}
+          help={
+            sessionActive
+              ? updaterCopy.lockedDuringSession(pendingVersion)
+              : updaterCopy.readyHelp(pendingVersion)
+          }
           control={
             <Button
               size="sm"
               onClick={() => void handleRestart()}
-              disabled={installing}
+              disabled={installing || sessionActive}
             >
               <RotateCcwIcon /> {updaterCopy.restartCta}
             </Button>
@@ -113,25 +119,30 @@ export function AboutCategory() {
       )
     }
 
-    const help =
-      status === 'checking'
+    const help = sessionActive
+      ? updaterCopy.checkLockedDuringSession
+      : status === 'checking'
         ? updaterCopy.checkingHelp
-        : errorKind === 'check'
-          ? strings.updater.errors.checkFailed
-          : errorKind === 'download'
-            ? strings.updater.errors.downloadFailed
-            : updaterCopy.upToDateHelp(__APP_VERSION__)
+        : status === 'upToDate'
+          ? updaterCopy.upToDateHelp(__APP_VERSION__)
+          : errorKind === 'check'
+            ? strings.updater.errors.checkFailed
+            : errorKind === 'download'
+              ? strings.updater.errors.downloadFailed
+              : status === 'error'
+                ? updaterCopy.lastCheckFailedHelp
+                : updaterCopy.unknownHelp
 
     return (
       <SettingsRow
-        label={copy.version.label}
+        label={updaterCopy.statusLabel}
         help={help}
         control={
           <Button
             variant="secondary"
             size="sm"
             onClick={() => void checkNow({ userInitiated: true })}
-            disabled={status === 'checking'}
+            disabled={status === 'checking' || sessionActive}
           >
             <SearchIcon /> {updaterCopy.checkCta}
           </Button>

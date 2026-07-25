@@ -372,6 +372,98 @@ describe('settingsStore — V3-P3 shortcut persistence & runtime push', () => {
   })
 })
 
+describe('resetShortcutsToDefaults — collision recovery (item 22)', () => {
+  // Stateful fake: each action "holds" a combo, and registering a combo the
+  // *other* action currently holds throws AlreadyRegistered, mirroring
+  // global-hotkey's real duplicate-registration error on both shipped OSes.
+  let held: Record<'ptt-friends' | 'ptt-ai', string>
+  let attempts: Array<{ action: string; accelerator: string }>
+
+  function install(friends: string, ai: string) {
+    held = { 'ptt-friends': friends, 'ptt-ai': ai }
+    attempts = []
+    const saved: Record<string, unknown> = {}
+    const fakeStore: StoreLike = {
+      async get<T>(k: string): Promise<T | undefined> {
+        return k in saved ? (saved[k] as T) : undefined
+      },
+      set: async (k, v) => {
+        saved[k] = v
+      },
+      delete: async () => true,
+      save: async () => {},
+    }
+    const deps: SettingsStoreDeps = {
+      storeFactory: () => fakeStore,
+      migrator: { readLegacyTheme: () => null, clearLegacyTheme: () => {} },
+      runtime: {
+        pushMinimizeToTray: async () => {},
+        pushAiFeaturesEnabled: async () => {},
+        setGlobalShortcut: async (action, accelerator) => {
+          attempts.push({ action, accelerator })
+          const other = action === 'ptt-friends' ? 'ptt-ai' : 'ptt-friends'
+          if (held[other] === accelerator) {
+            throw new Error('AlreadyRegistered')
+          }
+          held[action] = accelerator
+        },
+        relaunchApp: async () => {},
+      },
+    }
+    __setSettingsStoreDeps(deps)
+    useSettingsStore.setState({
+      status: 'ready',
+      values: {
+        ...DEFAULT_SETTINGS,
+        pttFriendsAccelerator: friends,
+        pttAiAccelerator: ai,
+      },
+      error: null,
+    })
+  }
+
+  afterEach(() => {
+    __resetSettingsStoreDeps()
+  })
+
+  test('reorders so a single collision still lands both bindings on defaults', async () => {
+    // AI squats on the friends-default combo. A fixed friends-first order would
+    // collide (friends -> '[' while AI holds '['); resetting AI first frees it.
+    install('CmdOrCtrl+K', PTT_FRIENDS_DEFAULT_ACCELERATOR)
+
+    await useSettingsStore.getState().resetShortcutsToDefaults()
+
+    expect(useSettingsStore.getState().values.pttFriendsAccelerator).toBe(
+      PTT_FRIENDS_DEFAULT_ACCELERATOR
+    )
+    expect(useSettingsStore.getState().values.pttAiAccelerator).toBe(
+      PTT_AI_DEFAULT_ACCELERATOR
+    )
+    expect(held).toEqual({
+      'ptt-friends': PTT_FRIENDS_DEFAULT_ACCELERATOR,
+      'ptt-ai': PTT_AI_DEFAULT_ACCELERATOR,
+    })
+    expect(attempts[0]?.action).toBe('ptt-ai')
+  })
+
+  test('runs the second setter even when the first rejects', async () => {
+    // Fully swapped pair — no order can break a mutual swap, so the first
+    // register throws; the second must still be attempted, then the last
+    // failure rethrows for the toast.
+    install(PTT_AI_DEFAULT_ACCELERATOR, PTT_FRIENDS_DEFAULT_ACCELERATOR)
+
+    await expect(
+      useSettingsStore.getState().resetShortcutsToDefaults()
+    ).rejects.toThrow('AlreadyRegistered')
+
+    expect(attempts).toHaveLength(2)
+    expect(attempts.map((a) => a.action).sort()).toEqual([
+      'ptt-ai',
+      'ptt-friends',
+    ])
+  })
+})
+
 describe('hydrateValuesFromStore — V3-P3 shortcut keys', () => {
   test('rehydrates persisted accelerators', async () => {
     const store: StoreLike = makeFakeStore({

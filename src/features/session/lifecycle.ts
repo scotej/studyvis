@@ -174,6 +174,10 @@ function unionPeerPubkeys(a: string | null, b: string | null): string | null {
   return union.length > 0 ? JSON.stringify(union) : null
 }
 
+// Injectable so the unit tests can drive a suspended machine without one;
+// production reads the webview's monotonic clock.
+const defaultMonotonicNow = (): number => performance.now()
+
 // Single teardown path: leaves trystero, generates the V2-P8 post-session
 // report by snapshotting per-user score / focused-time / declared topic
 // from in-memory stores BEFORE reset() clears anything, and upserts a
@@ -191,7 +195,10 @@ export function buildLeaveHandler(args: {
   room: TopicRoom
   topic: string
   startedAt: number
+  startedAtMono?: number
+  monotonicNow?: () => number
 }): () => Promise<void> {
+  const monotonicNow = args.monotonicNow ?? defaultMonotonicNow
   let alreadyLeft = false
   return async () => {
     if (alreadyLeft) return
@@ -214,9 +221,23 @@ export function buildLeaveHandler(args: {
     const peerEdPubkeys = [...new Set(sessionState.seenPeerEdPubkeys)]
     const initialDeclaredTopic = sessionState.initialDeclaredTopic
     const focusSnapshot = snapshotFocusForReport()
+    // Persisted study minutes are the SHORTER of wall-clock and monotonic
+    // elapsed. A laptop slept mid-session advances Date.now() across the whole
+    // overnight span, so a 45-minute session ended by closing the lid used to
+    // persist ~600 minutes — a fabricated streak day and a nonsense report.
+    // performance.now() advances on demand rather than per tick, so a hidden
+    // or throttled webview still reads the real awake span (no ticker to
+    // starve), and min() can only ever shrink an inflated number: on a
+    // platform whose monotonic clock does include suspend this degrades to
+    // exactly the old wall-clock value instead of under-counting real study.
+    const wallMs = endedAt - args.startedAt
+    const monoMs =
+      args.startedAtMono === undefined
+        ? wallMs
+        : monotonicNow() - args.startedAtMono
     const totalMinutes = Math.max(
       0,
-      Math.floor((endedAt - args.startedAt) / 60_000)
+      Math.floor(Math.min(wallMs, monoMs) / 60_000)
     )
 
     try {
@@ -323,6 +344,13 @@ export function wireSessionRoom(
   const graceMs = options?.graceMs ?? DISCONNECT_GRACE_MS
   const peers = new Set<string>()
   let hadAny = false
+  // Peers that vanished WITHOUT the signed 'left' broadcast a deliberate Leave
+  // sends first, and haven't returned. Tracked per-peer (not a single flag) so
+  // an intervening join by a DIFFERENT peer can't erase the memory of one still
+  // absent: the grace window is skipped only when this set is empty. In a
+  // 3-way session where one peer leaves on purpose and another blips we still
+  // wait, which is the safe way to be wrong.
+  const unexplainedAbsent = new Set<string>()
   let graceHandle: number | null = null
   const sessionFull = room.makeAction<null>(SESSION_FULL_ACTION)
 
@@ -379,6 +407,7 @@ export function wireSessionRoom(
     // A (re)join cancels a pending auto-end: the transport recovered before
     // the grace window expired.
     cancelGrace()
+    unexplainedAbsent.delete(peerId)
     peers.add(peerId)
     hadAny = true
     useSessionStore.getState().peerJoined(peerId)
@@ -387,9 +416,22 @@ export function wireSessionRoom(
   room.onPeerLeave((peerId) => {
     if (!peers.has(peerId)) return
     peers.delete(peerId)
-    useSessionStore.getState().peerLeft(peerId)
+    const store = useSessionStore.getState()
+    if (!store.departedPeerIds.includes(peerId)) unexplainedAbsent.add(peerId)
+    store.peerLeft(peerId)
     if (peers.size === 0 && hadAny) {
-      armGrace()
+      if (unexplainedAbsent.size > 0) {
+        armGrace()
+      } else {
+        // Every peer that left told us so first, so the room is provably
+        // empty: end now instead of showing "waiting for your friend to
+        // reconnect" for 20 s about someone who isn't coming back. 'peer'
+        // (not 'auto') keeps the Report from offering Rejoin into a room
+        // nobody is in.
+        cancelGrace()
+        store.setPendingEndReason('peer')
+        void hooks.leave()
+      }
     }
   })
 

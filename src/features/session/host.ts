@@ -18,12 +18,14 @@ export function hostSession(): SessionHandle {
   usePttStore.getState().reset()
   const { room, topic, password } = createHostRoom()
   const startedAt = Date.now()
-  const leave = buildLeaveHandler({ room, topic, startedAt })
+  const startedAtMono = performance.now()
+  const leave = buildLeaveHandler({ room, topic, startedAt, startedAtMono })
   useSessionStore.getState().begin({
     sessionTopic: topic,
     sessionPassword: password,
     isHost: true,
     startedAt,
+    startedAtMono,
     room,
     leave,
   })

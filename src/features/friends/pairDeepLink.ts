@@ -11,10 +11,12 @@ function isTauriRuntime(): boolean {
 }
 
 // The launch URL (`getCurrent()`) is the SAME value every time it's read, so a
-// component that re-mounts (view switches re-mount the boot, like InboxBoot)
-// would otherwise re-open the dialog with the launch link after the user
-// already dismissed it. Consume it once per process; runtime links via
-// `onOpenUrl` are unaffected and always deliver.
+// re-mount of the boot would otherwise re-open the dialog with the launch link
+// after the user already dismissed it. View switches no longer remount it (the
+// keyed `tail` fragment in Home.tsx pins its slot), but the identity /
+// onboarding gate still mounts it fresh once those resolve — and dev
+// StrictMode mounts it twice — so this guard stays. Consume the launch URL once
+// per process; runtime links via `onOpenUrl` are unaffected and always deliver.
 let launchConsumed = false
 
 // F10 — routes an OS-delivered `studyvis://` link into the add-friend flow.

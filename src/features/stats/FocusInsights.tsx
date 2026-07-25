@@ -23,7 +23,7 @@ import { Card } from '@/components/ui/card'
 import { tokens } from '@/design/tokens'
 import { strings } from '@/strings'
 
-import { CHART_Y_AXIS_WIDTH } from './statsData'
+import { CHART_Y_AXIS_WIDTH, dayKey } from './statsData'
 import type {
   FocusInsights as FocusInsightsData,
   TimingDistribution,
@@ -157,6 +157,7 @@ function TrendSection({ trend }: { trend: TrendPoint[] }) {
 function TrendChart({ trend }: { trend: TrendPoint[] }) {
   const data = trend.map((p, i) => ({
     index: i + 1,
+    startedAt: p.startedAt,
     focusedPct: p.focusedPct,
   }))
   return (
@@ -204,7 +205,9 @@ function TrendChart({ trend }: { trend: TrendPoint[] }) {
 
 type TrendTooltipProps = {
   active?: boolean
-  payload?: Array<{ payload: { index: number; focusedPct: number } }>
+  payload?: Array<{
+    payload: { index: number; startedAt: number; focusedPct: number }
+  }>
 }
 
 function TrendTooltip({ active, payload }: TrendTooltipProps) {
@@ -212,6 +215,9 @@ function TrendTooltip({ active, payload }: TrendTooltipProps) {
   const point = payload[0].payload
   return (
     <div className="rounded-md border border-border-default bg-bg-raised px-3 py-2 text-xs shadow-md">
+      <div className="font-medium text-text-primary">
+        {dayKey(point.startedAt)}
+      </div>
       <div className="text-text-secondary tabular-nums">
         {strings.stats.insights.trend.point(point.focusedPct)}
       </div>

@@ -234,10 +234,11 @@ export function computeStats(
 }
 
 // R3 — stats CSV export rows, derived entirely from a computed StatsSummary
-// (no re-query). Two sections in one file: the trailing-30-day daily
-// study-minutes series, then the all-time per-partner session counts. Pure
-// so the exact layout is unit-pinned; the view hands the result to
-// buildCsv + saveTextFile.
+// (no re-query). Three sections in one file: the headline summary tiles
+// (total sessions, streak, average score, scored sessions), then the
+// trailing-30-day daily study-minutes series, then the all-time per-partner
+// session counts. Pure so the exact layout is unit-pinned; the view hands the
+// result to buildCsv + saveTextFile.
 export type StatsCsv = {
   header: string[]
   rows: (string | number)[][]
@@ -246,6 +247,10 @@ export type StatsCsv = {
 export function buildStatsCsvModel(summary: StatsSummary): StatsCsv {
   const header = ['section', 'key', 'value']
   const rows: (string | number)[][] = []
+  rows.push(['summary', 'total_sessions', summary.totalSessions])
+  rows.push(['summary', 'streak_days', summary.streak])
+  rows.push(['summary', 'average_score', summary.score.average ?? ''])
+  rows.push(['summary', 'scored_sessions', summary.score.scoredSessions])
   for (const d of summary.daily) {
     rows.push(['daily_study_minutes', d.day, d.minutes])
   }

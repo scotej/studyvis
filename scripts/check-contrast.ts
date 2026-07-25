@@ -451,11 +451,38 @@ const PAIRINGS: Pairing[] = [
     kind: 'ui-component',
     severity: 'info',
   },
+  // The global focus ring is `ring-accent-ring`, an accent at partial alpha —
+  // but evaluate() strips alpha from the foreground by design, so measuring it
+  // as an fg would report the opaque accent and pass vacuously. compositeBg
+  // DOES honor alpha, and contrast is symmetric, so the ring goes in the bg
+  // stack over its surface and the surface plays foreground. The ratio is the
+  // one the app actually paints.
   {
-    id: 'accent-default focus ring on bg-base',
-    where: 'global focus-visible ring on buttons, inputs',
-    fg: tok(['accent', 'default']),
-    bg: [tok(['bg', 'base'])],
+    id: 'accent ring over bg-base',
+    where: 'global focus-visible ring (ring-accent-ring) on buttons, inputs',
+    fg: tok(['bg', 'base']),
+    bg: [tok(['accent', 'ring']), tok(['bg', 'base'])],
+    kind: 'ui-component',
+  },
+  {
+    id: 'accent ring over bg-surface',
+    where: 'global focus-visible ring on controls inside a card',
+    fg: tok(['bg', 'surface']),
+    bg: [tok(['accent', 'ring']), tok(['bg', 'surface'])],
+    kind: 'ui-component',
+  },
+  {
+    id: 'accent ring over bg-raised',
+    where: 'global focus-visible ring on controls on a raised surface',
+    fg: tok(['bg', 'raised']),
+    bg: [tok(['accent', 'ring']), tok(['bg', 'raised'])],
+    kind: 'ui-component',
+  },
+  {
+    id: 'accent ring over bg-sunk',
+    where: 'global focus-visible ring on controls in a sunk well',
+    fg: tok(['bg', 'sunk']),
+    bg: [tok(['accent', 'ring']), tok(['bg', 'sunk'])],
     kind: 'ui-component',
   },
 
@@ -465,8 +492,8 @@ const PAIRINGS: Pairing[] = [
   // idle borders are hairlines that don't carry the identification load
   // — the input is identified by its label + caret, the checkbox by its
   // shape + label, and the focus-visible state lights up the accent ring
-  // at ≥4.7:1 in both themes (see `accent-default focus ring on bg-base`
-  // above). Logged for awareness, not failure.
+  // at ≥3.4:1 composited in both themes (see the `accent ring over bg-*`
+  // entries above). Logged for awareness, not failure.
   {
     id: 'border-default on bg-base',
     where: 'card and input idle outlines (active state uses accent ring)',
@@ -598,8 +625,9 @@ const PAIRINGS: Pairing[] = [
     kind: 'ui-component',
     // The thumb is identified by its shape, position, and the accent
     // focus-visible ring (ring-accent-ring, hover:ring-4 / focus-visible:ring-4
-    // at ≥4.7:1). The accent border on the white fill is decorative trim, not
-    // the identifying affordance — WCAG 1.4.11 inactive-component exemption.
+    // at ≥3.4:1 composited). The accent border on the white fill is decorative
+    // trim, not the identifying affordance — WCAG 1.4.11 inactive-component
+    // exemption.
     severity: 'info',
   },
 

@@ -11,7 +11,7 @@ const badgeVariants = cva(
       variant: {
         default:
           'bg-accent-default text-text-inverse [a&]:hover:bg-accent-hover',
-        secondary: 'bg-bg-raised text-text-primary [a&]:hover:bg-bg-raised',
+        secondary: 'bg-bg-raised text-text-primary [a&]:hover:bg-bg-surface',
         destructive:
           'bg-status-alerted text-text-inverse focus-visible:ring-status-alerted [a&]:hover:bg-status-alerted',
         outline:

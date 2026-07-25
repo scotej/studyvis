@@ -8,12 +8,21 @@
 // receiver looks up the sender peerId in the populated map) and the
 // sessions.peer_pubkeys column (a sorted JSON array of every binding seen).
 
+import { normalizeUntrustedName } from '@/features/friends/contactCard'
 import { verifyMessage } from '@/lib/crypto/identity'
 import { hexToBytes } from '@/lib/encoding'
 import type { TopicRoom } from '@/lib/trystero'
 
 export const HELLO_ACTION = 'session-hello'
 export const HELLO_VERSION = 1 as const
+
+// Receive-side bound on a peer's display_name, in UTF-8 bytes. Our own name
+// inputs cap at 64 `maxLength` UTF-16 code units (DisplayNameStep,
+// IdentityCategory), and one such unit can be a 3-byte BMP character (CJK), so
+// a legitimate 64-unit name reaches up to 192 UTF-8 bytes. Sizing the cap to
+// that worst case lets every name a stock build can produce survive intact
+// while a hand-modified sender still can't push an unbounded string.
+export const HELLO_NAME_CAP = 192
 
 export type HelloCore = {
   v: typeof HELLO_VERSION
@@ -90,9 +99,13 @@ export function validateHelloPayload(
   })
   if (!verifyMessage(edPub, signed, sig)) return null
 
+  // Normalize only what we hand back — the signature covers the original bytes,
+  // so this must happen strictly after verification. The name is authentically
+  // the sender's, but they choose it: bidi/zero-width chars are stripped and the
+  // length is bounded before it reaches the peer tiles, audit rows and notes.
   return {
     ed_pubkey_hex: data.ed_pubkey_hex,
-    display_name: data.display_name,
+    display_name: normalizeUntrustedName(data.display_name, HELLO_NAME_CAP),
     joined_at: data.joined_at,
   }
 }

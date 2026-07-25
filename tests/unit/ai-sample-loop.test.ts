@@ -149,10 +149,12 @@ function resetAllStores(): void {
   }))
 }
 
-function makeFakeTrack(): MediaStreamTrack {
+function makeFakeTrack(
+  readyState: MediaStreamTrack['readyState'] = 'live'
+): MediaStreamTrack {
   return {
     kind: 'video',
-    readyState: 'live',
+    readyState,
     getSettings: () => ({ width: 1280, height: 720 }),
     stop: () => {},
   } as unknown as MediaStreamTrack
@@ -975,6 +977,79 @@ describe('startSampleLoop — capture errors', () => {
     // Next tick succeeds.
     await clock.advance(5000)
     expect(fetchMock).toHaveBeenCalledTimes(1)
+    await handle.stop()
+  })
+
+  test('a persistent CaptureError reports once and re-arms after a success', async () => {
+    const clock = new FakeClock()
+    const fetchMock = vi.fn(async () => judgmentResponse('on_task'))
+    const onCaptureError = vi.fn()
+    let failing = true
+    screenExtractImpl = async () => {
+      if (failing) {
+        throw new CaptureError('frame_extraction_failed', 'still broken')
+      }
+      return {
+        bitmap: {} as unknown as ImageBitmap,
+        sourceWidth: 1280,
+        sourceHeight: 720,
+      }
+    }
+    __setSampleLoopRuntime(
+      buildSampleLoopRuntime({
+        clock,
+        fetch: fetchMock as never,
+      })
+    )
+    const handle = startSampleLoop({
+      getTopic: () => 't',
+      modelId: 'test-model',
+      getFaceTrack: () => makeFakeTrack(),
+      onCaptureError,
+    })
+    await flushMicrotasks(10)
+    for (let i = 0; i < 4; i += 1) {
+      await clock.advance(5000)
+    }
+    // Four failing ticks, one toast — the consumer's toast is not deduped.
+    expect(onCaptureError).toHaveBeenCalledTimes(1)
+    expect(fetchMock).not.toHaveBeenCalled()
+    // A successful tick clears the latch, so a later relapse is reported again.
+    failing = false
+    await clock.advance(5000)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    failing = true
+    await clock.advance(5000)
+    expect(onCaptureError).toHaveBeenCalledTimes(2)
+    await handle.stop()
+  })
+
+  test('an ended face track skips the tick without capturing or reporting', async () => {
+    const clock = new FakeClock()
+    const fetchMock = vi.fn(async () => judgmentResponse('on_task'))
+    const onCaptureError = vi.fn()
+    const captureFace = vi.fn(async () => 'face-base64')
+    __setSampleLoopRuntime(
+      buildSampleLoopRuntime({
+        clock,
+        fetch: fetchMock as never,
+        captureFace,
+      })
+    )
+    const handle = startSampleLoop({
+      getTopic: () => 't',
+      modelId: 'test-model',
+      getFaceTrack: () => makeFakeTrack('ended'),
+      onCaptureError,
+    })
+    await flushMicrotasks(10)
+    for (let i = 0; i < 3; i += 1) {
+      await clock.advance(5000)
+    }
+    expect(captureFace).not.toHaveBeenCalled()
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect(onCaptureError).not.toHaveBeenCalled()
+    expect(useFocusStore.getState().totalSamples).toBe(0)
     await handle.stop()
   })
 })
