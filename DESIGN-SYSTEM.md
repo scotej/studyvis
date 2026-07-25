@@ -325,6 +325,8 @@ Three modes wired through the same token map:
 
 Theme switch is purely a re-render of the variable layer; component logic does not branch on theme.
 
+One sanctioned static texture exists: `.texture-cardstock` (`src/design/index.css`), a whisper-quiet graph-paper grid + top wash derived entirely from the live theme variables, used on the add-friend dialog surface (user-requested, 2026-07). It is a static background layer — §6's "no decorative motion" rules are untouched. Any further decorative surface remains a §7-rule-3 discussion, not a copy-paste.
+
 ## 6. Motion
 
 Use motion only when it serves comprehension. Five permitted uses:
