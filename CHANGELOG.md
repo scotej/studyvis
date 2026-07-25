@@ -18,13 +18,65 @@ V3 work was drafted as v1.0.4 but shipped under the **v1.0.5** tag —
 there is no v1.0.4 tag; the section below is labelled by the tag that
 shipped it.)
 
-## Unreleased — a correctness-and-accessibility maintenance pass
+## 1.7.0 — 2026-07-25 — Gemma without a token, a fixed add-friend screen, and a broad correctness pass
 
-A verified round of fixes across sessions, friend presence, the AI focus
+A feature pass on the AI model picker and the add-a-friend screen, plus
+a verified round of fixes across sessions, friend presence, the AI focus
 loop, accessibility, settings, and the updater — the third improvement
 wave. Nothing changes about your identity, friends, or history.
 
+### Added
+
+- **Gemma 3 4B no longer asks for a Hugging Face token — and now comes
+  in three sizes.** The "Best" model was marked as gated, but the mirror
+  StudyVis downloads from never required an account; the token-paste
+  step is gone. The card also gained a quantization selector: the
+  recommended Q4_K_M (~3.1 GB), a near-lossless Q8_0 (~4.6 GB), and
+  full-precision f16 (~8.0 GB) for machines with RAM to spare. Each size
+  installs and benchmarks independently, and anything you already
+  installed stays installed.
+
+- **The add-a-friend screen has a new cardstock backdrop** — a quiet
+  graph-paper texture that follows both themes — in place of the flat
+  panel.
+
+- **A failed 24-word recovery names the words that aren't real.** Mistype one
+  word restoring your identity and the error now tells you which word(s)
+  aren't in the wordlist, instead of rejecting all 24 at once.
+
+- **The stats CSV export leads with your headline numbers** — total
+  sessions, streak, average score — which it previously omitted entirely.
+
+- **The focus-over-time chart's tooltip shows the day** each point belongs
+  to, so a dip is anchorable to a date.
+
+- **The corrupt-data recovery dialog points at the friends backup.** If
+  StudyVis ever has to reset unreadable local data, the dialog now tells you
+  to restore from a friends backup if you made one, instead of only "pair
+  again".
+
 ### Fixed
+
+- **The add-a-friend screen fits the window.** The QR code used to sit
+  above the paste box in one tall column that outgrew the default
+  window — and because dialogs center themselves with nothing to scroll,
+  the title, Cancel button, and close control were clipped off the top
+  and bottom edges. The QR (slightly smaller, still comfortably
+  scannable) now sits beside the paste box, the whole dialog scrolls in
+  the rare case it needs to, and the camera-scan view no longer outgrows
+  the window either.
+
+- **Database problems now read like sentences.** In the rare cases
+  StudyVis can't read its local data — the session-history list, the
+  friends list, or the worst-case startup failure — you get one plain
+  explanation instead of a wall of raw SQLite error text. The full
+  technical detail still lands in the debug log for troubleshooting.
+
+- **Settings panes share one spacing rhythm.** The AI pane had rows
+  floating without the divider-and-padding treatment every other row
+  gets, and the Stats pane drew each of its loading states at a
+  different offset — so the pane visibly jumped when the charts arrived.
+  Every pane now sits on the same grid.
 
 - **Study time no longer counts the hours your laptop was asleep.** Ending
   a session by closing the lid used to persist the entire span until wake —
@@ -85,23 +137,6 @@ wave. Nothing changes about your identity, friends, or history.
   update banner, so a stray click can't drop you (and your friend) out of a
   session. About also stops claiming "you're on the latest" before any
   update check has actually run.
-
-### Added
-
-- **A failed 24-word recovery names the words that aren't real.** Mistype one
-  word restoring your identity and the error now tells you which word(s)
-  aren't in the wordlist, instead of rejecting all 24 at once.
-
-- **The stats CSV export leads with your headline numbers** — total
-  sessions, streak, average score — which it previously omitted entirely.
-
-- **The focus-over-time chart's tooltip shows the day** each point belongs
-  to, so a dip is anchorable to a date.
-
-- **The corrupt-data recovery dialog points at the friends backup.** If
-  StudyVis ever has to reset unreadable local data, the dialog now tells you
-  to restore from a friends backup if you made one, instead of only "pair
-  again".
 
 ## 1.6.0 — 2026-07-21 — a searchable settings rail, lighter and faster
 
