@@ -1148,7 +1148,7 @@ export const strings = {
       },
       hfToken: {
         label: 'Hugging Face token',
-        help: 'Stored in your OS keychain for gated model downloads (e.g. Gemma). Forgetting it does not delete already-downloaded models.',
+        help: 'Stored in your OS keychain for gated model downloads. None of the current catalog needs one — kept for gated models a future update may add. Forgetting it does not delete already-downloaded models.',
         forgetCta: 'Forget',
         savedToast: 'Token saved to your keychain.',
         saveErrorPrefix: "Couldn't save the token: ",
@@ -1462,6 +1462,13 @@ export const strings = {
         gated: 'Gated',
         installed: 'Installed',
         incomplete: 'Incomplete',
+      },
+      // Quant-variant selector on cards that offer the same model at
+      // several quantization levels (currently Gemma 3 4B).
+      quantPicker: {
+        legend: 'Quantization',
+        ariaLabel: (model: string) => `${model} quantization`,
+        installedSuffix: ' · installed',
       },
       dataLabels: {
         download: 'Download',

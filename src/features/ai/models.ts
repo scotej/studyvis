@@ -46,6 +46,11 @@ export type ModelSpec = {
   // The literal quant tag (e.g. 'Q4_K_M', 'f16') for display only — the
   // actual filenames are in `model` / `mmproj`.
   quantLabel: string
+  // Specs sharing a quantFamily are quant levels of the same model; the
+  // picker collapses them into one card with a quant selector. Absent for
+  // single-quant models. Each variant keeps its own id (install dir /
+  // records key), so switching quants never strands an existing install.
+  quantFamily?: string
   modelFile: ModelFileSpec
   mmprojFile: ModelFileSpec
   approxSizeMB: number
@@ -117,31 +122,86 @@ const BALANCED: ModelSpec = {
     'Recommended default. Good vision quality with steady cadence on M-series Macs.',
 }
 
+// The ggml-org GGUF mirror of Gemma 3 4B is NOT gated (verified via the HF
+// API 2026-07-25: `gated: false`) — only Google's first-party repos require
+// accepting the Gemma terms on HF. No token needed; the weights remain
+// licensed under the Gemma terms regardless of which repo serves them.
+// All three quants live in the same repo at the same pinned revision and
+// share one f16 projector.
+const GEMMA_MMPROJ: ModelFileSpec = {
+  filename: 'mmproj-model-f16.gguf',
+  sizeBytes: 851_251_104,
+  sha256: '8c0fb064b019a6972856aaae2c7e4792858af3ca4561be2dbf649123ba6c40cb',
+  localFilename: 'mmproj.gguf',
+}
+
 const BEST: ModelSpec = {
   id: 'gemma3-4b',
   displayName: 'Gemma 3 4B',
   hfRepo: 'ggml-org/gemma-3-4b-it-GGUF',
   hfRevision: 'd0976223747697cb51e056d85c532013931fe52e',
   quantLabel: 'Q4_K_M',
+  quantFamily: 'gemma3-4b',
   modelFile: {
     filename: 'gemma-3-4b-it-Q4_K_M.gguf',
     sizeBytes: 2_489_757_856,
     sha256: '882e8d2db44dc554fb0ea5077cb7e4bc49e7342a1f0da57901c0802ea21a0863',
     localFilename: 'model.gguf',
   },
-  mmprojFile: {
-    filename: 'mmproj-model-f16.gguf',
-    sizeBytes: 851_251_104,
-    sha256: '8c0fb064b019a6972856aaae2c7e4792858af3ca4561be2dbf649123ba6c40cb',
-    localFilename: 'mmproj.gguf',
-  },
+  mmprojFile: GEMMA_MMPROJ,
   approxSizeMB: 3187,
   ramRequiredGB: 10,
-  license: 'Gemma terms (accept on Hugging Face)',
-  gated: true,
+  license: 'Gemma terms',
+  gated: false,
   defaultTier: 'best',
   blurb:
-    'Highest-quality 4B vision model. Requires accepting Gemma terms on Hugging Face and pasting your access token.',
+    'Highest-quality 4B vision model. Q4_K_M is the recommended balance of size and speed.',
+}
+
+const BEST_Q8: ModelSpec = {
+  id: 'gemma3-4b-q8_0',
+  displayName: 'Gemma 3 4B',
+  hfRepo: 'ggml-org/gemma-3-4b-it-GGUF',
+  hfRevision: 'd0976223747697cb51e056d85c532013931fe52e',
+  quantLabel: 'Q8_0',
+  quantFamily: 'gemma3-4b',
+  modelFile: {
+    filename: 'gemma-3-4b-it-Q8_0.gguf',
+    sizeBytes: 4_130_226_336,
+    sha256: '97b06383df48336e7d2f9b56b6ce545e0fa476407a62c0bd081b53447a58e644',
+    localFilename: 'model.gguf',
+  },
+  mmprojFile: GEMMA_MMPROJ,
+  approxSizeMB: 4751,
+  ramRequiredGB: 12,
+  license: 'Gemma terms',
+  gated: false,
+  defaultTier: 'best',
+  blurb:
+    'Near-lossless Q8_0 quant. Bigger download and slower ticks for a small quality gain.',
+}
+
+const BEST_F16: ModelSpec = {
+  id: 'gemma3-4b-f16',
+  displayName: 'Gemma 3 4B',
+  hfRepo: 'ggml-org/gemma-3-4b-it-GGUF',
+  hfRevision: 'd0976223747697cb51e056d85c532013931fe52e',
+  quantLabel: 'f16',
+  quantFamily: 'gemma3-4b',
+  modelFile: {
+    filename: 'gemma-3-4b-it-f16.gguf',
+    sizeBytes: 7_767_474_336,
+    sha256: '29f4b518b636635613894282bda2a01bad964c8d474c4147343057b7ac442d50',
+    localFilename: 'model.gguf',
+  },
+  mmprojFile: GEMMA_MMPROJ,
+  approxSizeMB: 8219,
+  ramRequiredGB: 16,
+  license: 'Gemma terms',
+  gated: false,
+  defaultTier: 'best',
+  blurb:
+    'Full-precision weights. Biggest download; pick this only with ≥16 GB free RAM.',
 }
 
 const HEAVIEST: ModelSpec = {
@@ -175,11 +235,38 @@ export const SUPPORTED_MODELS: ReadonlyArray<ModelSpec> = [
   FASTEST,
   BALANCED,
   BEST,
+  BEST_Q8,
+  BEST_F16,
   HEAVIEST,
 ]
 
 export function getModel(id: string): ModelSpec | undefined {
   return SUPPORTED_MODELS.find((m) => m.id === id)
+}
+
+// Registry order collapsed into picker cards: specs sharing a quantFamily
+// form one group (order preserved, first variant is the family default);
+// everything else is a singleton group.
+export function modelCardGroups(
+  specs: ReadonlyArray<ModelSpec> = SUPPORTED_MODELS
+): ModelSpec[][] {
+  const groups: ModelSpec[][] = []
+  const byFamily = new Map<string, ModelSpec[]>()
+  for (const spec of specs) {
+    if (!spec.quantFamily) {
+      groups.push([spec])
+      continue
+    }
+    const existing = byFamily.get(spec.quantFamily)
+    if (existing) {
+      existing.push(spec)
+    } else {
+      const group = [spec]
+      byFamily.set(spec.quantFamily, group)
+      groups.push(group)
+    }
+  }
+  return groups
 }
 
 export function tierLabel(tier: ModelTier): string {
