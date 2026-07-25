@@ -212,14 +212,20 @@ export const PartiallyInstalled: Story = {
   },
 }
 
-export const GatedNeedsToken: Story = {
+// Gemma's card offers three quant levels behind one selector; installing a
+// non-default variant pins the card to it and marks it in the option label.
+// (The old GatedNeedsToken story retired with the gating itself: the
+// ggml-org Gemma GGUF mirror needs no Hugging Face token.)
+export const QuantVariantInstalled: Story = {
   args: {
-    installed: {},
+    installed: {
+      'gemma3-4b-q8_0': {
+        ...makeRecord(16.2, 14.0),
+        modelId: 'gemma3-4b-q8_0',
+      },
+    },
     hfTokenPresent: false,
   },
-  // Gemma's card auto-shows the token paste field when not installed and
-  // no token is present; the user can paste a value to flip the in-story
-  // state.
 }
 
 export const FailedDownload: Story = {

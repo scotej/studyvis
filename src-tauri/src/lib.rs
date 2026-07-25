@@ -345,6 +345,22 @@ fn show_db_recovered_dialog<R: tauri::Runtime>(app: &tauri::AppHandle<R>, corrup
         .blocking_show();
 }
 
+// The dialog gets only a capped, single-clause detail: the full rusqlite
+// error chain (path + every retry step) reads as a wall of raw SQLite text
+// in a user-facing modal. The complete chain still goes to stderr above, so
+// a debug log / terminal launch keeps the diagnostic fidelity.
+const DETAIL_DIALOG_MAX_CHARS: usize = 160;
+
+fn short_detail(detail: &str) -> String {
+    let mut chars = detail.chars();
+    let capped: String = chars.by_ref().take(DETAIL_DIALOG_MAX_CHARS).collect();
+    if chars.next().is_some() {
+        format!("{capped}…")
+    } else {
+        capped
+    }
+}
+
 fn show_startup_error_and_exit<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     title: &str,
@@ -355,7 +371,7 @@ fn show_startup_error_and_exit<R: tauri::Runtime>(
 
     eprintln!("[db] fatal init error: {detail}");
     app.dialog()
-        .message(format!("{body}\n\nDetails: {detail}"))
+        .message(format!("{body}\n\nDetails: {}", short_detail(detail)))
         .title(title)
         .kind(MessageDialogKind::Error)
         .blocking_show();

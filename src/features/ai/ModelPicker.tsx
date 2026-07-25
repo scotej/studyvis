@@ -1,6 +1,8 @@
 // Model picker UI per ARCHITECTURE.md §8 / DESIGN-SYSTEM.md §4 inventory.
-// Renders one card per registered model with download / benchmark
-// affordances; opens the gated-token paste flow inline for the Gemma tier.
+// Renders one card per model (quant variants of the same model collapse
+// into a single card with a quant selector) with download / benchmark
+// affordances; the gated-token paste flow renders inline for any gated
+// tier (none currently — the Gemma GGUF mirror was ungated upstream).
 //
 // All side-effects flow through injected `pickerActions` so unit tests and
 // Storybook can drive the UI without Tauri (`__setDownloadRuntime` /
@@ -23,13 +25,14 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Progress } from '@/components/ui/progress'
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { Skeleton } from '@/components/ui/skeleton'
 import { strings } from '@/strings'
 
 import { isBenchmarkStale, type BenchmarkResult } from './benchmark'
 import {
   type ModelSpec,
-  SUPPORTED_MODELS,
+  modelCardGroups,
   tierLabel,
   totalDownloadBytes,
 } from './models'
@@ -195,21 +198,23 @@ export function ModelPicker({
       </header>
 
       <div className="flex flex-col gap-4">
-        {SUPPORTED_MODELS.map((spec) => {
-          const state =
-            perModel[spec.id] ??
-            ({
-              spec,
-              installState: { modelExists: false, mmprojExists: false },
-              record: null,
-              phase: 'idle' as const,
-              downloadProgress: null,
-              errorMessage: null,
-            } satisfies PickerStateForModel)
+        {modelCardGroups().map((group) => {
+          const states = group.map(
+            (spec) =>
+              perModel[spec.id] ??
+              ({
+                spec,
+                installState: { modelExists: false, mmprojExists: false },
+                record: null,
+                phase: 'idle' as const,
+                downloadProgress: null,
+                errorMessage: null,
+              } satisfies PickerStateForModel)
+          )
           return (
             <ModelCard
-              key={spec.id}
-              state={state}
+              key={group[0].id}
+              states={states}
               hfTokenPresent={hfTokenPresent}
               actions={actions}
               actionsLocked={actionsLocked}
@@ -223,17 +228,35 @@ export function ModelPicker({
   )
 }
 
+function isVariantInstalled(s: PickerStateForModel): boolean {
+  return s.installState.modelExists && s.installState.mmprojExists
+}
+
 function ModelCard({
-  state,
+  states,
   hfTokenPresent,
   actions,
   actionsLocked,
 }: {
-  state: PickerStateForModel
+  // One entry per quant variant, registry order; single-quant models pass
+  // exactly one. Every entry shares displayName/tier — only the files and
+  // footprint differ.
+  states: PickerStateForModel[]
   hfTokenPresent: boolean
   actions: PickerActions
   actionsLocked: boolean
 }) {
+  // The user's explicit quant choice; null until they touch the selector.
+  const [chosenId, setChosenId] = useState<string | null>(null)
+  // A variant with active work pins the card to it (switching away would
+  // hide a live progress bar); otherwise the explicit choice wins, then an
+  // installed variant, then the family default (first in registry order).
+  const busyVariant = states.find((s) => classifyPhase(s.phase).busy)
+  const state =
+    busyVariant ??
+    states.find((s) => s.spec.id === chosenId) ??
+    states.find(isVariantInstalled) ??
+    states[0]
   const { spec, installState, record, phase, errorMessage } = state
   const isInstalled = installState.modelExists && installState.mmprojExists
   const isPartial =
@@ -301,6 +324,41 @@ function ModelCard({
           actionsLocked={actionsLocked}
         />
       </div>
+
+      {states.length > 1 ? (
+        <RadioGroup
+          value={spec.id}
+          onValueChange={setChosenId}
+          disabled={busyVariant != null}
+          aria-label={strings.ai.picker.quantPicker.ariaLabel(spec.displayName)}
+          className="flex flex-wrap items-center gap-x-5 gap-y-2"
+        >
+          <span className="text-xs uppercase tracking-wide text-text-muted">
+            {strings.ai.picker.quantPicker.legend}
+          </span>
+          {states.map((variant) => (
+            <div key={variant.spec.id} className="flex items-center gap-2">
+              <RadioGroupItem
+                value={variant.spec.id}
+                id={`quant-${variant.spec.id}`}
+              />
+              <Label
+                htmlFor={`quant-${variant.spec.id}`}
+                className="cursor-pointer text-sm font-normal text-text-primary"
+              >
+                <span className="font-mono">{variant.spec.quantLabel}</span>
+                <span className="text-text-muted">
+                  {' · '}
+                  {formatBytesGB(totalDownloadBytes(variant.spec))}
+                  {isVariantInstalled(variant)
+                    ? strings.ai.picker.quantPicker.installedSuffix
+                    : ''}
+                </span>
+              </Label>
+            </div>
+          ))}
+        </RadioGroup>
+      ) : null}
 
       <dl className="grid grid-cols-4 gap-x-6 gap-y-2 text-sm">
         <div className="flex flex-col">

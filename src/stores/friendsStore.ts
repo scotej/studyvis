@@ -12,6 +12,7 @@ import {
   updateLastStudied,
   type Friend,
 } from '@/lib/db/friends'
+import { strings } from '@/strings'
 
 export type FriendsStatus = 'idle' | 'loading' | 'ready' | 'error'
 
@@ -44,10 +45,11 @@ export const useFriendsStore = create<FriendsState>((set, get) => ({
       const friends = await listFriends()
       set({ friends, status: 'ready' })
     } catch (err) {
-      set({
-        status: 'error',
-        error: err instanceof Error ? err.message : String(err),
-      })
+      // Tauri rejects with a plain string — storing it verbatim would hand
+      // raw rusqlite text to whichever surface renders `error` next. Keep
+      // the raw value in the console; the store carries friendly copy.
+      console.error('friends_list failed:', err)
+      set({ status: 'error', error: strings.friends.loadError })
     }
   },
 

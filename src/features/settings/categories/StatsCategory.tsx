@@ -28,7 +28,10 @@ export function StatsCategory() {
 function DashboardFallback() {
   return (
     <SettingsSection heading={strings.stats.heading}>
-      <div className="flex flex-col gap-8">
+      {/* pt-4 keeps this skeleton on the same 16px top offset as the
+          Dashboard states that replace it, so the chunk-fetch → mounted
+          swap doesn't shift the pane. */}
+      <div className="flex flex-col gap-8 pt-4">
         <div className="grid grid-cols-2 gap-4">
           <Skeleton className="h-24 rounded-lg" />
           <Skeleton className="h-24 rounded-lg" />

@@ -271,6 +271,10 @@ export const strings = {
   },
 
   friends: {
+    // Stored by the friends store when the local friends table can't be
+    // read; friendly stand-in for the raw backend string (which goes to the
+    // console instead).
+    loadError: "Couldn't load your friends list.",
     list: {
       heading: 'Friends',
       addCta: 'Add friend',
@@ -976,6 +980,8 @@ export const strings = {
     sessions: {
       heading: 'Sessions',
       loadErrorLabel: "Couldn't load session history.",
+      loadErrorHelp:
+        'Something went wrong reading your local data. Retrying usually fixes it; restarting StudyVis helps if it keeps happening.',
       emptyLabel: 'No sessions yet',
       emptyHelp: 'Past sessions will appear here once you study with a friend.',
       loadingAriaLabel: 'Loading sessions',
@@ -1187,7 +1193,7 @@ export const strings = {
       },
       hfToken: {
         label: 'Hugging Face token',
-        help: 'Stored in your OS keychain for gated model downloads (e.g. Gemma). Forgetting it does not delete already-downloaded models.',
+        help: 'Stored in your OS keychain for gated model downloads. None of the current catalog needs one — kept for gated models a future update may add. Forgetting it does not delete already-downloaded models.',
         forgetCta: 'Forget',
         savedToast: 'Token saved to your keychain.',
         saveErrorPrefix: "Couldn't save the token: ",
@@ -1501,6 +1507,13 @@ export const strings = {
         gated: 'Gated',
         installed: 'Installed',
         incomplete: 'Incomplete',
+      },
+      // Quant-variant selector on cards that offer the same model at
+      // several quantization levels (currently Gemma 3 4B).
+      quantPicker: {
+        legend: 'Quantization',
+        ariaLabel: (model: string) => `${model} quantization`,
+        installedSuffix: ' · installed',
       },
       dataLabels: {
         download: 'Download',
