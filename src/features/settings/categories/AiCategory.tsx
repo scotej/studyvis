@@ -2,7 +2,12 @@ import { useCallback, useEffect, useState } from 'react'
 import { toast } from 'sonner'
 
 import { ScreenCapturePermissionOverlay } from '@/components/ScreenCapturePermissionOverlay'
-import { SettingsRow, SettingsSection } from '@/components/SettingsRow'
+import {
+  SettingsRow,
+  SettingsSection,
+  settingsRowChrome,
+} from '@/components/SettingsRow'
+import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
@@ -206,7 +211,9 @@ export function AiCategory() {
 
   return (
     <SettingsSection heading={copy.heading}>
-      <p className="mb-3 text-sm text-text-secondary">{copy.intro}</p>
+      {/* No own margin: the h2's mb-3 above and the first row's py-4 below
+          already carry the section rhythm. */}
+      <p className="text-sm text-text-secondary">{copy.intro}</p>
 
       <SettingsRow
         label={copy.enable.label}
@@ -228,11 +235,11 @@ export function AiCategory() {
           {/* D5 — canonical screen-recording indicator note. Below the
               enable row (not above it) so toggling doesn't shift the switch
               under the cursor; only meaningful while AI can sample. */}
-          <p className="pt-4 text-sm text-text-secondary">
+          <p className={cn(settingsRowChrome, 'text-sm text-text-secondary')}>
             {copy.screenIndicatorNote}
           </p>
 
-          <div className="pt-4">
+          <div className={settingsRowChrome}>
             <ModelPickerContainer />
           </div>
 

@@ -17,6 +17,13 @@ export type SettingsRowProps = {
   disabled?: boolean
 }
 
+// The row silhouette every direct child of a SettingsSection stack wears:
+// bottom hairline + 16px vertical padding, divider dropped on the last row.
+// Exported so non-SettingsRow children (disclosures, skeletons, notes)
+// share the exact same chrome instead of hand-copying the literal.
+export const settingsRowChrome =
+  'border-b border-border-subtle py-4 last:border-b-0'
+
 // Pure presentational primitive (DESIGN-SYSTEM.md §4 inventory). Renders a
 // labeled row with optional helper text and a control on the right (or
 // stacked below for wider controls). No store or feature imports.
@@ -33,7 +40,8 @@ export function SettingsRow({
       data-slot="settings-row"
       data-disabled={disabled || undefined}
       className={cn(
-        'flex border-b border-border-subtle py-4 last:border-b-0',
+        'flex',
+        settingsRowChrome,
         // §12 gaps per orientation: 24px keeps an inline control clear of its
         // label; stacked controls belong to the label directly above, so the
         // inline gap (12px) reads as one unit instead of a detached block.
