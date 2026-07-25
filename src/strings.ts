@@ -256,6 +256,10 @@ export const strings = {
   },
 
   friends: {
+    // Stored by the friends store when the local friends table can't be
+    // read; friendly stand-in for the raw backend string (which goes to the
+    // console instead).
+    loadError: "Couldn't load your friends list.",
     list: {
       heading: 'Friends',
       addCta: 'Add friend',
@@ -939,6 +943,8 @@ export const strings = {
     sessions: {
       heading: 'Sessions',
       loadErrorLabel: "Couldn't load session history.",
+      loadErrorHelp:
+        'Something went wrong reading your local data. Retrying usually fixes it; restarting StudyVis helps if it keeps happening.',
       emptyLabel: 'No sessions yet',
       emptyHelp: 'Past sessions will appear here once you study with a friend.',
       loadingAriaLabel: 'Loading sessions',

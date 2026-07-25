@@ -49,10 +49,14 @@ export function SessionsCategory({ onOpenSession }: SessionsCategoryProps) {
       setSessions(rows)
       setStatus('ready')
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
+      // Tauri rejects with a plain string, so the raw backend text (a
+      // rusqlite error chain) used to land verbatim in the row's help line.
+      // Keep it in the console for debugging; the user gets friendly copy.
+      console.error('sessions_list failed:', err)
+      setError(copy.loadErrorHelp)
       setStatus('error')
     }
-  }, [])
+  }, [copy.loadErrorHelp])
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- one-shot mount load: load awaits the Tauri command before any setState fires (same suppression as useIdentity.refresh).
