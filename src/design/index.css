@@ -229,3 +229,37 @@
     scroll-behavior: auto !important;
   }
 }
+
+@layer components {
+  /* Sanctioned static texture (DESIGN-SYSTEM.md §5 note): a graph-paper
+     grid on the section spacing rhythm plus a faint warm wash bleeding
+     down from the top edge. Applied to the add-friend dialog surface.
+     Everything derives from the live theme variables, so both themes and
+     any future palette edit flow through untouched; it is a background
+     layer only — no motion, so §6 and the reduce-motion kill switch are
+     unaffected. Keep the color-mix strengths whisper-quiet: the contrast
+     gate (scripts/check-contrast.ts) compares token pairs, not rendered
+     layers, so a louder grid behind text-muted would slip past CI. */
+  .texture-cardstock {
+    background-image:
+      radial-gradient(
+        120% 60% at 50% 0%,
+        color-mix(in srgb, var(--accent-muted) 10%, transparent),
+        transparent 70%
+      ),
+      linear-gradient(
+        to right,
+        color-mix(in srgb, var(--border-subtle) 55%, transparent) 1px,
+        transparent 1px
+      ),
+      linear-gradient(
+        to bottom,
+        color-mix(in srgb, var(--border-subtle) 55%, transparent) 1px,
+        transparent 1px
+      );
+    background-size:
+      100% 100%,
+      24px 24px,
+      24px 24px;
+  }
+}

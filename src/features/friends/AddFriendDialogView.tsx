@@ -132,7 +132,7 @@ export function AddFriendDialogView({
           window minimum — the dialog is fixed-centered, so without it
           overflow clips equally off both screen edges with nothing to
           scroll (title, footer and close button all become unreachable). */}
-      <DialogContent className="max-h-[calc(100vh-4rem)] max-w-3xl overflow-y-auto">
+      <DialogContent className="texture-cardstock max-h-[calc(100vh-4rem)] max-w-3xl overflow-y-auto">
         {missingDisplayName ? (
           <MissingDisplayNamePanel onCancel={onCancel} />
         ) : mode === 'legacy' ? (
