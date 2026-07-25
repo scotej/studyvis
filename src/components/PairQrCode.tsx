@@ -44,7 +44,11 @@ export function PairQrCode({ value, label, size = QR_SIZE }: PairQrCodeProps) {
   }, [value, size])
 
   if (!src) {
-    return <Skeleton className="aspect-square w-56 rounded-lg" />
+    // Sized to the requested QR so resolving doesn't shift the layout
+    // (callers render at 224 and 288; a fixed w-56 jumped for the latter).
+    return (
+      <Skeleton className="aspect-square rounded-lg" style={{ width: size }} />
+    )
   }
 
   return (

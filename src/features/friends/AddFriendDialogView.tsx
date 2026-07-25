@@ -17,7 +17,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { Separator } from '@/components/ui/separator'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Textarea } from '@/components/ui/textarea'
 // The QR encoder (qrcode) and scanner (jsqr) are moderate vendor deps used
@@ -127,7 +126,13 @@ export function AddFriendDialogView({
 }: AddFriendDialogViewProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-xl">
+      {/* Wider than the primitive's max-w-lg so the card surface fits QR +
+          import controls side by side; the max-h + overflow guard keeps every
+          sub-surface (card / scanner / legacy) reachable at the 1024×640
+          window minimum — the dialog is fixed-centered, so without it
+          overflow clips equally off both screen edges with nothing to
+          scroll (title, footer and close button all become unreachable). */}
+      <DialogContent className="max-h-[calc(100vh-4rem)] max-w-3xl overflow-y-auto">
         {missingDisplayName ? (
           <MissingDisplayNamePanel onCancel={onCancel} />
         ) : mode === 'legacy' ? (
@@ -245,16 +250,21 @@ function CardSurface({
           <DialogTitle>{card.addHeading}</DialogTitle>
           <DialogDescription>{card.scanHint}</DialogDescription>
         </DialogHeader>
-        <Suspense
-          fallback={<Skeleton className="aspect-square w-full rounded-lg" />}
-        >
-          <PairQrScanner
-            onDecode={handleScanDecode}
-            onError={handleScanError}
-            label={card.scanAria}
-            accept={(text) => interpretImportText(text) !== null}
-          />
-        </Suspense>
+        {/* Capped width: the scanner preview is a full-width square, and at
+            the widened dialog an uncapped square alone would outgrow the
+            640px window minimum. 384px is plenty for camera aiming. */}
+        <div className="mx-auto w-full max-w-sm">
+          <Suspense
+            fallback={<Skeleton className="aspect-square w-full rounded-lg" />}
+          >
+            <PairQrScanner
+              onDecode={handleScanDecode}
+              onError={handleScanError}
+              label={card.scanAria}
+              accept={(text) => interpretImportText(text) !== null}
+            />
+          </Suspense>
+        </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => setScanning(false)}>
             {strings.common.actions.cancel}
@@ -271,107 +281,118 @@ function CardSurface({
         <DialogDescription>{card.description}</DialogDescription>
       </DialogHeader>
 
-      <section className="flex flex-col items-center gap-2">
-        <h3 className="self-start text-sm font-medium text-text-primary">
-          {card.yourCodeHeading}
-        </h3>
-        {cardBuildError ? (
-          <p role="alert" className="text-sm text-status-alerted">
-            {card.codeError}
-          </p>
-        ) : myCardLink ? (
-          <>
-            {/* Larger than the legacy word QR (224): the card is a denser
-                ~200-char byte-mode payload, so more px-per-module keeps it
-                scannable from a laptop camera across a desk. */}
-            <Suspense
-              fallback={<Skeleton className="aspect-square w-80 rounded-lg" />}
-            >
-              <PairQrCode value={myCardLink} label={card.qrAlt} size={320} />
-            </Suspense>
-            <p className="text-center text-xs text-text-muted">
-              {card.qrCaption}
+      {/* Two columns — QR left, import controls right — so the pane's
+          height stays inside the 1024×640 window minimum. The previous
+          single-column stack (QR at 320 above the import section) computed
+          to ~890px against an 800px default viewport, clipping the title
+          and footer off both screen edges. Left column is fixed at w-72 to
+          match the QR; an auto column would size to the captions'
+          unwrapped max-content instead. */}
+      <div className="grid gap-6 sm:grid-cols-[auto_1fr]">
+        <section className="mx-auto flex w-72 flex-col items-center gap-2 sm:mx-0">
+          <h3 className="self-start text-sm font-medium text-text-primary">
+            {card.yourCodeHeading}
+          </h3>
+          {cardBuildError ? (
+            <p role="alert" className="text-sm text-status-alerted">
+              {card.codeError}
             </p>
+          ) : myCardLink ? (
+            <>
+              {/* Larger than the legacy word QR (224): the card is a denser
+                  ~200-char byte-mode payload, so more px-per-module keeps it
+                  scannable from a laptop camera across a desk. 288 (not the
+                  earlier 320) is the largest size that keeps the whole pane
+                  inside the window minimum alongside the import column. */}
+              <Suspense
+                fallback={
+                  <Skeleton className="aspect-square w-72 rounded-lg" />
+                }
+              >
+                <PairQrCode value={myCardLink} label={card.qrAlt} size={288} />
+              </Suspense>
+              <p className="text-center text-xs text-text-muted">
+                {card.qrCaption}
+              </p>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => void handleCopy()}
+                aria-label={card.copyAriaLabel}
+              >
+                {copied ? (
+                  <>
+                    <CheckIcon /> {card.copiedCta}
+                  </>
+                ) : (
+                  <>
+                    <CopyIcon /> {card.copyCta}
+                  </>
+                )}
+              </Button>
+              <p className="text-center text-xs text-text-muted">
+                {card.yourCodeCaption}
+              </p>
+            </>
+          ) : (
+            <div
+              className="flex flex-col items-center gap-2"
+              aria-busy="true"
+              aria-label={card.codeBuilding}
+            >
+              <Skeleton className="aspect-square w-72 rounded-lg" />
+              <p className="text-xs text-text-muted">{card.codeBuilding}</p>
+            </div>
+          )}
+        </section>
+
+        <section className="flex min-w-0 flex-col gap-3">
+          <div className="flex flex-col gap-1">
+            <h3 className="text-sm font-medium text-text-primary">
+              {card.addHeading}
+            </h3>
+            <p className="text-xs text-text-muted">{card.addBody}</p>
+          </div>
+          <div className="flex items-center gap-2">
             <Button
+              type="button"
               variant="outline"
               size="sm"
-              onClick={() => void handleCopy()}
-              aria-label={card.copyAriaLabel}
+              onClick={() => setScanning(true)}
             >
-              {copied ? (
-                <>
-                  <CheckIcon /> {card.copiedCta}
-                </>
-              ) : (
-                <>
-                  <CopyIcon /> {card.copyCta}
-                </>
-              )}
+              {card.scanCta}
             </Button>
-            <p className="text-center text-xs text-text-muted">
-              {card.yourCodeCaption}
-            </p>
-          </>
-        ) : (
-          <div
-            className="flex flex-col items-center gap-2"
-            aria-busy="true"
-            aria-label={card.codeBuilding}
-          >
-            <Skeleton className="aspect-square w-56 rounded-lg" />
-            <p className="text-xs text-text-muted">{card.codeBuilding}</p>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => void handlePasteClipboard()}
+            >
+              {card.pasteCta}
+            </Button>
           </div>
-        )}
-      </section>
-
-      <Separator />
-
-      <section className="flex flex-col gap-3">
-        <div className="flex flex-col gap-1">
-          <h3 className="text-sm font-medium text-text-primary">
-            {card.addHeading}
-          </h3>
-          <p className="text-xs text-text-muted">{card.addBody}</p>
-        </div>
-        <div className="flex items-center gap-2">
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() => setScanning(true)}
-          >
-            {card.scanCta}
-          </Button>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() => void handlePasteClipboard()}
-          >
-            {card.pasteCta}
-          </Button>
-        </div>
-        <Textarea
-          value={pasteValue}
-          onChange={(e) => setPasteValue(e.target.value)}
-          aria-label={card.inputAriaLabel}
-          rows={2}
-          autoCapitalize="none"
-          autoCorrect="off"
-          spellCheck={false}
-          className="font-mono text-xs"
-        />
-        <div className="flex justify-end">
-          <Button
-            type="button"
-            size="sm"
-            onClick={handleAddTyped}
-            disabled={!pasteValue.trim()}
-          >
-            {card.addCta}
-          </Button>
-        </div>
-      </section>
+          <Textarea
+            value={pasteValue}
+            onChange={(e) => setPasteValue(e.target.value)}
+            aria-label={card.inputAriaLabel}
+            rows={2}
+            autoCapitalize="none"
+            autoCorrect="off"
+            spellCheck={false}
+            className="font-mono text-xs"
+          />
+          <div className="flex justify-end">
+            <Button
+              type="button"
+              size="sm"
+              onClick={handleAddTyped}
+              disabled={!pasteValue.trim()}
+            >
+              {card.addCta}
+            </Button>
+          </div>
+        </section>
+      </div>
 
       <DialogFooter className="flex-col items-stretch gap-3 sm:flex-row sm:items-center sm:justify-between">
         <Button
