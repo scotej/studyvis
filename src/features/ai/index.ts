@@ -11,6 +11,7 @@ export type { SidecarRuntime, SidecarStatus } from './sidecar'
 export {
   SUPPORTED_MODELS,
   getModel,
+  modelCardGroups,
   tierLabel,
   totalDownloadBytes,
   modelDownloadUrls,

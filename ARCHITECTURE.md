@@ -445,10 +445,10 @@ Each chosen vision model requires a matching `*.mmproj.gguf` projector file. Bot
 |-|-|-|-|-|-|
 | Fastest | `ggml-org/moondream2-20250414-GGUF` | f16 (no Q4 in repo) | ~3.5 GB (2.7 + 0.85) | 2–5 s | Apache-2.0 |
 | Balanced | `ggml-org/Qwen2.5-VL-3B-Instruct-GGUF` | Q4_K_M + mmproj-Q8_0 | ~2.6 GB (1.8 + 0.8) | 5–15 s | Apache-2.0 |
-| Best (gated) | `ggml-org/gemma-3-4b-it-GGUF` | Q4_K_M | ~3.2 GB (2.4 + 0.8) | 8–18 s | Gemma terms (user accepts on HF) |
+| Best | `ggml-org/gemma-3-4b-it-GGUF` | Q4_K_M / Q8_0 / f16 (user picks) | ~3.2 / 4.6 / 8.0 GB (model + 0.8 mmproj) | 8–18 s (Q4_K_M) | Gemma terms |
 | Heaviest | `ggml-org/Qwen2.5-VL-7B-Instruct-GGUF` | Q4_K_M + mmproj-Q8_0 | ~5.2 GB (4.4 + 0.8) | 15–30 s | Apache-2.0 |
 
-Latencies are estimates pending real-machine measurement during V2 development. Model picker shows real numbers after the user's first benchmark. The "Fastest" tier ships the f16 weights because `ggml-org/moondream2-20250414-GGUF` does not publish a Q4_K_M quant — earlier table revisions claimed Q4_K_M / ~1.5 GB; we corrected this to the actual repo content during V2-P2. The Qwen tiers pair the Q4_K_M model with the smaller Q8_0 projector (the f16 projector is ~1.3 GB) to keep the per-tier download footprint sane.
+Latencies are estimates pending real-machine measurement during V2 development. Model picker shows real numbers after the user's first benchmark. The "Fastest" tier ships the f16 weights because `ggml-org/moondream2-20250414-GGUF` does not publish a Q4_K_M quant — earlier table revisions claimed Q4_K_M / ~1.5 GB; we corrected this to the actual repo content during V2-P2. The Qwen tiers pair the Q4_K_M model with the smaller Q8_0 projector (the f16 projector is ~1.3 GB) to keep the per-tier download footprint sane. The Best tier was originally marked gated; the `ggml-org` GGUF mirror is in fact ungated (HF API `gated: false`, verified 2026-07-25), so no catalog model requires a Hugging Face token — the keychain token plumbing stays for future gated additions. The three Gemma quants are separate registry entries (ids `gemma3-4b`, `gemma3-4b-q8_0`, `gemma3-4b-f16`) collapsed into one picker card by `quantFamily`, so each quant keeps its own install dir and benchmark record.
 
 ### Capture mechanics
 

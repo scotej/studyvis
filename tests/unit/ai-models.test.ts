@@ -7,6 +7,7 @@ import {
   emptyPickerState,
   downloadFraction,
   huggingfaceResolveUrl,
+  modelCardGroups,
   modelDownloadUrls,
   progressEventToPhase,
   SUPPORTED_MODELS,
@@ -43,22 +44,53 @@ function makeFakeDeps(): { deps: ModelStoreDeps; store: FakeStore } {
 }
 
 describe('models registry', () => {
-  test('exposes all four ARCHITECTURE.md §8 tiers', () => {
-    expect(SUPPORTED_MODELS).toHaveLength(4)
+  test('exposes the four ARCHITECTURE.md §8 tiers, with three Gemma quants on Best', () => {
+    expect(SUPPORTED_MODELS).toHaveLength(6)
     expect(SUPPORTED_MODELS.map((m) => m.defaultTier)).toEqual([
       'fastest',
       'balanced',
+      'best',
+      'best',
       'best',
       'heaviest',
     ])
   })
 
-  test('marks Gemma as gated, Qwen + Moondream as not gated', () => {
-    const ids = Object.fromEntries(SUPPORTED_MODELS.map((m) => [m.id, m.gated]))
-    expect(ids['gemma3-4b']).toBe(true)
-    expect(ids['qwen2_5-vl-3b']).toBe(false)
-    expect(ids['qwen2_5-vl-7b']).toBe(false)
-    expect(ids['moondream2']).toBe(false)
+  // The ggml-org GGUF mirror is ungated (HF API verified 2026-07-25), so no
+  // registered model requires a Hugging Face token anymore.
+  test('no registered model is gated', () => {
+    for (const spec of SUPPORTED_MODELS) {
+      expect(spec.gated).toBe(false)
+    }
+  })
+
+  test('Gemma quant variants share one family, repo, revision, and projector', () => {
+    const gemmas = SUPPORTED_MODELS.filter((m) => m.quantFamily === 'gemma3-4b')
+    expect(gemmas.map((m) => m.id)).toEqual([
+      'gemma3-4b',
+      'gemma3-4b-q8_0',
+      'gemma3-4b-f16',
+    ])
+    expect(gemmas.map((m) => m.quantLabel)).toEqual(['Q4_K_M', 'Q8_0', 'f16'])
+    const [q4, q8, f16] = gemmas
+    for (const variant of [q8, f16]) {
+      expect(variant.hfRepo).toBe(q4.hfRepo)
+      expect(variant.hfRevision).toBe(q4.hfRevision)
+      expect(variant.mmprojFile).toEqual(q4.mmprojFile)
+    }
+    // Distinct weights per quant — otherwise two ids would race one file.
+    const modelShas = new Set(gemmas.map((m) => m.modelFile.sha256))
+    expect(modelShas.size).toBe(3)
+  })
+
+  test('modelCardGroups collapses the Gemma quants into one card group', () => {
+    const groups = modelCardGroups()
+    expect(groups.map((g) => g.map((s) => s.id))).toEqual([
+      ['moondream2'],
+      ['qwen2_5-vl-3b'],
+      ['gemma3-4b', 'gemma3-4b-q8_0', 'gemma3-4b-f16'],
+      ['qwen2_5-vl-7b'],
+    ])
   })
 
   test('builds resolve URLs in the canonical hf.co/<repo>/resolve/<rev>/<file> shape', () => {
