@@ -135,7 +135,7 @@ export function Dashboard({ __loader, now }: DashboardProps) {
         <div
           role="status"
           aria-label={strings.stats.loadingAriaLabel}
-          className="flex flex-col gap-4 py-3"
+          className="flex flex-col gap-4 py-4"
         >
           <Skeleton className="h-4 w-1/3" />
           <div className="grid grid-cols-2 gap-4">
@@ -152,7 +152,7 @@ export function Dashboard({ __loader, now }: DashboardProps) {
       <SettingsSection heading={strings.stats.heading}>
         <div
           role="alert"
-          className="flex items-center justify-between gap-3 rounded-md border border-dashed border-border-subtle bg-bg-surface px-3 py-3 text-sm text-text-secondary"
+          className="mt-4 flex items-center justify-between gap-3 rounded-md border border-dashed border-border-subtle bg-bg-surface px-3 py-3 text-sm text-text-secondary"
         >
           <span>{status.message}</span>
           <Button variant="ghost" size="sm" onClick={retry}>
@@ -203,7 +203,10 @@ export function DashboardView({ summary, insights, now }: DashboardViewProps) {
 
   return (
     <SettingsSection heading={strings.stats.heading}>
-      <div className="flex items-center justify-between gap-3 pb-4">
+      {/* py-4 (not pb-4): all four pane states — chunk fallback, loading,
+          error, ready — share the same 16px top offset under the heading,
+          so state changes never shift the pane vertically. */}
+      <div className="flex items-center justify-between gap-3 py-4">
         <p className="text-xs text-text-muted">{strings.stats.disclaimer}</p>
         {totalSessions > 0 ? (
           <Button

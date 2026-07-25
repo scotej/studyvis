@@ -8,7 +8,12 @@ import { useCallback, useEffect, useState } from 'react'
 import { Trash2Icon } from 'lucide-react'
 import { toast } from 'sonner'
 
-import { SettingsRow, SettingsSection } from '@/components/SettingsRow'
+import {
+  SettingsRow,
+  SettingsSection,
+  settingsRowChrome,
+} from '@/components/SettingsRow'
+import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -202,7 +207,12 @@ function formatSessionMeta(session: SessionRecord): string {
 // loading to ready swaps content without a jump or a border pop-in.
 function SessionRowSkeleton() {
   return (
-    <div className="flex items-center justify-between gap-6 border-b border-border-subtle py-4 last:border-b-0">
+    <div
+      className={cn(
+        'flex items-center justify-between gap-6',
+        settingsRowChrome
+      )}
+    >
       <div className="flex min-w-0 flex-1 flex-col gap-1">
         <Skeleton className="h-4 w-1/3" />
         <Skeleton className="h-3 w-1/4" />

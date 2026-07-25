@@ -187,7 +187,7 @@ export function AdvancedCategory() {
           label={copy.shareLog.label}
           help={copy.shareLog.help}
           control={
-            <div className="flex gap-2">
+            <div className="flex items-center gap-2">
               <Button
                 variant="secondary"
                 size="sm"

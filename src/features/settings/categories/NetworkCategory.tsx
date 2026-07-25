@@ -2,7 +2,11 @@ import { useState } from 'react'
 
 import { Disclosure } from '@/components/Disclosure'
 import { RelayDiagnostics } from '@/components/RelayDiagnostics'
-import { SettingsRow, SettingsSection } from '@/components/SettingsRow'
+import {
+  SettingsRow,
+  SettingsSection,
+  settingsRowChrome,
+} from '@/components/SettingsRow'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -80,7 +84,7 @@ function AdvancedConnectionRow() {
   const copy = strings.settings.network.advanced
   return (
     <Disclosure
-      className="border-b border-border-subtle py-4 last:border-b-0"
+      className={settingsRowChrome}
       summaryClassName="rounded-md"
       summary={
         <span className="flex flex-col gap-1">
