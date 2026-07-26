@@ -194,6 +194,17 @@ pub async fn sidecar_start<R: Runtime>(
             .map_err(|e| format!("engine install: {e}"))?;
     }
 
+    // Hold the install gate across resolve + spawn so a concurrent forced
+    // reinstall (engine_install) can't swap the managed engine dir under the
+    // child we're about to spawn (PR-88 review). The ONE lock-order invariant
+    // across both modules: engine gate before sidecar lock, never the
+    // reverse. engine_install honors it (gate, then stop_now — which takes
+    // and RELEASES the sidecar lock internally and never touches the gate);
+    // holding a sidecar guard while acquiring the gate anywhere would be an
+    // AB-BA deadlock with this function. ensure_installed above takes and
+    // releases the gate internally, so it must stay before this acquire.
+    let _engine_gate = engine.gate.lock().await;
+
     let mut guard = arc.lock().await;
     // Re-check after the unlocked window — a concurrent start may have won.
     if guard.child.is_some() {

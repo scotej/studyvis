@@ -1137,9 +1137,11 @@ export const strings = {
     ai: {
       heading: 'AI',
       // One privacy statement for the pane; the enable row's help and the
-      // model row already say what turning AI on unlocks.
+      // model row already say what turning AI on unlocks. Scoped to captures
+      // (PR-88 review): model + engine downloads DO fetch from Hugging Face /
+      // GitHub, and their own rows disclose that.
       intro:
-        'The vision model runs on this machine and only looks at your camera and screen. Nothing leaves your computer.',
+        'The vision model runs on this machine and only looks at your camera and screen — none of that ever leaves your computer. Downloading a model or the engine fetches files from the internet; nothing about you is sent.',
       // D5 — canonical screen-recording indicator note: the OS indicator
       // stays lit while sampling, and macOS grant/revoke lives in System
       // Settings. Rendered only while the AI gate is on.
@@ -1529,6 +1531,9 @@ export const strings = {
       // until the session ends.
       lockedDuringSession:
         'Model changes unlock after your session ends — re-measuring or removing a model now would interrupt live focus checks.',
+      // I73 — the benchmark needs the engine; the bare sentinel would
+      // otherwise print on the card.
+      engineMissing: 'Install the AI engine first (see the AI engine row).',
       // Shown when a persisted benchmark predates the current inference
       // engine (INFERENCE_ENGINE_FINGERPRINT) — e.g. CPU-era numbers after
       // the Metal-offload update.

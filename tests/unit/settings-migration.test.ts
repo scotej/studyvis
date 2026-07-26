@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, test, vi } from 'vitest'
 
 import {
   hydrateValuesFromStore,
+  SETTINGS_KEY_ENGINE_AUTO_INSTALL,
   type Migrator,
   type StoreLike,
 } from '@/stores/settingsStore'
@@ -164,7 +165,7 @@ describe('hydrateValuesFromStore — V1-P11 settings migration', () => {
     )
     expect(missing.values.engineAutoInstall).toBe(true)
     const off = await hydrateValuesFromStore(
-      fakeStore({ engine_auto_install: false }),
+      fakeStore({ [SETTINGS_KEY_ENGINE_AUTO_INSTALL]: false }),
       makeMigrator(null)
     )
     expect(off.values.engineAutoInstall).toBe(false)

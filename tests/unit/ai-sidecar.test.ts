@@ -5,6 +5,7 @@ import {
   __setSidecarRuntime,
   DEFAULT_CTX_SIZE,
   ERR_AI_DISABLED,
+  ERR_ENGINE_NOT_INSTALLED,
   HEALTH_POLL_INTERVAL_MS,
   useSidecarStore,
   type SidecarRuntime,
@@ -15,8 +16,11 @@ type Tick = () => void
 
 function makeFakeRuntime(opts: {
   aiEnabled: boolean
+  engineAutoInstall?: boolean
   startReturns?: number
-  startThrows?: Error
+  // Tauri invoke rejects with plain STRINGS from Rust `Err(String)`; pass a
+  // string here to exercise that path (an Error covers JS-side throws).
+  startThrows?: Error | string
   fetchHealthSequence?: boolean[]
 }) {
   let scheduled: Tick | null = null
@@ -28,6 +32,7 @@ function makeFakeRuntime(opts: {
     modelPath: string
     mmprojPath: string | null
     ctxSize: number
+    engineAutoInstall: boolean
   }> = []
   let stopCalls = 0
   let statusCalls = 0
@@ -95,7 +100,7 @@ function makeFakeRuntime(opts: {
       }
     },
     getAiFeaturesEnabled: () => opts.aiEnabled,
-    getEngineAutoInstall: () => true,
+    getEngineAutoInstall: () => opts.engineAutoInstall ?? true,
   }
 
   return {
@@ -241,6 +246,28 @@ describe('useSidecarStore.start', () => {
     expect(state.status).toBe('errored')
     expect(state.lastError).toContain('model_path does not exist')
     expect(env.handlesAlive()).toBe(0)
+  })
+
+  // I73 — the auto-install-off contract: the settings value is forwarded
+  // verbatim, and the bare `engine_not_installed` sentinel (a plain-string
+  // rejection, the way Tauri actually rejects) survives into lastError
+  // intact so SessionView's strict-equality match works.
+  test('forwards engineAutoInstall=false and surfaces the sentinel unchanged', async () => {
+    const env = makeFakeRuntime({
+      aiEnabled: true,
+      engineAutoInstall: false,
+      startThrows: ERR_ENGINE_NOT_INSTALLED,
+    })
+    __setSidecarRuntime(env.runtime)
+
+    const port = await useSidecarStore
+      .getState()
+      .start({ modelPath: '/tmp/model.gguf' })
+    expect(port).toBeNull()
+    expect(env.startCalls[0]?.engineAutoInstall).toBe(false)
+    const state = useSidecarStore.getState()
+    expect(state.status).toBe('errored')
+    expect(state.lastError).toBe(ERR_ENGINE_NOT_INSTALLED)
   })
 })
 

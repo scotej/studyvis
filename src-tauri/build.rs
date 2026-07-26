@@ -19,10 +19,11 @@ fn main() {
 // fresh checkout (observed: two extra rebuilds, then it settles because the
 // file is never rewritten). A one-time cost, only where the fetch script was
 // never run.
+// Anything smaller cannot be a real llama-server (smallest prebuilt ~9 MB);
+// mirrors MIN_REAL_ENGINE_BYTES in commands/engine.rs.
+const PLACEHOLDER_CEILING_BYTES: u64 = 4 * 1024 * 1024;
+
 fn ensure_debug_sidecar_placeholder() {
-    if std::env::var("PROFILE").as_deref() != Ok("debug") {
-        return;
-    }
     let Ok(target) = std::env::var("TARGET") else {
         return;
     };
@@ -37,6 +38,38 @@ fn ensure_debug_sidecar_placeholder() {
     let path = PathBuf::from(manifest_dir)
         .join("binaries")
         .join(format!("llama-server-{target}{ext}"));
+    if std::env::var("PROFILE").as_deref() != Ok("debug") {
+        // Release-profile arm: tauri-build only checks the file EXISTS, so a
+        // placeholder left behind by an earlier debug build (gitignored —
+        // invisible in `git status`) would bundle silently into a local
+        // installer. Fail the build instead (PR-88 review).
+        if let Ok(meta) = fs::metadata(&path) {
+            if meta.len() < PLACEHOLDER_CEILING_BYTES {
+                panic!(
+                    "{} is a dev placeholder, not a real llama-server; run scripts/fetch-llama-server.sh before a release-profile build",
+                    path.display()
+                );
+            }
+        }
+        return;
+    }
+    // The resources glob `binaries/llama-runtime-*/*` ALSO hard-fails when
+    // nothing matches (a truly fresh checkout has neither the binary nor the
+    // runtime dir — both gitignored), so the placeholder must cover both.
+    // The marker file inside is inert: resolve_runtime_dir only prepends the
+    // dir to the library search path, and the fetch script overwrites the
+    // whole dir when it runs.
+    let runtime_dir = path
+        .parent()
+        .expect("binaries dir has a parent")
+        .join(format!("llama-runtime-{target}"));
+    if !runtime_dir.exists() {
+        let _ = fs::create_dir_all(&runtime_dir);
+        let _ = fs::write(
+            runtime_dir.join("PLACEHOLDER-README.txt"),
+            b"studyvis placeholder: real companion libraries come from scripts/fetch-llama-server.sh or the in-app engine auto-install (I73)\n",
+        );
+    }
     if path.exists() {
         return;
     }

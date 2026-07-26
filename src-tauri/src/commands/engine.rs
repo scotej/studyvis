@@ -149,7 +149,12 @@ pub struct EngineState {
     // Serializes installs; every entrant re-checks "already installed" after
     // acquiring, so concurrent callers (sidecar_start auto-install racing the
     // Settings button) both succeed instead of one erroring "in flight".
-    gate: tauri::async_runtime::Mutex<()>,
+    // pub(crate) so sidecar_start can hold it across resolve + spawn (PR-88
+    // review — a forced reinstall must not swap the managed dir under a
+    // child being spawned). Lock ORDER: this gate before the sidecar lock,
+    // never the reverse. Not reentrant — never hold it while calling
+    // ensure_installed/engine_install.
+    pub(crate) gate: tauri::async_runtime::Mutex<()>,
     // Short-hold metadata for engine_info; never held across an await.
     meta: std::sync::Mutex<EngineMeta>,
 }
@@ -212,17 +217,22 @@ fn emit_progress<R: Runtime>(app: &AppHandle<R>, event: &EngineProgressEvent) {
     let _ = app.emit(PROGRESS_EVENT_NAME, event);
 }
 
-// Manual install / reinstall from Settings → AI. Stops the sidecar first: on
-// Windows the child's loaded DLLs can't be replaced while it runs, and a
-// half-swapped engine dir is worse than a stopped AI.
+// Manual install / reinstall from Settings → AI. Takes the install gate
+// FIRST, then stops the sidecar, then swaps the engine dir — all under one
+// gate hold, so no sidecar_start (which also acquires gate before the
+// sidecar lock) can spawn from the directory mid-swap, and on Windows no
+// child holds the DLLs being replaced. Lock ORDER everywhere: engine gate →
+// sidecar lock, never the reverse (stop_now takes and RELEASES the sidecar
+// lock internally and never touches the gate).
 #[tauri::command]
 pub async fn engine_install<R: Runtime>(
     app: AppHandle<R>,
     state: State<'_, EngineState>,
     sidecar: State<'_, SidecarState>,
 ) -> Result<(), String> {
+    let _gate = state.gate.lock().await;
     super::sidecar::stop_now(&sidecar).await?;
-    install_inner(&app, &state, true).await
+    install_locked(&app, &state, true).await
 }
 
 // sidecar_start's auto-install path: no-op when any candidate already
@@ -232,15 +242,17 @@ pub async fn ensure_installed<R: Runtime>(
     app: &AppHandle<R>,
     state: &EngineState,
 ) -> Result<(), String> {
-    install_inner(app, state, false).await
+    let _gate = state.gate.lock().await;
+    install_locked(app, state, false).await
 }
 
-async fn install_inner<R: Runtime>(
+// Callers hold `gate`. Every entrant re-checks "already installed" after
+// acquiring, so concurrent callers coalesce instead of erroring "in flight".
+async fn install_locked<R: Runtime>(
     app: &AppHandle<R>,
     state: &EngineState,
     force: bool,
 ) -> Result<(), String> {
-    let _gate = state.gate.lock().await;
     if !force {
         if let Ok(path) = managed_binary_path(app) {
             if path.is_file() {
@@ -302,21 +314,33 @@ async fn do_install<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
         },
     );
     let staging = root.join(format!(".tmp-{ENGINE_TAG}-{TARGET_TRIPLE}"));
-    {
+    let extract_result = {
         let archive_path = archive_path.clone();
         let staging = staging.clone();
         tauri::async_runtime::spawn_blocking(move || {
             extract_archive(&archive_path, &staging, binary_name())
         })
         .await
-        .map_err(|e| format!("extract task: {e}"))??;
-    }
+        .map_err(|e| format!("extract task: {e}"))
+        .and_then(|r| r)
+    };
+    // The archive is spent either way, and a failed extraction must not leave
+    // staging debris (cleanup_stale would catch it next run, but a failed
+    // manual install shouldn't wait for one).
     let _ = fs::remove_file(&archive_path);
+    if let Err(e) = extract_result {
+        let _ = fs::remove_dir_all(&staging);
+        return Err(e);
+    }
 
     let staged_binary = staging.join(binary_name());
-    let staged_len = fs::metadata(&staged_binary)
-        .map_err(|e| format!("{} missing from archive: {e}", binary_name()))?
-        .len();
+    let staged_len = match fs::metadata(&staged_binary) {
+        Ok(meta) => meta.len(),
+        Err(e) => {
+            let _ = fs::remove_dir_all(&staging);
+            return Err(format!("{} missing from archive: {e}", binary_name()));
+        }
+    };
     if staged_len < MIN_REAL_ENGINE_BYTES {
         let _ = fs::remove_dir_all(&staging);
         return Err(format!(

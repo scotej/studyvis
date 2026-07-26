@@ -329,9 +329,11 @@ npm run tauri dev                # full desktop app — React UI + Rust shell
 
 Debug builds no longer need `scripts/fetch-llama-server.sh` first: `build.rs`
 writes a placeholder sidecar and the app auto-installs the real llama.cpp
-engine on first AI use (I73). Run the script anyway if you want the bundled
-engine offline, and it is still **required** before `tauri build`
-(release-profile builds fail without real binaries, by design).
+engine on first AI use (I73) — provided Settings → AI → "Install engine
+automatically" is still on (its default) and the machine is online; with it
+off, run the script or use the pane's Install now button. The script is still
+**required** before `tauri build` (release-profile builds fail without real
+binaries, by design).
 
 Two lighter loops when you don't need the desktop shell:
 
