@@ -26,6 +26,8 @@ use tauri::Manager;
 
 #[cfg(desktop)]
 use commands::ai_dialog::toggle_ai_dialog;
+#[cfg(desktop)]
+use commands::engine::{engine_info, engine_install, EngineState};
 use commands::friends::{
     friends_add, friends_get_x_pubkey, friends_list, friends_remove, friends_update_last_studied,
 };
@@ -176,6 +178,10 @@ pub fn run() {
         #[cfg(desktop)]
         sidecar_status,
         #[cfg(desktop)]
+        engine_info,
+        #[cfg(desktop)]
+        engine_install,
+        #[cfg(desktop)]
         diagnostics_reveal_log,
         #[cfg(desktop)]
         diagnostics_info,
@@ -286,6 +292,7 @@ pub fn run() {
                     read_shortcut_accelerators_from_settings(app.handle());
                 app.manage(ShortcutBindings::new(&initial_ptt_friends, &initial_ptt_ai));
                 app.manage(SidecarState::new());
+                app.manage(EngineState::new());
                 app.manage(DownloadState::new());
                 setup_desktop(app)?;
             }

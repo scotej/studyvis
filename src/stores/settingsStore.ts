@@ -107,6 +107,12 @@ export type SettingsValues = {
   // land in V2-P9; for V2-P1 the value is read-only and consumed by
   // src/features/ai/sidecar.ts to gate `useSidecarStore.start(...)`.
   aiFeaturesEnabled: boolean
+  // I73 — auto-install the llama.cpp engine when no sidecar binary resolves
+  // at AI start (fresh dev checkout, damaged install). ON by default: the
+  // download is the pinned ~10–20 MB llama.cpp release asset from GitHub,
+  // SHA-256-verified, fetched only when AI is actually started — consistent
+  // with PLAN §3's model-download carve-out from "zero unsolicited outbound".
+  engineAutoInstall: boolean
   // V2-P5 score-machine thresholds (ARCHITECTURE.md §8). Defaults match the
   // PLAN.md §5 V2 "first 2 / next 2" framing. Setters land in V2-P9 (Settings
   // → AI sliders, ranges [2,8] / [3,12] enforced there); for V2-P5 the fields
@@ -186,6 +192,7 @@ export const SETTINGS_KEY_MINIMIZE_TRAY = 'minimize_to_tray_on_close'
 export const SETTINGS_KEY_DEBUG_LOG = 'debug_log_enabled'
 export const SETTINGS_KEY_TURN_PREF = 'turn_preference'
 export const SETTINGS_KEY_AI_FEATURES = 'ai_features_enabled'
+export const SETTINGS_KEY_ENGINE_AUTO_INSTALL = 'engine_auto_install'
 export const SETTINGS_KEY_WARNING_THRESHOLD = 'warning_threshold'
 export const SETTINGS_KEY_ALERT_THRESHOLD = 'alert_threshold'
 export const SETTINGS_KEY_CONFIDENCE_FLOOR = 'off_task_confidence_floor'
@@ -219,6 +226,7 @@ export const DEFAULT_SETTINGS: SettingsValues = {
   debugLogEnabled: false,
   turnPreference: 'auto',
   aiFeaturesEnabled: false,
+  engineAutoInstall: true,
   warningThreshold: 2,
   alertThreshold: 4,
   // A3 — mirrors scoreMachine.DEFAULT_CONFIDENCE_FLOOR (0.6). Duplicated here
@@ -281,6 +289,7 @@ type SettingsState = {
     credential?: string
   }) => Promise<void>
   setAiFeaturesEnabled: (enabled: boolean) => Promise<void>
+  setEngineAutoInstall: (enabled: boolean) => Promise<void>
   setWarningThreshold: (count: number) => Promise<void>
   setAlertThreshold: (count: number) => Promise<void>
   // A3 — persist the off-task confidence floor ∈ [0,1]. The slider UI clamps;
@@ -660,6 +669,7 @@ export async function hydrateValuesFromStore(
     debug: await store.get(SETTINGS_KEY_DEBUG_LOG),
     turn: await store.get(SETTINGS_KEY_TURN_PREF),
     ai: await store.get(SETTINGS_KEY_AI_FEATURES),
+    engineAutoInstall: await store.get(SETTINGS_KEY_ENGINE_AUTO_INSTALL),
     warning: await store.get(SETTINGS_KEY_WARNING_THRESHOLD),
     alert: await store.get(SETTINGS_KEY_ALERT_THRESHOLD),
     confidenceFloor: await store.get(SETTINGS_KEY_CONFIDENCE_FLOOR),
@@ -744,6 +754,10 @@ export async function hydrateValuesFromStore(
       aiFeaturesEnabled: readBool(
         stored.ai,
         DEFAULT_SETTINGS.aiFeaturesEnabled
+      ),
+      engineAutoInstall: readBool(
+        stored.engineAutoInstall,
+        DEFAULT_SETTINGS.engineAutoInstall
       ),
       warningThreshold: readNumber(
         stored.warning,
@@ -1017,6 +1031,11 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       console.error('pushAiFeaturesEnabled failed:', err)
       set({ error: message })
     }
+  },
+
+  setEngineAutoInstall: async (enabled) => {
+    set((s) => ({ values: { ...s.values, engineAutoInstall: enabled } }))
+    await writeKey(set, SETTINGS_KEY_ENGINE_AUTO_INSTALL, enabled)
   },
 
   // Range/`warning < alert` enforcement lives in the Settings → AI slider UI

@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, test, vi } from 'vitest'
 
 import {
   hydrateValuesFromStore,
+  SETTINGS_KEY_ENGINE_AUTO_INSTALL,
   type Migrator,
   type StoreLike,
 } from '@/stores/settingsStore'
@@ -152,6 +153,22 @@ describe('hydrateValuesFromStore — V1-P11 settings migration', () => {
     const migrator = makeMigrator(null)
     const { values } = await hydrateValuesFromStore(store, migrator)
     expect(values.turnPreference).toBe('auto')
+  })
+
+  // I73 — engine auto-install defaults ON for fresh installs AND for
+  // existing users whose settings.json predates the key (absent → default,
+  // the X6 readBool pattern; no write-back migration needed).
+  test('defaults engineAutoInstall on when missing and preserves an explicit off', async () => {
+    const missing = await hydrateValuesFromStore(
+      fakeStore({}),
+      makeMigrator(null)
+    )
+    expect(missing.values.engineAutoInstall).toBe(true)
+    const off = await hydrateValuesFromStore(
+      fakeStore({ [SETTINGS_KEY_ENGINE_AUTO_INSTALL]: false }),
+      makeMigrator(null)
+    )
+    expect(off.values.engineAutoInstall).toBe(false)
   })
 
   // V3-P6 — windowStyle hydrates from `window_style`. Default 'system'

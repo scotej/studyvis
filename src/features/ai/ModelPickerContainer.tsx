@@ -24,7 +24,7 @@ import {
   progressEventToPhase,
 } from './picker-helpers'
 import { runBenchmark, type BenchmarkProgress } from './benchmark'
-import { useSidecarStore } from './sidecar'
+import { ERR_ENGINE_NOT_INSTALLED, useSidecarStore } from './sidecar'
 import {
   getDownloadRuntime,
   specToFileRequests,
@@ -294,7 +294,13 @@ export function ModelPickerContainer() {
           strings.ai.picker.readyToast(spec.displayName, result.p95Sec)
         )
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err)
+        const raw = err instanceof Error ? err.message : String(err)
+        // I73 — the bare engine_not_installed sentinel would otherwise land
+        // on the card verbatim; the engine row above is the fix, name it.
+        const message =
+          raw === ERR_ENGINE_NOT_INSTALLED
+            ? strings.ai.picker.engineMissing
+            : raw
         updateCard(spec.id, {
           phase: 'failed',
           downloadProgress: null,

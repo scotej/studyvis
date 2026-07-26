@@ -18,6 +18,41 @@ V3 work was drafted as v1.0.4 but shipped under the **v1.0.5** tag —
 there is no v1.0.4 tag; the section below is labelled by the tag that
 shipped it.)
 
+## Unreleased
+
+The second half of the "AI never actually ran" story (1.7.1 was the
+first): the AI engine now starts, and installs itself if it's missing.
+
+### Fixed
+
+- **AI could never start: the app looked for its inference engine in
+  the wrong place.** The bundled llama-server binary is placed next to
+  the app executable, but the spawn call looked for it under a
+  `binaries/` subfolder that has never existed in a shipped build — so
+  every "start AI" attempt failed on the spot ("AI failed to start" /
+  "AI model crashed"). With 1.7.1's download fix this was the last
+  wall between installing a model and the first real focus check. The
+  engine is now resolved to its real path — and verified against the
+  actual installed-app layout. (I73)
+
+### Added
+
+- **The AI engine installs itself.** If the engine binary is ever
+  missing or unusable when AI starts, StudyVis now downloads the exact
+  pinned llama.cpp build (~10–20 MB from GitHub, checksum-verified)
+  and installs it under the app's data folder — no manual step, as
+  long as the new **Install engine automatically** toggle stays on
+  (it's on by default; turn it off if you'd rather AI never touch the
+  network, and use Install now instead). If the download itself fails
+  — offline, GitHub down — the Settings row says why and the next AI
+  start retries. A new **Settings → AI → AI engine** row shows what's
+  installed (with live download progress) and offers
+  Install/Reinstall. On Windows, a failed engine start now names the
+  missing Microsoft VC++ runtime — with the link — instead of a bare
+  error code. Developers: fresh checkouts now build and run without
+  `scripts/fetch-llama-server.sh`; the app fetches the engine on first
+  AI use while the toggle is on. (I73)
+
 ## 1.7.1 — 2026-07-26 — Model downloads actually work
 
 One fix, and it's the big one: installing an AI model from

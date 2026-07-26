@@ -626,6 +626,10 @@ export const strings = {
       aiFailedToStart: 'AI failed to start.',
       aiFailedToStartDetail: (detail: string) =>
         `AI failed to start: ${detail}.`,
+      // I73 — engine missing with auto-install off: a setup state, not a
+      // crash. Calm copy, no scary detail string.
+      engineNotInstalled:
+        "The AI engine isn't installed. Install it in Settings → AI.",
       aiCaptureError: (message: string) => `AI capture error: ${message}.`,
       aiCrashed: 'AI model crashed. Restart it in Settings → AI.',
       aiCrashedDetail: (lastError: string) =>
@@ -870,6 +874,8 @@ export const strings = {
       ai: [
         'focus detection',
         'model',
+        'engine',
+        'llama',
         'threshold',
         'warning',
         'alert',
@@ -1131,9 +1137,11 @@ export const strings = {
     ai: {
       heading: 'AI',
       // One privacy statement for the pane; the enable row's help and the
-      // model row already say what turning AI on unlocks.
+      // model row already say what turning AI on unlocks. Scoped to captures
+      // (PR-88 review): model + engine downloads DO fetch from Hugging Face /
+      // GitHub, and their own rows disclose that.
       intro:
-        'The vision model runs on this machine and only looks at your camera and screen. Nothing leaves your computer.',
+        'The vision model runs on this machine and only looks at your camera and screen — none of that ever leaves your computer. Downloading a model or the engine fetches files from the internet; nothing about you is sent.',
       // D5 — canonical screen-recording indicator note: the OS indicator
       // stays lit while sampling, and macOS grant/revoke lives in System
       // Settings. Rendered only while the AI gate is on.
@@ -1208,6 +1216,35 @@ export const strings = {
         restartedToast: 'AI model restarting.',
         restartErrorFallback: "Couldn't restart the model.",
         pickModelFirstToast: 'Pick a model first.',
+      },
+      // I73 — the llama.cpp engine row + auto-install toggle.
+      engine: {
+        label: 'AI engine',
+        helpBundled: (version: string) =>
+          `llama.cpp ${version} — included with this build.`,
+        helpManaged: (version: string) =>
+          `llama.cpp ${version} — downloaded automatically.`,
+        helpMissingAuto:
+          "Not installed yet. It'll download automatically when AI starts.",
+        helpMissingManual: 'Not installed.',
+        helpUnsupported: 'No prebuilt engine for this computer yet.',
+        helpInstallError: (error: string) => `Couldn't install: ${error}`,
+        helpDownloading: (received: string, total: string) =>
+          `Downloading the engine — ${received} of ${total}.`,
+        helpDownloadingIndeterminate: (received: string) =>
+          `Downloading the engine — ${received} so far.`,
+        helpVerifying: 'Checking the download.',
+        helpExtracting: 'Unpacking the engine.',
+        installCta: 'Install now',
+        reinstallCta: 'Reinstall',
+        installedToast: 'AI engine installed.',
+        installErrorFallback: "Couldn't install the AI engine.",
+        installAria: 'Install the AI engine',
+        auto: {
+          label: 'Install engine automatically',
+          help: "Fetches the llama.cpp engine from GitHub if it's ever missing when AI starts. About 10–20 MB, verified against a pinned checksum.",
+          ariaLabel: 'Install engine automatically',
+        },
       },
       permissions: {
         grantedToast: 'Screen recording granted.',
@@ -1494,6 +1531,9 @@ export const strings = {
       // until the session ends.
       lockedDuringSession:
         'Model changes unlock after your session ends — re-measuring or removing a model now would interrupt live focus checks.',
+      // I73 — the benchmark needs the engine; the bare sentinel would
+      // otherwise print on the card.
+      engineMissing: 'Install the AI engine first (see the AI engine row).',
       // Shown when a persisted benchmark predates the current inference
       // engine (INFERENCE_ENGINE_FINGERPRINT) — e.g. CPU-era numbers after
       // the Metal-offload update.

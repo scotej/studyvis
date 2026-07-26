@@ -34,6 +34,7 @@ import {
   AI_DIALOG_TOPIC_CHANGE,
   AI_DIALOG_WINDOW_LABEL,
   CaptureError,
+  ERR_ENGINE_NOT_INSTALLED,
   isUncertainVerdict,
   requestScreenCapturePermission,
   startSampleLoop,
@@ -917,6 +918,13 @@ export function SessionView({
         } else if (reason === 'model_files_missing') {
           toast.error(
             strings.session.errors.modelFilesMissing,
+            aiSettingsToastAction()
+          )
+        } else if (detail === ERR_ENGINE_NOT_INSTALLED) {
+          // I73 — a setup state (auto-install off, engine absent), not a
+          // failure worth a raw backend string.
+          toast.error(
+            strings.session.errors.engineNotInstalled,
             aiSettingsToastAction()
           )
         } else {
