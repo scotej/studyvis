@@ -8,6 +8,8 @@ import {
   sessionTopic,
   presenceTopic,
   presencePassword,
+  presenceRelayKey,
+  presenceRelayTag,
 } from '@/lib/crypto/topics'
 import { buildPairAuthMessage } from '@/features/friends/pair'
 import { bytesToHex } from '@/lib/encoding'
@@ -76,15 +78,32 @@ describe('rendezvous derivations (peer-binding wire contract)', () => {
     )
   })
 
-  test('the four ed-keyed derivations are pairwise distinct', () => {
+  // I74 — the relay-presence pair are rendezvous contracts too: sender and
+  // receiver derive the tag/key independently from the ed pubkey.
+  test('presenceRelayTag is pinned', () => {
+    expect(presenceRelayTag(ED)).toBe(
+      '5b2e7ef2dfe122833d8e8001d033ce70c5cde65d40bd4c8ee9ced73ae551b68f'
+    )
+  })
+
+  test('presenceRelayKey is pinned', () => {
+    expect(bytesToHex(presenceRelayKey(ED))).toBe(
+      '7e5ed20836110685e810294a6123529debc6643d329dcc7df69d90a81772f04f'
+    )
+  })
+
+  test('the six ed-keyed derivations are pairwise distinct', () => {
     // They hash an IDENTICAL base64 payload (the same ed pubkey) and differ
-    // only by label, so a copy-pasted label — collapsing presence onto inbox —
-    // is exactly the collision this catches.
+    // only by label, so a copy-pasted label — collapsing presence onto inbox,
+    // or the relay tag onto the trystero topic (which would land our events
+    // in trystero's announce parser) — is exactly the collision this catches.
     const values = [
       inboxTopic(ED),
       inboxPassword(ED),
       presenceTopic(ED),
       presencePassword(ED),
+      presenceRelayTag(ED),
+      bytesToHex(presenceRelayKey(ED)),
     ]
     expect(new Set(values).size).toBe(values.length)
   })

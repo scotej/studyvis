@@ -88,3 +88,30 @@ export function presenceTopic(edPubkey: Uint8Array): string {
 export function presencePassword(edPubkey: Uint8Array): string {
   return digestHex('studyvis:presence-pw:v1:', bytesToBase64(edPubkey))
 }
+
+// Relay-carried presence (I74). Heartbeats over trystero ride WebRTC
+// datachannels, so a NAT pair that STUN can't traverse shows both friends
+// permanently offline even though every relay is reachable. The relay leg
+// publishes tiny ephemeral Nostr events straight to the pinned relays instead
+// — no WebRTC required. The `#x` tag value is deliberately a DIFFERENT
+// derivation from presenceTopic: trystero subscribes to filters derived from
+// the room topic string we pass it, and events landing in its subscription
+// would hit its announce parser. A distinct namespace makes collision
+// structurally impossible. Same rendezvous-wire-contract rules as above:
+// bump :v1:, never edit.
+export function presenceRelayTag(edPubkey: Uint8Array): string {
+  return digestHex('studyvis:presence-relay:v1:', bytesToBase64(edPubkey))
+}
+
+// Symmetric key for sealing relay-presence payloads (XSalsa20-Poly1305).
+// Derivable by anyone who knows the ed pubkey — the same protection class as
+// the trystero presence-room password above, so the accepted I47 posture
+// (presence is forgeable by someone who already has your pubkey) is unchanged;
+// what it adds is that relay observers who DON'T know the pubkey see only an
+// opaque beacon, and cross-app tag collisions fail authentication instead of
+// stamping a phantom heartbeat.
+export function presenceRelayKey(edPubkey: Uint8Array): Uint8Array {
+  return sha256(
+    enc.encode('studyvis:presence-relay-key:v1:' + bytesToBase64(edPubkey))
+  )
+}
