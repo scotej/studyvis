@@ -845,11 +845,7 @@ fn seed_hasher_blocking(path: &Path) -> Result<(Sha256, u64), String> {
 mod tests {
     use super::*;
 
-    // I72 — a HEAD response body is empty, so reqwest's content_length()
-    // (the body size hint) is always 0 over HTTP/1.1; the command must
-    // report the Content-Length header instead.
-    #[test]
-    fn head_check_reports_header_content_length() {
+    fn serve_head_once(response: &'static [u8]) -> std::net::SocketAddr {
         use std::io::{Read, Write};
         let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
         let addr = listener.local_addr().expect("addr");
@@ -857,19 +853,49 @@ mod tests {
             if let Ok((mut stream, _)) = listener.accept() {
                 let mut buf = [0u8; 1024];
                 let _ = stream.read(&mut buf);
-                let _ = stream.write_all(
-                    b"HTTP/1.1 200 OK\r\nContent-Length: 12345\r\nConnection: close\r\n\r\n",
-                );
+                let _ = stream.write_all(response);
             }
         });
+        addr
+    }
 
-        let head = tauri::async_runtime::block_on(model_head_check(
-            format!("http://{addr}/m.gguf"),
-            false,
-        ))
-        .expect("head check");
+    fn head_check(addr: std::net::SocketAddr) -> HeadResult {
+        tauri::async_runtime::block_on(model_head_check(format!("http://{addr}/m.gguf"), false))
+            .expect("head check")
+    }
+
+    // I72 — a HEAD response body is empty, so reqwest's content_length()
+    // (the body size hint) is always 0 over HTTP/1.1; the command must
+    // report the Content-Length header instead.
+    #[test]
+    fn head_check_reports_header_content_length() {
+        let addr = serve_head_once(
+            b"HTTP/1.1 200 OK\r\nContent-Length: 12345\r\nConnection: close\r\n\r\n",
+        );
+        let head = head_check(addr);
         assert_eq!(head.status, 200);
         assert_eq!(head.content_length, Some(12345));
+    }
+
+    // Absent or malformed Content-Length must degrade to None ("unknown"),
+    // which the JS preflight treats as skip-the-size-gate — the download's
+    // exact-byte + sha256 checks still gate integrity.
+    #[test]
+    fn head_check_reports_none_without_content_length() {
+        let addr = serve_head_once(b"HTTP/1.1 200 OK\r\nConnection: close\r\n\r\n");
+        let head = head_check(addr);
+        assert_eq!(head.status, 200);
+        assert_eq!(head.content_length, None);
+    }
+
+    #[test]
+    fn head_check_reports_none_for_malformed_content_length() {
+        let addr = serve_head_once(
+            b"HTTP/1.1 200 OK\r\nContent-Length: 12345abc\r\nConnection: close\r\n\r\n",
+        );
+        let head = head_check(addr);
+        assert_eq!(head.status, 200);
+        assert_eq!(head.content_length, None);
     }
 
     #[test]
