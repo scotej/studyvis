@@ -511,6 +511,82 @@ pub fn system_open_microphone_settings<R: Runtime>(app: AppHandle<R>) -> Result<
     }
 }
 
+// X6 / issue #77 — whether tauri-plugin-updater can swap this bundle in
+// place. On macOS an app opened straight from the mounted .dmg runs under
+// Gatekeeper App Translocation: the bundle is served from a read-only mount
+// at a randomized /private/var/…/AppTranslocation/… path. The plugin
+// installs by renaming the .app derived from `current_exe()`, which can
+// never succeed there, so the JS updater store asks this command before
+// downloading and, when blocked, points the user at Applications instead of
+// offering a Restart that always errors.
+#[derive(Serialize)]
+pub struct InstallContext {
+    pub updatable: bool,
+    // "translocated" | "readOnlyVolume"; `None` when updatable. Logged by
+    // the JS store for diagnosis — the user-facing copy doesn't branch on it.
+    pub reason: Option<&'static str>,
+}
+
+#[cfg(target_os = "macos")]
+fn is_translocated_path(exe: &std::path::Path) -> bool {
+    exe.components()
+        .any(|c| c.as_os_str() == "AppTranslocation")
+}
+
+// statfs on the executable's own path — the bundle lives on the same
+// filesystem. Any failure reads as writable: fail open, the worst case is
+// the pre-#77 behavior (install errors with the generic toast).
+#[cfg(target_os = "macos")]
+fn is_on_read_only_volume(path: &std::path::Path) -> bool {
+    use std::os::unix::ffi::OsStrExt;
+    let Ok(c_path) = std::ffi::CString::new(path.as_os_str().as_bytes()) else {
+        return false;
+    };
+    let mut fs_stat: libc::statfs = unsafe { std::mem::zeroed() };
+    if unsafe { libc::statfs(c_path.as_ptr(), &mut fs_stat) } != 0 {
+        return false;
+    }
+    fs_stat.f_flags & libc::MNT_RDONLY as u32 != 0
+}
+
+#[tauri::command]
+pub fn system_install_context() -> InstallContext {
+    #[cfg(target_os = "macos")]
+    {
+        let Ok(exe) = std::env::current_exe() else {
+            return InstallContext {
+                updatable: true,
+                reason: None,
+            };
+        };
+        if is_translocated_path(&exe) {
+            return InstallContext {
+                updatable: false,
+                reason: Some("translocated"),
+            };
+        }
+        if is_on_read_only_volume(&exe) {
+            return InstallContext {
+                updatable: false,
+                reason: Some("readOnlyVolume"),
+            };
+        }
+        InstallContext {
+            updatable: true,
+            reason: None,
+        }
+    }
+    // Windows: the NSIS installer elevates and replaces the install dir
+    // itself — there is no translocation equivalent to detect.
+    #[cfg(not(target_os = "macos"))]
+    {
+        InstallContext {
+            updatable: true,
+            reason: None,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::RELEASES_URL;
@@ -522,5 +598,35 @@ mod tests {
     #[test]
     fn releases_url_points_at_the_studyvis_repo() {
         assert_eq!(RELEASES_URL, "https://github.com/scotej/studyvis/releases");
+    }
+
+    // Issue #77 — the exact path shape Gatekeeper produced for the .dmg-run
+    // app that could never install its update.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn translocated_exe_paths_are_flagged() {
+        use std::path::Path;
+        assert!(super::is_translocated_path(Path::new(
+            "/private/var/folders/sw/bgtd8b_97_n/T/AppTranslocation/372166F1-C35B/d/StudyVis.app/Contents/MacOS/studyvis"
+        )));
+        assert!(!super::is_translocated_path(Path::new(
+            "/Applications/StudyVis.app/Contents/MacOS/studyvis"
+        )));
+        // Component match, not substring — a folder merely *containing* the
+        // word must not read as translocated.
+        assert!(!super::is_translocated_path(Path::new(
+            "/Users/x/AppTranslocationNotes/StudyVis.app/Contents/MacOS/studyvis"
+        )));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn writable_and_missing_paths_read_as_writable() {
+        use std::path::Path;
+        assert!(!super::is_on_read_only_volume(&std::env::temp_dir()));
+        // statfs failure fails open.
+        assert!(!super::is_on_read_only_volume(Path::new(
+            "/no/such/volume/anywhere"
+        )));
     }
 }

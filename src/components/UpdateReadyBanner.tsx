@@ -1,4 +1,4 @@
-import { DownloadIcon, RotateCcwIcon } from 'lucide-react'
+import { DownloadIcon, FolderInputIcon, RotateCcwIcon } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { Button } from '@/components/ui/button'
@@ -73,6 +73,63 @@ export function UpdateReadyBannerView({
   )
 }
 
+export type UpdateBlockedBannerViewProps = {
+  version: string
+  onDismiss: () => void
+  className?: string
+}
+
+// Issue #77 — the update exists but this bundle can't swap itself in place
+// (macOS running straight off the mounted .dmg). Same quiet shell as the
+// ready banner, but no Restart: the instruction is the action, so the only
+// button acknowledges it.
+export function UpdateBlockedBannerView({
+  version,
+  onDismiss,
+  className,
+}: UpdateBlockedBannerViewProps) {
+  const copy = strings.updater.banner
+
+  return (
+    <section
+      role="status"
+      aria-live="polite"
+      aria-label={copy.blockedAriaLabel}
+      className={cn('mx-auto w-full px-4 pt-4 sm:px-6', className)}
+      style={{ maxWidth: tokens.sizes.readingMaxWidth }}
+    >
+      <div className="flex items-start gap-3 rounded-md border border-accent-default/40 bg-bg-surface px-4 py-3">
+        <span
+          aria-hidden="true"
+          className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full bg-accent-default/15 text-accent-default"
+        >
+          <FolderInputIcon className="size-4" />
+        </span>
+        <div className="flex flex-col gap-2">
+          <div className="flex flex-col gap-1">
+            <span className="text-sm font-medium text-text-primary">
+              {copy.blockedTitle(version)}
+            </span>
+            <span className="text-sm text-text-secondary">
+              {copy.blockedBody}
+            </span>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={onDismiss}
+              aria-label={copy.blockedDismissAriaLabel}
+            >
+              {copy.blockedDismissCta}
+            </Button>
+          </div>
+        </div>
+      </div>
+    </section>
+  )
+}
+
 // Container. Dismissing hides the banner for this process only — the staged
 // update stays reachable from Settings → About, so dismissing can't strand
 // someone on an old build.
@@ -95,7 +152,23 @@ export function UpdateReadyBanner({ className }: { className?: string }) {
   // Never mid-session: the download is already suppressed there (UpdaterBoot),
   // but an update staged before the session started could otherwise surface
   // over a live video grid and offer to restart out of it.
-  if (status !== 'ready' || !version || dismissed || sessionActive) return null
+  if (
+    (status !== 'ready' && status !== 'blocked') ||
+    !version ||
+    dismissed ||
+    sessionActive
+  )
+    return null
+
+  if (status === 'blocked') {
+    return (
+      <UpdateBlockedBannerView
+        version={version}
+        onDismiss={dismiss}
+        className={className}
+      />
+    )
+  }
 
   return (
     <UpdateReadyBannerView

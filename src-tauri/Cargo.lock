@@ -4347,6 +4347,7 @@ dependencies = [
  "futures-util",
  "hex",
  "keyring",
+ "libc",
  "objc2",
  "objc2-app-kit",
  "reqwest 0.12.28",
