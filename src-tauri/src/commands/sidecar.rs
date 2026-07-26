@@ -553,6 +553,17 @@ fn spawn_llama<R: Runtime>(
         command = command.args(["--mmproj", p]);
     }
     if let Some(dir) = runtime_dir {
+        // I75: the prebuilt llama.cpp binary is a GGML_BACKEND_DL build —
+        // ggml-cpu-*/metal/blas are separate libs it dlopen()s at startup,
+        // not linked imports. ggml's loader (ggml_backend_load_best) globs
+        // exactly two places for those: the executable's own directory and
+        // the process's current working directory — never PATH /
+        // DYLD_FALLBACK_LIBRARY_PATH / LD_LIBRARY_PATH, which only satisfy
+        // the *linked* imports (llama.dll/ggml-base.dll etc, resolved below).
+        // Without this, the child starts and logs its banner, then dies with
+        // "no backends are loaded" the moment it tries to load a model.
+        command = command.current_dir(dir);
+
         let dir_str = dir.to_string_lossy().into_owned();
         // Prepend the runtime directory to the platform's shared-library
         // search path so the prebuilt llama-server's @rpath / DT_RUNPATH

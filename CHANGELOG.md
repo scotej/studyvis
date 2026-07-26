@@ -18,6 +18,25 @@ V3 work was drafted as v1.0.4 but shipped under the **v1.0.5** tag —
 there is no v1.0.4 tag; the section below is labelled by the tag that
 shipped it.)
 
+## 1.8.1 — 2026-07-26 — The AI engine now actually loads a model
+
+A same-day follow-up to 1.8.0: that release fixed the engine failing to
+*start* (I73); this fixes the very next link in the same chain — the engine
+starting, then refusing to load a model.
+
+### Fixed
+
+- **On-device AI still couldn't run, even on 1.8.0.** The bundled llama.cpp
+  engine spawned, printed its startup banner, and then exited every time
+  with "no backends are loaded" / "failed to load model" — on every Windows
+  and macOS install, not an edge case. The prebuilt engine loads its CPU
+  (and, on Apple Silicon, Metal) backend as a separate library it opens at
+  startup rather than links directly into itself, and that lookup only
+  checks the executable's own folder and the app's current working
+  directory — neither of which was where StudyVis kept that library. The
+  engine now launches with its companion-library folder set as its working
+  directory, so the backend is found and a model actually loads. (I75)
+
 ## 1.8.0 — 2026-07-26 — AI starts, and friends stop showing a false "Offline"
 
 The second half of the "AI never actually ran" story: 1.7.1 fixed model
