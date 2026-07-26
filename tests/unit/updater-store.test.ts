@@ -38,6 +38,7 @@ function fakeUpdate(
       onEvent({ event: 'Finished' })
     }),
     install: vi.fn(overrides.install ?? (async () => {})),
+    close: vi.fn(async () => {}),
   }
 }
 
@@ -57,6 +58,11 @@ function resetStore() {
 beforeEach(() => {
   resetStore()
   resetUpdaterDeps()
+  // The production default invokes Tauri, which doesn't exist in node-env;
+  // pin the common case so only the blocked-path tests override it.
+  setUpdaterDeps({
+    installContext: async () => ({ updatable: true, reason: null }),
+  })
 })
 
 describe('checkNow', () => {
@@ -198,6 +204,61 @@ describe('checkNow', () => {
     expect(update.download).not.toHaveBeenCalled()
     expect(useUpdaterStore.getState().status).toBe('idle')
     expect(useUpdaterStore.getState().pending).toBeNull()
+  })
+
+  test('an unswappable bundle blocks before any bytes move — issue #77, the .dmg-run app', async () => {
+    const update = fakeUpdate({ version: '2.4.0', body: 'notes' })
+    setUpdaterDeps({
+      check: async () => update as never,
+      installContext: async () => ({
+        updatable: false,
+        reason: 'translocated',
+      }),
+    })
+
+    await useUpdaterStore.getState().checkNow()
+
+    const s = useUpdaterStore.getState()
+    expect(update.download).not.toHaveBeenCalled()
+    expect(s.status).toBe('blocked')
+    expect(s.version).toBe('2.4.0')
+    expect(s.pending).toBeNull()
+    // Nothing staged, so the plugin's Update resource is released.
+    expect(update.close).toHaveBeenCalledOnce()
+  })
+
+  test('blocked is permanent for the process — later checks are no-ops', async () => {
+    setUpdaterDeps({
+      check: async () => fakeUpdate({ version: '2.4.0' }) as never,
+      installContext: async () => ({
+        updatable: false,
+        reason: 'readOnlyVolume',
+      }),
+    })
+    await useUpdaterStore.getState().checkNow()
+    expect(useUpdaterStore.getState().status).toBe('blocked')
+
+    const check = vi.fn(async () => fakeUpdate({ version: '2.5.0' }) as never)
+    setUpdaterDeps({ check })
+    await useUpdaterStore.getState().checkNow({ userInitiated: true })
+
+    expect(check).not.toHaveBeenCalled()
+    expect(useUpdaterStore.getState().version).toBe('2.4.0')
+  })
+
+  test('a failed install-context probe fails open and downloads as before', async () => {
+    const update = fakeUpdate({ version: '2.6.0' })
+    setUpdaterDeps({
+      check: async () => update as never,
+      installContext: async () => {
+        throw new Error('no such command')
+      },
+    })
+
+    await useUpdaterStore.getState().checkNow()
+
+    expect(update.download).toHaveBeenCalledOnce()
+    expect(useUpdaterStore.getState().status).toBe('ready')
   })
 
   test('a user-initiated check also defers during a session — no installer bytes over a live mesh', async () => {

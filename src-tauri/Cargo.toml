@@ -51,6 +51,9 @@ keyring = { version = "3.6", features = ["apple-native"] }
 # we cast back into `objc2_app_kit::NSWindow`).
 objc2 = "0.6"
 objc2-app-kit = "0.3"
+# Issue #77 — `system_install_context` asks statfs whether the bundle sits on
+# a read-only mount (the app-translocated .dmg case the updater can't swap).
+libc = "0.2"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 keyring = { version = "3.6", features = ["windows-native"] }

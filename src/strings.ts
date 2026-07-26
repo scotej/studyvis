@@ -1738,6 +1738,15 @@ export const strings = {
       dismissAriaLabel: 'Dismiss until next launch',
       notesCta: 'Release notes',
       installing: 'Installing…',
+      // Issue #77 — the app is running somewhere it can't swap its own
+      // bundle (macOS: opened straight from the mounted .dmg). No Restart
+      // button to offer; the instruction *is* the action.
+      blockedAriaLabel: 'Update available — a move to Applications is needed',
+      blockedTitle: (version: string) => `StudyVis ${version} is available`,
+      blockedBody:
+        "StudyVis can't update itself from where it's running — usually the installer disk image. Quit StudyVis, drag it into Applications (replacing any old copy), and open it from there. Updates take care of themselves after that.",
+      blockedDismissCta: 'Got it',
+      blockedDismissAriaLabel: 'Dismiss until next launch',
     },
     settings: {
       // Mirrors the banner in Settings → About so the update is reachable
@@ -1745,6 +1754,9 @@ export const strings = {
       readyLabel: 'Update ready',
       readyHelp: (version: string) =>
         `Version ${version} is downloaded and waiting. Restart to finish.`,
+      blockedLabel: 'Update available',
+      blockedHelp: (version: string) =>
+        `Version ${version} is out, but StudyVis can't update itself from where it's running — usually the installer disk image. Quit, drag StudyVis into Applications, and open it from there.`,
       downloadingLabel: 'Downloading update',
       downloadingHelp: (version: string, percent: number) =>
         `Version ${version} — ${percent}%`,

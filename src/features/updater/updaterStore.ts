@@ -39,10 +39,20 @@ export type UpdaterStatus =
   | 'ready'
   | 'upToDate'
   | 'error'
+  // An update exists but this bundle can't swap itself in place (issue #77:
+  // macOS running translocated off the mounted .dmg, or any read-only
+  // volume). Process-permanent — the fix is quitting and moving the app —
+  // so it short-circuits every later check.
+  | 'blocked'
+
+export type InstallContext = {
+  updatable: boolean
+  reason: string | null
+}
 
 export type UpdaterDeps = {
   check: () => Promise<Update | null>
-  // Split out so tests can drive the flow without a Tauri host. All three are
+  // Split out so tests can drive the flow without a Tauri host. All are
   // thin passthroughs in production.
   stopSidecar: () => Promise<void>
   relaunch: () => Promise<void>
@@ -50,6 +60,10 @@ export type UpdaterDeps = {
   // the (network-bound) check aborts before any installer bytes move. See
   // the note in checkNow.
   isSessionActive: () => boolean
+  // Consulted once an update is found, before any bytes move: a bundle the
+  // plugin can never swap (see UpdaterStatus 'blocked') skips the download
+  // and surfaces the way out instead.
+  installContext: () => Promise<InstallContext>
 }
 
 export const defaultUpdaterDeps: UpdaterDeps = {
@@ -57,6 +71,7 @@ export const defaultUpdaterDeps: UpdaterDeps = {
   stopSidecar: () => invoke('sidecar_stop'),
   relaunch: () => invoke('system_relaunch_app'),
   isSessionActive: () => useSessionStore.getState().status === 'active',
+  installContext: () => invoke('system_install_context'),
 }
 
 let deps: UpdaterDeps = defaultUpdaterDeps
@@ -111,8 +126,14 @@ export const useUpdaterStore = create<UpdaterState>((set, get) => ({
   checkNow: async ({ userInitiated = false } = {}) => {
     const { status } = get()
     // A check already in flight, or an update already staged, wins — a second
-    // pass would re-download bytes we have.
-    if (status === 'checking' || status === 'downloading' || status === 'ready')
+    // pass would re-download bytes we have. Blocked is permanent for this
+    // process (see UpdaterStatus), so re-checking it would only re-learn it.
+    if (
+      status === 'checking' ||
+      status === 'downloading' ||
+      status === 'ready' ||
+      status === 'blocked'
+    )
       return
 
     set({ status: 'checking', errorKind: null })
@@ -129,6 +150,34 @@ export const useUpdaterStore = create<UpdaterState>((set, get) => ({
 
     if (!update) {
       set({ status: 'upToDate', version: null, notes: null })
+      return
+    }
+
+    // Issue #77: a bundle the plugin can never swap in place used to download
+    // the installer on every launch just to fail at "Restart now". Ask first;
+    // when blocked, keep the version for the UI's move-to-Applications
+    // guidance and move no bytes. Fail open on a probe error — the worst
+    // case is the old behavior (install errors with the generic toast).
+    let context: InstallContext = { updatable: true, reason: null }
+    try {
+      context = await deps.installContext()
+    } catch (err) {
+      console.error('[updater] install-context probe failed:', err)
+    }
+    if (!context.updatable) {
+      console.warn('[updater] cannot self-update here:', context.reason)
+      set({
+        status: 'blocked',
+        version: update.version,
+        notes: update.body ?? null,
+        dismissed: false,
+      })
+      // Nothing staged, so free the Rust-side Update resource.
+      try {
+        await update.close()
+      } catch {
+        // Best-effort cleanup.
+      }
       return
     }
 
