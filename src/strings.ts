@@ -280,7 +280,26 @@ export const strings = {
       addCta: 'Add friend',
       empty: 'Add a friend to start studying together.',
       available: 'Available',
+      // I74 — relay heartbeats are landing but no P2P heartbeat has for the
+      // settle window: the friend is genuinely around, and a video session
+      // very likely won't connect. Both facts in one short label.
+      availableLimited: 'Available · limited connection',
+      limitedTitle:
+        "You can see each other, but a direct connection isn't forming — video sessions may not connect.",
       offline: 'Offline',
+      // I74 — session-scoped recency once a friend drops offline. Beyond a
+      // day we stop counting and show the plain label.
+      offlineSeen: {
+        justNow: 'Offline · seen just now',
+        minutesAgo: (n: number) => `Offline · seen ${n} min ago`,
+        hoursAgo: (n: number) => `Offline · seen ${n} hr ago`,
+      },
+      // I74 — shown once above the list while ANY friend is in the limited
+      // state; the one place that says what to do about it.
+      limitedHint: {
+        body: "A direct connection to some friends isn't forming, so video sessions may not connect. A TURN relay in Network settings usually fixes this.",
+        cta: 'Network settings',
+      },
       inviteCta: 'Invite',
       inviteAriaLabel: (name: string) => `Invite ${name}`,
       lastTogether: {

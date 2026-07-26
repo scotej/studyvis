@@ -65,15 +65,24 @@ export {
 } from './inbox'
 export {
   HEARTBEAT_INTERVAL_MS,
+  LIMITED_CONNECTION_SETTLE_MS,
   ONLINE_WINDOW_MS,
   SWEEP_INTERVAL_MS,
   isOnline,
+  presenceState,
   startPresence,
+  type FriendPresenceState,
   type HeartbeatPayload,
   type PresenceContext,
+  type PresenceEntry,
   type PresenceMap,
   type PresenceSubscription,
 } from './presence'
+export {
+  startPresenceRelay,
+  type PresenceRelayHandle,
+  type PresenceRelayOptions,
+} from './presenceRelay'
 export {
   INVITE_ACTION,
   INVITE_ENVELOPE_VERSION,

@@ -1,10 +1,12 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
 
 import { FriendsListView } from '@/features/friends/FriendsListView'
+import type { FriendPresenceState } from '@/features/friends/presence'
 import type { Friend } from '@/lib/db/friends'
 
 const NOW = new Date('2026-05-09T12:00:00Z').getTime()
 const DAY = 24 * 60 * 60 * 1000
+const MINUTE = 60 * 1000
 
 const ALICE: Friend = {
   ed_pubkey_hex:
@@ -34,6 +36,16 @@ const MEI: Friend = {
   last_studied_with: NOW - 14 * DAY,
 }
 
+const ONLINE: FriendPresenceState = { state: 'online', limited: false }
+const LIMITED: FriendPresenceState = { state: 'online', limited: true }
+const OFFLINE: FriendPresenceState = { state: 'offline', lastSeenAt: null }
+
+function presenceOf(
+  states: Record<string, FriendPresenceState>
+): (edPubkeyHex: string) => FriendPresenceState {
+  return (edPubkeyHex) => states[edPubkeyHex] ?? OFFLINE
+}
+
 const meta = {
   title: 'Features/FriendsList',
   component: FriendsListView,
@@ -46,7 +58,7 @@ type Story = StoryObj<typeof meta>
 export const Empty: Story = {
   args: {
     friends: [],
-    isOnline: () => false,
+    presenceOf: () => OFFLINE,
     onAddFriend: () => {},
     onInvite: () => {},
     now: NOW,
@@ -56,7 +68,7 @@ export const Empty: Story = {
 export const Populated: Story = {
   args: {
     friends: [ALICE, BO, MEI],
-    isOnline: () => true,
+    presenceOf: () => ONLINE,
     onAddFriend: () => {},
     onInvite: () => {},
     now: NOW,
@@ -66,8 +78,44 @@ export const Populated: Story = {
 export const MixedOnlineOffline: Story = {
   args: {
     friends: [ALICE, BO, MEI],
-    isOnline: (edPubkeyHex) =>
-      edPubkeyHex === ALICE.ed_pubkey_hex || edPubkeyHex === BO.ed_pubkey_hex,
+    presenceOf: presenceOf({
+      [ALICE.ed_pubkey_hex]: ONLINE,
+      [BO.ed_pubkey_hex]: ONLINE,
+    }),
+    onAddFriend: () => {},
+    onInvite: () => {},
+    now: NOW,
+  },
+}
+
+// I74 — Bo is reachable over the relay but no direct connection is forming:
+// amber dot, "limited connection" label, and the one-line hint with the
+// Settings → Network deep link above the list.
+export const LimitedConnection: Story = {
+  args: {
+    friends: [ALICE, BO, MEI],
+    presenceOf: presenceOf({
+      [ALICE.ed_pubkey_hex]: ONLINE,
+      [BO.ed_pubkey_hex]: LIMITED,
+      [MEI.ed_pubkey_hex]: { state: 'offline', lastSeenAt: NOW - 12 * MINUTE },
+    }),
+    onAddFriend: () => {},
+    onInvite: () => {},
+    onOpenNetworkSettings: () => {},
+    now: NOW,
+  },
+}
+
+// I74 — offline recency: Alice was seen moments ago (clean goodbye), Bo
+// within the hour, Mei beyond a day (falls back to the plain label).
+export const OfflineRecency: Story = {
+  args: {
+    friends: [ALICE, BO, MEI],
+    presenceOf: presenceOf({
+      [ALICE.ed_pubkey_hex]: { state: 'offline', lastSeenAt: NOW - MINUTE },
+      [BO.ed_pubkey_hex]: { state: 'offline', lastSeenAt: NOW - 45 * MINUTE },
+      [MEI.ed_pubkey_hex]: { state: 'offline', lastSeenAt: NOW - 2 * DAY },
+    }),
     onAddFriend: () => {},
     onInvite: () => {},
     now: NOW,
@@ -77,7 +125,7 @@ export const MixedOnlineOffline: Story = {
 export const SingleOfflineFriend: Story = {
   args: {
     friends: [MEI],
-    isOnline: () => false,
+    presenceOf: () => OFFLINE,
     onAddFriend: () => {},
     onInvite: () => {},
     now: NOW,

@@ -22,6 +22,8 @@ shipped it.)
 
 The second half of the "AI never actually ran" story (1.7.1 was the
 first): the AI engine now starts, and installs itself if it's missing.
+Plus: friends stop showing a false "Offline" when only the direct
+connection between you is blocked.
 
 ### Fixed
 
@@ -34,6 +36,22 @@ first): the AI engine now starts, and installs itself if it's missing.
   wall between installing a model and the first real focus check. The
   engine is now resolved to its real path — and verified against the
   actual installed-app layout. (I73)
+
+- **Friends no longer show "Offline" to each other when only the direct
+  connection is blocked (I74).** Presence heartbeats used to ride WebRTC
+  datachannels exclusively, so two friends whose networks a STUN-only
+  connection can't cross (symmetric NAT, CGNAT, strict firewalls — no
+  TURN ships) each saw the other permanently offline, with no error
+  anywhere. Presence now also publishes tiny sealed heartbeats straight
+  to the pinned Nostr relays — the same infrastructure that already
+  proved reachable — so "their app is running" shows truthfully even
+  when the peer-to-peer path can't form. Both friends need this version
+  to see each other through the relay leg; either side on an older build
+  behaves exactly as before.
+
+- Dropped `wss://offchain.pub` from the pinned relay list — it now
+  rejects anonymous publishes, which breaks the exact round-trip
+  rendezvous depends on.
 
 ### Added
 
@@ -52,6 +70,17 @@ first): the AI engine now starts, and installs itself if it's missing.
   error code. Developers: fresh checkouts now build and run without
   `scripts/fetch-llama-server.sh`; the app fetches the engine on first
   AI use while the toggle is on. (I73)
+
+### Changed
+
+- **The friends list now tells the truth in more detail.** Three states
+  instead of two: _Available_ (green — direct connection proven),
+  _Available · limited connection_ (amber — reachable through the relay,
+  but a video session likely won't connect until a TURN relay is set
+  up), and _Offline_ with recency ("seen 12 min ago") once someone
+  drops. While any friend is limited, a one-line hint above the list
+  explains why sessions may fail and links straight to
+  Settings → Network.
 
 ## 1.7.1 — 2026-07-26 — Model downloads actually work
 
