@@ -18,6 +18,26 @@ V3 work was drafted as v1.0.4 but shipped under the **v1.0.5** tag —
 there is no v1.0.4 tag; the section below is labelled by the tag that
 shipped it.)
 
+## 1.7.1 — 2026-07-26 — Model downloads actually work
+
+One fix, and it's the big one: installing an AI model from
+Settings → AI works now.
+
+### Fixed
+
+- **Every model download was rejected before a single byte moved.**
+  The pre-download safety check asks the server how big each file is
+  and compares that against the built-in catalog — but it read the
+  answer from a field that is always zero for that kind of request, so
+  every model failed with "The model manifest may be stale." no matter
+  which one you picked. The catalog was never stale; the check was
+  reading the wrong number. It has been wrong since the model picker
+  first shipped, which means this is the first release where the
+  download path can actually run — the check now reads the size the
+  server really advertises, and all ten files in the catalog were
+  verified byte-for-byte against it. If a download misbehaves for you,
+  cancel and press Download again: it resumes where it left off. (I72)
+
 ## 1.7.0 — 2026-07-25 — Gemma without a token, a fixed add-friend screen, and a broad correctness pass
 
 A feature pass on the AI model picker and the add-a-friend screen, plus
