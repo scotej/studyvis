@@ -18,6 +18,28 @@ V3 work was drafted as v1.0.4 but shipped under the **v1.0.5** tag —
 there is no v1.0.4 tag; the section below is labelled by the tag that
 shipped it.)
 
+## 1.8.2 — 2026-07-26 — AI screen capture no longer fails on ordinary session starts
+
+### Fixed
+
+- **Starting a session with AI already enabled could throw a raw
+  "getDisplayMedia must be called from a user gesture handler" error and
+  silently kill the just-started on-device engine.** WebView2 (Windows) and
+  WKWebView (macOS) require every `getDisplayMedia()` call — not only the
+  first — to run inside an active user gesture, but the AI sample loop
+  acquired its long-lived screen stream from a React effect with no click in
+  its call stack, so the acquisition was rejected outright and the engine
+  that had just started was torn down as a result. A friend hitting this
+  would then separately see a misleading "AI isn't running yet, turn it on
+  in Settings → AI" from the AI chat dialog, even though AI genuinely was
+  on. Starting a session via the AI topic gate, flipping the Settings → AI
+  toggle mid-session, and retrying from the capture-permission overlay now
+  all acquire that stream at the moment of the actual click and hand it off
+  to the sample loop, instead of the loop acquiring it itself later with no
+  gesture to satisfy. The in-session AI status indicator also now correctly
+  flips to "error" when this happens, instead of continuing to read
+  "active" after AI had already died. (I76)
+
 ## 1.8.1 — 2026-07-26 — The AI engine now actually loads a model
 
 A same-day follow-up to 1.8.0: that release fixed the engine failing to

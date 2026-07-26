@@ -4,10 +4,13 @@ import {
   captureFace,
   captureScreen,
   CaptureError,
+  discardPendingScreenStream,
   FACE_FRAME_SIZE,
   FACE_FRAME_QUALITY,
+  preacquireScreenStream,
   SCREEN_FRAME_MAX_WIDTH,
   SCREEN_FRAME_QUALITY,
+  takePendingScreenStream,
   __resetCaptureRuntime,
   __resetScreenCaptureRuntime,
   __setCaptureRuntime,
@@ -24,6 +27,12 @@ import {
 // covered behind injectable runtimes. The tests exercise the orchestration
 // (dim routing, quality plumbing, error mapping, acquire/release pairing)
 // rather than the browser's encode path.
+
+async function flushMicrotasks(n = 10): Promise<void> {
+  for (let i = 0; i < n; i += 1) {
+    await Promise.resolve()
+  }
+}
 
 type FakeTrackOptions = {
   kind?: 'video' | 'audio'
@@ -320,5 +329,94 @@ describe('captureScreen', () => {
     expect(caught).toBeInstanceOf(CaptureError)
     expect((caught as CaptureError).code).toBe('screen_capture_no_video')
     expect(audioTrack.stop).toHaveBeenCalledTimes(1)
+  })
+})
+
+// V2-P9 gesture fix regression coverage: getDisplayMedia() must run inside
+// live transient user activation on WebView2/WKWebView — even the long-lived
+// stream sampleLoop's boot() re-acquires per session. boot() itself runs
+// from a useEffect with no gesture, so callers with a real gesture stash the
+// outcome here for boot()'s acquireScreenStream runtime hook to consume
+// instead of calling getDisplayMedia() itself outside gesture context.
+describe('preacquireScreenStream / pending stream handoff', () => {
+  beforeEach(() => {
+    __resetScreenCaptureRuntime()
+    discardPendingScreenStream()
+  })
+  afterEach(() => {
+    __resetScreenCaptureRuntime()
+    discardPendingScreenStream()
+  })
+
+  test('stashes a gesture-acquired stream for a later takePendingScreenStream()', async () => {
+    const track = makeFakeTrack()
+    const stream = makeFakeStream(track)
+    __setScreenCaptureRuntime({ getDisplayMedia: async () => stream })
+
+    preacquireScreenStream()
+    const pending = takePendingScreenStream()
+    expect(pending).not.toBeNull()
+    await expect(pending).resolves.toBe(stream)
+    // Consumed — a second take sees nothing left.
+    expect(takePendingScreenStream()).toBeNull()
+  })
+
+  test('stashes a denial as a mapped CaptureError, calling getDisplayMedia only once', async () => {
+    let calls = 0
+    __setScreenCaptureRuntime({
+      getDisplayMedia: async () => {
+        calls += 1
+        throw new DOMException('user denied', 'NotAllowedError')
+      },
+    })
+
+    preacquireScreenStream()
+    const pending = takePendingScreenStream()
+    expect(pending).not.toBeNull()
+    let caught: unknown
+    try {
+      await pending
+    } catch (err) {
+      caught = err
+    }
+    expect(caught).toBeInstanceOf(CaptureError)
+    expect((caught as CaptureError).code).toBe('screen_capture_denied')
+    expect(calls).toBe(1)
+  })
+
+  test('a second preacquire releases an earlier unconsumed stream (no leak on rapid re-toggle)', async () => {
+    const firstTrack = makeFakeTrack()
+    const firstStream = makeFakeStream(firstTrack)
+    const secondTrack = makeFakeTrack()
+    const secondStream = makeFakeStream(secondTrack)
+    let call = 0
+    __setScreenCaptureRuntime({
+      getDisplayMedia: async () => {
+        call += 1
+        return call === 1 ? firstStream : secondStream
+      },
+    })
+
+    preacquireScreenStream()
+    // Nobody consumes the first attempt before a rapid second fires.
+    preacquireScreenStream()
+    await flushMicrotasks()
+    expect(firstTrack.stop).toHaveBeenCalledTimes(1)
+
+    const pending = takePendingScreenStream()
+    await expect(pending).resolves.toBe(secondStream)
+    expect(secondTrack.stop).not.toHaveBeenCalled()
+  })
+
+  test('discardPendingScreenStream releases an unconsumed stream', async () => {
+    const track = makeFakeTrack()
+    const stream = makeFakeStream(track)
+    __setScreenCaptureRuntime({ getDisplayMedia: async () => stream })
+
+    preacquireScreenStream()
+    discardPendingScreenStream()
+    await flushMicrotasks()
+    expect(track.stop).toHaveBeenCalledTimes(1)
+    expect(takePendingScreenStream()).toBeNull()
   })
 })

@@ -10,16 +10,20 @@ import {
   BACKOFF_RECOVER_AFTER,
   BATTERY_POLL_INTERVAL_MS,
   CaptureError,
+  discardPendingScreenStream,
   initialBackoffState,
   nextBackoffState,
+  preacquireScreenStream,
   SLOW_TICK_FACTOR,
   __resetBatteryRuntime,
   __resetCaptureRuntime,
   __resetFocusStoreThresholdReader,
   __resetSampleLoopRuntime,
+  __resetScreenCaptureRuntime,
   __resetSidecarRuntime,
   __setCaptureRuntime,
   __setSampleLoopRuntime,
+  __setScreenCaptureRuntime,
   getSampleLoopRuntime,
   initialScoreMachineState,
   startSampleLoop,
@@ -940,6 +944,33 @@ describe('startSampleLoop — capture errors', () => {
     await handle.stop()
   })
 
+  test('a non-denied boot-time acquire failure reports onCaptureError as fatal', async () => {
+    const clock = new FakeClock()
+    const fetchMock = vi.fn()
+    const onCaptureError = vi.fn()
+    __setSampleLoopRuntime(
+      buildSampleLoopRuntime({
+        clock,
+        fetch: fetchMock as never,
+        acquireScreenStream: async () => {
+          throw new CaptureError('screen_capture_unavailable', 'nope')
+        },
+      })
+    )
+    const handle = startSampleLoop({
+      getTopic: () => 't',
+      modelId: 'test-model',
+      getFaceTrack: () => makeFakeTrack(),
+      onCaptureError,
+    })
+    await flushMicrotasks(10)
+    // fatal === true: this is the boot()-time acquire, which tears the loop
+    // (and the just-started sidecar) down — distinct from a tick-time
+    // transient failure, which leaves the loop running.
+    expect(onCaptureError).toHaveBeenCalledWith(expect.any(CaptureError), true)
+    await handle.stop()
+  })
+
   test('non-denied CaptureError calls onCaptureError but continues scheduling', async () => {
     const clock = new FakeClock()
     const fetchMock = vi.fn(async () => judgmentResponse('on_task'))
@@ -973,6 +1004,8 @@ describe('startSampleLoop — capture errors', () => {
     await flushMicrotasks(10)
     await clock.advance(5000)
     expect(onCaptureError).toHaveBeenCalledTimes(1)
+    // fatal === false: a tick-time capture error leaves the loop running.
+    expect(onCaptureError).toHaveBeenCalledWith(expect.any(CaptureError), false)
     expect(fetchMock).not.toHaveBeenCalled()
     // Next tick succeeds.
     await clock.advance(5000)
@@ -1051,6 +1084,56 @@ describe('startSampleLoop — capture errors', () => {
     expect(onCaptureError).not.toHaveBeenCalled()
     expect(useFocusStore.getState().totalSamples).toBe(0)
     await handle.stop()
+  })
+})
+
+// V2-P9 gesture fix — regression coverage for the actual wiring between
+// captureScreen.ts's pending-stream stash and sampleLoop.ts's default
+// runtime. boot() calls `runtime.acquireScreenStream()`; the DEFAULT
+// implementation (used any time a caller doesn't override it, i.e.
+// production) must prefer a gesture-acquired stash over calling
+// getDisplayMedia() itself with no gesture in its call stack.
+describe('startSampleLoop — default runtime consumes a pre-acquired screen stream', () => {
+  beforeEach(() => {
+    __resetSampleLoopRuntime()
+    __resetScreenCaptureRuntime()
+    discardPendingScreenStream()
+  })
+  afterEach(() => {
+    __resetSampleLoopRuntime()
+    __resetScreenCaptureRuntime()
+    discardPendingScreenStream()
+  })
+
+  test('the default acquireScreenStream hook resolves a preacquireScreenStream() stash without touching navigator.mediaDevices', async () => {
+    const stream = makeFakeScreenStream()
+    __setScreenCaptureRuntime({ getDisplayMedia: async () => stream })
+    preacquireScreenStream()
+    // The stash is already in flight; nothing after this point should need
+    // the screen-capture runtime again (defaultRuntime falls back to the
+    // real navigator.mediaDevices.getDisplayMedia, unavailable in this
+    // node-env test, if it doesn't find the stash).
+    __resetScreenCaptureRuntime()
+    const resolved = await getSampleLoopRuntime().acquireScreenStream()
+    expect(resolved).toBe(stream)
+  })
+
+  test('a stashed denial surfaces as the same CaptureError, not a fresh getDisplayMedia() call', async () => {
+    __setScreenCaptureRuntime({
+      getDisplayMedia: async () => {
+        throw new DOMException('user denied', 'NotAllowedError')
+      },
+    })
+    preacquireScreenStream()
+    __resetScreenCaptureRuntime()
+    let caught: unknown
+    try {
+      await getSampleLoopRuntime().acquireScreenStream()
+    } catch (err) {
+      caught = err
+    }
+    expect(caught).toBeInstanceOf(CaptureError)
+    expect((caught as CaptureError).code).toBe('screen_capture_denied')
   })
 })
 

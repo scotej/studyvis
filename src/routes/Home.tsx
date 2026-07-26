@@ -25,6 +25,7 @@ import { toast } from 'sonner'
 import { UpdateReadyBanner } from '@/components/UpdateReadyBanner'
 import { Button } from '@/components/ui/button'
 import { tokens } from '@/design/tokens'
+import { preacquireScreenStream, useModelStore } from '@/features/ai'
 import {
   AddFriendDialog,
   ContactImportDialog,
@@ -296,6 +297,16 @@ export function Home() {
       const req = pendingStart
       setPendingStart(undefined)
       if (!req) return
+      // V2-P9 gesture fix — this submit click is the only place a
+      // getDisplayMedia() call for the upcoming session's AI screen capture
+      // can run inside real transient activation: sampleLoop's boot() (a
+      // useEffect, once SessionView mounts) has no gesture of its own. Only
+      // bother when a model is actually active — otherwise boot() never
+      // runs and nothing would consume the pre-acquired stream. Must be the
+      // very first thing this handler does, before any `await`.
+      if (useModelStore.getState().activeModelId) {
+        void preacquireScreenStream()
+      }
       // Seed the one-shot topic BEFORE the session flips to active so
       // `begin()` writes it into both initialDeclaredTopic (→
       // sessions.declared_topic) and the live declaredStudyTopic.
