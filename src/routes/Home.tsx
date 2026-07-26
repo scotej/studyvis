@@ -93,6 +93,12 @@ export function Home() {
     useState<ContactImportSource>('remote')
   const [presence, setPresence] = useState<PresenceMap>({})
   const [view, setView] = useState<View>('main')
+  // I74 — category the main-view Settings opens on. Normally undefined (the
+  // Settings default); the friends-list limited-connection hint deep-links to
+  // 'network'. Reset on every open so a hint-driven visit doesn't stick.
+  const [settingsCategory, setSettingsCategory] = useState<
+    SettingsCategoryId | undefined
+  >(undefined)
   // #47 B2 — Settings hosted over a live session (null = closed). Distinct
   // from `view`: SessionView stays mounted underneath so media, peers, and
   // the AI loop keep running. Cleared whenever the session stops being
@@ -439,7 +445,10 @@ export function Home() {
       <>
         {/* #47 B1 follow-up — see the report branch above. */}
         <PendingInvites onAccept={handleInviteAccepted} />
-        <Settings onClose={() => setView('main')} />
+        <Settings
+          onClose={() => setView('main')}
+          initialCategory={settingsCategory}
+        />
         {tail}
       </>
     )
@@ -460,7 +469,10 @@ export function Home() {
           <Button
             variant="ghost"
             size="sm"
-            onClick={() => setView('settings')}
+            onClick={() => {
+              setSettingsCategory(undefined)
+              setView('settings')
+            }}
             aria-label={strings.settings.openAriaLabel}
           >
             <Settings2Icon /> {strings.settings.heading}
@@ -478,6 +490,10 @@ export function Home() {
           presence={presence}
           onAddFriend={() => setAddOpen(true)}
           onInvite={handleInvite}
+          onOpenNetworkSettings={() => {
+            setSettingsCategory('network')
+            setView('settings')
+          }}
         />
         <AddFriendDialog
           open={addOpen}

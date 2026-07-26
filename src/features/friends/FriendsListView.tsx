@@ -6,21 +6,29 @@ import { cn } from '@/lib/utils'
 import { strings } from '@/strings'
 import type { Friend } from '@/lib/db/friends'
 
+import type { FriendPresenceState } from './presence'
 import { shortPubkey } from './shortPubkey'
 
 export type FriendsListViewProps = {
   friends: ReadonlyArray<Friend>
-  isOnline: (edPubkeyHex: string) => boolean
+  // I74 — the row renders richer state than a boolean: online (direct),
+  // online-limited (relay heartbeats only — sessions likely won't connect),
+  // and offline with session-scoped last-seen recency.
+  presenceOf: (edPubkeyHex: string) => FriendPresenceState
   onAddFriend: () => void
   onInvite: (friend: Friend) => void
+  // I74 — deep-link into Settings → Network from the limited-connection hint.
+  // Optional so Storybook can render the hint without a live settings shell.
+  onOpenNetworkSettings?: () => void
   now?: number
 }
 
 export function FriendsListView({
   friends,
-  isOnline,
+  presenceOf,
   onAddFriend,
   onInvite,
+  onOpenNetworkSettings,
   now,
 }: FriendsListViewProps) {
   if (friends.length === 0) {
@@ -58,6 +66,16 @@ export function FriendsListView({
     )
   }
 
+  const states = new Map(
+    friends.map((friend) => [
+      friend.ed_pubkey_hex,
+      presenceOf(friend.ed_pubkey_hex),
+    ])
+  )
+  const anyLimited = [...states.values()].some(
+    (s) => s.state === 'online' && s.limited
+  )
+
   return (
     <section
       aria-labelledby="friends-heading"
@@ -75,12 +93,20 @@ export function FriendsListView({
           <PlusIcon /> {strings.friends.list.addCta}
         </Button>
       </header>
+      {anyLimited ? (
+        <LimitedConnectionHint onOpen={onOpenNetworkSettings} />
+      ) : null}
       <ul className="divide-y divide-border-subtle rounded-lg border border-border-default bg-bg-surface">
         {friends.map((friend) => (
           <FriendRow
             key={friend.ed_pubkey_hex}
             friend={friend}
-            online={isOnline(friend.ed_pubkey_hex)}
+            presence={
+              states.get(friend.ed_pubkey_hex) ?? {
+                state: 'offline',
+                lastSeenAt: null,
+              }
+            }
             now={now}
             onInvite={() => onInvite(friend)}
           />
@@ -90,27 +116,46 @@ export function FriendsListView({
   )
 }
 
+// I74 — one hint for the whole list (not per row): the remedy is global
+// (configure a TURN relay), and repeating it per friend would drown the list.
+function LimitedConnectionHint({ onOpen }: { onOpen?: () => void }) {
+  const copy = strings.friends.list.limitedHint
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border-default bg-bg-surface px-4 py-3">
+      <p className="min-w-0 flex-1 text-xs text-text-secondary">{copy.body}</p>
+      {onOpen ? (
+        <Button variant="outline" size="sm" onClick={onOpen}>
+          {copy.cta}
+        </Button>
+      ) : null}
+    </div>
+  )
+}
+
 type FriendRowProps = {
   friend: Friend
-  online: boolean
+  presence: FriendPresenceState
   now?: number
   onInvite: () => void
 }
 
-function FriendRow({ friend, online, now, onInvite }: FriendRowProps) {
+function FriendRow({ friend, presence, now, onInvite }: FriendRowProps) {
   const name = friend.display_name?.trim() || shortPubkey(friend.ed_pubkey_hex)
   const last = formatLastTogether(friend.last_studied_with, now)
+  const online = presence.state === 'online'
+  const limited = presence.state === 'online' && presence.limited
   return (
     <li className="group grid grid-cols-[auto_1fr_auto] items-center gap-x-4 gap-y-1 px-5 py-4">
-      <PresenceDot online={online} />
+      <PresenceDot online={online} limited={limited} />
       <div className="flex min-w-0 flex-col">
         <span className="truncate text-base font-medium text-text-primary">
           {name}
         </span>
-        <span className="text-xs text-text-secondary">
-          {online
-            ? strings.friends.list.available
-            : strings.friends.list.offline}
+        <span
+          className="text-xs text-text-secondary"
+          title={limited ? strings.friends.list.limitedTitle : undefined}
+        >
+          {presenceLabel(presence, now)}
         </span>
       </div>
       <div className="flex items-center justify-end gap-4">
@@ -138,14 +183,53 @@ function FriendRow({ friend, online, now, onInvite }: FriendRowProps) {
   )
 }
 
-function PresenceDot({ online }: { online: boolean }) {
+// The label carries the full state in text (never color alone, DESIGN §11):
+// Available / Available · limited connection / Offline · seen … ago / Offline.
+function presenceLabel(presence: FriendPresenceState, now?: number): string {
+  const copy = strings.friends.list
+  if (presence.state === 'online') {
+    return presence.limited ? copy.availableLimited : copy.available
+  }
+  return formatOfflineSeen(presence.lastSeenAt, now)
+}
+
+// Session-scoped recency: the map only lives while the app runs, so anything
+// beyond a day is indistinguishable from "before I opened the app" — show the
+// plain label rather than a misleading large number.
+function formatOfflineSeen(
+  lastSeenAt: number | null,
+  now: number | undefined
+): string {
+  const copy = strings.friends.list
+  if (lastSeenAt === null) return copy.offline
+  const reference = now ?? Date.now()
+  const deltaMs = Math.max(0, reference - lastSeenAt)
+  const minute = 60 * 1000
+  const hour = 60 * minute
+  const day = 24 * hour
+  if (deltaMs >= day) return copy.offline
+  if (deltaMs < 2 * minute) return copy.offlineSeen.justNow
+  if (deltaMs < hour)
+    return copy.offlineSeen.minutesAgo(Math.floor(deltaMs / minute))
+  return copy.offlineSeen.hoursAgo(Math.floor(deltaMs / hour))
+}
+
+function PresenceDot({
+  online,
+  limited,
+}: {
+  online: boolean
+  limited: boolean
+}) {
   return (
     <span
       aria-hidden="true"
       className={cn(
         'inline-flex size-2.5 shrink-0 rounded-full',
         online
-          ? 'bg-status-online'
+          ? limited
+            ? 'bg-status-warning'
+            : 'bg-status-online'
           : 'border-2 border-status-offline bg-transparent'
       )}
     />
