@@ -21,7 +21,7 @@ shipped it.)
 ## 1.8.1 — 2026-07-26 — The AI engine now actually loads a model
 
 A same-day follow-up to 1.8.0: that release fixed the engine failing to
-*start* (I73); this fixes the very next link in the same chain — the engine
+_start_ (I73); this fixes the very next link in the same chain — the engine
 starting, then refusing to load a model.
 
 ### Fixed
