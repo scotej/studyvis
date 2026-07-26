@@ -2,11 +2,25 @@ export {
   useSidecarStore,
   DEFAULT_CTX_SIZE,
   ERR_AI_DISABLED,
+  ERR_ENGINE_NOT_INSTALLED,
   HEALTH_POLL_INTERVAL_MS,
   __setSidecarRuntime,
   __resetSidecarRuntime,
 } from './sidecar'
 export type { SidecarRuntime, SidecarStatus } from './sidecar'
+
+export {
+  getEngineRuntime,
+  __setEngineRuntime,
+  __resetEngineRuntime,
+} from './engine'
+export type {
+  EngineInfo,
+  EngineSource,
+  EnginePhase,
+  EngineProgressEvent,
+  EngineRuntime,
+} from './engine'
 
 export {
   SUPPORTED_MODELS,

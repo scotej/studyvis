@@ -33,6 +33,12 @@ rusqlite = { version = "0.39", features = ["bundled"] }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream"] }
 sha2 = "0.10"
 futures-util = "0.3"
+# I73 engine auto-install — unpack the pinned llama.cpp release archives
+# (mac/linux .tar.gz, windows .zip). All three compile everywhere so the
+# extraction code and its tests run on both CI legs.
+flate2 = "1"
+tar = "0.4"
+zip = { version = "8", default-features = false, features = ["deflate"] }
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-global-shortcut = "2"

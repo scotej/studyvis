@@ -22,6 +22,7 @@ import {
   effectiveIntervalSec,
   FALLBACK_SAMPLE_INTERVAL_SEC,
   getDownloadRuntime,
+  getEngineRuntime,
   getHfTokenRuntime,
   MAX_SAMPLE_INTERVAL_SEC,
   ModelPickerContainer,
@@ -30,13 +31,20 @@ import {
   useSidecarStore,
   WARNING_THRESHOLD_MAX,
   WARNING_THRESHOLD_MIN,
+  type EngineInfo,
+  type EngineProgressEvent,
 } from '@/features/ai'
+import { useSessionStore } from '@/stores/sessionStore'
 import {
   isCaptureDisplaysMode,
   useSettingsStore,
   type CaptureDisplaysMode,
 } from '@/stores/settingsStore'
 import { strings } from '@/strings'
+
+function formatMb(bytes: number): string {
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
 
 // A3 — the off-task-sensitivity slider's lowest user-reachable value. The
 // programmatic floor CONFIDENCE_FLOOR_MIN is 0, which is the special "gate
@@ -72,6 +80,9 @@ export function AiCategory() {
   const setDebugLogEnabled = useSettingsStore((s) => s.setDebugLogEnabled)
   const captureDisplays = useSettingsStore((s) => s.values.captureDisplays)
   const setCaptureDisplays = useSettingsStore((s) => s.setCaptureDisplays)
+  const engineAutoInstall = useSettingsStore((s) => s.values.engineAutoInstall)
+  const setEngineAutoInstall = useSettingsStore((s) => s.setEngineAutoInstall)
+  const sessionActive = useSessionStore((s) => s.status === 'active')
   const copy = strings.settings.ai
 
   const activeModelId = useModelStore((s) => s.activeModelId)
@@ -92,6 +103,47 @@ export function AiCategory() {
   const [toggling, setToggling] = useState(false)
   const [restarting, setRestarting] = useState(false)
   const [tokenPresent, setTokenPresent] = useState<boolean | null>(null)
+  const [engineInfo, setEngineInfo] = useState<EngineInfo | null>(null)
+  const [engineProgress, setEngineProgress] =
+    useState<EngineProgressEvent | null>(null)
+  const [installingEngine, setInstallingEngine] = useState(false)
+
+  const refreshEngineInfo = useCallback(async () => {
+    try {
+      setEngineInfo(await getEngineRuntime().info())
+    } catch {
+      setEngineInfo(null)
+    }
+  }, [])
+
+  // I73 — engine presence + live install progress. The subscription stays
+  // mounted while AI is on so a session-triggered auto-install shows its
+  // progress here too, not only installs started from this pane.
+  useEffect(() => {
+    if (!aiFeaturesEnabled) return
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- one-shot engine presence check: refreshEngineInfo awaits the Tauri command before any setState fires (same suppression as refreshTokenPresence above).
+    void refreshEngineInfo()
+    let unlisten: (() => void) | null = null
+    let disposed = false
+    void getEngineRuntime()
+      .subscribeProgress((event) => {
+        if (event.phase === 'done' || event.phase === 'failed') {
+          setEngineProgress(null)
+          void refreshEngineInfo()
+        } else {
+          setEngineProgress(event)
+        }
+      })
+      .then((fn) => {
+        if (disposed) fn()
+        else unlisten = fn
+      })
+      .catch(() => {})
+    return () => {
+      disposed = true
+      unlisten?.()
+    }
+  }, [aiFeaturesEnabled, refreshEngineInfo])
 
   const refreshTokenPresence = useCallback(async () => {
     try {
@@ -200,6 +252,59 @@ export function AiCategory() {
     }
   }, [activeModelId, copy.sidecar])
 
+  // Reinstall stops a running sidecar first (Rust side does it too — Windows
+  // can't swap loaded DLLs), so mid-session it would kill the live AI loop;
+  // the button is locked during sessions like the model picker's actions.
+  const handleInstallEngine = useCallback(async () => {
+    setInstallingEngine(true)
+    try {
+      await getEngineRuntime().install()
+      await refreshEngineInfo()
+      toast.success(copy.engine.installedToast)
+    } catch {
+      // The row's help shows the persisted last_error after refresh; the
+      // toast stays calm instead of relaying a raw backend string.
+      await refreshEngineInfo()
+      toast.error(copy.engine.installErrorFallback)
+    } finally {
+      setInstallingEngine(false)
+    }
+  }, [copy.engine, refreshEngineInfo])
+
+  const engineBusy =
+    installingEngine ||
+    engineProgress !== null ||
+    (engineInfo?.installing ?? false)
+
+  const engineHelp = (() => {
+    if (engineProgress) {
+      if (engineProgress.phase === 'verifying') return copy.engine.helpVerifying
+      if (engineProgress.phase === 'extracting')
+        return copy.engine.helpExtracting
+      return engineProgress.total_bytes > 0
+        ? copy.engine.helpDownloading(
+            formatMb(engineProgress.bytes_received),
+            formatMb(engineProgress.total_bytes)
+          )
+        : copy.engine.helpDownloadingIndeterminate(
+            formatMb(engineProgress.bytes_received)
+          )
+    }
+    if (!engineInfo) return copy.engine.helpMissingManual
+    if (!engineInfo.supported) return copy.engine.helpUnsupported
+    if (engineInfo.installing) return copy.engine.helpExtracting
+    if (engineInfo.installed) {
+      return engineInfo.source === 'bundled'
+        ? copy.engine.helpBundled(engineInfo.version)
+        : copy.engine.helpManaged(engineInfo.version)
+    }
+    if (engineInfo.last_error)
+      return copy.engine.helpInstallError(engineInfo.last_error)
+    return engineAutoInstall
+      ? copy.engine.helpMissingAuto
+      : copy.engine.helpMissingManual
+  })()
+
   // Clamp the displayed value through the SAME function the loop uses so the
   // slider can't show a value below `min` (a stale override saved on a faster
   // model, then switched to a slower one) and what the user sees matches
@@ -242,6 +347,46 @@ export function AiCategory() {
           <div className={settingsRowChrome}>
             <ModelPickerContainer />
           </div>
+
+          <SettingsRow
+            label={copy.engine.label}
+            help={
+              // Progress is conveyed as text (no spinner, DESIGN-SYSTEM §10);
+              // the live region announces phase changes to screen readers.
+              <span role="status" aria-live="polite">
+                {engineHelp}
+              </span>
+            }
+            control={
+              engineInfo?.supported === false ? undefined : (
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => void handleInstallEngine()}
+                  disabled={engineBusy || sessionActive}
+                  aria-label={copy.engine.installAria}
+                >
+                  {engineInfo?.installed
+                    ? copy.engine.reinstallCta
+                    : copy.engine.installCta}
+                </Button>
+              )
+            }
+          />
+
+          <SettingsRow
+            label={copy.engine.auto.label}
+            help={copy.engine.auto.help}
+            control={
+              <Switch
+                checked={engineAutoInstall}
+                onCheckedChange={(checked) =>
+                  void setEngineAutoInstall(Boolean(checked))
+                }
+                aria-label={copy.engine.auto.ariaLabel}
+              />
+            }
+          />
 
           <SettingsRow
             label={copy.sampleInterval.label}

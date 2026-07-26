@@ -39,6 +39,7 @@ export type SidecarRuntime = {
     modelPath: string
     mmprojPath: string | null
     ctxSize: number
+    engineAutoInstall: boolean
   }) => Promise<number>
   stop: () => Promise<void>
   status: () => Promise<SidecarStatus>
@@ -46,17 +47,20 @@ export type SidecarRuntime = {
   setInterval: (handler: () => void, ms: number) => unknown
   clearInterval: (handle: unknown) => void
   getAiFeaturesEnabled: () => boolean
+  getEngineAutoInstall: () => boolean
 }
 
 async function defaultStart(params: {
   modelPath: string
   mmprojPath: string | null
   ctxSize: number
+  engineAutoInstall: boolean
 }): Promise<number> {
   return invoke<number>('sidecar_start', {
     modelPath: params.modelPath,
     mmprojPath: params.mmprojPath ?? null,
     ctxSize: params.ctxSize,
+    engineAutoInstall: params.engineAutoInstall,
   })
 }
 
@@ -100,6 +104,8 @@ const defaultRuntime: SidecarRuntime = {
   },
   getAiFeaturesEnabled: () =>
     useSettingsStore.getState().values.aiFeaturesEnabled,
+  getEngineAutoInstall: () =>
+    useSettingsStore.getState().values.engineAutoInstall,
 }
 
 let activeRuntime: SidecarRuntime = defaultRuntime
@@ -137,6 +143,10 @@ export const DEFAULT_CTX_SIZE = 4096
 // `lastError` so the caller can show a "Enable AI in Settings" hint without
 // needing to read settings state itself.
 export const ERR_AI_DISABLED = 'ai_features_disabled'
+// I73 — Rust's sidecar_start rejects with exactly this token when no engine
+// binary resolves and auto-install is off. Compare with strict equality (the
+// backend rejects with plain strings, never Error instances).
+export const ERR_ENGINE_NOT_INSTALLED = 'engine_not_installed'
 
 export const useSidecarStore = create<SidecarState>((set, get) => ({
   status: 'idle',
@@ -163,7 +173,12 @@ export const useSidecarStore = create<SidecarState>((set, get) => ({
     }
     set({ status: 'starting', lastError: null })
     try {
-      const port = await activeRuntime.start({ modelPath, mmprojPath, ctxSize })
+      const port = await activeRuntime.start({
+        modelPath,
+        mmprojPath,
+        ctxSize,
+        engineAutoInstall: activeRuntime.getEngineAutoInstall(),
+      })
       // PR-13 — a stop() may have run while we awaited (session teardown, a
       // localStream re-acquire, or a model change firing the sample-loop effect
       // cleanup). It would have transitioned us out of 'starting'; don't clobber

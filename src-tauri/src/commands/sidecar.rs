@@ -10,8 +10,16 @@
 //! - The `generation` counter + `shutting_down` flag (below) keep the
 //!   crash-restart watcher honest: a stale watcher must never re-incarnate a
 //!   process that a newer start or an exit already superseded.
-//! - `TARGET_TRIPLE` / `SIDECAR_NAME` couple to `scripts/fetch-llama-server.sh`
-//!   output and `tauri.conf.json`'s `externalBin` + `resources` globs.
+//! - `TARGET_TRIPLE` couples to `scripts/fetch-llama-server.sh` output and
+//!   `tauri.conf.json`'s `externalBin` + `resources` globs.
+//! - I73: the binary is resolved to an absolute path by
+//!   `engine::resolve_candidates` and spawned via `shell().command()`. The
+//!   old `shell().sidecar("binaries/llama-server")` call resolved
+//!   `<exe_dir>/binaries/llama-server`, but tauri-build and the bundler both
+//!   strip the directory prefix and place the file at `<exe_dir>/llama-server`
+//!   — every in-app spawn failed with ENOENT since V2-P1. When no candidate
+//!   resolves, `sidecar_start` auto-installs the pinned engine (settings-gated)
+//!   before erroring.
 //!
 //! JS drives this via `sidecar_start` / `sidecar_stop` / `sidecar_status`
 //! (`src/features/ai/sidecar.ts`) and talks to the spawned server directly
@@ -38,12 +46,17 @@ use crate::db::data_dir;
 // dylibs/dlls land. tauri_build::build() emits this from cargo's TARGET, so it
 // always names the triple actually being built. The hand-written #[cfg] arms
 // this replaces left the const undefined on any unlisted triple (aarch64
-// Linux, the dev host) — an E0425 raised far from its cause. The lockstep that
-// matters is unaffected: tauri-build still fails the build outright when
-// binaries/llama-server-<triple> is missing.
-const TARGET_TRIPLE: &str = env!("TAURI_ENV_TARGET_TRIPLE");
+// Linux, the dev host) — an E0425 raised far from its cause. The build-time
+// gate is softer since I73: build.rs writes a placeholder for debug-profile
+// builds (release-profile builds still fail outright when
+// binaries/llama-server-<triple> is missing).
+pub(crate) const TARGET_TRIPLE: &str = env!("TAURI_ENV_TARGET_TRIPLE");
 
-const SIDECAR_NAME: &str = "binaries/llama-server";
+// Exact-match sentinel for the JS side (mirrors ERR_AI_DISABLED in
+// src/features/ai/sidecar.ts): no engine candidate resolves and auto-install
+// is off, so the UI should show the calm not-installed state, not a crash.
+pub(crate) const ENGINE_NOT_INSTALLED: &str = "engine_not_installed";
+
 const LOG_DIR: &str = "logs";
 const LOG_FILE: &str = "llama-server.log";
 // Cap the diagnostic log at 5 MiB, keeping a single previous generation as
@@ -144,16 +157,20 @@ pub struct SidecarStatus {
 pub async fn sidecar_start<R: Runtime>(
     app: AppHandle<R>,
     state: State<'_, SidecarState>,
+    engine: State<'_, super::engine::EngineState>,
     model_path: String,
     mmproj_path: Option<String>,
     ctx_size: u32,
+    engine_auto_install: bool,
 ) -> Result<u16, String> {
     let arc = state.0.clone();
-    let mut guard = arc.lock().await;
-    if guard.child.is_some() {
-        return guard
-            .port
-            .ok_or_else(|| "sidecar running but no port recorded".to_string());
+    {
+        let guard = arc.lock().await;
+        if guard.child.is_some() {
+            return guard
+                .port
+                .ok_or_else(|| "sidecar running but no port recorded".to_string());
+        }
     }
 
     if !PathBuf::from(&model_path).is_file() {
@@ -165,24 +182,37 @@ pub async fn sidecar_start<R: Runtime>(
         }
     }
 
+    // Engine presence check OUTSIDE the sidecar lock: a first-run download
+    // takes a while and sidecar_status polls must stay responsive. The
+    // engine module serializes concurrent installs itself.
+    if super::engine::resolve_candidates(&app).is_empty() {
+        if !engine_auto_install {
+            return Err(ENGINE_NOT_INSTALLED.to_string());
+        }
+        super::engine::ensure_installed(&app, &engine)
+            .await
+            .map_err(|e| format!("engine install: {e}"))?;
+    }
+
+    let mut guard = arc.lock().await;
+    // Re-check after the unlocked window — a concurrent start may have won.
+    if guard.child.is_some() {
+        return guard
+            .port
+            .ok_or_else(|| "sidecar running but no port recorded".to_string());
+    }
+
     let port = pick_unused_port()?;
     guard.generation = guard.generation.wrapping_add(1);
     let generation = guard.generation;
-    let runtime_dir = resolve_runtime_dir(&app)?;
     let log_path = ensure_log_path(&app)?;
     // Roll the log before opening for append, while it has no open writer (only
     // one sidecar runs at a time). Keeps the diagnostic log size-bounded (D7).
     rotate_log_if_needed(&log_path, LOG_MAX_BYTES);
     let log_file = open_log_file(&log_path)?;
 
-    let (rx, child) = spawn_llama(
-        &app,
-        &model_path,
-        mmproj_path.as_deref(),
-        ctx_size,
-        port,
-        runtime_dir.as_deref(),
-    )?;
+    let (rx, child) =
+        spawn_with_fallback(&app, &model_path, mmproj_path.as_deref(), ctx_size, port)?;
 
     guard.child = Some(child);
     guard.port = Some(port);
@@ -231,8 +261,9 @@ fn take_child_and_wipe(guard: &mut SidecarInner) -> Option<CommandChild> {
     child
 }
 
-#[tauri::command]
-pub async fn sidecar_stop(state: State<'_, SidecarState>) -> Result<(), String> {
+// Shared by sidecar_stop and engine_install (a reinstall must not race a
+// running child — Windows can't replace loaded DLLs).
+pub(crate) async fn stop_now(state: &SidecarState) -> Result<(), String> {
     let arc = state.0.clone();
     let mut guard = arc.lock().await;
     let child = take_child_and_wipe(&mut guard);
@@ -243,6 +274,11 @@ pub async fn sidecar_stop(state: State<'_, SidecarState>) -> Result<(), String> 
             .map_err(|e| format!("kill llama-server: {e}"))?;
     }
     Ok(())
+}
+
+#[tauri::command]
+pub async fn sidecar_stop(state: State<'_, SidecarState>) -> Result<(), String> {
+    stop_now(&state).await
 }
 
 // model_remove's pre-delete check: when the running sidecar is serving a
@@ -411,30 +447,97 @@ const N_GPU_LAYERS: &str = "99";
 #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
 const N_GPU_LAYERS: &str = "0";
 
+// Try every resolved engine binary in preference order (bundled, then
+// managed). A bundled binary that fails to spawn — deleted, wrong arch,
+// truncated — falls through to the managed install instead of surfacing an
+// error; the fallback covers spawn failures only, a binary that starts and
+// then crash-loops still ends at the watcher's restart budget.
+fn spawn_with_fallback<R: Runtime>(
+    app: &AppHandle<R>,
+    model_path: &str,
+    mmproj_path: Option<&str>,
+    ctx_size: u32,
+    port: u16,
+) -> Result<(tauri::async_runtime::Receiver<CommandEvent>, CommandChild), String> {
+    let candidates = super::engine::resolve_candidates(app);
+    if candidates.is_empty() {
+        return Err(ENGINE_NOT_INSTALLED.to_string());
+    }
+    let mut last_err = String::new();
+    for (source, binary) in candidates {
+        let runtime_dir = match source {
+            // Companion dylibs/dlls that tauri bundles under Resources/.
+            super::engine::EngineSource::Bundled => resolve_runtime_dir(app).ok().flatten(),
+            // The managed install keeps libraries next to the binary, where
+            // @loader_path / $ORIGIN already resolve them; prepending the dir
+            // anyway keeps both sources on one code path.
+            super::engine::EngineSource::Managed => binary.parent().map(Path::to_path_buf),
+        };
+        match spawn_llama(
+            app,
+            &binary,
+            model_path,
+            mmproj_path,
+            ctx_size,
+            port,
+            runtime_dir.as_deref(),
+        ) {
+            Ok(pair) => return Ok(pair),
+            Err(e) => last_err = e,
+        }
+    }
+    Err(append_windows_dll_hint(last_err))
+}
+
+// llama-server.exe links msvcp140/vcruntime140 (the VC++ redistributable,
+// not shipped in the llama.cpp zip and not an OS component). When a spawn
+// fails on a machine without it, name the actual fix instead of leaving a
+// bare CreateProcess error.
+#[cfg(target_os = "windows")]
+fn append_windows_dll_hint(err: String) -> String {
+    let sysroot = std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".to_string());
+    let vcruntime = Path::new(&sysroot)
+        .join("System32")
+        .join("vcruntime140.dll");
+    if vcruntime.exists() {
+        err
+    } else {
+        format!(
+            "{err}; the Microsoft Visual C++ runtime is missing — install it from https://aka.ms/vs/17/release/vc_redist.x64.exe and try again"
+        )
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn append_windows_dll_hint(err: String) -> String {
+    err
+}
+
 fn spawn_llama<R: Runtime>(
     app: &AppHandle<R>,
+    binary: &Path,
     model_path: &str,
     mmproj_path: Option<&str>,
     ctx_size: u32,
     port: u16,
     runtime_dir: Option<&Path>,
 ) -> Result<(tauri::async_runtime::Receiver<CommandEvent>, CommandChild), String> {
-    let mut command = app
-        .shell()
-        .sidecar(SIDECAR_NAME)
-        .map_err(|e| format!("locate sidecar {SIDECAR_NAME}: {e}"))?
-        .args([
-            "--host",
-            "127.0.0.1",
-            "--port",
-            &port.to_string(),
-            "--ctx-size",
-            &ctx_size.to_string(),
-            "--n-gpu-layers",
-            N_GPU_LAYERS,
-            "--model",
-            model_path,
-        ]);
+    // shell().command() with an absolute path — Command::new sets the same
+    // piped stdio + CREATE_NO_WINDOW as the sidecar constructor, minus the
+    // exe-relative resolution that I73 showed never matched where the binary
+    // actually lands.
+    let mut command = app.shell().command(binary).args([
+        "--host",
+        "127.0.0.1",
+        "--port",
+        &port.to_string(),
+        "--ctx-size",
+        &ctx_size.to_string(),
+        "--n-gpu-layers",
+        N_GPU_LAYERS,
+        "--model",
+        model_path,
+    ]);
     if let Some(p) = mmproj_path {
         command = command.args(["--mmproj", p]);
     }
@@ -482,7 +585,7 @@ fn spawn_llama<R: Runtime>(
     }
     command
         .spawn()
-        .map_err(|e| format!("spawn llama-server: {e}"))
+        .map_err(|e| format!("spawn {}: {e}", binary.display()))
 }
 
 // Consecutive respawns that each died before MIN_HEALTHY_UPTIME accumulate
@@ -604,18 +707,10 @@ async fn watch<R: Runtime>(
                 return;
             }
         };
-        let runtime_dir = match resolve_runtime_dir(&app) {
-            Ok(d) => d,
-            Err(_) => None,
-        };
-        let spawn_result = spawn_llama(
-            &app,
-            &model_path,
-            mmproj_path.as_deref(),
-            ctx_size,
-            port,
-            runtime_dir.as_deref(),
-        );
+        // Same candidate chain as the initial start, but never a download —
+        // the respawn path must stay fast and offline-safe.
+        let spawn_result =
+            spawn_with_fallback(&app, &model_path, mmproj_path.as_deref(), ctx_size, port);
         let (new_rx, new_child) = match spawn_result {
             Ok(pair) => pair,
             Err(e) => {

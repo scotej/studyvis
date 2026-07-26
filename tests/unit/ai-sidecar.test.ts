@@ -95,6 +95,7 @@ function makeFakeRuntime(opts: {
       }
     },
     getAiFeaturesEnabled: () => opts.aiEnabled,
+    getEngineAutoInstall: () => true,
   }
 
   return {
@@ -172,6 +173,9 @@ describe('useSidecarStore.start', () => {
         modelPath: '/tmp/model.gguf',
         mmprojPath: '/tmp/mmproj.gguf',
         ctxSize: 2048,
+        // I73 — start() forwards the settings-store auto-install flag to
+        // Rust's sidecar_start (mock runtime pins it true).
+        engineAutoInstall: true,
       },
     ])
     const state = useSidecarStore.getState()
@@ -279,6 +283,7 @@ describe('useSidecarStore.refreshStatus', () => {
         if (handles.size === 0) scheduled = null
       },
       getAiFeaturesEnabled: () => true,
+      getEngineAutoInstall: () => true,
     })
 
     expect(handles.size).toBe(0)
@@ -339,6 +344,7 @@ describe('useSidecarStore.stop racing a newer start', () => {
       setInterval: () => 1,
       clearInterval: () => {},
       getAiFeaturesEnabled: () => true,
+      getEngineAutoInstall: () => true,
     }
     __setSidecarRuntime(runtime)
     useSidecarStore.setState({

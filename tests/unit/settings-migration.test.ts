@@ -154,6 +154,22 @@ describe('hydrateValuesFromStore — V1-P11 settings migration', () => {
     expect(values.turnPreference).toBe('auto')
   })
 
+  // I73 — engine auto-install defaults ON for fresh installs AND for
+  // existing users whose settings.json predates the key (absent → default,
+  // the X6 readBool pattern; no write-back migration needed).
+  test('defaults engineAutoInstall on when missing and preserves an explicit off', async () => {
+    const missing = await hydrateValuesFromStore(
+      fakeStore({}),
+      makeMigrator(null)
+    )
+    expect(missing.values.engineAutoInstall).toBe(true)
+    const off = await hydrateValuesFromStore(
+      fakeStore({ engine_auto_install: false }),
+      makeMigrator(null)
+    )
+    expect(off.values.engineAutoInstall).toBe(false)
+  })
+
   // V3-P6 — windowStyle hydrates from `window_style`. Default 'system'
   // matches the v1.0.3 shipped behavior, so a fresh install or any
   // missing/invalid value lands on system chrome (the toggle has to be
