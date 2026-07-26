@@ -1261,7 +1261,7 @@ export const strings = {
         installAria: 'Install the AI engine',
         auto: {
           label: 'Install engine automatically',
-          help: "Fetches the llama.cpp engine from GitHub if it's ever missing when AI starts. About 10–20 MB, verified against a pinned checksum.",
+          help: "Fetches the llama.cpp engine from GitHub if it's ever missing when AI starts. About 8–16 MB, verified against a pinned checksum.",
           ariaLabel: 'Install engine automatically',
         },
       },

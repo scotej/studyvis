@@ -18,69 +18,101 @@ V3 work was drafted as v1.0.4 but shipped under the **v1.0.5** tag —
 there is no v1.0.4 tag; the section below is labelled by the tag that
 shipped it.)
 
-## Unreleased
+## 1.8.0 — 2026-07-26 — AI starts, and friends stop showing a false "Offline"
 
-The second half of the "AI never actually ran" story (1.7.1 was the
-first): the AI engine now starts, and installs itself if it's missing.
-Plus: friends stop showing a false "Offline" when only the direct
-connection between you is blocked.
-
-### Fixed
-
-- **AI could never start: the app looked for its inference engine in
-  the wrong place.** The bundled llama-server binary is placed next to
-  the app executable, but the spawn call looked for it under a
-  `binaries/` subfolder that has never existed in a shipped build — so
-  every "start AI" attempt failed on the spot ("AI failed to start" /
-  "AI model crashed"). With 1.7.1's download fix this was the last
-  wall between installing a model and the first real focus check. The
-  engine is now resolved to its real path — and verified against the
-  actual installed-app layout. (I73)
-
-- **Friends no longer show "Offline" to each other when only the direct
-  connection is blocked (I74).** Presence heartbeats used to ride WebRTC
-  datachannels exclusively, so two friends whose networks a STUN-only
-  connection can't cross (symmetric NAT, CGNAT, strict firewalls — no
-  TURN ships) each saw the other permanently offline, with no error
-  anywhere. Presence now also publishes tiny sealed heartbeats straight
-  to the pinned Nostr relays — the same infrastructure that already
-  proved reachable — so "their app is running" shows truthfully even
-  when the peer-to-peer path can't form. Both friends need this version
-  to see each other through the relay leg; either side on an older build
-  behaves exactly as before.
-
-- Dropped `wss://offchain.pub` from the pinned relay list — it now
-  rejects anonymous publishes, which breaks the exact round-trip
-  rendezvous depends on.
+The second half of the "AI never actually ran" story: 1.7.1 fixed model
+downloads, and this fixes the engine those models were supposed to run on.
+It starts now, and installs itself if it's missing. Separately, friends
+stop showing a false "Offline" when only the direct connection between you
+is blocked.
 
 ### Added
 
-- **The AI engine installs itself.** If the engine binary is ever
-  missing or unusable when AI starts, StudyVis now downloads the exact
-  pinned llama.cpp build (~10–20 MB from GitHub, checksum-verified)
-  and installs it under the app's data folder — no manual step, as
-  long as the new **Install engine automatically** toggle stays on
-  (it's on by default; turn it off if you'd rather AI never touch the
-  network, and use Install now instead). If the download itself fails
-  — offline, GitHub down — the Settings row says why and the next AI
-  start retries. A new **Settings → AI → AI engine** row shows what's
-  installed (with live download progress) and offers
-  Install/Reinstall. On Windows, a failed engine start now names the
-  missing Microsoft VC++ runtime — with the link — instead of a bare
-  error code. Developers: fresh checkouts now build and run without
-  `scripts/fetch-llama-server.sh`; the app fetches the engine on first
-  AI use while the toggle is on. (I73)
+- **The AI engine installs itself.** If the engine binary is ever missing
+  or unusable when AI starts, StudyVis downloads the exact pinned
+  llama.cpp build (about 8–16 MB from GitHub depending on your platform,
+  verified against a pinned checksum) and installs it under the app's data
+  folder — no manual step, as long as the new **Install engine
+  automatically** toggle stays on. It's on by default; turn it off if
+  you'd rather AI never touch the network, and use **Install now**
+  instead. If the download itself fails — you're offline, GitHub is down —
+  the Settings row says why and the next AI start tries again. A new
+  **Settings → AI → AI engine** row shows what's installed, with live
+  download progress, and offers Install / Reinstall. On Windows, a failed
+  engine start now names the missing Microsoft VC++ runtime — with the
+  link — instead of a bare error code. (I73)
+
+### Fixed
+
+- **AI could never start: the app looked for its inference engine in the
+  wrong place.** The bundled llama-server binary sits next to the app
+  executable, but the spawn call looked for it under a `binaries/`
+  subfolder that has never existed in a shipped build — so every "start
+  AI" attempt failed on the spot ("AI failed to start" / "AI model
+  crashed"). With 1.7.1's download fix, this was the last wall between
+  installing a model and the first real focus check. The engine is now
+  resolved to its real absolute path, verified against the actual
+  installed-app layout. (I73)
+
+- **Friends no longer show "Offline" to each other when only the direct
+  connection between them is blocked.** Presence heartbeats used to ride
+  WebRTC datachannels exclusively, so two friends whose networks a
+  STUN-only connection can't cross (symmetric NAT, CGNAT, strict
+  firewalls — no TURN ships) each saw the other permanently offline, with
+  no error anywhere. Presence now also publishes small sealed heartbeats
+  straight to the pinned Nostr relays — the same infrastructure that
+  already proved reachable — so "their app is running" reads truthfully
+  even when the peer-to-peer path can't form. Both of you need this
+  version to see each other through the relay leg; either side on an
+  older build behaves exactly as before. (I74)
+
+- Dropped `wss://offchain.pub` from the pinned relay list. It now rejects
+  anonymous publishes, which breaks the exact round-trip that rendezvous —
+  and now relay presence — depends on.
 
 ### Changed
 
-- **The friends list now tells the truth in more detail.** Three states
-  instead of two: _Available_ (green — direct connection proven),
-  _Available · limited connection_ (amber — reachable through the relay,
-  but a video session likely won't connect until a TURN relay is set
-  up), and _Offline_ with recency ("seen 12 min ago") once someone
-  drops. While any friend is limited, a one-line hint above the list
-  explains why sessions may fail and links straight to
-  Settings → Network.
+- **The friends list tells the truth in more detail.** Three states
+  instead of two: _Available_ (green — a direct connection is working, or
+  a friend who just arrived is still establishing one), _Available ·
+  limited connection_ (amber — reachable through the relay, but a video
+  session likely won't connect until a TURN relay is set up), and
+  _Offline_ with recency ("seen 12 min ago") once someone drops. Amber
+  only appears after a friend has been online a couple of minutes without
+  a direct connection forming, so a normal arrival never flickers through
+  it. While any friend is limited, a one-line hint above the list explains
+  why sessions may fail and links straight to Settings → Network.
+
+- **Presence costs a little more network while the app is idle.** The
+  relay leg opens one more WebSocket to each pinned relay and sends one
+  sealed ~300-byte beacon to each every 30 seconds, for as long as
+  StudyVis is running. Idle traffic goes from a few KB/hour to a few
+  hundred KB/hour. The beacon says nothing but "still here", sealed so
+  only your friends can read it, and there's no switch for it — presence is
+  how friends see you're around. Full accounting in `PLAN.md` §3.
+
+- **The AI pane's privacy line is more precise.** It used to say flatly
+  that nothing leaves your computer. Camera and screen captures still
+  never do — but downloading a model or the engine plainly fetches files,
+  so the text now says both. The promise it makes is one we keep.
+
+### Known issue
+
+- **Mid-session, the Invite list doesn't show the limited state yet.** The
+  friends list on the home screen does; the in-session picker still shows a
+  limited-connection friend as plain _Available_. Inviting them can sit for
+  15 seconds and then report that they may be offline — they aren't, the
+  direct connection just isn't forming. If it happens, check the home
+  screen: a friend sitting at _Available · limited connection_ needs a TURN
+  relay in Settings → Network before a session with them will connect.
+
+### For developers
+
+- A fresh checkout runs without `scripts/fetch-llama-server.sh` first:
+  `build.rs` writes a debug-only placeholder sidecar, and the app installs
+  the real engine on first AI use while the auto-install toggle is on. The
+  script is still required before a release build — a release-profile
+  build fails on the placeholder, by design.
 
 ## 1.7.1 — 2026-07-26 — Model downloads actually work
 

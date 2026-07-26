@@ -109,7 +109,7 @@ export type SettingsValues = {
   aiFeaturesEnabled: boolean
   // I73 — auto-install the llama.cpp engine when no sidecar binary resolves
   // at AI start (fresh dev checkout, damaged install). ON by default: the
-  // download is the pinned ~10–20 MB llama.cpp release asset from GitHub,
+  // download is the pinned ~8–16 MB llama.cpp release asset from GitHub,
   // SHA-256-verified, fetched only when AI is actually started — consistent
   // with PLAN §3's model-download carve-out from "zero unsolicited outbound".
   engineAutoInstall: boolean
