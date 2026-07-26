@@ -57,15 +57,13 @@ export function startPresenceRelay(
     { edPubkeyHex: string; key: Uint8Array }
   >()
 
-  const publish = (payload: RelayPresencePayload): void => {
-    const event = buildPresenceEvent(
+  const sealedEvent = (payload: RelayPresencePayload) =>
+    buildPresenceEvent(
       signer,
       myTag,
       sealPresencePayload(myKey, payload),
       Math.floor(now() / 1000)
     )
-    pool.publish(event)
-  }
 
   const makePool = opts.makePool ?? createRelayPool
   const pool = makePool({
@@ -79,10 +77,16 @@ export function startPresenceRelay(
       const payload = openPresencePayload(friend.key, content)
       if (payload) opts.onFriendPayload(friend.edPubkeyHex, payload)
     },
-    // A relay socket (re)connecting means friends behind that relay may have
-    // missed our last beat — send one now rather than waiting out the tick.
-    onSocketOpen: () => publish({ v: 1 }),
+    // A relay socket (re)connecting means friends behind THAT relay may have
+    // missed our last beat — send one there now rather than waiting out the
+    // tick. Scoped to the opened socket so a flapping relay can't fan
+    // republishes out to every healthy one.
+    onSocketOpen: (publishHere) => publishHere(sealedEvent({ v: 1 })),
   })
+
+  const publish = (payload: RelayPresencePayload): void => {
+    pool.publish(sealedEvent(payload))
+  }
 
   return {
     publishHeartbeat: () => publish({ v: 1 }),

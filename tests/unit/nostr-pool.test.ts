@@ -56,11 +56,12 @@ class FakeSocket implements PoolSocket {
 function makeHarness(urls: string[]) {
   const sockets = new Map<string, FakeSocket[]>()
   const events: Array<[string, string]> = []
-  const opens: number[] = []
+  // One entry per socket open; each entry is that socket's scoped publisher.
+  const opens: Array<(event: NostrEvent) => void> = []
   const pool: RelayPool = createRelayPool({
     urls,
     onEvent: (tag, content) => events.push([tag, content]),
-    onSocketOpen: () => opens.push(1),
+    onSocketOpen: (publishHere) => opens.push(publishHere),
     makeSocket: (url) => {
       const socket = new FakeSocket()
       const list = sockets.get(url) ?? []
@@ -168,6 +169,47 @@ describe('publish', () => {
   })
 })
 
+describe('scoped republish on open', () => {
+  test('onSocketOpen publisher targets only the socket that opened', () => {
+    const h = makeHarness(['wss://a', 'wss://b'])
+    const a = h.latest('wss://a')
+    const b = h.latest('wss://b')
+    a.open()
+    b.open()
+    expect(h.opens.length).toBe(2)
+    // Use b's scoped publisher: only b receives the frame.
+    h.opens[1](presenceEvent('tag-1'))
+    expect(b.frames().filter((f) => f[0] === 'EVENT').length).toBe(1)
+    expect(a.frames().filter((f) => f[0] === 'EVENT').length).toBe(0)
+    h.pool.close()
+  })
+})
+
+describe('relay rejection visibility', () => {
+  test('OK-false and NOTICE frames are logged, never routed as events', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const h = makeHarness(['wss://a'])
+      h.pool.setSubscription(['tag-1'])
+      const socket = h.latest('wss://a')
+      socket.open()
+      socket.emit('message', {
+        data: JSON.stringify(['OK', 'someid', false, 'restricted: policy']),
+      })
+      socket.emit('message', {
+        data: JSON.stringify(['NOTICE', 'rate limited']),
+      })
+      expect(h.events).toEqual([])
+      const logged = warn.mock.calls.map((c) => c.join(' '))
+      expect(logged.some((l) => l.includes('restricted: policy'))).toBe(true)
+      expect(logged.some((l) => l.includes('rate limited'))).toBe(true)
+      h.pool.close()
+    } finally {
+      warn.mockRestore()
+    }
+  })
+})
+
 describe('event routing', () => {
   test('routes a matching event and dedupes the same id across relays', () => {
     const h = makeHarness(['wss://a', 'wss://b'])
@@ -221,7 +263,7 @@ describe('reconnect', () => {
     h.pool.close()
   })
 
-  test('backoff grows per attempt and resets after a successful open', async () => {
+  test('backoff grows per attempt and resets only after a STABLE open', async () => {
     const h = makeHarness(['wss://a'])
     const first = h.latest('wss://a')
     first.emit('close') // never opened → attempt 0 → 1s
@@ -236,10 +278,32 @@ describe('reconnect', () => {
     await vi.advanceTimersByTimeAsync(1)
     expect(h.sockets.get('wss://a')?.length).toBe(3)
 
-    h.latest('wss://a').open() // success resets the counter
+    // Open-then-quick-close must NOT reset the counter — a relay that
+    // accepts the socket and immediately drops it would otherwise loop at
+    // the base delay forever. attempt 2 → 4s.
+    h.latest('wss://a').open()
+    h.latest('wss://a').emit('close')
+    await vi.advanceTimersByTimeAsync(3_999)
+    expect(h.sockets.get('wss://a')?.length).toBe(3)
+    await vi.advanceTimersByTimeAsync(1)
+    expect(h.sockets.get('wss://a')?.length).toBe(4)
+
+    // A connection that survives the stability window earns the reset:
+    // the next close reconnects at the base delay again.
+    h.latest('wss://a').open()
+    await vi.advanceTimersByTimeAsync(60_000)
     h.latest('wss://a').emit('close')
     await vi.advanceTimersByTimeAsync(1_000)
-    expect(h.sockets.get('wss://a')?.length).toBe(4)
+    expect(h.sockets.get('wss://a')?.length).toBe(5)
+    h.pool.close()
+  })
+
+  test('a dropped socket is explicitly closed so no orphan can linger', async () => {
+    const h = makeHarness(['wss://a'])
+    const first = h.latest('wss://a')
+    first.open()
+    first.emit('error') // error without a browser-driven close
+    expect(first.closed).toBe(true)
     h.pool.close()
   })
 
@@ -269,7 +333,6 @@ describe('reconnect', () => {
       })
       await vi.advanceTimersByTimeAsync(60_000)
       expect(calls).toBe(1)
-      expect(pool.socketStates()).toEqual([])
       pool.close()
     } finally {
       warn.mockRestore()

@@ -121,7 +121,12 @@ export function FriendsListView({
 function LimitedConnectionHint({ onOpen }: { onOpen?: () => void }) {
   const copy = strings.friends.list.limitedHint
   return (
-    <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border-default bg-bg-surface px-4 py-3">
+    // role="status": the hint appears/disappears with live presence state,
+    // so screen readers need the polite announcement (DESIGN §11).
+    <div
+      role="status"
+      className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border-default bg-bg-surface px-4 py-3"
+    >
       <p className="min-w-0 flex-1 text-xs text-text-secondary">{copy.body}</p>
       {onOpen ? (
         <Button variant="outline" size="sm" onClick={onOpen}>

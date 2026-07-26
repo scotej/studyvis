@@ -106,10 +106,12 @@ export function presenceRelayTag(edPubkey: Uint8Array): string {
 // Symmetric key for sealing relay-presence payloads (XSalsa20-Poly1305).
 // Derivable by anyone who knows the ed pubkey — the same protection class as
 // the trystero presence-room password above, so the accepted I47 posture
-// (presence is forgeable by someone who already has your pubkey) is unchanged;
-// what it adds is that relay observers who DON'T know the pubkey see only an
-// opaque beacon, and cross-app tag collisions fail authentication instead of
-// stamping a phantom heartbeat.
+// (presence is forgeable) is unchanged. Be precise about what the seal buys:
+// cross-app tag collisions fail authentication instead of stamping a phantom
+// heartbeat, and observers can't read payload contents — but a relay
+// observer who never learns the pubkey can still REPLAY a captured beacon
+// under a fresh event id (heartbeats carry no freshness field by design; see
+// events.ts). Griefed online dots are inside the I47 acceptance either way.
 export function presenceRelayKey(edPubkey: Uint8Array): Uint8Array {
   return sha256(
     enc.encode('studyvis:presence-relay-key:v1:' + bytesToBase64(edPubkey))

@@ -35,33 +35,39 @@ export type RelayPoolConfig = {
   // Fires for every event that passes subId + kind + tag + dedupe checks.
   onEvent: (tagValue: string, content: string) => void
   // Fires each time a socket (re)opens, AFTER the subscription is re-issued.
-  // The presence leg uses it to publish a fresh heartbeat immediately, so a
-  // relay blip doesn't cost friends up to a full heartbeat interval.
-  onSocketOpen?: () => void
+  // Receives a publisher scoped to THAT socket: the presence leg uses it to
+  // send a fresh heartbeat only where it's needed, so a relay blip doesn't
+  // cost friends behind that relay up to a full heartbeat interval — and a
+  // flapping relay can't fan republishes out to every healthy one.
+  onSocketOpen?: (publishHere: (event: NostrEvent) => void) => void
   // Test seams.
   makeSocket?: (url: string) => PoolSocket
   reconnectBaseMs?: number
   reconnectMaxMs?: number
 }
 
-export type RelayPoolSocketState = { url: string; readyState: number }
-
 export type RelayPool = {
   // Replace the subscribed tag set (empty array closes the subscription).
   setSubscription: (tagValues: string[]) => void
   publish: (event: NostrEvent) => void
-  socketStates: () => RelayPoolSocketState[]
   close: () => void
 }
 
 const RECONNECT_BASE_MS = 5_000
 const RECONNECT_MAX_MS = 60_000
+// A connection must survive this long before a close resets the backoff
+// counter. Resetting on `open` alone defeats exponential backoff for the
+// exact failure class it exists for: a relay that accepts the socket and
+// drops it moments later (rate-limit disconnect, AUTH-required policy,
+// captive portal) would loop at the base delay forever.
+const STABLE_CONNECTION_MS = 60_000
 const SEEN_IDS_CAP = 512
 
 type SocketSlot = {
   url: string
   socket: PoolSocket | null
   attempts: number
+  openedAt: number | null
   timer: ReturnType<typeof setTimeout> | null
   gaveUp: boolean
 }
@@ -76,14 +82,16 @@ export function createRelayPool(config: RelayPoolConfig): RelayPool {
   let tags: string[] = []
   let closed = false
 
-  // Insertion-ordered so capping evicts the oldest first. Every relay
-  // broadcasts the same event, so ~(relays × friends) live ids at a time.
+  // Set iteration is insertion-ordered, so capping evicts the oldest first.
+  // Every relay broadcasts the same event, so ~(relays × friends) live ids
+  // at a time.
   const seenIds = new Set<string>()
 
   const slots: SocketSlot[] = config.urls.map((url) => ({
     url,
     socket: null,
     attempts: 0,
+    openedAt: null,
     timer: null,
     gaveUp: false,
   }))
@@ -103,15 +111,30 @@ export function createRelayPool(config: RelayPoolConfig): RelayPool {
     )
   }
 
-  const handleMessage = (raw: unknown): void => {
+  const handleMessage = (url: string, raw: unknown): void => {
     let frame: unknown[]
     try {
       frame = JSON.parse(String(raw)) as unknown[]
     } catch {
       return
     }
-    if (!Array.isArray(frame) || frame[0] !== 'EVENT' || frame[1] !== subId)
+    if (!Array.isArray(frame)) return
+    // This leg exists because the OTHER transport fails silently — so it
+    // must not fail silently itself. A relay refusing our publishes
+    // (`["OK", id, false, reason]` — e.g. a web-of-trust policy, or a
+    // clock-skewed sender tripping a created_at bound) or complaining via
+    // NOTICE is exactly what a future "presence stopped working on relay X"
+    // report needs in the console. check-relays catches this at release
+    // time only; policies change between releases (offchain.pub did).
+    if (frame[0] === 'OK' && frame[2] === false) {
+      console.warn(`presence relay ${url} rejected publish:`, frame[3])
       return
+    }
+    if (frame[0] === 'NOTICE') {
+      console.warn(`presence relay ${url} notice:`, frame[1])
+      return
+    }
+    if (frame[0] !== 'EVENT' || frame[1] !== subId) return
     const event = frame[2] as Partial<NostrEvent> | undefined
     if (!event || typeof event !== 'object') return
     if (event.kind !== PRESENCE_EVENT_KIND) return
@@ -132,6 +155,16 @@ export function createRelayPool(config: RelayPoolConfig): RelayPool {
     config.onEvent(tagValue, event.content)
   }
 
+  const sendEventTo = (socket: PoolSocket, event: NostrEvent): void => {
+    if (socket.readyState !== 1) return
+    try {
+      socket.send(JSON.stringify(['EVENT', event]))
+    } catch {
+      // A dying socket surfaces via its close/error listener; a failed
+      // publish is covered by the next heartbeat tick.
+    }
+  }
+
   const connect = (slot: SocketSlot): void => {
     if (closed || slot.gaveUp) return
     let socket: PoolSocket
@@ -149,7 +182,24 @@ export function createRelayPool(config: RelayPoolConfig): RelayPool {
     const scheduleReconnect = (): void => {
       if (closed || settled) return
       settled = true
+      // Close explicitly: `error` without a following `close` would leave an
+      // orphan socket that could still open later, double-subscribing beside
+      // its replacement.
+      try {
+        socket.close()
+      } catch {
+        // already closed
+      }
       slot.socket = null
+      // Only a connection that proved stable earns a backoff reset — see
+      // STABLE_CONNECTION_MS above.
+      if (
+        slot.openedAt !== null &&
+        Date.now() - slot.openedAt >= STABLE_CONNECTION_MS
+      ) {
+        slot.attempts = 0
+      }
+      slot.openedAt = null
       const delay = Math.min(maxMs, baseMs * 2 ** slot.attempts)
       slot.attempts += 1
       slot.timer = setTimeout(() => {
@@ -158,11 +208,13 @@ export function createRelayPool(config: RelayPoolConfig): RelayPool {
       }, delay)
     }
     socket.addEventListener('open', () => {
-      slot.attempts = 0
+      slot.openedAt = Date.now()
       sendSubscription(socket)
-      config.onSocketOpen?.()
+      config.onSocketOpen?.((event) => sendEventTo(socket, event))
     })
-    socket.addEventListener('message', (evt) => handleMessage(evt.data))
+    socket.addEventListener('message', (evt) =>
+      handleMessage(slot.url, evt.data)
+    )
     socket.addEventListener('close', scheduleReconnect)
     socket.addEventListener('error', scheduleReconnect)
   }
@@ -177,25 +229,10 @@ export function createRelayPool(config: RelayPoolConfig): RelayPool {
       }
     },
     publish: (event) => {
-      const frame = JSON.stringify(['EVENT', event])
       for (const slot of slots) {
-        if (slot.socket?.readyState === 1) {
-          try {
-            slot.socket.send(frame)
-          } catch {
-            // A dying socket surfaces via its close/error listener; a failed
-            // publish is covered by the next heartbeat tick.
-          }
-        }
+        if (slot.socket) sendEventTo(slot.socket, event)
       }
     },
-    socketStates: () =>
-      slots
-        .filter((slot) => !slot.gaveUp)
-        .map((slot) => ({
-          url: slot.url,
-          readyState: slot.socket?.readyState ?? 3,
-        })),
     close: () => {
       closed = true
       for (const slot of slots) {
