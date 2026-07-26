@@ -65,6 +65,36 @@ export function connectionFocusState(
   }
 }
 
+// I77 — publish the local camera/mic stream to EVERY peer, present and future.
+//
+// An untargeted `room.addStream` reaches only the peers that are active at the
+// instant it is called, and trystero never re-sends it to anyone who joins
+// afterwards: `addStream` → `applyMediaOp` → `iterate` enumerates
+// `keys(activePeerMap)` right then (@trystero-p2p/core room.mjs:83, :494), and
+// peer activation (room.mjs:306-314) only fires `onPeerJoin` — it replays no
+// previously added local stream. A host derives a fresh random topic and
+// acquires media while provably alone, so the lone broadcast landed on nobody
+// and the host's camera + mic never reached a single guest, in any build.
+//
+// The two statements below MUST stay adjacent with no `await` between them:
+// the broadcast covers whoever is active now, the subscriber covers whoever
+// arrives later, and JS's single thread closes the seam so a peer can neither
+// be missed nor served twice (a double-add desyncs trystero's FIFO pairing of
+// stream metadata to tracks). Keeping them inside one function is what makes
+// that invariant structural instead of a comment someone edits between.
+//
+// Returns an unsubscribe that MUST run before the stream's tracks are stopped,
+// or a "Try again" re-acquire would hand a later joiner a dead stream.
+export function publishLocalStream(
+  room: TopicRoom,
+  stream: MediaStream
+): () => void {
+  room.addStream(stream)
+  return room.onPeerJoin((peerId) => {
+    room.addStream(stream, peerId)
+  })
+}
+
 export type SessionHandle = {
   sessionTopic: string
   sessionPassword: string

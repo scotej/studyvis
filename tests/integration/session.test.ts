@@ -23,6 +23,10 @@ vi.mock('@/lib/trystero', () => {
     onStream: StreamHandler[]
     receivers: Map<string, Receiver[]>
     streams: unknown[]
+    // I77 — trystero's `activePeerMap` for this room: the peers a stream
+    // broadcast can actually reach at the moment it is called. A peer lands
+    // here only once the (simulated) handshake completes.
+    active: Set<string>
     left: boolean
   }
   type Bus = { rooms: Map<string, BusRoom> }
@@ -63,6 +67,7 @@ vi.mock('@/lib/trystero', () => {
       onStream: [],
       receivers: new Map(),
       streams: [],
+      active: new Set(),
       left: false,
     }
     bus.rooms.set(peerId, room)
@@ -72,17 +77,16 @@ vi.mock('@/lib/trystero', () => {
       if (room.left) return
       for (const other of bus.rooms.values()) {
         if (other === room || other.left) continue
-        // Both sides see each other join. Trystero replays existing streams
-        // and the bus mirrors that — every existing stream from `other` is
-        // re-delivered to the new peer, and vice-versa.
+        // I77 — both sides become active, then both see the join. Streams are
+        // deliberately NOT replayed: real trystero never re-sends a stream
+        // added before the peer activated (@trystero-p2p/core room.mjs:83,
+        // :306-314). Delivery to a late joiner happens only because the app
+        // re-adds the stream from its own onPeerJoin handler, which the
+        // notifications below are what drive.
+        room.active.add(other.peerId)
+        other.active.add(room.peerId)
         for (const fn of room.onJoin) fn(other.peerId)
         for (const fn of other.onJoin) fn(room.peerId)
-        for (const s of other.streams) {
-          for (const fn of room.onStream) fn(s, other.peerId)
-        }
-        for (const s of room.streams) {
-          for (const fn of other.onStream) fn(s, room.peerId)
-        }
       }
     })
 
@@ -129,22 +133,25 @@ vi.mock('@/lib/trystero', () => {
         }
       },
       onPeerStream: (fn: StreamHandler) => {
+        // I77 — no replay. Real trystero assigns this listener bare
+        // (room.mjs:511); only onPeerJoin sweeps already-active peers.
         room.onStream.push(fn)
-        // Replay streams already present at subscription time, matching
-        // trystero's "callback also replays for existing peers" semantics.
-        for (const other of bus.rooms.values()) {
-          if (other === room || other.left) continue
-          for (const s of other.streams) fn(s, other.peerId)
-        }
         return () => {
           const i = room.onStream.indexOf(fn)
           if (i >= 0) room.onStream.splice(i, 1)
         }
       },
-      addStream: (stream: unknown) => {
+      addStream: (stream: unknown, targetPeers?: string | string[] | null) => {
         room.streams.push(stream)
-        for (const other of bus.rooms.values()) {
-          if (other === room || other.left) continue
+        // I77 — reaches exactly the peers named, or every peer active AT THIS
+        // INSTANT when untargeted. Nothing is queued for a later joiner.
+        const targets =
+          targetPeers == null
+            ? room.active
+            : new Set(Array.isArray(targetPeers) ? targetPeers : [targetPeers])
+        for (const id of targets) {
+          const other = bus.rooms.get(id)
+          if (!other || other === room || other.left) continue
           for (const fn of other.onStream) fn(stream, room.peerId)
         }
       },
@@ -171,6 +178,7 @@ vi.mock('@/lib/trystero', () => {
         room.left = true
         bus.rooms.delete(peerId)
         for (const other of bus.rooms.values()) {
+          other.active.delete(peerId)
           for (const fn of other.onLeave) fn(peerId)
         }
       },
