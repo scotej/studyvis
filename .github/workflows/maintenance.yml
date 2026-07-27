@@ -1,0 +1,108 @@
+name: Weekly maintenance
+
+# The checks that answer "has the world moved under us?" rather than "is this
+# diff good?". None of them belong on a pull request: they can all go from
+# green to red with no commit at all, and a gate that fails for reasons the
+# author did not cause is a gate people learn to ignore.
+#
+# So they run on a schedule and report. Findings land in the Security tab and
+# in the run summary; nothing here blocks a merge.
+
+on:
+  schedule:
+    # Monday morning, off the hour to dodge GitHub's cron stampede.
+    - cron: '23 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  # OSV covers ground cargo-deny does not. It reads the GitHub Advisory
+  # Database as well as RustSec, and that difference is not academic: the
+  # advisory against the currently-pinned tauri (GHSA-7gmj-67g7-phm9, origin
+  # confusion letting remote pages invoke local-only IPC commands, fixed in
+  # 2.11.1) is GHSA-only and cargo-deny's RustSec feed does not carry it.
+  # Both lockfiles, both ecosystems.
+  osv:
+    name: OSV scan (npm + cargo)
+    uses: google/osv-scanner-action/.github/workflows/osv-scanner-reusable.yml@9a498708959aeaef5ef730655706c5a1df1edbc2 # v2.3.8
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+    with:
+      scan-args: |-
+        --lockfile=./package-lock.json
+        --lockfile=./src-tauri/Cargo.lock
+      upload-sarif: true
+      # Report, do not fail. The npm side has a known dev-chain backlog
+      # (ISSUES.md I19) and the cargo side has a pinned, reasoned ignore list
+      # in src-tauri/deny.toml; a red weekly cron would say nothing new.
+      fail-on-vuln: false
+
+  relays:
+    name: Signaling-relay health
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      # #47 C4 — release-prep already runs this non-blocking at release time,
+      # which is the right moment to *act* on it but the wrong one to first
+      # *learn* it: a relay that died three weeks ago has been degrading
+      # default-config discovery for every install since. Weekly turns "found
+      # out while cutting a release" into "knew about it for a while".
+      - name: Check pinned relays are reachable
+        continue-on-error: true
+        run: |
+          set -uo pipefail
+          {
+            echo "### Signaling relays"
+            echo
+            echo '```'
+            npm run check-relays 2>&1 | tail -40 || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  scorecard:
+    name: OpenSSF Scorecard
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      security-events: write
+      # Scorecard reads workflow run history to score the CI configuration.
+      actions: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - uses: ossf/scorecard-action@2d1146689b8cda280b9bc96326124645441f03bc # v2.4.4
+        with:
+          results_file: scorecard.sarif
+          results_format: sarif
+          # Deliberately NOT published to the public OpenSSF API. The score
+          # is useful to this repo as a checklist — pinned actions, token
+          # permissions, branch protection, a security policy — and there is
+          # no audience for a badge on a friends-only project.
+          publish_results: false
+
+      - uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: scorecard.sarif
+          category: scorecard
