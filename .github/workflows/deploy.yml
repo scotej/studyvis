@@ -1,0 +1,346 @@
+name: Deploy
+
+# AN INDICATOR, NOT A GATE. Nothing waits for this workflow.
+#
+# Read this before adding `Deployed` to branch protection: it is not meant to
+# be there. A full Tauri build is ~30-60 minutes per platform, so requiring it
+# would put every docs fix and dependency bump behind an hour of wall-clock
+# for a signal that is almost always "yes, it still builds". Merging waits on
+# the FAST checks — `All pre-merge checks` (ci.yml) and `PR title`
+# (pr-title.yml) — and those two remain the only required ones. This workflow
+# runs alongside them and reports: green means the commit produced installable
+# bundles, red means a platform stopped building. Either way the merge button
+# is live as soon as the fast checks finish.
+#
+# So a red `Deployed` is information, not a blocker. Look at it before you
+# merge if the change is shippable; act on it when it is red; never sit and
+# wait for it. If it turns out to catch things often enough to be worth the
+# wall-clock, promoting it to required is a one-line ruleset edit — that is a
+# deliberate future decision, not the current setup.
+#
+# What it actually does: every commit that reaches a pull request or main is
+# built into real, installable StudyVis bundles for both shipped platforms
+# from that exact SHA, published as the run's artifacts, and recorded as a
+# GitHub Deployment against the `preview` environment.
+#
+# This replaces .github/workflows/pr-build.yml ("PR installers"), which ran
+# the same build behind a `build-installers` label. The reasoning for that
+# label was sound and is kept — a full Tauri build is expensive and most PRs
+# here are docs or CI — but it is now encoded as the `scope` job below rather
+# than left to whoever remembers to apply a label. A change that touches no
+# shippable file is deployed as a docs-only change; everything else builds.
+# What is gone is having to opt IN: a shippable change now always gets its
+# bundle, whether or not anyone thought to ask for one.
+#
+# Why this matters more here than on a typical project: CI proves the code
+# compiles, lints, and passes the automated gates, and that is genuinely all
+# it proves. There are no component tests (vitest is node-env only), no
+# desktop smoke test, and the things this app gets wrong most often — a
+# camera stream that never reaches a late joiner, a sidecar that dies at
+# session start — are only visible with two real builds talking to each
+# other. Before this workflow, the first installable build of any change
+# appeared AFTER release-prep had already pushed an immutable tag.
+#
+# These bundles are NOT releases. `createUpdaterArtifacts` is switched off
+# below, so no `latest.json` is produced and nothing here can be mistaken
+# for — or consumed by — the update channel (X6).
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# Deliberately the same shape as ci.yml, including the activity types left at
+# their defaults. #102 is the reason: an event that re-fires on an UNCHANGED
+# commit (`edited`, `ready_for_review`) combines with cancel-in-progress to
+# leave a `cancelled` required check beside a successful one on the same SHA,
+# and the PR then sits at BLOCKED with everything green. Only opened /
+# synchronize / reopened, all of which mean a new head commit to deploy.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# See ci.yml's header: third-party actions are hash-pinned (enforced by the
+# zizmor policy in .github/zizmor.yml), actions/* stay on major tags, and the
+# workflow token is read-only. The `Deployed` job below creates a deployment
+# record through the `environment:` key, which the Actions service mints on
+# the job's behalf — it needs no `deployments: write` here.
+permissions:
+  contents: read
+
+jobs:
+  # Which surface does this commit actually change? A docs or CI-only commit
+  # has no installable surface, and spending two hours of runner time to
+  # produce a byte-identical bundle for it would make the gate something
+  # people route around rather than something that catches breakage.
+  scope:
+    name: Deployment scope
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      installable: ${{ steps.classify.outputs.installable }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # The diff below needs the base commit reachable; a shallow clone
+          # of the PR merge ref does not have it.
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Classify the change
+        id: classify
+        env:
+          # Via env, never inlined into the script: a branch name is
+          # attacker-controlled on a fork PR, and interpolating one straight
+          # into a run block is the template-injection shape zizmor exists
+          # to catch.
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+
+          # Any path NOT matched here is treated as shippable. The list is
+          # deliberately an allowlist of things that cannot reach a user's
+          # installed copy — err towards building.
+          non_shippable='^(.*\.md|\.github/.*|\.gitignore|\.editorconfig|LICENSE.*|_typos\.toml)$'
+
+          case "$EVENT_NAME" in
+            pull_request) base="$BASE_SHA" ;;
+            push)         base="$BEFORE_SHA" ;;
+            *)            base='' ;;
+          esac
+
+          # workflow_dispatch has no diff, and a force-push or a branch's
+          # first commit leaves `before` as the all-zero SHA. Both mean "we
+          # cannot prove nothing shippable changed", which resolves to
+          # building, not to skipping.
+          if [ -z "$base" ] || ! git cat-file -e "${base}^{commit}" 2>/dev/null; then
+            echo "No usable base commit — deploying the full installable surface."
+            echo "installable=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          changed=$(git diff --name-only "$base" HEAD)
+          shippable=$(printf '%s\n' "$changed" | grep -Ev "$non_shippable" || true)
+
+          {
+            echo "### Deployment scope"
+            echo
+            echo "\`$(printf '%s\n' "$changed" | grep -c . || true)\` file(s) changed since \`${base:0:7}\`."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ -n "$shippable" ]; then
+            echo "installable=true" >> "$GITHUB_OUTPUT"
+            {
+              echo
+              echo "Shippable files changed — building installers for both platforms:"
+              echo
+              echo '```'
+              printf '%s\n' "$shippable" | head -40
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "installable=false" >> "$GITHUB_OUTPUT"
+            {
+              echo
+              echo "Docs/CI only — no installable surface changed, so the"
+              echo "installer legs are skipped and this commit is deployed"
+              echo "as a documentation change."
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  installers:
+    name: Build ${{ matrix.label }}
+    needs: scope
+    if: ${{ needs.scope.outputs.installable == 'true' }}
+    runs-on: ${{ matrix.platform }}
+    # 90, not the 60 release.yml uses: this job does everything that one does
+    # plus `npm ci` and the sidecar fetch, and a build can take up to 60
+    # minutes on its own. A timeout that can kill a slow-but-valid run after
+    # an hour of work is worth nothing — public-repo minutes are free.
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: macOS (Apple Silicon)
+            platform: macos-latest
+            rust-targets: aarch64-apple-darwin
+            args: --target aarch64-apple-darwin --bundles dmg
+            llama-triple: aarch64-apple-darwin
+          - label: Windows
+            platform: windows-latest
+            rust-targets: ''
+            args: --bundles nsis
+            llama-triple: x86_64-pc-windows-msvc
+
+    steps:
+      # `pull_request`, never `pull_request_target`: fork code runs with a
+      # read-only token and no access to secrets, and nothing here needs
+      # either. The artifact is an unsigned installer built from unreviewed
+      # code — treat a fork PR's bundle accordingly before running it.
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master; the toolchain input selects the channel
+        with:
+          toolchain: stable
+          targets: ${{ matrix.rust-targets }}
+
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          workspaces: src-tauri -> target
+          # Only main writes the cache. GitHub already scopes a
+          # pull_request run's cache writes to refs/pull/N/*, and
+          # rust-cache's key includes the job id, so a PR could not feed
+          # main's or release.yml's cache anyway — but a PR is untrusted
+          # input and a build that never populates a cache is one less
+          # thing to reason about. main populating it is what keeps the
+          # per-PR build closer to 30 minutes than 60.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      # Release-profile builds fail without a real sidecar binary, by design
+      # (build.rs only writes a placeholder for debug builds).
+      - name: Fetch llama-server prebuild
+        shell: bash
+        run: bash scripts/fetch-llama-server.sh --triple ${{ matrix.llama-triple }}
+
+      # The config override is what makes this safe to run without secrets:
+      # with createUpdaterArtifacts on, the bundler demands the minisign key
+      # and fails. Off, it emits only the installer — which is all a smoke
+      # test needs, and means no deployment artifact from here can ever be
+      # fed to a client's updater.
+      - name: Build the app bundle (no updater artifacts, no signing)
+        shell: bash
+        run: |
+          npm run tauri -- build ${{ matrix.args }} \
+            --config '{"bundle":{"createUpdaterArtifacts":false}}'
+
+      - name: Collect bundles
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          find src-tauri/target -type f \
+            \( -name '*.dmg' -o -name '*-setup.exe' \) \
+            -exec cp {} out/ \;
+          ls -la out
+
+      - uses: actions/upload-artifact@v7
+        with:
+          # NOT github.ref_name as the fallback: upload-artifact rejects any
+          # name containing '/', and every branch here is namespaced
+          # (ci/…, feat/…, fix/…). A workflow_dispatch run would build for
+          # 30-60 minutes and then die on the upload. run_id is always
+          # slash-free and unique.
+          name: studyvis-${{ matrix.llama-triple }}-${{ github.event.pull_request.number || github.run_id }}
+          path: out/
+          if-no-files-found: error
+          # Unsigned installers of unreviewed code. Short retention keeps
+          # them from lingering as a download anyone might mistake for a
+          # release.
+          retention-days: 7
+
+      - name: Explain what these artifacts are
+        shell: bash
+        run: |
+          {
+            echo "### ${{ matrix.label }} deployment"
+            echo
+            echo "Unsigned, **not** a release, no auto-update manifest."
+            echo "Expect the usual Gatekeeper/SmartScreen warning (INSTALL.md)."
+            echo "Installing this over a real StudyVis install replaces it."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # The indicator itself: one check name summarising both legs, and the job
+  # whose `environment:` mints the GitHub Deployment record for this commit.
+  #
+  # It reports a real pass/fail — a broken platform build turns this red — but
+  # it is NOT in the ruleset and must not be added there without accepting the
+  # ~30-60 min per platform it would add to every merge. See the file header.
+  deployed:
+    name: Deployed
+    # !cancelled(), not always(): always() is true for a CANCELLED run too,
+    # and with cancel-in-progress on every superseded push would spin this
+    # job up, read 'cancelled' from its needs, and report a hard failure for
+    # a run nobody was waiting on.
+    if: ${{ !cancelled() }}
+    needs: [scope, installers]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    environment:
+      name: preview
+      # Where the deployment actually landed: the run page, from which both
+      # platform bundles are downloadable for seven days.
+      url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    steps:
+      # ci.yml's aggregator can treat every `skipped` as a pass because no
+      # job in that file depends on another. This one cannot: `installers`
+      # is skipped both when there was nothing to build (fine) and when
+      # `scope` failed before deciding (not fine), and those must not read
+      # the same. Hence the explicit three-way check rather than a jq sweep
+      # over `needs`.
+      - name: Report whether this commit deployed
+        env:
+          SCOPE_RESULT: ${{ needs.scope.result }}
+          INSTALLERS_RESULT: ${{ needs.installers.result }}
+          INSTALLABLE: ${{ needs.scope.outputs.installable }}
+        run: |
+          set -euo pipefail
+
+          if [ "$SCOPE_RESULT" != "success" ]; then
+            echo "::error::deployment scope could not be determined (${SCOPE_RESULT}) — nothing was deployed."
+            exit 1
+          fi
+
+          if [ "$INSTALLABLE" = "true" ]; then
+            if [ "$INSTALLERS_RESULT" != "success" ]; then
+              echo "::error::the installer build did not succeed (${INSTALLERS_RESULT}) — this commit changes shippable code that no longer builds into bundles on both platforms. This check does NOT block the merge; it is telling you something is broken."
+              exit 1
+            fi
+            {
+              echo "### Deployed"
+              echo
+              echo "macOS (Apple Silicon) and Windows bundles were built from"
+              echo "this commit and attached to the run. Download them from the"
+              echo "**Artifacts** section of this page if you want to smoke-test."
+              echo
+              echo "_Indicator only — merging does not wait for this._"
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          # Docs/CI-only. `installers` must be genuinely skipped — anything
+          # else means the `if:` guard and this branch disagree about what
+          # ran, which is a workflow bug, not a passing deployment.
+          if [ "$INSTALLERS_RESULT" != "skipped" ]; then
+            echo "::error::scope said nothing shippable changed but the installer legs reported '${INSTALLERS_RESULT}'. Refusing to record a deployment for a run this job cannot explain."
+            exit 1
+          fi
+          {
+            echo "### Deployed (documentation)"
+            echo
+            echo "No shippable file changed, so there is no new installable"
+            echo "surface to build. Recorded as a documentation deployment."
+            echo
+            echo "_Indicator only — merging does not wait for this._"
+          } >> "$GITHUB_STEP_SUMMARY"
