@@ -1,0 +1,85 @@
+name: Storybook
+
+# Publishes the component workbench to GitHub Pages from main.
+#
+# Storybook is already mandatory here — DESIGN-SYSTEM.md requires a story for
+# every primitive and feature component, and the axe-core gate in ci.yml runs
+# over every one of them. But reading it has always meant cloning the repo and
+# running `npm run storybook`, which is a lot of ceremony for "what does the
+# new dialog look like in the light theme?". Publishing it makes the design
+# system reviewable from a link.
+#
+# Nothing secret goes up: stories render components against fixture props, and
+# the build has no Tauri APIs, no database, and no identity material. PR
+# previews are handled differently — see the artifact upload in ci.yml, which
+# reuses the Storybook build that job already produces rather than building it
+# a second time here.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Never cancel a half-finished deploy: unlike CI, the casualty is a live site
+# left in whatever state the interrupted upload reached.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      # Deliberately NO actions/configure-pages step. Its `enablement: true`
+      # cannot work from here — the input's own docs require a token other
+      # than GITHUB_TOKEN (a PAT with repo scope, or an App with
+      # administration:write), so it would fail on the first run. Pages was
+      # instead enabled once out-of-band with `build_type: workflow`:
+      #
+      #   gh api -X POST repos/scotej/studyvis/pages -f build_type=workflow
+      #
+      # The action's other job is computing a base path for static-site
+      # generators, and Storybook does not need it: its build emits relative
+      # asset URLs ("./sb-manager/runtime.js", "./assets/…"), so it works
+      # unchanged under the /studyvis/ subpath.
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build Storybook
+        run: npm run build-storybook
+
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: storybook-static
+
+  deploy:
+    name: Deploy
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      # Minting the Pages deployment token — the narrowest pair that can
+      # publish, and scoped to this job so the build job above never holds it.
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5
