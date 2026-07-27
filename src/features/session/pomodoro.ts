@@ -240,8 +240,14 @@ export type PomodoroController = {
 export function startPomodoroController(
   args: ControllerArgs
 ): PomodoroController {
-  const setTimeoutFn = args.setTimeoutFn ?? setTimeout
-  const setIntervalFn = args.setIntervalFn ?? setInterval
+  // Annotated, not inferred: @types/node's `setTimeout` and the DOM lib's both
+  // reach this file, so `?? setTimeout` infers a union of call signatures whose
+  // return is `number | Timeout` — wider than the `ReturnType<typeof setTimeout>`
+  // the handles below are declared with. Pinning the seam's own type collapses it.
+  const setTimeoutFn: NonNullable<ControllerArgs['setTimeoutFn']> =
+    args.setTimeoutFn ?? setTimeout
+  const setIntervalFn: NonNullable<ControllerArgs['setIntervalFn']> =
+    args.setIntervalFn ?? setInterval
   const clearTimeoutFn = args.clearTimeoutFn ?? clearTimeout
   const clearIntervalFn = args.clearIntervalFn ?? clearInterval
   const now = () => (args.now ? args.now() : Date.now())
