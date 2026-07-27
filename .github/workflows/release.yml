@@ -72,6 +72,10 @@ jobs:
           # so the two checks cannot drift — see the script header.
           section=$(bash scripts/changelog-section.sh "$ver" \
             "Write the release notes on main, re-tag, and re-run — the Releases page is the update channel.")
+          # Single-quoted on purpose: this is literal release-notes prose, and
+          # the backticks around `latest.json` must reach the release body as
+          # markdown rather than being run as a command.
+          # shellcheck disable=SC2016
           boiler='Friends-only release — the macOS app is ad-hoc signed (not notarized);
           the Windows installer is unsigned. See INSTALL.md for first-run steps:
           macOS users right-click the app and choose Open the first time;

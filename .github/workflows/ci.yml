@@ -14,10 +14,16 @@ concurrency:
 # installers must not trust mutable third-party refs: a moved tag/branch on
 # any of these executes attacker code in jobs whose artifacts friends install
 # with SmartScreen/Gatekeeper already bypassed. Third-party actions are
-# SHA-pinned (trailing comment = the tag the SHA was resolved from; refresh
-# manually — there is no dependabot config); actions/* stay on major tags
-# (GitHub-owned). GITHUB_TOKEN is scoped read-only as drift-proofing against
-# a future repo/org default change.
+# SHA-pinned (trailing comment = the tag the SHA was resolved from);
+# actions/* and github/* stay on major tags (GitHub-owned). GITHUB_TOKEN is
+# scoped read-only as drift-proofing against a future repo/org default change.
+#
+# That paragraph is now enforced rather than merely asserted: the `workflows`
+# job below runs zizmor with the policy in .github/zizmor.yml, which fails
+# the build on any third-party action that is not hash-pinned. Refreshing the
+# pins is no longer manual either — .github/dependabot.yml bumps the SHA and
+# the trailing version comment together (which is why that comment must END
+# with the version).
 permissions:
   contents: read
 
@@ -28,6 +34,11 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
+        with:
+          # No job in this workflow pushes. Leaving the token on disk for
+          # every later step — including ones that run third-party code —
+          # is free credential exposure.
+          persist-credentials: false
 
       - uses: actions/setup-node@v6
         with:
@@ -52,6 +63,19 @@ jobs:
       - name: Storybook build
         run: npm run build-storybook
 
+      # PR preview of the component workbench. main publishes to GitHub Pages
+      # (pages.yml); a PR cannot, because Pages has exactly one live site — so
+      # reviewers get the same build as a downloadable artifact instead.
+      # Reuses the build above rather than repeating it in another workflow.
+      - name: Upload Storybook preview (pull requests)
+        if: ${{ github.event_name == 'pull_request' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: storybook-preview-pr${{ github.event.pull_request.number }}
+          path: storybook-static
+          if-no-files-found: error
+          retention-days: 7
+
       # V3-P7 — Install only the Chromium browser test-storybook needs.
       # Default `npx playwright install` would pull Firefox + WebKit too,
       # roughly tripling the download. The runner only spins up Chromium.
@@ -69,6 +93,26 @@ jobs:
 
       - name: Contrast audit (WCAG AA over token pairs, both themes)
         run: npm run check-contrast
+
+      # Storybook is the ONLY component-test surface here (vitest is node-env,
+      # there are no *.test.tsx), and check-a11y can only audit a component
+      # that has a story — so a component landing without one silently opts
+      # out of both. Three current gaps are frozen in the script with reasons.
+      - name: Storybook coverage (every component has a story)
+        run: npm run check-stories
+
+      # Compatibility surfaces (CLAUDE.md). Both of these guard a mistake
+      # whose blast radius is a friend's already-installed copy, and both are
+      # invisible on a fresh checkout — exactly the class that needs CI.
+      - name: Forward-only migration guard
+        run: npm run check-migrations
+
+      # Not release-time-only: a PR that bumps package.json but forgets
+      # Cargo.toml sits on main looking fine until release.yml's preflight
+      # rejects the tag — after release-prep has already pushed it. Catching
+      # the partial bump on the PR costs nothing and saves burning a version.
+      - name: Version lockstep across the five tracked files
+        run: bash scripts/check-version-lockstep.sh "$(node -p "require('./package.json').version")"
 
   rust:
     name: Rust (${{ matrix.label }})
@@ -92,6 +136,8 @@ jobs:
             llama-triple: x86_64-pc-windows-msvc
     steps:
       - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
 
       - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master; the toolchain input selects the channel
         with:
@@ -128,3 +174,304 @@ jobs:
       - name: cargo test
         working-directory: src-tauri
         run: cargo test --locked
+
+      # The gate above allows every clippy group except correctness, so
+      # `suspicious`, `complexity`, and `perf` findings — the ones that catch
+      # a real mistake rather than a style preference — have never been seen.
+      # Nobody knows how large that backlog is: this box cannot compile the
+      # Tauri crate, so the only way to find out is to measure it in CI.
+      #
+      # Non-blocking on purpose, and it should stay that way until the count
+      # is known and burned down; then promote the groups that reach zero
+      # into the blocking step above. Reuses the same warm cargo cache, so it
+      # costs seconds rather than a second full build.
+      - name: cargo clippy (advisory — measuring the wider lint backlog)
+        continue-on-error: true
+        working-directory: src-tauri
+        shell: bash
+        run: |
+          set -uo pipefail
+          cargo clippy --all-targets --message-format short -- \
+            -A clippy::all \
+            -W clippy::suspicious -W clippy::complexity -W clippy::perf \
+            2>&1 | tee clippy.log || true
+          count=$(grep -c 'warning:' clippy.log || true)
+          {
+            echo "### clippy backlog — ${{ matrix.label }}"
+            echo
+            echo "\`suspicious\` + \`complexity\` + \`perf\`: **${count:-0}** warning(s)."
+            echo
+            echo "Advisory. Promote a group into the blocking step in ci.yml once it reaches zero."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # ---------------------------------------------------------------------
+  # Everything below is new pre-merge surface (#102). Each job is cheap and
+  # independent, so they fan out beside the two slow ones above rather than
+  # lengthening them; `all-green` at the bottom is the single check branch
+  # protection needs to require.
+  # ---------------------------------------------------------------------
+
+  workflows:
+    name: Workflow lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      # The advisory pass uploads SARIF so the low-confidence findings live
+      # in the Security tab instead of reddening a merge.
+      security-events: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      # actionlint catches the boring-but-real class: a typo'd `runs-on`, an
+      # expression that cannot type-check, a `run:` block shellcheck can
+      # prove wrong. Those fail a workflow at dispatch time — which for
+      # release.yml means discovering it after the immutable tag is pushed.
+      #
+      # Installed from the release tarball with its published checksum
+      # verified before extraction rather than via a third-party action:
+      # this step is a binary download into the job that audits the release
+      # pipeline, so "which bytes ran" should not depend on a marketplace
+      # action's own supply chain. Bump VERSION and SHA256 together — the
+      # checksum comes from actionlint_<version>_checksums.txt on the
+      # release. Dependabot does not manage this one; the version is
+      # deliberately in one obvious place.
+      - name: actionlint
+        env:
+          ACTIONLINT_VERSION: 1.7.12
+          ACTIONLINT_SHA256: 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
+        run: |
+          set -euo pipefail
+          tarball="actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          curl --fail --silent --show-error --location --retry 3 \
+            -o "$tarball" \
+            "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/${tarball}"
+          echo "${ACTIONLINT_SHA256}  ${tarball}" | sha256sum --check --strict
+          tar xzf "$tarball" actionlint
+          ./actionlint -color
+
+      # zizmor is the security-shaped half: template injection, credential
+      # persistence, over-broad permissions, and — the one that matters most
+      # here — unpinned third-party actions. .github/zizmor.yml encodes this
+      # repo's actual policy (github-owned on major tags, everything else
+      # hash-pinned), so this step is the machine-checkable form of the
+      # paragraph at the top of this file.
+      #
+      # Blocking at high severity AND high confidence. That is verified
+      # green on the current tree and, in practice, is exactly the pinning
+      # policy; the heuristic audits below it would gate merges on
+      # low-confidence guesses, which is how a gate gets ignored.
+      - name: zizmor (blocking — pinning policy)
+        uses: zizmorcore/zizmor-action@6fc4b006235f201fdab3722e17240ab420d580e5 # v0.6.1
+        with:
+          version: 1.28.0
+          config: .github/zizmor.yml
+          min-severity: high
+          min-confidence: high
+          advanced-security: false
+          annotations: true
+          inputs: .github/workflows/
+
+      # Second pass, everything zizmor has to say, into the Security tab.
+      # Non-blocking by construction: findings become code-scanning alerts to
+      # triage, not a red X on an unrelated PR.
+      - name: zizmor (advisory — full findings to code scanning)
+        continue-on-error: true
+        uses: zizmorcore/zizmor-action@6fc4b006235f201fdab3722e17240ab420d580e5 # v0.6.1
+        with:
+          version: 1.28.0
+          config: .github/zizmor.yml
+          persona: pedantic
+          advanced-security: true
+          inputs: .github/workflows/
+
+  supply-chain:
+    name: Supply chain
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      # The gate that can be strict without being red on day one: it scores
+      # only what THIS pull request adds to the dependency graph, so the
+      # pre-existing advisory backlog (ISSUES.md I19) does not block unrelated
+      # work while a newly-introduced vulnerable package still fails.
+      #
+      # PR-only: on a push to main there is no base to diff against.
+      - name: Dependency review (new vulnerabilities in this diff)
+        if: ${{ github.event_name == 'pull_request' }}
+        uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        with:
+          fail-on-severity: high
+          # Copyleft in a shipped desktop binary is a licensing decision, not
+          # a routine dependency bump; surface it rather than deny outright,
+          # since the Rust side already has an explicit allowlist in
+          # src-tauri/deny.toml and this only covers npm.
+          comment-summary-in-pr: false
+
+      # The whole-graph npm picture, deliberately NON-blocking. `npm audit`
+      # is red on this repo today and has been since ISSUES.md I19 logged it:
+      # the findings are dev-chain (storybook's test-runner pulling nyc /
+      # jest-junit) plus react-router advisories that are all SSR/server-route
+      # issues in an app with no server. Making it blocking would train the
+      # one maintainer to merge past a red X, which costs more than it buys.
+      # It lands in the job summary so the backlog stays visible instead.
+      - name: npm audit (advisory)
+        continue-on-error: true
+        run: |
+          set -uo pipefail
+          {
+            echo "### npm audit"
+            echo
+            echo '```'
+            npm audit --audit-level=high 2>&1 | tail -40 || true
+            echo '```'
+            echo
+            echo "_Advisory only — see ISSUES.md I19. Blocking gate is"
+            echo "dependency-review, which scores only what this PR adds._"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # Rust had no supply-chain gate at all: `cargo check --locked` proves
+      # the lockfile is honoured, not that anything in it is safe. deny.toml
+      # is derived from the real 629-package graph and is verified green, so
+      # this one blocks. It reads manifests only — no compile, no
+      # webkit2gtk/WebView2 prerequisites, ~30s on a cold runner.
+      #
+      # The three inputs are not interchangeable — the action assembles
+      # `cargo-deny <arguments> <command> <command-arguments>`, so the check
+      # list belongs in command-arguments and only global options go in
+      # `arguments`. Overriding `arguments` also drops its `--all-features`
+      # default on purpose: deny.toml sets `all-features = false`, and the
+      # CLI flag would override the config and audit a different graph than
+      # the one verified locally.
+      - name: cargo-deny (advisories, licenses, bans, sources)
+        uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
+        with:
+          manifest-path: src-tauri/Cargo.toml
+          arguments: --config src-tauri/deny.toml
+          command: check
+          command-arguments: advisories licenses bans sources
+
+  hygiene:
+    name: Docs & copy hygiene
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      # Blocking, and green on the current tree with the allowlist in
+      # _typos.toml. It earns the gate mainly because of src/strings.ts:
+      # that file is every toast and notification a friend ever reads, it
+      # ships inside the binary, and a typo there survives until the next
+      # release.
+      - name: Spell check
+        uses: crate-ci/typos@bee27e3a4fd1ea2111cf90ab89cd076c870fce14 # v1.48.0
+
+      # Advisory: link rot is real (INSTALL.md and README.md both point at
+      # tauri.app and GitHub release URLs) but it is caused by other people's
+      # sites moving, so it must never be the reason a code PR cannot merge.
+      # `--no-progress` keeps the log readable; failures land in the summary.
+      - name: Link check (advisory)
+        continue-on-error: true
+        uses: lycheeverse/lychee-action@e7477775783ea5526144ba13e8db5eec57747ce8 # v2.9.0
+        with:
+          args: >-
+            --no-progress
+            --max-concurrency 4
+            --accept 200,206,403,429
+            --exclude-path node_modules
+            --exclude-path dist
+            --exclude-path storybook-static
+            --exclude '^https?://(localhost|127\.0\.0\.1)'
+            --exclude 'studyvis://'
+            './**/*.md'
+          fail: false
+          jobSummary: true
+
+  pr-title:
+    name: PR title
+    # CLAUDE.md mandates conventional-commit subjects, and PRs here are
+    # squash-merged — so the PR title becomes the commit subject on main and
+    # is what CHANGELOG entries get written from. Push events have no title
+    # to check; the aggregator treats the resulting skip as a pass.
+    if: ${{ github.event_name == 'pull_request' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: amannn/action-semantic-pull-request@48f256284bd46cdaab1048c3721360e808335d50 # v6.1.1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          types: |
+            feat
+            fix
+            docs
+            chore
+            ci
+            refactor
+            perf
+            test
+            build
+            revert
+          requireScope: false
+          # Only the trailing full stop is enforced. The obvious companion
+          # rule — "must start lowercase" — is wrong for this repo: subjects
+          # here routinely open with an acronym (`ci: SHA-pin third-party
+          # actions`, `fix(session): PTT hint shows the persisted binding`),
+          # and 5 of the last 120 commits on main would fail it. A gate that
+          # rejects the house style is a gate that gets bypassed. Nothing on
+          # main ends in a full stop, so that half costs nobody anything.
+          subjectPattern: '^(?!.*\.$).+$'
+          subjectPatternError: |
+            The subject "{subject}" of PR title "{title}" ends in a full stop —
+            drop it, e.g. `fix(session): re-publish the host stream to late
+            joiners`.
+
+  all-green:
+    name: All pre-merge checks
+    # The single check to require in branch protection. Adding a job above
+    # then extends the gate automatically instead of needing the protection
+    # rule edited — which is the failure mode where a new check exists but
+    # nothing enforces it.
+    if: ${{ always() }}
+    needs: [frontend, rust, workflows, supply-chain, hygiene, pr-title]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Assert every gate above succeeded
+        env:
+          # Via env, not inlined into the script: `${{ toJSON(needs) }}`
+          # interpolated straight into a run block is the template-injection
+          # shape zizmor exists to catch, and this file is the example the
+          # rest of the repo copies from.
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          set -euo pipefail
+          echo "$NEEDS" | jq -r 'to_entries[] | "\(.value.result)\t\(.key)"' | sort
+          # "skipped" counts as a pass ONLY because no job in this workflow
+          # depends on another — the sole skip is pr-title on a push event.
+          # If an inter-job `needs:` is ever added here, revisit this: a job
+          # skipped because its dependency failed would sail through.
+          failed=$(echo "$NEEDS" | jq -r '
+            [to_entries[] | select(.value.result != "success" and .value.result != "skipped") | .key]
+            | join(", ")')
+          if [ -n "$failed" ]; then
+            echo "::error::pre-merge gates did not pass: $failed"
+            exit 1
+          fi
+          echo "All pre-merge gates passed."
