@@ -1,0 +1,91 @@
+name: Bug report
+description: Something in the app behaves wrongly
+labels: ['bug']
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before filing: `ISSUES.md` entries **I9** (any peer can drive the shared
+        Pomodoro) and **I18** (the sidecar model path is not sandboxed) are
+        accepted deviations under the friends-only threat model, not open bugs.
+
+        Found a security problem? Do not file it here — see `SECURITY.md`.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you saw, and what you expected instead.
+      placeholder: |
+        My friend's tile stayed dark for the whole session. I expected to see
+        their camera once they joined.
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: |
+        The shortest path from a launched app to the wrong behaviour. If it
+        needs two machines, say which one you were on and what the other one
+        did — most of this app only goes wrong with a peer attached.
+      placeholder: |
+        1. I started a session and sent an invite
+        2. My friend joined from their machine
+        3. Their tile showed my camera; mine stayed dark on their side
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: StudyVis version
+      description: Settings → About. If you built from source, the commit SHA.
+      placeholder: '1.8.1'
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - macOS (Apple Silicon)
+        - Windows 10
+        - Windows 11
+        - Built from source on something else
+    validations:
+      required: true
+
+  - type: dropdown
+    id: reproducible
+    attributes:
+      label: How often does it happen?
+      options:
+        - Every time
+        - Most times
+        - Saw it once
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: surfaces
+    attributes:
+      label: Which parts were involved?
+      description: Tick anything that was on. It narrows the search a lot.
+      options:
+        - label: On-device AI focus detection was enabled
+        - label: A peer was connected (not a solo session)
+        - label: Screen sharing / screen capture was active
+        - label: The app had just auto-updated
+        - label: Push-to-talk or a custom keybinding was involved
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Anything from the logs or the audit view
+      description: |
+        Optional. **Never paste a BIP39 recovery phrase, a private key, or a
+        keychain export** — not here, and not into a chat with any AI service.
+      render: text

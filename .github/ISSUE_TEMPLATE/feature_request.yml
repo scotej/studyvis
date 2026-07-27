@@ -1,0 +1,39 @@
+name: Feature request
+description: Something StudyVis should do that it does not
+labels: ['enhancement']
+body:
+  - type: markdown
+    attributes:
+      value: |
+        `PLAN.md` §6 lists permanent non-goals (mobile clients, stranger/public
+        rooms, session recording, cloud sync, telemetry). §8 lists things
+        deferred with a concrete unblock trigger — Linux is the big one, gated
+        on re-verifying WebKitGTK `getDisplayMedia`.
+
+        Worth a look before writing: a "no" that is already written down saves
+        us both the round trip.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do?
+      description: |
+        The situation, not the solution. "I keep losing my streak when I study
+        on my phone-tethered laptop" tells us more than "add offline mode".
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What would you like it to do?
+      validations:
+        required: false
+
+  - type: checkboxes
+    id: checked
+    attributes:
+      label: Checks
+      options:
+        - label: I read `PLAN.md` §6 and this is not a listed non-goal
+        - label: This works without a server, an account, or any data leaving the machine
