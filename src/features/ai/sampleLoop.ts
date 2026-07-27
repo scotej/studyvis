@@ -53,6 +53,7 @@ import {
   mapDisplayMediaError,
   SCREEN_FRAME_MAX_WIDTH,
   SCREEN_FRAME_QUALITY,
+  takePendingScreenStream,
 } from './captureScreen'
 import {
   CaptureError,
@@ -241,6 +242,13 @@ const defaultRuntime: SampleLoopRuntime = {
   fetch: (...args) => fetch(...args),
   captureFace: defaultCaptureFace,
   acquireScreenStream: async () => {
+    // V2-P9 gesture fix — prefer a stream a real user gesture already
+    // started acquiring (see captureScreen.ts's preacquireScreenStream).
+    // boot() itself runs from a useEffect with no gesture of its own, so
+    // falling through to a fresh getDisplayMedia() call here throws
+    // "must be called from a user gesture handler" on WebView2/WKWebView.
+    const pending = takePendingScreenStream()
+    if (pending) return await pending
     if (
       typeof navigator === 'undefined' ||
       !navigator.mediaDevices ||
@@ -342,7 +350,12 @@ export type SampleLoopOptions = {
   // most once per loop lifetime unless documented otherwise.
   onStartFail?: (reason: SampleLoopStartReason, detail?: string) => void
   onCaptureDenied?: () => void
-  onCaptureError?: (err: CaptureError) => void
+  // `fatal` distinguishes a boot()-time acquire failure (the loop tears
+  // itself down + stops the sidecar; AI is now dead until a fresh start())
+  // from a tick()-time transient capture failure (the loop keeps
+  // rescheduling and may recover on its own next tick). Consumers use this
+  // to decide whether to reflect an "errored" runtime status or just toast.
+  onCaptureError?: (err: CaptureError, fatal: boolean) => void
   onSidecarErrored?: (lastError: string | null) => void
   // §8 battery pause. Fires once when the loop enters the on-battery-<20%
   // paused state, and `onBatteryResume` once when it leaves. Without these the
@@ -895,7 +908,7 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
         }
         if (!state.captureErrorReported) {
           state.captureErrorReported = true
-          opts.onCaptureError?.(err)
+          opts.onCaptureError?.(err, false)
         }
         return
       }
@@ -1042,14 +1055,15 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
         state.captureDenied = true
         opts.onCaptureDenied?.()
       } else if (err instanceof CaptureError) {
-        opts.onCaptureError?.(err)
+        opts.onCaptureError?.(err, true)
       } else {
         opts.onCaptureError?.(
           new CaptureError(
             'screen_capture_unavailable',
             err instanceof Error ? err.message : String(err),
             { cause: err }
-          )
+          ),
+          true
         )
       }
       // The sidecar was already started above; teardownInternal() does NOT
@@ -1082,7 +1096,8 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
         new CaptureError(
           'screen_capture_no_video',
           'getDisplayMedia returned a stream with no video tracks'
-        )
+        ),
+        true
       )
       await stopSidecarBestEffort()
       teardownInternal()

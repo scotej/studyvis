@@ -33,10 +33,10 @@ import {
   AI_DIALOG_CONTEXT_REQUEST,
   AI_DIALOG_TOPIC_CHANGE,
   AI_DIALOG_WINDOW_LABEL,
-  CaptureError,
+  discardPendingScreenStream,
   ERR_ENGINE_NOT_INSTALLED,
   isUncertainVerdict,
-  requestScreenCapturePermission,
+  preacquireScreenStream,
   startSampleLoop,
   useBreakStore,
   useFocusStore,
@@ -942,8 +942,14 @@ export function SessionView({
         setCaptureOverlayOpen(true)
         setAiRuntimeStatus('error')
       },
-      onCaptureError: (err) => {
+      onCaptureError: (err, fatal) => {
         toast.error(strings.session.errors.aiCaptureError(err.message))
+        // A transient tick-time capture error (fatal === false) leaves the
+        // loop running — it may recover on the next tick, so the chip
+        // shouldn't flip to a dead-end "error" state. A boot()-time failure
+        // (fatal === true) really did stop the sidecar; without this the
+        // chip kept reading "active" while AI was silently dead underneath.
+        if (fatal) setAiRuntimeStatus('error')
       },
       onSidecarErrored: (lastError) => {
         toast.error(
@@ -973,6 +979,22 @@ export function SessionView({
       void local?.stop()
     }
   }, [status, aiFeaturesEnabled, activeModelId, localStream, captureDenied])
+
+  // V2-P9 gesture fix safety net — a gesture handler (TopicGateModal submit,
+  // fired BEFORE this component even mounts, the AiCategory toggle, or
+  // handleCaptureRetry above) may pre-acquire a long-lived screen stream
+  // that the effect above never ends up consuming (e.g. the camera never
+  // comes up, so `localStream` never satisfies the effect's guard). Without
+  // this, that stream — and the OS recording indicator it lights — would
+  // stay alive for no reason until the app quits. Bounding the leak to "at
+  // most this SessionView's lifetime" is enough. Deliberately NOT also
+  // discarding on mount: a pre-acquire from the TopicGateModal submit that
+  // started this very session landed in the stash before SessionView
+  // mounted at all, and boot() (the effect above) hasn't had a chance to
+  // consume it yet — clearing here too would just race and defeat it.
+  useEffect(() => {
+    return () => discardPendingScreenStream()
+  }, [])
 
   // V2-P7 — listen for cross-window events from the Ctrl+] AI dialog. The
   // dialog runs in a separate Tauri WebviewWindow (label = AI_DIALOG_
@@ -1332,28 +1354,19 @@ export function SessionView({
   // denial. The overlay closes itself before calling this; on success we
   // reset the focus score (the dead loop's last samples shouldn't count) and
   // clear the latch, which is in the sample-loop effect deps so it remounts.
+  //
+  // V2-P9 gesture fix — this click is the gesture: pre-acquire (stash for
+  // boot() to consume) rather than seed-and-release-then-let-boot()-
+  // reacquire, which would be a second getDisplayMedia() call with no
+  // gesture left to satisfy it. Whatever the outcome (grant or another
+  // denial), the effect re-run below drives boot() to consume it, and
+  // boot()'s existing onCaptureDenied/onCaptureError handling takes it from
+  // there — no need to duplicate that branching here.
   const handleCaptureRetry = useCallback(() => {
-    void (async () => {
-      try {
-        await requestScreenCapturePermission()
-        useFocusStore.getState().reset()
-        setCaptureDenied(false)
-        setAiRuntimeStatus('active')
-      } catch (err) {
-        if (
-          err instanceof CaptureError &&
-          err.code === 'screen_capture_denied'
-        ) {
-          setCaptureOverlayOpen(true)
-          return
-        }
-        toast.error(
-          err instanceof Error
-            ? err.message
-            : strings.session.errors.requestAccessFallback
-        )
-      }
-    })()
+    void preacquireScreenStream()
+    useFocusStore.getState().reset()
+    setCaptureDenied(false)
+    setAiRuntimeStatus('active')
   }, [])
 
   const auditEntries = useMemo(
