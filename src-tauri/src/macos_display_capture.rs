@@ -140,7 +140,12 @@ unsafe fn patch_ui_delegate(webview: *mut AnyObject) {
             types.as_ptr(),
         )
     };
-    if !added.as_bool() {
+    // Say so on the way out, not only on failure. Silence would otherwise be
+    // indistinguishable from "the closure never ran", which is exactly the
+    // ambiguity that made this bug expensive to find in the first place.
+    if added.as_bool() {
+        eprintln!("[display-capture] display-capture delegate installed on {class:?}");
+    } else {
         eprintln!("[display-capture] class_addMethod failed; getDisplayMedia stays denied");
     }
 }
