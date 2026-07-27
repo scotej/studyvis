@@ -114,6 +114,66 @@ async function acquireScreenStream(): Promise<MediaStream> {
   }
 }
 
+// V2-P9 gesture fix — WebView2 (Windows) and WKWebView (macOS) require
+// getDisplayMedia() to run inside live transient user activation on EVERY
+// call, not just the first. sampleLoop.ts's boot() acquires the long-lived
+// screen stream from a useEffect (no gesture in its call stack), which is
+// exactly why the loop's first tick could throw "getDisplayMedia must be
+// called from a user gesture handler" instead of the intended
+// screen_capture_denied flow.
+//
+// Callers that DO have a gesture (TopicGateModal's submit, AiCategory's
+// "enable AI" toggle when a session is already active, SessionView's
+// permission-overlay retry) call `preacquireScreenStream()` synchronously —
+// no `await` before it — so the native getDisplayMedia() call happens
+// inside that click. The in-flight acquisition is stashed here;
+// sampleLoop's default `acquireScreenStream` runtime hook awaits it instead
+// of calling getDisplayMedia() itself outside gesture context.
+let pendingScreenAcquire: Promise<MediaStream> | null = null
+
+// Returns the same promise that gets stashed — a caller that cares about
+// the immediate outcome (e.g. SessionView's retry, for optimistic UI) may
+// await it. That does NOT consume the stash: promises support multiple
+// independent subscribers, so boot()'s later `takePendingScreenStream()`
+// still observes the same settlement. Callers that don't care just ignore
+// the return value.
+export function preacquireScreenStream(): Promise<MediaStream> {
+  const prior = pendingScreenAcquire
+  const attempt = acquireScreenStream()
+  pendingScreenAcquire = attempt
+  // Nothing may ever call takePendingScreenStream() for this attempt (e.g.
+  // the session never reaches boot()) — attach a no-op catch so that case
+  // doesn't surface as an unhandled promise rejection. Callers that do
+  // await the returned promise still observe the original rejection.
+  attempt.catch(() => {})
+  // A still-unconsumed stream from an earlier call (rapid re-toggle/retry)
+  // must not leak — release it once it settles.
+  if (prior) {
+    void prior.then(stopStream).catch(() => {})
+  }
+  return attempt
+}
+
+// Consumed by sampleLoop.ts's default screen-acquire runtime hook. Returns
+// null when no gesture-context acquisition is in flight (falls back to a
+// direct getDisplayMedia() call, e.g. in tests or an uncovered code path).
+export function takePendingScreenStream(): Promise<MediaStream> | null {
+  const attempt = pendingScreenAcquire
+  pendingScreenAcquire = null
+  return attempt
+}
+
+// Release an unconsumed pre-acquired stream (e.g. SessionView unmounting
+// before boot() ever ran) so it doesn't hold the OS recording indicator lit
+// for no reason.
+export function discardPendingScreenStream(): void {
+  const attempt = pendingScreenAcquire
+  pendingScreenAcquire = null
+  if (attempt) {
+    void attempt.then(stopStream).catch(() => {})
+  }
+}
+
 // Exported so the V2-P5/V2-P9 long-lived-stream path in sampleLoop.ts maps
 // getDisplayMedia rejections to the same CaptureError codes (the
 // macOS-Sequoia NotAllowedError → `screen_capture_denied` mapping is

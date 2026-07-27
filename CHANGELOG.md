@@ -18,7 +18,12 @@ V3 work was drafted as v1.0.4 but shipped under the **v1.0.5** tag —
 there is no v1.0.4 tag; the section below is labelled by the tag that
 shipped it.)
 
-## 1.8.2 — 2026-07-26 — You can finally see the friend who started the session
+## 1.8.2 — 2026-07-26 — The host's camera reaches you, and AI stops dying at session start
+
+Two fixes for things that went wrong the moment a session began: the camera
+and mic of whoever started it never reaching anyone who joined, and on-device
+AI throwing a raw screen-capture error that killed the engine it had just
+started.
 
 ### Fixed
 
@@ -36,6 +41,24 @@ shipped it.)
   to each friend as they arrive. **You and your friends all need to
   update:** an updated host reaches a friend on an older build, but if the
   host is on an older build you still won't see them. (I77)
+
+- **Starting a session with AI already enabled could throw a raw
+  "getDisplayMedia must be called from a user gesture handler" error and
+  silently kill the just-started on-device engine.** WebView2 (Windows) and
+  WKWebView (macOS) require every `getDisplayMedia()` call — not only the
+  first — to run inside an active user gesture, but the AI sample loop
+  acquired its long-lived screen stream from a React effect with no click in
+  its call stack, so the acquisition was rejected outright and the engine
+  that had just started was torn down as a result. A friend hitting this
+  would then separately see a misleading "AI isn't running yet, turn it on
+  in Settings → AI" from the AI chat dialog, even though AI genuinely was
+  on. Starting a session via the AI topic gate, flipping the Settings → AI
+  toggle mid-session, and retrying from the capture-permission overlay now
+  all acquire that stream at the moment of the actual click and hand it off
+  to the sample loop, instead of the loop acquiring it itself later with no
+  gesture to satisfy. The in-session AI status indicator also now correctly
+  flips to "error" when this happens, instead of continuing to read
+  "active" after AI had already died. (I76)
 
 ## 1.8.1 — 2026-07-26 — The AI engine now actually loads a model
 

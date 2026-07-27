@@ -102,6 +102,9 @@ export { captureFace, FACE_FRAME_SIZE, FACE_FRAME_QUALITY } from './captureFace'
 export {
   captureScreen,
   requestScreenCapturePermission,
+  preacquireScreenStream,
+  takePendingScreenStream,
+  discardPendingScreenStream,
   SCREEN_FRAME_MAX_WIDTH,
   SCREEN_FRAME_QUALITY,
   __setScreenCaptureRuntime,

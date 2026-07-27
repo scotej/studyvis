@@ -26,6 +26,7 @@ import {
   getHfTokenRuntime,
   MAX_SAMPLE_INTERVAL_SEC,
   ModelPickerContainer,
+  preacquireScreenStream,
   requestScreenCapturePermission,
   useModelStore,
   useSidecarStore,
@@ -178,11 +179,24 @@ export function AiCategory() {
 
   const handleToggle = useCallback(
     async (next: boolean) => {
+      // V2-P9 gesture fix — when a session is already running, flipping AI
+      // on fires sampleLoop's boot() from a useEffect the instant
+      // aiFeaturesEnabled lands, with no gesture of its own to acquire the
+      // long-lived screen stream. THIS click is the only gesture available,
+      // so pre-acquire (stashed for boot() to consume) before any of the
+      // slower `setAiFeaturesEnabled` IPC round-trips below can eat the
+      // transient-activation window. Must run before any `await`.
+      if (next && sessionActive) {
+        void preacquireScreenStream()
+      }
       setToggling(true)
       try {
         await setAiFeaturesEnabled(next)
         if (next) {
-          await seedScreenPermission()
+          // The pre-acquire above already covers the mid-session case;
+          // seeding again here would be a second getDisplayMedia() call
+          // with no gesture left to satisfy it.
+          if (!sessionActive) await seedScreenPermission()
         } else {
           // V2-P1 carryover: terminate the llama-server child + unwind the
           // health-poll loop the moment the gate closes. Records + on-disk
@@ -194,7 +208,7 @@ export function AiCategory() {
         setToggling(false)
       }
     },
-    [seedScreenPermission, setAiFeaturesEnabled]
+    [seedScreenPermission, setAiFeaturesEnabled, sessionActive]
   )
 
   const handleRetryPermission = useCallback(async () => {
