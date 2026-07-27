@@ -13,4 +13,12 @@
 -- 1 = AI features were on, 0 = off, NULL = unknown (any row written before
 -- this migration). The report treats NULL as "unknown" and keeps its existing
 -- cause-neutral copy, so old rows never gain a claim nobody recorded.
+--
+-- Read at TEARDOWN, not at session start, so a mid-session toggle is recorded
+-- as its final state. That is deliberate rather than merely convenient: the
+-- question this column answers is "should the report explain an absence?", and
+-- a session that recorded checks is identified by the sample counters, which
+-- the report consults FIRST (see aiCoverage in reportData.ts). So a user who
+-- toggles AI off after a scored session still reads as measured, and only a
+-- session with nothing to show falls through to this column for its wording.
 ALTER TABLE sessions ADD COLUMN ai_enabled INTEGER;
