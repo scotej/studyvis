@@ -6,7 +6,10 @@ authors = ["StudyVis"]
 license = ""
 repository = ""
 edition = "2021"
-rust-version = "1.77.2"
+# ed25519-dalek 3 is edition 2024 and needs 1.85. Nothing enforces this — the
+# workflows all build on `stable` and resolver 2 ignores rust-version — so the
+# declared floor is documentation that has to be kept honest by hand.
+rust-version = "1.85"
 # This crate is the application, not a library anyone consumes — it has no
 # license expression and must never reach crates.io. Marking it explicitly is
 # also what lets cargo-deny's `[licenses.private] ignore` skip it instead of
