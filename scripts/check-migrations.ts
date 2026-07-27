@@ -181,6 +181,23 @@ async function main() {
   }
 
   if (update) {
+    // A manifest entry with no file behind it means a shipped migration was
+    // deleted, and --update must not quietly rewrite it away. The sequence
+    // check does NOT cover this: delete the highest-numbered migration and
+    // 1..N stays contiguous, so without this the hash would vanish from the
+    // manifest with nothing said — the exact case this script exists for.
+    const orphaned = [...manifest.keys()].filter(
+      (file) => !entries.some((e) => e.file === file)
+    )
+    if (orphaned.length > 0) {
+      process.stderr.write(
+        `check-migrations: --update refuses to drop ${orphaned.length} manifest entr(ies) whose file is gone:\n` +
+          orphaned.map((f) => `  ${f}\n`).join('') +
+          `\nA shipped migration was deleted. Restore it, or remove its manifest line by hand and say why in the commit.\n`
+      )
+      process.exit(1)
+    }
+
     // Refuse to launder an edit as an addition: --update may only ever add
     // rows. Changing an existing hash still has to be argued for by hand.
     const changed = entries.filter(

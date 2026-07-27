@@ -49,7 +49,12 @@ jobs:
       || contains(github.event.pull_request.labels.*.name, 'build-installers') }}
     name: ${{ matrix.label }}
     runs-on: ${{ matrix.platform }}
-    timeout-minutes: 60
+    # 90, not the 60 release.yml uses: this job does everything that one
+    # does plus `npm ci` and the sidecar fetch, and the header above says a
+    # build can take up to 60 minutes on its own. A timeout that can kill a
+    # slow-but-valid run after an hour of work is worth nothing here —
+    # public-repo minutes are free and the label already gates the cost.
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:

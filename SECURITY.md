@@ -14,7 +14,16 @@ The full version lives in `ARCHITECTURE.md` §12. The short form:
   malicious peer is someone you already decided to study with.
 - **All data is local.** Sessions, stats, and the audit log live in a
   SQLite database on your own disk. Private keys live in the OS keychain
-  (macOS Keychain, Windows Credential Manager). Nothing is uploaded, ever.
+  (macOS Keychain, Windows Credential Manager). There is no account, no
+  server-side history, and no telemetry — none of it is uploaded.
+- **Two things do leave the machine, and neither is content.** Peer
+  discovery rides third-party Nostr/MQTT relays, and since I74 presence
+  does too: every 30 s the app publishes a tiny ephemeral Nostr event
+  (kind 20001) to the pinned relays. The payload is XSalsa20-Poly1305
+  sealed and signed with a throwaway per-run key, and it carries a
+  heartbeat or a goodbye — nothing about what you are studying. A relay
+  operator sees encrypted beacons on an opaque tag, and traffic-analysis
+  inferences from them are in scope for a report. See ARCHITECTURE §4.
 - **AI inference is on-device.** The llama-server sidecar runs locally;
   screenshots and camera frames never leave the machine.
 - **Two entries in `ISSUES.md` are accepted deviations, not open bugs** —

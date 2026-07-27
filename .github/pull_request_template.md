@@ -41,9 +41,16 @@ tsc --noEmit, and cargo fmt — everything else below is yours to run. -->
 
 - [ ] `npm run build && npm run lint && npm run test`
 - [ ] `npm run check-tokens && npm run check-strings && npm run check-contrast`
+- [ ] `npm run check-migrations && npm run check-stories`
 - [ ] `npm run build-storybook && npm run check-a11y`
 - [ ] `cd src-tauri && cargo fmt --check && cargo clippy && cargo test`
       — _or: no Rust changes / CI is the first compiler for this box_
+- [ ] `cd src-tauri && cargo deny check` — supply chain
+
+CI-only, nothing to run locally: `actionlint` + `zizmor` (workflow lint),
+`dependency-review`, `typos`, the version-lockstep assertion, the PR-title
+check, and CodeQL. They gate the merge; they just have no useful local
+form.
 
 ## Merge style
 
