@@ -18,6 +18,35 @@ V3 work was drafted as v1.0.4 but shipped under the **v1.0.5** tag —
 there is no v1.0.4 tag; the section below is labelled by the tag that
 shipped it.)
 
+## 1.9.0 — 2026-07-27 — Show each other what you're working on
+
+### Added
+
+- **Screen sharing, for everyone in the session at once.** A Share button in
+  the session footer hands your screen to your friends the same way your
+  camera already is — peer-to-peer, never through a server, never recorded.
+  Everyone can share at the same time: each shared screen appears as its own
+  tile beside the face it belongs to, so a two-person session where you are
+  both sharing is four tiles rather than a fight over one slot. Screens are
+  letterboxed instead of cropped (cropping loses whatever you were pointing
+  at), and every screen tile has an expand control that opens it at full size
+  — a 4K display at quarter-tile is unreadable, so that view is where the
+  screen is actually read. Stopping is a button, or your operating system's
+  own "Stop sharing" control; either way your friends' tiles clear
+  immediately instead of freezing on a last frame. Nothing is shared until
+  you press the button, and your own screen is shown back to you the whole
+  time so what your friends can see is never a guess.
+
+  Sharing sends video only — no system audio, which would echo against the
+  live mic — and caps the frame rate rather than the resolution, because a
+  screen is read rather than watched and the pixels are what make text
+  legible. A friend still on 1.8.x can keep studying with you normally: they
+  simply never receive a screen, deliberately, since an older build would
+  bind it to your face tile with no way to clear it.
+
+  On macOS this rides on the screen-recording permission fix tracked in #94 /
+  I79 — without it, macOS builds cannot capture a screen at all.
+
 ## 1.8.2 — 2026-07-26 — The host's camera reaches you, and AI stops dying at session start
 
 Two fixes for things that went wrong the moment a session began: the camera

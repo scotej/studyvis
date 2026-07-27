@@ -8,14 +8,21 @@ import { tokens } from '@/design/tokens'
 // is available. We animate a colored gradient + label into a hidden canvas
 // and capture it as a MediaStream — matches the V1-P8 brief's "mocked streams
 // using a colored canvas" without needing a real camera.
-function useColorStream(label: string, color: string): MediaStream | null {
+function useColorStream(
+  label: string,
+  color: string,
+  // #96 — screen tiles letterbox rather than crop, so their stories need a
+  // source whose aspect differs from the tile's.
+  width = 640,
+  height = 360
+): MediaStream | null {
   const [stream, setStream] = useState<MediaStream | null>(null)
   const rafRef = useRef<number | null>(null)
 
   useEffect(() => {
     const canvas = document.createElement('canvas')
-    canvas.width = 640
-    canvas.height = 360
+    canvas.width = width
+    canvas.height = height
     const ctx = canvas.getContext('2d')
     if (!ctx) return
     let frame = 0
@@ -47,13 +54,22 @@ function useColorStream(label: string, color: string): MediaStream | null {
         return null
       })
     }
-  }, [color, label])
+  }, [color, label, width, height])
 
   return stream
 }
 
-function MockedTile(props: Omit<VideoTileProps, 'stream'> & { color: string }) {
-  const stream = useColorStream(props.name, props.color)
+function MockedTile({
+  color,
+  width,
+  height,
+  ...props
+}: Omit<VideoTileProps, 'stream'> & {
+  color: string
+  width?: number
+  height?: number
+}) {
+  const stream = useColorStream(props.name, color, width, height)
   return <VideoTile {...props} stream={stream} />
 }
 
@@ -180,6 +196,42 @@ export const CameraOffPeer: Story = {
   render: () => (
     <div className="w-full max-w-md">
       <MockedTile name="Bo" color={tokens.color.accent.muted} cameraOff />
+    </div>
+  ),
+}
+
+// #96 — a friend's shared screen. Same tile shape as a face, with the
+// person-specific affordances dropped (no focus dot, no PTT, no volume) and
+// letterboxed instead of cropped, because cropping a screen loses whatever the
+// person is pointing at. The expand control opens the full-size viewer.
+export const SharedScreen: Story = {
+  render: () => (
+    <div className="w-full max-w-md">
+      <MockedTile
+        name="Alice's screen"
+        color={tokens.color.accent.muted}
+        variant="screen"
+        width={1280}
+        height={800}
+        onExpand={() => {}}
+      />
+    </div>
+  ),
+}
+
+// #96 — your own screen, so you can see exactly what your friends can see.
+export const SharedScreenLocal: Story = {
+  render: () => (
+    <div className="w-full max-w-md">
+      <MockedTile
+        name="Your screen"
+        color={tokens.color.accent.default}
+        variant="screen"
+        isLocal
+        width={1280}
+        height={800}
+        onExpand={() => {}}
+      />
     </div>
   ),
 }

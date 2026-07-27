@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react'
-import { VideoOff } from 'lucide-react'
+import { MaximizeIcon, MonitorIcon, VideoOff } from 'lucide-react'
 
+import { Button } from '@/components/ui/button'
 import { Slider } from '@/components/ui/slider'
 import { tokens } from '@/design/tokens'
 import { cn } from '@/lib/utils'
@@ -9,9 +10,19 @@ import { strings } from '@/strings'
 import { FocusIndicator, type FocusState } from './FocusIndicator'
 import { PttIndicator } from './PttIndicator'
 
+// #96 — a screen tile carries someone's shared display rather than their face.
+// It is the same tile shape (so the grid stays one rhythm) with the
+// person-specific affordances dropped: no focus verdict, no PTT, no volume, and
+// `object-contain` because cropping a screen loses the part being pointed at.
+export type VideoTileVariant = 'camera' | 'screen'
+
 export type VideoTileProps = {
   name: string
   stream: MediaStream | null
+  variant?: VideoTileVariant
+  // #96 — screen tiles only: opens the full-size viewer. A screen at quarter
+  // grid size is unreadable, so this is what makes the tile useful.
+  onExpand?: () => void
   state?: FocusState
   ptt?: boolean
   isLocal?: boolean
@@ -43,6 +54,8 @@ export type VideoTileProps = {
 export function VideoTile({
   name,
   stream,
+  variant = 'camera',
+  onExpand,
   state,
   ptt = false,
   isLocal = false,
@@ -54,6 +67,7 @@ export function VideoTile({
   className,
 }: VideoTileProps) {
   const videoRef = useRef<HTMLVideoElement | null>(null)
+  const isScreen = variant === 'screen'
   // Camera-off does NOT coerce the focus state to 'offline': that would mask a
   // broadcast off-task alert (and its reasoning) and the F4 connecting/failed
   // transport states on an otherwise-connected peer. The camera-off overlay
@@ -109,15 +123,22 @@ export function VideoTile({
       }}
       data-testid="video-tile"
       data-state={resolvedState}
+      data-variant={variant}
       data-camera-off={cameraOff ? 'true' : undefined}
     >
       <video
         ref={videoRef}
         autoPlay
         playsInline
-        muted={isLocal}
+        // A screen tile never carries audio (the share is requested video-only)
+        // and muting it defensively keeps a peer who publishes one anyway from
+        // echoing against the live mic.
+        muted={isLocal || isScreen}
         className={cn(
-          'h-full w-full object-cover',
+          'h-full w-full',
+          // Cropping a screen loses whatever the person is pointing at; letter-
+          // boxing it inside the tile does not.
+          isScreen ? 'object-contain' : 'object-cover',
           // Keep the element mounted (so the track stays bound) but hide the
           // frozen frame behind the camera-off placeholder.
           cameraOff && 'invisible'
@@ -143,13 +164,32 @@ export function VideoTile({
       ) : null}
       <figcaption className="absolute inset-x-0 bottom-0 flex items-center justify-between gap-3 bg-overlay-glass px-4 py-2.5">
         <div className="flex min-w-0 items-center gap-2">
-          <FocusIndicator state={resolvedState} />
+          {isScreen ? (
+            <MonitorIcon
+              className="size-3.5 shrink-0 text-text-secondary"
+              aria-hidden="true"
+            />
+          ) : (
+            <FocusIndicator state={resolvedState} />
+          )}
           <span className="truncate text-sm font-medium text-text-primary">
             {name}
           </span>
         </div>
         <div className="flex shrink-0 items-center gap-3">
-          {!isLocal && volume != null && onVolumeChange ? (
+          {isScreen && onExpand ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={onExpand}
+              aria-haspopup="dialog"
+              aria-label={strings.session.screenShare.expandAriaLabel(name)}
+            >
+              <MaximizeIcon />
+            </Button>
+          ) : null}
+          {!isScreen && !isLocal && volume != null && onVolumeChange ? (
             <Slider
               aria-label={strings.session.output.volumeAriaLabel(name)}
               value={[Math.round(volume * 100)]}
@@ -163,7 +203,7 @@ export function VideoTile({
               className="w-20"
             />
           ) : null}
-          <PttIndicator active={ptt} />
+          {isScreen ? null : <PttIndicator active={ptt} />}
         </div>
       </figcaption>
     </figure>

@@ -291,8 +291,9 @@ These components only import from `ui/`, `design/tokens.ts`, and shared utilitie
 
 | Component | Purpose |
 |-|-|
-| `VideoTile` | One peer's video + name + per-tile status dot + PTT indicator. |
-| `VideoGrid` | Mesh layout of tiles (1, 2, 3, or 4). Aspect-aware. |
+| `VideoTile` | One peer's video + name + per-tile status dot + PTT indicator. `variant="screen"` renders a shared screen instead of a face: letterboxed rather than cropped, no status dot / PTT / volume, and an expand control. |
+| `VideoGrid` | Mesh layout of tiles. 1–8 children, since each of the (max 4) people can publish a screen alongside their camera. Aspect-aware. |
+| `ScreenShareViewer` | Full-size view of one shared screen, opened from a screen tile's expand control. A modal dialog, so Escape closes the viewer rather than arming leave-the-session. |
 | `WaitingTile` | Calm "waiting for your friend" tile shown beside the self tile when alone in an active session. §10 empty-state pattern, no spinner. `invite` / `reconnect` variants. |
 | `AudioOutputPicker` | Speaker/headphone output selector for the session footer (`setSinkId`). Feature-detected — renders nothing where unsupported (macOS WKWebView). |
 | `AudioDevicePicker` | Session-footer dropdown that swaps the active microphone mid-session without renegotiating SDP; refreshes on `devicechange`. |
