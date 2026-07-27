@@ -19,9 +19,11 @@ name: Deploy
 # deliberate future decision, not the current setup.
 #
 # What it actually does: every commit that reaches a pull request or main is
-# built into real, installable StudyVis bundles for both shipped platforms
+# built into a real, installable StudyVis bundle for each shipped platform
 # from that exact SHA, published as the run's artifacts, and recorded as a
-# GitHub Deployment against the `preview` environment.
+# GitHub Deployment — one per platform, to `preview-macos` and
+# `preview-windows`, because the two artifacts succeed and fail
+# independently.
 #
 # This replaces .github/workflows/pr-build.yml ("PR installers"), which ran
 # the same build behind a `build-installers` label. The reasoning for that
@@ -64,9 +66,9 @@ concurrency:
 
 # See ci.yml's header: third-party actions are hash-pinned (enforced by the
 # zizmor policy in .github/zizmor.yml), actions/* stay on major tags, and the
-# workflow token is read-only. The `Deployed` job below creates a deployment
-# record through the `environment:` key, which the Actions service mints on
-# the job's behalf — it needs no `deployments: write` here.
+# workflow token is read-only. The deployment records come from the
+# `environment:` key, which the Actions service mints on the job's behalf —
+# no `deployments: write` is needed here.
 permissions:
   contents: read
 
@@ -76,7 +78,7 @@ jobs:
   # produce a byte-identical bundle for it would make the gate something
   # people route around rather than something that catches breakage.
   scope:
-    name: Deployment scope
+    name: Deploy scope
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -129,7 +131,7 @@ jobs:
           shippable=$(printf '%s\n' "$changed" | grep -Ev "$non_shippable" || true)
 
           {
-            echo "### Deployment scope"
+            echo "### Deploy scope"
             echo
             echo "\`$(printf '%s\n' "$changed" | grep -c . || true)\` file(s) changed since \`${base:0:7}\`."
           } >> "$GITHUB_STEP_SUMMARY"
@@ -138,7 +140,7 @@ jobs:
             echo "installable=true" >> "$GITHUB_OUTPUT"
             {
               echo
-              echo "Shippable files changed — building installers for both platforms:"
+              echo "Shippable files changed — building an installer for both platforms:"
               echo
               echo '```'
               printf '%s\n' "$shippable" | head -40
@@ -148,16 +150,15 @@ jobs:
             echo "installable=false" >> "$GITHUB_OUTPUT"
             {
               echo
-              echo "Docs/CI only — no installable surface changed, so the"
-              echo "installer legs are skipped and this commit is deployed"
-              echo "as a documentation change."
+              echo "Docs/CI only — no installable surface changed, so no"
+              echo "installer is built and this commit is deployed as a"
+              echo "documentation change."
             } >> "$GITHUB_STEP_SUMMARY"
           fi
 
-  installers:
-    name: Build ${{ matrix.label }}
+  installer:
+    name: Installer (${{ matrix.label }})
     needs: scope
-    if: ${{ needs.scope.outputs.installable == 'true' }}
     runs-on: ${{ matrix.platform }}
     # 90, not the 60 release.yml uses: this job does everything that one does
     # plus `npm ci` and the sidecar fetch, and a build can take up to 60
@@ -166,42 +167,91 @@ jobs:
     timeout-minutes: 90
     permissions:
       contents: read
+    # The guard is on the STEPS, not on the job, and that is deliberate — do
+    # not "simplify" it back to a job-level `if:`. GitHub resolves a matrix
+    # job's display name only when the job actually runs, so a leg skipped by
+    # a job-level `if:` reports its check under the LITERAL, unexpanded name.
+    # This job used to carry `if: needs.scope.outputs.installable == 'true'`
+    # and every docs PR grew a check literally called
+    # "Build ${{ matrix.label }}" — observed on PR #141, not theoretical.
+    # Letting the job start and no-op costs ~20s of free public-repo runner
+    # time and gives both platforms a correctly-named, always-present
+    # indicator instead.
+    #
+    # The cost of that choice: a docs-only commit still mints both deployment
+    # records below, having built nothing. The step summary and the `Deployed`
+    # rollup both say so. Avoiding it would mean per-leg job outputs feeding
+    # two extra statically-named jobs, which is a lot of machinery for two
+    # rows in a low-traffic tab.
+    env:
+      SHIPPABLE: ${{ needs.scope.outputs.installable }}
+    # One deployment record PER PLATFORM, minted here rather than on the
+    # rollup job below. It has to be here: a matrix job's `result` collapses
+    # every leg into a single value, so a job downstream of this one cannot
+    # tell "macOS shipped, Windows broke" from "both broke" — it would mint
+    # one deployment for two independent artifacts. Each leg deploying to its
+    # own environment means the Deployments tab shows exactly what exists.
+    environment:
+      name: ${{ matrix.environment }}
+      # No stable per-artifact URL exists at this point, so both point at the
+      # run, which is where the download actually is.
+      url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          - label: macOS (Apple Silicon)
+          - label: macOS
+            arch: arm64
+            environment: preview-macos
             platform: macos-latest
             rust-targets: aarch64-apple-darwin
             args: --target aarch64-apple-darwin --bundles dmg
             llama-triple: aarch64-apple-darwin
           - label: Windows
+            arch: x64
+            environment: preview-windows
             platform: windows-latest
             rust-targets: ''
             args: --bundles nsis
             llama-triple: x86_64-pc-windows-msvc
 
     steps:
+      # Green on a docs commit means "nothing needed building", not "the
+      # installer is fine". Say so where someone reading the check will see it.
+      - name: Nothing to build
+        if: env.SHIPPABLE != 'true'
+        shell: bash
+        run: |
+          {
+            echo "### ${{ matrix.label }} installer"
+            echo
+            echo "Not built — this commit changes no shippable file."
+          } >> "$GITHUB_STEP_SUMMARY"
+
       # `pull_request`, never `pull_request_target`: fork code runs with a
       # read-only token and no access to secrets, and nothing here needs
       # either. The artifact is an unsigned installer built from unreviewed
       # code — treat a fork PR's bundle accordingly before running it.
       - uses: actions/checkout@v7
+        if: env.SHIPPABLE == 'true'
         with:
           persist-credentials: false
 
       - uses: actions/setup-node@v7
+        if: env.SHIPPABLE == 'true'
         with:
           node-version: '20'
           cache: 'npm'
 
       - name: Install Rust toolchain
+        if: env.SHIPPABLE == 'true'
         uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master; the toolchain input selects the channel
         with:
           toolchain: stable
           targets: ${{ matrix.rust-targets }}
 
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        if: env.SHIPPABLE == 'true'
         with:
           workspaces: src-tauri -> target
           # Only main writes the cache. GitHub already scopes a
@@ -214,11 +264,13 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install frontend dependencies
+        if: env.SHIPPABLE == 'true'
         run: npm ci
 
       # Release-profile builds fail without a real sidecar binary, by design
       # (build.rs only writes a placeholder for debug builds).
       - name: Fetch llama-server prebuild
+        if: env.SHIPPABLE == 'true'
         shell: bash
         run: bash scripts/fetch-llama-server.sh --triple ${{ matrix.llama-triple }}
 
@@ -227,13 +279,15 @@ jobs:
       # and fails. Off, it emits only the installer — which is all a smoke
       # test needs, and means no deployment artifact from here can ever be
       # fed to a client's updater.
-      - name: Build the app bundle (no updater artifacts, no signing)
+      - name: Build the installer (unsigned, no updater artifacts)
+        if: env.SHIPPABLE == 'true'
         shell: bash
         run: |
           npm run tauri -- build ${{ matrix.args }} \
             --config '{"bundle":{"createUpdaterArtifacts":false}}'
 
-      - name: Collect bundles
+      - name: Collect the installer
+        if: env.SHIPPABLE == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -244,13 +298,16 @@ jobs:
           ls -la out
 
       - uses: actions/upload-artifact@v7
+        if: env.SHIPPABLE == 'true'
         with:
-          # NOT github.ref_name as the fallback: upload-artifact rejects any
-          # name containing '/', and every branch here is namespaced
-          # (ci/…, feat/…, fix/…). A workflow_dispatch run would build for
-          # 30-60 minutes and then die on the upload. run_id is always
-          # slash-free and unique.
-          name: studyvis-${{ matrix.llama-triple }}-${{ github.event.pull_request.number || github.run_id }}
+          # Named for whoever downloads it, not for the build system:
+          # `StudyVis-macOS-arm64-pr141`, not `studyvis-aarch64-apple-darwin-141`.
+          #
+          # NOT github.ref_name in the suffix: upload-artifact rejects any name
+          # containing '/', and every branch here is namespaced (ci/…, feat/…,
+          # fix/…). A workflow_dispatch run would build for 30-60 minutes and
+          # then die on the upload. run_id is always slash-free and unique.
+          name: StudyVis-${{ matrix.label }}-${{ matrix.arch }}-${{ github.event.pull_request.number && format('pr{0}', github.event.pull_request.number) || github.run_id }}
           path: out/
           if-no-files-found: error
           # Unsigned installers of unreviewed code. Short retention keeps
@@ -258,19 +315,22 @@ jobs:
           # release.
           retention-days: 7
 
-      - name: Explain what these artifacts are
+      - name: Explain what this build is
+        if: env.SHIPPABLE == 'true'
         shell: bash
         run: |
           {
-            echo "### ${{ matrix.label }} deployment"
+            echo "### ${{ matrix.label }} installer (${{ matrix.arch }})"
             echo
             echo "Unsigned, **not** a release, no auto-update manifest."
             echo "Expect the usual Gatekeeper/SmartScreen warning (INSTALL.md)."
             echo "Installing this over a real StudyVis install replaces it."
           } >> "$GITHUB_STEP_SUMMARY"
 
-  # The indicator itself: one check name summarising both legs, and the job
-  # whose `environment:` mints the GitHub Deployment record for this commit.
+  # One check summarising both platforms, so the PR has a single line to read
+  # rather than two to correlate. It mints no deployment record of its own —
+  # those belong to the per-platform jobs above, which are the only things
+  # that know what actually got built.
   #
   # It reports a real pass/fail — a broken platform build turns this red — but
   # it is NOT in the ruleset and must not be added there without accepting the
@@ -282,65 +342,56 @@ jobs:
     # job up, read 'cancelled' from its needs, and report a hard failure for
     # a run nobody was waiting on.
     if: ${{ !cancelled() }}
-    needs: [scope, installers]
+    needs: [scope, installer]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
       contents: read
-    environment:
-      name: preview
-      # Where the deployment actually landed: the run page, from which both
-      # platform bundles are downloadable for seven days.
-      url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
     steps:
-      # ci.yml's aggregator can treat every `skipped` as a pass because no
-      # job in that file depends on another. This one cannot: `installers`
-      # is skipped both when there was nothing to build (fine) and when
-      # `scope` failed before deciding (not fine), and those must not read
-      # the same. Hence the explicit three-way check rather than a jq sweep
-      # over `needs`.
+      # `installer` has no job-level `if:`, so once `scope` succeeds it always
+      # runs and its result is a genuine pass/fail rather than a `skipped` that
+      # could mean either "nothing to build" or "the dependency died". That is
+      # what lets this be a plain two-step check instead of ci.yml's jq sweep
+      # over `needs` — whose "skipped counts as a pass" shortcut is only safe
+      # there because no job in that file depends on another.
       - name: Report whether this commit deployed
         env:
           SCOPE_RESULT: ${{ needs.scope.result }}
-          INSTALLERS_RESULT: ${{ needs.installers.result }}
+          INSTALLER_RESULT: ${{ needs.installer.result }}
           INSTALLABLE: ${{ needs.scope.outputs.installable }}
         run: |
           set -euo pipefail
 
           if [ "$SCOPE_RESULT" != "success" ]; then
-            echo "::error::deployment scope could not be determined (${SCOPE_RESULT}) — nothing was deployed."
+            echo "::error::deploy scope could not be determined (${SCOPE_RESULT}) — nothing was deployed."
             exit 1
           fi
 
-          if [ "$INSTALLABLE" = "true" ]; then
-            if [ "$INSTALLERS_RESULT" != "success" ]; then
-              echo "::error::the installer build did not succeed (${INSTALLERS_RESULT}) — this commit changes shippable code that no longer builds into bundles on both platforms. This check does NOT block the merge; it is telling you something is broken."
+          if [ "$INSTALLABLE" != "true" ]; then
+            if [ "$INSTALLER_RESULT" != "success" ]; then
+              echo "::error::nothing shippable changed, yet the installer job reported '${INSTALLER_RESULT}'. That is a workflow bug, not a build break."
               exit 1
             fi
             {
-              echo "### Deployed"
+              echo "### Deployed — documentation only"
               echo
-              echo "macOS (Apple Silicon) and Windows bundles were built from"
-              echo "this commit and attached to the run. Download them from the"
-              echo "**Artifacts** section of this page if you want to smoke-test."
+              echo "No shippable file changed, so no installer was built."
               echo
               echo "_Indicator only — merging does not wait for this._"
             } >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
 
-          # Docs/CI-only. `installers` must be genuinely skipped — anything
-          # else means the `if:` guard and this branch disagree about what
-          # ran, which is a workflow bug, not a passing deployment.
-          if [ "$INSTALLERS_RESULT" != "skipped" ]; then
-            echo "::error::scope said nothing shippable changed but the installer legs reported '${INSTALLERS_RESULT}'. Refusing to record a deployment for a run this job cannot explain."
+          if [ "$INSTALLER_RESULT" != "success" ]; then
+            echo "::error::the installer build did not succeed (${INSTALLER_RESULT}) — this commit changes shippable code that no longer builds on at least one platform. Check Installer (macOS) and Installer (Windows) to see which. This does NOT block the merge; it is telling you something is broken."
             exit 1
           fi
           {
-            echo "### Deployed (documentation)"
+            echo "### Deployed"
             echo
-            echo "No shippable file changed, so there is no new installable"
-            echo "surface to build. Recorded as a documentation deployment."
+            echo "macOS (arm64) and Windows (x64) installers were built from"
+            echo "this commit and attached to the run. Download them from the"
+            echo "**Artifacts** section of this page if you want to smoke-test."
             echo
             echo "_Indicator only — merging does not wait for this._"
           } >> "$GITHUB_STEP_SUMMARY"
