@@ -528,14 +528,6 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
     state.screenStreams.splice(idx, 1)
   }
 
-  async function stopSidecarBestEffort(): Promise<void> {
-    try {
-      await runtime.stopSidecar()
-    } catch (err) {
-      console.warn('[sampleLoop] sidecar stop failed:', err)
-    }
-  }
-
   function disposeScreenStream(): void {
     for (const track of state.screenTracks) {
       try {
@@ -1005,21 +997,14 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
         ? benchmark.p95Sec
         : 0
 
-    // Start the sidecar BEFORE we allocate any recurring work. If it fails,
-    // teardownInternal makes the start-failure handle indistinguishable
-    // from a freshly-stopped one — no leaked battery timer, no stale state.
-    const port = await runtime.startSidecar({
-      modelPath: paths.modelPath,
-      mmprojPath: paths.mmprojPath,
-      ctxSize: DEFAULT_CTX_SIZE,
-    })
-    if (port == null) {
-      const lastError = useSidecarStore.getState().lastError
-      opts.onStartFail?.('sidecar_start_failed', lastError ?? undefined)
-      teardownInternal()
-      return
-    }
-
+    // I79 — screen capture is acquired BEFORE the sidecar, not after. Both
+    // orders tear down cleanly, but this one never asks llama-server to load
+    // a multi-GB model that a failed acquire is about to kill milliseconds
+    // later: the reported symptom was "model does not load into machine",
+    // with `[event] terminated code=None` and no stderr in the diagnostic log
+    // (the child died before it could print its banner). Acquire first and a
+    // capture failure costs nothing but the picker.
+    //
     // V3-P4 — decide how many screen streams to acquire BEFORE the first
     // getDisplayMedia call. Reading the setting once here (not per tick) is
     // why "All displays" applies on the next loop boot rather than mid-
@@ -1064,10 +1049,8 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
           true
         )
       }
-      // The sidecar was already started above; teardownInternal() does NOT
-      // stop it and a later stop() short-circuits on state.stopped, so the
-      // child would leak. Stop it explicitly on this post-start failure path.
-      await stopSidecarBestEffort()
+      // No sidecar to unwind — I79 moved the spawn below this acquire, so a
+      // capture failure now costs nothing beyond the loop itself.
       teardownInternal()
       return
     }
@@ -1097,7 +1080,6 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
         ),
         true
       )
-      await stopSidecarBestEffort()
       teardownInternal()
       return
     }
@@ -1156,6 +1138,22 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
         }
         break
       }
+    }
+
+    // Every screen the model will see is now in hand, so it is finally worth
+    // paying for the model itself. If the spawn fails, teardownInternal()
+    // releases the streams we just acquired along with the rest of the loop.
+    if (state.stopped) return
+    const port = await runtime.startSidecar({
+      modelPath: paths.modelPath,
+      mmprojPath: paths.mmprojPath,
+      ctxSize: DEFAULT_CTX_SIZE,
+    })
+    if (port == null) {
+      const lastError = useSidecarStore.getState().lastError
+      opts.onStartFail?.('sidecar_start_failed', lastError ?? undefined)
+      teardownInternal()
+      return
     }
 
     // Seed the battery cache before scheduling — first tick should use a

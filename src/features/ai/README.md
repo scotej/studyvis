@@ -62,9 +62,23 @@ acquire turns out to prompt every tick:
    V2-P3 to keep the API surface small (one prompt, one function); V2-P5
    adds the helpers when it has measurements to justify the second mode.
 
+### macOS: the webview has to be taught to ask (I79)
+
+Before the OS grant matters at all, WebKit has to be willing to route the
+request. Since macOS 13 it resolves `getDisplayMedia()` either by its own
+default action — taken only when the app implements **no** capture delegate —
+or by the private
+`_webView:requestDisplayCapturePermissionForOrigin:initiatedByFrame:withSystemAudio:decisionHandler:`
+delegate, and it denies the call outright when an app implements the public
+camera/mic delegate without that private one. wry is exactly that app, so
+until `src-tauri/src/macos_display_capture.rs` adds the missing method to
+wry's delegate class at startup, every acquire here rejects with
+`NotAllowedError` no matter what the user has granted. Upstream is
+tauri-apps/wry#1195 (open) / #1196 (unmerged); drop our patch if it lands.
+
 ### macOS Sequoia permission flow
 
-On macOS Sequoia (15.x), Screen Recording is a per-app grant in System
+With the delegate in place, Screen Recording is a per-app grant in System
 Settings → Privacy & Security → Screen Recording. Until the user toggles
 StudyVis on there, `getDisplayMedia` rejects with `NotAllowedError`.
 `captureScreen` maps that to `CaptureError.code === 'screen_capture_denied'`,

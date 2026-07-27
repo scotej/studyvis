@@ -913,19 +913,18 @@ describe('startSampleLoop — capture errors', () => {
     await handle.stop()
   })
 
-  test('screen acquire failure after sidecar start stops the sidecar (no leak)', async () => {
+  test('a failed screen acquire never spawns the sidecar (I79)', async () => {
     const clock = new FakeClock()
     const fetchMock = vi.fn()
-    const stopSidecar = vi.fn(async () => {})
+    const startSidecar = vi.fn(async () => {
+      seedSidecarStoreRunning()
+      return 9999
+    })
     __setSampleLoopRuntime(
       buildSampleLoopRuntime({
         clock,
         fetch: fetchMock as never,
-        startSidecar: async () => {
-          seedSidecarStoreRunning()
-          return 9999
-        },
-        stopSidecar,
+        startSidecar,
         acquireScreenStream: async () => {
           throw new CaptureError('screen_capture_denied', 'denied')
         },
@@ -937,9 +936,38 @@ describe('startSampleLoop — capture errors', () => {
       getFaceTrack: () => makeFakeTrack(),
     })
     await flushMicrotasks(10)
-    // The sidecar was started before the (failing) screen acquire; it must
-    // be torn down even though teardownInternal()/stop() short-circuit.
-    expect(stopSidecar).toHaveBeenCalledTimes(1)
+    // The whole point of the reorder: no multi-GB model load is paid for and
+    // then killed milliseconds later when capture can't be had.
+    expect(startSidecar).not.toHaveBeenCalled()
+    await handle.stop()
+  })
+
+  test('a failed sidecar start releases the screen streams acquired first (I79)', async () => {
+    const clock = new FakeClock()
+    const fetchMock = vi.fn()
+    const screenStream = makeFakeScreenStream()
+    const track = screenStream.getVideoTracks()[0]!
+    const stopSpy = vi.spyOn(track, 'stop')
+    __setSampleLoopRuntime(
+      buildSampleLoopRuntime({
+        clock,
+        fetch: fetchMock as never,
+        acquireScreenStream: async () => screenStream,
+        startSidecar: async () => null, // simulate failure
+      })
+    )
+    const onStartFail = vi.fn()
+    const handle = startSampleLoop({
+      getTopic: () => 't',
+      modelId: 'test-model',
+      getFaceTrack: () => makeFakeTrack(),
+      onStartFail,
+    })
+    await flushMicrotasks(10)
+    expect(onStartFail).toHaveBeenCalledWith('sidecar_start_failed', undefined)
+    // Capture now outlives the spawn attempt, so the OS recording indicator
+    // has to be extinguished on this path too.
+    expect(stopSpy).toHaveBeenCalled()
     await handle.stop()
   })
 
