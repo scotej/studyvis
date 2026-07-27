@@ -32,7 +32,7 @@ jobs:
     outputs:
       release-body: ${{ steps.notes.outputs.body }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
 
@@ -139,11 +139,11 @@ jobs:
       # third-party build action to read is the one credential exposure worth
       # removing everywhere. Nothing here uses git directly; tauri-action
       # publishes through the API with the token from `env`.
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: '20'
           cache: 'npm'

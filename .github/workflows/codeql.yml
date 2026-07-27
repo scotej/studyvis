@@ -61,7 +61,7 @@ jobs:
             build-mode: none
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           # Nothing here pushes; leaving the token on disk for the rest of
           # the job is free credential exposure to any later step.
