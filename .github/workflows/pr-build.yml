@@ -36,10 +36,14 @@ permissions:
 
 jobs:
   build:
-    # `pull_request`, never `pull_request_target`: fork code must run with a
-    # read-only token and no access to secrets. Nothing in this workflow
-    # needs either, and the label is maintainer-applied, so a fork PR getting
-    # built is fine.
+    # `pull_request`, never `pull_request_target`: fork code runs with a
+    # read-only token and no access to secrets, and nothing here needs
+    # either. Note what the label does and does not buy: applying it is a
+    # maintainer act, but the workflow also fires on `synchronize`, so once a
+    # PR is labelled every later push rebuilds without further review. That
+    # is intended for our own branches. For a fork PR, remove the label after
+    # the build unless you mean to keep trusting new commits — the artifact
+    # is an unsigned installer.
     if: >-
       ${{ github.event_name == 'workflow_dispatch'
       || contains(github.event.pull_request.labels.*.name, 'build-installers') }}
@@ -80,9 +84,12 @@ jobs:
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
         with:
           workspaces: src-tauri -> target
-          # Keep PR builds out of the cache main's builds read from. A PR is
-          # untrusted input; letting it write the shared cache is the
-          # cache-poisoning path into the release pipeline.
+          # Belt-and-braces, not the load-bearing control: GitHub already
+          # scopes a pull_request run's cache writes to refs/pull/N/*, and
+          # rust-cache's key includes the job id, so this job could not feed
+          # main's or release.yml's cache anyway. It stays because a PR is
+          # untrusted input and a build that never populates a cache is one
+          # less thing to reason about.
           save-if: false
 
       - name: Install frontend dependencies
@@ -117,7 +124,12 @@ jobs:
 
       - uses: actions/upload-artifact@v7
         with:
-          name: studyvis-${{ matrix.llama-triple }}-${{ github.event.pull_request.number || github.ref_name }}
+          # NOT github.ref_name as the fallback: upload-artifact rejects any
+          # name containing '/', and every branch here is namespaced
+          # (ci/…, feat/…, fix/…). A workflow_dispatch run would build for
+          # 30-60 minutes and then die on the upload. run_id is always
+          # slash-free and unique.
+          name: studyvis-${{ matrix.llama-triple }}-${{ github.event.pull_request.number || github.run_id }}
           path: out/
           if-no-files-found: error
           # Unsigned installers of unreviewed code. Short retention keeps them

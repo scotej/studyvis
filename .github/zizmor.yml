@@ -8,7 +8,7 @@
 # installs. ci.yml's header has said so in prose since PR-17; this file is
 # the machine-checkable version of that paragraph.
 #
-# The CI gate runs zizmor twice (see .github/workflows/workflow-lint.yml):
+# The CI gate runs zizmor twice (the `workflows` job in .github/workflows/ci.yml):
 #   - blocking, at --min-severity=high --min-confidence=high — in practice
 #     that is exactly the unpinned-uses policy below;
 #   - advisory, full-persona, uploaded as SARIF to the Security tab so the

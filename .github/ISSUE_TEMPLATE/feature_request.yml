@@ -27,8 +27,6 @@ body:
     id: proposal
     attributes:
       label: What would you like it to do?
-      validations:
-        required: false
 
   - type: checkboxes
     id: checked

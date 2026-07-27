@@ -81,7 +81,7 @@ Pre-commit (husky) enforces a subset automatically — `lint`, `check-tokens`, `
 
 ### What CI adds on top (pull requests)
 
-Everything above runs in `.github/workflows/ci.yml`, plus checks that only make sense with a repository around them. `All pre-merge checks` is the aggregator job branch protection requires — add a job to `ci.yml` and it is covered automatically.
+Everything above runs in `.github/workflows/ci.yml`, plus checks that only make sense with a repository around them. `All pre-merge checks` is the aggregator job branch protection requires. Adding a job to `ci.yml` means adding it to that job's `needs:` list too — the part you never have to touch again is the branch-protection rule, not the list.
 
 - **Workflow lint** — `actionlint` (+ shellcheck over inline `run:` blocks) and `zizmor`. `.github/zizmor.yml` encodes the pinning policy: GitHub-owned actions may float on a major tag, every third-party action must be hash-pinned. That is now enforced, not just documented.
 - **Supply chain** — `dependency-review` fails on vulnerabilities *this PR adds* (the pre-existing backlog stays out of the way); `cargo-deny` runs advisories/licenses/bans/sources against `src-tauri/deny.toml`; `npm audit` is advisory-only into the job summary, because it is red today (`ISSUES.md` I19).

@@ -21,9 +21,13 @@ import { fileURLToPath } from 'node:url'
 
 const ROOT = resolve(fileURLToPath(import.meta.url), '..', '..')
 const STORIES = join(ROOT, 'src', 'stories')
-const COMPONENT_DIRS = [
-  join(ROOT, 'src', 'components'),
-  join(ROOT, 'src', 'components', 'ui'),
+// CLAUDE.md says "every primitive and feature component", so features/ counts:
+// scoping this to components/ would have quietly exempted the whole feature
+// tree while the CI step still claimed to cover it.
+const COMPONENT_DIRS: { dir: string; recurse: boolean }[] = [
+  { dir: join(ROOT, 'src', 'components'), recurse: false },
+  { dir: join(ROOT, 'src', 'components', 'ui'), recurse: false },
+  { dir: join(ROOT, 'src', 'features'), recurse: true },
 ]
 
 // Components that have no story today. This is a freeze, not an amnesty: the
@@ -38,6 +42,54 @@ const KNOWN_UNCOVERED: Record<string, string> = {
   'src/components/PairQrScanner.tsx':
     'Opens a live camera via getUserMedia. Storybook has no camera and the axe pass runs headless, so a story would assert nothing.',
 }
+
+// The feature tree as it stood when this gate landed: 33 of 56 .tsx files
+// under src/features/ have no story. Freezing them is the only honest way to
+// turn the gate on today — enforcing retroactively would mean writing 33
+// stories in a CI pull request, and leaving features/ out of scope entirely
+// (the earlier draft of this script) meant the step claimed a coverage it
+// did not check.
+//
+// This list must only ever SHRINK. It is not a place to add new components:
+// anything landing in src/features/ from now on is caught by the check above,
+// and deleting a line here after writing the story is the intended direction
+// of travel. A path listed here that no longer exists, or that has since
+// gained a story, is reported as stale.
+const FEATURE_BASELINE = new Set<string>([
+  'src/features/ai/AiDialogWindow.tsx',
+  'src/features/ai/ModelGuide.tsx',
+  'src/features/ai/ModelPicker.tsx',
+  'src/features/ai/ModelPickerContainer.tsx',
+  'src/features/ai/ai-dialog-main.tsx',
+  'src/features/friends/AddFriendDialog.tsx',
+  'src/features/friends/ContactImportDialog.tsx',
+  'src/features/friends/FriendsList.tsx',
+  'src/features/friends/InboxBoot.tsx',
+  'src/features/friends/PairDeepLinkBoot.tsx',
+  'src/features/friends/PairWordInput.tsx',
+  'src/features/friends/PendingInvites.tsx',
+  'src/features/identity/IdentityLoadError.tsx',
+  'src/features/identity/IdentitySetupGate.tsx',
+  'src/features/identity/Recover.tsx',
+  'src/features/onboarding/AddFriendStep.tsx',
+  'src/features/onboarding/IdentityStep.tsx',
+  'src/features/onboarding/Onboarding.tsx',
+  'src/features/onboarding/PermissionsStep.tsx',
+  'src/features/session/SessionInviteDialog.tsx',
+  'src/features/session/SessionView.tsx',
+  'src/features/session/TopicGateModal.tsx',
+  'src/features/settings/Settings.tsx',
+  'src/features/settings/SettingsOverlay.tsx',
+  'src/features/settings/categories/AiCategory.tsx',
+  'src/features/settings/categories/StatsCategory.tsx',
+  'src/features/stats/Dashboard.tsx',
+  'src/features/stats/FocusInsights.tsx',
+  'src/features/system/PomodoroNotifyListener.tsx',
+  'src/features/system/PttListener.tsx',
+  'src/features/system/QuitConfirmListener.tsx',
+  'src/features/system/WindowLayoutListener.tsx',
+  'src/features/updater/UpdaterBoot.tsx',
+])
 
 const IMPORT_PATTERN = /from\s+'(@\/(?:components|features)\/[^']+)'/g
 
@@ -69,28 +121,30 @@ async function main() {
   }
 
   const components: string[] = []
-  for (const dir of COMPONENT_DIRS) {
-    for (const file of await walk(dir, false)) {
+  for (const { dir, recurse } of COMPONENT_DIRS) {
+    for (const file of await walk(dir, recurse)) {
       components.push(relative(ROOT, file).split('\\').join('/'))
     }
   }
   components.sort()
 
   const uncovered = components.filter(
-    (c) => !covered.has(c) && !(c in KNOWN_UNCOVERED)
+    (c) =>
+      !covered.has(c) && !(c in KNOWN_UNCOVERED) && !FEATURE_BASELINE.has(c)
   )
 
   // A stale exemption is its own bug: it quietly lowers the bar for a
   // component that has since been given a story, or names a file that no
   // longer exists.
-  const stale = Object.keys(KNOWN_UNCOVERED).filter(
+  const stale = [...Object.keys(KNOWN_UNCOVERED), ...FEATURE_BASELINE].filter(
     (c) => !components.includes(c) || covered.has(c)
   )
 
   if (uncovered.length === 0 && stale.length === 0) {
     process.stdout.write(
       `check-stories: OK (${components.length} components, ${storyFiles.length} stories, ` +
-        `${Object.keys(KNOWN_UNCOVERED).length} known-uncovered)\n`
+        `${Object.keys(KNOWN_UNCOVERED).length} known-uncovered, ` +
+        `${FEATURE_BASELINE.size} frozen feature baseline)\n`
     )
     process.exit(0)
   }

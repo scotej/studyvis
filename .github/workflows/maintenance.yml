@@ -86,7 +86,6 @@ jobs:
       security-events: write
       # Scorecard reads workflow run history to score the CI configuration.
       actions: read
-      id-token: write
     steps:
       - uses: actions/checkout@v6
         with:

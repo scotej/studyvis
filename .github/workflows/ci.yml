@@ -309,10 +309,11 @@ jobs:
         uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
         with:
           fail-on-severity: high
-          # Copyleft in a shipped desktop binary is a licensing decision, not
-          # a routine dependency bump; surface it rather than deny outright,
-          # since the Rust side already has an explicit allowlist in
-          # src-tauri/deny.toml and this only covers npm.
+          # Vulnerabilities only — no allow-licenses/deny-licenses is set, so
+          # this step scores no licences at all. npm licences are deliberately
+          # unguarded for now; the Rust side has a real allowlist in
+          # src-tauri/deny.toml because that graph ends up inside the signed
+          # binary. Do not read this step as licence coverage.
           comment-summary-in-pr: false
 
       # The whole-graph npm picture, deliberately NON-blocking. `npm audit`
@@ -446,7 +447,14 @@ jobs:
     # then extends the gate automatically instead of needing the protection
     # rule edited — which is the failure mode where a new check exists but
     # nothing enforces it.
-    if: ${{ always() }}
+    # !cancelled(), not always(): always() is true even for a CANCELLED run,
+    # and with cancel-in-progress on (line 11) every superseded push would
+    # spin this job up, read 'cancelled' from every need, and report a hard
+    # failure for a run nobody was waiting on.
+    if: ${{ !cancelled() }}
+    # Hand-maintained on purpose, and the one line to update when adding a
+    # job to this file — a job missing from here is a job branch protection
+    # does not gate on.
     needs: [frontend, rust, workflows, supply-chain, hygiene, pr-title]
     runs-on: ubuntu-latest
     timeout-minutes: 5
