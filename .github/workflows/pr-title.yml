@@ -1,0 +1,76 @@
+name: PR title
+
+# Its own workflow rather than a job in ci.yml, for a reason discovered the
+# hard way on #102.
+#
+# A PR title is changed by an `edited` event, which is not one of the default
+# `pull_request` activity types. Inside ci.yml the check therefore never
+# re-ran when the title changed: a rejected title could not be cleared by
+# fixing it, and a title edited after the checks went green was never
+# re-validated. Adding `edited` to ci.yml fixed that and broke something
+# worse — every description edit re-ran the whole suite against an UNCHANGED
+# commit, and with `cancel-in-progress` the superseded run left a
+# `cancelled` "All pre-merge checks" beside the successful one on the same
+# SHA. The required check then would not clear and the PR sat at BLOCKED
+# with everything green.
+#
+# Splitting it out means the cheap check listens for `edited` and the
+# expensive suite does not. Branch protection requires both this and
+# "All pre-merge checks".
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, edited, reopened, synchronize]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # CLAUDE.md mandates conventional-commit subjects, and PRs here
+  # squash-merge — so the PR title becomes the commit subject on main and is
+  # what CHANGELOG entries get written from.
+  pr-title:
+    name: PR title
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: amannn/action-semantic-pull-request@48f256284bd46cdaab1048c3721360e808335d50 # v6.1.1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          # Specifying `types` REPLACES the action's defaults, so this list
+          # has to cover everything main actually uses — `style` is here
+          # because of `style(backend): rustfmt the AI-dialog teardown block`.
+          types: |
+            feat
+            fix
+            docs
+            chore
+            ci
+            refactor
+            perf
+            test
+            build
+            revert
+            style
+          requireScope: false
+          # Only the trailing full stop is enforced. The obvious companion
+          # rule — "must start lowercase" — is wrong for this repo: subjects
+          # here routinely open with an acronym (`ci: SHA-pin third-party
+          # actions`, `fix(session): PTT hint shows the persisted binding`),
+          # and 5 of the last 120 commits on main would fail it. A gate that
+          # rejects the house style is a gate that gets bypassed. Nothing on
+          # main ends in a full stop, so that half costs nobody anything.
+          subjectPattern: '^(?!.*\.$).+$'
+          subjectPatternError: |
+            The subject "{subject}" of PR title "{title}" ends in a full stop —
+            drop it, e.g. `fix(session): re-publish the host stream to late
+            joiners`.

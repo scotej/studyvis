@@ -5,12 +5,6 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
-    # `edited` is not a default activity type, and a PR title is edited
-    # outside opened/synchronize/reopened — without it the pr-title gate can
-    # neither be cleared by fixing the title nor catch a title changed after
-    # the checks went green. Costs a re-run on a description edit;
-    # cancel-in-progress above keeps that to one run.
-    types: [opened, synchronize, reopened, edited]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -405,49 +399,6 @@ jobs:
           fail: false
           jobSummary: true
 
-  pr-title:
-    name: PR title
-    # CLAUDE.md mandates conventional-commit subjects, and PRs here are
-    # squash-merged — so the PR title becomes the commit subject on main and
-    # is what CHANGELOG entries get written from. Push events have no title
-    # to check; the aggregator treats the resulting skip as a pass.
-    if: ${{ github.event_name == 'pull_request' }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    permissions:
-      contents: read
-      pull-requests: read
-    steps:
-      - uses: amannn/action-semantic-pull-request@48f256284bd46cdaab1048c3721360e808335d50 # v6.1.1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          types: |
-            feat
-            fix
-            docs
-            chore
-            ci
-            refactor
-            perf
-            test
-            build
-            revert
-            style
-          requireScope: false
-          # Only the trailing full stop is enforced. The obvious companion
-          # rule — "must start lowercase" — is wrong for this repo: subjects
-          # here routinely open with an acronym (`ci: SHA-pin third-party
-          # actions`, `fix(session): PTT hint shows the persisted binding`),
-          # and 5 of the last 120 commits on main would fail it. A gate that
-          # rejects the house style is a gate that gets bypassed. Nothing on
-          # main ends in a full stop, so that half costs nobody anything.
-          subjectPattern: '^(?!.*\.$).+$'
-          subjectPatternError: |
-            The subject "{subject}" of PR title "{title}" ends in a full stop —
-            drop it, e.g. `fix(session): re-publish the host stream to late
-            joiners`.
-
   all-green:
     name: All pre-merge checks
     # The single check to require in branch protection: one rule to
@@ -461,7 +412,7 @@ jobs:
     # Hand-maintained on purpose, and the one line to update when adding a
     # job to this file — a job missing from here is a job branch protection
     # does not gate on.
-    needs: [frontend, rust, workflows, supply-chain, hygiene, pr-title]
+    needs: [frontend, rust, workflows, supply-chain, hygiene]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
