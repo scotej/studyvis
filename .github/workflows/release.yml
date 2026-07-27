@@ -32,7 +32,7 @@ jobs:
     outputs:
       release-body: ${{ steps.notes.outputs.body }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
 
@@ -139,11 +139,11 @@ jobs:
       # third-party build action to read is the one credential exposure worth
       # removing everywhere. Nothing here uses git directly; tauri-action
       # publishes through the API with the token from `env`.
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: '20'
           cache: 'npm'
@@ -171,7 +171,7 @@ jobs:
           done
 
       - name: Build & publish via tauri-action
-        uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # v0.6.2
+        uses: tauri-apps/tauri-action@1deb371b0cd8bd54025b384f1cd735e725c4060f # v1.0.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # X6 — the minisign keypair that signs update artifacts. This is
