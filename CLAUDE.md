@@ -139,7 +139,7 @@ Full layout in `ARCHITECTURE.md` §11.
 
 Releasing bumps the version in **five tracked files** (kept in lockstep): `package.json`, `package-lock.json` (two entries), `src-tauri/Cargo.toml`, `src-tauri/Cargo.lock` (the `studyvis` entry), `src-tauri/tauri.conf.json`. Two ways to cut one:
 
-- **One-click:** the `Release prep` workflow (Actions tab, `.github/workflows/release-prep.yml`) bumps all five files, commits + tags `vX.Y.Z` on `main`, and dispatches the release build.
+- **One-click:** the `Release prep` workflow (Actions tab, `.github/workflows/release-prep.yml`) bumps all five files, commits + tags `vX.Y.Z` on `main`, and dispatches the release build. It needs the **`RELEASE_PAT`** secret — a fine-grained PAT scoped to this repo with Contents: read+write. `main` is protected by a ruleset requiring a PR plus the `All pre-merge checks` status check, and `GITHUB_TOKEN` cannot bypass that on a user-owned repo (Integration bypass actors are organization-only), so the bump commit is pushed with an owner PAT — the ruleset's one bypass actor is RepositoryRole 5 (admin). The gate job fails fast with that explanation if the secret is missing.
 - **Manual:** bump the five files yourself, commit `chore(release): vX.Y.Z`, and push a `v*.*.*` tag — `release.yml` builds the per-OS installers as a **draft** GitHub Release to review and publish.
 
 Update `CHANGELOG.md` as part of the release. `package.json#version` flows through `__APP_VERSION__` into Settings → About automatically.
