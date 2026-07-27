@@ -162,6 +162,8 @@ describe('serializeReportToText — AI coverage honesty (I79)', () => {
 
   test('AI ran and found nothing: the earned praise survives', () => {
     // The whole point of the change is that this case still reads confidently.
+    // Note `confident_samples: 30` — the praise is earned by READABLE checks,
+    // which is what the noConfident case below establishes.
     const text = serializeReportToText(
       buildData(
         baseSession({
@@ -173,5 +175,29 @@ describe('serializeReportToText — AI coverage honesty (I79)', () => {
       )
     )
     expect(text).toContain('No distractions detected. Nice work.')
+  })
+
+  test('checks ran but none readable: distinct copy, still no praise', () => {
+    // Two unreadable checks is below SKIPPED_SAMPLES_MIN, so the #47 D5
+    // data-quality line renders nothing and this copy is the only thing that
+    // tells the truth. It must not claim "No AI checks ran" either — checks did
+    // run; none could be read.
+    const text = serializeReportToText(
+      buildData(
+        baseSession({
+          ...unscored,
+          confident_samples: 0,
+          skipped_samples: 2,
+          ai_enabled: 1,
+        }),
+        []
+      )
+    )
+    expect(text).toContain('Score: not recorded (no readable AI checks)')
+    expect(text).toContain(
+      'AI checks ran but none could be read, so nothing was measured here.'
+    )
+    expect(text).not.toContain('Nice work')
+    expect(text).not.toContain('No AI checks ran')
   })
 })

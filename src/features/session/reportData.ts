@@ -35,26 +35,33 @@ export function sampleQualitySummary(session: {
   return { skipped, totalChecks }
 }
 
-// I79 — how much the AI actually saw of this session. Four states, because
-// three of them used to render identically (issue #92: a Windows session where
-// AI was on and silently dead was byte-identical to a clean AI-off one, down to
-// "No distractions detected. Nice work." asserting a measurement that never
+// I79 — how much the AI actually saw of this session. Five states, because four
+// of them used to render identically (issue #92: a Windows session where AI was
+// on and silently dead was byte-identical to a clean AI-off one, down to "No
+// distractions detected. Nice work." asserting a measurement that never
 // happened).
 //
-//   'ran'      at least one check completed — an empty distraction list is a
-//              real finding and the confident "Nice work" copy is earned.
-//   'noChecks' AI was on and not one check completed. Nothing was measured;
-//              the report says so and points at Settings → AI.
-//   'off'      AI was deliberately off. Nothing was measured, and that is
-//              exactly what the user asked for.
-//   'unknown'  a row written before the 004 migration recorded `ai_enabled`.
-//              Nothing was measured as far as we know, and we don't claim why.
+//   'ran'         at least one CONFIDENT check completed — an empty distraction
+//                 list is a real finding and the "Nice work" copy is earned.
+//   'noConfident' checks ran but none could be read (every one uncertain per
+//                 A2/A3). Nothing was measured, so praise is unearned here too.
+//   'noChecks'    AI was on and not one check completed. Nothing was measured;
+//                 the report says so and points at Settings → AI.
+//   'off'         AI was deliberately off. Nothing was measured, and that is
+//                 exactly what the user asked for.
+//   'unknown'     a row written before the 004 migration recorded `ai_enabled`.
+//                 Nothing was measured as far as we know; we don't claim why.
 //
-// `confident_samples` / `skipped_samples` are the check-ran evidence: both are
-// non-null together whenever the loop completed a tick (snapshotFocusForReport),
-// and null together otherwise. `score` is checked too so a pre-003 row that
-// recorded a score still reads as 'ran' rather than losing its history.
-export type AiCoverage = 'ran' | 'noChecks' | 'off' | 'unknown'
+// `confident_samples` must be > 0 for 'ran', not merely non-null. A session of
+// pure parse failures has `confident_samples: 0` with `skipped_samples: k`, and
+// the #47 D5 data-quality line does NOT cover the small-k case: it needs
+// SKIPPED_SAMPLES_MIN (3) skips before it renders anything. So for k of 1 or 2
+// the page would show "Focused-time —", no caveat, and "No distractions
+// detected. Nice work." — issue #92's own defect surviving its own fix.
+//
+// `score` is checked first so a pre-003 row that recorded a score without the
+// counters still reads 'ran' rather than losing its history.
+export type AiCoverage = 'ran' | 'noConfident' | 'noChecks' | 'off' | 'unknown'
 
 export function aiCoverage(session: {
   score: number | null
@@ -62,11 +69,10 @@ export function aiCoverage(session: {
   skipped_samples: number | null
   ai_enabled: number | null
 }): AiCoverage {
-  const ranAnyCheck =
-    session.confident_samples != null ||
-    session.skipped_samples != null ||
-    session.score != null
-  if (ranAnyCheck) return 'ran'
+  if (session.score != null || (session.confident_samples ?? 0) > 0) {
+    return 'ran'
+  }
+  if ((session.skipped_samples ?? 0) > 0) return 'noConfident'
   if (session.ai_enabled === 1) return 'noChecks'
   if (session.ai_enabled === 0) return 'off'
   return 'unknown'

@@ -277,3 +277,29 @@ export const AiOffForSession: Story = {
     onClose,
   },
 }
+
+// I79 — checks ran and none could be read. Two skipped checks is BELOW
+// SKIPPED_SAMPLES_MIN (3), so the #47 D5 data-quality line renders nothing and
+// this copy is the only thing on the page telling the truth. It must not say
+// "No AI checks ran" either: checks did run, none were readable.
+export const AiRanNoReadableChecks: Story = {
+  args: {
+    data: buildData(
+      baseSession({
+        score: null,
+        focused_pct: null,
+        confident_samples: 0,
+        skipped_samples: 2,
+        ai_enabled: 1,
+        declared_topic: 'latin',
+      }),
+      [
+        event(ME, 'joined', 0),
+        event(ME, 'topic_set', 0, { topic: 'latin' }),
+        event(ME, 'left', 638_000),
+      ]
+    ),
+    animateScore: false,
+    onClose,
+  },
+}

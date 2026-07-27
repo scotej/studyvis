@@ -79,13 +79,29 @@ export function describeRow(
 export function noScoreBody(coverage: AiCoverage): string {
   if (coverage === 'off') return strings.report.noScore.bodyOff
   if (coverage === 'noChecks') return strings.report.noScore.bodyNoChecks
+  if (coverage === 'noConfident') {
+    return strings.report.noScore.bodyNoConfident
+  }
   return strings.report.noScore.body
 }
 
 export function noScoreCopyLine(coverage: AiCoverage): string {
   if (coverage === 'off') return strings.report.noScore.copyLineOff
   if (coverage === 'noChecks') return strings.report.noScore.copyLineNoChecks
+  if (coverage === 'noConfident') {
+    return strings.report.noScore.copyLineNoConfident
+  }
   return strings.report.noScore.copyLine
+}
+
+// I79 — the distractions empty state, which must agree with the score card
+// beside it. Only a session with at least one readable check earns "Nice work".
+export function distractionsEmptyMessage(coverage: AiCoverage): string {
+  if (coverage === 'ran') return strings.report.sections.distractions.empty
+  if (coverage === 'noConfident') {
+    return strings.report.sections.distractions.emptyNoReadableChecks
+  }
+  return strings.report.sections.distractions.emptyNoChecks
 }
 
 export function formatTopicHeading(topic: string | null): string {
@@ -158,11 +174,7 @@ export function serializeReportToText(data: ResolvedReportData): string {
   // user just saw. The on-screen Distractions section precedes Breaks.
   lines.push('', `## ${strings.report.sections.distractions.heading}`)
   if (distractions.length === 0) {
-    lines.push(
-      coverage === 'ran'
-        ? strings.report.sections.distractions.empty
-        : strings.report.sections.distractions.emptyNoChecks
-    )
+    lines.push(distractionsEmptyMessage(coverage))
   } else {
     for (const d of distractions) {
       const ded = d.totalDeduction > 0 ? ` · −${d.totalDeduction}` : ''

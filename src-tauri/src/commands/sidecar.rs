@@ -78,6 +78,20 @@ const LOG_MAX_BYTES: u64 = 5 * 1024 * 1024;
 const RESTART_BUDGET: u32 = 3;
 const MIN_HEALTHY_UPTIME: Duration = Duration::from_secs(120);
 const RESTART_BACKOFF: Duration = Duration::from_millis(500);
+// I79 — a lifetime ceiling on respawns within one generation, because the
+// consecutive-streak rule above has a hole: a child that dies every ~2.5
+// minutes clears MIN_HEALTHY_UPTIME every time, so `restart_attempts` resets to
+// 1 forever and `errored` is never set. The JS stall notice fires once and the
+// session then runs for an hour on an engine that is dying and respawning the
+// whole time, recording nothing. This counts EVERY respawn in the generation,
+// not just the sub-uptime ones, or a 121-second cycle would escape it again.
+//
+// 12 is chosen so the two cases stay far apart: a genuinely long session whose
+// sidecar dies once an hour after clean uptime spends 8 respawns across 8 hours
+// and never trips, while a 121-second crash cycle trips at roughly 24 minutes.
+// An explicit sidecar_stop + sidecar_start bumps the generation, so a
+// deliberate retry always starts from zero.
+const TOTAL_RESTART_BUDGET: u32 = 12;
 
 #[derive(Default)]
 struct SidecarInner {
@@ -520,15 +534,21 @@ fn spawn_with_fallback<R: Runtime>(
 // bare CreateProcess error.
 #[cfg(target_os = "windows")]
 fn append_windows_dll_hint(err: String) -> String {
+    // I79 — probe BOTH halves of the redistributable. llama-server.exe links
+    // the C++ standard library (msvcp140.dll) as well as the C runtime
+    // (vcruntime140.dll), and a machine can carry one without the other: some
+    // installers ship vcruntime140 alone, and a repair/uninstall can leave a
+    // partial set. Checking only vcruntime140 meant the actionable hint stayed
+    // silent on exactly the boxes that needed it most.
     let sysroot = std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".to_string());
-    let vcruntime = Path::new(&sysroot)
-        .join("System32")
-        .join("vcruntime140.dll");
-    if vcruntime.exists() {
+    let system32 = Path::new(&sysroot).join("System32");
+    let both_present =
+        system32.join("vcruntime140.dll").exists() && system32.join("msvcp140.dll").exists();
+    if both_present {
         err
     } else {
         format!(
-            "{err}; the Microsoft Visual C++ runtime is missing — install it from https://aka.ms/vs/17/release/vc_redist.x64.exe and try again"
+            "{err}; the Microsoft Visual C++ runtime is missing or incomplete — install it from https://aka.ms/vs/17/release/vc_redist.x64.exe and try again"
         )
     }
 }
@@ -635,6 +655,14 @@ fn next_attempts(prev: u32, uptime: Duration) -> u32 {
     }
 }
 
+// I79 — has this generation respawned so many times that the engine should be
+// called dead regardless of how long each child survived? Separate from
+// `next_attempts` on purpose: that one answers "is this a crash loop right
+// now?", this one answers "has this been going on all session?".
+fn exceeded_total_restarts(total: u32) -> bool {
+    total > TOTAL_RESTART_BUDGET
+}
+
 async fn watch<R: Runtime>(
     app: AppHandle<R>,
     state: Arc<Mutex<SidecarInner>>,
@@ -647,6 +675,8 @@ async fn watch<R: Runtime>(
 ) {
     let mut log = log_file;
     let mut restart_attempts: u32 = 0;
+    // I79 — every respawn in this generation, never reset by a clean run.
+    let mut total_restarts: u32 = 0;
     let mut child_started_at = Instant::now();
 
     loop {
@@ -693,6 +723,23 @@ async fn watch<R: Runtime>(
 
         // Count consecutive short-lived deaths; a durable child resets to 1.
         restart_attempts = next_attempts(restart_attempts, child_started_at.elapsed());
+        total_restarts += 1;
+        // I79 — a slow crash loop clears MIN_HEALTHY_UPTIME on every cycle, so
+        // the streak check below can never fire for it. Stop pretending this
+        // engine is going to recover.
+        if exceeded_total_restarts(total_restarts) {
+            guard.errored = true;
+            guard.last_error = Some(append_windows_dll_hint(format!(
+                "the AI engine restarted {total_restarts} times this session and kept dying"
+            )));
+            guard.port = None;
+            let _ = writeln!(
+                log,
+                "[event] giving up after {total_restarts} lifetime restarts (slow crash loop)"
+            );
+            let _ = log.flush();
+            return;
+        }
         if restart_attempts > RESTART_BUDGET {
             guard.errored = true;
             // I79 — carry the Windows VC++ hint here too. A child that dies
@@ -816,5 +863,37 @@ mod tests {
     #[test]
     fn first_crash_starts_at_one() {
         assert_eq!(next_attempts(0, Duration::from_secs(1)), 1);
+    }
+
+    // I79 — the hole the lifetime cap closes: a child dying just past
+    // MIN_HEALTHY_UPTIME resets the consecutive streak on every cycle, so
+    // `restart_attempts` never exceeds RESTART_BUDGET and `errored` is never
+    // set. Simulate that cycle and show the streak rule alone never gives up.
+    #[test]
+    fn slow_crash_loop_never_trips_the_consecutive_streak() {
+        let mut attempts = 0;
+        let just_past_healthy = MIN_HEALTHY_UPTIME + Duration::from_secs(1);
+        for _ in 0..50 {
+            attempts = next_attempts(attempts, just_past_healthy);
+            assert!(
+                attempts <= RESTART_BUDGET,
+                "a 121s crash cycle must never reach the streak budget — \
+                 that is exactly why the lifetime cap exists"
+            );
+        }
+    }
+
+    #[test]
+    fn lifetime_cap_stops_a_slow_crash_loop() {
+        // The same cycle, counted the other way: every respawn accumulates.
+        assert!(!exceeded_total_restarts(TOTAL_RESTART_BUDGET));
+        assert!(exceeded_total_restarts(TOTAL_RESTART_BUDGET + 1));
+    }
+
+    #[test]
+    fn lifetime_cap_leaves_a_long_healthy_session_alone() {
+        // An 8-hour session whose sidecar dies once an hour after clean uptime
+        // spends 8 respawns. It must never be called a crash loop.
+        assert!(!exceeded_total_restarts(8));
     }
 }

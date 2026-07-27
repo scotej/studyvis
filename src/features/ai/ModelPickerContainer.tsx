@@ -81,8 +81,17 @@ export function ModelPickerContainer() {
   }, [])
 
   // Hydrate persistent records once on mount.
+  //
+  // I79 — retry on `'error'` too, not only `'loading'`. A LazyStore read of
+  // models.json can fail transiently (an AV scanner holding the file, a
+  // partial write from a previous run), and `status: 'error'` used to be
+  // terminal for the whole process: `activeModelId` stayed null, so no AI ran
+  // for any session until the app was restarted, and this — the one surface
+  // that could re-read it — refused to try. `hydrate()` early-returns only on
+  // `'ready'`, and this effect's deps re-run it on a status CHANGE rather than
+  // in a loop, so a persistent failure costs one attempt per visit here.
   useEffect(() => {
-    if (status === 'loading') void hydrate()
+    if (status !== 'ready') void hydrate()
   }, [status, hydrate])
 
   // Probe initial install state for every model so the cards reflect what's

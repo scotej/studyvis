@@ -366,11 +366,26 @@ describe('aiCoverage', () => {
     )
   })
 
-  test("'ran' when every check was skipped but checks did run", () => {
-    // A2/A3 — a session of pure parse failures has confident_samples 0 and
-    // skipped_samples > 0. The AI was watching; it just couldn't read its own
-    // answers. An empty distraction list there is a real (if thin) finding, and
-    // the existing #47 D5 data-quality line is what caveats it.
+  test("a zero confident count is not 'ran' just for being non-null", () => {
+    // snapshotFocusForReport writes 0 (not NULL) whenever any tick resolved, so
+    // non-null-ness alone cannot carry the "was measured" meaning.
+    expect(
+      aiCoverage({
+        ...base,
+        confident_samples: 0,
+        skipped_samples: 0,
+        ai_enabled: 1,
+      })
+    ).toBe('noChecks')
+  })
+
+  // REVERSED during review. The first cut of this returned 'ran' for a session
+  // of pure parse failures, arguing the #47 D5 data-quality line caveats it.
+  // It does not below SKIPPED_SAMPLES_MIN (3) skips — see the paired test
+  // below — so for 1 or 2 unreadable checks the page rendered "Focused-time —",
+  // no caveat at all, and "No distractions detected. Nice work.": issue #92's
+  // own defect surviving its own fix.
+  test("'noConfident' when checks ran but none could be read", () => {
     expect(
       aiCoverage({
         ...base,
@@ -378,7 +393,20 @@ describe('aiCoverage', () => {
         skipped_samples: 7,
         ai_enabled: 1,
       })
-    ).toBe('ran')
+    ).toBe('noConfident')
+  })
+
+  test("'noConfident' in the window the data-quality line does not cover", () => {
+    const session = {
+      ...base,
+      confident_samples: 0,
+      skipped_samples: 2,
+      ai_enabled: 1,
+    }
+    expect(aiCoverage(session)).toBe('noConfident')
+    // The evidence for the reversal: at 2 skips nothing else on the page says
+    // a word about it, so the distractions copy is the only honest surface.
+    expect(sampleQualitySummary(session)).toBeNull()
   })
 
   test("'ran' for a pre-003 row that recorded a score without counters", () => {

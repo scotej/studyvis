@@ -4,7 +4,11 @@ import type { LucideIcon } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { strings } from '@/strings'
 
-export type AiStatus = 'off' | 'active' | 'paused' | 'error'
+// I79 — 'unconfigured' is distinct from 'off': AI is switched ON and cannot
+// run, because no model is active (never picked, or the model list failed to
+// read). Reading that as "AI off" during issue #92 pointed the user at the one
+// wrong conclusion — that they had left the feature off.
+export type AiStatus = 'off' | 'unconfigured' | 'active' | 'paused' | 'error'
 
 // Icon tint carries the status color; the label always renders in a
 // neutral text token so small footer text keeps AA contrast on
@@ -12,6 +16,7 @@ export type AiStatus = 'off' | 'active' | 'paused' | 'error'
 // chip satisfies no-color-alone (WCAG 1.4.1) on its own.
 const STATUS_ICON: Record<AiStatus, LucideIcon> = {
   off: EyeOff,
+  unconfigured: EyeOff,
   active: ScanFace,
   paused: PauseCircle,
   error: EyeOff,
@@ -19,6 +24,9 @@ const STATUS_ICON: Record<AiStatus, LucideIcon> = {
 
 const STATUS_ICON_TINT: Record<AiStatus, string> = {
   off: 'text-text-secondary',
+  // Warning, not alerted: nothing has failed, something is unset. Same token
+  // the paused state already uses, so no new contrast pairing.
+  unconfigured: 'text-status-warning',
   active: 'text-status-focused',
   paused: 'text-status-warning',
   error: 'text-status-alerted',
@@ -26,6 +34,7 @@ const STATUS_ICON_TINT: Record<AiStatus, string> = {
 
 const STATUS_LABEL: Record<AiStatus, string> = {
   off: strings.session.aiStatus.off,
+  unconfigured: strings.session.aiStatus.unconfigured,
   active: strings.session.aiStatus.active,
   paused: strings.session.aiStatus.paused,
   error: strings.session.aiStatus.error,

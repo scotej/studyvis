@@ -74,6 +74,7 @@ import { usePttStore } from '@/stores/pttStore'
 import { strings } from '@/strings'
 
 import { startAiAlertDispatcher, type AiAlertDispatcher } from './aiAlerts'
+import { deriveAiChipStatus } from './aiChip'
 
 import {
   cancelActiveBreakTimer,
@@ -889,17 +890,27 @@ export function SessionView({
   // `startSampleLoop` never runs and its `onStartFail('no_active_model')`
   // toast — the one surface that names this problem — can never fire. Issue
   // #92 is what that silence looks like from the outside: a full session, an
-  // unscored report, and nothing anywhere saying AI sat out. Gated on
-  // modelStatus === 'ready' so a mid-hydration null never accuses a correctly
-  // configured install, and keyed on startedAt so it fires once per session
-  // rather than on every model/camera flap.
+  // unscored report, and nothing anywhere saying AI sat out.
+  //
+  // Two distinct causes, two messages: `'ready'` with no model means the user
+  // never picked one, while `'error'` means models.json itself couldn't be read
+  // — nothing is wrong with their choice and the advice differs. `'loading'`
+  // stays silent so a mid-hydration null never accuses a correctly configured
+  // install. Keyed on startedAt so a loading → error → ready sequence still
+  // toasts at most once per session rather than on every model/camera flap.
   const noModelNoticeShownFor = useRef<number | null>(null)
   useEffect(() => {
     if (status !== 'active' || !startedAt) return
-    if (!aiFeaturesEnabled || modelStatus !== 'ready' || activeModelId) return
+    if (!aiFeaturesEnabled || activeModelId) return
+    if (modelStatus !== 'ready' && modelStatus !== 'error') return
     if (noModelNoticeShownFor.current === startedAt) return
     noModelNoticeShownFor.current = startedAt
-    toast.error(strings.session.errors.pickModel, aiSettingsToastAction())
+    toast.error(
+      modelStatus === 'error'
+        ? strings.session.errors.modelListUnreadable
+        : strings.session.errors.pickModel,
+      aiSettingsToastAction()
+    )
   }, [status, startedAt, aiFeaturesEnabled, modelStatus, activeModelId])
 
   // V2-P5 AI sample loop: starts when AI features are on, an active model
@@ -1461,10 +1472,17 @@ export function SessionView({
   // from a prior loop never lies once AI is disabled, the model is cleared,
   // or the camera track drops. Otherwise the runtime state (set by the
   // sample-loop callbacks) is the truth for the running loop.
-  const aiChipStatus: AiStatus =
-    !aiFeaturesEnabled || !activeModelId || !localStream
-      ? 'off'
-      : aiRuntimeStatus
+  //
+  // I79 — the decision moved to `deriveAiChipStatus` (pure, unit-tested) to add
+  // the 'unconfigured' case: AI on with no model used to read "AI off", which is
+  // the one reading that sends a user to the wrong setting.
+  const aiChipStatus: AiStatus = deriveAiChipStatus({
+    aiFeaturesEnabled,
+    activeModelId,
+    modelStatus,
+    hasLocalStream: Boolean(localStream),
+    runtimeStatus: aiRuntimeStatus,
+  })
 
   if (!room) return null
 

@@ -601,6 +601,9 @@ export const strings = {
     },
     aiStatus: {
       off: 'AI off',
+      // I79 — AI is on but has no model to run. Deliberately not "AI off":
+      // that wording sent the #92 reporter looking at the wrong setting.
+      unconfigured: 'AI needs a model',
       active: 'AI watching',
       paused: 'AI paused',
       error: 'AI error',
@@ -640,6 +643,12 @@ export const strings = {
       // the AI category (the copy above names it; the button honors it).
       openSettingsAction: 'Open settings',
       pickModel: 'Pick a model in Settings → AI.',
+      // I79 — the model store's own read failed (a locked or corrupt
+      // models.json), which is indistinguishable from "no model picked" to
+      // every other surface but needs different advice: nothing is wrong with
+      // the user's choice, the list just couldn't be loaded.
+      modelListUnreadable:
+        "Your AI model list couldn't be read, so AI sat out this session. Open Settings → AI to try again.",
       // I79 — the loop is running but has produced no judgment for several
       // consecutive checks. Each reason names what to do about it; all four
       // used to be a console.warn nobody in a release build can read, so the
@@ -769,6 +778,11 @@ export const strings = {
         // session it never watched it was a fabricated all-clear, and it read
         // as one right beside a score card admitting no score was recorded.
         emptyNoChecks: 'No AI checks ran, so nothing was measured here.',
+        // Distinct from emptyNoChecks: checks DID run, so "No AI checks ran"
+        // would be false. None of them could be read, so nothing was measured
+        // and the praise is still unearned.
+        emptyNoReadableChecks:
+          'AI checks ran but none could be read, so nothing was measured here.',
       },
       breaks: {
         heading: 'Breaks',
@@ -795,8 +809,11 @@ export const strings = {
       bodyOff: 'AI focus detection was off for this session.',
       bodyNoChecks:
         'AI was on but never ran a check, so nothing was measured. Check Settings → AI.',
+      bodyNoConfident:
+        'AI ran, but no check could be read clearly, so nothing was measured.',
       copyLineOff: 'Score: not recorded (AI off)',
       copyLineNoChecks: 'Score: not recorded (AI ran no checks)',
+      copyLineNoConfident: 'Score: not recorded (no readable AI checks)',
     },
     copyCta: 'Copy report',
     copyAriaLabel: 'Copy session report to clipboard',
@@ -1045,6 +1062,11 @@ export const strings = {
         manyFriends: (n: number) => `${n} friends`,
         minutes: (n: number) => `${n} min`,
         score: (n: number) => `${n} / 100`,
+        // I79 — Settings → Sessions is the second place a user looks for a
+        // missing score, and a row with no score used to be indistinguishable
+        // from one where AI was off. Only rendered when the row actually
+        // recorded that AI was on (ai_enabled === 1), never inferred.
+        notMeasured: 'not measured',
       },
       // R4 — per-session delete behind an AlertDialog confirm, mirroring the
       // Friends remove pattern. Deleting removes the session row and its

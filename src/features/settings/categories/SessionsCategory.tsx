@@ -197,8 +197,16 @@ function formatSessionMeta(session: SessionRecord): string {
       : peers === 1
         ? meta.oneFriend
         : meta.manyFriends(peers)
+  // I79 — a scored session shows its score; a session that recorded AI as ON
+  // and still has no score says so. A row with ai_enabled 0 or NULL adds
+  // nothing, because "AI was off" and "we never recorded it" are not claims
+  // this list should invent.
   const scoreLabel =
-    session.score != null ? ` · ${meta.score(session.score)}` : ''
+    session.score != null
+      ? ` · ${meta.score(session.score)}`
+      : session.ai_enabled === 1
+        ? ` · ${meta.notMeasured}`
+        : ''
   return `${meta.minutes(minutes)} · ${peerLabel}${scoreLabel}`
 }
 

@@ -67,6 +67,7 @@ import {
 } from './reportData'
 import {
   describeRow,
+  distractionsEmptyMessage,
   formatTopicHeading,
   labelFor,
   noScoreBody,
@@ -522,13 +523,7 @@ export function ReportView({
 
         <Section heading={strings.report.sections.distractions.heading}>
           {topDistractions.length === 0 ? (
-            <Empty
-              message={
-                coverage === 'ran'
-                  ? strings.report.sections.distractions.empty
-                  : strings.report.sections.distractions.emptyNoChecks
-              }
-            />
+            <Empty message={distractionsEmptyMessage(coverage)} />
           ) : (
             <ul className="m-0 flex list-none flex-col gap-2 p-0">
               {topDistractions.map((entry, i) => (
