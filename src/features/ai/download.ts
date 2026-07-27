@@ -10,11 +10,7 @@ import { modelDownloadUrls, type ModelSpec } from './models'
 export type ModelFileKind = 'model' | 'mmproj'
 
 export type ProgressPhase =
-  | 'downloading'
-  | 'verifying'
-  | 'done'
-  | 'failed'
-  | 'cancelled'
+  'downloading' | 'verifying' | 'done' | 'failed' | 'cancelled'
 
 export type ProgressEvent = {
   model_id: string

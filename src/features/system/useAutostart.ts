@@ -10,11 +10,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { getAutostartEnabled, setAutostartEnabled } from './autostart'
 
 export type AutostartStatus =
-  | 'loading'
-  | 'ready'
-  | 'saving'
-  | 'error'
-  | 'unavailable'
+  'loading' | 'ready' | 'saving' | 'error' | 'unavailable'
 
 export type UseAutostartResult = {
   enabled: boolean
