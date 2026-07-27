@@ -208,6 +208,64 @@ describe('relay rejection visibility', () => {
       warn.mockRestore()
     }
   })
+
+  // The relay writes this text and we print it. A newline lets it forge log
+  // lines that read as ours in a log a friend pastes into a bug report; a
+  // bidi override reorders what they see without changing the bytes.
+  test('control characters in a relay-authored reason cannot forge log lines', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const h = makeHarness(['wss://a'])
+      h.pool.setSubscription(['tag-1'])
+      const socket = h.latest('wss://a')
+      socket.open()
+      socket.emit('message', {
+        data: JSON.stringify([
+          'OK',
+          'someid',
+          false,
+          'denied\n[error] presence relay wss://evil accepted publish',
+        ]),
+      })
+      socket.emit('message', {
+        data: JSON.stringify(['NOTICE', 'clean‮reversed']),
+      })
+
+      const logged = warn.mock.calls.map((c) => c.join(' '))
+      const joined = logged.join('\n---\n')
+      // The text still arrives — this must not become silent swallowing.
+      expect(joined).toContain('denied')
+      expect(joined).toContain('reversed')
+      // ...but never with the control characters that made it forgeable.
+      for (const call of warn.mock.calls) {
+        const payload = String(call[call.length - 1])
+        expect(payload).not.toMatch(/[\p{Cc}\p{Cf}]/u)
+      }
+      h.pool.close()
+    } finally {
+      warn.mockRestore()
+    }
+  })
+
+  test('an over-long relay reason is clamped rather than flooding the log', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const h = makeHarness(['wss://a'])
+      h.pool.setSubscription(['tag-1'])
+      const socket = h.latest('wss://a')
+      socket.open()
+      socket.emit('message', {
+        data: JSON.stringify(['NOTICE', 'x'.repeat(5000)]),
+      })
+
+      const payload = String(warn.mock.calls[0]?.[1] ?? '')
+      expect(payload.length).toBeLessThanOrEqual(201)
+      expect(payload.endsWith('…')).toBe(true)
+      h.pool.close()
+    } finally {
+      warn.mockRestore()
+    }
+  })
 })
 
 describe('event routing', () => {
