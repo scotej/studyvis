@@ -88,8 +88,15 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
+          # Pinned to the PR head, not left to default to `refs/pull/N/merge`
+          # (PR #141 review). GitHub recomputes the merge ref whenever the base
+          # branch moves, so two jobs in the same run can otherwise resolve it
+          # to different trees — and the artifact this workflow hands you would
+          # be a commit that exists in nobody's clone. Both checkouts in this
+          # file use this identical expression; keep them in step.
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           # The diff below needs the base commit reachable; a shallow clone
-          # of the PR merge ref does not have it.
+          # does not have it.
           fetch-depth: 0
           persist-credentials: false
 
@@ -127,7 +134,16 @@ jobs:
             exit 0
           fi
 
-          changed=$(git diff --name-only "$base" HEAD)
+          # Three dots, not two, and that is load-bearing now that HEAD is the
+          # PR head rather than the merge commit. `git diff base HEAD` asks
+          # "how do these two trees differ", so once the base branch moves
+          # ahead of the branch point it reports the base's OWN new commits as
+          # if this PR reverted them. Measured on this branch: two-dot claimed
+          # 27 changed files (18 shippable) for a PR that had changed nothing,
+          # which would build installers for every PR with a stale base.
+          # `base...HEAD` diffs from the merge-base instead — the PR's own
+          # changes, which is the question being asked.
+          changed=$(git diff --name-only "$base...HEAD")
           shippable=$(printf '%s\n' "$changed" | grep -Ev "$non_shippable" || true)
 
           {
@@ -218,12 +234,20 @@ jobs:
     steps:
       # Green on a docs commit means "nothing needed building", not "the
       # installer is fine". Say so where someone reading the check will see it.
+      # Every `run:` below takes its matrix values through `env:` rather than
+      # `${{ }}` interpolation. These particular values are static literals in
+      # this file, so neither form is exploitable — but zizmor flags the
+      # interpolated shape on sight, and a workflow that mints installers
+      # should not be teaching the pattern that a later, less static value
+      # would follow.
       - name: Nothing to build
         if: env.SHIPPABLE != 'true'
         shell: bash
+        env:
+          LABEL: ${{ matrix.label }}
         run: |
           {
-            echo "### ${{ matrix.label }} installer"
+            echo "### ${LABEL} installer"
             echo
             echo "Not built — this commit changes no shippable file."
           } >> "$GITHUB_STEP_SUMMARY"
@@ -235,6 +259,10 @@ jobs:
       - uses: actions/checkout@v7
         if: env.SHIPPABLE == 'true'
         with:
+          # Same expression as the scope job's checkout — see the comment
+          # there. The installer you download is built from the commit you
+          # pushed, not from a merge ref that may have been recomputed.
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
 
       - uses: actions/setup-node@v7
@@ -272,7 +300,9 @@ jobs:
       - name: Fetch llama-server prebuild
         if: env.SHIPPABLE == 'true'
         shell: bash
-        run: bash scripts/fetch-llama-server.sh --triple ${{ matrix.llama-triple }}
+        env:
+          LLAMA_TRIPLE: ${{ matrix.llama-triple }}
+        run: bash scripts/fetch-llama-server.sh --triple "$LLAMA_TRIPLE"
 
       # The config override is what makes this safe to run without secrets:
       # with createUpdaterArtifacts on, the bundler demands the minisign key
@@ -282,8 +312,13 @@ jobs:
       - name: Build the installer (unsigned, no updater artifacts)
         if: env.SHIPPABLE == 'true'
         shell: bash
+        env:
+          BUILD_ARGS: ${{ matrix.args }}
         run: |
-          npm run tauri -- build ${{ matrix.args }} \
+          # BUILD_ARGS is a flag list ("--target … --bundles …") and MUST word-
+          # split, so it stays unquoted here on purpose.
+          # shellcheck disable=SC2086
+          npm run tauri -- build $BUILD_ARGS \
             --config '{"bundle":{"createUpdaterArtifacts":false}}'
 
       - name: Collect the installer
@@ -318,9 +353,12 @@ jobs:
       - name: Explain what this build is
         if: env.SHIPPABLE == 'true'
         shell: bash
+        env:
+          LABEL: ${{ matrix.label }}
+          ARCH: ${{ matrix.arch }}
         run: |
           {
-            echo "### ${{ matrix.label }} installer (${{ matrix.arch }})"
+            echo "### ${LABEL} installer (${ARCH})"
             echo
             echo "Unsigned, **not** a release, no auto-update manifest."
             echo "Expect the usual Gatekeeper/SmartScreen warning (INSTALL.md)."
