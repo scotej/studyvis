@@ -1,0 +1,30 @@
+# zizmor — static analysis for the workflows that mint StudyVis's installers.
+#
+# The point of running it here is narrow and load-bearing: this repo ships
+# UNSIGNED builds that friends run past Gatekeeper/SmartScreen, and since
+# v1.5.0 those installs self-update. A third-party action resolved from a
+# mutable tag is therefore not a style question — a moved tag executes
+# attacker code in the job that mints the artifact every friend then
+# installs. ci.yml's header has said so in prose since PR-17; this file is
+# the machine-checkable version of that paragraph.
+#
+# The CI gate runs zizmor twice (see .github/workflows/workflow-lint.yml):
+#   - blocking, at --min-severity=high --min-confidence=high — in practice
+#     that is exactly the unpinned-uses policy below;
+#   - advisory, full-persona, uploaded as SARIF to the Security tab so the
+#     lower-confidence heuristics stay visible without gating a merge.
+rules:
+  unpinned-uses:
+    config:
+      policies:
+        # GitHub-owned actions stay on major tags. They live in the same
+        # trust domain as the runner itself, and a floating major is how
+        # they ship node-runtime and security fixes; pinning them by hash
+        # buys nothing and silently rots.
+        actions/*: ref-pin
+        github/*: ref-pin
+        # Everything else must be a 40-character commit SHA with the tag
+        # it was resolved from in a trailing comment. Dependabot refreshes
+        # both (see .github/dependabot.yml for why the comment must END
+        # with the version).
+        '*': hash-pin
