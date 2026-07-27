@@ -60,6 +60,21 @@ started.
   flips to "error" when this happens, instead of continuing to read
   "active" after AI had already died. (I76)
 
+- **On macOS, on-device AI never worked at all: the model appeared to load
+  and then vanish.** Every attempt spawned the engine, loaded a multi-GB
+  model and killed it milliseconds later, leaving nothing in the diagnostic
+  log but a bare "terminated" line — which made it look like the engine was
+  at fault when the real failure was one step earlier, in screen capture.
+  macOS stopped letting apps like StudyVis ask for a screen at all unless
+  they answer a specific system question the app was never answering, so
+  every request was refused before the user could even see a picker — no
+  gesture, and no amount of granting Screen Recording in System Settings,
+  could change that. StudyVis now answers it, and the OS shows its normal
+  screen picker. The engine is also no longer started until the screen has
+  actually been handed over, so a cancelled or refused picker costs nothing
+  instead of loading a model only to throw it away. Windows was never
+  affected. (I79)
+
 ## 1.8.1 — 2026-07-26 — The AI engine now actually loads a model
 
 A same-day follow-up to 1.8.0: that release fixed the engine failing to
