@@ -499,6 +499,9 @@ export const strings = {
     footerHoldBefore: 'Hold ',
     footerHoldAfter: ' to talk.',
     mainAriaLabel: 'Active session',
+    // #96 — the grid holds shared screens as well as people now, so the label
+    // can no longer say "participants" and stay true.
+    gridAriaLabel: 'Session participants and shared screens',
     mediaErrors: {
       denied: {
         title: 'Camera and mic access is blocked.',
@@ -623,6 +626,27 @@ export const strings = {
       // state ("Turn camera on, pressed").
       toggleAriaLabel: 'Camera',
       offTileLabel: 'Camera off',
+    },
+    // #96 — screen sharing. Everyone in the session can publish their screen
+    // alongside their camera; the tiles below sit in the same grid.
+    screenShare: {
+      // Constant toggle label paired with aria-pressed, matching the camera
+      // control above rather than double-encoding state in the label.
+      toggleAriaLabel: 'Share screen',
+      startCta: 'Share',
+      stopCta: 'Stop sharing',
+      selfTileName: 'Your screen',
+      peerTileName: (name: string) => `${name}'s screen`,
+      expandAriaLabel: (name: string) => `View ${name} at full size`,
+      startedToast: "You're sharing your screen.",
+      stoppedToast: 'You stopped sharing your screen.',
+      // NotAllowedError covers both "you dismissed the picker" and "the OS has
+      // not granted screen recording", and the two are indistinguishable from
+      // the rejection — so the copy has to hold for either.
+      blockedToast:
+        "Screen sharing didn't start. If you didn't cancel it, allow StudyVis under Screen Recording, then try again.",
+      failedToast: "Couldn't start screen sharing.",
+      openSettingsCta: 'Open settings',
     },
     // S4 — audio output device picker + per-peer volume.
     output: {

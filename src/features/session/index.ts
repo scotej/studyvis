@@ -52,6 +52,19 @@ export {
   type HelloProtocolHandle,
 } from './hello'
 export {
+  isScreenSharePayload,
+  isScreenStreamMetadata,
+  requestScreenShareStream,
+  SCREEN_SHARE_ACTION,
+  SCREEN_SHARE_MAX_FPS,
+  SCREEN_STREAM_METADATA,
+  startScreenShareController,
+  type IncomingStreamKind,
+  type ScreenShareController,
+  type ScreenShareControllerArgs,
+  type ScreenSharePayload,
+} from './screenShare'
+export {
   AI_ALERT_ACTION,
   AI_ALERT_VERSION,
   buildAiAlertPayload,

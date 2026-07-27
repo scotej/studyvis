@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { emitTo, listen } from '@tauri-apps/api/event'
 import {
+  ScreenShareIcon,
+  ScreenShareOffIcon,
   Settings2Icon,
   UserPlusIcon,
   VideoIcon,
@@ -18,6 +20,7 @@ import { BreakCountdownBadge } from '@/components/BreakCountdownBadge'
 import type { FocusState } from '@/components/FocusIndicator'
 import { MediaErrorBanner } from '@/components/MediaErrorBanner'
 import { ScreenCapturePermissionOverlay } from '@/components/ScreenCapturePermissionOverlay'
+import { ScreenShareViewer } from '@/components/ScreenShareViewer'
 import { SelfWarningBadge } from '@/components/SelfWarningBadge'
 import { SessionTimer } from '@/components/SessionTimer'
 import { Button } from '@/components/ui/button'
@@ -106,6 +109,11 @@ import {
   type NotePayload,
 } from './notes'
 import { useNotesStore, type SessionNote } from './notesStore'
+import {
+  requestScreenShareStream,
+  startScreenShareController,
+  type ScreenShareController,
+} from './screenShare'
 import { SessionNotesPanel } from './SessionNotesPanel'
 import {
   startPomodoroController,
@@ -131,6 +139,11 @@ type PttPayload = { active: boolean }
 type CameraPayload = { off: boolean }
 
 const DEFAULT_PEER_VOLUME = 1
+
+// #96 — key for "the screen I'm sharing" in the expanded-viewer state, which is
+// otherwise keyed by peerId. trystero generates peerIds from an alphanumeric
+// alphabet, so a leading '@' can never collide with one.
+const LOCAL_SCREEN_KEY = '@local'
 
 // Composed session feature surface (DESIGN-SYSTEM.md §8.3): tiles for self +
 // each peer, PTT-driven mute on the local audio track, an audit log right
@@ -280,6 +293,18 @@ export function SessionView({
     string | null
   >(() => useSettingsStore.getState().values.audioOutputDeviceId)
   const [peerVolumes, setPeerVolumes] = useState<Record<string, number>>({})
+  // #96 — screen sharing. The local stream is the one we publish; the peer map
+  // is fed by the controller's classifier, so a friend's screen never lands on
+  // their face tile. `expandedScreen` holds the key of the screen open in the
+  // full-size viewer (LOCAL_SCREEN_KEY or a peerId) — keyed rather than holding
+  // the stream itself so a share that stops closes the viewer on its own.
+  const [screenStream, setScreenStream] = useState<MediaStream | null>(null)
+  const [peerScreenStreams, setPeerScreenStreams] = useState<
+    Record<string, MediaStream>
+  >({})
+  const [expandedScreen, setExpandedScreen] = useState<string | null>(null)
+  const screenStreamRef = useRef<MediaStream | null>(null)
+  const screenShareRef = useRef<ScreenShareController | null>(null)
   const cameraSendRef = useRef<
     ((payload: CameraPayload) => Promise<void[]>) | null
   >(null)
@@ -487,7 +512,16 @@ export function SessionView({
   // "setState synchronously inside an effect body" doesn't fire.
   useEffect(() => {
     if (!room) return
-    const offStream = room.onPeerStream((stream, peerId) => {
+    const offStream = room.onPeerStream((stream, peerId, metadata) => {
+      // #96 — a sharing peer publishes a second stream on the same connection.
+      // Ask the screen-share controller which tile it belongs to before binding
+      // it, or the friend's face is replaced by their desktop.
+      if (
+        screenShareRef.current?.classify(peerId, stream, metadata) === 'screen'
+      ) {
+        setPeerScreenStreams((cur) => ({ ...cur, [peerId]: stream }))
+        return
+      }
       setRemoteStreams((cur) => ({ ...cur, [peerId]: stream }))
       const cur = useSessionStore.getState().peers[peerId]
       if (cur) useSessionStore.getState().setPeerStream(peerId, true)
@@ -640,6 +674,43 @@ export function SessionView({
     const send = cameraSendRef.current
     if (send) void send({ off: !cameraOn })
   }, [cameraOn])
+
+  // #96 — screen-share controller. Owns the `screen-share` announce channel,
+  // the capability gate that keeps a pre-1.9 peer from being handed a second
+  // stream it can never clear, and the classification of incoming streams. The
+  // stream binding effect above reaches it through `screenShareRef`, matching
+  // the emitAuditRef / aiAlertDispatcherRef pattern.
+  useEffect(() => {
+    if (!room) return
+    const controller = startScreenShareController({
+      room,
+      onPeerSharingChange: (peerId, sharing) => {
+        if (sharing) return
+        // Also fires on peer-leave, so this is the single place a peer's screen
+        // tile is retired.
+        setPeerScreenStreams((cur) => {
+          if (!(peerId in cur)) return cur
+          const next = { ...cur }
+          delete next[peerId]
+          return next
+        })
+      },
+    })
+    screenShareRef.current = controller
+    return () => {
+      screenShareRef.current = null
+      controller.teardown()
+      // The controller unpublishes; stopping the tracks (and with them the OS
+      // screen-recording indicator) belongs to whoever owns the MediaStream,
+      // which is this component.
+      const stream = screenStreamRef.current
+      screenStreamRef.current = null
+      if (stream) stopTracks(stream)
+      setScreenStream(null)
+      setPeerScreenStreams({})
+      setExpandedScreen(null)
+    }
+  }, [room])
 
   // Hello + audit + pomodoro pipeline. Deps are the stable string slices of
   // identity — display-name edits do not tear the controller down, because
@@ -1288,6 +1359,78 @@ export function SessionView({
     setCameraOn((on) => !on)
   }, [])
 
+  // #96 — stop sharing. Reached from the footer toggle, from the OS-level "Stop
+  // sharing" control (the track's 'ended' event), and from session teardown.
+  const stopScreenShare = useCallback(() => {
+    const stream = screenStreamRef.current
+    screenStreamRef.current = null
+    setScreenStream(null)
+    setExpandedScreen((cur) => (cur === LOCAL_SCREEN_KEY ? null : cur))
+    screenShareRef.current?.unpublish()
+    if (stream) stopTracks(stream)
+  }, [])
+
+  const handleToggleScreenShare = useCallback(() => {
+    if (screenStreamRef.current) {
+      stopScreenShare()
+      toast(strings.session.screenShare.stoppedToast)
+      return
+    }
+    // getDisplayMedia has to run inside the live user activation of this click
+    // on both WebView2 and WKWebView (the V2-P9 gesture constraint), so it is
+    // called here with nothing awaited in front of it.
+    void requestScreenShareStream()
+      .then((stream) => {
+        const controller = screenShareRef.current
+        if (!controller) {
+          // The session ended while the OS picker was open.
+          stopTracks(stream)
+          return
+        }
+        // The OS "Stop sharing" affordance ends the track without telling us
+        // anything else; without this the tile would freeze and peers would
+        // keep a dead sender.
+        for (const track of stream.getTracks()) {
+          track.addEventListener('ended', () => {
+            if (screenStreamRef.current !== stream) return
+            stopScreenShare()
+          })
+        }
+        screenStreamRef.current = stream
+        setScreenStream(stream)
+        controller.publish(stream)
+        toast.success(strings.session.screenShare.startedToast)
+      })
+      .catch((err: unknown) => {
+        // Dismissing the picker and a system-level screen-recording block both
+        // reject with NotAllowedError and cannot be told apart, so the copy
+        // covers either and this stays a neutral toast rather than an error.
+        const name =
+          typeof err === 'object' && err !== null && 'name' in err
+            ? String((err as { name: unknown }).name)
+            : ''
+        if (mediaErrorKind(name) !== 'denied') {
+          toast.error(strings.session.screenShare.failedToast)
+          return
+        }
+        toast(
+          strings.session.screenShare.blockedToast,
+          isMacLikePlatform()
+            ? {
+                action: {
+                  label: strings.session.screenShare.openSettingsCta,
+                  onClick: () => {
+                    void invoke('system_open_screen_capture_settings').catch(
+                      () => {}
+                    )
+                  },
+                },
+              }
+            : undefined
+        )
+      })
+  }, [stopScreenShare])
+
   const handleSelectOutputDevice = useCallback((deviceId: string) => {
     setActiveOutputDeviceId(deviceId)
     // #47 B4 — headset users shouldn't re-pick every session.
@@ -1432,6 +1575,27 @@ export function SessionView({
   const presenceCheck = (edPubkeyHex: string) =>
     presence !== undefined && isOnline(presence, edPubkeyHex)
   const youName = identity?.display_name?.trim() || strings.session.selfFallback
+  // #96 — resolve the expanded screen from its key at render time, so a share
+  // that stops (locally or remotely) closes the viewer without a second piece
+  // of state to keep in step.
+  const expandedScreenStream =
+    expandedScreen === null
+      ? null
+      : expandedScreen === LOCAL_SCREEN_KEY
+        ? screenStream
+        : (peerScreenStreams[expandedScreen] ?? null)
+  // Radix keeps the dialog mounted through its close animation, so this still
+  // renders for a frame after the key clears — hence the null branch, without
+  // which the title would flip to a mangled peer label on the way out.
+  const expandedScreenName =
+    expandedScreen === null
+      ? ''
+      : expandedScreen === LOCAL_SCREEN_KEY
+        ? strings.session.screenShare.selfTileName
+        : strings.session.screenShare.peerTileName(
+            peerEntries.find((p) => p.peerId === expandedScreen)?.displayName ??
+              peerLabel(expandedScreen)
+          )
   const broadcasterName = pomodoroSnapshot.iAmBroadcaster
     ? strings.session.broadcasterSelf
     : pomodoroSnapshot.broadcasterEdPubkey
@@ -1475,13 +1639,23 @@ export function SessionView({
               state={selfTileState}
               alertReasoning={selfAlertReasoning}
             />
+            {screenStream ? (
+              <VideoTile
+                key="local-screen"
+                name={strings.session.screenShare.selfTileName}
+                stream={screenStream}
+                variant="screen"
+                isLocal
+                onExpand={() => setExpandedScreen(LOCAL_SCREEN_KEY)}
+              />
+            ) : null}
             {peerEntries.length === 0 ? (
               <WaitingTile
                 key="waiting"
                 variant={hadAnyPeer ? 'reconnect' : 'invite'}
               />
             ) : null}
-            {peerEntries.map((peer) => {
+            {peerEntries.flatMap((peer) => {
               const peerStream = remoteStreams[peer.peerId] ?? null
               const peerAlert = peer.edPubkeyHex
                 ? alertedPeers[peer.edPubkeyHex]
@@ -1497,10 +1671,13 @@ export function SessionView({
                 peerStream && peerAlert
                   ? 'alerted'
                   : connectionFocusState(peerConnState[peer.peerId], peerStream)
-              return (
+              const peerName = peer.displayName ?? peerLabel(peer.peerId)
+              // #96 — an array (not a fragment) so VideoGrid's Children.count
+              // still sees one entry per tile and picks the right column count.
+              const tiles = [
                 <VideoTile
                   key={peer.peerId}
-                  name={peer.displayName ?? peerLabel(peer.peerId)}
+                  name={peerName}
                   stream={peerStream}
                   ptt={peerPtt[peer.peerId] ?? false}
                   cameraOff={peerCameraOff[peer.peerId] ?? false}
@@ -1515,8 +1692,21 @@ export function SessionView({
                     DEFAULT_PEER_VOLUME
                   }
                   onVolumeChange={(v) => handlePeerVolumeChange(peer.peerId, v)}
-                />
-              )
+                />,
+              ]
+              const peerScreen = peerScreenStreams[peer.peerId]
+              if (peerScreen) {
+                tiles.push(
+                  <VideoTile
+                    key={`${peer.peerId}-screen`}
+                    name={strings.session.screenShare.peerTileName(peerName)}
+                    stream={peerScreen}
+                    variant="screen"
+                    onExpand={() => setExpandedScreen(peer.peerId)}
+                  />
+                )
+              }
+              return tiles
             })}
           </VideoGrid>
         </div>
@@ -1561,6 +1751,35 @@ export function SessionView({
             className="gap-2"
           >
             {cameraOn ? <VideoIcon /> : <VideoOffIcon />}
+          </Button>
+          {/* #96 — the stop side carries a visible label as well as the icon:
+              sharing your screen is the one control here whose "on" state you
+              want to be able to find and undo at a glance. */}
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={handleToggleScreenShare}
+            aria-pressed={screenStream !== null}
+            // Only the icon-only (not sharing) state needs a label. While
+            // sharing, the visible "Stop sharing" text IS the accessible name —
+            // an aria-label would override it and leave the two disagreeing
+            // (WCAG 2.5.3 Label in Name).
+            aria-label={
+              screenStream
+                ? undefined
+                : strings.session.screenShare.toggleAriaLabel
+            }
+            className="gap-2"
+          >
+            {screenStream ? (
+              <>
+                <ScreenShareOffIcon />
+                {strings.session.screenShare.stopCta}
+              </>
+            ) : (
+              <ScreenShareIcon />
+            )}
           </Button>
           {onOpenSettings ? (
             <Button
@@ -1620,6 +1839,14 @@ export function SessionView({
         open={captureOverlayOpen}
         onOpenChange={setCaptureOverlayOpen}
         onRetry={handleCaptureRetry}
+      />
+      <ScreenShareViewer
+        open={expandedScreenStream !== null}
+        onOpenChange={(next) => {
+          if (!next) setExpandedScreen(null)
+        }}
+        name={expandedScreenName}
+        stream={expandedScreenStream}
       />
       {canInvite ? (
         <SessionInviteDialog
