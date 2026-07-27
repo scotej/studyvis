@@ -346,15 +346,30 @@ Two lighter loops when you don't need the desktop shell:
   running app.
 
 Before opening a PR, all gates must pass (husky pre-commit enforces
-only a subset — lint, prettier, `tsc --noEmit`, token/string guards,
-`cargo fmt --check`):
+only a subset — lint, prettier, `tsc --noEmit`, token/string/migration/
+story guards, `cargo fmt --check`):
 
 ```sh
 npm run build && npm run lint && npm run test
 npm run check-tokens && npm run check-strings && npm run check-contrast
+npm run check-migrations && npm run check-stories
 npm run build-storybook && npm run check-a11y
 (cd src-tauri && cargo test && cargo fmt --check && cargo clippy)
+(cd src-tauri && cargo deny check)
 ```
+
+CI runs all of that on every pull request and adds what only makes
+sense with a repository around it: workflow linting (`actionlint` +
+`zizmor`), dependency review, `cargo-deny`, spell-checking, and a
+conventional-commit PR title. Most roll up into one required check,
+**All pre-merge checks**; the title check is its own required check
+(**PR title**) because it has to re-run when a title is edited. CodeQL runs alongside as its own workflow
+(JavaScript/TypeScript, Rust, and the workflows themselves) and
+reports into the Security tab. Storybook publishes to GitHub Pages from
+`main` and is attached to each PR as an artifact; adding the
+`build-installers` label to a PR produces real unsigned macOS and
+Windows bundles you can install and smoke-test — those carry no
+updater manifest and are never consumable as an update.
 
 **Read before changing code.** `CLAUDE.md` (repo root) is the
 working agreement — house rules, doc map, quality gates — for human

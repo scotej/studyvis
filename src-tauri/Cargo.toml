@@ -7,6 +7,11 @@ license = ""
 repository = ""
 edition = "2021"
 rust-version = "1.77.2"
+# This crate is the application, not a library anyone consumes — it has no
+# license expression and must never reach crates.io. Marking it explicitly is
+# also what lets cargo-deny's `[licenses.private] ignore` skip it instead of
+# failing the audit on its own empty `license` field (see deny.toml).
+publish = false
 
 [lib]
 name = "studyvis_lib"

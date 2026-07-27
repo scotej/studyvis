@@ -45,6 +45,9 @@ jobs:
       - uses: actions/checkout@v6
         with:
           ref: main
+          # The gate job only reads; the `prep` job below is the one that
+          # pushes the bump commit and tag, and keeps its credential.
+          persist-credentials: false
 
       - uses: actions/setup-node@v6
         with:
@@ -108,6 +111,22 @@ jobs:
       # gap this closes. Require that CI (which DOES compile/clippy/test both
       # host targets and runs check-a11y) has gone green on the precise main SHA
       # being tagged, so the irreversible bump+tag+push can't outrun it.
+      # Same reasoning as release.yml's signing-key preflight: a missing
+      # secret that only surfaces later reads as a mysterious failure. Without
+      # RELEASE_PAT the `prep` job below runs the whole bump, then dies on
+      # `git push origin main` with a rules violation that looks like a
+      # protection misconfiguration rather than an absent secret. Only
+      # presence is checked; the value never reaches the log.
+      - name: Assert the release PAT is configured
+        env:
+          PAT: ${{ secrets.RELEASE_PAT }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${PAT}" ]]; then
+            echo "::error::RELEASE_PAT is not set. main is protected by a ruleset requiring a PR + 'All pre-merge checks', and GITHUB_TOKEN cannot bypass it on a user-owned repo. Create a fine-grained PAT scoped to this repository with Contents: read and write, add it as the RELEASE_PAT secret, and re-run."
+            exit 1
+          fi
+
       - name: Require CI success on this main commit
         id: ci-check
         env:
@@ -135,9 +154,26 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
+      # RELEASE_PAT, not GITHUB_TOKEN. main is protected by a ruleset that
+      # requires a pull request and the "All pre-merge checks" status check,
+      # and a ruleset evaluates a direct push from Actions the same as any
+      # other — the bump commit has no PR and no CI run of its own, so
+      # GITHUB_TOKEN's push is rejected outright (verified against a probe
+      # branch: "Changes must be made through a pull request").
+      #
+      # A repository-owner PAT is what gets through: the ruleset's only
+      # bypass actor is RepositoryRole 5 (admin), and Integration bypass —
+      # which would have let GITHUB_TOKEN through directly — is not offered
+      # on a user-owned repository, only inside an organization.
+      #
+      # Scope it as narrowly as GitHub allows: a fine-grained PAT limited to
+      # this repository with Contents: read and write. Nothing else.
+      # persist-credentials stays ON here (unlike every other checkout in
+      # this repo) because the pushes below need the credential on disk.
       - uses: actions/checkout@v6
         with:
           ref: main
+          token: ${{ secrets.RELEASE_PAT }}
 
       # Pin the release to the EXACT SHA the gate verified. `ref: main` above
       # can resolve to a newer commit if main advanced between the gate and prep

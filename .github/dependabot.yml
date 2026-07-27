@@ -1,0 +1,129 @@
+version: 2
+
+# ci.yml's pinning note says third-party actions are SHA-pinned and must be
+# "refreshed manually — there is no dependabot config". This is that config;
+# the note is now stale and updated alongside it.
+#
+# Why it is safe to automate a pin refresh the whole threat model rests on:
+# Dependabot bumps the SHA *and* rewrites the trailing `# vX.Y.Z` comment, but
+# only when the version is the last thing in the comment (dependabot-core
+# #4691 / PR #5951 — a comment with trailing prose is treated as
+# documentation and left alone). Two consequences for anyone editing a
+# workflow here:
+#
+#   1. Keep the version at the END of the pin comment. `# v2.9.1` is
+#      refreshed; `# v2.9.1 — see note below` silently is not, and the
+#      comment then lies about which code the SHA points at.
+#   2. `dtolnay/rust-toolchain@<sha> # master; the toolchain input selects
+#      the channel` is deliberately comment-only-prose. The action does
+#      publish a `v1` tag, but this repo pins a `master` SHA on purpose (see
+#      ci.yml) — the comment describes which ref the SHA came from and why,
+#      not a version, so there is nothing here for Dependabot to rewrite and
+#      the sentence stays true across bumps.
+#
+# The `cooldown` blocks below are the reason this is a net security win
+# rather than a wash. StudyVis's workflows mint the unsigned installers
+# friends run past Gatekeeper/SmartScreen, so the failure mode that matters
+# is a compromised-then-yanked release getting merged the hour it lands.
+# Waiting a week before opening the PR means the ecosystem has had time to
+# pull a bad version, and a maintainer who reviews weekly loses nothing.
+updates:
+  # --- GitHub Actions -----------------------------------------------------
+  # `directory: "/"` is what scans .github/workflows; it is not the directory
+  # the actions run in.
+  - package-ecosystem: 'github-actions'
+    directory: '/'
+    schedule:
+      interval: 'weekly'
+      day: 'monday'
+    # github-actions supports default-days only — no semver-*-days split.
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: 'ci'
+    labels:
+      - 'dependencies'
+      - 'github-actions'
+    groups:
+      # One PR for all action bumps. Reviewing eight near-identical SHA
+      # diffs separately is how a bad one gets rubber-stamped; reviewing
+      # them as one diff is how you notice the odd one out.
+      actions:
+        patterns:
+          - '*'
+
+  # --- Frontend (npm) -----------------------------------------------------
+  - package-ecosystem: 'npm'
+    directory: '/'
+    schedule:
+      interval: 'weekly'
+      day: 'monday'
+    cooldown:
+      default-days: 7
+      semver-major-days: 14
+    open-pull-requests-limit: 5
+    versioning-strategy: 'increase'
+    commit-message:
+      prefix: 'chore'
+      prefix-development: 'chore'
+      include: 'scope'
+    labels:
+      - 'dependencies'
+      - 'javascript'
+    groups:
+      # Toolchain churn (eslint/prettier/storybook/vitest/tsx and friends)
+      # can never reach a friend's machine — it is not in the bundle. Group
+      # it broadly and let CI be the reviewer.
+      dev-tooling:
+        dependency-type: 'development'
+        update-types:
+          - 'minor'
+          - 'patch'
+      # Runtime deps DO reach installed builds, and several are load-bearing
+      # for compatibility surfaces CLAUDE.md calls cross-version contracts
+      # (trystero wire format, @noble/* identity derivation). Group the safe
+      # end; majors stay solo so they get their own review.
+      runtime-minor-patch:
+        dependency-type: 'production'
+        update-types:
+          - 'minor'
+          - 'patch'
+        exclude-patterns:
+          # Deliberately ungrouped: a bump here can strand a peer on an
+          # older build or invalidate a stored identity. Each gets its own
+          # PR so the wire-format/derivation question is asked out loud.
+          - 'trystero'
+          - '@trystero-p2p/*'
+          - '@noble/*'
+          - '@scure/*'
+          - '@tauri-apps/*'
+
+  # --- Rust (src-tauri) ---------------------------------------------------
+  - package-ecosystem: 'cargo'
+    directory: '/src-tauri'
+    schedule:
+      interval: 'weekly'
+      day: 'monday'
+    cooldown:
+      default-days: 7
+      semver-major-days: 14
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: 'chore'
+      include: 'scope'
+    labels:
+      - 'dependencies'
+      - 'rust'
+    groups:
+      cargo-minor-patch:
+        update-types:
+          - 'minor'
+          - 'patch'
+        exclude-patterns:
+          # tauri + its plugins move as a set and the updater plugin is the
+          # integrity chain for every install; never batch these into a
+          # "routine" group.
+          - 'tauri'
+          - 'tauri-*'
+          - 'tauri-plugin-*'

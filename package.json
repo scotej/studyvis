@@ -20,7 +20,9 @@
     "format:check": "prettier --check .",
     "storybook": "storybook dev -p 6006",
     "build-storybook": "storybook build",
-    "prepare": "husky"
+    "prepare": "husky",
+    "check-migrations": "tsx scripts/check-migrations.ts",
+    "check-stories": "tsx scripts/check-stories.ts"
   },
   "dependencies": {
     "@fontsource-variable/inter": "^5.2.8",

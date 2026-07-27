@@ -33,6 +33,8 @@ jobs:
       release-body: ${{ steps.notes.outputs.body }}
     steps:
       - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
 
       - name: Assert this run is on a release tag
         run: |
@@ -72,6 +74,10 @@ jobs:
           # so the two checks cannot drift — see the script header.
           section=$(bash scripts/changelog-section.sh "$ver" \
             "Write the release notes on main, re-tag, and re-run — the Releases page is the update channel.")
+          # Single-quoted on purpose: this is literal release-notes prose, and
+          # the backticks around `latest.json` must reach the release body as
+          # markdown rather than being run as a command.
+          # shellcheck disable=SC2016
           boiler='Friends-only release — the macOS app is ad-hoc signed (not notarized);
           the Windows installer is unsigned. See INSTALL.md for first-run steps:
           macOS users right-click the app and choose Open the first time;
@@ -127,7 +133,15 @@ jobs:
     runs-on: ${{ matrix.platform }}
     timeout-minutes: 60
     steps:
+      # This job holds `contents: write` — the highest-privilege token in the
+      # repo, since it mints the installers friends auto-update from. Leaving
+      # it in .git/config for `npm ci`'s postinstall scripts and a
+      # third-party build action to read is the one credential exposure worth
+      # removing everywhere. Nothing here uses git directly; tauri-action
+      # publishes through the API with the token from `env`.
       - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-node@v6
         with:

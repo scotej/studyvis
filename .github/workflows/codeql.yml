@@ -1,0 +1,84 @@
+name: CodeQL
+
+# Semantic scanning for the three languages this repo actually ships:
+# the React/TS frontend, the Rust shell, and the workflows themselves.
+#
+# Advanced setup rather than GitHub's default setup, for one reason: default
+# setup would generate and manage its own workflow, and this repo's whole CI
+# posture is hand-written, SHA-pin-audited YAML (see ci.yml's header). Two
+# competing sources of truth for "what scans this repo" is worse than one
+# slightly longer file.
+#
+# `build-mode: none` for Rust matters here — the Tauri crate needs
+# webkit2gtk/WebView2 system libraries to link, so a build-mode analysis
+# would need the whole platform prerequisite chain on the runner. None-mode
+# extracts from source without linking, which is exactly what a
+# security-oriented scan wants anyway.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Queries improve independently of this repo's commit rate — a codebase
+    # that has not changed in a month can still pick up a new finding. Weekly,
+    # off-hours, off the top of the hour so it does not land in GitHub's
+    # cron stampede.
+    - cron: '37 5 * * 1'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      # Writing results into the Security tab is the entire point of the job.
+      security-events: write
+      # Required so the analysis can be attributed to the PR that produced it.
+      actions: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - language: javascript-typescript
+            build-mode: none
+          - language: rust
+            build-mode: none
+          # CodeQL analyses workflow files as their own language. Overlaps
+          # zizmor deliberately: zizmor is pattern-driven and fast enough to
+          # block a merge, CodeQL is dataflow-driven and catches the
+          # multi-step injections a pattern misses.
+          - language: actions
+            build-mode: none
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          # Nothing here pushes; leaving the token on disk for the rest of
+          # the job is free credential exposure to any later step.
+          persist-credentials: false
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v4
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+          # security-extended adds the lower-precision queries. This repo
+          # has no public users and a tiny review surface, so a few extra
+          # findings to triage costs less than a missed one reaching an
+          # installer friends run past SmartScreen.
+          queries: security-extended
+
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@v4
+        with:
+          category: '/language:${{ matrix.language }}'
