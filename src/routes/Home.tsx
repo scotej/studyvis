@@ -25,7 +25,11 @@ import { toast } from 'sonner'
 import { UpdateReadyBanner } from '@/components/UpdateReadyBanner'
 import { Button } from '@/components/ui/button'
 import { tokens } from '@/design/tokens'
-import { preacquireScreenStream, useModelStore } from '@/features/ai'
+import {
+  discardPendingScreenStream,
+  preacquireScreenStream,
+  useModelStore,
+} from '@/features/ai'
 import {
   AddFriendDialog,
   ContactImportDialog,
@@ -291,6 +295,11 @@ export function Home() {
     try {
       joinSession(s.sessionTopic, s.sessionPassword)
     } catch (err) {
+      // I79 — the rejoin failed, so no SessionView will mount to consume (or
+      // unmount to discard) the stream pre-acquired a few lines up. Release it
+      // here or the OS screen-recording indicator stays lit with no session
+      // behind it until the app quits.
+      discardPendingScreenStream()
       const message =
         err instanceof Error ? err.message : strings.friends.joinErrorFallback
       toast.error(message)
@@ -339,8 +348,16 @@ export function Home() {
       // boot()'s gestureless getDisplayMedia is refused outright and the loop
       // dies before its first tick. An unconsumed stream is the cheap side of
       // this trade — SessionView discards it on unmount.
+      //
+      // The host branch additionally repeats `runHostInvite`'s own
+      // identity/display_name guard: that guard returns silently BEFORE the
+      // session begins, so SessionView never mounts and nothing would ever
+      // release the stream — the OS recording indicator would stay lit with no
+      // session behind it.
       const models = useModelStore.getState()
-      if (models.activeModelId || models.status === 'loading') {
+      const canStart =
+        req.kind === 'guest' || Boolean(identity && identity.display_name)
+      if (canStart && (models.activeModelId || models.status === 'loading')) {
         void preacquireScreenStream()
       }
       // Seed the one-shot topic BEFORE the session flips to active so
@@ -350,7 +367,7 @@ export function Home() {
       if (req.kind === 'host') void runHostInvite(req.friend)
       else runGuestJoin(req.invite)
     },
-    [pendingStart, runHostInvite, runGuestJoin]
+    [pendingStart, runHostInvite, runGuestJoin, identity]
   )
 
   if (status === 'loading' || onboarding.status === 'loading') {
