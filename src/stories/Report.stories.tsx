@@ -50,6 +50,7 @@ function baseSession(overrides: Partial<SessionRecord> = {}): SessionRecord {
     generated_at: ENDED_AT,
     confident_samples: null,
     skipped_samples: null,
+    ai_enabled: null,
     ...overrides,
   }
 }
@@ -198,10 +199,11 @@ export const MostlyOffTask: Story = {
   },
 }
 
-// No-AI baseline (R1): lifecycle events only. AI focus detection was off, so
-// score AND focused_pct are null — the hero renders the calm "No focus score"
-// placeholder instead of a fabricated 100/100 gauge, and the Top distractions
-// section shows the "Nice work" empty state.
+// No-AI baseline (R1): lifecycle events only, and a row with no `ai_enabled`
+// recorded — i.e. written by a build older than the I79 004 migration. Score
+// and focused_pct are null, so the hero renders the calm cause-neutral "No
+// focus score" placeholder rather than a fabricated 100/100 gauge. This is the
+// one remaining state where the report cannot say WHY nothing was measured.
 export const NoAiBaseline: Story = {
   args: {
     data: buildData(
@@ -217,6 +219,58 @@ export const NoAiBaseline: Story = {
         event(ME, 'pomodoro_end', 25 * 60_000 - 1_000),
         event(ME, 'left', 25 * 60_000),
         event(ALICE, 'left', 25 * 60_000),
+      ]
+    ),
+    animateScore: false,
+    onClose,
+  },
+}
+
+// I79 — AI was ON and produced nothing. This is the state issue #92
+// screenshotted from a real Windows session, and the state this PR exists to
+// stop rendering as an all-clear: the score card names the malfunction and
+// points at Settings → AI, and Top distractions says nothing was measured
+// instead of "No distractions detected. Nice work."
+export const AiOnButNoChecks: Story = {
+  args: {
+    data: buildData(
+      baseSession({
+        score: null,
+        focused_pct: null,
+        confident_samples: null,
+        skipped_samples: null,
+        ai_enabled: 1,
+        declared_topic: 'latin',
+      }),
+      [
+        event(ME, 'joined', 0),
+        event(ME, 'topic_set', 0, { topic: 'latin' }),
+        event(ALICE, 'pomodoro_start', 163_000, { preset: '25/5' }),
+        event(ME, 'left', 638_000),
+      ]
+    ),
+    animateScore: false,
+    onClose,
+  },
+}
+
+// I79 — AI was deliberately OFF. Nothing was measured and nothing is wrong;
+// the copy says so plainly rather than implying a malfunction or claiming a
+// clean session the AI never watched.
+export const AiOffForSession: Story = {
+  args: {
+    data: buildData(
+      baseSession({
+        score: null,
+        focused_pct: null,
+        confident_samples: null,
+        skipped_samples: null,
+        ai_enabled: 0,
+      }),
+      [
+        event(ME, 'joined', 0),
+        event(ALICE, 'joined', 800),
+        event(ME, 'left', 25 * 60_000),
       ]
     ),
     animateScore: false,

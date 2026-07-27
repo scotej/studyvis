@@ -119,6 +119,22 @@ export function Home() {
     }
   }, [status, friendsStatus, loadFriends])
 
+  // I79 — hydrate the model store at boot, not at Settings → AI mount.
+  //
+  // `activeModelId` is the gate on the whole AI focus pipeline: SessionView
+  // starts no sample loop without it, and `handleTopicSubmit` below skips the
+  // gesture-context screen pre-acquire without it. Until this effect existed
+  // the ONLY caller of `hydrate()` was ModelPickerContainer, which mounts
+  // exclusively inside Settings → AI — so on every launch where the user
+  // didn't happen to visit that pane, a fully configured install ran a whole
+  // session with AI silently dead and persisted an unscored sessions row
+  // (issue #92: score/focused_pct NULL, no ai_* audit rows, no toast, no log).
+  // Hydrating here (Home is the main window's root view, mounted before any
+  // session can start) makes the persisted model the truth from boot.
+  useEffect(() => {
+    void useModelStore.getState().hydrate()
+  }, [])
+
   const runHostInvite = useCallback(
     async (friend: Friend) => {
       if (!identity || !identity.display_name) return
@@ -259,7 +275,19 @@ export function Home() {
   const handleRejoin = useCallback(() => {
     const s = useSessionStore.getState()
     if (!s.sessionTopic || !s.sessionPassword) return
-    if (aiOn()) s.setPendingInitialTopic(s.declaredStudyTopic)
+    // I79 — Rejoin skips the topic gate, so it also used to skip the only
+    // gesture-context screen pre-acquire (handleTopicSubmit's). This click IS
+    // a user gesture; spend it the same way, or the rejoined session's boot()
+    // calls getDisplayMedia gestureless and AI is dead for the second stint.
+    // Must precede any await, and the model-store gate matches
+    // handleTopicSubmit's.
+    if (aiOn()) {
+      const models = useModelStore.getState()
+      if (models.activeModelId || models.status === 'loading') {
+        void preacquireScreenStream()
+      }
+      s.setPendingInitialTopic(s.declaredStudyTopic)
+    }
     try {
       joinSession(s.sessionTopic, s.sessionPassword)
     } catch (err) {
@@ -304,7 +332,15 @@ export function Home() {
       // bother when a model is actually active — otherwise boot() never
       // runs and nothing would consume the pre-acquired stream. Must be the
       // very first thing this handler does, before any `await`.
-      if (useModelStore.getState().activeModelId) {
+      //
+      // I79 — a store still mid-hydration counts as "maybe active". Reading a
+      // null `activeModelId` out of an unhydrated store used to skip the
+      // pre-acquire, and on WebView2 that is fatal rather than degraded:
+      // boot()'s gestureless getDisplayMedia is refused outright and the loop
+      // dies before its first tick. An unconsumed stream is the cheap side of
+      // this trade — SessionView discards it on unmount.
+      const models = useModelStore.getState()
+      if (models.activeModelId || models.status === 'loading') {
         void preacquireScreenStream()
       }
       // Seed the one-shot topic BEFORE the session flips to active so

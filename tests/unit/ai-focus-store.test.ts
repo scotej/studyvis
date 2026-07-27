@@ -15,6 +15,7 @@ import {
 } from '@/features/ai'
 import type { Judgment, SampleVerdict, UncertainVerdict } from '@/features/ai'
 import { snapshotFocusForReport } from '@/features/ai/focusStore'
+import { useSettingsStore } from '@/stores/settingsStore'
 
 const UNCERTAIN: UncertainVerdict = { kind: 'uncertain', reason: 'parse fail' }
 
@@ -281,5 +282,42 @@ describe('useFocusStore', () => {
     expect(useFocusStore.getState().skippedSamples).toBe(1)
     state.reset()
     expect(useFocusStore.getState().skippedSamples).toBe(0)
+  })
+})
+
+// I79 — the snapshot now also records WHETHER AI was on, because every other
+// field it returns is null both for an AI-off session and for an AI-on session
+// whose loop never ran a single check. Issue #92 is what that ambiguity costs:
+// the report had no way to distinguish a deliberate choice from a malfunction.
+describe('snapshotFocusForReport — aiEnabled (I79)', () => {
+  beforeEach(() => {
+    resetStore()
+  })
+  afterEach(() => {
+    useSettingsStore.setState((s) => ({
+      values: { ...s.values, aiFeaturesEnabled: false },
+    }))
+  })
+
+  test('records 1 when AI features are enabled, even with zero samples', () => {
+    useSettingsStore.setState((s) => ({
+      values: { ...s.values, aiFeaturesEnabled: true },
+    }))
+    const snap = snapshotFocusForReport()
+    // The distinguishing case: nothing measured, but the user had it on.
+    expect(snap.score).toBeNull()
+    expect(snap.confidentSamples).toBeNull()
+    expect(snap.aiEnabled).toBe(1)
+  })
+
+  test('records 0 when AI features are off', () => {
+    useSettingsStore.setState((s) => ({
+      values: { ...s.values, aiFeaturesEnabled: false },
+    }))
+    expect(snapshotFocusForReport().aiEnabled).toBe(0)
+  })
+
+  test('is never null — only a pre-004 database row reads unknown', () => {
+    expect(snapshotFocusForReport().aiEnabled).not.toBeNull()
   })
 })

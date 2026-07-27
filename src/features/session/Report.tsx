@@ -55,6 +55,7 @@ import { SEVERITY_DEDUCTIONS } from '@/features/ai/scoreMachine'
 import type { Severity } from '@/features/ai/parseJudgment'
 import { formatBreakDuration } from './break'
 import {
+  aiCoverage,
   deriveBreaksSummary,
   deriveTopDistractions,
   deriveTopicTimeline,
@@ -62,11 +63,13 @@ import {
   groupTimelineByWho,
   sampleQualitySummary,
   parseAuditDetail,
+  type AiCoverage,
 } from './reportData'
 import {
   describeRow,
   formatTopicHeading,
   labelFor,
+  noScoreBody,
   serializeReportToText,
   type ResolvedReportData,
 } from './reportSerialize'
@@ -277,6 +280,11 @@ export function ReportView({
   )
   // #47 D5 — non-null only when a material share of AI checks were skipped.
   const sampleQuality = sampleQualitySummary(session)
+  // I79 — whether the AI measured anything, and if not, whether we know why.
+  // Drives the score card's body copy and the distractions empty state, which
+  // must agree: one claiming "no score recorded" beside the other saying "Nice
+  // work" is the contradiction issue #92 screenshotted.
+  const coverage = aiCoverage(session)
 
   const [copied, setCopied] = useState(false)
   const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -460,7 +468,7 @@ export function ReportView({
             <p className="text-xs text-text-muted">{strings.report.privacy}</p>
           </div>
           {score == null ? (
-            <NoScore />
+            <NoScore coverage={coverage} />
           ) : (
             <ScoreGauge score={score} animate={animateScore} />
           )}
@@ -514,7 +522,13 @@ export function ReportView({
 
         <Section heading={strings.report.sections.distractions.heading}>
           {topDistractions.length === 0 ? (
-            <Empty message={strings.report.sections.distractions.empty} />
+            <Empty
+              message={
+                coverage === 'ran'
+                  ? strings.report.sections.distractions.empty
+                  : strings.report.sections.distractions.emptyNoChecks
+              }
+            />
           ) : (
             <ul className="m-0 flex list-none flex-col gap-2 p-0">
               {topDistractions.map((entry, i) => (
@@ -591,7 +605,11 @@ function Empty({ message }: { message: string }) {
 // recorded focus score (AI off / no confident samples). DESIGN-SYSTEM §10
 // empty-state pattern: muted, no spinner, occupies the gauge's footprint so
 // the hero layout doesn't reflow.
-function NoScore() {
+//
+// I79 — the body names the cause when the row recorded one; `noScoreBody` lives
+// in reportSerialize.ts so the exported copy is shared with the text export and
+// this file keeps only component exports (react-refresh).
+function NoScore({ coverage }: { coverage: AiCoverage }) {
   return (
     <div
       role="img"
@@ -606,9 +624,7 @@ function NoScore() {
       <span className="text-sm font-medium text-text-secondary">
         {strings.report.noScore.heading}
       </span>
-      <span className="text-xs text-text-muted">
-        {strings.report.noScore.body}
-      </span>
+      <span className="text-xs text-text-muted">{noScoreBody(coverage)}</span>
     </div>
   )
 }

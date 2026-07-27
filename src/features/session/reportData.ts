@@ -35,6 +35,43 @@ export function sampleQualitySummary(session: {
   return { skipped, totalChecks }
 }
 
+// I79 — how much the AI actually saw of this session. Four states, because
+// three of them used to render identically (issue #92: a Windows session where
+// AI was on and silently dead was byte-identical to a clean AI-off one, down to
+// "No distractions detected. Nice work." asserting a measurement that never
+// happened).
+//
+//   'ran'      at least one check completed — an empty distraction list is a
+//              real finding and the confident "Nice work" copy is earned.
+//   'noChecks' AI was on and not one check completed. Nothing was measured;
+//              the report says so and points at Settings → AI.
+//   'off'      AI was deliberately off. Nothing was measured, and that is
+//              exactly what the user asked for.
+//   'unknown'  a row written before the 004 migration recorded `ai_enabled`.
+//              Nothing was measured as far as we know, and we don't claim why.
+//
+// `confident_samples` / `skipped_samples` are the check-ran evidence: both are
+// non-null together whenever the loop completed a tick (snapshotFocusForReport),
+// and null together otherwise. `score` is checked too so a pre-003 row that
+// recorded a score still reads as 'ran' rather than losing its history.
+export type AiCoverage = 'ran' | 'noChecks' | 'off' | 'unknown'
+
+export function aiCoverage(session: {
+  score: number | null
+  confident_samples: number | null
+  skipped_samples: number | null
+  ai_enabled: number | null
+}): AiCoverage {
+  const ranAnyCheck =
+    session.confident_samples != null ||
+    session.skipped_samples != null ||
+    session.score != null
+  if (ranAnyCheck) return 'ran'
+  if (session.ai_enabled === 1) return 'noChecks'
+  if (session.ai_enabled === 0) return 'off'
+  return 'unknown'
+}
+
 export function parseAuditDetail(raw: string): Record<string, unknown> {
   if (!raw) return {}
   try {

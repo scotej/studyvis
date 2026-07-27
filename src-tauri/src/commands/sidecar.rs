@@ -478,7 +478,21 @@ fn spawn_with_fallback<R: Runtime>(
     for (source, binary) in candidates {
         let runtime_dir = match source {
             // Companion dylibs/dlls that tauri bundles under Resources/.
-            super::engine::EngineSource::Bundled => resolve_runtime_dir(app).ok().flatten(),
+            //
+            // I79 — fall back to the binary's own directory when the resource
+            // path doesn't resolve. `resolve_runtime_dir` returns Ok(None) for
+            // any miss (wrong triple, bundler laid the companions out
+            // differently — I73 is precisely that having happened once), and a
+            // None used to mean spawning with NO working directory and NO PATH
+            // prepend: the exact state I75 fixed, still reachable, and fatal on
+            // Windows where the ggml backends are dlopen-only. The exe's own
+            // directory is one of the two places ggml_backend_load_best globs
+            // anyway, so this fallback is never worse than None and is right
+            // whenever the companions ship beside the binary.
+            super::engine::EngineSource::Bundled => resolve_runtime_dir(app)
+                .ok()
+                .flatten()
+                .or_else(|| binary.parent().map(Path::to_path_buf)),
             // The managed install keeps libraries next to the binary, where
             // @loader_path / $ORIGIN already resolve them; prepending the dir
             // anyway keeps both sources on one code path.
@@ -681,9 +695,17 @@ async fn watch<R: Runtime>(
         restart_attempts = next_attempts(restart_attempts, child_started_at.elapsed());
         if restart_attempts > RESTART_BUDGET {
             guard.errored = true;
+            // I79 — carry the Windows VC++ hint here too. A child that dies
+            // inside the loader spawns successfully (CreateProcess returns a
+            // handle before the DLL resolution that kills it), so it never
+            // reaches the spawn-failure path where this hint was applied — it
+            // crash-loops to the restart budget instead, and the toast the JS
+            // side raises from `last_error` named an exit code and nothing the
+            // user could act on.
             guard.last_error = last_exit
                 .clone()
-                .or_else(|| Some(format!("restart budget exceeded ({RESTART_BUDGET})")));
+                .or_else(|| Some(format!("restart budget exceeded ({RESTART_BUDGET})")))
+                .map(append_windows_dll_hint);
             guard.port = None;
             let _ = writeln!(
                 log,

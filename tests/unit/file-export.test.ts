@@ -89,6 +89,7 @@ describe('buildStatsCsvModel', () => {
       generated_at: null,
       confident_samples: null,
       skipped_samples: null,
+      ai_enabled: null,
       ...over,
     }
   }

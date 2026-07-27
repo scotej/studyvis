@@ -6,6 +6,7 @@
 import { describe, expect, test } from 'vitest'
 
 import {
+  aiCoverage,
   deriveBreaksSummary,
   deriveTopDistractions,
   deriveTopicTimeline,
@@ -343,5 +344,61 @@ describe('sampleQualitySummary', () => {
     expect(
       sampleQualitySummary({ confident_samples: 0, skipped_samples: 0 })
     ).toBeNull()
+  })
+})
+
+// I79 — the report could not tell "AI never ran" from "AI ran and saw nothing".
+// Issue #92: a Windows session where AI was on and silently dead rendered
+// "No distractions detected. Nice work." beside a card admitting no score was
+// recorded. `aiCoverage` is the single derivation both the JSX and the text
+// export branch on, so these cases pin the copy for both surfaces at once.
+describe('aiCoverage', () => {
+  const base = {
+    score: null,
+    confident_samples: null,
+    skipped_samples: null,
+    ai_enabled: null,
+  }
+
+  test("'ran' when confident samples were recorded", () => {
+    expect(aiCoverage({ ...base, confident_samples: 12, ai_enabled: 1 })).toBe(
+      'ran'
+    )
+  })
+
+  test("'ran' when every check was skipped but checks did run", () => {
+    // A2/A3 — a session of pure parse failures has confident_samples 0 and
+    // skipped_samples > 0. The AI was watching; it just couldn't read its own
+    // answers. An empty distraction list there is a real (if thin) finding, and
+    // the existing #47 D5 data-quality line is what caveats it.
+    expect(
+      aiCoverage({
+        ...base,
+        confident_samples: 0,
+        skipped_samples: 7,
+        ai_enabled: 1,
+      })
+    ).toBe('ran')
+  })
+
+  test("'ran' for a pre-003 row that recorded a score without counters", () => {
+    // The 003 migration added the counters, so an older row can hold a real
+    // score with NULL counts. That session was measured; don't demote it.
+    expect(aiCoverage({ ...base, score: 88 })).toBe('ran')
+  })
+
+  test("'noChecks' when AI was on and not one check completed", () => {
+    expect(aiCoverage({ ...base, ai_enabled: 1 })).toBe('noChecks')
+  })
+
+  test("'off' when AI was recorded as disabled", () => {
+    expect(aiCoverage({ ...base, ai_enabled: 0 })).toBe('off')
+  })
+
+  test("'unknown' for a row written before the 004 migration", () => {
+    // NULL ai_enabled is not 0: claiming "AI was off" for a session nobody
+    // recorded the setting for would invent a fact. The cause-neutral R1 copy
+    // is the honest render there.
+    expect(aiCoverage(base)).toBe('unknown')
   })
 })

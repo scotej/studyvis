@@ -640,6 +640,20 @@ export const strings = {
       // the AI category (the copy above names it; the button honors it).
       openSettingsAction: 'Open settings',
       pickModel: 'Pick a model in Settings → AI.',
+      // I79 — the loop is running but has produced no judgment for several
+      // consecutive checks. Each reason names what to do about it; all four
+      // used to be a console.warn nobody in a release build can read, so the
+      // session simply recorded nothing and said nothing.
+      aiStalled: {
+        engineUnavailable:
+          "The AI engine isn't responding, so nothing is being checked. Try turning AI off and on in Settings → AI.",
+        engineError:
+          'The AI model is loaded but rejecting checks. Re-download it in Settings → AI — its vision files may be incomplete.',
+        inferenceTimeout:
+          'AI checks are timing out on this machine. A smaller model, or a slower sample interval, will fit better.',
+        unknown:
+          "AI checks aren't completing, so nothing is being recorded this session.",
+      },
       modelFilesMissing:
         'Model files are missing. Re-download them in Settings → AI.',
       aiFailedToStart: 'AI failed to start.',
@@ -750,6 +764,11 @@ export const strings = {
       distractions: {
         heading: 'Top distractions',
         empty: 'No distractions detected. Nice work.',
+        // I79 — the same section when nothing was measured. "Nice work" is
+        // earned praise for a session the AI watched and found clean; on a
+        // session it never watched it was a fabricated all-clear, and it read
+        // as one right beside a score card admitting no score was recorded.
+        emptyNoChecks: 'No AI checks ran, so nothing was measured here.',
       },
       breaks: {
         heading: 'Breaks',
@@ -769,6 +788,15 @@ export const strings = {
       heading: 'No focus score',
       body: 'No focus score was recorded for this session.',
       copyLine: 'Score: not recorded',
+      // I79 — R1 kept this copy cause-neutral because the sessions row held no
+      // way to tell the causes apart. The 004 migration records `ai_enabled`,
+      // so two of the three cases can now be named honestly. `body` above
+      // stays the wording for rows that predate it.
+      bodyOff: 'AI focus detection was off for this session.',
+      bodyNoChecks:
+        'AI was on but never ran a check, so nothing was measured. Check Settings → AI.',
+      copyLineOff: 'Score: not recorded (AI off)',
+      copyLineNoChecks: 'Score: not recorded (AI ran no checks)',
     },
     copyCta: 'Copy report',
     copyAriaLabel: 'Copy session report to clipboard',
