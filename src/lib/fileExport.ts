@@ -12,8 +12,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { save } from '@tauri-apps/plugin-dialog'
 
 export type SaveTextFileResult =
-  | { kind: 'saved'; path: string }
-  | { kind: 'cancelled' }
+  { kind: 'saved'; path: string } | { kind: 'cancelled' }
 
 export type DialogFilter = { name: string; extensions: string[] }
 

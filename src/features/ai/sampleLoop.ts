@@ -317,9 +317,7 @@ export function getSampleLoopRuntime(): SampleLoopRuntime {
 }
 
 export type SampleLoopStartReason =
-  | 'no_active_model'
-  | 'model_files_missing'
-  | 'sidecar_start_failed'
+  'no_active_model' | 'model_files_missing' | 'sidecar_start_failed'
 
 export type SampleLoopOptions = {
   // Declared study topic. Read per-tick via callback so a mid-session

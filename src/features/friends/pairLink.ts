@@ -70,9 +70,7 @@ export function decodeContactLink(text: string): Uint8Array | null {
 // pairing code, or neither. First non-null by exact prefix wins. Kept pure (no
 // Tauri import) so it is unit-testable and shared by the deep-link subscriber.
 export type DeepLinkRoute =
-  | { kind: 'add'; card: Uint8Array }
-  | { kind: 'pair'; words: string[] }
-  | null
+  { kind: 'add'; card: Uint8Array } | { kind: 'pair'; words: string[] } | null
 
 export function routeDeepLinkUrl(url: string): DeepLinkRoute {
   const card = decodeContactLink(url)

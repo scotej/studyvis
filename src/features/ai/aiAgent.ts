@@ -42,10 +42,7 @@ type ChatCompletionResponse = {
 }
 
 export type AgentIntent =
-  | 'topic_change'
-  | 'break_request'
-  | 'question'
-  | 'unknown'
+  'topic_change' | 'break_request' | 'question' | 'unknown'
 
 export type TopicChangePayload = { new_topic: string }
 export type BreakRequestPayload = {

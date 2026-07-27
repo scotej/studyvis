@@ -43,11 +43,7 @@ export const AUDIT_ICONS: Record<AuditEventKind, LucideIcon> = {
 // and Report timeline both read this to apply per-kind styling without
 // duplicating the lookup.
 export type AuditIconTone =
-  | 'default'
-  | 'warning'
-  | 'alerted'
-  | 'focused'
-  | 'accent'
+  'default' | 'warning' | 'alerted' | 'focused' | 'accent'
 
 export const AUDIT_ICON_TONE: Record<AuditEventKind, AuditIconTone> = {
   joined: 'default',
