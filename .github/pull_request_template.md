@@ -35,8 +35,9 @@ box is ticked, say in one line what keeps the old side working. -->
 ## Gates
 
 <!-- Pre-merge CI runs these. Tick what you ran locally; anything you skipped,
-CI will tell you about. The husky pre-commit hook covers only lint,
-check-tokens, check-strings, format:check, tsc --noEmit, and cargo fmt. -->
+CI will tell you about. The husky pre-commit hook covers lint,
+check-tokens, check-strings, check-migrations, check-stories, format:check,
+tsc --noEmit, and cargo fmt — everything else below is yours to run. -->
 
 - [ ] `npm run build && npm run lint && npm run test`
 - [ ] `npm run check-tokens && npm run check-strings && npm run check-contrast`

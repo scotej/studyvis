@@ -132,14 +132,15 @@ async function main() {
       )
       continue
     }
-    const constName = runner.match(
-      new RegExp(
-        `const\\s+(\\w+)\\s*:\\s*&str\\s*=\\s*include_str!\\("migrations/${entry.file.replace(
-          /\./g,
-          '\\.'
-        )}"\\)`
-      )
-    )?.[1]
+    // Locate the declaration by plain substring match, then read the const
+    // name off that line with a fixed pattern. Building a RegExp out of the
+    // filename instead meant escaping it, and escaping only `.` is
+    // js/incomplete-sanitization — CodeQL flagged exactly that here at high
+    // severity. Not interpolating the input at all beats escaping it better.
+    const declaration = runner
+      .split('\n')
+      .find((line) => line.includes(`include_str!("migrations/${entry.file}")`))
+    const constName = declaration?.match(/const\s+(\w+)\s*:\s*&str\s*=/)?.[1]
     if (!constName) continue
     const tuple = new RegExp(
       `\\(\\s*${entry.version}\\s*,\\s*${constName}\\s*\\)`
@@ -198,7 +199,17 @@ async function main() {
     process.stdout.write(
       `check-migrations: manifest updated (${entries.length} migrations)\n`
     )
-    process.exit(violations.length === 0 ? 0 : 1)
+    // The sequence and registration checks still apply after an --update, and
+    // exiting 1 without saying why is how someone concludes the tool is
+    // broken rather than that their migration is not wired up.
+    if (violations.length > 0) {
+      process.stderr.write(
+        `check-migrations: manifest written, but ${violations.length} violation(s) remain\n`
+      )
+      for (const v of violations) process.stderr.write(`  ${v}\n`)
+      process.exit(1)
+    }
+    process.exit(0)
   }
 
   if (violations.length === 0) {

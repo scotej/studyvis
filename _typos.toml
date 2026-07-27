@@ -20,30 +20,42 @@ extend-exclude = [
 ]
 
 [default]
+# Scoped patterns, not global word overrides. `extend-words` silences a
+# correction EVERYWHERE — writing `mis = "mis"` to excuse "mis-decoding"
+# would also let a genuine stray "mis" through in src/strings.ts, which is
+# the file this check mainly exists for. Each pattern below matches only the
+# shape that actually occurs.
 extend-ignore-re = [
   # Pair / contact links are base64url payloads in stories and tests; every
   # two-letter slice of one is a potential "typo".
   "studyvis://[A-Za-z0-9+/=_#-]+",
+  # Base64 capture fixture in tests/unit/ai-capture.test.ts (-> "Iz").
+  "YWJjMTIz",
   # Lock-ordering notation in sidecar.rs ("an AB-BA deadlock").
   "AB-BA",
+  # "mis-" as a hyphenated English prefix: mis-decoding, mis-associated,
+  # mis-decode. A bare "mis" is still corrected.
+  "\\bmis-[a-z]+",
+  # `NULLable` in a sessions.rs comment on SQLite column nullability, which
+  # the checker splits into "NULL" + "Lable".
+  "\\bNULLable\\b",
+  # `PNGs` in generate-icons.mjs, split into "PN" + "Gs".
+  "\\bPNGs?\\b",
 ]
 
-[default.extend-words]
-# Both spellings are standard; the codebase uses this one consistently
-# across nine sites (Rust, TS, SQL comments, tests, docs). Changing them all
-# to satisfy a linter would be churn, not a fix.
-unparseable = "unparseable"
-# Local binding in reportSerialize.ts holding the formatted deduction suffix.
+[default.extend-identifiers]
+# Whole-identifier match: the local binding in reportSerialize.ts holding the
+# formatted deduction suffix. Prose containing "ded" is still corrected.
 ded = "ded"
+
+[default.extend-words]
+# Genuine vocabulary, so a global allowance is the right scope for these.
+#
+# Both spellings are standard; the codebase uses this one consistently across
+# nine sites (Rust, TS, SQL comments, tests, docs). Changing them all to
+# satisfy a linter would be churn, not a fix.
+unparseable = "unparseable"
 # Real word — "the toast alone was missable" in strings.ts.
 missable = "missable"
 # ISSUES.md counts advisories by severity: "criticals: concurrently@9 → ...".
 criticals = "criticals"
-# From `NULLable` in a sessions.rs comment about SQLite column nullability.
-Lable = "Lable"
-# Substring of hex/base64 fixtures and of "mismatch" splits in encoding tests.
-mis = "mis"
-# From `PNGs` in generate-icons.mjs — the checker splits the acronym.
-PN = "PN"
-# Slice of the base64 capture fixture in tests/unit/ai-capture.test.ts.
-Iz = "Iz"

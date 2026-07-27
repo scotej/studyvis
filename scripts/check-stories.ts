@@ -20,14 +20,19 @@ import { resolve, join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const ROOT = resolve(fileURLToPath(import.meta.url), '..', '..')
-const STORIES = join(ROOT, 'src', 'stories')
+// Stories are discovered anywhere under src/, matching .storybook/main.ts's
+// own glob ('../src/**/*.stories.@(js|jsx|mjs|ts|tsx)'). Reading only
+// src/stories/ would count a colocated Foo.stories.tsx as neither coverage
+// nor a story — it would be reported as an uncovered "component" instead.
+const SRC = join(ROOT, 'src')
 // CLAUDE.md says "every primitive and feature component", so features/ counts:
-// scoping this to components/ would have quietly exempted the whole feature
-// tree while the CI step still claimed to cover it.
-const COMPONENT_DIRS: { dir: string; recurse: boolean }[] = [
-  { dir: join(ROOT, 'src', 'components'), recurse: false },
-  { dir: join(ROOT, 'src', 'components', 'ui'), recurse: false },
-  { dir: join(ROOT, 'src', 'features'), recurse: true },
+// scoping this to components/ would quietly exempt the whole feature tree
+// while the CI step still claimed to cover it. Both trees are walked
+// recursively — a new src/components/<group>/ subdirectory is a component
+// directory like any other.
+const COMPONENT_DIRS: string[] = [
+  join(ROOT, 'src', 'components'),
+  join(ROOT, 'src', 'features'),
 ]
 
 // Components that have no story today. This is a freeze, not an amnesty: the
@@ -93,12 +98,12 @@ const FEATURE_BASELINE = new Set<string>([
 
 const IMPORT_PATTERN = /from\s+'(@\/(?:components|features)\/[^']+)'/g
 
-async function walk(dir: string, recurse: boolean): Promise<string[]> {
+async function walk(dir: string): Promise<string[]> {
   const out: string[] = []
   for (const entry of await readdir(dir, { withFileTypes: true })) {
     const full = join(dir, entry.name)
     if (entry.isDirectory()) {
-      if (recurse) out.push(...(await walk(full, recurse)))
+      out.push(...(await walk(full)))
       continue
     }
     if (entry.name.endsWith('.tsx')) out.push(full)
@@ -106,23 +111,28 @@ async function walk(dir: string, recurse: boolean): Promise<string[]> {
   return out
 }
 
+const isStory = (path: string) => /\.stories\.tsx$/.test(path)
+
 async function main() {
   // Every module any story imports, normalised to a repo-relative path. The
   // alias '@/x' maps to 'src/x' (vite.config.ts resolve.alias).
   const covered = new Set<string>()
-  const storyFiles = (await readdir(STORIES)).filter((n) =>
-    n.endsWith('.stories.tsx')
-  )
+  const storyFiles = (await walk(SRC)).filter(isStory)
   for (const file of storyFiles) {
-    const text = await readFile(join(STORIES, file), 'utf8')
+    const text = await readFile(file, 'utf8')
     for (const match of text.matchAll(IMPORT_PATTERN)) {
       covered.add(`src/${match[1].slice('@/'.length)}.tsx`)
     }
+    // A colocated story covers its neighbour by convention even when it
+    // imports it relatively: Foo.stories.tsx sitting beside Foo.tsx.
+    const sibling = relative(ROOT, file).replace(/\.stories\.tsx$/, '.tsx')
+    covered.add(sibling.split('\\').join('/'))
   }
 
   const components: string[] = []
-  for (const { dir, recurse } of COMPONENT_DIRS) {
-    for (const file of await walk(dir, recurse)) {
+  for (const dir of COMPONENT_DIRS) {
+    for (const file of await walk(dir)) {
+      if (isStory(file)) continue
       components.push(relative(ROOT, file).split('\\').join('/'))
     }
   }

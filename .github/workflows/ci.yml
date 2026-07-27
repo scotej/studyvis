@@ -5,6 +5,12 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+    # `edited` is not a default activity type, and a PR title is edited
+    # outside opened/synchronize/reopened — without it the pr-title gate can
+    # neither be cleared by fixing the title nor catch a title changed after
+    # the checks went green. Costs a re-run on a description edit;
+    # cancel-in-progress above keeps that to one run.
+    types: [opened, synchronize, reopened, edited]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -427,6 +433,7 @@ jobs:
             test
             build
             revert
+            style
           requireScope: false
           # Only the trailing full stop is enforced. The obvious companion
           # rule — "must start lowercase" — is wrong for this repo: subjects
@@ -443,10 +450,9 @@ jobs:
 
   all-green:
     name: All pre-merge checks
-    # The single check to require in branch protection. Adding a job above
-    # then extends the gate automatically instead of needing the protection
-    # rule edited — which is the failure mode where a new check exists but
-    # nothing enforces it.
+    # The single check to require in branch protection: one rule to
+    # configure, instead of re-editing it every time a job is added. The
+    # `needs:` list below is the part that IS hand-maintained.
     # !cancelled(), not always(): always() is true even for a CANCELLED run,
     # and with cancel-in-progress on (line 11) every superseded push would
     # spin this job up, read 'cancelled' from every need, and report a hard
