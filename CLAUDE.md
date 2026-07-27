@@ -69,12 +69,29 @@ npm run lint           # eslint (includes the layering-wall rule)
 npm run test           # vitest (node-env; see the test-harness note below)
 npm run check-tokens   # design-token guard
 npm run check-strings  # strings-module guard
+npm run check-migrations # forward-only SQLite migrations (hash manifest + registration)
+npm run check-stories  # every component has a Storybook story
 npm run check-contrast # WCAG AA over both themes
 npm run check-a11y     # axe-core over Storybook (needs `npm run build-storybook` first)
 cargo test && cargo fmt --check && cargo clippy   # in src-tauri/, for Rust changes
+cargo deny check       # in src-tauri/, supply chain (advisories/licenses/bans/sources)
 ```
 
-Pre-commit (husky) enforces a subset automatically — `lint`, `check-tokens`, `check-strings`, `format:check` (prettier repo-wide), `tsc --noEmit` (tsconfig.app.json), and the `cargo fmt --check` gate. The rest above (`build`, `test`, `check-contrast`, `check-a11y`, `cargo test`/`clippy`) are **not** in the hook — run them yourself before opening a PR. Before committing multi-file or subagent work, run `npm run format` (prettier --write .) so the whole tree is clean — `format:check` rejects files you didn't touch.
+Pre-commit (husky) enforces a subset automatically — `lint`, `check-tokens`, `check-strings`, `check-migrations`, `check-stories`, `format:check` (prettier repo-wide), `tsc --noEmit` (tsconfig.app.json), and the `cargo fmt --check` gate. The rest above (`build`, `test`, `check-contrast`, `check-a11y`, `cargo test`/`clippy`, `cargo deny`) are **not** in the hook — run them yourself before opening a PR. Before committing multi-file or subagent work, run `npm run format` (prettier --write .) so the whole tree is clean — `format:check` rejects files you didn't touch.
+
+### What CI adds on top (pull requests)
+
+Everything above runs in `.github/workflows/ci.yml`, plus checks that only make sense with a repository around them. `All pre-merge checks` is the aggregator job branch protection requires — add a job to `ci.yml` and it is covered automatically.
+
+- **Workflow lint** — `actionlint` (+ shellcheck over inline `run:` blocks) and `zizmor`. `.github/zizmor.yml` encodes the pinning policy: GitHub-owned actions may float on a major tag, every third-party action must be hash-pinned. That is now enforced, not just documented.
+- **Supply chain** — `dependency-review` fails on vulnerabilities *this PR adds* (the pre-existing backlog stays out of the way); `cargo-deny` runs advisories/licenses/bans/sources against `src-tauri/deny.toml`; `npm audit` is advisory-only into the job summary, because it is red today (`ISSUES.md` I19).
+- **Docs & copy hygiene** — `typos` (blocking, configured in `_typos.toml`) and a link check (advisory).
+- **PR title** — conventional-commit shape, since PRs squash-merge into main's history.
+- **CodeQL** — `javascript-typescript`, `rust`, and `actions`, all build-mode `none`.
+- **Weekly** (`maintenance.yml`) — OSV over both lockfiles, relay health, OpenSSF Scorecard. Never a PR gate: these go red without anyone committing anything.
+- **Deployments** — Storybook publishes to GitHub Pages from main (`pages.yml`) and rides along as a PR artifact. Adding the `build-installers` label to a PR builds real unsigned macOS/Windows bundles for smoke-testing (`pr-build.yml`); they carry no updater manifest and can never be consumed as an update.
+
+Dependency bumps arrive via `.github/dependabot.yml` (npm, cargo, actions). It rewrites a SHA pin's trailing `# vX.Y.Z` comment only when the version is the **last** thing in the comment — keep it that way.
 
 > If the pre-commit hook isn't firing (commits succeed with no gate output), `git config core.hooksPath` has drifted — run `npm run prepare` to reset husky to `.husky/_`.
 
@@ -112,7 +129,7 @@ src/         ← React frontend
   routes/          ← minimal routing (Home + dev-only /style)
   stories/         ← Storybook
   strings.ts       ← user-facing copy   types/   App.tsx   main.tsx
-scripts/     ← check-tokens / check-strings / check-contrast, fetch/build-llama-server, generate-*
+scripts/     ← check-tokens / check-strings / check-contrast / check-migrations / check-stories, fetch/build-llama-server, generate-*
 tests/       ← unit / integration / ai-eval (eval dataset + RESULTS.md)
 ```
 
