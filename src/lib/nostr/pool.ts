@@ -19,6 +19,19 @@
 import { bytesToHex } from '@/lib/encoding'
 import { PRESENCE_EVENT_KIND, type NostrEvent } from './events'
 
+// The text in an OK-false reason or a NOTICE is written by the relay, and the
+// console is what a friend copies into a bug report (README points them at
+// Settings → Advanced → Open data folder). A newline in that text forges log
+// lines that read as ours; a bidi override reorders what a human sees without
+// changing the bytes. Strip both classes and clamp the length — a relay that
+// wants more than 200 characters of our log is not being helpful.
+// Flagged as js/log-injection by CodeQL, which is how it was found.
+const LOG_MAX = 200
+function forLog(value: unknown): string {
+  const text = String(value).replace(/[\p{Cc}\p{Cf}]/gu, ' ')
+  return text.length > LOG_MAX ? `${text.slice(0, LOG_MAX)}…` : text
+}
+
 // The structural subset of WebSocket the pool needs; tests inject fakes.
 export type PoolSocket = {
   readyState: number
@@ -127,11 +140,11 @@ export function createRelayPool(config: RelayPoolConfig): RelayPool {
     // report needs in the console. check-relays catches this at release
     // time only; policies change between releases (offchain.pub did).
     if (frame[0] === 'OK' && frame[2] === false) {
-      console.warn(`presence relay ${url} rejected publish:`, frame[3])
+      console.warn(`presence relay ${url} rejected publish:`, forLog(frame[3]))
       return
     }
     if (frame[0] === 'NOTICE') {
-      console.warn(`presence relay ${url} notice:`, frame[1])
+      console.warn(`presence relay ${url} notice:`, forLog(frame[1]))
       return
     }
     if (frame[0] !== 'EVENT' || frame[1] !== subId) return
