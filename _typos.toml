@@ -1,0 +1,49 @@
+# Spell-check config for `typos`, run in CI over docs, code, and user-facing
+# copy. It earns its place mainly because of `src/strings.ts`: that file is
+# the single source of truth for every toast and notification a friend ever
+# reads, and a typo there ships to installed builds and stays until the next
+# release.
+#
+# Everything below is an accepted word or a pattern that only *looks* like a
+# misspelling — checked one by one against the source, not batch-silenced.
+
+[files]
+extend-exclude = [
+  "package-lock.json",
+  "src-tauri/Cargo.lock",
+  "dist",
+  "storybook-static",
+  "src-tauri/target",
+  "src-tauri/gen",
+  # Historical provenance doc, frozen by CLAUDE.md — not live prose.
+  "BUILD-PROMPTS.md",
+]
+
+[default]
+extend-ignore-re = [
+  # Pair / contact links are base64url payloads in stories and tests; every
+  # two-letter slice of one is a potential "typo".
+  "studyvis://[A-Za-z0-9+/=_#-]+",
+  # Lock-ordering notation in sidecar.rs ("an AB-BA deadlock").
+  "AB-BA",
+]
+
+[default.extend-words]
+# Both spellings are standard; the codebase uses this one consistently
+# across nine sites (Rust, TS, SQL comments, tests, docs). Changing them all
+# to satisfy a linter would be churn, not a fix.
+unparseable = "unparseable"
+# Local binding in reportSerialize.ts holding the formatted deduction suffix.
+ded = "ded"
+# Real word — "the toast alone was missable" in strings.ts.
+missable = "missable"
+# ISSUES.md counts advisories by severity: "criticals: concurrently@9 → ...".
+criticals = "criticals"
+# From `NULLable` in a sessions.rs comment about SQLite column nullability.
+Lable = "Lable"
+# Substring of hex/base64 fixtures and of "mismatch" splits in encoding tests.
+mis = "mis"
+# From `PNGs` in generate-icons.mjs — the checker splits the acronym.
+PN = "PN"
+# Slice of the base64 capture fixture in tests/unit/ai-capture.test.ts.
+Iz = "Iz"

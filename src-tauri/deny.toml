@@ -1,0 +1,106 @@
+# cargo-deny — supply-chain gate for the Rust half of StudyVis.
+#
+# The frontend has `npm audit` (advisory only — see ISSUES.md I19, a known
+# dev-chain backlog) and dependency-review on PRs. The Rust side had nothing:
+# `cargo check --locked` proves the lockfile is honoured, not that anything
+# in it is safe to ship. This closes that, and it matters more here than in a
+# typical app because the crate graph ends up inside an unsigned installer
+# that friends run past Gatekeeper/SmartScreen and that self-updates.
+#
+# The allowlist below was derived from the actual graph (629 packages) rather
+# than copied from a template — see the comments on the unusual entries.
+
+[graph]
+# Only the two platforms StudyVis actually ships. Without this, cargo-deny
+# walks every target's dependencies — including the Linux/Android/wasm trees
+# that this repo never builds — and reports advisories against crates that
+# are not in any shipped binary. Linux joins the list when PLAN §8's
+# WebKitGTK trigger is met.
+targets = [
+  "aarch64-apple-darwin",
+  "x86_64-pc-windows-msvc",
+]
+all-features = false
+
+[advisories]
+db-urls = ["https://github.com/rustsec/advisory-db"]
+yanked = "deny"
+# "unmaintained" for a transitive crate is not a defect — it is a fact about
+# someone else's release cadence, and the fix is upstream's to make. Scoping
+# it to workspace dependencies keeps the signal (a crate WE chose has been
+# abandoned) and drops six findings that no change to this repo can resolve:
+# mach, unic-char-property, unic-char-range, unic-common, unic-ucd-ident,
+# unic-ucd-version — all pulled in beneath tauri.
+unmaintained = "workspace"
+# Everything else fails the build. The list below is the backlog that
+# existed the day this gate landed, each entry pinned by ID so that a NEW
+# advisory — including one introduced by a dependency bump — still turns the
+# build red. cargo-deny warns when an entry stops matching, so a fixed
+# advisory surfaces as "remove me" rather than rotting here silently.
+ignore = [
+  # quick-xml 0.37.5 / 0.39.3, both beneath tauri (plist + bundler paths).
+  # Denial-of-service reachable only by parsing hostile XML; StudyVis parses
+  # no attacker-supplied XML at runtime — the exposure is build-time
+  # tooling. Upstream fix is 0.41.0, which has to arrive via tauri.
+  { id = "RUSTSEC-2026-0194", reason = "quick-xml DoS; transitive under tauri, no runtime XML from peers. Drop when tauri pulls >=0.41." },
+  { id = "RUSTSEC-2026-0195", reason = "quick-xml namespace-allocation DoS; same path and same fix as RUSTSEC-2026-0194." },
+]
+
+[licenses]
+# Every license present in the resolved graph today. Adding a dependency that
+# introduces a new one is a deliberate act, so it should fail here and get a
+# line added with a reason rather than pass silently.
+allow = [
+  "MIT",
+  "MIT-0",
+  "Apache-2.0",
+  "Apache-2.0 WITH LLVM-exception",
+  "BSD-2-Clause",
+  "BSD-3-Clause",
+  "ISC",
+  "Zlib",
+  "0BSD",
+  "CC0-1.0",
+  "Unlicense",
+  "BSL-1.0",
+  # ICU / unicode-ident. Unicode-3.0 is the current permissive Unicode
+  # licence and replaced the old Unicode-DFS-2016 across the icu_* crates.
+  "Unicode-3.0",
+  # webpki-roots / webpki-root-certs — the Mozilla CA bundle, redistributed
+  # under a permissive data licence.
+  "CDLA-Permissive-2.0",
+  # Servo's CSS stack (cssparser, selectors, dtoa-short) and option-ext,
+  # pulled in through wry/tauri. MPL-2.0 is file-level copyleft: it obliges
+  # publishing changes to *those files*, which this repo does not make.
+  "MPL-2.0",
+]
+# Crates offering a copyleft option alongside permissive ones resolve to the
+# permissive branch (r-efi is MIT OR Apache-2.0 OR LGPL-2.1-or-later); an
+# explicit confidence floor keeps the SPDX parse from drifting into a guess.
+confidence-threshold = 0.93
+
+[licenses.private]
+# `studyvis` itself sets `license = ""` in Cargo.toml: it is a private
+# application, never published to crates.io, and `publish = false` marks it
+# as such. Without this, the crate under audit fails its own audit.
+ignore = true
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+# Duplicated crates are routine in a Tauri graph (windows-sys generations,
+# syn 1/2) and blocking on them would be pure noise, hence "warn" above.
+skip = []
+deny = [
+  # Nothing yet. This is the hook for "we decided never to depend on X" —
+  # e.g. a crate that pulls in a network client the threat model forbids.
+]
+
+[sources]
+# Everything must come from crates.io. A git dependency — or a private
+# registry — in a graph that gets signed and shipped to friends is exactly
+# the supply-chain move this repo's pinning discipline exists to prevent.
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []
