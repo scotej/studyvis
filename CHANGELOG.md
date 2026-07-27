@@ -18,9 +18,29 @@ V3 work was drafted as v1.0.4 but shipped under the **v1.0.5** tag —
 there is no v1.0.4 tag; the section below is labelled by the tag that
 shipped it.)
 
-## 1.8.2 — 2026-07-26 — AI screen capture no longer fails on ordinary session starts
+## 1.8.2 — 2026-07-26 — The host's camera reaches you, and AI stops dying at session start
+
+Two fixes for things that went wrong the moment a session began: the camera
+and mic of whoever started it never reaching anyone who joined, and on-device
+AI throwing a raw screen-capture error that killed the engine it had just
+started.
 
 ### Fixed
+
+- **You could never see the camera or hear the mic of the friend who
+  started the session.** If they hosted and you joined, their tile stayed
+  dark and silent for the whole session while they saw and heard you
+  normally — a day-one bug, present in every build StudyVis has ever
+  shipped. The app handed your camera to the peer-to-peer layer exactly
+  once, and that layer only delivers a stream to the friends who are
+  already connected at that moment — it never passes it on to someone who
+  joins afterwards. The host opens their camera before the invite has even
+  been sent, so there was nobody there to hand it to, and nothing ever
+  re-sent it. Your camera reached them only because you join a session
+  that is already running. StudyVis now also re-sends your camera and mic
+  to each friend as they arrive. **You and your friends all need to
+  update:** an updated host reaches a friend on an older build, but if the
+  host is on an older build you still won't see them. (I77)
 
 - **Starting a session with AI already enabled could throw a raw
   "getDisplayMedia must be called from a user gesture handler" error and

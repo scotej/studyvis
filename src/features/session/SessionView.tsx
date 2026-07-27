@@ -96,6 +96,7 @@ import {
   connectionFocusState,
   MAX_REMOTE_PEERS,
   PTT_STATE_ACTION,
+  publishLocalStream,
 } from './lifecycle'
 import { SessionInviteDialog } from './SessionInviteDialog'
 import {
@@ -356,15 +357,17 @@ export function SessionView({
     }
   }, [status])
 
-  // Capture the camera + mic once per active session and add the resulting
-  // MediaStream to the trystero room. trystero forwards new tracks to all
-  // current peers and to peers who join later (Context7 docs / README §
-  // Stream Audio and Video).
+  // Capture the camera + mic once per active session and publish the resulting
+  // MediaStream to the room. I77 — publishing is `publishLocalStream`, not a
+  // bare `addStream`: trystero only ever delivers a stream to the peers active
+  // at call time, so the host (alone in a freshly derived topic when its camera
+  // opens) reached nobody. See the contract on that function.
   useEffect(() => {
     if (!room) return
     let cancelled = false
     let acquiredStream: MediaStream | null = null
     let detachTrackEnded: (() => void) | null = null
+    let offJoinStream: (() => void) | null = null
     void (async () => {
       try {
         const stream = await navigator.mediaDevices.getUserMedia(
@@ -414,7 +417,7 @@ export function SessionView({
             t.removeEventListener('ended', handleTrackEnded)
           }
         }
-        room.addStream(stream)
+        offJoinStream = publishLocalStream(room, stream)
         setLocalStream(stream)
         localStreamRef.current = stream
         // Surface the OS-chosen default deviceId so the audio picker can
@@ -439,6 +442,11 @@ export function SessionView({
     return () => {
       cancelled = true
       detachTrackEnded?.()
+      // Drop the join re-send BEFORE the stream dies: a "Try again"
+      // (mediaRetryNonce) tears this effect down and a surviving subscriber
+      // would hand a peer joining a moment later a stream whose tracks were
+      // just stopped below.
+      offJoinStream?.()
       if (acquiredStream) {
         try {
           room.removeStream(acquiredStream)
@@ -467,9 +475,14 @@ export function SessionView({
     }
   }, [room])
 
-  // Bind peer streams to per-peer state. trystero replays existing peers when
-  // we register the stream callback, so this works for both already-present
-  // peers and joiners. We also drop stream + PTT entries when a peer leaves
+  // Bind peer streams to per-peer state. I77 — `onPeerStream` does NOT replay:
+  // trystero assigns it bare (room.mjs:511) and only `onPeerJoin` sweeps
+  // already-active peers (room.mjs:506-509), a replay our wrapper consumes at
+  // construction anyway. Nothing re-delivers a stream we were not subscribed
+  // for, so this effect is only correct because `begin()` publishes the room
+  // and `status: 'active'` in one store write — the subscriber is live one
+  // commit later, long before any handshake can complete. We also drop stream
+  // + PTT entries when a peer leaves
   // — this keeps cleanup inside an event callback so the lint rule against
   // "setState synchronously inside an effect body" doesn't fire.
   useEffect(() => {
