@@ -47,6 +47,19 @@ shipped it.)
   On macOS this rides on the screen-recording permission fix tracked in #94 /
   I79 — without it, macOS builds cannot capture a screen at all.
 
+### Changed
+
+- **The people in your session are now as big as the window allows.** Tiles
+  used to stop growing at 360 px tall and to sit side by side whatever the
+  shape of the window, so you and one friend were a pair of small strips with
+  most of the screen empty underneath. The session now measures the room it has
+  and arranges the tiles the way that makes them largest — for two people that
+  is usually one above the other, each about a third wider and a third taller
+  than before. A third friend, or a shared screen, rearranges everyone again to
+  suit; no one's tile is ever bigger than anyone else's, and faces stay 16:9
+  and uncropped at every size. Sitting alone also stops laying two tiles out in
+  three columns' worth of space. (#95)
+
 ## 1.8.2 — 2026-07-26 — The host's camera reaches you, and AI stops dying at session start
 
 Two fixes for things that went wrong the moment a session began: the camera
