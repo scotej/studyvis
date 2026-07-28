@@ -171,7 +171,10 @@ export function SettingsLayout<TId extends string = string>({
           // grouped items visible at the 640px window-height minimum.
           className="w-(--settings-rail-width) shrink-0 overflow-y-auto border-r border-border-subtle bg-bg-surface px-3 py-4"
         >
-          <div className="relative mb-2">
+          {/* mb-3 pairs with the `pt-3` every later group heading carries, so
+              the first heading sits the same distance below the search field
+              as the others sit below the item above them. */}
+          <div className="relative mb-3">
             <SearchIcon
               size={16}
               strokeWidth={1.5}
@@ -191,7 +194,10 @@ export function SettingsLayout<TId extends string = string>({
               aria-controls={filtered.length > 0 ? listId : undefined}
               autoComplete="off"
               spellCheck={false}
-              className="px-9"
+              // pl-10 = the icon inset (left-3) + the 16px glyph + the nav
+              // item's gap-3, so the query text lines up with the labels it
+              // filters. pr-9 still clears the clear button.
+              className="pl-10 pr-9"
             />
             {query !== '' ? (
               <button
