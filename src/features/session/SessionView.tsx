@@ -1606,7 +1606,11 @@ export function SessionView({
 
   return (
     <main
-      className="flex min-h-full flex-col bg-bg-base text-text-primary"
+      // #95 — `h-full`, not `min-h-full`: the session view is a fixed cockpit,
+      // not a document that scrolls. Pinning it to the window is what leaves
+      // the video column a definite height to hand VideoGrid, which sizes the
+      // tiles to fill it. The grid scrolls internally if the tiles ever can't.
+      className="flex h-full flex-col bg-bg-base text-text-primary"
       aria-label={strings.session.mainAriaLabel}
     >
       {/* V3-P7 — Visually-hidden top-level heading so SR users have a clean
@@ -1615,9 +1619,10 @@ export function SessionView({
           own. */}
       <h1 className="sr-only">{strings.app.sessionSrHeading}</h1>
       <div className="flex min-h-0 flex-1">
-        <div className="flex-1 px-6 py-6">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col px-6 py-6">
           {mediaErrorName !== null ? (
             <MediaErrorBanner
+              className="shrink-0"
               errorName={mediaErrorName}
               onRetry={handleMediaRetry}
               onOpenSettings={
@@ -1628,7 +1633,7 @@ export function SessionView({
               }
             />
           ) : null}
-          <VideoGrid>
+          <VideoGrid className="min-h-0 flex-1">
             <VideoTile
               key="local"
               name={youName}
@@ -1725,7 +1730,7 @@ export function SessionView({
           />
         </div>
       </div>
-      <footer className="flex items-center justify-between gap-4 border-t border-border-subtle bg-bg-surface px-6 py-4 text-sm">
+      <footer className="flex shrink-0 items-center justify-between gap-4 border-t border-border-subtle bg-bg-surface px-6 py-4 text-sm">
         <span className="flex items-center gap-3 text-text-secondary">
           <span className="flex items-center gap-2">
             {strings.session.footerHoldBefore}

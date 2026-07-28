@@ -38,10 +38,7 @@ export function WaitingTile({
         'flex aspect-video flex-col items-center justify-center gap-3 rounded-lg border border-dashed border-border-subtle bg-bg-sunk px-6 text-center',
         className
       )}
-      style={{
-        minHeight: tokens.sizes.videoTileMinHeight,
-        maxHeight: tokens.sizes.videoTileMaxHeight,
-      }}
+      style={{ minHeight: tokens.sizes.videoTileMinHeight }}
       data-testid="waiting-tile"
     >
       <UsersIcon className="size-7 text-text-muted" aria-hidden="true" />

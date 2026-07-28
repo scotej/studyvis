@@ -117,10 +117,10 @@ export function VideoTile({
           : 'border border-border-default',
         className
       )}
-      style={{
-        minHeight: tokens.sizes.videoTileMinHeight,
-        maxHeight: tokens.sizes.videoTileMaxHeight,
-      }}
+      // #95 — the floor keeps a tile legible; there is deliberately no ceiling.
+      // A capped tile stopped growing at 360 px tall while the session view had
+      // twice that to give, and VideoGrid now sizes tiles to fill the slot.
+      style={{ minHeight: tokens.sizes.videoTileMinHeight }}
       data-testid="video-tile"
       data-state={resolvedState}
       data-variant={variant}

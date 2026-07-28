@@ -54,13 +54,25 @@ const PEERS: ReadonlyArray<{ name: string; color: string }> = [
   { name: 'Mei', color: tokens.color.accent.active },
 ]
 
-function GridWithCount({ count }: { count: 1 | 2 | 3 | 4 }) {
-  const tiles = PEERS.slice(0, count).map((p, i) => (
-    <Tile key={p.name} name={p.name} color={p.color} isLocal={i === 0} />
-  ))
+// #95 — the grid sizes its tiles from the slot it is given, so these stories
+// hand it the whole frame (`layout: 'fullscreen'`) the way SessionView hands it
+// everything left between the media banner and the footer. In a padded box with
+// no height it would have nothing to fill.
+function GridWithCount({ count }: { count: number }) {
+  const tiles = Array.from({ length: count }, (_, i) => {
+    const peer = PEERS[i % PEERS.length]!
+    return (
+      <Tile
+        key={`${peer.name}-${i}`}
+        name={i < PEERS.length ? peer.name : `${peer.name} (screen)`}
+        color={peer.color}
+        isLocal={i === 0}
+      />
+    )
+  })
   return (
-    <div className="w-full max-w-5xl">
-      <VideoGrid>{tiles}</VideoGrid>
+    <div className="h-full p-6">
+      <VideoGrid className="h-full">{tiles}</VideoGrid>
     </div>
   )
 }
@@ -81,7 +93,7 @@ function Tile({
 const meta = {
   title: 'Components/VideoGrid',
   component: VideoGrid,
-  parameters: { layout: 'padded' },
+  parameters: { layout: 'fullscreen' },
   args: { children: null },
 } satisfies Meta<typeof VideoGrid>
 
@@ -92,3 +104,7 @@ export const OneTile: Story = { render: () => <GridWithCount count={1} /> }
 export const TwoTiles: Story = { render: () => <GridWithCount count={2} /> }
 export const ThreeTiles: Story = { render: () => <GridWithCount count={3} /> }
 export const FourTiles: Story = { render: () => <GridWithCount count={4} /> }
+
+// #96 — the ceiling: four people each also publishing a screen. The tiles have
+// stopped growing to fill the slot and are back to fitting into it.
+export const EightTiles: Story = { render: () => <GridWithCount count={8} /> }
