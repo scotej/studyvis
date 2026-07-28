@@ -159,8 +159,7 @@ export const tokens = {
     contentMaxWidth:        1200,
     sidebarWidth:            280,
     auditPanelWidth:         320,
-    videoTileMinHeight:      180,
-    videoTileMaxHeight:      360,
+    videoTileMinHeight:      180,  // floor only; #95 removed the 360 ceiling
     // V3-P6 opt-in custom window chrome (TitleBar). The band height is
     // shared across platforms so the wordmark vertical-centre matches on
     // macOS (overlap onto the system traffic-light area via
@@ -291,8 +290,9 @@ These components only import from `ui/`, `design/tokens.ts`, and shared utilitie
 
 | Component | Purpose |
 |-|-|
-| `VideoTile` | One peer's video + name + per-tile status dot + PTT indicator. |
-| `VideoGrid` | Mesh layout of tiles (1, 2, 3, or 4). Aspect-aware. |
+| `VideoTile` | One peer's video + name + per-tile status dot + PTT indicator. `variant="screen"` renders a shared screen instead of a face: letterboxed rather than cropped, no status dot / PTT / volume, and an expand control. |
+| `VideoGrid` | Mesh layout of tiles. 1–8 children, since each of the (max 4) people can publish a screen alongside their camera. Aspect-aware. |
+| `ScreenShareViewer` | Full-size view of one shared screen, opened from a screen tile's expand control. A modal dialog, so Escape closes the viewer rather than arming leave-the-session. |
 | `WaitingTile` | Calm "waiting for your friend" tile shown beside the self tile when alone in an active session. §10 empty-state pattern, no spinner. `invite` / `reconnect` variants. |
 | `AudioOutputPicker` | Speaker/headphone output selector for the session footer (`setSinkId`). Feature-detected — renders nothing where unsupported (macOS WKWebView). |
 | `AudioDevicePicker` | Session-footer dropdown that swaps the active microphone mid-session without renegotiating SDP; refreshes on `devicechange`. |
@@ -547,7 +547,7 @@ V3 ships: full screen-reader pass, reduced-motion mode, axe-core CI gate over ev
 - **Settings max width** (settings pane content): 768 (`sizes.settingsMaxWidth`). Settings rows pair a left label with a right-aligned control; at 1200 the control sat ~700 px from its label at the window minimum, so settings use a tighter measure than onboarding. All three come from `tokens.sizes` — no hard-coded `1200`/`896`/`768` literals anywhere in app code.
 - **Audit log panel**: fixed 320 wide, full height of session view.
 - **Sidebar (settings)**: fluid — `clamp(224px, 22vw, 280px)` (`sizes.settingsRailMinWidth` → `sizes.sidebarWidth`, expressed as `--settings-rail-width` in `src/design/index.css`). A fixed 280 was 27% of the window at the 1024 minimum and squeezed the content column below its 768 measure; wide windows still get the full 280.
-- **Video grid**: flex; tiles maintain a minimum aspect 16:9 and a clamped height (180–360 px).
+- **Video grid**: flex-wrap, filling everything the session view has between the media banner and the footer. Tiles are always 16:9, and are sized to the largest they can be: the grid measures its slot and picks the row/column split that maximizes tile size for the current tile count, so two people in a window shorter than 32:9 of usable area stack rather than sit side by side (#95). Floor of 180 px tall (`sizes.videoTileMinHeight`) — reachable only with several screen shares open at the window minimum, and the grid scrolls internally rather than shrink past it. The floor protects against the *height* running out, not the width: a tile is never widened past its own column to reach it, because that costs a whole column the moment a scrollbar appears. The grid also reserves a stable scrollbar gutter, so its measured width doesn't move when it starts scrolling. No ceiling.
 - **Spacing**: page padding `space.5` (24); section gap `space.6` (32); inline gap `space.3` (12). The route shells (Home, Onboarding, Report) use `px-4 py-4 sm:px-6 sm:py-6` so the page padding steps down to `space.4` (16) below the `sm` breakpoint — a deliberate responsive concession; ≥ `sm` (the realistic minimum window) is on-grid at `space.5`. The Settings pane uses a constant `px-6 py-6`: its `sm:` step-down could never trigger inside the 1024-minimum window, and dead phone branches mislead edits (the same rationale removed the `sm:` variants inside the settings categories and the dialog/input primitives).
 - **Custom titlebar (V3-P6, opt-in)**: 38 px tall (`sizes.titleBarHeight`). macOS reserves 78 px on the left (`sizes.titleBarMacInset`) for the system traffic-light cluster; the wordmark sits to its right. Windows hosts the app-painted min/restore/close cluster on the right edge. Native chrome is the default; this row of the grid only applies when the user has opted in.
 

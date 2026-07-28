@@ -1,4 +1,4 @@
-// I79 — the footer AI chip read "AI off" whenever no model was active, even
+// I83 — the footer AI chip read "AI off" whenever no model was active, even
 // with AI switched ON. During issue #92 that was the only on-screen signal that
 // anything was wrong, and it pointed at the wrong setting entirely.
 //

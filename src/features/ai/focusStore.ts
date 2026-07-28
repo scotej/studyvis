@@ -173,7 +173,7 @@ export type FocusSnapshot = {
   // doesn't render as "0 checks skipped".
   confidentSamples: number | null
   skippedSamples: number | null
-  // I79 — 1 when AI focus detection was enabled for this session, 0 when off.
+  // I83 — 1 when AI focus detection was enabled for this session, 0 when off.
   // Read from settings rather than inferred from the tallies: every field above
   // is null both for an AI-off session and for an AI-on session whose loop
   // never ran a check, and issue #92 is what it costs a user not to be able to

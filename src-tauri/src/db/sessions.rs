@@ -33,7 +33,7 @@ pub struct SessionRow {
     // and AI-off sessions; the report treats NULL as "counts unknown".
     pub confident_samples: Option<i64>,
     pub skipped_samples: Option<i64>,
-    // I79 — whether AI focus detection was enabled for this session (004
+    // I83 — whether AI focus detection was enabled for this session (004
     // migration). 1 = on, 0 = off, NULL = unknown (pre-004 row). Lets the
     // report separate "AI was off" from "AI was on and recorded nothing",
     // which every other column in this struct reads as NULL for both.

@@ -326,7 +326,7 @@ describe('useModelStore (LazyStore-backed)', () => {
     expect(state.activeModelId).toBeNull()
   })
 
-  // I79 — a failed read used to be terminal for the whole process:
+  // I83 — a failed read used to be terminal for the whole process:
   // `status: 'error'` left activeModelId null, so no session could run AI, and
   // the one surface able to re-read it (ModelPickerContainer) only retried on
   // 'loading'. Its gate is now `status !== 'ready'`, which these two pin.

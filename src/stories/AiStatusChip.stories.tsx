@@ -13,7 +13,7 @@ export default meta
 type Story = StoryObj<typeof meta>
 
 export const Off: Story = { args: { status: 'off' } }
-// I79 — AI is on but has no model to run. Distinct from Off, which used to
+// I83 — AI is on but has no model to run. Distinct from Off, which used to
 // absorb this case and send users to the wrong setting.
 export const Unconfigured: Story = { args: { status: 'unconfigured' } }
 export const Active: Story = { args: { status: 'active' } }

@@ -197,7 +197,7 @@ function formatSessionMeta(session: SessionRecord): string {
       : peers === 1
         ? meta.oneFriend
         : meta.manyFriends(peers)
-  // I79 — a scored session shows its score; a session that recorded AI as ON
+  // I83 — a scored session shows its score; a session that recorded AI as ON
   // and still has no score says so. A row with ai_enabled 0 or NULL adds
   // nothing, because "AI was off" and "we never recorded it" are not claims
   // this list should invent.

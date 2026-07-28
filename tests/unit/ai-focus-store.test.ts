@@ -285,11 +285,11 @@ describe('useFocusStore', () => {
   })
 })
 
-// I79 — the snapshot now also records WHETHER AI was on, because every other
+// I83 — the snapshot now also records WHETHER AI was on, because every other
 // field it returns is null both for an AI-off session and for an AI-on session
 // whose loop never ran a single check. Issue #92 is what that ambiguity costs:
 // the report had no way to distinguish a deliberate choice from a malfunction.
-describe('snapshotFocusForReport — aiEnabled (I79)', () => {
+describe('snapshotFocusForReport — aiEnabled (I83)', () => {
   beforeEach(() => {
     resetStore()
   })

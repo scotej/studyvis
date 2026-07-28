@@ -123,7 +123,7 @@ export function Home() {
     }
   }, [status, friendsStatus, loadFriends])
 
-  // I79 — hydrate the model store at boot, not at Settings → AI mount.
+  // I83 — hydrate the model store at boot, not at Settings → AI mount.
   //
   // `activeModelId` is the gate on the whole AI focus pipeline: SessionView
   // starts no sample loop without it, and `handleTopicSubmit` below skips the
@@ -279,7 +279,7 @@ export function Home() {
   const handleRejoin = useCallback(() => {
     const s = useSessionStore.getState()
     if (!s.sessionTopic || !s.sessionPassword) return
-    // I79 — Rejoin skips the topic gate, so it also used to skip the only
+    // I83 — Rejoin skips the topic gate, so it also used to skip the only
     // gesture-context screen pre-acquire (handleTopicSubmit's). This click IS
     // a user gesture; spend it the same way, or the rejoined session's boot()
     // calls getDisplayMedia gestureless and AI is dead for the second stint.
@@ -295,7 +295,7 @@ export function Home() {
     try {
       joinSession(s.sessionTopic, s.sessionPassword)
     } catch (err) {
-      // I79 — the rejoin failed, so no SessionView will mount to consume (or
+      // I83 — the rejoin failed, so no SessionView will mount to consume (or
       // unmount to discard) the stream pre-acquired a few lines up. Release it
       // here or the OS screen-recording indicator stays lit with no session
       // behind it until the app quits.
@@ -342,7 +342,7 @@ export function Home() {
       // runs and nothing would consume the pre-acquired stream. Must be the
       // very first thing this handler does, before any `await`.
       //
-      // I79 — a store still mid-hydration counts as "maybe active". Reading a
+      // I83 — a store still mid-hydration counts as "maybe active". Reading a
       // null `activeModelId` out of an unhydrated store used to skip the
       // pre-acquire, and on WebView2 that is fatal rather than degraded:
       // boot()'s gestureless getDisplayMedia is refused outright and the loop

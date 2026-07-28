@@ -26,7 +26,7 @@ export type SessionRow = {
   // (AI off, or a row written by an older build).
   confidentSamples?: number | null
   skippedSamples?: number | null
-  // I79 — was AI focus detection on for this session? (004 migration.)
+  // I83 — was AI focus detection on for this session? (004 migration.)
   // 1 = on, 0 = off, null = unknown. Every other AI column reads null both
   // when AI was off and when it was on but never produced a check; this is
   // what lets the report tell those two apart.

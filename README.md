@@ -366,10 +366,24 @@ conventional-commit PR title. Most roll up into one required check,
 (**PR title**) because it has to re-run when a title is edited. CodeQL runs alongside as its own workflow
 (JavaScript/TypeScript, Rust, and the workflows themselves) and
 reports into the Security tab. Storybook publishes to GitHub Pages from
-`main` and is attached to each PR as an artifact; adding the
-`build-installers` label to a PR produces real unsigned macOS and
-Windows bundles you can install and smoke-test — those carry no
-updater manifest and are never consumable as an update.
+`main` and is attached to each PR as an artifact.
+
+Every pull request also gets a deployment, and no pull request waits
+for one. `deploy.yml` builds each commit that reaches a PR or `main`
+into a real unsigned installer per platform that you can install and
+smoke-test — `StudyVis-macOS-arm64-pr<n>` and
+`StudyVis-Windows-x64-pr<n>`, attached to the run for seven days. Each
+platform records its own GitHub Deployment (`preview-macos`,
+`preview-windows`), so a broken Windows build is visible without
+hiding a good macOS one.
+
+Its **Deployed** check is an _indicator only_ — a full build takes
+30–60 minutes per platform, so merging waits on the two fast checks
+above, never on this one. Red means a platform stopped building and is
+worth acting on; it still will not block the merge. A commit touching
+only docs or workflow files builds nothing and is recorded as a
+documentation deployment. These bundles carry no updater manifest and
+are never consumable as an update.
 
 **Read before changing code.** `CLAUDE.md` (repo root) is the
 working agreement — house rules, doc map, quality gates — for human

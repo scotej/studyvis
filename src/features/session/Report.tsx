@@ -281,7 +281,7 @@ export function ReportView({
   )
   // #47 D5 — non-null only when a material share of AI checks were skipped.
   const sampleQuality = sampleQualitySummary(session)
-  // I79 — whether the AI measured anything, and if not, whether we know why.
+  // I83 — whether the AI measured anything, and if not, whether we know why.
   // Drives the score card's body copy and the distractions empty state, which
   // must agree: one claiming "no score recorded" beside the other saying "Nice
   // work" is the contradiction issue #92 screenshotted.
@@ -601,7 +601,7 @@ function Empty({ message }: { message: string }) {
 // empty-state pattern: muted, no spinner, occupies the gauge's footprint so
 // the hero layout doesn't reflow.
 //
-// I79 — the body names the cause when the row recorded one; `noScoreBody` lives
+// I83 — the body names the cause when the row recorded one; `noScoreBody` lives
 // in reportSerialize.ts so the exported copy is shared with the text export and
 // this file keeps only component exports (react-refresh).
 function NoScore({ coverage }: { coverage: AiCoverage }) {

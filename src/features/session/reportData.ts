@@ -35,7 +35,7 @@ export function sampleQualitySummary(session: {
   return { skipped, totalChecks }
 }
 
-// I79 — how much the AI actually saw of this session. Five states, because four
+// I83 — how much the AI actually saw of this session. Five states, because four
 // of them used to render identically (issue #92: a Windows session where AI was
 // on and silently dead was byte-identical to a clean AI-off one, down to "No
 // distractions detected. Nice work." asserting a measurement that never

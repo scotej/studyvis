@@ -203,7 +203,7 @@ export function mapDisplayMediaError(err: unknown): CaptureError {
         break
       case 'InvalidStateError':
       case 'InvalidAccessError':
-        // I79 — "no transient activation" (the I76 failure). Chromium/WebView2
+        // I83 — "no transient activation" (the I76 failure). Chromium/WebView2
         // raises InvalidStateError, WebKit InvalidAccessError, and the default
         // branch below used to file both under `screen_capture_unavailable`,
         // whose only affordance is a toast carrying a raw DOMException string.

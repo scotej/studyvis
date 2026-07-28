@@ -71,7 +71,7 @@ export function describeRow(
   return label
 }
 
-// I79 — body copy for the unscored-session card, and the matching one-liner in
+// I83 — body copy for the unscored-session card, and the matching one-liner in
 // the text export. Shared so the rendered report and a pasted/saved copy can
 // never disagree about what the AI did: an unscored session where AI was ON and
 // produced nothing is a malfunction the user can act on, one where AI was off is
@@ -94,7 +94,7 @@ export function noScoreCopyLine(coverage: AiCoverage): string {
   return strings.report.noScore.copyLine
 }
 
-// I79 — the distractions empty state, which must agree with the score card
+// I83 — the distractions empty state, which must agree with the score card
 // beside it. Only a session with at least one readable check earns "Nice work".
 export function distractionsEmptyMessage(coverage: AiCoverage): string {
   if (coverage === 'ran') return strings.report.sections.distractions.empty
@@ -137,7 +137,7 @@ export function serializeReportToText(data: ResolvedReportData): string {
     formatTopicHeading(session.declared_topic),
     `${strings.report.summaryPrefix}${strings.report.summaryMinutes(totalMinutes)}${strings.report.summaryMiddle}${focusedPctLabel}`,
     // R1 — never emit a fabricated 100 for an unscored (AI-off) session.
-    // I79 — and name the cause when the row recorded one.
+    // I83 — and name the cause when the row recorded one.
     session.score == null
       ? noScoreCopyLine(coverage)
       : strings.report.scoreLine(session.score),

@@ -237,7 +237,7 @@ mod tests {
         assert_eq!(skipped, None);
     }
 
-    // I79 acceptance: 004 runs cleanly on a database already at schema_version
+    // I83 acceptance: 004 runs cleanly on a database already at schema_version
     // 3 with a real session row, and that pre-migration row reads back a NULL
     // `ai_enabled` — "unknown", never a fabricated 0 that would let the report
     // claim AI was off in a session nobody recorded the setting for.
@@ -349,7 +349,7 @@ mod tests {
             ),
             (
                 4,
-                "fce15a8badc863a1498260daaae96174d14ece8d0d87b73b7d03c75d35562a36",
+                "f394e5e3179254fafb8f682dac3b189687e7ff7c5200b0b280b75cd5a26607e3",
             ),
         ];
         assert_eq!(

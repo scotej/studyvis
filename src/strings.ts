@@ -499,6 +499,9 @@ export const strings = {
     footerHoldBefore: 'Hold ',
     footerHoldAfter: ' to talk.',
     mainAriaLabel: 'Active session',
+    // #96 — the grid holds shared screens as well as people now, so the label
+    // can no longer say "participants" and stay true.
+    gridAriaLabel: 'Session participants and shared screens',
     mediaErrors: {
       denied: {
         title: 'Camera and mic access is blocked.',
@@ -601,7 +604,7 @@ export const strings = {
     },
     aiStatus: {
       off: 'AI off',
-      // I79 — AI is on but has no model to run. Deliberately not "AI off":
+      // I83 — AI is on but has no model to run. Deliberately not "AI off":
       // that wording sent the #92 reporter looking at the wrong setting.
       unconfigured: 'AI needs a model',
       active: 'AI watching',
@@ -627,6 +630,27 @@ export const strings = {
       toggleAriaLabel: 'Camera',
       offTileLabel: 'Camera off',
     },
+    // #96 — screen sharing. Everyone in the session can publish their screen
+    // alongside their camera; the tiles below sit in the same grid.
+    screenShare: {
+      // Constant toggle label paired with aria-pressed, matching the camera
+      // control above rather than double-encoding state in the label.
+      toggleAriaLabel: 'Share screen',
+      startCta: 'Share',
+      stopCta: 'Stop sharing',
+      selfTileName: 'Your screen',
+      peerTileName: (name: string) => `${name}'s screen`,
+      expandAriaLabel: (name: string) => `View ${name} at full size`,
+      startedToast: "You're sharing your screen.",
+      stoppedToast: 'You stopped sharing your screen.',
+      // NotAllowedError covers both "you dismissed the picker" and "the OS has
+      // not granted screen recording", and the two are indistinguishable from
+      // the rejection — so the copy has to hold for either.
+      blockedToast:
+        "Screen sharing didn't start. If you didn't cancel it, allow StudyVis under Screen Recording, then try again.",
+      failedToast: "Couldn't start screen sharing.",
+      openSettingsCta: 'Open settings',
+    },
     // S4 — audio output device picker + per-peer volume.
     output: {
       menuLabel: 'Speaker',
@@ -643,13 +667,13 @@ export const strings = {
       // the AI category (the copy above names it; the button honors it).
       openSettingsAction: 'Open settings',
       pickModel: 'Pick a model in Settings → AI.',
-      // I79 — the model store's own read failed (a locked or corrupt
+      // I83 — the model store's own read failed (a locked or corrupt
       // models.json), which is indistinguishable from "no model picked" to
       // every other surface but needs different advice: nothing is wrong with
       // the user's choice, the list just couldn't be loaded.
       modelListUnreadable:
         "Your AI model list couldn't be read, so AI sat out this session. Open Settings → AI to try again.",
-      // I79 — the loop is running but has produced no judgment for several
+      // I83 — the loop is running but has produced no judgment for several
       // consecutive checks. Each reason names what to do about it; all four
       // used to be a console.warn nobody in a release build can read, so the
       // session simply recorded nothing and said nothing.
@@ -773,7 +797,7 @@ export const strings = {
       distractions: {
         heading: 'Top distractions',
         empty: 'No distractions detected. Nice work.',
-        // I79 — the same section when nothing was measured. "Nice work" is
+        // I83 — the same section when nothing was measured. "Nice work" is
         // earned praise for a session the AI watched and found clean; on a
         // session it never watched it was a fabricated all-clear, and it read
         // as one right beside a score card admitting no score was recorded.
@@ -802,7 +826,7 @@ export const strings = {
       heading: 'No focus score',
       body: 'No focus score was recorded for this session.',
       copyLine: 'Score: not recorded',
-      // I79 — R1 kept this copy cause-neutral because the sessions row held no
+      // I83 — R1 kept this copy cause-neutral because the sessions row held no
       // way to tell the causes apart. The 004 migration records `ai_enabled`,
       // so two of the three cases can now be named honestly. `body` above
       // stays the wording for rows that predate it.
@@ -1062,7 +1086,7 @@ export const strings = {
         manyFriends: (n: number) => `${n} friends`,
         minutes: (n: number) => `${n} min`,
         score: (n: number) => `${n} / 100`,
-        // I79 — Settings → Sessions is the second place a user looks for a
+        // I83 — Settings → Sessions is the second place a user looks for a
         // missing score, and a row with no score used to be indistinguishable
         // from one where AI was off. Only rendered when the row actually
         // recorded that AI was on (ai_enabled === 1), never inferred.

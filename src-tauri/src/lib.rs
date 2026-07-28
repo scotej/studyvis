@@ -20,6 +20,8 @@
 mod commands;
 pub mod crypto;
 pub mod db;
+#[cfg(target_os = "macos")]
+mod macos_display_capture;
 pub mod window_layout;
 
 use tauri::Manager;
@@ -575,6 +577,13 @@ fn setup_desktop(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>>
     // an intermediate default-sized frame. No-op unless the user left
     // remember-window-layout on AND a tracked layout exists.
     window_layout::apply_saved_window_layout(app.handle());
+
+    // I79 — wry's UI delegate answers WebKit's camera/mic capture request but
+    // not its display-capture one, which makes WebKit deny every
+    // getDisplayMedia() call on macOS. Add the missing method to the delegate
+    // class before any surface can ask for a screen frame.
+    #[cfg(target_os = "macos")]
+    macos_display_capture::install(app.handle());
 
     app.handle().plugin(tauri_plugin_autostart::init(
         tauri_plugin_autostart::MacosLauncher::LaunchAgent,

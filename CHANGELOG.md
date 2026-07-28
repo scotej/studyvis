@@ -18,6 +18,48 @@ V3 work was drafted as v1.0.4 but shipped under the **v1.0.5** tag —
 there is no v1.0.4 tag; the section below is labelled by the tag that
 shipped it.)
 
+## 1.9.0 — 2026-07-27 — Show each other what you're working on
+
+### Added
+
+- **Screen sharing, for everyone in the session at once.** A Share button in
+  the session footer hands your screen to your friends the same way your
+  camera already is — peer-to-peer, never through a server, never recorded.
+  Everyone can share at the same time: each shared screen appears as its own
+  tile beside the face it belongs to, so a two-person session where you are
+  both sharing is four tiles rather than a fight over one slot. Screens are
+  letterboxed instead of cropped (cropping loses whatever you were pointing
+  at), and every screen tile has an expand control that opens it at full size
+  — a 4K display at quarter-tile is unreadable, so that view is where the
+  screen is actually read. Stopping is a button, or your operating system's
+  own "Stop sharing" control; either way your friends' tiles clear
+  immediately instead of freezing on a last frame. Nothing is shared until
+  you press the button, and your own screen is shown back to you the whole
+  time so what your friends can see is never a guess.
+
+  Sharing sends video only — no system audio, which would echo against the
+  live mic — and caps the frame rate rather than the resolution, because a
+  screen is read rather than watched and the pixels are what make text
+  legible. A friend still on 1.8.x can keep studying with you normally: they
+  simply never receive a screen, deliberately, since an older build would
+  bind it to your face tile with no way to clear it.
+
+  On macOS this rides on the screen-recording permission fix tracked in #94 /
+  I79 — without it, macOS builds cannot capture a screen at all.
+
+### Changed
+
+- **The people in your session are now as big as the window allows.** Tiles
+  used to stop growing at 360 px tall and to sit side by side whatever the
+  shape of the window, so you and one friend were a pair of small strips with
+  most of the screen empty underneath. The session now measures the room it has
+  and arranges the tiles the way that makes them largest — for two people that
+  is usually one above the other, each about a third wider and a third taller
+  than before. A third friend, or a shared screen, rearranges everyone again to
+  suit; no one's tile is ever bigger than anyone else's, and faces stay 16:9
+  and uncropped at every size. Sitting alone also stops laying two tiles out in
+  three columns' worth of space. (#95)
+
 ## 1.8.2 — 2026-07-26 — The host's camera reaches you, and AI stops dying at session start
 
 Two fixes for things that went wrong the moment a session began: the camera
@@ -59,6 +101,21 @@ started.
   gesture to satisfy. The in-session AI status indicator also now correctly
   flips to "error" when this happens, instead of continuing to read
   "active" after AI had already died. (I76)
+
+- **On macOS, on-device AI never worked at all: the model appeared to load
+  and then vanish.** Every attempt spawned the engine, loaded a multi-GB
+  model and killed it milliseconds later, leaving nothing in the diagnostic
+  log but a bare "terminated" line — which made it look like the engine was
+  at fault when the real failure was one step earlier, in screen capture.
+  macOS stopped letting apps like StudyVis ask for a screen at all unless
+  they answer a specific system question the app was never answering, so
+  every request was refused before the user could even see a picker — no
+  gesture, and no amount of granting Screen Recording in System Settings,
+  could change that. StudyVis now answers it, and the OS shows its normal
+  screen picker. The engine is also no longer started until the screen has
+  actually been handed over, so a cancelled or refused picker costs nothing
+  instead of loading a model only to throw it away. Windows was never
+  affected. (I79)
 
 ## 1.8.1 — 2026-07-26 — The AI engine now actually loads a model
 

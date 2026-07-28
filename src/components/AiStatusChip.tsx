@@ -4,7 +4,7 @@ import type { LucideIcon } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { strings } from '@/strings'
 
-// I79 — 'unconfigured' is distinct from 'off': AI is switched ON and cannot
+// I83 — 'unconfigured' is distinct from 'off': AI is switched ON and cannot
 // run, because no model is active (never picked, or the model list failed to
 // read). Reading that as "AI off" during issue #92 pointed the user at the one
 // wrong conclusion — that they had left the feature off.

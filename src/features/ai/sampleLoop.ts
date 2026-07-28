@@ -79,7 +79,7 @@ import { DEFAULT_CTX_SIZE, useSidecarStore } from './sidecar'
 // steady-state path 60 s is generous. If the model takes longer the tick is
 // aborted, marked as a skip, and the next interval resumes.
 export const REQUEST_TIMEOUT_MS = 90_000
-// I79 — ceiling on how long boot() waits for the screen-capture acquire to
+// I83 — ceiling on how long boot() waits for the screen-capture acquire to
 // settle. getDisplayMedia does not time out on its own: a picker the user never
 // answers (alt-tabbed away, prompt behind the session window — WebView2 shows
 // its own, and it is easy to miss) leaves the promise pending forever. boot()
@@ -89,11 +89,11 @@ export const REQUEST_TIMEOUT_MS = 90_000
 // cost of the ceiling is converting a permanent silent wedge into a visible,
 // retryable error.
 export const SCREEN_ACQUIRE_TIMEOUT_MS = 120_000
-// I79 — ceiling on the derived per-tick timeout below. Matches benchmark.ts's
+// I83 — ceiling on the derived per-tick timeout below. Matches benchmark.ts's
 // own 5-minute per-request bound, so a model the benchmark accepted can never
 // be guaranteed to abort here.
 export const MAX_REQUEST_TIMEOUT_MS = 300_000
-// I79 — multiple of the benchmark-measured p95 to allow a live inference before
+// I83 — multiple of the benchmark-measured p95 to allow a live inference before
 // aborting it. The benchmark bounds a request at 5 minutes while this loop
 // bounded it at 90 s, so a model that measured a p95 above ~90 s benchmarked
 // "successfully" (that measurement is the ONLY thing that sets activeModelId)
@@ -137,7 +137,7 @@ export function effectiveIntervalSec(
   return Math.max(floor, Math.min(MAX_SAMPLE_INTERVAL_SEC, userOverrideSec))
 }
 
-// I79 — per-tick HTTP timeout, derived from the model's benchmark-measured p95.
+// I83 — per-tick HTTP timeout, derived from the model's benchmark-measured p95.
 // `p95Sec` of 0 means "never benchmarked" (or a benchmark without a usable
 // measurement), which falls back to the flat REQUEST_TIMEOUT_MS the loop always
 // used. Pure so the unit tests can pin the boundaries.
@@ -357,7 +357,7 @@ export type SampleLoopStartReason =
   | 'model_files_missing'
   | 'sidecar_start_failed'
 
-// I79 — why a running loop has produced no judgments. Distinct from
+// I83 — why a running loop has produced no judgments. Distinct from
 // `SampleLoopStartReason`: the loop DID start, and is still ticking.
 export type SampleLoopStallReason =
   // The sidecar never reached running+healthy. Covers the Rust watcher having
@@ -374,7 +374,7 @@ export type SampleLoopStallReason =
   // response, an encode failure.
   | 'unknown'
 
-// I79 — consecutive unproductive ticks before `onStalled` fires. Three is long
+// I83 — consecutive unproductive ticks before `onStalled` fires. Three is long
 // enough that a cold-start warmup (the first tick or two commonly skip while
 // llama-server loads the model into RAM) never trips it, and short enough that
 // the user hears about a genuinely dead pipeline in well under a minute at the
@@ -429,7 +429,7 @@ export type SampleLoopOptions = {
   // p95, i.e. the machine is throttling). SessionView wires a one-shot
   // in-voice toast. No payload: the notice is informational, not actionable.
   onThermalBackoff?: () => void
-  // I79 — fires ONCE per loop lifetime when the loop has been ticking without
+  // I83 — fires ONCE per loop lifetime when the loop has been ticking without
   // producing a single judgment for STALL_TICKS consecutive ticks.
   //
   // Every path this covers used to be a bare `console.warn` and a reschedule:
@@ -495,7 +495,7 @@ type InternalState = {
   // `justEngaged` and re-toast. This latch keeps the documented once-only
   // contract; mirrors `batteryNoticeShown` / `sidecarErrorReported`.
   thermalNoticeShown: boolean
-  // I79 — consecutive ticks that reached the inference path (not a paused or
+  // I83 — consecutive ticks that reached the inference path (not a paused or
   // input-absent state) and still produced no judgment. Reset by any resolved
   // sample. Drives the one-shot `onStalled` notice via `stallReported`.
   unproductiveTicks: number
@@ -512,7 +512,7 @@ type InternalState = {
 
 export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
   const runtime = activeRuntime
-  // I79 — an explicit override wins verbatim (the unit tests drive short
+  // I83 — an explicit override wins verbatim (the unit tests drive short
   // timeouts through it); otherwise the bound is derived per tick from the
   // model's measured p95 via `effectiveRequestTimeoutMs`.
   const requestTimeoutOverrideMs = opts.requestTimeoutMs ?? null
@@ -611,14 +611,6 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
     }
     state.screenTracks.splice(idx, 1)
     state.screenStreams.splice(idx, 1)
-  }
-
-  async function stopSidecarBestEffort(): Promise<void> {
-    try {
-      await runtime.stopSidecar()
-    } catch (err) {
-      console.warn('[sampleLoop] sidecar stop failed:', err)
-    }
   }
 
   function disposeScreenStream(): void {
@@ -793,7 +785,7 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
     }, delayMs)
   }
 
-  // I79 — count an unproductive tick and raise the one-shot stall notice once
+  // I83 — count an unproductive tick and raise the one-shot stall notice once
   // the streak reaches STALL_TICKS. Called only from paths that genuinely tried
   // to produce a judgment; paused / input-absent paths call `resetStall` or
   // neither, so a camera-off stretch never accuses the engine.
@@ -875,7 +867,7 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
       } catch {
         // best-effort; we'll try again next tick
       }
-      // I79 — a sidecar that never becomes healthy is the single most common
+      // I83 — a sidecar that never becomes healthy is the single most common
       // way AI runs a whole session recording nothing. Counted, so the user
       // hears about it instead of reading "AI watching" over a dead engine.
       noteUnproductiveTick('engine_unavailable')
@@ -990,7 +982,7 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
         opts.onThermalBackoff?.()
       }
       state.captureErrorReported = false
-      // I79 — a resolved sample (confident OR uncertain) means the pipeline is
+      // I83 — a resolved sample (confident OR uncertain) means the pipeline is
       // alive end to end, so the stall streak starts over. `stallReported`
       // stays latched: the notice is once per loop lifetime, and a pipeline
       // that recovers on its own doesn't need a second toast.
@@ -1075,7 +1067,7 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
     disposeScreenStream()
   }
 
-  // I79 — `runtime.acquireScreenStream()` with a deadline. A stream that
+  // I83 — `runtime.acquireScreenStream()` with a deadline. A stream that
   // arrives after the deadline is stopped rather than leaked: the caller has
   // already moved on to its failure path, so nothing would ever release those
   // tracks and the OS recording indicator would stay lit with no session
@@ -1165,21 +1157,14 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
         ? benchmark.p95Sec
         : 0
 
-    // Start the sidecar BEFORE we allocate any recurring work. If it fails,
-    // teardownInternal makes the start-failure handle indistinguishable
-    // from a freshly-stopped one — no leaked battery timer, no stale state.
-    const port = await runtime.startSidecar({
-      modelPath: paths.modelPath,
-      mmprojPath: paths.mmprojPath,
-      ctxSize: DEFAULT_CTX_SIZE,
-    })
-    if (port == null) {
-      const lastError = useSidecarStore.getState().lastError
-      opts.onStartFail?.('sidecar_start_failed', lastError ?? undefined)
-      teardownInternal()
-      return
-    }
-
+    // I83 — screen capture is acquired BEFORE the sidecar, not after. Both
+    // orders tear down cleanly, but this one never asks llama-server to load
+    // a multi-GB model that a failed acquire is about to kill milliseconds
+    // later: the reported symptom was "model does not load into machine",
+    // with `[event] terminated code=None` and no stderr in the diagnostic log
+    // (the child died before it could print its banner). Acquire first and a
+    // capture failure costs nothing but the picker.
+    //
     // V3-P4 — decide how many screen streams to acquire BEFORE the first
     // getDisplayMedia call. Reading the setting once here (not per tick) is
     // why "All displays" applies on the next loop boot rather than mid-
@@ -1224,10 +1209,8 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
           true
         )
       }
-      // The sidecar was already started above; teardownInternal() does NOT
-      // stop it and a later stop() short-circuits on state.stopped, so the
-      // child would leak. Stop it explicitly on this post-start failure path.
-      await stopSidecarBestEffort()
+      // No sidecar to unwind — I83 moved the spawn below this acquire, so a
+      // capture failure now costs nothing beyond the loop itself.
       teardownInternal()
       return
     }
@@ -1257,7 +1240,6 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
         ),
         true
       )
-      await stopSidecarBestEffort()
       teardownInternal()
       return
     }
@@ -1316,6 +1298,22 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
         }
         break
       }
+    }
+
+    // Every screen the model will see is now in hand, so it is finally worth
+    // paying for the model itself. If the spawn fails, teardownInternal()
+    // releases the streams we just acquired along with the rest of the loop.
+    if (state.stopped) return
+    const port = await runtime.startSidecar({
+      modelPath: paths.modelPath,
+      mmprojPath: paths.mmprojPath,
+      ctxSize: DEFAULT_CTX_SIZE,
+    })
+    if (port == null) {
+      const lastError = useSidecarStore.getState().lastError
+      opts.onStartFail?.('sidecar_start_failed', lastError ?? undefined)
+      teardownInternal()
+      return
     }
 
     // Seed the battery cache before scheduling — first tick should use a

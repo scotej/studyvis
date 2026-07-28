@@ -126,11 +126,11 @@ describe('serializeReportToText score line', () => {
   })
 })
 
-// I79 — the exported/copied text is an independent second implementation of
+// I83 — the exported/copied text is an independent second implementation of
 // the report's copy, so a fix applied only to the JSX would leave the pasted
 // version still claiming a clean session. These pin both halves of the honesty
 // change in the surface a user actually shares.
-describe('serializeReportToText — AI coverage honesty (I79)', () => {
+describe('serializeReportToText — AI coverage honesty (I83)', () => {
   const unscored = { score: null, focused_pct: null }
 
   test('AI on but no checks: names the malfunction, not "Nice work"', () => {

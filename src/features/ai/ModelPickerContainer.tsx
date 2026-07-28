@@ -82,7 +82,7 @@ export function ModelPickerContainer() {
 
   // Hydrate persistent records once on mount.
   //
-  // I79 — retry on `'error'` too, not only `'loading'`. A LazyStore read of
+  // I83 — retry on `'error'` too, not only `'loading'`. A LazyStore read of
   // models.json can fail transiently (an AV scanner holding the file, a
   // partial write from a previous run), and `status: 'error'` used to be
   // terminal for the whole process: `activeModelId` stayed null, so no AI ran

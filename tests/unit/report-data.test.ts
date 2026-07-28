@@ -347,7 +347,7 @@ describe('sampleQualitySummary', () => {
   })
 })
 
-// I79 — the report could not tell "AI never ran" from "AI ran and saw nothing".
+// I83 — the report could not tell "AI never ran" from "AI ran and saw nothing".
 // Issue #92: a Windows session where AI was on and silently dead rendered
 // "No distractions detected. Nice work." beside a card admitting no score was
 // recorded. `aiCoverage` is the single derivation both the JSX and the text

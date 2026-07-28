@@ -1,4 +1,4 @@
-// I79 — the footer AI chip's status, as a pure function.
+// I83 — the footer AI chip's status, as a pure function.
 //
 // It lives here rather than inside SessionView for two reasons: react-refresh
 // forbids non-component exports from a component file (the same constraint that

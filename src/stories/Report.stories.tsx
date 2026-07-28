@@ -200,7 +200,7 @@ export const MostlyOffTask: Story = {
 }
 
 // No-AI baseline (R1): lifecycle events only, and a row with no `ai_enabled`
-// recorded — i.e. written by a build older than the I79 004 migration. Score
+// recorded — i.e. written by a build older than the I83 004 migration. Score
 // and focused_pct are null, so the hero renders the calm cause-neutral "No
 // focus score" placeholder rather than a fabricated 100/100 gauge. This is the
 // one remaining state where the report cannot say WHY nothing was measured.
@@ -226,7 +226,7 @@ export const NoAiBaseline: Story = {
   },
 }
 
-// I79 — AI was ON and produced nothing. This is the state issue #92
+// I83 — AI was ON and produced nothing. This is the state issue #92
 // screenshotted from a real Windows session, and the state this PR exists to
 // stop rendering as an all-clear: the score card names the malfunction and
 // points at Settings → AI, and Top distractions says nothing was measured
@@ -254,7 +254,7 @@ export const AiOnButNoChecks: Story = {
   },
 }
 
-// I79 — AI was deliberately OFF. Nothing was measured and nothing is wrong;
+// I83 — AI was deliberately OFF. Nothing was measured and nothing is wrong;
 // the copy says so plainly rather than implying a malfunction or claiming a
 // clean session the AI never watched.
 export const AiOffForSession: Story = {
@@ -278,7 +278,7 @@ export const AiOffForSession: Story = {
   },
 }
 
-// I79 — checks ran and none could be read. Two skipped checks is BELOW
+// I83 — checks ran and none could be read. Two skipped checks is BELOW
 // SKIPPED_SAMPLES_MIN (3), so the #47 D5 data-quality line renders nothing and
 // this copy is the only thing on the page telling the truth. It must not say
 // "No AI checks ran" either: checks did run, none were readable.

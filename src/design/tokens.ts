@@ -162,8 +162,10 @@ export const tokens = {
     auditPanelWidth: 320,
     // #47 B6 — cap on the in-session notes list before it scrolls internally.
     sessionNotesListMaxHeight: 180,
+    // Legibility floor for a session tile. #95 removed the matching 360 ceiling
+    // — tiles now grow to fill whatever the session view has left over, and a
+    // cap is the thing that used to stop two people from filling the window.
     videoTileMinHeight: 180,
-    videoTileMaxHeight: 360,
     // Post-session focus gauge diameter (DESIGN-SYSTEM §6 motion rule #5 hero
     // size). Shared so the R1 no-score placeholder occupies the same footprint
     // as the ScoreGauge it replaces and the hero layout doesn't reflow.

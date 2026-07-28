@@ -78,7 +78,7 @@ const LOG_MAX_BYTES: u64 = 5 * 1024 * 1024;
 const RESTART_BUDGET: u32 = 3;
 const MIN_HEALTHY_UPTIME: Duration = Duration::from_secs(120);
 const RESTART_BACKOFF: Duration = Duration::from_millis(500);
-// I79 — a lifetime ceiling on respawns within one generation, because the
+// I83 — a lifetime ceiling on respawns within one generation, because the
 // consecutive-streak rule above has a hole: a child that dies every ~2.5
 // minutes clears MIN_HEALTHY_UPTIME every time, so `restart_attempts` resets to
 // 1 forever and `errored` is never set. The JS stall notice fires once and the
@@ -493,7 +493,7 @@ fn spawn_with_fallback<R: Runtime>(
         let runtime_dir = match source {
             // Companion dylibs/dlls that tauri bundles under Resources/.
             //
-            // I79 — fall back to the binary's own directory when the resource
+            // I83 — fall back to the binary's own directory when the resource
             // path doesn't resolve. `resolve_runtime_dir` returns Ok(None) for
             // any miss (wrong triple, bundler laid the companions out
             // differently — I73 is precisely that having happened once), and a
@@ -534,7 +534,7 @@ fn spawn_with_fallback<R: Runtime>(
 // bare CreateProcess error.
 #[cfg(target_os = "windows")]
 fn append_windows_dll_hint(err: String) -> String {
-    // I79 — probe BOTH halves of the redistributable. llama-server.exe links
+    // I83 — probe BOTH halves of the redistributable. llama-server.exe links
     // the C++ standard library (msvcp140.dll) as well as the C runtime
     // (vcruntime140.dll), and a machine can carry one without the other: some
     // installers ship vcruntime140 alone, and a repair/uninstall can leave a
@@ -655,7 +655,7 @@ fn next_attempts(prev: u32, uptime: Duration) -> u32 {
     }
 }
 
-// I79 — has this generation respawned so many times that the engine should be
+// I83 — has this generation respawned so many times that the engine should be
 // called dead regardless of how long each child survived? Separate from
 // `next_attempts` on purpose: that one answers "is this a crash loop right
 // now?", this one answers "has this been going on all session?".
@@ -675,7 +675,7 @@ async fn watch<R: Runtime>(
 ) {
     let mut log = log_file;
     let mut restart_attempts: u32 = 0;
-    // I79 — every respawn in this generation, never reset by a clean run.
+    // I83 — every respawn in this generation, never reset by a clean run.
     let mut total_restarts: u32 = 0;
     let mut child_started_at = Instant::now();
 
@@ -724,7 +724,7 @@ async fn watch<R: Runtime>(
         // Count consecutive short-lived deaths; a durable child resets to 1.
         restart_attempts = next_attempts(restart_attempts, child_started_at.elapsed());
         total_restarts += 1;
-        // I79 — a slow crash loop clears MIN_HEALTHY_UPTIME on every cycle, so
+        // I83 — a slow crash loop clears MIN_HEALTHY_UPTIME on every cycle, so
         // the streak check below can never fire for it. Stop pretending this
         // engine is going to recover.
         if exceeded_total_restarts(total_restarts) {
@@ -742,7 +742,7 @@ async fn watch<R: Runtime>(
         }
         if restart_attempts > RESTART_BUDGET {
             guard.errored = true;
-            // I79 — carry the Windows VC++ hint here too. A child that dies
+            // I83 — carry the Windows VC++ hint here too. A child that dies
             // inside the loader spawns successfully (CreateProcess returns a
             // handle before the DLL resolution that kills it), so it never
             // reaches the spawn-failure path where this hint was applied — it
@@ -865,7 +865,7 @@ mod tests {
         assert_eq!(next_attempts(0, Duration::from_secs(1)), 1);
     }
 
-    // I79 — the hole the lifetime cap closes: a child dying just past
+    // I83 — the hole the lifetime cap closes: a child dying just past
     // MIN_HEALTHY_UPTIME resets the consecutive streak on every cycle, so
     // `restart_attempts` never exceeds RESTART_BUDGET and `errored` is never
     // set. Simulate that cycle and show the streak rule alone never gives up.

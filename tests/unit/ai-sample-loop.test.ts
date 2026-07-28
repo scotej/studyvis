@@ -879,12 +879,12 @@ describe('startSampleLoop — gating skip paths', () => {
   })
 })
 
-// I79 — every one of these paths used to be a bare console.warn plus a
+// I83 — every one of these paths used to be a bare console.warn plus a
 // reschedule. In a release build there is no devtools and llama-server.log
 // carries none of it, so a session could run to completion with the AI chip
 // reading "watching", the report recording nothing, and the user told nothing.
 // Issue #92 is that state, screenshotted.
-// I79 — the loop's effective cadence depends on the model floor and the user's
+// I83 — the loop's effective cadence depends on the model floor and the user's
 // Settings → AI override, so counting wall-clock advances is fragile. Drive off
 // the loop's own tick accounting instead: advance until it has recorded exactly
 // `target` unproductive ticks, and fail loudly rather than hang if it never does.
@@ -902,7 +902,7 @@ async function advanceToUnproductiveTicks(
   )
 }
 
-describe('startSampleLoop — stall notice (I79)', () => {
+describe('startSampleLoop — stall notice (I83)', () => {
   beforeEach(() => {
     resetAllStores()
     screenEncodeCalls = 0
@@ -1085,19 +1085,18 @@ describe('startSampleLoop — capture errors', () => {
     await handle.stop()
   })
 
-  test('screen acquire failure after sidecar start stops the sidecar (no leak)', async () => {
+  test('a failed screen acquire never spawns the sidecar (I83)', async () => {
     const clock = new FakeClock()
     const fetchMock = vi.fn()
-    const stopSidecar = vi.fn(async () => {})
+    const startSidecar = vi.fn(async () => {
+      seedSidecarStoreRunning()
+      return 9999
+    })
     __setSampleLoopRuntime(
       buildSampleLoopRuntime({
         clock,
         fetch: fetchMock as never,
-        startSidecar: async () => {
-          seedSidecarStoreRunning()
-          return 9999
-        },
-        stopSidecar,
+        startSidecar,
         acquireScreenStream: async () => {
           throw new CaptureError('screen_capture_denied', 'denied')
         },
@@ -1109,9 +1108,38 @@ describe('startSampleLoop — capture errors', () => {
       getFaceTrack: () => makeFakeTrack(),
     })
     await flushMicrotasks(10)
-    // The sidecar was started before the (failing) screen acquire; it must
-    // be torn down even though teardownInternal()/stop() short-circuit.
-    expect(stopSidecar).toHaveBeenCalledTimes(1)
+    // The whole point of the reorder: no multi-GB model load is paid for and
+    // then killed milliseconds later when capture can't be had.
+    expect(startSidecar).not.toHaveBeenCalled()
+    await handle.stop()
+  })
+
+  test('a failed sidecar start releases the screen streams acquired first (I83)', async () => {
+    const clock = new FakeClock()
+    const fetchMock = vi.fn()
+    const screenStream = makeFakeScreenStream()
+    const track = screenStream.getVideoTracks()[0]!
+    const stopSpy = vi.spyOn(track, 'stop')
+    __setSampleLoopRuntime(
+      buildSampleLoopRuntime({
+        clock,
+        fetch: fetchMock as never,
+        acquireScreenStream: async () => screenStream,
+        startSidecar: async () => null, // simulate failure
+      })
+    )
+    const onStartFail = vi.fn()
+    const handle = startSampleLoop({
+      getTopic: () => 't',
+      modelId: 'test-model',
+      getFaceTrack: () => makeFakeTrack(),
+      onStartFail,
+    })
+    await flushMicrotasks(10)
+    expect(onStartFail).toHaveBeenCalledWith('sidecar_start_failed', undefined)
+    // Capture now outlives the spawn attempt, so the OS recording indicator
+    // has to be extinguished on this path too.
+    expect(stopSpy).toHaveBeenCalled()
     await handle.stop()
   })
 
@@ -1593,11 +1621,11 @@ describe('startSampleLoop — A6 cadence backoff', () => {
   })
 })
 
-// I79 — the live per-tick bound was a flat 90 s while benchmark.ts allows a
+// I83 — the live per-tick bound was a flat 90 s while benchmark.ts allows a
 // request 5 minutes, and a completed benchmark is the ONLY thing that sets
 // activeModelId. So a model measuring a p95 above ~90 s "passed" setup and then
 // aborted every live tick forever, logging nothing a release build can show.
-describe('effectiveRequestTimeoutMs — I79', () => {
+describe('effectiveRequestTimeoutMs — I83', () => {
   test('falls back to the flat timeout when there is no benchmark', () => {
     expect(effectiveRequestTimeoutMs(0)).toBe(REQUEST_TIMEOUT_MS)
     expect(effectiveRequestTimeoutMs(-1)).toBe(REQUEST_TIMEOUT_MS)

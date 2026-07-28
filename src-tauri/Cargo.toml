@@ -6,7 +6,10 @@ authors = ["StudyVis"]
 license = ""
 repository = ""
 edition = "2021"
-rust-version = "1.77.2"
+# ed25519-dalek 3 is edition 2024 and needs 1.85. Nothing enforces this — the
+# workflows all build on `stable` and resolver 2 ignores rust-version — so the
+# declared floor is documentation that has to be kept honest by hand.
+rust-version = "1.85"
 # This crate is the application, not a library anyone consumes — it has no
 # license expression and must never reach crates.io. Marking it explicitly is
 # also what lets cargo-deny's `[licenses.private] ignore` skip it instead of
@@ -30,11 +33,11 @@ tauri-plugin-store = "2"
 tauri-plugin-opener = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-deep-link = "2"
-ed25519-dalek = "2"
+ed25519-dalek = "3"
 hex = "0.4"
 base64 = "0.22"
 crypto_box = { version = "0.9", features = ["salsa20", "seal"] }
-rusqlite = { version = "0.39", features = ["bundled"] }
+rusqlite = { version = "0.40", features = ["bundled"] }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream"] }
 sha2 = "0.10"
 futures-util = "0.3"
@@ -62,6 +65,10 @@ keyring = { version = "3.6", features = ["apple-native"] }
 # we cast back into `objc2_app_kit::NSWindow`).
 objc2 = "0.6"
 objc2-app-kit = "0.3"
+# I79 — the display-capture UI-delegate method WebKit is missing takes a
+# completion block; block2 is how we invoke it. Already in the graph beneath
+# wry, so this adds no new package.
+block2 = "0.6"
 # Issue #77 — `system_install_context` asks statfs whether the bundle sits on
 # a read-only mount (the app-translocated .dmg case the updater can't swap).
 libc = "0.2"

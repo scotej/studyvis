@@ -1,4 +1,4 @@
--- I79 migration. Chained behind 003 (never edit a shipped migration).
+-- I83 migration. Chained behind 003 (never edit a shipped migration).
 --
 -- Whether on-device AI focus detection was ENABLED for this session, recorded
 -- at teardown from the live settings value. Without it, `score`/`focused_pct`/
