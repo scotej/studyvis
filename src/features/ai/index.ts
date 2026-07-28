@@ -296,11 +296,14 @@ export {
   BACKOFF_ENGAGE_AFTER,
   BACKOFF_RECOVER_AFTER,
   BACKOFF_MULTIPLIER,
+  STALL_NOTICE_AFTER_MS,
+  STALL_CHECK_INTERVAL_MS,
 } from './sampleLoop'
 export type {
   SampleLoopRuntime,
   SampleLoopOptions,
   SampleLoopHandle,
   SampleLoopStartReason,
+  SampleBlockReason,
   BackoffState,
 } from './sampleLoop'

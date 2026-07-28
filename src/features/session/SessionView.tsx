@@ -48,6 +48,7 @@ import {
   type AiDialogContextPayload,
   type AiDialogTopicChangePayload,
   type BreakResponsePayload,
+  type SampleBlockReason,
   type SampleLoopHandle,
 } from '@/features/ai'
 import { tokens } from '@/design/tokens'
@@ -144,6 +145,23 @@ const DEFAULT_PEER_VOLUME = 1
 // otherwise keyed by peerId. trystero generates peerIds from an alphanumeric
 // alphabet, so a leading '@' can never collide with one.
 const LOCAL_SCREEN_KEY = '@local'
+
+// I82 — copy for the "AI hasn't managed a reading" notice, one entry per
+// `SampleBlockReason`. Typed as full Records so a new reason in the loop is a
+// type error here rather than an `undefined` toast.
+const AI_NO_READING_TOAST: Record<SampleBlockReason, string> =
+  strings.session.errors.aiNoReading
+const AI_NO_READING_LOG: Record<SampleBlockReason, string> =
+  strings.session.errors.aiNoReadingLog
+
+// The subset whose fix lives in Settings → AI (restart the engine, pick a
+// lighter model). A missing camera frame or a stopped screen share is fixed
+// in the session bar instead, so those toasts carry no settings shortcut.
+const AI_ENGINE_BLOCK_REASONS = new Set<SampleBlockReason>([
+  'engine_warming',
+  'inference_timeout',
+  'inference_failed',
+])
 
 // Composed session feature surface (DESIGN-SYSTEM.md §8.3): tiles for self +
 // each peer, PTT-driven mute on the local audio track, an audit log right
@@ -327,6 +345,12 @@ export function SessionView({
   // aiFeaturesEnabled + activeModelId + localStream; this state only tracks
   // the paused/error/resumed transitions within a running loop.
   const [aiRuntimeStatus, setAiRuntimeStatus] = useState<AiStatus>('active')
+  // I82 — is a reported stall still outstanding? Only a resolved sample
+  // (`onSamplesResumed`) clears it. Other events that would otherwise flip the
+  // chip back to "AI watching" — notably the battery-pause resume, which fires
+  // on the first unpaused tick without any sample having landed — must not
+  // claim the loop is working again while this is true.
+  const aiStalledRef = useRef(false)
   const localStreamRef = useRef<MediaStream | null>(null)
   const pttSendRef = useRef<((payload: PttPayload) => Promise<void[]>) | null>(
     null
@@ -962,6 +986,14 @@ export function SessionView({
     if (!localStream) return
     // Don't relaunch into a denied state — the overlay's retry clears this.
     if (captureDenied) return
+    // A new loop instance has reported nothing yet, so it must not inherit the
+    // previous one's stall. `onSamplesResumed` is loop-local and fires only
+    // when THAT loop had reported a stall, so without this the chip stays
+    // "AI paused" forever after the user follows the stall toast's advice and
+    // switches to a lighter model (which is what re-runs this effect).
+    aiStalledRef.current = false
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- resets the AI-runtime latch for a freshly constructed loop; idempotent on re-run
+    setAiRuntimeStatus('active')
     let handle: SampleLoopHandle | null = startSampleLoop({
       getTopic: () => useSessionStore.getState().declaredStudyTopic,
       modelId: activeModelId,
@@ -1050,11 +1082,42 @@ export function SessionView({
       },
       onBatteryResume: () => {
         toast.success(strings.session.errors.aiResumed)
-        setAiRuntimeStatus('active')
+        // Leaving the battery pause only proves the battery recovered. If AI
+        // was already stalled when the pause began, it still is.
+        if (!aiStalledRef.current) setAiRuntimeStatus('active')
       },
       onThermalBackoff: () => {
         // A6 — one-shot per session; the loop fires this at most once.
         toast(strings.session.errors.aiSlowedDown)
+      },
+      // I82 — the loop went long enough without a single reading that the
+      // session would otherwise end with an unexplained "No focus score".
+      // Three surfaces, because one was never enough: the chip stops
+      // claiming "AI watching", a toast names the blocker while the session
+      // is still live and fixable, and a local-only audit row puts it in the
+      // session log — which is what the post-session report reads.
+      onSamplesStalled: (reason) => {
+        aiStalledRef.current = true
+        setAiRuntimeStatus('paused')
+        toast.warning(
+          AI_NO_READING_TOAST[reason],
+          AI_ENGINE_BLOCK_REASONS.has(reason)
+            ? aiSettingsToastAction()
+            : undefined
+        )
+        void appendLocalAuditRef
+          .current?.('ai_stalled', {
+            reason,
+            reasoning: AI_NO_READING_LOG[reason],
+          })
+          .catch((err: unknown) => {
+            console.error('ai_stalled local-append failed:', err)
+          })
+      },
+      onSamplesResumed: () => {
+        aiStalledRef.current = false
+        setAiRuntimeStatus('active')
+        toast.success(strings.session.errors.aiReadingsResumed)
       },
     })
     return () => {
@@ -1945,8 +2008,11 @@ function hoverDetailFor(
   detail: AuditEventDetail
 ): string | undefined {
   switch (kind) {
+    // I82 — `ai_stalled` reuses the same `detail.reasoning` slot, carrying the
+    // short "why AI couldn't read" phrase rather than a model judgment.
     case 'ai_warning':
-    case 'ai_alert': {
+    case 'ai_alert':
+    case 'ai_stalled': {
       const reasoning = detail?.reasoning
       return typeof reasoning === 'string' && reasoning.length > 0
         ? reasoning

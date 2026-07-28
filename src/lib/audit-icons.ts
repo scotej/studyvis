@@ -10,6 +10,7 @@ import {
   BookOpenIcon,
   CheckIcon,
   CoffeeIcon,
+  EyeOffIcon,
   LogInIcon,
   LogOutIcon,
   PauseIcon,
@@ -32,6 +33,7 @@ export const AUDIT_ICONS: Record<AuditEventKind, LucideIcon> = {
   pomodoro_end: TimerOffIcon,
   ai_warning: AlertTriangleIcon,
   ai_alert: AlertOctagonIcon,
+  ai_stalled: EyeOffIcon,
   topic_set: BookOpenIcon,
   topic_change: RefreshCwIcon,
   break_request: CoffeeIcon,
@@ -54,6 +56,9 @@ export const AUDIT_ICON_TONE: Record<AuditEventKind, AuditIconTone> = {
   pomodoro_end: 'default',
   ai_warning: 'warning',
   ai_alert: 'alerted',
+  // Not the user's fault and not a focus judgment — a neutral tone keeps it
+  // from reading like an off-task row in the report timeline.
+  ai_stalled: 'default',
   topic_set: 'accent',
   topic_change: 'accent',
   break_request: 'default',

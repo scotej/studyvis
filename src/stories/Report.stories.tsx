@@ -223,3 +223,37 @@ export const NoAiBaseline: Story = {
     onClose,
   },
 }
+
+// I82 (issue #92) — AI was ON (the topic gate ran, so `topic_set` fired) but
+// never managed a single reading, so score and focused_pct are null exactly
+// as in the NoAiBaseline above. The difference is the `ai_stalled` row: the
+// report now says WHY the AI section is empty instead of leaving the user to
+// guess whether AI was even running.
+export const AiNeverGotAReading: Story = {
+  args: {
+    data: buildData(
+      baseSession({
+        score: null,
+        focused_pct: null,
+        declared_topic: 'latin',
+        total_minutes: 10,
+        ended_at: STARTED_AT + 10 * 60_000 + 38_000,
+      }),
+      [
+        event(ME, 'joined', 0),
+        event(ME, 'topic_set', 0, { topic: 'latin' }),
+        event(ALICE, 'joined', 800),
+        event(ME, 'ai_stalled', 2 * 60_000 + 5_000, {
+          reason: 'inference_timeout',
+          reasoning: 'the model took too long to answer',
+        }),
+        event(ALICE, 'pomodoro_start', 2 * 60_000 + 43_000, {
+          preset: '25/5',
+        }),
+        event(ME, 'left', 10 * 60_000 + 38_000),
+      ]
+    ),
+    animateScore: false,
+    onClose,
+  },
+}

@@ -685,6 +685,31 @@ export const strings = {
       // to give your machine room to cool).
       aiSlowedDown:
         'Checks are running slower than usual, so StudyVis is spacing them out to ease the load on your machine.',
+      // I82 — the AI loop has gone a sustained stretch without a single
+      // reading. Keys match `SampleBlockReason` in features/ai/sampleLoop.ts;
+      // the toast copy names the blocker, the log copy is the short "why"
+      // that rides on the session-log row.
+      aiNoReading: {
+        engine_warming:
+          "AI hasn't managed a check yet — the engine is still starting up.",
+        inference_timeout:
+          'AI checks are timing out on this machine. A smaller model in Settings → AI will keep up better.',
+        inference_failed:
+          'AI checks keep failing. Restart AI in Settings → AI.',
+        capture_failing:
+          "AI can't read your camera or screen, so it isn't checking in.",
+        camera_missing: "AI has no camera frame to check, so it's not running.",
+        screen_lost: "Screen capture stopped, so AI isn't checking in.",
+      },
+      aiNoReadingLog: {
+        engine_warming: 'the AI engine was still starting up',
+        inference_timeout: 'the model took too long to answer',
+        inference_failed: 'the model request kept failing',
+        capture_failing: 'the camera or screen snapshot kept failing',
+        camera_missing: 'there was no camera frame to check',
+        screen_lost: 'screen capture had stopped',
+      },
+      aiReadingsResumed: 'AI is checking in again.',
     },
     full: 'This session is full (4 friends max).',
     // N4 — quit-during-session confirm. Fired when the user tries to quit
@@ -819,6 +844,7 @@ export const strings = {
       pomodoro_end: 'stopped the Pomodoro',
       ai_warning: 'got a self-warning',
       ai_alert: 'looking off-task',
+      ai_stalled: "couldn't be checked by AI",
       topic_set: 'set the topic',
       topic_change: 'changed topic',
       break_request: 'asked for a break',

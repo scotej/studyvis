@@ -15,6 +15,8 @@ import {
   nextBackoffState,
   preacquireScreenStream,
   SLOW_TICK_FACTOR,
+  STALL_NOTICE_AFTER_MS,
+  REQUEST_TIMEOUT_MS,
   __resetBatteryRuntime,
   __resetCaptureRuntime,
   __resetFocusStoreThresholdReader,
@@ -1303,6 +1305,429 @@ describe('startSampleLoop — sidecar lifecycle', () => {
     expect(fetchMock).not.toHaveBeenCalled()
     await clock.advance(1_000)
     expect(fetchMock).toHaveBeenCalledTimes(1)
+    await handle.stop()
+  })
+})
+
+// I82 — issue #92: a Windows session ran ~10 minutes with AI on and ended with
+// "No focus score was recorded" and nothing anywhere explaining why. Every
+// branch below used to skip the tick in silence; the watchdog turns a
+// sustained run of them into one reported reason.
+describe('startSampleLoop — I82 stall watchdog', () => {
+  beforeEach(() => {
+    resetAllStores()
+    __resetSampleLoopRuntime()
+  })
+  afterEach(() => {
+    __resetSampleLoopRuntime()
+  })
+
+  test('a sidecar that never turns healthy reports engine_warming exactly once', async () => {
+    const clock = new FakeClock()
+    const fetchMock = vi.fn(async () => judgmentResponse('on_task'))
+    __setSampleLoopRuntime(
+      buildSampleLoopRuntime({
+        clock,
+        fetch: fetchMock as never,
+        startSidecar: async () => {
+          useSidecarStore.setState({ status: 'starting', healthy: false })
+          return 9999
+        },
+      })
+    )
+    const onSamplesStalled = vi.fn()
+    const handle = startSampleLoop({
+      getTopic: () => 't',
+      modelId: 'test-model',
+      getFaceTrack: () => makeFakeTrack(),
+      onSamplesStalled,
+    })
+    await flushMicrotasks(10)
+
+    // Blocked, but not yet long enough to be worth saying anything about.
+    await clock.advance(STALL_NOTICE_AFTER_MS - 5_000)
+    expect(onSamplesStalled).not.toHaveBeenCalled()
+
+    await clock.advance(20_000)
+    expect(onSamplesStalled).toHaveBeenCalledTimes(1)
+    expect(onSamplesStalled).toHaveBeenCalledWith('engine_warming')
+
+    // Still stuck: the notice must not repeat every 5 s for the rest of the
+    // session.
+    await clock.advance(STALL_NOTICE_AFTER_MS)
+    expect(onSamplesStalled).toHaveBeenCalledTimes(1)
+    expect(fetchMock).not.toHaveBeenCalled()
+    await handle.stop()
+  })
+
+  test('inference timeouts report inference_timeout, and a landed sample resumes + re-arms', async () => {
+    const clock = new FakeClock()
+    // Every request aborts at the per-tick timeout — the CPU-only-build case
+    // (Windows/Linux run --n-gpu-layers 0) where each vision inference is
+    // slower than the loop is willing to wait.
+    let aborting = true
+    const fetchMock = vi.fn(async () => {
+      if (aborting) throw new DOMException('aborted', 'AbortError')
+      return judgmentResponse('on_task')
+    })
+    __setSampleLoopRuntime(
+      buildSampleLoopRuntime({ clock, fetch: fetchMock as never })
+    )
+    const onSamplesStalled = vi.fn()
+    const onSamplesResumed = vi.fn()
+    const handle = startSampleLoop({
+      getTopic: () => 't',
+      modelId: 'test-model',
+      getFaceTrack: () => makeFakeTrack(),
+      onSamplesStalled,
+      onSamplesResumed,
+    })
+    await flushMicrotasks(10)
+
+    await clock.advance(STALL_NOTICE_AFTER_MS + 10_000)
+    expect(fetchMock.mock.calls.length).toBeGreaterThan(1)
+    expect(onSamplesStalled).toHaveBeenCalledTimes(1)
+    expect(onSamplesStalled).toHaveBeenCalledWith('inference_timeout')
+    expect(onSamplesResumed).not.toHaveBeenCalled()
+
+    // The machine catches up: one resolved sample is proof enough.
+    aborting = false
+    await clock.advance(5_000)
+    expect(onSamplesResumed).toHaveBeenCalledTimes(1)
+    expect(useFocusStore.getState().totalSamples).toBe(1)
+
+    // Re-armed: a second stall reports again rather than staying quiet.
+    aborting = true
+    await clock.advance(STALL_NOTICE_AFTER_MS + 10_000)
+    expect(onSamplesStalled).toHaveBeenCalledTimes(2)
+    await handle.stop()
+  })
+
+  test('a long break is not a stall', async () => {
+    const clock = new FakeClock()
+    const fetchMock = vi.fn(async () => judgmentResponse('on_task'))
+    __setSampleLoopRuntime(
+      buildSampleLoopRuntime({ clock, fetch: fetchMock as never })
+    )
+    const onSamplesStalled = vi.fn()
+    useBreakStore
+      .getState()
+      .startApprovedBreak({ durationSec: 3600, startedAt: 1000 })
+    const handle = startSampleLoop({
+      getTopic: () => 't',
+      modelId: 'test-model',
+      getFaceTrack: () => makeFakeTrack(),
+      onSamplesStalled,
+    })
+    await flushMicrotasks(10)
+    await clock.advance(STALL_NOTICE_AFTER_MS * 2)
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect(onSamplesStalled).not.toHaveBeenCalled()
+    // Positive control: the loop really was ticking and choosing to skip,
+    // rather than never having started.
+    expect(handle.__state().ticks).toBeGreaterThan(0)
+    await handle.stop()
+  })
+
+  test('a camera turned off mid-session is not a stall either', async () => {
+    const clock = new FakeClock()
+    const fetchMock = vi.fn(async () => judgmentResponse('on_task'))
+    __setSampleLoopRuntime(
+      buildSampleLoopRuntime({ clock, fetch: fetchMock as never })
+    )
+    const onSamplesStalled = vi.fn()
+    const handle = startSampleLoop({
+      getTopic: () => 't',
+      modelId: 'test-model',
+      getFaceTrack: () => makeFakeTrack(),
+      isPaused: () => true,
+      onSamplesStalled,
+    })
+    await flushMicrotasks(10)
+    await clock.advance(STALL_NOTICE_AFTER_MS * 2)
+    expect(onSamplesStalled).not.toHaveBeenCalled()
+    expect(handle.__state().ticks).toBeGreaterThan(0)
+    await handle.stop()
+  })
+
+  test('an ended face track reports camera_missing', async () => {
+    const clock = new FakeClock()
+    const fetchMock = vi.fn(async () => judgmentResponse('on_task'))
+    __setSampleLoopRuntime(
+      buildSampleLoopRuntime({ clock, fetch: fetchMock as never })
+    )
+    const onSamplesStalled = vi.fn()
+    const handle = startSampleLoop({
+      getTopic: () => 't',
+      modelId: 'test-model',
+      getFaceTrack: () => makeFakeTrack('ended'),
+      onSamplesStalled,
+    })
+    await flushMicrotasks(10)
+    await clock.advance(STALL_NOTICE_AFTER_MS + 10_000)
+    expect(onSamplesStalled).toHaveBeenCalledTimes(1)
+    expect(onSamplesStalled).toHaveBeenCalledWith('camera_missing')
+    await handle.stop()
+  })
+
+  // The defect this pins: the watchdog used to be evaluated ONLY at the end of
+  // a blocked tick, and an inference_timeout tick burns the whole
+  // REQUEST_TIMEOUT_MS before it fails. Three consecutive 90 s timeouts had to
+  // elapse before the notice fired — 285 s, not the two minutes the constant
+  // and the CHANGELOG promise, on precisely the CPU-only case this exists for.
+  test('reports inference_timeout inside the notice window even when every request burns the full timeout', async () => {
+    const clock = new FakeClock()
+    // Faithful to production: the request only settles when the loop's own
+    // abort timer fires at requestTimeoutMs, so each tick really does consume
+    // REQUEST_TIMEOUT_MS of clock.
+    const fetchMock = vi.fn(
+      (_url: string, init?: { signal?: AbortSignal }) =>
+        new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () => {
+            reject(new DOMException('aborted', 'AbortError'))
+          })
+        })
+    )
+    __setSampleLoopRuntime(
+      buildSampleLoopRuntime({ clock, fetch: fetchMock as never })
+    )
+    const onSamplesStalled = vi.fn()
+    const handle = startSampleLoop({
+      getTopic: () => 't',
+      modelId: 'test-model',
+      getFaceTrack: () => makeFakeTrack(),
+      onSamplesStalled,
+    })
+    await flushMicrotasks(10)
+
+    // One full timeout has elapsed and the first tick has failed, but the
+    // window has not run out yet.
+    await clock.advance(REQUEST_TIMEOUT_MS + 10_000)
+    expect(fetchMock).toHaveBeenCalled()
+    expect(onSamplesStalled).not.toHaveBeenCalled()
+
+    // Past the window. Pre-fix this needed ~285 s.
+    await clock.advance(STALL_NOTICE_AFTER_MS - REQUEST_TIMEOUT_MS)
+    expect(clock.now).toBeLessThanOrEqual(STALL_NOTICE_AFTER_MS + 20_000)
+    expect(onSamplesStalled).toHaveBeenCalledTimes(1)
+    expect(onSamplesStalled).toHaveBeenCalledWith('inference_timeout')
+    await handle.stop()
+  })
+
+  // stop() aborts the in-flight request itself, which lands in the same catch
+  // as a real timeout. Without a stopped-guard the loop reported its own
+  // teardown as a stall — a warning toast blaming the model, and a spurious
+  // ai_stalled row written into the log the report reads.
+  test('teardown never reports a stall: stop() aborting its own request is not a timeout', async () => {
+    const clock = new FakeClock()
+    const fetchMock = vi.fn(
+      (_url: string, init?: { signal?: AbortSignal }) =>
+        new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () => {
+            reject(new DOMException('aborted', 'AbortError'))
+          })
+        })
+    )
+    __setSampleLoopRuntime(
+      buildSampleLoopRuntime({
+        clock,
+        fetch: fetchMock as never,
+        startSidecar: async () => {
+          useSidecarStore.setState({ status: 'starting', healthy: false })
+          return 9999
+        },
+      })
+    )
+    const onSamplesStalled = vi.fn()
+    const onSamplesResumed = vi.fn()
+    const handle = startSampleLoop({
+      getTopic: () => 't',
+      modelId: 'test-model',
+      getFaceTrack: () => makeFakeTrack(),
+      onSamplesStalled,
+      onSamplesResumed,
+    })
+    await flushMicrotasks(10)
+    // Let a legitimate stall land first (sidecar warming past the window):
+    // that part is correct behaviour and is asserted elsewhere.
+    await clock.advance(STALL_NOTICE_AFTER_MS + 10_000)
+    expect(onSamplesStalled).toHaveBeenCalledTimes(1)
+    expect(onSamplesStalled).toHaveBeenCalledWith('engine_warming')
+
+    // Sidecar comes up; a request goes out and is still in flight when the
+    // user leaves. stop() aborts it itself, which lands in the same catch as
+    // a real timeout — and must not be reported as one.
+    seedSidecarStoreRunning()
+    await clock.advance(10_000)
+    expect(fetchMock).toHaveBeenCalled()
+    const callsBeforeStop = onSamplesStalled.mock.calls.length
+
+    await handle.stop()
+    await flushMicrotasks(30)
+
+    expect(onSamplesStalled).toHaveBeenCalledTimes(callsBeforeStop)
+    expect(
+      onSamplesStalled.mock.calls.some((c) => c[0] === 'inference_timeout')
+    ).toBe(false)
+    expect(onSamplesResumed).not.toHaveBeenCalled()
+  })
+
+  test('a non-2xx sidecar response reports inference_failed', async () => {
+    const clock = new FakeClock()
+    const fetchMock = vi.fn(async () => new Response('boom', { status: 500 }))
+    __setSampleLoopRuntime(
+      buildSampleLoopRuntime({ clock, fetch: fetchMock as never })
+    )
+    const onSamplesStalled = vi.fn()
+    const handle = startSampleLoop({
+      getTopic: () => 't',
+      modelId: 'test-model',
+      getFaceTrack: () => makeFakeTrack(),
+      onSamplesStalled,
+    })
+    await flushMicrotasks(10)
+    await clock.advance(STALL_NOTICE_AFTER_MS + 20_000)
+    expect(fetchMock.mock.calls.length).toBeGreaterThan(1)
+    expect(onSamplesStalled).toHaveBeenCalledTimes(1)
+    expect(onSamplesStalled).toHaveBeenCalledWith('inference_failed')
+    await handle.stop()
+  })
+
+  // onCaptureError toasts the FIRST capture failure and then latches, so
+  // without the watchdog every failure after it was silent.
+  test('a persistent capture failure reports capture_failing', async () => {
+    const clock = new FakeClock()
+    const fetchMock = vi.fn(async () => judgmentResponse('on_task'))
+    __setSampleLoopRuntime(
+      buildSampleLoopRuntime({
+        clock,
+        fetch: fetchMock as never,
+        captureFace: async () => {
+          throw new CaptureError('frame_extraction_failed', 'no frame')
+        },
+      })
+    )
+    const onSamplesStalled = vi.fn()
+    const onCaptureError = vi.fn()
+    const handle = startSampleLoop({
+      getTopic: () => 't',
+      modelId: 'test-model',
+      getFaceTrack: () => makeFakeTrack(),
+      onCaptureError,
+      onSamplesStalled,
+    })
+    await flushMicrotasks(10)
+    await clock.advance(STALL_NOTICE_AFTER_MS + 20_000)
+    // The pre-existing latch still reports the capture error exactly once...
+    expect(onCaptureError).toHaveBeenCalledTimes(1)
+    // ...and the watchdog covers the silence that followed it.
+    expect(onSamplesStalled).toHaveBeenCalledTimes(1)
+    expect(onSamplesStalled).toHaveBeenCalledWith('capture_failing')
+    expect(fetchMock).not.toHaveBeenCalled()
+    await handle.stop()
+  })
+
+  // Pins the contract that resetStallClock actually does something. Every
+  // other "not a stall" test sets its condition BEFORE boot, so stallSince was
+  // null throughout and deleting the reset calls left them green.
+  test('a break part-way through the window restarts it rather than counting toward it', async () => {
+    const clock = new FakeClock()
+    const fetchMock = vi.fn(async () => judgmentResponse('on_task'))
+    __setSampleLoopRuntime(
+      buildSampleLoopRuntime({
+        clock,
+        fetch: fetchMock as never,
+        startSidecar: async () => {
+          useSidecarStore.setState({ status: 'starting', healthy: false })
+          return 9999
+        },
+      })
+    )
+    const onSamplesStalled = vi.fn()
+    const handle = startSampleLoop({
+      getTopic: () => 't',
+      modelId: 'test-model',
+      getFaceTrack: () => makeFakeTrack(),
+      onSamplesStalled,
+    })
+    await flushMicrotasks(10)
+    // Most of the window spent blocked on a warming sidecar.
+    await clock.advance(STALL_NOTICE_AFTER_MS - 20_000)
+    expect(onSamplesStalled).not.toHaveBeenCalled()
+    // A break starts and runs long past the window.
+    useBreakStore
+      .getState()
+      .startApprovedBreak({ durationSec: 3600, startedAt: clock.now })
+    await clock.advance(STALL_NOTICE_AFTER_MS * 2)
+    expect(onSamplesStalled).not.toHaveBeenCalled()
+    // Break over, still blocked: a FRESH full window is required.
+    useBreakStore.getState().endBreak(clock.now)
+    await clock.advance(STALL_NOTICE_AFTER_MS - 20_000)
+    expect(onSamplesStalled).not.toHaveBeenCalled()
+    await clock.advance(40_000)
+    expect(onSamplesStalled).toHaveBeenCalledTimes(1)
+    expect(onSamplesStalled).toHaveBeenCalledWith('engine_warming')
+    await handle.stop()
+  })
+
+  test('onSamplesResumed fires once per stall, not once per healthy sample', async () => {
+    const clock = new FakeClock()
+    let failing = true
+    const fetchMock = vi.fn(async () => {
+      if (failing) return new Response('boom', { status: 500 })
+      return judgmentResponse('on_task')
+    })
+    __setSampleLoopRuntime(
+      buildSampleLoopRuntime({ clock, fetch: fetchMock as never })
+    )
+    const onSamplesResumed = vi.fn()
+    const handle = startSampleLoop({
+      getTopic: () => 't',
+      modelId: 'test-model',
+      getFaceTrack: () => makeFakeTrack(),
+      onSamplesStalled: vi.fn(),
+      onSamplesResumed,
+    })
+    await flushMicrotasks(10)
+    await clock.advance(STALL_NOTICE_AFTER_MS + 20_000)
+    failing = false
+    // Many healthy samples in a row must produce exactly one resume.
+    await clock.advance(60_000)
+    expect(useFocusStore.getState().totalSamples).toBeGreaterThan(3)
+    expect(onSamplesResumed).toHaveBeenCalledTimes(1)
+    await handle.stop()
+  })
+
+  test('an errored sidecar reports through onSidecarErrored, not as a stall', async () => {
+    const clock = new FakeClock()
+    const fetchMock = vi.fn(async () => judgmentResponse('on_task'))
+    __setSampleLoopRuntime(
+      buildSampleLoopRuntime({
+        clock,
+        fetch: fetchMock as never,
+        startSidecar: async () => {
+          useSidecarStore.setState({
+            status: 'errored',
+            healthy: false,
+            lastError: 'kaboom',
+          })
+          return 9999
+        },
+      })
+    )
+    const onSamplesStalled = vi.fn()
+    const onSidecarErrored = vi.fn()
+    const handle = startSampleLoop({
+      getTopic: () => 't',
+      modelId: 'test-model',
+      getFaceTrack: () => makeFakeTrack(),
+      onSamplesStalled,
+      onSidecarErrored,
+    })
+    await flushMicrotasks(10)
+    await clock.advance(STALL_NOTICE_AFTER_MS + 10_000)
+    expect(onSidecarErrored).toHaveBeenCalledTimes(1)
+    expect(onSamplesStalled).not.toHaveBeenCalled()
     await handle.stop()
   })
 })
