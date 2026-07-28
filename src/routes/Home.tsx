@@ -472,6 +472,7 @@ export function Home() {
           <SettingsOverlay
             initialCategory={sessionSettingsCategory}
             onClose={() => setSessionSettingsCategory(null)}
+            presence={presence}
           />
         ) : null}
         {tail}
@@ -512,6 +513,7 @@ export function Home() {
         <Settings
           onClose={() => setView('main')}
           initialCategory={settingsCategory}
+          presence={presence}
         />
         {tail}
       </>

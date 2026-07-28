@@ -19,6 +19,7 @@ import {
   computeStats,
   computeStreak,
   dayKey,
+  partnerStudyTotals,
   studyMinutesForSession,
   studyMinutesPerDay,
   topStudyPartners,
@@ -256,6 +257,87 @@ describe('topStudyPartners', () => {
     const sessions = [session({ peer_pubkeys: JSON.stringify([A]) })]
     const partners = topStudyPartners(sessions, [friend(A, '   ')])
     expect(partners[0].name).toBe(`Peer ${A.slice(0, 6)}`)
+  })
+})
+
+// #101 — the per-friend totals Settings → Friends renders. Same rows and the
+// same peer rule as topStudyPartners, so the two surfaces cannot disagree.
+describe('partnerStudyTotals', () => {
+  const A = 'a'.repeat(64)
+  const B = 'b'.repeat(64)
+
+  test('sums sessions, minutes and the latest start per peer', () => {
+    const totals = partnerStudyTotals([
+      session({
+        peer_pubkeys: JSON.stringify([A, B]),
+        total_minutes: 25,
+        started_at: dayAgo(5),
+      }),
+      session({
+        peer_pubkeys: JSON.stringify([A]),
+        total_minutes: 50,
+        started_at: dayAgo(1),
+      }),
+    ])
+    expect(totals.get(A)).toEqual({
+      sessions: 2,
+      minutes: 75,
+      lastAt: dayAgo(1),
+    })
+    expect(totals.get(B)).toEqual({
+      sessions: 1,
+      minutes: 25,
+      lastAt: dayAgo(5),
+    })
+  })
+
+  test('a session counts in full for every peer in it, not split between them', () => {
+    const totals = partnerStudyTotals([
+      session({ peer_pubkeys: JSON.stringify([A, B]), total_minutes: 40 }),
+    ])
+    expect(totals.get(A)?.minutes).toBe(40)
+    expect(totals.get(B)?.minutes).toBe(40)
+  })
+
+  test('agrees with topStudyPartners on session counts', () => {
+    const sessions = [
+      session({ peer_pubkeys: JSON.stringify([A, B]) }),
+      session({ peer_pubkeys: JSON.stringify([A, A]) }),
+      session({ peer_pubkeys: null }),
+    ]
+    const totals = partnerStudyTotals(sessions)
+    for (const partner of topStudyPartners(sessions, [])) {
+      expect(totals.get(partner.edPubkeyHex)?.sessions).toBe(partner.sessions)
+    }
+  })
+
+  test('null / malformed peer_pubkeys and null minutes are tolerated', () => {
+    const totals = partnerStudyTotals([
+      session({ peer_pubkeys: null, total_minutes: 30 }),
+      session({ peer_pubkeys: 'not json', total_minutes: 30 }),
+      session({ peer_pubkeys: JSON.stringify([A]), total_minutes: null }),
+    ])
+    expect(totals.size).toBe(1)
+    expect(totals.get(A)).toEqual({ sessions: 1, minutes: 0, lastAt: NOW })
+  })
+
+  test('a peer whose only sessions predate started_at reports lastAt null', () => {
+    const totals = partnerStudyTotals([
+      session({ peer_pubkeys: JSON.stringify([A]), started_at: null }),
+    ])
+    expect(totals.get(A)?.lastAt).toBeNull()
+  })
+
+  test('a null started_at never erases a real one already seen', () => {
+    const totals = partnerStudyTotals([
+      session({ peer_pubkeys: JSON.stringify([A]), started_at: dayAgo(3) }),
+      session({ peer_pubkeys: JSON.stringify([A]), started_at: null }),
+    ])
+    expect(totals.get(A)?.lastAt).toBe(dayAgo(3))
+  })
+
+  test('no sessions → empty map', () => {
+    expect(partnerStudyTotals([]).size).toBe(0)
   })
 })
 

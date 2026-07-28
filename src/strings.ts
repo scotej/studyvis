@@ -919,7 +919,17 @@ export const strings = {
         'friends backup',
         'restore',
       ],
-      friends: ['manage', 'remove', 'pair'],
+      friends: [
+        'manage',
+        'remove',
+        'pair',
+        'safety number',
+        'verify',
+        'public key',
+        'online',
+        'last seen',
+        'study time',
+      ],
       sessions: ['history', 'past', 'report', 'delete'],
       stats: [
         'statistics',
@@ -1071,6 +1081,41 @@ export const strings = {
       removeErrorFallback: "Couldn't remove that friend.",
       defaultFriendName: 'your friend',
       defaultFriendDisplay: 'This friend',
+      // Per-friend detail panel. Everything here is derived on the device from
+      // the friends row, the live presence map, and local session history —
+      // nothing new is stored and nothing is fetched.
+      detail: {
+        toggleCta: 'Details',
+        showAriaLabel: (name: string) => `Show details for ${name}`,
+        hideAriaLabel: (name: string) => `Hide details for ${name}`,
+        statusLabel: 'Status',
+        safetyNumberLabel: 'Safety number',
+        safetyNumberHelp:
+          'Read these digits aloud on a call or in person. Matching on both screens means no one has swapped keys on you since you paired.',
+        safetyNumberPending: 'Loading your identity…',
+        safetyNumberCopyAriaLabel: (name: string) =>
+          `Copy the safety number for ${name}`,
+        publicKeyLabel: 'Public key',
+        publicKeyHelp: "Your friend's identity key. Safe to share.",
+        publicKeyCopyAriaLabel: (name: string) =>
+          `Copy the public key for ${name}`,
+        addedLabel: 'Added',
+        addedUnknown: 'Unknown',
+        studiedLabel: 'Studied together',
+        studiedNone: 'No sessions together yet',
+        // "3 sessions · 2 h 15 min". Minutes are each session's full length,
+        // counted for every friend who was in it — not split between them.
+        studiedSummary: (sessions: string, duration: string) =>
+          `${sessions} · ${duration}`,
+        studiedSessions: (n: number) =>
+          `${n} ${n === 1 ? 'session' : 'sessions'}`,
+        durationMinutes: (n: number) => `${n} min`,
+        durationHours: (h: number, m: number) =>
+          m === 0 ? `${h} h` : `${h} h ${m} min`,
+        studiedLoading: 'Reading your session history…',
+        studiedError: "Couldn't read your session history.",
+        lastTogetherLabel: 'Last together',
+      },
     },
 
     sessions: {

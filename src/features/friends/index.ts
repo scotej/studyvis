@@ -19,6 +19,7 @@ export {
 } from './ContactImportView'
 export { FriendsList, type FriendsListProps } from './FriendsList'
 export { FriendsListView, type FriendsListViewProps } from './FriendsListView'
+export { formatLastTogether, presenceLabel } from './friendLabels'
 export { shortPubkey } from './shortPubkey'
 export { InboxBoot, type InboxBootProps } from './InboxBoot'
 export {

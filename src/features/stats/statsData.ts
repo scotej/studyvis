@@ -188,6 +188,48 @@ export function topStudyPartners(
     .sort((a, b) => b.sessions - a.sessions || a.name.localeCompare(b.name))
 }
 
+export type PartnerStudyTotals = {
+  sessions: number
+  minutes: number
+  // Most recent `started_at` of a session this peer appeared in, or null when
+  // every such session predates the column being written.
+  lastAt: number | null
+}
+
+export const NO_PARTNER_STUDY: PartnerStudyTotals = {
+  sessions: 0,
+  minutes: 0,
+  lastAt: null,
+}
+
+// Sessions, study minutes and most-recent date per partner, keyed by
+// ed_pubkey_hex. Same rows and the same "a partner is any peer in
+// sessions.peer_pubkeys" rule as topStudyPartners, so Settings → Friends and
+// the stats dashboard can never disagree about a count. Minutes are the whole
+// session's minutes for EVERY peer present rather than a split of one pot:
+// with three people in the room, those 50 minutes really were 50 minutes
+// spent with each of them, which is what "studied together" means.
+export function partnerStudyTotals(
+  sessions: readonly SessionRecord[]
+): Map<string, PartnerStudyTotals> {
+  const byPeer = new Map<string, PartnerStudyTotals>()
+  for (const s of sessions) {
+    const minutes = studyMinutesForSession(s)
+    for (const ed of parsePeerPubkeys(s.peer_pubkeys)) {
+      const prev = byPeer.get(ed) ?? NO_PARTNER_STUDY
+      byPeer.set(ed, {
+        sessions: prev.sessions + 1,
+        minutes: prev.minutes + minutes,
+        lastAt:
+          s.started_at == null
+            ? prev.lastAt
+            : Math.max(prev.lastAt ?? s.started_at, s.started_at),
+      })
+    }
+  }
+  return byPeer
+}
+
 export type ScoreSummary = {
   // Rounded mean of every session that recorded a score, or null when no
   // session has one (V1 / AI-off history).

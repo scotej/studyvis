@@ -1,8 +1,11 @@
-import { useCallback, useState } from 'react'
-import { Trash2Icon } from 'lucide-react'
+// Settings → Friends: the roster, a per-friend detail panel (#101), and
+// removal behind a confirm. The container owns everything the view cannot
+// reach on its own — the friends store, the local identity the safety number
+// is computed against, and the session history the study totals come from.
+
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
 
-import { SettingsRow, SettingsSection } from '@/components/SettingsRow'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -12,17 +15,83 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { shortPubkey } from '@/features/friends'
+import { presenceState, type PresenceMap } from '@/features/friends'
+import { useIdentity } from '@/features/identity'
+// Deep path, not the '@/features/stats' barrel: the barrel statically
+// re-exports Dashboard, which pulls recharts, and that would undo the lazy
+// chunk StatsCategory deliberately splits it into.
+import {
+  NO_PARTNER_STUDY,
+  partnerStudyTotals,
+} from '@/features/stats/statsData'
+import { pairFingerprint } from '@/lib/crypto/topics'
 import type { Friend } from '@/lib/db/friends'
+import { listSessions, type SessionRecord } from '@/lib/db/sessions'
+import { logger } from '@/lib/log'
 import { useFriendsStore } from '@/stores/friendsStore'
 import { strings } from '@/strings'
 
-export function FriendsCategory() {
+import {
+  FriendsCategoryView,
+  type FriendDetail,
+  type StudyHistoryStatus,
+} from './FriendsCategoryView'
+
+const log = logger.child('settings.friends')
+
+export type FriendsCategoryProps = {
+  // Live presence, threaded down from Home — the only owner of the
+  // subscription. Absent in Storybook and in any host that has none, where the
+  // panel drops its Status row rather than guessing "Offline".
+  presence?: PresenceMap
+}
+
+export function FriendsCategory({ presence }: FriendsCategoryProps) {
   const friends = useFriendsStore((s) => s.friends)
   const remove = useFriendsStore((s) => s.remove)
+  const { identity } = useIdentity()
   const [pendingRemoval, setPendingRemoval] = useState<Friend | null>(null)
   const [removing, setRemoving] = useState(false)
+  const [sessions, setSessions] = useState<readonly SessionRecord[]>([])
+  const [studyStatus, setStudyStatus] = useState<StudyHistoryStatus>('loading')
   const copy = strings.settings.friends
+
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      try {
+        const rows = await listSessions()
+        if (cancelled) return
+        setSessions(rows)
+        setStudyStatus('ready')
+      } catch (err) {
+        // Tauri rejects with a plain string; the raw rusqlite chain belongs in
+        // the log, not in a settings row. Only the two study lines degrade —
+        // identity, keys and presence still render.
+        log.error('list.failed', { cmd: 'sessions_list', err })
+        if (!cancelled) setStudyStatus('error')
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  const totals = useMemo(() => partnerStudyTotals(sessions), [sessions])
+  const localEd = identity?.ed_pubkey_hex ?? null
+
+  const details = useMemo<FriendDetail[]>(
+    () =>
+      friends.map((friend) => ({
+        friend,
+        presence: presence
+          ? presenceState(presence, friend.ed_pubkey_hex)
+          : null,
+        safetyNumber: localEd ? safeFingerprint(localEd, friend) : null,
+        study: totals.get(friend.ed_pubkey_hex) ?? NO_PARTNER_STUDY,
+      })),
+    [friends, presence, localEd, totals]
+  )
 
   const confirmRemoval = useCallback(async () => {
     if (!pendingRemoval) return
@@ -46,43 +115,11 @@ export function FriendsCategory() {
 
   return (
     <>
-      <SettingsSection heading={copy.heading}>
-        {friends.length === 0 ? (
-          <SettingsRow label={copy.emptyLabel} help={copy.emptyHelp} />
-        ) : (
-          friends.map((friend) => {
-            const name = friend.display_name?.trim()
-            const pubkey = shortPubkey(friend.ed_pubkey_hex)
-            // Key material renders mono everywhere else in the app (Identity
-            // pane, pairing dialogs) — the fingerprint here should match.
-            const pubkeyChip = <span className="font-mono">{pubkey}</span>
-            return (
-              <SettingsRow
-                key={friend.ed_pubkey_hex}
-                label={name || pubkeyChip}
-                // A nameless friend's label already falls back to the pubkey —
-                // no help line, or the same string would stack twice.
-                help={name ? pubkeyChip : undefined}
-                control={
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => setPendingRemoval(friend)}
-                    // The visible row label must appear in the accessible
-                    // name (WCAG 2.5.3) — for a nameless friend that's the
-                    // fingerprint, which also keeps the Remove buttons
-                    // distinguishable to a screen reader.
-                    aria-label={copy.removeAriaLabel(name || pubkey)}
-                  >
-                    <Trash2Icon /> {copy.removeCta}
-                  </Button>
-                }
-              />
-            )
-          })
-        )}
-      </SettingsSection>
+      <FriendsCategoryView
+        details={details}
+        studyStatus={studyStatus}
+        onRemove={setPendingRemoval}
+      />
 
       <Dialog
         open={Boolean(pendingRemoval)}
@@ -125,4 +162,15 @@ export function FriendsCategory() {
       </Dialog>
     </>
   )
+}
+
+// pairFingerprint parses both keys as hex, so a friends row written by a
+// future build (or a corrupt one) would otherwise take the whole pane down.
+function safeFingerprint(localEd: string, friend: Friend): string | null {
+  try {
+    return pairFingerprint(localEd, friend.ed_pubkey_hex)
+  } catch (err) {
+    log.warn('safety_number.failed', { err })
+    return null
+  }
 }
