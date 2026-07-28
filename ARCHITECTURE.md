@@ -662,6 +662,7 @@ The `Ctrl+]` AI dialog is a separate Tauri window with:
 - `decorations: false`
 - `alwaysOnTop: true`
 - macOS additionally needs `NSWindowCollectionBehavior.canJoinAllSpaces | .fullScreenAuxiliary` to appear over fullscreen apps. Set via the Tauri window-builder's macOS-specific config in V2-P7.
+- macOS also needs `shadow: false` (`NSWindow.hasShadow`). AppKit draws its window rim around the *alpha silhouette* of a borderless transparent window, and that silhouette is the panel plus the faint halo of the panel's own CSS shadow — so the rim renders as a phantom outline floating around the dialog rather than hugging it (I81). Depth comes from the panel's `shadow-lg` on every platform instead. Left enabled on Windows, where the same flag supplies an undecorated window's 1 px border and Windows 11 rounded corners.
 
 ## 13. State diagrams (ASCII)
 

@@ -57,6 +57,18 @@ pub fn toggle_ai_dialog<R: Runtime>(app: &AppHandle<R>) -> Result<(), tauri::Err
         // the AppKit cast fails — better to show on all spaces than to
         // get stuck on one.
         builder = builder.visible_on_all_workspaces(true);
+
+        // I81 — AppKit draws its window rim (a black outer hairline over a
+        // grey inner one) around the *alpha silhouette* of a borderless
+        // transparent window rather than around the frame. That silhouette
+        // is the panel UNION the faint halo of the panel's CSS `shadow-lg`,
+        // so the rim traced a phantom rounded rect hanging ~10 pt outside
+        // and ~22 pt below the panel instead of hugging it. `shadow(false)`
+        // is tao's `NSWindow::setHasShadow(false)`, which turns the whole
+        // shadow-and-rim pass off; the panel keeps its own CSS shadow.
+        // macOS-only — on Windows this same flag is what gives an
+        // undecorated window its 1 px border and Windows 11 rounded corners.
+        builder = builder.shadow(false);
     }
 
     let window = builder.build()?;
