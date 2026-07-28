@@ -932,6 +932,8 @@ export const strings = {
       network: ['relay', 'turn', 'signaling', 'connection', 'diagnostics'],
       advanced: [
         'debug log',
+        'log',
+        'diagnostics',
         'autostart',
         'launch at login',
         'startup',
@@ -1239,7 +1241,7 @@ export const strings = {
       },
       diagnostics: {
         label: 'AI diagnostics in debug log',
-        help: 'AI sample/parse warnings are written to the developer console when the debug log is on. Same setting as Advanced → Debug log.',
+        help: 'Adds per-sample AI detail to the log. Sample and parse warnings are recorded either way. Same setting as Advanced → Debug log.',
         ariaLabel: 'AI diagnostics in debug log',
       },
       hfToken: {
@@ -1406,7 +1408,7 @@ export const strings = {
       },
       debugLog: {
         label: 'Debug log',
-        help: 'Logs verbose diagnostic output to the developer console. Off by default; persists across launches.',
+        help: 'Adds verbose detail to the log and mirrors it to the developer console. The log is written to disk either way. Off by default; persists across launches.',
         ariaLabel: 'Debug log',
       },
       dataFolder: {
@@ -1417,7 +1419,7 @@ export const strings = {
       },
       shareLog: {
         label: 'Share log',
-        help: 'When the AI misbehaves, copy a short diagnostics summary or open the log file, then send it to a friend or paste it into a GitHub issue. Nothing is uploaded — sharing is always manual.',
+        help: 'When something misbehaves, copy a diagnostics summary — your machine, plus the last few minutes of the log — or open the log files, then send it to a friend or paste it into a GitHub issue. Usernames, keys and your own writing are stripped out. Nothing is uploaded — sharing is always manual.',
         copyCta: 'Copy diagnostics',
         revealCta: 'Open log',
         copiedToast: 'Diagnostics copied to the clipboard.',
@@ -1427,9 +1429,13 @@ export const strings = {
           version: string
           os: string
           arch: string
+          webview: string
+          display: string
           logPath: string
+          aiLogPath: string
+          logTail: string
         }) =>
-          `StudyVis ${v.version}\nOS: ${v.os} (${v.arch})\nLog: ${v.logPath}`,
+          `StudyVis ${v.version}\nOS: ${v.os} (${v.arch})\nWebview: ${v.webview}\nDisplay: ${v.display}\nLog: ${v.logPath}\nAI log: ${v.aiLogPath}\n\nRecent log:\n${v.logTail}`,
       },
       replayOnboarding: {
         label: 'Replay onboarding',

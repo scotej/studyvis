@@ -140,7 +140,11 @@ Inside:
   report and the Stats dashboard.
 - `models/` — AI model files you've downloaded (V2 features). Each
   model is 1–8 GB depending on the tier you picked.
-- `llama-server.log` — diagnostic log for the AI sidecar. Rolled to
+- `logs/studyvis.log` — the app's own diagnostic log: one JSON record
+  per line, written as the app runs. Usernames, keys, mnemonics and
+  your own writing are stripped before anything is recorded. Rolled to
+  `studyvis.log.1` at ~2 MB, one previous copy kept.
+- `logs/llama-server.log` — diagnostic log for the AI sidecar. Rolled to
   `llama-server.log.1` automatically when it passes ~5 MB at the start
   of an AI session, so it stays bounded; one previous copy is kept.
 
@@ -197,10 +201,10 @@ right friends for StudyVis.
 There is no built-in error reporter — that would imply telemetry.
 Instead:
 
-1. **Settings → Advanced → Share log.** "Open log" reveals
-   `llama-server.log` (AI errors) in your file manager; "Copy
-   diagnostics" puts your version, OS, and log path on the clipboard.
-   Nothing is uploaded — you choose what to send.
+1. **Settings → Advanced → Share log.** "Open log" reveals the log
+   folder in your file manager; "Copy diagnostics" puts your version,
+   OS, display, and the last 80 log records on the clipboard, ready to
+   paste into an issue. Nothing is uploaded — you choose what to send.
 2. **File an issue on GitHub** with the version (Settings → About),
    your OS + version, and a paste of the relevant log lines.
 3. **Crash logs** stay local — macOS routes them to
