@@ -1,12 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 
 import { parseJudgment, type Judgment, type ParseResult } from '@/features/ai'
-import {
-  FIELD_MAX_CHARS,
-  __resetLog,
-  __setLogRecordSink,
-  type LogRecord,
-} from '@/lib/log'
+import { __resetLog, __setLogRecordSink, type LogRecord } from '@/lib/log'
 
 const VALID: Judgment = {
   severity: 'on_task',
@@ -214,12 +209,15 @@ Let me know.`
     if (result.ok) expect(result.value).toEqual(first)
   })
 
-  test('logs the raw response when falling back', () => {
+  test('records a fallback with the shape of the reply', () => {
     parseJudgment('total nonsense, no JSON here')
     expect(records).toHaveLength(1)
     expect(records[0]?.scope).toBe('ai.parse')
     expect(records[0]?.msg).toBe('parse.fallback')
-    expect(records[0]?.data?.snippet).toBe('total nonsense, no JSON here')
+    expect(records[0]?.data?.rawLength).toBe(
+      'total nonsense, no JSON here'.length
+    )
+    expect(records[0]?.data?.startsWithBrace).toBe(false)
   })
 
   test('does not log on a successful parse', () => {
@@ -227,23 +225,19 @@ Let me know.`
     expect(records).toHaveLength(0)
   })
 
-  test('truncates the logged raw snippet on long responses; full raw stays on the result', () => {
-    const longRaw = 'prose '.repeat(200) + 'no json here'
+  test('the reply text never reaches the record; the full raw stays on the result', () => {
+    // `reasoning` is the model describing the user's camera and screen. The
+    // log is a file the README tells friends to attach to a public issue, so
+    // the record carries the reply's shape and nothing it said.
+    const longRaw =
+      'the user appears to be reading email in a browser window ' +
+      'prose '.repeat(200)
     const result = parseJudgment(longRaw)
     expect(result.ok).toBe(false)
-    const snippet = String(records[0]?.data?.snippet)
-    expect(snippet.length).toBe(FIELD_MAX_CHARS + 1)
-    expect(snippet.endsWith('…')).toBe(true)
-    // The pre-clamp length is a field rather than a suffix, so a reader can
-    // still tell how much was dropped.
+    const serialised = JSON.stringify(records[0])
+    expect(serialised).not.toContain('reading email')
+    expect(serialised).not.toContain('prose')
     expect(records[0]?.data?.rawLength).toBe(longRaw.length)
     if (!result.ok) expect(result.raw).toBe(longRaw)
-  })
-
-  test('model output can never forge a log line', () => {
-    parseJudgment('sure!\nlvl=error [app] everything is fine')
-    const snippet = String(records[0]?.data?.snippet)
-    expect(snippet).not.toMatch(/[\p{Cc}\p{Cf}]/u)
-    expect(snippet).toContain('everything is fine')
   })
 })

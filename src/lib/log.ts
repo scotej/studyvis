@@ -139,18 +139,20 @@ const CONTROL_OR_FORMAT = /[\p{Cc}\p{Cf}]/gu
 //
 // The match is the MAXIMAL run of lowercase 3–8 letter words, and it is
 // redacted only when the whole run is exactly a BIP39 length. Matching "12 or
-// more" instead would swallow model prose whole — a 200-word all-lowercase
-// reply is the normal failure case at ai.parse, and that snippet is the most
-// useful field on the record.
+// more" instead would swallow ordinary lowercase prose whole, which is a
+// common shape in a relay notice or a backend error message.
 const LOWERCASE_RUN = /[a-z]{3,8}(?:\s+[a-z]{3,8})+/g
 const MNEMONIC_WORD_COUNTS = new Set([12, 15, 18, 21, 24])
 
 // Raw rusqlite, identity and Tauri error strings routinely embed the OS
 // username, and diagnostics_info's log path leaks it outright.
+// The username ends at a path separator, never at a space: a Windows profile
+// created from a full name is `C:\Users\John Smith`, and stopping at the
+// space left the surname in a blob meant for a public issue.
 const HOME_DIRS: readonly [RegExp, string][] = [
-  [/(\/Users\/)[^/\\\s]+/g, '$1~'],
-  [/(\/home\/)[^/\\\s]+/g, '$1~'],
-  [/([A-Za-z]:\\Users\\)[^\\/\s]+/gi, '$1~'],
+  [/(\/Users\/)[^/\\]+/g, '$1~'],
+  [/(\/home\/)[^/\\]+/g, '$1~'],
+  [/([A-Za-z]:\\Users\\)[^\\/]+/gi, '$1~'],
 ]
 
 // Catches ed25519 pubkeys, session topics, event ids and stream ids without
@@ -439,7 +441,15 @@ function emit(
     head = (head + 1) % RING_CAPACITY
     if (filled < RING_CAPACITY) filled += 1
 
-    throttle.set(key, { index, seq: record.seq, ts: now, suppressed: 0 })
+    // Carry any un-drained tally across the window rollover. Zeroing it here
+    // loses every fold whose window closed before a flush ran, which is the
+    // common case for anything slower than the 1 s debounce.
+    throttle.set(key, {
+      index,
+      seq: record.seq,
+      ts: now,
+      suppressed: previous?.suppressed ?? 0,
+    })
     if (throttle.size > THROTTLE_KEYS_MAX) {
       const oldest = throttle.keys().next()
       if (!oldest.done) throttle.delete(oldest.value)
@@ -582,6 +592,10 @@ function drain(): Promise<void> {
 // kills the process, and before reading the tail for a bug report.
 export async function flushLog(): Promise<void> {
   clearTimer()
+  // Unconditionally once: the loop below skips drain() whenever `pending` is
+  // empty, and folded-repeat counts live on the throttle rather than in
+  // `pending` — without this they never reach the file a bug report quotes.
+  if (writeLines) await drain()
   let rounds = 0
   while (writeLines && (pending.length > 0 || draining) && rounds < 16) {
     rounds += 1

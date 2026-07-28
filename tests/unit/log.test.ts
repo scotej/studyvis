@@ -281,6 +281,17 @@ describe('redaction', () => {
     )
   })
 
+  test('a profile folder with a space in it loses all of it', () => {
+    // A Windows account created from a full name gives C:\Users\John Smith.
+    // Stopping the match at the space left the surname in the blob.
+    expect(sanitizeText('C:\\Users\\John Smith\\AppData\\app.db')).toBe(
+      'C:\\Users\\~\\AppData\\app.db'
+    )
+    expect(sanitizeText('/Users/John Smith/Library/app.db')).toBe(
+      '/Users/~/Library/app.db'
+    )
+  })
+
   test('long hex truncates to eight characters, short hex does not', () => {
     const pubkey = 'a'.repeat(64)
     expect(sanitizeText(pubkey)).toBe(`${'a'.repeat(8)}…`)
@@ -560,6 +571,35 @@ describe('flush and sink', () => {
       .map((line) => JSON.parse(line) as LogRecord)
       .find((r) => r.msg === 'repeat')
     expect(repeat?.data?.n).toBe(4)
+  })
+
+  test('folds that outlive their window are still counted on disk', async () => {
+    // The dangerous spacing: slower than the 1 s flush debounce, faster than
+    // the 10 s throttle window, so the window rolls over before any drain has
+    // reported the tally. Zeroing it there lost every fold.
+    const writeLines = installWriter()
+    await flushLog()
+    writeLines.mockClear()
+    for (let round = 0; round < 3; round += 1) {
+      for (let i = 0; i < 5; i += 1) {
+        logger.warn('join.error')
+        clock.advance(2_000)
+      }
+    }
+    await flushLog()
+    const counted = writeLines.mock.calls
+      .flatMap((call) => call[0])
+      .map((line) => JSON.parse(line) as LogRecord)
+      .reduce(
+        (total, r) =>
+          r.msg === 'join.error'
+            ? total + 1
+            : r.msg === 'repeat'
+              ? total + Number(r.data?.n ?? 0)
+              : total,
+        0
+      )
+    expect(counted).toBe(15)
   })
 
   test('flushLog resolves when no sink is installed', async () => {

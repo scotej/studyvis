@@ -288,12 +288,13 @@ export function parseAgentReply(raw: string): AgentReply {
     }
   }
   // Don't reflect raw model output into the dialog: on total parse failure it
-  // could carry attacker-influenced on-screen text. Fixed string to the user;
-  // the raw reply goes to the log for debugging (I12), where the logger's
-  // sanitiser clamps and strips it.
+  // could carry attacker-influenced on-screen text (I12). It doesn't reach the
+  // log either — a reply that parsed but was rejected carries `new_topic`, a
+  // verbatim copy of what the user typed. Shape only.
   log.warn('reply.parse_failed', {
-    rawSnippet: raw,
     rawLength: raw.length,
+    candidateCount: candidates.length,
+    fenced: raw.includes('```'),
     intentFallback: 'unknown',
   })
   return {

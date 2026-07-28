@@ -146,12 +146,19 @@ function extractFirstJsonObject(input: string): string | null {
   return null
 }
 
-// The full string is preserved on ParseFallback.raw for the caller; the log
-// gets a clamped, control-stripped copy. That clamping is the logger's job now
-// (sanitizeText), not this module's — model output is shaped by whatever is on
-// the user's screen, so it is untrusted text like any relay's.
+// The reply's SHAPE, never its text. `reasoning` is the model describing the
+// user's camera and screen, and this log is a file the README tells friends to
+// attach to a public issue — the same invariant aiAlerts keeps by logging a
+// reasoning length. The full string stays on ParseFallback.raw for the caller
+// and the eval harness, in memory.
 function logFallback(reason: string, raw: string): void {
-  log.warn('parse.fallback', { reason, snippet: raw, rawLength: raw.length })
+  const trimmed = raw.trimStart()
+  log.warn('parse.fallback', {
+    reason,
+    rawLength: raw.length,
+    startsWithBrace: trimmed.startsWith('{'),
+    fenced: raw.includes('```'),
+  })
 }
 
 export function parseJudgment(raw: string): ParseResult {
