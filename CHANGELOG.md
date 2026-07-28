@@ -99,9 +99,15 @@ shipped it.)
   in those three days records itself as already up to date, so it never picked
   them up. Every read and write of your session table named a column that
   wasn't there. StudyVis now checks the shape of your database at every launch
-  and adds anything missing, leaving all existing data untouched; the affected
-  sessions from before the fix are gone, but everything from here is recorded.
-  (#99)
+  and adds anything missing, leaving all existing data untouched.
+
+  Your past sessions are not lost with it. The session log — who joined, when
+  everyone left, every focus alert — was written to a different table that was
+  never affected, and StudyVis already knows how to rebuild a session from that
+  log when a crash stopped it being saved. The first launch after this fix does
+  exactly that, so sessions you have already studied reappear in your history
+  with their real dates, lengths and study partners. They carry no focus score,
+  because none was ever recorded for them. (#99)
 
 - **On-device AI never started unless you had opened Settings → AI at least
   once since launching.** The app remembered which model you had chosen, but

@@ -137,6 +137,7 @@ pub fn reconcile_schema(conn: &mut Connection) -> Result<Vec<String>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::db::audit_events::{self, AuditEventRow};
     use crate::db::migrations;
     use crate::db::sessions::{self, SessionRow};
 
@@ -203,7 +204,10 @@ mod tests {
         let present = column_names(&conn, "sessions");
         assert!(!present.contains("focused_pct"));
         assert!(!present.contains("generated_at"));
-        assert!(sessions::list(&conn).is_err(), "issue #99: every read fails");
+        assert!(
+            sessions::list(&conn).is_err(),
+            "issue #99: every read fails"
+        );
     }
 
     #[test]
@@ -251,6 +255,43 @@ mod tests {
         // contract 003 gave pre-migration rows.
         assert_eq!(read.focused_pct, None);
         assert_eq!(read.generated_at, None);
+    }
+
+    // The happy consequence of WHERE this pass runs. `audit_events` was never
+    // part of the divergence, so a machine that could not write a single
+    // sessions row was still recording every join / leave / alert. Those rows
+    // are precisely what `synthesize_from_orphaned_audit_events` (db::init
+    // runs it straight after open_and_migrate, so after this repair) adopts —
+    // which means the first launch on a fixed build doesn't start the user's
+    // history at zero, it hands back the sessions they thought they'd lost.
+    #[test]
+    fn repair_lets_boot_adopt_the_history_the_broken_schema_never_wrote() {
+        let mut conn = legacy_v1_db();
+        let me = "aa".repeat(32);
+        let friend = "bb".repeat(32);
+        for (ts, who) in [(1_700_000_000_000, &me), (1_700_001_800_000, &friend)] {
+            let row = AuditEventRow {
+                session_id: "lost-topic".into(),
+                ts,
+                who: who.clone(),
+                kind: "joined".into(),
+                detail: "{}".into(),
+                sig: format!("sig-{ts}"),
+            };
+            audit_events::insert(&conn, &row).expect("audit row");
+        }
+        // Before the repair the adoption cannot even write its row.
+        let blocked = sessions::synthesize_from_orphaned_audit_events(&mut conn, Some(&me));
+        assert!(blocked.is_err(), "issue #99: every write fails too");
+
+        reconcile_schema(&mut conn).expect("reconcile");
+        let adopted = sessions::synthesize_from_orphaned_audit_events(&mut conn, Some(&me));
+        assert_eq!(adopted.expect("synthesize"), 1);
+        let read = sessions::list(&conn).expect("list");
+        assert_eq!(read.len(), 1);
+        assert_eq!(read[0].id, "lost-topic");
+        assert_eq!(read[0].total_minutes, Some(30));
+        assert_eq!(read[0].peer_pubkeys, Some(format!("[\"{friend}\"]")));
     }
 
     #[test]
