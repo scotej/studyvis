@@ -19,12 +19,11 @@ import {
   getRelaySockets,
   joinRoom,
   selfId,
-  type ActionReceiver,
-  type ActionSender,
   type DataPayload,
   type JoinError,
   type JoinRoomCallbacks,
   type JsonValue,
+  type ProgressHandler,
   type Room,
   type TargetPeers,
   type TurnServerConfig,
@@ -126,9 +125,29 @@ export type TopicConfig = {
   onJoinError?: JoinErrorHandler
 }
 
+// trystero 0.25 replaced the `[send, receive, progress]` tuple with an action
+// OBJECT: `send(data, {target, metadata, onProgress})` and a nullable
+// `onMessage` PROPERTY that hands the handler a `{peerId, metadata}` context
+// instead of positional args. These two types keep the wrapper's app-facing
+// action shape exactly as it was on 0.24 — positional send arguments, a
+// `receive(fn)` registrar, and an `(data, peerId, metadata)` handler — so the
+// migration stayed inside this file rather than rewriting every consumer in
+// features/session and features/friends. trystero no longer exports
+// ActionSender/ActionReceiver, hence the local definitions.
+export type TopicActionSender<T extends DataPayload> = (
+  data: T,
+  targetPeers?: TargetPeers,
+  metadata?: JsonValue,
+  onProgress?: ProgressHandler
+) => Promise<void>
+
+export type TopicActionReceiver<T extends DataPayload> = (
+  onData: (data: T, peerId: string, metadata?: JsonValue) => void
+) => void
+
 export type TopicAction<T extends DataPayload> = {
-  send: ActionSender<T>
-  receive: ActionReceiver<T>
+  send: TopicActionSender<T>
+  receive: TopicActionReceiver<T>
 }
 
 export type PeerStreamHandler = (
@@ -278,13 +297,18 @@ function mergeRooms(rooms: TopicRoom[]): TopicRoom {
     selfId: rooms[0].selfId,
     makeAction<T extends DataPayload>(namespace: string): TopicAction<T> {
       const actions = rooms.map((r) => r.makeAction<T>(namespace))
-      const send = ((data, targetPeers, metadata, onProgress) =>
+      const send: TopicActionSender<T> = (
+        data,
+        targetPeers,
+        metadata,
+        onProgress
+      ) =>
         Promise.all(
           actions.map((a) => a.send(data, targetPeers, metadata, onProgress))
-        ).then((results) => results.flat())) as ActionSender<T>
-      const receive = ((onData) => {
+        ).then(() => {})
+      const receive: TopicActionReceiver<T> = (onData) => {
         for (const a of actions) a.receive(onData)
-      }) as ActionReceiver<T>
+      }
       return { send, receive }
     },
     onPeerJoin: (fn) => {
@@ -342,21 +366,40 @@ function wrapRoom(room: Room): TopicRoom {
   const leaveSubs = new Set<(peerId: string) => void>()
   const streamSubs = new Set<PeerStreamHandler>()
 
-  room.onPeerJoin((peerId) => {
+  // 0.25 turned these from registration functions into nullable properties.
+  // Assigning is still last-wins underneath — which is exactly why this fan-out
+  // layer exists; the single assignment here is the only one in the app.
+  room.onPeerJoin = (peerId) => {
     guardedFanout(joinSubs, peerId)
-  })
-  room.onPeerLeave((peerId) => {
+  }
+  room.onPeerLeave = (peerId) => {
     guardedFanout(leaveSubs, peerId)
-  })
-  room.onPeerStream((stream, peerId, metadata) => {
+  }
+  room.onPeerStream = (stream, peerId, metadata) => {
     guardedFanout(streamSubs, stream, peerId, metadata)
-  })
+  }
 
   return {
     selfId,
     makeAction<T extends DataPayload>(namespace: string): TopicAction<T> {
-      const [send, receive] = room.makeAction<T>(namespace)
-      return { send, receive }
+      const action = room.makeAction<T>(namespace)
+      return {
+        send: (data, targetPeers, metadata, onProgress) =>
+          action.send(data, {
+            target: targetPeers,
+            metadata,
+            // 0.25 hands progress a {peerId, metadata} context; the app-facing
+            // ProgressHandler stays positional.
+            onProgress:
+              onProgress &&
+              ((percent, context) =>
+                onProgress(percent, context.peerId, context.metadata)),
+          }),
+        receive: (onData) => {
+          action.onMessage = (data, context) =>
+            onData(data, context.peerId, context.metadata)
+        },
+      }
     },
     onPeerJoin: (fn) => {
       joinSubs.add(fn)
@@ -376,11 +419,14 @@ function wrapRoom(room: Room): TopicRoom {
         streamSubs.delete(fn)
       }
     },
+    // 0.25 moved the media APIs to options objects. addStream returns a
+    // per-peer Promise[] in both versions; the wrapper has always discarded it
+    // (publishLocalStream must not await between its two addStream calls).
     addStream: (stream, targetPeers, metadata) => {
-      room.addStream(stream, targetPeers, metadata)
+      void room.addStream(stream, { target: targetPeers, metadata })
     },
     removeStream: (stream, targetPeers) => {
-      room.removeStream(stream, targetPeers)
+      room.removeStream(stream, { target: targetPeers })
     },
     getPeers: () => room.getPeers(),
     leave: () => room.leave(),

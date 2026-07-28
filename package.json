@@ -38,7 +38,7 @@
     "@tauri-apps/plugin-notification": "^2.3.3",
     "@tauri-apps/plugin-store": "^2.4.4",
     "@tauri-apps/plugin-updater": "^2.10.1",
-    "@trystero-p2p/mqtt": "^0.24.0",
+    "@trystero-p2p/mqtt": "^0.25.3",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "jsqr": "^1.4.0",
@@ -51,7 +51,7 @@
     "recharts": "^3.9.2",
     "sonner": "^2.0.7",
     "tailwind-merge": "^3.6.0",
-    "trystero": "^0.24.0",
+    "trystero": "^0.25.3",
     "zustand": "^5.0.14"
   },
   "devDependencies": {

@@ -58,9 +58,8 @@ class BusRoom {
     const room: Partial<TopicRoom> & { selfId: string } = {
       selfId: peerId,
       makeAction: <T>(namespace: string) => ({
-        send: async (data: T): Promise<void[]> => {
+        send: async (data: T): Promise<void> => {
           bus.send(peerId, namespace, data)
-          return []
         },
         receive: (cb: (data: T, peerId: string) => void) => {
           const list = receivers.get(namespace) ?? []

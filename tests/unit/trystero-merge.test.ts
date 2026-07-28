@@ -36,21 +36,24 @@ function makeMockRoom(strategy: string, config: Record<string, unknown>) {
     emitLeave: (peerId) => room.leaveHandlers.forEach((h) => h(peerId)),
   }
   rooms.push(room)
+  // 0.25: handlers are nullable properties the wrapper assigns, and makeAction
+  // returns an action object whose receiver is the `onMessage` property.
   return {
-    onPeerJoin: (fn: Handler) => {
+    set onPeerJoin(fn: Handler) {
       room.joinHandlers.push(fn)
     },
-    onPeerLeave: (fn: Handler) => {
+    set onPeerLeave(fn: Handler) {
       room.leaveHandlers.push(fn)
     },
-    onPeerStream: () => {},
-    makeAction: () => [
-      room.send,
-      (cb: (...args: unknown[]) => void) => {
+    set onPeerStream(_fn: (...args: unknown[]) => void) {},
+    makeAction: () => ({
+      send: room.send,
+      set onMessage(cb: (...args: unknown[]) => void) {
         room.receivers.push(cb)
       },
-    ],
-    addStream: vi.fn(),
+      onReceiveProgress: null,
+    }),
+    addStream: vi.fn(() => []),
     removeStream: vi.fn(),
     getPeers: () => ({}),
     leave: room.leave,
@@ -200,24 +203,43 @@ describe('joinTopic multi-strategy race + mergeRooms', () => {
     })
     const action = room.makeAction<{ hi: string }>('hello')
 
+    // 0.25 takes send options as an object rather than trailing positional args.
     await action.send({ hi: 'there' })
+    const sendOptions = {
+      target: undefined,
+      metadata: undefined,
+      onProgress: undefined,
+    }
     expect(byStrategy('nostr').send).toHaveBeenCalledWith(
       { hi: 'there' },
-      undefined,
-      undefined,
-      undefined
+      sendOptions
     )
     expect(byStrategy('mqtt').send).toHaveBeenCalledWith(
       { hi: 'there' },
-      undefined,
-      undefined,
+      sendOptions
+    )
+
+    // Each transport gets its own receiver, and the wrapper flattens 0.25's
+    // {peerId, metadata} context back to the positional signature the app uses.
+    const onData = vi.fn()
+    action.receive(onData)
+    expect(byStrategy('nostr').receivers).toHaveLength(1)
+    expect(byStrategy('mqtt').receivers).toHaveLength(1)
+
+    byStrategy('nostr').receivers[0]({ hi: 'from-nostr' }, { peerId: 'peer-n' })
+    expect(onData).toHaveBeenCalledWith(
+      { hi: 'from-nostr' },
+      'peer-n',
       undefined
     )
 
-    const onData = vi.fn()
-    action.receive(onData)
-    expect(byStrategy('nostr').receivers).toContain(onData)
-    expect(byStrategy('mqtt').receivers).toContain(onData)
+    byStrategy('mqtt').receivers[0](
+      { hi: 'from-mqtt' },
+      { peerId: 'peer-m', metadata: { kind: 'cam' } }
+    )
+    expect(onData).toHaveBeenCalledWith({ hi: 'from-mqtt' }, 'peer-m', {
+      kind: 'cam',
+    })
   })
 
   test('leave() tears down every transport', async () => {

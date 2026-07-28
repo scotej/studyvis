@@ -19,12 +19,16 @@ const captured: {
   onPeerStream: StreamHandler | null
   config: Record<string, unknown> | null
   callbacks: Record<string, unknown> | null
+  addStream: Array<[MediaStream, unknown]>
+  removeStream: Array<[MediaStream, unknown]>
 } = {
   onPeerJoin: null,
   onPeerLeave: null,
   onPeerStream: null,
   config: null,
   callbacks: null,
+  addStream: [],
+  removeStream: [],
 }
 
 const fakeSockets: Record<string, { readyState: number; url: string }> = {}
@@ -39,19 +43,31 @@ vi.mock('trystero', () => ({
   ) => {
     captured.config = config
     captured.callbacks = callbacks ?? null
+    // 0.25 handlers are nullable PROPERTIES the wrapper assigns, not
+    // registration functions it calls. Setters capture that assignment so the
+    // tests below can still fire the underlying event by hand.
     return {
-      onPeerJoin: (fn: JoinHandler) => {
+      set onPeerJoin(fn: JoinHandler) {
         captured.onPeerJoin = fn
       },
-      onPeerLeave: (fn: LeaveHandler) => {
+      set onPeerLeave(fn: LeaveHandler) {
         captured.onPeerLeave = fn
       },
-      onPeerStream: (fn: StreamHandler) => {
+      set onPeerStream(fn: StreamHandler) {
         captured.onPeerStream = fn
       },
-      makeAction: () => [vi.fn(), vi.fn()],
-      addStream: vi.fn(),
-      removeStream: vi.fn(),
+      makeAction: () => ({
+        send: vi.fn(async () => {}),
+        onMessage: null,
+        onReceiveProgress: null,
+      }),
+      addStream: (stream: MediaStream, options: unknown) => {
+        captured.addStream.push([stream, options])
+        return []
+      },
+      removeStream: (stream: MediaStream, options: unknown) => {
+        captured.removeStream.push([stream, options])
+      },
       getPeers: () => ({}),
       leave: vi.fn(async () => {}),
     }
@@ -67,6 +83,8 @@ beforeEach(() => {
   captured.onPeerStream = null
   captured.config = null
   captured.callbacks = null
+  captured.addStream.length = 0
+  captured.removeStream.length = 0
   for (const k of Object.keys(fakeSockets)) delete fakeSockets[k]
 })
 
@@ -143,6 +161,40 @@ describe('trystero wrapRoom fanout', () => {
     captured.onPeerStream?.(fakeStream, 'peer-7', undefined)
     expect(b).toHaveBeenCalledTimes(1)
     expect(a).toHaveBeenCalledTimes(2)
+  })
+})
+
+// 0.25 moved the media APIs from trailing positional args to an options
+// object. The wrapper keeps the positional shape for callers, so this pins the
+// translation — screenShare.ts is the app's only metadata producer, and
+// SessionView reads that metadata to tell a screen share from a camera.
+describe('trystero wrapRoom media options mapping', () => {
+  test('addStream maps positional target + metadata onto the options object', () => {
+    const room = joinTopic({ topic: 't', password: 'p' })
+    const stream = {} as MediaStream
+
+    room.addStream(stream)
+    room.addStream(stream, 'peer-1')
+    room.addStream(stream, 'peer-2', { screen: true })
+
+    expect(captured.addStream).toEqual([
+      [stream, { target: undefined, metadata: undefined }],
+      [stream, { target: 'peer-1', metadata: undefined }],
+      [stream, { target: 'peer-2', metadata: { screen: true } }],
+    ])
+  })
+
+  test('removeStream maps the positional target onto the options object', () => {
+    const room = joinTopic({ topic: 't', password: 'p' })
+    const stream = {} as MediaStream
+
+    room.removeStream(stream)
+    room.removeStream(stream, ['peer-1', 'peer-2'])
+
+    expect(captured.removeStream).toEqual([
+      [stream, { target: undefined }],
+      [stream, { target: ['peer-1', 'peer-2'] }],
+    ])
   })
 })
 

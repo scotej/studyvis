@@ -314,7 +314,7 @@ export function SessionView({
   const screenStreamRef = useRef<MediaStream | null>(null)
   const screenShareRef = useRef<ScreenShareController | null>(null)
   const cameraSendRef = useRef<
-    ((payload: CameraPayload) => Promise<void[]>) | null
+    ((payload: CameraPayload) => Promise<void>) | null
   >(null)
   // Imperative mirror of `cameraOn` so the on-join camera-state resend reads
   // the live value without re-subscribing the action on every toggle.
@@ -336,7 +336,7 @@ export function SessionView({
   // the paused/error/resumed transitions within a running loop.
   const [aiRuntimeStatus, setAiRuntimeStatus] = useState<AiStatus>('active')
   const localStreamRef = useRef<MediaStream | null>(null)
-  const pttSendRef = useRef<((payload: PttPayload) => Promise<void[]>) | null>(
+  const pttSendRef = useRef<((payload: PttPayload) => Promise<void>) | null>(
     null
   )
   // Stable refs the audit/pomodoro wiring closes over. Avoids re-creating the
