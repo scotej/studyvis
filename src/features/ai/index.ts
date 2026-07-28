@@ -280,6 +280,11 @@ export {
   __resetSampleLoopRuntime,
   getSampleLoopRuntime,
   REQUEST_TIMEOUT_MS,
+  MAX_REQUEST_TIMEOUT_MS,
+  REQUEST_TIMEOUT_P95_FACTOR,
+  SCREEN_ACQUIRE_TIMEOUT_MS,
+  STALL_TICKS,
+  effectiveRequestTimeoutMs,
   BATTERY_POLL_INTERVAL_MS,
   FALLBACK_SAMPLE_INTERVAL_SEC,
   MAX_SAMPLE_INTERVAL_SEC,
@@ -296,5 +301,6 @@ export type {
   SampleLoopOptions,
   SampleLoopHandle,
   SampleLoopStartReason,
+  SampleLoopStallReason,
   BackoffState,
 } from './sampleLoop'

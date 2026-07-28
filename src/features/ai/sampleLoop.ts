@@ -83,6 +83,29 @@ const log = logger.child('ai.sampleloop')
 // steady-state path 60 s is generous. If the model takes longer the tick is
 // aborted, marked as a skip, and the next interval resumes.
 export const REQUEST_TIMEOUT_MS = 90_000
+// I83 — ceiling on how long boot() waits for the screen-capture acquire to
+// settle. getDisplayMedia does not time out on its own: a picker the user never
+// answers (alt-tabbed away, prompt behind the session window — WebView2 shows
+// its own, and it is easy to miss) leaves the promise pending forever. boot()
+// then never returns, `stop()` awaits `bootPromise` and so never returns
+// either, and the sidecar it already started is never killed. Generous on
+// purpose: a user genuinely reading the picker has two minutes, and the only
+// cost of the ceiling is converting a permanent silent wedge into a visible,
+// retryable error.
+export const SCREEN_ACQUIRE_TIMEOUT_MS = 120_000
+// I83 — ceiling on the derived per-tick timeout below. Matches benchmark.ts's
+// own 5-minute per-request bound, so a model the benchmark accepted can never
+// be guaranteed to abort here.
+export const MAX_REQUEST_TIMEOUT_MS = 300_000
+// I83 — multiple of the benchmark-measured p95 to allow a live inference before
+// aborting it. The benchmark bounds a request at 5 minutes while this loop
+// bounded it at 90 s, so a model that measured a p95 above ~90 s benchmarked
+// "successfully" (that measurement is the ONLY thing that sets activeModelId)
+// and then aborted every single live tick, forever, with nothing but a
+// console.warn to show for it. Deriving the live bound from the same
+// measurement closes that gap; 3× leaves room for the ordinary variance the
+// cadence backoff is separately designed to absorb.
+export const REQUEST_TIMEOUT_P95_FACTOR = 3
 // How often we re-read battery state — once a minute matches ARCHITECTURE
 // §2's "polls this every 60 s". Cheap Tauri command so we could go faster,
 // but battery state isn't moving in the milliseconds.
@@ -116,6 +139,19 @@ export function effectiveIntervalSec(
   // (ARCHITECTURE.md §8); applying the ceiling last would cap it at 30s and
   // force every tick to skip on the in-flight guard.
   return Math.max(floor, Math.min(MAX_SAMPLE_INTERVAL_SEC, userOverrideSec))
+}
+
+// I83 — per-tick HTTP timeout, derived from the model's benchmark-measured p95.
+// `p95Sec` of 0 means "never benchmarked" (or a benchmark without a usable
+// measurement), which falls back to the flat REQUEST_TIMEOUT_MS the loop always
+// used. Pure so the unit tests can pin the boundaries.
+export function effectiveRequestTimeoutMs(p95Sec: number): number {
+  if (!Number.isFinite(p95Sec) || p95Sec <= 0) return REQUEST_TIMEOUT_MS
+  const derived = p95Sec * REQUEST_TIMEOUT_P95_FACTOR * 1000
+  return Math.min(
+    MAX_REQUEST_TIMEOUT_MS,
+    Math.max(REQUEST_TIMEOUT_MS, Math.round(derived))
+  )
 }
 
 // A6 — duration-based cadence backoff. ARCHITECTURE §8 promised a
@@ -323,6 +359,30 @@ export function getSampleLoopRuntime(): SampleLoopRuntime {
 export type SampleLoopStartReason =
   'no_active_model' | 'model_files_missing' | 'sidecar_start_failed'
 
+// I83 — why a running loop has produced no judgments. Distinct from
+// `SampleLoopStartReason`: the loop DID start, and is still ticking.
+export type SampleLoopStallReason =
+  // The sidecar never reached running+healthy. Covers the Rust watcher having
+  // exhausted its restarts (status 'errored' has its own callback) and the
+  // slower kind where /health simply never returns 2xx.
+  | 'engine_unavailable'
+  // The sidecar answered, with an HTTP error. A model that loaded without its
+  // vision projector answers exactly this way, every tick.
+  | 'engine_error'
+  // Every inference hit the per-tick timeout. The machine is too slow for the
+  // cadence, or the model is wedged.
+  | 'inference_timeout'
+  // Anything else thrown inside the tick — a fetch TypeError, a malformed
+  // response, an encode failure.
+  | 'unknown'
+
+// I83 — consecutive unproductive ticks before `onStalled` fires. Three is long
+// enough that a cold-start warmup (the first tick or two commonly skip while
+// llama-server loads the model into RAM) never trips it, and short enough that
+// the user hears about a genuinely dead pipeline in well under a minute at the
+// default cadence.
+export const STALL_TICKS = 3
+
 export type SampleLoopOptions = {
   // Declared study topic. Read per-tick via callback so a mid-session
   // topic_change via the V2-P7 Ctrl+] dialog takes effect on the NEXT
@@ -371,6 +431,19 @@ export type SampleLoopOptions = {
   // p95, i.e. the machine is throttling). SessionView wires a one-shot
   // in-voice toast. No payload: the notice is informational, not actionable.
   onThermalBackoff?: () => void
+  // I83 — fires ONCE per loop lifetime when the loop has been ticking without
+  // producing a single judgment for STALL_TICKS consecutive ticks.
+  //
+  // Every path this covers used to be a bare `console.warn` and a reschedule:
+  // a sidecar that spawns but never reports healthy, an HTTP error from a model
+  // whose vision projector failed to load, an inference that aborts on the
+  // per-tick timeout every time, a `fetch` TypeError. In release builds there
+  // is no devtools and llama-server.log holds none of it, so the entire
+  // session ran with the AI chip reading "watching" and the report recorded
+  // nothing — which is exactly what issue #92 looked like from the user's side.
+  // Paused states (break, camera off, pomodoro rest, battery) are deliberately
+  // NOT stalls: nothing is wrong and nothing is being hidden.
+  onStalled?: (reason: SampleLoopStallReason) => void
   // Fires once per resolved sample with the events the score machine
   // emitted for that sample plus the sample's verdict. V2-P6 wires the
   // peer-alert + self-warning dispatcher through this callback so the
@@ -424,6 +497,11 @@ type InternalState = {
   // `justEngaged` and re-toast. This latch keeps the documented once-only
   // contract; mirrors `batteryNoticeShown` / `sidecarErrorReported`.
   thermalNoticeShown: boolean
+  // I83 — consecutive ticks that reached the inference path (not a paused or
+  // input-absent state) and still produced no judgment. Reset by any resolved
+  // sample. Drives the one-shot `onStalled` notice via `stallReported`.
+  unproductiveTicks: number
+  stallReported: boolean
   modelId: string | null
   ticks: number
   // The long-lived screen MediaStreams acquired in boot(). Empty until boot
@@ -436,7 +514,10 @@ type InternalState = {
 
 export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
   const runtime = activeRuntime
-  const requestTimeoutMs = opts.requestTimeoutMs ?? REQUEST_TIMEOUT_MS
+  // I83 — an explicit override wins verbatim (the unit tests drive short
+  // timeouts through it); otherwise the bound is derived per tick from the
+  // model's measured p95 via `effectiveRequestTimeoutMs`.
+  const requestTimeoutOverrideMs = opts.requestTimeoutMs ?? null
 
   const state: InternalState = {
     stopped: false,
@@ -450,6 +531,8 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
     modelP95Sec: 0,
     backoff: initialBackoffState(),
     thermalNoticeShown: false,
+    unproductiveTicks: 0,
+    stallReported: false,
     modelId: opts.modelId,
     ticks: 0,
     screenStreams: [],
@@ -704,6 +787,18 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
     }, delayMs)
   }
 
+  // I83 — count an unproductive tick and raise the one-shot stall notice once
+  // the streak reaches STALL_TICKS. Called only from paths that genuinely tried
+  // to produce a judgment; paused / input-absent paths call `resetStall` or
+  // neither, so a camera-off stretch never accuses the engine.
+  function noteUnproductiveTick(reason: SampleLoopStallReason): void {
+    state.unproductiveTicks += 1
+    if (state.unproductiveTicks >= STALL_TICKS && !state.stallReported) {
+      state.stallReported = true
+      opts.onStalled?.(reason)
+    }
+  }
+
   async function tick(): Promise<void> {
     if (state.stopped) return
     state.ticks += 1
@@ -774,6 +869,10 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
       } catch {
         // best-effort; we'll try again next tick
       }
+      // I83 — a sidecar that never becomes healthy is the single most common
+      // way AI runs a whole session recording nothing. Counted, so the user
+      // hears about it instead of reading "AI watching" over a dead engine.
+      noteUnproductiveTick('engine_unavailable')
       schedule(nextDelayMs())
       return
     }
@@ -806,9 +905,11 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
 
     state.inFlight = true
     activeAbort = new AbortController()
+    const tickTimeoutMs =
+      requestTimeoutOverrideMs ?? effectiveRequestTimeoutMs(state.modelP95Sec)
     const timer = runtime.setTimeout(() => {
       activeAbort?.abort()
-    }, requestTimeoutMs)
+    }, tickTimeoutMs)
 
     try {
       const [face, screen] = await Promise.all([
@@ -828,6 +929,7 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
         port == null ||
         port !== gatedPort
       ) {
+        noteUnproductiveTick('engine_unavailable')
         return
       }
       const body = buildFocusRequest({
@@ -858,6 +960,7 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
           bodyLength: errText.length,
           modelId: opts.modelId,
         })
+        noteUnproductiveTick('engine_error')
         return
       }
       const json = (await response.json()) as ChatCompletionResponse
@@ -885,6 +988,11 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
         opts.onThermalBackoff?.()
       }
       state.captureErrorReported = false
+      // I83 — a resolved sample (confident OR uncertain) means the pipeline is
+      // alive end to end, so the stall streak starts over. `stallReported`
+      // stays latched: the notice is once per loop lifetime, and a pipeline
+      // that recovers on its own doesn't need a second toast.
+      state.unproductiveTicks = 0
       const events = useFocusStore
         .getState()
         .applyJudgment(verdict, runtime.now())
@@ -914,19 +1022,23 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
           state.captureErrorReported = true
           opts.onCaptureError?.(err, false)
         }
+        noteUnproductiveTick('unknown')
         return
       }
       if (err instanceof DOMException && err.name === 'AbortError') {
         // The "why did focus detection stop scoring" line — the cadence
-        // state is what makes it answerable.
+        // state is what makes it answerable. I83 — the bound is the
+        // p95-derived tick timeout, not the old flat constant.
         log.warn('inference.aborted', {
-          timeoutMs: requestTimeoutMs,
+          timeoutMs: tickTimeoutMs,
           modelId: opts.modelId,
           onBattery: state.battery.onBattery,
         })
+        noteUnproductiveTick('inference_timeout')
         return
       }
       log.warn('tick.failed', { modelId: opts.modelId, err })
+      noteUnproductiveTick('unknown')
     } finally {
       runtime.clearTimeout(timer)
       activeAbort = null
@@ -971,6 +1083,53 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
     // Stop the long-lived screen track so the OS screen-recording indicator
     // goes dark the moment the session (or AI) ends.
     disposeScreenStream()
+  }
+
+  // I83 — `runtime.acquireScreenStream()` with a deadline. A stream that
+  // arrives after the deadline is stopped rather than leaked: the caller has
+  // already moved on to its failure path, so nothing would ever release those
+  // tracks and the OS recording indicator would stay lit with no session
+  // behind it.
+  async function acquireScreenStreamBounded(): Promise<MediaStream> {
+    let timer: ReturnType<typeof runtime.setTimeout> | null = null
+    let timedOut = false
+    const attempt = runtime.acquireScreenStream()
+    try {
+      return await Promise.race([
+        attempt,
+        new Promise<never>((_resolve, reject) => {
+          timer = runtime.setTimeout(() => {
+            timedOut = true
+            reject(
+              new CaptureError(
+                'screen_capture_unavailable',
+                `screen capture was not granted within ${Math.round(
+                  SCREEN_ACQUIRE_TIMEOUT_MS / 1000
+                )}s (the screen-share prompt may be waiting behind another window)`
+              )
+            )
+          }, SCREEN_ACQUIRE_TIMEOUT_MS)
+        }),
+      ])
+    } finally {
+      if (timer !== null) runtime.clearTimeout(timer)
+      if (timedOut) {
+        void attempt
+          .then((late) => {
+            for (const t of late.getTracks()) {
+              try {
+                t.stop()
+              } catch {
+                // already-stopped tracks throw on some platforms; ignore.
+              }
+            }
+          })
+          .catch(() => {
+            // The acquire failed on its own after we gave up — nothing to
+            // release, and the timeout error is what the caller already saw.
+          })
+      }
+    }
   }
 
   async function boot(): Promise<void> {
@@ -1019,7 +1178,7 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
         ? benchmark.p95Sec
         : 0
 
-    // I79 — screen capture is acquired BEFORE the sidecar, not after. Both
+    // I83 — screen capture is acquired BEFORE the sidecar, not after. Both
     // orders tear down cleanly, but this one never asks llama-server to load
     // a multi-GB model that a failed acquire is about to kill milliseconds
     // later: the reported symptom was "model does not load into machine",
@@ -1058,7 +1217,7 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
     // and the model just sees fewer screens.
     let firstStream: MediaStream
     try {
-      firstStream = await runtime.acquireScreenStream()
+      firstStream = await acquireScreenStreamBounded()
     } catch (err) {
       if (err instanceof CaptureError && err.code === 'screen_capture_denied') {
         state.captureDenied = true
@@ -1075,7 +1234,7 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
           true
         )
       }
-      // No sidecar to unwind — I79 moved the spawn below this acquire, so a
+      // No sidecar to unwind — I83 moved the spawn below this acquire, so a
       // capture failure now costs nothing beyond the loop itself.
       teardownInternal()
       return
@@ -1121,7 +1280,7 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
     for (let i = 1; i < acquireTargetCount; i += 1) {
       if (state.stopped) return
       try {
-        const stream = await runtime.acquireScreenStream()
+        const stream = await acquireScreenStreamBounded()
         const track = stream.getVideoTracks()[0]
         if (!track) {
           // Defensive — degraded into a no-track stream. Release and stop

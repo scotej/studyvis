@@ -15,6 +15,11 @@ import {
   nextBackoffState,
   preacquireScreenStream,
   SLOW_TICK_FACTOR,
+  STALL_TICKS,
+  MAX_REQUEST_TIMEOUT_MS,
+  REQUEST_TIMEOUT_MS,
+  REQUEST_TIMEOUT_P95_FACTOR,
+  effectiveRequestTimeoutMs,
   __resetBatteryRuntime,
   __resetCaptureRuntime,
   __resetFocusStoreThresholdReader,
@@ -873,6 +878,172 @@ describe('startSampleLoop — gating skip paths', () => {
   })
 })
 
+// I83 — every one of these paths used to be a bare console.warn plus a
+// reschedule. In a release build there is no devtools and llama-server.log
+// carries none of it, so a session could run to completion with the AI chip
+// reading "watching", the report recording nothing, and the user told nothing.
+// Issue #92 is that state, screenshotted.
+// I83 — the loop's effective cadence depends on the model floor and the user's
+// Settings → AI override, so counting wall-clock advances is fragile. Drive off
+// the loop's own tick accounting instead: advance until it has recorded exactly
+// `target` unproductive ticks, and fail loudly rather than hang if it never does.
+async function advanceToUnproductiveTicks(
+  handle: { __state: () => { unproductiveTicks: number } },
+  clock: FakeClock,
+  target: number
+): Promise<void> {
+  for (let i = 0; i < 200; i += 1) {
+    if (handle.__state().unproductiveTicks >= target) return
+    await clock.advance(5000)
+  }
+  throw new Error(
+    `loop never reached ${target} unproductive ticks (stuck at ${handle.__state().unproductiveTicks})`
+  )
+}
+
+describe('startSampleLoop — stall notice (I83)', () => {
+  beforeEach(() => {
+    resetAllStores()
+    screenEncodeCalls = 0
+    screenExtractImpl = null
+    __setCaptureRuntime(fakeCaptureRuntime)
+    __setScreenCaptureRuntime({
+      getDisplayMedia: async () => makeFakeScreenStream(),
+    })
+  })
+  afterEach(() => {
+    __resetSampleLoopRuntime()
+    __resetCaptureRuntime()
+    __resetScreenCaptureRuntime()
+    __resetBatteryRuntime()
+    __resetFocusStoreThresholdReader()
+    discardPendingScreenStream()
+  })
+
+  test('a sidecar that never becomes healthy reports engine_unavailable once', async () => {
+    const clock = new FakeClock()
+    const fetchMock = vi.fn(async () => judgmentResponse('on_task'))
+    __setSampleLoopRuntime(
+      buildSampleLoopRuntime({
+        clock,
+        fetch: fetchMock as never,
+        startSidecar: async () => {
+          // Spawns, never reaches running+healthy — the shape of a child that
+          // dies in the Windows loader and crash-loops under the watcher.
+          useSidecarStore.setState({ status: 'starting', healthy: false })
+          return 9999
+        },
+      })
+    )
+    const onStalled = vi.fn()
+    const handle = startSampleLoop({
+      getTopic: () => 't',
+      modelId: 'test-model',
+      getFaceTrack: () => makeFakeTrack(),
+      onStalled,
+    })
+    await flushMicrotasks(10)
+    // One tick short of the threshold: still quiet, because a cold start
+    // legitimately skips the first tick or two while the model loads.
+    await advanceToUnproductiveTicks(handle, clock, STALL_TICKS - 1)
+    expect(onStalled).not.toHaveBeenCalled()
+
+    await advanceToUnproductiveTicks(handle, clock, STALL_TICKS)
+    expect(onStalled).toHaveBeenCalledTimes(1)
+    expect(onStalled).toHaveBeenCalledWith('engine_unavailable')
+
+    // One-shot for the loop's lifetime — not a toast every 5 seconds.
+    await advanceToUnproductiveTicks(handle, clock, STALL_TICKS + 3)
+    expect(onStalled).toHaveBeenCalledTimes(1)
+    await handle.stop()
+  })
+
+  test('an HTTP error from the sidecar reports engine_error', async () => {
+    // A model that loaded without its vision projector answers exactly this
+    // way, on every single tick.
+    const clock = new FakeClock()
+    const fetchMock = vi.fn(async () => ({
+      ok: false,
+      status: 500,
+      text: async () => 'no multimodal support',
+      json: async () => ({}),
+    }))
+    __setSampleLoopRuntime(
+      buildSampleLoopRuntime({ clock, fetch: fetchMock as never })
+    )
+    const onStalled = vi.fn()
+    const handle = startSampleLoop({
+      getTopic: () => 't',
+      modelId: 'test-model',
+      getFaceTrack: () => makeFakeTrack(),
+      onStalled,
+    })
+    await flushMicrotasks(10)
+    await advanceToUnproductiveTicks(handle, clock, STALL_TICKS)
+    expect(onStalled).toHaveBeenCalledWith('engine_error')
+    expect(useFocusStore.getState().totalSamples).toBe(0)
+    await handle.stop()
+  })
+
+  test('a resolved sample clears the streak before it reaches the threshold', async () => {
+    // The guarantee that keeps this from crying wolf: an intermittent failure
+    // interleaved with real samples is not a stall.
+    const clock = new FakeClock()
+    let call = 0
+    const fetchMock = vi.fn(async () => {
+      call += 1
+      // fail, fail, succeed, fail, fail — never STALL_TICKS in a row.
+      if (call % 3 === 0) return judgmentResponse('on_task')
+      return {
+        ok: false,
+        status: 503,
+        text: async (): Promise<string> => 'busy',
+        json: async (): Promise<unknown> => ({}),
+      }
+    })
+    __setSampleLoopRuntime(
+      buildSampleLoopRuntime({ clock, fetch: fetchMock as never })
+    )
+    const onStalled = vi.fn()
+    const handle = startSampleLoop({
+      getTopic: () => 't',
+      modelId: 'test-model',
+      getFaceTrack: () => makeFakeTrack(),
+      onStalled,
+    })
+    await flushMicrotasks(10)
+    // Nine ticks' worth of wall clock: enough for three fail/fail/succeed
+    // cycles, never STALL_TICKS failures in a row.
+    for (let i = 0; i < 40; i += 1) await clock.advance(5000)
+    expect(onStalled).not.toHaveBeenCalled()
+    expect(useFocusStore.getState().totalSamples).toBeGreaterThan(0)
+    await handle.stop()
+  })
+
+  test('a camera-off stretch is not a stall', async () => {
+    // isPaused covers camera-off and pomodoro rest. Nothing is wrong, nothing
+    // is being hidden, and accusing the engine there would be a false alarm.
+    const clock = new FakeClock()
+    const fetchMock = vi.fn(async () => judgmentResponse('on_task'))
+    __setSampleLoopRuntime(
+      buildSampleLoopRuntime({ clock, fetch: fetchMock as never })
+    )
+    const onStalled = vi.fn()
+    const handle = startSampleLoop({
+      getTopic: () => 't',
+      modelId: 'test-model',
+      getFaceTrack: () => makeFakeTrack(),
+      isPaused: () => true,
+      onStalled,
+    })
+    await flushMicrotasks(10)
+    for (let i = 0; i < 40; i += 1) await clock.advance(5000)
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect(onStalled).not.toHaveBeenCalled()
+    await handle.stop()
+  })
+})
+
 describe('startSampleLoop — capture errors', () => {
   beforeEach(() => {
     resetAllStores()
@@ -913,7 +1084,7 @@ describe('startSampleLoop — capture errors', () => {
     await handle.stop()
   })
 
-  test('a failed screen acquire never spawns the sidecar (I79)', async () => {
+  test('a failed screen acquire never spawns the sidecar (I83)', async () => {
     const clock = new FakeClock()
     const fetchMock = vi.fn()
     const startSidecar = vi.fn(async () => {
@@ -942,7 +1113,7 @@ describe('startSampleLoop — capture errors', () => {
     await handle.stop()
   })
 
-  test('a failed sidecar start releases the screen streams acquired first (I79)', async () => {
+  test('a failed sidecar start releases the screen streams acquired first (I83)', async () => {
     const clock = new FakeClock()
     const fetchMock = vi.fn()
     const screenStream = makeFakeScreenStream()
@@ -1446,6 +1617,38 @@ describe('startSampleLoop — A6 cadence backoff', () => {
     expect(handle.__state().backoff.engaged).toBe(false)
     expect(onThermalBackoff).not.toHaveBeenCalled()
     await handle.stop()
+  })
+})
+
+// I83 — the live per-tick bound was a flat 90 s while benchmark.ts allows a
+// request 5 minutes, and a completed benchmark is the ONLY thing that sets
+// activeModelId. So a model measuring a p95 above ~90 s "passed" setup and then
+// aborted every live tick forever, logging nothing a release build can show.
+describe('effectiveRequestTimeoutMs — I83', () => {
+  test('falls back to the flat timeout when there is no benchmark', () => {
+    expect(effectiveRequestTimeoutMs(0)).toBe(REQUEST_TIMEOUT_MS)
+    expect(effectiveRequestTimeoutMs(-1)).toBe(REQUEST_TIMEOUT_MS)
+    expect(effectiveRequestTimeoutMs(Number.NaN)).toBe(REQUEST_TIMEOUT_MS)
+  })
+
+  test('never drops below the flat timeout for a fast model', () => {
+    // A 3 s p95 would derive 9 s, which would abort ticks a cold cache makes
+    // legitimately slow. The flat value stays the floor.
+    expect(effectiveRequestTimeoutMs(3)).toBe(REQUEST_TIMEOUT_MS)
+  })
+
+  test('scales with the measured p95 for a slow model', () => {
+    // 60 s p95 → 180 s, comfortably above the old flat 90 s ceiling that would
+    // have aborted every tick of a model that benchmarked fine.
+    expect(effectiveRequestTimeoutMs(60)).toBe(
+      60 * REQUEST_TIMEOUT_P95_FACTOR * 1000
+    )
+  })
+
+  test('caps at the benchmark request bound', () => {
+    // Without the cap a 280 s p95 would let one wedged inference hold the loop
+    // for 14 minutes with nothing recorded.
+    expect(effectiveRequestTimeoutMs(280)).toBe(MAX_REQUEST_TIMEOUT_MS)
   })
 })
 

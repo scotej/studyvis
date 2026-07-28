@@ -77,6 +77,7 @@ import { usePttStore } from '@/stores/pttStore'
 import { strings } from '@/strings'
 
 import { startAiAlertDispatcher, type AiAlertDispatcher } from './aiAlerts'
+import { deriveAiChipStatus } from './aiChip'
 
 import {
   cancelActiveBreakTimer,
@@ -201,6 +202,9 @@ export function SessionView({
   // when this session hasn't touched a peer's slider yet.
   const persistedPeerVolumes = useSettingsStore((s) => s.values.peerVolumes)
   const activeModelId = useModelStore((s) => s.activeModelId)
+  // I83 — distinguishes "no model picked" from "model store hasn't loaded
+  // yet". Only the former is worth telling the user about.
+  const modelStatus = useModelStore((s) => s.status)
   const selfWarning = useAlertsUiStore((s) => s.selfWarning)
   const alertedPeers = useAlertsUiStore((s) => s.alertedPeers)
   const onBreak = useBreakStore((s) => s.onBreak)
@@ -964,6 +968,35 @@ export function SessionView({
     }
   }, [status, startedAt])
 
+  // I83 — AI on, session live, but no model to run: say so ONCE per session.
+  //
+  // The loop effect below returns early in this state, which means
+  // `startSampleLoop` never runs and its `onStartFail('no_active_model')`
+  // toast — the one surface that names this problem — can never fire. Issue
+  // #92 is what that silence looks like from the outside: a full session, an
+  // unscored report, and nothing anywhere saying AI sat out.
+  //
+  // Two distinct causes, two messages: `'ready'` with no model means the user
+  // never picked one, while `'error'` means models.json itself couldn't be read
+  // — nothing is wrong with their choice and the advice differs. `'loading'`
+  // stays silent so a mid-hydration null never accuses a correctly configured
+  // install. Keyed on startedAt so a loading → error → ready sequence still
+  // toasts at most once per session rather than on every model/camera flap.
+  const noModelNoticeShownFor = useRef<number | null>(null)
+  useEffect(() => {
+    if (status !== 'active' || !startedAt) return
+    if (!aiFeaturesEnabled || activeModelId) return
+    if (modelStatus !== 'ready' && modelStatus !== 'error') return
+    if (noModelNoticeShownFor.current === startedAt) return
+    noModelNoticeShownFor.current = startedAt
+    toast.error(
+      modelStatus === 'error'
+        ? strings.session.errors.modelListUnreadable
+        : strings.session.errors.pickModel,
+      aiSettingsToastAction()
+    )
+  }, [status, startedAt, aiFeaturesEnabled, modelStatus, activeModelId])
+
   // V2-P5 AI sample loop: starts when AI features are on, an active model
   // exists, the session is running, and the local camera track is up.
   // Stops on any of those flipping. Topic defaults to "Studying" — V2-P9
@@ -1068,6 +1101,24 @@ export function SessionView({
       onThermalBackoff: () => {
         // A6 — one-shot per session; the loop fires this at most once.
         toast(strings.session.errors.aiSlowedDown)
+      },
+      // I83 — the loop is alive but has produced nothing for STALL_TICKS
+      // consecutive checks. One-shot per loop lifetime. The chip goes to
+      // 'error' alongside the toast so the state is still legible after the
+      // toast dismisses — a silently-dead pipeline reading "watching" for a
+      // whole session is what issue #92 recorded.
+      onStalled: (reason) => {
+        const copy = strings.session.errors.aiStalled
+        const message =
+          reason === 'engine_unavailable'
+            ? copy.engineUnavailable
+            : reason === 'engine_error'
+              ? copy.engineError
+              : reason === 'inference_timeout'
+                ? copy.inferenceTimeout
+                : copy.unknown
+        toast.error(message, aiSettingsToastAction())
+        setAiRuntimeStatus('error')
       },
     })
     return () => {
@@ -1510,10 +1561,20 @@ export function SessionView({
 
   // "Try again" — clear the error and bump the nonce so the acquisition
   // effect (keyed on [room, mediaRetryNonce]) re-runs getUserMedia.
+  // I83 — a camera/mic retry re-acquires `localStream`, which is in the
+  // sample-loop effect's deps, so the loop tears down and boot()s again. That
+  // second boot() reaches getDisplayMedia with an empty gesture stash and, on
+  // WebView2, is refused outright — recovering the camera would silently cost
+  // the user AI for the rest of the session. This click is a real gesture;
+  // spend it on a screen pre-acquire too, under the same AI-is-actually-running
+  // condition the loop effect uses.
   const handleMediaRetry = useCallback(() => {
+    if (aiFeaturesEnabled && activeModelId && !captureDenied) {
+      void preacquireScreenStream()
+    }
     setMediaErrorName(null)
     setMediaRetryNonce((n) => n + 1)
-  }, [])
+  }, [aiFeaturesEnabled, activeModelId, captureDenied])
 
   // Only offered for the permission-denied case. Jumps to the OS camera
   // privacy pane via the same Rust opener the onboarding step uses. macOS is
@@ -1576,10 +1637,17 @@ export function SessionView({
   // from a prior loop never lies once AI is disabled, the model is cleared,
   // or the camera track drops. Otherwise the runtime state (set by the
   // sample-loop callbacks) is the truth for the running loop.
-  const aiChipStatus: AiStatus =
-    !aiFeaturesEnabled || !activeModelId || !localStream
-      ? 'off'
-      : aiRuntimeStatus
+  //
+  // I83 — the decision moved to `deriveAiChipStatus` (pure, unit-tested) to add
+  // the 'unconfigured' case: AI on with no model used to read "AI off", which is
+  // the one reading that sends a user to the wrong setting.
+  const aiChipStatus: AiStatus = deriveAiChipStatus({
+    aiFeaturesEnabled,
+    activeModelId,
+    modelStatus,
+    hasLocalStream: Boolean(localStream),
+    runtimeStatus: aiRuntimeStatus,
+  })
 
   if (!room) return null
 

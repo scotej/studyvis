@@ -29,6 +29,10 @@ pub fn sessions_insert(
     generated_at: Option<i64>,
     confident_samples: Option<i64>,
     skipped_samples: Option<i64>,
+    // I83 — 1 = AI focus detection was on for this session, 0 = off, None =
+    // caller didn't say (older frontend). None coalesces, so an omitted value
+    // never overwrites a recorded one.
+    ai_enabled: Option<i64>,
 ) -> Result<(), String> {
     let conn = lock(&state)?;
     let row = sessions::SessionRow {
@@ -43,6 +47,7 @@ pub fn sessions_insert(
         generated_at,
         confident_samples,
         skipped_samples,
+        ai_enabled,
     };
     sessions::insert(&conn, &row).map_err(|e| e.to_string())
 }

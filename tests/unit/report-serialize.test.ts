@@ -47,6 +47,7 @@ function baseSession(over: Partial<SessionRecord> = {}): SessionRecord {
     generated_at: START_TS + 25 * 60_000,
     confident_samples: null,
     skipped_samples: null,
+    ai_enabled: null,
     ...over,
   }
 }
@@ -122,5 +123,81 @@ describe('serializeReportToText score line', () => {
     )
     expect(text).toContain(strings.report.noScore.copyLine)
     expect(text).not.toContain('Score: 100/100')
+  })
+})
+
+// I83 — the exported/copied text is an independent second implementation of
+// the report's copy, so a fix applied only to the JSX would leave the pasted
+// version still claiming a clean session. These pin both halves of the honesty
+// change in the surface a user actually shares.
+describe('serializeReportToText — AI coverage honesty (I83)', () => {
+  const unscored = { score: null, focused_pct: null }
+
+  test('AI on but no checks: names the malfunction, not "Nice work"', () => {
+    const text = serializeReportToText(
+      buildData(baseSession({ ...unscored, ai_enabled: 1 }), [])
+    )
+    expect(text).toContain('Score: not recorded (AI ran no checks)')
+    expect(text).toContain('No AI checks ran, so nothing was measured here.')
+    expect(text).not.toContain('Nice work')
+  })
+
+  test('AI off: says so, and still never claims a clean session', () => {
+    const text = serializeReportToText(
+      buildData(baseSession({ ...unscored, ai_enabled: 0 }), [])
+    )
+    expect(text).toContain('Score: not recorded (AI off)')
+    expect(text).not.toContain('Nice work')
+  })
+
+  test('pre-004 row: stays cause-neutral', () => {
+    const text = serializeReportToText(
+      buildData(baseSession({ ...unscored, ai_enabled: null }), [])
+    )
+    expect(text).toContain('Score: not recorded')
+    expect(text).not.toContain('(AI off)')
+    expect(text).not.toContain('(AI ran no checks)')
+    expect(text).not.toContain('Nice work')
+  })
+
+  test('AI ran and found nothing: the earned praise survives', () => {
+    // The whole point of the change is that this case still reads confidently.
+    // Note `confident_samples: 30` — the praise is earned by READABLE checks,
+    // which is what the noConfident case below establishes.
+    const text = serializeReportToText(
+      buildData(
+        baseSession({
+          confident_samples: 30,
+          skipped_samples: 0,
+          ai_enabled: 1,
+        }),
+        []
+      )
+    )
+    expect(text).toContain('No distractions detected. Nice work.')
+  })
+
+  test('checks ran but none readable: distinct copy, still no praise', () => {
+    // Two unreadable checks is below SKIPPED_SAMPLES_MIN, so the #47 D5
+    // data-quality line renders nothing and this copy is the only thing that
+    // tells the truth. It must not claim "No AI checks ran" either — checks did
+    // run; none could be read.
+    const text = serializeReportToText(
+      buildData(
+        baseSession({
+          ...unscored,
+          confident_samples: 0,
+          skipped_samples: 2,
+          ai_enabled: 1,
+        }),
+        []
+      )
+    )
+    expect(text).toContain('Score: not recorded (no readable AI checks)')
+    expect(text).toContain(
+      'AI checks ran but none could be read, so nothing was measured here.'
+    )
+    expect(text).not.toContain('Nice work')
+    expect(text).not.toContain('No AI checks ran')
   })
 })

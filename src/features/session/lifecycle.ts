@@ -314,6 +314,7 @@ export function buildLeaveHandler(args: {
         generatedAt: endedAt,
         confidentSamples: focusSnapshot.confidentSamples,
         skippedSamples: focusSnapshot.skippedSamples,
+        aiEnabled: focusSnapshot.aiEnabled,
       })
     } catch (err) {
       log.error('sessions_insert.failed', {

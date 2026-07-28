@@ -201,6 +201,19 @@ export function mapDisplayMediaError(err: unknown): CaptureError {
       case 'OverconstrainedError':
         code = 'screen_capture_no_video'
         break
+      case 'InvalidStateError':
+      case 'InvalidAccessError':
+        // I83 — "no transient activation" (the I76 failure). Chromium/WebView2
+        // raises InvalidStateError, WebKit InvalidAccessError, and the default
+        // branch below used to file both under `screen_capture_unavailable`,
+        // whose only affordance is a toast carrying a raw DOMException string.
+        // `screen_capture_denied` mounts the recovery overlay instead — and its
+        // "Try again" button is itself the user gesture the call was missing,
+        // so the retry genuinely works rather than repeating the failure. Its
+        // non-mac steps ("if the prompt was dismissed, click Try again") read
+        // correctly for this case too.
+        code = 'screen_capture_denied'
+        break
       default:
         code = 'screen_capture_unavailable'
     }

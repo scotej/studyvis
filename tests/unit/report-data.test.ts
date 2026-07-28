@@ -6,6 +6,7 @@
 import { describe, expect, test } from 'vitest'
 
 import {
+  aiCoverage,
   deriveBreaksSummary,
   deriveTopDistractions,
   deriveTopicTimeline,
@@ -343,5 +344,89 @@ describe('sampleQualitySummary', () => {
     expect(
       sampleQualitySummary({ confident_samples: 0, skipped_samples: 0 })
     ).toBeNull()
+  })
+})
+
+// I83 — the report could not tell "AI never ran" from "AI ran and saw nothing".
+// Issue #92: a Windows session where AI was on and silently dead rendered
+// "No distractions detected. Nice work." beside a card admitting no score was
+// recorded. `aiCoverage` is the single derivation both the JSX and the text
+// export branch on, so these cases pin the copy for both surfaces at once.
+describe('aiCoverage', () => {
+  const base = {
+    score: null,
+    confident_samples: null,
+    skipped_samples: null,
+    ai_enabled: null,
+  }
+
+  test("'ran' when confident samples were recorded", () => {
+    expect(aiCoverage({ ...base, confident_samples: 12, ai_enabled: 1 })).toBe(
+      'ran'
+    )
+  })
+
+  test("a zero confident count is not 'ran' just for being non-null", () => {
+    // snapshotFocusForReport writes 0 (not NULL) whenever any tick resolved, so
+    // non-null-ness alone cannot carry the "was measured" meaning.
+    expect(
+      aiCoverage({
+        ...base,
+        confident_samples: 0,
+        skipped_samples: 0,
+        ai_enabled: 1,
+      })
+    ).toBe('noChecks')
+  })
+
+  // REVERSED during review. The first cut of this returned 'ran' for a session
+  // of pure parse failures, arguing the #47 D5 data-quality line caveats it.
+  // It does not below SKIPPED_SAMPLES_MIN (3) skips — see the paired test
+  // below — so for 1 or 2 unreadable checks the page rendered "Focused-time —",
+  // no caveat at all, and "No distractions detected. Nice work.": issue #92's
+  // own defect surviving its own fix.
+  test("'noConfident' when checks ran but none could be read", () => {
+    expect(
+      aiCoverage({
+        ...base,
+        confident_samples: 0,
+        skipped_samples: 7,
+        ai_enabled: 1,
+      })
+    ).toBe('noConfident')
+  })
+
+  test("'noConfident' in the window the data-quality line does not cover", () => {
+    const session = {
+      ...base,
+      confident_samples: 0,
+      skipped_samples: 2,
+      ai_enabled: 1,
+    }
+    expect(aiCoverage(session)).toBe('noConfident')
+    // The evidence for the reversal: at 2 skips nothing else on the page says
+    // a word about it, so the distractions copy is the only honest surface.
+    expect(sampleQualitySummary(session)).toBeNull()
+  })
+
+  test("'ran' for a pre-003 row that recorded a score without counters", () => {
+    // The 003 migration added the counters, so an older row can hold a real
+    // score with NULL counts. That session was measured; don't demote it.
+    expect(aiCoverage({ ...base, score: 88 })).toBe('ran')
+  })
+
+  test("'noChecks' when AI was on and not one check completed", () => {
+    expect(aiCoverage({ ...base, ai_enabled: 1 })).toBe('noChecks')
+  })
+
+  test("'off' when AI was recorded as disabled", () => {
+    expect(aiCoverage({ ...base, ai_enabled: 0 })).toBe('off')
+  })
+
+  test("'unknown' for a row written before the 004 migration", () => {
+    // NULL ai_enabled is not 0: claiming "AI was off" for a session nobody
+    // recorded the setting for would invent a fact. The cause-neutral R1 copy
+    // is the honest render there.
+    expect(aiCoverage(base)).toBe('unknown')
   })
 })

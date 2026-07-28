@@ -1,0 +1,24 @@
+-- I83 migration. Chained behind 003 (never edit a shipped migration).
+--
+-- Whether on-device AI focus detection was ENABLED for this session, recorded
+-- at teardown from the live settings value. Without it, `score`/`focused_pct`/
+-- `confident_samples`/`skipped_samples` all reading NULL is ambiguous three
+-- ways — AI deliberately off, AI on but never able to run a single check, or a
+-- row written by a build older than the counters — and the post-session report
+-- cannot tell the user which happened. Issue #92 is that ambiguity seen from
+-- the outside: a Windows session where AI was on and silently dead rendered
+-- identically to a clean AI-off session, down to "No distractions detected.
+-- Nice work."
+--
+-- 1 = AI features were on, 0 = off, NULL = unknown (any row written before
+-- this migration). The report treats NULL as "unknown" and keeps its existing
+-- cause-neutral copy, so old rows never gain a claim nobody recorded.
+--
+-- Read at TEARDOWN, not at session start, so a mid-session toggle is recorded
+-- as its final state. That is deliberate rather than merely convenient: the
+-- question this column answers is "should the report explain an absence?", and
+-- a session that recorded checks is identified by the sample counters, which
+-- the report consults FIRST (see aiCoverage in reportData.ts). So a user who
+-- toggles AI off after a scored session still reads as measured, and only a
+-- session with nothing to show falls through to this column for its wording.
+ALTER TABLE sessions ADD COLUMN ai_enabled INTEGER;
