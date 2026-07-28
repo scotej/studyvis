@@ -7,7 +7,12 @@ package-lock.json
 
 # Canonical docs are hand-formatted; Prettier should not touch them.
 ARCHITECTURE.md
-BUILD-PROMPTS.md
 CLAUDE.md
 DESIGN-SYSTEM.md
 PLAN.md
+
+# The audit ledger was a five-column table whose cells grew past 5 KB, and
+# Prettier pads every row to the widest one: 631 KB of its 707 KB was trailing
+# spaces. It is per-finding sections now — keep Prettier off it so that cannot
+# come back.
+ISSUES.md
