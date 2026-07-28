@@ -82,6 +82,19 @@ shipped it.)
 
 ### Fixed
 
+- **Your session history and stats could error out on every single session,
+  with nothing ever recorded.** On some machines Settings → Sessions and
+  Settings → Stats both failed to load, no session was ever written down, and
+  no post-session report appeared — while friends, pairing and AI carried on
+  normally. The cause was old: the very first database layout was edited in
+  place three days after it shipped to add two columns, and a database created
+  in those three days records itself as already up to date, so it never picked
+  them up. Every read and write of your session table named a column that
+  wasn't there. StudyVis now checks the shape of your database at every launch
+  and adds anything missing, leaving all existing data untouched; the affected
+  sessions from before the fix are gone, but everything from here is recorded.
+  (#99)
+
 - **On-device AI never started unless you had opened Settings → AI at least
   once since launching.** The app remembered which model you had chosen, but
   only read that memory when the AI settings pane was on screen, so a normal
