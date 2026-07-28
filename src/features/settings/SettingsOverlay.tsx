@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react'
 
 import { tokens } from '@/design/tokens'
+import type { PresenceMap } from '@/features/friends'
 import { titleBarHeightPx } from '@/lib/windowChrome'
 import { readWindowStyleBootCache } from '@/stores/settingsStore'
 import { strings } from '@/strings'
@@ -19,6 +20,8 @@ const BOOTED_WINDOW_STYLE = readWindowStyleBootCache()
 export type SettingsOverlayProps = {
   initialCategory?: SettingsCategoryId
   onClose: () => void
+  // #101 — passed straight through to Settings → Friends; see SettingsProps.
+  presence?: PresenceMap
 }
 
 // #47 B2 — full-screen Settings hosted ABOVE a still-mounted SessionView.
@@ -32,6 +35,7 @@ export type SettingsOverlayProps = {
 export function SettingsOverlay({
   initialCategory,
   onClose,
+  presence,
 }: SettingsOverlayProps) {
   const rootRef = useRef<HTMLDivElement | null>(null)
   const openerRef = useRef<HTMLElement | null>(null)
@@ -107,7 +111,11 @@ export function SettingsOverlay({
       className="fixed inset-x-0 bottom-0 overflow-y-auto bg-bg-base"
       style={{ top: chromeInsetTop, zIndex: tokens.zIndex.overlay }}
     >
-      <Settings initialCategory={initialCategory} onClose={onClose} />
+      <Settings
+        initialCategory={initialCategory}
+        onClose={onClose}
+        presence={presence}
+      />
     </div>
   )
 }

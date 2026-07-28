@@ -17,6 +17,7 @@ import {
   SettingsLayout,
   type SettingsCategoryDescriptor,
 } from '@/components/SettingsLayout'
+import type { PresenceMap } from '@/features/friends'
 import { Recover, useIdentity } from '@/features/identity'
 import { Report } from '@/features/session'
 import { useSettingsStore } from '@/stores/settingsStore'
@@ -148,11 +149,19 @@ export type SettingsProps = {
   // open straight to 'ai'). Initial only: later prop changes don't re-route
   // an open Settings the user is navigating.
   initialCategory?: SettingsCategoryId
+  // #101 — the live presence map, owned by Home. Settings → Friends is the
+  // only consumer; it stays optional so a host without a subscription (or
+  // Storybook) renders the pane without a Status it cannot back up.
+  presence?: PresenceMap
 }
 
 // Container: owns the active-category state and subscribes the settings
 // store. Each category sub-component reads what it needs.
-export function Settings({ onClose, initialCategory }: SettingsProps) {
+export function Settings({
+  onClose,
+  initialCategory,
+  presence,
+}: SettingsProps) {
   const [activeCategoryId, setActiveCategoryId] = useState<SettingsCategoryId>(
     initialCategory ?? 'identity'
   )
@@ -206,7 +215,9 @@ export function Settings({ onClose, initialCategory }: SettingsProps) {
           onRestoreIdentity={() => setRestoringIdentity(true)}
         />
       ) : null}
-      {activeCategoryId === 'friends' ? <FriendsCategory /> : null}
+      {activeCategoryId === 'friends' ? (
+        <FriendsCategory presence={presence} />
+      ) : null}
       {activeCategoryId === 'sessions' ? (
         <SessionsCategory onOpenSession={setOpenSessionId} />
       ) : null}
