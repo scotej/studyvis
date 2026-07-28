@@ -85,6 +85,17 @@ export default defineConfig([
       'react-refresh/only-export-components': 'off',
     },
   },
+  // #98 — app diagnostics go through src/lib/log.ts, which is the only place
+  // that redacts, bounds and persists them. A console call in src/ writes to
+  // a devtools window nobody has open and to nothing else, so the migration
+  // only stays migrated if a new one is an error.
+  {
+    files: ['src/**/*.{ts,tsx}'],
+    ignores: ['src/lib/log.ts'],
+    rules: {
+      'no-console': 'error',
+    },
+  },
   ...storybook.configs['flat/recommended'],
   prettier,
 ])
