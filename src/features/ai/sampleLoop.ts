@@ -353,9 +353,7 @@ export function getSampleLoopRuntime(): SampleLoopRuntime {
 }
 
 export type SampleLoopStartReason =
-  | 'no_active_model'
-  | 'model_files_missing'
-  | 'sidecar_start_failed'
+  'no_active_model' | 'model_files_missing' | 'sidecar_start_failed'
 
 // I83 — why a running loop has produced no judgments. Distinct from
 // `SampleLoopStartReason`: the loop DID start, and is still ticking.

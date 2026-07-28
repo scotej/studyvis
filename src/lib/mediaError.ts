@@ -5,11 +5,7 @@
 // consumes this owns the strings + rendering.
 
 export type MediaErrorKind =
-  | 'denied'
-  | 'notFound'
-  | 'inUse'
-  | 'overconstrained'
-  | 'generic'
+  'denied' | 'notFound' | 'inUse' | 'overconstrained' | 'generic'
 
 export function mediaErrorKind(name: string | undefined): MediaErrorKind {
   switch (name) {

@@ -192,8 +192,7 @@ function makeFakeScreenStream(): MediaStream {
 // `screenExtractImpl` lets a test inject a transient/throwing frame grab.
 let screenEncodeCalls = 0
 let screenExtractImpl:
-  | ((track: MediaStreamTrack) => Promise<CaptureFrame>)
-  | null = null
+  ((track: MediaStreamTrack) => Promise<CaptureFrame>) | null = null
 
 const fakeCaptureRuntime: CaptureRuntime = {
   extractFrame: async (track) => {

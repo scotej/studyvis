@@ -17,8 +17,7 @@ function fakePc(opts?: { failOffer?: boolean }): {
   let closed = false
   const pc = {
     onicecandidate: null as
-      | ((evt: { candidate: Partial<RTCIceCandidate> | null }) => void)
-      | null,
+      ((evt: { candidate: Partial<RTCIceCandidate> | null }) => void) | null,
     createDataChannel: () => ({}),
     createOffer: () =>
       opts?.failOffer

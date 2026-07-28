@@ -17,11 +17,7 @@ export type EngineInfo = {
 }
 
 export type EnginePhase =
-  | 'downloading'
-  | 'verifying'
-  | 'extracting'
-  | 'done'
-  | 'failed'
+  'downloading' | 'verifying' | 'extracting' | 'done' | 'failed'
 
 export type EngineProgressEvent = {
   phase: EnginePhase
