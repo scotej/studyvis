@@ -283,7 +283,6 @@ export {
   MAX_REQUEST_TIMEOUT_MS,
   REQUEST_TIMEOUT_P95_FACTOR,
   SCREEN_ACQUIRE_TIMEOUT_MS,
-  STALL_TICKS,
   effectiveRequestTimeoutMs,
   BATTERY_POLL_INTERVAL_MS,
   FALLBACK_SAMPLE_INTERVAL_SEC,
@@ -295,12 +294,14 @@ export {
   BACKOFF_ENGAGE_AFTER,
   BACKOFF_RECOVER_AFTER,
   BACKOFF_MULTIPLIER,
+  STALL_NOTICE_AFTER_MS,
+  STALL_CHECK_INTERVAL_MS,
 } from './sampleLoop'
 export type {
   SampleLoopRuntime,
   SampleLoopOptions,
   SampleLoopHandle,
   SampleLoopStartReason,
-  SampleLoopStallReason,
+  SampleBlockReason,
   BackoffState,
 } from './sampleLoop'

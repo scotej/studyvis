@@ -673,20 +673,6 @@ export const strings = {
       // the user's choice, the list just couldn't be loaded.
       modelListUnreadable:
         "Your AI model list couldn't be read, so AI sat out this session. Open Settings → AI to try again.",
-      // I83 — the loop is running but has produced no judgment for several
-      // consecutive checks. Each reason names what to do about it; all four
-      // used to be a console.warn nobody in a release build can read, so the
-      // session simply recorded nothing and said nothing.
-      aiStalled: {
-        engineUnavailable:
-          "The AI engine isn't responding, so nothing is being checked. Try turning AI off and on in Settings → AI.",
-        engineError:
-          'The AI model is loaded but rejecting checks. Re-download it in Settings → AI — its vision files may be incomplete.',
-        inferenceTimeout:
-          'AI checks are timing out on this machine. A smaller model, or a slower sample interval, will fit better.',
-        unknown:
-          "AI checks aren't completing, so nothing is being recorded this session.",
-      },
       modelFilesMissing:
         'Model files are missing. Re-download them in Settings → AI.',
       aiFailedToStart: 'AI failed to start.',
@@ -708,6 +694,31 @@ export const strings = {
       // to give your machine room to cool).
       aiSlowedDown:
         'Checks are running slower than usual, so StudyVis is spacing them out to ease the load on your machine.',
+      // I82 — the AI loop has gone a sustained stretch without a single
+      // reading. Keys match `SampleBlockReason` in features/ai/sampleLoop.ts;
+      // the toast copy names the blocker, the log copy is the short "why"
+      // that rides on the session-log row.
+      aiNoReading: {
+        engine_warming:
+          "AI hasn't managed a check yet — the engine is still starting up.",
+        inference_timeout:
+          'AI checks are timing out on this machine. A smaller model in Settings → AI will keep up better.',
+        inference_failed:
+          'The AI model is loaded but rejecting checks. Re-download it in Settings → AI — its vision files may be incomplete.',
+        capture_failing:
+          "AI can't read your camera or screen, so it isn't checking in.",
+        camera_missing: "AI has no camera frame to check, so it's not running.",
+        screen_lost: "Screen capture stopped, so AI isn't checking in.",
+      },
+      aiNoReadingLog: {
+        engine_warming: 'the AI engine was still starting up',
+        inference_timeout: 'the model took too long to answer',
+        inference_failed: 'the model request kept failing',
+        capture_failing: 'the camera or screen snapshot kept failing',
+        camera_missing: 'there was no camera frame to check',
+        screen_lost: 'screen capture had stopped',
+      },
+      aiReadingsResumed: 'AI is checking in again.',
     },
     full: 'This session is full (4 friends max).',
     // N4 — quit-during-session confirm. Fired when the user tries to quit
@@ -864,6 +875,7 @@ export const strings = {
       pomodoro_end: 'stopped the Pomodoro',
       ai_warning: 'got a self-warning',
       ai_alert: 'looking off-task',
+      ai_stalled: "couldn't be checked by AI",
       topic_set: 'set the topic',
       topic_change: 'changed topic',
       break_request: 'asked for a break',

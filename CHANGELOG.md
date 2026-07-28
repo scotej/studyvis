@@ -80,6 +80,46 @@ shipped it.)
   and uncropped at every size. Sitting alone also stops laying two tiles out in
   three columns' worth of space. (#95)
 
+### Fixed
+
+- **On-device AI never started unless you had opened Settings → AI at least
+  once since launching.** The app remembered which model you had chosen, but
+  only read that memory when the AI settings pane was on screen, so a normal
+  launch began every session believing no model was picked — and the whole
+  focus pipeline is gated on that. Sessions ran to completion with AI switched
+  on and nothing watching: no score, no focused-time, and a report that could
+  not tell a deliberate choice from a malfunction. The saved model is now read
+  at startup, the report distinguishes "AI was off" from "AI was on and got
+  nothing" from an older session that predates the distinction, and a session
+  that starts with AI on but no usable model says so instead of running
+  silently. (#92, #94, I83)
+
+- **When on-device AI couldn't take a single reading, nothing said so — the
+  session simply ended with an empty focus score.** A Windows friend studied
+  for ten minutes with AI switched on and got a report with no score, no
+  focused-time, no distractions and no explanation, indistinguishable from a
+  report for a session where AI had never been turned on. The AI loop has
+  several ways to come up empty — the engine still loading, a check timing
+  out because the model is heavier than the machine (Windows and Linux run the
+  model on the CPU, where macOS uses the GPU, so the same model can be much
+  slower there), the engine answering with an error, the camera frame or
+  screen snapshot failing, or screen sharing having stopped — and every one of
+  them used to pass in silence. The in-session indicator kept reading "AI
+  watching" the whole time.
+
+  StudyVis now notices when AI has gone a couple of minutes without managing a
+  single check. The indicator stops claiming to watch — it reads "AI error"
+  when the engine itself is the problem and "AI paused" when there is simply
+  nothing to look at — a message names what is actually in the way, with a
+  shortcut to Settings → AI when that is where the fix lives, and a line goes
+  into the session log, so the report afterwards says why the AI section is
+  empty rather than leaving you to guess whether AI was even on. If AI
+  recovers, it says that too, and it will speak up again if it stalls a second
+  time. Deliberate pauses are not treated as a stall: taking a break, turning
+  your camera off, a Pomodoro rest, and a battery pause all stay quiet as
+  before. Nothing about this crosses to your friends — the log line is local to
+  your device. (#92, I82)
+
 ## 1.8.2 — 2026-07-26 — The host's camera reaches you, and AI stops dying at session start
 
 Two fixes for things that went wrong the moment a session began: the camera

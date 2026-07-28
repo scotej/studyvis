@@ -176,6 +176,49 @@ export const BACKOFF_RECOVER_AFTER = 3
 // cool without abandoning accountability entirely.
 export const BACKOFF_MULTIPLIER = 2
 
+// I82 — why a tick produced no sample. Every value here names a condition
+// the loop used to skip in silence: no toast, no status-chip change, no log
+// row, and (because the focus store never saw a judgment) a post-session
+// report with "No focus score was recorded" and nothing explaining it. That
+// is the reported Windows symptom — the loop knew, and threw it away.
+//
+// Deliberate pauses (break, camera off, pomodoro rest, battery) are NOT in
+// this set: they already have their own surfaces and are expected to last.
+export type SampleBlockReason =
+  // The sidecar is not running/healthy yet — still loading the model, or
+  // stuck short of the crash-restart budget that would flip it to errored.
+  | 'engine_warming'
+  // The inference request hit `requestTimeoutMs` and aborted. The likeliest
+  // cause on a CPU-only build (Windows/Linux run `--n-gpu-layers 0`) is a
+  // model too heavy for the machine, so every tick burns the full timeout.
+  | 'inference_timeout'
+  // The sidecar answered non-2xx, or the tick threw something unexpected.
+  | 'inference_failed'
+  // Snapshotting the camera or the screen keeps throwing. `onCaptureError`
+  // toasts the first one and then latches, so without this the 2nd through
+  // nth failures are silent.
+  | 'capture_failing'
+  // No live local camera track to snapshot.
+  | 'camera_missing'
+  // Every long-lived screen track is gone (without the denial latch firing).
+  | 'screen_lost'
+
+// How long the loop may go without a resolved sample before it says so.
+// Measured from boot (or the last resolved sample / deliberate pause), NOT
+// from the first blocked tick: a single slow cold start can't trip it because
+// nothing is reported until at least one tick has actually failed and named a
+// reason. Two minutes is short enough that the user learns inside the session
+// rather than from an empty report afterwards.
+export const STALL_NOTICE_AFTER_MS = 120_000
+
+// Cadence of the stall check. It gets its own timer rather than riding the
+// sample tick because a stalled loop is frequently stalled *inside* a tick:
+// an inference that burns the whole REQUEST_TIMEOUT_MS (90 s) before failing
+// means tick boundaries land 90 s apart, so evaluating only there pushed the
+// first notice out to ~285 s — well past the two minutes this promises, on
+// exactly the CPU-only-machine case the watchdog exists for.
+export const STALL_CHECK_INTERVAL_MS = 15_000
+
 export type BackoffState = {
   engaged: boolean
   consecutiveSlow: number
@@ -359,30 +402,6 @@ export function getSampleLoopRuntime(): SampleLoopRuntime {
 export type SampleLoopStartReason =
   'no_active_model' | 'model_files_missing' | 'sidecar_start_failed'
 
-// I83 — why a running loop has produced no judgments. Distinct from
-// `SampleLoopStartReason`: the loop DID start, and is still ticking.
-export type SampleLoopStallReason =
-  // The sidecar never reached running+healthy. Covers the Rust watcher having
-  // exhausted its restarts (status 'errored' has its own callback) and the
-  // slower kind where /health simply never returns 2xx.
-  | 'engine_unavailable'
-  // The sidecar answered, with an HTTP error. A model that loaded without its
-  // vision projector answers exactly this way, every tick.
-  | 'engine_error'
-  // Every inference hit the per-tick timeout. The machine is too slow for the
-  // cadence, or the model is wedged.
-  | 'inference_timeout'
-  // Anything else thrown inside the tick — a fetch TypeError, a malformed
-  // response, an encode failure.
-  | 'unknown'
-
-// I83 — consecutive unproductive ticks before `onStalled` fires. Three is long
-// enough that a cold-start warmup (the first tick or two commonly skip while
-// llama-server loads the model into RAM) never trips it, and short enough that
-// the user hears about a genuinely dead pipeline in well under a minute at the
-// default cadence.
-export const STALL_TICKS = 3
-
 export type SampleLoopOptions = {
   // Declared study topic. Read per-tick via callback so a mid-session
   // topic_change via the V2-P7 Ctrl+] dialog takes effect on the NEXT
@@ -431,8 +450,12 @@ export type SampleLoopOptions = {
   // p95, i.e. the machine is throttling). SessionView wires a one-shot
   // in-voice toast. No payload: the notice is informational, not actionable.
   onThermalBackoff?: () => void
-  // I83 — fires ONCE per loop lifetime when the loop has been ticking without
-  // producing a single judgment for STALL_TICKS consecutive ticks.
+  // I82 — fires when the loop has gone STALL_NOTICE_AFTER_MS without a
+  // resolved sample for a reason the user can't otherwise see, carrying the
+  // most recent reason. Re-arms after `onSamplesResumed`, so a session that
+  // stalls, recovers, and stalls again reports both — but a single stall can
+  // never repeat-toast. Consumers surface it AND record it, because the
+  // post-session report is where its absence was noticed.
   //
   // Every path this covers used to be a bare `console.warn` and a reschedule:
   // a sidecar that spawns but never reports healthy, an HTTP error from a model
@@ -443,7 +466,16 @@ export type SampleLoopOptions = {
   // nothing — which is exactly what issue #92 looked like from the user's side.
   // Paused states (break, camera off, pomodoro rest, battery) are deliberately
   // NOT stalls: nothing is wrong and nothing is being hidden.
-  onStalled?: (reason: SampleLoopStallReason) => void
+  //
+  // I83's consecutive-tick counter (STALL_TICKS) was the first cut at this and
+  // is superseded here: it counted the cold-start ticks that boot() documents
+  // as "gracefully skip" while llama-server loads the model, so a healthy
+  // CPU-only session toasted "the engine isn't responding" ~15-30 s in and had
+  // no resume path to take it back. A wall-clock window measures the thing the
+  // user actually experiences, and re-arms.
+  onSamplesStalled?: (reason: SampleBlockReason) => void
+  // Fires once after a reported stall when a sample finally resolves.
+  onSamplesResumed?: () => void
   // Fires once per resolved sample with the events the score machine
   // emitted for that sample plus the sample's verdict. V2-P6 wires the
   // peer-alert + self-warning dispatcher through this callback so the
@@ -497,10 +529,14 @@ type InternalState = {
   // `justEngaged` and re-toast. This latch keeps the documented once-only
   // contract; mirrors `batteryNoticeShown` / `sidecarErrorReported`.
   thermalNoticeShown: boolean
-  // I83 — consecutive ticks that reached the inference path (not a paused or
-  // input-absent state) and still produced no judgment. Reset by any resolved
-  // sample. Drives the one-shot `onStalled` notice via `stallReported`.
-  unproductiveTicks: number
+  // I82 — stall watchdog. `lastProgressAt` is the last moment the loop was
+  // demonstrably fine: boot, a resolved sample, or a deliberate pause.
+  // `stallReason` is the most recent blocked-tick reason and doubles as the
+  // arming flag — null means nothing has failed since the last progress, so
+  // there is nothing to report. `stallReported` is the report-once latch that
+  // `onSamplesResumed` clears.
+  lastProgressAt: number
+  stallReason: SampleBlockReason | null
   stallReported: boolean
   modelId: string | null
   ticks: number
@@ -531,7 +567,8 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
     modelP95Sec: 0,
     backoff: initialBackoffState(),
     thermalNoticeShown: false,
-    unproductiveTicks: 0,
+    lastProgressAt: 0,
+    stallReason: null,
     stallReported: false,
     modelId: opts.modelId,
     ticks: 0,
@@ -541,6 +578,9 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
 
   let tickHandle: unknown | null = null
   let batteryHandle: unknown | null = null
+  // I82 — stall watchdog timer. Separate from the tick chain on purpose; see
+  // STALL_CHECK_INTERVAL_MS.
+  let stallHandle: unknown | null = null
   let activeAbort: AbortController | null = null
   // Surfaces the long-running boot work (refusal checks, sidecar start) so
   // stop() can wait for it before returning. Without this, an immediate
@@ -555,6 +595,57 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
     const override = useSettingsStore.getState().values.sampleIntervalSec
     const baseMs = effectiveIntervalSec(state.modelFloorSec, override) * 1000
     return state.backoff.engaged ? baseMs * BACKOFF_MULTIPLIER : baseMs
+  }
+
+  // I82 — a tick ended without a sample for a reason nothing else surfaces.
+  // Arms the watchdog with the reason; the decision to report is
+  // `evaluateStall`'s, so a tick that itself took longer than the notice
+  // window doesn't delay the notice by its own duration.
+  function noteBlockedTick(reason: SampleBlockReason): void {
+    if (state.stopped) return
+    state.stallReason = reason
+    evaluateStall()
+  }
+
+  // The single place that decides "this loop has gone quiet and the user
+  // should be told". Called from blocked ticks AND from the standalone
+  // watchdog timer, so an inference hung for the full request timeout can't
+  // hide the condition until it finally rejects.
+  function evaluateStall(): void {
+    if (state.stopped) return
+    // A denial already surfaced through onCaptureDenied and mounted the
+    // permission overlay; a second notice underneath it would be noise.
+    if (state.captureDenied) return
+    if (state.stallReported) return
+    const reason = state.stallReason
+    // Nothing has failed since the last progress — a loop mid-inference on a
+    // healthy machine is not stalled, it's working.
+    if (reason === null) return
+    if (runtime.now() - state.lastProgressAt < STALL_NOTICE_AFTER_MS) return
+    state.stallReported = true
+    opts.onSamplesStalled?.(reason)
+  }
+
+  // A deliberate pause (break, camera off, pomodoro rest, battery, AI toggled
+  // off, an errored sidecar that already toasted) is not a stall — treat it as
+  // progress so a long break can't be mistaken for one, and disarm the reason
+  // so the watchdog timer has nothing to report while paused. The report-once
+  // latch deliberately survives: a stall that was already reported is still
+  // outstanding until a sample actually lands, and the consumer's own state
+  // (SessionView's `aiStalled` ref) stays consistent with that.
+  function resetStallClock(): void {
+    state.lastProgressAt = runtime.now()
+    state.stallReason = null
+  }
+
+  // A sample resolved: the loop is demonstrably working again. Re-arm the
+  // watchdog, and tell the consumer if it had been told otherwise.
+  function noteSampleResolved(): void {
+    if (state.stopped) return
+    resetStallClock()
+    if (!state.stallReported) return
+    state.stallReported = false
+    opts.onSamplesResumed?.()
   }
 
   // A screen track ended — the user clicked the OS "Stop sharing" pill, or a
@@ -787,18 +878,6 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
     }, delayMs)
   }
 
-  // I83 — count an unproductive tick and raise the one-shot stall notice once
-  // the streak reaches STALL_TICKS. Called only from paths that genuinely tried
-  // to produce a judgment; paused / input-absent paths call `resetStall` or
-  // neither, so a camera-off stretch never accuses the engine.
-  function noteUnproductiveTick(reason: SampleLoopStallReason): void {
-    state.unproductiveTicks += 1
-    if (state.unproductiveTicks >= STALL_TICKS && !state.stallReported) {
-      state.stallReported = true
-      opts.onStalled?.(reason)
-    }
-  }
-
   async function tick(): Promise<void> {
     if (state.stopped) return
     state.ticks += 1
@@ -816,6 +895,7 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
       return
     }
     if (useBreakStore.getState().onBreak) {
+      resetStallClock()
       schedule(nextDelayMs())
       return
     }
@@ -823,10 +903,12 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
     // (the user isn't off-task, the input is just absent) and no streak reset,
     // so focused-time % stays honest across a camera-off window.
     if (opts.isPaused?.()) {
+      resetStallClock()
       schedule(nextDelayMs())
       return
     }
     if (shouldPauseForBattery(state.battery)) {
+      resetStallClock()
       if (!state.batteryNoticeShown) {
         state.batteryNoticeShown = true
         opts.onBatteryPause?.(state.battery)
@@ -842,6 +924,7 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
       opts.onBatteryResume?.()
     }
     if (!useSettingsStore.getState().values.aiFeaturesEnabled) {
+      resetStallClock()
       // The user toggled AI off mid-session. Defensive — SessionView's
       // effect should already be tearing this loop down; the check guards
       // the race where stop() hasn't landed yet.
@@ -850,6 +933,9 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
 
     const sidecar = useSidecarStore.getState()
     if (sidecar.status === 'errored') {
+      // Already surfaced through its own channel — don't double-report it
+      // as a stall too.
+      resetStallClock()
       if (!state.sidecarErrorReported) {
         state.sidecarErrorReported = true
         opts.onSidecarErrored?.(sidecar.lastError)
@@ -869,10 +955,12 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
       } catch {
         // best-effort; we'll try again next tick
       }
-      // I83 — a sidecar that never becomes healthy is the single most common
-      // way AI runs a whole session recording nothing. Counted, so the user
-      // hears about it instead of reading "AI watching" over a dead engine.
-      noteUnproductiveTick('engine_unavailable')
+      // A sidecar that never becomes healthy is the single most common way AI
+      // runs a whole session recording nothing. Blocked (not paused), so the
+      // watchdog reports it instead of the chip reading "AI watching" over a
+      // dead engine — but on the wall clock, so a slow cold start isn't
+      // mistaken for a dead one.
+      noteBlockedTick('engine_warming')
       schedule(nextDelayMs())
       return
     }
@@ -883,6 +971,7 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
       // camera died mid-session (I42). Both are "input absent": reschedule
       // without counting a sample. SessionView's MediaErrorBanner owns the
       // recovery affordance for the ended case.
+      noteBlockedTick('camera_missing')
       schedule(nextDelayMs())
       return
     }
@@ -899,6 +988,7 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
     ) {
       // boot() acquired these; if they're all gone the 'ended' handler has
       // already latched captureDenied. Skip defensively.
+      noteBlockedTick('screen_lost')
       schedule(nextDelayMs())
       return
     }
@@ -929,7 +1019,7 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
         port == null ||
         port !== gatedPort
       ) {
-        noteUnproductiveTick('engine_unavailable')
+        noteBlockedTick('engine_warming')
         return
       }
       const body = buildFocusRequest({
@@ -960,7 +1050,7 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
           bodyLength: errText.length,
           modelId: opts.modelId,
         })
-        noteUnproductiveTick('engine_error')
+        noteBlockedTick('inference_failed')
         return
       }
       const json = (await response.json()) as ChatCompletionResponse
@@ -988,11 +1078,10 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
         opts.onThermalBackoff?.()
       }
       state.captureErrorReported = false
-      // I83 — a resolved sample (confident OR uncertain) means the pipeline is
-      // alive end to end, so the stall streak starts over. `stallReported`
-      // stays latched: the notice is once per loop lifetime, and a pipeline
-      // that recovers on its own doesn't need a second toast.
-      state.unproductiveTicks = 0
+      // A resolved sample (confident OR uncertain) means the pipeline is alive
+      // end to end, so the stall clock starts over and a reported stall is
+      // announced as recovered.
+      noteSampleResolved()
       const events = useFocusStore
         .getState()
         .applyJudgment(verdict, runtime.now())
@@ -1022,23 +1111,23 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
           state.captureErrorReported = true
           opts.onCaptureError?.(err, false)
         }
-        noteUnproductiveTick('unknown')
+        noteBlockedTick('capture_failing')
         return
       }
       if (err instanceof DOMException && err.name === 'AbortError') {
         // The "why did focus detection stop scoring" line — the cadence
-        // state is what makes it answerable. I83 — the bound is the
-        // p95-derived tick timeout, not the old flat constant.
+        // state is what makes it answerable. The bound is the p95-derived
+        // tick timeout, not the old flat constant.
         log.warn('inference.aborted', {
           timeoutMs: tickTimeoutMs,
           modelId: opts.modelId,
           onBattery: state.battery.onBattery,
         })
-        noteUnproductiveTick('inference_timeout')
+        noteBlockedTick('inference_timeout')
         return
       }
       log.warn('tick.failed', { modelId: opts.modelId, err })
-      noteUnproductiveTick('unknown')
+      noteBlockedTick('inference_failed')
     } finally {
       runtime.clearTimeout(timer)
       activeAbort = null
@@ -1071,6 +1160,10 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
     if (batteryHandle !== null) {
       runtime.clearTimeout(batteryHandle)
       batteryHandle = null
+    }
+    if (stallHandle !== null) {
+      runtime.clearTimeout(stallHandle)
+      stallHandle = null
     }
     if (activeAbort) {
       try {
@@ -1346,6 +1439,14 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
     // real reading, not the constructor default.
     await pollBattery()
     if (state.stopped) return
+    // I82 — the stall window runs from here: the loop is about to start
+    // ticking, so from this moment on "no resolved sample" is meaningful.
+    state.lastProgressAt = runtime.now()
+    stallHandle = runtime.setTimeout(function stallTick() {
+      if (state.stopped) return
+      evaluateStall()
+      stallHandle = runtime.setTimeout(stallTick, STALL_CHECK_INTERVAL_MS)
+    }, STALL_CHECK_INTERVAL_MS)
     batteryHandle = runtime.setTimeout(function batteryTick() {
       if (state.stopped) return
       void pollBattery().finally(() => {
