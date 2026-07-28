@@ -23,6 +23,10 @@
 // src/features/session/hello.ts) instead of zod: house style avoids runtime
 // validation libs and the schema is three fields wide.
 
+import { logger } from '@/lib/log'
+
+const log = logger.child('ai.parse')
+
 export type Severity = 'on_task' | 'mild' | 'moderate' | 'blatant'
 
 export const SEVERITIES: ReadonlyArray<Severity> = [
@@ -142,31 +146,12 @@ function extractFirstJsonObject(input: string): string | null {
   return null
 }
 
-// Optional logger seam for tests; production calls console.warn which is
-// fine in both the browser (sample loop) and Node (eval harness).
-type ParseLogger = (...args: unknown[]) => void
-let activeLogger: ParseLogger = (...args) => console.warn(...args)
-
-export function __setParseLogger(logger: ParseLogger): void {
-  activeLogger = logger
-}
-
-export function __resetParseLogger(): void {
-  activeLogger = (...args) => console.warn(...args)
-}
-
-// Max prefix of `raw` we emit to the logger. The full string is preserved on
-// the ParseFallback.raw field for debugging — the logger snippet just keeps
-// console output bounded when a model returns hundreds of tokens of prose,
-// and avoids flooding logs with on-screen text that may be sensitive.
-const LOG_SNIPPET_MAX = 200
-
+// The full string is preserved on ParseFallback.raw for the caller; the log
+// gets a clamped, control-stripped copy. That clamping is the logger's job now
+// (sanitizeText), not this module's — model output is shaped by whatever is on
+// the user's screen, so it is untrusted text like any relay's.
 function logFallback(reason: string, raw: string): void {
-  const snippet =
-    raw.length > LOG_SNIPPET_MAX
-      ? `${raw.slice(0, LOG_SNIPPET_MAX)}…[${raw.length} chars total]`
-      : raw
-  activeLogger('[parseJudgment] fallback:', reason, { snippet })
+  log.warn('parse.fallback', { reason, snippet: raw, rawLength: raw.length })
 }
 
 export function parseJudgment(raw: string): ParseResult {

@@ -17,20 +17,15 @@
 // on the clock-skew trap).
 
 import { bytesToHex } from '@/lib/encoding'
+import { logger } from '@/lib/log'
 import { PRESENCE_EVENT_KIND, type NostrEvent } from './events'
 
-// The text in an OK-false reason or a NOTICE is written by the relay, and the
-// console is what a friend copies into a bug report (README points them at
-// Settings → Advanced → Open data folder). A newline in that text forges log
-// lines that read as ours; a bidi override reorders what a human sees without
-// changing the bytes. Strip both classes and clamp the length — a relay that
-// wants more than 200 characters of our log is not being helpful.
-// Flagged as js/log-injection by CodeQL, which is how it was found.
-const LOG_MAX = 200
-function forLog(value: unknown): string {
-  const text = String(value).replace(/[\p{Cc}\p{Cf}]/gu, ' ')
-  return text.length > LOG_MAX ? `${text.slice(0, LOG_MAX)}…` : text
-}
+// I80 — the text in an OK-false reason or a NOTICE is written by the relay,
+// and the log is what a friend pastes into a bug report. The private forLog()
+// that used to live here is now sanitizeText() inside the logger, applied to
+// every field of every record, so relay-authored text is stripped and clamped
+// wherever it lands rather than only at the two sites that were audited.
+const log = logger.child('nostr.pool')
 
 // The structural subset of WebSocket the pool needs; tests inject fakes.
 export type PoolSocket = {
@@ -140,11 +135,15 @@ export function createRelayPool(config: RelayPoolConfig): RelayPool {
     // report needs in the console. check-relays catches this at release
     // time only; policies change between releases (offchain.pub did).
     if (frame[0] === 'OK' && frame[2] === false) {
-      console.warn(`presence relay ${url} rejected publish:`, forLog(frame[3]))
+      log.warn('relay.rejected', {
+        relayUrl: url,
+        eventId: frame[1],
+        reason: frame[3],
+      })
       return
     }
     if (frame[0] === 'NOTICE') {
-      console.warn(`presence relay ${url} notice:`, forLog(frame[1]))
+      log.warn('relay.notice', { relayUrl: url, subId, notice: frame[1] })
       return
     }
     if (frame[0] !== 'EVENT' || frame[1] !== subId) return
@@ -186,7 +185,7 @@ export function createRelayPool(config: RelayPoolConfig): RelayPool {
     } catch (err) {
       // A constructor throw is a malformed URL, not a network blip —
       // retrying re-throws forever. Give up on this URL only.
-      console.warn(`presence relay pool: bad relay URL ${slot.url}:`, err)
+      log.warn('relay.bad_url', { relayUrl: slot.url, gaveUp: true, err })
       slot.gaveUp = true
       return
     }

@@ -133,11 +133,17 @@ let runtime: LogRuntime = { ...defaultRuntime }
 const CONTROL_OR_FORMAT = /[\p{Cc}\p{Cf}]/gu
 
 // Shape-based, not wordlist-based: importing @scure/bip39's 2048 words into a
-// module every other module imports costs more than occasionally mangling an
-// all-lowercase sentence, and over-redacting is the right direction to be
-// wrong in at the three bare `console.error(err)` sites inside the mnemonic
-// path. 12/15/18/21/24-word runs all match.
-const MNEMONIC_RUN = /\b(?:[a-z]{3,8}\s+){11,}[a-z]{3,8}\b/g
+// module every other module imports costs more than a blunt shape check, and
+// over-redacting is the right direction to be wrong in at the three bare
+// `console.error(err)` sites that sit inside the mnemonic path.
+//
+// The match is the MAXIMAL run of lowercase 3–8 letter words, and it is
+// redacted only when the whole run is exactly a BIP39 length. Matching "12 or
+// more" instead would swallow model prose whole — a 200-word all-lowercase
+// reply is the normal failure case at ai.parse, and that snippet is the most
+// useful field on the record.
+const LOWERCASE_RUN = /[a-z]{3,8}(?:\s+[a-z]{3,8})+/g
+const MNEMONIC_WORD_COUNTS = new Set([12, 15, 18, 21, 24])
 
 // Raw rusqlite, identity and Tauri error strings routinely embed the OS
 // username, and diagnostics_info's log path leaks it outright.
@@ -157,7 +163,9 @@ export function sanitizeText(
   maxChars: number = FIELD_MAX_CHARS
 ): string {
   let text = String(value).replace(CONTROL_OR_FORMAT, ' ')
-  text = text.replace(MNEMONIC_RUN, REDACTED_MNEMONIC)
+  text = text.replace(LOWERCASE_RUN, (run) =>
+    MNEMONIC_WORD_COUNTS.has(run.split(/\s+/).length) ? REDACTED_MNEMONIC : run
+  )
   for (const [pattern, replacement] of HOME_DIRS) {
     text = text.replace(pattern, replacement)
   }

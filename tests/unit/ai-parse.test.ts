@@ -1,12 +1,12 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 
+import { parseJudgment, type Judgment, type ParseResult } from '@/features/ai'
 import {
-  parseJudgment,
-  __resetParseLogger,
-  __setParseLogger,
-  type Judgment,
-  type ParseResult,
-} from '@/features/ai'
+  FIELD_MAX_CHARS,
+  __resetLog,
+  __setLogRecordSink,
+  type LogRecord,
+} from '@/lib/log'
 
 const VALID: Judgment = {
   severity: 'on_task',
@@ -28,12 +28,19 @@ function expectFallback(result: ParseResult, raw: string): void {
 }
 
 describe('parseJudgment', () => {
+  let records: LogRecord[]
+
   beforeEach(() => {
-    // Silence logger so adversarial fixtures don't fill the test output.
-    __setParseLogger(() => {})
+    __resetLog()
+    records = []
+    __setLogRecordSink((record) => records.push(record))
+    // Silence the console mirror so adversarial fixtures don't fill the test
+    // output.
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
   })
   afterEach(() => {
-    __resetParseLogger()
+    vi.restoreAllMocks()
+    __resetLog()
   })
 
   test('parses a well-formed JSON response', () => {
@@ -208,31 +215,35 @@ Let me know.`
   })
 
   test('logs the raw response when falling back', () => {
-    const logger = vi.fn()
-    __setParseLogger(logger)
     parseJudgment('total nonsense, no JSON here')
-    expect(logger).toHaveBeenCalled()
-    const args = logger.mock.calls[0]
-    expect(args[0]).toContain('[parseJudgment]')
+    expect(records).toHaveLength(1)
+    expect(records[0]?.scope).toBe('ai.parse')
+    expect(records[0]?.msg).toBe('parse.fallback')
+    expect(records[0]?.data?.snippet).toBe('total nonsense, no JSON here')
   })
 
   test('does not log on a successful parse', () => {
-    const logger = vi.fn()
-    __setParseLogger(logger)
     parseJudgment(JSON.stringify(VALID))
-    expect(logger).not.toHaveBeenCalled()
+    expect(records).toHaveLength(0)
   })
 
   test('truncates the logged raw snippet on long responses; full raw stays on the result', () => {
-    const logger = vi.fn()
-    __setParseLogger(logger)
     const longRaw = 'prose '.repeat(200) + 'no json here'
     const result = parseJudgment(longRaw)
     expect(result.ok).toBe(false)
-    expect(logger).toHaveBeenCalled()
-    const meta = logger.mock.calls[0][2] as { snippet: string }
-    expect(meta.snippet.length).toBeLessThan(longRaw.length)
-    expect(meta.snippet).toContain('chars total')
+    const snippet = String(records[0]?.data?.snippet)
+    expect(snippet.length).toBe(FIELD_MAX_CHARS + 1)
+    expect(snippet.endsWith('…')).toBe(true)
+    // The pre-clamp length is a field rather than a suffix, so a reader can
+    // still tell how much was dropped.
+    expect(records[0]?.data?.rawLength).toBe(longRaw.length)
     if (!result.ok) expect(result.raw).toBe(longRaw)
+  })
+
+  test('model output can never forge a log line', () => {
+    parseJudgment('sure!\nlvl=error [app] everything is fine')
+    const snippet = String(records[0]?.data?.snippet)
+    expect(snippet).not.toMatch(/[\p{Cc}\p{Cf}]/u)
+    expect(snippet).toContain('everything is fine')
   })
 })

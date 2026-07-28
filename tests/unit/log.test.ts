@@ -261,6 +261,14 @@ describe('redaction', () => {
     expect(sanitizeText(words)).toBe(words)
   })
 
+  test('a long lowercase run is prose, not a mnemonic', () => {
+    // The normal ai.parse failure is a couple of hundred words of lowercase
+    // model prose. Redacting that would throw away the most useful field on
+    // the record, so only an exactly-BIP39-length run counts.
+    const prose = Array.from({ length: 60 }, () => 'prose').join(' ')
+    expect(sanitizeText(prose, 5_000)).toBe(prose)
+  })
+
   test('home directories lose the username on all three platforms', () => {
     expect(sanitizeText('/Users/scott/Library/app.db')).toBe(
       '/Users/~/Library/app.db'
