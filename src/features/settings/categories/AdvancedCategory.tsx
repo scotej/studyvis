@@ -16,6 +16,12 @@ import {
 import { toast } from 'sonner'
 
 import { SettingsRow, SettingsSection } from '@/components/SettingsRow'
+import {
+  flushLog,
+  formatRecords,
+  parseRecordLines,
+  sanitizeText,
+} from '@/lib/log'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -31,6 +37,18 @@ import { useAutostart } from '@/features/system'
 import { sessionsClearAll } from '@/lib/db/sessions'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { strings } from '@/strings'
+
+type DiagnosticsInfo = {
+  os: string
+  arch: string
+  log_path: string
+  app_log_path: string
+}
+
+// Enough to cover the minutes around a failure and still paste as a comment
+// rather than an attachment.
+const LOG_TAIL_LINES = 80
+const PATH_MAX_CHARS = 300
 
 export function AdvancedCategory() {
   const debugLogEnabled = useSettingsStore((s) => s.values.debugLogEnabled)
@@ -60,14 +78,27 @@ export function AdvancedCategory() {
   const handleCopyDiagnostics = useCallback(async () => {
     setSharingLog(true)
     try {
-      const info = await invoke<{ os: string; arch: string; log_path: string }>(
-        'diagnostics_info'
-      )
+      // Flush first, then read the tail back from DISK rather than from this
+      // webview's ring buffer: only the file has the AI dialog window's
+      // records and the previous run's, and "it crashed and restarted" is the
+      // case a bug report is usually about. Everything in the file was
+      // redacted at record time, so reading it back adds no exposure.
+      await flushLog()
+      const info = await invoke<DiagnosticsInfo>('diagnostics_info')
+      const lines = await invoke<string[]>('app_log_tail', {
+        maxLines: LOG_TAIL_LINES,
+      })
       const text = copy.shareLog.summary({
         version: __APP_VERSION__,
         os: info.os,
         arch: info.arch,
-        logPath: info.log_path,
+        webview: sanitizeText(navigator.userAgent),
+        display: `${screen.width}x${screen.height}@${devicePixelRatio} · ${navigator.hardwareConcurrency} cores`,
+        // The paths carry the OS username; the same scrubber the log lines
+        // went through takes it out.
+        logPath: sanitizeText(info.app_log_path, PATH_MAX_CHARS),
+        aiLogPath: sanitizeText(info.log_path, PATH_MAX_CHARS),
+        logTail: formatRecords(parseRecordLines(lines)),
       })
       await navigator.clipboard.writeText(text)
       toast.success(copy.shareLog.copiedToast)

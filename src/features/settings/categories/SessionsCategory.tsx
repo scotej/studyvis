@@ -29,6 +29,10 @@ import {
   sessionsDelete,
   type SessionRecord,
 } from '@/lib/db/sessions'
+import { logger } from '@/lib/log'
+
+const log = logger.child('settings.sessions')
+
 import { strings } from '@/strings'
 
 type LoadStatus = 'idle' | 'loading' | 'ready' | 'error'
@@ -56,8 +60,8 @@ export function SessionsCategory({ onOpenSession }: SessionsCategoryProps) {
     } catch (err) {
       // Tauri rejects with a plain string, so the raw backend text (a
       // rusqlite error chain) used to land verbatim in the row's help line.
-      // Keep it in the console for debugging; the user gets friendly copy.
-      console.error('sessions_list failed:', err)
+      // Keep it in the log for debugging; the user gets friendly copy.
+      log.error('list.failed', { cmd: 'sessions_list', err })
       setError(copy.loadErrorHelp)
       setStatus('error')
     }

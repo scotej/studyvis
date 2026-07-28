@@ -121,6 +121,10 @@ import {
   type PeerOrderingEntry,
   type StartArgs as PomodoroStartArgs,
 } from './pomodoro'
+import { logger } from '@/lib/log'
+
+const log = logger.child('session')
+const dialogLog = log.child('aidialog')
 
 // #47 B4 — honor the persisted mic pick on acquisition. `ideal` (never
 // `exact`) so an unplugged/renamed device falls back to the OS default
@@ -797,7 +801,11 @@ export function SessionView({
       try {
         await auditAction.send(event)
       } catch (err) {
-        console.error('audit broadcast failed:', err)
+        log.error('audit_broadcast.failed', {
+          auditKind: kind,
+          localAppendSucceeded: true,
+          err,
+        })
       }
     }
     emitAuditRef.current = emitAudit
@@ -856,7 +864,12 @@ export function SessionView({
       try {
         await noteAction.send(payload)
       } catch (err) {
-        console.error('note broadcast failed:', err)
+        // The length, never the text: a session note is the user's own
+        // private writing.
+        log.error('note_broadcast.failed', {
+          textLength: payload.text.length,
+          err,
+        })
       }
     }
 
@@ -1187,7 +1200,9 @@ export function SessionView({
       // response; emitTo rejects in that case. Swallow the rejection so
       // it doesn't surface as an unhandled promise rejection.
       void emitTo(AI_DIALOG_WINDOW_LABEL, event, payload).catch((err) => {
-        console.warn(`[ai-dialog] emitTo(${event}) failed:`, err)
+        // The dialog closing between request and response is the normal
+        // case, so this is debug rather than a warning nobody can act on.
+        dialogLog.debug('emit.failed', { event, err })
       })
     }
 
@@ -1210,7 +1225,11 @@ export function SessionView({
               previous_topic: previous,
               new_topic: next,
             }).catch((err) => {
-              console.error('[ai-dialog] topic_change audit failed:', err)
+              dialogLog.error('topic_change_audit.failed', {
+                previousTopicLength: previous.length,
+                newTopicLength: next.length,
+                err,
+              })
             })
           }
           // Re-push context so a still-open dialog reflects the new value.
@@ -1270,7 +1289,10 @@ export function SessionView({
               emitToDialog(AI_DIALOG_BREAK_RESPONSE, response)
             })
             .catch((err) => {
-              console.error('[ai-dialog] break flow failed:', err)
+              dialogLog.error('break_flow.failed', {
+                fallbackVerdict: 'denied',
+                err,
+              })
               emitToDialog(AI_DIALOG_BREAK_RESPONSE, {
                 nonce: payload.nonce,
                 verdict: 'denied',

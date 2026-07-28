@@ -1,12 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 
-import {
-  parseJudgment,
-  __resetParseLogger,
-  __setParseLogger,
-  type Judgment,
-  type ParseResult,
-} from '@/features/ai'
+import { parseJudgment, type Judgment, type ParseResult } from '@/features/ai'
+import { __resetLog, __setLogRecordSink, type LogRecord } from '@/lib/log'
 
 const VALID: Judgment = {
   severity: 'on_task',
@@ -28,12 +23,19 @@ function expectFallback(result: ParseResult, raw: string): void {
 }
 
 describe('parseJudgment', () => {
+  let records: LogRecord[]
+
   beforeEach(() => {
-    // Silence logger so adversarial fixtures don't fill the test output.
-    __setParseLogger(() => {})
+    __resetLog()
+    records = []
+    __setLogRecordSink((record) => records.push(record))
+    // Silence the console mirror so adversarial fixtures don't fill the test
+    // output.
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
   })
   afterEach(() => {
-    __resetParseLogger()
+    vi.restoreAllMocks()
+    __resetLog()
   })
 
   test('parses a well-formed JSON response', () => {
@@ -207,32 +209,35 @@ Let me know.`
     if (result.ok) expect(result.value).toEqual(first)
   })
 
-  test('logs the raw response when falling back', () => {
-    const logger = vi.fn()
-    __setParseLogger(logger)
+  test('records a fallback with the shape of the reply', () => {
     parseJudgment('total nonsense, no JSON here')
-    expect(logger).toHaveBeenCalled()
-    const args = logger.mock.calls[0]
-    expect(args[0]).toContain('[parseJudgment]')
+    expect(records).toHaveLength(1)
+    expect(records[0]?.scope).toBe('ai.parse')
+    expect(records[0]?.msg).toBe('parse.fallback')
+    expect(records[0]?.data?.rawLength).toBe(
+      'total nonsense, no JSON here'.length
+    )
+    expect(records[0]?.data?.startsWithBrace).toBe(false)
   })
 
   test('does not log on a successful parse', () => {
-    const logger = vi.fn()
-    __setParseLogger(logger)
     parseJudgment(JSON.stringify(VALID))
-    expect(logger).not.toHaveBeenCalled()
+    expect(records).toHaveLength(0)
   })
 
-  test('truncates the logged raw snippet on long responses; full raw stays on the result', () => {
-    const logger = vi.fn()
-    __setParseLogger(logger)
-    const longRaw = 'prose '.repeat(200) + 'no json here'
+  test('the reply text never reaches the record; the full raw stays on the result', () => {
+    // `reasoning` is the model describing the user's camera and screen. The
+    // log is a file the README tells friends to attach to a public issue, so
+    // the record carries the reply's shape and nothing it said.
+    const longRaw =
+      'the user appears to be reading email in a browser window ' +
+      'prose '.repeat(200)
     const result = parseJudgment(longRaw)
     expect(result.ok).toBe(false)
-    expect(logger).toHaveBeenCalled()
-    const meta = logger.mock.calls[0][2] as { snippet: string }
-    expect(meta.snippet.length).toBeLessThan(longRaw.length)
-    expect(meta.snippet).toContain('chars total')
+    const serialised = JSON.stringify(records[0])
+    expect(serialised).not.toContain('reading email')
+    expect(serialised).not.toContain('prose')
+    expect(records[0]?.data?.rawLength).toBe(longRaw.length)
     if (!result.ok) expect(result.raw).toBe(longRaw)
   })
 })

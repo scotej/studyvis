@@ -30,7 +30,10 @@ import {
   type TurnServerConfig,
 } from 'trystero'
 
+import { logger } from '@/lib/log'
 import { DEFAULT_RELAY_URLS } from './relays'
+
+const log = logger.child('p2p.trystero')
 
 export const APP_ID = 'studyvis'
 
@@ -323,12 +326,14 @@ function guardedFanout<Args extends unknown[]>(
   subs: Iterable<(...args: Args) => void>,
   ...args: Args
 ): void {
+  let index = 0
   for (const fn of subs) {
     try {
       fn(...args)
     } catch (err) {
-      console.error('trystero subscriber threw:', err)
+      log.error('subscriber.threw', { subscriberIndex: index, err })
     }
+    index += 1
   }
 }
 

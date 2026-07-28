@@ -15,6 +15,7 @@ import {
   PRESENCE_EVENT_KIND,
   type NostrEvent,
 } from '@/lib/nostr/events'
+import { __resetLog, __setLogRecordSink, type LogRecord } from '@/lib/log'
 
 type Listener = (evt: { data?: unknown }) => void
 
@@ -186,85 +187,85 @@ describe('scoped republish on open', () => {
 })
 
 describe('relay rejection visibility', () => {
-  test('OK-false and NOTICE frames are logged, never routed as events', () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
-    try {
-      const h = makeHarness(['wss://a'])
-      h.pool.setSubscription(['tag-1'])
-      const socket = h.latest('wss://a')
-      socket.open()
-      socket.emit('message', {
-        data: JSON.stringify(['OK', 'someid', false, 'restricted: policy']),
-      })
-      socket.emit('message', {
-        data: JSON.stringify(['NOTICE', 'rate limited']),
-      })
-      expect(h.events).toEqual([])
-      const logged = warn.mock.calls.map((c) => c.join(' '))
-      expect(logged.some((l) => l.includes('restricted: policy'))).toBe(true)
-      expect(logged.some((l) => l.includes('rate limited'))).toBe(true)
-      h.pool.close()
-    } finally {
-      warn.mockRestore()
-    }
+  // I80 — the relay writes this text and we record it. These assertions are
+  // the regression net for both halves of the contract: the text must still
+  // arrive (never silent swallowing), and it must arrive stripped of the
+  // control characters that would let it forge a line reading as ours.
+  let records: LogRecord[]
+
+  beforeEach(() => {
+    __resetLog()
+    records = []
+    __setLogRecordSink((record) => records.push(record))
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
   })
 
-  // The relay writes this text and we print it. A newline lets it forge log
-  // lines that read as ours in a log a friend pastes into a bug report; a
-  // bidi override reorders what they see without changing the bytes.
-  test('control characters in a relay-authored reason cannot forge log lines', () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
-    try {
-      const h = makeHarness(['wss://a'])
-      h.pool.setSubscription(['tag-1'])
-      const socket = h.latest('wss://a')
-      socket.open()
-      socket.emit('message', {
-        data: JSON.stringify([
-          'OK',
-          'someid',
-          false,
-          'denied\n[error] presence relay wss://evil accepted publish',
-        ]),
-      })
-      socket.emit('message', {
-        data: JSON.stringify(['NOTICE', 'clean‮reversed']),
-      })
+  afterEach(() => {
+    vi.restoreAllMocks()
+    __resetLog()
+  })
 
-      const logged = warn.mock.calls.map((c) => c.join(' '))
-      const joined = logged.join('\n---\n')
-      // The text still arrives — this must not become silent swallowing.
-      expect(joined).toContain('denied')
-      expect(joined).toContain('reversed')
-      // ...but never with the control characters that made it forgeable.
-      for (const call of warn.mock.calls) {
-        const payload = String(call[call.length - 1])
-        expect(payload).not.toMatch(/[\p{Cc}\p{Cf}]/u)
-      }
-      h.pool.close()
-    } finally {
-      warn.mockRestore()
+  test('OK-false and NOTICE frames are logged, never routed as events', () => {
+    const h = makeHarness(['wss://a'])
+    h.pool.setSubscription(['tag-1'])
+    const socket = h.latest('wss://a')
+    socket.open()
+    socket.emit('message', {
+      data: JSON.stringify(['OK', 'someid', false, 'restricted: policy']),
+    })
+    socket.emit('message', {
+      data: JSON.stringify(['NOTICE', 'rate limited']),
+    })
+    expect(h.events).toEqual([])
+    const logged = records.map((r) => JSON.stringify(r))
+    expect(logged.some((l) => l.includes('restricted: policy'))).toBe(true)
+    expect(logged.some((l) => l.includes('rate limited'))).toBe(true)
+    expect(records.map((r) => r.scope)).toEqual(['nostr.pool', 'nostr.pool'])
+    expect(records[0]?.data?.relayUrl).toBe('wss://a')
+    h.pool.close()
+  })
+
+  test('control characters in a relay-authored reason cannot forge log lines', () => {
+    const h = makeHarness(['wss://a'])
+    h.pool.setSubscription(['tag-1'])
+    const socket = h.latest('wss://a')
+    socket.open()
+    socket.emit('message', {
+      data: JSON.stringify([
+        'OK',
+        'someid',
+        false,
+        'denied\n[error] presence relay wss://evil accepted publish',
+      ]),
+    })
+    socket.emit('message', {
+      data: JSON.stringify(['NOTICE', 'clean\u202Ereversed']),
+    })
+
+    const joined = records.map((r) => JSON.stringify(r)).join('\n---\n')
+    // The text still arrives — this must not become silent swallowing.
+    expect(joined).toContain('denied')
+    expect(joined).toContain('reversed')
+    // ...but never with the control characters that made it forgeable.
+    for (const record of records) {
+      expect(JSON.stringify(record.data)).not.toMatch(/[\p{Cc}\p{Cf}]/u)
     }
+    h.pool.close()
   })
 
   test('an over-long relay reason is clamped rather than flooding the log', () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
-    try {
-      const h = makeHarness(['wss://a'])
-      h.pool.setSubscription(['tag-1'])
-      const socket = h.latest('wss://a')
-      socket.open()
-      socket.emit('message', {
-        data: JSON.stringify(['NOTICE', 'x'.repeat(5000)]),
-      })
+    const h = makeHarness(['wss://a'])
+    h.pool.setSubscription(['tag-1'])
+    const socket = h.latest('wss://a')
+    socket.open()
+    socket.emit('message', {
+      data: JSON.stringify(['NOTICE', 'x'.repeat(5000)]),
+    })
 
-      const payload = String(warn.mock.calls[0]?.[1] ?? '')
-      expect(payload.length).toBeLessThanOrEqual(201)
-      expect(payload.endsWith('…')).toBe(true)
-      h.pool.close()
-    } finally {
-      warn.mockRestore()
-    }
+    const payload = String(records[0]?.data?.notice ?? '')
+    expect(payload.length).toBeLessThanOrEqual(201)
+    expect(payload.endsWith('…')).toBe(true)
+    h.pool.close()
   })
 })
 

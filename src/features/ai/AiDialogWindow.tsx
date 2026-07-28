@@ -17,6 +17,9 @@ import {
   type AiDialogContextPayload,
   type BreakResponsePayload,
 } from './aiDialogChannels'
+import { logger } from '@/lib/log'
+
+const log = logger.child('ai.dialog')
 
 // V2-P7 — Floating Ctrl+] dialog hosted in a separate Tauri WebviewWindow.
 // The OS-level window itself (transparent, alwaysOnTop, no decorations,
@@ -166,7 +169,7 @@ export function AiDialogWindow({
       try {
         await runtime.emit(AI_DIALOG_CONTEXT_REQUEST, {})
       } catch (err) {
-        console.warn('[ai-dialog] context request failed:', err)
+        log.warn('emit.failed', { event: 'context_request', err })
       }
     })()
 
@@ -259,7 +262,11 @@ export function AiDialogWindow({
             new_topic: reply.payload.new_topic,
           })
         } catch (err) {
-          console.warn('[ai-dialog] topic emit failed:', err)
+          log.warn('emit.failed', {
+            event: 'topic_change',
+            newTopicLength: reply.payload.new_topic.length,
+            err,
+          })
         }
         setState({
           text: '',
@@ -308,7 +315,7 @@ export function AiDialogWindow({
               ai_reasoning: reply.payload.reasoning,
             })
             .catch((err) => {
-              console.warn('[ai-dialog] break-request emit failed:', err)
+              log.warn('emit.failed', { event: 'break_request', nonce, err })
               if (!pendingNonces.current.has(nonce)) return
               pendingNonces.current.delete(nonce)
               window.clearTimeout(timeoutHandle)

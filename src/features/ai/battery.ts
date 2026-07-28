@@ -15,6 +15,9 @@
 // battery state we can't determine.
 
 import { invoke } from '@tauri-apps/api/core'
+import { logger } from '@/lib/log'
+
+const log = logger.child('ai.battery')
 
 export type BatteryInfo = {
   onBattery: boolean
@@ -42,7 +45,13 @@ async function defaultRead(): Promise<BatteryInfo> {
     // No battery detected, UPower absent on Linux, or platform error.
     // Surface as on-AC so the sample loop keeps running — the alternative
     // (pausing on every machine the crate doesn't support) is worse.
-    console.warn('system_battery failed; assuming on AC:', err)
+    // Fires on every poll on hardware with no battery backend (most
+    // desktops, Linux without UPower), so it is debug rather than a warning.
+    log.debug('read.failed', {
+      cmd: 'system_battery',
+      assumedOnBattery: false,
+      err,
+    })
     return { onBattery: false, percent: 100 }
   }
 }

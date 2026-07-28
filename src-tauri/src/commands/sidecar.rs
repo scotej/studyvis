@@ -356,15 +356,22 @@ pub struct DiagnosticsInfo {
     pub os: String,
     pub arch: String,
     pub log_path: String,
+    pub app_log_path: String,
 }
 
-// Reveal the AI diagnostic log in the OS file manager so a user can attach it
-// to a bug report (PLAN §3 "Share Log"). The log file is absent until the
-// sidecar runs once, so fall back to revealing its parent dir, which
-// ensure_log_path creates. Strictly local — nothing is uploaded.
+// Reveal the diagnostic logs in the OS file manager so a user can attach them
+// to a bug report (PLAN §3 "Share Log"). Prefers the app log (#98), which
+// exists from the first launch and covers the whole app rather than only the
+// AI sidecar; revealing a file opens its folder with the file selected, so the
+// friend sees llama-server.log sitting beside it either way. Falls back to the
+// sidecar log and then to the parent dir, which ensure_log_path creates.
+// Strictly local — nothing is uploaded.
 #[tauri::command]
 pub fn diagnostics_reveal_log<R: Runtime>(app: AppHandle<R>) -> Result<String, String> {
-    let log_path = ensure_log_path(&app)?;
+    let log_path = crate::commands::applog::app_log_path(&app)
+        .ok()
+        .filter(|p| p.is_file())
+        .map_or_else(|| ensure_log_path(&app), Ok)?;
     let reveal_target = if log_path.is_file() {
         log_path.clone()
     } else {
@@ -380,16 +387,21 @@ pub fn diagnostics_reveal_log<R: Runtime>(app: AppHandle<R>) -> Result<String, S
     Ok(log_path.to_string_lossy().into_owned())
 }
 
-// Plaintext diagnostics for a manual bug report. Deliberately PII-free: OS,
-// arch, and the log path only — no pubkey, display name, friends, or mnemonic.
-// The app version is added JS-side from __APP_VERSION__.
+// Plaintext diagnostics for a manual bug report. This struct carries OS, arch
+// and the two log paths only — no pubkey, display name, friends, or mnemonic.
+// The app version is added JS-side from __APP_VERSION__, and the log tail the
+// clipboard blob appends was redacted at record time by src/lib/log.ts (the
+// paths themselves go through the same scrubber, which takes the OS username
+// out of them).
 #[tauri::command]
 pub fn diagnostics_info<R: Runtime>(app: AppHandle<R>) -> Result<DiagnosticsInfo, String> {
     let log_path = ensure_log_path(&app)?;
+    let app_log_path = crate::commands::applog::app_log_path(&app)?;
     Ok(DiagnosticsInfo {
         os: std::env::consts::OS.to_string(),
         arch: std::env::consts::ARCH.to_string(),
         log_path: log_path.to_string_lossy().into_owned(),
+        app_log_path: app_log_path.to_string_lossy().into_owned(),
     })
 }
 

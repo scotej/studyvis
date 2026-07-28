@@ -27,6 +27,9 @@
 import { useBreakStore } from '@/features/ai/breakStore'
 import type { AuditEventDetail, AuditEventKind } from '@/lib/audit-types'
 import { strings } from '@/strings'
+import { logger } from '@/lib/log'
+
+const log = logger.child('session.break')
 
 export const MIN_BREAK_INTERVAL_MS = 25 * 60 * 1000
 export const MAX_BREAK_DURATION_SEC = 10 * 60
@@ -199,7 +202,13 @@ export async function requestBreak(
       ai_reasoning: input.aiReasoning,
     })
   } catch (err) {
-    console.error('[break] break_request local-audit failed:', err)
+    // Never the reasoning: it is model output derived from the user's screen.
+    log.error('audit.failed', {
+      auditKind: 'break_request',
+      requestedDurationSec: input.requestedDurationSec,
+      aiRecommendation: input.aiRecommendation,
+      err,
+    })
   }
 
   const verdict = evaluateBreakRules(input, state)
@@ -208,7 +217,11 @@ export async function requestBreak(
     try {
       await deps.emitAudit('break_denied', { reason: verdict.reason })
     } catch (err) {
-      console.error('[break] break_denied broadcast failed:', err)
+      log.error('broadcast.failed', {
+        auditKind: 'break_denied',
+        verdictReason: verdict.reason,
+        err,
+      })
     }
     return verdict
   }
@@ -224,7 +237,12 @@ export async function requestBreak(
       reason: verdict.reason,
     })
   } catch (err) {
-    console.error('[break] break_approved broadcast failed:', err)
+    log.error('broadcast.failed', {
+      auditKind: 'break_approved',
+      durationSec: verdict.durationSec,
+      localStateAlreadyApplied: true,
+      err,
+    })
   }
   // Schedule the natural end. The handle lives at module scope so a
   // teardown can cancel it (e.g. SessionView unmount on session end);

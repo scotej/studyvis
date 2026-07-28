@@ -16,6 +16,9 @@
 // false` is what retires a peer's screen tile.
 
 import type { TopicRoom } from '@/lib/trystero'
+import { logger } from '@/lib/log'
+
+const log = logger.child('session.screenshare')
 
 export const SCREEN_SHARE_ACTION = 'screen-share'
 
@@ -106,7 +109,11 @@ export function startScreenShareController({
 
   const announce = (target?: string): void => {
     void action.send(payload(), target).catch((err) => {
-      console.warn('screen-share announce failed:', err)
+      log.warn('announce.failed', {
+        target: target ?? 'broadcast',
+        sharing: localStream !== null,
+        err,
+      })
     })
   }
 

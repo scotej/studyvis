@@ -23,6 +23,10 @@ import { invoke } from '@tauri-apps/api/core'
 import { LazyStore } from '@tauri-apps/plugin-store'
 
 import { writeReduceMotionBootCache } from '@/design/reduce-motion'
+import { logger } from '@/lib/log'
+
+const log = logger.child('settings')
+
 import {
   PTT_AI_DEFAULT_ACCELERATOR,
   PTT_FRIENDS_DEFAULT_ACCELERATOR,
@@ -851,7 +855,8 @@ async function writeKey(
     await store.save()
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
-    console.error(`settingsStore.writeKey(${key}) failed:`, err)
+    // The key, never the value: turnServer carries a username and credential.
+    log.error('write.failed', { settingsKey: key, err })
     set({ error: message })
   }
 }
@@ -977,7 +982,11 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       await activeDeps.runtime.pushMinimizeToTray(enabled)
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
-      console.error('pushMinimizeToTray failed:', err)
+      log.error('push.failed', {
+        setting: 'minimizeToTrayOnClose',
+        desired: enabled,
+        err,
+      })
       set({ error: message })
     }
   },
@@ -1028,7 +1037,11 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       await activeDeps.runtime.pushAiFeaturesEnabled(enabled)
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
-      console.error('pushAiFeaturesEnabled failed:', err)
+      log.error('push.failed', {
+        setting: 'aiFeaturesEnabled',
+        desired: enabled,
+        err,
+      })
       set({ error: message })
     }
   },
@@ -1158,7 +1171,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       await activeDeps.runtime.relaunchApp()
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
-      console.error('relaunchApp failed:', err)
+      log.error('relaunch.failed', { err })
       set({ error: message })
     }
   },

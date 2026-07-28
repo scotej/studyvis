@@ -12,6 +12,9 @@
 // §13. Composed locally via ffmpeg's lavfi sine generator + libopus.
 
 import alertSoundUrl from '../../../assets/sounds/peer_alert.opus'
+import { logger } from '@/lib/log'
+
+const log = logger.child('ai.sound')
 
 export { alertSoundUrl }
 
@@ -38,10 +41,12 @@ function makeDefaultRuntime(): AlertSoundRuntime {
         }
         audio.currentTime = 0
         void audio.play().catch((err) => {
-          console.warn('[alertSound] play failed:', err)
+          // Same reasoning as the pomodoro chime: a blocked sound is normal
+          // and recurs, so it must not be able to flood the log.
+          log.debug('alert.play_failed', { phase: 'promise', err })
         })
       } catch (err) {
-        console.warn('[alertSound] play threw:', err)
+        log.warn('alert.play_threw', { phase: 'construct', err })
       }
     },
   }

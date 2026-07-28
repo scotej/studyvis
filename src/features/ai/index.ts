@@ -141,13 +141,7 @@ export {
   FOCUS_SYSTEM_PROMPT_VERSION,
 } from './systemPrompt'
 
-export {
-  parseJudgment,
-  isUncertainVerdict,
-  SEVERITIES,
-  __setParseLogger,
-  __resetParseLogger,
-} from './parseJudgment'
+export { parseJudgment, isUncertainVerdict, SEVERITIES } from './parseJudgment'
 export type {
   Severity,
   Judgment,
