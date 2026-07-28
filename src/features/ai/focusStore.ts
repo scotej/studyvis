@@ -173,6 +173,13 @@ export type FocusSnapshot = {
   // doesn't render as "0 checks skipped".
   confidentSamples: number | null
   skippedSamples: number | null
+  // I83 — 1 when AI focus detection was enabled for this session, 0 when off.
+  // Read from settings rather than inferred from the tallies: every field above
+  // is null both for an AI-off session and for an AI-on session whose loop
+  // never ran a check, and issue #92 is what it costs a user not to be able to
+  // tell those apart. Never null from this function — only a row written by a
+  // build older than the 004 migration reads null.
+  aiEnabled: number
 }
 
 export function snapshotFocusForReport(): FocusSnapshot {
@@ -184,5 +191,6 @@ export function snapshotFocusForReport(): FocusSnapshot {
     focusedPct: scored ? s.onTaskSamples / s.totalSamples : null,
     confidentSamples: ranAnyCheck ? s.totalSamples : null,
     skippedSamples: ranAnyCheck ? s.skippedSamples : null,
+    aiEnabled: useSettingsStore.getState().values.aiFeaturesEnabled ? 1 : 0,
   }
 }

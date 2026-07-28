@@ -78,6 +78,7 @@ import { usePttStore } from '@/stores/pttStore'
 import { strings } from '@/strings'
 
 import { startAiAlertDispatcher, type AiAlertDispatcher } from './aiAlerts'
+import { deriveAiChipStatus } from './aiChip'
 
 import {
   cancelActiveBreakTimer,
@@ -121,6 +122,10 @@ import {
   type PeerOrderingEntry,
   type StartArgs as PomodoroStartArgs,
 } from './pomodoro'
+import { logger } from '@/lib/log'
+
+const log = logger.child('session')
+const dialogLog = log.child('aidialog')
 
 // #47 B4 — honor the persisted mic pick on acquisition. `ideal` (never
 // `exact`) so an unplugged/renamed device falls back to the OS default
@@ -215,6 +220,9 @@ export function SessionView({
   // when this session hasn't touched a peer's slider yet.
   const persistedPeerVolumes = useSettingsStore((s) => s.values.peerVolumes)
   const activeModelId = useModelStore((s) => s.activeModelId)
+  // I83 — distinguishes "no model picked" from "model store hasn't loaded
+  // yet". Only the former is worth telling the user about.
+  const modelStatus = useModelStore((s) => s.status)
   const selfWarning = useAlertsUiStore((s) => s.selfWarning)
   const alertedPeers = useAlertsUiStore((s) => s.alertedPeers)
   const onBreak = useBreakStore((s) => s.onBreak)
@@ -817,7 +825,11 @@ export function SessionView({
       try {
         await auditAction.send(event)
       } catch (err) {
-        console.error('audit broadcast failed:', err)
+        log.error('audit_broadcast.failed', {
+          auditKind: kind,
+          localAppendSucceeded: true,
+          err,
+        })
       }
     }
     emitAuditRef.current = emitAudit
@@ -876,7 +888,12 @@ export function SessionView({
       try {
         await noteAction.send(payload)
       } catch (err) {
-        console.error('note broadcast failed:', err)
+        // The length, never the text: a session note is the user's own
+        // private writing.
+        log.error('note_broadcast.failed', {
+          textLength: payload.text.length,
+          err,
+        })
       }
     }
 
@@ -974,6 +991,35 @@ export function SessionView({
       cancelActiveBreakTimer((handle) => window.clearTimeout(handle as number))
     }
   }, [status, startedAt])
+
+  // I83 — AI on, session live, but no model to run: say so ONCE per session.
+  //
+  // The loop effect below returns early in this state, which means
+  // `startSampleLoop` never runs and its `onStartFail('no_active_model')`
+  // toast — the one surface that names this problem — can never fire. Issue
+  // #92 is what that silence looks like from the outside: a full session, an
+  // unscored report, and nothing anywhere saying AI sat out.
+  //
+  // Two distinct causes, two messages: `'ready'` with no model means the user
+  // never picked one, while `'error'` means models.json itself couldn't be read
+  // — nothing is wrong with their choice and the advice differs. `'loading'`
+  // stays silent so a mid-hydration null never accuses a correctly configured
+  // install. Keyed on startedAt so a loading → error → ready sequence still
+  // toasts at most once per session rather than on every model/camera flap.
+  const noModelNoticeShownFor = useRef<number | null>(null)
+  useEffect(() => {
+    if (status !== 'active' || !startedAt) return
+    if (!aiFeaturesEnabled || activeModelId) return
+    if (modelStatus !== 'ready' && modelStatus !== 'error') return
+    if (noModelNoticeShownFor.current === startedAt) return
+    noModelNoticeShownFor.current = startedAt
+    toast.error(
+      modelStatus === 'error'
+        ? strings.session.errors.modelListUnreadable
+        : strings.session.errors.pickModel,
+      aiSettingsToastAction()
+    )
+  }, [status, startedAt, aiFeaturesEnabled, modelStatus, activeModelId])
 
   // V2-P5 AI sample loop: starts when AI features are on, an active model
   // exists, the session is running, and the local camera track is up.
@@ -1098,7 +1144,14 @@ export function SessionView({
       // session log — which is what the post-session report reads.
       onSamplesStalled: (reason) => {
         aiStalledRef.current = true
-        setAiRuntimeStatus('paused')
+        // An engine that has produced nothing for two minutes is an error,
+        // not a pause — the same reading onStartFail / onCaptureError(fatal)
+        // / onSidecarErrored already give. The input-absent reasons
+        // (camera_missing, screen_lost, capture_failing) genuinely are a
+        // pause: nothing is broken, there is just nothing to look at.
+        setAiRuntimeStatus(
+          AI_ENGINE_BLOCK_REASONS.has(reason) ? 'error' : 'paused'
+        )
         toast.warning(
           AI_NO_READING_TOAST[reason],
           AI_ENGINE_BLOCK_REASONS.has(reason)
@@ -1111,7 +1164,7 @@ export function SessionView({
             reasoning: AI_NO_READING_LOG[reason],
           })
           .catch((err: unknown) => {
-            console.error('ai_stalled local-append failed:', err)
+            log.error('audit.ai_stalled_append_failed', { reason, err })
           })
       },
       onSamplesResumed: () => {
@@ -1199,7 +1252,9 @@ export function SessionView({
       // response; emitTo rejects in that case. Swallow the rejection so
       // it doesn't surface as an unhandled promise rejection.
       void emitTo(AI_DIALOG_WINDOW_LABEL, event, payload).catch((err) => {
-        console.warn(`[ai-dialog] emitTo(${event}) failed:`, err)
+        // The dialog closing between request and response is the normal
+        // case, so this is debug rather than a warning nobody can act on.
+        dialogLog.debug('emit.failed', { event, err })
       })
     }
 
@@ -1222,7 +1277,11 @@ export function SessionView({
               previous_topic: previous,
               new_topic: next,
             }).catch((err) => {
-              console.error('[ai-dialog] topic_change audit failed:', err)
+              dialogLog.error('topic_change_audit.failed', {
+                previousTopicLength: previous.length,
+                newTopicLength: next.length,
+                err,
+              })
             })
           }
           // Re-push context so a still-open dialog reflects the new value.
@@ -1282,7 +1341,10 @@ export function SessionView({
               emitToDialog(AI_DIALOG_BREAK_RESPONSE, response)
             })
             .catch((err) => {
-              console.error('[ai-dialog] break flow failed:', err)
+              dialogLog.error('break_flow.failed', {
+                fallbackVerdict: 'denied',
+                err,
+              })
               emitToDialog(AI_DIALOG_BREAK_RESPONSE, {
                 nonce: payload.nonce,
                 verdict: 'denied',
@@ -1551,10 +1613,20 @@ export function SessionView({
 
   // "Try again" — clear the error and bump the nonce so the acquisition
   // effect (keyed on [room, mediaRetryNonce]) re-runs getUserMedia.
+  // I83 — a camera/mic retry re-acquires `localStream`, which is in the
+  // sample-loop effect's deps, so the loop tears down and boot()s again. That
+  // second boot() reaches getDisplayMedia with an empty gesture stash and, on
+  // WebView2, is refused outright — recovering the camera would silently cost
+  // the user AI for the rest of the session. This click is a real gesture;
+  // spend it on a screen pre-acquire too, under the same AI-is-actually-running
+  // condition the loop effect uses.
   const handleMediaRetry = useCallback(() => {
+    if (aiFeaturesEnabled && activeModelId && !captureDenied) {
+      void preacquireScreenStream()
+    }
     setMediaErrorName(null)
     setMediaRetryNonce((n) => n + 1)
-  }, [])
+  }, [aiFeaturesEnabled, activeModelId, captureDenied])
 
   // Only offered for the permission-denied case. Jumps to the OS camera
   // privacy pane via the same Rust opener the onboarding step uses. macOS is
@@ -1617,10 +1689,17 @@ export function SessionView({
   // from a prior loop never lies once AI is disabled, the model is cleared,
   // or the camera track drops. Otherwise the runtime state (set by the
   // sample-loop callbacks) is the truth for the running loop.
-  const aiChipStatus: AiStatus =
-    !aiFeaturesEnabled || !activeModelId || !localStream
-      ? 'off'
-      : aiRuntimeStatus
+  //
+  // I83 — the decision moved to `deriveAiChipStatus` (pure, unit-tested) to add
+  // the 'unconfigured' case: AI on with no model used to read "AI off", which is
+  // the one reading that sends a user to the wrong setting.
+  const aiChipStatus: AiStatus = deriveAiChipStatus({
+    aiFeaturesEnabled,
+    activeModelId,
+    modelStatus,
+    hasLocalStream: Boolean(localStream),
+    runtimeStatus: aiRuntimeStatus,
+  })
 
   if (!room) return null
 
@@ -1669,7 +1748,11 @@ export function SessionView({
 
   return (
     <main
-      className="flex min-h-full flex-col bg-bg-base text-text-primary"
+      // #95 — `h-full`, not `min-h-full`: the session view is a fixed cockpit,
+      // not a document that scrolls. Pinning it to the window is what leaves
+      // the video column a definite height to hand VideoGrid, which sizes the
+      // tiles to fill it. The grid scrolls internally if the tiles ever can't.
+      className="flex h-full flex-col bg-bg-base text-text-primary"
       aria-label={strings.session.mainAriaLabel}
     >
       {/* V3-P7 — Visually-hidden top-level heading so SR users have a clean
@@ -1678,9 +1761,10 @@ export function SessionView({
           own. */}
       <h1 className="sr-only">{strings.app.sessionSrHeading}</h1>
       <div className="flex min-h-0 flex-1">
-        <div className="flex-1 px-6 py-6">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col px-6 py-6">
           {mediaErrorName !== null ? (
             <MediaErrorBanner
+              className="shrink-0"
               errorName={mediaErrorName}
               onRetry={handleMediaRetry}
               onOpenSettings={
@@ -1691,7 +1775,7 @@ export function SessionView({
               }
             />
           ) : null}
-          <VideoGrid>
+          <VideoGrid className="min-h-0 flex-1">
             <VideoTile
               key="local"
               name={youName}
@@ -1788,7 +1872,7 @@ export function SessionView({
           />
         </div>
       </div>
-      <footer className="flex items-center justify-between gap-4 border-t border-border-subtle bg-bg-surface px-6 py-4 text-sm">
+      <footer className="flex shrink-0 items-center justify-between gap-4 border-t border-border-subtle bg-bg-surface px-6 py-4 text-sm">
         <span className="flex items-center gap-3 text-text-secondary">
           <span className="flex items-center gap-2">
             {strings.session.footerHoldBefore}

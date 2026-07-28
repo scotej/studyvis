@@ -14,6 +14,9 @@ import {
   type RecoverErrorKind,
   type RecoverPhase,
 } from './RecoverView'
+import { logger } from '@/lib/log'
+
+const log = logger.child('identity.recover')
 
 export type RecoverProps = {
   progress?: OnboardingStepProgress
@@ -75,7 +78,13 @@ export function Recover({
       pendingCommit.current = null
       setPhase('done')
     } catch (err) {
-      console.error(err)
+      // Same rule as IdentitySetup: the words are in scope on this screen and
+      // never become a field.
+      log.error('commit.failed', {
+        op: 'identity_recover',
+        phase: 'submitting',
+        err,
+      })
       toast.error(strings.common.errors.savingIdentity)
       setPhase('input')
     }
@@ -98,7 +107,11 @@ export function Recover({
       // (e.g. a crypto-lib internal failure); surface the generic recovery
       // error instead of the misleading "invalid mnemonic" inline message,
       // and log it for diagnosis. Mirrors the commit() failure path.
-      console.error(err)
+      log.error('derive.failed', {
+        op: 'identity_recover_derive',
+        wordCount: classified.words.length,
+        err,
+      })
       toast.error(strings.common.errors.savingIdentity)
       return
     }

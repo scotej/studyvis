@@ -2,6 +2,10 @@ import { Component, type ErrorInfo, type ReactNode } from 'react'
 import { AlertTriangle, RotateCcw } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
+import { flushLog, logger } from '@/lib/log'
+
+const log = logger.child('ui.boundary')
+
 import { strings } from '@/strings'
 
 // PR-31 — the app had no error boundary anywhere, so any uncaught render throw
@@ -33,13 +37,16 @@ export class ErrorBoundary extends Component<
   }
 
   componentDidCatch(error: Error, info: ErrorInfo): void {
-    // Local console only — no telemetry (PLAN §3). The stack helps a friend
-    // paste diagnostics from the dev console if they hit this.
-    console.error(
-      `[error-boundary${this.props.surface ? `:${this.props.surface}` : ''}]`,
-      error,
-      info.componentStack
-    )
+    // Local ring buffer and local file — still no telemetry (PLAN §3). A
+    // render crash is the single highest-value record in the log, so it is
+    // flushed rather than left to the debounce: the next thing the user does
+    // is often quit.
+    log.error('render.crashed', {
+      surface: this.props.surface,
+      err: error,
+      componentStack: info.componentStack,
+    })
+    void flushLog()
   }
 
   private handleRetry = (): void => {

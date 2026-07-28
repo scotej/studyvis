@@ -16,7 +16,10 @@ import {
   preacquireScreenStream,
   SLOW_TICK_FACTOR,
   STALL_NOTICE_AFTER_MS,
+  MAX_REQUEST_TIMEOUT_MS,
   REQUEST_TIMEOUT_MS,
+  REQUEST_TIMEOUT_P95_FACTOR,
+  effectiveRequestTimeoutMs,
   __resetBatteryRuntime,
   __resetCaptureRuntime,
   __resetFocusStoreThresholdReader,
@@ -915,7 +918,7 @@ describe('startSampleLoop — capture errors', () => {
     await handle.stop()
   })
 
-  test('a failed screen acquire never spawns the sidecar (I79)', async () => {
+  test('a failed screen acquire never spawns the sidecar (I83)', async () => {
     const clock = new FakeClock()
     const fetchMock = vi.fn()
     const startSidecar = vi.fn(async () => {
@@ -944,7 +947,7 @@ describe('startSampleLoop — capture errors', () => {
     await handle.stop()
   })
 
-  test('a failed sidecar start releases the screen streams acquired first (I79)', async () => {
+  test('a failed sidecar start releases the screen streams acquired first (I83)', async () => {
     const clock = new FakeClock()
     const fetchMock = vi.fn()
     const screenStream = makeFakeScreenStream()
@@ -1497,6 +1500,11 @@ describe('startSampleLoop — I82 stall watchdog', () => {
       modelId: 'test-model',
       getFaceTrack: () => makeFakeTrack(),
       onSamplesStalled,
+      // Pinned explicitly rather than relying on effectiveRequestTimeoutMs(0)
+      // happening to return REQUEST_TIMEOUT_MS with no benchmark seeded. This
+      // test is the evidence for a wall-clock window over a tick count, so it
+      // must not be load-bearing on a default that a p95 change could move.
+      requestTimeoutMs: REQUEST_TIMEOUT_MS,
     })
     await flushMicrotasks(10)
 
@@ -1730,6 +1738,41 @@ describe('startSampleLoop — I82 stall watchdog', () => {
     expect(onSamplesStalled).not.toHaveBeenCalled()
     await handle.stop()
   })
+
+  test('an intermittently failing pipeline never reports a stall', async () => {
+    // The guarantee that keeps this from crying wolf. Carried over from the
+    // superseded consecutive-tick counter, which pinned it against a streak;
+    // here it has to hold against the wall clock, which is strictly harder —
+    // the window keeps running while the failures do.
+    const clock = new FakeClock()
+    let call = 0
+    const fetchMock = vi.fn(async () => {
+      call += 1
+      // fail, fail, succeed — every resolved sample restarts the window.
+      if (call % 3 === 0) return judgmentResponse('on_task')
+      return {
+        ok: false,
+        status: 503,
+        text: async (): Promise<string> => 'busy',
+        json: async (): Promise<unknown> => ({}),
+      }
+    })
+    __setSampleLoopRuntime(
+      buildSampleLoopRuntime({ clock, fetch: fetchMock as never })
+    )
+    const onSamplesStalled = vi.fn()
+    const handle = startSampleLoop({
+      getTopic: () => 't',
+      modelId: 'test-model',
+      getFaceTrack: () => makeFakeTrack(),
+      onSamplesStalled,
+    })
+    await flushMicrotasks(10)
+    await clock.advance(STALL_NOTICE_AFTER_MS * 2 + 10_000)
+    expect(onSamplesStalled).not.toHaveBeenCalled()
+    expect(useFocusStore.getState().totalSamples).toBeGreaterThan(0)
+    await handle.stop()
+  })
 })
 
 describe('startSampleLoop — A6 cadence backoff', () => {
@@ -1871,6 +1914,38 @@ describe('startSampleLoop — A6 cadence backoff', () => {
     expect(handle.__state().backoff.engaged).toBe(false)
     expect(onThermalBackoff).not.toHaveBeenCalled()
     await handle.stop()
+  })
+})
+
+// I83 — the live per-tick bound was a flat 90 s while benchmark.ts allows a
+// request 5 minutes, and a completed benchmark is the ONLY thing that sets
+// activeModelId. So a model measuring a p95 above ~90 s "passed" setup and then
+// aborted every live tick forever, logging nothing a release build can show.
+describe('effectiveRequestTimeoutMs — I83', () => {
+  test('falls back to the flat timeout when there is no benchmark', () => {
+    expect(effectiveRequestTimeoutMs(0)).toBe(REQUEST_TIMEOUT_MS)
+    expect(effectiveRequestTimeoutMs(-1)).toBe(REQUEST_TIMEOUT_MS)
+    expect(effectiveRequestTimeoutMs(Number.NaN)).toBe(REQUEST_TIMEOUT_MS)
+  })
+
+  test('never drops below the flat timeout for a fast model', () => {
+    // A 3 s p95 would derive 9 s, which would abort ticks a cold cache makes
+    // legitimately slow. The flat value stays the floor.
+    expect(effectiveRequestTimeoutMs(3)).toBe(REQUEST_TIMEOUT_MS)
+  })
+
+  test('scales with the measured p95 for a slow model', () => {
+    // 60 s p95 → 180 s, comfortably above the old flat 90 s ceiling that would
+    // have aborted every tick of a model that benchmarked fine.
+    expect(effectiveRequestTimeoutMs(60)).toBe(
+      60 * REQUEST_TIMEOUT_P95_FACTOR * 1000
+    )
+  })
+
+  test('caps at the benchmark request bound', () => {
+    // Without the cap a 280 s p95 would let one wedged inference hold the loop
+    // for 14 minutes with nothing recorded.
+    expect(effectiveRequestTimeoutMs(280)).toBe(MAX_REQUEST_TIMEOUT_MS)
   })
 })
 

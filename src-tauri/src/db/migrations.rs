@@ -13,11 +13,13 @@ use rusqlite::{Connection, TransactionBehavior};
 const MIGRATION_001_INITIAL: &str = include_str!("migrations/001_initial.sql");
 const MIGRATION_002_V2: &str = include_str!("migrations/002_v2.sql");
 const MIGRATION_003_SAMPLE_COUNTS: &str = include_str!("migrations/003_sample_counts.sql");
+const MIGRATION_004_AI_ENABLED: &str = include_str!("migrations/004_ai_enabled.sql");
 
 const MIGRATIONS: &[(u32, &str)] = &[
     (1, MIGRATION_001_INITIAL),
     (2, MIGRATION_002_V2),
     (3, MIGRATION_003_SAMPLE_COUNTS),
+    (4, MIGRATION_004_AI_ENABLED),
 ];
 
 pub const MAX_KNOWN_VERSION: u32 = MIGRATIONS[MIGRATIONS.len() - 1].0;
@@ -110,7 +112,7 @@ mod tests {
         .unwrap_or(0)
     }
 
-    const LATEST_VERSION: u32 = 3;
+    const LATEST_VERSION: u32 = 4;
 
     #[test]
     fn applies_full_schema_on_empty_db() {
@@ -235,6 +237,53 @@ mod tests {
         assert_eq!(skipped, None);
     }
 
+    // I83 acceptance: 004 runs cleanly on a database already at schema_version
+    // 3 with a real session row, and that pre-migration row reads back a NULL
+    // `ai_enabled` — "unknown", never a fabricated 0 that would let the report
+    // claim AI was off in a session nobody recorded the setting for.
+    #[test]
+    fn upgrades_v3_db_to_v4_with_null_ai_enabled_on_old_rows() {
+        let mut conn = Connection::open_in_memory().expect("open in-memory");
+        {
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS schema_version (version INTEGER PRIMARY KEY)",
+                [],
+            )
+            .expect("schema_version");
+            let tx = conn.transaction().expect("tx");
+            tx.execute_batch(MIGRATION_001_INITIAL).expect("apply 001");
+            tx.execute_batch(MIGRATION_002_V2).expect("apply 002");
+            tx.execute_batch(MIGRATION_003_SAMPLE_COUNTS)
+                .expect("apply 003");
+            tx.execute(
+                "INSERT INTO schema_version (version) VALUES (1), (2), (3)",
+                [],
+            )
+            .expect("record v3");
+            tx.commit().expect("commit v3");
+        }
+        conn.execute(
+            "INSERT INTO sessions (id, started_at, score, confident_samples)
+             VALUES ('s1', 1, 90, 24)",
+            [],
+        )
+        .expect("insert session");
+        assert_eq!(current_version(&conn), 3);
+
+        let applied = run_migrations(&mut conn).expect("upgrade run");
+        assert_eq!(applied, LATEST_VERSION);
+
+        let (ai_enabled, confident): (Option<i64>, Option<i64>) = conn
+            .query_row(
+                "SELECT ai_enabled, confident_samples FROM sessions WHERE id = 's1'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .expect("read ai_enabled");
+        assert_eq!(ai_enabled, None, "pre-004 rows must read as unknown");
+        assert_eq!(confident, Some(24), "003 data must survive the 004 upgrade");
+    }
+
     #[test]
     fn refuses_db_created_by_newer_version() {
         let mut conn = Connection::open_in_memory().expect("open in-memory");
@@ -297,6 +346,10 @@ mod tests {
             (
                 3,
                 "a1ef24581336a04ecb9f9636afe3d0c574d9e47072f88ffccd1ff3c9aefffa42",
+            ),
+            (
+                4,
+                "f394e5e3179254fafb8f682dac3b189687e7ff7c5200b0b280b75cd5a26607e3",
             ),
         ];
         assert_eq!(

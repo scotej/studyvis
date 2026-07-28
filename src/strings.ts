@@ -604,6 +604,9 @@ export const strings = {
     },
     aiStatus: {
       off: 'AI off',
+      // I83 — AI is on but has no model to run. Deliberately not "AI off":
+      // that wording sent the #92 reporter looking at the wrong setting.
+      unconfigured: 'AI needs a model',
       active: 'AI watching',
       paused: 'AI paused',
       error: 'AI error',
@@ -664,6 +667,12 @@ export const strings = {
       // the AI category (the copy above names it; the button honors it).
       openSettingsAction: 'Open settings',
       pickModel: 'Pick a model in Settings → AI.',
+      // I83 — the model store's own read failed (a locked or corrupt
+      // models.json), which is indistinguishable from "no model picked" to
+      // every other surface but needs different advice: nothing is wrong with
+      // the user's choice, the list just couldn't be loaded.
+      modelListUnreadable:
+        "Your AI model list couldn't be read, so AI sat out this session. Open Settings → AI to try again.",
       modelFilesMissing:
         'Model files are missing. Re-download them in Settings → AI.',
       aiFailedToStart: 'AI failed to start.',
@@ -695,7 +704,7 @@ export const strings = {
         inference_timeout:
           'AI checks are timing out on this machine. A smaller model in Settings → AI will keep up better.',
         inference_failed:
-          'AI checks keep failing. Restart AI in Settings → AI.',
+          'The AI model is loaded but rejecting checks. Re-download it in Settings → AI — its vision files may be incomplete.',
         capture_failing:
           "AI can't read your camera or screen, so it isn't checking in.",
         camera_missing: "AI has no camera frame to check, so it's not running.",
@@ -799,6 +808,16 @@ export const strings = {
       distractions: {
         heading: 'Top distractions',
         empty: 'No distractions detected. Nice work.',
+        // I83 — the same section when nothing was measured. "Nice work" is
+        // earned praise for a session the AI watched and found clean; on a
+        // session it never watched it was a fabricated all-clear, and it read
+        // as one right beside a score card admitting no score was recorded.
+        emptyNoChecks: 'No AI checks ran, so nothing was measured here.',
+        // Distinct from emptyNoChecks: checks DID run, so "No AI checks ran"
+        // would be false. None of them could be read, so nothing was measured
+        // and the praise is still unearned.
+        emptyNoReadableChecks:
+          'AI checks ran but none could be read, so nothing was measured here.',
       },
       breaks: {
         heading: 'Breaks',
@@ -818,6 +837,18 @@ export const strings = {
       heading: 'No focus score',
       body: 'No focus score was recorded for this session.',
       copyLine: 'Score: not recorded',
+      // I83 — R1 kept this copy cause-neutral because the sessions row held no
+      // way to tell the causes apart. The 004 migration records `ai_enabled`,
+      // so two of the three cases can now be named honestly. `body` above
+      // stays the wording for rows that predate it.
+      bodyOff: 'AI focus detection was off for this session.',
+      bodyNoChecks:
+        'AI was on but never ran a check, so nothing was measured. Check Settings → AI.',
+      bodyNoConfident:
+        'AI ran, but no check could be read clearly, so nothing was measured.',
+      copyLineOff: 'Score: not recorded (AI off)',
+      copyLineNoChecks: 'Score: not recorded (AI ran no checks)',
+      copyLineNoConfident: 'Score: not recorded (no readable AI checks)',
     },
     copyCta: 'Copy report',
     copyAriaLabel: 'Copy session report to clipboard',
@@ -958,6 +989,8 @@ export const strings = {
       network: ['relay', 'turn', 'signaling', 'connection', 'diagnostics'],
       advanced: [
         'debug log',
+        'log',
+        'diagnostics',
         'autostart',
         'launch at login',
         'startup',
@@ -1067,6 +1100,11 @@ export const strings = {
         manyFriends: (n: number) => `${n} friends`,
         minutes: (n: number) => `${n} min`,
         score: (n: number) => `${n} / 100`,
+        // I83 — Settings → Sessions is the second place a user looks for a
+        // missing score, and a row with no score used to be indistinguishable
+        // from one where AI was off. Only rendered when the row actually
+        // recorded that AI was on (ai_enabled === 1), never inferred.
+        notMeasured: 'not measured',
       },
       // R4 — per-session delete behind an AlertDialog confirm, mirroring the
       // Friends remove pattern. Deleting removes the session row and its
@@ -1265,7 +1303,7 @@ export const strings = {
       },
       diagnostics: {
         label: 'AI diagnostics in debug log',
-        help: 'AI sample/parse warnings are written to the developer console when the debug log is on. Same setting as Advanced → Debug log.',
+        help: 'Adds per-sample AI detail to the log. Sample and parse warnings are recorded either way. Same setting as Advanced → Debug log.',
         ariaLabel: 'AI diagnostics in debug log',
       },
       hfToken: {
@@ -1432,7 +1470,7 @@ export const strings = {
       },
       debugLog: {
         label: 'Debug log',
-        help: 'Logs verbose diagnostic output to the developer console. Off by default; persists across launches.',
+        help: 'Adds verbose detail to the log and mirrors it to the developer console. The log is written to disk either way. Off by default; persists across launches.',
         ariaLabel: 'Debug log',
       },
       dataFolder: {
@@ -1443,7 +1481,7 @@ export const strings = {
       },
       shareLog: {
         label: 'Share log',
-        help: 'When the AI misbehaves, copy a short diagnostics summary or open the log file, then send it to a friend or paste it into a GitHub issue. Nothing is uploaded — sharing is always manual.',
+        help: 'When something misbehaves, copy a diagnostics summary — your machine, plus the last few minutes of the log — or open the log files, then send it to a friend or paste it into a GitHub issue. Usernames, keys and your own writing are stripped out. Nothing is uploaded — sharing is always manual.',
         copyCta: 'Copy diagnostics',
         revealCta: 'Open log',
         copiedToast: 'Diagnostics copied to the clipboard.',
@@ -1453,9 +1491,13 @@ export const strings = {
           version: string
           os: string
           arch: string
+          webview: string
+          display: string
           logPath: string
+          aiLogPath: string
+          logTail: string
         }) =>
-          `StudyVis ${v.version}\nOS: ${v.os} (${v.arch})\nLog: ${v.logPath}`,
+          `StudyVis ${v.version}\nOS: ${v.os} (${v.arch})\nWebview: ${v.webview}\nDisplay: ${v.display}\nLog: ${v.logPath}\nAI log: ${v.aiLogPath}\n\nRecent log:\n${v.logTail}`,
       },
       replayOnboarding: {
         label: 'Replay onboarding',

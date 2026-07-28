@@ -29,6 +29,10 @@ import {
   sessionsDelete,
   type SessionRecord,
 } from '@/lib/db/sessions'
+import { logger } from '@/lib/log'
+
+const log = logger.child('settings.sessions')
+
 import { strings } from '@/strings'
 
 type LoadStatus = 'idle' | 'loading' | 'ready' | 'error'
@@ -56,8 +60,8 @@ export function SessionsCategory({ onOpenSession }: SessionsCategoryProps) {
     } catch (err) {
       // Tauri rejects with a plain string, so the raw backend text (a
       // rusqlite error chain) used to land verbatim in the row's help line.
-      // Keep it in the console for debugging; the user gets friendly copy.
-      console.error('sessions_list failed:', err)
+      // Keep it in the log for debugging; the user gets friendly copy.
+      log.error('list.failed', { cmd: 'sessions_list', err })
       setError(copy.loadErrorHelp)
       setStatus('error')
     }
@@ -197,8 +201,16 @@ function formatSessionMeta(session: SessionRecord): string {
       : peers === 1
         ? meta.oneFriend
         : meta.manyFriends(peers)
+  // I83 — a scored session shows its score; a session that recorded AI as ON
+  // and still has no score says so. A row with ai_enabled 0 or NULL adds
+  // nothing, because "AI was off" and "we never recorded it" are not claims
+  // this list should invent.
   const scoreLabel =
-    session.score != null ? ` · ${meta.score(session.score)}` : ''
+    session.score != null
+      ? ` · ${meta.score(session.score)}`
+      : session.ai_enabled === 1
+        ? ` · ${meta.notMeasured}`
+        : ''
   return `${meta.minutes(minutes)} · ${peerLabel}${scoreLabel}`
 }
 

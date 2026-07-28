@@ -33,6 +33,7 @@ function session(over: Partial<SessionRecord> = {}): SessionRecord {
     generated_at: null,
     confident_samples: null,
     skipped_samples: null,
+    ai_enabled: null,
     ...over,
   }
 }

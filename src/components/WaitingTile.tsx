@@ -1,6 +1,5 @@
 import { UsersIcon } from 'lucide-react'
 
-import { tokens } from '@/design/tokens'
 import { cn } from '@/lib/utils'
 import { strings } from '@/strings'
 
@@ -38,10 +37,8 @@ export function WaitingTile({
         'flex aspect-video flex-col items-center justify-center gap-3 rounded-lg border border-dashed border-border-subtle bg-bg-sunk px-6 text-center',
         className
       )}
-      style={{
-        minHeight: tokens.sizes.videoTileMinHeight,
-        maxHeight: tokens.sizes.videoTileMaxHeight,
-      }}
+      // #95 — sized by VideoGrid like every other tile; see the note on
+      // VideoTile's figure for why it carries no height of its own.
       data-testid="waiting-tile"
     >
       <UsersIcon className="size-7 text-text-muted" aria-hidden="true" />

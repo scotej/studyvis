@@ -141,13 +141,7 @@ export {
   FOCUS_SYSTEM_PROMPT_VERSION,
 } from './systemPrompt'
 
-export {
-  parseJudgment,
-  isUncertainVerdict,
-  SEVERITIES,
-  __setParseLogger,
-  __resetParseLogger,
-} from './parseJudgment'
+export { parseJudgment, isUncertainVerdict, SEVERITIES } from './parseJudgment'
 export type {
   Severity,
   Judgment,
@@ -286,6 +280,10 @@ export {
   __resetSampleLoopRuntime,
   getSampleLoopRuntime,
   REQUEST_TIMEOUT_MS,
+  MAX_REQUEST_TIMEOUT_MS,
+  REQUEST_TIMEOUT_P95_FACTOR,
+  SCREEN_ACQUIRE_TIMEOUT_MS,
+  effectiveRequestTimeoutMs,
   BATTERY_POLL_INTERVAL_MS,
   FALLBACK_SAMPLE_INTERVAL_SEC,
   MAX_SAMPLE_INTERVAL_SEC,

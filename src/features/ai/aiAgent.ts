@@ -18,7 +18,10 @@
 // tells the model the constraints so its recommendation usually aligns,
 // reducing user-visible surprise when the rule layer overrides.
 
+import { logger } from '@/lib/log'
 import { strings } from '@/strings'
+
+const log = logger.child('ai.agent')
 
 import { useSidecarStore } from './sidecar'
 
@@ -284,10 +287,16 @@ export function parseAgentReply(raw: string): AgentReply {
       // continue
     }
   }
-  // Don't reflect raw model output into the dialog: on total parse failure
-  // it could carry attacker-influenced on-screen text. Fixed string to the
-  // user; raw goes to the console for debugging (I12).
-  console.warn('[ai-agent] reply parse failure, raw:', raw.slice(0, 200))
+  // Don't reflect raw model output into the dialog: on total parse failure it
+  // could carry attacker-influenced on-screen text (I12). It doesn't reach the
+  // log either — a reply that parsed but was rejected carries `new_topic`, a
+  // verbatim copy of what the user typed. Shape only.
+  log.warn('reply.parse_failed', {
+    rawLength: raw.length,
+    candidateCount: candidates.length,
+    fenced: raw.includes('```'),
+    intentFallback: 'unknown',
+  })
   return {
     intent: 'unknown',
     payload: {},

@@ -50,6 +50,7 @@ function baseSession(overrides: Partial<SessionRecord> = {}): SessionRecord {
     generated_at: ENDED_AT,
     confident_samples: null,
     skipped_samples: null,
+    ai_enabled: null,
     ...overrides,
   }
 }
@@ -198,10 +199,11 @@ export const MostlyOffTask: Story = {
   },
 }
 
-// No-AI baseline (R1): lifecycle events only. AI focus detection was off, so
-// score AND focused_pct are null — the hero renders the calm "No focus score"
-// placeholder instead of a fabricated 100/100 gauge, and the Top distractions
-// section shows the "Nice work" empty state.
+// No-AI baseline (R1): lifecycle events only, and a row with no `ai_enabled`
+// recorded — i.e. written by a build older than the I83 004 migration. Score
+// and focused_pct are null, so the hero renders the calm cause-neutral "No
+// focus score" placeholder rather than a fabricated 100/100 gauge. This is the
+// one remaining state where the report cannot say WHY nothing was measured.
 export const NoAiBaseline: Story = {
   args: {
     data: buildData(
@@ -224,17 +226,99 @@ export const NoAiBaseline: Story = {
   },
 }
 
+// I83 — AI was ON and produced nothing. This is the state issue #92
+// screenshotted from a real Windows session, and the state this PR exists to
+// stop rendering as an all-clear: the score card names the malfunction and
+// points at Settings → AI, and Top distractions says nothing was measured
+// instead of "No distractions detected. Nice work."
+export const AiOnButNoChecks: Story = {
+  args: {
+    data: buildData(
+      baseSession({
+        score: null,
+        focused_pct: null,
+        confident_samples: null,
+        skipped_samples: null,
+        ai_enabled: 1,
+        declared_topic: 'latin',
+      }),
+      [
+        event(ME, 'joined', 0),
+        event(ME, 'topic_set', 0, { topic: 'latin' }),
+        event(ALICE, 'pomodoro_start', 163_000, { preset: '25/5' }),
+        event(ME, 'left', 638_000),
+      ]
+    ),
+    animateScore: false,
+    onClose,
+  },
+}
+
+// I83 — AI was deliberately OFF. Nothing was measured and nothing is wrong;
+// the copy says so plainly rather than implying a malfunction or claiming a
+// clean session the AI never watched.
+export const AiOffForSession: Story = {
+  args: {
+    data: buildData(
+      baseSession({
+        score: null,
+        focused_pct: null,
+        confident_samples: null,
+        skipped_samples: null,
+        ai_enabled: 0,
+      }),
+      [
+        event(ME, 'joined', 0),
+        event(ALICE, 'joined', 800),
+        event(ME, 'left', 25 * 60_000),
+      ]
+    ),
+    animateScore: false,
+    onClose,
+  },
+}
+
+// I83 — checks ran and none could be read. Two skipped checks is BELOW
+// SKIPPED_SAMPLES_MIN (3), so the #47 D5 data-quality line renders nothing and
+// this copy is the only thing on the page telling the truth. It must not say
+// "No AI checks ran" either: checks did run, none were readable.
+export const AiRanNoReadableChecks: Story = {
+  args: {
+    data: buildData(
+      baseSession({
+        score: null,
+        focused_pct: null,
+        confident_samples: 0,
+        skipped_samples: 2,
+        ai_enabled: 1,
+        declared_topic: 'latin',
+      }),
+      [
+        event(ME, 'joined', 0),
+        event(ME, 'topic_set', 0, { topic: 'latin' }),
+        event(ME, 'left', 638_000),
+      ]
+    ),
+    animateScore: false,
+    onClose,
+  },
+}
+
 // I82 (issue #92) — AI was ON (the topic gate ran, so `topic_set` fired) but
-// never managed a single reading, so score and focused_pct are null exactly
-// as in the NoAiBaseline above. The difference is the `ai_stalled` row: the
-// report now says WHY the AI section is empty instead of leaving the user to
-// guess whether AI was even running.
+// never managed a single reading, so score and focused_pct are null exactly as
+// in AiOnButNoChecks above. The difference is the `ai_stalled` row: the report
+// now says WHY the AI section is empty instead of leaving the user to guess
+// whether AI was even running. `ai_enabled: 1` is what keeps this the
+// "AI was on and broke" case rather than the pre-004 "unknown" one.
 export const AiNeverGotAReading: Story = {
   args: {
     data: buildData(
       baseSession({
         score: null,
         focused_pct: null,
+        confident_samples: null,
+        skipped_samples: null,
+        ai_enabled: 1,
         declared_topic: 'latin',
         total_minutes: 10,
         ended_at: STARTED_AT + 10 * 60_000 + 38_000,

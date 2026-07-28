@@ -20,6 +20,9 @@ import {
 import { verifyMessage } from '@/lib/crypto/identity'
 import { auditEventInsert } from '@/lib/db/audit'
 import { bytesToHex, hexToBytes } from '@/lib/encoding'
+import { logger } from '@/lib/log'
+
+const log = logger.child('audit')
 
 export type StoredAuditEvent = AuditEvent & {
   // Per-event monotonic sequence used as React key. Receiver-side seq is
@@ -92,7 +95,14 @@ export const useAuditStore = create<AuditState>((set, get) => ({
     // the event regardless of disk write success. The post-session report
     // (V2) is the consumer of the persisted rows.
     const promise = persistFn(event).catch((err) => {
-      console.error('audit persist failed:', err)
+      // The topic is a shared secret, so only its prefix — enough to tie
+      // records from one session together, not enough to join one.
+      log.error('persist.failed', {
+        eventKind: event.kind,
+        ts: event.ts,
+        sessionPrefix: event.session_topic.slice(0, 8),
+        err,
+      })
     })
     pendingPersists.add(promise)
     void promise.finally(() => {

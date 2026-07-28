@@ -11,6 +11,9 @@
 // asset itself is short (~0.5 s), quiet, and softly faded.
 
 import chimeUrl from '../../../assets/sounds/pomodoro_chime.opus'
+import { logger } from '@/lib/log'
+
+const log = logger.child('session.pomodoro')
 
 export { chimeUrl }
 
@@ -33,10 +36,12 @@ function makeDefaultRuntime(): PomodoroSoundRuntime {
         }
         audio.currentTime = 0
         void audio.play().catch((err) => {
-          console.warn('[pomodoroSound] play failed:', err)
+          // A chime the OS autoplay policy blocked is normal, not a fault,
+          // and it recurs every pomodoro — debug so it can't flood the log.
+          log.debug('chime.play_failed', { phase: 'promise', err })
         })
       } catch (err) {
-        console.warn('[pomodoroSound] play threw:', err)
+        log.warn('chime.play_threw', { phase: 'construct', err })
       }
     },
   }

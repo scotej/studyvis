@@ -25,6 +25,9 @@ import {
   IDENTITY_VERSION,
   type IdentityRecord,
 } from '@/lib/db/identity'
+import { logger } from '@/lib/log'
+
+const log = logger.child('identity')
 
 // 'error' (D1): identity.json exists but couldn't be read/parsed (bit-rot,
 // partial write, bad serde). The private keys are still valid in the keychain,
@@ -107,7 +110,11 @@ export const useIdentityStore = create<IdentityState>((set, get) => {
     try {
       exists = await identityExists()
     } catch (err) {
-      console.error('useIdentity.refresh: identity_exists failed:', err)
+      log.error('probe.failed', {
+        cmd: 'identity_exists',
+        errorKind: 'file',
+        err,
+      })
       set({
         identity: null,
         status: 'error',
@@ -129,7 +136,11 @@ export const useIdentityStore = create<IdentityState>((set, get) => {
     try {
       record = await loadIdentityRecord()
     } catch (err) {
-      console.error('useIdentity.refresh: identity_load_record failed:', err)
+      log.error('load.failed', {
+        cmd: 'identity_load_record',
+        errorKind: 'file',
+        err,
+      })
       set({
         identity: null,
         status: 'error',
@@ -170,7 +181,11 @@ export const useIdentityStore = create<IdentityState>((set, get) => {
         return
       }
     } catch (err) {
-      console.warn('useIdentity.refresh: keychain probe inconclusive:', err)
+      log.warn('keychain.inconclusive', {
+        cmd: 'identity_keys_present',
+        outcome: 'continue',
+        err,
+      })
     }
     set({
       identity: record,

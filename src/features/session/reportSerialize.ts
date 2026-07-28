@@ -14,12 +14,14 @@ import type { SessionRecord } from '@/lib/db/sessions'
 import { strings } from '@/strings'
 import { formatBreakDuration } from './break'
 import {
+  aiCoverage,
   deriveBreaksSummary,
   deriveTopDistractions,
   deriveTopicTimeline,
   formatOffset,
   groupTimelineByWho,
   parseAuditDetail,
+  type AiCoverage,
 } from './reportData'
 
 export type ResolvedReportData = {
@@ -69,6 +71,39 @@ export function describeRow(
   return label
 }
 
+// I83 — body copy for the unscored-session card, and the matching one-liner in
+// the text export. Shared so the rendered report and a pasted/saved copy can
+// never disagree about what the AI did: an unscored session where AI was ON and
+// produced nothing is a malfunction the user can act on, one where AI was off is
+// not, and a row predating the 004 migration cannot say which it was.
+export function noScoreBody(coverage: AiCoverage): string {
+  if (coverage === 'off') return strings.report.noScore.bodyOff
+  if (coverage === 'noChecks') return strings.report.noScore.bodyNoChecks
+  if (coverage === 'noConfident') {
+    return strings.report.noScore.bodyNoConfident
+  }
+  return strings.report.noScore.body
+}
+
+export function noScoreCopyLine(coverage: AiCoverage): string {
+  if (coverage === 'off') return strings.report.noScore.copyLineOff
+  if (coverage === 'noChecks') return strings.report.noScore.copyLineNoChecks
+  if (coverage === 'noConfident') {
+    return strings.report.noScore.copyLineNoConfident
+  }
+  return strings.report.noScore.copyLine
+}
+
+// I83 — the distractions empty state, which must agree with the score card
+// beside it. Only a session with at least one readable check earns "Nice work".
+export function distractionsEmptyMessage(coverage: AiCoverage): string {
+  if (coverage === 'ran') return strings.report.sections.distractions.empty
+  if (coverage === 'noConfident') {
+    return strings.report.sections.distractions.emptyNoReadableChecks
+  }
+  return strings.report.sections.distractions.emptyNoChecks
+}
+
 export function formatTopicHeading(topic: string | null): string {
   if (!topic || !topic.trim()) return strings.report.studiedFallback
   return strings.report.studiedWithTopic(topic)
@@ -88,6 +123,7 @@ export function serializeReportToText(data: ResolvedReportData): string {
   const grouped = groupTimelineByWho(auditEvents)
   const distractions = deriveTopDistractions(auditEvents, myEdPubkeyHex)
   const breaks = deriveBreaksSummary(auditEvents)
+  const coverage = aiCoverage(session)
   const totalMinutes = session.total_minutes ?? 0
   const focusedPctLabel =
     session.focused_pct == null
@@ -101,8 +137,9 @@ export function serializeReportToText(data: ResolvedReportData): string {
     formatTopicHeading(session.declared_topic),
     `${strings.report.summaryPrefix}${strings.report.summaryMinutes(totalMinutes)}${strings.report.summaryMiddle}${focusedPctLabel}`,
     // R1 — never emit a fabricated 100 for an unscored (AI-off) session.
+    // I83 — and name the cause when the row recorded one.
     session.score == null
-      ? strings.report.noScore.copyLine
+      ? noScoreCopyLine(coverage)
       : strings.report.scoreLine(session.score),
     '',
     `## ${strings.report.sections.topic.heading}`,
@@ -137,7 +174,7 @@ export function serializeReportToText(data: ResolvedReportData): string {
   // user just saw. The on-screen Distractions section precedes Breaks.
   lines.push('', `## ${strings.report.sections.distractions.heading}`)
   if (distractions.length === 0) {
-    lines.push(strings.report.sections.distractions.empty)
+    lines.push(distractionsEmptyMessage(coverage))
   } else {
     for (const d of distractions) {
       const ded = d.totalDeduction > 0 ? ` · −${d.totalDeduction}` : ''

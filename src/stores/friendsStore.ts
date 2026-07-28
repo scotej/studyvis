@@ -13,6 +13,9 @@ import {
   type Friend,
 } from '@/lib/db/friends'
 import { strings } from '@/strings'
+import { logger } from '@/lib/log'
+
+const log = logger.child('friends')
 
 export type FriendsStatus = 'idle' | 'loading' | 'ready' | 'error'
 
@@ -47,8 +50,8 @@ export const useFriendsStore = create<FriendsState>((set, get) => ({
     } catch (err) {
       // Tauri rejects with a plain string — storing it verbatim would hand
       // raw rusqlite text to whichever surface renders `error` next. Keep
-      // the raw value in the console; the store carries friendly copy.
-      console.error('friends_list failed:', err)
+      // the raw value in the log; the store carries friendly copy.
+      log.error('list.failed', { cmd: 'friends_list', err })
       set({ status: 'error', error: strings.friends.loadError })
     }
   },

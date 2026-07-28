@@ -1,6 +1,7 @@
-import { describe, expect, test, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import type { TurnServerConfig } from 'trystero'
 
+import { __resetLog, __setLogRecordSink, type LogRecord } from '@/lib/log'
 import {
   buildIceOptions,
   iceOptionsFor,
@@ -31,25 +32,41 @@ describe('iceOptionsFor (with TURN servers configured)', () => {
 })
 
 describe('iceOptionsFor (no TURN servers)', () => {
+  let records: LogRecord[]
+
+  beforeEach(() => {
+    __resetLog()
+    records = []
+    __setLogRecordSink((record) => records.push(record))
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+    __resetLog()
+  })
+
   test('every preference degrades to STUN-only — even "always"', () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     // Forcing relay-only with zero relays would guarantee a failed connection,
     // so it must NOT be honored when the server list is empty.
     expect(iceOptionsFor('auto', [])).toEqual({})
     expect(iceOptionsFor('always', [])).toEqual({})
     expect(iceOptionsFor('never', [])).toEqual({})
-    warn.mockRestore()
   })
 
   test("warns when 'always' is dropped for lack of TURN, not for auto/never", () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     iceOptionsFor('auto', [])
     iceOptionsFor('never', [])
-    expect(warn).not.toHaveBeenCalled()
+    expect(records).toHaveLength(0)
     iceOptionsFor('always', [])
-    expect(warn).toHaveBeenCalledTimes(1)
-    expect(warn.mock.calls[0]?.[0]).toMatch(/relay-only.*ignored/i)
-    warn.mockRestore()
+    expect(records).toHaveLength(1)
+    expect(records[0]?.scope).toBe('webrtc.ice')
+    expect(records[0]?.msg).toBe('turn.relay_only_ignored')
+    expect(records[0]?.data).toMatchObject({
+      turnPreference: 'always',
+      configuredServerCount: 0,
+      effective: 'stun-only',
+    })
   })
 })
 

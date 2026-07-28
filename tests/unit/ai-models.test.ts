@@ -326,6 +326,55 @@ describe('useModelStore (LazyStore-backed)', () => {
     expect(state.activeModelId).toBeNull()
   })
 
+  // I83 — a failed read used to be terminal for the whole process:
+  // `status: 'error'` left activeModelId null, so no session could run AI, and
+  // the one surface able to re-read it (ModelPickerContainer) only retried on
+  // 'loading'. Its gate is now `status !== 'ready'`, which these two pin.
+  test('hydrate records an error without inventing a model', async () => {
+    const throwing: ModelStoreDeps = {
+      storeFactory: () => ({
+        get: async <T>(): Promise<T | undefined> => {
+          throw new Error('models.json is locked')
+        },
+        set: async () => {},
+        delete: async () => true,
+        save: async () => {},
+      }),
+    }
+    __setModelStoreDeps(throwing)
+    await useModelStore.getState().hydrate()
+    const after = useModelStore.getState()
+    expect(after.status).toBe('error')
+    expect(after.error).toContain('locked')
+    expect(after.activeModelId).toBeNull()
+  })
+
+  test('a second hydrate after an error can still reach ready', async () => {
+    // The recovery this enables: the user opens Settings → AI, that mount
+    // retries, and AI works for the rest of the process without a restart.
+    let calls = 0
+    const flaky: ModelStoreDeps = {
+      storeFactory: () => ({
+        get: async <T>(key: string): Promise<T | undefined> => {
+          calls += 1
+          if (calls === 1) throw new Error('transient AV lock')
+          return (key === 'active_model_id' ? 'qwen2_5-vl-3b' : {}) as T
+        },
+        set: async () => {},
+        delete: async () => true,
+        save: async () => {},
+      }),
+    }
+    __setModelStoreDeps(flaky)
+    await useModelStore.getState().hydrate()
+    expect(useModelStore.getState().status).toBe('error')
+
+    await useModelStore.getState().hydrate()
+    const after = useModelStore.getState()
+    expect(after.status).toBe('ready')
+    expect(after.activeModelId).toBe('qwen2_5-vl-3b')
+  })
+
   test('hydrate without a Tauri store factory falls back to defaults', async () => {
     __setModelStoreDeps({ storeFactory: null })
     await useModelStore.getState().hydrate()

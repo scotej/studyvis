@@ -6,6 +6,9 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import { LazyStore } from '@tauri-apps/plugin-store'
+import { logger } from '@/lib/log'
+
+const log = logger.child('onboarding')
 
 const STORE_FILE = 'app-state.json'
 const KEY_COMPLETED_AT = 'onboarding_completed_at'
@@ -70,7 +73,7 @@ export function useOnboardingState(): UseOnboardingState {
         if (cancelled) return
         // Surface and fall back to pending so a corrupted store doesn't
         // strand the user without onboarding.
-        console.error('readOnboardingCompletedAt failed:', err)
+        log.error('read.failed', { fallbackStatus: 'pending', err })
         setStatus('pending')
       })
     return () => {
@@ -82,7 +85,7 @@ export function useOnboardingState(): UseOnboardingState {
     try {
       await writeOnboardingCompletedAt()
     } catch (err) {
-      console.error('writeOnboardingCompletedAt failed:', err)
+      log.error('write.failed', { statusAppliedAnyway: 'completed', err })
     }
     setStatus('completed')
   }, [])
@@ -91,7 +94,7 @@ export function useOnboardingState(): UseOnboardingState {
     try {
       await resetOnboardingCompletedAt()
     } catch (err) {
-      console.error('resetOnboardingCompletedAt failed:', err)
+      log.error('reset.failed', { trigger: 'replay', err })
     }
     setStatus('pending')
   }, [])

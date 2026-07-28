@@ -19,6 +19,9 @@
 // reactive — listing devices and tracking the active deviceId.
 
 import type { TopicRoom } from '@/lib/trystero'
+import { logger } from '@/lib/log'
+
+const log = logger.child('session.audio')
 
 export const AUDIO_DEVICE_DEFAULT_ID = 'default'
 
@@ -148,7 +151,7 @@ export async function swapAudioInput(
           try {
             await sender.replaceTrack(newTrack)
           } catch (err) {
-            console.error('replaceTrack failed for one peer:', err)
+            log.error('replace_track.failed', { err })
           }
         }
       }

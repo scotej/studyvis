@@ -22,6 +22,26 @@ shipped it.)
 
 ### Added
 
+- **When something goes wrong, there's now a record of it.** StudyVis
+  keeps a diagnostic log on your own disk — what the app was doing, which
+  relay refused a publish, why focus detection stopped scoring, what the
+  updater choked on — instead of writing it to a developer console nobody
+  has open. Settings → Advanced → **Copy diagnostics** now puts your
+  version, machine and the last eighty records on the clipboard, ready to
+  paste into an issue, and **Open log** reveals the log folder.
+
+  It is written for someone reading it cold: one record per line, each
+  naming the event and its details rather than a sentence someone has to
+  grep. Usernames are cut out of file paths, keys and session topics are
+  shortened to a prefix, and anything shaped like a recovery phrase is
+  removed — as are your session notes, your study topic, and anything the
+  AI said about your screen. Nothing is uploaded, ever; the log is a file
+  on your machine that you choose whether to share. It stays under 2 MB
+  and keeps one previous copy, so it can't grow without bound.
+
+  **Debug log** in Settings → Advanced now does something: it adds
+  verbose per-sample detail on top of what is always recorded.
+
 - **Screen sharing, for everyone in the session at once.** A Share button in
   the session footer hands your screen to your friends the same way your
   camera already is — peer-to-peer, never through a server, never recorded.
@@ -47,7 +67,32 @@ shipped it.)
   On macOS this rides on the screen-recording permission fix tracked in #94 /
   I79 — without it, macOS builds cannot capture a screen at all.
 
+### Changed
+
+- **The people in your session are now as big as the window allows.** Tiles
+  used to stop growing at 360 px tall and to sit side by side whatever the
+  shape of the window, so you and one friend were a pair of small strips with
+  most of the screen empty underneath. The session now measures the room it has
+  and arranges the tiles the way that makes them largest — for two people that
+  is usually one above the other, each about a third wider and a third taller
+  than before. A third friend, or a shared screen, rearranges everyone again to
+  suit; no one's tile is ever bigger than anyone else's, and faces stay 16:9
+  and uncropped at every size. Sitting alone also stops laying two tiles out in
+  three columns' worth of space. (#95)
+
 ### Fixed
+
+- **On-device AI never started unless you had opened Settings → AI at least
+  once since launching.** The app remembered which model you had chosen, but
+  only read that memory when the AI settings pane was on screen, so a normal
+  launch began every session believing no model was picked — and the whole
+  focus pipeline is gated on that. Sessions ran to completion with AI switched
+  on and nothing watching: no score, no focused-time, and a report that could
+  not tell a deliberate choice from a malfunction. The saved model is now read
+  at startup, the report distinguishes "AI was off" from "AI was on and got
+  nothing" from an older session that predates the distinction, and a session
+  that starts with AI on but no usable model says so instead of running
+  silently. (#92, #94, I83)
 
 - **When on-device AI couldn't take a single reading, nothing said so — the
   session simply ended with an empty focus score.** A Windows friend studied
@@ -63,15 +108,17 @@ shipped it.)
   watching" the whole time.
 
   StudyVis now notices when AI has gone a couple of minutes without managing a
-  single check. The indicator drops to "AI paused", a message names what is
-  actually in the way — with a shortcut to Settings → AI when that is where
-  the fix lives — and a line goes into the session log, so the report
-  afterwards says why the AI section is empty rather than leaving you to guess
-  whether AI was even on. If AI recovers, it says that too, and it will speak
-  up again if it stalls a second time. Deliberate pauses are not treated as a
-  stall: taking a break, turning your camera off, a Pomodoro rest, and a
-  battery pause all stay quiet as before. Nothing about this crosses to your
-  friends — the log line is local to your device. (#92, I82)
+  single check. The indicator stops claiming to watch — it reads "AI error"
+  when the engine itself is the problem and "AI paused" when there is simply
+  nothing to look at — a message names what is actually in the way, with a
+  shortcut to Settings → AI when that is where the fix lives, and a line goes
+  into the session log, so the report afterwards says why the AI section is
+  empty rather than leaving you to guess whether AI was even on. If AI
+  recovers, it says that too, and it will speak up again if it stalls a second
+  time. Deliberate pauses are not treated as a stall: taking a break, turning
+  your camera off, a Pomodoro rest, and a battery pause all stay quiet as
+  before. Nothing about this crosses to your friends — the log line is local to
+  your device. (#92, I82)
 
 ## 1.8.2 — 2026-07-26 — The host's camera reaches you, and AI stops dying at session start
 

@@ -24,6 +24,10 @@ import {
   listAudioInputs,
   type AudioInputOption,
 } from '@/features/session/audioDevices'
+import { logger } from '@/lib/log'
+
+const log = logger.child('media.devices')
+
 import { strings } from '@/strings'
 
 export type AudioDevicePickerProps = {
@@ -55,7 +59,9 @@ export function AudioDevicePicker({
     const refresh = () => {
       listAudioInputs()
         .then(apply)
-        .catch((err) => console.error('enumerateDevices failed:', err))
+        .catch((err) =>
+          log.error('enumerate.failed', { direction: 'input', err })
+        )
     }
     refresh()
     if (
