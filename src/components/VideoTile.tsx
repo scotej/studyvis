@@ -3,7 +3,6 @@ import { MaximizeIcon, MonitorIcon, VideoOff } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { Slider } from '@/components/ui/slider'
-import { tokens } from '@/design/tokens'
 import { cn } from '@/lib/utils'
 import { strings } from '@/strings'
 
@@ -117,10 +116,11 @@ export function VideoTile({
           : 'border border-border-default',
         className
       )}
-      // #95 — the floor keeps a tile legible; there is deliberately no ceiling.
-      // A capped tile stopped growing at 360 px tall while the session view had
-      // twice that to give, and VideoGrid now sizes tiles to fill the slot.
-      style={{ minHeight: tokens.sizes.videoTileMinHeight }}
+      // #95 — a tile has no size of its own any more: VideoGrid measures its
+      // slot and gives every tile a width, and `aspect-video` does the rest.
+      // The old inline min/max height fought that — a min-height plus an aspect
+      // ratio re-derives the WIDTH (180 → 320), so a tile the grid had sized at
+      // 312 burst out of its slot and overflowed the row.
       data-testid="video-tile"
       data-state={resolvedState}
       data-variant={variant}

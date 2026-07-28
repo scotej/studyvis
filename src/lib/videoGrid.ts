@@ -17,25 +17,60 @@ export type TileFitArgs = {
   width: number
   height: number
   gap: number
+  // Legibility floor: the width at which a tile is `videoTileMinHeight` tall.
+  minWidth: number
 }
 
-// Width of one tile in the best-fitting split, ignoring any legibility floor —
-// the caller clamps, because whether the result was clamped is also what tells
-// it the tiles no longer fit and the grid has to scroll.
-export function fitTileWidth({
+export type TileFit = {
+  width: number
+  // Whether the resulting rows are taller than the slot. The grid scrolls, and
+  // has to stop centring its rows — centred overflow puts the first row above
+  // the scroll origin, where nothing can reach it.
+  scrolls: boolean
+}
+
+export function fitTiles({
   count,
   width,
   height,
   gap,
-}: TileFitArgs): number {
-  let best = 0
+  minWidth,
+}: TileFitArgs): TileFit {
+  let best = { tile: 0, column: 0 }
   for (let columns = 1; columns <= count; columns += 1) {
     const rows = Math.ceil(count / columns)
     const byWidth = (width - gap * (columns - 1)) / columns
     const byHeight = ((height - gap * (rows - 1)) / rows) * VIDEO_TILE_ASPECT
-    best = Math.max(best, Math.min(byWidth, byHeight))
+    const tile = Math.min(byWidth, byHeight)
+    if (tile > best.tile) best = { tile, column: byWidth }
   }
+  // The floor protects a tile from the HEIGHT running out: past it the grid
+  // scrolls rather than shrink everyone into slivers. It must never outgrow
+  // the column the tile sits in, though — a tile wider than its share of the
+  // row costs a whole column, and on Windows a scrollbar appearing inside the
+  // content box (macOS overlays its own) is enough to trigger that. Before
+  // this bound, eight tiles at the 1024×640 minimum went from two columns to
+  // one 320-wide strip with 160 px dead on either side the moment the grid
+  // started scrolling.
+  const raised = Math.max(best.tile, Math.min(minWidth, best.column))
   // Floor rather than round: a tile a fraction of a pixel wider than its share
   // of the row is what makes flex-wrap break a row one tile early.
-  return Math.max(0, Math.floor(best))
+  const tile = Math.max(0, Math.floor(raised))
+  return { width: tile, scrolls: overflows(count, tile, height, gap, width) }
+}
+
+// Re-derives the greedy packing flex-wrap will produce at `tile` px per tile,
+// and asks whether those rows fit. Greedy is exact here: every tile is the
+// same width, so a row holds as many as the width divides into.
+function overflows(
+  count: number,
+  tile: number,
+  height: number,
+  gap: number,
+  width: number
+): boolean {
+  if (count === 0 || tile <= 0) return false
+  const columns = Math.max(1, Math.floor((width + gap) / (tile + gap)))
+  const rows = Math.ceil(count / columns)
+  return rows * (tile / VIDEO_TILE_ASPECT) + gap * (rows - 1) > height
 }

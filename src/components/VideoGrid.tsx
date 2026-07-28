@@ -9,7 +9,7 @@ import {
 
 import { tokens } from '@/design/tokens'
 import { cn } from '@/lib/utils'
-import { fitTileWidth, VIDEO_TILE_ASPECT } from '@/lib/videoGrid'
+import { fitTiles, VIDEO_TILE_ASPECT } from '@/lib/videoGrid'
 import { strings } from '@/strings'
 
 // Layout for the session tiles. The mesh hard-caps at 4 people
@@ -26,6 +26,7 @@ const TILE_GAP = tokens.space[4]
 // #95 — a face is worth showing down to the tile-height floor and no further;
 // past that the grid scrolls instead of shrinking everyone into slivers. Only
 // reachable with a screen share or two open at the 1024×640 window minimum.
+// `fitTiles` will still go below it rather than give up a column — see there.
 const MIN_TILE_WIDTH = Math.round(
   tokens.sizes.videoTileMinHeight * VIDEO_TILE_ASPECT
 )
@@ -65,17 +66,19 @@ export function VideoGrid({ children, className }: VideoGridProps) {
     return () => observer.disconnect()
   }, [])
 
-  const fitted =
-    area === null
+  // A zero-sized slot counts as unmeasured: the session view can hand the grid
+  // no room at all mid-transition, and sizing tiles from it would render every
+  // one of them 0 px wide.
+  const fit =
+    area === null || area.width <= 0 || area.height <= 0
       ? null
-      : fitTileWidth({
+      : fitTiles({
           count: tiles.length,
           width: area.width,
           height: area.height,
           gap: TILE_GAP,
+          minWidth: MIN_TILE_WIDTH,
         })
-  const overflows = fitted !== null && fitted < MIN_TILE_WIDTH
-  const tileWidth = fitted === null ? null : Math.max(fitted, MIN_TILE_WIDTH)
 
   return (
     <div
@@ -84,9 +87,14 @@ export function VideoGrid({ children, className }: VideoGridProps) {
       aria-label={strings.session.gridAriaLabel}
       className={cn(
         'flex h-full min-h-0 flex-wrap justify-center gap-4 overflow-y-auto',
+        // Reserve the scrollbar's width whether or not it is showing, so the
+        // slot the tiles were sized from can't shrink underneath them the
+        // moment the grid starts scrolling. No-op where scrollbars overlay
+        // (macOS); same reasoning as SettingsLayout's stable gutter.
+        '[scrollbar-gutter:stable]',
         // Centering the rows is right when they fit; when they don't, it would
         // put the first row above the scroll origin where nothing can reach it.
-        overflows ? 'content-start' : 'content-center',
+        fit?.scrolls ? 'content-start' : 'content-center',
         className
       )}
       data-tile-count={tiles.length}
@@ -98,8 +106,8 @@ export function VideoGrid({ children, className }: VideoGridProps) {
           // measurement: an auto-width tile is a full-width tile, which would
           // overflow the slot and hand `measure()` a scrollbar-narrowed box to
           // size everything from. Never painted — layout effects run first.
-          className={cn('shrink-0', tileWidth === null && 'hidden')}
-          style={tileWidth === null ? undefined : { width: tileWidth }}
+          className={cn('shrink-0', fit === null && 'hidden')}
+          style={fit === null ? undefined : { width: fit.width }}
         >
           {tile}
         </div>
