@@ -10,6 +10,10 @@ import {
   type WindowControl,
 } from '@/lib/windowChrome'
 import { cn } from '@/lib/utils'
+import { logger } from '@/lib/log'
+
+const log = logger.child('ui.titlebar')
+
 import { strings } from '@/strings'
 
 // V3-P6 — Custom window chrome titlebar. Renders only when the user has
@@ -115,7 +119,7 @@ export function TitleBar({
       else if (control === 'maximize') await win.toggleMaximize()
       else await win.close()
     } catch (err) {
-      console.error(`[titlebar] ${control} failed:`, err)
+      log.error('control.failed', { control, err })
     }
   }
 

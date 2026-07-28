@@ -24,6 +24,10 @@ import {
   setSinkIdSupported,
   type AudioInputOption,
 } from '@/features/session/audioDevices'
+import { logger } from '@/lib/log'
+
+const log = logger.child('media.devices')
+
 import { strings } from '@/strings'
 
 export type AudioOutputPickerProps = {
@@ -47,7 +51,9 @@ export function AudioOutputPicker({
     const refresh = () => {
       listAudioOutputs()
         .then(apply)
-        .catch((err) => console.error('enumerateDevices failed:', err))
+        .catch((err) =>
+          log.error('enumerate.failed', { direction: 'output', err })
+        )
     }
     refresh()
     if (

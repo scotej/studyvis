@@ -19,6 +19,9 @@ import {
   type InviteEnvelope,
   type InvitePayload,
 } from './envelope'
+import { logger } from '@/lib/log'
+
+const log = logger.child('friends.inbox')
 
 // Resolves to the friend's x_pubkey (hex) given their ed_pubkey (hex), or null
 // if they're not a known friend. Lets the caller hot-path a store cache and
@@ -187,10 +190,12 @@ export function subscribeToOwnInbox(ctx: InboxContext): InboxSubscription {
       // drive, so a join error is logged for diagnostics only. A real relay
       // outage surfaces to the user through the pairing/invite flows instead.
       onJoinError: (details) =>
-        console.warn('inbox room join error:', details.error),
+        log.warn('join.error', { room: 'inbox', joinError: details.error }),
     })
   } catch (err) {
-    console.error('inbox room join failed:', err)
+    // The "I stopped receiving invites" smoking gun: a malformed saved relay
+    // URL leaves a no-op room and invites silently stop arriving.
+    log.error('join.failed', { degradedTo: 'noop-room', err })
     return { leave: async () => {} }
   }
   const action = room.makeAction<InviteEnvelope>(INVITE_ACTION)

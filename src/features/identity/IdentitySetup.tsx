@@ -9,6 +9,9 @@ import {
 import { strings } from '@/strings'
 
 import type { Mnemonic } from '@/lib/crypto/identity'
+import { logger } from '@/lib/log'
+
+const log = logger.child('identity.setup')
 
 export type IdentitySetupProps = {
   mnemonic: Mnemonic
@@ -39,7 +42,9 @@ export function IdentitySetup({
     try {
       await onConfirm()
     } catch (err) {
-      console.error(err)
+      // The mnemonic is in scope on this screen. It is never a field here,
+      // and the logger redacts a BIP39-shaped run out of err.message besides.
+      log.error('create.failed', { op: 'identity_create', err })
       const raw = err instanceof Error ? err.message : String(err)
       toast.error(
         raw.includes(KEYS_EXIST_MARKER)

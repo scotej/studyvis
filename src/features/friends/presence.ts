@@ -45,6 +45,9 @@ import {
   type PresenceRelayHandle,
   type PresenceRelayOptions,
 } from './presenceRelay'
+import { logger } from '@/lib/log'
+
+const log = logger.child('friends.presence')
 
 export const HEARTBEAT_ACTION = 'heartbeat'
 export const HEARTBEAT_INTERVAL_MS = 30_000
@@ -212,7 +215,7 @@ export function startPresence(ctx: PresenceContext): PresenceSubscription {
     try {
       return joinTopic(config)
     } catch (err) {
-      console.error('presence room join failed:', err)
+      log.error('join.failed', { degradedTo: 'null-room', err })
       return null
     }
   }
@@ -235,7 +238,7 @@ export function startPresence(ctx: PresenceContext): PresenceSubscription {
         ? ctx.makeRelay(relayOpts)
         : startPresenceRelay(relayOpts)
     } catch (err) {
-      console.error('presence relay leg unavailable:', err)
+      log.error('relay_leg.unavailable', { legsRemaining: ['trystero'], err })
       relay = null
     }
   }
@@ -265,7 +268,10 @@ export function startPresence(ctx: PresenceContext): PresenceSubscription {
     ...buildIceOptions(useSettingsStore.getState().values.turnPreference),
     // F1 — presence is a background channel; a join error is logged only.
     onJoinError: (details) =>
-      console.warn('presence (own) room join error:', details.error),
+      log.warn('join.error', {
+        room: 'presence-own',
+        joinError: details.error,
+      }),
   })
   if (ownRoom) {
     const ownAction = ownRoom.makeAction<PresencePayload>(HEARTBEAT_ACTION)
@@ -305,8 +311,13 @@ export function startPresence(ctx: PresenceContext): PresenceSubscription {
       strategies: ['nostr', 'mqtt'],
       // TURN for the datachannel leg — see the own-room note above.
       ...buildIceOptions(useSettingsStore.getState().values.turnPreference),
+      // One room per friend, so this is the loudest repeat offender in the
+      // app — the logger's throttle is what keeps it from evicting the ring.
       onJoinError: (details) =>
-        console.warn('presence (friend) room join error:', details.error),
+        log.warn('join.error', {
+          room: 'presence-friend',
+          joinError: details.error,
+        }),
     })
     if (!room) return
     friendRooms.set(friend.ed_pubkey_hex, room)

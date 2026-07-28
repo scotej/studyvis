@@ -31,6 +31,9 @@ import { check, type Update } from '@tauri-apps/plugin-updater'
 import { create } from 'zustand'
 
 import { useSessionStore } from '@/stores/sessionStore'
+import { logger } from '@/lib/log'
+
+const log = logger.child('updater')
 
 export type UpdaterStatus =
   | 'idle'
@@ -142,8 +145,10 @@ export const useUpdaterStore = create<UpdaterState>((set, get) => ({
       update = await deps.check()
     } catch (err) {
       // Silent in the background path: no network is the common case on a
-      // laptop that just woke up, and it isn't the user's problem.
-      console.error('[updater] check failed:', err)
+      // laptop that just woke up, and it isn't the user's problem — so it is
+      // a warning there and an error only when the user asked.
+      const record = userInitiated ? log.error : log.warn
+      record('check.failed', { userInitiated, err })
       set({ status: 'error', errorKind: userInitiated ? 'check' : null })
       return
     }
@@ -162,10 +167,10 @@ export const useUpdaterStore = create<UpdaterState>((set, get) => ({
     try {
       context = await deps.installContext()
     } catch (err) {
-      console.error('[updater] install-context probe failed:', err)
+      log.error('install_context.failed', { failedOpen: true, err })
     }
     if (!context.updatable) {
-      console.warn('[updater] cannot self-update here:', context.reason)
+      log.warn('self_update.blocked', { reason: context.reason })
       set({
         status: 'blocked',
         version: update.version,
@@ -225,7 +230,7 @@ export const useUpdaterStore = create<UpdaterState>((set, get) => ({
     } catch (err) {
       // Leave nothing staged: the next check re-downloads from scratch rather
       // than trying to resume a half-written artifact.
-      console.error('[updater] download failed:', err)
+      log.error('download.failed', { err })
       set({
         status: 'error',
         pending: null,
@@ -264,7 +269,7 @@ export const useUpdaterStore = create<UpdaterState>((set, get) => ({
     } catch (err) {
       // Most often macOS refusing to overwrite a bundle the user doesn't own
       // (a root-installed /Applications, or still running from the .dmg).
-      console.error('[updater] install failed:', err)
+      log.error('install.failed', { err })
       set({ installing: false, errorKind: 'install' })
       return false
     }
@@ -275,7 +280,7 @@ export const useUpdaterStore = create<UpdaterState>((set, get) => ({
     try {
       await deps.relaunch()
     } catch (err) {
-      console.error('[updater] relaunch failed:', err)
+      log.error('relaunch.failed', { installSucceeded: true, err })
       set({ installing: false, errorKind: 'install' })
       return false
     }

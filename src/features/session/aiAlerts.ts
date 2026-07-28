@@ -36,6 +36,9 @@ import { bytesToHex, hexToBytes } from '@/lib/encoding'
 import type { TopicRoom } from '@/lib/trystero'
 import type { AuditEventDetail, AuditEventKind } from '@/lib/audit-types'
 import type { SignFn } from '@/stores/auditStore'
+import { logger } from '@/lib/log'
+
+const log = logger.child('session.alerts')
 
 export const AI_ALERT_ACTION = 'ai-alert'
 export const AI_ALERT_VERSION = 1 as const
@@ -225,7 +228,15 @@ export function startAiAlertDispatcher(
         { now: () => ts }
       )
     } catch (err) {
-      console.error('[aiAlerts] ai_alert audit failed:', err)
+      // The reasoning length, never the reasoning: it is model output
+      // derived from whatever was on the user's screen.
+      log.error('audit.failed', {
+        auditKind: 'ai_alert',
+        severity,
+        ts,
+        reasoningLength: reasoning.length,
+        err,
+      })
     }
 
     // 2. Signed alert message on the new AI_ALERT_ACTION channel.
@@ -240,7 +251,7 @@ export function startAiAlertDispatcher(
       })
       await alertAction.send(payload)
     } catch (err) {
-      console.error('[aiAlerts] alert broadcast failed:', err)
+      log.error('broadcast.failed', { severity, ts, err })
     }
 
     // 3. Light our own tile too — the carryover spec is "All peers
@@ -270,7 +281,13 @@ export function startAiAlertDispatcher(
         { now: () => ts }
       )
     } catch (err) {
-      console.error('[aiAlerts] ai_warning local-append failed:', err)
+      log.error('local_append.failed', {
+        auditKind: 'ai_warning',
+        severity,
+        ts,
+        reasoningLength: reasoning.length,
+        err,
+      })
     }
   }
 
