@@ -22,6 +22,26 @@ shipped it.)
 
 ### Added
 
+- **When something goes wrong, there's now a record of it.** StudyVis
+  keeps a diagnostic log on your own disk — what the app was doing, which
+  relay refused a publish, why focus detection stopped scoring, what the
+  updater choked on — instead of writing it to a developer console nobody
+  has open. Settings → Advanced → **Copy diagnostics** now puts your
+  version, machine and the last eighty records on the clipboard, ready to
+  paste into an issue, and **Open log** reveals the log folder.
+
+  It is written for someone reading it cold: one record per line, each
+  naming the event and its details rather than a sentence someone has to
+  grep. Usernames are cut out of file paths, keys and session topics are
+  shortened to a prefix, and anything shaped like a recovery phrase is
+  removed — as are your session notes, your study topic, and anything the
+  AI said about your screen. Nothing is uploaded, ever; the log is a file
+  on your machine that you choose whether to share. It stays under 2 MB
+  and keeps one previous copy, so it can't grow without bound.
+
+  **Debug log** in Settings → Advanced now does something: it adds
+  verbose per-sample detail on top of what is always recorded.
+
 - **Screen sharing, for everyone in the session at once.** A Share button in
   the session footer hands your screen to your friends the same way your
   camera already is — peer-to-peer, never through a server, never recorded.

@@ -1,10 +1,13 @@
 import type { TurnServerConfig } from 'trystero'
 
+import { logger } from '@/lib/log'
 import {
   useSettingsStore,
   type CustomTurnServer,
   type TurnPreference,
 } from '@/stores/settingsStore'
+
+const log = logger.child('webrtc.ice')
 
 // Public TURN servers for NAT traversal when a direct WebRTC connection can't
 // form (symmetric / carrier-grade NAT, AP isolation, strict firewalls). These
@@ -47,12 +50,15 @@ export function iceOptionsFor(
 ): IceOptions {
   if (servers.length === 0) {
     if (pref === 'always') {
-      console.warn(
-        "TURN preference 'always' (relay-only) ignored: no TURN servers are " +
-          'configured, so forcing relay-only transport would guarantee a failed ' +
-          'connection. Falling back to STUN-only. Configure PUBLIC_TURN_SERVERS ' +
-          'in src/lib/trystero/ice.ts to honor this preference.'
-      )
+      log.warn('turn.relay_only_ignored', {
+        turnPreference: 'always',
+        configuredServerCount: 0,
+        effective: 'stun-only',
+        hint:
+          'Forcing relay-only transport with no TURN servers would guarantee a ' +
+          'failed connection. Configure PUBLIC_TURN_SERVERS in ' +
+          'src/lib/trystero/ice.ts to honor this preference.',
+      })
     }
     return {}
   }

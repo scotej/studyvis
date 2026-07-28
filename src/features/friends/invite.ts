@@ -22,13 +22,17 @@ import {
   type InvitePayloadCore,
 } from './envelope'
 import { createInviteRetryManager } from './inviteRetry'
+import { logger } from '@/lib/log'
+
+const log = logger.child('friends.invite')
 
 // F6 — process-wide retry manager. `inviteFriend` registers a pending retry on
 // InviteTimeoutError (the friend was offline) and marks (recipient, session)
 // delivered on success; InboxBoot drives `onPresenceOnline` when a friend's
 // presence flips online, and `cancelAll` when the host's session ends.
 export const inviteRetryManager = createInviteRetryManager({
-  onRetryError: (err) => console.warn('invite retry failed:', err),
+  // Never the envelope: it carries the session password.
+  onRetryError: (err) => log.warn('retry.failed', { err }),
   // PR-9 — only ever retry-deliver an invite for the session the host is still
   // in. A retry queued for a session that has since ended must not pull the
   // friend into an empty room.

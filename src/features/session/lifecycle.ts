@@ -16,6 +16,9 @@ import { useFriendsStore } from '@/stores/friendsStore'
 import { useSessionStore } from '@/stores/sessionStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { strings } from '@/strings'
+import { logger } from '@/lib/log'
+
+const log = logger.child('session.lifecycle')
 
 export const SESSION_FULL_ACTION = 'session-full'
 export const PTT_STATE_ACTION = 'ptt-state'
@@ -154,7 +157,9 @@ export function createGuestRoom(topic: string, password: string): RoomInit {
 // invite, since both sides share the session password) or a peer handshake
 // timeout reads through here.
 function logJoinError(details: { error: string }): void {
-  console.warn('session room join error:', details.error)
+  // trystero assembles this string around remote peer data, so it is
+  // untrusted text — the logger sanitises it on the way in.
+  log.warn('join.error', { room: 'session', joinError: details.error })
 }
 
 // Re-entering the same room — Rejoin after a grace-window auto-end (#47 B3)
@@ -282,7 +287,7 @@ export function buildLeaveHandler(args: {
     try {
       await useAuditStore.getState().flushPending()
     } catch (err) {
-      console.error('audit flushPending failed:', err)
+      log.error('audit_flush.failed', { phase: 'teardown', err })
     }
 
     // A prior row for this topic can only be an earlier stint of this same
@@ -293,7 +298,7 @@ export function buildLeaveHandler(args: {
     try {
       merged = mergeSessionStints(await sessionsGet(args.topic), merged)
     } catch (err) {
-      console.error('sessions_get for the re-entry merge failed:', err)
+      log.error('sessions_get.failed', { degradedTo: 'stint-only', err })
     }
 
     try {
@@ -311,12 +316,20 @@ export function buildLeaveHandler(args: {
         skippedSamples: focusSnapshot.skippedSamples,
       })
     } catch (err) {
-      console.error('sessions_insert failed:', err)
+      log.error('sessions_insert.failed', {
+        totalMinutes: merged.totalMinutes,
+        peerCount: merged.peerPubkeys?.length ?? 0,
+        score: focusSnapshot.score,
+        focusedPct: focusSnapshot.focusedPct,
+        confidentSamples: focusSnapshot.confidentSamples,
+        skippedSamples: focusSnapshot.skippedSamples,
+        err,
+      })
     }
     try {
       await useFriendsStore.getState().markStudied(peerEdPubkeys, endedAt)
     } catch (err) {
-      console.error('markStudied failed:', err)
+      log.error('mark_studied.failed', { peerCount: peerEdPubkeys.length, err })
     }
     // Flip to 'ended'. The Report view (mounted by Home.tsx when status ===
     // 'ended') queries the just-persisted sessions row + audit_events for

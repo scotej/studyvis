@@ -67,12 +67,16 @@ import { buildFocusRequest } from './focusRequest'
 import { useFocusStore } from './focusStore'
 import { useModelStore } from './modelStore'
 import {
+  isUncertainVerdict,
   parseJudgment,
   type SampleVerdict,
   type Severity,
 } from './parseJudgment'
 import type { ScoreEvent } from './scoreMachine'
 import { DEFAULT_CTX_SIZE, useSidecarStore } from './sidecar'
+import { logger } from '@/lib/log'
+
+const log = logger.child('ai.sampleloop')
 
 // Per-tick HTTP timeout. Cold-start warmup can run ~30–90 s on CPU; the
 // benchmark surfaces representative p95s into useModelStore so on the
@@ -282,7 +286,7 @@ const defaultRuntime: SampleLoopRuntime = {
     } catch (err) {
       // availableMonitors() can fail on platforms where the WebView hasn't
       // yet bound the window plugin. The safe degradation is single-display.
-      console.warn('[sampleLoop] availableMonitors() failed:', err)
+      log.warn('monitors.enumerate_failed', { degradedTo: 1, err })
       return 1
     }
   },
@@ -846,10 +850,14 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
       )
       if (!response.ok) {
         const errText = await response.text().catch(() => '')
-        console.warn(
-          `[sampleLoop] HTTP ${response.status} from sidecar`,
-          errText.slice(0, 200)
-        )
+        // The body is sidecar- and model-authored; the logger clamps and
+        // strips it, so no slice() here.
+        log.warn('sidecar.http_error', {
+          httpStatus: response.status,
+          bodySnippet: errText,
+          bodyLength: errText.length,
+          modelId: opts.modelId,
+        })
         return
       }
       const json = (await response.json()) as ChatCompletionResponse
@@ -884,7 +892,13 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
         try {
           await opts.onScoreEvents(events, verdict)
         } catch (err) {
-          console.warn('[sampleLoop] onScoreEvents handler threw:', err)
+          log.warn('score_events.threw', {
+            eventCount: events.length,
+            verdictKind: isUncertainVerdict(verdict)
+              ? 'uncertain'
+              : verdict.severity,
+            err,
+          })
         }
       }
     } catch (err) {
@@ -903,12 +917,16 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
         return
       }
       if (err instanceof DOMException && err.name === 'AbortError') {
-        console.warn(
-          `[sampleLoop] inference aborted (timeout ${requestTimeoutMs} ms)`
-        )
+        // The "why did focus detection stop scoring" line — the cadence
+        // state is what makes it answerable.
+        log.warn('inference.aborted', {
+          timeoutMs: requestTimeoutMs,
+          modelId: opts.modelId,
+          onBattery: state.battery.onBattery,
+        })
         return
       }
-      console.warn('[sampleLoop] tick failed:', err)
+      log.warn('tick.failed', { modelId: opts.modelId, err })
     } finally {
       runtime.clearTimeout(timer)
       activeAbort = null
@@ -921,7 +939,8 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
     try {
       state.battery = await runtime.readBattery()
     } catch (err) {
-      console.warn('[sampleLoop] battery read failed:', err)
+      // Fires on every poll on unsupported hardware — debug, not a warning.
+      log.debug('battery.read_failed', { err })
     }
   }
 
@@ -985,9 +1004,12 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
     ) {
       state.modelFloorSec = interval
     } else {
-      console.warn(
-        `[sampleLoop] no benchmark for ${opts.modelId}, using fallback ${FALLBACK_SAMPLE_INTERVAL_SEC}s`
-      )
+      // Not a fault: a model that has never been benchmarked simply gets the
+      // conservative interval.
+      log.info('benchmark.missing', {
+        modelId: opts.modelId,
+        fallbackIntervalSec: FALLBACK_SAMPLE_INTERVAL_SEC,
+      })
       state.modelFloorSec = FALLBACK_SAMPLE_INTERVAL_SEC
     }
     // A6 — the benchmark p95 is the baseline the cadence backoff compares each
@@ -1021,7 +1043,11 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
       } catch (err) {
         // Enumeration failure isn't a session-ending event — fall back to
         // single-display capture (the V2 behavior).
-        console.warn('[sampleLoop] enumerateDisplayCount() failed:', err)
+        log.warn('displays.enumerate_failed', {
+          captureMode: 'all',
+          degradedTo: 1,
+          err,
+        })
       }
     }
 
@@ -1131,10 +1157,11 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
           !(err instanceof CaptureError) ||
           err.code !== 'screen_capture_denied'
         ) {
-          console.warn(
-            '[sampleLoop] additional display acquire failed:',
-            err instanceof Error ? err.message : err
-          )
+          log.warn('display.acquire_failed', {
+            acquireTargetCount,
+            latchedDenied: false,
+            err,
+          })
         }
         break
       }
@@ -1179,7 +1206,11 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
   }
 
   bootPromise = boot().catch((err) => {
-    console.error('[sampleLoop] boot failed:', err)
+    log.error('boot.failed', {
+      modelId: opts.modelId,
+      failCode: 'sidecar_start_failed',
+      err,
+    })
     opts.onStartFail?.(
       'sidecar_start_failed',
       err instanceof Error ? err.message : String(err)
@@ -1208,7 +1239,9 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
     try {
       await runtime.stopSidecar()
     } catch (err) {
-      console.warn('[sampleLoop] sidecar stop failed:', err)
+      // Matters for the updater path: a sidecar we failed to stop makes a
+      // worse install.
+      log.warn('sidecar.stop_failed', { cmd: 'sidecar_stop', err })
     }
   }
 

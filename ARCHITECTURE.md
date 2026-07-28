@@ -594,6 +594,7 @@ studyvis/
 │  │  ├─ ai/                      # V2+ — entire dir absent in V1
 │  │  └─ settings/
 │  ├─ lib/
+│  │  ├─ log.ts                   # structured app log (#98): ring + disk sink
 │  │  ├─ trystero/                # discovery wrappers
 │  │  ├─ nostr/                   # I74 relay-presence events + socket pool
 │  │  ├─ webrtc/                  # peer connection helpers
@@ -624,6 +625,7 @@ The `commands/` tree above is illustrative; the actual command modules are `iden
 - **Local data management:** `sessions_delete`, `sessions_clear_all` (each tx-scoped, deleting the session row and its `audit_events` together), `audit_events_list_all` (the cross-session read backing the focus-insights view), and `system_write_text_file` (the report / audit-JSON / stats-CSV save path — no fs-plugin surface added).
 - **Friends backup:** `friends_export` / `friends_import` (sealed-box to the user's own X25519 key, SVFB v1 format; import upserts on `ON CONFLICT(ed_pubkey_hex)`).
 - **Lifecycle:** `session_set_active` (drives the Rust `SessionActiveFlag` for the quit-confirm path) and `app_quit` (arms the quit and exits after the in-app confirm).
+- **Diagnostics (#98):** `app_log_append` / `app_log_tail` in `commands/applog.rs`, backing `src/lib/log.ts`. The frontend renders and redacts each newline-delimited-JSON record; Rust appends it to `<data_dir>/logs/studyvis.log` under a process-wide mutex (both webviews write to the one file) and rolls a single generation at 2 MiB. Neither command takes a caller-supplied path — the ai-dialog window can reach every app command regardless of its capability file, so the narrow signature is the mitigation. `diagnostics_info` gained `app_log_path` alongside the sidecar's `log_path`.
 - **Update check:** none — X6's `tauri-plugin-updater` owns this end to end (see §2 "Auto-update"); the X4 `system_fetch_latest_version` command was removed in v1.5.0. The `version_check_enabled` store key is still read (never written) as the fallback that carries an explicit X4 opt-out onto `auto_update_enabled`.
 - `identity_save_keys` gained an `overwrite: bool` argument — create-new passes `false` (so a corrupt-`identity.json` load can never clobber still-valid keychain keys), and the explicit Recover/Restore path passes `true` after its own confirm.
 

@@ -7,6 +7,9 @@ import { LazyStore } from '@tauri-apps/plugin-store'
 import { create } from 'zustand'
 
 import type { BenchmarkResult } from './benchmark'
+import { logger } from '@/lib/log'
+
+const log = logger.child('ai.models')
 
 // A4 — recorded when a download errors/interrupts partway so the picker can
 // honestly read as "Resume download" rather than restart-from-zero. The Rust
@@ -130,7 +133,7 @@ async function persist(
     await store.save()
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
-    console.error('modelStore.persist failed:', err)
+    log.error('persist.failed', { err })
     set({ error: message })
   }
 }
