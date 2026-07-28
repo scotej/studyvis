@@ -17,9 +17,9 @@ const SRC = join(ROOT, 'src')
 
 const ALLOWLIST_FILES = new Set<string>([join('src', 'design', 'tokens.ts')])
 
-// Vendored shadcn primitives we cannot rewrite inside this pass: they live
-// under Group D ownership in BUILD-PROMPTS, and their bracket-arbitraries are
-// load-bearing visuals that need a coordinated visual-design pass to replace.
+// Vendored shadcn primitives we cannot rewrite inside this pass: they were
+// Group D's to own in the original build plan, and their bracket-arbitraries
+// are load-bearing visuals needing a coordinated visual-design pass to replace.
 // Each entry is exempted ONLY for the named rule(s); other rules still apply.
 // TODO(V3 polish): drop this allowlist after replacing the bracketed values
 // with token-derived utilities.

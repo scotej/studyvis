@@ -683,3 +683,103 @@ Format: one `###` section per finding, ordered by ID. Entries are appended, neve
 **Evidence.** User report (issue #99): "Session history and stats show blank when exiting a new session" — Settings → Sessions shows its load error, Settings → Stats the same, no session is ever recorded and no post-session report renders, while friends / identity / pairing / AI are unaffected. **Root cause: a version-keyed migration cannot reach a database whose recorded version already covers a file that was later edited in place.** `001_initial.sql` created `sessions` on 2026-05-09 (1329305, V1-P4) without `focused_pct` / `generated_at`; V2-P8 added both by amending that same file on 2026-05-11 (4caa546). A database created in that window records `schema_version = 1`, so 001 never re-runs — 002/003/004 apply on top and leave it at the current version with those two columns permanently absent. `sessions::list`, `get` and `insert` all name every column, so every one of them fails with `no such column: focused_pct`; the `friends` amendment in the same window only REMOVED a column, which SQLite tolerates, which is why nothing else broke. The 2026-07 `shipped_migrations_are_immutable` test stops the NEXT in-place edit but cannot repair the disks the two before it already diverged.
 
 **Status.** **fixed** — `db::schema_repair::reconcile_schema` runs after `run_migrations` at every boot and `ALTER TABLE ADD COLUMN`s whatever `EXPECTED_SCHEMA` names and the disk lacks: additive only, never a drop / rewrite / type change, so it cannot lose data and is a no-op on a healthy database. Failure is logged, not fatal — a repair that can't run leaves the database exactly as it was found. Tests reconstruct the real 2026-05-09 `sessions` DDL and assert the un-repaired database fails `list` (the defect), then that insert + list + get round-trip after the repair, that pre-existing rows keep their values while the new columns read NULL, and idempotence. A drift guard compares `EXPECTED_SCHEMA` against a freshly-migrated database in both directions, so a future migration that adds a column without listing it here fails the suite.
+## Archive — retired backlogs
+
+Two documents used to sit beside this ledger and were deleted once they had no open work left to describe: `BUILD-PROMPTS.md` (the sequenced V0→V3 build plan) and `IMPROVEMENTS.md` (the v1.2.0-era improvement backlog). Git history holds both in full — `git log --diff-filter=D -- BUILD-PROMPTS.md IMPROVEMENTS.md`, then `git show <sha>^:<file>`. What survives here is the part still cited from code.
+
+### Improvement backlog (2026-06, v1.2.0-era)
+
+**Retired, not live.** A code-level audit on 2026-07-10 verified every item against the source: **55 of 56 shipped** (largely in v1.2.1, with v1.2.2 and v1.3.1 following), **1 partial (P1)**, **0 open**. The IDs below appear as comment tags at the exact code sites that implemented them; the letter-to-section legend is in `CLAUDE.md`. Item text described the **v1.2.0-era gap** it was written against, not today's code — which is why only the titles are kept here, as a decoder for those tags rather than as a backlog.
+
+Exceptions and judgment calls, so nobody re-litigates them from an item title alone:
+
+- **P1 (Linux deferral checklist) — partial.** Its literal ask shipped — the deferral now has a concrete trigger + unblock checklist (PLAN §8) — but the Linux work the checklist describes (keyring feature, `.AppImage` job, smoke-test re-run) has not started.
+- **X2** shipped via its sanctioned alternative: the Intel-Mac claim was dropped from the docs rather than adding an `x64.dmg` build.
+- **X7** shipped as the documented triage (ISSUES.md I19); the "when convenient" dev-dep bumps remain untaken by design.
+- **S2** closed the privacy defect with a stuck-key guard (120 s, not ~30 s) + per-session reset; the suggested blur-release was considered and deliberately rejected (`PttListener.tsx`) because the PTT shortcut is system-wide.
+- **N3** shipped as a global toggle only (no per-friend mute). **S4**'s output picker is inoperative on macOS WKWebView (`setSinkId` unsupported — documented in code); per-peer volume works everywhere.
+
+#### Item index
+
+**F — Friend-finding & connection**
+
+- `F1` — Wire trystero `onJoinError` so silent relay/network failures become visible
+- `F2` — Connection-diagnostics panel via trystero `getRelaySockets`
+- `F3` — Let users add a relay URL / TURN server without a new build
+- `F4` — Surface per-peer WebRTC connection state in the session grid
+- `F5` — Post-peer-arrival stall timer for the pairing dialog
+- `F6` — Make invite delivery honest about offline friends + retry on presence
+- `F7` — Goodbye heartbeat so presence flips offline near-instantly on quit
+- `F8` — Align docs and in-app copy to the STUN-only reality
+- `F9` — Raise QR error-correction level and surface code freshness
+- `F10` — Register `studyvis://` as a real OS deep link
+
+**U — UI / UX & accessibility**
+
+- `U1` — Give online friend rows a persistent invite affordance
+- `U2` — Show a "waiting for your friend" state when alone in a session
+- `U3` — Add Back navigation to the onboarding step sequence
+- `U4` — Collapse the redundant second "Add friend" button
+- `U5` — Make the WCAG contrast gate detect token pairings not in its allowlist
+- `U6` — Replace the raw radio input in SessionTimer with the RadioGroup primitive
+- `U7` — Update the stale BipBackupPanel note in DESIGN-SYSTEM.md
+
+**S — Session robustness**
+
+- `S1` — Grace window before auto-ending on transient disconnect
+- `S2` — Make a missed PTT key-release recoverable
+- `S3` — Camera on/off toggle for the live session
+- `S4` — Audio output device + per-peer volume control
+
+**A — AI focus-detection quality**
+
+- `A1` — Make the benchmark request shape-identical to the real focus request
+- `A2` — Treat malformed/empty model responses as uncertain, not `on_task`
+- `A3` — Consume `on_topic_confidence` in the score machine
+- `A4` — Add HTTP Range resume to model downloads
+- `A5` — Re-read the sidecar port after the capture await before POSTing
+- `A6` — Resolve the dangling "thermal-aware notice" in ARCHITECTURE §8
+
+**D — Data, identity & recovery**
+
+- `D1` — Don't steer a corrupt-identity load into new-identity onboarding
+- `D2` — Recover gracefully from a corrupt `app.db` instead of crashing at startup
+- `D3` — Local friends-list backup/restore, encrypted to the user's own key
+- `D4` — Turn the dead "Recovery phrase" settings row into an honest, actionable one
+- `D5` — Detect SAME vs DIFFERENT backup before the recovery overwrite warning
+- `D6` — Refuse to open a DB created by a newer app version
+- `D7` — Document the plaintext-at-rest boundary in the threat model
+
+**R — Stats, report & focus history**
+
+- `R1` — Stop persisting `score=100` for AI-off sessions
+- `R2` — Disambiguate "Focused minutes" (stats) from "Focused-time %" (report)
+- `R3` — File export for the report and a stats CSV
+- `R4` — Session delete / clear-history affordance
+- `R5` — Match the copy-report section order to the on-screen order
+- `R6` — Surface how many sessions are unscored in the average-score tile
+- `R7` — Local focus-insights view across sessions
+
+**X — Release & distribution**
+
+- `X1` — Gate the release on CI-green before tagging `main`
+- `X2` — Build the Intel Mac `x64.dmg` the docs promise (or drop the claim)
+- `X3` — Run `check-strings` in CI
+- `X4` — Opt-in, OFF-by-default new-version notification
+- `X5` — Reduce macOS Gatekeeper friction via ad-hoc signing
+- `X6` — Resolve the dormant `tauri-plugin-updater` dependency
+- `X7` — Document the npm audit triage (9 vulns are dev-only)
+
+**N — New features & cross-cutting lifecycle**
+
+- `N1` — Single-instance guard so relaunch focuses the existing window
+- `N2` — OS notification on pomodoro work↔rest transitions
+- `N3` — Optional "friend came online" notification
+- `N4` — Confirm before quitting during an active session
+- `N5` — Custom pomodoro durations (wire-compat aware)
+- `N6` — Optional audio cue on break / phase transitions
+
+**P — Strategic / credential-gated**
+
+- `P1` — Turn the Linux deferral into a concrete unblock checklist
+- `P2` — Record signing / notarization / auto-install as one credential-gated roadmap item

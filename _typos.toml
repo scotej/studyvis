@@ -15,8 +15,6 @@ extend-exclude = [
   "storybook-static",
   "src-tauri/target",
   "src-tauri/gen",
-  # Historical provenance doc, frozen by CLAUDE.md — not live prose.
-  "BUILD-PROMPTS.md",
 ]
 
 [default]

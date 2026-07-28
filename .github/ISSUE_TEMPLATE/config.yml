@@ -2,7 +2,7 @@ blank_issues_enabled: true
 contact_links:
   - name: Security vulnerability
     url: https://github.com/scotej/studyvis/security/advisories/new
-    about: Report privately. Do not open a public issue — see SECURITY.md.
+    about: Report privately. Do not open a public issue — see the security policy.
   - name: Install trouble (Gatekeeper / SmartScreen / first run)
     url: https://github.com/scotej/studyvis/blob/main/INSTALL.md
     about: The warnings on first install are expected — builds are unsigned. INSTALL.md walks through them.

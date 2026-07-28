@@ -616,7 +616,7 @@ studyvis/
 ├─ PLAN.md
 ├─ ARCHITECTURE.md                # this file
 ├─ DESIGN-SYSTEM.md
-├─ BUILD-PROMPTS.md               # historical build plan (archived)
+├─ ISSUES.md                      # audit ledger (one section per finding) + archive
 └─ README.md                      # summary + install
 ```
 
