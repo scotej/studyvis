@@ -52,6 +52,7 @@ import {
   type StatsSummary,
 } from './statsData'
 import { FocusInsights } from './FocusInsights'
+import { StudyHeatmap } from './StudyHeatmap'
 import {
   computeInsights,
   type FocusInsights as FocusInsightsData,
@@ -239,6 +240,10 @@ export function DashboardView({ summary, insights, now }: DashboardViewProps) {
               totalSessions={totalSessions}
             />
           </div>
+
+          {/* The year first, then the 30-day detail under it: the heatmap is
+              the "how am I doing" glance, the bar chart is the zoom-in. */}
+          <StudyHeatmap heatmap={summary.heatmap} />
 
           <section className="flex flex-col gap-3">
             <h3 className="text-sm font-medium tracking-wide text-text-secondary uppercase">

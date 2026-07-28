@@ -7,6 +7,15 @@
 //! tuple to `MIGRATIONS` — `MAX_KNOWN_VERSION` derives from the last entry.
 //! There are no down migrations. Write DDL idempotently (`IF NOT EXISTS`) and
 //! add an upgrade test alongside the existing ones below.
+//!
+//! 001's own header calls its two pre-release in-place amendments harmless
+//! because "SQLite tolerates extra columns". That holds for the column the
+//! `friends` amendment removed and not for the two the `sessions` one added:
+//! a database created between them records version 1, so 001 never re-runs and
+//! `sessions` stays short `focused_pct` + `generated_at` forever (issue #99).
+//! `db::schema_repair` converges those databases at boot; the file itself is
+//! now immutable (see `shipped_migrations_are_immutable`), hashes included,
+//! so don't "correct" that comment.
 
 use rusqlite::{Connection, TransactionBehavior};
 

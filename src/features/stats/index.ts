@@ -7,6 +7,7 @@ export {
   type DashboardViewProps,
 } from './Dashboard'
 export { FocusInsights, type FocusInsightsViewProps } from './FocusInsights'
+export { StudyHeatmap, type StudyHeatmapProps } from './StudyHeatmap'
 export {
   computeInsights,
   computeRecurringReasons,
@@ -25,20 +26,30 @@ export {
 export {
   averageScore,
   buildStatsCsvModel,
+  buildStudyHeatmap,
+  computeLongestStreak,
   computeStats,
   computeStreak,
+  heatmapLevel,
   partnerStudyTotals,
   studyMinutesForSession,
   studyMinutesPerDay,
   topStudyPartners,
+  weekdayIndex,
   FOCUS_WINDOW_DAYS,
+  HEATMAP_LEVEL_MINUTES,
+  HEATMAP_WEEKS,
   NO_PARTNER_STUDY,
   STREAK_MIN_MINUTES,
   TOP_PARTNERS_LIMIT,
   type DailyFocus,
+  type HeatmapDay,
+  type HeatmapLevel,
+  type HeatmapMonth,
   type PartnerStudyTotals,
   type ScoreSummary,
   type StatsCsv,
   type StatsSummary,
+  type StudyHeatmap as StudyHeatmapData,
   type StudyPartner,
 } from './statsData'

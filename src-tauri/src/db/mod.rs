@@ -24,6 +24,7 @@ use tauri::{AppHandle, Manager, Runtime};
 pub mod audit_events;
 pub mod friends;
 pub mod migrations;
+pub mod schema_repair;
 pub mod sessions;
 
 /// The app's single shared connection behind a `Mutex` (not an actual pool),
@@ -155,6 +156,20 @@ enum OpenError {
     Other(String),
 }
 
+// #99 — version-keyed migrations can't reach a database whose recorded version
+// already covers a migration that was later edited in place, so the columns
+// that edit added are missing forever. See db::schema_repair for the two that
+// were, and what it costs (every `sessions` query fails). Deliberately not
+// fatal: a repair we couldn't run leaves the database exactly as this build
+// found it, and refusing to boot over it would be strictly worse than the bug.
+fn repair_diverged_schema(conn: &mut Connection) {
+    match schema_repair::reconcile_schema(conn) {
+        Ok(added) if added.is_empty() => {}
+        Ok(added) => eprintln!("db: repaired diverged schema — added {}", added.join(", ")),
+        Err(e) => eprintln!("db: schema repair failed (continuing): {e}"),
+    }
+}
+
 fn open_and_migrate(path: &Path) -> Result<DbPool, OpenError> {
     let mut conn = Connection::open(path)
         .map_err(|e| OpenError::Other(format!("open {}: {e}", path.display())))?;
@@ -166,7 +181,10 @@ fn open_and_migrate(path: &Path) -> Result<DbPool, OpenError> {
     conn.busy_timeout(std::time::Duration::from_secs(5))
         .map_err(|e| OpenError::Other(format!("busy_timeout: {e}")))?;
     match migrations::run_migrations(&mut conn) {
-        Ok(_) => Ok(DbPool(Arc::new(Mutex::new(conn)))),
+        Ok(_) => {
+            repair_diverged_schema(&mut conn);
+            Ok(DbPool(Arc::new(Mutex::new(conn))))
+        }
         Err(e @ migrations::MigrationError::NewerSchema { .. }) => {
             Err(OpenError::NewerSchema(e.to_string()))
         }
