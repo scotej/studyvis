@@ -96,7 +96,7 @@ vi.mock('@/lib/trystero', () => {
         const send = async (
           data: T,
           targetPeers?: string | string[] | null
-        ): Promise<void[]> => {
+        ): Promise<void> => {
           const allow =
             targetPeers == null
               ? null
@@ -109,7 +109,6 @@ vi.mock('@/lib/trystero', () => {
             const handlers = other.receivers.get(namespace) ?? []
             for (const h of handlers) h(data, room.peerId)
           }
-          return []
         }
         const receive = (cb: (data: T, peerId: string) => void) => {
           const list = room.receivers.get(namespace) ?? []

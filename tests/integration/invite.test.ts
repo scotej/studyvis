@@ -55,7 +55,7 @@ vi.mock('@/lib/trystero', () => {
 
     return {
       makeAction<T>(namespace: string) {
-        const send = async (data: T): Promise<void[]> => {
+        const send = async (data: T): Promise<void> => {
           const promises: Promise<void>[] = []
           for (const other of bus.rooms.values()) {
             if (other === room || other.left) continue
@@ -65,7 +65,6 @@ vi.mock('@/lib/trystero', () => {
             }
           }
           await Promise.all(promises)
-          return []
         }
         const receive = (cb: (data: T, peerId: string) => void) => {
           const list = room.receivers.get(namespace) ?? []

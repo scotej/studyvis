@@ -173,7 +173,7 @@ export function startPresence(ctx: PresenceContext): PresenceSubscription {
   // a friend whose room join failed (bad relay config) must still be
   // reachable over the relay leg.
   const friendKeys = new Set<string>()
-  const heartbeatSenders: Array<(p: PresencePayload) => Promise<void[]>> = []
+  const heartbeatSenders: Array<(p: PresencePayload) => Promise<void>> = []
 
   // Stamp with the RECEIVER's clock. A heartbeat that just arrived means the
   // friend is reachable now, regardless of their wall clock. `p2p` records

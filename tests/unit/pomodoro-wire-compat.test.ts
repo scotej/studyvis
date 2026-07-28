@@ -59,9 +59,8 @@ function makeCapturingRoom(): { room: TopicRoom; sent: PomodoroMessage[] } {
   const room: Partial<TopicRoom> & { selfId: string } = {
     selfId: 'self',
     makeAction: <T>() => ({
-      send: async (data: T): Promise<void[]> => {
+      send: async (data: T): Promise<void> => {
         sent.push(data as PomodoroMessage)
-        return []
       },
       receive: () => {},
     }),

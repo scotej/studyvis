@@ -42,13 +42,12 @@ vi.mock('@/lib/trystero', () => {
     bus.rooms.set(peerId, room)
     return {
       makeAction<T>(namespace: string) {
-        const send = async (data: T): Promise<void[]> => {
+        const send = async (data: T): Promise<void> => {
           for (const other of bus.rooms.values()) {
             if (other === room || other.left) continue
             const handlers = other.receivers.get(namespace) ?? []
             for (const h of handlers) h(data, room.peerId)
           }
-          return []
         }
         const receive = (cb: (data: T, peerId: string) => void) => {
           const list = room.receivers.get(namespace) ?? []
