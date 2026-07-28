@@ -1630,6 +1630,42 @@ export const strings = {
       heading: 'Study minutes · last 30 days',
       minutes: (n: number) => `${n} ${n === 1 ? 'minute' : 'minutes'}`,
     },
+    heatmap: {
+      heading: 'Your year of studying',
+      help: 'One square per day, darker for a longer day. Hover a square for the date.',
+      // Read out as the whole grid's alt text: the numbers below repeat in
+      // plain text, so nothing here is carried by colour alone.
+      ariaLabel: (daysStudied: number, days: number) =>
+        `Study heatmap: ${daysStudied} of the last ${days} days studied`,
+      empty: 'Nothing on the calendar yet. Your first session fills a square.',
+      cell: (day: string, minutes: number) =>
+        `${day} · ${minutes === 0 ? 'no study' : `${minutes} min`}`,
+      legend: {
+        less: 'Less',
+        more: 'More',
+        // Level 0 is "no study"; 1–4 read as the minute band they stand for.
+        level: (from: number, to: number | null) =>
+          to === null ? `${from}+ min` : `${from}–${to} min`,
+        none: 'No study',
+      },
+      // Three of the seven rows carry a name — enough to orient, few enough
+      // to stay legible against 10px rows.
+      weekdays: {
+        monday: 'Mon',
+        wednesday: 'Wed',
+        friday: 'Fri',
+      },
+      stats: {
+        daysStudied: 'Days studied',
+        daysStudiedOf: (days: number) => `Out of the last ${days}`,
+        hours: 'Hours studied',
+        hoursHelp: 'Across the same year',
+        longestStreak: 'Longest streak',
+        longestStreakHelp: 'Best run of days in a row, all time',
+        days: (n: number) => (n === 1 ? 'day' : 'days'),
+        hoursUnit: (n: number) => (n === 1 ? 'hour' : 'hours'),
+      },
+    },
     partners: {
       heading: 'Top study partners',
       empty:

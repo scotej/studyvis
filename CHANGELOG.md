@@ -67,6 +67,14 @@ shipped it.)
   On macOS this rides on the screen-recording permission fix tracked in #94 /
   I79 — without it, macOS builds cannot capture a screen at all.
 
+- **A year of your studying, one square per day.** Settings → Stats opens on a
+  calendar of the last year: every day is a square, darker the longer you
+  studied, so a month of steady evenings and a fortnight you lost are both
+  visible at a glance. Hovering a square names the day and its minutes. Under
+  it sit the three numbers the grid can't say precisely — how many of the last
+  365 days you studied, how many hours those came to, and the longest run of
+  days in a row you've ever put together. (#99)
+
 ### Changed
 
 - **The people in your session are now as big as the window allows.** Tiles
