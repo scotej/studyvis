@@ -115,7 +115,8 @@ Versions and full justifications are in `ARCHITECTURE.md` §2.
 
 ```
 PLAN.md, ARCHITECTURE.md, DESIGN-SYSTEM.md   ← canonical specs
-CHANGELOG.md, ISSUES.md, README.md, INSTALL.md      .github/SECURITY.md
+CHANGELOG.md, ISSUES.md, README.md, INSTALL.md
+.github/     ← workflows, issue templates, SECURITY.md
 src-tauri/   ← Rust + Tauri config + capabilities + db/migrations + bundled binaries
 src/         ← React frontend
   design/      ← tokens.ts, index.css

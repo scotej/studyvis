@@ -9,7 +9,8 @@ body:
         Pomodoro) and **I18** (the sidecar model path is not sandboxed) are
         accepted deviations under the friends-only threat model, not open bugs.
 
-        Found a security problem? Do not file it here — see the security policy.
+        Found a security problem? Do not file it here — report it privately via
+        [the security policy](https://github.com/scotej/studyvis/security/policy).
 
   - type: textarea
     id: what-happened

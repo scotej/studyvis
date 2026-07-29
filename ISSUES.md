@@ -12,6 +12,8 @@ Round 1 (`audit/sev1-sev2-fixes`, PR #29): every Sev1/Sev2 fixed. Round 2 (`audi
 
 Format: one `###` section per finding, ordered by ID. Entries are appended, never renumbered — an ID is a permanent handle cited from code comments, commits and CI config. This file is in `.prettierignore`: it was a five-column table whose cells grew to 5 KB, and Prettier's column alignment padded every row to the widest one (631 KB of the 707 KB was trailing spaces).
 
+## Findings
+
 ### I1 — Sev1
 
 `src/features/session/pomodoro.ts`
