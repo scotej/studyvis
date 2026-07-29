@@ -18,7 +18,16 @@ V3 work was drafted as v1.0.4 but shipped under the **v1.0.5** tag —
 there is no v1.0.4 tag; the section below is labelled by the tag that
 shipped it.)
 
-## 1.9.0 — 2026-07-27 — Show each other what you're working on
+## 1.9.0 — 2026-07-29 — Show each other what you're working on
+
+A session gets a screen to look at, your history gets a year of squares to
+look back on, and when something breaks there is finally a record of what
+happened. This release also carries the fixes drafted as **1.8.2**, which was
+never tagged — there is no v1.8.2, and everything below ships together here.
+Two of those matter before you next sit down with someone: **you and your
+friends all need to be on this build** for the camera of whoever starts a
+session to reach the people who join, and macOS could not run on-device AI at
+all until now.
 
 ### Added
 
@@ -75,6 +84,16 @@ shipped it.)
   365 days you studied, how many hours those came to, and the longest run of
   days in a row you've ever put together. (#99)
 
+- **Every friend now has a page of their own.** Settings → Friends listed a
+  name and a shortened key and nothing else. Each row now opens into the four
+  things StudyVis already knew about that person but never showed you: the
+  safety number — the same digits the import sheet shows once and then throws
+  away, so there is at last a way to re-verify a friend long after adding
+  them — their full public key, whether they are reachable right now, and how
+  many sessions and minutes the two of you have actually studied together,
+  and when you last did. Nothing new is stored and nothing is fetched: every
+  line is worked out on your own device from what is already on it. (#101)
+
 ### Changed
 
 - **The people in your session are now as big as the window allows.** Tiles
@@ -88,7 +107,43 @@ shipped it.)
   and uncropped at every size. Sitting alone also stops laying two tiles out in
   three columns' worth of space. (#95)
 
+- **The settings nav rail sits evenly again.** The search box added in 1.6.0
+  left the first group heading closer to it than every later heading is to
+  what precedes it, so the top group read as glued to the box, and the text
+  you typed sat a few pixels left of the labels it was filtering. Both line up
+  now. (#100)
+
 ### Fixed
+
+- **You could never see the camera or hear the mic of the friend who
+  started the session.** If they hosted and you joined, their tile stayed
+  dark and silent for the whole session while they saw and heard you
+  normally — a day-one bug, present in every build StudyVis has ever
+  shipped. The app handed your camera to the peer-to-peer layer exactly
+  once, and that layer only delivers a stream to the friends who are
+  already connected at that moment — it never passes it on to someone who
+  joins afterwards. The host opens their camera before the invite has even
+  been sent, so there was nobody there to hand it to, and nothing ever
+  re-sent it. Your camera reached them only because you join a session
+  that is already running. StudyVis now also re-sends your camera and mic
+  to each friend as they arrive. **You and your friends all need to
+  update:** an updated host reaches a friend on an older build, but if the
+  host is on an older build you still won't see them. (I77)
+
+- **On macOS, on-device AI never worked at all: the model appeared to load
+  and then vanish.** Every attempt spawned the engine, loaded a multi-GB
+  model and killed it milliseconds later, leaving nothing in the diagnostic
+  log but a bare "terminated" line — which made it look like the engine was
+  at fault when the real failure was one step earlier, in screen capture.
+  macOS stopped letting apps like StudyVis ask for a screen at all unless
+  they answer a specific system question the app was never answering, so
+  every request was refused before the user could even see a picker — no
+  gesture, and no amount of granting Screen Recording in System Settings,
+  could change that. StudyVis now answers it, and the OS shows its normal
+  screen picker. The engine is also no longer started until the screen has
+  actually been handed over, so a cancelled or refused picker costs nothing
+  instead of loading a model only to throw it away. Windows was never
+  affected. (I79)
 
 - **Your session history and stats could error out on every single session,
   with nothing ever recorded.** On some machines Settings → Sessions and
@@ -147,30 +202,6 @@ shipped it.)
   before. Nothing about this crosses to your friends — the log line is local to
   your device. (#92, I82)
 
-## 1.8.2 — 2026-07-26 — The host's camera reaches you, and AI stops dying at session start
-
-Two fixes for things that went wrong the moment a session began: the camera
-and mic of whoever started it never reaching anyone who joined, and on-device
-AI throwing a raw screen-capture error that killed the engine it had just
-started.
-
-### Fixed
-
-- **You could never see the camera or hear the mic of the friend who
-  started the session.** If they hosted and you joined, their tile stayed
-  dark and silent for the whole session while they saw and heard you
-  normally — a day-one bug, present in every build StudyVis has ever
-  shipped. The app handed your camera to the peer-to-peer layer exactly
-  once, and that layer only delivers a stream to the friends who are
-  already connected at that moment — it never passes it on to someone who
-  joins afterwards. The host opens their camera before the invite has even
-  been sent, so there was nobody there to hand it to, and nothing ever
-  re-sent it. Your camera reached them only because you join a session
-  that is already running. StudyVis now also re-sends your camera and mic
-  to each friend as they arrive. **You and your friends all need to
-  update:** an updated host reaches a friend on an older build, but if the
-  host is on an older build you still won't see them. (I77)
-
 - **Starting a session with AI already enabled could throw a raw
   "getDisplayMedia must be called from a user gesture handler" error and
   silently kill the just-started on-device engine.** WebView2 (Windows) and
@@ -189,20 +220,27 @@ started.
   flips to "error" when this happens, instead of continuing to read
   "active" after AI had already died. (I76)
 
-- **On macOS, on-device AI never worked at all: the model appeared to load
-  and then vanish.** Every attempt spawned the engine, loaded a multi-GB
-  model and killed it milliseconds later, leaving nothing in the diagnostic
-  log but a bare "terminated" line — which made it look like the engine was
-  at fault when the real failure was one step earlier, in screen capture.
-  macOS stopped letting apps like StudyVis ask for a screen at all unless
-  they answer a specific system question the app was never answering, so
-  every request was refused before the user could even see a picker — no
-  gesture, and no amount of granting Screen Recording in System Settings,
-  could change that. StudyVis now answers it, and the OS shows its normal
-  screen picker. The engine is also no longer started until the screen has
-  actually been handed over, so a cancelled or refused picker costs nothing
-  instead of loading a model only to throw it away. Windows was never
-  affected. (I79)
+- **On macOS the floating Ask AI panel was ringed by a phantom outline.**
+  Ctrl+] opened the panel inside a rounded rectangle that hung off its left,
+  right and bottom edges instead of hugging it. macOS shapes a see-through
+  window from whatever its contents leave visible, and what it had found was
+  the panel's drop shadow rather than the panel — so it drew a rim around the
+  shadow. The panel keeps its shadow and is unchanged on Windows, which never
+  showed the artifact. (#97, I81)
+
+- **Text written by a signalling relay could forge lines in your own
+  diagnostic log.** StudyVis records a relay's complaints word for word, so a
+  relay that quietly starts refusing our messages cannot go unnoticed — but
+  nothing stopped that text from containing line breaks, which let a relay
+  write what looked like StudyVis's own records, or invisible characters that
+  reorder what a human reads without changing the bytes underneath. Relay text
+  is now stripped of control characters and clamped to 200 characters before
+  it is written down. (I80)
+
+- **A security advisory in the application framework is closed.** Tauri 2.11.0
+  and earlier carried an origin-confusion flaw (GHSA-7gmj-67g7-phm9, CVSS 8.8)
+  by which a remote page could invoke commands meant only for the app itself.
+  StudyVis now builds on 2.11.5. (I78)
 
 ## 1.8.1 — 2026-07-26 — The AI engine now actually loads a model
 
