@@ -15,10 +15,8 @@ The source of truth for their concern. Read the ones a task touches; don't work 
 Supporting references:
 
 - **`CHANGELOG.md`** — release history by version era (V1 / V2 / V3). Keep it current when you ship a release.
-- **`ISSUES.md`** — the audit ledger (Sev1–Sev4). **`I9` (Pomodoro broadcaster takeover) and `I18` (sidecar model-path sandbox) are accepted deviations** under the friends-only threat model — do not "fix" them without an explicit request.
-- **`IMPROVEMENTS.md`** — a **retired** backlog snapshot (2026-06, v1.2.0-era): a 2026-07 code audit found 55 of its 56 items shipped and only P1 (Linux) partially open — see its Status block. Its item IDs (`F6`, `A2`, …) live on as comment tags at the implementing code sites; do not treat item text as open work.
+- **`ISSUES.md`** — the audit ledger (Sev1–Sev4), one `###` section per finding. **`I9` (Pomodoro broadcaster takeover) and `I18` (sidecar model-path sandbox) are accepted deviations** under the friends-only threat model — do not "fix" them without an explicit request. Its **Archive** section decodes the retired `IMPROVEMENTS.md` item IDs; that backlog and `BUILD-PROMPTS.md` (the historical V0→V3 build plan) were deleted once nothing in them was open — git history holds both.
 - **`README.md`** / **`INSTALL.md`** — user-facing entry point (plus a Developing section) and install walkthrough.
-- **`BUILD-PROMPTS.md`** — **historical**. The sequenced prompts that originally built V0→V3, kept for provenance. It is *not* a live spec; do not paste from it or treat its phase scaffolding as current process.
 
 If a request conflicts with PLAN / ARCHITECTURE / DESIGN-SYSTEM, surface the conflict; don't silently deviate.
 
@@ -26,9 +24,9 @@ If a request conflicts with PLAN / ARCHITECTURE / DESIGN-SYSTEM, surface the con
 
 Inline comments cite compact tags instead of restating history. Decode them as:
 
-- **`V1-P4` / `V2-P7` / `V3-P3`** — build phases from `BUILD-PROMPTS.md` (provenance only; the referenced behavior is described where the tag appears).
+- **`V1-P4` / `V2-P7` / `V3-P3`** — build phases from the original V0→V3 build plan (provenance only; the referenced behavior is described where the tag appears).
 - **`I9`, `I16`, …** — entries in the `ISSUES.md` audit ledger.
-- **`F6`, `U4`, `S2`, `A2`, `D1`, `R7`, `X4`, `N5`, …** — items from the `IMPROVEMENTS.md` backlog, letter = section (F friend-finding/connection, U UI/UX/a11y, S session robustness, A AI quality, D data/identity/recovery, R stats/report, X release/distribution, N new features/lifecycle).
+- **`F6`, `U4`, `S2`, `A2`, `D1`, `R7`, `X4`, `N5`, …** — items from the retired improvement backlog, letter = section (F friend-finding/connection, U UI/UX/a11y, S session robustness, A AI quality, D data/identity/recovery, R stats/report, X release/distribution, N new features/lifecycle). Titles are indexed in `ISSUES.md` § Archive.
 - **`PR-27`** — a finding from that pull request's review, addressed in code.
 
 The tag is a pointer to the fuller story; the comment beside it should already carry what you need to edit safely. When you fix something traceable to one of these, keep the tag convention.
@@ -117,7 +115,8 @@ Versions and full justifications are in `ARCHITECTURE.md` §2.
 
 ```
 PLAN.md, ARCHITECTURE.md, DESIGN-SYSTEM.md   ← canonical specs
-CHANGELOG.md, ISSUES.md, README.md, INSTALL.md, BUILD-PROMPTS.md (historical)
+CHANGELOG.md, ISSUES.md, README.md, INSTALL.md
+.github/     ← workflows, issue templates, SECURITY.md
 src-tauri/   ← Rust + Tauri config + capabilities + db/migrations + bundled binaries
 src/         ← React frontend
   design/      ← tokens.ts, index.css

@@ -170,5 +170,5 @@ These are not promises — they are scoped backlog items, parked until a named t
 - `PLAN.md` (this file) — vision, scope, principles, footprint disclosure.
 - `ARCHITECTURE.md` — system design, identity, discovery, AI pipeline, file layout, state machines.
 - `DESIGN-SYSTEM.md` — Calm Dark direction, tokens, stack, components, wireframes, six consistency rules.
-- `CHANGELOG.md` — release history by version era; `ISSUES.md` — the audit ledger.
-- `BUILD-PROMPTS.md` — **historical**: the sequenced prompts that originally built V0 → V3. Kept for provenance, not a live spec.
+- `CHANGELOG.md` — release history by version era; `ISSUES.md` — the audit ledger, plus an Archive section indexing the retired improvement backlog.
+- `README.md` / `INSTALL.md` — user-facing entry point and install walkthrough; `.github/SECURITY.md` — how to report a vulnerability.

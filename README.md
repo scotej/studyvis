@@ -314,10 +314,8 @@ where you'd see it surface.
 `PLAN.md`, `ARCHITECTURE.md`, and `DESIGN-SYSTEM.md` are the
 canonical specs — each the source of truth for its concern.
 `CHANGELOG.md` and `ISSUES.md` track release history and the audit
-ledger; `IMPROVEMENTS.md` is a retired backlog snapshot;
-`BUILD-PROMPTS.md` is the historical build plan. `CLAUDE.md` is the
-working agreement for contributors and AI coding agents. This README
-is the user-facing entry point.
+ledger. `CLAUDE.md` is the working agreement for contributors and AI
+coding agents. This README is the user-facing entry point.
 
 ## Developing
 
@@ -401,10 +399,10 @@ at different times); accessibility (WCAG AA, axe-clean stories,
 reduced-motion) is a gate, not a nicety; and no telemetry, ever.
 
 `ISSUES.md` entries `I9` and `I18` are accepted deviations under the
-friends-only threat model — leave them unless explicitly asked.
-`IMPROVEMENTS.md` is a retired 2026-06 backlog snapshot — a code
-audit found essentially all of it shipped (see its Status block);
-don't pick items up from it as open work.
+friends-only threat model — leave them unless explicitly asked. Its
+Archive section indexes the retired 2026-06 improvement backlog, whose
+IDs still tag the code that implemented them; a code audit found
+essentially all of it shipped, so nothing there is open work.
 
 ## Versioning
 
