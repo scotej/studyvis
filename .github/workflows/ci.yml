@@ -125,6 +125,12 @@ jobs:
       # windows-native keyring backend) uncompiled until release.yml's
       # windows-latest job — which runs AFTER release-prep has already pushed
       # the immutable vX.Y.Z tag, so a Windows-only break burned a version.
+      #
+      # Linux is NOT a release target (PLAN §8), and it is here for exactly the
+      # reason quoted above: the identity/keyring command surface now compiles
+      # on Linux too, and an uncompiled platform is one nobody notices breaking.
+      # Without this leg the whole `cfg(target_os = "linux")` keyring block
+      # would be verified only on a maintainer's dev box.
       fail-fast: false
       matrix:
         include:
@@ -134,10 +140,25 @@ jobs:
           - label: Windows
             os: windows-latest
             llama-triple: x86_64-pc-windows-msvc
+          - label: Linux
+            os: ubuntu-latest
+            llama-triple: x86_64-unknown-linux-gnu
     steps:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
+
+      # Tauri's Linux build needs the WebKitGTK/GTK development headers, which
+      # the macOS and Windows runners get from their own SDKs. libdbus-1-dev is
+      # ours specifically: keyring's `sync-secret-service` backend links libdbus
+      # to reach org.freedesktop.secrets (src-tauri/Cargo.toml).
+      - name: Linux system dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev \
+            libxdo-dev libssl-dev libdbus-1-dev build-essential file
 
       - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master; the toolchain input selects the channel
         with:
