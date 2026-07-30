@@ -209,7 +209,7 @@ fn import_rows(
     Ok(FriendsImportResult { imported, updated })
 }
 
-#[cfg(any(target_os = "macos", target_os = "windows"))]
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 #[tauri::command]
 pub fn friends_export(state: State<'_, DbPool>, path: String) -> Result<u32, String> {
     let rows = {
@@ -238,7 +238,7 @@ pub fn friends_export(state: State<'_, DbPool>, path: String) -> Result<u32, Str
     Ok(rows.len() as u32)
 }
 
-#[cfg(any(target_os = "macos", target_os = "windows"))]
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 #[tauri::command]
 pub fn friends_import(
     state: State<'_, DbPool>,

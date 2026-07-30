@@ -35,14 +35,17 @@ use commands::engine::{engine_info, engine_install, EngineState};
 use commands::friends::{
     friends_add, friends_get_x_pubkey, friends_list, friends_remove, friends_update_last_studied,
 };
-#[cfg(any(target_os = "macos", target_os = "windows"))]
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 use commands::friends::{friends_export, friends_import};
-#[cfg(any(target_os = "macos", target_os = "windows"))]
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 use commands::identity::{
     identity_box_decrypt, identity_box_encrypt, identity_exists, identity_keys_present,
     identity_load_record, identity_save_keys, identity_save_record, identity_sign,
 };
-#[cfg(all(desktop, any(target_os = "macos", target_os = "windows")))]
+#[cfg(all(
+    desktop,
+    any(target_os = "macos", target_os = "windows", target_os = "linux")
+))]
 use commands::models::{hf_token_clear, hf_token_present, hf_token_save};
 #[cfg(desktop)]
 use commands::models::{
@@ -113,9 +116,9 @@ pub fn run() {
         friends_remove,
         friends_update_last_studied,
         friends_get_x_pubkey,
-        #[cfg(any(target_os = "macos", target_os = "windows"))]
+        #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
         friends_export,
-        #[cfg(any(target_os = "macos", target_os = "windows"))]
+        #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
         friends_import,
         sessions_insert,
         sessions_list,
@@ -125,21 +128,21 @@ pub fn run() {
         audit_event_insert,
         audit_events_list_for_session,
         audit_events_list_all,
-        #[cfg(any(target_os = "macos", target_os = "windows"))]
+        #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
         identity_save_keys,
-        #[cfg(any(target_os = "macos", target_os = "windows"))]
+        #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
         identity_exists,
-        #[cfg(any(target_os = "macos", target_os = "windows"))]
+        #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
         identity_keys_present,
-        #[cfg(any(target_os = "macos", target_os = "windows"))]
+        #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
         identity_save_record,
-        #[cfg(any(target_os = "macos", target_os = "windows"))]
+        #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
         identity_load_record,
-        #[cfg(any(target_os = "macos", target_os = "windows"))]
+        #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
         identity_sign,
-        #[cfg(any(target_os = "macos", target_os = "windows"))]
+        #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
         identity_box_decrypt,
-        #[cfg(any(target_os = "macos", target_os = "windows"))]
+        #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
         identity_box_encrypt,
         #[cfg(desktop)]
         autostart_set_enabled,
@@ -205,11 +208,20 @@ pub fn run() {
         model_download,
         #[cfg(desktop)]
         model_download_cancel,
-        #[cfg(all(desktop, any(target_os = "macos", target_os = "windows")))]
+        #[cfg(all(
+            desktop,
+            any(target_os = "macos", target_os = "windows", target_os = "linux")
+        ))]
         hf_token_save,
-        #[cfg(all(desktop, any(target_os = "macos", target_os = "windows")))]
+        #[cfg(all(
+            desktop,
+            any(target_os = "macos", target_os = "windows", target_os = "linux")
+        ))]
         hf_token_present,
-        #[cfg(all(desktop, any(target_os = "macos", target_os = "windows")))]
+        #[cfg(all(
+            desktop,
+            any(target_os = "macos", target_os = "windows", target_os = "linux")
+        ))]
         hf_token_clear,
     ]);
 

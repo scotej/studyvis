@@ -9,7 +9,7 @@
 pub mod friends;
 pub mod sessions;
 
-#[cfg(any(target_os = "macos", target_os = "windows"))]
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 pub mod identity;
 
 #[cfg(desktop)]

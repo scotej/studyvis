@@ -75,3 +75,19 @@ libc = "0.2"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 keyring = { version = "3.6", features = ["windows-native"] }
+
+# Linux custody is the freedesktop Secret Service (gnome-keyring, KWallet,
+# KeePassXC — whatever owns org.freedesktop.secrets on the session bus).
+# `sync-secret-service` keeps the blocking API the Tauri commands already use;
+# the async backend would drag a runtime in for no gain. `crypto-rust` encrypts
+# the session transport with RustCrypto rather than linking OpenSSL. Building
+# this target needs libdbus-1-dev — see the Linux leg in .github/workflows/ci.yml.
+#
+# Linux is NOT a release target (PLAN §8): this exists so the app is runnable
+# and testable on a Linux dev box, and so the shared identity code stops
+# silently vanishing from that platform's build.
+[target.'cfg(target_os = "linux")'.dependencies]
+keyring = { version = "3.6", default-features = false, features = [
+  "sync-secret-service",
+  "crypto-rust",
+] }
