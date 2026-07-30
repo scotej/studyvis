@@ -152,6 +152,16 @@ jobs:
       # the macOS and Windows runners get from their own SDKs. libdbus-1-dev is
       # ours specifically: keyring's `sync-secret-service` backend links libdbus
       # to reach org.freedesktop.secrets (src-tauri/Cargo.toml).
+      #
+      # This leg is deliberately COMPILE-ONLY for the keychain. libdbus-1-dev is
+      # the build-time dependency; it is not an org.freedesktop.secrets provider,
+      # and no runner here has one. That costs nothing today because no test
+      # touches the Secret Service — the keyring is reached only through Tauri
+      # commands, which need a live app. Standing up gnome-keyring under
+      # dbus-run-session would therefore be scaffolding around zero assertions.
+      # The runtime round-trip is verified by hand on a Linux dev box instead
+      # (dbus-run-session + gnome-keyring --components=secrets). Revisit if a
+      # test ever exercises `keyring::Entry` directly.
       - name: Linux system dependencies
         if: runner.os == 'Linux'
         run: |
