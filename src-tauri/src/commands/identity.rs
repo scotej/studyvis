@@ -7,9 +7,10 @@
 //! idempotent retries and, on the confirmed recovery path, explicit
 //! overwrites) and are retained in the OS keychain (service
 //! `com.studyvis.app`, user `identity-keys`) — never on plaintext disk. JS
-//! asks Rust to sign/open-box on its behalf afterwards. The module is
-//! macOS/Windows-only because `keyring` has no Linux backend wired
-//! (`commands/mod.rs`).
+//! asks Rust to sign/open-box on its behalf afterwards. The module compiles
+//! wherever `keyring` has a backend wired (`commands/mod.rs`): Keychain on
+//! macOS, Credential Manager on Windows, Secret Service on Linux. Nothing in
+//! here is platform-specific — only the backend behind `Entry` differs.
 //!
 //! `identity.json` (public keys + display name + fingerprint) lives in the
 //! SQLite data dir, NOT the Tauri `app_data_dir` that holds `settings.json`.

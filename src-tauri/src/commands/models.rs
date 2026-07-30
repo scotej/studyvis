@@ -26,7 +26,7 @@ use sha2::{Digest, Sha256};
 use tauri::async_runtime::Mutex;
 use tauri::{AppHandle, Emitter, Runtime, State};
 
-#[cfg(any(target_os = "macos", target_os = "windows"))]
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 use keyring::Entry;
 
 use crate::db::data_dir;
@@ -60,9 +60,9 @@ const HTTP_CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
 // is kept for Range resume and the model_id is released.
 const HTTP_READ_TIMEOUT: Duration = Duration::from_secs(60);
 
-#[cfg(any(target_os = "macos", target_os = "windows"))]
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 const KEYRING_SERVICE: &str = "com.studyvis.app";
-#[cfg(any(target_os = "macos", target_os = "windows"))]
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 const KEYRING_USER_HF_TOKEN: &str = "hf-access-token";
 
 // Model-id sanitization. JS supplies an id from `models.ts`; we treat the
@@ -248,12 +248,12 @@ pub async fn model_head_check(url: String, with_token: bool) -> Result<HeadResul
 
 // ── Hugging Face access token (mac + win only — Linux deferred with V1-P3) ──
 
-#[cfg(any(target_os = "macos", target_os = "windows"))]
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 fn hf_token_entry() -> Result<Entry, String> {
     Entry::new(KEYRING_SERVICE, KEYRING_USER_HF_TOKEN).map_err(|e| e.to_string())
 }
 
-#[cfg(any(target_os = "macos", target_os = "windows"))]
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 #[tauri::command]
 pub fn hf_token_save(token: String) -> Result<(), String> {
     let trimmed = token.trim();
@@ -268,7 +268,7 @@ pub fn hf_token_save(token: String) -> Result<(), String> {
         .map_err(|e| format!("keyring set: {e}"))
 }
 
-#[cfg(any(target_os = "macos", target_os = "windows"))]
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 #[tauri::command]
 pub fn hf_token_present() -> Result<bool, String> {
     match hf_token_entry()?.get_password() {
@@ -278,7 +278,7 @@ pub fn hf_token_present() -> Result<bool, String> {
     }
 }
 
-#[cfg(any(target_os = "macos", target_os = "windows"))]
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 #[tauri::command]
 pub fn hf_token_clear() -> Result<(), String> {
     match hf_token_entry()?.delete_credential() {
@@ -288,7 +288,7 @@ pub fn hf_token_clear() -> Result<(), String> {
     }
 }
 
-#[cfg(any(target_os = "macos", target_os = "windows"))]
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 fn load_hf_token_internal() -> Option<String> {
     match Entry::new(KEYRING_SERVICE, KEYRING_USER_HF_TOKEN)
         .ok()?
@@ -299,7 +299,7 @@ fn load_hf_token_internal() -> Option<String> {
     }
 }
 
-#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+#[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
 fn load_hf_token_internal() -> Option<String> {
     None
 }
