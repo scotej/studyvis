@@ -18,12 +18,14 @@
 // tells the model the constraints so its recommendation usually aligns,
 // reducing user-visible surprise when the rule layer overrides.
 
+import { invoke } from '@tauri-apps/api/core'
+
 import { logger } from '@/lib/log'
 import { strings } from '@/strings'
 
-const log = logger.child('ai.agent')
+import type { SidecarStatus } from './sidecar'
 
-import { useSidecarStore } from './sidecar'
+const log = logger.child('ai.agent')
 
 export const AGENT_REQUEST_TIMEOUT_MS = 60_000
 
@@ -70,18 +72,19 @@ export type AgentReply =
 export type AiAgentRuntime = {
   fetch: typeof fetch
   now: () => number
-  // Sidecar port reader — production wraps `useSidecarStore.getState()`.
-  // Returns null while the sidecar is idle / starting / errored.
-  getSidecarPort: () => number | null
+  // The dialog lives in a separate JS realm from the main window, so its
+  // Zustand stores cannot reveal the running sidecar. Production asks the
+  // shared Rust process for the current port on every submit instead.
+  getSidecarPort: () => Promise<number | null>
 }
 
 const defaultRuntime: AiAgentRuntime = {
   fetch: (...args) => fetch(...args),
   now: () => Date.now(),
-  getSidecarPort: () => {
-    const s = useSidecarStore.getState()
-    if (s.status !== 'running' || !s.healthy || s.port == null) return null
-    return s.port
+  getSidecarPort: async () => {
+    const status = await invoke<SidecarStatus>('sidecar_status')
+    if (!status.running || status.errored || status.port == null) return null
+    return status.port
   },
 }
 
@@ -188,7 +191,13 @@ export async function handleUserText(
   if (trimmed.length === 0) {
     throw new AiAgentError('empty_text', 'message is empty')
   }
-  const port = runtime.getSidecarPort()
+  let port: number | null
+  try {
+    port = await runtime.getSidecarPort()
+  } catch (err) {
+    log.warn('sidecar_status.failed', { err })
+    throw new AiAgentError('sidecar_unavailable', strings.ai.agent.sidecarOff)
+  }
   if (port == null) {
     throw new AiAgentError('sidecar_unavailable', strings.ai.agent.sidecarOff)
   }

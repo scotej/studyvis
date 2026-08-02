@@ -1895,8 +1895,7 @@ export const strings = {
       unexpectedError: 'Something went wrong. Try again?',
     },
     agent: {
-      sidecarOff:
-        "AI isn't running yet. Turn it on in Settings → AI, then try again.",
+      sidecarOff: "AI isn't ready yet. Check Settings → AI, then try again.",
       timeout: 'The assistant took too long.',
       httpStatus: (status: number) => `The assistant returned HTTP ${status}.`,
       parseFallback: "I didn't catch that. Say it another way?",

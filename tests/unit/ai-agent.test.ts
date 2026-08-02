@@ -1,9 +1,13 @@
 import { afterEach, describe, expect, test, vi } from 'vitest'
 
+const { invokeMock } = vi.hoisted(() => ({ invokeMock: vi.fn() }))
+vi.mock('@tauri-apps/api/core', () => ({ invoke: invokeMock }))
+
 import {
   AGENT_REQUEST_TIMEOUT_MS,
   AGENT_SYSTEM_PROMPT,
   AiAgentError,
+  getAiAgentRuntime,
   handleUserText,
   parseAgentReply,
   __resetAiAgentRuntime,
@@ -21,12 +25,13 @@ function buildRuntime(overrides: Partial<AiAgentRuntime> = {}): AiAgentRuntime {
   return {
     fetch: vi.fn() as unknown as typeof fetch,
     now: () => 1_700_000_000_000,
-    getSidecarPort: () => 12345,
+    getSidecarPort: async () => 12345,
     ...overrides,
   }
 }
 
 afterEach(() => {
+  invokeMock.mockReset()
   __resetAiAgentRuntime()
   vi.restoreAllMocks()
 })
@@ -220,6 +225,21 @@ describe('handleUserText (intent classification end-to-end)', () => {
     expect(body.messages[1].content).toContain('User message: hello?')
   })
 
+  test('default runtime reads the current sidecar port from shared Rust state', async () => {
+    invokeMock.mockResolvedValue({
+      running: true,
+      port: 23456,
+      model: '/models/mock.gguf',
+      mmproj: null,
+      ctx_size: 4096,
+      errored: false,
+      last_error: null,
+    })
+
+    await expect(getAiAgentRuntime().getSidecarPort()).resolves.toBe(23456)
+    expect(invokeMock).toHaveBeenCalledWith('sidecar_status')
+  })
+
   test('classifies a break request', async () => {
     const fetchMock = vi.fn(async () =>
       chatCompletionResponse(
@@ -318,9 +338,27 @@ describe('handleUserText (intent classification end-to-end)', () => {
           modelId: 'mock',
           recentAuditKinds: [],
         },
-        buildRuntime({ fetch: fetchMock, getSidecarPort: () => null })
+        buildRuntime({ fetch: fetchMock, getSidecarPort: async () => null })
       )
     ).rejects.toBeInstanceOf(AiAgentError)
+  })
+
+  test('maps a failed Rust status query to sidecar_unavailable', async () => {
+    await expect(
+      handleUserText(
+        {
+          text: 'hi',
+          declaredTopic: 'maths',
+          modelId: 'mock',
+          recentAuditKinds: [],
+        },
+        buildRuntime({
+          getSidecarPort: async () => {
+            throw new Error('IPC unavailable')
+          },
+        })
+      )
+    ).rejects.toMatchObject({ code: 'sidecar_unavailable' })
   })
 
   test('throws empty_text on a blank message', async () => {
