@@ -689,7 +689,7 @@ export type InstallLogSinkOptions = {
   appVersion: string
   // Gates the console mirror for debug/info. Every level always reaches disk;
   // a function is still read at emit time so flipping Settings → Advanced →
-  // Debug log takes effect on the next console line rather than at relaunch.
+  // Developer console takes effect on the next console line rather than at relaunch.
   // Injected rather than imported: settingsStore itself logs through here.
   debugEnabled?: () => boolean
   // Override for tests. Omitted in production: the real sink is built here
