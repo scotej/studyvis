@@ -307,6 +307,21 @@ describe('screen-share stream classification', () => {
     expect(controller.classify('friend', stream('their-camera'))).toBe('camera')
   })
 
+  test('the announced id overrides mismatched metadata after a reconnect', () => {
+    const bus = fakeRoom()
+    const { controller } = start(bus)
+    bus.join('friend')
+    bus.announce('friend', { sharing: true, stream_id: 'their-screen' })
+
+    // Camera and screen are both re-published onto the new RTCPeerConnection.
+    // Trystero pairs metadata to arriving streams FIFO, so renegotiation can
+    // hand the screen tag to the camera and no tag to the actual screen.
+    expect(
+      controller.classify('friend', stream('their-camera'), { kind: 'screen' })
+    ).toBe('camera')
+    expect(controller.classify('friend', stream('their-screen'))).toBe('screen')
+  })
+
   test('a stopped share stops claiming its stream id', () => {
     const bus = fakeRoom()
     const { controller } = start(bus)
