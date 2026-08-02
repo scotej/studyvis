@@ -892,10 +892,7 @@ async fn watch<R: Runtime>(
                 guard.last_error = Some(e.clone());
                 guard.port = None;
                 with_sidecar_log(|| {
-                    let _ = writeln!(
-                        log,
-                        "[event gen={generation}] pick_unused_port failed: {e}"
-                    );
+                    let _ = writeln!(log, "[event gen={generation}] pick_unused_port failed: {e}");
                     let _ = log.flush();
                 });
                 return;
@@ -929,10 +926,7 @@ async fn watch<R: Runtime>(
             return;
         }
         with_sidecar_log(|| {
-            let _ = writeln!(
-                log,
-                "[event gen={generation}] respawned on port {port}"
-            );
+            let _ = writeln!(log, "[event gen={generation}] respawned on port {port}");
             let _ = log.flush();
         });
         guard.child = Some(new_child);

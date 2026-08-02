@@ -229,13 +229,12 @@ fn install_new_destination(temp: &Path, destination: &Path) -> Result<(), String
     }
 
     let mut source = File::open(temp).map_err(|e| format!("open diagnostics temp file: {e}"))?;
-    let mut output = create_new_private_file(destination)
-        .map_err(|e| {
-            format!(
-                "create diagnostics destination {} without replacing an existing file: {e}",
-                destination.display()
-            )
-        })?;
+    let mut output = create_new_private_file(destination).map_err(|e| {
+        format!(
+            "create diagnostics destination {} without replacing an existing file: {e}",
+            destination.display()
+        )
+    })?;
     let copied = io::copy(&mut source, &mut output)
         .and_then(|_| output.flush())
         .map_err(|e| format!("copy completed diagnostics archive: {e}"));
@@ -321,7 +320,9 @@ fn build_diagnostics_archive(
     destination: &Path,
     metadata: DiagnosticsMetadata,
 ) -> Result<(), String> {
-    let _export_guard = EXPORT_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+    let _export_guard = EXPORT_LOCK
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
     fs::create_dir_all(log_dir).map_err(|e| format!("create log dir: {e}"))?;
     if destination.is_dir() {
         return Err("diagnostics destination must be a file".to_string());
@@ -510,7 +511,10 @@ mod tests {
 
     #[test]
     fn session_prefix_accepts_only_short_hex_values() {
-        assert_eq!(valid_session_prefix(Some("deadBEEF".to_string())).as_deref(), Some("deadBEEF"));
+        assert_eq!(
+            valid_session_prefix(Some("deadBEEF".to_string())).as_deref(),
+            Some("deadBEEF")
+        );
         assert_eq!(valid_session_prefix(Some("not-hex".to_string())), None);
         assert_eq!(valid_session_prefix(Some("deadbeef0".to_string())), None);
     }
