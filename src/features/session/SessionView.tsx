@@ -548,9 +548,13 @@ export function SessionView({
       // #96 — a sharing peer publishes a second stream on the same connection.
       // Ask the screen-share controller which tile it belongs to before binding
       // it, or the friend's face is replaced by their desktop.
-      if (
-        screenShareRef.current?.classify(peerId, stream, metadata) === 'screen'
-      ) {
+      const streamKind = screenShareRef.current?.classify(
+        peerId,
+        stream,
+        metadata
+      )
+      if (streamKind === 'ignore') return
+      if (streamKind === 'screen') {
         setPeerScreenStreams((cur) => ({ ...cur, [peerId]: stream }))
         return
       }
