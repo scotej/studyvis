@@ -23,11 +23,11 @@ const log = logger.child('session.screenshare')
 export const SCREEN_SHARE_ACTION = 'screen-share'
 
 // Tagged onto the published stream. Secondary classifier only: trystero pairs
-// stream metadata to incoming streams FIFO (@trystero-p2p/core media.mjs:104,
-// :119 — `pendingStreamMetas[id].shift()`), so it is position-addressed and a
-// single orphaned meta would mislabel every later stream on that connection.
-// Carrying the source stream id lets the fallback reject a tag that landed on
-// the wrong stream. The announced stream id remains authoritative when known.
+// stream metadata to incoming streams FIFO (@trystero-p2p/core room.mjs:438-443
+// — `pendingStreamMetas[id].shift()`), so it is position-addressed and a single
+// orphaned meta would mislabel every later stream on that connection. The
+// announced stream id is content-addressed and wins; this covers the case where
+// media outruns the announce.
 export const SCREEN_STREAM_METADATA = { kind: 'screen' } as const
 
 // Screens are read, not watched. Capping the frame rate (rather than the
@@ -40,7 +40,7 @@ export type ScreenSharePayload = {
   stream_id: string | null
 }
 
-export type IncomingStreamKind = 'camera' | 'screen' | 'ignore'
+export type IncomingStreamKind = 'camera' | 'screen'
 
 export function isScreenSharePayload(
   value: unknown
@@ -56,19 +56,6 @@ export function isScreenStreamMetadata(value: unknown): boolean {
   return (value as Record<string, unknown>).kind === SCREEN_STREAM_METADATA.kind
 }
 
-function screenStreamMetadata(stream: MediaStream): {
-  kind: typeof SCREEN_STREAM_METADATA.kind
-  stream_id: string
-} {
-  return { ...SCREEN_STREAM_METADATA, stream_id: stream.id }
-}
-
-function screenStreamMetadataId(value: unknown): string | undefined {
-  if (!isScreenStreamMetadata(value)) return undefined
-  const streamId = (value as Record<string, unknown>).stream_id
-  return typeof streamId === 'string' ? streamId : undefined
-}
-
 export type ScreenShareController = {
   // Publish `stream` to every peer that speaks this protocol, now and as they
   // arrive. Replaces any previously published stream.
@@ -78,8 +65,7 @@ export type ScreenShareController = {
   // with the owner of the MediaStream.
   unpublish: () => void
   // Which tile an incoming peer stream belongs to. Called from the camera
-  // binding so a screen stream never lands on the face tile. `ignore` is a
-  // late stream from a share that has already stopped.
+  // binding so a screen stream never lands on the face tile.
   classify: (
     peerId: string,
     stream: MediaStream,
@@ -104,10 +90,6 @@ export function startScreenShareController({
   const announced = new Set<string>()
   // peerId → the stream id that peer is currently sharing.
   const screenStreamIds = new Map<string, string>()
-  // peerId → stream ids that have been explicitly stopped. There is no
-  // stream-removed callback in trystero, so a late old stream must be dropped
-  // instead of replacing the peer's camera or recreating its screen tile.
-  const retiredScreenStreamIds = new Map<string, Set<string>>()
   // peerId → we have already handed them the current local stream. A repeat
   // `addStream` of the same stream object is a no-op inside trystero's shared
   // peer (shared-peer.mjs:206-211, `shouldAttach = owners.size === 0`) but
@@ -151,7 +133,7 @@ export function startScreenShareController({
     if (publishedTo.has(peerId)) return
     publishedTo.add(peerId)
     announce(peerId)
-    room.addStream(stream, peerId, screenStreamMetadata(stream))
+    room.addStream(stream, peerId, SCREEN_STREAM_METADATA)
   }
 
   action.receive((data, peerId) => {
@@ -160,14 +142,7 @@ export function startScreenShareController({
     announced.add(peerId)
     if (data.sharing && data.stream_id) {
       screenStreamIds.set(peerId, data.stream_id)
-      retiredScreenStreamIds.get(peerId)?.delete(data.stream_id)
     } else {
-      const previousScreenId = screenStreamIds.get(peerId)
-      if (previousScreenId) {
-        const retired = retiredScreenStreamIds.get(peerId) ?? new Set<string>()
-        retired.add(previousScreenId)
-        retiredScreenStreamIds.set(peerId, retired)
-      }
       screenStreamIds.delete(peerId)
     }
     onPeerSharingChange(peerId, data.sharing && data.stream_id !== null)
@@ -184,7 +159,6 @@ export function startScreenShareController({
   const offLeave = room.onPeerLeave((peerId) => {
     announced.delete(peerId)
     screenStreamIds.delete(peerId)
-    retiredScreenStreamIds.delete(peerId)
     // A blip inside the S1 grace window rejoins under the same peerId with a
     // brand-new RTCPeerConnection, so the stream has to be added again. Holding
     // them here would leave their screen tile permanently blank.
@@ -225,15 +199,6 @@ export function startScreenShareController({
       if (announcedScreenId !== undefined) {
         return announcedScreenId === stream.id ? 'screen' : 'camera'
       }
-      if (retiredScreenStreamIds.get(peerId)?.has(stream.id)) return 'ignore'
-      const metadataStreamId = screenStreamMetadataId(metadata)
-      if (metadataStreamId !== undefined) {
-        return metadataStreamId === stream.id ? 'screen' : 'camera'
-      }
-      // A legacy peer's bare screen tag is only safe before its first valid
-      // screen-share announce. After an explicit stop it is indistinguishable
-      // from stale FIFO metadata, so binding it could resurrect a screen tile.
-      if (announced.has(peerId)) return 'camera'
       return isScreenStreamMetadata(metadata) ? 'screen' : 'camera'
     },
     teardown: () => {
@@ -245,7 +210,6 @@ export function startScreenShareController({
       publishedTo.clear()
       announced.clear()
       screenStreamIds.clear()
-      retiredScreenStreamIds.clear()
     },
   }
 }
