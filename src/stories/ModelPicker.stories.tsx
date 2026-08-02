@@ -30,6 +30,7 @@ function makeRecord(p95Sec: number, p50Sec = p95Sec * 0.85): ModelRecord {
 
 type StoryArgs = {
   installed: Record<string, ModelRecord | null>
+  activeModelId?: string | null
   hfTokenPresent: boolean
   pickerOverrides?: Record<string, Partial<PickerStateForModel>>
   actionsLocked?: boolean
@@ -37,6 +38,7 @@ type StoryArgs = {
 
 function Harness({
   installed,
+  activeModelId,
   hfTokenPresent,
   pickerOverrides,
   actionsLocked,
@@ -69,12 +71,14 @@ function Harness({
     <div className="mx-auto max-w-4xl bg-bg-base p-6 text-text-primary">
       <ModelPicker
         perModel={perModel}
+        activeModelId={activeModelId}
         hfTokenPresent={hfPresent}
         actionsLocked={actionsLocked}
         guide={<ModelGuide records={records} />}
         actions={{
-          onSelect: () => undefined,
-          onRebenchmark: () => undefined,
+          onDownload: () => undefined,
+          onActivate: () => undefined,
+          onBenchmark: () => undefined,
           onCancel: () => undefined,
           onRemove: () => undefined,
           onSaveHfToken: () => setHfPresent(true),
@@ -112,6 +116,35 @@ export const OneInstalled: Story = {
         modelId: 'qwen2_5-vl-3b',
       },
     },
+    activeModelId: 'qwen2_5-vl-3b',
+    hfTokenPresent: false,
+  },
+}
+
+export const InstalledUnbenchmarked: Story = {
+  args: {
+    installed: {
+      moondream2: {
+        modelId: 'moondream2',
+        benchmark: null,
+        installedAt: Date.now(),
+      },
+    },
+    activeModelId: null,
+    hfTokenPresent: false,
+  },
+}
+
+export const ActiveUnbenchmarked: Story = {
+  args: {
+    installed: {
+      moondream2: {
+        modelId: 'moondream2',
+        benchmark: null,
+        installedAt: Date.now(),
+      },
+    },
+    activeModelId: 'moondream2',
     hfTokenPresent: false,
   },
 }
@@ -130,6 +163,7 @@ export const AllInstalledWithSpeeds: Story = {
         modelId: 'qwen2_5-vl-7b',
       },
     },
+    activeModelId: 'gemma3-4b',
     hfTokenPresent: true,
   },
 }
@@ -149,6 +183,7 @@ export const StaleBenchmark: Story = {
         },
       },
     },
+    activeModelId: 'qwen2_5-vl-3b',
     hfTokenPresent: false,
   },
 }
@@ -164,6 +199,7 @@ export const LockedDuringSession: Story = {
         modelId: 'qwen2_5-vl-3b',
       },
     },
+    activeModelId: 'qwen2_5-vl-3b',
     hfTokenPresent: false,
     actionsLocked: true,
   },
@@ -224,6 +260,7 @@ export const QuantVariantInstalled: Story = {
         modelId: 'gemma3-4b-q8_0',
       },
     },
+    activeModelId: 'gemma3-4b-q8_0',
     hfTokenPresent: false,
   },
 }

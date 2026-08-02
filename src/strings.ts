@@ -135,8 +135,8 @@ export const strings = {
       ariaLabel: 'How a session works',
       cta: 'Get started',
       heading: 'How a session works',
-      body: 'Three things to know. You can re-read this any time from Settings.',
-      listAriaLabel: 'Three tips',
+      body: 'Four things to know. You can re-read this any time from Settings.',
+      listAriaLabel: 'Four tips',
       cards: {
         invite: {
           title: 'Invite a friend',
@@ -150,6 +150,10 @@ export const strings = {
         leave: {
           title: 'Leave any time',
           body: 'Click Leave to drop out. The session ends for everyone when only one of you is left.',
+        },
+        ai: {
+          title: 'AI is optional',
+          body: 'AI starts off. Download and choose a model in Settings → AI. Benchmark before a session — or while AI is off in one — for timing tuned to this computer; you can still use the model without it.',
         },
       },
     },
@@ -610,6 +614,7 @@ export const strings = {
       active: 'AI watching',
       paused: 'AI paused',
       error: 'AI error',
+      openSettingsAriaLabel: (status: string) => `${status}. Open AI settings`,
     },
     elapsed: {
       label: 'Elapsed',
@@ -1301,17 +1306,38 @@ export const strings = {
         "While the AI is sampling, your operating system's screen-recording indicator stays on for the whole session. That's expected — it turns off when you leave. On macOS, screen-recording access is granted and revoked only in System Settings → Privacy & Security → Screen Recording; StudyVis can open it for you when needed.",
       enable: {
         label: 'Enable AI features',
-        help: "Off by default. When off, StudyVis is a plain study room — no model, no capture, no scoring. We'll ask for screen access when you turn AI on.",
+        help: "Off by default. Model setup and benchmarks stay available while AI is off. We'll ask for screen access when you turn AI on.",
         ariaLabel: 'Enable AI features',
+        loadingToast:
+          'Model settings are still loading. Try again in a moment.',
+        modelErrorToast:
+          "Couldn't read your model settings. Reopen Settings and try again.",
+        pickModelFirstToast:
+          'Download and choose a model before turning AI on.',
+        benchmarkBusyToast:
+          'Wait for the current model setup or benchmark to finish before turning AI on.',
       },
       modelOff: {
         label: 'AI is off',
-        help: 'Enable AI features above to choose and benchmark a vision model and tune how often it samples.',
+        help: 'No camera or screen checks are running. You can still download, choose, and benchmark a model below.',
+      },
+      benchmarkWarning: {
+        title: 'Benchmark this model first?',
+        fallbackModelName: 'Your selected model',
+        description: (displayName: string, fallbackSec: number) =>
+          `${displayName} can run without a benchmark. Until you measure it, StudyVis uses a ${fallbackSec}-second sampling interval, allows extra time for each result, and skips automatic slowdown tuning.`,
+        recommendation:
+          'Benchmarking is recommended for timing tuned to this computer, but it is not required.',
+        keepOffCta: 'Keep AI off',
+        benchmarkFirstCta: 'Benchmark first',
+        enableAnywayCta: 'Turn on anyway',
       },
       sampleInterval: {
         label: 'Sample interval',
-        help: (measuredFloor: number, max: number) =>
+        helpMeasured: (measuredFloor: number, max: number) =>
           `How often the model looks (seconds). The floor is what this machine measured (${measuredFloor}s); you can only slow it down, up to ${max}s. Takes effect on the next sample.`,
+        helpDefault: (fallbackFloor: number, max: number) =>
+          `How often the model looks (seconds). Until you benchmark it, the model uses a ${fallbackFloor}s floor; you can slow it down up to ${max}s. Takes effect on the next sample.`,
         ariaLabel: 'Sample interval (seconds)',
       },
       warnAfter: {
@@ -1717,12 +1743,12 @@ export const strings = {
     picker: {
       ariaLabel: 'Vision model picker',
       heading: 'Pick a vision model',
-      body: 'The model runs on your own machine and judges only your camera and screen. Smaller is faster; bigger is more thorough.',
+      body: 'Download, choose, and benchmark separately. Benchmarking is recommended for tuned timing, but it is not required. The model runs only on this machine.',
       // Settings is reachable mid-session (#47 B2); the mutating picker
       // actions share the live sample loop's sidecar, so they stay locked
       // until the session ends.
       lockedDuringSession:
-        'Model changes unlock after your session ends — re-measuring or removing a model now would interrupt live focus checks.',
+        'Model changes are locked while AI is running in this session. Turn AI off or wait until the session ends.',
       // I73 — the benchmark needs the engine; the bare sentinel would
       // otherwise print on the card.
       engineMissing: 'Install the AI engine first (see the AI engine row).',
@@ -1733,11 +1759,14 @@ export const strings = {
         'Measured on an older StudyVis — re-run the benchmark for current numbers.',
       // A download that resolves mid-session must not chain into the
       // benchmark (it would stop the live sample loop's sidecar).
-      benchmarkAfterSession:
-        'Model installed. Run its benchmark after your session ends — measuring now would interrupt live focus checks.',
+      benchmarkWhileAiEnabled:
+        'Turn AI off before benchmarking. This keeps the benchmark from sharing the model process with live focus checks.',
+      modelChangesWhileAiRunning:
+        'Turn AI off or wait until the session ends before changing models.',
       pills: {
         gated: 'Gated',
         installed: 'Installed',
+        active: 'In use',
         incomplete: 'Incomplete',
       },
       // Quant-variant selector on cards that offer the same model at
@@ -1746,6 +1775,7 @@ export const strings = {
         legend: 'Quantization',
         ariaLabel: (model: string) => `${model} quantization`,
         installedSuffix: ' · installed',
+        activeSuffix: ' · in use',
       },
       dataLabels: {
         download: 'Download',
@@ -1754,6 +1784,8 @@ export const strings = {
         quant: 'Quant',
       },
       cancelCta: 'Cancel',
+      useModelCta: 'Use model',
+      benchmarkCta: 'Benchmark',
       reBenchmarkCta: 'Re-benchmark',
       reDownloadCta: 'Re-download',
       downloadCta: 'Download',
@@ -1763,6 +1795,8 @@ export const strings = {
       resumeNote: (received: string) =>
         `Picks up from where it stopped (${received} downloaded).`,
       removeAriaLabel: (name: string) => `Remove ${name}`,
+      notBenchmarked:
+        'Not benchmarked. You can still use this model; StudyVis will use safe default timing.',
       speedSummary: (p95Sec: number) =>
         `Speed on your machine: ${p95Sec.toFixed(1)} seconds per check`,
       phases: {
@@ -1776,11 +1810,23 @@ export const strings = {
         runningSample: (i: number, n: number) =>
           `Running sample ${i} / ${n}${ELLIPSIS}`,
         benchmarking: `Benchmarking${ELLIPSIS}`,
+        removing: `Removing model${ELLIPSIS}`,
         cancelling: `Cancelling${ELLIPSIS}`,
         failedFallback: 'Something went wrong.',
       },
       readyToast: (displayName: string, p95Sec: number) =>
         `${displayName} ready. Speed on your machine: ${p95Sec.toFixed(1)} s/check.`,
+      installedAndSelectedToast: (displayName: string) =>
+        `${displayName} installed and selected. Benchmark it for timing tuned to this computer.`,
+      installedToast: (displayName: string) =>
+        `${displayName} installed. Choose Use model when you're ready.`,
+      selectedToast: (displayName: string) => `${displayName} is now in use.`,
+      selectUnbenchmarkedTurnAiOff:
+        'Turn AI off before choosing an unbenchmarked model. You can turn it back on and choose whether to benchmark first.',
+      removeActiveTurnAiOff:
+        'Turn AI off before removing the model currently in use.',
+      selectErrorToast: (displayName: string, message: string) =>
+        `Couldn't use ${displayName}: ${message}`,
       removedToast: (displayName: string) => `Removed ${displayName}.`,
       removeErrorToast: (displayName: string, message: string) =>
         `Couldn't remove ${displayName}: ${message}`,
@@ -1809,7 +1855,7 @@ export const strings = {
     },
     guide: {
       heading: 'What model should I pick?',
-      body: "Smaller models run faster and use less RAM but describe the screen in less detail. Bigger models catch subtler off-task behavior. The numbers below come from your machine after the first benchmark; the dashes are tiers you haven't tried yet.",
+      body: "Smaller models run faster and use less RAM but describe the screen in less detail. Bigger models catch subtler off-task behavior. Benchmarking is optional; measured numbers appear below after you run it, and dashes are tiers you haven't measured yet.",
       tableHeaders: {
         tier: 'Tier',
         model: 'Model',

@@ -152,19 +152,22 @@ You can open the data folder from Settings → Advanced.
 
 ## How AI features fit in
 
-Disabled by default. Settings → AI to turn on. The first time you
-enable it, StudyVis asks for screen-recording permission and offers
-you a model picker — four tiers between fast/small and slow/thorough,
-with measured speed on your machine after a 30-second benchmark.
-Models download from Hugging Face directly to your computer; the
-"gated" tier (Gemma) needs a one-time HF token paste, stored in your
-OS keychain.
+AI stays disabled by default until you explicitly turn it on in
+Settings → AI. You can choose and download any of the four model tiers
+without running a benchmark. Benchmarking is optional but recommended:
+it measures that model's speed on this device and tunes the sampling
+cadence. If the selected model has not been benchmarked, StudyVis warns
+you before enabling AI; continuing uses a 5-second fallback cadence and
+a 90-second request timeout, without p95 slowdown backoff. Models
+download from Hugging Face directly to your computer; none of the
+current catalog models requires a Hugging Face token.
 
 During an AI session:
 
 - StudyVis captures one frame of your camera and one frame of your
-  screen every few seconds (the picker's measured cadence; you can
-  slow it down in Settings).
+  screen at the benchmark-derived cadence, or with a 5-second fallback
+  interval when the selected model is unbenchmarked. You can slow it
+  down in Settings.
 - The local model classifies "on task", "mild", "moderate", or
   "blatant" off-task. Friends never see frames — only a flag and the
   model's one-line reasoning.

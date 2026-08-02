@@ -2,12 +2,17 @@ export {
   useSidecarStore,
   DEFAULT_CTX_SIZE,
   ERR_AI_DISABLED,
+  ERR_BENCHMARK_REQUIRES_AI_OFF,
   ERR_ENGINE_NOT_INSTALLED,
   HEALTH_POLL_INTERVAL_MS,
   __setSidecarRuntime,
   __resetSidecarRuntime,
 } from './sidecar'
-export type { SidecarRuntime, SidecarStatus } from './sidecar'
+export type {
+  SidecarRuntime,
+  SidecarStatus,
+  SidecarStartPurpose,
+} from './sidecar'
 
 export {
   getEngineRuntime,
@@ -69,6 +74,9 @@ export type {
   ModelStoreDeps,
   InterruptedDownload,
 } from './modelStore'
+
+export { getAiEnableReadiness } from './benchmarkGate'
+export type { AiEnableReadiness, AiEnableReadinessInput } from './benchmarkGate'
 
 export {
   runBenchmark,
@@ -167,6 +175,10 @@ export {
 export { ModelGuide } from './ModelGuide'
 export type { ModelGuideProps } from './ModelGuide'
 export { ModelPickerContainer } from './ModelPickerContainer'
+export type {
+  ModelPickerContainerHandle,
+  ModelPickerContainerProps,
+} from './ModelPickerContainer'
 
 export {
   step as scoreMachineStep,

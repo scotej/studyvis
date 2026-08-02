@@ -41,8 +41,8 @@ export type ModelRecord = {
 
 export type ModelStoreSnapshot = {
   records: Record<string, ModelRecord>
-  // The model id whose benchmark was most recently completed. V2-P5 reads
-  // this to decide which paths to start the sample loop with.
+  // The installed model the user chose for live AI. Selection is independent
+  // from benchmarking: an active record may legitimately have benchmark:null.
   activeModelId: string | null
 }
 
@@ -101,6 +101,7 @@ type ModelState = ModelStoreSnapshot & {
   error: string | null
   hydrate: () => Promise<void>
   recordInstalled: (modelId: string, installedAt?: number) => Promise<void>
+  selectModel: (modelId: string) => Promise<void>
   recordBenchmark: (
     modelId: string,
     benchmark: BenchmarkResult
@@ -192,6 +193,15 @@ export const useModelStore = create<ModelState>((set, get) => ({
     await persist(set)
   },
 
+  selectModel: async (modelId) => {
+    const record = get().records[modelId]
+    if (!record || record.installedAt == null) {
+      throw new Error(`model is not installed: ${modelId}`)
+    }
+    set({ activeModelId: modelId })
+    await persist(set)
+  },
+
   recordInterruptedDownload: async (modelId, bytesReceived) => {
     set((s) => ({
       records: {
@@ -231,15 +241,12 @@ export const useModelStore = create<ModelState>((set, get) => ({
           benchmark,
           installedAt: s.records[modelId]?.installedAt ?? Date.now(),
           // A4 — carry the interruption marker through rather than dropping it.
-          // In the live download→benchmark flow recordInstalled already cleared
-          // it to null before this runs, but preserving it explicitly (like
-          // installedAt) removes the implicit ordering dependency: a future
-          // path that benchmarks a model still carrying a partial won't
-          // silently erase the resume affordance.
+          // A normal benchmark follows a completed install, which already
+          // clears this marker. Preserving it explicitly removes that ordering
+          // dependency for any future benchmark entry point.
           interruptedDownload: s.records[modelId]?.interruptedDownload ?? null,
         },
       },
-      activeModelId: modelId,
     }))
     await persist(set)
   },

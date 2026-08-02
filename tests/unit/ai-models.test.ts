@@ -294,36 +294,105 @@ describe('useModelStore (LazyStore-backed)', () => {
     ).toBeDefined()
   })
 
-  test('recordBenchmark sets activeModelId and stores the result', async () => {
+  test('selectModel persists an installed model without requiring a benchmark', async () => {
     const { deps, store } = makeFakeDeps()
     __setModelStoreDeps(deps)
     await useModelStore.getState().hydrate()
+
+    await useModelStore.getState().recordInstalled('moondream2', 200)
+    await useModelStore.getState().selectModel('moondream2')
+
+    const state = useModelStore.getState()
+    expect(state.activeModelId).toBe('moondream2')
+    expect(state.records['moondream2']?.benchmark).toBeNull()
+    expect(store.data.get('active_model_id')).toBe('moondream2')
+    expect(store.saved).toBe(2)
+  })
+
+  test('selectModel rejects a model with no stored installation record', async () => {
+    const { deps, store } = makeFakeDeps()
+    __setModelStoreDeps(deps)
+    await useModelStore.getState().hydrate()
+
+    await expect(
+      useModelStore.getState().selectModel('moondream2')
+    ).rejects.toThrow('model is not installed: moondream2')
+    expect(useModelStore.getState().activeModelId).toBeNull()
+    expect(store.saved).toBe(0)
+  })
+
+  test('selectModel rejects a partial-download record', async () => {
+    const { deps } = makeFakeDeps()
+    __setModelStoreDeps(deps)
+    await useModelStore.getState().hydrate()
+    await useModelStore.getState().recordInterruptedDownload('moondream2', 1024)
+
+    await expect(
+      useModelStore.getState().selectModel('moondream2')
+    ).rejects.toThrow('model is not installed: moondream2')
+    expect(useModelStore.getState().activeModelId).toBeNull()
+  })
+
+  test('recordBenchmark stores the result without changing the active model', async () => {
+    const { deps, store } = makeFakeDeps()
+    __setModelStoreDeps(deps)
+    await useModelStore.getState().hydrate()
+    await useModelStore.getState().recordInstalled('moondream2', 100)
+    await useModelStore.getState().recordInstalled('gemma3-4b', 200)
+    await useModelStore.getState().selectModel('moondream2')
     const result = summariseBenchmark({
       samplesSec: [2, 3, 4],
       completedAtSec: 99,
     })
-    await useModelStore.getState().recordBenchmark('moondream2', result)
+    await useModelStore.getState().recordBenchmark('gemma3-4b', result)
+
     const state = useModelStore.getState()
     expect(state.activeModelId).toBe('moondream2')
-    expect(state.records['moondream2']?.benchmark?.p95Sec).toBe(4)
-    expect(store.saved).toBe(1)
+    expect(state.records['gemma3-4b']?.benchmark?.p95Sec).toBe(4)
+    expect(store.data.get('active_model_id')).toBe('moondream2')
+    expect(store.saved).toBe(4)
   })
 
-  test('forget removes the record and clears activeModelId if it pointed there', async () => {
+  test('switching models preserves each installation and benchmark record', async () => {
     const { deps } = makeFakeDeps()
     __setModelStoreDeps(deps)
     await useModelStore.getState().hydrate()
+    await useModelStore.getState().recordInstalled('moondream2', 100)
+    await useModelStore.getState().recordInstalled('gemma3-4b', 200)
     await useModelStore
       .getState()
       .recordBenchmark(
         'gemma3-4b',
         summariseBenchmark({ samplesSec: [10, 11, 12], completedAtSec: 0 })
       )
+    await useModelStore.getState().selectModel('moondream2')
+    await useModelStore.getState().selectModel('gemma3-4b')
+
+    const state = useModelStore.getState()
     expect(useModelStore.getState().activeModelId).toBe('gemma3-4b')
+    expect(state.records['moondream2']?.installedAt).toBe(100)
+    expect(state.records['moondream2']?.benchmark).toBeNull()
+    expect(state.records['gemma3-4b']?.installedAt).toBe(200)
+    expect(state.records['gemma3-4b']?.benchmark?.p95Sec).toBe(12)
+  })
+
+  test('forget clears only a matching active selection', async () => {
+    const { deps, store } = makeFakeDeps()
+    __setModelStoreDeps(deps)
+    await useModelStore.getState().hydrate()
+    await useModelStore.getState().recordInstalled('moondream2', 100)
+    await useModelStore.getState().recordInstalled('gemma3-4b', 200)
+    await useModelStore.getState().selectModel('gemma3-4b')
+
+    await useModelStore.getState().forget('moondream2')
+    expect(useModelStore.getState().records['moondream2']).toBeUndefined()
+    expect(useModelStore.getState().activeModelId).toBe('gemma3-4b')
+
     await useModelStore.getState().forget('gemma3-4b')
     const state = useModelStore.getState()
     expect(state.records['gemma3-4b']).toBeUndefined()
     expect(state.activeModelId).toBeNull()
+    expect(store.data.get('active_model_id')).toBeNull()
   })
 
   // I83 — a failed read used to be terminal for the whole process:

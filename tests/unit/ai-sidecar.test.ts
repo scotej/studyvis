@@ -5,6 +5,7 @@ import {
   __setSidecarRuntime,
   DEFAULT_CTX_SIZE,
   ERR_AI_DISABLED,
+  ERR_BENCHMARK_REQUIRES_AI_OFF,
   ERR_ENGINE_NOT_INSTALLED,
   HEALTH_POLL_INTERVAL_MS,
   useSidecarStore,
@@ -146,7 +147,7 @@ describe('useSidecarStore.start', () => {
     __resetSidecarRuntime()
   })
 
-  test('refuses to start when AI features are disabled', async () => {
+  test('refuses a live start when AI features are disabled', async () => {
     const env = makeFakeRuntime({ aiEnabled: false })
     __setSidecarRuntime(env.runtime)
 
@@ -156,6 +157,47 @@ describe('useSidecarStore.start', () => {
     expect(port).toBeNull()
     expect(env.startCalls).toHaveLength(0)
     expect(useSidecarStore.getState().lastError).toBe(ERR_AI_DISABLED)
+    expect(useSidecarStore.getState().status).toBe('idle')
+  })
+
+  test('allows a benchmark start when AI features are disabled', async () => {
+    const env = makeFakeRuntime({ aiEnabled: false, startReturns: 8123 })
+    __setSidecarRuntime(env.runtime)
+
+    const port = await useSidecarStore.getState().start({
+      modelPath: '/tmp/model.gguf',
+      mmprojPath: '/tmp/mmproj.gguf',
+      ctxSize: 2048,
+      purpose: 'benchmark',
+    })
+
+    expect(port).toBe(8123)
+    expect(env.startCalls).toEqual([
+      {
+        modelPath: '/tmp/model.gguf',
+        mmprojPath: '/tmp/mmproj.gguf',
+        ctxSize: 2048,
+        engineAutoInstall: true,
+      },
+    ])
+    expect(useSidecarStore.getState().status).toBe('running')
+    expect(useSidecarStore.getState().lastError).toBeNull()
+  })
+
+  test('refuses a benchmark start while AI features are enabled', async () => {
+    const env = makeFakeRuntime({ aiEnabled: true })
+    __setSidecarRuntime(env.runtime)
+
+    const port = await useSidecarStore.getState().start({
+      modelPath: '/tmp/model.gguf',
+      purpose: 'benchmark',
+    })
+
+    expect(port).toBeNull()
+    expect(env.startCalls).toHaveLength(0)
+    expect(useSidecarStore.getState().lastError).toBe(
+      ERR_BENCHMARK_REQUIRES_AI_OFF
+    )
     expect(useSidecarStore.getState().status).toBe('idle')
   })
 

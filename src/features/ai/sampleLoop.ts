@@ -99,20 +99,18 @@ export const SCREEN_ACQUIRE_TIMEOUT_MS = 120_000
 export const MAX_REQUEST_TIMEOUT_MS = 300_000
 // I83 — multiple of the benchmark-measured p95 to allow a live inference before
 // aborting it. The benchmark bounds a request at 5 minutes while this loop
-// bounded it at 90 s, so a model that measured a p95 above ~90 s benchmarked
-// "successfully" (that measurement is the ONLY thing that sets activeModelId)
-// and then aborted every single live tick, forever, with nothing but a
-// console.warn to show for it. Deriving the live bound from the same
-// measurement closes that gap; 3× leaves room for the ordinary variance the
-// cadence backoff is separately designed to absorb.
+// bounded it at 90 s, so a model that measured a p95 above ~90 s could then
+// abort every single live tick, forever, with nothing but a console.warn to
+// show for it. Deriving the live bound from the same measurement closes that
+// gap; 3× leaves room for the ordinary variance the cadence backoff is
+// separately designed to absorb.
 export const REQUEST_TIMEOUT_P95_FACTOR = 3
 // How often we re-read battery state — once a minute matches ARCHITECTURE
 // §2's "polls this every 60 s". Cheap Tauri command so we could go faster,
 // but battery state isn't moving in the milliseconds.
 export const BATTERY_POLL_INTERVAL_MS = 60_000
-// Sample interval defaults to whatever the V2-P2 benchmark recorded. If a
-// model record is missing one (shouldn't happen, but defensive), this
-// fallback keeps the loop running on the 5 s floor.
+// A measured model uses its benchmark-derived floor. Benchmarking is optional,
+// so an unmeasured model deliberately uses this 5 s fallback.
 export const FALLBACK_SAMPLE_INTERVAL_SEC = 5
 // Ceiling for the Settings → AI sample-interval slider. The user may slow
 // sampling down to here but never below the model's measured floor (so they
