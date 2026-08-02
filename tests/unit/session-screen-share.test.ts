@@ -144,7 +144,11 @@ describe('screen-share capability gate', () => {
     bus.announce('friend', SILENT)
 
     expect(bus.added).toEqual([
-      { stream: screen, peerId: 'friend', metadata: { kind: 'screen' } },
+      {
+        stream: screen,
+        peerId: 'friend',
+        metadata: { kind: 'screen', stream_id: 'screen-1' },
+      },
     ])
   })
 
@@ -158,7 +162,11 @@ describe('screen-share capability gate', () => {
     controller.publish(screen)
 
     expect(bus.added).toEqual([
-      { stream: screen, peerId: 'friend', metadata: { kind: 'screen' } },
+      {
+        stream: screen,
+        peerId: 'friend',
+        metadata: { kind: 'screen', stream_id: 'screen-1' },
+      },
     ])
   })
 })
@@ -307,6 +315,25 @@ describe('screen-share stream classification', () => {
     expect(controller.classify('friend', stream('their-camera'))).toBe('camera')
   })
 
+  test('id-bound metadata rejects a FIFO tag that landed on the camera', () => {
+    const bus = fakeRoom()
+    const { controller } = start(bus)
+    bus.join('friend')
+
+    expect(
+      controller.classify('friend', stream('their-camera'), {
+        kind: 'screen',
+        stream_id: 'their-screen',
+      })
+    ).toBe('camera')
+    expect(
+      controller.classify('friend', stream('their-screen'), {
+        kind: 'screen',
+        stream_id: 'their-screen',
+      })
+    ).toBe('screen')
+  })
+
   test('the announced id overrides mismatched metadata after a reconnect', () => {
     const bus = fakeRoom()
     const { controller } = start(bus)
@@ -317,19 +344,68 @@ describe('screen-share stream classification', () => {
     // Trystero pairs metadata to arriving streams FIFO, so renegotiation can
     // hand the screen tag to the camera and no tag to the actual screen.
     expect(
-      controller.classify('friend', stream('their-camera'), { kind: 'screen' })
+      controller.classify('friend', stream('their-camera'), {
+        kind: 'screen',
+        stream_id: 'their-screen',
+      })
     ).toBe('camera')
     expect(controller.classify('friend', stream('their-screen'))).toBe('screen')
   })
 
-  test('a stopped share stops claiming its stream id', () => {
+  test('a stopped share retires its stream and rejects stale metadata', () => {
     const bus = fakeRoom()
     const { controller } = start(bus)
     bus.join('friend')
     bus.announce('friend', { sharing: true, stream_id: 'their-screen' })
     bus.announce('friend', SILENT)
 
-    expect(controller.classify('friend', stream('their-screen'))).toBe('camera')
+    expect(
+      controller.classify('friend', stream('their-screen'), {
+        kind: 'screen',
+        stream_id: 'their-screen',
+      })
+    ).toBe('ignore')
+    expect(
+      controller.classify('friend', stream('their-camera'), {
+        kind: 'screen',
+        stream_id: 'their-screen',
+      })
+    ).toBe('camera')
+    expect(
+      controller.classify('friend', stream('their-camera'), { kind: 'screen' })
+    ).toBe('camera')
+  })
+
+  test('id-bound metadata can start a new share before its next announce', () => {
+    const bus = fakeRoom()
+    const { controller } = start(bus)
+    bus.join('friend')
+    bus.announce('friend', { sharing: true, stream_id: 'their-old-screen' })
+    bus.announce('friend', SILENT)
+
+    expect(
+      controller.classify('friend', stream('their-new-screen'), {
+        kind: 'screen',
+        stream_id: 'their-new-screen',
+      })
+    ).toBe('screen')
+  })
+
+  test('a peer rejoin clears retired screen ids', () => {
+    const bus = fakeRoom()
+    const { controller } = start(bus)
+    bus.join('friend')
+    bus.announce('friend', { sharing: true, stream_id: 'their-screen' })
+    bus.announce('friend', SILENT)
+    bus.leave('friend')
+    bus.join('friend')
+
+    expect(
+      controller.classify('friend', stream('their-screen'), {
+        kind: 'screen',
+        stream_id: 'their-screen',
+      })
+    ).toBe('screen')
   })
 
   test('one peer id never classifies another peer stream', () => {
