@@ -31,10 +31,10 @@ describe('pttStore', () => {
     expect(usePttStore.getState().active).toBe(false)
   })
 
-  test('repeated press is idempotent', () => {
+  test('a second press releases a latch whose release event was dropped', () => {
     usePttStore.getState().press()
     usePttStore.getState().press()
-    expect(usePttStore.getState().active).toBe(true)
+    expect(usePttStore.getState().active).toBe(false)
   })
 
   test('release without prior press stays inactive', () => {
@@ -117,19 +117,33 @@ describe('pttStore', () => {
       expect(usePttStore.getState().active).toBe(false)
     })
 
-    test('a re-press re-arms the failsafe without stacking timers', () => {
+    test('a recovery press cancels the stale failsafe timer', () => {
       const sched = fakeScheduler()
       usePttStore.getState().press()
       sched.advance(MAX_HOLD_MS - 1)
-      // A fresh press (e.g. release-then-press) re-arms from a clean window.
+      // The matching release was dropped. A new physical press is an immediate
+      // recovery action, not another two-minute extension of the hot mic.
       usePttStore.getState().press()
-      expect(sched.pending()).toBe(1)
-      // The original timer would have fired here had it not been cleared.
-      sched.advance(1)
-      expect(usePttStore.getState().active).toBe(true)
-      // It still falls back a full window after the last press.
+      expect(usePttStore.getState().active).toBe(false)
+      expect(sched.pending()).toBe(0)
       sched.advance(MAX_HOLD_MS)
       expect(usePttStore.getState().active).toBe(false)
+    })
+
+    test('a new press after recovery starts one clean hold', () => {
+      const sched = fakeScheduler()
+      usePttStore.getState().press()
+      usePttStore.getState().press()
+      usePttStore.getState().release()
+      expect(sched.pending()).toBe(0)
+
+      usePttStore.getState().press()
+      expect(usePttStore.getState().active).toBe(true)
+      expect(sched.pending()).toBe(1)
+
+      usePttStore.getState().release()
+      expect(usePttStore.getState().active).toBe(false)
+      expect(sched.pending()).toBe(0)
     })
 
     test('reset cancels a pending failsafe timer', () => {
