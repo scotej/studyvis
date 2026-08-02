@@ -383,6 +383,13 @@ Several signals ride trystero `makeAction`s on their own channels rather than th
 
 ## 8. AI inference pipeline (V2+)
 
+AI is opt-in and `ai_features_enabled` remains false by default. Model installation,
+selection, and benchmarking are separate operations: a completed model +
+mmproj download can be selected immediately, while the benchmark is optional
+but recommended. Before changing `ai_features_enabled` to true with an unbenchmarked
+selected model, the settings UI shows a confirmation warning; accepting it
+uses the fallback runtime contract described under Sample loop.
+
 ### Process model
 
 ```
@@ -418,7 +425,10 @@ loop:
     face_frame  = capture_camera_frame()
     screen_grab = capture_primary_display()
     t0 = now()
-    response = POST /v1/chat/completions {
+    request_timeout = benchmark_p95
+        ? clamp(benchmark_p95 * 3, 90s, 300s)
+        : 90s
+    response = POST /v1/chat/completions, timeout=request_timeout {
       model: <user's chosen model>,
       messages: [
         { role: "system",  content: SYSTEM_PROMPT },
@@ -444,9 +454,9 @@ loop:
     sleep(effective_sample_interval)             # stretched while backed off
 ```
 
-`sample_interval` is set on first run of a chosen model: a 30s benchmark measures p95 inference latency, then `sample_interval = max(5s, ceil(p95 + 1s))`. User can override in settings within `[5s, 30s]`. The benchmark sends the *same* request shape as the live tick (two images — a 384×384 face frame + a ~1024-wide screen frame — the full system prompt, and the grammar-constrained 200-token decode) so its measured p95 reflects real per-tick cost (A1).
+When a benchmark exists for the selected model, `sample_interval = max(5s, ceil(p95 + 1s))`; without one it uses the existing 5s fallback. The user can slow the interval in settings within `[5s, 30s]` (a measured floor above 30s still wins). Benchmarking does not gate download or selection: it is an optional, recommended local measurement of that model on the current device. It sends the *same* request shape as the live tick (two images — a 384×384 face frame + a ~1024-wide screen frame — the full system prompt, and the grammar-constrained 200-token decode), so its p95 reflects real per-tick cost and sets a per-device cadence (A1). A benchmarked model's request timeout is `clamp(p95 × 3, 90s, 300s)`; an unbenchmarked model retains the flat 90s timeout.
 
-**Cadence backoff (A6, local, no telemetry).** ARCHITECTURE originally promised a "thermal-aware notice" but only paused on battery <20% — which never fires on AC, exactly where a fanless laptop throttles under continuous vision inference. There is no portable OS thermal API and no telemetry, so instead the loop watches inference durations: after **2** consecutive ticks whose measured inference exceeds `benchmark_p95 × 2.5`, it engages — doubling the effective sample interval — and recovers after **3** consecutive normal ticks. It fires a single in-voice "checks are running slower than usual" notice once per session (one-shot, on the engaging tick). The battery pause above is unchanged. When no benchmark p95 exists the backoff is disabled (no baseline to compare against).
+**Cadence backoff (A6, local, no telemetry).** ARCHITECTURE originally promised a "thermal-aware notice" but only paused on battery <20% — which never fires on AC, exactly where a fanless laptop throttles under continuous vision inference. There is no portable OS thermal API and no telemetry, so instead the loop watches inference durations: after **2** consecutive ticks whose measured inference exceeds `benchmark_p95 × 2.5`, it engages — doubling the effective sample interval — and recovers after **3** consecutive normal ticks. It fires a single in-voice "checks are running slower than usual" notice once per session (one-shot, on the engaging tick). The battery pause above is unchanged. When no benchmark p95 exists the backoff is disabled (no baseline to compare against), so the unbenchmarked path neither stretches cadence through A6 nor emits its slowdown notice.
 
 ### Vision model + mmproj pairing
 
@@ -459,7 +469,7 @@ Each chosen vision model requires a matching `*.mmproj.gguf` projector file. Bot
 | Best | `ggml-org/gemma-3-4b-it-GGUF` | Q4_K_M / Q8_0 / f16 (user picks) | ~3.2 / 4.6 / 8.0 GB (model + 0.8 mmproj) | 8–18 s (Q4_K_M) | Gemma terms |
 | Heaviest | `ggml-org/Qwen2.5-VL-7B-Instruct-GGUF` | Q4_K_M + mmproj-Q8_0 | ~5.2 GB (4.4 + 0.8) | 15–30 s | Apache-2.0 |
 
-Latencies are estimates pending real-machine measurement during V2 development. Model picker shows real numbers after the user's first benchmark. The "Fastest" tier ships the f16 weights because `ggml-org/moondream2-20250414-GGUF` does not publish a Q4_K_M quant — earlier table revisions claimed Q4_K_M / ~1.5 GB; we corrected this to the actual repo content during V2-P2. The Qwen tiers pair the Q4_K_M model with the smaller Q8_0 projector (the f16 projector is ~1.3 GB) to keep the per-tier download footprint sane. The Best tier was originally marked gated; the `ggml-org` GGUF mirror is in fact ungated (HF API `gated: false`, verified 2026-07-25), so no catalog model requires a Hugging Face token — the keychain token plumbing stays for future gated additions. The three Gemma quants are separate registry entries (ids `gemma3-4b`, `gemma3-4b-q8_0`, `gemma3-4b-f16`) collapsed into one picker card by `quantFamily`, so each quant keeps its own install dir and benchmark record.
+Latencies are estimates pending real-machine measurement during V2 development. The model picker shows real numbers if the user chooses to benchmark; the measurement is recommended, not required for download or selection. The "Fastest" tier ships the f16 weights because `ggml-org/moondream2-20250414-GGUF` does not publish a Q4_K_M quant — earlier table revisions claimed Q4_K_M / ~1.5 GB; we corrected this to the actual repo content during V2-P2. The Qwen tiers pair the Q4_K_M model with the smaller Q8_0 projector (the f16 projector is ~1.3 GB) to keep the per-tier download footprint sane. The Best tier was originally marked gated; the `ggml-org` GGUF mirror is in fact ungated (HF API `gated: false`, verified 2026-07-25), so no catalog model requires a Hugging Face token — the keychain token plumbing stays for future gated additions. The three Gemma quants are separate registry entries (ids `gemma3-4b`, `gemma3-4b-q8_0`, `gemma3-4b-f16`) collapsed into one picker card by `quantFamily`, so each quant keeps its own install dir and benchmark record.
 
 ### Capture mechanics
 

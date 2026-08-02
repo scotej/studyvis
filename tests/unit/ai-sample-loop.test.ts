@@ -1918,9 +1918,9 @@ describe('startSampleLoop — A6 cadence backoff', () => {
 })
 
 // I83 — the live per-tick bound was a flat 90 s while benchmark.ts allows a
-// request 5 minutes, and a completed benchmark is the ONLY thing that sets
-// activeModelId. So a model measuring a p95 above ~90 s "passed" setup and then
-// aborted every live tick forever, logging nothing a release build can show.
+// request 5 minutes. So a model measuring a p95 above ~90 s could benchmark
+// successfully and then abort every live tick forever, logging nothing a
+// release build can show.
 describe('effectiveRequestTimeoutMs — I83', () => {
   test('falls back to the flat timeout when there is no benchmark', () => {
     expect(effectiveRequestTimeoutMs(0)).toBe(REQUEST_TIMEOUT_MS)

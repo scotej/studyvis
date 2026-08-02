@@ -1,6 +1,6 @@
 #!/usr/bin/env tsx
 // Generates the 384×384 benchmark image bundled with the AI feature for
-// V2-P2's first-run benchmark. We commit the produced PNG so installs don't
+// V2-P2's optional local benchmark. We commit the produced PNG so installs don't
 // need sharp at runtime; this script is the canonical source of truth and
 // runs once when the rendered image needs refreshing.
 //

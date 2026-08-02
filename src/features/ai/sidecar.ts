@@ -9,10 +9,9 @@
 //     llama-server /health endpoint while the sidecar is alive and update the
 //     store's `healthy` flag.
 //
-// AI feature gate: until the user enables AI features in Settings (V2-P9),
-// startSidecar is a no-op. The gate is read from useSettingsStore.values
-// .aiFeaturesEnabled — this PR adds the field with default `false`; V2-P9
-// adds the toggle UI and setter.
+// Live AI stays gated by Settings. The fixed local benchmark may start the
+// sidecar while that gate is off so users can measure a model before deciding
+// whether to enable capture and scoring.
 
 import { invoke } from '@tauri-apps/api/core'
 import { create } from 'zustand'
@@ -29,6 +28,8 @@ export type SidecarStatus = {
   errored: boolean
   last_error: string | null
 }
+
+export type SidecarStartPurpose = 'live' | 'benchmark'
 
 export const HEALTH_POLL_INTERVAL_MS = 2000
 
@@ -133,16 +134,20 @@ type SidecarState = {
     modelPath: string
     mmprojPath?: string | null
     ctxSize?: number
+    purpose?: SidecarStartPurpose
   }) => Promise<number | null>
   stop: () => Promise<void>
   refreshStatus: () => Promise<void>
 }
 
 export const DEFAULT_CTX_SIZE = 4096
-// AI features off → start refuses with this error. Surfaced via the store's
-// `lastError` so the caller can show a "Enable AI in Settings" hint without
-// needing to read settings state itself.
+// A live start while AI features are off refuses with this error. Benchmark
+// starts deliberately bypass the live gate.
 export const ERR_AI_DISABLED = 'ai_features_disabled'
+// The benchmark and live loop share one child process. Requiring the live gate
+// to be off prevents a session that starts mid-benchmark from adopting and
+// later losing the benchmark's sidecar.
+export const ERR_BENCHMARK_REQUIRES_AI_OFF = 'benchmark_requires_ai_off'
 // I73 — Rust's sidecar_start rejects with exactly this token when no engine
 // binary resolves and auto-install is off. Compare with strict equality (the
 // backend rejects with plain strings, never Error instances).
@@ -163,8 +168,14 @@ export const useSidecarStore = create<SidecarState>((set, get) => ({
     modelPath,
     mmprojPath = null,
     ctxSize = DEFAULT_CTX_SIZE,
+    purpose = 'live',
   }) => {
-    if (!activeRuntime.getAiFeaturesEnabled()) {
+    const aiEnabled = activeRuntime.getAiFeaturesEnabled()
+    if (purpose === 'benchmark' && aiEnabled) {
+      set({ lastError: ERR_BENCHMARK_REQUIRES_AI_OFF, status: 'idle' })
+      return null
+    }
+    if (purpose !== 'benchmark' && !aiEnabled) {
       set({ lastError: ERR_AI_DISABLED, status: 'idle' })
       return null
     }

@@ -1,4 +1,4 @@
-// First-run benchmark: spin up the sidecar with the chosen model, send 3
+// Optional local benchmark: spin up the sidecar with the chosen model, send 3
 // fixed chat-completions requests built from a bundled desk image (re-encoded
 // into a 384×384 face JPEG + a 1024×576 screen JPEG so the two slots mirror the
 // live tick's real prefill cost), measure per-request latency. Results feed
@@ -173,7 +173,7 @@ const defaultRuntime: BenchmarkRuntime = {
   startSidecar: async ({ modelPath, mmprojPath, ctxSize }) => {
     const port = await useSidecarStore
       .getState()
-      .start({ modelPath, mmprojPath, ctxSize })
+      .start({ modelPath, mmprojPath, ctxSize, purpose: 'benchmark' })
     if (port == null) {
       const err = useSidecarStore.getState().lastError
       throw new Error(err ?? 'sidecar_start returned null')

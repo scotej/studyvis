@@ -1,14 +1,21 @@
 // Container for `ModelPicker` that owns:
 //  * subscribing to `model:progress` events from Rust
-//  * driving HEAD-check → download → benchmark for "Select"
-//  * driving sidecar_stop + benchmark for "Re-benchmark"
+//  * downloading and selecting models independently from benchmarking
+//  * driving sidecar_stop + benchmark for "Benchmark" / "Re-benchmark"
 //  * persisting benchmark results to `useModelStore`
 //  * keychain-token round-trips
 //
 // The presenter (`ModelPicker.tsx`) stays pure; this file is the only
 // place that touches Tauri command runtimes.
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import {
+  forwardRef,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useRef,
+  useState,
+} from 'react'
 import { toast } from 'sonner'
 
 import { ModelGuide } from './ModelGuide'
@@ -34,31 +41,62 @@ import { getHfTokenRuntime } from './hfToken'
 import { SUPPORTED_MODELS, type ModelSpec } from './models'
 import { useModelStore } from './modelStore'
 import { useSessionStore } from '@/stores/sessionStore'
+import { useSettingsStore } from '@/stores/settingsStore'
 import { strings } from '@/strings'
 
 type CardState = PickerStateForModel
 
 type CardUpdate = Partial<Omit<CardState, 'spec'>>
 
-export function ModelPickerContainer() {
+export type ModelPickerContainerProps = {
+  onBusyChange?: (busy: boolean) => void
+}
+
+export type ModelPickerContainerHandle = {
+  benchmarkSelected: () => boolean
+}
+
+export const ModelPickerContainer = forwardRef<
+  ModelPickerContainerHandle,
+  ModelPickerContainerProps
+>(function ModelPickerContainer({ onBusyChange }, ref) {
   const records = useModelStore((s) => s.records)
+  const activeModelId = useModelStore((s) => s.activeModelId)
   const hydrate = useModelStore((s) => s.hydrate)
   const recordInstalled = useModelStore((s) => s.recordInstalled)
+  const selectModel = useModelStore((s) => s.selectModel)
   const recordBenchmark = useModelStore((s) => s.recordBenchmark)
   const recordInterruptedDownload = useModelStore(
     (s) => s.recordInterruptedDownload
   )
   const forget = useModelStore((s) => s.forget)
   const status = useModelStore((s) => s.status)
-  // Settings is reachable mid-session (#47 B2); lock the mutating picker
-  // actions while a session is live — see ModelPickerProps.actionsLocked.
+  // Settings is reachable mid-session (#47 B2). Model setup is safe while AI
+  // is off, but locks once the live loop owns the shared sidecar.
   const sessionActive = useSessionStore((s) => s.status === 'active')
+  const aiFeaturesEnabled = useSettingsStore((s) => s.values.aiFeaturesEnabled)
+  const actionsLocked = sessionActive && aiFeaturesEnabled
 
   const [cards, setCards] = useState<Record<string, CardState>>(() =>
     emptyPickerState()
   )
   const [hfTokenPresent, setHfTokenPresent] = useState(false)
   const [hfTokenChecked, setHfTokenChecked] = useState(false)
+
+  const setupBusy = Object.values(cards).some(
+    (card) => card.phase !== 'idle' && card.phase !== 'failed'
+  )
+
+  useEffect(() => {
+    onBusyChange?.(setupBusy)
+  }, [onBusyChange, setupBusy])
+
+  useEffect(
+    () => () => {
+      onBusyChange?.(false)
+    },
+    [onBusyChange]
+  )
 
   // A4 — the latest `bytes_received` seen on a 'downloading' event per model.
   // The Rust terminal failed/cancelled events hardcode bytes_received: 0 (they
@@ -79,6 +117,17 @@ export function ModelPickerContainer() {
       return { ...prev, [modelId]: { ...existing, ...patch } }
     })
   }, [])
+
+  // Notify the settings gate in the originating click before async work can
+  // yield. The derived setupBusy effect keeps it accurate after that first
+  // transition, including when several cards have work in flight.
+  const startCardWork = useCallback(
+    (modelId: string, patch: CardUpdate) => {
+      onBusyChange?.(true)
+      updateCard(modelId, patch)
+    },
+    [onBusyChange, updateCard]
+  )
 
   // Hydrate persistent records once on mount.
   //
@@ -204,9 +253,8 @@ export function ModelPickerContainer() {
         // the running count — so we leave the stash alone for those.
         delete lastDownloadBytes.current[evt.model_id]
       }
-      // 'done' is otherwise handled by the in-flight Select / Rebenchmark
-      // coordinators — we don't transition phase here because the next step is
-      // the benchmark, not "back to idle".
+      // 'done' is otherwise handled by the in-flight download coordinator,
+      // which records the install and returns the card to idle.
     },
     [updateCard, recordPartialFromLastSeen]
   )
@@ -252,23 +300,21 @@ export function ModelPickerContainer() {
 
   const runBenchmarkFor = useCallback(
     async (spec: ModelSpec) => {
-      // Re-checked HERE, not just via the disabled buttons: a download
-      // started before the session can resolve minutes into it and chain
-      // straight into this benchmark, whose first act stops the sidecar the
-      // live sample loop is using (the loop has no restart path). The model
-      // stays installed; the card returns to idle with a Re-benchmark
-      // affordance that unlocks when the session ends.
-      if (useSessionStore.getState().status === 'active') {
+      // Never let the benchmark process coexist with enabled AI. Even outside
+      // a session, one could start while the multi-minute benchmark owns the
+      // singleton sidecar. Benchmarking during an AI-off session is safe and
+      // is the intended "Benchmark first" path.
+      if (useSettingsStore.getState().values.aiFeaturesEnabled) {
         updateCard(spec.id, {
           phase: 'idle',
           downloadProgress: null,
           errorMessage: null,
         })
-        toast.info(strings.ai.picker.benchmarkAfterSession)
+        toast.info(strings.ai.picker.benchmarkWhileAiEnabled)
         return
       }
       const runtime = getDownloadRuntime()
-      updateCard(spec.id, {
+      startCardWork(spec.id, {
         phase: 'benchmark-starting',
         downloadProgress: null,
         errorMessage: null,
@@ -317,13 +363,13 @@ export function ModelPickerContainer() {
         })
       }
     },
-    [updateCard, recordBenchmark]
+    [updateCard, startCardWork, recordBenchmark]
   )
 
-  const runDownloadAndBenchmark = useCallback(
+  const runDownload = useCallback(
     async (spec: ModelSpec) => {
       const runtime = getDownloadRuntime()
-      updateCard(spec.id, {
+      startCardWork(spec.id, {
         phase: 'starting',
         downloadProgress: 0,
         errorMessage: null,
@@ -393,24 +439,103 @@ export function ModelPickerContainer() {
 
       await refreshInstallState(spec)
       await recordInstalled(spec.id)
-      // 3) Benchmark.
-      await runBenchmarkFor(spec)
+
+      // First install becomes the selected model, but never switch models as
+      // an in-flight download finishes while AI is enabled. That would bypass
+      // the unbenchmarked enable warning. A later model stays installed until
+      // the user explicitly clicks "Use model."
+      let selected = false
+      const modelState = useModelStore.getState()
+      const aiEnabled = useSettingsStore.getState().values.aiFeaturesEnabled
+      if (!modelState.activeModelId && !aiEnabled) {
+        await selectModel(spec.id)
+        selected = true
+      }
+
+      updateCard(spec.id, {
+        phase: 'idle',
+        downloadProgress: null,
+        errorMessage: null,
+      })
+      toast.success(
+        selected
+          ? strings.ai.picker.installedAndSelectedToast(spec.displayName)
+          : strings.ai.picker.installedToast(spec.displayName)
+      )
     },
-    [updateCard, refreshInstallState, recordInstalled, runBenchmarkFor]
+    [
+      updateCard,
+      startCardWork,
+      refreshInstallState,
+      recordInstalled,
+      selectModel,
+    ]
   )
 
-  const onSelect = useCallback(
+  const onDownload = useCallback(
     (spec: ModelSpec) => {
-      void runDownloadAndBenchmark(spec)
+      void runDownload(spec)
     },
-    [runDownloadAndBenchmark]
+    [runDownload]
   )
 
-  const onRebenchmark = useCallback(
+  const onBenchmark = useCallback(
     (spec: ModelSpec) => {
       void runBenchmarkFor(spec)
     },
     [runBenchmarkFor]
+  )
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      benchmarkSelected: () => {
+        const selectedId = useModelStore.getState().activeModelId
+        const selected = SUPPORTED_MODELS.find((spec) => spec.id === selectedId)
+        if (!selected) return false
+        onBenchmark(selected)
+        return true
+      },
+    }),
+    [onBenchmark]
+  )
+
+  const onActivate = useCallback(
+    (spec: ModelSpec) => {
+      void (async () => {
+        const sessionOwnsSidecar =
+          useSessionStore.getState().status === 'active' &&
+          useSettingsStore.getState().values.aiFeaturesEnabled
+        if (sessionOwnsSidecar) {
+          toast.info(strings.ai.picker.modelChangesWhileAiRunning)
+          return
+        }
+
+        try {
+          const existingRecord = useModelStore.getState().records[spec.id]
+          if (!existingRecord || existingRecord.installedAt == null) {
+            await recordInstalled(spec.id)
+          }
+          const benchmark =
+            useModelStore.getState().records[spec.id]?.benchmark ?? null
+          const settings = useSettingsStore.getState()
+          if (settings.values.aiFeaturesEnabled && !benchmark) {
+            toast.info(strings.ai.picker.selectUnbenchmarkedTurnAiOff)
+            return
+          }
+          await selectModel(spec.id)
+          toast.success(strings.ai.picker.selectedToast(spec.displayName))
+        } catch (err) {
+          toast.error(
+            strings.ai.picker.selectErrorToast(
+              spec.displayName,
+              err instanceof Error ? err.message : String(err)
+            )
+          )
+        }
+      })()
+    },
+    [recordInstalled, selectModel]
   )
 
   const onCancel = useCallback(
@@ -432,6 +557,18 @@ export function ModelPickerContainer() {
   const onRemove = useCallback(
     (spec: ModelSpec) => {
       void (async () => {
+        if (
+          useModelStore.getState().activeModelId === spec.id &&
+          useSettingsStore.getState().values.aiFeaturesEnabled
+        ) {
+          toast.info(strings.ai.picker.removeActiveTurnAiOff)
+          return
+        }
+        startCardWork(spec.id, {
+          phase: 'removing',
+          downloadProgress: null,
+          errorMessage: null,
+        })
         try {
           await getDownloadRuntime().remove(spec.id)
           await forget(spec.id)
@@ -444,13 +581,18 @@ export function ModelPickerContainer() {
           toast.success(strings.ai.picker.removedToast(spec.displayName))
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err)
+          updateCard(spec.id, {
+            phase: 'failed',
+            downloadProgress: null,
+            errorMessage: message,
+          })
           toast.error(
             strings.ai.picker.removeErrorToast(spec.displayName, message)
           )
         }
       })()
     },
-    [forget, refreshInstallState, updateCard]
+    [forget, refreshInstallState, startCardWork, updateCard]
   )
 
   const onSaveHfToken = useCallback((token: string) => {
@@ -497,21 +639,23 @@ export function ModelPickerContainer() {
 
   const props: ModelPickerProps = {
     perModel,
+    activeModelId,
     hfTokenPresent: hfTokenChecked ? hfTokenPresent : false,
     guide: <ModelGuide records={records} />,
     actions: {
-      onSelect,
-      onRebenchmark,
+      onDownload,
+      onActivate,
+      onBenchmark,
       onCancel,
       onRemove,
       onSaveHfToken,
       onClearHfToken,
     },
-    actionsLocked: sessionActive,
+    actionsLocked,
   }
 
   return <ModelPicker {...props} />
-}
+})
 
 function benchmarkPhaseToCard(p: BenchmarkProgress): DownloadPhase {
   switch (p.phase) {

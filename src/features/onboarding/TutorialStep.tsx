@@ -1,4 +1,9 @@
-import { DoorOpenIcon, MicIcon, UserPlus2Icon } from 'lucide-react'
+import {
+  BrainCircuitIcon,
+  DoorOpenIcon,
+  MicIcon,
+  UserPlus2Icon,
+} from 'lucide-react'
 
 import {
   OnboardingStep,
@@ -60,7 +65,7 @@ export function TutorialStep({
       </header>
 
       <ol
-        className="grid w-full grid-cols-1 gap-4 md:grid-cols-3"
+        className="grid w-full grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4"
         aria-label={strings.onboarding.tutorial.listAriaLabel}
       >
         <TutorialCard
@@ -83,6 +88,11 @@ export function TutorialStep({
           Icon={DoorOpenIcon}
           title={cards.leave.title}
           body={cards.leave.body}
+        />
+        <TutorialCard
+          Icon={BrainCircuitIcon}
+          title={cards.ai.title}
+          body={cards.ai.body}
         />
       </ol>
     </OnboardingStep>

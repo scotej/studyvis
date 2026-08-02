@@ -1,7 +1,8 @@
 // Model picker UI per ARCHITECTURE.md §8 / DESIGN-SYSTEM.md §4 inventory.
 // Renders one card per model (quant variants of the same model collapse
-// into a single card with a quant selector) with download / benchmark
-// affordances; the gated-token paste flow renders inline for any gated
+// into a single card with a quant selector) with independent download,
+// selection, and benchmark affordances; the gated-token paste flow renders
+// inline for any gated
 // tier (none currently — the Gemma GGUF mirror was ungated upstream).
 //
 // All side-effects flow through injected `pickerActions` so unit tests and
@@ -47,6 +48,7 @@ export type DownloadPhase =
   | 'benchmark-starting'
   | 'benchmark-loading-image'
   | 'benchmark-running'
+  | 'removing'
   | 'cancelling'
   | 'failed'
 
@@ -67,12 +69,13 @@ export type PickerStateForModel = {
 }
 
 export type PickerActions = {
-  // Triggered when the user clicks "Select" on an un-installed model.
-  // Implementations should: HEAD-check both URLs, kick off the download,
-  // verify SHA256s, run a benchmark, and persist the result.
-  onSelect: (spec: ModelSpec) => void
-  // Triggered when the user clicks "Re-benchmark" on an installed model.
-  onRebenchmark: (spec: ModelSpec) => void
+  // Download and verify an uninstalled model. Benchmarking is a separate,
+  // optional action after the files are ready.
+  onDownload: (spec: ModelSpec) => void
+  // Choose an installed model for live AI without requiring a benchmark.
+  onActivate: (spec: ModelSpec) => void
+  // Measure an installed model (first benchmark or re-benchmark).
+  onBenchmark: (spec: ModelSpec) => void
   // Triggered when the user clicks "Cancel" mid-download.
   onCancel: (spec: ModelSpec) => void
   // Triggered when the user clicks the trash button to remove an installed
@@ -87,6 +90,7 @@ export type ModelPickerProps = {
   // Observation-only state. Derived in the parent so unit tests can pin
   // every state cleanly without juggling reducers in the picker itself.
   perModel: Record<string, PickerStateForModel>
+  activeModelId?: string | null
   hfTokenPresent: boolean
   // Surfaces the "What model should I pick?" guide as a sibling render.
   guide: ReactNode
@@ -97,7 +101,7 @@ export type ModelPickerProps = {
   // restart path and the AI chip keeps saying "active"), a benchmark run
   // concurrent with loop ticks contaminates the measured p95, and removing
   // a model deletes files a running llama-server holds open. Download /
-  // Re-benchmark / Remove are disabled while a session is active.
+  // model changes are disabled while a live AI loop owns the sidecar.
   actionsLocked?: boolean
   className?: string
 }
@@ -139,6 +143,8 @@ function phaseLabel(state: PickerStateForModel): string {
       const n = state.benchmarkSampleTotal ?? 0
       return n > 0 ? phases.runningSample(i, n) : phases.benchmarking
     }
+    case 'removing':
+      return phases.removing
     case 'cancelling':
       return phases.cancelling
     case 'failed':
@@ -150,27 +156,56 @@ function classifyPhase(p: DownloadPhase): {
   busy: boolean
   downloading: boolean
   cancelling: boolean
+  cancellable: boolean
 } {
   switch (p) {
     case 'idle':
     case 'failed':
-      return { busy: false, downloading: false, cancelling: false }
+      return {
+        busy: false,
+        downloading: false,
+        cancelling: false,
+        cancellable: false,
+      }
     case 'cancelling':
-      return { busy: true, downloading: false, cancelling: true }
+      return {
+        busy: true,
+        downloading: false,
+        cancelling: true,
+        cancellable: true,
+      }
     case 'downloading-model':
     case 'downloading-mmproj':
-      return { busy: true, downloading: true, cancelling: false }
+      return {
+        busy: true,
+        downloading: true,
+        cancelling: false,
+        cancellable: true,
+      }
     case 'starting':
     case 'verifying':
+      return {
+        busy: true,
+        downloading: false,
+        cancelling: false,
+        cancellable: true,
+      }
     case 'benchmark-starting':
     case 'benchmark-loading-image':
     case 'benchmark-running':
-      return { busy: true, downloading: false, cancelling: false }
+    case 'removing':
+      return {
+        busy: true,
+        downloading: false,
+        cancelling: false,
+        cancellable: false,
+      }
   }
 }
 
 export function ModelPicker({
   perModel,
+  activeModelId = null,
   hfTokenPresent,
   guide,
   actions,
@@ -215,6 +250,7 @@ export function ModelPicker({
             <ModelCard
               key={group[0].id}
               states={states}
+              activeModelId={activeModelId}
               hfTokenPresent={hfTokenPresent}
               actions={actions}
               actionsLocked={actionsLocked}
@@ -234,6 +270,7 @@ function isVariantInstalled(s: PickerStateForModel): boolean {
 
 function ModelCard({
   states,
+  activeModelId,
   hfTokenPresent,
   actions,
   actionsLocked,
@@ -242,6 +279,7 @@ function ModelCard({
   // exactly one. Every entry shares displayName/tier — only the files and
   // footprint differ.
   states: PickerStateForModel[]
+  activeModelId: string | null
   hfTokenPresent: boolean
   actions: PickerActions
   actionsLocked: boolean
@@ -255,6 +293,7 @@ function ModelCard({
   const state =
     busyVariant ??
     states.find((s) => s.spec.id === chosenId) ??
+    states.find((s) => s.spec.id === activeModelId) ??
     states.find(isVariantInstalled) ??
     states[0]
   const { spec, installState, record, phase, errorMessage } = state
@@ -273,6 +312,7 @@ function ModelCard({
   const showProgressBar =
     phaseClass.downloading && state.downloadProgress != null
   const benchmark = record?.benchmark ?? null
+  const isActive = isInstalled && spec.id === activeModelId
   const tokenPasteOpen = spec.gated && !hfTokenPresent && !busy && !isInstalled
 
   return (
@@ -300,6 +340,11 @@ function ModelCard({
                 <CheckIcon /> {strings.ai.picker.pills.installed}
               </span>
             ) : null}
+            {isActive ? (
+              <span className="inline-flex items-center gap-1 rounded-full bg-accent-muted px-2 py-0.5 text-xs font-semibold uppercase tracking-wide text-text-inverse">
+                <CheckIcon /> {strings.ai.picker.pills.active}
+              </span>
+            ) : null}
             {isPartial ? (
               <span className="inline-flex items-center gap-1 rounded-full bg-status-warning px-2 py-0.5 text-xs font-semibold uppercase tracking-wide text-text-inverse">
                 <AlertCircleIcon /> {strings.ai.picker.pills.incomplete}
@@ -317,6 +362,8 @@ function ModelCard({
         <CardActions
           state={state}
           isInstalled={isInstalled}
+          isActive={isActive}
+          benchmark={benchmark}
           isPartial={isPartial}
           canResume={interrupted != null}
           hfTokenPresent={hfTokenPresent}
@@ -352,6 +399,10 @@ function ModelCard({
                   {formatBytesGB(totalDownloadBytes(variant.spec))}
                   {isVariantInstalled(variant)
                     ? strings.ai.picker.quantPicker.installedSuffix
+                    : ''}
+                  {isVariantInstalled(variant) &&
+                  variant.spec.id === activeModelId
+                    ? strings.ai.picker.quantPicker.activeSuffix
                     : ''}
                 </span>
               </Label>
@@ -389,7 +440,12 @@ function ModelCard({
         </div>
       </dl>
 
-      {benchmark ? (
+      {isInstalled && !benchmark ? (
+        <p className="flex items-start gap-2 text-sm text-status-warning">
+          <GaugeIcon className="mt-0.5 shrink-0" />
+          <span>{strings.ai.picker.notBenchmarked}</span>
+        </p>
+      ) : benchmark ? (
         isBenchmarkStale(benchmark) ? (
           // Measured on an older engine build/flags (e.g. pre-Metal-offload
           // CPU numbers on Apple Silicon): still shown, but not presented as
@@ -454,6 +510,8 @@ function ModelCard({
 function CardActions({
   state,
   isInstalled,
+  isActive,
+  benchmark,
   isPartial,
   canResume,
   hfTokenPresent,
@@ -462,6 +520,8 @@ function CardActions({
 }: {
   state: PickerStateForModel
   isInstalled: boolean
+  isActive: boolean
+  benchmark: BenchmarkResult | null
   isPartial: boolean
   // A4 — a partial download is known on disk; the primary action resumes it
   // (backend Range-resumes) rather than reading as a fresh download.
@@ -472,12 +532,13 @@ function CardActions({
 }) {
   const { spec, phase } = state
   const phaseClass = classifyPhase(phase)
-  // While in 'cancelling' we keep the Cancel button visible (just disabled);
-  // every other busy state is "active work in progress."
-  const downloadOrBenchmarkRunning = phaseClass.busy && !phaseClass.cancelling
   const blocksGated = spec.gated && !hfTokenPresent
 
-  if (downloadOrBenchmarkRunning) {
+  // Downloads have a real Rust cancellation path. Benchmarks do not, so they
+  // show progress without the old misleading Cancel button.
+  if (phaseClass.busy && !phaseClass.cancellable) return null
+
+  if (phaseClass.cancellable) {
     return (
       <Button
         variant="outline"
@@ -492,14 +553,27 @@ function CardActions({
 
   if (isInstalled) {
     return (
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center justify-end gap-2">
+        {!isActive ? (
+          <Button
+            variant="default"
+            size="sm"
+            onClick={() => actions.onActivate(spec)}
+            disabled={actionsLocked}
+          >
+            <CheckIcon /> {strings.ai.picker.useModelCta}
+          </Button>
+        ) : null}
         <Button
           variant="secondary"
           size="sm"
-          onClick={() => actions.onRebenchmark(spec)}
+          onClick={() => actions.onBenchmark(spec)}
           disabled={actionsLocked}
         >
-          <RefreshCwIcon /> {strings.ai.picker.reBenchmarkCta}
+          <RefreshCwIcon />{' '}
+          {benchmark
+            ? strings.ai.picker.reBenchmarkCta
+            : strings.ai.picker.benchmarkCta}
         </Button>
         <Button
           variant="ghost"
@@ -520,7 +594,7 @@ function CardActions({
         <Button
           variant="default"
           size="sm"
-          onClick={() => actions.onSelect(spec)}
+          onClick={() => actions.onDownload(spec)}
           disabled={blocksGated || actionsLocked}
         >
           <DownloadIcon />{' '}
@@ -545,7 +619,7 @@ function CardActions({
     <Button
       variant="default"
       size="sm"
-      onClick={() => actions.onSelect(spec)}
+      onClick={() => actions.onDownload(spec)}
       disabled={blocksGated || actionsLocked}
       aria-disabled={blocksGated || actionsLocked || undefined}
     >

@@ -1942,7 +1942,20 @@ export function SessionView({
           ) : null}
         </span>
         <span className="flex items-center gap-4">
-          <AiStatusChip status={aiChipStatus} />
+          {onOpenSettings ? (
+            <button
+              type="button"
+              className="rounded-md outline-none focus-visible:ring-3 focus-visible:ring-accent-ring"
+              onClick={() => onOpenSettings('ai')}
+              aria-label={strings.session.aiStatus.openSettingsAriaLabel(
+                strings.session.aiStatus[aiChipStatus]
+              )}
+            >
+              <AiStatusChip status={aiChipStatus} />
+            </button>
+          ) : (
+            <AiStatusChip status={aiChipStatus} />
+          )}
           <ElapsedTime startedAt={startedAt} startedAtMono={startedAtMono} />
           <SessionTimer
             phase={pomodoroSnapshot.phase}

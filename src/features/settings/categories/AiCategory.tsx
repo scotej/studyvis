@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 
 import { ScreenCapturePermissionOverlay } from '@/components/ScreenCapturePermissionOverlay'
@@ -9,6 +9,14 @@ import {
 } from '@/components/SettingsRow'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import { Label } from '@/components/ui/label'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { Slider } from '@/components/ui/slider'
@@ -21,9 +29,11 @@ import {
   DEFAULT_CTX_SIZE,
   effectiveIntervalSec,
   FALLBACK_SAMPLE_INTERVAL_SEC,
+  getAiEnableReadiness,
   getDownloadRuntime,
   getEngineRuntime,
   getHfTokenRuntime,
+  getModel,
   MAX_SAMPLE_INTERVAL_SEC,
   ModelPickerContainer,
   preacquireScreenStream,
@@ -34,6 +44,7 @@ import {
   WARNING_THRESHOLD_MIN,
   type EngineInfo,
   type EngineProgressEvent,
+  type ModelPickerContainerHandle,
 } from '@/features/ai'
 import { useSessionStore } from '@/stores/sessionStore'
 import {
@@ -56,12 +67,11 @@ function formatMb(bytes: number): string {
 // internal disable and start the UI at 0.05.
 const CONFIDENCE_FLOOR_UI_MIN = 0.05
 
-// V2-P9 — the master AI gate plus the tuning controls prior phases left as
-// read-only stubs. When the toggle is off the only thing rendered is the
-// toggle itself: no picker, no sliders, no sidecar affordances. When it's on
-// the gated controls come alive. Side-effects (permission seed on enable,
-// sidecar stop on disable) are orchestrated here so the settings store stays
-// in the `@/stores` layer with no `@/features/ai` import.
+// The master AI gate controls live capture and scoring, not model setup.
+// Downloads, selection, engine setup, and optional benchmarks remain available
+// while AI is off. Side-effects (permission seed on enable, sidecar stop on
+// disable) are orchestrated here so the settings store stays in the `@/stores`
+// layer with no `@/features/ai` import.
 export function AiCategory() {
   const aiFeaturesEnabled = useSettingsStore((s) => s.values.aiFeaturesEnabled)
   const setAiFeaturesEnabled = useSettingsStore((s) => s.setAiFeaturesEnabled)
@@ -87,20 +97,23 @@ export function AiCategory() {
   const copy = strings.settings.ai
 
   const activeModelId = useModelStore((s) => s.activeModelId)
-  const measuredFloor = useModelStore((s) => {
-    const id = s.activeModelId
-    const measured = id
-      ? s.records[id]?.benchmark?.sampleIntervalSec
-      : undefined
-    return typeof measured === 'number' && measured >= 1
-      ? measured
-      : FALLBACK_SAMPLE_INTERVAL_SEC
-  })
+  const modelStatus = useModelStore((s) => s.status)
+  const modelRecords = useModelStore((s) => s.records)
+  const measuredSampleInterval = activeModelId
+    ? modelRecords[activeModelId]?.benchmark?.sampleIntervalSec
+    : undefined
+  const hasMeasuredFloor =
+    typeof measuredSampleInterval === 'number' && measuredSampleInterval >= 1
+  const measuredFloor = hasMeasuredFloor
+    ? (measuredSampleInterval as number)
+    : FALLBACK_SAMPLE_INTERVAL_SEC
 
   const sidecarStatus = useSidecarStore((s) => s.status)
   const sidecarLastError = useSidecarStore((s) => s.lastError)
 
   const [permissionOverlayOpen, setPermissionOverlayOpen] = useState(false)
+  const [benchmarkWarningOpen, setBenchmarkWarningOpen] = useState(false)
+  const [modelSetupBusy, setModelSetupBusy] = useState(false)
   const [toggling, setToggling] = useState(false)
   const [restarting, setRestarting] = useState(false)
   const [tokenPresent, setTokenPresent] = useState<boolean | null>(null)
@@ -108,6 +121,8 @@ export function AiCategory() {
   const [engineProgress, setEngineProgress] =
     useState<EngineProgressEvent | null>(null)
   const [installingEngine, setInstallingEngine] = useState(false)
+  const modelPickerSectionRef = useRef<HTMLDivElement>(null)
+  const modelPickerRef = useRef<ModelPickerContainerHandle>(null)
 
   const refreshEngineInfo = useCallback(async () => {
     try {
@@ -117,11 +132,9 @@ export function AiCategory() {
     }
   }, [])
 
-  // I73 — engine presence + live install progress. The subscription stays
-  // mounted while AI is on so a session-triggered auto-install shows its
-  // progress here too, not only installs started from this pane.
+  // Engine setup remains visible while AI is off, so keep presence and live
+  // install progress current for the whole time this settings pane is open.
   useEffect(() => {
-    if (!aiFeaturesEnabled) return
     // eslint-disable-next-line react-hooks/set-state-in-effect -- one-shot engine presence check: refreshEngineInfo awaits the Tauri command before any setState fires (same suppression as refreshTokenPresence above).
     void refreshEngineInfo()
     let unlisten: (() => void) | null = null
@@ -144,7 +157,7 @@ export function AiCategory() {
       disposed = true
       unlisten?.()
     }
-  }, [aiFeaturesEnabled, refreshEngineInfo])
+  }, [refreshEngineInfo])
 
   const refreshTokenPresence = useCallback(async () => {
     try {
@@ -156,8 +169,8 @@ export function AiCategory() {
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- one-shot keychain presence check: refreshTokenPresence awaits the Tauri command before any setState fires (same suppression as SessionsCategory / useIdentity.refresh).
-    if (aiFeaturesEnabled) void refreshTokenPresence()
-  }, [aiFeaturesEnabled, refreshTokenPresence])
+    void refreshTokenPresence()
+  }, [refreshTokenPresence])
 
   // One-shot OS permission seed (V2-P3 carryover): never call captureScreen()
   // to probe — `requestScreenCapturePermission` is the dedicated seed.
@@ -177,7 +190,7 @@ export function AiCategory() {
     }
   }, [copy.permissions.pickModelFirstBody])
 
-  const handleToggle = useCallback(
+  const applyToggle = useCallback(
     async (next: boolean) => {
       // V2-P9 gesture fix — when a session is already running, flipping AI
       // on fires sampleLoop's boot() from a useEffect the instant
@@ -210,6 +223,73 @@ export function AiCategory() {
     },
     [seedScreenPermission, setAiFeaturesEnabled, sessionActive]
   )
+
+  const handleToggle = useCallback(
+    (next: boolean) => {
+      if (!next) {
+        void applyToggle(false)
+        return
+      }
+
+      if (
+        modelSetupBusy ||
+        (!aiFeaturesEnabled &&
+          (sidecarStatus === 'starting' ||
+            sidecarStatus === 'running' ||
+            sidecarStatus === 'stopping'))
+      ) {
+        toast.info(copy.enable.benchmarkBusyToast)
+        return
+      }
+
+      const readiness = getAiEnableReadiness({
+        status: modelStatus,
+        activeModelId,
+        records: modelRecords,
+      })
+      if (readiness === 'loading') {
+        toast.info(copy.enable.loadingToast)
+        return
+      }
+      if (readiness === 'error') {
+        toast.error(copy.enable.modelErrorToast)
+        return
+      }
+      if (readiness === 'no-model') {
+        toast.info(copy.enable.pickModelFirstToast)
+        modelPickerSectionRef.current?.scrollIntoView({ block: 'start' })
+        return
+      }
+      if (readiness === 'unbenchmarked') {
+        setBenchmarkWarningOpen(true)
+        return
+      }
+      void applyToggle(true)
+    },
+    [
+      activeModelId,
+      aiFeaturesEnabled,
+      applyToggle,
+      copy.enable,
+      modelRecords,
+      modelSetupBusy,
+      modelStatus,
+      sidecarStatus,
+    ]
+  )
+
+  const handleBenchmarkFirst = useCallback(() => {
+    setBenchmarkWarningOpen(false)
+    modelPickerSectionRef.current?.scrollIntoView({ block: 'start' })
+    modelPickerRef.current?.benchmarkSelected()
+  }, [])
+
+  const handleEnableAnyway = useCallback(() => {
+    setBenchmarkWarningOpen(false)
+    // This callback is the user's click. applyToggle pre-acquires the screen
+    // stream synchronously before its first await when a session is active.
+    void applyToggle(true)
+  }, [applyToggle])
 
   const handleRetryPermission = useCallback(async () => {
     try {
@@ -340,7 +420,7 @@ export function AiCategory() {
         control={
           <Switch
             checked={aiFeaturesEnabled}
-            disabled={toggling}
+            disabled={toggling || (!aiFeaturesEnabled && modelSetupBusy)}
             onCheckedChange={(checked) => void handleToggle(Boolean(checked))}
             aria-label={copy.enable.ariaLabel}
           />
@@ -350,65 +430,79 @@ export function AiCategory() {
       {!aiFeaturesEnabled ? (
         <SettingsRow label={copy.modelOff.label} help={copy.modelOff.help} />
       ) : (
+        // D5 — only meaningful while AI can sample.
+        <p className={cn(settingsRowChrome, 'text-sm text-text-secondary')}>
+          {copy.screenIndicatorNote}
+        </p>
+      )}
+
+      <div ref={modelPickerSectionRef} className={settingsRowChrome}>
+        <ModelPickerContainer
+          ref={modelPickerRef}
+          onBusyChange={setModelSetupBusy}
+        />
+      </div>
+
+      <SettingsRow
+        label={copy.engine.label}
+        help={
+          // Progress is conveyed as text (no spinner, DESIGN-SYSTEM §10);
+          // the live region announces phase changes to screen readers.
+          <span role="status" aria-live="polite">
+            {engineHelp}
+          </span>
+        }
+        control={
+          engineInfo?.supported === false ? undefined : (
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => void handleInstallEngine()}
+              disabled={
+                engineBusy ||
+                modelSetupBusy ||
+                (sessionActive && aiFeaturesEnabled)
+              }
+              aria-label={copy.engine.installAria}
+            >
+              {engineInfo?.installed
+                ? copy.engine.reinstallCta
+                : copy.engine.installCta}
+            </Button>
+          )
+        }
+      />
+
+      <SettingsRow
+        label={copy.engine.auto.label}
+        help={copy.engine.auto.help}
+        control={
+          <Switch
+            checked={engineAutoInstall}
+            onCheckedChange={(checked) =>
+              void setEngineAutoInstall(Boolean(checked))
+            }
+            aria-label={copy.engine.auto.ariaLabel}
+          />
+        }
+      />
+
+      {aiFeaturesEnabled ? (
         <>
-          {/* D5 — canonical screen-recording indicator note. Below the
-              enable row (not above it) so toggling doesn't shift the switch
-              under the cursor; only meaningful while AI can sample. */}
-          <p className={cn(settingsRowChrome, 'text-sm text-text-secondary')}>
-            {copy.screenIndicatorNote}
-          </p>
-
-          <div className={settingsRowChrome}>
-            <ModelPickerContainer />
-          </div>
-
-          <SettingsRow
-            label={copy.engine.label}
-            help={
-              // Progress is conveyed as text (no spinner, DESIGN-SYSTEM §10);
-              // the live region announces phase changes to screen readers.
-              <span role="status" aria-live="polite">
-                {engineHelp}
-              </span>
-            }
-            control={
-              engineInfo?.supported === false ? undefined : (
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={() => void handleInstallEngine()}
-                  disabled={engineBusy || sessionActive}
-                  aria-label={copy.engine.installAria}
-                >
-                  {engineInfo?.installed
-                    ? copy.engine.reinstallCta
-                    : copy.engine.installCta}
-                </Button>
-              )
-            }
-          />
-
-          <SettingsRow
-            label={copy.engine.auto.label}
-            help={copy.engine.auto.help}
-            control={
-              <Switch
-                checked={engineAutoInstall}
-                onCheckedChange={(checked) =>
-                  void setEngineAutoInstall(Boolean(checked))
-                }
-                aria-label={copy.engine.auto.ariaLabel}
-              />
-            }
-          />
-
           <SettingsRow
             label={copy.sampleInterval.label}
             stack
-            help={copy.sampleInterval.help(
-              measuredFloor,
-              MAX_SAMPLE_INTERVAL_SEC
-            )}
+            help={
+              hasMeasuredFloor
+                ? copy.sampleInterval.helpMeasured(
+                    measuredFloor,
+                    MAX_SAMPLE_INTERVAL_SEC
+                  )
+                : copy.sampleInterval.helpDefault(
+                    measuredFloor,
+                    MAX_SAMPLE_INTERVAL_SEC
+                  )
+            }
             control={
               <div className="flex max-w-md items-center gap-4">
                 <Slider
@@ -604,7 +698,46 @@ export function AiCategory() {
             />
           ) : null}
         </>
-      )}
+      ) : null}
+
+      <Dialog
+        open={benchmarkWarningOpen}
+        onOpenChange={setBenchmarkWarningOpen}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{copy.benchmarkWarning.title}</DialogTitle>
+            <DialogDescription>
+              {copy.benchmarkWarning.description(
+                (activeModelId && getModel(activeModelId)?.displayName) ||
+                  copy.benchmarkWarning.fallbackModelName,
+                FALLBACK_SAMPLE_INTERVAL_SEC
+              )}{' '}
+              {copy.benchmarkWarning.recommendation}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="flex-col sm:flex-row">
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={() => setBenchmarkWarningOpen(false)}
+            >
+              {copy.benchmarkWarning.keepOffCta}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={handleEnableAnyway}
+              disabled={toggling}
+            >
+              {copy.benchmarkWarning.enableAnywayCta}
+            </Button>
+            <Button type="button" onClick={handleBenchmarkFirst}>
+              {copy.benchmarkWarning.benchmarkFirstCta}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <ScreenCapturePermissionOverlay
         open={permissionOverlayOpen}
