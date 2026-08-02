@@ -1,11 +1,15 @@
 import { create } from 'zustand'
 
-// S2 — A missed `ptt-friends-released` event (the Rust side emits it
-// best-effort) latches `active` true, holding the mic open. Two guards:
+// S2 / I85 — A missed `ptt-friends-released` event (the Rust side emits it
+// best-effort) latches `active` true, holding the mic open. Three guards:
 //   1. `reset()` is called by SessionView's per-session reset effect AND on
 //      teardown so a stuck state never bleeds into the next session's first
 //      audio track (PLAN §5 default-muted).
-//   2. `MAX_HOLD_MS` failsafe — `press()` arms a self-release timer so a hold
+//   2. A second `press()` while active immediately mutes. global-hotkey
+//      suppresses auto-repeat on every supported backend, so a second Pressed
+//      event represents a new physical press whose previous Released event was
+//      lost, not the original key still being held.
+//   3. `MAX_HOLD_MS` failsafe — `press()` arms a self-release timer so a hold
 //      whose matching release is never delivered falls back to muted. This is
 //      a STUCK-KEY guard, not a hold limit: macOS global hotkeys
 //      (tauri_plugin_global_shortcut → Carbon RegisterEventHotKey) fire
@@ -61,12 +65,20 @@ type PttState = {
   reset: () => void
 }
 
-export const usePttStore = create<PttState>((set) => ({
+export const usePttStore = create<PttState>((set, get) => ({
   active: false,
   press: () => {
+    // A second physical press means the prior release edge was lost. Treat it
+    // as an emergency mute instead of extending the hot-mic window by another
+    // two minutes (issue #156).
+    if (get().active) {
+      clearHoldTimer()
+      set({ active: false })
+      return
+    }
+
     // Arm the stuck-key failsafe. A single press whose matching release never
-    // arrives falls back to muted after MAX_HOLD_MS. clearHoldTimer() first so
-    // an idempotent re-press (or a stray re-arm) never leaves two timers.
+    // arrives falls back to muted after MAX_HOLD_MS.
     clearHoldTimer()
     holdTimer = activeScheduler.setTimeout(() => {
       holdTimer = null
