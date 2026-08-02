@@ -191,7 +191,14 @@ export function startScreenShareController({
       if (!stopped) announce()
     },
     classify: (peerId, stream, metadata) => {
-      if (screenStreamIds.get(peerId) === stream.id) return 'screen'
+      const announcedScreenId = screenStreamIds.get(peerId)
+      // On reconnect the camera and screen are renegotiated together, so
+      // trystero's FIFO metadata can land on the camera. Once the content-
+      // addressed id is known it is authoritative in both directions: the
+      // matching stream is the screen and every non-matching stream is not.
+      if (announcedScreenId !== undefined) {
+        return announcedScreenId === stream.id ? 'screen' : 'camera'
+      }
       return isScreenStreamMetadata(metadata) ? 'screen' : 'camera'
     },
     teardown: () => {
