@@ -44,6 +44,7 @@ import {
 } from '@/lib/fileExport'
 import { listFriends, type Friend } from '@/lib/db/friends'
 import { sessionsGet } from '@/lib/db/sessions'
+import { saveDiagnosticsArchive } from '@/lib/diagnostics'
 import { useIdentity } from '@/features/identity'
 import { strings } from '@/strings'
 import {
@@ -91,6 +92,10 @@ export type ReportProps = {
   // merges into the topic-keyed row (mergeSessionStints in lifecycle.ts),
   // so the report after a rejoin shows accumulated whole-session totals.
   onRejoin?: () => void
+  // Issue #161 — only the just-ended Home route opts into this action. A
+  // report reopened from Settings must not label today's logs as belonging to
+  // an older session.
+  showDiagnosticsExport?: boolean
   // Storybook hook so a story can drive the entire data path with mock
   // data and skip the Tauri calls. Production omits it; the shell falls
   // through to the live invocations.
@@ -137,6 +142,7 @@ export function Report({
   sessionId,
   onClose,
   onRejoin,
+  showDiagnosticsExport = false,
   __loader,
 }: ReportProps) {
   const [status, setStatus] = useState<Status>({ kind: 'loading' })
@@ -239,7 +245,14 @@ export function Report({
     )
   }
 
-  return <ReportView data={status.data} onClose={onClose} onRejoin={onRejoin} />
+  return (
+    <ReportView
+      data={status.data}
+      onClose={onClose}
+      onRejoin={onRejoin}
+      showDiagnosticsExport={showDiagnosticsExport}
+    />
+  )
 }
 
 // Pure presentational layer — no side effects, no data fetching. Receives
@@ -250,6 +263,8 @@ export type ReportViewProps = {
   onClose: () => void
   // #47 B3 — see ReportProps.onRejoin.
   onRejoin?: () => void
+  // See ReportProps.showDiagnosticsExport.
+  showDiagnosticsExport?: boolean
   // Disables the on-mount ScoreGauge sweep so Storybook snapshots stay
   // deterministic. Production callers pass true (or omit).
   animateScore?: boolean
@@ -259,6 +274,7 @@ export function ReportView({
   data,
   onClose,
   onRejoin,
+  showDiagnosticsExport = false,
   animateScore = true,
 }: ReportViewProps) {
   const { session, auditEvents, nameByEdPubkey, myEdPubkeyHex } = data
@@ -314,6 +330,28 @@ export function ReportView({
   const fileStem = `studyvis-${slugify(session.declared_topic ?? 'session')}-${
     session.started_at != null ? fileDateStamp(session.started_at) : 'session'
   }`
+
+  const [exportingDiagnostics, setExportingDiagnostics] = useState(false)
+  const diagnosticsExportingRef = useRef(false)
+  const handleDownloadDiagnostics = async () => {
+    if (diagnosticsExportingRef.current) return
+    diagnosticsExportingRef.current = true
+    setExportingDiagnostics(true)
+    try {
+      const result = await saveDiagnosticsArchive({
+        defaultPath: `${fileStem}-diagnostics.zip`,
+        sessionPrefix: session.id.slice(0, 8),
+      })
+      if (result.kind === 'saved') {
+        toast.success(strings.diagnostics.savedToast)
+      }
+    } catch {
+      toast.error(strings.diagnostics.errorToast)
+    } finally {
+      diagnosticsExportingRef.current = false
+      setExportingDiagnostics(false)
+    }
+  }
 
   const runExport = async (
     build: () => string,
@@ -400,6 +438,21 @@ export function ReportView({
             </span>
           </div>
           <div className="flex flex-wrap items-center justify-end gap-2">
+            {showDiagnosticsExport ? (
+              <Button
+                variant="default"
+                size="sm"
+                onClick={() => void handleDownloadDiagnostics()}
+                disabled={exportingDiagnostics}
+                aria-busy={exportingDiagnostics}
+                aria-label={strings.diagnostics.downloadAriaLabel}
+              >
+                <DownloadIcon />
+                {exportingDiagnostics
+                  ? strings.diagnostics.preparingCta
+                  : strings.diagnostics.downloadCta}
+              </Button>
+            ) : null}
             <Button
               variant="secondary"
               size="sm"

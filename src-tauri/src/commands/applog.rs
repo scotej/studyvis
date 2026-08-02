@@ -8,19 +8,19 @@
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Mutex, MutexGuard};
 
 use tauri::{AppHandle, Runtime};
 
 use crate::db::data_dir;
 
 const LOG_DIR: &str = "logs";
-const APP_LOG_FILE: &str = "studyvis.log";
+pub(crate) const APP_LOG_FILE: &str = "studyvis.log";
+pub(crate) const LOG_HISTORY_FILES: usize = 10;
 
-// Half the sidecar log's 5 MiB, smaller on purpose: two logs at two
-// generations each bounds `logs/` at ~14 MiB rather than 20, and this file is
-// structured JSON, so a given number of bytes carries far more incidents than
-// the same bytes of llama-server stdout.
+// The structured app log rolls at 2 MiB. Ten retained generations bound its
+// history at roughly 20 MiB while still leaving enough room for several long
+// sessions. The diagnostics archive applies a separate, smaller tail cap.
 const APP_LOG_MAX_BYTES: u64 = 2 * 1024 * 1024;
 
 // Per-call ceilings. The JS logger already batches and clamps; these bound what
@@ -35,6 +35,10 @@ const MAX_TAIL_LINES: usize = 500;
 // Both webviews call `app_log_append`. Without this, two appends can interleave
 // a partial line and a roll can race a write.
 static APP_LOG_LOCK: Mutex<()> = Mutex::new(());
+
+pub(crate) fn app_log_guard() -> MutexGuard<'static, ()> {
+    APP_LOG_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+}
 
 pub(crate) fn app_log_path<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, String> {
     let dir = data_dir(app)?.join(LOG_DIR);
@@ -54,8 +58,42 @@ fn should_rotate(current_len: u64, max_bytes: u64) -> bool {
     current_len >= max_bytes
 }
 
-// Single-generation roll, mirroring sidecar.rs. Best-effort: a failed metadata
-// read or rename must never turn logging into an error the app has to handle.
+pub(crate) fn rotated_log_path(path: &Path, generation: usize) -> PathBuf {
+    path.with_extension(format!("log.{generation}"))
+}
+
+// Shift oldest-to-newest destinations in descending order. Removing each
+// destination first is load-bearing on Windows: unlike Unix, `fs::rename`
+// does not replace an existing file there.
+pub(crate) fn shift_log_history(path: &Path, generations: usize) {
+    if generations == 0 {
+        return;
+    }
+    let oldest = rotated_log_path(path, generations);
+    let _ = fs::remove_file(&oldest);
+    for generation in (1..generations).rev() {
+        let source = rotated_log_path(path, generation);
+        if !source.is_file() {
+            continue;
+        }
+        let destination = rotated_log_path(path, generation + 1);
+        let _ = fs::remove_file(&destination);
+        let _ = fs::rename(source, destination);
+    }
+}
+
+pub(crate) fn rotate_log_history(path: &Path, generations: usize) {
+    if generations == 0 || !path.is_file() {
+        return;
+    }
+    shift_log_history(path, generations);
+    let first = rotated_log_path(path, 1);
+    let _ = fs::remove_file(&first);
+    let _ = fs::rename(path, first);
+}
+
+// Size-bounded roll. Best-effort: a failed metadata read or rename must never
+// turn logging into an error the app has to handle.
 fn rotate_if_needed(path: &Path, max_bytes: u64) {
     let Ok(meta) = fs::metadata(path) else {
         return;
@@ -63,9 +101,7 @@ fn rotate_if_needed(path: &Path, max_bytes: u64) {
     if !should_rotate(meta.len(), max_bytes) {
         return;
     }
-    // `with_extension` replaces the final extension, which is why the filename
-    // has to keep ending in `.log`: studyvis.log -> studyvis.log.1.
-    let _ = fs::rename(path, path.with_extension("log.1"));
+    rotate_log_history(path, LOG_HISTORY_FILES);
 }
 
 // One record is one line, so an embedded newline would split a record in two
@@ -108,7 +144,7 @@ pub fn app_log_append<R: Runtime>(app: AppHandle<R>, lines: Vec<String>) -> Resu
     }
     let path = app_log_path(&app)?;
     let body = render_batch(&lines);
-    let _guard = APP_LOG_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let _guard = app_log_guard();
     // Roll before opening, while this call holds the only writer — the same
     // precondition sidecar.rs's roll relies on. On Windows `fs::rename` fails
     // against an open handle, which is why the File below is dropped inside
@@ -128,6 +164,7 @@ pub fn app_log_tail<R: Runtime>(
     max_lines: usize,
 ) -> Result<Vec<String>, String> {
     let path = app_log_path(&app)?;
+    let _guard = app_log_guard();
     let Ok(mut file) = File::open(&path) else {
         return Ok(Vec::new());
     };
@@ -207,7 +244,7 @@ mod tests {
     }
 
     #[test]
-    fn appends_then_rolls_a_single_generation() {
+    fn appends_then_rolls_into_history() {
         let dir = scratch_dir("roll");
         let path = dir.join(APP_LOG_FILE);
 
@@ -221,7 +258,7 @@ mod tests {
         rotate_if_needed(&path, APP_LOG_MAX_BYTES);
         assert!(!path.with_extension("log.1").exists());
 
-        // At the cap the live file becomes the single rolled generation and a
+        // At the cap the live file becomes the newest rolled generation and a
         // fresh live file starts empty.
         rotate_if_needed(&path, 1);
         assert!(!path.exists());
@@ -236,6 +273,57 @@ mod tests {
         drop(file);
         assert_eq!(fs::read_to_string(&path).unwrap(), "second\n");
 
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn rotation_shifts_ten_generations_and_drops_the_oldest() {
+        let dir = scratch_dir("history");
+        let path = dir.join(APP_LOG_FILE);
+        fs::write(&path, "live").unwrap();
+        for generation in 1..=LOG_HISTORY_FILES {
+            fs::write(
+                rotated_log_path(&path, generation),
+                format!("old-{generation}"),
+            )
+            .unwrap();
+        }
+
+        rotate_log_history(&path, LOG_HISTORY_FILES);
+
+        assert!(!path.exists());
+        assert_eq!(
+            fs::read_to_string(rotated_log_path(&path, 1)).unwrap(),
+            "live"
+        );
+        for generation in 2..=LOG_HISTORY_FILES {
+            assert_eq!(
+                fs::read_to_string(rotated_log_path(&path, generation)).unwrap(),
+                format!("old-{}", generation - 1)
+            );
+        }
+        assert!(!rotated_log_path(&path, LOG_HISTORY_FILES + 1).exists());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn rotation_handles_gaps_without_duplicating_history() {
+        let dir = scratch_dir("gaps");
+        let path = dir.join(APP_LOG_FILE);
+        fs::write(&path, "live").unwrap();
+        fs::write(rotated_log_path(&path, 2), "old-2").unwrap();
+
+        rotate_log_history(&path, LOG_HISTORY_FILES);
+
+        assert_eq!(
+            fs::read_to_string(rotated_log_path(&path, 1)).unwrap(),
+            "live"
+        );
+        assert!(!rotated_log_path(&path, 2).exists());
+        assert_eq!(
+            fs::read_to_string(rotated_log_path(&path, 3)).unwrap(),
+            "old-2"
+        );
         let _ = fs::remove_dir_all(&dir);
     }
 }

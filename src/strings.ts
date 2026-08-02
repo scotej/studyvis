@@ -69,6 +69,16 @@ export const strings = {
     },
   },
 
+  diagnostics: {
+    defaultFilename: 'studyvis-diagnostics.zip',
+    filterName: 'ZIP archive',
+    downloadCta: 'Download diagnostics',
+    preparingCta: `Preparing${ELLIPSIS}`,
+    downloadAriaLabel: 'Download StudyVis app and local AI engine diagnostics',
+    savedToast: 'Diagnostics saved.',
+    errorToast: "Couldn't save the diagnostics.",
+  },
+
   onboarding: {
     welcome: {
       ariaLabel: 'Welcome',
@@ -1373,9 +1383,9 @@ export const strings = {
         },
       },
       diagnostics: {
-        label: 'AI diagnostics in debug log',
-        help: 'Adds per-sample AI detail to the log. Sample and parse warnings are recorded either way. Same setting as Advanced → Debug log.',
-        ariaLabel: 'AI diagnostics in debug log',
+        label: 'Mirror AI diagnostics to console',
+        help: 'Per-sample AI detail is always saved to the local diagnostic log. Turn this on to mirror it to the developer console. Same setting as Advanced → Developer console.',
+        ariaLabel: 'Mirror AI diagnostics to the developer console',
       },
       hfToken: {
         label: 'Hugging Face token',
@@ -1540,9 +1550,9 @@ export const strings = {
         label: 'Autostart error',
       },
       debugLog: {
-        label: 'Debug log',
-        help: 'Adds verbose detail to the log and mirrors it to the developer console. The log is written to disk either way. Off by default; persists across launches.',
-        ariaLabel: 'Debug log',
+        label: 'Developer console',
+        help: 'Verbose diagnostic detail is always saved to the local log. Turn this on to mirror info and debug records to the developer console. Off by default; persists across launches.',
+        ariaLabel: 'Mirror verbose diagnostics to the developer console',
       },
       dataFolder: {
         label: 'Open data folder',
@@ -1551,8 +1561,8 @@ export const strings = {
         errorFallback: "Couldn't open the data folder.",
       },
       shareLog: {
-        label: 'Share log',
-        help: 'When something misbehaves, copy a diagnostics summary — your machine, plus the last few minutes of the log — or open the log files, then send it to a friend or paste it into a GitHub issue. Usernames, keys and your own writing are stripped out. Nothing is uploaded — sharing is always manual.',
+        label: 'Diagnostics',
+        help: 'Download a ZIP with recent StudyVis and local AI-engine logs, copy a short app summary, or open the log folder. Nothing is uploaded — review the files and choose what to share.',
         copyCta: 'Copy diagnostics',
         revealCta: 'Open log',
         copiedToast: 'Diagnostics copied to the clipboard.',

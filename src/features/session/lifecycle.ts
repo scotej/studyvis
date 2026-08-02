@@ -16,9 +16,32 @@ import { useFriendsStore } from '@/stores/friendsStore'
 import { useSessionStore } from '@/stores/sessionStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { strings } from '@/strings'
-import { logger } from '@/lib/log'
+import { flushLog, logger, setLogContext } from '@/lib/log'
 
 const log = logger.child('session.lifecycle')
+
+export type SessionRole = 'host' | 'guest'
+
+// Start the share-safe diagnostic timeline before any room callbacks can
+// fire. The full topic is a room join capability; setLogContext keeps only its
+// eight-character correlation prefix. Settings are reduced to categorical
+// state/counts so no custom relay URL, TURN credential or declared topic can
+// reach the log.
+export function beginSessionDiagnostics(
+  topic: string,
+  role: SessionRole
+): void {
+  setLogContext({ sess: topic })
+  const settings = useSettingsStore.getState().values
+  log.info('session.begin', {
+    role,
+    aiEnabled: settings.aiFeaturesEnabled,
+    captureMode: settings.captureDisplays,
+    turnPreference: settings.turnPreference,
+    turnConfigured: settings.turnServer !== null,
+    customRelayCount: settings.customRelayUrls.length,
+  })
+}
 
 export const SESSION_FULL_ACTION = 'session-full'
 export const PTT_STATE_ACTION = 'ptt-state'
@@ -250,6 +273,7 @@ export function buildLeaveHandler(args: {
     // fires on 'active', so the score survives the 'ended' window in
     // practice — but capturing up front decouples us from that gate.
     const sessionState = useSessionStore.getState()
+    const endReason = sessionState.pendingEndReason ?? 'user'
     const peerPubkeys = sessionState.collectPeerPubkeys()
     // Cumulative set, not the live `peers` map: on the everyone-else-leaves
     // auto-end path `peerLeft` has already pruned every entry by now.
@@ -275,17 +299,32 @@ export function buildLeaveHandler(args: {
       Math.floor(Math.min(wallMs, monoMs) / 60_000)
     )
 
+    log.info('session.end_started', {
+      role: sessionState.isHost ? 'host' : 'guest',
+      endReason,
+      livePeerCount: Object.keys(sessionState.peers).length,
+      seenPeerCount: peerEdPubkeys.length,
+      hadAnyPeer: sessionState.hadAnyPeer,
+      wallMs,
+      awakeMs: monoMs,
+    })
+
     try {
       await args.room.leave()
-    } catch {
+      log.debug('room.leave_succeeded')
+    } catch (err) {
       // best-effort; persistence still runs
+      log.warn('room.leave_failed', { err })
     }
 
     // Make sure every audit_event_insert kicked off during the session
     // (including the very last 'left' row from our own emit a few ticks
     // ago) has landed in SQLite before the report queries audit_events.
+    let auditFlushed = false
     try {
       await useAuditStore.getState().flushPending()
+      auditFlushed = true
+      log.debug('audit_flush.succeeded', { phase: 'teardown' })
     } catch (err) {
       log.error('audit_flush.failed', { phase: 'teardown', err })
     }
@@ -295,12 +334,17 @@ export function buildLeaveHandler(args: {
     // rewind it. Read failure degrades to stint-only values (pre-merge
     // behavior) instead of blocking persistence.
     let merged = { startedAt: args.startedAt, totalMinutes, peerPubkeys }
+    let priorStintFound = false
     try {
-      merged = mergeSessionStints(await sessionsGet(args.topic), merged)
+      const prior = await sessionsGet(args.topic)
+      priorStintFound = prior !== null
+      merged = mergeSessionStints(prior, merged)
+      log.debug('sessions_get.succeeded', { priorStintFound })
     } catch (err) {
       log.error('sessions_get.failed', { degradedTo: 'stint-only', err })
     }
 
+    let sessionPersisted = false
     try {
       await sessionsInsert({
         id: args.topic,
@@ -316,22 +360,47 @@ export function buildLeaveHandler(args: {
         skippedSamples: focusSnapshot.skippedSamples,
         aiEnabled: focusSnapshot.aiEnabled,
       })
+      sessionPersisted = true
+      log.debug('sessions_insert.succeeded', {
+        priorStintFound,
+        totalMinutes: merged.totalMinutes,
+        seenPeerCount: peerEdPubkeys.length,
+      })
     } catch (err) {
       log.error('sessions_insert.failed', {
         totalMinutes: merged.totalMinutes,
-        peerCount: merged.peerPubkeys?.length ?? 0,
-        score: focusSnapshot.score,
-        focusedPct: focusSnapshot.focusedPct,
+        peerCount: peerEdPubkeys.length,
+        scoreRecorded: focusSnapshot.score !== null,
+        focusedPctRecorded: focusSnapshot.focusedPct !== null,
         confidentSamples: focusSnapshot.confidentSamples,
         skippedSamples: focusSnapshot.skippedSamples,
         err,
       })
     }
+    let friendsUpdated = false
     try {
       await useFriendsStore.getState().markStudied(peerEdPubkeys, endedAt)
+      friendsUpdated = true
+      log.debug('mark_studied.succeeded', {
+        peerCount: peerEdPubkeys.length,
+      })
     } catch (err) {
       log.error('mark_studied.failed', { peerCount: peerEdPubkeys.length, err })
     }
+    log.info('session.end_completed', {
+      endReason,
+      totalMinutes: merged.totalMinutes,
+      seenPeerCount: peerEdPubkeys.length,
+      scoreRecorded: focusSnapshot.score !== null,
+      confidentSamples: focusSnapshot.confidentSamples,
+      skippedSamples: focusSnapshot.skippedSamples,
+      auditFlushed,
+      sessionPersisted,
+      friendsUpdated,
+    })
+    // The next screen is precisely where issue #161 puts the export button.
+    // Make the end markers durable before the report can be rendered/saved.
+    await flushLog()
     // Flip to 'ended'. The Report view (mounted by Home.tsx when status ===
     // 'ended') queries the just-persisted sessions row + audit_events for
     // this topic. Reset of audit + pomodoro stores is driven by the V2-P5
@@ -339,6 +408,7 @@ export function buildLeaveHandler(args: {
     // the invite-while-on-report path); the V2-P3 1.5 s auto-reset has
     // been retired alongside the SessionEndedSplash.
     useSessionStore.getState().markEnded()
+    setLogContext({ sess: undefined })
   }
 }
 
@@ -402,17 +472,26 @@ export function wireSessionRoom(
     if (graceHandle !== null) {
       scheduler.clearTimeout(graceHandle)
       graceHandle = null
+      log.debug('disconnect_grace.cancelled', { peerCount: peers.size })
     }
   }
 
   const armGrace = (): void => {
     if (graceHandle !== null) return
+    log.info('disconnect_grace.armed', {
+      graceMs,
+      unexplainedPeerCount: unexplainedAbsent.size,
+    })
     graceHandle = scheduler.setTimeout(() => {
       graceHandle = null
       // Only auto-end if the room is STILL empty — a reconnect within the
       // window cancels this via cancelGrace(). The leave handler is itself
       // idempotent, so an explicit user-leave racing the timer is safe.
       if (peers.size === 0) {
+        log.info('disconnect_grace.expired', {
+          graceMs,
+          unexplainedPeerCount: unexplainedAbsent.size,
+        })
         // #47 B3 — stage the reason BEFORE the leave handler runs (first
         // writer wins; the handler itself stages 'user') so markEnded
         // records this as an auto-end and the Report can offer Rejoin (the
@@ -425,6 +504,7 @@ export function wireSessionRoom(
 
   if (!hooks.isHost) {
     sessionFull.receive(() => {
+      log.warn('session_full.received', { role: 'guest' })
       toast.error(SESSION_FULL_MESSAGE)
       cancelGrace()
       void hooks.leave()
@@ -434,6 +514,10 @@ export function wireSessionRoom(
   room.onPeerJoin((peerId) => {
     if (peers.has(peerId)) return
     if (hooks.isHost && peers.size >= MAX_REMOTE_PEERS) {
+      log.warn('session_full.rejected_peer', {
+        role: 'host',
+        peerCount: peers.size,
+      })
       // Reject the 4th remote peer (5th total user). The targeted action
       // lets the rejected peer show a toast and leave cleanly; the
       // .close() is a best-effort production safety net in case the
@@ -455,14 +539,24 @@ export function wireSessionRoom(
     peers.add(peerId)
     hadAny = true
     useSessionStore.getState().peerJoined(peerId)
+    log.info('peer.joined', {
+      role: hooks.isHost ? 'host' : 'guest',
+      peerCount: peers.size,
+    })
   })
 
   room.onPeerLeave((peerId) => {
     if (!peers.has(peerId)) return
     peers.delete(peerId)
     const store = useSessionStore.getState()
-    if (!store.departedPeerIds.includes(peerId)) unexplainedAbsent.add(peerId)
+    const explained = store.departedPeerIds.includes(peerId)
+    if (!explained) unexplainedAbsent.add(peerId)
     store.peerLeft(peerId)
+    log.info('peer.left', {
+      role: hooks.isHost ? 'host' : 'guest',
+      peerCount: peers.size,
+      explained,
+    })
     if (peers.size === 0 && hadAny) {
       if (unexplainedAbsent.size > 0) {
         armGrace()

@@ -35,6 +35,9 @@ export const AI_DIALOG_BREAK_REQUEST = 'ai-dialog:break-request'
 export const AI_DIALOG_BREAK_RESPONSE = 'ai-dialog:break-response'
 
 export type AiDialogContextPayload = {
+  // Same bounded correlation key carried by structured logs in both webviews.
+  // Never send the full session topic to the diagnostics context.
+  sessionKey: string
   declaredTopic: string
   modelId: string
   recentAuditKinds: ReadonlyArray<string>

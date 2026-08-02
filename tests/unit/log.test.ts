@@ -124,7 +124,7 @@ describe('record shape', () => {
   })
 
   test('setLogContext stamps sess on later records and clears it again', () => {
-    setLogContext({ sess: 'abcd1234' })
+    setLogContext({ sess: 'abcd1234-full-topic-must-not-leak' })
     logger.info('joined')
     setLogContext({ sess: undefined })
     logger.info('left')
@@ -392,6 +392,16 @@ describe('ring buffer and throttle', () => {
     expect(captured()).toHaveLength(2)
   })
 
+  test('debug records never throttle because each one is timeline evidence', () => {
+    for (let i = 0; i < 5; i += 1) {
+      logger.debug('sample.resolved', { tick: i })
+    }
+    const records = captured()
+    expect(records).toHaveLength(5)
+    expect(records.map((record) => record.data?.tick)).toEqual([0, 1, 2, 3, 4])
+    expect(records.every((record) => record.n === undefined)).toBe(true)
+  })
+
   test('a flood cannot evict the boot record', () => {
     logger.info('run.start')
     for (let i = 0; i < 2_000; i += 1) logger.warn('flood')
@@ -540,9 +550,10 @@ describe('flush and sink', () => {
     expect(String(forged?.data?.notice)).toContain('forged')
   })
 
-  test('debug reaches disk only when the gate is on', async () => {
+  test('debug always reaches disk while the gate controls only its console mirror', async () => {
     let enabled = false
-    const writeLines = vi.fn(() => Promise.resolve())
+    const writeLines = vi.fn<(lines: string[]) => Promise<void>>()
+    writeLines.mockResolvedValue(undefined)
     installLogSink({
       window: 'main',
       appVersion: '0.0.0',
@@ -552,14 +563,22 @@ describe('flush and sink', () => {
     })
     await flushLog()
     writeLines.mockClear()
+    consoleDebug.mockClear()
     logger.debug('off')
     await flushLog()
-    expect(writeLines).not.toHaveBeenCalled()
+    expect(writeLines).toHaveBeenCalledTimes(1)
+    const firstBatch = writeLines.mock.calls.flatMap((call) => call[0])
+    expect(
+      firstBatch.some((line) => (JSON.parse(line) as LogRecord).msg === 'off')
+    ).toBe(true)
+    expect(consoleDebug).not.toHaveBeenCalled()
     expect(captured().some((r) => r.msg === 'off')).toBe(true)
+    writeLines.mockClear()
     enabled = true
     logger.debug('on')
     await flushLog()
     expect(writeLines).toHaveBeenCalledTimes(1)
+    expect(consoleDebug).toHaveBeenCalledTimes(1)
   })
 
   test('a collapsed burst is still counted on disk', async () => {

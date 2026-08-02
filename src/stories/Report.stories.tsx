@@ -104,6 +104,17 @@ export const MostlyOnTask: Story = {
     ),
     animateScore: false,
     onClose,
+    showDiagnosticsExport: true,
+  },
+}
+
+// Settings → Sessions reopens the same report surface, but it must not offer
+// today's diagnostics beside an older session. Home is the only production
+// caller that opts into the export action.
+export const HistoricalReportWithoutDiagnostics: Story = {
+  args: {
+    ...MostlyOnTask.args,
+    showDiagnosticsExport: false,
   },
 }
 

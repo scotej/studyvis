@@ -3,6 +3,7 @@ import { useSessionStore } from '@/stores/sessionStore'
 
 import {
   buildLeaveHandler,
+  beginSessionDiagnostics,
   createHostRoom,
   wireSessionRoom,
   type SessionHandle,
@@ -17,6 +18,7 @@ export function hostSession(): SessionHandle {
   // acquire effect reads it, so the first audio track never comes up live.
   usePttStore.getState().reset()
   const { room, topic, password } = createHostRoom()
+  beginSessionDiagnostics(topic, 'host')
   const startedAt = Date.now()
   const startedAtMono = performance.now()
   const leave = buildLeaveHandler({ room, topic, startedAt, startedAtMono })

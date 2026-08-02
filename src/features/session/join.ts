@@ -3,6 +3,7 @@ import { useSessionStore } from '@/stores/sessionStore'
 
 import {
   buildLeaveHandler,
+  beginSessionDiagnostics,
   createGuestRoom,
   wireSessionRoom,
   type SessionHandle,
@@ -22,6 +23,7 @@ export function joinSession(
     sessionTopic,
     sessionPassword
   )
+  beginSessionDiagnostics(topic, 'guest')
   const startedAt = Date.now()
   const startedAtMono = performance.now()
   const leave = buildLeaveHandler({ room, topic, startedAt, startedAtMono })

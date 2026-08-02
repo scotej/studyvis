@@ -23,6 +23,7 @@ function makeFakeRuntime(opts: {
   // string here to exercise that path (an Error covers JS-side throws).
   startThrows?: Error | string
   fetchHealthSequence?: boolean[]
+  fetchHealthThrows?: Error
 }) {
   let scheduled: Tick | null = null
   let scheduledMs: number | null = null
@@ -80,6 +81,7 @@ function makeFakeRuntime(opts: {
       return baseStatus
     },
     fetchHealth: async () => {
+      if (opts.fetchHealthThrows) throw opts.fetchHealthThrows
       const seq = opts.fetchHealthSequence ?? [true]
       const value = seq[Math.min(healthIndex, seq.length - 1)]
       healthIndex += 1
@@ -242,6 +244,24 @@ describe('useSidecarStore.start', () => {
     await Promise.resolve()
     expect(useSidecarStore.getState().healthy).toBe(true)
     expect(useSidecarStore.getState().lastHealthCheckAt).not.toBeNull()
+  })
+
+  test('a rejected health probe is contained and records an unhealthy check', async () => {
+    const env = makeFakeRuntime({
+      aiEnabled: true,
+      fetchHealthThrows: new Error('probe transport failed'),
+    })
+    __setSidecarRuntime(env.runtime)
+
+    await useSidecarStore.getState().start({ modelPath: '/m.gguf' })
+    await Promise.resolve()
+    await Promise.resolve()
+    await Promise.resolve()
+
+    const state = useSidecarStore.getState()
+    expect(state.status).toBe('running')
+    expect(state.healthy).toBe(false)
+    expect(state.lastHealthCheckAt).not.toBeNull()
   })
 
   test('uses the default context size when none is supplied', async () => {
