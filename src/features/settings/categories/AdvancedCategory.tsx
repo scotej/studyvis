@@ -1,13 +1,13 @@
-// Settings → Advanced: autostart toggle, diagnostics (reveal llama-server
-// log, copy version/OS/log-path to clipboard — nothing uploads), open the
-// data folder, replay onboarding, and clear-all-session-history behind a
-// confirm dialog. Everything here rides Tauri `invoke`; outside the desktop
-// runtime the rows render but the actions fail into toasts.
+// Settings → Advanced: autostart toggle, local diagnostics export / copy,
+// reveal logs, open the data folder, replay onboarding, and clear-all-session-
+// history behind a confirm dialog. Everything here rides Tauri `invoke`;
+// outside the desktop runtime the rows render but the actions fail into toasts.
 
-import { useCallback, useState } from 'react'
+import { useCallback, useRef, useState } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import {
   CopyIcon,
+  DownloadIcon,
   FileTextIcon,
   FolderOpenIcon,
   RotateCcwIcon,
@@ -35,6 +35,7 @@ import { Switch } from '@/components/ui/switch'
 import { useOnboardingState } from '@/features/onboarding'
 import { useAutostart } from '@/features/system'
 import { sessionsClearAll } from '@/lib/db/sessions'
+import { saveDiagnosticsArchive } from '@/lib/diagnostics'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { strings } from '@/strings'
 
@@ -57,6 +58,8 @@ export function AdvancedCategory() {
   const onboarding = useOnboardingState()
   const [openingFolder, setOpeningFolder] = useState(false)
   const [sharingLog, setSharingLog] = useState(false)
+  const [exportingDiagnostics, setExportingDiagnostics] = useState(false)
+  const diagnosticsExportingRef = useRef(false)
   const [resettingOnboarding, setResettingOnboarding] = useState(false)
   const [confirmingClear, setConfirmingClear] = useState(false)
   const [clearingHistory, setClearingHistory] = useState(false)
@@ -108,6 +111,26 @@ export function AdvancedCategory() {
       setSharingLog(false)
     }
   }, [copy.shareLog])
+
+  const handleDownloadDiagnostics = useCallback(async () => {
+    if (diagnosticsExportingRef.current) return
+    diagnosticsExportingRef.current = true
+    setExportingDiagnostics(true)
+    try {
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
+      const result = await saveDiagnosticsArchive({
+        defaultPath: `studyvis-diagnostics-${timestamp}.zip`,
+      })
+      if (result.kind === 'saved') {
+        toast.success(strings.diagnostics.savedToast)
+      }
+    } catch {
+      toast.error(strings.diagnostics.errorToast)
+    } finally {
+      diagnosticsExportingRef.current = false
+      setExportingDiagnostics(false)
+    }
+  }, [])
 
   const handleRevealLog = useCallback(async () => {
     try {
@@ -218,7 +241,20 @@ export function AdvancedCategory() {
           label={copy.shareLog.label}
           help={copy.shareLog.help}
           control={
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => void handleDownloadDiagnostics()}
+                disabled={exportingDiagnostics}
+                aria-busy={exportingDiagnostics}
+                aria-label={strings.diagnostics.downloadAriaLabel}
+              >
+                <DownloadIcon />
+                {exportingDiagnostics
+                  ? strings.diagnostics.preparingCta
+                  : strings.diagnostics.downloadCta}
+              </Button>
               <Button
                 variant="secondary"
                 size="sm"

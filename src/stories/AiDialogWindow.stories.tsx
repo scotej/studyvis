@@ -11,6 +11,7 @@ const noopRuntime: AiDialogRuntime = {
 }
 
 const context = {
+  sessionKey: 'deadbeef',
   declaredTopic: 'Studying',
   modelId: 'ggml-org/Qwen2.5-VL-3B-Instruct-GGUF',
   recentAuditKinds: ['joined', 'pomodoro_start'],

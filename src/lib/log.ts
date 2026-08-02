@@ -80,9 +80,12 @@ export const FIELDS_MAX_KEYS = 24
 export const FIELDS_MAX_DEPTH = 3
 export const FIELDS_MAX_ARRAY = 16
 
-// Identical (level, scope, msg) inside this window folds onto the earlier
-// record's `n` instead of appending. Without it one flapping relay's
-// per-friend join error evicts every boot and error-boundary record.
+// Identical non-debug (level, scope, msg) records inside this window fold onto
+// the earlier record's `n` instead of appending. Debug records deliberately do
+// NOT fold: they carry the per-tick timings and state transitions a bug report
+// needs to reconstruct a session, and collapsing those would erase ordering.
+// Higher levels still fold so one flapping relay cannot evict every boot and
+// error-boundary record.
 export const THROTTLE_WINDOW_MS = 10_000
 export const THROTTLE_KEYS_MAX = 64
 
@@ -409,7 +412,9 @@ function emit(
     const key = `${level}|${scope}|${msg}`
     const now = runtime.now()
 
-    const previous = throttle.get(key)
+    // Debug is the diagnostic timeline. Preserve every sample instead of
+    // folding identical event names into a count with no per-sample fields.
+    const previous = level === 'debug' ? undefined : throttle.get(key)
     if (previous && now - previous.ts < THROTTLE_WINDOW_MS) {
       const slot = ring[previous.index]
       if (slot && slot.seq === previous.seq) {
@@ -444,24 +449,26 @@ function emit(
     // Carry any un-drained tally across the window rollover. Zeroing it here
     // loses every fold whose window closed before a flush ran, which is the
     // common case for anything slower than the 1 s debounce.
-    throttle.set(key, {
-      index,
-      seq: record.seq,
-      ts: now,
-      suppressed: previous?.suppressed ?? 0,
-    })
-    if (throttle.size > THROTTLE_KEYS_MAX) {
-      const oldest = throttle.keys().next()
-      if (!oldest.done) throttle.delete(oldest.value)
+    if (level !== 'debug') {
+      throttle.set(key, {
+        index,
+        seq: record.seq,
+        ts: now,
+        suppressed: previous?.suppressed ?? 0,
+      })
+      if (throttle.size > THROTTLE_KEYS_MAX) {
+        const oldest = throttle.keys().next()
+        if (!oldest.done) throttle.delete(oldest.value)
+      }
     }
 
     recordSink?.(record)
     mirrorToConsole(record)
 
-    // debug is the hot-path tier; unbounded disk writes there are exactly the
-    // battery and I/O cost the A6 cadence backoff exists to avoid. It always
-    // lands in the ring, so Copy diagnostics still sees it after the fact.
-    if (level !== 'debug' || debugGate()) enqueue(record)
+    // Every tier reaches disk. `debugGate` controls only the developer-console
+    // mirror: a user should not need to reproduce a failure after discovering
+    // that verbose logging was off, especially in the preliminary test phase.
+    enqueue(record)
   } catch {
     // A logger must never throw into the thing it is observing.
   }
@@ -489,7 +496,11 @@ export const logger: Logger = makeLogger('')
 // the 8-char topic prefix; teardown MUST clear it, or a late callback files
 // itself under a session that already ended.
 export function setLogContext(ctx: { sess?: string }): void {
-  sessionKey = ctx.sess
+  const next = ctx.sess?.trim()
+  // The full room topic is a join capability and never belongs in a shareable
+  // log. Eight characters are enough to correlate the main and AI-dialog
+  // webviews while matching shortPubkey's established diagnostic shape.
+  sessionKey = next ? sanitizeText(next, 8).slice(0, 8) : undefined
 }
 
 // ── flush ──────────────────────────────────────────────────────────────────
@@ -676,10 +687,10 @@ export type InstallLogSinkOptions = {
   // __APP_VERSION__ from the entry point; stamped on the run.start header
   // only, which keeps the Vite global out of this module.
   appVersion: string
-  // Gates the console mirror for debug/info AND whether debug reaches disk. A
-  // function, read at emit time, so flipping Settings → Advanced → Debug log
-  // takes effect on the next line rather than at relaunch. Injected rather
-  // than imported: settingsStore itself logs through here.
+  // Gates the console mirror for debug/info. Every level always reaches disk;
+  // a function is still read at emit time so flipping Settings → Advanced →
+  // Developer console takes effect on the next console line rather than at relaunch.
+  // Injected rather than imported: settingsStore itself logs through here.
   debugEnabled?: () => boolean
   // Override for tests. Omitted in production: the real sink is built here
   // only when a Tauri runtime is detected, and reaches @tauri-apps/api/core

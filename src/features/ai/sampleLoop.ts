@@ -538,6 +538,7 @@ type InternalState = {
   stallReported: boolean
   modelId: string | null
   ticks: number
+  resolvedSamples: number
   // The long-lived screen MediaStreams acquired in boot(). Empty until boot
   // resolves. Length 1 in 'primary' mode; length N in 'all' mode when N
   // displays were enumerated AND the OS granted every acquire. Tracks at
@@ -552,6 +553,14 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
   // timeouts through it); otherwise the bound is derived per tick from the
   // model's measured p95 via `effectiveRequestTimeoutMs`.
   const requestTimeoutOverrideMs = opts.requestTimeoutMs ?? null
+  const loopStartedAt = runtime.now()
+
+  log.info('loop.created', {
+    modelId: opts.modelId,
+    requestTimeoutMode:
+      requestTimeoutOverrideMs === null ? 'p95-derived' : 'override',
+    requestTimeoutMs: requestTimeoutOverrideMs,
+  })
 
   const state: InternalState = {
     stopped: false,
@@ -570,6 +579,7 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
     stallReported: false,
     modelId: opts.modelId,
     ticks: 0,
+    resolvedSamples: 0,
     screenStreams: [],
     screenTracks: [],
   }
@@ -601,6 +611,13 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
   // window doesn't delay the notice by its own duration.
   function noteBlockedTick(reason: SampleBlockReason): void {
     if (state.stopped) return
+    if (state.stallReason !== reason) {
+      log.debug('tick.blocked', {
+        tick: state.ticks,
+        reason,
+        sinceProgressMs: Math.max(0, runtime.now() - state.lastProgressAt),
+      })
+    }
     state.stallReason = reason
     evaluateStall()
   }
@@ -621,6 +638,11 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
     if (reason === null) return
     if (runtime.now() - state.lastProgressAt < STALL_NOTICE_AFTER_MS) return
     state.stallReported = true
+    log.warn('stall.reported', {
+      reason,
+      tick: state.ticks,
+      sinceProgressMs: Math.max(0, runtime.now() - state.lastProgressAt),
+    })
     opts.onSamplesStalled?.(reason)
   }
 
@@ -640,9 +662,15 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
   // watchdog, and tell the consumer if it had been told otherwise.
   function noteSampleResolved(): void {
     if (state.stopped) return
+    const recoveredFrom = state.stallReason
+    const wasReported = state.stallReported
     resetStallClock()
-    if (!state.stallReported) return
+    if (!wasReported) return
     state.stallReported = false
+    log.info('stall.recovered', {
+      previousReason: recoveredFrom,
+      tick: state.ticks,
+    })
     opts.onSamplesResumed?.()
   }
 
@@ -666,9 +694,17 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
     ).length
     if (liveRemaining > 0) {
       if (endedTrack) dropScreenTrack(endedTrack)
+      log.info('screen_track.ended', {
+        liveRemaining,
+        captureStopped: false,
+      })
       return
     }
     state.captureDenied = true
+    log.warn('screen_track.ended', {
+      liveRemaining: 0,
+      captureStopped: true,
+    })
     opts.onCaptureDenied?.()
   }
 
@@ -812,6 +848,10 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
     if (state.screenTracks.length <= 1) return
     const extraTracks = state.screenTracks.slice(1)
     const extraStreams = state.screenStreams.slice(1)
+    log.info('screen_capture.demoted', {
+      releasedDisplayCount: extraStreams.length,
+      remainingDisplayCount: 1,
+    })
     state.screenTracks = state.screenTracks.slice(0, 1)
     state.screenStreams = state.screenStreams.slice(0, 1)
     for (const track of extraTracks) {
@@ -879,6 +919,7 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
   async function tick(): Promise<void> {
     if (state.stopped) return
     state.ticks += 1
+    const tickStartedAt = runtime.now()
 
     if (state.inFlight) {
       // The previous sample's network/encode/parse is still resolving. Do
@@ -1000,10 +1041,12 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
     }, tickTimeoutMs)
 
     try {
+      const captureStartedAt = runtime.now()
       const [face, screen] = await Promise.all([
         runtime.captureFace(track),
         snapshotScreens(),
       ])
+      const captureMs = Math.max(0, runtime.now() - captureStartedAt)
       // A5 — the Rust watcher may have respawned the sidecar on a fresh
       // ephemeral port during the capture window. Re-read the port right
       // before the POST; if it moved or went away, bail and reschedule this
@@ -1040,13 +1083,14 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
       )
       if (!response.ok) {
         const errText = await response.text().catch(() => '')
-        // The body is sidecar- and model-authored; the logger clamps and
-        // strips it, so no slice() here.
+        // Keep only shape. A sidecar error can echo request material, which
+        // includes the user's declared topic and encoded captures.
         log.warn('sidecar.http_error', {
           httpStatus: response.status,
-          bodySnippet: errText,
           bodyLength: errText.length,
           modelId: opts.modelId,
+          tick: state.ticks,
+          elapsedMs: Math.max(0, runtime.now() - tickStartedAt),
         })
         noteBlockedTick('inference_failed')
         return
@@ -1096,17 +1140,45 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
           })
         }
       }
+      state.resolvedSamples += 1
+      log.debug('sample.resolved', {
+        tick: state.ticks,
+        resolvedSamples: state.resolvedSamples,
+        modelId,
+        displayCount: state.screenTracks.filter(
+          (screenTrack) => screenTrack.readyState !== 'ended'
+        ).length,
+        captureMs,
+        inferenceMs: Math.round(inferenceSec * 1000),
+        totalMs: Math.max(0, runtime.now() - tickStartedAt),
+        verdict: isUncertainVerdict(verdict) ? 'uncertain' : verdict.severity,
+        parseOk: parsed.ok,
+        scoreEventCount: events.length,
+        backoffEngaged: state.backoff.engaged,
+        nextDelayMs: nextDelayMs(),
+        onBattery: state.battery.onBattery,
+      })
     } catch (err) {
       if (err instanceof CaptureError) {
         if (err.code === 'screen_capture_denied') {
           // Latch and bail — V2-P9's ScreenCapturePermissionOverlay handles
           // the re-grant; the loop only resumes after a fresh start().
           state.captureDenied = true
+          log.warn('capture.denied', {
+            phase: 'tick',
+            tick: state.ticks,
+          })
           opts.onCaptureDenied?.()
           return
         }
         if (!state.captureErrorReported) {
           state.captureErrorReported = true
+          log.warn('capture.failed', {
+            phase: 'tick',
+            tick: state.ticks,
+            code: err.code,
+            fatal: false,
+          })
           opts.onCaptureError?.(err, false)
         }
         noteBlockedTick('capture_failing')
@@ -1120,11 +1192,17 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
           timeoutMs: tickTimeoutMs,
           modelId: opts.modelId,
           onBattery: state.battery.onBattery,
+          tick: state.ticks,
         })
         noteBlockedTick('inference_timeout')
         return
       }
-      log.warn('tick.failed', { modelId: opts.modelId, err })
+      log.warn('tick.failed', {
+        modelId: opts.modelId,
+        tick: state.ticks,
+        elapsedMs: Math.max(0, runtime.now() - tickStartedAt),
+        err,
+      })
       noteBlockedTick('inference_failed')
     } finally {
       runtime.clearTimeout(timer)
@@ -1150,6 +1228,19 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
   // (stop() does; boot() doesn't, because the sidecar wasn't successfully
   // started in the failure paths that call this).
   function teardownInternal(): void {
+    if (state.stopped) return
+    log.info('loop.teardown', {
+      modelId: state.modelId,
+      elapsedMs: Math.max(0, runtime.now() - loopStartedAt),
+      ticks: state.ticks,
+      resolvedSamples: state.resolvedSamples,
+      liveDisplayCount: state.screenTracks.filter(
+        (track) => track.readyState !== 'ended'
+      ).length,
+      captureDenied: state.captureDenied,
+      stallReported: state.stallReported,
+      backoffEngaged: state.backoff.engaged,
+    })
     state.stopped = true
     if (tickHandle !== null) {
       runtime.clearTimeout(tickHandle)
@@ -1224,7 +1315,10 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
   }
 
   async function boot(): Promise<void> {
+    const bootStartedAt = runtime.now()
+    log.info('boot.started', { modelId: opts.modelId })
     if (!opts.modelId) {
+      log.warn('boot.refused', { reason: 'no_active_model' })
       opts.onStartFail?.('no_active_model')
       teardownInternal()
       return
@@ -1235,6 +1329,11 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
       paths = await runtime.modelPaths(opts.modelId)
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
+      log.warn('boot.refused', {
+        modelId: opts.modelId,
+        reason: 'model_files_missing',
+        err,
+      })
       opts.onStartFail?.('model_files_missing', msg)
       teardownInternal()
       return
@@ -1268,6 +1367,16 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
       typeof benchmark?.p95Sec === 'number' && benchmark.p95Sec > 0
         ? benchmark.p95Sec
         : 0
+    log.info('boot.cadence', {
+      modelId: opts.modelId,
+      benchmarkPresent: benchmark !== null,
+      modelFloorSec: state.modelFloorSec,
+      modelP95Sec: state.modelP95Sec,
+      effectiveIntervalSec: effectiveIntervalSec(
+        state.modelFloorSec,
+        useSettingsStore.getState().values.sampleIntervalSec
+      ),
+    })
 
     // I83 — screen capture is acquired BEFORE the sidecar, not after. Both
     // orders tear down cleanly, but this one never asks llama-server to load
@@ -1300,16 +1409,23 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
         })
       }
     }
+    log.info('screen_capture.planned', {
+      captureMode,
+      targetDisplayCount: acquireTargetCount,
+    })
 
     // The first acquire is the V2-P9 contract: denial latches captureDenied
     // and surfaces onCaptureDenied so SessionView mounts the permission
     // overlay. Subsequent acquires (multi-monitor only) treat denial as a
     // soft fallback — we keep whatever displays the user already granted,
     // and the model just sees fewer screens.
+    const captureAcquireStartedAt = runtime.now()
     let firstStream: MediaStream
     try {
       firstStream = await acquireScreenStreamBounded()
     } catch (err) {
+      const code =
+        err instanceof CaptureError ? err.code : 'screen_capture_unavailable'
       if (err instanceof CaptureError && err.code === 'screen_capture_denied') {
         state.captureDenied = true
         opts.onCaptureDenied?.()
@@ -1325,6 +1441,12 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
           true
         )
       }
+      log.warn('screen_capture.failed', {
+        phase: 'boot_primary',
+        code,
+        fatal: true,
+        elapsedMs: Math.max(0, runtime.now() - captureAcquireStartedAt),
+      })
       // No sidecar to unwind — I83 moved the spawn below this acquire, so a
       // capture failure now costs nothing beyond the loop itself.
       teardownInternal()
@@ -1356,6 +1478,12 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
         ),
         true
       )
+      log.warn('screen_capture.failed', {
+        phase: 'boot_primary',
+        code: 'screen_capture_no_video',
+        fatal: true,
+        elapsedMs: Math.max(0, runtime.now() - captureAcquireStartedAt),
+      })
       teardownInternal()
       return
     }
@@ -1398,6 +1526,10 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
         state.screenStreams.push(stream)
         state.screenTracks.push(track)
         track.addEventListener('ended', onScreenTrackEnded)
+        log.debug('screen_capture.display_added', {
+          acquiredDisplayCount: state.screenTracks.length,
+          targetDisplayCount: acquireTargetCount,
+        })
       } catch (err) {
         // Soft fallback: a cancelled picker or any other capture error on
         // the extra-display acquires drops us back to single-display for
@@ -1416,11 +1548,21 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
         break
       }
     }
+    log.info('screen_capture.ready', {
+      acquiredDisplayCount: state.screenTracks.length,
+      targetDisplayCount: acquireTargetCount,
+      elapsedMs: Math.max(0, runtime.now() - captureAcquireStartedAt),
+    })
 
     // Every screen the model will see is now in hand, so it is finally worth
     // paying for the model itself. If the spawn fails, teardownInternal()
     // releases the streams we just acquired along with the rest of the loop.
     if (state.stopped) return
+    const sidecarStartedAt = runtime.now()
+    log.info('sidecar.starting', {
+      modelId: opts.modelId,
+      ctxSize: DEFAULT_CTX_SIZE,
+    })
     const port = await runtime.startSidecar({
       modelPath: paths.modelPath,
       mmprojPath: paths.mmprojPath,
@@ -1428,10 +1570,19 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
     })
     if (port == null) {
       const lastError = useSidecarStore.getState().lastError
+      log.warn('boot.sidecar_failed', {
+        modelId: opts.modelId,
+        elapsedMs: Math.max(0, runtime.now() - sidecarStartedAt),
+        hasError: lastError !== null,
+      })
       opts.onStartFail?.('sidecar_start_failed', lastError ?? undefined)
       teardownInternal()
       return
     }
+    log.info('sidecar.ready', {
+      modelId: opts.modelId,
+      elapsedMs: Math.max(0, runtime.now() - sidecarStartedAt),
+    })
 
     // Seed the battery cache before scheduling — first tick should use a
     // real reading, not the constructor default.
@@ -1460,7 +1611,15 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
     // the sidecar has time to /health-poll into the healthy state. If it
     // takes longer than one interval, the first few ticks gracefully skip
     // and refreshSidecarStatus() picks up an errored transition.
-    schedule(nextDelayMs())
+    const initialDelayMs = nextDelayMs()
+    log.info('boot.ready', {
+      modelId: opts.modelId,
+      elapsedMs: Math.max(0, runtime.now() - bootStartedAt),
+      displayCount: state.screenTracks.length,
+      initialDelayMs,
+      onBattery: state.battery.onBattery,
+    })
+    schedule(initialDelayMs)
   }
 
   bootPromise = boot().catch((err) => {
@@ -1477,6 +1636,7 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
   })
 
   async function stop(): Promise<void> {
+    const stopStartedAt = runtime.now()
     if (state.stopped) {
       // boot()'s failure paths already called teardownInternal(); we still
       // need to await the boot promise so callers can sequence on stop()
@@ -1486,6 +1646,10 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
       } catch {
         // boot failures already surfaced through onStartFail
       }
+      log.debug('stop.completed', {
+        alreadyStopped: true,
+        elapsedMs: Math.max(0, runtime.now() - stopStartedAt),
+      })
       return
     }
     teardownInternal()
@@ -1496,6 +1660,12 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
     }
     try {
       await runtime.stopSidecar()
+      log.info('stop.completed', {
+        alreadyStopped: false,
+        elapsedMs: Math.max(0, runtime.now() - stopStartedAt),
+        ticks: state.ticks,
+        resolvedSamples: state.resolvedSamples,
+      })
     } catch (err) {
       // Matters for the updater path: a sidecar we failed to stop makes a
       // worse install.

@@ -41,6 +41,7 @@ import {
   type CaptureRuntime,
   type SampleLoopRuntime,
 } from '@/features/ai'
+import { __resetLog, __setLogRecordSink, type LogRecord } from '@/lib/log'
 import { useSettingsStore } from '@/stores/settingsStore'
 
 type DeferredTimer = {
@@ -288,6 +289,7 @@ beforeEach(() => {
 })
 afterEach(() => {
   __resetCaptureRuntime()
+  __resetLog()
 })
 
 describe('startSampleLoop — start failures', () => {
@@ -1580,9 +1582,16 @@ describe('startSampleLoop — I82 stall watchdog', () => {
     expect(onSamplesResumed).not.toHaveBeenCalled()
   })
 
-  test('a non-2xx sidecar response reports inference_failed', async () => {
+  test('a non-2xx sidecar response logs only status and body length', async () => {
     const clock = new FakeClock()
-    const fetchMock = vi.fn(async () => new Response('boom', { status: 500 }))
+    const privateResponse =
+      'echoed user prompt: confidential calculus topic and captured content'
+    const fetchMock = vi.fn(
+      async () => new Response(privateResponse, { status: 500 })
+    )
+    const records: LogRecord[] = []
+    __resetLog()
+    __setLogRecordSink((record) => records.push(record))
     __setSampleLoopRuntime(
       buildSampleLoopRuntime({ clock, fetch: fetchMock as never })
     )
@@ -1598,6 +1607,16 @@ describe('startSampleLoop — I82 stall watchdog', () => {
     expect(fetchMock.mock.calls.length).toBeGreaterThan(1)
     expect(onSamplesStalled).toHaveBeenCalledTimes(1)
     expect(onSamplesStalled).toHaveBeenCalledWith('inference_failed')
+    const httpError = records.find(
+      (record) =>
+        record.scope === 'ai.sampleloop' && record.msg === 'sidecar.http_error'
+    )
+    expect(httpError?.data).toMatchObject({
+      httpStatus: 500,
+      bodyLength: privateResponse.length,
+    })
+    expect(httpError?.data).not.toHaveProperty('bodySnippet')
+    expect(JSON.stringify(httpError)).not.toContain(privateResponse)
     await handle.stop()
   })
 

@@ -26,10 +26,10 @@
 //! over OpenAI-compatible HTTP.
 
 use std::fs::{self, File, OpenOptions};
-use std::io::Write;
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::net::TcpListener;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex as StdMutex, MutexGuard};
 use std::time::{Duration, Instant};
 
 use serde::Serialize;
@@ -58,12 +58,18 @@ pub(crate) const TARGET_TRIPLE: &str = env!("TAURI_ENV_TARGET_TRIPLE");
 pub(crate) const ENGINE_NOT_INSTALLED: &str = "engine_not_installed";
 
 const LOG_DIR: &str = "logs";
-const LOG_FILE: &str = "llama-server.log";
-// Cap the diagnostic log at 5 MiB, keeping a single previous generation as
-// `llama-server.log.1`. The magnitude is a judgement call: large enough to
-// hold a long AI session's stdout/stderr, small enough to stay shareable via
-// Settings → Advanced → Share log. Bounds total on-disk log to ~2× this.
-const LOG_MAX_BYTES: u64 = 5 * 1024 * 1024;
+pub(crate) const SIDECAR_LOG_FILE: &str = "llama-server.log";
+const SIDECAR_LOG_MAX_BYTES: u64 = 5 * 1024 * 1024;
+const RETAINED_TAIL_MARKER: &[u8] = b"[older engine output truncated]\n";
+
+// The watcher writes while diagnostics may snapshot the file. Each critical
+// section is synchronous and short; the async task never holds this over an
+// await.
+static SIDECAR_LOG_LOCK: StdMutex<()> = StdMutex::new(());
+
+pub(crate) fn sidecar_log_guard() -> MutexGuard<'static, ()> {
+    SIDECAR_LOG_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+}
 
 // Restart policy: cap automatic respawns so a permanently broken binary
 // doesn't spam the log file. `restart_attempts` counts CONSECUTIVE respawns
@@ -226,15 +232,35 @@ pub async fn sidecar_start<R: Runtime>(
             .port
             .ok_or_else(|| "sidecar running but no port recorded".to_string());
     }
+    if guard.shutting_down {
+        return Err("app is shutting down".to_string());
+    }
 
     let port = pick_unused_port()?;
     guard.generation = guard.generation.wrapping_add(1);
     let generation = guard.generation;
     let log_path = ensure_log_path(&app)?;
-    // Roll the log before opening for append, while it has no open writer (only
-    // one sidecar runs at a time). Keeps the diagnostic log size-bounded (D7).
-    rotate_log_if_needed(&log_path, LOG_MAX_BYTES);
-    let log_file = open_log_file(&log_path)?;
+    // One sidecar generation corresponds to one explicit AI-engine run. Archive
+    // the previous run before opening this one, retaining ten generations.
+    // Benchmarks and deliberate restarts count as runs too, so the UI calls
+    // these "log generations" rather than claiming they are exactly sessions.
+    let mut log_file = {
+        let _log_guard = sidecar_log_guard();
+        let _ = rotate_sidecar_log_history(
+            &log_path,
+            crate::commands::applog::LOG_HISTORY_FILES,
+            SIDECAR_LOG_MAX_BYTES,
+        );
+        open_log_file(&log_path)?
+    };
+    with_sidecar_log(|| {
+        let _ = writeln!(
+            log_file,
+            "[event gen={generation}] start target={TARGET_TRIPLE} ctx={ctx_size} mmproj={} gpu_layers={N_GPU_LAYERS}",
+            mmproj_path.is_some()
+        );
+        let _ = log_file.flush();
+    });
 
     let (rx, child) =
         spawn_with_fallback(&app, &model_path, mmproj_path.as_deref(), ctx_size, port)?;
@@ -246,8 +272,6 @@ pub async fn sidecar_start<R: Runtime>(
     guard.ctx_size = Some(ctx_size);
     guard.errored = false;
     guard.last_error = None;
-    drop(guard);
-
     let app_for_watcher = app.clone();
     let state_arc = arc.clone();
     let model_for_restart = model_path;
@@ -265,6 +289,7 @@ pub async fn sidecar_start<R: Runtime>(
         )
         .await;
     });
+    drop(guard);
 
     Ok(port)
 }
@@ -435,7 +460,7 @@ fn resolve_runtime_dir<R: Runtime>(app: &AppHandle<R>) -> Result<Option<PathBuf>
 fn ensure_log_path<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, String> {
     let dir = data_dir(app)?.join(LOG_DIR);
     fs::create_dir_all(&dir).map_err(|e| format!("create log dir: {e}"))?;
-    Ok(dir.join(LOG_FILE))
+    Ok(dir.join(SIDECAR_LOG_FILE))
 }
 
 fn open_log_file(path: &PathBuf) -> Result<File, String> {
@@ -446,23 +471,66 @@ fn open_log_file(path: &PathBuf) -> Result<File, String> {
         .map_err(|e| format!("open log file {}: {e}", path.display()))
 }
 
-fn should_rotate(current_len: u64, max_bytes: u64) -> bool {
-    current_len >= max_bytes
+fn read_retained_tail(path: &Path, max_bytes: u64) -> Result<Vec<u8>, String> {
+    let mut file = File::open(path).map_err(|e| format!("open retained log: {e}"))?;
+    let length = file
+        .metadata()
+        .map_err(|e| format!("stat retained log: {e}"))?
+        .len();
+    if length <= max_bytes {
+        let mut contents = Vec::with_capacity(length as usize);
+        file.read_to_end(&mut contents)
+            .map_err(|e| format!("read retained log: {e}"))?;
+        return Ok(contents);
+    }
+
+    let marker_bytes = (RETAINED_TAIL_MARKER.len() as u64).min(max_bytes);
+    let body_bytes = max_bytes.saturating_sub(marker_bytes);
+    file.seek(SeekFrom::Start(length - body_bytes))
+        .map_err(|e| format!("seek retained log: {e}"))?;
+    let mut tail = Vec::with_capacity(max_bytes as usize);
+    file.read_to_end(&mut tail)
+        .map_err(|e| format!("read retained log: {e}"))?;
+    if let Some(newline) = tail.iter().position(|byte| *byte == b'\n') {
+        tail.drain(..=newline);
+    } else {
+        tail.clear();
+    }
+    let mut contents = RETAINED_TAIL_MARKER[..marker_bytes as usize].to_vec();
+    contents.extend_from_slice(&tail);
+    Ok(contents)
 }
 
-// Single-generation roll: when the live log has reached the cap, move it to
-// `<name>.1` (overwriting any prior generation). Best-effort — a failed
-// metadata read or rename must never block the AI session, so errors are
-// swallowed; the worst case is the prior unbounded-append behaviour.
-fn rotate_log_if_needed(path: &Path, max_bytes: u64) {
-    let Ok(meta) = fs::metadata(path) else {
-        return;
-    };
-    if !should_rotate(meta.len(), max_bytes) {
-        return;
+// The previous watcher can still own an open Windows handle briefly after
+// sidecar_stop. Snapshot + truncate the live file instead of renaming it:
+// the write mutex makes the snapshot line-consistent, and append-mode handles
+// continue safely at the new end if a final termination event arrives later.
+fn rotate_sidecar_log_history(
+    path: &Path,
+    generations: usize,
+    max_bytes: u64,
+) -> Result<(), String> {
+    if generations == 0 || !path.is_file() {
+        return Ok(());
     }
-    let rolled = path.with_extension("log.1");
-    let _ = fs::rename(path, rolled);
+    let contents = read_retained_tail(path, max_bytes)?;
+    crate::commands::applog::shift_log_history(path, generations);
+    let first = crate::commands::applog::rotated_log_path(path, 1);
+    let temp = path.with_extension("log.rotation.tmp");
+    fs::write(&temp, contents).map_err(|e| format!("write retained log: {e}"))?;
+    let _ = fs::remove_file(&first);
+    fs::rename(&temp, &first).map_err(|e| format!("install retained log: {e}"))?;
+    OpenOptions::new()
+        .write(true)
+        .truncate(true)
+        .open(path)
+        .map_err(|e| format!("truncate live log: {e}"))?;
+    Ok(())
+}
+
+fn with_sidecar_log<T>(write: impl FnOnce() -> T) -> T {
+    let _guard = sidecar_log_guard();
+    write()
 }
 
 // #47 D2 — Metal offload on Apple Silicon. The bundled macos-arm64 llama.cpp
@@ -696,29 +764,43 @@ async fn watch<R: Runtime>(
         while let Some(event) = rx.recv().await {
             match event {
                 CommandEvent::Stdout(bytes) => {
-                    let _ = log.write_all(b"[stdout] ");
-                    let _ = log.write_all(&bytes);
-                    let _ = log.write_all(b"\n");
+                    with_sidecar_log(|| {
+                        let _ = write!(log, "[stdout gen={generation}] ");
+                        let _ = log.write_all(&bytes);
+                        let _ = log.write_all(b"\n");
+                    });
                 }
                 CommandEvent::Stderr(bytes) => {
-                    let _ = log.write_all(b"[stderr] ");
-                    let _ = log.write_all(&bytes);
-                    let _ = log.write_all(b"\n");
+                    with_sidecar_log(|| {
+                        let _ = write!(log, "[stderr gen={generation}] ");
+                        let _ = log.write_all(&bytes);
+                        let _ = log.write_all(b"\n");
+                    });
                 }
                 CommandEvent::Terminated(payload) => {
-                    let _ = writeln!(log, "[event] terminated code={:?}", payload.code);
+                    with_sidecar_log(|| {
+                        let _ = writeln!(
+                            log,
+                            "[event gen={generation}] terminated code={:?}",
+                            payload.code
+                        );
+                    });
                     last_exit = Some(format!("exit {:?}", payload.code));
                     break;
                 }
                 CommandEvent::Error(err) => {
-                    let _ = writeln!(log, "[event] error: {err}");
+                    with_sidecar_log(|| {
+                        let _ = writeln!(log, "[event gen={generation}] error: {err}");
+                    });
                     last_exit = Some(err);
                     break;
                 }
                 _ => {}
             }
         }
-        let _ = log.flush();
+        with_sidecar_log(|| {
+            let _ = log.flush();
+        });
 
         // If a stop or a newer start happened while we were running, this
         // generation is stale — exit without restarting.
@@ -745,11 +827,13 @@ async fn watch<R: Runtime>(
                 "the AI engine restarted {total_restarts} times this session and kept dying"
             )));
             guard.port = None;
-            let _ = writeln!(
-                log,
-                "[event] giving up after {total_restarts} lifetime restarts (slow crash loop)"
-            );
-            let _ = log.flush();
+            with_sidecar_log(|| {
+                let _ = writeln!(
+                    log,
+                    "[event gen={generation}] giving up after {total_restarts} lifetime restarts (slow crash loop)"
+                );
+                let _ = log.flush();
+            });
             return;
         }
         if restart_attempts > RESTART_BUDGET {
@@ -766,11 +850,13 @@ async fn watch<R: Runtime>(
                 .or_else(|| Some(format!("restart budget exceeded ({RESTART_BUDGET})")))
                 .map(append_windows_dll_hint);
             guard.port = None;
-            let _ = writeln!(
-                log,
-                "[event] giving up after {restart_attempts} restart attempts"
-            );
-            let _ = log.flush();
+            with_sidecar_log(|| {
+                let _ = writeln!(
+                    log,
+                    "[event gen={generation}] giving up after {restart_attempts} restart attempts"
+                );
+                let _ = log.flush();
+            });
             return;
         }
         drop(guard);
@@ -805,8 +891,10 @@ async fn watch<R: Runtime>(
                 guard.errored = true;
                 guard.last_error = Some(e.clone());
                 guard.port = None;
-                let _ = writeln!(log, "[event] pick_unused_port failed: {e}");
-                let _ = log.flush();
+                with_sidecar_log(|| {
+                    let _ = writeln!(log, "[event gen={generation}] pick_unused_port failed: {e}");
+                    let _ = log.flush();
+                });
                 return;
             }
         };
@@ -824,8 +912,10 @@ async fn watch<R: Runtime>(
                 guard.errored = true;
                 guard.last_error = Some(e.clone());
                 guard.port = None;
-                let _ = writeln!(log, "[event] respawn failed: {e}");
-                let _ = log.flush();
+                with_sidecar_log(|| {
+                    let _ = writeln!(log, "[event gen={generation}] respawn failed: {e}");
+                    let _ = log.flush();
+                });
                 return;
             }
         };
@@ -835,8 +925,10 @@ async fn watch<R: Runtime>(
             let _ = new_child.kill();
             return;
         }
-        let _ = writeln!(log, "[event] respawned on port {port}");
-        let _ = log.flush();
+        with_sidecar_log(|| {
+            let _ = writeln!(log, "[event gen={generation}] respawned on port {port}");
+            let _ = log.flush();
+        });
         guard.child = Some(new_child);
         guard.port = Some(port);
         drop(guard);
@@ -849,16 +941,59 @@ async fn watch<R: Runtime>(
 mod tests {
     use super::*;
 
-    #[test]
-    fn rotates_at_or_above_cap() {
-        assert!(should_rotate(LOG_MAX_BYTES, LOG_MAX_BYTES));
-        assert!(should_rotate(LOG_MAX_BYTES + 1, LOG_MAX_BYTES));
+    fn scratch_log(name: &str) -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "studyvis-sidecar-test-{name}-{}",
+            std::process::id()
+        ))
     }
 
     #[test]
-    fn keeps_small_log() {
-        assert!(!should_rotate(0, LOG_MAX_BYTES));
-        assert!(!should_rotate(LOG_MAX_BYTES - 1, LOG_MAX_BYTES));
+    fn retained_engine_log_keeps_only_the_newest_complete_lines() {
+        let path = scratch_log("trim");
+        let _ = fs::remove_file(&path);
+        let mut source = vec![b'x'; 80];
+        source.extend_from_slice(b"\nkeep-one\nkeep-two\n");
+        fs::write(&path, source).unwrap();
+
+        let contents = read_retained_tail(&path, 64).unwrap();
+
+        assert!(contents.len() <= 64);
+        assert!(contents.starts_with(RETAINED_TAIL_MARKER));
+        assert!(contents.ends_with(b"keep-one\nkeep-two\n"));
+        assert!(!contents.contains(&b'x'));
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn sidecar_rotation_caps_the_new_generation_and_truncates_live() {
+        let path = scratch_log("rotation");
+        let _ = fs::remove_file(&path);
+        let _ = fs::remove_file(crate::commands::applog::rotated_log_path(&path, 1));
+        let _ = fs::remove_file(crate::commands::applog::rotated_log_path(&path, 2));
+        let mut source = vec![b'x'; 80];
+        source.extend_from_slice(b"\nkeep-one\nkeep-two\n");
+        fs::write(&path, source).unwrap();
+        fs::write(
+            crate::commands::applog::rotated_log_path(&path, 1),
+            b"older-generation\n",
+        )
+        .unwrap();
+
+        rotate_sidecar_log_history(&path, 2, 64).unwrap();
+
+        assert_eq!(fs::metadata(&path).unwrap().len(), 0);
+        let newest = fs::read(crate::commands::applog::rotated_log_path(&path, 1)).unwrap();
+        assert!(newest.len() <= 64);
+        assert!(newest.starts_with(RETAINED_TAIL_MARKER));
+        assert!(newest.ends_with(b"keep-one\nkeep-two\n"));
+        assert_eq!(
+            fs::read(crate::commands::applog::rotated_log_path(&path, 2)).unwrap(),
+            b"older-generation\n"
+        );
+        let _ = fs::remove_file(&path);
+        let _ = fs::remove_file(crate::commands::applog::rotated_log_path(&path, 1));
+        let _ = fs::remove_file(crate::commands::applog::rotated_log_path(&path, 2));
     }
 
     #[test]

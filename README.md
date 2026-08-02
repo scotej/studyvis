@@ -49,8 +49,9 @@ A few honest disclosures, in the spirit of "no surprises":
   new versions. Those requests are unauthenticated and carry no
   identifiers and no payload — nothing about you, your friends, or your
   sessions. Turn the toggle off for literal zero outbound. If something
-  goes wrong, share the log file manually (Settings → Advanced → Open
-  data folder).
+  goes wrong, download a diagnostics archive from the fresh post-session
+  report or Settings → Advanced. The archive is created locally and is
+  never uploaded by StudyVis; you decide whether and where to share it.
 
 ## Install
 
@@ -142,11 +143,23 @@ Inside:
   model is 1–8 GB depending on the tier you picked.
 - `logs/studyvis.log` — the app's own diagnostic log: one JSON record
   per line, written as the app runs. Usernames, keys, mnemonics and
-  your own writing are stripped before anything is recorded. Rolled to
-  `studyvis.log.1` at ~2 MB, one previous copy kept.
-- `logs/llama-server.log` — diagnostic log for the AI sidecar. Rolled to
-  `llama-server.log.1` automatically when it passes ~5 MB at the start
-  of an AI session, so it stays bounded; one previous copy is kept.
+  your own writing are stripped before anything is recorded. At about
+  2 MB the live file rolls to `studyvis.log.1`; up to ten rolled
+  generations are kept alongside the live file.
+- `logs/llama-server.log` — diagnostic output from the local AI engine.
+  Each explicit engine start archives up to the newest 5 MB of the
+  previous live file, with ten rolled generations kept alongside the
+  live file. Benchmarks, retries and deliberate restarts can each start
+  the engine, so these are **log generations, not a promise of ten study
+  sessions**.
+
+The downloadable diagnostics ZIP includes a manifest and bounded tails
+of the live and retained app/AI-engine logs (at most the newest 1 MB from
+each file). Older bytes are marked as truncated instead of making an
+unbounded archive. App records were redacted before being written;
+AI-engine output has common home-directory usernames scrubbed while the
+ZIP is built, but it can still contain local model and machine details.
+Review the archive before sharing it. Creating it never uploads anything.
 
 You can open the data folder from Settings → Advanced.
 
@@ -204,13 +217,21 @@ right friends for StudyVis.
 There is no built-in error reporter — that would imply telemetry.
 Instead:
 
-1. **Settings → Advanced → Share log.** "Open log" reveals the log
-   folder in your file manager; "Copy diagnostics" puts your version,
-   OS, display, and the last 80 log records on the clipboard, ready to
-   paste into an issue. Nothing is uploaded — you choose what to send.
-2. **File an issue on GitHub** with the version (Settings → About),
-   your OS + version, and a paste of the relevant log lines.
-3. **Crash logs** stay local — macOS routes them to
+1. **Download diagnostics.** Immediately after a session, use the
+   download action at the top of its fresh report. The same action is
+   available later from Settings → Advanced. It creates a local ZIP
+   containing a manifest plus bounded app and AI-engine log tails;
+   nothing is sent automatically. "Copy diagnostics" remains available
+   for a short version/OS/display summary and recent app-log records,
+   while "Open log" reveals the retained source files.
+2. **Review the ZIP before sharing it.** Structured app records are
+   redacted and common usernames are scrubbed from AI-engine paths, but
+   AI-engine output may still reveal model or machine details and the
+   retained generations can predate the session whose report you just
+   closed.
+3. **File an issue on GitHub** with the archive, or with the version
+   (Settings → About), OS version and only the relevant log lines.
+4. **Crash logs** stay local — macOS routes them to
    `~/Library/Logs/DiagnosticReports/StudyVis*`, Windows routes them
    to Event Viewer. Share manually if asked.
 

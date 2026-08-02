@@ -499,6 +499,7 @@ export function Home() {
           sessionId={sessionTopic}
           onClose={() => useSessionStore.getState().reset()}
           onRejoin={sessionEndedBy === 'auto' ? handleRejoin : undefined}
+          showDiagnosticsExport
         />
         {tail}
       </>

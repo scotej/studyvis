@@ -17,7 +17,7 @@ import {
   type AiDialogContextPayload,
   type BreakResponsePayload,
 } from './aiDialogChannels'
-import { logger } from '@/lib/log'
+import { logger, setLogContext } from '@/lib/log'
 
 const log = logger.child('ai.dialog')
 
@@ -114,6 +114,14 @@ export function AiDialogWindow({
   >(new Map())
 
   const effective = forceState ?? state
+
+  // The floating dialog is a separate JS realm with its own logger module.
+  // Mirror only the bounded session correlation key; the full topic remains
+  // UI/agent context and never becomes ambient diagnostic metadata.
+  useEffect(() => {
+    setLogContext({ sess: context?.sessionKey })
+    return () => setLogContext({ sess: undefined })
+  }, [context?.sessionKey])
 
   // Context exchange + break-response listener. The dialog requests its
   // context on mount and re-listens for any future broadcasts (e.g. the

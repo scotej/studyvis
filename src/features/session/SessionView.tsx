@@ -1222,6 +1222,7 @@ export function SessionView({
         .map((e) => e.kind)
         .reverse()
       return {
+        sessionKey: sessionTopic.slice(0, 8),
         declaredTopic: useSessionStore.getState().declaredStudyTopic,
         modelId: useModelStore.getState().activeModelId ?? '',
         recentAuditKinds,

@@ -19,6 +19,9 @@ pub mod ai_dialog;
 pub mod applog;
 
 #[cfg(desktop)]
+pub mod diagnostics;
+
+#[cfg(desktop)]
 pub mod engine;
 
 #[cfg(desktop)]
