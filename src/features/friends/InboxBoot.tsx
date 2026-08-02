@@ -1,10 +1,5 @@
 import { useEffect, useMemo, useRef } from 'react'
 import { toast } from 'sonner'
-import {
-  isPermissionGranted,
-  requestPermission,
-  sendNotification,
-} from '@tauri-apps/plugin-notification'
 
 import { hexToBytes } from '@/lib/crypto/identity'
 import { boxDecryptWithKeyring, signWithKeyring } from '@/lib/db/identity'
@@ -19,6 +14,7 @@ import {
   shouldNotifyFriendOnline,
 } from './friendOnlineNotify'
 import { subscribeToOwnInbox, type ValidInvite } from './inbox'
+import { notifyIncomingInvite } from './inviteNotification'
 import { usePendingInvitesStore } from './pendingInvitesStore'
 import { inviteRetryManager } from './invite'
 import {
@@ -276,26 +272,9 @@ async function handleValidInvite(
     },
   })
 
-  // Settings → Notifications gate (V1-P11). The in-app toast above always
-  // fires; only the OS-level prompt is opt-out so a user who's silenced
-  // notifications still sees the invite when the app is foreground.
-  if (!useSettingsStore.getState().values.incomingInviteNotificationEnabled) {
-    return
-  }
-
-  try {
-    let granted = await isPermissionGranted()
-    if (!granted) {
-      const result = await requestPermission()
-      granted = result === 'granted'
-    }
-    if (granted)
-      await sendNotification({
-        title: strings.notifications.invite.title,
-        body: message,
-      })
-  } catch {
-    // Notification plugin is best-effort; the in-app toast is the
-    // user-visible source of truth.
-  }
+  await notifyIncomingInvite({
+    body: message,
+    enabled:
+      useSettingsStore.getState().values.incomingInviteNotificationEnabled,
+  })
 }
