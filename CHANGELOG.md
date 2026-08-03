@@ -1,5 +1,43 @@
 # Changelog
 
+## 1.10.0 — 2026-08-03 — More reliable study sessions
+
+### Added
+
+- **AI can be set up without waiting for a benchmark.** Download and choose a
+  model whenever you are ready; benchmarking is now an optional calibration
+  step rather than a prerequisite. If you turn AI on before benchmarking,
+  StudyVis explains the trade-off and keeps its conservative defaults.
+
+- **Download diagnostics saves a shareable local report.** From the just-ended
+  session report or Settings → Advanced, you can now export a ZIP containing a
+  manifest and bounded tails of the app and AI-engine logs. It stays on your
+  device until you choose to share it, and the export keeps prompts, session
+  topics, notes, captures, AI reasoning, credentials, and HTTP response bodies
+  out of the report.
+
+### Fixed
+
+- **Screen sharing stays attached to the right tile after reconnects and
+  stops.** A friend's camera can no longer be mistaken for their screen when
+  peer-to-peer media renegotiates, and late metadata from a stopped share is
+  discarded instead of bringing an old screen tile back.
+
+- **The Cmd+] AI dialog can talk to the running engine.** The separate dialog
+  now asks the Rust side of the app for the current sidecar endpoint, so it no
+  longer falsely says that AI is off after startup or an engine restart.
+
+- **Push-to-talk has an immediate escape hatch if its release event is lost.**
+  Pressing the shortcut again now mutes a latched microphone rather than
+  extending the failsafe window.
+
+### Changed
+
+- **Linux development builds can retain their identity and friends data.**
+  StudyVis now uses the desktop Secret Service for its keychain on Linux.
+  Linux is still not an installer release target, so this does not add a Linux
+  download to this release.
+
 All notable changes to StudyVis, grouped by version era. The product
 was built in roughly three phases — V1 (study with friends, no AI),
 V2 (on-device AI focus detection), V3 (polish + breadth) — described
