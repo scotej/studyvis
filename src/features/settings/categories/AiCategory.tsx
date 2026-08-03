@@ -34,6 +34,7 @@ import {
   getEngineRuntime,
   getHfTokenRuntime,
   getModel,
+  isBenchmarkStale,
   MAX_SAMPLE_INTERVAL_SEC,
   ModelPickerContainer,
   preacquireScreenStream,
@@ -99,9 +100,13 @@ export function AiCategory() {
   const activeModelId = useModelStore((s) => s.activeModelId)
   const modelStatus = useModelStore((s) => s.status)
   const modelRecords = useModelStore((s) => s.records)
-  const measuredSampleInterval = activeModelId
-    ? modelRecords[activeModelId]?.benchmark?.sampleIntervalSec
-    : undefined
+  const activeBenchmark = activeModelId
+    ? (modelRecords[activeModelId]?.benchmark ?? null)
+    : null
+  const measuredSampleInterval =
+    activeBenchmark && !isBenchmarkStale(activeBenchmark)
+      ? activeBenchmark.sampleIntervalSec
+      : undefined
   const hasMeasuredFloor =
     typeof measuredSampleInterval === 'number' && measuredSampleInterval >= 1
   const measuredFloor = hasMeasuredFloor

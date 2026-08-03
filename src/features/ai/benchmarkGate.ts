@@ -1,4 +1,5 @@
 import type { ModelRecord } from './modelStore'
+import { isBenchmarkStale } from './benchmark'
 
 export type AiEnableReadiness =
   'loading' | 'error' | 'no-model' | 'unbenchmarked' | 'ready'
@@ -18,5 +19,7 @@ export function getAiEnableReadiness({
   if (status === 'error') return 'error'
   const record = activeModelId ? records[activeModelId] : undefined
   if (!record || record.installedAt == null) return 'no-model'
-  return record.benchmark ? 'ready' : 'unbenchmarked'
+  return record.benchmark && !isBenchmarkStale(record.benchmark)
+    ? 'ready'
+    : 'unbenchmarked'
 }

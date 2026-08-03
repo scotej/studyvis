@@ -12,6 +12,7 @@ import {
   CaptureError,
   discardPendingScreenStream,
   initialBackoffState,
+  INFERENCE_ENGINE_FINGERPRINT,
   nextBackoffState,
   preacquireScreenStream,
   SLOW_TICK_FACTOR,
@@ -151,6 +152,7 @@ function resetAllStores(): void {
           p95Sec: 3,
           sampleIntervalSec: 5,
           completedAtSec: 0,
+          engineFingerprint: INFERENCE_ENGINE_FINGERPRINT,
         },
         installedAt: 0,
       },
@@ -1272,6 +1274,67 @@ describe('startSampleLoop — sidecar lifecycle', () => {
     })
     await flushMicrotasks(10)
     expect(handle.__state().modelFloorSec).toBe(5)
+    expect(handle.__state().modelP95Sec).toBe(0)
+    await handle.stop()
+  })
+
+  test('ignores a cache-contaminated benchmark and completes a Windows CPU tick after 90s', async () => {
+    const clock = new FakeClock()
+    useModelStore.setState((s) => ({
+      ...s,
+      records: {
+        'test-model': {
+          modelId: 'test-model',
+          benchmark: {
+            // #171's measured cache-hit p95 was ~12.57 s even though changing
+            // two-image live requests needed ~127–148 s on the same machine.
+            samplesSec: [11.303, 12.573, 8.997],
+            p50Sec: 11.303,
+            p95Sec: 12.573,
+            sampleIntervalSec: 14,
+            completedAtSec: 0,
+            engineFingerprint: 'b9095-ngl99',
+          },
+          installedAt: 0,
+        },
+      },
+      activeModelId: 'test-model',
+    }))
+    let abortFired = false
+    const fetchMock = vi.fn<typeof fetch>(
+      (_url, init) =>
+        new Promise<Response>((resolve, reject) => {
+          const signal = (init as RequestInit | undefined)?.signal
+          signal?.addEventListener('abort', () => {
+            abortFired = true
+            reject(new DOMException('aborted', 'AbortError'))
+          })
+          // The attached Windows log shows real live requests taking
+          // ~127–148 s. Resolve inside that window to prove the sample lands.
+          clock.setTimeout(() => resolve(judgmentResponse('on_task')), 130_000)
+        })
+    )
+    __setSampleLoopRuntime(
+      buildSampleLoopRuntime({ clock, fetch: fetchMock as never })
+    )
+    const handle = startSampleLoop({
+      getTopic: () => 't',
+      modelId: 'test-model',
+      getFaceTrack: () => makeFakeTrack(),
+    })
+    await flushMicrotasks(10)
+    expect(handle.__state().modelFloorSec).toBe(5)
+    expect(handle.__state().modelP95Sec).toBe(0)
+
+    await clock.advance(5_000)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    await clock.advance(REQUEST_TIMEOUT_MS)
+    expect(abortFired).toBe(false)
+    expect(useFocusStore.getState().totalSamples).toBe(0)
+    await clock.advance(40_000)
+    expect(abortFired).toBe(false)
+    expect(useFocusStore.getState().totalSamples).toBe(1)
+    expect(handle.__state().inFlight).toBe(false)
     await handle.stop()
   })
 
@@ -1288,6 +1351,7 @@ describe('startSampleLoop — sidecar lifecycle', () => {
             p95Sec: 20,
             sampleIntervalSec: 21,
             completedAtSec: 0,
+            engineFingerprint: INFERENCE_ENGINE_FINGERPRINT,
           },
           installedAt: 0,
         },
@@ -1941,10 +2005,10 @@ describe('startSampleLoop — A6 cadence backoff', () => {
 // successfully and then abort every live tick forever, logging nothing a
 // release build can show.
 describe('effectiveRequestTimeoutMs — I83', () => {
-  test('falls back to the flat timeout when there is no benchmark', () => {
-    expect(effectiveRequestTimeoutMs(0)).toBe(REQUEST_TIMEOUT_MS)
-    expect(effectiveRequestTimeoutMs(-1)).toBe(REQUEST_TIMEOUT_MS)
-    expect(effectiveRequestTimeoutMs(Number.NaN)).toBe(REQUEST_TIMEOUT_MS)
+  test('uses the conservative benchmark bound when there is no usable benchmark', () => {
+    expect(effectiveRequestTimeoutMs(0)).toBe(MAX_REQUEST_TIMEOUT_MS)
+    expect(effectiveRequestTimeoutMs(-1)).toBe(MAX_REQUEST_TIMEOUT_MS)
+    expect(effectiveRequestTimeoutMs(Number.NaN)).toBe(MAX_REQUEST_TIMEOUT_MS)
   })
 
   test('never drops below the flat timeout for a fast model', () => {

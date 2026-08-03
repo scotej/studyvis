@@ -84,7 +84,7 @@ Layers focus detection, scoring, AI break dialogue, and post-session reports on 
 
 **Features:**
 - Model picker — first-run shows 4 options (Moondream2 / Qwen2.5-VL-3B / Gemma 3 4B / Qwen2.5-VL-7B as defaults, with sizes and RAM requirements). Downloading and selecting a model do not require a benchmark. The optional, recommended benchmark measures the chosen model on the user's current device and records the resulting cadence; advanced users can point at any local GGUF.
-- AI enablement guard — AI remains off until the user explicitly enables it. If the selected model has no benchmark, show a warning before enabling; the user may continue with the existing 5s cadence and 90s request-timeout fallbacks or benchmark first. Without a p95 baseline, slowdown backoff is disabled.
+- AI enablement guard — AI remains off until the user explicitly enables it. If the selected model has no current benchmark, show a warning before enabling; the user may continue with the 5s cadence and conservative 300s request-timeout fallbacks or benchmark first. Without a p95 baseline, slowdown backoff is disabled.
 - llama-server sidecar — bundled per-platform, started on-demand when AI features used.
 - Topic declaration — at session start, a one-line text input ("I'm studying maths"). Mid-session, `Ctrl+]` / `Cmd+]` opens a floating text dialog over any app to update the topic ("now I'm doing coding work") or ask the AI for a break.
 - Capture pipeline — every N seconds (where N is derived from the selected model's per-device benchmark, or 5s when no benchmark exists), capture the user's primary face frame and a screenshot of the user's primary display, then send both to local llama-server with the declared topic.
@@ -144,7 +144,7 @@ Explicit so we don't pretend.
 - **BIP39 backup is the user's responsibility.** Lose the 24 words and the laptop, you're a new identity to your friends.
 - **TURN relay required for ~15% of network setups.** No public TURN ships (the old free public endpoints are dead), so StudyVis is STUN-only by default and those sessions can fail to connect until the user adds their own TURN server (Settings → Network). Documented in onboarding and ARCHITECTURE §4.
 - **No cross-device identity.** One install = one identity. Multi-device is V3+ via BIP39 restore.
-- **Inference cadence is hardware-dependent.** A user with a slow CPU running a 7B model might only get one inference every 15–30s, not every 5s. The optional benchmark shows realistic, measured numbers and tunes cadence for that model on the current device. An unbenchmarked model instead uses the generic 5s interval and 90s request timeout, with no p95 slowdown baseline; the pre-enable warning makes that trade-off explicit.
+- **Inference cadence is hardware-dependent.** A user with a slow CPU running a 7B model might only get one inference every 15–30s, not every 5s. The optional benchmark shows realistic, measured numbers and tunes cadence for that model on the current device. A model without a current benchmark instead uses the generic 5s interval and conservative 300s request timeout, with no p95 slowdown baseline; the pre-enable warning makes that trade-off explicit.
 - **Always-on daemon means battery cost.** Negligible in practice (idle Nostr WebSocket), but not zero.
 
 ## 8. Open questions (deferred, not blocking V1)
