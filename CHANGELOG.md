@@ -38,7 +38,6 @@
   Linux is still not an installer release target, so this does not add a Linux
   download to this release.
 
-
 All notable changes to StudyVis, grouped by version era. The product
 was built in roughly three phases — V1 (study with friends, no AI),
 V2 (on-device AI focus detection), V3 (polish + breadth) — described
