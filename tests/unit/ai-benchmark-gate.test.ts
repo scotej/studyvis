@@ -91,4 +91,22 @@ describe('getAiEnableReadiness', () => {
       })
     ).toBe('ready')
   })
+
+  test('treats a benchmark from the cache-contaminated protocol as unbenchmarked', () => {
+    const benchmark = {
+      ...summariseBenchmark({
+        samplesSec: [11.303, 12.573, 8.997],
+        completedAtSec: 99,
+      }),
+      engineFingerprint: 'b9095-ngl99',
+    }
+
+    expect(
+      getAiEnableReadiness({
+        status: 'ready',
+        activeModelId: 'gemma3-4b',
+        records: { 'gemma3-4b': record('gemma3-4b', benchmark) },
+      })
+    ).toBe('unbenchmarked')
+  })
 })

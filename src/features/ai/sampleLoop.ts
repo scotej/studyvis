@@ -65,6 +65,7 @@ import { COMPOSITE_MAX_WIDTH, computeCompositeLayout } from './composite'
 import { getDownloadRuntime } from './download'
 import { buildFocusRequest } from './focusRequest'
 import { useFocusStore } from './focusStore'
+import { isBenchmarkStale } from './benchmark'
 import { useModelStore } from './modelStore'
 import {
   isUncertainVerdict,
@@ -78,10 +79,8 @@ import { logger } from '@/lib/log'
 
 const log = logger.child('ai.sampleloop')
 
-// Per-tick HTTP timeout. Cold-start warmup can run ~30–90 s on CPU; the
-// benchmark surfaces representative p95s into useModelStore so on the
-// steady-state path 60 s is generous. If the model takes longer the tick is
-// aborted, marked as a skip, and the next interval resumes.
+// Floor for a CURRENT benchmark-derived per-tick HTTP timeout. Cold-start
+// warmup can run ~30–90 s on CPU; a valid measured p95 scales this up below.
 export const REQUEST_TIMEOUT_MS = 90_000
 // I83 — ceiling on how long boot() waits for the screen-capture acquire to
 // settle. getDisplayMedia does not time out on its own: a picker the user never
@@ -93,9 +92,10 @@ export const REQUEST_TIMEOUT_MS = 90_000
 // cost of the ceiling is converting a permanent silent wedge into a visible,
 // retryable error.
 export const SCREEN_ACQUIRE_TIMEOUT_MS = 120_000
-// I83 — ceiling on the derived per-tick timeout below. Matches benchmark.ts's
-// own 5-minute per-request bound, so a model the benchmark accepted can never
-// be guaranteed to abort here.
+// I83/#171 — ceiling on the derived per-tick timeout below. It is also the
+// conservative timeout for an unbenchmarked or stale-benchmark model. This
+// matches benchmark.ts's own five-minute request bound and lets the Windows
+// CPU path complete real two-image work before a trustworthy p95 exists.
 export const MAX_REQUEST_TIMEOUT_MS = 300_000
 // I83 — multiple of the benchmark-measured p95 to allow a live inference before
 // aborting it. The benchmark bounds a request at 5 minutes while this loop
@@ -139,12 +139,16 @@ export function effectiveIntervalSec(
   return Math.max(floor, Math.min(MAX_SAMPLE_INTERVAL_SEC, userOverrideSec))
 }
 
-// I83 — per-tick HTTP timeout, derived from the model's benchmark-measured p95.
-// `p95Sec` of 0 means "never benchmarked" (or a benchmark without a usable
-// measurement), which falls back to the flat REQUEST_TIMEOUT_MS the loop always
-// used. Pure so the unit tests can pin the boundaries.
+// I83/#171 — per-tick HTTP timeout derived from a current benchmark p95.
+// `p95Sec` of 0 means never benchmarked, stale, or otherwise unusable. That
+// path gets the conservative maximum: #171's Windows CPU request needed
+// ~127–148 s, while a prompt-cache-contaminated benchmark had falsely saved a
+// ~12 s p95 and the old 90 s fallback aborted every live tick. Pure so tests
+// can pin the boundaries.
 export function effectiveRequestTimeoutMs(p95Sec: number): number {
-  if (!Number.isFinite(p95Sec) || p95Sec <= 0) return REQUEST_TIMEOUT_MS
+  if (!Number.isFinite(p95Sec) || p95Sec <= 0) {
+    return MAX_REQUEST_TIMEOUT_MS
+  }
   const derived = p95Sec * REQUEST_TIMEOUT_P95_FACTOR * 1000
   return Math.min(
     MAX_REQUEST_TIMEOUT_MS,
@@ -1344,8 +1348,16 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
     // (or the record was forgotten), the fallback floor keeps the loop
     // ticking but logs. The effective per-tick interval layers the user's
     // Settings → AI override on top of this floor (see effectiveIntervalSec).
-    const benchmark =
+    const storedBenchmark =
       useModelStore.getState().records[opts.modelId]?.benchmark ?? null
+    // #171 — the cache-cold benchmark protocol is part of the fingerprint.
+    // Old records can be far too optimistic, so unlike the pre-fix code they
+    // do not drive cadence, slowdown detection, or the live request timeout.
+    const benchmark =
+      storedBenchmark && !isBenchmarkStale(storedBenchmark)
+        ? storedBenchmark
+        : null
+    const benchmarkStale = storedBenchmark !== null && benchmark === null
     const interval = benchmark?.sampleIntervalSec
     if (
       typeof interval === 'number' &&
@@ -1353,11 +1365,12 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
     ) {
       state.modelFloorSec = interval
     } else {
-      // Not a fault: a model that has never been benchmarked simply gets the
-      // conservative interval.
-      log.info('benchmark.missing', {
+      // Not a fault: an unmeasured or stale model gets the safe fallback until
+      // the user runs the current cache-cold benchmark.
+      log.info(benchmarkStale ? 'benchmark.stale' : 'benchmark.missing', {
         modelId: opts.modelId,
         fallbackIntervalSec: FALLBACK_SAMPLE_INTERVAL_SEC,
+        fallbackRequestTimeoutMs: MAX_REQUEST_TIMEOUT_MS,
       })
       state.modelFloorSec = FALLBACK_SAMPLE_INTERVAL_SEC
     }
@@ -1369,7 +1382,8 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
         : 0
     log.info('boot.cadence', {
       modelId: opts.modelId,
-      benchmarkPresent: benchmark !== null,
+      benchmarkPresent: storedBenchmark !== null,
+      benchmarkCurrent: benchmark !== null,
       modelFloorSec: state.modelFloorSec,
       modelP95Sec: state.modelP95Sec,
       effectiveIntervalSec: effectiveIntervalSec(

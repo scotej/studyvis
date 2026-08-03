@@ -13,6 +13,7 @@ import {
   tierLabel,
 } from './models'
 import type { ModelRecord } from './modelStore'
+import { isBenchmarkStale } from './benchmark'
 
 export type ModelGuideProps = {
   records: Record<string, ModelRecord>
@@ -27,7 +28,7 @@ function formatGB(bytes: number): string {
 }
 
 function formatMeasured(record: ModelRecord | undefined): string {
-  if (!record?.benchmark) return '—'
+  if (!record?.benchmark || isBenchmarkStale(record.benchmark)) return '—'
   return strings.ai.guide.measured(record.benchmark.p95Sec)
 }
 

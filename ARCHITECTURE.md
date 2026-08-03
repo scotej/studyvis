@@ -425,9 +425,9 @@ loop:
     face_frame  = capture_camera_frame()
     screen_grab = capture_primary_display()
     t0 = now()
-    request_timeout = benchmark_p95
+    request_timeout = current_benchmark_p95
         ? clamp(benchmark_p95 * 3, 90s, 300s)
-        : 90s
+        : 300s
     response = POST /v1/chat/completions, timeout=request_timeout {
       model: <user's chosen model>,
       messages: [
@@ -454,7 +454,7 @@ loop:
     sleep(effective_sample_interval)             # stretched while backed off
 ```
 
-When a benchmark exists for the selected model, `sample_interval = max(5s, ceil(p95 + 1s))`; without one it uses the existing 5s fallback. The user can slow the interval in settings within `[5s, 30s]` (a measured floor above 30s still wins). Benchmarking does not gate download or selection: it is an optional, recommended local measurement of that model on the current device. It sends the *same* request shape as the live tick (two images — a 384×384 face frame + a ~1024-wide screen frame — the full system prompt, and the grammar-constrained 200-token decode), so its p95 reflects real per-tick cost and sets a per-device cadence (A1). A benchmarked model's request timeout is `clamp(p95 × 3, 90s, 300s)`; an unbenchmarked model retains the flat 90s timeout.
+When a current benchmark exists for the selected model, `sample_interval = max(5s, ceil(p95 + 1s))`; without one it uses the existing 5s fallback. The user can slow the interval in settings within `[5s, 30s]` (a measured floor above 30s still wins). Benchmarking does not gate download or selection: it is an optional, recommended local measurement of that model on the current device. It sends the *same* semantic request shape as the live tick (two images — a 384×384 face frame + a ~1024-wide screen frame — the full system prompt, and the grammar-constrained 200-token decode) with benchmark-only `cache_prompt: false`, so llama-server re-encodes both static images on every pass just as it must for changing live frames. Its cache-cold p95 therefore reflects real per-tick cost and sets a per-device cadence (A1). A current benchmark's request timeout is `clamp(p95 × 3, 90s, 300s)`; an unbenchmarked or protocol-stale model uses the conservative 300s bound until it is measured again. Stale timing numbers never drive cadence, slowdown detection, or timeout decisions.
 
 **Cadence backoff (A6, local, no telemetry).** ARCHITECTURE originally promised a "thermal-aware notice" but only paused on battery <20% — which never fires on AC, exactly where a fanless laptop throttles under continuous vision inference. There is no portable OS thermal API and no telemetry, so instead the loop watches inference durations: after **2** consecutive ticks whose measured inference exceeds `benchmark_p95 × 2.5`, it engages — doubling the effective sample interval — and recovers after **3** consecutive normal ticks. It fires a single in-voice "checks are running slower than usual" notice once per session (one-shot, on the engaging tick). The battery pause above is unchanged. When no benchmark p95 exists the backoff is disabled (no baseline to compare against), so the unbenchmarked path neither stretches cadence through A6 nor emits its slowdown notice.
 

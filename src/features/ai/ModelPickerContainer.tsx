@@ -30,7 +30,11 @@ import {
   emptyPickerState,
   progressEventToPhase,
 } from './picker-helpers'
-import { runBenchmark, type BenchmarkProgress } from './benchmark'
+import {
+  isBenchmarkStale,
+  runBenchmark,
+  type BenchmarkProgress,
+} from './benchmark'
 import { ERR_ENGINE_NOT_INSTALLED, useSidecarStore } from './sidecar'
 import {
   getDownloadRuntime,
@@ -519,7 +523,10 @@ export const ModelPickerContainer = forwardRef<
           const benchmark =
             useModelStore.getState().records[spec.id]?.benchmark ?? null
           const settings = useSettingsStore.getState()
-          if (settings.values.aiFeaturesEnabled && !benchmark) {
+          if (
+            settings.values.aiFeaturesEnabled &&
+            (!benchmark || isBenchmarkStale(benchmark))
+          ) {
             toast.info(strings.ai.picker.selectUnbenchmarkedTurnAiOff)
             return
           }

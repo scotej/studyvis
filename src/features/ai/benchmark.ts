@@ -1,7 +1,8 @@
 // Optional local benchmark: spin up the sidecar with the chosen model, send 3
-// fixed chat-completions requests built from a bundled desk image (re-encoded
-// into a 384×384 face JPEG + a 1024×576 screen JPEG so the two slots mirror the
-// live tick's real prefill cost), measure per-request latency. Results feed
+// cache-cold chat-completions requests built from a bundled desk image
+// (re-encoded into a 384×384 face JPEG + a 1024×576 screen JPEG so the two slots
+// mirror the live tick's real prefill cost), and measure per-request latency.
+// Results feed
 // `useModelStore.recordBenchmark` so the picker can show "Speed on your
 // machine" and the AI sample loop (V2-P5) can pick a
 // `sample_interval = max(5, ceil(p95 + 1))`.
@@ -41,17 +42,18 @@ const BENCHMARK_SCREEN_HEIGHT = Math.round((SCREEN_FRAME_MAX_WIDTH * 9) / 16)
 // structure to a real session.
 const BENCHMARK_TOPIC = 'Studying'
 
-// Identifies the inference engine a benchmark measured: the pinned
-// llama.cpp build (scripts/fetch-llama-server.sh LLAMA_RELEASE_TAG /
-// build-llama-server.sh) + the spawn flags that change throughput
-// (N_GPU_LAYERS in src-tauri/src/commands/sidecar.rs). Bump this whenever
-// either changes materially — a persisted benchmark from a different engine
-// is then flagged stale in the picker so the user re-measures (e.g. the D2
-// Metal-offload change made pre-existing Apple Silicon numbers 5-10x too
-// slow, silently locking cadence to the CPU-era floor). Deliberately NOT
-// __APP_VERSION__: most releases don't touch the engine, and nagging every
-// update would train users to ignore the hint.
-export const INFERENCE_ENGINE_FINGERPRINT = 'b9095-ngl99'
+// Identifies the inference runtime + benchmark protocol that produced a
+// measurement: the pinned llama.cpp build, throughput-sensitive spawn flags,
+// and the cache-cold request method below. Bump this whenever any of those
+// changes materially. A mismatched record is shown as stale in the picker and
+// is not trusted for live cadence/timeout decisions.
+//
+// The `cachecold2` bump invalidates benchmarks written before #171. Those
+// benchmarks reused one byte-identical request for warmup + every measured
+// sample, so llama-server's prompt cache skipped both image encodes and made a
+// ~150 s Windows CPU request look like ~12 s. Deliberately NOT __APP_VERSION__:
+// most releases don't affect inference measurements.
+export const INFERENCE_ENGINE_FINGERPRINT = 'b9095-ngl99-cachecold2'
 
 export type BenchmarkResult = {
   // Wall-clock seconds per chat-completion request, in invocation order.
@@ -72,10 +74,10 @@ export type BenchmarkResult = {
   engineFingerprint?: string
 }
 
-// A persisted benchmark measured on a different engine build/flags (or one
-// predating the stamp). Its numbers still drive cadence — a stale floor is
-// conservative and safe — but the picker shows a re-measure hint instead of
-// presenting the speed as current.
+// A persisted benchmark measured with a different engine/protocol (or one
+// predating the stamp). The picker shows a re-measure hint, and sampleLoop
+// treats its timing numbers as unavailable: #171 proved a stale measurement
+// can be dangerously optimistic rather than conservative.
 export function isBenchmarkStale(result: BenchmarkResult): boolean {
   return result.engineFingerprint !== INFERENCE_ENGINE_FINGERPRINT
 }
@@ -119,9 +121,14 @@ export type BenchmarkRuntime = {
   now: () => number
 }
 
-// A1 — the benchmark request body is now the shared focus request shape, so
-// the runtime carries the same type the live loop + eval harness send.
-export type ChatCompletionRequest = FocusChatRequest
+// A1 — the benchmark request body is the shared focus shape. The benchmark's
+// one intentional transport-level difference is `cache_prompt: false`: the
+// pinned llama-server b9095 endpoint accepts this per request, and disabling
+// its prefix cache is what makes repeated static benchmark images represent
+// the changing images used by the live loop.
+export type ChatCompletionRequest = FocusChatRequest & {
+  cache_prompt: false
+}
 
 const HEALTH_TIMEOUT_MS = 90_000 // covers cold-start projector load on CPU
 
@@ -317,17 +324,28 @@ export async function runBenchmark(
     await runtime.waitForHealthy(port, HEALTH_TIMEOUT_MS)
 
     // A1 — mirror the live tick's two-image shape (a camera frame + a screen
-    // frame). NEW-FINDING-2: the two slots now carry distinct re-encodes of the
+    // frame). NEW-FINDING-2: the two slots carry distinct re-encodes of the
     // bundled asset — a 384×384 face and a 1024×576 screen — so the measured
     // p95 reflects the real per-tick prefill cost (the screen slot's larger
     // area is what a dynamic-resolution ViT like Qwen2.5-VL actually pays for).
-    const requestBody = buildFocusRequest({
-      modelId: spec.id,
-      topic: BENCHMARK_TOPIC,
-      faceBase64: images.faceBase64,
-      screenBase64: images.screenBase64,
-      imageMimeType: images.mimeType,
-    })
+    //
+    // #171 — disable llama-server's per-request prompt cache. The benchmark's
+    // images are deliberately static, but live camera/screen frames are not;
+    // letting the server restore a checkpoint skipped both image encodes and
+    // made the warmup pay the ~150 s Windows CPU cost while all three measured
+    // passes looked like ~12 s. `cache_prompt` is a request field in the exact
+    // pinned b9095 server, so this keeps the semantic prompt byte-identical to
+    // a live tick while making every pass pay representative vision work.
+    const requestBody: ChatCompletionRequest = {
+      ...buildFocusRequest({
+        modelId: spec.id,
+        topic: BENCHMARK_TOPIC,
+        faceBase64: images.faceBase64,
+        screenBase64: images.screenBase64,
+        imageMimeType: images.mimeType,
+      }),
+      cache_prompt: false,
+    }
 
     // Discard one cold-start sample before measuring. Model load + first
     // inference is dramatically slower than steady state (CPU 7B warmup

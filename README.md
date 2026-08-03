@@ -171,7 +171,7 @@ without running a benchmark. Benchmarking is optional but recommended:
 it measures that model's speed on this device and tunes the sampling
 cadence. If the selected model has not been benchmarked, StudyVis warns
 you before enabling AI; continuing uses a 5-second fallback cadence and
-a 90-second request timeout, without p95 slowdown backoff. Models
+a conservative five-minute request timeout, without p95 slowdown backoff. Models
 download from Hugging Face directly to your computer; none of the
 current catalog models requires a Hugging Face token.
 

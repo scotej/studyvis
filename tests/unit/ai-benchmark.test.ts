@@ -114,10 +114,25 @@ describe('runBenchmark', () => {
     expect(env.stops).toBe(1)
     // Warmup + 3 measured requests, each carrying the shared focus shape.
     expect(env.bodies).toHaveLength(4)
+    // #171 — the static benchmark images must never hit llama-server's prompt
+    // cache. Otherwise only the discarded warmup encodes them and the measured
+    // passes can understate a Windows CPU request by roughly 10×.
+    expect(
+      env.bodies.every((candidate) => candidate.cache_prompt === false)
+    ).toBe(true)
+    // Cache policy is the only difference; the semantic focus workload stays
+    // identical across passes and to the shared live-request builder.
+    const semanticBodies = env.bodies.map((candidate) => {
+      const focusRequest: Partial<ChatCompletionRequest> = { ...candidate }
+      delete focusRequest.cache_prompt
+      return JSON.stringify(focusRequest)
+    })
+    expect(new Set(semanticBodies).size).toBe(1)
     // A1 — the benchmark request must be shape-identical to the live tick:
     // system prompt + a user turn with one text block and TWO image blocks,
     // grammar-constrained 200-token decode. This is what makes the measured
-    // p95 (→ sampleIntervalSec) a sustainable cadence.
+    // p95 (→ sampleIntervalSec) a sustainable cadence. `cache_prompt: false`
+    // is the only intentional transport-level addition.
     const body = env.bodies[0]
     expect(body.messages[0]).toMatchObject({ role: 'system' })
     expect(body.messages[1].role).toBe('user')
@@ -196,11 +211,10 @@ describe('runBenchmark', () => {
   })
 })
 
-// A persisted benchmark from a different engine build/flags (or predating
-// the stamp entirely — every pre-Metal-offload record) must read as stale so
-// the picker shows the re-measure hint instead of presenting CPU-era numbers
-// as current.
-describe('engine fingerprint staleness', () => {
+// A persisted benchmark from a different engine/protocol (or predating the
+// stamp entirely) must read as stale so the picker and sample loop do not
+// present or trust incompatible timing numbers.
+describe('benchmark fingerprint staleness', () => {
   test('summariseBenchmark stamps the current engine fingerprint', () => {
     const result = summariseBenchmark({
       samplesSec: [3, 5, 8],
@@ -220,6 +234,10 @@ describe('engine fingerprint staleness', () => {
     )
     expect(
       isBenchmarkStale({ ...result, engineFingerprint: 'b8000-ngl0' })
+    ).toBe(true)
+    // #171's prompt-cache-contaminated protocol used this fingerprint.
+    expect(
+      isBenchmarkStale({ ...result, engineFingerprint: 'b9095-ngl99' })
     ).toBe(true)
   })
 })
