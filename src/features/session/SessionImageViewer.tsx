@@ -9,6 +9,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import { useReduceMotion } from '@/design/reduce-motion'
 import { strings } from '@/strings'
 
 import { saveSessionImage } from './imageSave'
@@ -31,6 +32,7 @@ export function SessionImageViewer({
   resolveName,
 }: SessionImageViewerProps) {
   const [zoom, setZoom] = useState(1)
+  const reduceMotion = useReduceMotion()
   const copy = strings.session.images
 
   const download = async () => {
@@ -119,16 +121,27 @@ export function SessionImageViewer({
                 </Button>
               </div>
             </div>
-            <div className="min-h-0 overflow-auto rounded-md bg-bg-sunk p-3">
-              <img
-                src={image.objectUrl}
-                alt={copy.imageAlt(resolveName(image))}
-                style={{
-                  width: `${image.width * zoom}px`,
-                  maxWidth: zoom <= 1 ? '100%' : 'none',
-                }}
-                className="mx-auto h-auto object-contain"
-              />
+            <div
+              role="region"
+              tabIndex={0}
+              aria-label={copy.imageAlt(resolveName(image))}
+              className="min-h-0 overflow-auto rounded-md bg-bg-sunk p-3 outline-none focus-visible:ring-3 focus-visible:ring-inset focus-visible:ring-accent-ring"
+            >
+              {reduceMotion && image.mimeType === 'image/gif' ? (
+                <div className="flex min-h-64 items-center justify-center px-4 text-center text-sm text-text-secondary">
+                  {image.filename}
+                </div>
+              ) : (
+                <img
+                  src={image.objectUrl}
+                  alt={copy.imageAlt(resolveName(image))}
+                  style={{
+                    width: `${image.width * zoom}px`,
+                    maxWidth: zoom <= 1 ? '100%' : 'none',
+                  }}
+                  className="mx-auto h-auto object-contain"
+                />
+              )}
             </div>
           </>
         )}
