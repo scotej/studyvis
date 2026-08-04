@@ -16,6 +16,12 @@ import {
 } from '@/lib/crypto/identity'
 
 const TOPIC = 'session-image-topic'
+const VALID_PNG_BYTES = new Uint8Array([
+  137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0,
+  1, 0, 0, 0, 1, 8, 4, 0, 0, 0, 181, 28, 12, 2, 0, 0, 0, 11, 73, 68,
+  65, 84, 120, 218, 99, 252, 255, 31, 0, 2, 235, 1, 245, 143, 89, 210, 45,
+  0, 0, 0, 0, 73, 69, 78, 68, 174, 66, 96, 130,
+])
 
 function makeSigner() {
   const identity = generateIdentity()
@@ -27,15 +33,15 @@ function makeSigner() {
 
 async function fixture() {
   const signer = makeSigner()
-  const bytes = new Uint8Array([1, 2, 3, 4])
+  const bytes = VALID_PNG_BYTES.slice()
   const payload = await buildImagePayload({
     sessionTopic: TOPIC,
     myEdPubkeyHex: signer.edHex,
     bytes,
     filename: '../study shot.PNG',
     mimeType: 'image/png',
-    width: 640,
-    height: 480,
+    width: 1,
+    height: 1,
     sign: signer.sign,
     now: () => 123,
   })
@@ -53,14 +59,17 @@ describe('session image wire', () => {
     )
     expect(verified?.metadata.filename).toBe('study shot.PNG')
     expect(verified?.blob.type).toBe('image/png')
-    expect(verified?.blob.size).toBe(4)
+    expect(verified?.blob.size).toBe(VALID_PNG_BYTES.byteLength)
   })
 
   test('rejects tampered bytes, metadata, sender, and session', async () => {
     const { signer, payload } = await fixture()
+    const tamperedBytes = payload.bytes.slice()
+    tamperedBytes[tamperedBytes.length - 1] ^= 1
+
     expect(
       verifyIncomingImage(
-        new Uint8Array([1, 2, 3, 5]),
+        tamperedBytes,
         payload.metadata,
         signer.edHex,
         TOPIC
@@ -69,7 +78,7 @@ describe('session image wire', () => {
     expect(
       verifyIncomingImage(
         payload.bytes,
-        { ...payload.metadata, width: 641 },
+        { ...payload.metadata, width: 2 },
         signer.edHex,
         TOPIC
       )
