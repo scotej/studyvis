@@ -3,6 +3,7 @@ import { ImagePlusIcon, SendIcon } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { useReduceMotion } from '@/design/reduce-motion'
 import { tokens } from '@/design/tokens'
 import { strings } from '@/strings'
 
@@ -35,10 +36,12 @@ export function SessionNotesPanel({
   const headingId = useId()
   const copy = strings.session.notes
   const imageCopy = strings.session.images
+  const reduceMotion = useReduceMotion()
   const [draft, setDraft] = useState('')
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const entries = [...notes, ...images].sort((a, b) => a.ts - b.ts)
+  const entriesKey = entries.map((entry) => `${entry.id}:${entry.ts}`).join('|')
 
   // Keep the newest note in view (the list is short and session-scoped, so
   // unconditional pin-to-bottom is fine — unlike the audit log there's no
@@ -46,7 +49,7 @@ export function SessionNotesPanel({
   useLayoutEffect(() => {
     const el = scrollRef.current
     if (el) el.scrollTop = el.scrollHeight
-  }, [entries.length])
+  }, [entriesKey])
 
   const submit = () => {
     const text = draft.trim()
@@ -106,11 +109,17 @@ export function SessionNotesPanel({
                     className="mt-1 block w-full overflow-hidden rounded-md border border-border-subtle bg-bg-sunk text-left outline-none focus-visible:ring-3 focus-visible:ring-accent-ring"
                     aria-label={imageCopy.openImage(resolveName(entry))}
                   >
-                    <img
-                      src={entry.objectUrl}
-                      alt={imageCopy.imageAlt(resolveName(entry))}
-                      className="max-h-40 w-full object-contain"
-                    />
+                    {reduceMotion && entry.mimeType === 'image/gif' ? (
+                      <span className="flex min-h-24 items-center justify-center px-3 text-center text-xs text-text-secondary">
+                        {entry.filename}
+                      </span>
+                    ) : (
+                      <img
+                        src={entry.objectUrl}
+                        alt={imageCopy.imageAlt(resolveName(entry))}
+                        className="max-h-40 w-full object-contain"
+                      />
+                    )}
                     <span className="block truncate border-t border-border-subtle px-2 py-1 text-xs text-text-secondary">
                       {entry.filename}
                     </span>
@@ -133,6 +142,8 @@ export function SessionNotesPanel({
           type="file"
           accept="image/jpeg,image/png,image/webp,image/gif"
           className="sr-only"
+          tabIndex={-1}
+          aria-hidden="true"
           onChange={(event) => {
             const file = event.target.files?.[0]
             event.target.value = ''
