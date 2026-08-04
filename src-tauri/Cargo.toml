@@ -35,7 +35,7 @@ tauri-plugin-dialog = "2"
 tauri-plugin-deep-link = "2"
 ed25519-dalek = "3"
 hex = "0.4"
-base64 = "0.22"
+base64 = "0.23"
 crypto_box = { version = "0.9", features = ["salsa20", "seal"] }
 rusqlite = { version = "0.40", features = ["bundled"] }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream"] }
