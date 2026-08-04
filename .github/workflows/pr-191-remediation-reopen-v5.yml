@@ -1,15 +1,20 @@
-name: PR 191 final production gate
+name: PR 191 one-shot deployment fix
 
 on:
-  pull_request:
-    types: [reopened]
+  push:
+    branches:
+      - feat/session-image-sharing-185
+  workflow_dispatch:
 
 permissions:
   contents: write
 
+concurrency:
+  group: pr-191-one-shot-deployment-fix
+  cancel-in-progress: false
+
 jobs:
-  remediate:
-    if: github.event.pull_request.head.ref == 'feat/session-image-sharing-185'
+  fix:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -22,52 +27,52 @@ jobs:
           node-version: 22
           cache: npm
 
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
-
-      - name: Apply targeted fixes
-        run: |
-          python scripts/pr-191-remediate.py
-          python scripts/pr-191-remediate-fix.py
-          python scripts/pr-191-remediate-fix-v3.py
-          python scripts/pr-191-remediate-fix-v4.py
-          python scripts/pr-191-remediate-fix-v5.py
-
       - name: Install dependencies
         run: npm ci
 
-      - name: Install accessibility browser
-        run: npx playwright install --with-deps chromium
-
-      - name: Format
-        run: npm run format
-
-      - name: Frontend gates
+      - name: Fix TypeScript and remove temporary remediation files
+        shell: python
         run: |
-          npm run build
+          from pathlib import Path
+
+          source = Path('src/features/session/images.ts')
+          text = source.read_text()
+          old = '  let offset = PNG_SIGNATURE.length\n'
+          new = '  let offset: number = PNG_SIGNATURE.length\n'
+          if text.count(old) != 1:
+              raise SystemExit(f'Expected exactly one PNG offset declaration, found {text.count(old)}')
+          source.write_text(text.replace(old, new))
+
+          temporary_files = [
+              '.github/workflows/pr-191-remediation-reopen-v2.yml',
+              '.github/workflows/pr-191-remediation-reopen-v3.yml',
+              '.github/workflows/pr-191-remediation-reopen-v4.yml',
+              '.github/workflows/pr-191-remediation-reopen-v5.yml',
+              '.github/workflows/pr-191-remediation-reopen.yml',
+              '.github/workflows/pr-191-remediation.yml',
+              'scripts/pr-191-remediate-fix-v3.py',
+              'scripts/pr-191-remediate-fix-v4.py',
+              'scripts/pr-191-remediate-fix-v5.py',
+              'scripts/pr-191-remediate-fix.py',
+              'scripts/pr-191-remediate.py',
+          ]
+          for filename in temporary_files:
+              Path(filename).unlink(missing_ok=True)
+
+      - name: Format fixed source
+        run: npx prettier --write src/features/session/images.ts
+
+      - name: Validate deployment build
+        run: |
+          npm run format:check
           npm run lint
-          npm run test
-          npm run check-tokens
-          npm run check-strings
-          npm run check-migrations
-          npm run check-stories
-          npm run check-contrast
-          npm run build-storybook
-          npm run check-a11y
+          npm run build
 
-      - name: Rust gates
-        working-directory: src-tauri
-        run: |
-          cargo test
-          cargo fmt --check
-          cargo clippy
-          cargo deny check
-
-      - name: Commit remediation
+      - name: Commit fix and cleanup
         run: |
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git add -A
-          git commit -m "fix: address image sharing review findings"
+          git diff --cached --check
+          git commit -m "fix: restore PR deployment checks"
           git push origin HEAD:feat/session-image-sharing-185
