@@ -340,6 +340,11 @@ pub fn system_write_text_file(path: String, contents: String) -> Result<(), Stri
 }
 
 #[tauri::command]
+pub fn system_write_binary_file(path: String, bytes: Vec<u8>) -> Result<(), String> {
+    std::fs::write(&path, bytes).map_err(|e| format!("Couldn't write {path}: {e}"))
+}
+
+#[tauri::command]
 pub fn system_open_data_folder<R: Runtime>(app: AppHandle<R>) -> Result<String, String> {
     let dir = data_dir(&app)?;
     let dir_str = dir.to_string_lossy().into_owned();

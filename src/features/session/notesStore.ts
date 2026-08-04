@@ -17,9 +17,24 @@ export type SessionNote = {
   ts: number
 }
 
+export type SessionImage = {
+  id: string
+  fromEdPubkeyHex: string
+  mine: boolean
+  blob: Blob
+  objectUrl: string
+  filename: string
+  mimeType: string
+  width: number
+  height: number
+  ts: number
+}
+
 type NotesState = {
   notes: ReadonlyArray<SessionNote>
+  images: ReadonlyArray<SessionImage>
   append: (note: Omit<SessionNote, 'id'>) => void
+  appendImage: (image: Omit<SessionImage, 'id' | 'objectUrl'>) => void
   reset: () => void
 }
 
@@ -27,6 +42,7 @@ let seq = 0
 
 export const useNotesStore = create<NotesState>((set) => ({
   notes: [],
+  images: [],
   append: (note) =>
     set((s) => {
       const entry: SessionNote = {
@@ -36,5 +52,23 @@ export const useNotesStore = create<NotesState>((set) => ({
       const next = [...s.notes, entry]
       return { notes: next.length > NOTES_CAP ? next.slice(-NOTES_CAP) : next }
     }),
-  reset: () => set({ notes: [] }),
+  appendImage: (image) =>
+    set((s) => {
+      const entry: SessionImage = {
+        ...image,
+        id: `${image.fromEdPubkeyHex}:${image.ts}:${seq++}`,
+        objectUrl: URL.createObjectURL(image.blob),
+      }
+      const next = [...s.images, entry]
+      const kept = next.length > NOTES_CAP ? next.slice(-NOTES_CAP) : next
+      for (const removed of next.slice(0, next.length - kept.length)) {
+        URL.revokeObjectURL(removed.objectUrl)
+      }
+      return { images: kept }
+    }),
+  reset: () =>
+    set((s) => {
+      for (const image of s.images) URL.revokeObjectURL(image.objectUrl)
+      return { notes: [], images: [] }
+    }),
 }))
