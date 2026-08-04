@@ -21,9 +21,7 @@ export const IMAGE_MIME_TYPES = [
 
 export type ImageMimeType = (typeof IMAGE_MIME_TYPES)[number]
 export type SessionImageErrorCode =
-  | 'unsupported_type'
-  | 'too_large'
-  | 'invalid_image'
+  'unsupported_type' | 'too_large' | 'invalid_image'
 
 export class SessionImageError extends Error {
   readonly code: SessionImageErrorCode
@@ -69,8 +67,7 @@ type ImageInspection = {
 const MIME_TYPE_SET = new Set<string>(IMAGE_MIME_TYPES)
 const PNG_SIGNATURE = [137, 80, 78, 71, 13, 10, 26, 10] as const
 const JPEG_SOF_MARKERS = new Set([
-  0xc0, 0xc1, 0xc2, 0xc3, 0xc5, 0xc6, 0xc7, 0xc9, 0xca, 0xcb, 0xcd, 0xce,
-  0xcf,
+  0xc0, 0xc1, 0xc2, 0xc3, 0xc5, 0xc6, 0xc7, 0xc9, 0xca, 0xcb, 0xcd, 0xce, 0xcf,
 ])
 
 export function isImageMimeType(value: unknown): value is ImageMimeType {
@@ -345,7 +342,7 @@ export function verifyIncomingImage(
 function inspectPng(bytes: Uint8Array): ImageInspection | null {
   if (!matches(bytes, 0, PNG_SIGNATURE)) return null
   const view = viewOf(bytes)
-  let offset = PNG_SIGNATURE.length
+  let offset: number = PNG_SIGNATURE.length
   let width: number | null = null
   let height: number | null = null
   let declaredFrames: number | null = null
@@ -583,7 +580,10 @@ function dimensionsMatch(
   decoded: { width: number; height: number },
   mimeType: ImageMimeType
 ): boolean {
-  if (inspected.width === decoded.width && inspected.height === decoded.height) {
+  if (
+    inspected.width === decoded.width &&
+    inspected.height === decoded.height
+  ) {
     return true
   }
   return (
