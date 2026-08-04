@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.10.1 — 2026-08-04 — Accurate AI timing on slower PCs
+
+### Fixed
+
+- **The AI benchmark now measures the same cache-cold vision work as a live
+  session.** Repeated benchmark requests no longer reuse llama-server's prompt
+  cache and report an unrealistically fast result, especially on Windows PCs
+  running inference on the CPU. Results from the old benchmark protocol are
+  marked stale and no longer shorten the sampling cadence or request timeout;
+  re-run the benchmark to calibrate them again.
+
 ## 1.10.0 — 2026-08-03 — More reliable study sessions
 
 ### Added
