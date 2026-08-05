@@ -1,10 +1,13 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "main-window permissions (ARCHITECTURE.md §12: scoped to main). V3-P6 adds the four window-control IPC bindings (start-dragging / minimize / toggle-maximize / close) used by the opt-in custom titlebar; is-fullscreen / set-fullscreen back the screen-share viewer; the set-size / center / unmaximize trio backs the Settings → Appearance → Window reset action. X6 adds updater:default — check/download/install are driven only from the main window's updater feature, so the AI dialog can't reach them. Gated to the main window so the AI dialog stays on least-privilege.",
-  "windows": ["main"],
+  "description": "main-window permissions (ARCHITECTURE.md §12: scoped to main). V3-P6 adds the four window-control IPC bindings (start-dragging / minimize / toggle-maximize / close) used by the opt-in custom titlebar; is-fullscreen / set-fullscreen back the screen-share viewer; the set-size / center / unmaximize trio backs the Settings → Appearance → Window reset action. X6 adds updater:default — check/download/install are driven only from the main window's updater feature, so the AI dialog can't reach them. The create-webview-window grant is used only for the transient in-session overlay. Gated to the main window so secondary windows stay on least-privilege.",
+  "windows": [
+    "main"
+  ],
   "permissions": [
     "core:default",
+    "core:webview:allow-create-webview-window",
     "notification:default",
     "store:default",
     "dialog:default",
@@ -14,6 +17,7 @@
     "core:window:allow-minimize",
     "core:window:allow-toggle-maximize",
     "core:window:allow-close",
+    "core:window:allow-show",
     "core:window:allow-is-fullscreen",
     "core:window:allow-set-fullscreen",
     "core:window:allow-set-size",

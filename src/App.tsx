@@ -6,6 +6,7 @@ import { TitleBar } from '@/components/TitleBar'
 import { Toaster } from '@/components/ui/sonner'
 import { ApplyReduceMotion } from '@/design/reduce-motion'
 import { ThemeProvider } from '@/design/theme'
+import { useSessionOverlayBridge } from '@/features/session/useSessionOverlayBridge'
 import {
   PomodoroNotifyListener,
   PttListener,
@@ -46,6 +47,8 @@ function ChromeAwareShell({ children }: { children: ReactNode }) {
 }
 
 function App() {
+  useSessionOverlayBridge()
+
   return (
     <ThemeProvider>
       <ApplyReduceMotion />

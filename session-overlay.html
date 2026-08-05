@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark light" />
+    <title>StudyVis</title>
+    <script>
+      ;(function () {
+        try {
+          var stored = window.localStorage.getItem('studyvis.theme')
+          var mode =
+            stored === 'light' || stored === 'dark' || stored === 'auto'
+              ? stored
+              : 'dark'
+          var systemLight =
+            window.matchMedia &&
+            window.matchMedia('(prefers-color-scheme: light)').matches
+          var resolved =
+            mode === 'auto' ? (systemLight ? 'light' : 'dark') : mode
+          if (resolved === 'light') {
+            document.documentElement.classList.add('light')
+          }
+          document.documentElement.dataset.theme = resolved
+        } catch (_e) {
+          // React reconciles the theme after mount.
+        }
+      })()
+      ;(function () {
+        try {
+          var stored =
+            window.localStorage.getItem('studyvis.reduceMotion') === 'true'
+          var osPrefers =
+            window.matchMedia &&
+            window.matchMedia('(prefers-reduced-motion: reduce)').matches
+          document.documentElement.dataset.reduceMotion =
+            stored || osPrefers ? 'true' : 'false'
+        } catch (_e) {
+          // React reconciles reduced motion after mount.
+        }
+      })()
+    </script>
+    <style>
+      html,
+      body,
+      #root {
+        width: 100%;
+        height: 100%;
+      }
+      html,
+      body {
+        background: transparent;
+        margin: 0;
+        padding: 0;
+        overflow: hidden;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/features/session/session-overlay-main.ts"></script>
+  </body>
+</html>
