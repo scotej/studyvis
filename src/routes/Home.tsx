@@ -508,7 +508,8 @@ export function Home() {
           sessionId={sessionTopic}
           onClose={() => useSessionStore.getState().reset()}
           onRejoin={
-            sessionEndedBy === 'auto' || sessionEndedBy === 'user'
+            rejoinDeadline !== null &&
+            (sessionEndedBy === 'auto' || sessionEndedBy === 'user')
               ? handleRejoin
               : undefined
           }
