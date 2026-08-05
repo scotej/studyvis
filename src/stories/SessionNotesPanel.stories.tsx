@@ -1,12 +1,19 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
+import { expect, fn, userEvent, within } from 'storybook/test'
 
 import { SessionNotesPanel } from '@/features/session/SessionNotesPanel'
-import type { SessionNote } from '@/features/session/notesStore'
+import type { SessionImage, SessionNote } from '@/features/session/notesStore'
 
 // #47 B6 — the quiet in-session text strip (pure view; wire + store live in
 // SessionView / notes.ts).
 
 const NOW = 1_700_000_000_000
+const IMAGE_DATA_URL =
+  'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg=='
+const IMAGE_BYTES = Uint8Array.from(
+  atob(IMAGE_DATA_URL.split(',')[1]),
+  (character) => character.charCodeAt(0)
+)
 
 function note(
   seq: number,
@@ -25,13 +32,30 @@ function note(
 
 const NAMES: Record<string, string> = { alice: 'Alice', blake: 'Blake' }
 
+const image: SessionImage = {
+  id: 'alice:image:1',
+  fromEdPubkeyHex: 'alice',
+  mine: false,
+  blob: new Blob([IMAGE_BYTES], { type: 'image/png' }),
+  objectUrl: IMAGE_DATA_URL,
+  filename: 'linear-algebra-notes.png',
+  mimeType: 'image/png',
+  width: 1,
+  height: 1,
+  frameCount: 1,
+  ts: NOW + 1,
+}
+
 const meta = {
   title: 'Session/SessionNotesPanel',
   component: SessionNotesPanel,
   args: {
     onSend: () => {},
-    resolveName: (n: SessionNote) =>
-      n.mine ? 'You' : (NAMES[n.fromEdPubkeyHex] ?? 'Peer'),
+    onSendImage: () => {},
+    onOpenImage: () => {},
+    resolveName: (item: SessionNote | SessionImage) =>
+      item.mine ? 'You' : (NAMES[item.fromEdPubkeyHex] ?? 'Peer'),
+    images: [],
     notes: [
       note(1, 'alice', false, 'brb 5'),
       note(2, 'me', true, 'np, grinding through problem 4'),
@@ -45,6 +69,21 @@ export default meta
 type Story = StoryObj<typeof meta>
 
 export const Conversation: Story = {}
+
+export const WithImage: Story = {
+  args: {
+    images: [image],
+    notes: [],
+    onOpenImage: fn(),
+  },
+  play: async ({ args, canvasElement }) => {
+    const canvas = within(canvasElement)
+    await userEvent.click(
+      canvas.getByRole('button', { name: 'Open image from Alice' })
+    )
+    await expect(args.onOpenImage).toHaveBeenCalledWith(image)
+  },
+}
 
 // Fresh session: the empty state explains the feature and its ephemerality.
 export const Empty: Story = {

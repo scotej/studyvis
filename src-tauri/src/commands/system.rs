@@ -22,6 +22,7 @@ use std::sync::Mutex;
 use serde::Serialize;
 use tauri::{AppHandle, Manager, Runtime};
 use tauri_plugin_autostart::ManagerExt;
+use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut};
 use tauri_plugin_opener::OpenerExt;
 
@@ -339,6 +340,66 @@ pub fn system_write_text_file(path: String, contents: String) -> Result<(), Stri
     std::fs::write(&path, contents.as_bytes()).map_err(|e| format!("Couldn't write {path}: {e}"))
 }
 
+const IMAGE_SAVE_MAX_BYTES: usize = 5 * 1024 * 1024;
+
+fn image_extension(mime_type: &str) -> Option<&'static str> {
+    match mime_type {
+        "image/jpeg" => Some("jpg"),
+        "image/png" => Some("png"),
+        "image/webp" => Some("webp"),
+        "image/gif" => Some("gif"),
+        _ => None,
+    }
+}
+
+fn safe_image_filename(filename: &str, extension: &str) -> String {
+    let basename = filename.rsplit(['/', '\\']).next().unwrap_or_default();
+    let cleaned: String = basename
+        .chars()
+        .filter(|character| !character.is_control() && !r#"<>:"/\|?*"#.contains(*character))
+        .take(120)
+        .collect();
+    let expected_suffix = format!(".{extension}");
+    if cleaned.to_ascii_lowercase().ends_with(&expected_suffix) {
+        cleaned
+    } else {
+        format!("studyvis-image.{extension}")
+    }
+}
+
+// Image downloads are deliberately a single native operation: renderer code
+// can suggest a safe filename and bytes, but only the path returned by this
+// command's native save dialog is writable. Never accept a renderer-supplied
+// destination here.
+#[tauri::command]
+pub async fn system_save_image<R: Runtime>(
+    app: AppHandle<R>,
+    filename: String,
+    mime_type: String,
+    bytes: Vec<u8>,
+) -> Result<bool, String> {
+    let extension = image_extension(&mime_type).ok_or("Unsupported image type")?;
+    if bytes.is_empty() || bytes.len() > IMAGE_SAVE_MAX_BYTES {
+        return Err("Invalid image size".to_string());
+    }
+    let default_filename = safe_image_filename(&filename, extension);
+    let Some(destination) = app
+        .dialog()
+        .file()
+        .set_file_name(default_filename)
+        .add_filter("Image", &[extension])
+        .blocking_save_file()
+    else {
+        return Ok(false);
+    };
+    let destination = destination
+        .into_path()
+        .map_err(|e| format!("Invalid image destination: {e}"))?;
+    std::fs::write(destination, bytes)
+        .map_err(|e| format!("Couldn't write the selected image: {e}"))?;
+    Ok(true)
+}
+
 #[tauri::command]
 pub fn system_open_data_folder<R: Runtime>(app: AppHandle<R>) -> Result<String, String> {
     let dir = data_dir(&app)?;
@@ -589,7 +650,19 @@ pub fn system_install_context() -> InstallContext {
 
 #[cfg(test)]
 mod tests {
-    use super::RELEASES_URL;
+    use super::{image_extension, safe_image_filename, RELEASES_URL};
+
+    #[test]
+    fn image_save_metadata_is_constrained() {
+        assert_eq!(image_extension("image/jpeg"), Some("jpg"));
+        assert_eq!(image_extension("image/png"), Some("png"));
+        assert_eq!(image_extension("text/plain"), None);
+        assert_eq!(safe_image_filename("../notes.PNG", "png"), "notes.PNG");
+        assert_eq!(
+            safe_image_filename("notes.png.exe", "png"),
+            "studyvis-image.png"
+        );
+    }
 
     // X6 replaced the X4 tag check with tauri-plugin-updater, whose endpoint
     // is derived from this same repo in tauri.conf.json. Pin the constant so
