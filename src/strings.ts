@@ -591,26 +591,10 @@ export const strings = {
     notes: {
       heading: 'Notes',
       empty:
-        'Quiet notes and images for your friends, without breaking the silence. Nothing is saved.',
+        'Quiet notes to your friends — a quick "brb 5" or a link — without breaking the silence. Nothing is saved.',
       placeholder: 'Type a note…',
       inputAriaLabel: 'Note to your session',
       sendAriaLabel: 'Send the note',
-    },
-    images: {
-      attachImage: 'Send an image',
-      openImage: (name: string) => `Open image from ${name}`,
-      imageAlt: (name: string) => `Image sent by ${name}`,
-      viewerTitle: (name: string) => `Image from ${name}`,
-      zoomIn: 'Zoom in',
-      zoomOut: 'Zoom out',
-      resetZoom: 'Reset zoom',
-      download: 'Download image',
-      downloaded: 'Image saved.',
-      downloadFailed: "Couldn't save the image.",
-      unsupportedType: 'Choose a JPEG, PNG, WebP, or GIF image.',
-      tooLarge: 'Images must be 5 MB or smaller.',
-      invalidImage: "That file couldn't be read as an image.",
-      sendFailed: "Couldn't send the image.",
     },
     focusStates: {
       focused: 'On task',

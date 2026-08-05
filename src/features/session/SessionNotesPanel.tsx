@@ -1,14 +1,13 @@
 import { useId, useLayoutEffect, useRef, useState } from 'react'
-import { ImagePlusIcon, SendIcon } from 'lucide-react'
+import { SendIcon } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { useReduceMotion } from '@/design/reduce-motion'
 import { tokens } from '@/design/tokens'
 import { strings } from '@/strings'
 
 import { NOTE_MAX_LENGTH } from './notes'
-import type { SessionImage, SessionNote } from './notesStore'
+import type { SessionNote } from './notesStore'
 
 // #47 B6 — the quiet text strip under the session log: "brb 5", a link,
 // without breaking the silence for everyone. Pure view — the store, wire
@@ -18,30 +17,19 @@ import type { SessionImage, SessionNote } from './notesStore'
 
 export type SessionNotesPanelProps = {
   notes: ReadonlyArray<SessionNote>
-  images: ReadonlyArray<SessionImage>
-  resolveName: (item: SessionNote | SessionImage) => string
+  resolveName: (note: SessionNote) => string
   onSend: (text: string) => void
-  onSendImage: (file: File) => void
-  onOpenImage: (image: SessionImage) => void
 }
 
 export function SessionNotesPanel({
   notes,
-  images,
   resolveName,
   onSend,
-  onSendImage,
-  onOpenImage,
 }: SessionNotesPanelProps) {
   const headingId = useId()
   const copy = strings.session.notes
-  const imageCopy = strings.session.images
-  const reduceMotion = useReduceMotion()
   const [draft, setDraft] = useState('')
   const scrollRef = useRef<HTMLDivElement | null>(null)
-  const fileInputRef = useRef<HTMLInputElement | null>(null)
-  const entries = [...notes, ...images].sort((a, b) => a.ts - b.ts)
-  const entriesKey = entries.map((entry) => `${entry.id}:${entry.ts}`).join('|')
 
   // Keep the newest note in view (the list is short and session-scoped, so
   // unconditional pin-to-bottom is fine — unlike the audit log there's no
@@ -49,7 +37,7 @@ export function SessionNotesPanel({
   useLayoutEffect(() => {
     const el = scrollRef.current
     if (el) el.scrollTop = el.scrollHeight
-  }, [entriesKey])
+  }, [notes.length])
 
   const submit = () => {
     const text = draft.trim()
@@ -78,7 +66,7 @@ export function SessionNotesPanel({
         className="overflow-y-auto outline-none focus-visible:ring-3 focus-visible:ring-inset focus-visible:ring-accent-ring"
         style={{ maxHeight: tokens.sizes.sessionNotesListMaxHeight }}
       >
-        {entries.length === 0 ? (
+        {notes.length === 0 ? (
           <p className="px-4 py-3 text-xs text-text-muted">{copy.empty}</p>
         ) : (
           <ul
@@ -87,44 +75,20 @@ export function SessionNotesPanel({
             aria-relevant="additions"
             className="flex flex-col gap-1 px-4 py-2"
           >
-            {entries.map((entry) => (
-              <li key={entry.id} className="text-sm leading-snug">
+            {notes.map((note) => (
+              <li key={note.id} className="text-sm leading-snug">
                 <span
                   className={
-                    entry.mine
+                    note.mine
                       ? 'font-medium text-text-secondary'
                       : 'font-medium text-accent-default'
                   }
                 >
-                  {resolveName(entry)}
+                  {resolveName(note)}
                 </span>{' '}
-                {'text' in entry ? (
-                  <span className="whitespace-pre-wrap break-words text-text-primary">
-                    {entry.text}
-                  </span>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => onOpenImage(entry)}
-                    className="mt-1 block w-full overflow-hidden rounded-md border border-border-subtle bg-bg-sunk text-left outline-none focus-visible:ring-3 focus-visible:ring-accent-ring"
-                    aria-label={imageCopy.openImage(resolveName(entry))}
-                  >
-                    {reduceMotion && entry.frameCount > 1 ? (
-                      <span className="flex min-h-24 items-center justify-center px-3 text-center text-xs text-text-secondary">
-                        {entry.filename}
-                      </span>
-                    ) : (
-                      <img
-                        src={entry.objectUrl}
-                        alt={imageCopy.imageAlt(resolveName(entry))}
-                        className="max-h-40 w-full object-contain"
-                      />
-                    )}
-                    <span className="block truncate border-t border-border-subtle px-2 py-1 text-xs text-text-secondary">
-                      {entry.filename}
-                    </span>
-                  </button>
-                )}
+                <span className="whitespace-pre-wrap break-words text-text-primary">
+                  {note.text}
+                </span>
               </li>
             ))}
           </ul>
@@ -137,28 +101,6 @@ export function SessionNotesPanel({
           submit()
         }}
       >
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept="image/jpeg,image/png,image/webp,image/gif"
-          className="sr-only"
-          tabIndex={-1}
-          aria-hidden="true"
-          onChange={(event) => {
-            const file = event.target.files?.[0]
-            event.target.value = ''
-            if (file) onSendImage(file)
-          }}
-        />
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          onClick={() => fileInputRef.current?.click()}
-          aria-label={imageCopy.attachImage}
-        >
-          <ImagePlusIcon />
-        </Button>
         <Input
           value={draft}
           onChange={(e) => setDraft(e.target.value)}

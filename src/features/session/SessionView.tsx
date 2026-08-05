@@ -103,30 +103,14 @@ import {
   PTT_STATE_ACTION,
   publishLocalStream,
 } from './lifecycle'
-import { SessionImageViewer } from './SessionImageViewer'
 import { SessionInviteDialog } from './SessionInviteDialog'
-import {
-  buildImagePayload,
-  IMAGE_ACTION,
-  inspectImageBytes,
-  isImageMimeType,
-  readImageDimensions,
-  SessionImageError,
-  validateOutgoingImage,
-  verifyIncomingImage,
-  type ImageMetadata,
-} from './images'
 import {
   buildNotePayload,
   NOTE_ACTION,
   verifyIncomingNote,
   type NotePayload,
 } from './notes'
-import {
-  useNotesStore,
-  type SessionImage,
-  type SessionNote,
-} from './notesStore'
+import { useNotesStore, type SessionNote } from './notesStore'
 import {
   requestScreenShareStream,
   startScreenShareController,
@@ -256,9 +240,7 @@ export function SessionView({
   // #47 B6 — the ephemeral note feed + the wire sender owned by the
   // hello/audit effect (same ref pattern as emitAuditRef).
   const sessionNotes = useNotesStore((s) => s.notes)
-  const sessionImages = useNotesStore((s) => s.images)
   const sendNoteRef = useRef<((text: string) => Promise<void>) | null>(null)
-  const sendImageRef = useRef<((file: File) => Promise<void>) | null>(null)
   // useShallow stops the hello+audit+pomodoro effect from re-firing on every
   // 5-second broadcaster tick: without it the selector returns a fresh
   // object literal each store mutation, which would re-render SessionView
@@ -297,11 +279,6 @@ export function SessionView({
   const [audioSwapping, setAudioSwapping] = useState(false)
   // #47 A2 — mid-session invite picker (host only; see the footer button).
   const [inviteOpen, setInviteOpen] = useState(false)
-  const [openSessionImageId, setOpenSessionImageId] = useState<string | null>(
-    null
-  )
-  const openSessionImage =
-    sessionImages.find((image) => image.id === openSessionImageId) ?? null
   const friends = useFriendsStore((s) => s.friends)
   // #47 B2 — ref so the sample-loop effect's toast callbacks reach the
   // current opener without adding it to the effect deps (same pattern as
@@ -896,38 +873,6 @@ export function SessionView({
         ts: verified.ts,
       })
     })
-    const imageAction = room.makeAction<Uint8Array>(IMAGE_ACTION)
-    imageAction.receive((data, peerId, metadata) => {
-      const expectedEd =
-        useSessionStore.getState().peers[peerId]?.edPubkeyHex ?? null
-      const verified = verifyIncomingImage(
-        data,
-        metadata,
-        expectedEd,
-        sessionTopic
-      )
-      if (!verified) return
-      void readImageDimensions(verified.blob).then((decoded) => {
-        if (
-          decoded.width !== verified.metadata.width ||
-          decoded.height !== verified.metadata.height
-        ) {
-          return
-        }
-        useNotesStore.getState().appendImage({
-          fromEdPubkeyHex: verified.metadata.from_ed_pubkey,
-          mine: false,
-          blob: verified.blob,
-          filename: verified.metadata.filename,
-          mimeType: verified.metadata.mime_type,
-          width: verified.metadata.width,
-          height: verified.metadata.height,
-          frameCount: verified.frameCount,
-          ts: verified.metadata.ts,
-        })
-      })
-    })
-
     sendNoteRef.current = async (text: string) => {
       const payload = await buildNotePayload({
         sessionTopic,
@@ -954,49 +899,6 @@ export function SessionView({
           err,
         })
       }
-    }
-    sendImageRef.current = async (file: File) => {
-      validateOutgoingImage(file)
-      if (!isImageMimeType(file.type)) {
-        throw new SessionImageError('unsupported_type')
-      }
-      const blob = file.slice(0, file.size, file.type)
-      const bytes = new Uint8Array(await blob.arrayBuffer())
-      const dimensions = await readImageDimensions(blob)
-      const payload = await buildImagePayload({
-        sessionTopic,
-        myEdPubkeyHex,
-        bytes,
-        filename: file.name,
-        mimeType: file.type,
-        width: dimensions.width,
-        height: dimensions.height,
-        sign,
-      })
-      await imageAction.send(
-        payload.bytes,
-        undefined,
-        payload.metadata as ImageMetadata
-      )
-      const localBlob = new Blob([payload.bytes.slice()], {
-        type: payload.metadata.mime_type,
-      })
-      const inspection = inspectImageBytes(
-        payload.bytes,
-        payload.metadata.mime_type
-      )
-      if (!inspection) throw new SessionImageError('invalid_image')
-      useNotesStore.getState().appendImage({
-        fromEdPubkeyHex: myEdPubkeyHex,
-        mine: true,
-        blob: localBlob,
-        filename: payload.metadata.filename,
-        mimeType: payload.metadata.mime_type,
-        width: payload.metadata.width,
-        height: payload.metadata.height,
-        frameCount: inspection.frameCount,
-        ts: payload.metadata.ts,
-      })
     }
 
     const dispatcher = startAiAlertDispatcher({
@@ -1062,8 +964,6 @@ export function SessionView({
       pomodoroStartRef.current = null
       pomodoroStopRef.current = null
       aiAlertDispatcherRef.current = null
-      sendNoteRef.current = null
-      sendImageRef.current = null
     }
   }, [room, myEdPubkeyHex, myXPubkeyHex, sessionTopic, startedAt, setPeerHello])
 
@@ -1693,24 +1593,8 @@ export function SessionView({
   const handleSendNote = useCallback((text: string) => {
     void sendNoteRef.current?.(text)
   }, [])
-  const handleSendImage = useCallback((file: File) => {
-    void sendImageRef.current?.(file).catch((error: unknown) => {
-      const copy = strings.session.images
-      if (error instanceof SessionImageError) {
-        const message =
-          error.code === 'unsupported_type'
-            ? copy.unsupportedType
-            : error.code === 'too_large'
-              ? copy.tooLarge
-              : copy.invalidImage
-        toast.error(message)
-        return
-      }
-      toast.error(copy.sendFailed)
-    })
-  }, [])
   const resolveNoteName = useCallback(
-    (note: SessionNote | SessionImage) => {
+    (note: SessionNote) => {
       if (note.mine) {
         return (
           useIdentityStore.getState().identity?.display_name?.trim() ||
@@ -1988,21 +1872,11 @@ export function SessionView({
           />
           <SessionNotesPanel
             notes={sessionNotes}
-            images={sessionImages}
             resolveName={resolveNoteName}
             onSend={handleSendNote}
-            onSendImage={handleSendImage}
-            onOpenImage={(image) => setOpenSessionImageId(image.id)}
           />
         </div>
       </div>
-      <SessionImageViewer
-        image={openSessionImage}
-        onOpenChange={(open) => {
-          if (!open) setOpenSessionImageId(null)
-        }}
-        resolveName={resolveNoteName}
-      />
       <footer className="flex shrink-0 items-center justify-between gap-4 border-t border-border-subtle bg-bg-surface px-6 py-4 text-sm">
         <span className="flex items-center gap-3 text-text-secondary">
           <span className="flex items-center gap-2">
