@@ -457,16 +457,14 @@ function inspectGif(bytes: Uint8Array): ImageInspection | null {
       continue
     }
     if (marker !== 0x2c || offset + 9 > bytes.length) return null
-    const left = view.getUint16(offset, true)
-    const top = view.getUint16(offset + 2, true)
     const frameWidth = view.getUint16(offset + 4, true)
     const frameHeight = view.getUint16(offset + 6, true)
     const packed = bytes[offset + 8]
     if (
       frameWidth <= 0 ||
       frameHeight <= 0 ||
-      left + frameWidth > width ||
-      top + frameHeight > height
+      frameWidth > IMAGE_MAX_DIMENSION ||
+      frameHeight > IMAGE_MAX_DIMENSION
     ) {
       return null
     }
