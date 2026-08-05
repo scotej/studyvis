@@ -103,7 +103,11 @@ async function syncOverlayWindow(): Promise<void> {
   if (!overlayWindow || !windowReady) return
 
   try {
-    await emitTo(SESSION_OVERLAY_WINDOW_LABEL, SESSION_OVERLAY_UPDATE, snapshot)
+    await emitTo(
+      SESSION_OVERLAY_WINDOW_LABEL,
+      SESSION_OVERLAY_UPDATE,
+      snapshot
+    )
     await overlayWindow.show()
   } catch {
     windowReady = false
@@ -172,7 +176,10 @@ async function createOverlayWindow(): Promise<WebviewWindow | null> {
       if (timeout !== null) clearTimeout(timeout)
       resolve(result)
     }
-    timeout = setTimeout(() => finish(null), SESSION_OVERLAY_CREATE_TIMEOUT_MS)
+    timeout = setTimeout(
+      () => finish(null),
+      SESSION_OVERLAY_CREATE_TIMEOUT_MS
+    )
     void overlayWindow.once('tauri://created', () => finish(overlayWindow))
     void overlayWindow.once('tauri://error', () => finish(null))
   })
