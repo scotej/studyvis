@@ -1,11 +1,8 @@
-// #96 — full-size view of one shared screen. A 4K display rendered at quarter
-// grid size is unreadable, so the grid tile is the affordance and this is where
-// the screen is actually read.
-//
-// Deliberately a Radix Dialog rather than a bespoke overlay: it renders
-// `aria-modal="true"`, which the session's two-tap Esc-to-leave handler already
-// treats as "something else owns Escape". Closing the viewer therefore never
-// arms leaving the session.
+// #96 / #184 — fullscreen view of one shared screen. A 4K display rendered
+// in the session grid is unreadable, so the tile is the affordance and this is
+// where the screen is actually read. The viewer fills the webview and asks
+// Tauri to put the native window into fullscreen; the full-webview layout is
+// also the browser/Storybook fallback when native fullscreen is unavailable.
 
 import { useEffect, useRef } from 'react'
 
@@ -15,12 +12,17 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import { logger } from '@/lib/log'
+import {
+  createNativeScreenShareFullscreenRuntime,
+  createScreenShareFullscreenController,
+} from '@/lib/screenShareFullscreen'
+
+const log = logger.child('session.screenShareViewer')
 
 export type ScreenShareViewerProps = {
   open: boolean
   onOpenChange: (open: boolean) => void
-  // Caption for the screen on show — already resolved to "Your screen" or
-  // "<friend>'s screen" by the caller.
   name: string
   stream: MediaStream | null
 }
@@ -32,23 +34,53 @@ export function ScreenShareViewer({
   stream,
 }: ScreenShareViewerProps) {
   const videoRef = useRef<HTMLVideoElement | null>(null)
+  const onOpenChangeRef = useRef(onOpenChange)
 
-  // Re-bound on `open` as well as `stream`: the element only exists while the
-  // dialog is mounted, so binding on the stream alone would miss the first
-  // render after it opens.
+  useEffect(() => {
+    onOpenChangeRef.current = onOpenChange
+  }, [onOpenChange])
+
   useEffect(() => {
     const el = videoRef.current
     if (!el) return
     if (el.srcObject !== stream) el.srcObject = stream
   }, [stream, open])
 
+  useEffect(() => {
+    if (!open) return
+
+    let cancelled = false
+    let closeFullscreen: (() => Promise<void>) | null = null
+
+    void createNativeScreenShareFullscreenRuntime()
+      .then(async (runtime) => {
+        if (cancelled) return
+        const controller = createScreenShareFullscreenController(
+          runtime,
+          () => {
+            onOpenChangeRef.current(false)
+          }
+        )
+        closeFullscreen = controller.close
+        await controller.open()
+      })
+      .catch((err) => {
+        log.warn('nativeFullscreen.unavailable', { err })
+      })
+
+    return () => {
+      cancelled = true
+      if (closeFullscreen) void closeFullscreen()
+    }
+  }, [open])
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        className="max-w-[92vw] gap-3 p-4"
+        className="inset-0 top-0 left-0 flex h-full max-w-none translate-x-0 translate-y-0 flex-col gap-3 rounded-none border-0 p-4"
         aria-describedby={undefined}
       >
-        <DialogHeader>
+        <DialogHeader className="shrink-0">
           <DialogTitle className="pr-8 text-base">{name}</DialogTitle>
         </DialogHeader>
         <video
@@ -57,7 +89,7 @@ export function ScreenShareViewer({
           playsInline
           muted
           data-testid="screen-share-viewer-video"
-          className="max-h-[76vh] w-full rounded-md bg-bg-sunk object-contain"
+          className="min-h-0 w-full flex-1 rounded-md bg-bg-sunk object-contain"
         />
       </DialogContent>
     </Dialog>
