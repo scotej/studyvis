@@ -8,6 +8,7 @@ import {
   validateOutgoingImage,
   verifyIncomingImage,
 } from '@/features/session/images'
+import { saveSessionImage } from '@/features/session/imageSave'
 import { useNotesStore } from '@/features/session/notesStore'
 import {
   bytesToHex,
@@ -19,9 +20,9 @@ const TOPIC = 'session-image-topic'
 // prettier-ignore
 const VALID_PNG_BYTES = new Uint8Array([
   137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0,
-  1, 0, 0, 0, 1, 8, 4, 0, 0, 0, 181, 28, 12, 2, 0, 0, 0, 11, 73, 68,
-  65, 84, 120, 218, 99, 252, 255, 31, 0, 2, 235, 1, 245, 143, 89, 210, 45,
-  0, 0, 0, 0, 73, 69, 78, 68, 174, 66, 96, 130,
+  1, 0, 0, 0, 1, 8, 6, 0, 0, 0, 31, 21, 196, 137, 0, 0, 0, 13, 73, 68,
+  65, 84, 120, 156, 99, 248, 207, 192, 240, 31, 0, 5, 0, 1, 255, 137, 153,
+  61, 29, 0, 0, 0, 0, 73, 69, 78, 68, 174, 66, 96, 130,
 ])
 
 function makeSigner() {
@@ -133,10 +134,46 @@ describe('session image store lifecycle', () => {
       mimeType: 'image/png',
       width: 10,
       height: 10,
+      frameCount: 1,
       ts: 1,
     })
     expect(useNotesStore.getState().images[0]?.objectUrl).toBe('blob:fixture')
     useNotesStore.getState().reset()
     expect(revokeObjectURL).toHaveBeenCalledWith('blob:fixture')
+  })
+})
+
+describe('session image save', () => {
+  test('writes exact bytes after a chosen path', async () => {
+    const writeFile = vi.fn(async () => {})
+    const result = await saveSessionImage(
+      new Blob([VALID_PNG_BYTES], { type: 'image/png' }),
+      'image.png',
+      'image/png',
+      {
+        pickPath: async () => '/tmp/image.png',
+        writeFile,
+      }
+    )
+    expect(result).toBe('saved')
+    expect(writeFile).toHaveBeenCalledWith(
+      '/tmp/image.png',
+      Array.from(VALID_PNG_BYTES)
+    )
+  })
+
+  test('does not write when the dialog is cancelled', async () => {
+    const writeFile = vi.fn(async () => {})
+    const result = await saveSessionImage(
+      new Blob([VALID_PNG_BYTES], { type: 'image/png' }),
+      'image.png',
+      'image/png',
+      {
+        pickPath: async () => null,
+        writeFile,
+      }
+    )
+    expect(result).toBe('cancelled')
+    expect(writeFile).not.toHaveBeenCalled()
   })
 })

@@ -108,6 +108,7 @@ import { SessionInviteDialog } from './SessionInviteDialog'
 import {
   buildImagePayload,
   IMAGE_ACTION,
+  inspectImageBytes,
   isImageMimeType,
   readImageDimensions,
   SessionImageError,
@@ -296,9 +297,11 @@ export function SessionView({
   const [audioSwapping, setAudioSwapping] = useState(false)
   // #47 A2 — mid-session invite picker (host only; see the footer button).
   const [inviteOpen, setInviteOpen] = useState(false)
-  const [openSessionImage, setOpenSessionImage] = useState<SessionImage | null>(
+  const [openSessionImageId, setOpenSessionImageId] = useState<string | null>(
     null
   )
+  const openSessionImage =
+    sessionImages.find((image) => image.id === openSessionImageId) ?? null
   const friends = useFriendsStore((s) => s.friends)
   // #47 B2 — ref so the sample-loop effect's toast callbacks reach the
   // current opener without adding it to the effect deps (same pattern as
@@ -904,15 +907,24 @@ export function SessionView({
         sessionTopic
       )
       if (!verified) return
-      useNotesStore.getState().appendImage({
-        fromEdPubkeyHex: verified.metadata.from_ed_pubkey,
-        mine: false,
-        blob: verified.blob,
-        filename: verified.metadata.filename,
-        mimeType: verified.metadata.mime_type,
-        width: verified.metadata.width,
-        height: verified.metadata.height,
-        ts: verified.metadata.ts,
+      void readImageDimensions(verified.blob).then((decoded) => {
+        if (
+          decoded.width !== verified.metadata.width ||
+          decoded.height !== verified.metadata.height
+        ) {
+          return
+        }
+        useNotesStore.getState().appendImage({
+          fromEdPubkeyHex: verified.metadata.from_ed_pubkey,
+          mine: false,
+          blob: verified.blob,
+          filename: verified.metadata.filename,
+          mimeType: verified.metadata.mime_type,
+          width: verified.metadata.width,
+          height: verified.metadata.height,
+          frameCount: verified.frameCount,
+          ts: verified.metadata.ts,
+        })
       })
     })
 
@@ -961,9 +973,19 @@ export function SessionView({
         height: dimensions.height,
         sign,
       })
+      await imageAction.send(
+        payload.bytes,
+        undefined,
+        payload.metadata as ImageMetadata
+      )
       const localBlob = new Blob([payload.bytes.slice()], {
         type: payload.metadata.mime_type,
       })
+      const inspection = inspectImageBytes(
+        payload.bytes,
+        payload.metadata.mime_type
+      )
+      if (!inspection) throw new SessionImageError('invalid_image')
       useNotesStore.getState().appendImage({
         fromEdPubkeyHex: myEdPubkeyHex,
         mine: true,
@@ -972,13 +994,9 @@ export function SessionView({
         mimeType: payload.metadata.mime_type,
         width: payload.metadata.width,
         height: payload.metadata.height,
+        frameCount: inspection.frameCount,
         ts: payload.metadata.ts,
       })
-      await imageAction.send(
-        payload.bytes,
-        undefined,
-        payload.metadata as ImageMetadata
-      )
     }
 
     const dispatcher = startAiAlertDispatcher({
@@ -1974,14 +1992,14 @@ export function SessionView({
             resolveName={resolveNoteName}
             onSend={handleSendNote}
             onSendImage={handleSendImage}
-            onOpenImage={setOpenSessionImage}
+            onOpenImage={(image) => setOpenSessionImageId(image.id)}
           />
         </div>
       </div>
       <SessionImageViewer
         image={openSessionImage}
         onOpenChange={(open) => {
-          if (!open) setOpenSessionImage(null)
+          if (!open) setOpenSessionImageId(null)
         }}
         resolveName={resolveNoteName}
       />

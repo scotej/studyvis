@@ -56,6 +56,7 @@ export type BuiltImagePayload = {
 export type VerifiedImagePayload = {
   blob: Blob
   metadata: ImageMetadata
+  frameCount: number
 }
 
 type ImageInspection = {
@@ -164,14 +165,16 @@ export function inspectImageBytes(
   bytes: Uint8Array,
   mimeType: ImageMimeType
 ): ImageInspection | null {
-  const inspection =
-    mimeType === 'image/png'
-      ? inspectPng(bytes)
-      : mimeType === 'image/jpeg'
-        ? inspectJpeg(bytes)
-        : mimeType === 'image/gif'
-          ? inspectGif(bytes)
-          : inspectWebp(bytes)
+  const inspectors: Record<
+    ImageMimeType,
+    (input: Uint8Array) => ImageInspection | null
+  > = {
+    'image/png': inspectPng,
+    'image/jpeg': inspectJpeg,
+    'image/webp': inspectWebp,
+    'image/gif': inspectGif,
+  }
+  const inspection = inspectors[mimeType](bytes)
 
   if (
     !inspection ||
@@ -336,6 +339,7 @@ export function verifyIncomingImage(
   return {
     blob: new Blob([bytes.slice()], { type: value.mime_type }),
     metadata: { ...core, sig: value.sig },
+    frameCount: inspection.frameCount,
   }
 }
 
