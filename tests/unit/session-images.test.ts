@@ -69,12 +69,7 @@ describe('session image wire', () => {
     tamperedBytes[tamperedBytes.length - 1] ^= 1
 
     expect(
-      verifyIncomingImage(
-        tamperedBytes,
-        payload.metadata,
-        signer.edHex,
-        TOPIC
-      )
+      verifyIncomingImage(tamperedBytes, payload.metadata, signer.edHex, TOPIC)
     ).toBeNull()
     expect(
       verifyIncomingImage(
