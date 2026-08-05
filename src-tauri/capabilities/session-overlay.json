@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "session-overlay",
+  "description": "Least-privilege capability for the transient in-session overlay window.",
+  "windows": ["session-overlay"],
+  "permissions": ["core:default", "core:window:allow-close"]
+}
