@@ -97,7 +97,13 @@ export function useSessionOverlayBridge(): void {
       })
     }
     pruneSeen(alertedKeys.current, activeKeys)
-  }, [alertedPeers, seenPeerNames, selfDisplayName, selfEdPubkey, status])
+  }, [
+    alertedPeers,
+    seenPeerNames,
+    selfDisplayName,
+    selfEdPubkey,
+    status,
+  ])
 
   useEffect(() => {
     const activeIds = new Set(notes.map((note) => note.id))
