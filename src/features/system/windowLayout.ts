@@ -25,11 +25,14 @@ export type WindowSnapshot = {
   scaleFactor: number
   maximized: boolean
   minimized: boolean
+  fullscreen: boolean
 }
 
 // Decides what (if anything) to persist for a snapshot. Returns null when
 // nothing should be written:
 // - minimized: Windows reports off-screen placeholder geometry (-32000).
+// - fullscreen: display-sized geometry is transient and must not replace the
+//   last floating rect.
 // - maximized: only the flag flips — the floating rect keeps its last
 //   value so unmaximize-after-relaunch returns to the remembered size. With
 //   no prior floating rect there is nothing restorable yet, so skip.
@@ -38,7 +41,7 @@ export function nextWindowLayout(
   prev: WindowLayout | null,
   snap: WindowSnapshot
 ): WindowLayout | null {
-  if (snap.minimized) return null
+  if (snap.minimized || snap.fullscreen) return null
   const next: WindowLayout | null = snap.maximized
     ? prev
       ? { ...prev, maximized: true }
@@ -76,15 +79,15 @@ export function isTauriRuntime(): boolean {
 
 export async function captureWindowSnapshot(): Promise<WindowSnapshot> {
   const w = getCurrentWindow()
-  const [size, position, scaleFactor, maximized, minimized] = await Promise.all(
-    [
+  const [size, position, scaleFactor, maximized, minimized, fullscreen] =
+    await Promise.all([
       w.innerSize(),
       w.outerPosition(),
       w.scaleFactor(),
       w.isMaximized(),
       w.isMinimized(),
-    ]
-  )
+      w.isFullscreen(),
+    ])
   return {
     width: size.width,
     height: size.height,
@@ -93,6 +96,7 @@ export async function captureWindowSnapshot(): Promise<WindowSnapshot> {
     scaleFactor,
     maximized,
     minimized,
+    fullscreen,
   }
 }
 

@@ -37,6 +37,7 @@ function snap(overrides: Partial<WindowSnapshot> = {}): WindowSnapshot {
     scaleFactor: 1,
     maximized: false,
     minimized: false,
+    fullscreen: false,
     ...overrides,
   }
 }
@@ -58,6 +59,16 @@ describe('nextWindowLayout', () => {
     expect(
       nextWindowLayout(FLOATING, snap({ minimized: true, maximized: true }))
     ).toBeNull()
+  })
+
+  test('skips fullscreen geometry and preserves the last floating rect', () => {
+    expect(
+      nextWindowLayout(
+        FLOATING,
+        snap({ fullscreen: true, width: 2560, height: 1440, x: 0, y: 0 })
+      )
+    ).toBeNull()
+    expect(nextWindowLayout(null, snap({ fullscreen: true }))).toBeNull()
   })
 
   test('maximized flips only the flag, preserving the floating rect', () => {

@@ -655,7 +655,7 @@ export const strings = {
       stopCta: 'Stop sharing',
       selfTileName: 'Your screen',
       peerTileName: (name: string) => `${name}'s screen`,
-      expandAriaLabel: (name: string) => `View ${name} at full size`,
+      expandAriaLabel: (name: string) => `View ${name} in fullscreen`,
       startedToast: "You're sharing your screen.",
       stoppedToast: 'You stopped sharing your screen.',
       // NotAllowedError covers both "you dismissed the picker" and "the OS has
