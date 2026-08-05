@@ -1,0 +1,26 @@
+name: Format debug
+
+on:
+  push:
+    branches:
+      - feat/in-session-overlay-183
+
+permissions:
+  contents: read
+
+jobs:
+  format:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Print formatted runtime
+        run: npx prettier src/features/session/sessionOverlayRuntime.ts
+      - name: Print formatted bridge
+        run: npx prettier src/features/session/useSessionOverlayBridge.ts
