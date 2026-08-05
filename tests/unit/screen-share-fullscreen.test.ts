@@ -100,6 +100,7 @@ describe('screen-share fullscreen controller', () => {
 
     await controller.open()
     harness.setActive(false)
+    // setActive already emitted once; emit again to verify one-shot closure.
     harness.emitChange()
     await flushMicrotasks()
 

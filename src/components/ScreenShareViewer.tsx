@@ -53,8 +53,12 @@ export function ScreenShareViewer({
     let closeFullscreen: (() => Promise<void>) | null = null
 
     void createNativeScreenShareFullscreenRuntime()
+      .catch((err) => {
+        log.warn('nativeFullscreen.unavailable', { err })
+        return null
+      })
       .then(async (runtime) => {
-        if (cancelled) return
+        if (!runtime || cancelled) return
         const controller = createScreenShareFullscreenController(
           runtime,
           () => {
@@ -62,10 +66,11 @@ export function ScreenShareViewer({
           }
         )
         closeFullscreen = controller.close
-        await controller.open()
-      })
-      .catch((err) => {
-        log.warn('nativeFullscreen.unavailable', { err })
+        try {
+          await controller.open()
+        } catch (err) {
+          log.warn('nativeFullscreen.enterFailed', { err })
+        }
       })
 
     return () => {
