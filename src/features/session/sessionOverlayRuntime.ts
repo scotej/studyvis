@@ -116,10 +116,13 @@ function scheduleExpiry(expiresAt: number | null, now: number): void {
     expiryTimer = null
   }
   if (expiresAt === null) return
-  expiryTimer = setTimeout(() => {
-    expiryTimer = null
-    void runSerial(syncOverlayWindow)
-  }, Math.max(0, expiresAt - now))
+  expiryTimer = setTimeout(
+    () => {
+      expiryTimer = null
+      void runSerial(syncOverlayWindow)
+    },
+    Math.max(0, expiresAt - now)
+  )
 }
 
 async function ensureOverlayWindow(): Promise<WebviewWindow | null> {
