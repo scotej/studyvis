@@ -1,7 +1,7 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
 
 import { SessionNotesPanel } from '@/features/session/SessionNotesPanel'
-import type { SessionNote } from '@/features/session/notesStore'
+import type { SessionImage, SessionNote } from '@/features/session/notesStore'
 
 // #47 B6 — the quiet in-session text strip (pure view; wire + store live in
 // SessionView / notes.ts).
@@ -30,8 +30,11 @@ const meta = {
   component: SessionNotesPanel,
   args: {
     onSend: () => {},
-    resolveName: (n: SessionNote) =>
-      n.mine ? 'You' : (NAMES[n.fromEdPubkeyHex] ?? 'Peer'),
+    onSendImage: () => {},
+    onOpenImage: () => {},
+    resolveName: (item: SessionNote | SessionImage) =>
+      item.mine ? 'You' : (NAMES[item.fromEdPubkeyHex] ?? 'Peer'),
+    images: [],
     notes: [
       note(1, 'alice', false, 'brb 5'),
       note(2, 'me', true, 'np, grinding through problem 4'),

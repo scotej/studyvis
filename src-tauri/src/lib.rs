@@ -70,8 +70,8 @@ use commands::system::{
     system_minimize_to_tray_set_enabled, system_open_camera_settings, system_open_data_folder,
     system_open_microphone_settings, system_open_notification_settings, system_open_releases,
     system_open_screen_capture_settings, system_relaunch_app, system_set_global_shortcut,
-    system_write_text_file, AiFeaturesFlag, MinimizeToTrayFlag, QuitFlag, SessionActiveFlag,
-    ShortcutBindings,
+    system_write_binary_file, system_write_text_file, AiFeaturesFlag, MinimizeToTrayFlag, QuitFlag,
+    SessionActiveFlag, ShortcutBindings,
 };
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -158,6 +158,8 @@ pub fn run() {
         system_open_data_folder,
         #[cfg(desktop)]
         system_write_text_file,
+        #[cfg(desktop)]
+        system_write_binary_file,
         #[cfg(desktop)]
         system_open_releases,
         #[cfg(desktop)]
