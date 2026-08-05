@@ -109,7 +109,7 @@ export function SessionNotesPanel({
                     className="mt-1 block w-full overflow-hidden rounded-md border border-border-subtle bg-bg-sunk text-left outline-none focus-visible:ring-3 focus-visible:ring-accent-ring"
                     aria-label={imageCopy.openImage(resolveName(entry))}
                   >
-                    {reduceMotion && entry.mimeType === 'image/gif' ? (
+                    {reduceMotion && entry.frameCount > 1 ? (
                       <span className="flex min-h-24 items-center justify-center px-3 text-center text-xs text-text-secondary">
                         {entry.filename}
                       </span>

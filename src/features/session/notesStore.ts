@@ -7,6 +7,9 @@ import { create } from 'zustand'
 // 90-minute session can't grow memory unbounded.
 
 export const NOTES_CAP = 100
+export const IMAGES_CAP = 12
+export const IMAGES_MAX_STORED_BYTES = 20 * 1024 * 1024
+export const IMAGES_MAX_STORED_PIXELS = 64 * 1024 * 1024
 
 export type SessionNote = {
   // `${from}:${ts}:${seq}` — unique enough for React keys within a session.
@@ -27,6 +30,7 @@ export type SessionImage = {
   mimeType: string
   width: number
   height: number
+  frameCount: number
   ts: number
 }
 
@@ -60,8 +64,21 @@ export const useNotesStore = create<NotesState>((set) => ({
         objectUrl: URL.createObjectURL(image.blob),
       }
       const next = [...s.images, entry]
-      const kept = next.length > NOTES_CAP ? next.slice(-NOTES_CAP) : next
-      for (const removed of next.slice(0, next.length - kept.length)) {
+      const kept = [...next]
+      let encodedBytes = kept.reduce((total, item) => total + item.blob.size, 0)
+      let decodedPixels = kept.reduce(
+        (total, item) => total + item.width * item.height * item.frameCount,
+        0
+      )
+      while (
+        kept.length > IMAGES_CAP ||
+        encodedBytes > IMAGES_MAX_STORED_BYTES ||
+        decodedPixels > IMAGES_MAX_STORED_PIXELS
+      ) {
+        const removed = kept.shift()
+        if (!removed) break
+        encodedBytes -= removed.blob.size
+        decodedPixels -= removed.width * removed.height * removed.frameCount
         URL.revokeObjectURL(removed.objectUrl)
       }
       return { images: kept }

@@ -127,7 +127,7 @@ export function SessionImageViewer({
               aria-label={copy.imageAlt(resolveName(image))}
               className="min-h-0 overflow-auto rounded-md bg-bg-sunk p-3 outline-none focus-visible:ring-3 focus-visible:ring-inset focus-visible:ring-accent-ring"
             >
-              {reduceMotion && image.mimeType === 'image/gif' ? (
+              {reduceMotion && image.frameCount > 1 ? (
                 <div className="flex min-h-64 items-center justify-center px-4 text-center text-sm text-text-secondary">
                   {image.filename}
                 </div>
