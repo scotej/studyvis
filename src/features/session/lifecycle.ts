@@ -421,11 +421,11 @@ export type RoomLifecycle = {
   peers: () => readonly string[]
 }
 
-// S1 — grace window before the everyone-else-left auto-end fires. A WiFi blip
-// drops the transport to every peer at once and trystero fires onPeerLeave for
-// each, crashing the count to 0; without a debounce a 5-second hiccup
-// irreversibly ends a 90-minute session. We arm a timer when the room empties
-// and only run the leave handler if it's STILL empty when the timer expires.
+// S1 / #190 — grace window before the everyone-else-left auto-end fires. A
+// WiFi blip or an accidental Leave can drop the transport to every peer at
+// once; without a debounce either event irreversibly ends a long session. We
+// arm a timer whenever the room empties and only run the leave handler if it is
+// STILL empty when the timer expires.
 // trystero re-fires onPeerJoin on reconnect (and the cumulative
 // seenPeerEdPubkeys set in the session store survives the gap, so the report
 // still records who we studied with). Injectable scheduler so the unit tests
@@ -448,7 +448,7 @@ const defaultGraceScheduler: GraceScheduler = {
 // host enforces the 4-user cap here (rejects the 4th remote peer); guests
 // listen for 'session-full' and tear down with a toast. Both sides auto-end
 // when peer count stays at 0 for DISCONNECT_GRACE_MS after at least one peer
-// was present.
+// was present, including after a signed deliberate Leave.
 export function wireSessionRoom(
   room: TopicRoom,
   hooks: WireHooks,
@@ -460,10 +460,9 @@ export function wireSessionRoom(
   let hadAny = false
   // Peers that vanished WITHOUT the signed 'left' broadcast a deliberate Leave
   // sends first, and haven't returned. Tracked per-peer (not a single flag) so
-  // an intervening join by a DIFFERENT peer can't erase the memory of one still
-  // absent: the grace window is skipped only when this set is empty. In a
-  // 3-way session where one peer leaves on purpose and another blips we still
-  // wait, which is the safe way to be wrong.
+  // an intervening join by a DIFFERENT peer cannot erase the memory of one
+  // still absent. The set controls end attribution after the shared grace
+  // window: unexplained absence is `auto`; explained absence is `peer`.
   const unexplainedAbsent = new Set<string>()
   let graceHandle: number | null = null
   const sessionFull = room.makeAction<null>(SESSION_FULL_ACTION)
@@ -492,11 +491,13 @@ export function wireSessionRoom(
           graceMs,
           unexplainedPeerCount: unexplainedAbsent.size,
         })
-        // #47 B3 — stage the reason BEFORE the leave handler runs (first
-        // writer wins; the handler itself stages 'user') so markEnded
-        // records this as an auto-end and the Report can offer Rejoin (the
-        // room may still be live without us after a >20s blip).
-        useSessionStore.getState().setPendingEndReason('auto')
+        // Preserve why the room emptied while still giving every departure
+        // the same recovery window. An unexplained absence may be a transport
+        // blip, while a signed `left` means the peer chose Leave and simply
+        // did not rejoin before the deadline.
+        useSessionStore
+          .getState()
+          .setPendingEndReason(unexplainedAbsent.size > 0 ? 'auto' : 'peer')
         void hooks.leave()
       }
     }, graceMs)
@@ -507,6 +508,7 @@ export function wireSessionRoom(
       log.warn('session_full.received', { role: 'guest' })
       toast.error(SESSION_FULL_MESSAGE)
       cancelGrace()
+      useSessionStore.getState().setPendingEndReason('peer')
       void hooks.leave()
     })
   }
@@ -532,8 +534,8 @@ export function wireSessionRoom(
       }
       return
     }
-    // A (re)join cancels a pending auto-end: the transport recovered before
-    // the grace window expired.
+    // A (re)join cancels the pending end: either the transport recovered or a
+    // user reversed an accidental Leave before the grace window expired.
     cancelGrace()
     unexplainedAbsent.delete(peerId)
     peers.add(peerId)
@@ -558,18 +560,7 @@ export function wireSessionRoom(
       explained,
     })
     if (peers.size === 0 && hadAny) {
-      if (unexplainedAbsent.size > 0) {
-        armGrace()
-      } else {
-        // Every peer that left told us so first, so the room is provably
-        // empty: end now instead of showing "waiting for your friend to
-        // reconnect" for 20 s about someone who isn't coming back. 'peer'
-        // (not 'auto') keeps the Report from offering Rejoin into a room
-        // nobody is in.
-        cancelGrace()
-        store.setPendingEndReason('peer')
-        void hooks.leave()
-      }
+      armGrace()
     }
   })
 

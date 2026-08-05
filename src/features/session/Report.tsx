@@ -85,12 +85,12 @@ export type ReportProps = {
   // closing the report drops the UI back to the friends list; the Settings
   // → Sessions re-open passes a back-to-list handler instead.
   onClose: () => void
-  // #47 B3 — present only when the session auto-ended (S1 grace expiry) and
-  // the store still holds the topic + password: a >20s blip strands a guest
-  // while the room may still be live, invites are one-shot, and the host is
-  // heads-down. Rejoining re-enters the same room; the second leave cycle
-  // merges into the topic-keyed row (mergeSessionStints in lifecycle.ts),
-  // so the report after a rejoin shows accumulated whole-session totals.
+  // #47 B3 / #190 — present when a transport-loss grace period expired or
+  // the local user deliberately left while the remote room may still be in
+  // its matching 20-second grace period. Rejoining re-enters the same room;
+  // the second leave cycle merges into the topic-keyed row
+  // (mergeSessionStints in lifecycle.ts), so the report after a rejoin shows
+  // accumulated whole-session totals.
   onRejoin?: () => void
   // Issue #161 — only the just-ended Home route opts into this action. A
   // report reopened from Settings must not label today's logs as belonging to

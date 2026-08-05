@@ -272,8 +272,9 @@ export function Home() {
 
   const aiOn = () => useSettingsStore.getState().values.aiFeaturesEnabled
 
-  // #47 B3 — re-enter the still-live room after a grace-window auto-end.
-  // Reuses the already-declared topic (no AI topic-gate re-prompt) and the
+  // #47 B3 / #190 — re-enter the still-live room after a grace-window
+  // auto-end or an accidental local Leave. Reuses the already-declared topic
+  // (no AI topic-gate re-prompt) and the
   // credentials the store holds until the Report closes; joinSession's
   // begin() flips status to 'active', unmounting the Report.
   const handleRejoin = useCallback(() => {
@@ -498,7 +499,11 @@ export function Home() {
         <Report
           sessionId={sessionTopic}
           onClose={() => useSessionStore.getState().reset()}
-          onRejoin={sessionEndedBy === 'auto' ? handleRejoin : undefined}
+          onRejoin={
+            sessionEndedBy === 'auto' || sessionEndedBy === 'user'
+              ? handleRejoin
+              : undefined
+          }
           showDiagnosticsExport
         />
         {tail}

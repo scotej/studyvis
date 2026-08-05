@@ -12,12 +12,11 @@ import type { TopicRoom } from '@/lib/trystero'
 
 export type SessionStatus = 'idle' | 'active' | 'ended'
 
-// #47 B3 — why the last session ended. 'auto' = the S1 grace window expired
-// (a >20s connection blip), which is the one case where the room may still
-// be live without us — the Report offers Rejoin there. 'peer' = every peer
-// that left broadcast a signed 'left' first, so the room is provably empty
-// and Rejoin would land in a dead room. 'user' covers every deliberate local
-// path (Leave click, double-Esc, confirmed quit, session-full eviction).
+// #47 B3 / #190 — why the last session ended. 'auto' = the S1 grace window
+// expired after an unexplained transport loss. 'peer' = the grace window
+// expired after every absent peer broadcast a signed `left`, or this client
+// was evicted from a full room. 'user' covers a deliberate local Leave and is
+// rejoinable while the remote peer's matching grace window remains open.
 // null until a session has ended.
 export type SessionEndReason = 'user' | 'auto' | 'peer'
 

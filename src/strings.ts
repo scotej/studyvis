@@ -159,7 +159,7 @@ export const strings = {
         },
         leave: {
           title: 'Leave any time',
-          body: 'Click Leave to drop out. The session ends for everyone when only one of you is left.',
+          body: 'Click Leave to drop out. If that was a mistake, rejoin within 20 seconds before the session ends.',
         },
         ai: {
           title: 'AI is optional',
