@@ -20,6 +20,12 @@ export type SessionStatus = 'idle' | 'active' | 'ended'
 // null until a session has ended.
 export type SessionEndReason = 'user' | 'auto' | 'peer'
 
+export type SessionRejoinRequest = {
+  sessionTopic: string
+  sessionPassword: string
+  isHost: boolean
+}
+
 // Mirrors the validated payload shape returned by the V1-P9 signed-hello
 // handshake. Inlined here so the store does not import a feature module
 // (keeps stores → lib + zustand only, matching friendsStore / pttStore).
@@ -69,6 +75,10 @@ type SessionState = {
   // attribution — a grace timer firing while a deliberate Leave's async
   // teardown is mid-flight can no longer rewrite it to 'auto'.
   pendingEndReason: SessionEndReason | null
+  // Absolute wall-clock deadline captured when teardown begins. It starts
+  // before room.leave(), persistence, and report loading, so slow cleanup
+  // cannot accidentally extend the remote peer's recovery window.
+  rejoinDeadline: number | null
   sessionTopic: string | null
   sessionPassword: string | null
   isHost: boolean
@@ -117,9 +127,9 @@ type SessionState = {
   seenPeerNames: Record<string, string>
   // trystero peerIds that broadcast a verified 'left' audit event this
   // session — the departures we can explain. The lifecycle wiring reads this
-  // to skip the S1 grace window when the room empties for a deliberate
-  // departure; `peerJoined` drops an id again so a re-invited peer's later
-  // blip still gets the window. Cleared by begin/reset.
+  // to preserve end attribution after the shared grace window; `peerJoined`
+  // drops an id again so a re-invited peer's later blip is treated as an
+  // unexplained disconnect. Cleared by begin/reset.
   departedPeerIds: string[]
   begin: (init: SessionInit) => void
   setPendingInitialTopic: (topic: string | null) => void
@@ -135,6 +145,8 @@ type SessionState = {
   // populate sessions.peer_pubkeys. NULL until at least one hello arrived.
   collectPeerPubkeys: () => string | null
   setPendingEndReason: (reason: SessionEndReason) => void
+  setRejoinDeadline: (deadline: number | null) => void
+  getRejoinRequest: (now?: number) => SessionRejoinRequest | null
   // Flip status to 'ended' so Home.tsx can mount the post-session Report
   // (V2-P8). The Report queries SQLite for the just-persisted sessions
   // row + audit_events; the in-memory peers / displayNames aren't
@@ -149,6 +161,7 @@ const INITIAL: Pick<
   | 'status'
   | 'endedBy'
   | 'pendingEndReason'
+  | 'rejoinDeadline'
   | 'sessionTopic'
   | 'sessionPassword'
   | 'isHost'
@@ -168,6 +181,7 @@ const INITIAL: Pick<
   status: 'idle',
   endedBy: null,
   pendingEndReason: null,
+  rejoinDeadline: null,
   sessionTopic: null,
   sessionPassword: null,
   isHost: false,
@@ -198,6 +212,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         status: 'active',
         endedBy: null,
         pendingEndReason: null,
+        rejoinDeadline: null,
         sessionTopic: init.sessionTopic,
         sessionPassword: init.sessionPassword,
         isHost: init.isHost,
@@ -308,6 +323,25 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     set((s) =>
       s.pendingEndReason === null ? { pendingEndReason: reason } : s
     ),
+  setRejoinDeadline: (deadline) => set({ rejoinDeadline: deadline }),
+  getRejoinRequest: (now = Date.now()) => {
+    const s = get()
+    if (
+      s.status !== 'ended' ||
+      (s.endedBy !== 'auto' && s.endedBy !== 'user') ||
+      s.rejoinDeadline === null ||
+      now >= s.rejoinDeadline ||
+      !s.sessionTopic ||
+      !s.sessionPassword
+    ) {
+      return null
+    }
+    return {
+      sessionTopic: s.sessionTopic,
+      sessionPassword: s.sessionPassword,
+      isHost: s.isHost,
+    }
+  },
   markEnded: () =>
     set((s) =>
       s.status === 'active'

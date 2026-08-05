@@ -3,9 +3,8 @@ import { beforeEach, describe, expect, test } from 'vitest'
 import type { TopicRoom } from '@/lib/trystero'
 import { useSessionStore } from '@/stores/sessionStore'
 
-// #47 B3 — markEnded records WHY the session ended so the Report can offer
-// Rejoin exactly for the S1 grace-window auto-end (the one case where the
-// room may still be live without us).
+// #47 B3 / #190 — markEnded records why the session ended and the store
+// rejects stale report actions once the teardown-time rejoin deadline passes.
 
 function begin(): void {
   useSessionStore.getState().begin({
@@ -85,6 +84,39 @@ describe('session end reason (#47 B3)', () => {
     useSessionStore.getState().setPendingEndReason('user')
     useSessionStore.getState().markEnded()
     expect(useSessionStore.getState().endedBy).toBe('auto')
+  })
+
+  test.each(['auto', 'user'] as const)(
+    'rejects a late rejoin request after a %s ending',
+    (reason) => {
+      begin()
+      useSessionStore.getState().setPendingEndReason(reason)
+      useSessionStore.getState().setRejoinDeadline(20_000)
+      useSessionStore.getState().markEnded()
+
+      expect(useSessionStore.getState().getRejoinRequest(19_999)).toEqual({
+        sessionTopic: 'topic',
+        sessionPassword: 'pw',
+        isHost: false,
+      })
+      expect(useSessionStore.getState().getRejoinRequest(20_000)).toBeNull()
+    }
+  )
+
+  test('preserves the prior role in an eligible rejoin request', () => {
+    useSessionStore.getState().begin({
+      sessionTopic: 'topic',
+      sessionPassword: 'pw',
+      isHost: true,
+      startedAt: 1_700_000_000_000,
+      room: {} as TopicRoom,
+      leave: async () => {},
+    })
+    useSessionStore.getState().setRejoinDeadline(20_000)
+    useSessionStore.getState().markEnded()
+    expect(useSessionStore.getState().getRejoinRequest(19_999)?.isHost).toBe(
+      true
+    )
   })
 
   test('reset clears the reason', () => {

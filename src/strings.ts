@@ -817,8 +817,8 @@ export const strings = {
   report: {
     notFound: 'Session not found.',
     loadErrorFallback: "Couldn't load the report.",
-    // #47 B3 — shown only after an S1 grace-window auto-end, where the room
-    // may still be live without you.
+    // #47 B3 / #190 — shown after an eligible auto or local-user ending
+    // while the remote room's teardown-time grace deadline is still open.
     rejoinCta: 'Rejoin session',
     // #47 D5 — calm data-quality caveat when a material share of AI checks
     // couldn't be read (see sampleQualitySummary): the focused-time % above

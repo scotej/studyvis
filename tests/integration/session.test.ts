@@ -195,7 +195,7 @@ vi.mock('@/lib/trystero', () => {
   }
 })
 
-import { hostSession, joinSession } from '@/features/session'
+import { hostSession, joinSession, rejoinSession } from '@/features/session'
 import { MAX_REMOTE_PEERS } from '@/features/session/lifecycle'
 import { useSessionStore } from '@/stores/sessionStore'
 
@@ -286,6 +286,26 @@ describe('mesh hard-cap', () => {
     // Cleanup so rooms don't leak across tests. Each leave is idempotent.
     await host.leave()
     for (const g of guests) await g.leave()
+  })
+
+  test('a rejoined host preserves host role and cap enforcement', async () => {
+    const topic = 'rejoin-host-topic'
+    const password = 'rejoin-host-password'
+    const host = rejoinSession(topic, password, true)
+    expect(useSessionStore.getState().isHost).toBe(true)
+
+    const guests = [
+      joinSession(topic, password),
+      joinSession(topic, password),
+      joinSession(topic, password),
+      joinSession(topic, password),
+    ]
+    await flushMicrotasks(12)
+
+    expect(host.peers()).toHaveLength(MAX_REMOTE_PEERS)
+
+    await host.leave()
+    for (const guest of guests) await guest.leave()
   })
 })
 

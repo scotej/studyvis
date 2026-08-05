@@ -274,6 +274,11 @@ export function buildLeaveHandler(args: {
     // practice — but capturing up front decouples us from that gate.
     const sessionState = useSessionStore.getState()
     const endReason = sessionState.pendingEndReason ?? 'user'
+    const rejoinable =
+      sessionState.hadAnyPeer && (endReason === 'auto' || endReason === 'user')
+    sessionState.setRejoinDeadline(
+      rejoinable ? endedAt + DISCONNECT_GRACE_MS : null
+    )
     const peerPubkeys = sessionState.collectPeerPubkeys()
     // Cumulative set, not the live `peers` map: on the everyone-else-leaves
     // auto-end path `peerLeft` has already pruned every entry by now.
@@ -389,6 +394,7 @@ export function buildLeaveHandler(args: {
     }
     log.info('session.end_completed', {
       endReason,
+      rejoinDeadline: rejoinable ? endedAt + DISCONNECT_GRACE_MS : null,
       totalMinutes: merged.totalMinutes,
       seenPeerCount: peerEdPubkeys.length,
       scoreRecorded: focusSnapshot.score !== null,
