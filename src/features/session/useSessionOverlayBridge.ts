@@ -151,7 +151,7 @@ export function useSessionOverlayBridge(): void {
     let cancelled = false
     const unlistens: Array<() => void> = []
 
-    const register = async <T,>(
+    const register = async <T>(
       eventName: string,
       handler: (payload: T) => void
     ): Promise<void> => {

@@ -1,3 +1,4 @@
+import { tokens } from '@/design/tokens'
 import { strings } from '@/strings'
 
 export const SESSION_OVERLAY_WINDOW_LABEL = 'session-overlay'
@@ -9,7 +10,7 @@ export const SESSION_OVERLAY_TTL_MS = 15_000
 export const SESSION_OVERLAY_QUEUE_CAP = 8
 export const SESSION_OVERLAY_WINDOW_WIDTH = 420
 export const SESSION_OVERLAY_WINDOW_HEIGHT = 144
-export const SESSION_OVERLAY_WINDOW_MARGIN = 16
+export const SESSION_OVERLAY_WINDOW_MARGIN = tokens.space[4]
 export const SESSION_OVERLAY_CREATE_TIMEOUT_MS = 5_000
 
 export type SessionOverlayTone = 'neutral' | 'warning' | 'alerted'

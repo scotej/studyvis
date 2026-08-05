@@ -1,6 +1,7 @@
 import { emitTo } from '@tauri-apps/api/event'
 import { WebviewWindow } from '@tauri-apps/api/webviewWindow'
 import {
+  currentMonitor,
   cursorPosition,
   getCurrentWindow,
   monitorFromPoint,
@@ -189,7 +190,7 @@ async function resolveOverlayPosition(): Promise<{
     const cursor = await cursorPosition()
     const monitor =
       (await monitorFromPoint(cursor.x, cursor.y)) ??
-      (await getCurrentWindow().currentMonitor()) ??
+      (await currentMonitor()) ??
       (await primaryMonitor())
     if (!monitor) return null
     const position = monitor.workArea.position.toLogical(monitor.scaleFactor)
