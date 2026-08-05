@@ -749,30 +749,31 @@ The `Ctrl+]` AI dialog is a separate Tauri window with:
                                                    │
                                           room empties (peer count 1)
                                                    │
-                     ┌─────────────────────────────┤
-                     │  every departure explained  │
-                     │  (each peer broadcast a     │
-                     │  signed `left` first)       ▼
-                     │               [20 s grace window (S1)]
-                     │                  │                │
-                     │  a peer reconnects              expires
-                     │                  │                │
-                     ▼                  ▼                ▼
-       [end now: persist row,     [media live]   [auto-end: persist row,
-        generate report,             (resume)     generate report]
-        reason `peer`]                                   │
-                     │                    Report offers Rejoin (#47 B3,
-                     │                    auto-ends only; re-entry merges
-                     │                    into the same sessions row)
-                     │                                   │
-                     └──────────────────┬────────────────┘
-                                        ▼
-                           [tear down, return to idle]
+                                                   ▼
+                                      [20 s grace window (S1)]
+                                           │               │
+                           peer reconnects/rejoins        expires
+                                           │               │
+                                           ▼               ▼
+                                      [media live]   [persist row,
+                                        (resume)      generate report]
+                                                           │
+                                         ┌─────────────────┴─────────────────┐
+                                         │ unexplained loss    signed `left` │
+                                         ▼                                  ▼
+                                   [reason `auto`]                    [reason `peer`]
+                                         │
+                              Report offers Rejoin (#47 B3;
+                              re-entry merges into the same row)
+                                         │
+                                         └─────────────────┬─────────────────┘
+                                                           ▼
+                                              [tear down, return to idle]
 ```
 
-A deliberate local Leave skips the grace window: it persists and reports immediately with reason `user` (no Rejoin offer).
+A deliberate local Leave persists and reports immediately with reason `user`, but the other participant keeps the room alive for the same 20-second grace period. The leaver's report offers Rejoin during that window; re-entry uses the existing topic and password and merges the new stint into the same session row.
 
-A deliberate *remote* Leave skips it too. `handleLeave` broadcasts a signed `left` audit event and awaits it before `room.leave()`; both ride the same ordered data channel, so the receiver has the peer marked as departed before trystero reports the departure. When the room empties and **every** departure since the last join was marked that way, the session ends immediately with reason `peer` — no waiting for a friend who isn't coming back, and no Rejoin button into a room nobody is in. Any unmarked departure (crash, kill, tray-quit, transport drop) keeps the full grace window and the `auto` + Rejoin path, and a peer re-invited into the still-live session clears their mark on rejoin so a later blip of theirs is debounced again.
+`handleLeave` broadcasts a signed `left` audit event and awaits it before `room.leave()`; both ride the same ordered data channel, so the receiver can retain accurate end attribution while still applying the shared grace period. If the peer returns before expiry, the pending end is cancelled and their departure mark is cleared. If the room remains empty, an unexplained departure ends with reason `auto`, while a fully explained deliberate departure ends with reason `peer`. Session-cap eviction remains non-rejoinable.
 
 ## 14. Threat model & known limitations
 

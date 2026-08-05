@@ -159,7 +159,7 @@ export const strings = {
         },
         leave: {
           title: 'Leave any time',
-          body: 'Click Leave to drop out. The session ends for everyone when only one of you is left.',
+          body: 'Click Leave to drop out. If that was a mistake, rejoin within 20 seconds before the session ends.',
         },
         ai: {
           title: 'AI is optional',
@@ -817,8 +817,8 @@ export const strings = {
   report: {
     notFound: 'Session not found.',
     loadErrorFallback: "Couldn't load the report.",
-    // #47 B3 — shown only after an S1 grace-window auto-end, where the room
-    // may still be live without you.
+    // #47 B3 / #190 — shown after an eligible auto or local-user ending
+    // while the remote room's teardown-time grace deadline is still open.
     rejoinCta: 'Rejoin session',
     // #47 D5 — calm data-quality caveat when a material share of AI checks
     // couldn't be read (see sampleQualitySummary): the focused-time % above

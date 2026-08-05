@@ -51,6 +51,7 @@ import {
   inviteToCurrentSession,
   InviteWhileGuestError,
   joinSession,
+  rejoinSession,
   Report,
   SessionView,
   TopicGateModal,
@@ -83,9 +84,11 @@ export function Home() {
   const settingsStatus = useSettingsStore((s) => s.status)
   const sessionStatus = useSessionStore((s) => s.status)
   const sessionTopic = useSessionStore((s) => s.sessionTopic)
-  // #47 B3 — 'auto' (S1 grace expiry) is the one end the Report offers
-  // Rejoin for; the store keeps topic+password until the Report closes.
+  // #47 B3 / #190 — auto and deliberate local endings may be rejoinable
+  // until the teardown-time deadline. The store retains credentials and the
+  // prior role until the report closes or a successful rejoin begins.
   const sessionEndedBy = useSessionStore((s) => s.endedBy)
+  const rejoinDeadline = useSessionStore((s) => s.rejoinDeadline)
   const [addOpen, setAddOpen] = useState(false)
   // F10 — words prefilled into the Add-friend Enter-code tab from an OS deep
   // link. Set alongside opening the dialog on the join tab; never auto-connects.
@@ -272,13 +275,15 @@ export function Home() {
 
   const aiOn = () => useSettingsStore.getState().values.aiFeaturesEnabled
 
-  // #47 B3 — re-enter the still-live room after a grace-window auto-end.
-  // Reuses the already-declared topic (no AI topic-gate re-prompt) and the
+  // #47 B3 / #190 — re-enter the still-live room after a grace-window
+  // auto-end or an accidental local Leave. Reuses the already-declared topic
+  // (no AI topic-gate re-prompt) and the
   // credentials the store holds until the Report closes; joinSession's
   // begin() flips status to 'active', unmounting the Report.
   const handleRejoin = useCallback(() => {
+    const request = useSessionStore.getState().getRejoinRequest()
+    if (!request) return
     const s = useSessionStore.getState()
-    if (!s.sessionTopic || !s.sessionPassword) return
     // I83 — Rejoin skips the topic gate, so it also used to skip the only
     // gesture-context screen pre-acquire (handleTopicSubmit's). This click IS
     // a user gesture; spend it the same way, or the rejoined session's boot()
@@ -293,7 +298,11 @@ export function Home() {
       s.setPendingInitialTopic(s.declaredStudyTopic)
     }
     try {
-      joinSession(s.sessionTopic, s.sessionPassword)
+      rejoinSession(
+        request.sessionTopic,
+        request.sessionPassword,
+        request.isHost
+      )
     } catch (err) {
       // I83 — the rejoin failed, so no SessionView will mount to consume (or
       // unmount to discard) the stream pre-acquired a few lines up. Release it
@@ -498,7 +507,13 @@ export function Home() {
         <Report
           sessionId={sessionTopic}
           onClose={() => useSessionStore.getState().reset()}
-          onRejoin={sessionEndedBy === 'auto' ? handleRejoin : undefined}
+          onRejoin={
+            rejoinDeadline !== null &&
+            (sessionEndedBy === 'auto' || sessionEndedBy === 'user')
+              ? handleRejoin
+              : undefined
+          }
+          rejoinDeadline={rejoinDeadline ?? undefined}
           showDiagnosticsExport
         />
         {tail}

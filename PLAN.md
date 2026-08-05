@@ -59,7 +59,7 @@ A complete, polished video-study app for friends. Zero AI code present. The app 
 - Session room — full-mesh WebRTC video + audio. Default-muted with `Ctrl+[` / `Cmd+[` push-to-talk for friends. Per-tile presence indicators (online / on-break / disconnected). Audit log panel showing per-user events: joined, took break, returned, left.
 - Pomodoro timer — opt-in, synced across all users via WebRTC data channel. Broadcaster role transfers on disconnect.
 - Free-form sessions also supported (no timer).
-- Session ends when only one user remains; each user can leave individually.
+- Session ends after a 20-second grace period when only one user remains; each user can leave individually and rejoin during that window after an accidental exit.
 - System tray + autostart-at-login (opt-in) so the user is reachable for invites.
 - Onboarding — welcome → permissions → identity setup (with BIP39 backup) → add first friend (or skip) → tutorial.
 - Settings — friends management, identity export/import, autostart toggle, PTT keybindings (fixed defaults; rebinding lands in V3), theme (dark / light / auto), notification preferences.

@@ -85,13 +85,16 @@ export type ReportProps = {
   // closing the report drops the UI back to the friends list; the Settings
   // → Sessions re-open passes a back-to-list handler instead.
   onClose: () => void
-  // #47 B3 — present only when the session auto-ended (S1 grace expiry) and
-  // the store still holds the topic + password: a >20s blip strands a guest
-  // while the room may still be live, invites are one-shot, and the host is
-  // heads-down. Rejoining re-enters the same room; the second leave cycle
-  // merges into the topic-keyed row (mergeSessionStints in lifecycle.ts),
-  // so the report after a rejoin shows accumulated whole-session totals.
+  // #47 B3 / #190 — present when a transport-loss grace period expired or
+  // the local user deliberately left while the remote room may still be in
+  // its matching 20-second grace period. Rejoining re-enters the same room;
+  // the second leave cycle merges into the topic-keyed row
+  // (mergeSessionStints in lifecycle.ts), so the report after a rejoin shows
+  // accumulated whole-session totals.
   onRejoin?: () => void
+  // Absolute deadline captured before teardown begins. The report may spend
+  // part of the window loading, so it must not start a fresh 20-second timer.
+  rejoinDeadline?: number
   // Issue #161 — only the just-ended Home route opts into this action. A
   // report reopened from Settings must not label today's logs as belonging to
   // an older session.
@@ -110,6 +113,14 @@ type Status =
   | { kind: 'loading' }
   | { kind: 'error'; message: string }
   | { kind: 'ready'; data: ResolvedReportData }
+
+function isRejoinAvailable(
+  onRejoin: (() => void) | undefined,
+  deadline: number | undefined,
+  now = Date.now()
+): boolean {
+  return onRejoin !== undefined && (deadline === undefined || now < deadline)
+}
 
 // Default loader used in production. Storybook stories override via
 // `__loader`. Splitting it out keeps the React component's effect body
@@ -142,6 +153,7 @@ export function Report({
   sessionId,
   onClose,
   onRejoin,
+  rejoinDeadline,
   showDiagnosticsExport = false,
   __loader,
 }: ReportProps) {
@@ -250,6 +262,7 @@ export function Report({
       data={status.data}
       onClose={onClose}
       onRejoin={onRejoin}
+      rejoinDeadline={rejoinDeadline}
       showDiagnosticsExport={showDiagnosticsExport}
     />
   )
@@ -263,6 +276,7 @@ export type ReportViewProps = {
   onClose: () => void
   // #47 B3 — see ReportProps.onRejoin.
   onRejoin?: () => void
+  rejoinDeadline?: number
   // See ReportProps.showDiagnosticsExport.
   showDiagnosticsExport?: boolean
   // Disables the on-mount ScoreGauge sweep so Storybook snapshots stay
@@ -274,6 +288,7 @@ export function ReportView({
   data,
   onClose,
   onRejoin,
+  rejoinDeadline,
   showDiagnosticsExport = false,
   animateScore = true,
 }: ReportViewProps) {
@@ -302,6 +317,20 @@ export function ReportView({
   // must agree: one claiming "no score recorded" beside the other saying "Nice
   // work" is the contradiction issue #92 screenshotted.
   const coverage = aiCoverage(session)
+
+  const [expiredDeadline, setExpiredDeadline] = useState<number | null>(null)
+  const rejoinAvailable =
+    isRejoinAvailable(onRejoin, rejoinDeadline) &&
+    expiredDeadline !== rejoinDeadline
+  useEffect(() => {
+    if (!isRejoinAvailable(onRejoin, rejoinDeadline)) return
+    if (rejoinDeadline === undefined) return
+    const handle = setTimeout(
+      () => setExpiredDeadline(rejoinDeadline),
+      Math.max(0, rejoinDeadline - Date.now())
+    )
+    return () => clearTimeout(handle)
+  }, [onRejoin, rejoinDeadline])
 
   const [copied, setCopied] = useState(false)
   const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -481,7 +510,12 @@ export function ReportView({
               <BracesIcon /> {exportCopy.auditCta}
             </Button>
             {onRejoin ? (
-              <Button variant="default" size="sm" onClick={onRejoin}>
+              <Button
+                variant="default"
+                size="sm"
+                onClick={onRejoin}
+                disabled={!rejoinAvailable}
+              >
                 <RotateCcwIcon /> {strings.report.rejoinCta}
               </Button>
             ) : null}

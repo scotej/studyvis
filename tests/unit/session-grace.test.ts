@@ -174,7 +174,7 @@ describe('S1 disconnect grace window', () => {
     )
   })
 
-  test("a peer that broadcast 'left' ends the session at once, with no grace window", () => {
+  test("a peer that broadcast 'left' gets the same rejoin grace window", () => {
     const { room, join, leave } = fakeRoom()
     const sched = fakeScheduler()
     const onLeave = vi.fn(async () => {})
@@ -190,10 +190,36 @@ describe('S1 disconnect grace window', () => {
     // which is always before trystero's own leave notification.
     useSessionStore.getState().markPeerDeparted('peer-a')
     leave('peer-a')
+    expect(onLeave).not.toHaveBeenCalled()
+    expect(sched.pending()).toBe(1)
+    sched.advance(DISCONNECT_GRACE_MS - 1)
+    expect(onLeave).not.toHaveBeenCalled()
+    sched.advance(1)
     expect(onLeave).toHaveBeenCalledTimes(1)
-    expect(sched.pending()).toBe(0)
-    // 'peer' (not 'auto') so the Report suppresses Rejoin into a dead room.
+    // The recovery window does not erase the signed departure semantics.
     expect(useSessionStore.getState().pendingEndReason).toBe('peer')
+  })
+
+  test('an accidental deliberate leave can rejoin before expiry', () => {
+    const { room, join, leave } = fakeRoom()
+    const sched = fakeScheduler()
+    const onLeave = vi.fn(async () => {})
+
+    wireSessionRoom(
+      room,
+      { isHost: true, leave: onLeave },
+      { scheduler: sched.scheduler }
+    )
+
+    join('peer-a')
+    useSessionStore.getState().markPeerDeparted('peer-a')
+    leave('peer-a')
+    sched.advance(DISCONNECT_GRACE_MS - 1)
+    join('peer-a')
+    expect(sched.pending()).toBe(0)
+    expect(useSessionStore.getState().departedPeerIds).not.toContain('peer-a')
+    sched.advance(DISCONNECT_GRACE_MS)
+    expect(onLeave).not.toHaveBeenCalled()
   })
 
   test('a deliberate departure alongside an unexplained one still waits out the window', () => {
@@ -275,8 +301,8 @@ describe('S1 disconnect grace window', () => {
     leave('peer-b')
     useSessionStore.getState().markPeerDeparted('peer-c')
     leave('peer-c')
-    // The room is empty but peer-a's departure was never explained, so we must
-    // wait out the window rather than kill the room instantly.
+    // The room is empty and peer-a's departure was never explained, so expiry
+    // remains attributed to a transport-style auto-end.
     expect(onLeave).not.toHaveBeenCalled()
     expect(sched.pending()).toBe(1)
     sched.advance(DISCONNECT_GRACE_MS)

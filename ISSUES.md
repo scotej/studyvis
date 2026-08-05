@@ -436,7 +436,7 @@ Format: one `###` section per finding, ordered by ID. Entries are appended, neve
 
 **Evidence.** A peer's deliberate `left` (signed, on the wire since V1-P9) still armed the 20 s reconnect grace and offered a Rejoin into a dead room.
 
-**Status.** **fixed** — mark departed peers, and skip the grace/Rejoin only when the room empties with no unexplained absence remaining, via a new `SessionEndReason` (`'peer'`). Unexplained-absent peers are tracked in a Set (not a single flag, per the review) so an intervening join by another peer can't strand a still-absent blipper; the mark clears per-peer on rejoin so a later blip still gets grace. ARCHITECTURE §13 updated. Grace unit tests extended.
+**Status.** **superseded by #190** — all empty-room departures now receive the same 20-second recovery window. Signed `left` events still preserve accurate `peer` attribution at expiry, while unexplained loss remains `auto`; a returning peer cancels the pending end and clears only its own departure mark. Rejoin is deadline-guarded and preserves the prior host/guest role.
 
 ### I54 — Sev3
 
