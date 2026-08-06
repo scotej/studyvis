@@ -225,105 +225,114 @@ type PendingInvitesState = {
   clear: () => void
 }
 
-export const usePendingInvitesStore = create<PendingInvitesState>((set, get) => ({
-  pending: [],
-  status: 'idle',
-  identityEdPubkeyHex: null,
+export const usePendingInvitesStore = create<PendingInvitesState>(
+  (set, get) => ({
+    pending: [],
+    status: 'idle',
+    identityEdPubkeyHex: null,
 
-  hydrate: async (identityEdPubkeyHex, knownFriendEdPubkeys, now = Date.now()) => {
-    const identity = identityEdPubkeyHex.toLowerCase()
-    const current = get()
-    if (current.identityEdPubkeyHex === identity && current.status === 'ready') {
-      return
-    }
-
-    const generation = ++hydrationGeneration
-    set({
-      status: 'loading',
-      identityEdPubkeyHex: identity,
-      pending:
-        current.identityEdPubkeyHex === identity ? current.pending : [],
-    })
-
-    const factory = activeDeps.storeFactory
-    if (!factory) {
-      if (generation === hydrationGeneration) {
-        set((state) => ({
-          status: 'ready',
-          pending: mergeEntries([], state.pending, now),
-        }))
-      }
-      return
-    }
-
-    try {
-      const raw = await factory().get<unknown>(storageKey(identity))
+    hydrate: async (
+      identityEdPubkeyHex,
+      knownFriendEdPubkeys,
+      now = Date.now()
+    ) => {
+      const identity = identityEdPubkeyHex.toLowerCase()
+      const current = get()
       if (
-        generation !== hydrationGeneration ||
-        get().identityEdPubkeyHex !== identity
+        current.identityEdPubkeyHex === identity &&
+        current.status === 'ready'
       ) {
         return
       }
-      const knownFriends = new Set(
-        [...knownFriendEdPubkeys].map((key) => key.toLowerCase())
-      )
-      const restored = restoreEntries(raw, now, knownFriends)
-      set((state) => ({
-        status: 'ready',
-        pending: mergeEntries(restored, state.pending, now),
-      }))
-    } catch (err) {
-      log.error('hydrate.failed', { err })
-      if (
-        generation === hydrationGeneration &&
-        get().identityEdPubkeyHex === identity
-      ) {
+
+      const generation = ++hydrationGeneration
+      set({
+        status: 'loading',
+        identityEdPubkeyHex: identity,
+        pending:
+          current.identityEdPubkeyHex === identity ? current.pending : [],
+      })
+
+      const factory = activeDeps.storeFactory
+      if (!factory) {
+        if (generation === hydrationGeneration) {
+          set((state) => ({
+            status: 'ready',
+            pending: mergeEntries([], state.pending, now),
+          }))
+        }
+        return
+      }
+
+      try {
+        const raw = await factory().get<unknown>(storageKey(identity))
+        if (
+          generation !== hydrationGeneration ||
+          get().identityEdPubkeyHex !== identity
+        ) {
+          return
+        }
+        const knownFriends = new Set(
+          [...knownFriendEdPubkeys].map((key) => key.toLowerCase())
+        )
+        const restored = restoreEntries(raw, now, knownFriends)
         set((state) => ({
           status: 'ready',
-          pending: mergeEntries([], state.pending, now),
+          pending: mergeEntries(restored, state.pending, now),
         }))
+      } catch (err) {
+        log.error('hydrate.failed', { err })
+        if (
+          generation === hydrationGeneration &&
+          get().identityEdPubkeyHex === identity
+        ) {
+          set((state) => ({
+            status: 'ready',
+            pending: mergeEntries([], state.pending, now),
+          }))
+        }
       }
-    }
-  },
+    },
 
-  deactivate: () => {
-    hydrationGeneration += 1
-    set({ pending: [], status: 'idle', identityEdPubkeyHex: null })
-  },
+    deactivate: () => {
+      hydrationGeneration += 1
+      set({ pending: [], status: 'idle', identityEdPubkeyHex: null })
+    },
 
-  add: (invite, now = Date.now()) =>
-    set((state) => {
-      const key = pendingInviteKey(invite)
-      const kept = state.pending.filter(
-        (entry) =>
-          entry.key !== key && entry.invite.payload.expires_at > now
-      )
-      return {
-        pending: [...kept, { key, invite, receivedAt: now }].slice(
-          -MAX_PENDING_INVITES
-        ),
-      }
-    }),
+    add: (invite, now = Date.now()) =>
+      set((state) => {
+        const key = pendingInviteKey(invite)
+        const kept = state.pending.filter(
+          (entry) =>
+            entry.key !== key && entry.invite.payload.expires_at > now
+        )
+        return {
+          pending: [...kept, { key, invite, receivedAt: now }].slice(
+            -MAX_PENDING_INVITES
+          ),
+        }
+      }),
 
-  remove: (key) =>
-    set((state) =>
-      state.pending.some((entry) => entry.key === key)
-        ? { pending: state.pending.filter((entry) => entry.key !== key) }
-        : state
-    ),
+    remove: (key) =>
+      set((state) =>
+        state.pending.some((entry) => entry.key === key)
+          ? { pending: state.pending.filter((entry) => entry.key !== key) }
+          : state
+      ),
 
-  prune: (now = Date.now()) =>
-    set((state) => {
-      const kept = state.pending.filter(
-        (entry) => entry.invite.payload.expires_at > now
-      )
-      return kept.length === state.pending.length
-        ? state
-        : { pending: kept }
-    }),
+    prune: (now = Date.now()) =>
+      set((state) => {
+        const kept = state.pending.filter(
+          (entry) => entry.invite.payload.expires_at > now
+        )
+        return kept.length === state.pending.length
+          ? state
+          : { pending: kept }
+      }),
 
-  clear: () => set({ pending: [] }),
-}))
+    clear: () => set({ pending: [] }),
+  })
+)
 
 function persist(state: PendingInvitesState): void {
   const factory = activeDeps.storeFactory
