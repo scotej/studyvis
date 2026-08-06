@@ -42,10 +42,13 @@ export function PendingInvitesView({
     >
       <div className="mb-2 flex items-center justify-between gap-3">
         <h2 className="text-sm font-semibold text-text-primary">
-          {strings.friends.inbox.pending.heading}
+          {strings.friends.inbox.pending.listAriaLabel}
         </h2>
-        <span className="text-xs text-text-muted">
-          {strings.friends.inbox.pending.count(entries.length)}
+        <span
+          className="flex size-5 items-center justify-center rounded-full bg-accent-default text-xs font-medium text-text-inverse"
+          aria-hidden="true"
+        >
+          {entries.length}
         </span>
       </div>
       <ul className="flex flex-col gap-2">
