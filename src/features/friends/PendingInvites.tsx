@@ -3,6 +3,8 @@ import { MailIcon } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { tokens } from '@/design/tokens'
+import { useFriendsStore } from '@/stores/friendsStore'
+import { useIdentityStore } from '@/stores/identityStore'
 import { strings } from '@/strings'
 
 import type { ValidInvite } from './inbox'
@@ -10,11 +12,6 @@ import {
   usePendingInvitesStore,
   type PendingInviteEntry,
 } from './pendingInvitesStore'
-
-// #47 B1 — the persistent accept surface for incoming invites. The sonner
-// toast (InboxBoot) stays as the immediate affordance; these rows survive on
-// the main view until the envelope's expires_at passes, so a recipient who
-// was tabbed away for a minute still sees and can accept the invite.
 
 export type PendingInvitesViewProps = {
   entries: ReadonlyArray<PendingInviteEntry>
@@ -43,6 +40,14 @@ export function PendingInvitesView({
       className="mx-auto w-full px-4 pt-4 sm:px-6"
       style={{ maxWidth: tokens.sizes.readingMaxWidth }}
     >
+      <div className="mb-2 flex items-center justify-between gap-3">
+        <h2 className="text-sm font-semibold text-text-primary">
+          {strings.friends.inbox.pending.heading}
+        </h2>
+        <span className="text-xs text-text-muted">
+          {strings.friends.inbox.pending.count(entries.length)}
+        </span>
+      </div>
       <ul className="flex flex-col gap-2">
         {entries.map((entry) => {
           const name = senderName(entry.invite)
@@ -107,19 +112,25 @@ export type PendingInvitesProps = {
 
 export function PendingInvites({ onAccept }: PendingInvitesProps) {
   const pending = usePendingInvitesStore((s) => s.pending)
+  const identityEdPubkeyHex = useIdentityStore(
+    (s) => s.identity?.ed_pubkey_hex ?? null
+  )
+  const friendsStatus = useFriendsStore((s) => s.status)
   const [now, setNow] = useState(() => Date.now())
 
-  // Refresh the countdown + drop expired rows on a slow tick, only while
-  // anything is pending. Acceptance-time expiry is separately re-checked in
-  // Home's runGuestJoin, so a stale row can never join a dead session.
+  useEffect(() => {
+    if (!identityEdPubkeyHex || friendsStatus !== 'ready') return
+    const friendKeys = new Set(
+      useFriendsStore.getState().friends.map((friend) => friend.ed_pubkey_hex)
+    )
+    void usePendingInvitesStore
+      .getState()
+      .hydrate(identityEdPubkeyHex, friendKeys)
+  }, [identityEdPubkeyHex, friendsStatus])
+
   useEffect(() => {
     if (pending.length === 0) return
-    // Not redundant with the interval below: the list sits empty for the app's
-    // whole tray-resident uptime, so by the time a row first renders the
-    // mount-time `now` is hours stale and a 5-minute invite reads "Expires in
-    // 214 min" — for the full 10s until the first tick, which is exactly the
-    // window the arrival toast summons the user to look in.
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- one-shot reseed of the display clock on the 0 -> n transition; Date.now() is impure so it can't be an adjust-during-render, and idempotent under StrictMode
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- reseed the display clock when the inbox changes from empty to non-empty
     setNow(Date.now())
     const id = setInterval(() => {
       setNow(Date.now())
