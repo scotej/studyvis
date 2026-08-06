@@ -40,9 +40,7 @@ function signedInvite(topic: string, expiresAt: number): ValidInvite {
     from_ed_pubkey: bytesToHex(identity.edPub),
     payload: {
       ...core,
-      sig: bytesToHex(
-        signMessage(identity.edPriv, serializePayloadForSig(core))
-      ),
+      sig: bytesToHex(signMessage(identity.edPriv, serializePayloadForSig(core))),
     },
   }
 }
