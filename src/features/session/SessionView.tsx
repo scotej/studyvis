@@ -130,6 +130,7 @@ import {
 } from './notesStore'
 import {
   requestScreenShareStream,
+  ScreenShareMonitorRequiredError,
   startScreenShareController,
   type ScreenShareController,
 } from './screenShare'
@@ -1618,6 +1619,14 @@ export function SessionView({
         toast.success(strings.session.screenShare.startedToast)
       })
       .catch((err: unknown) => {
+        if (err instanceof ScreenShareMonitorRequiredError) {
+          toast.error(
+            err.selectedSurface === undefined
+              ? strings.session.screenShare.monitorUnverifiedToast
+              : strings.session.screenShare.monitorRequiredToast
+          )
+          return
+        }
         // Dismissing the picker and a system-level screen-recording block both
         // reject with NotAllowedError and cannot be told apart, so the copy
         // covers either and this stays a neutral toast rather than an error.

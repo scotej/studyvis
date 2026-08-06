@@ -703,6 +703,10 @@ export const strings = {
       expandAriaLabel: (name: string) => `View ${name} in fullscreen`,
       startedToast: "You're sharing your screen.",
       stoppedToast: 'You stopped sharing your screen.',
+      monitorRequiredToast:
+        "Try again and choose Entire Screen in the Windows picker. StudyVis won't share a single window or app.",
+      monitorUnverifiedToast:
+        "StudyVis couldn't verify that you chose Entire Screen, so sharing didn't start. Update Microsoft Edge WebView2, then try again.",
       // NotAllowedError covers both "you dismissed the picker" and "the OS has
       // not granted screen recording", and the two are indistinguishable from
       // the rejection — so the copy has to hold for either.

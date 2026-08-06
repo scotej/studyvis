@@ -17,6 +17,7 @@
 
 import type { TopicRoom } from '@/lib/trystero'
 import { logger } from '@/lib/log'
+import { stopMediaStream } from '@/lib/media'
 
 const log = logger.child('session.screenshare')
 
@@ -34,6 +35,18 @@ export const SCREEN_STREAM_METADATA = { kind: 'screen' } as const
 // resolution, which is what makes text legible) is the cheap win: a full 4-user
 // mesh where everyone shares is eight concurrent video streams.
 export const SCREEN_SHARE_MAX_FPS = 15
+
+export class ScreenShareMonitorRequiredError extends Error {
+  readonly selectedSurface: string | undefined
+
+  constructor(selectedSurface: string | undefined) {
+    super(
+      `Windows screen sharing requires a monitor capture; received ${selectedSurface ?? 'an unverifiable surface'}`
+    )
+    this.name = 'ScreenShareMonitorRequiredError'
+    this.selectedSurface = selectedSurface
+  }
+}
 
 export type ScreenSharePayload = {
   sharing: boolean
@@ -271,10 +284,36 @@ export function requestScreenShareStream(): Promise<MediaStream> {
       new DOMException('getDisplayMedia is unavailable', 'NotSupportedError')
     )
   }
-  return navigator.mediaDevices.getDisplayMedia({
-    video: { frameRate: { max: SCREEN_SHARE_MAX_FPS } },
+  const requireMonitor = /Windows/i.test(navigator.userAgent)
+  // `displaySurface` can steer the picker but cannot restrict it; the Screen
+  // Capture spec preserves user choice, so enforcing StudyVis's monitor-only
+  // rule requires us to verify the actual selection afterward.
+  const request = navigator.mediaDevices.getDisplayMedia({
+    video: {
+      frameRate: { max: SCREEN_SHARE_MAX_FPS },
+      ...(requireMonitor ? { displaySurface: 'monitor' } : {}),
+    },
     // System audio would echo against the live mic, and PTT already owns the
     // audio story. Video only.
     audio: false,
+  })
+  if (!requireMonitor) return request
+
+  return request.then((stream) => {
+    const videoTrack = stream.getVideoTracks()[0]
+    let selectedSurface: string | undefined
+    try {
+      selectedSurface = videoTrack?.getSettings().displaySurface
+    } catch {
+      // An uninspectable stream cannot satisfy the Windows monitor-only
+      // invariant. It is released below before it can enter state or WebRTC.
+    }
+    if (selectedSurface === 'monitor') return stream
+
+    log.warn('capture.rejected_surface', {
+      selectedSurface: selectedSurface ?? 'unknown',
+    })
+    stopMediaStream(stream)
+    throw new ScreenShareMonitorRequiredError(selectedSurface)
   })
 }
