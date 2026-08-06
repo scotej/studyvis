@@ -64,6 +64,7 @@ describe('screen-share capture source policy', () => {
       },
       audio: false,
       monitorTypeSurfaces: 'include',
+      surfaceSwitching: 'exclude',
     })
     await expect(attempt).resolves.toBe(captured)
     expect(video.stop).not.toHaveBeenCalled()

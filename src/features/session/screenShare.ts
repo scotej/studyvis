@@ -48,6 +48,7 @@ export class EntireScreenShareRequiredError extends Error {
 
 type ScreenShareDisplayMediaOptions = DisplayMediaStreamOptions & {
   monitorTypeSurfaces?: 'include' | 'exclude'
+  surfaceSwitching?: 'include' | 'exclude'
 }
 
 export type ScreenShareCaptureRuntime = {
@@ -301,7 +302,12 @@ export function requestScreenShareStream(
     // System audio would echo against the live mic, and PTT already owns the
     // audio story. Video only.
     audio: false,
-    ...(windows ? { monitorTypeSurfaces: 'include' as const } : {}),
+    ...(windows
+      ? {
+          monitorTypeSurfaces: 'include' as const,
+          surfaceSwitching: 'exclude' as const,
+        }
+      : {}),
   })
 
   if (!windows) return request
