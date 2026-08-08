@@ -309,6 +309,28 @@ Nostr relays don't buffer for an absent peer, so an invite to a closed app can't
 
 After a successful send the host lingers briefly for the recipient-signed **`invite-ack`** (#47 C2, see §7's typed-action list): a verified ACK confirms real delivery, while its absence — an older build, a slow answer, or a friend who never added you back so their inbox silently drops envelopes — renders "sent, unconfirmed" copy with a nudge to make sure they've added you back. Concurrent sends to the same friend are serialized per inbox topic (trystero's core dedupes rooms per topic, so overlapping sends would otherwise share and then destroy one raw room).
 
+### Recipient pending inbox
+
+A validated invite is added immediately to an identity-bound in-memory inbox,
+even if the friends table is still loading. Once the current friend roster is
+ready, the inbox reconciles it with `pending-invites.json` in the app-data
+directory. The file holds one versioned snapshot for the **active** identity
+(maximum 16 rows), so replacing an identity cannot expose or accumulate the
+previous identity's session credentials. Restored rows are accepted only after
+the sender is still a friend, the canonical key and field bounds match, the
+Ed25519 signature verifies, and the receipt/expiry timestamps fit the five-minute
+window (plus bounded clock skew).
+
+Live arrivals win same-key disk records. Signature-specific tombstones keep an
+exact dismissed/accepted envelope from returning during an in-flight read while
+still allowing a genuinely new signed invite for the same session. Mutations are
+saved through a self-healing queue; a read failure leaves the unknown disk state
+untouched and keeps live invites available in degraded memory-only mode. One
+store-owned timer removes and persists the earliest expiry even when no pending
+inbox UI is mounted. If StudyVis is closed at the expiry instant, the expired
+bytes can remain in the local app-data file until the next successful launch,
+but they are already unusable and are rejected/deleted during reconciliation.
+
 ## 7. WebRTC topology
 
 Full mesh for 2–4 users. Each peer holds 1, 2, or 3 RTCPeerConnections. Audio and video tracks per peer; one shared data channel used for the audit log + score events + Pomodoro sync messages. Since #96 a peer may carry a **second** video stream on the same connection — their shared screen — added by renegotiation and told apart from the camera by the `screen-share` announce (see §7's typed-action list).

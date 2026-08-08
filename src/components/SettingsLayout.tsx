@@ -37,6 +37,11 @@ export type SettingsLayoutProps<TId extends string = string> = {
   activeCategoryId: TId
   onCategorySelect: (id: TId) => void
   onClose?: () => void
+  // Optional global content that belongs to the Settings main landmark but
+  // sits above the bounded nav/content split. Home uses this for the pending
+  // invite inbox so it cannot make the h-full Settings shell overflow as a
+  // preceding sibling, and so its h2 follows Settings' h1 in document order.
+  topContent?: ReactNode
   // Initial nav-search query. Initial only, like Settings' initialCategory —
   // lets a story exhibit the filtered / no-results states and leaves room to
   // deep-link a search later. Defaults to empty (the full list).
@@ -70,6 +75,7 @@ export function SettingsLayout<TId extends string = string>({
   activeCategoryId,
   onCategorySelect,
   onClose,
+  topContent,
   initialQuery = '',
   children,
 }: SettingsLayoutProps<TId>) {
@@ -161,6 +167,7 @@ export function SettingsLayout<TId extends string = string>({
           {strings.settings.heading}
         </h1>
       </header>
+      {topContent}
       <div className="flex min-h-0 flex-1">
         <nav
           aria-label={strings.settings.navAriaLabel}

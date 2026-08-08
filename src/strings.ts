@@ -486,6 +486,8 @@ export const strings = {
         dismissAriaLabel: (name: string) => `Dismiss the invite from ${name}`,
         acceptAriaLabel: (name: string) => `Accept the invite from ${name}`,
         expired: 'That invite expired. Ask your friend to invite you again.',
+        friendUnavailable:
+          'That invite is no longer available because the sender is no longer in your friends list.',
       },
     },
     inviteSent: (name: string) => `Invite sent to ${name}.`,

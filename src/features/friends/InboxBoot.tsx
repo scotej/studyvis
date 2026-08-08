@@ -15,7 +15,7 @@ import {
 } from './friendOnlineNotify'
 import { subscribeToOwnInbox, type ValidInvite } from './inbox'
 import { notifyIncomingInvite } from './inviteNotification'
-import { usePendingInvitesStore } from './pendingInvitesStore'
+import { pendingInviteKey, usePendingInvitesStore } from './pendingInvitesStore'
 import { inviteRetryManager } from './invite'
 import {
   isOnline,
@@ -51,6 +51,7 @@ export function InboxBoot({
   }, [onInviteAccepted])
 
   const friends = useFriendsStore((s) => s.friends)
+  const friendsStatus = useFriendsStore((s) => s.status)
   // Stable key that only changes when the *identity-relevant* friend set
   // does — not on every store mutation (e.g. last_studied_with bump). The
   // presence effect resubscribes when this string changes; otherwise it
@@ -63,9 +64,17 @@ export function InboxBoot({
         .join('|'),
     [friends]
   )
-
+  // Invite toasts carry an Accept closure, so they are identity-scoped just
+  // like the durable rows. Each subscription tracks its own set below and
+  // dismisses it on cleanup; the action also re-checks store scope.
   useEffect(() => {
     let cancelled = false
+    const identityEdPubkeyHex = myEdPubkeyHex.toLowerCase()
+    const inviteToastIds = new Set<string | number>()
+    // Bind the scope before subscribeToOwnInbox can synchronously attach a
+    // receiver. Hydration deliberately happens in the next effect: a live
+    // delivery is allowed to join the in-memory buffer while disk is loading.
+    usePendingInvitesStore.getState().activateIdentity(identityEdPubkeyHex)
 
     const myEd = hexToBytes(myEdPubkeyHex)
 
@@ -84,15 +93,48 @@ export function InboxBoot({
       signAck: signWithKeyring,
       onValidInvite: (invite) => {
         if (cancelled) return
-        void handleValidInvite(invite, (i) => onInviteAcceptedRef.current(i))
+        void handleValidInvite(
+          identityEdPubkeyHex,
+          invite,
+          (i) => onInviteAcceptedRef.current(i),
+          (toastId) => {
+            if (
+              cancelled ||
+              usePendingInvitesStore.getState().identityEdPubkeyHex !==
+                identityEdPubkeyHex
+            ) {
+              toast.dismiss(toastId)
+              return
+            }
+            inviteToastIds.add(toastId)
+          },
+          (toastId) => inviteToastIds.delete(toastId)
+        )
       },
     })
 
     return () => {
       cancelled = true
+      for (const toastId of inviteToastIds) toast.dismiss(toastId)
+      inviteToastIds.clear()
+      usePendingInvitesStore.getState().deactivateExpected(identityEdPubkeyHex)
       void inbox.leave()
     }
   }, [myEdPubkeyHex])
+
+  // Disk records cannot be trusted until the current friend roster is ready.
+  // Re-run for identity-relevant roster edits; the store treats a same-scope
+  // call as reconciliation, synchronously revoking removed-friend rows while a
+  // newer hydration generation supersedes any older read.
+  useEffect(() => {
+    if (friendsStatus !== 'ready') return
+    const friendKeys = new Set(
+      useFriendsStore
+        .getState()
+        .friends.map((friend) => friend.ed_pubkey_hex.toLowerCase())
+    )
+    void usePendingInvitesStore.getState().reconcile(myEdPubkeyHex, friendKeys)
+  }, [myEdPubkeyHex, friendsStatus, friendsKey])
 
   // F6 — detect offline→online presence transitions so a queued invite can be
   // re-delivered the instant a friend comes online. The per-friend online state
@@ -253,8 +295,11 @@ export function InboxBoot({
 }
 
 async function handleValidInvite(
+  identityEdPubkeyHex: string,
   invite: ValidInvite,
-  onAccept: (invite: ValidInvite) => void
+  onAccept: (invite: ValidInvite) => void,
+  onToastCreated: (toastId: string | number) => void,
+  onToastClosed: (toastId: string | number) => void
 ) {
   const senderName =
     invite.payload.our_display_name?.trim() ||
@@ -263,15 +308,48 @@ async function handleValidInvite(
 
   // #47 B1 — hold the invite on the persistent main-view surface for its
   // full 5-minute validity; the toast below is just the immediate nudge.
-  usePendingInvitesStore.getState().add(invite)
+  const key = pendingInviteKey(invite)
+  const before = usePendingInvitesStore.getState()
+  const alreadyQueued =
+    before.identityEdPubkeyHex === identityEdPubkeyHex &&
+    before.pending.some(
+      (entry) =>
+        entry.key === key && entry.invite.payload.sig === invite.payload.sig
+    )
+  const added = usePendingInvitesStore
+    .getState()
+    .add(identityEdPubkeyHex, invite)
+  // Relay retries carry the exact signed payload. Even if the store elects to
+  // refresh metadata for such a delivery, one durable row should yield only
+  // one immediate toast/OS nudge.
+  if (!added || alreadyQueued) return
+  const wasAdded = () => {
+    const state = usePendingInvitesStore.getState()
+    return (
+      state.identityEdPubkeyHex === identityEdPubkeyHex &&
+      state.pending.some(
+        (entry) =>
+          entry.key === key && entry.invite.payload.sig === invite.payload.sig
+      )
+    )
+  }
+  // A stale receive callback must not resurrect an inactive identity or leave
+  // behind a toast whose action can join with another identity's credentials.
+  if (!wasAdded()) return
 
-  toast(message, {
+  const toastId = toast(message, {
+    onDismiss: ({ id }) => onToastClosed(id),
+    onAutoClose: ({ id }) => onToastClosed(id),
     action: {
       label: strings.friends.inbox.acceptAction,
-      onClick: () => onAccept(invite),
+      onClick: () => {
+        if (wasAdded()) onAccept(invite)
+      },
     },
   })
+  onToastCreated(toastId)
 
+  if (!wasAdded()) return
   await notifyIncomingInvite({
     body: message,
     enabled:

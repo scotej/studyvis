@@ -5,13 +5,21 @@ import { verifyMessage } from '@/lib/crypto/identity'
 import { hexToBytes } from '@/lib/encoding'
 import { logger } from '@/lib/log'
 
-import { INVITE_TTL_MS, serializePayloadForSig } from './envelope'
+import {
+  INVITE_CLOCK_SKEW_MS,
+  INVITE_DISPLAY_NAME_MAX_LENGTH,
+  INVITE_SESSION_PASSWORD_MAX_LENGTH,
+  INVITE_SESSION_TOPIC_MAX_LENGTH,
+  INVITE_TTL_MS,
+  serializePayloadForSig,
+} from './envelope'
 import type { ValidInvite } from './inbox'
 
 const log = logger.child('friends.pending-invites')
 const STORE_FILE = 'pending-invites.json'
-const STORE_VERSION = 1 as const
+const STORE_VERSION = 2 as const
 const MAX_PENDING_INVITES = 16
+export const PENDING_INVITES_STORE_KEY = 'active'
 
 export type PendingInviteEntry = {
   key: string
@@ -21,7 +29,8 @@ export type PendingInviteEntry = {
 
 type PersistedPendingInvites = {
   v: typeof STORE_VERSION
-  entries: unknown[]
+  identityEdPubkeyHex: string
+  entries: PendingInviteEntry[]
 }
 
 export type PendingInviteStoreLike = {
@@ -44,16 +53,29 @@ function isTauriRuntime(): boolean {
 
 let cachedStore: LazyStore | null = null
 function defaultStoreFactory(): PendingInviteStoreLike {
-  cachedStore ??= new LazyStore(STORE_FILE)
+  cachedStore ??= new LazyStore(STORE_FILE, { autoSave: false })
   return cachedStore as unknown as PendingInviteStoreLike
 }
 
 const defaultDeps: PendingInviteStoreDeps = {
   storeFactory: isTauriRuntime() ? defaultStoreFactory : null,
 }
+
 let activeDeps = defaultDeps
-let hydrationGeneration = 0
+let identityGeneration = 0
+let reconcileGeneration = 0
 let persistenceQueue: Promise<void> = Promise.resolve()
+let persistenceReady: {
+  identityEdPubkeyHex: string
+  identityGeneration: number
+} | null = null
+let expiryTimer: ReturnType<typeof setTimeout> | null = null
+let mutationRevision = 0
+let suppressRestoredRevision = 0
+const tombstones = new Map<
+  string,
+  { inviteRevision: string; expiresAt: number; revision: number }
+>()
 
 export function __setPendingInviteStoreDeps(
   deps: PendingInviteStoreDeps
@@ -64,19 +86,49 @@ export function __setPendingInviteStoreDeps(
 export function __resetPendingInviteStoreDeps(): void {
   activeDeps = defaultDeps
   cachedStore = null
+  identityGeneration += 1
+  reconcileGeneration += 1
+  persistenceReady = null
   persistenceQueue = Promise.resolve()
+  mutationRevision = 0
+  suppressRestoredRevision = 0
+  tombstones.clear()
+  clearExpiryTimer()
 }
 
 export async function __flushPendingInvitePersistence(): Promise<void> {
-  await persistenceQueue
+  let observed: Promise<void>
+  do {
+    observed = persistenceQueue
+    await observed
+  } while (observed !== persistenceQueue)
 }
 
 export function pendingInviteKey(invite: ValidInvite): string {
   return `${invite.from_ed_pubkey}:${invite.payload.session_topic}`
 }
 
-function storageKey(identityEdPubkeyHex: string): string {
-  return `identity:${identityEdPubkeyHex.toLowerCase()}`
+function inviteRevision(invite: ValidInvite): string {
+  return JSON.stringify([
+    invite.from_ed_pubkey,
+    invite.payload.session_topic,
+    invite.payload.session_password,
+    invite.payload.our_display_name,
+    invite.payload.expires_at,
+    invite.payload.sig,
+  ])
+}
+
+function normalizeIdentity(identityEdPubkeyHex: string): string {
+  return identityEdPubkeyHex.trim().toLowerCase()
+}
+
+function normalizeFriends(
+  knownFriendEdPubkeys: ReadonlySet<string>
+): ReadonlySet<string> {
+  return new Set(
+    [...knownFriendEdPubkeys].map((key) => key.trim().toLowerCase())
+  )
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -123,16 +175,30 @@ function restoreEntry(
 
   if (!isHex(fromEdPubkey, 32)) return null
   if (!knownFriends.has(fromEdPubkey.toLowerCase())) return null
-  if (!isStringWithin(sessionTopic, 1, 256)) return null
-  if (!isStringWithin(sessionPassword, 1, 256)) return null
-  if (!isStringWithin(displayName, 0, 256)) return null
+  if (!isStringWithin(sessionTopic, 1, INVITE_SESSION_TOPIC_MAX_LENGTH)) {
+    return null
+  }
+  if (!isStringWithin(sessionPassword, 1, INVITE_SESSION_PASSWORD_MAX_LENGTH)) {
+    return null
+  }
+  if (!isStringWithin(displayName, 0, INVITE_DISPLAY_NAME_MAX_LENGTH)) {
+    return null
+  }
   if (!isHex(sig, 64)) return null
-  if (!Number.isSafeInteger(expiresAt) || expiresAt <= now) return null
   if (
+    typeof expiresAt !== 'number' ||
+    !Number.isSafeInteger(expiresAt) ||
+    expiresAt <= now
+  ) {
+    return null
+  }
+  if (
+    typeof receivedAt !== 'number' ||
     !Number.isSafeInteger(receivedAt) ||
     receivedAt <= 0 ||
+    receivedAt > now ||
     receivedAt > expiresAt ||
-    expiresAt - receivedAt > INVITE_TTL_MS
+    expiresAt - receivedAt > INVITE_TTL_MS + INVITE_CLOCK_SKEW_MS
   ) {
     return null
   }
@@ -147,7 +213,6 @@ function restoreEntry(
       sig: sig.toLowerCase(),
     },
   }
-
   const signed = serializePayloadForSig({
     session_topic: invite.payload.session_topic,
     session_password: invite.payload.session_password,
@@ -172,24 +237,54 @@ function restoreEntry(
   return value.key === key ? { key, invite, receivedAt } : null
 }
 
+function isTombstoned(entry: PendingInviteEntry): boolean {
+  const tombstone = tombstones.get(entry.key)
+  return tombstone?.inviteRevision === inviteRevision(entry.invite)
+}
+
 function restoreEntries(
-  value: unknown,
+  values: unknown[],
   now: number,
   knownFriends: ReadonlySet<string>
 ): PendingInviteEntry[] {
-  if (!isRecord(value) || value.v !== STORE_VERSION) return []
-  if (!Array.isArray(value.entries)) return []
-
+  if (suppressRestoredRevision > 0) return []
   const entries = new Map<string, PendingInviteEntry>()
-  for (const raw of value.entries.slice(-MAX_PENDING_INVITES)) {
+  for (const raw of values.slice(-MAX_PENDING_INVITES)) {
     const entry = restoreEntry(raw, now, knownFriends)
-    if (!entry) continue
+    if (!entry || isTombstoned(entry)) continue
     const previous = entries.get(entry.key)
     if (!previous || previous.receivedAt <= entry.receivedAt) {
       entries.set(entry.key, entry)
     }
   }
   return [...entries.values()].sort((a, b) => a.receivedAt - b.receivedAt)
+}
+
+type DecodedSnapshot =
+  { kind: 'supported'; entries: unknown[] } | { kind: 'future' }
+
+function decodeSnapshot(
+  value: unknown,
+  identityEdPubkeyHex: string
+): DecodedSnapshot {
+  if (value === undefined) return { kind: 'supported', entries: [] }
+  if (
+    isRecord(value) &&
+    typeof value.v === 'number' &&
+    value.v > STORE_VERSION
+  ) {
+    return { kind: 'future' }
+  }
+  if (
+    !isRecord(value) ||
+    value.v !== STORE_VERSION ||
+    typeof value.identityEdPubkeyHex !== 'string' ||
+    normalizeIdentity(value.identityEdPubkeyHex) !== identityEdPubkeyHex ||
+    !Array.isArray(value.entries)
+  ) {
+    return { kind: 'supported', entries: [] }
+  }
+  return { kind: 'supported', entries: value.entries }
 }
 
 function mergeEntries(
@@ -209,20 +304,120 @@ function mergeEntries(
     .slice(-MAX_PENDING_INVITES)
 }
 
+function clearExpiryTimer(): void {
+  if (expiryTimer !== null) clearTimeout(expiryTimer)
+  expiryTimer = null
+}
+
+function scheduleExpiryTimer(referenceNow = Date.now()): void {
+  clearExpiryTimer()
+  const pending = usePendingInvitesStore.getState().pending
+  const expiries = [
+    ...pending.map((entry) => entry.invite.payload.expires_at),
+    ...[...tombstones.values()].map((tombstone) => tombstone.expiresAt),
+  ]
+  if (expiries.length === 0) return
+  const earliest = Math.min(...expiries)
+  const delay = Math.min(Math.max(0, earliest - referenceNow), 2_147_483_647)
+  expiryTimer = setTimeout(() => {
+    expiryTimer = null
+    usePendingInvitesStore.getState().prune()
+  }, delay)
+}
+
+function recordTombstones(entries: ReadonlyArray<PendingInviteEntry>): number {
+  if (entries.length === 0) return mutationRevision
+  const revision = ++mutationRevision
+  for (const entry of entries) {
+    tombstones.set(entry.key, {
+      inviteRevision: inviteRevision(entry.invite),
+      expiresAt: entry.invite.payload.expires_at,
+      revision,
+    })
+  }
+  return revision
+}
+
+type PendingInvitesStatus = 'idle' | 'loading' | 'ready' | 'degraded'
+
 type PendingInvitesState = {
   pending: PendingInviteEntry[]
-  status: 'idle' | 'loading' | 'ready'
+  status: PendingInvitesStatus
   identityEdPubkeyHex: string | null
-  hydrate: (
+  activateIdentity: (identityEdPubkeyHex: string) => void
+  reconcile: (
     identityEdPubkeyHex: string,
     knownFriendEdPubkeys: ReadonlySet<string>,
     now?: number
   ) => Promise<void>
-  deactivate: () => void
-  add: (invite: ValidInvite, now?: number) => void
+  deactivateExpected: (identityEdPubkeyHex: string) => void
+  add: (
+    identityEdPubkeyHex: string,
+    invite: ValidInvite,
+    now?: number
+  ) => boolean
   remove: (key: string) => void
   prune: (now?: number) => void
   clear: () => void
+}
+
+function canPersist(identityEdPubkeyHex: string): boolean {
+  const ready = persistenceReady
+  return (
+    ready?.identityEdPubkeyHex === identityEdPubkeyHex &&
+    ready.identityGeneration === identityGeneration
+  )
+}
+
+function schedulePersistence(identityEdPubkeyHex: string): void {
+  const factory = activeDeps.storeFactory
+  if (!factory || !canPersist(identityEdPubkeyHex)) return
+
+  persistenceQueue = persistenceQueue.then(async () => {
+    const state = usePendingInvitesStore.getState()
+    if (
+      state.identityEdPubkeyHex !== identityEdPubkeyHex ||
+      state.status !== 'ready' ||
+      !canPersist(identityEdPubkeyHex)
+    ) {
+      return
+    }
+
+    const generation = identityGeneration
+    const coveredRevision = mutationRevision
+    const entries = state.pending.slice(-MAX_PENDING_INVITES)
+    try {
+      const store = factory()
+      if (entries.length === 0) {
+        await store.delete(PENDING_INVITES_STORE_KEY)
+      } else {
+        const snapshot: PersistedPendingInvites = {
+          v: STORE_VERSION,
+          identityEdPubkeyHex,
+          entries,
+        }
+        await store.set(PENDING_INVITES_STORE_KEY, snapshot)
+      }
+      await store.save()
+    } catch (err) {
+      log.error('persist.failed', { err })
+      return
+    }
+
+    const current = usePendingInvitesStore.getState()
+    if (
+      current.identityEdPubkeyHex !== identityEdPubkeyHex ||
+      generation !== identityGeneration
+    ) {
+      return
+    }
+    if (
+      suppressRestoredRevision > 0 &&
+      suppressRestoredRevision <= coveredRevision
+    ) {
+      suppressRestoredRevision = 0
+    }
+  })
 }
 
 export const usePendingInvitesStore = create<PendingInvitesState>(
@@ -231,144 +426,219 @@ export const usePendingInvitesStore = create<PendingInvitesState>(
     status: 'idle',
     identityEdPubkeyHex: null,
 
-    hydrate: async (
+    activateIdentity: (identityEdPubkeyHex) => {
+      const identity = normalizeIdentity(identityEdPubkeyHex)
+      if (!identity || get().identityEdPubkeyHex === identity) return
+      identityGeneration += 1
+      reconcileGeneration += 1
+      persistenceReady = null
+      mutationRevision = 0
+      suppressRestoredRevision = 0
+      tombstones.clear()
+      clearExpiryTimer()
+      set({ pending: [], status: 'idle', identityEdPubkeyHex: identity })
+    },
+
+    reconcile: async (
       identityEdPubkeyHex,
       knownFriendEdPubkeys,
-      now = Date.now()
+      explicitNow
     ) => {
-      const identity = identityEdPubkeyHex.toLowerCase()
-      const current = get()
-      if (
-        current.identityEdPubkeyHex === identity &&
-        current.status === 'ready'
-      ) {
-        return
-      }
+      const identity = normalizeIdentity(identityEdPubkeyHex)
+      if (!identity || get().identityEdPubkeyHex !== identity) return
 
-      const generation = ++hydrationGeneration
-      set({
-        status: 'loading',
-        identityEdPubkeyHex: identity,
-        pending:
-          current.identityEdPubkeyHex === identity ? current.pending : [],
-      })
+      const friends = normalizeFriends(knownFriendEdPubkeys)
+      const startNow = explicitNow ?? Date.now()
+      const generation = ++reconcileGeneration
+      const activeIdentityGeneration = identityGeneration
+      persistenceReady = null
+
+      const beforeRead = get().pending
+      const revoked = beforeRead.filter(
+        (entry) =>
+          entry.invite.payload.expires_at <= startNow ||
+          !friends.has(entry.invite.from_ed_pubkey.toLowerCase())
+      )
+      if (revoked.length > 0) recordTombstones(revoked)
+      const kept = beforeRead.filter((entry) => !revoked.includes(entry))
+      set({ status: 'loading', pending: kept })
+      scheduleExpiryTimer(startNow)
 
       const factory = activeDeps.storeFactory
       if (!factory) {
-        if (generation === hydrationGeneration) {
-          set((state) => ({
-            status: 'ready',
-            pending: mergeEntries([], state.pending, now),
-          }))
-        }
-        return
-      }
-
-      try {
-        const raw = await factory().get<unknown>(storageKey(identity))
         if (
-          generation !== hydrationGeneration ||
+          generation !== reconcileGeneration ||
+          activeIdentityGeneration !== identityGeneration ||
           get().identityEdPubkeyHex !== identity
         ) {
           return
         }
-        const knownFriends = new Set(
-          [...knownFriendEdPubkeys].map((key) => key.toLowerCase())
-        )
-        const restored = restoreEntries(raw, now, knownFriends)
-        set((state) => ({
-          status: 'ready',
-          pending: mergeEntries(restored, state.pending, now),
-        }))
+        tombstones.clear()
+        suppressRestoredRevision = 0
+        set({ status: 'ready' })
+        persistenceReady = {
+          identityEdPubkeyHex: identity,
+          identityGeneration: activeIdentityGeneration,
+        }
+        scheduleExpiryTimer(startNow)
+        return
+      }
+
+      let raw: unknown
+      try {
+        raw = await factory().get<unknown>(PENDING_INVITES_STORE_KEY)
       } catch (err) {
-        log.error('hydrate.failed', { err })
+        log.error('reconcile.failed', { phase: 'read', err })
         if (
-          generation === hydrationGeneration &&
+          generation === reconcileGeneration &&
+          activeIdentityGeneration === identityGeneration &&
           get().identityEdPubkeyHex === identity
         ) {
-          set((state) => ({
-            status: 'ready',
-            pending: mergeEntries([], state.pending, now),
-          }))
+          set({ status: 'degraded' })
+          scheduleExpiryTimer(startNow)
         }
+        return
       }
+
+      const now = explicitNow ?? Date.now()
+      if (
+        generation !== reconcileGeneration ||
+        activeIdentityGeneration !== identityGeneration ||
+        get().identityEdPubkeyHex !== identity
+      ) {
+        return
+      }
+
+      const decoded = decodeSnapshot(raw, identity)
+      if (decoded.kind === 'future') {
+        set({ status: 'degraded' })
+        scheduleExpiryTimer(now)
+        return
+      }
+
+      const restored = restoreEntries(decoded.entries, now, friends)
+      const live = get().pending.filter(
+        (entry) =>
+          entry.invite.payload.expires_at > now &&
+          friends.has(entry.invite.from_ed_pubkey.toLowerCase())
+      )
+      const newlyRevoked = get().pending.filter(
+        (entry) => !live.includes(entry)
+      )
+      if (newlyRevoked.length > 0) recordTombstones(newlyRevoked)
+      const pending = mergeEntries(restored, live, now)
+      set({ status: 'ready', pending })
+      persistenceReady = {
+        identityEdPubkeyHex: identity,
+        identityGeneration: activeIdentityGeneration,
+      }
+      scheduleExpiryTimer(now)
+      schedulePersistence(identity)
     },
 
-    deactivate: () => {
-      hydrationGeneration += 1
+    deactivateExpected: (identityEdPubkeyHex) => {
+      const identity = normalizeIdentity(identityEdPubkeyHex)
+      if (get().identityEdPubkeyHex !== identity) return
+      identityGeneration += 1
+      reconcileGeneration += 1
+      persistenceReady = null
+      mutationRevision = 0
+      suppressRestoredRevision = 0
+      tombstones.clear()
+      clearExpiryTimer()
       set({ pending: [], status: 'idle', identityEdPubkeyHex: null })
     },
 
-    add: (invite, now = Date.now()) =>
-      set((state) => {
-        const key = pendingInviteKey(invite)
-        const kept = state.pending.filter(
-          (entry) =>
-            entry.key !== key && entry.invite.payload.expires_at > now
-        )
-        return {
-          pending: [...kept, { key, invite, receivedAt: now }].slice(
-            -MAX_PENDING_INVITES
-          ),
-        }
-      }),
+    add: (identityEdPubkeyHex, invite, now = Date.now()) => {
+      const identity = normalizeIdentity(identityEdPubkeyHex)
+      const expiresAt = invite.payload.expires_at
+      if (
+        get().identityEdPubkeyHex !== identity ||
+        !Number.isSafeInteger(expiresAt) ||
+        expiresAt <= now ||
+        expiresAt > now + INVITE_TTL_MS + INVITE_CLOCK_SKEW_MS
+      ) {
+        return false
+      }
 
-    remove: (key) =>
-      set((state) =>
-        state.pending.some((entry) => entry.key === key)
-          ? { pending: state.pending.filter((entry) => entry.key !== key) }
-          : state
-      ),
+      const key = pendingInviteKey(invite)
+      const revision = inviteRevision(invite)
+      const current = get()
+      const existing = current.pending.find((entry) => entry.key === key)
+      if (existing && inviteRevision(existing.invite) === revision) return false
+      if (tombstones.get(key)?.inviteRevision === revision) return false
+      tombstones.delete(key)
 
-    prune: (now = Date.now()) =>
-      set((state) => {
-        const kept = state.pending.filter(
+      const expired = current.pending.filter(
+        (entry) => entry.invite.payload.expires_at <= now
+      )
+      if (expired.length > 0) recordTombstones(expired)
+      mutationRevision += 1
+      const kept = current.pending.filter(
+        (entry) => entry.key !== key && entry.invite.payload.expires_at > now
+      )
+      set({
+        pending: [...kept, { key, invite, receivedAt: now }].slice(
+          -MAX_PENDING_INVITES
+        ),
+      })
+      scheduleExpiryTimer(now)
+      if (current.status === 'ready') schedulePersistence(identity)
+      return true
+    },
+
+    remove: (key) => {
+      const current = get()
+      const removed = current.pending.filter((entry) => entry.key === key)
+      if (removed.length === 0 || !current.identityEdPubkeyHex) return
+      recordTombstones(removed)
+      set({
+        pending: current.pending.filter((entry) => entry.key !== key),
+      })
+      scheduleExpiryTimer()
+      if (current.status === 'ready') {
+        schedulePersistence(current.identityEdPubkeyHex)
+      }
+    },
+
+    prune: (now = Date.now()) => {
+      const current = get()
+      for (const [key, tombstone] of tombstones) {
+        if (tombstone.expiresAt <= now) tombstones.delete(key)
+      }
+      const removed = current.pending.filter(
+        (entry) => entry.invite.payload.expires_at <= now
+      )
+      if (removed.length === 0 || !current.identityEdPubkeyHex) {
+        scheduleExpiryTimer(now)
+        return
+      }
+      recordTombstones(removed)
+      set({
+        pending: current.pending.filter(
           (entry) => entry.invite.payload.expires_at > now
-        )
-        return kept.length === state.pending.length
-          ? state
-          : { pending: kept }
-      }),
+        ),
+      })
+      scheduleExpiryTimer(now)
+      if (current.status === 'ready') {
+        schedulePersistence(current.identityEdPubkeyHex)
+      }
+    },
 
-    clear: () => set({ pending: [] }),
+    clear: () => {
+      const current = get()
+      if (!current.identityEdPubkeyHex) return
+      const revision = recordTombstones(current.pending)
+      if (current.pending.length === 0) mutationRevision += 1
+      suppressRestoredRevision = Math.max(
+        suppressRestoredRevision,
+        current.pending.length === 0 ? mutationRevision : revision
+      )
+      set({ pending: [] })
+      clearExpiryTimer()
+      if (current.status === 'ready') {
+        schedulePersistence(current.identityEdPubkeyHex)
+      }
+    },
   })
 )
-
-function persist(state: PendingInvitesState): void {
-  const factory = activeDeps.storeFactory
-  if (!factory || state.status !== 'ready' || !state.identityEdPubkeyHex) {
-    return
-  }
-
-  const key = storageKey(state.identityEdPubkeyHex)
-  const entries = state.pending.slice(-MAX_PENDING_INVITES)
-  persistenceQueue = persistenceQueue.then(async () => {
-    try {
-      const store = factory()
-      if (entries.length === 0) {
-        await store.delete(key)
-      } else {
-        const snapshot: PersistedPendingInvites = {
-          v: STORE_VERSION,
-          entries,
-        }
-        await store.set(key, snapshot)
-      }
-      await store.save()
-    } catch (err) {
-      log.error('persist.failed', { err })
-    }
-  })
-}
-
-usePendingInvitesStore.subscribe((state, previous) => {
-  if (
-    state.status === 'ready' &&
-    state.identityEdPubkeyHex &&
-    (state.pending !== previous.pending ||
-      state.status !== previous.status ||
-      state.identityEdPubkeyHex !== previous.identityEdPubkeyHex)
-  ) {
-    persist(state)
-  }
-})

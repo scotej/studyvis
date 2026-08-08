@@ -10,7 +10,12 @@ import {
   INVITE_ACK_ACTION,
   INVITE_ACK_VERSION,
   INVITE_ACTION,
+  INVITE_CIPHERTEXT_MAX_LENGTH,
+  INVITE_CLOCK_SKEW_MS,
+  INVITE_DISPLAY_NAME_MAX_LENGTH,
   INVITE_ENVELOPE_VERSION,
+  INVITE_SESSION_PASSWORD_MAX_LENGTH,
+  INVITE_SESSION_TOPIC_MAX_LENGTH,
   INVITE_TTL_MS,
   serializeAckForSig,
   serializePayloadForSig,
@@ -71,9 +76,32 @@ function isInviteEnvelope(value: unknown): value is InviteEnvelope {
   const v = value as Partial<InviteEnvelope>
   return (
     v.v === INVITE_ENVELOPE_VERSION &&
-    typeof v.from_ed_pubkey === 'string' &&
+    isHex(v.from_ed_pubkey, 32) &&
     typeof v.nonce === 'string' &&
-    typeof v.ciphertext === 'string'
+    v.nonce.length === 32 &&
+    typeof v.ciphertext === 'string' &&
+    v.ciphertext.length > 0 &&
+    v.ciphertext.length <= INVITE_CIPHERTEXT_MAX_LENGTH
+  )
+}
+
+function isHex(value: unknown, bytes: number): value is string {
+  return (
+    typeof value === 'string' &&
+    value.length === bytes * 2 &&
+    /^[0-9a-f]+$/i.test(value)
+  )
+}
+
+function isStringWithin(
+  value: unknown,
+  minLength: number,
+  maxLength: number
+): value is string {
+  return (
+    typeof value === 'string' &&
+    value.length >= minLength &&
+    value.length <= maxLength
   )
 }
 
@@ -81,11 +109,12 @@ function isInvitePayload(value: unknown): value is InvitePayload {
   if (!value || typeof value !== 'object') return false
   const v = value as Partial<InvitePayload>
   return (
-    typeof v.session_topic === 'string' &&
-    typeof v.session_password === 'string' &&
-    typeof v.our_display_name === 'string' &&
+    isStringWithin(v.session_topic, 1, INVITE_SESSION_TOPIC_MAX_LENGTH) &&
+    isStringWithin(v.session_password, 1, INVITE_SESSION_PASSWORD_MAX_LENGTH) &&
+    isStringWithin(v.our_display_name, 0, INVITE_DISPLAY_NAME_MAX_LENGTH) &&
     typeof v.expires_at === 'number' &&
-    typeof v.sig === 'string'
+    Number.isSafeInteger(v.expires_at) &&
+    isHex(v.sig, 64)
   )
 }
 
@@ -158,7 +187,12 @@ export async function validateInviteEnvelope(
 
   // Step 6: expiry check.
   const now = ctx.now ? ctx.now() : Date.now()
-  if (payload.expires_at <= now) return null
+  if (
+    payload.expires_at <= now ||
+    payload.expires_at > now + INVITE_TTL_MS + INVITE_CLOCK_SKEW_MS
+  ) {
+    return null
+  }
 
   return { from_ed_pubkey: envelope.from_ed_pubkey, payload }
 }
