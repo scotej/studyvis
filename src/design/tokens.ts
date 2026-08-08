@@ -171,6 +171,12 @@ export const tokens = {
     // size). Shared so the R1 no-score placeholder occupies the same footprint
     // as the ScoreGauge it replaces and the hero layout doesn't reflow.
     scoreGaugeSize: 192,
+    // #187 — the post-session timeline is a bounded reading surface rather
+    // than an ever-growing page. Its bottom separator lets pointer and keyboard
+    // users trade overview for detail while the themed ScrollArea owns overflow.
+    reportTimelineMinHeight: 240,
+    reportTimelineDefaultHeight: 360,
+    reportTimelineMaxHeight: 640,
     // V3-P6 custom window chrome (opt-in). The TitleBar band height is shared
     // across platforms so the wordmark sits at the same vertical centre on
     // macOS (overlapped onto the system traffic-light area via

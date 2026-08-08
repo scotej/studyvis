@@ -10,6 +10,7 @@ import {
   BookOpenIcon,
   CheckIcon,
   CoffeeIcon,
+  EyeIcon,
   EyeOffIcon,
   LogInIcon,
   LogOutIcon,
@@ -34,6 +35,7 @@ export const AUDIT_ICONS: Record<AuditEventKind, LucideIcon> = {
   ai_warning: AlertTriangleIcon,
   ai_alert: AlertOctagonIcon,
   ai_stalled: EyeOffIcon,
+  ai_resumed: EyeIcon,
   topic_set: BookOpenIcon,
   topic_change: RefreshCwIcon,
   break_request: CoffeeIcon,
@@ -59,6 +61,7 @@ export const AUDIT_ICON_TONE: Record<AuditEventKind, AuditIconTone> = {
   // Not the user's fault and not a focus judgment — a neutral tone keeps it
   // from reading like an off-task row in the report timeline.
   ai_stalled: 'default',
+  ai_resumed: 'focused',
   topic_set: 'accent',
   topic_change: 'accent',
   break_request: 'default',

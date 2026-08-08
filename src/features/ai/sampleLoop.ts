@@ -221,6 +221,28 @@ export const STALL_NOTICE_AFTER_MS = 120_000
 // exactly the CPU-only-machine case the watchdog exists for.
 export const STALL_CHECK_INTERVAL_MS = 15_000
 
+// A late setTimeout is the other half of "the machine is running behind":
+// inference timing catches a saturated llama-server, while this catches a
+// saturated WebView main thread. Ignore ordinary timer jitter; report only a
+// delay that is both at least one second and at least half of the requested
+// cadence. The structured record contains timings only — never topic or frame
+// data — and the global log throttle keeps a sustained overload bounded.
+export const SCHEDULER_LAG_MIN_MS = 1_000
+export const SCHEDULER_LAG_RATIO = 0.5
+
+export function schedulerLagIsMaterial(
+  lagMs: number,
+  scheduledDelayMs: number
+): boolean {
+  if (!Number.isFinite(lagMs) || !Number.isFinite(scheduledDelayMs))
+    return false
+  if (lagMs < 0 || scheduledDelayMs < 0) return false
+  return (
+    lagMs >= SCHEDULER_LAG_MIN_MS &&
+    lagMs >= scheduledDelayMs * SCHEDULER_LAG_RATIO
+  )
+}
+
 export type BackoffState = {
   engaged: boolean
   consecutiveSlow: number
@@ -476,8 +498,10 @@ export type SampleLoopOptions = {
   // no resume path to take it back. A wall-clock window measures the thing the
   // user actually experiences, and re-arms.
   onSamplesStalled?: (reason: SampleBlockReason) => void
-  // Fires once after a reported stall when a sample finally resolves.
-  onSamplesResumed?: () => void
+  // Fires once after a reported stall when a sample finally resolves. The
+  // reason + unavailable duration are safe diagnostic metadata and let the
+  // session persist a matching recovery row beside `ai_stalled`.
+  onSamplesResumed?: (recovery: SampleRecoveryInfo) => void
   // Fires once per resolved sample with the events the score machine
   // emitted for that sample plus the sample's verdict. V2-P6 wires the
   // peer-alert + self-warning dispatcher through this callback so the
@@ -490,6 +514,11 @@ export type SampleLoopOptions = {
     events: ReadonlyArray<ScoreEvent>,
     verdict: SampleVerdict
   ) => void | Promise<void>
+}
+
+export type SampleRecoveryInfo = {
+  reason: SampleBlockReason
+  unavailableForMs: number
 }
 
 export type SampleLoopHandle = {
@@ -540,6 +569,14 @@ type InternalState = {
   lastProgressAt: number
   stallReason: SampleBlockReason | null
   stallReported: boolean
+  // The reason that actually triggered the user-visible stall notice. Keep it
+  // separate from `stallReason`: later blocked ticks can change reason, and a
+  // deliberate pause resets the live reason while the notice remains open.
+  reportedStallReason: SampleBlockReason | null
+  // Last-progress timestamp captured on the same edge as the notice. Unlike
+  // `lastProgressAt`, this survives a deliberate pause so the recovery log's
+  // unavailable duration still spans the full unresolved interval.
+  reportedStallSince: number | null
   modelId: string | null
   ticks: number
   resolvedSamples: number
@@ -581,6 +618,8 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
     lastProgressAt: 0,
     stallReason: null,
     stallReported: false,
+    reportedStallReason: null,
+    reportedStallSince: null,
     modelId: opts.modelId,
     ticks: 0,
     resolvedSamples: 0,
@@ -642,10 +681,21 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
     if (reason === null) return
     if (runtime.now() - state.lastProgressAt < STALL_NOTICE_AFTER_MS) return
     state.stallReported = true
+    state.reportedStallReason = reason
+    state.reportedStallSince = state.lastProgressAt
     log.warn('stall.reported', {
       reason,
       tick: state.ticks,
       sinceProgressMs: Math.max(0, runtime.now() - state.lastProgressAt),
+      resolvedSamples: state.resolvedSamples,
+      modelId: state.modelId,
+      modelP95Sec: state.modelP95Sec,
+      effectiveIntervalMs: nextDelayMs(),
+      requestTimeoutMs:
+        requestTimeoutOverrideMs ??
+        effectiveRequestTimeoutMs(state.modelP95Sec),
+      backoffEngaged: state.backoff.engaged,
+      onBattery: state.battery.onBattery,
     })
     opts.onSamplesStalled?.(reason)
   }
@@ -666,16 +716,34 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
   // watchdog, and tell the consumer if it had been told otherwise.
   function noteSampleResolved(): void {
     if (state.stopped) return
-    const recoveredFrom = state.stallReason
+    const lastBlockedReason = state.stallReason
     const wasReported = state.stallReported
+    const reportedReason = state.reportedStallReason
+    const unavailableForMs = Math.max(
+      0,
+      runtime.now() - (state.reportedStallSince ?? state.lastProgressAt)
+    )
     resetStallClock()
     if (!wasReported) return
     state.stallReported = false
+    state.reportedStallReason = null
+    state.reportedStallSince = null
+    // `reportedStallReason` is set on the same edge as `stallReported`, so the
+    // fallback is defensive for any future state migration/test seam.
+    const reason = reportedReason ?? lastBlockedReason
+    if (reason === null) return
     log.info('stall.recovered', {
-      previousReason: recoveredFrom,
+      previousReason: reason,
+      lastBlockedReason,
       tick: state.ticks,
+      unavailableForMs,
+      resolvedSamples: state.resolvedSamples,
+      modelId: state.modelId,
+      modelP95Sec: state.modelP95Sec,
+      effectiveIntervalMs: nextDelayMs(),
+      backoffEngaged: state.backoff.engaged,
     })
-    opts.onSamplesResumed?.()
+    opts.onSamplesResumed?.({ reason, unavailableForMs })
   }
 
   // A screen track ended — the user clicked the OS "Stop sharing" pill, or a
@@ -914,16 +982,39 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
       runtime.clearTimeout(tickHandle)
       tickHandle = null
     }
+    const scheduledAt = runtime.now()
+    const dueAt = scheduledAt + delayMs
     tickHandle = runtime.setTimeout(() => {
       tickHandle = null
-      void tick()
+      void tick({ delayMs, dueAt })
     }, delayMs)
   }
 
-  async function tick(): Promise<void> {
+  async function tick(scheduleInfo?: {
+    delayMs: number
+    dueAt: number
+  }): Promise<void> {
     if (state.stopped) return
     state.ticks += 1
     const tickStartedAt = runtime.now()
+    const schedulerLagMs = scheduleInfo
+      ? Math.max(0, tickStartedAt - scheduleInfo.dueAt)
+      : 0
+    if (
+      scheduleInfo &&
+      schedulerLagIsMaterial(schedulerLagMs, scheduleInfo.delayMs)
+    ) {
+      log.warn('scheduler.lagged', {
+        tick: state.ticks,
+        lagMs: schedulerLagMs,
+        scheduledDelayMs: scheduleInfo.delayMs,
+        resolvedSamples: state.resolvedSamples,
+        modelId: state.modelId,
+        modelP95Sec: state.modelP95Sec,
+        backoffEngaged: state.backoff.engaged,
+        onBattery: state.battery.onBattery,
+      })
+    }
 
     if (state.inFlight) {
       // The previous sample's network/encode/parse is still resolving. Do
@@ -1119,6 +1210,25 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
         state.modelP95Sec
       )
       state.backoff = nextBackoff
+      if (
+        state.modelP95Sec > 0 &&
+        inferenceSec > state.modelP95Sec * SLOW_TICK_FACTOR
+      ) {
+        log.warn('inference.slow', {
+          tick: state.ticks,
+          modelId,
+          inferenceMs: Math.round(inferenceSec * 1000),
+          benchmarkP95Ms: Math.round(state.modelP95Sec * 1000),
+          slowThresholdMs: Math.round(
+            state.modelP95Sec * SLOW_TICK_FACTOR * 1000
+          ),
+          consecutiveSlow: nextBackoff.consecutiveSlow,
+          backoffEngaged: nextBackoff.engaged,
+          effectiveIntervalMs: nextDelayMs(),
+          schedulerLagMs,
+          onBattery: state.battery.onBattery,
+        })
+      }
       if (nextBackoff.justEngaged && !state.thermalNoticeShown) {
         state.thermalNoticeShown = true
         opts.onThermalBackoff?.()
@@ -1160,6 +1270,7 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
         scoreEventCount: events.length,
         backoffEngaged: state.backoff.engaged,
         nextDelayMs: nextDelayMs(),
+        schedulerLagMs,
         onBattery: state.battery.onBattery,
       })
     } catch (err) {

@@ -16,19 +16,28 @@
 // fresh-session-end render and the re-opened-from-Settings render are
 // byte-identical.
 
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import {
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react'
 import {
   BracesIcon,
   CheckCircle2Icon,
   ChevronLeftIcon,
   CopyIcon,
   DownloadIcon,
+  GripHorizontalIcon,
   RotateCcwIcon,
 } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { ScoreGauge } from '@/components/ScoreGauge'
 import { Button } from '@/components/ui/button'
+import { ScrollArea } from '@/components/ui/scroll-area'
 import { Skeleton } from '@/components/ui/skeleton'
 import { tokens } from '@/design/tokens'
 import { isAuditEventKind } from '@/lib/audit-types'
@@ -303,6 +312,7 @@ export function ReportView({
   animateScore = true,
 }: ReportViewProps) {
   const { session, auditEvents, nameByEdPubkey, myEdPubkeyHex } = data
+  const timelineHeadingId = useId()
   const groupedTimeline = useMemo(
     () => groupTimelineByWho(auditEvents),
     [auditEvents]
@@ -592,31 +602,20 @@ export function ReportView({
           )}
         </Section>
 
-        <Section heading={strings.report.sections.timeline.heading}>
+        <Section
+          heading={strings.report.sections.timeline.heading}
+          headingId={timelineHeadingId}
+        >
           {groupedTimeline.length === 0 ? (
             <Empty message={strings.report.sections.timeline.empty} />
           ) : (
-            <div className="flex flex-col gap-4">
-              {groupedTimeline.map(({ who, events }) => (
-                <article
-                  key={who}
-                  className="rounded-lg border border-border-subtle bg-bg-surface"
-                >
-                  <header className="border-b border-border-subtle px-4 py-2 text-sm font-medium text-text-primary">
-                    {labelFor(who, nameByEdPubkey, myEdPubkeyHex)}
-                  </header>
-                  <ul className="m-0 list-none p-0">
-                    {events.map((row) => (
-                      <TimelineRow
-                        key={row.sig}
-                        row={row}
-                        anchorTs={timelineAnchor}
-                      />
-                    ))}
-                  </ul>
-                </article>
-              ))}
-            </div>
+            <ResizableTimeline
+              groups={groupedTimeline}
+              headingId={timelineHeadingId}
+              nameByEdPubkey={nameByEdPubkey}
+              myEdPubkeyHex={myEdPubkeyHex}
+              anchorTs={timelineAnchor}
+            />
           )}
         </Section>
 
@@ -672,18 +671,146 @@ export function ReportView({
 
 function Section({
   heading,
+  headingId,
   children,
 }: {
   heading: string
+  headingId?: string
   children: React.ReactNode
 }) {
   return (
     <section className="flex flex-col gap-3">
-      <h2 className="text-sm font-medium tracking-wide text-text-secondary uppercase">
+      <h2
+        id={headingId}
+        className="text-sm font-medium tracking-wide text-text-secondary uppercase"
+      >
         {heading}
       </h2>
       {children}
     </section>
+  )
+}
+
+type TimelineGroup = ReturnType<typeof groupTimelineByWho>[number]
+
+function clampTimelineHeight(height: number): number {
+  return Math.min(
+    tokens.sizes.reportTimelineMaxHeight,
+    Math.max(tokens.sizes.reportTimelineMinHeight, height)
+  )
+}
+
+function ResizableTimeline({
+  groups,
+  headingId,
+  nameByEdPubkey,
+  myEdPubkeyHex,
+  anchorTs,
+}: {
+  groups: TimelineGroup[]
+  headingId: string
+  nameByEdPubkey: Record<string, string>
+  myEdPubkeyHex: string | null
+  anchorTs: number
+}) {
+  const timelineId = useId()
+  const [height, setHeight] = useState(tokens.sizes.reportTimelineDefaultHeight)
+  const stopResizeRef = useRef<(() => void) | null>(null)
+
+  useEffect(() => () => stopResizeRef.current?.(), [])
+
+  const beginResize = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0) return
+    event.preventDefault()
+    stopResizeRef.current?.()
+    const startY = event.clientY
+    const startHeight = height
+    const onMove = (moveEvent: PointerEvent) => {
+      setHeight(clampTimelineHeight(startHeight + moveEvent.clientY - startY))
+    }
+    const stop = () => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', stop)
+      window.removeEventListener('pointercancel', stop)
+      stopResizeRef.current = null
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', stop)
+    window.addEventListener('pointercancel', stop)
+    stopResizeRef.current = stop
+  }
+
+  return (
+    <div className="relative">
+      <ScrollArea
+        id={timelineId}
+        type="hover"
+        scrollHideDelay={tokens.motion.duration.slow}
+        role="region"
+        aria-labelledby={headingId}
+        className="overflow-hidden rounded-lg border border-border-subtle bg-bg-surface"
+        viewportClassName="bg-bg-base p-1 pr-3"
+        scrollbarClassName="w-2 bg-bg-surface/80 [&_[data-slot=scroll-area-thumb]]:bg-border-strong"
+        style={{ height }}
+      >
+        <div className="flex flex-col gap-4">
+          {groups.map(({ who, events }) => (
+            <article
+              key={who}
+              className="rounded-lg border border-border-subtle bg-bg-surface"
+            >
+              <header className="border-b border-border-subtle px-4 py-2 text-sm font-medium text-text-primary">
+                {labelFor(who, nameByEdPubkey, myEdPubkeyHex)}
+              </header>
+              <ul className="m-0 list-none p-0">
+                {events.map((row) => (
+                  <TimelineRow key={row.sig} row={row} anchorTs={anchorTs} />
+                ))}
+              </ul>
+            </article>
+          ))}
+        </div>
+      </ScrollArea>
+      <div
+        role="separator"
+        aria-orientation="horizontal"
+        aria-controls={timelineId}
+        aria-label={strings.report.timelineResizeAriaLabel}
+        aria-valuemin={tokens.sizes.reportTimelineMinHeight}
+        aria-valuemax={tokens.sizes.reportTimelineMaxHeight}
+        aria-valuenow={height}
+        tabIndex={0}
+        onPointerDown={beginResize}
+        onKeyDown={(event) => {
+          if (
+            event.key !== 'ArrowUp' &&
+            event.key !== 'ArrowDown' &&
+            event.key !== 'Home' &&
+            event.key !== 'End'
+          ) {
+            return
+          }
+          event.preventDefault()
+          if (event.key === 'Home') {
+            setHeight(tokens.sizes.reportTimelineMinHeight)
+            return
+          }
+          if (event.key === 'End') {
+            setHeight(tokens.sizes.reportTimelineMaxHeight)
+            return
+          }
+          setHeight((current) =>
+            clampTimelineHeight(
+              current +
+                (event.key === 'ArrowDown' ? tokens.space[5] : -tokens.space[5])
+            )
+          )
+        }}
+        className="absolute -bottom-2 left-0 z-10 flex h-4 w-full touch-none cursor-row-resize items-center justify-center rounded outline-none focus-visible:ring-3 focus-visible:ring-accent-ring"
+      >
+        <GripHorizontalIcon className="size-4 rounded bg-bg-base text-text-muted" />
+      </div>
+    </div>
   )
 }
 
