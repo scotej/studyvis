@@ -1,4 +1,4 @@
-import { type ReactNode } from 'react'
+import { type ReactNode, type Ref } from 'react'
 
 import { cn } from '@/lib/utils'
 
@@ -83,13 +83,22 @@ export function SettingsRow({
 export function SettingsSection({
   heading,
   children,
+  headingRef,
 }: {
   heading: ReactNode
   children: ReactNode
+  // A route that swaps this section out can restore focus here when its
+  // original control no longer exists (for example, a deleted session).
+  // Keeping the heading out of the tab order preserves normal navigation.
+  headingRef?: Ref<HTMLHeadingElement>
 }) {
   return (
     <section className="flex flex-col">
-      <h2 className="mb-3 text-xl font-semibold tracking-tight text-text-primary">
+      <h2
+        ref={headingRef}
+        tabIndex={headingRef ? -1 : undefined}
+        className="mb-3 text-xl font-semibold tracking-tight text-text-primary"
+      >
         {heading}
       </h2>
       <div className="flex flex-col">{children}</div>
