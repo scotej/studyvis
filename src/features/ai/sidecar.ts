@@ -35,6 +35,10 @@ export type SidecarStatus = {
 export type SidecarStartPurpose = 'live' | 'benchmark'
 
 export const HEALTH_POLL_INTERVAL_MS = 2000
+// Cold CPU starts can spend over a minute loading the model and projector.
+// Benchmark and agent readiness use the same deadline and retry cadence.
+export const SIDECAR_HEALTH_TIMEOUT_MS = 90_000
+export const SIDECAR_HEALTH_RETRY_MS = 500
 
 // Indirection so unit tests can substitute the IPC + fetch + setInterval
 // without spinning Tauri up. Production wires the defaults below.

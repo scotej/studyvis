@@ -14,6 +14,10 @@ import {
   __setAiAgentRuntime,
   type AiAgentRuntime,
 } from '@/features/ai/aiAgent'
+import {
+  SIDECAR_HEALTH_RETRY_MS,
+  SIDECAR_HEALTH_TIMEOUT_MS,
+} from '@/features/ai/sidecar'
 
 function chatCompletionResponse(content: string): Response {
   return new Response(JSON.stringify({ choices: [{ message: { content } }] }), {
@@ -21,18 +25,41 @@ function chatCompletionResponse(content: string): Response {
   })
 }
 
-function buildRuntime(overrides: Partial<AiAgentRuntime> = {}): AiAgentRuntime {
+function healthResponse(status = 200): Response {
+  return new Response(null, { status })
+}
+
+type BuildRuntimeOverrides = Omit<Partial<AiAgentRuntime>, 'fetch'> & {
+  fetch?: typeof fetch
+  fetchHealth?: typeof fetch
+}
+
+function buildRuntime(overrides: BuildRuntimeOverrides = {}): AiAgentRuntime {
+  const {
+    fetch: completionFetch = vi.fn() as unknown as typeof fetch,
+    fetchHealth = vi.fn(async () =>
+      healthResponse()
+    ) as unknown as typeof fetch,
+    ...runtimeOverrides
+  } = overrides
+  const routedFetch = ((input: RequestInfo | URL, init?: RequestInit) => {
+    return String(input).endsWith('/health')
+      ? fetchHealth(input, init)
+      : completionFetch(input, init)
+  }) as typeof fetch
+
   return {
-    fetch: vi.fn() as unknown as typeof fetch,
+    fetch: routedFetch,
     now: () => 1_700_000_000_000,
     getSidecarPort: async () => 12345,
-    ...overrides,
+    ...runtimeOverrides,
   }
 }
 
 afterEach(() => {
   invokeMock.mockReset()
   __resetAiAgentRuntime()
+  vi.useRealTimers()
   vi.restoreAllMocks()
 })
 
@@ -410,10 +437,244 @@ describe('handleUserText (intent classification end-to-end)', () => {
     expect(reply.intent).toBe('unknown')
   })
 
-  test('AGENT_REQUEST_TIMEOUT_MS is a sane upper bound', () => {
-    // Tiny sanity assert so a future refactor that drops the timeout
-    // (or sets it to 0) blows up here rather than in production.
-    expect(AGENT_REQUEST_TIMEOUT_MS).toBeGreaterThanOrEqual(30_000)
-    expect(AGENT_REQUEST_TIMEOUT_MS).toBeLessThanOrEqual(120_000)
+  test('waits for 503, 503, 200 health before posting a completion', async () => {
+    vi.useFakeTimers()
+    const healthFetch = vi
+      .fn()
+      .mockResolvedValueOnce(healthResponse(503))
+      .mockResolvedValueOnce(healthResponse(503))
+      .mockResolvedValueOnce(healthResponse(200))
+    const fetchMock = vi.fn(async () =>
+      chatCompletionResponse(
+        JSON.stringify({
+          intent: 'question',
+          payload: {},
+          reply_text: 'Ready now.',
+        })
+      )
+    )
+
+    const pending = handleUserText(
+      {
+        text: 'hello?',
+        declaredTopic: 'maths',
+        modelId: 'mock',
+        recentAuditKinds: [],
+      },
+      buildRuntime({
+        fetch: fetchMock as unknown as typeof fetch,
+        fetchHealth: healthFetch as unknown as typeof fetch,
+      })
+    )
+
+    await vi.advanceTimersByTimeAsync(0)
+    expect(healthFetch).toHaveBeenCalledOnce()
+    expect(fetchMock).not.toHaveBeenCalled()
+
+    await vi.advanceTimersByTimeAsync(SIDECAR_HEALTH_RETRY_MS)
+    expect(healthFetch).toHaveBeenCalledTimes(2)
+    expect(fetchMock).not.toHaveBeenCalled()
+
+    await vi.advanceTimersByTimeAsync(SIDECAR_HEALTH_RETRY_MS)
+    await expect(pending).resolves.toMatchObject({
+      intent: 'question',
+      reply_text: 'Ready now.',
+    })
+    expect(healthFetch).toHaveBeenCalledTimes(3)
+    expect(healthFetch.mock.calls[0]?.[0]).toBe('http://127.0.0.1:12345/health')
+    expect(healthFetch.mock.calls[0]?.[1]).toMatchObject({ method: 'GET' })
+    expect(fetchMock).toHaveBeenCalledOnce()
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  test('does not spend the completion timeout while waiting for readiness', async () => {
+    vi.useFakeTimers()
+    let ready = false
+    const healthFetch = vi.fn(async () => healthResponse(ready ? 200 : 503))
+    const fetchMock = vi.fn(async () =>
+      chatCompletionResponse(
+        JSON.stringify({
+          intent: 'question',
+          payload: {},
+          reply_text: 'Completion still has its own budget.',
+        })
+      )
+    )
+    const pending = handleUserText(
+      {
+        text: 'hello?',
+        declaredTopic: 'maths',
+        modelId: 'mock',
+        recentAuditKinds: [],
+      },
+      buildRuntime({
+        fetch: fetchMock as unknown as typeof fetch,
+        fetchHealth: healthFetch as unknown as typeof fetch,
+      })
+    )
+
+    await vi.advanceTimersByTimeAsync(65_000)
+    expect(fetchMock).not.toHaveBeenCalled()
+    ready = true
+    await vi.advanceTimersByTimeAsync(SIDECAR_HEALTH_RETRY_MS)
+    await expect(pending).resolves.toMatchObject({ intent: 'question' })
+    expect(fetchMock).toHaveBeenCalledOnce()
+  })
+
+  test('bounds persistent unready health and never posts a completion', async () => {
+    vi.useFakeTimers()
+    const healthFetch = vi.fn(async () => healthResponse(503))
+    const fetchMock = vi.fn() as unknown as typeof fetch
+    const rejection = expect(
+      handleUserText(
+        {
+          text: 'hello?',
+          declaredTopic: 'maths',
+          modelId: 'mock',
+          recentAuditKinds: [],
+        },
+        buildRuntime({ fetch: fetchMock, fetchHealth: healthFetch as never })
+      )
+    ).rejects.toMatchObject({ code: 'sidecar_unavailable' })
+
+    await vi.advanceTimersByTimeAsync(SIDECAR_HEALTH_TIMEOUT_MS)
+    await rejection
+    expect(healthFetch.mock.calls.length).toBeGreaterThan(1)
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  test('aborts a hung health probe at the readiness deadline', async () => {
+    vi.useFakeTimers()
+    const healthFetch = vi.fn(
+      (_input: RequestInfo | URL, init?: RequestInit) => {
+        return new Promise<Response>((_resolve, reject) => {
+          const signal = init?.signal
+          if (!signal) {
+            reject(new Error('missing readiness abort signal'))
+            return
+          }
+          const rejectAbort = () =>
+            reject(
+              signal.reason ??
+                new DOMException('The operation was aborted.', 'AbortError')
+            )
+          if (signal.aborted) rejectAbort()
+          else signal.addEventListener('abort', rejectAbort, { once: true })
+        })
+      }
+    )
+    const fetchMock = vi.fn() as unknown as typeof fetch
+    const rejection = expect(
+      handleUserText(
+        {
+          text: 'hello?',
+          declaredTopic: 'maths',
+          modelId: 'mock',
+          recentAuditKinds: [],
+        },
+        buildRuntime({ fetch: fetchMock, fetchHealth: healthFetch as never })
+      )
+    ).rejects.toMatchObject({ code: 'sidecar_unavailable' })
+
+    await vi.advanceTimersByTimeAsync(SIDECAR_HEALTH_TIMEOUT_MS)
+    await rejection
+    expect(healthFetch).toHaveBeenCalledOnce()
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  test('starts agent work while a separate vision completion is in flight', async () => {
+    let resolveVision!: (response: Response) => void
+    const visionResponse = new Promise<Response>((resolve) => {
+      resolveVision = resolve
+    })
+    const completionFetch = vi
+      .fn()
+      .mockImplementationOnce(() => visionResponse)
+      .mockResolvedValueOnce(
+        chatCompletionResponse(
+          JSON.stringify({
+            intent: 'question',
+            payload: {},
+            reply_text: 'Agent completed.',
+          })
+        )
+      )
+    const runtime = buildRuntime({
+      fetch: completionFetch as unknown as typeof fetch,
+    })
+    let visionSettled = false
+    const visionRequest = runtime
+      .fetch('http://127.0.0.1:12345/v1/chat/completions', {
+        method: 'POST',
+        body: JSON.stringify({ kind: 'vision' }),
+      })
+      .then((response) => {
+        visionSettled = true
+        return response
+      })
+
+    await expect(
+      handleUserText(
+        {
+          text: 'How am I doing?',
+          declaredTopic: 'maths',
+          modelId: 'mock',
+          recentAuditKinds: [],
+        },
+        runtime
+      )
+    ).resolves.toMatchObject({
+      intent: 'question',
+      reply_text: 'Agent completed.',
+    })
+    expect(completionFetch).toHaveBeenCalledTimes(2)
+    expect(visionSettled).toBe(false)
+
+    resolveVision(healthResponse())
+    await visionRequest
+    expect(visionSettled).toBe(true)
+  })
+
+  test('still aborts a completion that never resolves after 60 seconds', async () => {
+    vi.useFakeTimers()
+    let aborted = false
+    const fetchMock = vi.fn((_input: RequestInfo | URL, init?: RequestInit) => {
+      return new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener(
+          'abort',
+          () => {
+            aborted = true
+            reject(new DOMException('aborted', 'AbortError'))
+          },
+          { once: true }
+        )
+      })
+    })
+    const rejection = expect(
+      handleUserText(
+        {
+          text: 'hello?',
+          declaredTopic: 'maths',
+          modelId: 'mock',
+          recentAuditKinds: [],
+        },
+        buildRuntime({
+          fetch: fetchMock as unknown as typeof fetch,
+          now: () => Date.now(),
+        })
+      )
+    ).rejects.toMatchObject({ code: 'timeout' })
+
+    await vi.advanceTimersByTimeAsync(0)
+    expect(fetchMock).toHaveBeenCalledOnce()
+    expect(AGENT_REQUEST_TIMEOUT_MS).toBe(60_000)
+    await vi.advanceTimersByTimeAsync(AGENT_REQUEST_TIMEOUT_MS - 1)
+    expect(aborted).toBe(false)
+    await vi.advanceTimersByTimeAsync(1)
+    await rejection
+    expect(aborted).toBe(true)
+    expect(vi.getTimerCount()).toBe(0)
   })
 })

@@ -658,6 +658,14 @@ fn spawn_llama<R: Runtime>(
         &port.to_string(),
         "--ctx-size",
         &ctx_size.to_string(),
+        // Preserve b9095's current auto policy explicitly. Supplying
+        // --parallel alone disables the auto branch that enables unified KV,
+        // so all three flags belong together. CLI arguments also override any
+        // inherited LLAMA_ARG_* environment settings.
+        "--parallel",
+        "4",
+        "--kv-unified",
+        "--cont-batching",
         "--n-gpu-layers",
         N_GPU_LAYERS,
         "--model",
