@@ -23,6 +23,7 @@ import {
   useRef,
   useState,
   type ReactNode,
+  type Ref,
 } from 'react'
 import {
   BracesIcon,
@@ -190,19 +191,37 @@ export function Report({
 }: ReportProps) {
   const [status, setStatus] = useState<Status>({ kind: 'loading' })
   const [reloadKey, setReloadKey] = useState(0)
+  const [focusCloseOnMount, setFocusCloseOnMount] = useState(autoFocusClose)
+  const closeButtonRef = useRef<HTMLButtonElement>(null)
+  const autoFocusCloseEnabledRef = useRef(autoFocusClose)
   const { identity } = useIdentity()
   const myEdPubkeyHex = identity?.ed_pubkey_hex ?? null
   const myDisplayName =
     identity?.display_name?.trim() || strings.session.selfFallback
 
   useEffect(() => {
+    autoFocusCloseEnabledRef.current = autoFocusClose
+  }, [autoFocusClose])
+
+  useEffect(() => {
     let cancelled = false
     const loader = __loader ?? defaultLoader
+    const preserveCloseFocus = () => {
+      // Loading, error, and ready use separate report trees. Carry focus to
+      // the replacement Back/Close button only while that button still owns
+      // focus; an async load must not override newer keyboard intent.
+      setFocusCloseOnMount(
+        autoFocusCloseEnabledRef.current &&
+          document.activeElement === closeButtonRef.current
+      )
+    }
+    preserveCloseFocus()
     // eslint-disable-next-line react-hooks/set-state-in-effect -- flips back to loading when sessionId changes (Settings → Sessions opens a different report without unmounting); the .then callback is the productive setState.
     setStatus({ kind: 'loading' })
     loader(sessionId)
       .then((data) => {
         if (cancelled) return
+        preserveCloseFocus()
         const merged: ResolvedReportData = {
           ...data,
           // Stitch in self-identity if the loader didn't provide one — the
@@ -247,10 +266,11 @@ export function Report({
               </h1>
             </div>
             <Button
+              ref={closeButtonRef}
               variant="secondary"
               size="sm"
               onClick={onClose}
-              autoFocus={autoFocusClose}
+              autoFocus={focusCloseOnMount}
             >
               <ChevronLeftIcon /> {closeLabel}
             </Button>
@@ -300,7 +320,8 @@ export function Report({
       data={status.data}
       onClose={onClose}
       closeLabel={closeLabel}
-      autoFocusClose={autoFocusClose}
+      autoFocusClose={focusCloseOnMount}
+      closeButtonRef={closeButtonRef}
       onRejoin={onRejoin}
       rejoinDeadline={rejoinDeadline}
       showDiagnosticsExport={showDiagnosticsExport}
@@ -317,6 +338,9 @@ export type ReportViewProps = {
   onClose: () => void
   closeLabel?: string
   autoFocusClose?: boolean
+  // Report's async shell uses this to preserve focus across its loading and
+  // ready trees without overriding a user's newer focus target.
+  closeButtonRef?: Ref<HTMLButtonElement>
   topContent?: ReactNode
   // #47 B3 — see ReportProps.onRejoin.
   onRejoin?: () => void
@@ -333,6 +357,7 @@ export function ReportView({
   onClose,
   closeLabel = strings.common.actions.close,
   autoFocusClose = false,
+  closeButtonRef,
   topContent,
   onRejoin,
   rejoinDeadline,
@@ -568,6 +593,7 @@ export function ReportView({
               </Button>
             ) : null}
             <Button
+              ref={closeButtonRef}
               variant="secondary"
               size="sm"
               onClick={onClose}

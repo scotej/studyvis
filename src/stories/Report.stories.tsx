@@ -1,7 +1,11 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
-import { expect, within } from 'storybook/test'
+import { expect, waitFor, within } from 'storybook/test'
 
-import { ReportView, type ResolvedReportData } from '@/features/session/Report'
+import {
+  Report,
+  ReportView,
+  type ResolvedReportData,
+} from '@/features/session/Report'
 import type { AuditEventRecord } from '@/lib/db/audit'
 import type { SessionRecord } from '@/lib/db/sessions'
 import { strings } from '@/strings'
@@ -126,6 +130,59 @@ export const HistoricalReportWithoutDiagnostics: Story = {
         name: strings.settings.sessions.review.backCta,
       })
     ).toHaveFocus()
+  },
+}
+
+const focusTransitionData = buildData(
+  baseSession({ declared_topic: 'Focus transition' }),
+  []
+)
+let releaseFocusTransition: (() => void) | null = null
+
+async function loadFocusTransition(): Promise<ResolvedReportData> {
+  await new Promise<void>((resolve) => {
+    releaseFocusTransition = resolve
+  })
+  return focusTransitionData
+}
+
+export const HistoricalReportPreservesNewerFocus: Story = {
+  args: MostlyOnTask.args,
+  render: () => (
+    <Report
+      sessionId={focusTransitionData.session.id}
+      onClose={onClose}
+      closeLabel={strings.settings.sessions.review.backCta}
+      autoFocusClose
+      topContent={<button type="button">Pending invite action</button>}
+      __loader={loadFocusTransition}
+    />
+  ),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const loadingBack = canvas.getByRole('button', {
+      name: strings.settings.sessions.review.backCta,
+    })
+    await expect(loadingBack).toHaveFocus()
+
+    const newerTarget = canvas.getByRole('button', {
+      name: 'Pending invite action',
+    })
+    newerTarget.focus()
+    await expect(newerTarget).toHaveFocus()
+    await waitFor(() => expect(releaseFocusTransition).not.toBeNull())
+    releaseFocusTransition?.()
+
+    await waitFor(() =>
+      expect(
+        canvas.getByRole('heading', { name: 'Studied Focus transition' })
+      ).toBeInTheDocument()
+    )
+    await expect(
+      canvas.getByRole('button', {
+        name: strings.settings.sessions.review.backCta,
+      })
+    ).not.toHaveFocus()
   },
 }
 
