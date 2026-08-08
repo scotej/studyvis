@@ -126,6 +126,26 @@ describe('serializeReportToText score line', () => {
   })
 })
 
+describe('serializeReportToText — #187 AI recovery', () => {
+  test('includes the recovery row after a stalled interval', () => {
+    const text = serializeReportToText(
+      buildData(baseSession(), [
+        evt(ME, 'ai_stalled', 2 * 60_000, {
+          reason: 'inference_timeout',
+          reasoning: 'the model took too long to answer',
+        }),
+        evt(ME, 'ai_resumed', 3 * 60_000, {
+          reason: 'inference_timeout',
+          unavailable_ms: 180_000,
+        }),
+      ])
+    )
+
+    expect(text).toContain("couldn't be checked by AI")
+    expect(text).toContain('could be checked by AI again')
+  })
+})
+
 // I83 — the exported/copied text is an independent second implementation of
 // the report's copy, so a fix applied only to the JSX would leave the pasted
 // version still claiming a clean session. These pin both halves of the honesty

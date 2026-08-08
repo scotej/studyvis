@@ -352,3 +352,65 @@ export const AiNeverGotAReading: Story = {
     onClose,
   },
 }
+
+// #187 — the machine fell behind and later caught up. The paired rows prove
+// the report no longer leaves an unresolved "couldn't be checked" message.
+// Enough surrounding activity is included to overflow the default timeline
+// height, exercising the hover-only themed scrollbar and resize separator.
+export const AiRecoveredAfterSlowdown: Story = {
+  args: {
+    data: buildData(
+      baseSession({
+        score: 92,
+        focused_pct: 0.94,
+        confident_samples: 18,
+        skipped_samples: 1,
+        ai_enabled: 1,
+        declared_topic: 'statistics revision',
+        total_minutes: 25,
+      }),
+      [
+        event(ME, 'joined', 0),
+        event(ME, 'topic_set', 200, { topic: 'statistics revision' }),
+        event(ALICE, 'joined', 800),
+        event(ME, 'pomodoro_start', 15_000, { preset: '25/5' }),
+        event(ME, 'ai_warning', 60_000, {
+          severity: 'mild',
+          reasoning: 'briefly checking an unrelated message',
+        }),
+        event(ME, 'ai_stalled', 2 * 60_000 + 5_000, {
+          reason: 'inference_timeout',
+          reasoning: 'the model took too long to answer',
+        }),
+        event(ALICE, 'paused_break', 2 * 60_000 + 30_000),
+        event(ALICE, 'resumed', 3 * 60_000),
+        event(ME, 'ai_resumed', 3 * 60_000 + 18_000, {
+          reason: 'inference_timeout',
+          unavailable_ms: 198_000,
+        }),
+        event(ME, 'topic_change', 8 * 60_000, {
+          previous_topic: 'statistics revision',
+          new_topic: 'probability exercises',
+        }),
+        event(ME, 'break_request', 12 * 60_000, {
+          requested_duration_sec: 300,
+        }),
+        event(ME, 'break_approved', 12 * 60_000 + 3_000, {
+          duration_sec: 300,
+          reason: 'approved · 5 min.',
+        }),
+        event(ME, 'resumed', 17 * 60_000 + 3_000),
+        event(ME, 'ai_warning', 20 * 60_000, {
+          severity: 'mild',
+          reasoning: 'looking away from the study material',
+        }),
+        event(ME, 'pomodoro_end', 25 * 60_000 - 5_000),
+        event(ME, 'left', 25 * 60_000),
+        event(ALICE, 'left', 25 * 60_000),
+      ]
+    ),
+    animateScore: false,
+    onClose,
+    showDiagnosticsExport: true,
+  },
+}

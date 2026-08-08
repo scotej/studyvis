@@ -18,9 +18,10 @@ import type { JsonValue } from 'trystero'
 //     peers see the outcome.
 //
 // I82 adds `ai_stalled`: the AI loop went a sustained stretch without
-// managing a single reading. LOCAL-ONLY, both for the `ai_warning` privacy
-// reason (it says something about your machine, not your focus) and because
-// a peer on an older build would reject the unknown kind outright.
+// managing a single reading. #187 pairs it with `ai_resumed` after a reading
+// lands again. Both are LOCAL-ONLY, both for the `ai_warning` privacy reason
+// (they say something about your machine, not your focus) and because a peer
+// on an older build would reject the unknown kinds outright.
 export type AuditEventKind =
   | 'joined'
   | 'left'
@@ -31,6 +32,7 @@ export type AuditEventKind =
   | 'ai_warning'
   | 'ai_alert'
   | 'ai_stalled'
+  | 'ai_resumed'
   | 'topic_set'
   | 'topic_change'
   | 'break_request'
@@ -88,6 +90,7 @@ export function isAuditEventKind(value: unknown): value is AuditEventKind {
     value === 'ai_warning' ||
     value === 'ai_alert' ||
     value === 'ai_stalled' ||
+    value === 'ai_resumed' ||
     value === 'topic_set' ||
     value === 'topic_change' ||
     value === 'break_request' ||

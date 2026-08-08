@@ -310,6 +310,9 @@ export {
   BACKOFF_MULTIPLIER,
   STALL_NOTICE_AFTER_MS,
   STALL_CHECK_INTERVAL_MS,
+  SCHEDULER_LAG_MIN_MS,
+  SCHEDULER_LAG_RATIO,
+  schedulerLagIsMaterial,
 } from './sampleLoop'
 export type {
   SampleLoopRuntime,
@@ -317,5 +320,6 @@ export type {
   SampleLoopHandle,
   SampleLoopStartReason,
   SampleBlockReason,
+  SampleRecoveryInfo,
   BackoffState,
 } from './sampleLoop'

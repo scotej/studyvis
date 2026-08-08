@@ -20,6 +20,7 @@ import {
   MAX_REQUEST_TIMEOUT_MS,
   REQUEST_TIMEOUT_MS,
   REQUEST_TIMEOUT_P95_FACTOR,
+  schedulerLagIsMaterial,
   effectiveRequestTimeoutMs,
   __resetBatteryRuntime,
   __resetCaptureRuntime,
@@ -1463,6 +1464,12 @@ describe('startSampleLoop — I82 stall watchdog', () => {
     aborting = false
     await clock.advance(5_000)
     expect(onSamplesResumed).toHaveBeenCalledTimes(1)
+    expect(onSamplesResumed).toHaveBeenCalledWith(
+      expect.objectContaining({
+        reason: 'inference_timeout',
+        unavailableForMs: expect.any(Number),
+      })
+    )
     expect(useFocusStore.getState().totalSamples).toBe(1)
 
     // Re-armed: a second stall reports again rather than staying quiet.
@@ -1855,6 +1862,23 @@ describe('startSampleLoop — I82 stall watchdog', () => {
     expect(onSamplesStalled).not.toHaveBeenCalled()
     expect(useFocusStore.getState().totalSamples).toBeGreaterThan(0)
     await handle.stop()
+  })
+})
+
+describe('schedulerLagIsMaterial — #187 overload diagnostics', () => {
+  test('ignores ordinary timer jitter', () => {
+    expect(schedulerLagIsMaterial(999, 5_000)).toBe(false)
+    expect(schedulerLagIsMaterial(1_000, 5_000)).toBe(false)
+  })
+
+  test('reports a delay that is both absolute and cadence-relative', () => {
+    expect(schedulerLagIsMaterial(2_500, 5_000)).toBe(true)
+    expect(schedulerLagIsMaterial(5_000, 10_000)).toBe(true)
+  })
+
+  test('rejects invalid timing input', () => {
+    expect(schedulerLagIsMaterial(Number.NaN, 5_000)).toBe(false)
+    expect(schedulerLagIsMaterial(5_000, -1)).toBe(false)
   })
 })
 

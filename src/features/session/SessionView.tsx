@@ -1258,10 +1258,18 @@ export function SessionView({
             log.error('audit.ai_stalled_append_failed', { reason, err })
           })
       },
-      onSamplesResumed: () => {
+      onSamplesResumed: ({ reason, unavailableForMs }) => {
         aiStalledRef.current = false
         setAiRuntimeStatus('active')
         toast.success(strings.session.errors.aiReadingsResumed)
+        void appendLocalAuditRef
+          .current?.('ai_resumed', {
+            reason,
+            unavailable_ms: Math.round(unavailableForMs),
+          })
+          .catch((err: unknown) => {
+            log.error('audit.ai_resumed_append_failed', { reason, err })
+          })
       },
     })
     return () => {

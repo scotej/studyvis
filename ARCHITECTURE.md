@@ -481,6 +481,8 @@ When a current benchmark exists for the selected model, `sample_interval = max(5
 
 **Cadence backoff (A6, local, no telemetry).** ARCHITECTURE originally promised a "thermal-aware notice" but only paused on battery <20% — which never fires on AC, exactly where a fanless laptop throttles under continuous vision inference. There is no portable OS thermal API and no telemetry, so instead the loop watches inference durations: after **2** consecutive ticks whose measured inference exceeds `benchmark_p95 × 2.5`, it engages — doubling the effective sample interval — and recovers after **3** consecutive normal ticks. It fires a single in-voice "checks are running slower than usual" notice once per session (one-shot, on the engaging tick). The battery pause above is unchanged. When no benchmark p95 exists the backoff is disabled (no baseline to compare against), so the unbenchmarked path neither stretches cadence through A6 nor emits its slowdown notice.
 
+**Overload diagnostics (#187, local-only).** The structured app log separates the two ways a machine can fall behind without recording any topic or capture content. `ai.sampleloop.scheduler.lagged` records a WebView timer that fired at least one second and half a cadence late (main-thread/whole-machine pressure); `ai.sampleloop.inference.slow` records a completed inference above the current benchmark p95 × 2.5 threshold (sidecar compute pressure). Stall and recovery records include the model id, effective interval, request bound, benchmark p95, backoff/battery state, resolved-sample count, and unavailable duration. Per-tick `sample.resolved` debug rows retain capture/inference/total timings for reconstruction, while the log throttle bounds repeated warning rows.
+
 ### Vision model + mmproj pairing
 
 Each chosen vision model requires a matching `*.mmproj.gguf` projector file. Both downloaded together by the model picker. Default candidates (verified on Hugging Face Hub):
@@ -564,15 +566,18 @@ type AuditEvent = {
     | "resumed"
     | "topic_set"      | "topic_change"
     | "ai_warning"     | "ai_alert"
+    | "ai_stalled"     | "ai_resumed"
     | "break_request"  | "break_approved" | "break_denied"
     | "pomodoro_start" | "pomodoro_end";
   detail: Record<string, unknown>;
 }
 ```
 
+`ai_stalled` and `ai_resumed` are a local-only pair: after two minutes without a resolved AI reading, the first records why checking stopped; the second records when a later reading proves the pipeline recovered. They describe the local machine, never the user's focus, so they are persisted for the local report and are not sent to peers. Their pairing also keeps an older peer from seeing an unknown event kind.
+
 What stays **private** (not in audit log) until session end: the running numeric score and the AI's internal reasoning text. Both appear in the post-session report.
 
-What's **broadcast in real time**: the kinds above. Peers see "Sam: ai_warning (looking away)" but not "Sam's score is 73". This honours the user's privacy nuance from the design conversation.
+What's **broadcast in real time**: session-presence, Pomodoro, topic, approved/denied break, and `ai_alert` events. `ai_warning`, `break_request`, `ai_stalled`, and `ai_resumed` remain local-only. Peers can see "Sam: looking off-task" after an alert, but never Sam's running numeric score or local machine-health events. This honours the user's privacy nuance from the design conversation.
 
 Audit log is also written to local SQLite per session for the post-session report and (V3) stats.
 

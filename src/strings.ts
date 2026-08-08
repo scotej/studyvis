@@ -918,6 +918,7 @@ export const strings = {
     },
     copyCta: 'Copy report',
     copyAriaLabel: 'Copy session report to clipboard',
+    timelineResizeAriaLabel: 'Resize report timeline',
     export: {
       saveCta: 'Save as…',
       saveAriaLabel: 'Save session report to a file',
@@ -942,6 +943,7 @@ export const strings = {
       ai_warning: 'got a self-warning',
       ai_alert: 'looking off-task',
       ai_stalled: "couldn't be checked by AI",
+      ai_resumed: 'could be checked by AI again',
       topic_set: 'set the topic',
       topic_change: 'changed topic',
       break_request: 'asked for a break',
