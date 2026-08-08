@@ -17,6 +17,7 @@
 
 import type { TopicRoom } from '@/lib/trystero'
 import { logger } from '@/lib/log'
+import { stopMediaStream } from '@/lib/media'
 
 const log = logger.child('session.screenshare')
 
@@ -34,6 +35,28 @@ export const SCREEN_STREAM_METADATA = { kind: 'screen' } as const
 // resolution, which is what makes text legible) is the cheap win: a full 4-user
 // mesh where everyone shares is eight concurrent video streams.
 export const SCREEN_SHARE_MAX_FPS = 15
+
+export class EntireScreenShareRequiredError extends Error {
+  readonly displaySurface: string | undefined
+
+  constructor(displaySurface: string | undefined) {
+    super('Windows screen sharing requires an entire screen')
+    this.name = 'EntireScreenShareRequiredError'
+    this.displaySurface = displaySurface
+  }
+}
+
+type ScreenShareDisplayMediaOptions = DisplayMediaStreamOptions & {
+  monitorTypeSurfaces?: 'include' | 'exclude'
+  surfaceSwitching?: 'include' | 'exclude'
+}
+
+export type ScreenShareCaptureRuntime = {
+  getDisplayMedia: (
+    constraints: ScreenShareDisplayMediaOptions
+  ) => Promise<MediaStream>
+  userAgent: string
+}
 
 export type ScreenSharePayload = {
   sharing: boolean
@@ -261,20 +284,71 @@ function removeStream(room: TopicRoom, stream: MediaStream): void {
 // getDisplayMedia must run inside live transient user activation on every call
 // in WKWebView / WebView2 (the same constraint V2-P9 hit for the AI loop), so
 // this is called synchronously from the click handler — never after an await.
-export function requestScreenShareStream(): Promise<MediaStream> {
+export function requestScreenShareStream(
+  runtime: ScreenShareCaptureRuntime | null = defaultScreenShareCaptureRuntime()
+): Promise<MediaStream> {
+  if (!runtime) {
+    return Promise.reject(
+      new DOMException('getDisplayMedia is unavailable', 'NotSupportedError')
+    )
+  }
+
+  const windows = /Windows/i.test(runtime.userAgent)
+  const request = runtime.getDisplayMedia({
+    video: {
+      frameRate: { max: SCREEN_SHARE_MAX_FPS },
+      ...(windows ? { displaySurface: 'monitor' } : {}),
+    },
+    // System audio would echo against the live mic, and PTT already owns the
+    // audio story. Video only.
+    audio: false,
+    ...(windows
+      ? {
+          monitorTypeSurfaces: 'include' as const,
+          surfaceSwitching: 'exclude' as const,
+        }
+      : {}),
+  })
+
+  if (!windows) return request
+
+  // `displaySurface` is only a preference: the Screen Capture API cannot
+  // constrain the picker to monitor surfaces. Enforce the Windows policy after
+  // selection, before SessionView can store or publish the stream.
+  return request.then((stream) => {
+    const displaySurface = selectedDisplaySurface(stream)
+    if (displaySurface === 'monitor') return stream
+
+    stopMediaStream(stream)
+    log.warn('source.rejected', {
+      reason: 'entire_screen_required',
+      displaySurface: displaySurface ?? 'unknown',
+    })
+    throw new EntireScreenShareRequiredError(displaySurface)
+  })
+}
+
+function defaultScreenShareCaptureRuntime(): ScreenShareCaptureRuntime | null {
   if (
     typeof navigator === 'undefined' ||
     !navigator.mediaDevices ||
     typeof navigator.mediaDevices.getDisplayMedia !== 'function'
   ) {
-    return Promise.reject(
-      new DOMException('getDisplayMedia is unavailable', 'NotSupportedError')
-    )
+    return null
   }
-  return navigator.mediaDevices.getDisplayMedia({
-    video: { frameRate: { max: SCREEN_SHARE_MAX_FPS } },
-    // System audio would echo against the live mic, and PTT already owns the
-    // audio story. Video only.
-    audio: false,
-  })
+  return {
+    getDisplayMedia: (constraints) =>
+      navigator.mediaDevices.getDisplayMedia(constraints),
+    userAgent: navigator.userAgent,
+  }
+}
+
+function selectedDisplaySurface(stream: MediaStream): string | undefined {
+  const track = stream.getVideoTracks()[0]
+  if (!track) return undefined
+  try {
+    return track.getSettings().displaySurface
+  } catch {
+    return undefined
+  }
 }

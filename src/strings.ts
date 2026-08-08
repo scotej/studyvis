@@ -598,6 +598,35 @@ export const strings = {
       inputAriaLabel: 'Note to your session',
       sendAriaLabel: 'Send the note',
     },
+    chat: {
+      heading: 'Chat',
+      group: 'Group',
+      ai: 'StudyVis AI',
+      addConversation: 'Add conversation',
+      conversations: 'Conversations',
+      directMessages: 'Direct messages',
+      aiDescription: 'Private, local AI with context from this session.',
+      aiDisabled: 'Enable AI features and select a model to use StudyVis AI.',
+      aiEmpty: 'Ask StudyVis AI about your current study session.',
+      aiPlaceholder: 'Message StudyVis AI…',
+      aiInputAriaLabel: 'Message StudyVis AI',
+      sendAiAriaLabel: 'Send message to StudyVis AI',
+      aiUnavailable: 'The local AI is unavailable.',
+      aiFailed: 'The local AI could not respond.',
+      aiTimedOut: 'The local AI response timed out.',
+      aiHttpStatus: (status: number) => `The local AI returned HTTP ${status}.`,
+      thinking: 'Thinking…',
+      you: 'You',
+      dmEmpty: 'No direct messages yet.',
+      dmPlaceholder: 'Write a direct message…',
+      dmInputAriaLabel: (name: string) => `Direct message to ${name}`,
+      sendDirectAriaLabel: (name: string) => `Send direct message to ${name}`,
+      sendDirectFallbackAriaLabel: 'Send direct message',
+      directMessageSendFailed: "Couldn't send the direct message.",
+      peerUnavailable: 'This person is no longer in the session.',
+      resize: 'Resize chat area',
+      close: (name: string) => `Close ${name}`,
+    },
     images: {
       attachImage: 'Send an image',
       openImage: (name: string) => `Open image from ${name}`,
@@ -676,6 +705,10 @@ export const strings = {
       expandAriaLabel: (name: string) => `View ${name} in fullscreen`,
       startedToast: "You're sharing your screen.",
       stoppedToast: 'You stopped sharing your screen.',
+      entireScreenRequiredToast:
+        "Try again and choose Entire Screen in the Windows picker. StudyVis won't share a single window or app.",
+      entireScreenUnverifiedToast:
+        "StudyVis couldn't verify that you chose Entire Screen, so sharing didn't start. Update Microsoft Edge WebView2, then try again.",
       // NotAllowedError covers both "you dismissed the picker" and "the OS has
       // not granted screen recording", and the two are indistinguishable from
       // the rejection — so the copy has to hold for either.
