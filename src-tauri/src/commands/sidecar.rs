@@ -116,6 +116,13 @@ struct SidecarInner {
     // post-spawn generation check only fires if the watcher task gets another
     // scheduling quantum before the process tears down).
     shutting_down: bool,
+    // Number of sidecar_start calls that passed path validation but have not
+    // yet returned. Usually 0/1; a counter keeps concurrent callers honest
+    // while they serialize on the engine install gate.
+    starting_attempts: u32,
+    // Explicit stop/reinstall/shutdown increments this independently of the
+    // child generation, invalidating any start still awaiting install/gates.
+    start_epoch: u64,
     errored: bool,
     last_error: Option<String>,
 }
@@ -154,6 +161,7 @@ impl SidecarState {
             }
         };
         guard.generation = guard.generation.wrapping_add(1);
+        cancel_pending_starts(&mut guard);
         guard.shutting_down = true;
         if let Some(child) = guard.child.take() {
             let _ = child.kill();
@@ -165,12 +173,31 @@ impl SidecarState {
 #[derive(Serialize)]
 pub struct SidecarStatus {
     pub running: bool,
+    pub starting: bool,
     pub port: Option<u16>,
     pub model: Option<String>,
     pub mmproj: Option<String>,
     pub ctx_size: Option<u32>,
     pub errored: bool,
     pub last_error: Option<String>,
+}
+
+fn mark_starting(guard: &mut SidecarInner) -> u64 {
+    guard.starting_attempts = guard.starting_attempts.saturating_add(1);
+    guard.errored = false;
+    guard.last_error = None;
+    guard.start_epoch
+}
+
+fn unmark_starting(guard: &mut SidecarInner, epoch: u64) {
+    if guard.start_epoch == epoch {
+        guard.starting_attempts = guard.starting_attempts.saturating_sub(1);
+    }
+}
+
+fn cancel_pending_starts(guard: &mut SidecarInner) {
+    guard.start_epoch = guard.start_epoch.wrapping_add(1);
+    guard.starting_attempts = 0;
 }
 
 #[tauri::command]
@@ -202,6 +229,51 @@ pub async fn sidecar_start<R: Runtime>(
         }
     }
 
+    // Mark the entire potentially slow install/spawn interval. Before the
+    // child exists, model/port are still empty—the same fields an explicit
+    // stop exposes—so JS needs this authoritative bit to distinguish "keep
+    // waiting" from "the session deliberately stopped the engine".
+    let start_epoch = {
+        let mut guard = arc.lock().await;
+        // Re-check after path validation; another caller may have completed.
+        if guard.child.is_some() {
+            return guard
+                .port
+                .ok_or_else(|| "sidecar running but no port recorded".to_string());
+        }
+        if guard.shutting_down {
+            return Err("app is shutting down".to_string());
+        }
+        mark_starting(&mut guard)
+    };
+
+    let result = sidecar_start_marked(
+        app,
+        arc.clone(),
+        &engine,
+        model_path,
+        mmproj_path,
+        ctx_size,
+        engine_auto_install,
+        start_epoch,
+    )
+    .await;
+    let mut guard = arc.lock().await;
+    unmark_starting(&mut guard, start_epoch);
+    drop(guard);
+    result
+}
+
+async fn sidecar_start_marked<R: Runtime>(
+    app: AppHandle<R>,
+    arc: Arc<Mutex<SidecarInner>>,
+    engine: &super::engine::EngineState,
+    model_path: String,
+    mmproj_path: Option<String>,
+    ctx_size: u32,
+    engine_auto_install: bool,
+    start_epoch: u64,
+) -> Result<u16, String> {
     // Engine presence check OUTSIDE the sidecar lock: a first-run download
     // takes a while and sidecar_status polls must stay responsive. The
     // engine module serializes concurrent installs itself.
@@ -209,7 +281,7 @@ pub async fn sidecar_start<R: Runtime>(
         if !engine_auto_install {
             return Err(ENGINE_NOT_INSTALLED.to_string());
         }
-        super::engine::ensure_installed(&app, &engine)
+        super::engine::ensure_installed(&app, engine)
             .await
             .map_err(|e| format!("engine install: {e}"))?;
     }
@@ -226,6 +298,9 @@ pub async fn sidecar_start<R: Runtime>(
     let _engine_gate = engine.gate.lock().await;
 
     let mut guard = arc.lock().await;
+    if guard.start_epoch != start_epoch {
+        return Err("sidecar start superseded".to_string());
+    }
     // Re-check after the unlocked window — a concurrent start may have won.
     if guard.child.is_some() {
         return guard
@@ -301,6 +376,7 @@ pub async fn sidecar_start<R: Runtime>(
 // model_remove serving-check so the two teardown paths can't drift.
 fn take_child_and_wipe(guard: &mut SidecarInner) -> Option<CommandChild> {
     guard.generation = guard.generation.wrapping_add(1);
+    cancel_pending_starts(guard);
     let child = guard.child.take();
     guard.port = None;
     guard.model = None;
@@ -365,15 +441,20 @@ pub async fn stop_if_serving_under(state: &SidecarState, dir: &Path) -> Result<b
 pub async fn sidecar_status(state: State<'_, SidecarState>) -> Result<SidecarStatus, String> {
     let arc = state.0.clone();
     let guard = arc.lock().await;
-    Ok(SidecarStatus {
+    Ok(snapshot_status(&guard))
+}
+
+fn snapshot_status(guard: &SidecarInner) -> SidecarStatus {
+    SidecarStatus {
         running: guard.child.is_some(),
+        starting: guard.starting_attempts > 0,
         port: guard.port,
         model: guard.model.clone(),
         mmproj: guard.mmproj.clone(),
         ctx_size: guard.ctx_size,
         errored: guard.errored,
         last_error: guard.last_error.clone(),
-    })
+    }
 }
 
 #[derive(Serialize)]
@@ -940,6 +1021,44 @@ async fn watch<R: Runtime>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn starting_counter_is_authoritative_and_clears_previous_errors() {
+        let mut inner = SidecarInner {
+            errored: true,
+            last_error: Some("previous failure".to_string()),
+            ..SidecarInner::default()
+        };
+
+        let epoch = mark_starting(&mut inner);
+        assert_eq!(mark_starting(&mut inner), epoch);
+        assert!(snapshot_status(&inner).starting);
+        assert!(!inner.errored);
+        assert!(inner.last_error.is_none());
+
+        unmark_starting(&mut inner, epoch);
+        assert!(snapshot_status(&inner).starting);
+        unmark_starting(&mut inner, epoch);
+        assert!(!snapshot_status(&inner).starting);
+        unmark_starting(&mut inner, epoch);
+        assert_eq!(inner.starting_attempts, 0);
+    }
+
+    #[test]
+    fn cancelling_starts_invalidates_old_cleanup_without_touching_new_work() {
+        let mut inner = SidecarInner::default();
+        let old_epoch = mark_starting(&mut inner);
+
+        cancel_pending_starts(&mut inner);
+        assert!(!snapshot_status(&inner).starting);
+        assert_ne!(inner.start_epoch, old_epoch);
+
+        let new_epoch = mark_starting(&mut inner);
+        unmark_starting(&mut inner, old_epoch);
+        assert!(snapshot_status(&inner).starting);
+        unmark_starting(&mut inner, new_epoch);
+        assert!(!snapshot_status(&inner).starting);
+    }
 
     fn scratch_log(name: &str) -> PathBuf {
         std::env::temp_dir().join(format!(

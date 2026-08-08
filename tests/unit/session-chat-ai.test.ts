@@ -9,6 +9,10 @@ import {
   type AiAgentRuntime,
 } from '@/features/ai/aiAgent'
 import {
+  SIDECAR_HEALTH_RETRY_MS,
+  type SidecarStatus,
+} from '@/features/ai/sidecar'
+import {
   handleSessionChatText,
   SESSION_CHAT_MAX_AUDIT_CONTEXT,
   SESSION_CHAT_MAX_AUDIT_KIND_LENGTH,
@@ -35,14 +39,34 @@ function completion(content: string, status = 200): Response {
   })
 }
 
+function sidecarStatus(overrides: Partial<SidecarStatus> = {}): SidecarStatus {
+  return {
+    running: true,
+    starting: false,
+    port: 12_345,
+    model: '/models/mock.gguf',
+    mmproj: null,
+    ctx_size: 4096,
+    errored: false,
+    last_error: null,
+    ...overrides,
+  }
+}
+
 function useRuntime(args: {
   fetch: typeof fetch
-  getSidecarPort?: () => Promise<number | null>
+  fetchHealth?: typeof fetch
+  getSidecarStatus?: () => Promise<SidecarStatus>
 }): void {
+  const routedFetch = ((input: RequestInfo | URL, init?: RequestInit) =>
+    String(input).endsWith('/health')
+      ? (args.fetchHealth?.(input, init) ??
+        Promise.resolve(new Response(null, { status: 200 })))
+      : args.fetch(input, init)) as typeof fetch
   __setAiAgentRuntime({
-    fetch: args.fetch,
+    fetch: routedFetch,
     now: () => 1_700_000_000_000,
-    getSidecarPort: args.getSidecarPort ?? (async () => 12_345),
+    getSidecarStatus: args.getSidecarStatus ?? (async () => sidecarStatus()),
   } satisfies AiAgentRuntime)
 }
 
@@ -201,24 +225,50 @@ describe('handleSessionChatText request contract', () => {
     const reply = await handleSessionChatText(BASE_INPUT)
     expect(reply).toBe('r'.repeat(SESSION_CHAT_MAX_REPLY_LENGTH))
   })
+
+  test('waits for sidecar readiness before posting the completion', async () => {
+    vi.useFakeTimers()
+    const fetchHealth = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(null, { status: 503 }))
+      .mockResolvedValueOnce(new Response(null, { status: 200 }))
+    const fetchMock = vi.fn(async () =>
+      completion(JSON.stringify({ reply_text: 'Ready now.' }))
+    )
+    useRuntime({
+      fetch: fetchMock as unknown as typeof fetch,
+      fetchHealth: fetchHealth as unknown as typeof fetch,
+    })
+
+    const request = handleSessionChatText(BASE_INPUT)
+    await vi.advanceTimersByTimeAsync(0)
+    expect(fetchHealth).toHaveBeenCalledOnce()
+    expect(fetchMock).not.toHaveBeenCalled()
+
+    await vi.advanceTimersByTimeAsync(SIDECAR_HEALTH_RETRY_MS)
+    await expect(request).resolves.toBe('Ready now.')
+    expect(fetchHealth).toHaveBeenCalledTimes(2)
+    expect(fetchMock).toHaveBeenCalledOnce()
+    expect(vi.getTimerCount()).toBe(0)
+  })
 })
 
 describe('handleSessionChatText failures and cancellation', () => {
   test('rejects empty text before consulting the sidecar', async () => {
-    const getSidecarPort = vi.fn(async () => 12_345)
-    useRuntime({ fetch: vi.fn() as unknown as typeof fetch, getSidecarPort })
+    const getSidecarStatus = vi.fn(async () => sidecarStatus())
+    useRuntime({ fetch: vi.fn() as unknown as typeof fetch, getSidecarStatus })
 
     await expect(
       handleSessionChatText({ ...BASE_INPUT, text: '   ' })
     ).rejects.toMatchObject({ code: 'empty_text' })
-    expect(getSidecarPort).not.toHaveBeenCalled()
+    expect(getSidecarStatus).not.toHaveBeenCalled()
   })
 
   test('maps a failed or unavailable sidecar lookup to sidecar_unavailable', async () => {
     const fetchMock = vi.fn()
     useRuntime({
       fetch: fetchMock as unknown as typeof fetch,
-      getSidecarPort: async () => {
+      getSidecarStatus: async () => {
         throw new Error('keychain path must not escape')
       },
     })
@@ -230,7 +280,8 @@ describe('handleSessionChatText failures and cancellation', () => {
 
     useRuntime({
       fetch: fetchMock as unknown as typeof fetch,
-      getSidecarPort: async () => null,
+      getSidecarStatus: async () =>
+        sidecarStatus({ running: false, port: null, model: null }),
     })
     await expect(handleSessionChatText(BASE_INPUT)).rejects.toMatchObject({
       code: 'sidecar_unavailable',
@@ -296,7 +347,7 @@ describe('handleSessionChatText failures and cancellation', () => {
 
     const request = handleSessionChatText(BASE_INPUT)
     const rejection = expect(request).rejects.toMatchObject({ code: 'timeout' })
-    await Promise.resolve()
+    await vi.advanceTimersByTimeAsync(0)
     expect(fetchMock).toHaveBeenCalledOnce()
     await vi.advanceTimersByTimeAsync(AGENT_REQUEST_TIMEOUT_MS)
     await rejection
@@ -314,10 +365,33 @@ describe('handleSessionChatText failures and cancellation', () => {
       signal: controller.signal,
     })
     const rejection = expect(request).rejects.toBe(reason)
-    await Promise.resolve()
+    await vi.advanceTimersByTimeAsync(0)
     expect(fetchMock).toHaveBeenCalledOnce()
     controller.abort(reason)
     await rejection
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  test('forwards caller cancellation while waiting for readiness', async () => {
+    vi.useFakeTimers()
+    const fetchHealth = pendingFetch()
+    const fetchMock = vi.fn() as unknown as typeof fetch
+    useRuntime({ fetch: fetchMock, fetchHealth })
+    const controller = new AbortController()
+    const reason = new DOMException('panel closed', 'AbortError')
+
+    const request = handleSessionChatText({
+      ...BASE_INPUT,
+      signal: controller.signal,
+    })
+    const rejection = expect(request).rejects.toBe(reason)
+    await vi.advanceTimersByTimeAsync(0)
+    expect(fetchHealth).toHaveBeenCalledOnce()
+    expect(fetchMock).not.toHaveBeenCalled()
+
+    controller.abort(reason)
+    await rejection
+    expect(fetchMock).not.toHaveBeenCalled()
     expect(vi.getTimerCount()).toBe(0)
   })
 })

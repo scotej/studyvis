@@ -18,7 +18,11 @@ import { SCREEN_FRAME_MAX_WIDTH, SCREEN_FRAME_QUALITY } from './captureScreen'
 import { getCaptureRuntime, type CaptureFrame } from './captureShared'
 import { buildFocusRequest, type FocusChatRequest } from './focusRequest'
 import type { ModelSpec } from './models'
-import { useSidecarStore } from './sidecar'
+import {
+  SIDECAR_HEALTH_RETRY_MS,
+  SIDECAR_HEALTH_TIMEOUT_MS,
+  useSidecarStore,
+} from './sidecar'
 
 export const BENCHMARK_SAMPLE_COUNT = 3
 
@@ -130,8 +134,6 @@ export type ChatCompletionRequest = FocusChatRequest & {
   cache_prompt: false
 }
 
-const HEALTH_TIMEOUT_MS = 90_000 // covers cold-start projector load on CPU
-
 // Decode the bundled desk PNG and re-encode it into the two JPEG slots the
 // live tick sends: a 384×384 face frame and a 1024×576 screen frame. Routing
 // through the shared CaptureRuntime encoder keeps the screen slot's area (and
@@ -199,7 +201,7 @@ const defaultRuntime: BenchmarkRuntime = {
       } catch {
         // probe failed; retry until the deadline
       }
-      await sleep(500)
+      await sleep(SIDECAR_HEALTH_RETRY_MS)
     }
     throw new Error(`sidecar /health did not return 2xx within ${timeoutMs} ms`)
   },
@@ -321,7 +323,7 @@ export async function runBenchmark(
       mmprojPath: opts.mmprojPath,
       ctxSize: opts.ctxSize ?? 4096,
     })
-    await runtime.waitForHealthy(port, HEALTH_TIMEOUT_MS)
+    await runtime.waitForHealthy(port, SIDECAR_HEALTH_TIMEOUT_MS)
 
     // A1 — mirror the live tick's two-image shape (a camera frame + a screen
     // frame). NEW-FINDING-2: the two slots carry distinct re-encodes of the

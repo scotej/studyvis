@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from 'vitest'
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 
 import {
   __resetSidecarRuntime,
@@ -40,6 +40,7 @@ function makeFakeRuntime(opts: {
   let statusCalls = 0
   let baseStatus: SidecarStatus = {
     running: false,
+    starting: false,
     port: null,
     model: null,
     mmproj: null,
@@ -55,6 +56,7 @@ function makeFakeRuntime(opts: {
       const port = opts.startReturns ?? 31337
       baseStatus = {
         running: true,
+        starting: false,
         port,
         model: params.modelPath,
         mmproj: params.mmprojPath,
@@ -68,6 +70,7 @@ function makeFakeRuntime(opts: {
       stopCalls += 1
       baseStatus = {
         running: false,
+        starting: false,
         port: null,
         model: null,
         mmproj: null,
@@ -346,6 +349,7 @@ describe('useSidecarStore.refreshStatus', () => {
     // mirrors the "JS reload after Rust still has a child" recovery path.
     const baseStatus: SidecarStatus = {
       running: true,
+      starting: false,
       port: 8200,
       model: '/m.gguf',
       mmproj: null,
@@ -388,16 +392,43 @@ describe('useSidecarStore.refreshStatus', () => {
     expect(useSidecarStore.getState().healthy).toBe(true)
     expect(scheduled).not.toBeNull()
   })
+
+  test('preserves starting while Rust is still installing or spawning', async () => {
+    const fetchHealth = vi.fn(async () => true)
+    const setInterval = vi.fn(() => 1)
+    __setSidecarRuntime({
+      start: async () => 8200,
+      stop: async () => undefined,
+      status: async () => ({
+        running: false,
+        starting: true,
+        port: null,
+        model: null,
+        mmproj: null,
+        ctx_size: null,
+        errored: false,
+        last_error: null,
+      }),
+      fetchHealth,
+      setInterval,
+      clearInterval: () => undefined,
+      getAiFeaturesEnabled: () => true,
+      getEngineAutoInstall: () => true,
+    })
+
+    await useSidecarStore.getState().refreshStatus()
+
+    expect(useSidecarStore.getState().status).toBe('starting')
+    expect(useSidecarStore.getState().port).toBeNull()
+    expect(setInterval).not.toHaveBeenCalled()
+    expect(fetchHealth).not.toHaveBeenCalled()
+  })
 })
 
-// The other direction of the PR-13/I38 interleave family: an old loop's
-// stop() continuation landing AFTER a newer start() claimed the state
-// machine must not clobber 'starting' — otherwise start's own PR-13 guard
-// kills the child it just spawned and the session toasts "AI failed to
-// start" with no recovery path (the live trigger is the sample-loop restart
-// on a localStream swap: cleanup stop() and setup start() run in one React
-// commit).
-describe('useSidecarStore.stop racing a newer start', () => {
+// PR-13/I38 interleaves: neither an old stop nor an old start continuation may
+// overwrite the state owned by newer work. The live trigger is a sample-loop
+// restart on localStream/model changes, where cleanup and setup run together.
+describe('useSidecarStore start/stop races', () => {
   beforeEach(() => {
     resetStore()
   })
@@ -422,6 +453,7 @@ describe('useSidecarStore.stop racing a newer start', () => {
       },
       status: async () => ({
         running: false,
+        starting: false,
         port: null,
         model: null,
         mmproj: null,
@@ -465,5 +497,94 @@ describe('useSidecarStore.stop racing a newer start', () => {
     // Exactly the old child was killed; start's PR-13 guard did not fire a
     // second stop against the fresh one.
     expect(stopCalls).toBe(1)
+  })
+
+  test("a canceled start's late rejection does not clobber idle", async () => {
+    let rejectStart!: (error: Error) => void
+    __setSidecarRuntime({
+      start: () =>
+        new Promise<number>((_resolve, reject) => {
+          rejectStart = reject
+        }),
+      stop: async () => undefined,
+      status: async () => ({
+        running: false,
+        starting: false,
+        port: null,
+        model: null,
+        mmproj: null,
+        ctx_size: null,
+        errored: false,
+        last_error: null,
+      }),
+      fetchHealth: async () => false,
+      setInterval: () => 1,
+      clearInterval: () => undefined,
+      getAiFeaturesEnabled: () => true,
+      getEngineAutoInstall: () => true,
+    })
+
+    const startPromise = useSidecarStore
+      .getState()
+      .start({ modelPath: '/slow.gguf' })
+    expect(useSidecarStore.getState().status).toBe('starting')
+
+    await useSidecarStore.getState().stop()
+    expect(useSidecarStore.getState().status).toBe('idle')
+
+    rejectStart(new Error('sidecar start superseded'))
+    await expect(startPromise).resolves.toBeNull()
+    expect(useSidecarStore.getState().status).toBe('idle')
+    expect(useSidecarStore.getState().lastError).toBeNull()
+  })
+
+  test("an old start's late rejection does not clobber a newer start", async () => {
+    let rejectOldStart!: (error: Error) => void
+    let resolveNewStart!: (port: number) => void
+    let startCalls = 0
+    __setSidecarRuntime({
+      start: () => {
+        startCalls += 1
+        return new Promise<number>((resolve, reject) => {
+          if (startCalls === 1) rejectOldStart = reject
+          else resolveNewStart = resolve
+        })
+      },
+      stop: async () => undefined,
+      status: async () => ({
+        running: false,
+        starting: false,
+        port: null,
+        model: null,
+        mmproj: null,
+        ctx_size: null,
+        errored: false,
+        last_error: null,
+      }),
+      fetchHealth: async () => false,
+      setInterval: () => 1,
+      clearInterval: () => undefined,
+      getAiFeaturesEnabled: () => true,
+      getEngineAutoInstall: () => true,
+    })
+
+    const oldStart = useSidecarStore
+      .getState()
+      .start({ modelPath: '/old-slow.gguf' })
+    await useSidecarStore.getState().stop()
+    const newStart = useSidecarStore
+      .getState()
+      .start({ modelPath: '/new.gguf' })
+    expect(useSidecarStore.getState().status).toBe('starting')
+
+    rejectOldStart(new Error('sidecar start superseded'))
+    await expect(oldStart).resolves.toBeNull()
+    expect(useSidecarStore.getState().status).toBe('starting')
+    expect(useSidecarStore.getState().lastError).toBeNull()
+
+    resolveNewStart(9300)
+    await expect(newStart).resolves.toBe(9300)
+    expect(useSidecarStore.getState().status).toBe('running')
+    expect(useSidecarStore.getState().port).toBe(9300)
   })
 })

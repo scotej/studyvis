@@ -5,6 +5,8 @@ export {
   ERR_BENCHMARK_REQUIRES_AI_OFF,
   ERR_ENGINE_NOT_INSTALLED,
   HEALTH_POLL_INTERVAL_MS,
+  SIDECAR_HEALTH_RETRY_MS,
+  SIDECAR_HEALTH_TIMEOUT_MS,
   __setSidecarRuntime,
   __resetSidecarRuntime,
 } from './sidecar'

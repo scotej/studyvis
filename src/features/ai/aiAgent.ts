@@ -23,7 +23,11 @@ import { invoke } from '@tauri-apps/api/core'
 import { logger } from '@/lib/log'
 import { strings } from '@/strings'
 
-import type { SidecarStatus } from './sidecar'
+import {
+  SIDECAR_HEALTH_RETRY_MS,
+  SIDECAR_HEALTH_TIMEOUT_MS,
+  type SidecarStatus,
+} from './sidecar'
 
 const log = logger.child('ai.agent')
 
@@ -74,18 +78,16 @@ export type AiAgentRuntime = {
   now: () => number
   // The dialog lives in a separate JS realm from the main window, so its
   // Zustand stores cannot reveal the running sidecar. Production asks the
-  // shared Rust process for the current port on every submit instead.
-  getSidecarPort: () => Promise<number | null>
+  // shared Rust process for authoritative lifecycle state instead. Readiness
+  // re-checks this while polling because the crash watcher may respawn the
+  // server on a different ephemeral port.
+  getSidecarStatus: () => Promise<SidecarStatus>
 }
 
 const defaultRuntime: AiAgentRuntime = {
   fetch: (...args) => fetch(...args),
   now: () => Date.now(),
-  getSidecarPort: async () => {
-    const status = await invoke<SidecarStatus>('sidecar_status')
-    if (!status.running || status.errored || status.port == null) return null
-    return status.port
-  },
+  getSidecarStatus: () => invoke<SidecarStatus>('sidecar_status'),
 }
 
 let activeRuntime: AiAgentRuntime = defaultRuntime
@@ -166,6 +168,11 @@ export type HandleUserTextInput = {
   recentAuditKinds: ReadonlyArray<string>
 }
 
+export type SidecarReadinessOptions = {
+  signal?: AbortSignal
+  unavailableMessage: string
+}
+
 export class AiAgentError extends Error {
   code:
     | 'sidecar_unavailable'
@@ -191,16 +198,14 @@ export async function handleUserText(
   if (trimmed.length === 0) {
     throw new AiAgentError('empty_text', 'message is empty')
   }
-  let port: number | null
-  try {
-    port = await runtime.getSidecarPort()
-  } catch (err) {
-    log.warn('sidecar_status.failed', { err })
-    throw new AiAgentError('sidecar_unavailable', strings.ai.agent.sidecarOff)
-  }
-  if (port == null) {
-    throw new AiAgentError('sidecar_unavailable', strings.ai.agent.sidecarOff)
-  }
+  // Rust marks the child as running as soon as it spawns, while llama-server
+  // returns 503 from /health until model/projector loading finishes. Keep that
+  // startup window separate from the user's 60-second generation budget. The
+  // resolver returns the port that actually became healthy; Rust may replace
+  // the initial port while automatically recovering a crashed child.
+  const port = await waitForSidecarReady(input.modelId, runtime, {
+    unavailableMessage: strings.ai.agent.sidecarOff,
+  })
 
   const userContent = buildUserContext({
     text: trimmed.slice(0, MAX_USER_TEXT_LEN),
@@ -220,21 +225,47 @@ export async function handleUserText(
   }
 
   const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), AGENT_REQUEST_TIMEOUT_MS)
-  let response: Response
+  let timedOut = false
+  const timer = setTimeout(() => {
+    timedOut = true
+    controller.abort()
+  }, AGENT_REQUEST_TIMEOUT_MS)
+  const requestStartedAt = runtime.now()
+  let json: ChatCompletionResponse | undefined
   try {
-    response = await runtime.fetch(
-      `http://127.0.0.1:${port}/v1/chat/completions`,
-      {
+    const response = await abortablePromise(
+      runtime.fetch(`http://127.0.0.1:${port}/v1/chat/completions`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
         signal: controller.signal,
-      }
+      }),
+      controller.signal
     )
+    if (!response.ok) {
+      throw new AiAgentError(
+        'http_error',
+        strings.ai.agent.httpStatus(response.status)
+      )
+    }
+    // Keep the response body inside the same timeout. fetch() resolves when
+    // headers arrive, so clearing the timer before json() would let a stalled
+    // or truncated body hang forever outside the advertised 60-second budget.
+    json = (await abortablePromise(
+      response.json(),
+      controller.signal
+    )) as ChatCompletionResponse
   } catch (err) {
-    if (err instanceof DOMException && err.name === 'AbortError') {
+    if (err instanceof AiAgentError) throw err
+    if (timedOut) {
+      log.warn('request.timeout', {
+        modelId: input.modelId,
+        elapsedMs: Math.max(0, runtime.now() - requestStartedAt),
+      })
       throw new AiAgentError('timeout', strings.ai.agent.timeout)
+    }
+    if (err instanceof SyntaxError) {
+      throw new AiAgentError('parse_error', strings.ai.dialog.catchFallback)
     }
     throw new AiAgentError(
       'http_error',
@@ -244,15 +275,183 @@ export async function handleUserText(
     clearTimeout(timer)
   }
 
-  if (!response.ok) {
-    throw new AiAgentError(
-      'http_error',
-      strings.ai.agent.httpStatus(response.status)
-    )
-  }
-  const json = (await response.json()) as ChatCompletionResponse
   const content = json?.choices?.[0]?.message?.content ?? ''
-  return parseAgentReply(content)
+  const reply = parseAgentReply(content)
+  log.info('request.succeeded', {
+    modelId: input.modelId,
+    elapsedMs: Math.max(0, runtime.now() - requestStartedAt),
+    intent: reply.intent,
+  })
+  return reply
+}
+
+export async function waitForSidecarReady(
+  modelId: string,
+  runtime: AiAgentRuntime,
+  options: SidecarReadinessOptions
+): Promise<number> {
+  if (options.signal?.aborted) throw abortReason(options.signal)
+
+  const controller = new AbortController()
+  let abortSource: 'external' | 'timeout' | null = null
+  const abortFromInput = () => {
+    if (abortSource) return
+    abortSource = 'external'
+    controller.abort(options.signal?.reason)
+  }
+  options.signal?.addEventListener('abort', abortFromInput, { once: true })
+  const timer = setTimeout(() => {
+    if (abortSource) return
+    abortSource = 'timeout'
+    controller.abort()
+  }, SIDECAR_HEALTH_TIMEOUT_MS)
+  const startedAt = runtime.now()
+  let lastPort: number | null = null
+  let healthAttempts = 0
+
+  try {
+    while (!controller.signal.aborted) {
+      let status: SidecarStatus
+      try {
+        status = await abortablePromise(
+          runtime.getSidecarStatus(),
+          controller.signal
+        )
+      } catch (err) {
+        if (abortSource === 'external') throw abortReason(options.signal)
+        if (abortSource === 'timeout') break
+        log.warn('sidecar_status.failed', { err })
+        throw new AiAgentError(
+          'sidecar_unavailable',
+          options.unavailableMessage
+        )
+      }
+
+      if (status.errored) {
+        log.warn('readiness.sidecar_errored', {
+          modelId,
+          hasLastError: status.last_error != null,
+        })
+        throw new AiAgentError(
+          'sidecar_unavailable',
+          options.unavailableMessage
+        )
+      }
+
+      const port = status.port
+      if (!status.running || !isValidPort(port)) {
+        // Initial install/spawn reports `starting`; a crash-restart window
+        // retains model metadata while child/port are temporarily absent. An
+        // explicit stop has neither, so only the first two states keep waiting.
+        if (!status.running && (status.starting || status.model != null)) {
+          await abortableDelay(SIDECAR_HEALTH_RETRY_MS, controller.signal)
+          continue
+        }
+        throw new AiAgentError(
+          'sidecar_unavailable',
+          options.unavailableMessage
+        )
+      }
+      lastPort = port
+
+      try {
+        healthAttempts += 1
+        const response = await abortablePromise(
+          runtime.fetch(`http://127.0.0.1:${port}/health`, {
+            method: 'GET',
+            signal: controller.signal,
+          }),
+          controller.signal
+        )
+        if (response.ok && !controller.signal.aborted) {
+          log.info('readiness.ready', {
+            modelId,
+            port,
+            attempts: healthAttempts,
+            elapsedMs: Math.max(0, runtime.now() - startedAt),
+          })
+          return port
+        }
+      } catch {
+        if (abortSource === 'external') throw abortReason(options.signal)
+        // Loading, connection refusal, and an abort all converge on the
+        // bounded retry loop. The signal check below distinguishes expiry.
+      }
+
+      if (!controller.signal.aborted) {
+        await abortableDelay(SIDECAR_HEALTH_RETRY_MS, controller.signal)
+      }
+    }
+  } finally {
+    clearTimeout(timer)
+    options.signal?.removeEventListener('abort', abortFromInput)
+  }
+
+  if (abortSource === 'external') throw abortReason(options.signal)
+
+  log.warn('readiness.timeout', {
+    modelId,
+    port: lastPort,
+    elapsedMs: Math.max(0, runtime.now() - startedAt),
+  })
+  throw new AiAgentError('sidecar_unavailable', options.unavailableMessage)
+}
+
+function isValidPort(port: number | null): port is number {
+  return port != null && Number.isInteger(port) && port >= 1 && port <= 65_535
+}
+
+function abortReason(signal: AbortSignal | undefined): Error {
+  const reason = signal?.reason
+  if (reason instanceof Error) return reason
+  return new DOMException(
+    typeof reason === 'string' ? reason : 'The operation was aborted.',
+    'AbortError'
+  )
+}
+
+function abortablePromise<T>(
+  promise: Promise<T>,
+  signal: AbortSignal
+): Promise<T> {
+  if (signal.aborted) return Promise.reject(abortReason(signal))
+
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => {
+      cleanup()
+      reject(abortReason(signal))
+    }
+    const cleanup = () => signal.removeEventListener('abort', onAbort)
+    signal.addEventListener('abort', onAbort, { once: true })
+    promise.then(
+      (value) => {
+        cleanup()
+        resolve(value)
+      },
+      (error: unknown) => {
+        cleanup()
+        reject(error)
+      }
+    )
+  })
+}
+
+function abortableDelay(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    if (signal.aborted) {
+      resolve()
+      return
+    }
+
+    const timer = setTimeout(done, ms)
+    signal.addEventListener('abort', done, { once: true })
+
+    function done(): void {
+      clearTimeout(timer)
+      signal.removeEventListener('abort', done)
+      resolve()
+    }
+  })
 }
 
 function buildUserContext(args: {
