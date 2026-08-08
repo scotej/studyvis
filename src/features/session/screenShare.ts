@@ -36,16 +36,26 @@ export const SCREEN_STREAM_METADATA = { kind: 'screen' } as const
 // mesh where everyone shares is eight concurrent video streams.
 export const SCREEN_SHARE_MAX_FPS = 15
 
-export class ScreenShareMonitorRequiredError extends Error {
-  readonly selectedSurface: string | undefined
+export class EntireScreenShareRequiredError extends Error {
+  readonly displaySurface: string | undefined
 
-  constructor(selectedSurface: string | undefined) {
-    super(
-      `Windows screen sharing requires a monitor capture; received ${selectedSurface ?? 'an unverifiable surface'}`
-    )
-    this.name = 'ScreenShareMonitorRequiredError'
-    this.selectedSurface = selectedSurface
+  constructor(displaySurface: string | undefined) {
+    super('Windows screen sharing requires an entire screen')
+    this.name = 'EntireScreenShareRequiredError'
+    this.displaySurface = displaySurface
   }
+}
+
+type ScreenShareDisplayMediaOptions = DisplayMediaStreamOptions & {
+  monitorTypeSurfaces?: 'include' | 'exclude'
+  surfaceSwitching?: 'include' | 'exclude'
+}
+
+export type ScreenShareCaptureRuntime = {
+  getDisplayMedia: (
+    constraints: ScreenShareDisplayMediaOptions
+  ) => Promise<MediaStream>
+  userAgent: string
 }
 
 export type ScreenSharePayload = {
@@ -274,46 +284,71 @@ function removeStream(room: TopicRoom, stream: MediaStream): void {
 // getDisplayMedia must run inside live transient user activation on every call
 // in WKWebView / WebView2 (the same constraint V2-P9 hit for the AI loop), so
 // this is called synchronously from the click handler — never after an await.
-export function requestScreenShareStream(): Promise<MediaStream> {
+export function requestScreenShareStream(
+  runtime: ScreenShareCaptureRuntime | null = defaultScreenShareCaptureRuntime()
+): Promise<MediaStream> {
+  if (!runtime) {
+    return Promise.reject(
+      new DOMException('getDisplayMedia is unavailable', 'NotSupportedError')
+    )
+  }
+
+  const windows = /Windows/i.test(runtime.userAgent)
+  const request = runtime.getDisplayMedia({
+    video: {
+      frameRate: { max: SCREEN_SHARE_MAX_FPS },
+      ...(windows ? { displaySurface: 'monitor' } : {}),
+    },
+    // System audio would echo against the live mic, and PTT already owns the
+    // audio story. Video only.
+    audio: false,
+    ...(windows
+      ? {
+          monitorTypeSurfaces: 'include' as const,
+          surfaceSwitching: 'exclude' as const,
+        }
+      : {}),
+  })
+
+  if (!windows) return request
+
+  // `displaySurface` is only a preference: the Screen Capture API cannot
+  // constrain the picker to monitor surfaces. Enforce the Windows policy after
+  // selection, before SessionView can store or publish the stream.
+  return request.then((stream) => {
+    const displaySurface = selectedDisplaySurface(stream)
+    if (displaySurface === 'monitor') return stream
+
+    stopMediaStream(stream)
+    log.warn('source.rejected', {
+      reason: 'entire_screen_required',
+      displaySurface: displaySurface ?? 'unknown',
+    })
+    throw new EntireScreenShareRequiredError(displaySurface)
+  })
+}
+
+function defaultScreenShareCaptureRuntime(): ScreenShareCaptureRuntime | null {
   if (
     typeof navigator === 'undefined' ||
     !navigator.mediaDevices ||
     typeof navigator.mediaDevices.getDisplayMedia !== 'function'
   ) {
-    return Promise.reject(
-      new DOMException('getDisplayMedia is unavailable', 'NotSupportedError')
-    )
+    return null
   }
-  const requireMonitor = /Windows/i.test(navigator.userAgent)
-  // `displaySurface` can steer the picker but cannot restrict it; the Screen
-  // Capture spec preserves user choice, so enforcing StudyVis's monitor-only
-  // rule requires us to verify the actual selection afterward.
-  const request = navigator.mediaDevices.getDisplayMedia({
-    video: {
-      frameRate: { max: SCREEN_SHARE_MAX_FPS },
-      ...(requireMonitor ? { displaySurface: 'monitor' } : {}),
-    },
-    // System audio would echo against the live mic, and PTT already owns the
-    // audio story. Video only.
-    audio: false,
-  })
-  if (!requireMonitor) return request
+  return {
+    getDisplayMedia: (constraints) =>
+      navigator.mediaDevices.getDisplayMedia(constraints),
+    userAgent: navigator.userAgent,
+  }
+}
 
-  return request.then((stream) => {
-    const videoTrack = stream.getVideoTracks()[0]
-    let selectedSurface: string | undefined
-    try {
-      selectedSurface = videoTrack?.getSettings().displaySurface
-    } catch {
-      // An uninspectable stream cannot satisfy the Windows monitor-only
-      // invariant. It is released below before it can enter state or WebRTC.
-    }
-    if (selectedSurface === 'monitor') return stream
-
-    log.warn('capture.rejected_surface', {
-      selectedSurface: selectedSurface ?? 'unknown',
-    })
-    stopMediaStream(stream)
-    throw new ScreenShareMonitorRequiredError(selectedSurface)
-  })
+function selectedDisplaySurface(stream: MediaStream): string | undefined {
+  const track = stream.getVideoTracks()[0]
+  if (!track) return undefined
+  try {
+    return track.getSettings().displaySurface
+  } catch {
+    return undefined
+  }
 }

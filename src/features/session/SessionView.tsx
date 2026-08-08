@@ -129,8 +129,8 @@ import {
   type SessionNote,
 } from './notesStore'
 import {
+  EntireScreenShareRequiredError,
   requestScreenShareStream,
-  ScreenShareMonitorRequiredError,
   startScreenShareController,
   type ScreenShareController,
 } from './screenShare'
@@ -1619,11 +1619,11 @@ export function SessionView({
         toast.success(strings.session.screenShare.startedToast)
       })
       .catch((err: unknown) => {
-        if (err instanceof ScreenShareMonitorRequiredError) {
+        if (err instanceof EntireScreenShareRequiredError) {
           toast.error(
-            err.selectedSurface === undefined
-              ? strings.session.screenShare.monitorUnverifiedToast
-              : strings.session.screenShare.monitorRequiredToast
+            err.displaySurface === undefined
+              ? strings.session.screenShare.entireScreenUnverifiedToast
+              : strings.session.screenShare.entireScreenRequiredToast
           )
           return
         }
