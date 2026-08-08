@@ -253,6 +253,45 @@ describe('invite envelope round-trip', () => {
     await inbox.leave()
   })
 
+  test('canonicalizes uppercase sender and signature hex on receipt', async () => {
+    const sam = makeApp('Sam')
+    const alice = makeApp('Alice')
+    const envelope = await buildInviteEnvelope(
+      sam.sender,
+      { edPubkeyHex: alice.edHex, xPubkeyHex: alice.xHex },
+      SAMPLE_SESSION
+    )
+    const lookupFriendXPub = vi.fn((edPubkeyHex: string) =>
+      edPubkeyHex === sam.edHex ? sam.xHex : null
+    )
+    let canonicalSig = ''
+
+    const received = await validateInviteEnvelope(
+      { ...envelope, from_ed_pubkey: envelope.from_ed_pubkey.toUpperCase() },
+      {
+        lookupFriendXPub,
+        boxDecrypt: async (theirXPub, nonce, ciphertext) => {
+          const plaintext = boxDecrypt(
+            theirXPub,
+            alice.identity.xPriv,
+            nonce,
+            ciphertext
+          )
+          const payload = JSON.parse(new TextDecoder().decode(plaintext)) as {
+            sig: string
+          }
+          canonicalSig = payload.sig
+          payload.sig = payload.sig.toUpperCase()
+          return new TextEncoder().encode(JSON.stringify(payload))
+        },
+      }
+    )
+
+    expect(lookupFriendXPub).toHaveBeenCalledWith(sam.edHex)
+    expect(received?.from_ed_pubkey).toBe(sam.edHex)
+    expect(received?.payload.sig).toBe(canonicalSig)
+  })
+
   test('non-friend C sending into B drops without decrypting', async () => {
     const carol = makeApp('Carol')
     const bob = makeApp('Bob')

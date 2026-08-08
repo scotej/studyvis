@@ -49,6 +49,26 @@ export const INVITE_DISPLAY_NAME_MAX_LENGTH = 256
 export const INVITE_CIPHERTEXT_MAX_LENGTH = 8192
 export const INVITE_ACTION = 'invite'
 
+export function isHex(value: unknown, bytes: number): value is string {
+  return (
+    typeof value === 'string' &&
+    value.length === bytes * 2 &&
+    /^[0-9a-f]+$/i.test(value)
+  )
+}
+
+export function isStringWithin(
+  value: unknown,
+  minLength: number,
+  maxLength: number
+): value is string {
+  return (
+    typeof value === 'string' &&
+    value.length >= minLength &&
+    value.length <= maxLength
+  )
+}
+
 // #47 C2 — signed invite-delivery ACK (the hardening ISSUES.md I46 flagged
 // as future work, shipped for UX legibility: with one-directional
 // ContactCard adds, a friend who never added you back silently drops your

@@ -235,6 +235,44 @@ describe('pendingInvitesStore (#182)', () => {
     ])
   })
 
+  test('restores an invite persisted from uppercase wire hex', async () => {
+    const fake = new FakeStore()
+    const canonical = signedInvite('uppercase-wire', NOW + 120_000)
+    const uppercase: ValidInvite = {
+      from_ed_pubkey: canonical.from_ed_pubkey.toUpperCase(),
+      payload: {
+        ...canonical.payload,
+        sig: canonical.payload.sig.toUpperCase(),
+      },
+    }
+    __setPendingInviteStoreDeps({ storeFactory: () => fake })
+
+    activate()
+    await usePendingInvitesStore
+      .getState()
+      .reconcile(IDENTITY_A, new Set([canonical.from_ed_pubkey]), NOW)
+    add(uppercase)
+    await __flushPendingInvitePersistence()
+
+    expect(storedEntries(fake)).toEqual([
+      {
+        key: pendingInviteKey(canonical),
+        invite: uppercase,
+        receivedAt: NOW,
+      },
+    ])
+
+    usePendingInvitesStore.getState().deactivateExpected(IDENTITY_A)
+    activate()
+    await usePendingInvitesStore
+      .getState()
+      .reconcile(IDENTITY_A, new Set([canonical.from_ed_pubkey]), NOW + 1)
+
+    expect(usePendingInvitesStore.getState().pending).toEqual([
+      persisted(canonical),
+    ])
+  })
+
   test('drops expired, tampered, and no-longer-friend records on restore', async () => {
     const fake = new FakeStore()
     __setPendingInviteStoreDeps({ storeFactory: () => fake })
@@ -829,14 +867,14 @@ describe('pendingInvitesStore (#182)', () => {
     expect(fake.values.size).toBe(0)
   })
 
-  test('a read failure degrades without destroying live state or cleaning disk', async () => {
+  test('a read failure degrades non-destructively and a later reconcile resumes persistence', async () => {
     const fake = new FakeStore()
-    const diskSnapshot = snapshot(IDENTITY_A, [
-      persisted(signedInvite('unread-disk', NOW + 120_000)),
-    ])
+    const unreadDisk = signedInvite('unread-disk', NOW + 120_000)
+    const diskSnapshot = snapshot(IDENTITY_A, [persisted(unreadDisk)])
     fake.values.set(PENDING_INVITES_STORE_KEY, diskSnapshot)
     fake.getError = new Error('read failed')
     const live = signedInvite('live-through-read-error', NOW + 120_000)
+    const afterRecovery = signedInvite('persist-after-recovery', NOW + 120_000)
     __setPendingInviteStoreDeps({ storeFactory: () => fake })
     activate()
     add(live)
@@ -853,6 +891,25 @@ describe('pendingInvitesStore (#182)', () => {
     expect(fake.values.get(PENDING_INVITES_STORE_KEY)).toBe(diskSnapshot)
     expect(fake.sets).toEqual([])
     expect(fake.deletes).toEqual([])
+
+    fake.getError = null
+    await usePendingInvitesStore
+      .getState()
+      .reconcile(
+        IDENTITY_A,
+        new Set([live.from_ed_pubkey, afterRecovery.from_ed_pubkey]),
+        NOW + 1
+      )
+    expect(usePendingInvitesStore.getState().status).toBe('ready')
+    expect(
+      usePendingInvitesStore.getState().add(IDENTITY_A, afterRecovery, NOW + 2)
+    ).toBe(true)
+    await __flushPendingInvitePersistence()
+
+    expect(storedEntries(fake)).toEqual([
+      persisted(live),
+      persisted(afterRecovery, NOW + 2),
+    ])
   })
 
   test('a throwing store factory degrades without destroying live state', async () => {

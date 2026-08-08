@@ -66,6 +66,8 @@ import { useSessionStore } from '@/stores/sessionStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { strings } from '@/strings'
 
+import { joinAndRemovePendingInvite } from './pendingInviteJoin'
+
 const isDev = import.meta.env.DEV
 
 type View = 'main' | 'settings'
@@ -236,9 +238,11 @@ export function Home() {
       toast.error(strings.friends.inbox.pending.expired)
       return false
     }
-    pendingState.remove(key)
     try {
-      joinSession(invite.payload.session_topic, invite.payload.session_password)
+      joinAndRemovePendingInvite(invite, key, {
+        joinSession,
+        removePendingInvite: pendingState.remove,
+      })
       return true
     } catch (err) {
       const message =

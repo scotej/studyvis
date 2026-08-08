@@ -138,6 +138,7 @@ export const tokens = {
   },
 
   sizes: {
+    windowMinHeight: 640,
     contentMaxWidth: 1200,
     // Reading/list screens (Report, FriendsListView). DESIGN-SYSTEM §12
     // specifies the wide measure for onboarding (contentMaxWidth: 1200); a

@@ -17,6 +17,8 @@ import {
   INVITE_SESSION_PASSWORD_MAX_LENGTH,
   INVITE_SESSION_TOPIC_MAX_LENGTH,
   INVITE_TTL_MS,
+  isHex,
+  isStringWithin,
   serializeAckForSig,
   serializePayloadForSig,
   type InviteAck,
@@ -85,26 +87,6 @@ function isInviteEnvelope(value: unknown): value is InviteEnvelope {
   )
 }
 
-function isHex(value: unknown, bytes: number): value is string {
-  return (
-    typeof value === 'string' &&
-    value.length === bytes * 2 &&
-    /^[0-9a-f]+$/i.test(value)
-  )
-}
-
-function isStringWithin(
-  value: unknown,
-  minLength: number,
-  maxLength: number
-): value is string {
-  return (
-    typeof value === 'string' &&
-    value.length >= minLength &&
-    value.length <= maxLength
-  )
-}
-
 function isInvitePayload(value: unknown): value is InvitePayload {
   if (!value || typeof value !== 'object') return false
   const v = value as Partial<InvitePayload>
@@ -123,6 +105,7 @@ export async function validateInviteEnvelope(
   ctx: Pick<InboxContext, 'lookupFriendXPub' | 'boxDecrypt' | 'now'>
 ): Promise<ValidInvite | null> {
   if (!isInviteEnvelope(envelope)) return null
+  const fromEdPubkey = envelope.from_ed_pubkey.toLowerCase()
 
   // Step 1: friend-list lookup BEFORE decrypt cost (§6 step 9). A throwing
   // lookup (DB read error, etc.) becomes a silent drop — same threat-model
@@ -130,7 +113,7 @@ export async function validateInviteEnvelope(
   // bubbling out of the receive callback.
   let senderXPubHex: string | null
   try {
-    senderXPubHex = await ctx.lookupFriendXPub(envelope.from_ed_pubkey)
+    senderXPubHex = await ctx.lookupFriendXPub(fromEdPubkey)
   } catch {
     return null
   }
@@ -143,7 +126,7 @@ export async function validateInviteEnvelope(
   let ciphertext: Uint8Array
   try {
     senderXPub = hexToBytes(senderXPubHex)
-    senderEdPub = hexToBytes(envelope.from_ed_pubkey)
+    senderEdPub = hexToBytes(fromEdPubkey)
     nonce = base64ToBytes(envelope.nonce)
     ciphertext = base64ToBytes(envelope.ciphertext)
   } catch {
@@ -170,9 +153,10 @@ export async function validateInviteEnvelope(
   if (!isInvitePayload(payload)) return null
 
   // Step 5: verify the inner Ed25519 sig over (payload without sig field).
+  const sigHex = payload.sig.toLowerCase()
   let sig: Uint8Array
   try {
-    sig = hexToBytes(payload.sig)
+    sig = hexToBytes(sigHex)
   } catch {
     return null
   }
@@ -194,7 +178,10 @@ export async function validateInviteEnvelope(
     return null
   }
 
-  return { from_ed_pubkey: envelope.from_ed_pubkey, payload }
+  return {
+    from_ed_pubkey: fromEdPubkey,
+    payload: { ...payload, sig: sigHex },
+  }
 }
 
 export function subscribeToOwnInbox(ctx: InboxContext): InboxSubscription {

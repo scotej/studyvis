@@ -11,6 +11,8 @@ import {
   INVITE_SESSION_PASSWORD_MAX_LENGTH,
   INVITE_SESSION_TOPIC_MAX_LENGTH,
   INVITE_TTL_MS,
+  isHex,
+  isStringWithin,
   serializePayloadForSig,
 } from './envelope'
 import type { ValidInvite } from './inbox'
@@ -105,17 +107,17 @@ export async function __flushPendingInvitePersistence(): Promise<void> {
 }
 
 export function pendingInviteKey(invite: ValidInvite): string {
-  return `${invite.from_ed_pubkey}:${invite.payload.session_topic}`
+  return `${invite.from_ed_pubkey.toLowerCase()}:${invite.payload.session_topic}`
 }
 
 function inviteRevision(invite: ValidInvite): string {
   return JSON.stringify([
-    invite.from_ed_pubkey,
+    invite.from_ed_pubkey.toLowerCase(),
     invite.payload.session_topic,
     invite.payload.session_password,
     invite.payload.our_display_name,
     invite.payload.expires_at,
-    invite.payload.sig,
+    invite.payload.sig.toLowerCase(),
   ])
 }
 
@@ -133,26 +135,6 @@ function normalizeFriends(
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
-function isHex(value: unknown, bytes: number): value is string {
-  return (
-    typeof value === 'string' &&
-    value.length === bytes * 2 &&
-    /^[0-9a-f]+$/i.test(value)
-  )
-}
-
-function isStringWithin(
-  value: unknown,
-  minLength: number,
-  maxLength: number
-): value is string {
-  return (
-    typeof value === 'string' &&
-    value.length >= minLength &&
-    value.length <= maxLength
-  )
 }
 
 function restoreEntry(

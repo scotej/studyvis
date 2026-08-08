@@ -1,5 +1,6 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
 
+import { tokens } from '@/design/tokens'
 import { PendingInvitesView } from '@/features/friends'
 import type { PendingInviteEntry } from '@/features/friends'
 
@@ -69,7 +70,7 @@ export const MaxCapacity: Story = {
     (Story) => (
       <div
         className="overflow-hidden bg-bg-base text-text-primary"
-        style={{ height: 640 }}
+        style={{ height: tokens.sizes.windowMinHeight }}
       >
         <Story />
       </div>
