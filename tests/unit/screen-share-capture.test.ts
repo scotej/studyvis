@@ -11,6 +11,8 @@ const WINDOWS_UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Edg/130.0.0.0'
 const MAC_UA =
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_5) AppleWebKit/605.1.15'
+const LINUX_UA =
+  'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/130.0.0.0'
 
 function track(
   kind: 'video' | 'audio',
@@ -94,9 +96,14 @@ describe('screen-share capture source policy', () => {
       const captured = stream(video, audio)
       const publish = vi.fn()
 
-      await expect(
-        requestScreenShareStream(runtime(WINDOWS_UA, captured)).then(publish)
-      ).rejects.toBeInstanceOf(EntireScreenShareRequiredError)
+      const attempt = requestScreenShareStream(
+        runtime(WINDOWS_UA, captured)
+      ).then(publish)
+
+      await expect(attempt).rejects.toBeInstanceOf(
+        EntireScreenShareRequiredError
+      )
+      await expect(attempt).rejects.toMatchObject({ displaySurface })
 
       expect(video.stop).toHaveBeenCalledTimes(1)
       expect(audio.stop).toHaveBeenCalledTimes(1)
@@ -130,10 +137,13 @@ describe('screen-share capture source policy', () => {
     expect(video.stop).toHaveBeenCalledTimes(1)
   })
 
-  test('keeps the existing source choice on macOS', async () => {
+  test.each([
+    ['macOS', MAC_UA],
+    ['Linux', LINUX_UA],
+  ])('keeps the existing source choice on %s', async (_os, userAgent) => {
     const video = track('video', 'window')
     const captured = stream(video)
-    const captureRuntime = runtime(MAC_UA, captured)
+    const captureRuntime = runtime(userAgent, captured)
 
     await expect(requestScreenShareStream(captureRuntime)).resolves.toBe(
       captured
@@ -143,5 +153,15 @@ describe('screen-share capture source policy', () => {
       audio: false,
     })
     expect(video.stop).not.toHaveBeenCalled()
+  })
+
+  test('preserves display-capture denial errors on Windows', async () => {
+    const denied = new DOMException('user cancelled', 'NotAllowedError')
+    const captureRuntime: ScreenShareCaptureRuntime = {
+      userAgent: WINDOWS_UA,
+      getDisplayMedia: vi.fn().mockRejectedValue(denied),
+    }
+
+    await expect(requestScreenShareStream(captureRuntime)).rejects.toBe(denied)
   })
 })

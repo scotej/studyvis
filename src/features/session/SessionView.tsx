@@ -1620,7 +1620,11 @@ export function SessionView({
       })
       .catch((err: unknown) => {
         if (err instanceof EntireScreenShareRequiredError) {
-          toast.error(strings.session.screenShare.entireScreenRequiredToast)
+          toast.error(
+            err.displaySurface === undefined
+              ? strings.session.screenShare.entireScreenUnverifiedToast
+              : strings.session.screenShare.entireScreenRequiredToast
+          )
           return
         }
         // Dismissing the picker and a system-level screen-recording block both

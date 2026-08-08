@@ -704,7 +704,9 @@ export const strings = {
       startedToast: "You're sharing your screen.",
       stoppedToast: 'You stopped sharing your screen.',
       entireScreenRequiredToast:
-        'Try again and choose Entire Screen in the picker to share on Windows.',
+        "Try again and choose Entire Screen in the Windows picker. StudyVis won't share a single window or app.",
+      entireScreenUnverifiedToast:
+        "StudyVis couldn't verify that you chose Entire Screen, so sharing didn't start. Update Microsoft Edge WebView2, then try again.",
       // NotAllowedError covers both "you dismissed the picker" and "the OS has
       // not granted screen recording", and the two are indistinguishable from
       // the rejection — so the copy has to hold for either.
