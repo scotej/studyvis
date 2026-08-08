@@ -1010,7 +1010,7 @@ export const strings = {
         'last seen',
         'study time',
       ],
-      sessions: ['history', 'past', 'report', 'delete'],
+      sessions: ['history', 'past', 'report', 'review', 'delete'],
       stats: [
         'statistics',
         'dashboard',
@@ -1204,7 +1204,7 @@ export const strings = {
       loadErrorHelp:
         'Something went wrong reading your local data. Retrying usually fixes it; restarting StudyVis helps if it keeps happening.',
       emptyLabel: 'No sessions yet',
-      emptyHelp: 'Past sessions will appear here once you study with a friend.',
+      emptyHelp: 'Finish a session to see its report here.',
       loadingAriaLabel: 'Loading sessions',
       missing: '—',
       meta: {
@@ -1213,18 +1213,26 @@ export const strings = {
         manyFriends: (n: number) => `${n} friends`,
         minutes: (n: number) => `${n} min`,
         score: (n: number) => `${n} / 100`,
+        unknown: 'Details unavailable',
         // I83 — Settings → Sessions is the second place a user looks for a
         // missing score, and a row with no score used to be indistinguishable
         // from one where AI was off. Only rendered when the row actually
         // recorded that AI was on (ai_enabled === 1), never inferred.
         notMeasured: 'not measured',
       },
+      review: {
+        cta: 'View report',
+        ariaLabel: (ordinal: number, when: string) =>
+          `View report for session ${ordinal} from ${when}`,
+        backCta: 'Back to sessions',
+      },
       // R4 — per-session delete behind an AlertDialog confirm, mirroring the
       // Friends remove pattern. Deleting removes the session row and its
       // audit events; stats/report read SQLite, so the change flows through.
       delete: {
         cta: 'Delete',
-        ariaLabel: (when: string) => `Delete session from ${when}`,
+        ariaLabel: (ordinal: number, when: string) =>
+          `Delete session ${ordinal} from ${when}`,
         confirmTitle: 'Delete this session?',
         confirmBody:
           'This removes the session and its focus history from this device. It cannot be undone.',

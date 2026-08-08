@@ -54,6 +54,7 @@ import {
 import { listFriends, type Friend } from '@/lib/db/friends'
 import { sessionsGet } from '@/lib/db/sessions'
 import { saveDiagnosticsArchive } from '@/lib/diagnostics'
+import { logger } from '@/lib/log'
 import { useIdentity } from '@/features/identity'
 import { strings } from '@/strings'
 import {
@@ -87,6 +88,8 @@ import {
 
 export type { ResolvedReportData } from './reportSerialize'
 
+const log = logger.child('report')
+
 export type ReportProps = {
   sessionId: string
   // Optional route-global content rendered inside the report's main landmark,
@@ -98,6 +101,12 @@ export type ReportProps = {
   // closing the report drops the UI back to the friends list; the Settings
   // → Sessions re-open passes a back-to-list handler instead.
   onClose: () => void
+  // The caller owns the destination after closing. A historical report uses
+  // "Back to sessions" rather than the fresh-session route's generic Close.
+  closeLabel?: string
+  // Historical reports replace Settings' focused opener. Focus the return
+  // action on entry so keyboard and screen-reader users land in the new view.
+  autoFocusClose?: boolean
   // #47 B3 / #190 — present when a transport-loss grace period expired or
   // the local user deliberately left while the remote room may still be in
   // its matching 20-second grace period. Rejoining re-enters the same room;
@@ -139,16 +148,22 @@ function isRejoinAvailable(
 // `__loader`. Splitting it out keeps the React component's effect body
 // focused on lifecycle, not data plumbing.
 async function defaultLoader(sessionId: string): Promise<ResolvedReportData> {
-  const [session, auditEvents, friends] = await Promise.all([
+  const friendRowsPromise = listFriends().catch((err: unknown): Friend[] => {
+    // Names enrich report rows but are never required to read local session
+    // evidence. Keep the report available with peer-key fallbacks instead.
+    log.warn('friends.list_failed', { cmd: 'friends_list', err })
+    return []
+  })
+  const [session, auditEvents, friendRows] = await Promise.all([
     sessionsGet(sessionId),
     auditEventsListForSession(sessionId),
-    listFriends(),
+    friendRowsPromise,
   ])
   if (!session) {
     throw new Error(strings.report.notFound)
   }
   const nameByEdPubkey = Object.fromEntries(
-    friends
+    friendRows
       .filter((f: Friend): f is Friend & { display_name: string } =>
         Boolean(f.display_name && f.display_name.trim().length > 0)
       )
@@ -166,6 +181,8 @@ export function Report({
   sessionId,
   topContent,
   onClose,
+  closeLabel = strings.common.actions.close,
+  autoFocusClose = false,
   onRejoin,
   rejoinDeadline,
   showDiagnosticsExport = false,
@@ -229,8 +246,13 @@ export function Report({
                 {strings.report.eyebrow}
               </h1>
             </div>
-            <Button variant="secondary" size="sm" onClick={onClose}>
-              <ChevronLeftIcon /> {strings.common.actions.close}
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={onClose}
+              autoFocus={autoFocusClose}
+            >
+              <ChevronLeftIcon /> {closeLabel}
             </Button>
           </div>
         </header>
@@ -277,6 +299,8 @@ export function Report({
     <ReportView
       data={status.data}
       onClose={onClose}
+      closeLabel={closeLabel}
+      autoFocusClose={autoFocusClose}
       onRejoin={onRejoin}
       rejoinDeadline={rejoinDeadline}
       showDiagnosticsExport={showDiagnosticsExport}
@@ -291,6 +315,8 @@ export function Report({
 export type ReportViewProps = {
   data: ResolvedReportData
   onClose: () => void
+  closeLabel?: string
+  autoFocusClose?: boolean
   topContent?: ReactNode
   // #47 B3 — see ReportProps.onRejoin.
   onRejoin?: () => void
@@ -305,6 +331,8 @@ export type ReportViewProps = {
 export function ReportView({
   data,
   onClose,
+  closeLabel = strings.common.actions.close,
+  autoFocusClose = false,
   topContent,
   onRejoin,
   rejoinDeadline,
@@ -539,8 +567,13 @@ export function ReportView({
                 <RotateCcwIcon /> {strings.report.rejoinCta}
               </Button>
             ) : null}
-            <Button variant="secondary" size="sm" onClick={onClose}>
-              <ChevronLeftIcon /> {strings.common.actions.close}
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={onClose}
+              autoFocus={autoFocusClose}
+            >
+              <ChevronLeftIcon /> {closeLabel}
             </Button>
           </div>
         </div>

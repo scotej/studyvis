@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import {
   BellIcon,
   ChartLineIcon,
@@ -174,6 +174,9 @@ export function Settings({
   // report into the content column. Lift the selection here and branch above
   // the layout, mirroring Home.tsx's fresh-session-end mount.
   const [openSessionId, setOpenSessionId] = useState<string | null>(null)
+  const [returnFocusSessionId, setReturnFocusSessionId] = useState<
+    string | null
+  >(null)
   // D4 — "Restore a different identity" mounts the full-screen Recover flow.
   // Lifted here (not inside IdentityCategory) for the same landmark reason as
   // the report: OnboardingStep renders its own <main>, so it must replace the
@@ -185,6 +188,26 @@ export function Settings({
   useEffect(() => {
     void hydrate()
   }, [hydrate])
+
+  const openHistoricalReport = useCallback((sessionId: string) => {
+    setReturnFocusSessionId(sessionId)
+    setOpenSessionId(sessionId)
+  }, [])
+
+  const closeHistoricalReport = useCallback(() => {
+    setOpenSessionId(null)
+  }, [])
+
+  const restoreHistoricalReportFocus = useCallback(() => {
+    setReturnFocusSessionId(null)
+  }, [])
+
+  const selectCategory = useCallback((categoryId: SettingsCategoryId) => {
+    // A user navigation is more recent intent than a pending report-return
+    // focus handoff (which can otherwise complete after SQLite responds).
+    setReturnFocusSessionId(null)
+    setActiveCategoryId(categoryId)
+  }, [])
 
   if (restoringIdentity) {
     return (
@@ -202,7 +225,9 @@ export function Settings({
     return (
       <Report
         sessionId={openSessionId}
-        onClose={() => setOpenSessionId(null)}
+        onClose={closeHistoricalReport}
+        closeLabel={strings.settings.sessions.review.backCta}
+        autoFocusClose
         topContent={topContent}
       />
     )
@@ -212,7 +237,7 @@ export function Settings({
     <SettingsLayout
       categories={CATEGORIES}
       activeCategoryId={activeCategoryId}
-      onCategorySelect={setActiveCategoryId}
+      onCategorySelect={selectCategory}
       onClose={onClose}
       topContent={topContent}
     >
@@ -225,7 +250,11 @@ export function Settings({
         <FriendsCategory presence={presence} />
       ) : null}
       {activeCategoryId === 'sessions' ? (
-        <SessionsCategory onOpenSession={setOpenSessionId} />
+        <SessionsCategory
+          onOpenSession={openHistoricalReport}
+          focusSessionId={returnFocusSessionId}
+          onFocusRestored={restoreHistoricalReportFocus}
+        />
       ) : null}
       {activeCategoryId === 'stats' ? <StatsCategory /> : null}
       {activeCategoryId === 'appearance' ? <AppearanceCategory /> : null}

@@ -1,8 +1,10 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
+import { expect, within } from 'storybook/test'
 
 import { ReportView, type ResolvedReportData } from '@/features/session/Report'
 import type { AuditEventRecord } from '@/lib/db/audit'
 import type { SessionRecord } from '@/lib/db/sessions'
+import { strings } from '@/strings'
 
 const meta = {
   title: 'Feature/Report',
@@ -115,6 +117,15 @@ export const HistoricalReportWithoutDiagnostics: Story = {
   args: {
     ...MostlyOnTask.args,
     showDiagnosticsExport: false,
+    closeLabel: strings.settings.sessions.review.backCta,
+    autoFocusClose: true,
+  },
+  play: async ({ canvasElement }) => {
+    await expect(
+      within(canvasElement).getByRole('button', {
+        name: strings.settings.sessions.review.backCta,
+      })
+    ).toHaveFocus()
   },
 }
 
