@@ -16,7 +16,7 @@
 // fresh-session-end render and the re-opened-from-Settings render are
 // byte-identical.
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
   BracesIcon,
   CheckCircle2Icon,
@@ -80,6 +80,10 @@ export type { ResolvedReportData } from './reportSerialize'
 
 export type ReportProps = {
   sessionId: string
+  // Optional route-global content rendered inside the report's main landmark,
+  // after its h1. Home uses this for pending invites so a preceding sibling
+  // cannot make this min-h-full surface exceed its bounded app slot.
+  topContent?: ReactNode
   // Optional handler invoked when the user closes the report. The fresh-
   // session-end mount passes `useSessionStore.getState().reset` here so
   // closing the report drops the UI back to the friends list; the Settings
@@ -151,6 +155,7 @@ async function defaultLoader(sessionId: string): Promise<ResolvedReportData> {
 
 export function Report({
   sessionId,
+  topContent,
   onClose,
   onRejoin,
   rejoinDeadline,
@@ -211,15 +216,17 @@ export function Report({
             style={{ maxWidth: tokens.sizes.readingMaxWidth }}
           >
             <div className="flex flex-col">
-              <span className="text-xs font-medium tracking-wide text-text-secondary uppercase">
+              <h1 className="text-xs font-medium tracking-wide text-text-secondary uppercase">
                 {strings.report.eyebrow}
-              </span>
+              </h1>
             </div>
             <Button variant="secondary" size="sm" onClick={onClose}>
               <ChevronLeftIcon /> {strings.common.actions.close}
             </Button>
           </div>
         </header>
+
+        {topContent}
 
         <div
           className="mx-auto flex w-full flex-col gap-8 px-4 py-4 sm:px-6 sm:py-6"
@@ -264,6 +271,7 @@ export function Report({
       onRejoin={onRejoin}
       rejoinDeadline={rejoinDeadline}
       showDiagnosticsExport={showDiagnosticsExport}
+      topContent={topContent}
     />
   )
 }
@@ -274,6 +282,7 @@ export function Report({
 export type ReportViewProps = {
   data: ResolvedReportData
   onClose: () => void
+  topContent?: ReactNode
   // #47 B3 — see ReportProps.onRejoin.
   onRejoin?: () => void
   rejoinDeadline?: number
@@ -287,6 +296,7 @@ export type ReportViewProps = {
 export function ReportView({
   data,
   onClose,
+  topContent,
   onRejoin,
   rejoinDeadline,
   showDiagnosticsExport = false,
@@ -561,6 +571,8 @@ export function ReportView({
             <ScoreGauge score={score} animate={animateScore} />
           )}
         </section>
+
+        {topContent}
 
         <Section heading={strings.report.sections.topic.heading}>
           {topicTimeline.length === 0 ? (

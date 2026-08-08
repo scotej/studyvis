@@ -1,5 +1,6 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
 
+import { tokens } from '@/design/tokens'
 import { PendingInvitesView } from '@/features/friends'
 import type { PendingInviteEntry } from '@/features/friends'
 
@@ -51,6 +52,30 @@ export const SingleInvite: Story = {
   args: {
     entries: [entry('a', 'Alex', 3 * 60_000)],
   },
+}
+
+// Production cap: the list itself scrolls instead of pushing the Settings or
+// Report surface beyond the app's 640px minimum window height.
+export const MaxCapacity: Story = {
+  args: {
+    entries: Array.from({ length: 16 }, (_, index) =>
+      entry(
+        index.toString(16),
+        `Study partner ${index + 1}`,
+        (index + 1) * 15_000
+      )
+    ),
+  },
+  decorators: [
+    (Story) => (
+      <div
+        className="overflow-hidden bg-bg-base text-text-primary"
+        style={{ height: tokens.sizes.windowMinHeight }}
+      >
+        <Story />
+      </div>
+    ),
+  ],
 }
 
 // Renders nothing — the section only exists while invites are pending.

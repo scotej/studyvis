@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import {
   BellIcon,
   ChartLineIcon,
@@ -145,6 +145,9 @@ const CATEGORIES: ReadonlyArray<
 
 export type SettingsProps = {
   onClose?: () => void
+  // Global content rendered inside SettingsLayout, after its h1 and before the
+  // bounded rail/content row. Used by Home's pending-invite inbox.
+  topContent?: ReactNode
   // #47 B2 — deep-link the initial pane (e.g. the in-session AI error toasts
   // open straight to 'ai'). Initial only: later prop changes don't re-route
   // an open Settings the user is navigating.
@@ -159,6 +162,7 @@ export type SettingsProps = {
 // store. Each category sub-component reads what it needs.
 export function Settings({
   onClose,
+  topContent,
   initialCategory,
   presence,
 }: SettingsProps) {
@@ -199,6 +203,7 @@ export function Settings({
       <Report
         sessionId={openSessionId}
         onClose={() => setOpenSessionId(null)}
+        topContent={topContent}
       />
     )
   }
@@ -209,6 +214,7 @@ export function Settings({
       activeCategoryId={activeCategoryId}
       onCategorySelect={setActiveCategoryId}
       onClose={onClose}
+      topContent={topContent}
     >
       {activeCategoryId === 'identity' ? (
         <IdentityCategory

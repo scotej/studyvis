@@ -61,9 +61,12 @@ import type { SettingsCategoryId } from '@/features/settings'
 import type { Friend } from '@/lib/db/friends'
 import { boxEncryptWithKeyring } from '@/lib/db/identity'
 import { useFriendsStore } from '@/stores/friendsStore'
+import { useIdentityStore } from '@/stores/identityStore'
 import { useSessionStore } from '@/stores/sessionStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { strings } from '@/strings'
+
+import { joinAndRemovePendingInvite } from './pendingInviteJoin'
 
 const isDev = import.meta.env.DEV
 
@@ -193,23 +196,59 @@ export function Home() {
     // #47 B1 pending surface for after they leave.
     if (useSessionStore.getState().status === 'active') {
       toast.error(strings.errors.leaveSessionFirst)
-      return
+      return false
+    }
+    const key = pendingInviteKey(invite)
+    const activeIdentity =
+      useIdentityStore.getState().identity?.ed_pubkey_hex.toLowerCase() ?? null
+    const pendingState = usePendingInvitesStore.getState()
+    const pendingEntry = pendingState.pending.find((entry) => entry.key === key)
+    // Invite actions can outlive the identity that created them (for example a
+    // Sonner action while Settings restores another identity). Require both the
+    // current identity scope and the still-present row before using its session
+    // credentials. InboxBoot also dismisses its toast on cleanup; this is the
+    // final defense at the irreversible join boundary.
+    if (
+      !activeIdentity ||
+      pendingState.identityEdPubkeyHex !== activeIdentity ||
+      pendingEntry?.invite.payload.sig !== invite.payload.sig
+    ) {
+      return false
+    }
+    // Removing a friend is a trust revocation. React/store reconciliation is
+    // intentionally redundant with this acceptance-time check so a click in
+    // the render-to-effect gap cannot join a removed friend's room. Only a
+    // ready roster is authoritative: during boot the inbox's database lookup
+    // has already validated a live invite while the Zustand list may be empty.
+    const sender = invite.from_ed_pubkey.toLowerCase()
+    const friendsState = useFriendsStore.getState()
+    const isCurrentFriend = friendsState.friends.some(
+      (friend) => friend.ed_pubkey_hex.toLowerCase() === sender
+    )
+    if (friendsState.status === 'ready' && !isCurrentFriend) {
+      pendingState.remove(key)
+      toast.error(strings.friends.inbox.pending.friendUnavailable)
+      return false
     }
     // #47 B1 — re-check expiry at accept time: the toast/banner row may be
     // minutes old, and joining a dead session would strand the user on a
     // waiting tile.
     if (invite.payload.expires_at <= Date.now()) {
-      usePendingInvitesStore.getState().remove(pendingInviteKey(invite))
+      pendingState.remove(key)
       toast.error(strings.friends.inbox.pending.expired)
-      return
+      return false
     }
-    usePendingInvitesStore.getState().remove(pendingInviteKey(invite))
     try {
-      joinSession(invite.payload.session_topic, invite.payload.session_password)
+      joinAndRemovePendingInvite(invite, key, {
+        joinSession,
+        removePendingInvite: pendingState.remove,
+      })
+      return true
     } catch (err) {
       const message =
         err instanceof Error ? err.message : strings.friends.joinErrorFallback
       toast.error(message)
+      return false
     }
   }, [])
 
@@ -366,15 +405,23 @@ export function Home() {
       const models = useModelStore.getState()
       const canStart =
         req.kind === 'guest' || Boolean(identity && identity.display_name)
-      if (canStart && (models.activeModelId || models.status === 'loading')) {
+      const preacquiredScreen =
+        canStart && Boolean(models.activeModelId || models.status === 'loading')
+      if (preacquiredScreen) {
         void preacquireScreenStream()
       }
       // Seed the one-shot topic BEFORE the session flips to active so
       // `begin()` writes it into both initialDeclaredTopic (→
       // sessions.declared_topic) and the live declaredStudyTopic.
       useSessionStore.getState().setPendingInitialTopic(topic)
-      if (req.kind === 'host') void runHostInvite(req.friend)
-      else runGuestJoin(req.invite)
+      if (req.kind === 'host') {
+        void runHostInvite(req.friend)
+      } else if (!runGuestJoin(req.invite) && preacquiredScreen) {
+        // The invitation may have expired, been replaced, lost its identity
+        // scope, or had its sender removed while the topic modal was open.
+        // No SessionView will mount to consume the gesture-time acquisition.
+        discardPendingScreenStream()
+      }
     },
     [pendingStart, runHostInvite, runGuestJoin, identity]
   )
@@ -498,14 +545,9 @@ export function Home() {
   if (sessionStatus === 'ended' && sessionTopic) {
     return (
       <>
-        {/* #47 B1 follow-up — invites arriving while the report is up (the
-            realistic case: a friend re-invites right after a grace-window
-            auto-end) used to exist only as a ~4s toast here; the persistent
-            rows rendered solely on the main view. Accepting is valid in this
-            state (runGuestJoin refuses only status 'active'). */}
-        <PendingInvites onAccept={handleInviteAccepted} />
         <Report
           sessionId={sessionTopic}
+          topContent={<PendingInvites onAccept={handleInviteAccepted} />}
           onClose={() => useSessionStore.getState().reset()}
           onRejoin={
             rejoinDeadline !== null &&
@@ -524,12 +566,11 @@ export function Home() {
   if (view === 'settings') {
     return (
       <>
-        {/* #47 B1 follow-up — see the report branch above. */}
-        <PendingInvites onAccept={handleInviteAccepted} />
         <Settings
           onClose={() => setView('main')}
           initialCategory={settingsCategory}
           presence={presence}
+          topContent={<PendingInvites onAccept={handleInviteAccepted} />}
         />
         {tail}
       </>

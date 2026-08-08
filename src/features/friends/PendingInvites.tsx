@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useId, useState } from 'react'
 import { MailIcon } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { tokens } from '@/design/tokens'
+import { useIdentityStore } from '@/stores/identityStore'
 import { strings } from '@/strings'
 
 import type { ValidInvite } from './inbox'
@@ -10,11 +11,6 @@ import {
   usePendingInvitesStore,
   type PendingInviteEntry,
 } from './pendingInvitesStore'
-
-// #47 B1 — the persistent accept surface for incoming invites. The sonner
-// toast (InboxBoot) stays as the immediate affordance; these rows survive on
-// the main view until the envelope's expires_at passes, so a recipient who
-// was tabbed away for a minute still sees and can accept the invite.
 
 export type PendingInvitesViewProps = {
   entries: ReadonlyArray<PendingInviteEntry>
@@ -36,14 +32,31 @@ export function PendingInvitesView({
   onAccept,
   onDismiss,
 }: PendingInvitesViewProps) {
+  const headingId = useId()
   if (entries.length === 0) return null
   return (
     <section
-      aria-label={strings.friends.inbox.pending.listAriaLabel}
-      className="mx-auto w-full px-4 pt-4 sm:px-6"
+      aria-labelledby={headingId}
+      className="mx-auto w-full shrink-0 px-4 py-4 sm:px-6"
       style={{ maxWidth: tokens.sizes.readingMaxWidth }}
     >
-      <ul className="flex flex-col gap-2">
+      <div className="mb-2 flex items-center justify-between gap-3">
+        <h2 id={headingId} className="text-sm font-semibold text-text-primary">
+          {strings.friends.inbox.pending.listAriaLabel}
+        </h2>
+        <span
+          className="flex size-5 items-center justify-center rounded-full bg-accent-default text-xs font-medium text-text-inverse"
+          role="status"
+          aria-live="polite"
+          aria-atomic="true"
+        >
+          <span className="sr-only">
+            {strings.friends.inbox.pending.listAriaLabel}
+          </span>{' '}
+          {entries.length}
+        </span>
+      </div>
+      <ul className="flex max-h-64 flex-col gap-2 overflow-y-auto pr-1">
         {entries.map((entry) => {
           const name = senderName(entry.invite)
           const minutesLeft = Math.max(
@@ -107,33 +120,64 @@ export type PendingInvitesProps = {
 
 export function PendingInvites({ onAccept }: PendingInvitesProps) {
   const pending = usePendingInvitesStore((s) => s.pending)
+  const pendingIdentityEdPubkeyHex = usePendingInvitesStore(
+    (s) => s.identityEdPubkeyHex
+  )
+  const identityEdPubkeyHex = useIdentityStore(
+    (s) => s.identity?.ed_pubkey_hex ?? null
+  )
   const [now, setNow] = useState(() => Date.now())
 
-  // Refresh the countdown + drop expired rows on a slow tick, only while
-  // anything is pending. Acceptance-time expiry is separately re-checked in
-  // Home's runGuestJoin, so a stale row can never join a dead session.
+  const activeIdentity = identityEdPubkeyHex?.toLowerCase() ?? null
+  const entries =
+    activeIdentity && pendingIdentityEdPubkeyHex === activeIdentity
+      ? pending
+      : []
+
   useEffect(() => {
-    if (pending.length === 0) return
-    // Not redundant with the interval below: the list sits empty for the app's
-    // whole tray-resident uptime, so by the time a row first renders the
-    // mount-time `now` is hours stale and a 5-minute invite reads "Expires in
-    // 214 min" — for the full 10s until the first tick, which is exactly the
-    // window the arrival toast summons the user to look in.
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- one-shot reseed of the display clock on the 0 -> n transition; Date.now() is impure so it can't be an adjust-during-render, and idempotent under StrictMode
+    if (entries.length === 0) return
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- reseed the display clock when the inbox changes from empty to non-empty
     setNow(Date.now())
     const id = setInterval(() => {
       setNow(Date.now())
       usePendingInvitesStore.getState().prune()
     }, 10_000)
     return () => clearInterval(id)
-  }, [pending.length])
+  }, [entries.length])
 
   return (
     <PendingInvitesView
-      entries={pending}
+      entries={entries}
       now={now}
-      onAccept={(entry) => onAccept(entry.invite)}
-      onDismiss={(entry) => usePendingInvitesStore.getState().remove(entry.key)}
+      onAccept={(entry) => {
+        const state = usePendingInvitesStore.getState()
+        if (
+          !activeIdentity ||
+          state.identityEdPubkeyHex !== activeIdentity ||
+          !state.pending.some(
+            (candidate) =>
+              candidate.key === entry.key &&
+              candidate.invite.payload.sig === entry.invite.payload.sig
+          )
+        ) {
+          return
+        }
+        onAccept(entry.invite)
+      }}
+      onDismiss={(entry) => {
+        const state = usePendingInvitesStore.getState()
+        if (
+          activeIdentity &&
+          state.identityEdPubkeyHex === activeIdentity &&
+          state.pending.some(
+            (candidate) =>
+              candidate.key === entry.key &&
+              candidate.invite.payload.sig === entry.invite.payload.sig
+          )
+        ) {
+          state.remove(entry.key)
+        }
+      }}
     />
   )
 }

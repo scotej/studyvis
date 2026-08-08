@@ -37,7 +37,37 @@ export function serializePayloadForSig(p: InvitePayloadCore): Uint8Array {
 
 export const INVITE_ENVELOPE_VERSION = 1 as const
 export const INVITE_TTL_MS = 5 * 60 * 1000 // 5 minutes per ARCHITECTURE §6
+// A sender's wall clock can be slightly ahead of the recipient's. Bound that
+// tolerance explicitly so a valid friend cannot turn the pending inbox into
+// unbounded long-lived credential storage by signing a far-future expiry.
+export const INVITE_CLOCK_SKEW_MS = 60 * 1000
+export const INVITE_SESSION_TOPIC_MAX_LENGTH = 256
+export const INVITE_SESSION_PASSWORD_MAX_LENGTH = 256
+export const INVITE_DISPLAY_NAME_MAX_LENGTH = 256
+// The JSON payload is well below this after encryption/base64. Reject larger
+// wire values before decoding or invoking the keyring-backed decrypt command.
+export const INVITE_CIPHERTEXT_MAX_LENGTH = 8192
 export const INVITE_ACTION = 'invite'
+
+export function isHex(value: unknown, bytes: number): value is string {
+  return (
+    typeof value === 'string' &&
+    value.length === bytes * 2 &&
+    /^[0-9a-f]+$/i.test(value)
+  )
+}
+
+export function isStringWithin(
+  value: unknown,
+  minLength: number,
+  maxLength: number
+): value is string {
+  return (
+    typeof value === 'string' &&
+    value.length >= minLength &&
+    value.length <= maxLength
+  )
+}
 
 // #47 C2 — signed invite-delivery ACK (the hardening ISSUES.md I46 flagged
 // as future work, shipped for UX legibility: with one-directional

@@ -136,6 +136,14 @@ import {
   type InviteSender,
   type ValidInvite,
 } from '@/features/friends'
+import {
+  INVITE_CIPHERTEXT_MAX_LENGTH,
+  INVITE_CLOCK_SKEW_MS,
+  INVITE_DISPLAY_NAME_MAX_LENGTH,
+  INVITE_SESSION_PASSWORD_MAX_LENGTH,
+  INVITE_SESSION_TOPIC_MAX_LENGTH,
+  INVITE_TTL_MS,
+} from '@/features/friends/envelope'
 
 beforeEach(async () => {
   const mod = (await import('@/lib/trystero')) as unknown as {
@@ -245,6 +253,45 @@ describe('invite envelope round-trip', () => {
     await inbox.leave()
   })
 
+  test('canonicalizes uppercase sender and signature hex on receipt', async () => {
+    const sam = makeApp('Sam')
+    const alice = makeApp('Alice')
+    const envelope = await buildInviteEnvelope(
+      sam.sender,
+      { edPubkeyHex: alice.edHex, xPubkeyHex: alice.xHex },
+      SAMPLE_SESSION
+    )
+    const lookupFriendXPub = vi.fn((edPubkeyHex: string) =>
+      edPubkeyHex === sam.edHex ? sam.xHex : null
+    )
+    let canonicalSig = ''
+
+    const received = await validateInviteEnvelope(
+      { ...envelope, from_ed_pubkey: envelope.from_ed_pubkey.toUpperCase() },
+      {
+        lookupFriendXPub,
+        boxDecrypt: async (theirXPub, nonce, ciphertext) => {
+          const plaintext = boxDecrypt(
+            theirXPub,
+            alice.identity.xPriv,
+            nonce,
+            ciphertext
+          )
+          const payload = JSON.parse(new TextDecoder().decode(plaintext)) as {
+            sig: string
+          }
+          canonicalSig = payload.sig
+          payload.sig = payload.sig.toUpperCase()
+          return new TextEncoder().encode(JSON.stringify(payload))
+        },
+      }
+    )
+
+    expect(lookupFriendXPub).toHaveBeenCalledWith(sam.edHex)
+    expect(received?.from_ed_pubkey).toBe(sam.edHex)
+    expect(received?.payload.sig).toBe(canonicalSig)
+  })
+
   test('non-friend C sending into B drops without decrypting', async () => {
     const carol = makeApp('Carol')
     const bob = makeApp('Bob')
@@ -304,6 +351,26 @@ describe('invite envelope round-trip', () => {
         boxDecrypt(theirXPub, alice.identity.xPriv, nonce, ct),
     })
     expect(result).toBeNull()
+  })
+
+  test('oversized ciphertext is dropped before decrypting', async () => {
+    const sam = makeApp('Sam')
+    const decrypt = vi.fn<InboxContext['boxDecrypt']>()
+    const result = await validateInviteEnvelope(
+      {
+        v: 1,
+        from_ed_pubkey: sam.edHex,
+        nonce: 'A'.repeat(32),
+        ciphertext: 'A'.repeat(INVITE_CIPHERTEXT_MAX_LENGTH + 1),
+      },
+      {
+        lookupFriendXPub: () => sam.xHex,
+        boxDecrypt: decrypt,
+      }
+    )
+
+    expect(result).toBeNull()
+    expect(decrypt).not.toHaveBeenCalled()
   })
 
   test('tampered nonce is dropped', async () => {
@@ -431,6 +498,68 @@ describe('invite envelope round-trip', () => {
       { edPubkeyHex: alice.edHex, xPubkeyHex: alice.xHex },
       SAMPLE_SESSION,
       { ttlMs: 1, now: () => Date.now() - 60_000 }
+    )
+
+    const result = await validateInviteEnvelope(envelope, {
+      lookupFriendXPub: () => sam.xHex,
+      boxDecrypt: async (theirXPub, nonce, ct) =>
+        boxDecrypt(theirXPub, alice.identity.xPriv, nonce, ct),
+    })
+    expect(result).toBeNull()
+  })
+
+  test('far-future invite is dropped even when a friend signs it', async () => {
+    const sam = makeApp('Sam')
+    const alice = makeApp('Alice')
+    const now = 1_700_000_000_000
+    const envelope = await buildInviteEnvelope(
+      sam.sender,
+      { edPubkeyHex: alice.edHex, xPubkeyHex: alice.xHex },
+      SAMPLE_SESSION,
+      {
+        ttlMs: INVITE_TTL_MS + INVITE_CLOCK_SKEW_MS + 1,
+        now: () => now,
+      }
+    )
+
+    const result = await validateInviteEnvelope(envelope, {
+      lookupFriendXPub: () => sam.xHex,
+      boxDecrypt: async (theirXPub, nonce, ct) =>
+        boxDecrypt(theirXPub, alice.identity.xPriv, nonce, ct),
+      now: () => now,
+    })
+    expect(result).toBeNull()
+  })
+
+  test.each([
+    {
+      field: 'session topic',
+      displayName: 'Sam',
+      session: {
+        ...SAMPLE_SESSION,
+        sessionTopic: 't'.repeat(INVITE_SESSION_TOPIC_MAX_LENGTH + 1),
+      },
+    },
+    {
+      field: 'session password',
+      displayName: 'Sam',
+      session: {
+        ...SAMPLE_SESSION,
+        sessionPassword: 'p'.repeat(INVITE_SESSION_PASSWORD_MAX_LENGTH + 1),
+      },
+    },
+    {
+      field: 'display name',
+      displayName: 'n'.repeat(INVITE_DISPLAY_NAME_MAX_LENGTH + 1),
+      session: SAMPLE_SESSION,
+    },
+  ])('oversized signed $field is dropped', async ({ displayName, session }) => {
+    const sam = makeApp(displayName)
+    const alice = makeApp('Alice')
+    const envelope = await buildInviteEnvelope(
+      sam.sender,
+      { edPubkeyHex: alice.edHex, xPubkeyHex: alice.xHex },
+      session
     )
 
     const result = await validateInviteEnvelope(envelope, {
