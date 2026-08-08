@@ -23,6 +23,9 @@ const log = logger.child('ai.sidecar')
 
 export type SidecarStatus = {
   running: boolean
+  // True while sidecar_start is installing/resolving/spawning, before a child
+  // and port exist. Distinguishes an early cold start from an explicit stop.
+  starting: boolean
   port: number | null
   model: string | null
   mmproj: string | null
@@ -117,6 +120,10 @@ const defaultRuntime: SidecarRuntime = {
 }
 
 let activeRuntime: SidecarRuntime = defaultRuntime
+// Monotonic ownership token for async start continuations. A stop or newer
+// start invalidates older callbacks even when the coarse status string has
+// already returned to `starting` for different work.
+let startRequestGeneration = 0
 
 export function __setSidecarRuntime(runtime: SidecarRuntime): void {
   activeRuntime = runtime
@@ -196,6 +203,7 @@ export const useSidecarStore = create<SidecarState>((set, get) => ({
       return get().port
     }
     const startedAt = Date.now()
+    const requestGeneration = ++startRequestGeneration
     const engineAutoInstall = activeRuntime.getEngineAutoInstall()
     log.info('start.requested', {
       purpose,
@@ -211,18 +219,17 @@ export const useSidecarStore = create<SidecarState>((set, get) => ({
         ctxSize,
         engineAutoInstall,
       })
-      // PR-13 — a stop() may have run while we awaited (session teardown, a
-      // localStream re-acquire, or a model change firing the sample-loop effect
-      // cleanup). It would have transitioned us out of 'starting'; don't clobber
-      // that back to 'running' with a port whose process the interleaved stop
-      // already killed. Tear down what we just started and bail.
-      if (get().status !== 'starting') {
+      // A stop or newer start may have taken ownership while Rust was
+      // installing/spawning. Rust's start epoch prevents resurrection; this
+      // generation check prevents the stale JS continuation from adopting a
+      // newer request's `starting` state.
+      if (
+        requestGeneration !== startRequestGeneration ||
+        get().status !== 'starting'
+      ) {
         log.warn('start.superseded', {
           elapsedMs: Date.now() - startedAt,
           currentStatus: get().status,
-        })
-        await activeRuntime.stop().catch((err) => {
-          log.warn('superseded_stop.failed', { err })
         })
         return null
       }
@@ -244,6 +251,19 @@ export const useSidecarStore = create<SidecarState>((set, get) => ({
       ensurePollingStarted()
       return port
     } catch (err) {
+      // A stop/model change may have canceled Rust's still-installing start.
+      // Its eventual "superseded" rejection belongs to that stale attempt;
+      // do not overwrite the newer idle/stopping/running state with errored.
+      if (
+        requestGeneration !== startRequestGeneration ||
+        get().status !== 'starting'
+      ) {
+        log.info('start_failed.superseded', {
+          elapsedMs: Date.now() - startedAt,
+          currentStatus: get().status,
+        })
+        return null
+      }
       const message = err instanceof Error ? err.message : String(err)
       set({ status: 'errored', lastError: message })
       stopPolling()
@@ -265,6 +285,7 @@ export const useSidecarStore = create<SidecarState>((set, get) => ({
     }
     const startedAt = Date.now()
     const previousStatus = get().status
+    startRequestGeneration += 1
     log.info('stop.requested', { previousStatus })
     set({ status: 'stopping' })
     stopPolling()
@@ -323,7 +344,9 @@ export const useSidecarStore = create<SidecarState>((set, get) => ({
         ? 'errored'
         : status.running
           ? 'running'
-          : 'idle'
+          : status.starting
+            ? 'starting'
+            : 'idle'
       set((s) => ({
         ...s,
         status: nextStatus,

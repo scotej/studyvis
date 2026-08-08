@@ -208,7 +208,16 @@ export const AiConversation: Story = {
           { status: 200 }
         ),
       now: () => NOW,
-      getSidecarPort: async () => 43123,
+      getSidecarStatus: async () => ({
+        running: true,
+        starting: false,
+        port: 43123,
+        model: '/models/story-model.gguf',
+        mmproj: null,
+        ctx_size: 4096,
+        errored: false,
+        last_error: null,
+      }),
     })
 
     const canvas = within(canvasElement)

@@ -2,6 +2,7 @@ import {
   AGENT_REQUEST_TIMEOUT_MS,
   AiAgentError,
   getAiAgentRuntime,
+  waitForSidecarReady,
 } from '@/features/ai/aiAgent'
 import { strings } from '@/strings'
 
@@ -135,23 +136,11 @@ export async function handleSessionChatText(
   if (input.signal?.aborted) throw abortReason(input.signal)
 
   const runtime = getAiAgentRuntime()
-  let port: number | null
-  try {
-    port = await runtime.getSidecarPort()
-  } catch {
-    if (input.signal?.aborted) throw abortReason(input.signal)
-    throw new AiAgentError(
-      'sidecar_unavailable',
-      strings.session.chat.aiUnavailable
-    )
-  }
+  const port = await waitForSidecarReady(input.modelId, runtime, {
+    signal: input.signal,
+    unavailableMessage: strings.session.chat.aiUnavailable,
+  })
   if (input.signal?.aborted) throw abortReason(input.signal)
-  if (!Number.isInteger(port) || port == null || port < 1 || port > 65_535) {
-    throw new AiAgentError(
-      'sidecar_unavailable',
-      strings.session.chat.aiUnavailable
-    )
-  }
 
   const controller = new AbortController()
   let abortSource: 'external' | 'timeout' | null = null
