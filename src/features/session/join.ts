@@ -60,9 +60,10 @@ function joinExistingSession(
   // post-session Report. That is another stint of the existing logical
   // session just like its explicit Rejoin button; preserve focus state before
   // `begin()` replaces the ended store snapshot.
-  const previous = useSessionStore.getState()
+  const previousSession = useSessionStore.getState()
   const continuesEndedSession =
-    previous.status === 'ended' && previous.sessionTopic === sessionTopic
+    previousSession.status === 'ended' &&
+    previousSession.sessionTopic === sessionTopic
   const continuesFocus = isRejoin || continuesEndedSession
   const { room, topic, password } = createGuestRoom(
     sessionTopic,
@@ -102,7 +103,7 @@ function joinExistingSession(
   const onPeerAuthenticated = options?.onPeerAuthenticated
   if (onPeerAuthenticated) {
     stopPeerAuthenticationWatch = useSessionStore.subscribe(
-      (state, previous) => {
+      (state, previousState) => {
         // setPeerHello is reached only after SessionView validates the hello
         // signature and confirms the room lifecycle admitted the peer. Notify
         // once per newly authenticated peer binding, rather than on arbitrary
@@ -112,7 +113,7 @@ function joinExistingSession(
           const edPubkeyHex = peer.edPubkeyHex
           if (
             !edPubkeyHex ||
-            previous.peers[peerId]?.edPubkeyHex === edPubkeyHex
+            previousState.peers[peerId]?.edPubkeyHex === edPubkeyHex
           ) {
             continue
           }

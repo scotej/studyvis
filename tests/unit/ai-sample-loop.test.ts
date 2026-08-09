@@ -1465,6 +1465,69 @@ describe('startSampleLoop — sidecar lifecycle', () => {
     expect(stopSpy).toHaveBeenCalled()
   })
 
+  test('handles a sidecar stop rejection while boot is still pending', async () => {
+    const clock = new FakeClock()
+    const stopError = new Error('stop failed')
+    let resolveModelPaths!: (paths: {
+      modelPath: string
+      mmprojPath: string
+    }) => void
+    const modelPaths = new Promise<{
+      modelPath: string
+      mmprojPath: string
+    }>((resolve) => {
+      resolveModelPaths = resolve
+    })
+    const unhandledRejections: unknown[] = []
+    const records: LogRecord[] = []
+    const onUnhandledRejection = (reason: unknown) => {
+      unhandledRejections.push(reason)
+    }
+    process.on('unhandledRejection', onUnhandledRejection)
+    __setLogRecordSink((record) => records.push(record))
+
+    __setSampleLoopRuntime(
+      buildSampleLoopRuntime({
+        clock,
+        fetch: vi.fn() as never,
+        modelPaths: () => modelPaths,
+        stopSidecar: () => Promise.reject(stopError),
+      })
+    )
+    const handle = startSampleLoop({
+      getTopic: () => 't',
+      modelId: 'test-model',
+      getFaceTrack: () => makeFakeTrack(),
+    })
+    await flushMicrotasks()
+
+    const stopping = handle.stop()
+    try {
+      // Node reports an unhandled rejection at the end of an event-loop turn.
+      // Boot is deliberately still blocked when that checkpoint runs.
+      await new Promise<void>((resolve) => setImmediate(resolve))
+      expect(unhandledRejections).toEqual([])
+    } finally {
+      process.off('unhandledRejection', onUnhandledRejection)
+      resolveModelPaths({
+        modelPath: '/abs/model.gguf',
+        mmprojPath: '/abs/mmproj.gguf',
+      })
+      await stopping
+    }
+    expect(records).toContainEqual(
+      expect.objectContaining({
+        lvl: 'warn',
+        scope: 'ai.sampleloop',
+        msg: 'sidecar.stop_failed',
+        data: expect.objectContaining({
+          cmd: 'sidecar_stop',
+          err: expect.objectContaining({ message: stopError.message }),
+        }),
+      })
+    )
+  })
+
   test('an old loop claims its stop before a replacement loop starts', async () => {
     const clock = new FakeClock()
     const oldStartFail = vi.fn()

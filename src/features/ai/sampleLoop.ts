@@ -529,11 +529,8 @@ export type SampleRecoveryInfo = {
 // A score-event callback owns external work (audit persistence and P2P
 // delivery). The loop cannot cancel an arbitrary promise, so it gives the
 // consumer an explicit lifetime it can honor before performing later effects.
-// `generation` is diagnostic and lets a consumer additionally reject stale
-// work without relying on promise settlement order.
 export type ScoreEventsDispatchContext = {
   signal: AbortSignal
-  generation: number
 }
 
 export type SampleLoopHandle = {
@@ -651,7 +648,6 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
   // The one bounded post-inference callback currently holding the tick chain.
   // Its signal makes an elapsed deadline or teardown observable to the
   // callback; resolving the deadline alone cannot cancel its promise.
-  let scoreEventsGeneration = 0
   let activeScoreEventsDispatch: {
     token: object
     handle: unknown
@@ -789,7 +785,6 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
     const controller = new AbortController()
     const context: ScoreEventsDispatchContext = {
       signal: controller.signal,
-      generation: ++scoreEventsGeneration,
     }
     try {
       await Promise.race([
@@ -1896,10 +1891,19 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
     // entering the sidecar store's stop path now makes that new caller wait
     // for the old process instead of joining a start this loop will later kill.
     let sidecarStop:
-      | { started: true; promise: Promise<void> }
+      | { started: true; settled: Promise<{ error: unknown } | null> }
       | { started: false; error: unknown }
     try {
-      sidecarStop = { started: true, promise: runtime.stopSidecar() }
+      sidecarStop = {
+        started: true,
+        // bootPromise can span multiple event-loop turns. Settle the stop
+        // rejection now so it cannot surface as unhandled while boot winds
+        // down; the error is still reported after the sequencing await.
+        settled: runtime.stopSidecar().then(
+          () => null,
+          (error: unknown) => ({ error })
+        ),
+      }
     } catch (err) {
       sidecarStop = { started: false, error: err }
     }
@@ -1910,7 +1914,8 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
     }
     try {
       if (!sidecarStop.started) throw sidecarStop.error
-      await sidecarStop.promise
+      const failure = await sidecarStop.settled
+      if (failure) throw failure.error
       log.info('stop.completed', {
         alreadyStopped: false,
         elapsedMs: Math.max(0, runtime.now() - stopStartedAt),

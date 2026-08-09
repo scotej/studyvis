@@ -50,20 +50,22 @@ index 992caaa..7ec71a7 100644
  	const iterate = (targets, f, { includePending = false } = {}) => (targets ? Array.isArray(targets) ? targets : [targets] : getPeerIds(includePending)).flatMap((id) => {
  		const peer = getPeer(id, includePending);
  		if (!peer) {
-@@ -80,7 +106,11 @@ const createActionWireManager = ({ getPeer, getPeerIds, canReceiveFromPeer, thro
+@@ -80,7 +106,13 @@ const createActionWireManager = ({ getPeer, getPeerIds, canReceiveFromPeer, thro
  				const pending = pendingActionPayloads[type];
  				if (pending?.length) {
  					delete pendingActionPayloads[type];
 -					pending.forEach(({ payload, peerId, metadata }) => f(payload, peerId, metadata));
-+					pending.forEach(({ payload, peerId, metadata, byteLength }) => {
++					pending.forEach(({ peerId, byteLength }) => {
 +						queuedInboundBytes[peerId] = Math.max(0, (queuedInboundBytes[peerId] ?? 0) - byteLength);
 +						queuedInboundMessageCount[peerId] = Math.max(0, (queuedInboundMessageCount[peerId] ?? 0) - 1);
++					});
++					pending.forEach(({ payload, peerId, metadata }) => {
 +						f(payload, peerId, metadata);
 +					});
  				}
  			},
  			setOnProgress: (f) => {
-@@ -141,6 +171,10 @@ const createActionWireManager = ({ getPeer, getPeerIds, canReceiveFromPeer, thro
+@@ -141,6 +173,10 @@ const createActionWireManager = ({ getPeer, getPeerIds, canReceiveFromPeer, thro
  	};
  	const handleData = (id, data) => {
  		const buffer = new Uint8Array(data);
@@ -74,7 +76,7 @@ index 992caaa..7ec71a7 100644
  		const type = decodeBytes(buffer.subarray(typeIndex, nonceIndex)).replaceAll("\0", "");
  		const action = actions[type];
  		if (!canReceiveFromPeer(id, Boolean(action?.options.receiveWhilePending))) return;
-@@ -152,27 +186,73 @@ const createActionWireManager = ({ getPeer, getPeerIds, canReceiveFromPeer, thro
+@@ -152,27 +188,73 @@ const createActionWireManager = ({ getPeer, getPeerIds, canReceiveFromPeer, thro
  		const isMeta = Boolean(tag & 2);
  		const isBinary = Boolean(tag & 4);
  		const isJson = Boolean(tag & 8);
@@ -155,7 +157,7 @@ index 992caaa..7ec71a7 100644
  			...target.meta === void 0 ? {} : { metadata: target.meta }
  		});
  	};
-@@ -181,6 +261,9 @@ const createActionWireManager = ({ getPeer, getPeerIds, canReceiveFromPeer, thro
+@@ -181,6 +263,9 @@ const createActionWireManager = ({ getPeer, getPeerIds, canReceiveFromPeer, thro
  		handleData,
  		clearPeer: (id) => {
  			delete pendingTransmissions[id];

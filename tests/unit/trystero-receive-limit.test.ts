@@ -272,4 +272,77 @@ describe('patched Trystero receive limits', () => {
 
     expect(wire.wasDestroyed()).toBe(false)
   })
+
+  test('releases queued message-count accounting before invoking callbacks', () => {
+    const wire = createWire()
+
+    // Queue two messages before the action is registered. The first callback
+    // throws, so the second callback is never invoked and its payload is no
+    // longer retained for a later registration.
+    wire.handleData(
+      'peer-1',
+      frame({ nonce: 1, tag: 5, payload: new Uint8Array([1]) })
+    )
+    wire.handleData(
+      'peer-1',
+      frame({ nonce: 2, tag: 5, payload: new Uint8Array([2]) })
+    )
+
+    const action = wire.makeInternalAction(TYPE)
+    expect(() =>
+      action.onMessage(() => {
+        throw new Error('consumer failed')
+      })
+    ).toThrow('consumer failed')
+
+    // All detached entries must release their reservations even though the
+    // consumer stopped delivery. Exactly 64 new unknown actions should fit.
+    for (let nonce = 0; nonce < MAX_QUEUED_UNKNOWN_ACTIONS; nonce += 1) {
+      wire.handleData(
+        'peer-1',
+        frame({
+          nonce,
+          tag: 5,
+          payload: new Uint8Array([nonce]),
+          type: 'future-action',
+        })
+      )
+    }
+
+    expect(wire.wasDestroyed()).toBe(false)
+  })
+
+  test('releases queued byte accounting before invoking callbacks', () => {
+    const wire = createWire()
+
+    wire.handleData(
+      'peer-1',
+      frame({ nonce: 1, tag: 5, payload: new Uint8Array([1]) })
+    )
+    wire.handleData(
+      'peer-1',
+      frame({ nonce: 2, tag: 5, payload: new Uint8Array(MAX_IMAGE_BYTES) })
+    )
+
+    const action = wire.makeInternalAction(TYPE)
+    expect(() =>
+      action.onMessage(() => {
+        throw new Error('consumer failed')
+      })
+    ).toThrow('consumer failed')
+
+    // A stale 5 MiB reservation would leave only 144 KiB of peer headroom,
+    // so this otherwise-small unknown action would terminate the peer.
+    wire.handleData(
+      'peer-1',
+      frame({
+        nonce: 3,
+        tag: 5,
+        payload: new Uint8Array(144 * 1024 + 1),
+        type: 'future-action',
+      })
+    )
+
+    expect(wire.wasDestroyed()).toBe(false)
+  })
 })
