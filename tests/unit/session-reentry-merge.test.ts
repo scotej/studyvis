@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, test, vi } from 'vitest'
 
+import type { FocusSnapshot } from '@/features/ai/focusStore'
+
 // Re-entering the same session room (Rejoin after a grace auto-end, or a
 // guest re-invited to a session they left) runs a second leave cycle against
 // the same topic-keyed sessions row. The Rust upsert overwrites
@@ -21,11 +23,14 @@ vi.mock('@/lib/db/sessions', () => ({
       total_minutes: row.totalMinutes ?? null,
       peer_pubkeys: row.peerPubkeys ?? null,
       declared_topic: null,
-      score: null,
-      focused_pct: null,
+      score: row.score ?? null,
+      focused_pct: row.focusedPct ?? null,
       generated_at: null,
-      confident_samples: null,
-      skipped_samples: null,
+      confident_samples: row.confidentSamples ?? null,
+      skipped_samples: row.skippedSamples ?? null,
+      ai_enabled: row.aiEnabled ?? null,
+      local_ed_pubkey: null,
+      local_display_name: null,
     }
   }),
   sessionsInsert: vi.fn(
@@ -35,13 +40,18 @@ vi.mock('@/lib/db/sessions', () => ({
   ),
 }))
 
-vi.mock('@/features/ai/focusStore', () => ({
-  snapshotFocusForReport: () => ({
+const focus: { snapshot: FocusSnapshot } = {
+  snapshot: {
     score: null,
     focusedPct: null,
     confidentSamples: null,
     skippedSamples: null,
-  }),
+    aiEnabled: 0,
+  },
+}
+
+vi.mock('@/features/ai/focusStore', () => ({
+  snapshotFocusForReport: () => focus.snapshot,
 }))
 
 import {
@@ -63,7 +73,8 @@ function fakeRoom(): TopicRoom {
 async function runStint(
   startedAt: number,
   endedAt: number,
-  mono?: { awakeMs: number }
+  mono?: { awakeMs: number },
+  continuesFocus = false
 ): Promise<void> {
   const startedAtMono = 5_000
   useSessionStore.getState().begin({
@@ -81,6 +92,7 @@ async function runStint(
     startedAt,
     startedAtMono: mono ? startedAtMono : undefined,
     monotonicNow: mono ? () => startedAtMono + mono.awakeMs : undefined,
+    continuesFocus,
   })
   vi.setSystemTime(endedAt)
   await leave()
@@ -89,6 +101,13 @@ async function runStint(
 describe('re-entry merge across leave cycles', () => {
   beforeEach(() => {
     db.clear()
+    focus.snapshot = {
+      score: null,
+      focusedPct: null,
+      confidentSamples: null,
+      skippedSamples: null,
+      aiEnabled: 0,
+    }
     useSessionStore.getState().reset()
     vi.useFakeTimers()
     return () => vi.useRealTimers()
@@ -110,6 +129,93 @@ describe('re-entry merge across leave cycles', () => {
       startedAt: T0, // earliest stint anchors the report timeline
       totalMinutes: 55, // 45 + 10 — the 2-minute gap is not studied time
       endedAt: t2 + 10 * MIN,
+    })
+  })
+
+  test('a rejoin persists focus metrics accumulated across both stints', async () => {
+    // The first stint has 4 focused samples out of 10. SessionView keeps this
+    // focus-store state when the same logical session rejoins.
+    focus.snapshot = {
+      score: 93,
+      focusedPct: 4 / 10,
+      confidentSamples: 10,
+      skippedSamples: 2,
+      aiEnabled: 1,
+    }
+    await runStint(T0, T0 + 45 * MIN)
+
+    // Five more confident samples (all focused) and one skipped check ran in
+    // the second stint. This is the continuous store snapshot, not a
+    // last-stint-only 5/5 = 100% value.
+    focus.snapshot = {
+      score: 91,
+      focusedPct: 9 / 15,
+      confidentSamples: 15,
+      skippedSamples: 3,
+      // The user turned AI off after the first stint. The cumulative session
+      // still truthfully records that AI ran earlier.
+      aiEnabled: 0,
+    }
+    const rejoinedAt = T0 + 47 * MIN
+    await runStint(rejoinedAt, rejoinedAt + 10 * MIN, undefined, true)
+
+    expect(db.get('topic-1')).toMatchObject({
+      totalMinutes: 55,
+      score: 91,
+      focusedPct: 9 / 15,
+      confidentSamples: 15,
+      skippedSamples: 3,
+      aiEnabled: 1,
+    })
+  })
+
+  test('a same-topic stint without carried score state clears score and combines raw focus samples', async () => {
+    focus.snapshot = {
+      score: 93,
+      focusedPct: 4 / 10,
+      confidentSamples: 10,
+      skippedSamples: 2,
+      aiEnabled: 1,
+    }
+    await runStint(T0, T0 + 45 * MIN)
+
+    // This models the app restarting before a guest receives the same invite:
+    // the new score machine has only its own five samples. It is not valid to
+    // attach this one-stint score to the 55-minute merged duration.
+    focus.snapshot = {
+      score: 98,
+      focusedPct: 5 / 5,
+      confidentSamples: 5,
+      skippedSamples: 1,
+      aiEnabled: 1,
+    }
+    const rejoinedAt = T0 + 47 * MIN
+    await runStint(rejoinedAt, rejoinedAt + 10 * MIN)
+
+    expect(db.get('topic-1')).toMatchObject({
+      totalMinutes: 55,
+      score: null,
+      focusedPct: 9 / 15,
+      confidentSamples: 15,
+      skippedSamples: 3,
+      replaceFocusMetrics: true,
+    })
+  })
+
+  test('a legacy unknown AI state stays unknown after an AI-disabled stint', async () => {
+    await runStint(T0, T0 + 45 * MIN)
+    const legacy = db.get('topic-1')!
+    legacy.aiEnabled = null
+    legacy.confidentSamples = null
+    legacy.skippedSamples = null
+
+    const rejoinedAt = T0 + 47 * MIN
+    await runStint(rejoinedAt, rejoinedAt + 10 * MIN)
+
+    expect(db.get('topic-1')).toMatchObject({
+      totalMinutes: 55,
+      aiEnabled: null,
+      replaceFocusMetrics: true,
     })
   })
 })

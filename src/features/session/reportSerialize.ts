@@ -30,8 +30,9 @@ export type ResolvedReportData = {
   // ed_pubkey_hex → display name. Local user's own pubkey is also keyed
   // here so the timeline can render "You" for self-emitted rows.
   nameByEdPubkey: Record<string, string>
-  // ed_pubkey_hex of the local user. The Report uses it to label self-
-  // rows as "You" and to surface "your" score / focused-time copy.
+  // Immutable ed_pubkey_hex of the local user who participated in this saved
+  // session. Null means a legacy row with unknown owner; it must never be
+  // replaced with the currently active identity.
   myEdPubkeyHex: string | null
 }
 
@@ -141,6 +142,7 @@ export function serializeReportToText(data: ResolvedReportData): string {
     session.score == null
       ? noScoreCopyLine(coverage)
       : strings.report.scoreLine(session.score),
+    ...(myEdPubkeyHex === null ? [strings.report.identityUnavailable] : []),
     '',
     `## ${strings.report.sections.topic.heading}`,
   ]
@@ -174,7 +176,11 @@ export function serializeReportToText(data: ResolvedReportData): string {
   // user just saw. The on-screen Distractions section precedes Breaks.
   lines.push('', `## ${strings.report.sections.distractions.heading}`)
   if (distractions.length === 0) {
-    lines.push(distractionsEmptyMessage(coverage))
+    lines.push(
+      myEdPubkeyHex === null
+        ? strings.report.identityUnavailable
+        : distractionsEmptyMessage(coverage)
+    )
   } else {
     for (const d of distractions) {
       const ded = d.totalDeduction > 0 ? ` · −${d.totalDeduction}` : ''

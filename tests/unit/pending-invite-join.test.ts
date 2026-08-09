@@ -4,6 +4,7 @@ import type { ValidInvite } from '@/features/friends'
 import { joinAndRemovePendingInvite } from '@/routes/pendingInviteJoin'
 
 const KEY = 'sender:session-topic'
+const IDENTITY = 'recipient'
 const INVITE: ValidInvite = {
   from_ed_pubkey: 'sender',
   payload: {
@@ -18,39 +19,56 @@ const INVITE: ValidInvite = {
 describe('joinAndRemovePendingInvite', () => {
   test('preserves the invite when joining throws', () => {
     const pending = new Set([KEY])
-    const removePendingInvite = vi.fn((key: string) => pending.delete(key))
+    const removePendingInviteIfCurrent = vi.fn(
+      (_identity: string, key: string) => pending.delete(key)
+    )
 
     expect(() =>
-      joinAndRemovePendingInvite(INVITE, KEY, {
+      joinAndRemovePendingInvite(INVITE, KEY, IDENTITY, {
         joinSession: () => {
           throw new Error('join failed')
         },
-        removePendingInvite,
+        removePendingInviteIfCurrent,
       })
     ).toThrow('join failed')
 
-    expect(removePendingInvite).not.toHaveBeenCalled()
+    expect(removePendingInviteIfCurrent).not.toHaveBeenCalled()
     expect(pending.has(KEY)).toBe(true)
   })
 
-  test('removes the invite only after joining succeeds', () => {
+  test('keeps the invite until any admitted peer completes authentication', () => {
     const pending = new Set([KEY])
     const calls: string[] = []
+    let onPeerAuthenticated: ((edPubkeyHex: string) => void) | undefined
 
-    joinAndRemovePendingInvite(INVITE, KEY, {
-      joinSession: (topic, password) => {
+    const removePendingInviteIfCurrent = vi.fn(
+      (identityEdPubkeyHex: string, key: string, invite: ValidInvite) => {
+        expect(identityEdPubkeyHex).toBe(IDENTITY)
+        expect(key).toBe(KEY)
+        expect(invite).toBe(INVITE)
+        calls.push('remove')
+        pending.delete(key)
+      }
+    )
+
+    joinAndRemovePendingInvite(INVITE, KEY, IDENTITY, {
+      joinSession: (topic, password, options) => {
         expect(topic).toBe(INVITE.payload.session_topic)
         expect(password).toBe(INVITE.payload.session_password)
         expect(pending.has(KEY)).toBe(true)
         calls.push('join')
+        onPeerAuthenticated = options.onPeerAuthenticated
       },
-      removePendingInvite: (key) => {
-        calls.push('remove')
-        pending.delete(key)
-      },
+      removePendingInviteIfCurrent,
     })
 
+    expect(calls).toEqual(['join'])
+    expect(pending.has(KEY)).toBe(true)
+
+    onPeerAuthenticated?.('another-authenticated-peer')
+    onPeerAuthenticated?.(INVITE.from_ed_pubkey)
     expect(calls).toEqual(['join', 'remove'])
     expect(pending.has(KEY)).toBe(false)
+    expect(removePendingInviteIfCurrent).toHaveBeenCalledTimes(1)
   })
 })

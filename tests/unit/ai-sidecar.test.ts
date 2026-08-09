@@ -276,6 +276,126 @@ describe('useSidecarStore.start', () => {
     expect(env.startCalls[0].mmprojPath).toBeNull()
   })
 
+  test('joins 10 concurrent cold starts; the first request owns configuration', async () => {
+    let resolveStart!: (port: number) => void
+    const nativeStart = vi.fn(
+      () =>
+        new Promise<number>((resolve) => {
+          resolveStart = resolve
+        })
+    )
+    __setSidecarRuntime({
+      start: nativeStart,
+      stop: async () => undefined,
+      status: async () => ({
+        running: false,
+        starting: false,
+        port: null,
+        model: null,
+        mmproj: null,
+        ctx_size: null,
+        errored: false,
+        last_error: null,
+      }),
+      fetchHealth: async () => true,
+      setInterval: () => 1,
+      clearInterval: () => undefined,
+      getAiFeaturesEnabled: () => true,
+      getEngineAutoInstall: () => true,
+    })
+
+    const firstRequest = {
+      modelPath: '/tmp/model.gguf',
+      mmprojPath: '/tmp/mmproj.gguf',
+      ctxSize: 2048,
+    }
+    const callers = [
+      useSidecarStore.getState().start(firstRequest),
+      ...Array.from({ length: 8 }, () =>
+        useSidecarStore.getState().start(firstRequest)
+      ),
+      // A second configuration cannot replace a singleton process mid-start;
+      // it joins the first owner, matching the native command's semantics.
+      useSidecarStore.getState().start({
+        modelPath: '/tmp/other-model.gguf',
+        mmprojPath: null,
+        ctxSize: 8192,
+      }),
+    ]
+
+    expect(nativeStart).toHaveBeenCalledTimes(1)
+    expect(nativeStart).toHaveBeenCalledWith({
+      ...firstRequest,
+      engineAutoInstall: true,
+    })
+    expect(useSidecarStore.getState()).toMatchObject({
+      status: 'starting',
+      port: null,
+    })
+
+    resolveStart(8124)
+    await expect(Promise.all(callers)).resolves.toEqual(Array(10).fill(8124))
+    expect(useSidecarStore.getState()).toMatchObject({
+      status: 'running',
+      port: 8124,
+      model: '/tmp/model.gguf',
+      mmproj: '/tmp/mmproj.gguf',
+      ctxSize: 2048,
+    })
+  })
+
+  test('an incompatible request cannot supersede an in-flight live start', async () => {
+    let resolveStart!: (port: number) => void
+    const nativeStart = vi.fn(
+      () =>
+        new Promise<number>((resolve) => {
+          resolveStart = resolve
+        })
+    )
+    __setSidecarRuntime({
+      start: nativeStart,
+      stop: async () => undefined,
+      status: async () => ({
+        running: false,
+        starting: false,
+        port: null,
+        model: null,
+        mmproj: null,
+        ctx_size: null,
+        errored: false,
+        last_error: null,
+      }),
+      fetchHealth: async () => true,
+      setInterval: () => 1,
+      clearInterval: () => undefined,
+      getAiFeaturesEnabled: () => true,
+      getEngineAutoInstall: () => true,
+    })
+
+    const liveStart = useSidecarStore
+      .getState()
+      .start({ modelPath: '/tmp/live.gguf' })
+    const benchmarkStart = useSidecarStore
+      .getState()
+      .start({ modelPath: '/tmp/benchmark.gguf', purpose: 'benchmark' })
+
+    await expect(benchmarkStart).resolves.toBeNull()
+    expect(useSidecarStore.getState()).toMatchObject({
+      status: 'starting',
+      lastError: ERR_BENCHMARK_REQUIRES_AI_OFF,
+    })
+    expect(nativeStart).toHaveBeenCalledTimes(1)
+
+    resolveStart(8125)
+    await expect(liveStart).resolves.toBe(8125)
+    expect(useSidecarStore.getState()).toMatchObject({
+      status: 'running',
+      port: 8125,
+      model: '/tmp/live.gguf',
+      lastError: null,
+    })
+  })
+
   test('stops the polling loop and clears state after stop()', async () => {
     const env = makeFakeRuntime({
       aiEnabled: true,
@@ -436,19 +556,20 @@ describe('useSidecarStore start/stop races', () => {
     __resetSidecarRuntime()
   })
 
-  test("stop's late continuation does not clobber the newer start", async () => {
+  test('replacement start waits for native stop before it can adopt a port', async () => {
     let resolveStop!: () => void
-    let resolveStart!: (port: number) => void
+    let nativeStopCompleted = false
     let stopCalls = 0
+    const nativeStart = vi.fn(async () => (nativeStopCompleted ? 9200 : 9000))
     const runtime: SidecarRuntime = {
-      start: () =>
-        new Promise<number>((res) => {
-          resolveStart = res
-        }),
+      start: nativeStart,
       stop: () => {
         stopCalls += 1
         return new Promise<void>((res) => {
-          resolveStop = res
+          resolveStop = () => {
+            nativeStopCompleted = true
+            res()
+          }
         })
       },
       status: async () => ({
@@ -477,25 +598,22 @@ describe('useSidecarStore start/stop races', () => {
     const stopPromise = useSidecarStore.getState().stop()
     expect(useSidecarStore.getState().status).toBe('stopping')
 
-    // The new loop boots while the stop IPC is still in flight; start()
-    // proceeds from 'stopping' and takes ownership by writing 'starting'.
+    // A native sidecar_start sent now could return the OLD child's port. The
+    // replacement must wait for the owning stop IPC instead of racing it.
     const startPromise = useSidecarStore
       .getState()
       .start({ modelPath: '/new.gguf' })
-    expect(useSidecarStore.getState().status).toBe('starting')
+    expect(useSidecarStore.getState().status).toBe('stopping')
+    expect(nativeStart).not.toHaveBeenCalled()
 
-    // The stop IPC response lands late — it must leave the state alone.
+    // Once native stop settles, the start may create the replacement process.
     resolveStop()
     await stopPromise
-    expect(useSidecarStore.getState().status).toBe('starting')
-
-    resolveStart(9200)
     await expect(startPromise).resolves.toBe(9200)
     const state = useSidecarStore.getState()
     expect(state.status).toBe('running')
     expect(state.port).toBe(9200)
-    // Exactly the old child was killed; start's PR-13 guard did not fire a
-    // second stop against the fresh one.
+    expect(nativeStart).toHaveBeenCalledTimes(1)
     expect(stopCalls).toBe(1)
   })
 

@@ -41,8 +41,10 @@ import {
   type BatteryInfo,
   type CaptureFrame,
   type CaptureRuntime,
+  type SampleLoopOptions,
   type SampleLoopRuntime,
 } from '@/features/ai'
+import { SCORE_EVENTS_TIMEOUT_MS } from '@/features/ai/sampleLoop'
 import { __resetLog, __setLogRecordSink, type LogRecord } from '@/lib/log'
 import { useSettingsStore } from '@/stores/settingsStore'
 
@@ -602,6 +604,138 @@ describe('startSampleLoop — happy-path tick', () => {
     await clock.advance(5000)
     expect(fetchMock).toHaveBeenCalledTimes(2)
     await handle.stop()
+  })
+
+  test('a hung score-event callback is bounded so later inference still runs', async () => {
+    const clock = new FakeClock()
+    const fetchMock = vi.fn(async () => judgmentResponse('on_task'))
+    const observed = { callbackSignal: null as AbortSignal | null }
+    const onScoreEvents = vi.fn(
+      (
+        ...args: Parameters<NonNullable<SampleLoopOptions['onScoreEvents']>>
+      ) => {
+        observed.callbackSignal = args[2].signal
+        return new Promise<void>(() => {})
+      }
+    )
+    __setSampleLoopRuntime(
+      buildSampleLoopRuntime({ clock, fetch: fetchMock as never })
+    )
+    const handle = startSampleLoop({
+      getTopic: () => 't',
+      modelId: 'test-model',
+      getFaceTrack: () => makeFakeTrack(),
+      onScoreEvents,
+    })
+    await flushMicrotasks(10)
+
+    await clock.advance(5_000)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(onScoreEvents).toHaveBeenCalledTimes(1)
+    expect(handle.__state().inFlight).toBe(true)
+
+    // The model response already landed, but the post-inference callback
+    // never settles. It must not keep the scheduler in-flight forever.
+    await clock.advance(SCORE_EVENTS_TIMEOUT_MS)
+    await flushMicrotasks(100)
+    expect(observed.callbackSignal?.aborted).toBe(true)
+    expect(handle.__state().inFlight).toBe(false)
+    expect(handle.__state().resolvedSamples).toBe(1)
+
+    await clock.advance(5_000)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    await handle.stop()
+    await flushMicrotasks(20)
+    // The pending callback cannot be cancelled, but its scheduler deadline
+    // and the enclosing tick timeout are both released on teardown.
+    expect(clock.timers).toHaveLength(0)
+  })
+
+  test('a late timed-out callback can honor its abort signal and cannot commit stale effects', async () => {
+    const clock = new FakeClock()
+    let resolveFirstCallback!: () => void
+    const firstCallback = new Promise<void>((resolve) => {
+      resolveFirstCallback = resolve
+    })
+    let fetchCount = 0
+    const fetchMock = vi.fn(async () => {
+      fetchCount += 1
+      return judgmentResponse(fetchCount === 1 ? 'mild' : 'on_task')
+    })
+    const consumerEffects: string[] = []
+    let callbackCount = 0
+    const onScoreEvents: NonNullable<
+      SampleLoopOptions['onScoreEvents']
+    > = async (_events, verdict, context) => {
+      callbackCount += 1
+      if (callbackCount === 1) await firstCallback
+      // Mirrors SessionView: never mutate current-session UI after this
+      // dispatch lost its deadline race.
+      if (context.signal.aborted) return
+      consumerEffects.push(
+        'severity' in verdict ? verdict.severity : 'uncertain'
+      )
+    }
+    __setSampleLoopRuntime(
+      buildSampleLoopRuntime({ clock, fetch: fetchMock as never })
+    )
+    const handle = startSampleLoop({
+      getTopic: () => 't',
+      modelId: 'test-model',
+      getFaceTrack: () => makeFakeTrack(),
+      onScoreEvents,
+    })
+    await flushMicrotasks(10)
+
+    await clock.advance(5_000)
+    await clock.advance(SCORE_EVENTS_TIMEOUT_MS)
+    await clock.advance(5_000)
+    expect(consumerEffects).toEqual(['on_task'])
+
+    resolveFirstCallback()
+    await flushMicrotasks(30)
+    expect(consumerEffects).toEqual(['on_task'])
+    await handle.stop()
+  })
+
+  test('stop aborts an active score-event callback before its late completion can commit effects', async () => {
+    const clock = new FakeClock()
+    let resolveCallback!: () => void
+    const callbackPending = new Promise<void>((resolve) => {
+      resolveCallback = resolve
+    })
+    const consumerEffects: string[] = []
+    const observed = { callbackSignal: null as AbortSignal | null }
+    const onScoreEvents: NonNullable<
+      SampleLoopOptions['onScoreEvents']
+    > = async (_events, _verdict, context) => {
+      observed.callbackSignal = context.signal
+      await callbackPending
+      if (context.signal.aborted) return
+      consumerEffects.push('late effect')
+    }
+    __setSampleLoopRuntime(
+      buildSampleLoopRuntime({
+        clock,
+        fetch: vi.fn(async () => judgmentResponse('on_task')) as never,
+      })
+    )
+    const handle = startSampleLoop({
+      getTopic: () => 't',
+      modelId: 'test-model',
+      getFaceTrack: () => makeFakeTrack(),
+      onScoreEvents,
+    })
+    await flushMicrotasks(10)
+    await clock.advance(5_000)
+    expect(observed.callbackSignal?.aborted).toBe(false)
+
+    await handle.stop()
+    expect(observed.callbackSignal?.aborted).toBe(true)
+    resolveCallback()
+    await flushMicrotasks(30)
+    expect(consumerEffects).toEqual([])
+    expect(clock.timers).toHaveLength(0)
   })
 
   test('A2 — malformed response is an uncertain skip, not a fabricated on_task', async () => {

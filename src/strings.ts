@@ -868,6 +868,8 @@ export const strings = {
     summaryMiddle: ' · Focused-time ',
     privacy:
       'Reports stay on this device. Friends never see your score breakdown unless you share it.',
+    identityUnavailable:
+      'This session predates identity tracking, so local-only analysis cannot be reconstructed.',
     sections: {
       topic: { heading: 'Topic', empty: 'No topic recorded.' },
       timeline: { heading: 'Timeline', empty: 'No events were recorded.' },

@@ -171,6 +171,16 @@ describe('deriveTopDistractions', () => {
     // Omitting the filter keeps the raw all-signers behavior.
     expect(deriveTopDistractions(events).length).toBe(2)
   })
+
+  test('a legacy row with unknown owner never treats every signer as local', () => {
+    const events: AuditEventRecord[] = [
+      evt('peer', 'ai_warning', 0, {
+        severity: 'mild',
+        reasoning: 'peer-only warning',
+      }),
+    ]
+    expect(deriveTopDistractions(events, null)).toEqual([])
+  })
 })
 
 describe('deriveTopicTimeline', () => {
@@ -254,6 +264,18 @@ describe('deriveTopicTimeline', () => {
     expect(deriveTopicTimeline('Calculus', events).map((e) => e.topic)).toEqual(
       ['Calculus', 'Spanish', 'Linear Algebra']
     )
+  })
+
+  test('a legacy row with unknown owner excludes signer-specific topic changes', () => {
+    const events: AuditEventRecord[] = [
+      evt('peer', 'topic_change', 5 * 60_000, {
+        previous_topic: 'Calculus',
+        new_topic: 'Spanish',
+      }),
+    ]
+    expect(
+      deriveTopicTimeline('Calculus', events, null).map((e) => e.topic)
+    ).toEqual(['Calculus'])
   })
 })
 

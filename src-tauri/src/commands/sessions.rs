@@ -33,6 +33,12 @@ pub fn sessions_insert(
     // caller didn't say (older frontend). None coalesces, so an omitted value
     // never overwrites a recorded one.
     ai_enabled: Option<i64>,
+    local_ed_pubkey: Option<String>,
+    local_display_name: Option<String>,
+    // A focus score is stateful. If a same-topic stint began without its
+    // predecessor's in-memory state, the frontend passes true so an honest
+    // null can clear the stale score instead of COALESCE retaining it.
+    replace_focus_metrics: Option<bool>,
 ) -> Result<(), String> {
     let conn = lock(&state)?;
     let row = sessions::SessionRow {
@@ -48,8 +54,11 @@ pub fn sessions_insert(
         confident_samples,
         skipped_samples,
         ai_enabled,
+        local_ed_pubkey,
+        local_display_name,
     };
-    sessions::insert(&conn, &row).map_err(|e| e.to_string())
+    sessions::insert_with_focus_metrics_mode(&conn, &row, replace_focus_metrics.unwrap_or(false))
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]

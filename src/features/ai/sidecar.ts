@@ -120,6 +120,18 @@ const defaultRuntime: SidecarRuntime = {
 }
 
 let activeRuntime: SidecarRuntime = defaultRuntime
+// The sidecar is a singleton.  A cold start has no port until the native
+// command returns, so callers that arrive during that interval must join the
+// owning request rather than treating `starting + null` as a failed start.
+// The first request owns the process configuration; this matches Rust's
+// sidecar_start behaviour, which returns the already-started child's port to
+// later requests rather than replacing it mid-start.
+let inFlightStart: Promise<number | null> | null = null
+// A start that races a stop cannot be sent to Rust until the stop command has
+// actually completed. Otherwise native command scheduling can run start first,
+// have it return the old child's port, and then let the late stop kill the
+// child JS just adopted as the new configuration.
+let inFlightStop: Promise<void> | null = null
 // Monotonic ownership token for async start continuations. A stop or newer
 // start invalidates older callbacks even when the coarse status string has
 // already returned to `starting` for different work.
@@ -131,6 +143,8 @@ export function __setSidecarRuntime(runtime: SidecarRuntime): void {
 
 export function __resetSidecarRuntime(): void {
   activeRuntime = defaultRuntime
+  inFlightStart = null
+  inFlightStop = null
 }
 
 type SidecarState = {
@@ -184,156 +198,208 @@ export const useSidecarStore = create<SidecarState>((set, get) => ({
     ctxSize = DEFAULT_CTX_SIZE,
     purpose = 'live',
   }) => {
+    // A caller can be refused by its own gate while another consumer owns a
+    // live start. Do not reset that unrelated state to idle: doing so would
+    // make the owner's successful native response look superseded.
+    const refuseStart = (reason: string): void => {
+      const status = get().status
+      set(
+        status === 'idle' || status === 'errored'
+          ? { lastError: reason, status: 'idle' }
+          : { lastError: reason }
+      )
+    }
     const aiEnabled = activeRuntime.getAiFeaturesEnabled()
     if (purpose === 'benchmark' && aiEnabled) {
       log.info('start.skipped', {
         reason: ERR_BENCHMARK_REQUIRES_AI_OFF,
         purpose,
       })
-      set({ lastError: ERR_BENCHMARK_REQUIRES_AI_OFF, status: 'idle' })
+      refuseStart(ERR_BENCHMARK_REQUIRES_AI_OFF)
       return null
     }
     if (purpose !== 'benchmark' && !aiEnabled) {
       log.info('start.skipped', { reason: ERR_AI_DISABLED, purpose })
-      set({ lastError: ERR_AI_DISABLED, status: 'idle' })
+      refuseStart(ERR_AI_DISABLED)
       return null
     }
-    if (get().status === 'running' || get().status === 'starting') {
-      log.debug('start.reused', { status: get().status })
-      return get().port
+    // Keep native `sidecar_stop` and a replacement `sidecar_start` ordered.
+    // The state becomes `stopping` before the IPC call settles, but Rust sees
+    // an extant child until that call has actually won its lock. Merely letting
+    // a start proceed from `stopping` would therefore reuse the old process.
+    const pendingStop = inFlightStop
+    if (pendingStop !== null) {
+      log.debug('start.waiting_for_stop', { status: get().status })
+      await pendingStop
+      // Re-evaluate gates and join any start another waiting caller created.
+      // If stopping failed, do not gamble on whatever native process remains.
+      if (get().status !== 'idle') {
+        log.warn('start.blocked_after_stop', { status: get().status })
+        return null
+      }
+      return get().start({ modelPath, mmprojPath, ctxSize, purpose })
     }
-    const startedAt = Date.now()
-    const requestGeneration = ++startRequestGeneration
-    const engineAutoInstall = activeRuntime.getEngineAutoInstall()
-    log.info('start.requested', {
-      purpose,
-      ctxSize,
-      hasProjector: mmprojPath !== null,
-      engineAutoInstall,
-    })
-    set({ status: 'starting', lastError: null })
-    try {
-      const port = await activeRuntime.start({
-        modelPath,
-        mmprojPath,
+    const current = get()
+    if (current.status === 'running') {
+      log.debug('start.reused', { status: current.status })
+      return current.port
+    }
+    if (current.status === 'starting' && inFlightStart !== null) {
+      log.debug('start.joined', { status: current.status })
+      return inFlightStart
+    }
+    const ownedStart = (async (): Promise<number | null> => {
+      const startedAt = Date.now()
+      const requestGeneration = ++startRequestGeneration
+      const engineAutoInstall = activeRuntime.getEngineAutoInstall()
+      log.info('start.requested', {
+        purpose,
         ctxSize,
+        hasProjector: mmprojPath !== null,
         engineAutoInstall,
       })
-      // A stop or newer start may have taken ownership while Rust was
-      // installing/spawning. Rust's start epoch prevents resurrection; this
-      // generation check prevents the stale JS continuation from adopting a
-      // newer request's `starting` state.
-      if (
-        requestGeneration !== startRequestGeneration ||
-        get().status !== 'starting'
-      ) {
-        log.warn('start.superseded', {
-          elapsedMs: Date.now() - startedAt,
-          currentStatus: get().status,
+      set({ status: 'starting', lastError: null })
+      try {
+        const port = await activeRuntime.start({
+          modelPath,
+          mmprojPath,
+          ctxSize,
+          engineAutoInstall,
         })
-        return null
-      }
-      set({
-        status: 'running',
-        port,
-        model: modelPath,
-        mmproj: mmprojPath,
-        ctxSize,
-        healthy: false,
-        lastError: null,
-      })
-      log.info('start.succeeded', {
-        purpose,
-        elapsedMs: Date.now() - startedAt,
-        ctxSize,
-        hasProjector: mmprojPath !== null,
-      })
-      ensurePollingStarted()
-      return port
-    } catch (err) {
-      // A stop/model change may have canceled Rust's still-installing start.
-      // Its eventual "superseded" rejection belongs to that stale attempt;
-      // do not overwrite the newer idle/stopping/running state with errored.
-      if (
-        requestGeneration !== startRequestGeneration ||
-        get().status !== 'starting'
-      ) {
-        log.info('start_failed.superseded', {
-          elapsedMs: Date.now() - startedAt,
-          currentStatus: get().status,
+        // A stop or newer start may have taken ownership while Rust was
+        // installing/spawning. Rust's start epoch prevents resurrection; this
+        // generation check prevents the stale JS continuation from adopting a
+        // newer request's `starting` state.
+        if (
+          requestGeneration !== startRequestGeneration ||
+          get().status !== 'starting'
+        ) {
+          log.warn('start.superseded', {
+            elapsedMs: Date.now() - startedAt,
+            currentStatus: get().status,
+          })
+          return null
+        }
+        set({
+          status: 'running',
+          port,
+          model: modelPath,
+          mmproj: mmprojPath,
+          ctxSize,
+          healthy: false,
+          lastError: null,
         })
-        return null
-      }
-      const message = err instanceof Error ? err.message : String(err)
-      set({ status: 'errored', lastError: message })
-      stopPolling()
-      log.error('start.failed', {
-        purpose,
-        elapsedMs: Date.now() - startedAt,
-        ctxSize,
-        hasProjector: mmprojPath !== null,
-        err,
-      })
-      return null
-    }
-  },
-
-  stop: async () => {
-    if (get().status === 'idle' || get().status === 'stopping') {
-      log.debug('stop.skipped', { status: get().status })
-      return
-    }
-    const startedAt = Date.now()
-    const previousStatus = get().status
-    startRequestGeneration += 1
-    log.info('stop.requested', { previousStatus })
-    set({ status: 'stopping' })
-    stopPolling()
-    try {
-      await activeRuntime.stop()
-      // Mirror of the PR-13 guard in start(): a newer start() may have run
-      // while we awaited (the sample-loop effect tears the old loop down and
-      // boots a new one in the same React commit on a localStream swap). Once
-      // it wrote 'starting' it owns the state machine — writing 'idle' here
-      // would make its own PR-13 guard kill the child it just spawned and
-      // toast "AI failed to start". The Rust side is already consistent:
-      // sidecar_stop killed the old child before sidecar_start spawned the
-      // new one.
-      if (get().status !== 'stopping') {
-        log.info('stop.superseded', {
+        log.info('start.succeeded', {
+          purpose,
           elapsedMs: Date.now() - startedAt,
-          currentStatus: get().status,
+          ctxSize,
+          hasProjector: mmprojPath !== null,
         })
-        return
-      }
-      set({
-        status: 'idle',
-        port: null,
-        model: null,
-        mmproj: null,
-        ctxSize: null,
-        healthy: false,
-        lastHealthCheckAt: null,
-        lastError: null,
-      })
-      log.info('stop.succeeded', { elapsedMs: Date.now() - startedAt })
-    } catch (err) {
-      if (get().status !== 'stopping') {
-        log.warn('stop_failed.superseded', {
+        ensurePollingStarted()
+        return port
+      } catch (err) {
+        // A stop/model change may have canceled Rust's still-installing start.
+        // Its eventual "superseded" rejection belongs to that stale attempt;
+        // do not overwrite the newer idle/stopping/running state with errored.
+        if (
+          requestGeneration !== startRequestGeneration ||
+          get().status !== 'starting'
+        ) {
+          log.info('start_failed.superseded', {
+            elapsedMs: Date.now() - startedAt,
+            currentStatus: get().status,
+          })
+          return null
+        }
+        const message = err instanceof Error ? err.message : String(err)
+        set({ status: 'errored', lastError: message })
+        stopPolling()
+        log.error('start.failed', {
+          purpose,
           elapsedMs: Date.now() - startedAt,
-          currentStatus: get().status,
+          ctxSize,
+          hasProjector: mmprojPath !== null,
           err,
         })
-        return
+        return null
       }
-      const message = err instanceof Error ? err.message : String(err)
-      set({ status: 'errored', lastError: message })
-      log.error('stop.failed', {
-        elapsedMs: Date.now() - startedAt,
-        previousStatus,
-        err,
-      })
+    })()
+    inFlightStart = ownedStart
+    void ownedStart.then(
+      () => {
+        if (inFlightStart === ownedStart) inFlightStart = null
+      },
+      () => {
+        if (inFlightStart === ownedStart) inFlightStart = null
+      }
+    )
+    return ownedStart
+  },
+
+  stop: () => {
+    if (inFlightStop !== null) {
+      log.debug('stop.joined', { status: get().status })
+      return inFlightStop
     }
+    if (get().status === 'idle') {
+      log.debug('stop.skipped', { status: get().status })
+      return Promise.resolve()
+    }
+    const ownedStop = (async (): Promise<void> => {
+      const startedAt = Date.now()
+      const previousStatus = get().status
+      startRequestGeneration += 1
+      log.info('stop.requested', { previousStatus })
+      set({ status: 'stopping' })
+      stopPolling()
+      try {
+        await activeRuntime.stop()
+        if (get().status !== 'stopping') {
+          log.info('stop.superseded', {
+            elapsedMs: Date.now() - startedAt,
+            currentStatus: get().status,
+          })
+          return
+        }
+        set({
+          status: 'idle',
+          port: null,
+          model: null,
+          mmproj: null,
+          ctxSize: null,
+          healthy: false,
+          lastHealthCheckAt: null,
+          lastError: null,
+        })
+        log.info('stop.succeeded', { elapsedMs: Date.now() - startedAt })
+      } catch (err) {
+        if (get().status !== 'stopping') {
+          log.warn('stop_failed.superseded', {
+            elapsedMs: Date.now() - startedAt,
+            currentStatus: get().status,
+            err,
+          })
+          return
+        }
+        const message = err instanceof Error ? err.message : String(err)
+        set({ status: 'errored', lastError: message })
+        log.error('stop.failed', {
+          elapsedMs: Date.now() - startedAt,
+          previousStatus,
+          err,
+        })
+      }
+    })()
+    inFlightStop = ownedStop
+    void ownedStop.then(
+      () => {
+        if (inFlightStop === ownedStop) inFlightStop = null
+      },
+      () => {
+        if (inFlightStop === ownedStop) inFlightStop = null
+      }
+    )
+    return ownedStop
   },
 
   refreshStatus: async () => {

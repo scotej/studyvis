@@ -97,6 +97,10 @@ export const SCREEN_ACQUIRE_TIMEOUT_MS = 120_000
 // matches benchmark.ts's own five-minute request bound and lets the Windows
 // CPU path complete real two-image work before a trustworthy p95 exists.
 export const MAX_REQUEST_TIMEOUT_MS = 300_000
+// Score-event dispatch reaches the local audit store and, for alerts, the P2P
+// data channel. Those side effects must not leave the sampling scheduler
+// permanently in-flight after inference has already completed.
+export const SCORE_EVENTS_TIMEOUT_MS = 15_000
 // I83 — multiple of the benchmark-measured p95 to allow a live inference before
 // aborting it. The benchmark bounds a request at 5 minutes while this loop
 // bounded it at 90 s, so a model that measured a p95 above ~90 s could then
@@ -505,20 +509,31 @@ export type SampleLoopOptions = {
   // Fires once per resolved sample with the events the score machine
   // emitted for that sample plus the sample's verdict. V2-P6 wires the
   // peer-alert + self-warning dispatcher through this callback so the
-  // sample loop stays unaware of the data-channel side. Awaited so the
-  // next tick does not start until the dispatcher's audit + broadcast
-  // calls have resolved — keeps the "never queue" invariant honest.
+  // sample loop stays unaware of the data-channel side. It is awaited only
+  // up to SCORE_EVENTS_TIMEOUT_MS: this preserves the usual serial ordering
+  // while a hung audit/broadcast callback cannot wedge future inference.
   // A2 — the verdict may be an uncertain skip (parse fallback); consumers
   // must branch on it rather than read a fabricated severity.
   onScoreEvents?: (
     events: ReadonlyArray<ScoreEvent>,
-    verdict: SampleVerdict
+    verdict: SampleVerdict,
+    context: ScoreEventsDispatchContext
   ) => void | Promise<void>
 }
 
 export type SampleRecoveryInfo = {
   reason: SampleBlockReason
   unavailableForMs: number
+}
+
+// A score-event callback owns external work (audit persistence and P2P
+// delivery). The loop cannot cancel an arbitrary promise, so it gives the
+// consumer an explicit lifetime it can honor before performing later effects.
+// `generation` is diagnostic and lets a consumer additionally reject stale
+// work without relying on promise settlement order.
+export type ScoreEventsDispatchContext = {
+  signal: AbortSignal
+  generation: number
 }
 
 export type SampleLoopHandle = {
@@ -633,6 +648,16 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
   // STALL_CHECK_INTERVAL_MS.
   let stallHandle: unknown | null = null
   let activeAbort: AbortController | null = null
+  // The one bounded post-inference callback currently holding the tick chain.
+  // Its signal makes an elapsed deadline or teardown observable to the
+  // callback; resolving the deadline alone cannot cancel its promise.
+  let scoreEventsGeneration = 0
+  let activeScoreEventsDispatch: {
+    token: object
+    handle: unknown
+    resolve: () => void
+    controller: AbortController
+  } | null = null
   // Surfaces the long-running boot work (refusal checks, sidecar start) so
   // stop() can wait for it before returning. Without this, an immediate
   // stop() could race the still-pending model_paths fetch.
@@ -744,6 +769,83 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
       backoffEngaged: state.backoff.engaged,
     })
     opts.onSamplesResumed?.({ reason, unavailableForMs })
+  }
+
+  // The dispatcher can await SQLite and P2P work. Inference has already
+  // completed by this point, so holding the only tick chain forever would
+  // silently stop sampling while the watchdog sees a recent resolved sample.
+  // Bound the callback rather than making it fully concurrent: normal event
+  // batches retain their ordering, while a broken network path only delays a
+  // subsequent sample for this small, explicit deadline.
+  async function dispatchScoreEventsBounded(
+    events: ReadonlyArray<ScoreEvent>,
+    verdict: SampleVerdict
+  ): Promise<void> {
+    const onScoreEvents = opts.onScoreEvents
+    if (!onScoreEvents) return
+
+    let timedOut = false
+    const deadlineToken = {}
+    const controller = new AbortController()
+    const context: ScoreEventsDispatchContext = {
+      signal: controller.signal,
+      generation: ++scoreEventsGeneration,
+    }
+    try {
+      await Promise.race([
+        Promise.resolve().then(() => onScoreEvents(events, verdict, context)),
+        new Promise<void>((resolve) => {
+          const deadline = {
+            token: deadlineToken,
+            handle: null as unknown,
+            resolve,
+            controller,
+          }
+          activeScoreEventsDispatch = deadline
+          deadline.handle = runtime.setTimeout(() => {
+            timedOut = true
+            // Promise.race cannot stop callback work. Abort makes the lost
+            // race explicit so consumers can suppress later UI/audit/P2P
+            // effects when their own awaited operation eventually settles.
+            controller.abort()
+            if (activeScoreEventsDispatch?.token === deadlineToken) {
+              activeScoreEventsDispatch = null
+            }
+            resolve()
+          }, SCORE_EVENTS_TIMEOUT_MS)
+        }),
+      ])
+    } catch (err) {
+      // An abort caused by the timeout or teardown is expected. A consumer
+      // may use it to reject its own promise, but that must not mask the
+      // timeout diagnostic or become a noisy post-stop warning.
+      if (!controller.signal.aborted && !state.stopped) {
+        log.warn('score_events.threw', {
+          eventCount: events.length,
+          verdictKind: isUncertainVerdict(verdict)
+            ? 'uncertain'
+            : verdict.severity,
+          err,
+        })
+      }
+    } finally {
+      if (activeScoreEventsDispatch?.token === deadlineToken) {
+        runtime.clearTimeout(activeScoreEventsDispatch.handle)
+        activeScoreEventsDispatch = null
+      }
+    }
+    // A signal-aware consumer can reject before the deadline promise wins
+    // Promise.race. Keep timeout reporting outside the catch so that expected
+    // cancellation does not hide the reason the scheduler moved on.
+    if (timedOut) {
+      log.warn('score_events.timeout', {
+        eventCount: events.length,
+        verdictKind: isUncertainVerdict(verdict)
+          ? 'uncertain'
+          : verdict.severity,
+        timeoutMs: SCORE_EVENTS_TIMEOUT_MS,
+      })
+    }
   }
 
   // A screen track ended — the user clicked the OS "Stop sharing" pill, or a
@@ -1241,19 +1343,7 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
       const events = useFocusStore
         .getState()
         .applyJudgment(verdict, runtime.now())
-      if (opts.onScoreEvents) {
-        try {
-          await opts.onScoreEvents(events, verdict)
-        } catch (err) {
-          log.warn('score_events.threw', {
-            eventCount: events.length,
-            verdictKind: isUncertainVerdict(verdict)
-              ? 'uncertain'
-              : verdict.severity,
-            err,
-          })
-        }
-      }
+      await dispatchScoreEventsBounded(events, verdict)
       state.resolvedSamples += 1
       log.debug('sample.resolved', {
         tick: state.ticks,
@@ -1376,6 +1466,13 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
         // best-effort
       }
       activeAbort = null
+    }
+    if (activeScoreEventsDispatch) {
+      const deadline = activeScoreEventsDispatch
+      activeScoreEventsDispatch = null
+      runtime.clearTimeout(deadline.handle)
+      deadline.controller.abort()
+      deadline.resolve()
     }
     // Stop the long-lived screen track so the OS screen-recording indicator
     // goes dark the moment the session (or AI) ends.

@@ -54,6 +54,9 @@ export type SessionInit = {
   // performance.now() taken alongside startedAt. Optional so non-production
   // callers (tests, stories) can omit it; consumers fall back to wall clock.
   startedAtMono?: number
+  // True only when this is another stint in the still-open logical session.
+  // SessionView keeps the focus score/tallies continuous in that case.
+  isRejoin?: boolean
   room: TopicRoom
   leave: () => Promise<void>
 }
@@ -82,6 +85,7 @@ type SessionState = {
   sessionTopic: string | null
   sessionPassword: string | null
   isHost: boolean
+  isRejoin: boolean
   startedAt: number | null
   // Monotonic origin for the same session start, so the live elapsed clock
   // (and the persisted total) can ignore time the machine spent asleep.
@@ -165,6 +169,7 @@ const INITIAL: Pick<
   | 'sessionTopic'
   | 'sessionPassword'
   | 'isHost'
+  | 'isRejoin'
   | 'startedAt'
   | 'startedAtMono'
   | 'hadAnyPeer'
@@ -185,6 +190,7 @@ const INITIAL: Pick<
   sessionTopic: null,
   sessionPassword: null,
   isHost: false,
+  isRejoin: false,
   startedAt: null,
   startedAtMono: null,
   hadAnyPeer: false,
@@ -216,6 +222,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         sessionTopic: init.sessionTopic,
         sessionPassword: init.sessionPassword,
         isHost: init.isHost,
+        isRejoin: init.isRejoin ?? false,
         startedAt: init.startedAt,
         startedAtMono: init.startedAtMono ?? null,
         hadAnyPeer: false,

@@ -339,6 +339,11 @@ type PendingInvitesState = {
     now?: number
   ) => boolean
   remove: (key: string) => void
+  removeIfCurrent: (
+    identityEdPubkeyHex: string,
+    key: string,
+    expectedInvite: ValidInvite
+  ) => void
   prune: (now?: number) => void
   clear: () => void
 }
@@ -581,6 +586,26 @@ export const usePendingInvitesStore = create<PendingInvitesState>(
       if (current.status === 'ready') {
         schedulePersistence(current.identityEdPubkeyHex)
       }
+    },
+
+    removeIfCurrent: (identityEdPubkeyHex, key, expectedInvite) => {
+      const identity = normalizeIdentity(identityEdPubkeyHex)
+      const current = get()
+      if (!identity || current.identityEdPubkeyHex !== identity) return
+
+      const expectedRevision = inviteRevision(expectedInvite)
+      const removed = current.pending.filter(
+        (entry) =>
+          entry.key === key && inviteRevision(entry.invite) === expectedRevision
+      )
+      if (removed.length === 0) return
+
+      recordTombstones(removed)
+      set({
+        pending: current.pending.filter((entry) => !removed.includes(entry)),
+      })
+      scheduleExpiryTimer()
+      if (current.status === 'ready') schedulePersistence(identity)
     },
 
     prune: (now = Date.now()) => {

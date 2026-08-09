@@ -182,8 +182,13 @@ export type AiAlertDispatcherArgs = {
 export type AiAlertDispatcher = {
   // Routes every batch of ScoreEvents the sample loop just emitted.
   // Warnings stay local; alerts broadcast. Each call is independent: the
-  // dispatcher never queues, never debounces.
-  handleScoreEvents: (events: ReadonlyArray<ScoreEvent>) => Promise<void>
+  // dispatcher never queues, never debounces. A signal cannot undo I/O
+  // already submitted to SQLite or a data channel, but prevents the later
+  // effects in a timed-out/session-ended dispatch from being started.
+  handleScoreEvents: (
+    events: ReadonlyArray<ScoreEvent>,
+    signal?: AbortSignal
+  ) => Promise<void>
   // Reacts to an on_task severity by clearing the active self-warning. The
   // 30 s TTL would catch this too, but the spec calls for explicit
   // dismissal on the next on_task sample.
@@ -215,7 +220,12 @@ export function startAiAlertDispatcher(
     playSound()
   })
 
-  async function handleAlert(severity: AlertSeverity, reasoning: string) {
+  async function handleAlert(
+    severity: AlertSeverity,
+    reasoning: string,
+    signal?: AbortSignal
+  ) {
+    if (signal?.aborted) return
     const ts = now()
     // 1. Audit row: append locally + broadcast via the AUDIT_ACTION pipe.
     // Pin the audit-event ts to the same `ts` we use for the signed alert
@@ -238,6 +248,7 @@ export function startAiAlertDispatcher(
         err,
       })
     }
+    if (signal?.aborted) return
 
     // 2. Signed alert message on the new AI_ALERT_ACTION channel.
     try {
@@ -253,6 +264,7 @@ export function startAiAlertDispatcher(
     } catch (err) {
       log.error('broadcast.failed', { severity, ts, err })
     }
+    if (signal?.aborted) return
 
     // 3. Light our own tile too — the carryover spec is "All peers
     // (including the off-task user) get a sound + tile-border highlight."
@@ -267,7 +279,12 @@ export function startAiAlertDispatcher(
     playSound()
   }
 
-  async function handleWarning(severity: AlertSeverity, reasoning: string) {
+  async function handleWarning(
+    severity: AlertSeverity,
+    reasoning: string,
+    signal?: AbortSignal
+  ) {
+    if (signal?.aborted) return
     const ts = now()
     useAlertsUiStore.getState().setSelfWarning({
       reasoning,
@@ -292,12 +309,13 @@ export function startAiAlertDispatcher(
   }
 
   return {
-    handleScoreEvents: async (events) => {
+    handleScoreEvents: async (events, signal) => {
       for (const event of events) {
+        if (signal?.aborted) return
         if (event.type === 'warning') {
-          await handleWarning(event.severity, event.reasoning)
+          await handleWarning(event.severity, event.reasoning, signal)
         } else if (event.type === 'alert') {
-          await handleAlert(event.severity, event.reasoning)
+          await handleAlert(event.severity, event.reasoning, signal)
         }
       }
     },

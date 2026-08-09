@@ -206,6 +206,41 @@ describe('pendingInvitesStore (#182)', () => {
     expect(usePendingInvitesStore.getState().pending).toHaveLength(0)
   })
 
+  test('conditional removal preserves a replacement invite and another identity scope', () => {
+    const inviter = generateIdentity()
+    const original = signedInvite('retry-topic', NOW + 60_000, {
+      identity: inviter,
+      sessionPassword: 'original-password',
+    })
+    const replacement = signedInvite('retry-topic', NOW + 120_000, {
+      identity: inviter,
+      sessionPassword: 'replacement-password',
+    })
+    const key = pendingInviteKey(original)
+
+    activate(IDENTITY_A)
+    add(original)
+    add(replacement, NOW + 1)
+    usePendingInvitesStore.getState().removeIfCurrent(IDENTITY_A, key, original)
+    expect(usePendingInvitesStore.getState().pending).toEqual([
+      persisted(replacement, NOW + 1),
+    ])
+
+    usePendingInvitesStore.getState().activateIdentity(IDENTITY_B)
+    add(replacement, NOW + 2, IDENTITY_B)
+    usePendingInvitesStore
+      .getState()
+      .removeIfCurrent(IDENTITY_A, key, replacement)
+    expect(usePendingInvitesStore.getState().pending).toEqual([
+      persisted(replacement, NOW + 2),
+    ])
+
+    usePendingInvitesStore
+      .getState()
+      .removeIfCurrent(IDENTITY_B, key, replacement)
+    expect(usePendingInvitesStore.getState().pending).toEqual([])
+  })
+
   test('persists and restores a signed invite for the active identity', async () => {
     const fake = new FakeStore()
     __setPendingInviteStoreDeps({ storeFactory: () => fake })

@@ -42,21 +42,14 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Skeleton } from '@/components/ui/skeleton'
 import { tokens } from '@/design/tokens'
 import { isAuditEventKind } from '@/lib/audit-types'
-import {
-  auditEventsListForSession,
-  type AuditEventRecord,
-} from '@/lib/db/audit'
+import type { AuditEventRecord } from '@/lib/db/audit'
 import {
   fileDateStamp,
   saveTextFile,
   slugify,
   type SaveTextFileResult,
 } from '@/lib/fileExport'
-import { listFriends, type Friend } from '@/lib/db/friends'
-import { sessionsGet } from '@/lib/db/sessions'
 import { saveDiagnosticsArchive } from '@/lib/diagnostics'
-import { logger } from '@/lib/log'
-import { useIdentity } from '@/features/identity'
 import { strings } from '@/strings'
 import {
   AUDIT_ICONS,
@@ -66,6 +59,7 @@ import {
 import { SEVERITY_DEDUCTIONS } from '@/features/ai/scoreMachine'
 import type { Severity } from '@/features/ai/parseJudgment'
 import { formatBreakDuration } from './break'
+import { loadReportData } from './reportLoader'
 import {
   aiCoverage,
   deriveBreaksSummary,
@@ -88,8 +82,6 @@ import {
 } from './reportSerialize'
 
 export type { ResolvedReportData } from './reportSerialize'
-
-const log = logger.child('report')
 
 export type ReportProps = {
   sessionId: string
@@ -145,39 +137,6 @@ function isRejoinAvailable(
   return onRejoin !== undefined && (deadline === undefined || now < deadline)
 }
 
-// Default loader used in production. Storybook stories override via
-// `__loader`. Splitting it out keeps the React component's effect body
-// focused on lifecycle, not data plumbing.
-async function defaultLoader(sessionId: string): Promise<ResolvedReportData> {
-  const friendRowsPromise = listFriends().catch((err: unknown): Friend[] => {
-    // Names enrich report rows but are never required to read local session
-    // evidence. Keep the report available with peer-key fallbacks instead.
-    log.warn('friends.list_failed', { cmd: 'friends_list', err })
-    return []
-  })
-  const [session, auditEvents, friendRows] = await Promise.all([
-    sessionsGet(sessionId),
-    auditEventsListForSession(sessionId),
-    friendRowsPromise,
-  ])
-  if (!session) {
-    throw new Error(strings.report.notFound)
-  }
-  const nameByEdPubkey = Object.fromEntries(
-    friendRows
-      .filter((f: Friend): f is Friend & { display_name: string } =>
-        Boolean(f.display_name && f.display_name.trim().length > 0)
-      )
-      .map((f) => [f.ed_pubkey_hex, f.display_name])
-  )
-  return {
-    session,
-    auditEvents,
-    nameByEdPubkey,
-    myEdPubkeyHex: null,
-  }
-}
-
 export function Report({
   sessionId,
   topContent,
@@ -194,10 +153,6 @@ export function Report({
   const [focusCloseOnMount, setFocusCloseOnMount] = useState(autoFocusClose)
   const closeButtonRef = useRef<HTMLButtonElement>(null)
   const autoFocusCloseEnabledRef = useRef(autoFocusClose)
-  const { identity } = useIdentity()
-  const myEdPubkeyHex = identity?.ed_pubkey_hex ?? null
-  const myDisplayName =
-    identity?.display_name?.trim() || strings.session.selfFallback
 
   useEffect(() => {
     autoFocusCloseEnabledRef.current = autoFocusClose
@@ -205,7 +160,7 @@ export function Report({
 
   useEffect(() => {
     let cancelled = false
-    const loader = __loader ?? defaultLoader
+    const loader = __loader ?? loadReportData
     const preserveCloseFocus = () => {
       // Loading, error, and ready use separate report trees. Carry focus to
       // the replacement Back/Close button only while that button still owns
@@ -222,18 +177,7 @@ export function Report({
       .then((data) => {
         if (cancelled) return
         preserveCloseFocus()
-        const merged: ResolvedReportData = {
-          ...data,
-          // Stitch in self-identity if the loader didn't provide one — the
-          // default loader doesn't know the local user, but the Storybook
-          // loader can supply it for self-row labeling.
-          myEdPubkeyHex: data.myEdPubkeyHex ?? myEdPubkeyHex,
-          nameByEdPubkey: {
-            ...data.nameByEdPubkey,
-            ...(myEdPubkeyHex ? { [myEdPubkeyHex]: myDisplayName } : {}),
-          },
-        }
-        setStatus({ kind: 'ready', data: merged })
+        setStatus({ kind: 'ready', data })
       })
       .catch((err: unknown) => {
         if (cancelled) return
@@ -244,7 +188,7 @@ export function Report({
     return () => {
       cancelled = true
     }
-  }, [sessionId, __loader, myEdPubkeyHex, myDisplayName, reloadKey])
+  }, [sessionId, __loader, reloadKey])
 
   if (status.kind === 'loading' || status.kind === 'error') {
     // §10 — loading + error sit inside the same shell as the loaded view so
@@ -633,6 +577,11 @@ export function ReportView({
               </p>
             ) : null}
             <p className="text-xs text-text-muted">{strings.report.privacy}</p>
+            {myEdPubkeyHex === null ? (
+              <p className="text-xs text-text-muted">
+                {strings.report.identityUnavailable}
+              </p>
+            ) : null}
           </div>
           {score == null ? (
             <NoScore coverage={coverage} />
@@ -680,7 +629,13 @@ export function ReportView({
 
         <Section heading={strings.report.sections.distractions.heading}>
           {topDistractions.length === 0 ? (
-            <Empty message={distractionsEmptyMessage(coverage)} />
+            <Empty
+              message={
+                myEdPubkeyHex === null
+                  ? strings.report.identityUnavailable
+                  : distractionsEmptyMessage(coverage)
+              }
+            />
           ) : (
             <ul className="m-0 flex list-none flex-col gap-2 p-0">
               {topDistractions.map((entry, i) => (

@@ -38,13 +38,19 @@ pub struct SessionRow {
     // report separate "AI was off" from "AI was on and recorded nothing",
     // which every other column in this struct reads as NULL for both.
     pub ai_enabled: Option<i64>,
+    // Immutable local owner captured at session start. Historical report
+    // ownership is session-scoped, never derived from the identity currently
+    // active when the report is opened.
+    pub local_ed_pubkey: Option<String>,
+    pub local_display_name: Option<String>,
 }
 
 pub fn list(conn: &Connection) -> Result<Vec<SessionRow>> {
     let mut stmt = conn.prepare(
         "SELECT id, started_at, ended_at, total_minutes, peer_pubkeys,
                 declared_topic, score, focused_pct, generated_at,
-                confident_samples, skipped_samples, ai_enabled
+                confident_samples, skipped_samples, ai_enabled,
+                local_ed_pubkey, local_display_name
          FROM sessions
          ORDER BY started_at DESC, id ASC",
     )?;
@@ -62,6 +68,8 @@ pub fn list(conn: &Connection) -> Result<Vec<SessionRow>> {
             confident_samples: row.get(9)?,
             skipped_samples: row.get(10)?,
             ai_enabled: row.get(11)?,
+            local_ed_pubkey: row.get(12)?,
+            local_display_name: row.get(13)?,
         })
     })?;
     rows.collect()
@@ -71,7 +79,8 @@ pub fn get(conn: &Connection, id: &str) -> Result<Option<SessionRow>> {
     let mut stmt = conn.prepare(
         "SELECT id, started_at, ended_at, total_minutes, peer_pubkeys,
                 declared_topic, score, focused_pct, generated_at,
-                confident_samples, skipped_samples, ai_enabled
+                confident_samples, skipped_samples, ai_enabled,
+                local_ed_pubkey, local_display_name
          FROM sessions
          WHERE id = ?1",
     )?;
@@ -89,12 +98,26 @@ pub fn get(conn: &Connection, id: &str) -> Result<Option<SessionRow>> {
             confident_samples: row.get(9)?,
             skipped_samples: row.get(10)?,
             ai_enabled: row.get(11)?,
+            local_ed_pubkey: row.get(12)?,
+            local_display_name: row.get(13)?,
         })
     })
     .optional()
 }
 
 pub fn insert(conn: &Connection, row: &SessionRow) -> Result<()> {
+    insert_with_focus_metrics_mode(conn, row, false)
+}
+
+// `replace_focus_metrics` is used only when a second stint cannot continue
+// the prior in-memory score machine (such as re-entry after app restart). In
+// that case NULL is meaningful: retain it instead of COALESCE reviving a
+// last-stint score that describes a different interval.
+pub fn insert_with_focus_metrics_mode(
+    conn: &Connection,
+    row: &SessionRow,
+    replace_focus_metrics: bool,
+) -> Result<()> {
     // Two distinct upsert semantics, deliberately (I17):
     //  - started_at / ended_at / total_minutes are authoritative-overwrite:
     //    the sole caller (lifecycle.ts leave handler) always supplies real
@@ -111,20 +134,23 @@ pub fn insert(conn: &Connection, row: &SessionRow) -> Result<()> {
         "INSERT INTO sessions
              (id, started_at, ended_at, total_minutes, peer_pubkeys,
               declared_topic, score, focused_pct, generated_at,
-              confident_samples, skipped_samples, ai_enabled)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+              confident_samples, skipped_samples, ai_enabled,
+              local_ed_pubkey, local_display_name)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
          ON CONFLICT(id) DO UPDATE SET
              started_at     = excluded.started_at,
              ended_at       = excluded.ended_at,
              total_minutes  = excluded.total_minutes,
              peer_pubkeys   = COALESCE(excluded.peer_pubkeys, sessions.peer_pubkeys),
              declared_topic = COALESCE(excluded.declared_topic, sessions.declared_topic),
-             score          = COALESCE(excluded.score, sessions.score),
-             focused_pct    = COALESCE(excluded.focused_pct, sessions.focused_pct),
+             score          = CASE WHEN ?15 THEN excluded.score ELSE COALESCE(excluded.score, sessions.score) END,
+             focused_pct    = CASE WHEN ?15 THEN excluded.focused_pct ELSE COALESCE(excluded.focused_pct, sessions.focused_pct) END,
              generated_at   = COALESCE(excluded.generated_at, sessions.generated_at),
-             confident_samples = COALESCE(excluded.confident_samples, sessions.confident_samples),
-             skipped_samples   = COALESCE(excluded.skipped_samples, sessions.skipped_samples),
-             ai_enabled        = COALESCE(excluded.ai_enabled, sessions.ai_enabled)",
+             confident_samples = CASE WHEN ?15 THEN excluded.confident_samples ELSE COALESCE(excluded.confident_samples, sessions.confident_samples) END,
+             skipped_samples   = CASE WHEN ?15 THEN excluded.skipped_samples ELSE COALESCE(excluded.skipped_samples, sessions.skipped_samples) END,
+             ai_enabled        = CASE WHEN ?15 THEN excluded.ai_enabled ELSE COALESCE(excluded.ai_enabled, sessions.ai_enabled) END,
+             local_ed_pubkey   = sessions.local_ed_pubkey,
+             local_display_name = sessions.local_display_name",
         params![
             row.id,
             row.started_at,
@@ -138,6 +164,9 @@ pub fn insert(conn: &Connection, row: &SessionRow) -> Result<()> {
             row.confident_samples,
             row.skipped_samples,
             row.ai_enabled,
+            row.local_ed_pubkey,
+            row.local_display_name,
+            replace_focus_metrics,
         ],
     )?;
     Ok(())
@@ -154,7 +183,9 @@ pub fn insert(conn: &Connection, row: &SessionRow) -> Result<()> {
 // begin a session, and the single-instance plugin rejects a second process.
 // The span under-counts slightly (last event ts, not the true crash
 // instant): an honest lower bound. Report fields stay NULL — the report
-// already renders NULL score/counts as unknown (D5 contract).
+// already renders NULL score/counts as unknown (D5 contract). The active
+// identity can help exclude itself from peer_pubkeys, but cannot prove it
+// owned a crashed session after an identity restore, so provenance stays NULL.
 pub fn synthesize_from_orphaned_audit_events(
     conn: &mut Connection,
     local_ed_pubkey_hex: Option<&str>,
@@ -230,6 +261,8 @@ pub fn synthesize_from_orphaned_audit_events(
                 confident_samples: None,
                 skipped_samples: None,
                 ai_enabled: None,
+                local_ed_pubkey: None,
+                local_display_name: None,
             },
         )?;
         adopted += 1;
@@ -286,6 +319,8 @@ mod tests {
             confident_samples: None,
             skipped_samples: None,
             ai_enabled: None,
+            local_ed_pubkey: None,
+            local_display_name: None,
         }
     }
 
@@ -299,6 +334,64 @@ mod tests {
         assert_eq!(read.ended_at, Some(1_700_000_300_000));
         assert_eq!(read.total_minutes, Some(5));
         assert_eq!(read.peer_pubkeys.as_deref(), Some("[\"aa\",\"bb\"]"));
+    }
+
+    #[test]
+    fn session_identity_is_immutable_across_later_upserts() {
+        let conn = fresh();
+        let mut first = lifecycle_row("topic-hex");
+        first.local_ed_pubkey = Some("alice-ed".into());
+        first.local_display_name = Some("Alice".into());
+        insert(&conn, &first).expect("insert first owner");
+
+        let mut later = lifecycle_row("topic-hex");
+        later.local_ed_pubkey = Some("bob-ed".into());
+        later.local_display_name = Some("Bob".into());
+        insert(&conn, &later).expect("insert later owner");
+
+        let read = get(&conn, "topic-hex").expect("get").expect("present");
+        assert_eq!(read.local_ed_pubkey.as_deref(), Some("alice-ed"));
+        assert_eq!(read.local_display_name.as_deref(), Some("Alice"));
+    }
+
+    #[test]
+    fn legacy_unknown_session_owner_is_never_backfilled_by_a_later_upsert() {
+        let conn = fresh();
+        insert(&conn, &lifecycle_row("legacy-topic")).expect("insert legacy row");
+
+        let mut later = lifecycle_row("legacy-topic");
+        later.local_ed_pubkey = Some("new-active-identity".into());
+        later.local_display_name = Some("New active identity".into());
+        insert(&conn, &later).expect("later upsert");
+
+        let read = get(&conn, "legacy-topic").expect("get").expect("present");
+        assert_eq!(read.local_ed_pubkey, None);
+        assert_eq!(read.local_display_name, None);
+    }
+
+    #[test]
+    fn discontinuous_focus_mode_can_clear_a_stale_score() {
+        let conn = fresh();
+        let mut first = lifecycle_row("topic-hex");
+        first.score = Some(88);
+        first.focused_pct = Some(0.4);
+        first.confident_samples = Some(10);
+        first.skipped_samples = Some(2);
+        insert(&conn, &first).expect("first stint");
+
+        let mut second = lifecycle_row("topic-hex");
+        second.score = None;
+        second.focused_pct = Some(0.6);
+        second.confident_samples = Some(15);
+        second.skipped_samples = Some(3);
+        insert_with_focus_metrics_mode(&conn, &second, true)
+            .expect("replace discontinuous focus metrics");
+
+        let read = get(&conn, "topic-hex").expect("get").expect("present");
+        assert_eq!(read.score, None);
+        assert_eq!(read.focused_pct, Some(0.6));
+        assert_eq!(read.confident_samples, Some(15));
+        assert_eq!(read.skipped_samples, Some(3));
     }
 
     #[test]
@@ -374,6 +467,8 @@ mod tests {
             confident_samples: None,
             skipped_samples: None,
             ai_enabled: None,
+            local_ed_pubkey: None,
+            local_display_name: None,
         };
         insert(&conn, &row).expect("insert 1");
         let again = SessionRow {
@@ -389,6 +484,8 @@ mod tests {
             confident_samples: None,
             skipped_samples: None,
             ai_enabled: None,
+            local_ed_pubkey: None,
+            local_display_name: None,
         };
         insert(&conn, &again).expect("insert 2");
         let read = get(&conn, "topic-hex").expect("get").expect("present");
@@ -417,6 +514,8 @@ mod tests {
             confident_samples: Some(24),
             skipped_samples: Some(2),
             ai_enabled: None,
+            local_ed_pubkey: None,
+            local_display_name: None,
         };
         insert(&conn, &report_row).expect("insert report");
         let read = get(&conn, "topic-hex").expect("get").expect("present");
@@ -556,6 +655,10 @@ mod tests {
 
         let row = get(&conn, "orphan-topic").expect("get").expect("adopted");
         assert_eq!(row.started_at, Some(1_700_000_060_000));
+        assert_eq!(
+            row.local_ed_pubkey, None,
+            "the current identity can filter peers but cannot be assigned as the orphan owner"
+        );
         assert_eq!(row.ended_at, Some(1_700_002_760_000));
         assert_eq!(row.total_minutes, Some(45)); // floor(2_700_000ms / 60_000)
         assert_eq!(row.peer_pubkeys, Some(format!("[\"{friend}\"]"))); // self excluded

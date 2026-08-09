@@ -10,6 +10,7 @@ import type { SessionRecord } from '@/lib/db/sessions'
 import {
   bucketForOffsetMin,
   computeInsights,
+  localAuditEventsForSessions,
   computeRecurringReasons,
   computeTiming,
   computeTrend,
@@ -17,6 +18,7 @@ import {
 } from '@/features/stats/statsInsights'
 
 const START = 1_700_000_000_000
+const ME = 'a'.repeat(64)
 
 let idc = 0
 function session(over: Partial<SessionRecord> = {}): SessionRecord {
@@ -34,6 +36,8 @@ function session(over: Partial<SessionRecord> = {}): SessionRecord {
     confident_samples: null,
     skipped_samples: null,
     ai_enabled: null,
+    local_ed_pubkey: ME,
+    local_display_name: 'Me',
     ...over,
   }
 }
@@ -204,6 +208,55 @@ describe('computeTrend', () => {
 })
 
 describe('computeInsights', () => {
+  test('uses each saved session owner, never the identity currently active', () => {
+    const alice = 'a'.repeat(64)
+    const bob = 'b'.repeat(64)
+    const sessions = [
+      session({ id: 'alice-session', local_ed_pubkey: alice }),
+      session({ id: 'bob-session', local_ed_pubkey: bob }),
+      session({
+        id: 'legacy-session',
+        local_ed_pubkey: null,
+        focused_pct: 0.75,
+      }),
+    ]
+    const events = [
+      {
+        ...evt('alice-session', 'ai_alert', 1, { reasoning: 'Alice' }),
+        who: alice,
+      },
+      {
+        ...evt('alice-session', 'ai_alert', 2, {
+          reasoning: 'Bob on Alice session',
+        }),
+        who: bob,
+      },
+      { ...evt('bob-session', 'ai_alert', 3, { reasoning: 'Bob' }), who: bob },
+      {
+        ...evt('legacy-session', 'ai_alert', 4, {
+          reasoning: 'Unknown legacy',
+        }),
+        who: alice,
+      },
+    ]
+
+    expect(
+      localAuditEventsForSessions(sessions, events).map((event) => event.detail)
+    ).toEqual([
+      JSON.stringify({ reasoning: 'Alice' }),
+      JSON.stringify({ reasoning: 'Bob' }),
+    ])
+    expect(computeInsights(sessions, events).reasons).toEqual([
+      { reasoning: 'Alice', count: 1 },
+      { reasoning: 'Bob', count: 1 },
+    ])
+    expect(computeInsights(sessions, events).trend).toContainEqual({
+      sessionId: 'legacy-session',
+      startedAt: START,
+      focusedPct: 75,
+    })
+  })
+
   test('hasData is false with no scored sessions and no distractions', () => {
     const insights = computeInsights(
       [session({ focused_pct: null, score: null })],

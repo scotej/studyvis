@@ -9,3 +9,8 @@
 *.png  binary
 *.ico  binary
 *.icns binary
+
+# patch-package files are diffs, so their leading context marker can be a
+# literal space followed by upstream indentation. Do not interpret that nested
+# diff syntax as whitespace damage in this repository.
+*.patch -whitespace

@@ -194,3 +194,11 @@ export function snapshotFocusForReport(): FocusSnapshot {
     aiEnabled: useSettingsStore.getState().values.aiFeaturesEnabled ? 1 : 0,
   }
 }
+
+// A rejoin is another transport stint of the same logical study session, not
+// a new score. Keeping this reset rule next to the store makes it testable and
+// prevents a future session view from accidentally resetting accumulated
+// score/tallies before the second leave persists them.
+export function resetFocusForSessionStart(isRejoin: boolean): void {
+  if (!isRejoin) useFocusStore.getState().reset()
+}

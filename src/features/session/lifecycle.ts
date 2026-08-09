@@ -195,8 +195,8 @@ function logJoinError(details: { error: string }): void {
 // silently breaking streaks, and collapsing stint-1 audit events into the
 // timeline's 00:00. The one caller merges instead: earliest start, summed
 // minutes (the between-stint gap is deliberately not studied time), union
-// of peers. score/focused_pct stay last-scored-stint-wins via the Rust
-// COALESCE — score continuity across a rejoin is a separate, larger change.
+// of peers. Focus score/tallies continue in memory across a rejoin, so this
+// second upsert carries metrics for the whole logical session too.
 export function mergeSessionStints(
   prior: Pick<
     SessionRecord,
@@ -209,6 +209,82 @@ export function mergeSessionStints(
     startedAt: Math.min(prior.started_at ?? stint.startedAt, stint.startedAt),
     totalMinutes: (prior.total_minutes ?? 0) + stint.totalMinutes,
     peerPubkeys: unionPeerPubkeys(prior.peer_pubkeys, stint.peerPubkeys),
+  }
+}
+
+type PersistedFocusMetrics = {
+  score: number | null
+  focusedPct: number | null
+  confidentSamples: number | null
+  skippedSamples: number | null
+  aiEnabled: number | null
+}
+
+function mergeAiEnabled(
+  prior: Pick<
+    SessionRecord,
+    'ai_enabled' | 'confident_samples' | 'skipped_samples'
+  >,
+  stintAiEnabled: number
+): number | null {
+  // Older rows may predate ai_enabled while still carrying sample counters;
+  // those counters prove AI ran. Otherwise preserve unknown unless either
+  // stint positively says AI was enabled.
+  const priorAiEnabled =
+    prior.ai_enabled ??
+    (prior.confident_samples !== null || prior.skipped_samples !== null
+      ? 1
+      : null)
+  if (priorAiEnabled === 1 || stintAiEnabled === 1) return 1
+  if (priorAiEnabled === 0 && stintAiEnabled === 0) return 0
+  return null
+}
+
+// A score contains streak state, so it cannot be mathematically combined once
+// a second stint started from a fresh machine. Focused-time can be combined
+// only from its raw denominator/numerator; if either is unavailable, retain
+// unknown rather than making a percentage for only one part of the session.
+export function mergeDiscontinuousFocusMetrics(
+  prior: Pick<
+    SessionRecord,
+    | 'score'
+    | 'focused_pct'
+    | 'confident_samples'
+    | 'skipped_samples'
+    | 'ai_enabled'
+  >,
+  stint: ReturnType<typeof snapshotFocusForReport>
+): PersistedFocusMetrics {
+  const priorConfident = prior.confident_samples
+  const stintConfident = stint.confidentSamples
+  const totalConfident =
+    priorConfident === null || stintConfident === null
+      ? null
+      : priorConfident + stintConfident
+  const canRecoverPriorFocused =
+    priorConfident === 0 || prior.focused_pct !== null
+  const canRecoverStintFocused =
+    stintConfident === 0 || stint.focusedPct !== null
+  const focusedPct =
+    totalConfident === null ||
+    totalConfident === 0 ||
+    !canRecoverPriorFocused ||
+    !canRecoverStintFocused
+      ? null
+      : (Math.round(priorConfident! * (prior.focused_pct ?? 0)) +
+          Math.round(stintConfident! * (stint.focusedPct ?? 0))) /
+        totalConfident
+  return {
+    // Never revive or average a streak-derived score from independent state
+    // machines. The Rust replace mode below makes this NULL durable.
+    score: null,
+    focusedPct,
+    confidentSamples: totalConfident,
+    skippedSamples:
+      prior.skipped_samples === null || stint.skippedSamples === null
+        ? null
+        : prior.skipped_samples + stint.skippedSamples,
+    aiEnabled: mergeAiEnabled(prior, stint.aiEnabled),
   }
 }
 
@@ -255,6 +331,17 @@ export function buildLeaveHandler(args: {
   startedAt: number
   startedAtMono?: number
   monotonicNow?: () => number
+  // Bound by hostSession/joinSession at the start of this stint. The SQL
+  // upsert preserves the original row verbatim (including legacy unknown),
+  // so a logical session's owner can never be rewritten by a later identity
+  // change or rejoin.
+  localEdPubkey?: string | null
+  localDisplayName?: string | null
+  // True only when the focus store was deliberately carried from the prior
+  // stint (explicit Rejoin or same-topic invite while its Report is open).
+  // False gives cross-process/memory-loss re-entry an honest score-null
+  // fallback instead of silently applying a last-stint score to total time.
+  continuesFocus?: boolean
 }): () => Promise<void> {
   const monotonicNow = args.monotonicNow ?? defaultMonotonicNow
   let alreadyLeft = false
@@ -340,10 +427,15 @@ export function buildLeaveHandler(args: {
     // behavior) instead of blocking persistence.
     let merged = { startedAt: args.startedAt, totalMinutes, peerPubkeys }
     let priorStintFound = false
+    let priorStint: SessionRecord | null = null
     try {
       const prior = await sessionsGet(args.topic)
-      priorStintFound = prior !== null
-      merged = mergeSessionStints(prior, merged)
+      // IPC promises should resolve null for an absent row, but normalize an
+      // undefined mock/older bridge response too: it is absence, never a row
+      // whose focus fields may be read below.
+      priorStintFound = prior != null
+      priorStint = prior ?? null
+      merged = mergeSessionStints(priorStint, merged)
       log.debug('sessions_get.succeeded', { priorStintFound })
     } catch (err) {
       log.error('sessions_get.failed', { degradedTo: 'stint-only', err })
@@ -351,6 +443,16 @@ export function buildLeaveHandler(args: {
 
     let sessionPersisted = false
     try {
+      const discontinuousFocus = priorStint !== null && !args.continuesFocus
+      const persistedFocus =
+        priorStint !== null && !args.continuesFocus
+          ? mergeDiscontinuousFocusMetrics(priorStint, focusSnapshot)
+          : priorStint !== null
+            ? {
+                ...focusSnapshot,
+                aiEnabled: mergeAiEnabled(priorStint, focusSnapshot.aiEnabled),
+              }
+            : focusSnapshot
       await sessionsInsert({
         id: args.topic,
         startedAt: merged.startedAt,
@@ -358,12 +460,15 @@ export function buildLeaveHandler(args: {
         totalMinutes: merged.totalMinutes,
         peerPubkeys: merged.peerPubkeys,
         declaredTopic: initialDeclaredTopic,
-        score: focusSnapshot.score,
-        focusedPct: focusSnapshot.focusedPct,
+        score: persistedFocus.score,
+        focusedPct: persistedFocus.focusedPct,
         generatedAt: endedAt,
-        confidentSamples: focusSnapshot.confidentSamples,
-        skippedSamples: focusSnapshot.skippedSamples,
-        aiEnabled: focusSnapshot.aiEnabled,
+        confidentSamples: persistedFocus.confidentSamples,
+        skippedSamples: persistedFocus.skippedSamples,
+        aiEnabled: persistedFocus.aiEnabled,
+        localEdPubkey: args.localEdPubkey ?? null,
+        localDisplayName: args.localDisplayName ?? null,
+        replaceFocusMetrics: discontinuousFocus,
       })
       sessionPersisted = true
       log.debug('sessions_insert.succeeded', {

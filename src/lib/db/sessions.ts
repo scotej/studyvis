@@ -31,6 +31,15 @@ export type SessionRow = {
   // when AI was off and when it was on but never produced a check; this is
   // what lets the report tell those two apart.
   aiEnabled?: number | null
+  // Immutable local-owner provenance captured when the logical session first
+  // starts. Historical reports must never substitute whichever identity is
+  // active when they are opened.
+  localEdPubkey?: string | null
+  localDisplayName?: string | null
+  // A same-topic stint whose in-memory score machine was not continuous (for
+  // example after app restart) must replace, including clear, focus fields
+  // rather than letting SQLite retain a misleading last-stint score.
+  replaceFocusMetrics?: boolean
 }
 
 // Shape returned by `sessions_list` / `sessions_get`. Tauri auto-camelCases
@@ -49,6 +58,10 @@ export type SessionRecord = {
   confident_samples: number | null
   skipped_samples: number | null
   ai_enabled: number | null
+  // Optional at the TypeScript boundary for mixed frontend/backend builds;
+  // missing has the same unknown-owner meaning as NULL from the migration.
+  local_ed_pubkey?: string | null
+  local_display_name?: string | null
 }
 
 export async function sessionsInsert(row: SessionRow): Promise<void> {
@@ -65,6 +78,9 @@ export async function sessionsInsert(row: SessionRow): Promise<void> {
     confidentSamples: row.confidentSamples ?? null,
     skippedSamples: row.skippedSamples ?? null,
     aiEnabled: row.aiEnabled ?? null,
+    localEdPubkey: row.localEdPubkey ?? null,
+    localDisplayName: row.localDisplayName ?? null,
+    replaceFocusMetrics: row.replaceFocusMetrics ?? false,
   })
 }
 

@@ -66,6 +66,8 @@ const EXPECTED_SCHEMA: &[(&str, &[(&str, &str)])] = &[
             ("confident_samples", "INTEGER"),
             ("skipped_samples", "INTEGER"),
             ("ai_enabled", "INTEGER"),
+            ("local_ed_pubkey", "TEXT"),
+            ("local_display_name", "TEXT"),
         ],
     ),
     (
@@ -229,6 +231,8 @@ mod tests {
             confident_samples: Some(20),
             skipped_samples: Some(1),
             ai_enabled: Some(1),
+            local_ed_pubkey: None,
+            local_display_name: None,
         };
         sessions::insert(&conn, &row).expect("insert after repair");
         let read = sessions::list(&conn).expect("list after repair");
