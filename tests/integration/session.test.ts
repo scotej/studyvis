@@ -258,6 +258,44 @@ describe('two in-process apps in the same room observe peer events', () => {
     // grace-armed auto-end, so the host persists exactly once more.
     await host.leave()
   })
+
+  test('guest join observers fire only after a new authenticated peer binding', async () => {
+    const host = hostSession()
+    const authenticatedPeers: string[] = []
+    const guest = joinSession(host.sessionTopic, host.sessionPassword, {
+      onPeerAuthenticated: (edPubkeyHex) =>
+        authenticatedPeers.push(edPubkeyHex),
+    })
+    await flushMicrotasks()
+
+    const hostPeerId = guest.peers()[0]
+    expect(hostPeerId).toBeDefined()
+    // SessionView calls setPeerHello only after validating the hello signature
+    // and checking admission; this isolates join.ts's one-shot observation of
+    // that authenticated binding.
+    useSessionStore.getState().setPeerHello(hostPeerId!, {
+      ed_pubkey_hex: 'inviter-key',
+      display_name: 'Inviter',
+      joined_at: 1,
+    })
+    useSessionStore.getState().setPeerHello(hostPeerId!, {
+      ed_pubkey_hex: 'inviter-key',
+      display_name: 'Renamed inviter',
+      joined_at: 2,
+    })
+
+    expect(authenticatedPeers).toEqual(['inviter-key'])
+
+    await guest.leave()
+    useSessionStore.getState().setPeerHello('late-peer', {
+      ed_pubkey_hex: 'late-key',
+      display_name: 'Late peer',
+      joined_at: 3,
+    })
+    expect(authenticatedPeers).toEqual(['inviter-key'])
+
+    await host.leave()
+  })
 })
 
 describe('mesh hard-cap', () => {
@@ -306,6 +344,22 @@ describe('mesh hard-cap', () => {
 
     await host.leave()
     for (const guest of guests) await guest.leave()
+  })
+
+  test('a same-topic invite accepted from the prior report preserves focus continuity', async () => {
+    // This is the guest re-invite path, not the Report's explicit rejoin
+    // button. The ended store still names the logical session while its report
+    // is open, so joinSession must not reset focus for its next stint.
+    useSessionStore.setState({
+      status: 'ended',
+      sessionTopic: 'same-topic-invite',
+      sessionPassword: 'old-password',
+      isRejoin: false,
+    })
+
+    const guest = joinSession('same-topic-invite', 'fresh-invite-password')
+    expect(useSessionStore.getState().isRejoin).toBe(true)
+    await guest.leave()
   })
 })
 

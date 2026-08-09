@@ -213,6 +213,7 @@ export type {
 
 export {
   useFocusStore,
+  resetFocusForSessionStart,
   __setFocusStoreThresholdReader,
   __resetFocusStoreThresholdReader,
 } from './focusStore'
@@ -321,5 +322,6 @@ export type {
   SampleLoopStartReason,
   SampleBlockReason,
   SampleRecoveryInfo,
+  ScoreEventsDispatchContext,
   BackoffState,
 } from './sampleLoop'

@@ -202,6 +202,7 @@ export function Home() {
     const activeIdentity =
       useIdentityStore.getState().identity?.ed_pubkey_hex.toLowerCase() ?? null
     const pendingState = usePendingInvitesStore.getState()
+    const pendingIdentity = pendingState.identityEdPubkeyHex
     const pendingEntry = pendingState.pending.find((entry) => entry.key === key)
     // Invite actions can outlive the identity that created them (for example a
     // Sonner action while Settings restores another identity). Require both the
@@ -210,7 +211,8 @@ export function Home() {
     // final defense at the irreversible join boundary.
     if (
       !activeIdentity ||
-      pendingState.identityEdPubkeyHex !== activeIdentity ||
+      !pendingIdentity ||
+      pendingIdentity !== activeIdentity ||
       pendingEntry?.invite.payload.sig !== invite.payload.sig
     ) {
       return false
@@ -239,9 +241,9 @@ export function Home() {
       return false
     }
     try {
-      joinAndRemovePendingInvite(invite, key, {
+      joinAndRemovePendingInvite(invite, key, pendingIdentity, {
         joinSession,
-        removePendingInvite: pendingState.remove,
+        removePendingInviteIfCurrent: pendingState.removeIfCurrent,
       })
       return true
     } catch (err) {

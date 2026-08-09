@@ -56,7 +56,7 @@ use commands::models::{
 };
 use commands::sessions::{
     audit_event_insert, audit_events_list_all, audit_events_list_for_session, sessions_clear_all,
-    sessions_delete, sessions_get, sessions_insert, sessions_list,
+    sessions_delete, sessions_get, sessions_insert, sessions_insert_if_absent, sessions_list,
 };
 #[cfg(desktop)]
 use commands::sidecar::{
@@ -123,6 +123,7 @@ pub fn run() {
         #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
         friends_import,
         sessions_insert,
+        sessions_insert_if_absent,
         sessions_list,
         sessions_get,
         sessions_delete,

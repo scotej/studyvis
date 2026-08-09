@@ -81,11 +81,10 @@ function startedAtBySession(
   return map
 }
 
-// `filterWho` restricts distraction events to a single signer — the Dashboard
-// passes the LOCAL user's ed_pubkey so a peer's broadcast `ai_alert` rows
-// (persisted locally under the same session_id) aren't tallied into the local
-// user's cross-session insights, matching the self-only `computeTrend`. Omitted
-// → counts every signer (raw-transform tests).
+// `filterWho` restricts distraction events to a single signer. Omitted →
+// counts every signer (raw-transform tests). `computeInsights` below does not
+// use a current identity: it first scopes each event to its saved session
+// owner, so a restored identity cannot rewrite historical ownership.
 export function computeTiming(
   sessions: readonly SessionRecord[],
   events: readonly AuditEventRecord[],
@@ -158,13 +157,34 @@ export function computeTrend(sessions: readonly SessionRecord[]): TrendPoint[] {
     )
 }
 
+// Returns only the auditable local events for each saved session. Ownership is
+// per session because an identity can legitimately be restored/replaced later;
+// a current identity has no authority over historical evidence. Legacy rows
+// without provenance are intentionally excluded rather than guessed.
+export function localAuditEventsForSessions(
+  sessions: readonly SessionRecord[],
+  events: readonly AuditEventRecord[]
+): AuditEventRecord[] {
+  const ownerBySession = new Map<string, string>()
+  for (const session of sessions) {
+    const owner = session.local_ed_pubkey?.trim().toLowerCase()
+    if (owner) ownerBySession.set(session.id, owner)
+  }
+  return events.filter(
+    (event) => ownerBySession.get(event.session_id) === event.who.toLowerCase()
+  )
+}
+
 export function computeInsights(
   sessions: readonly SessionRecord[],
-  events: readonly AuditEventRecord[],
-  filterWho?: string | null
+  events: readonly AuditEventRecord[]
 ): FocusInsights {
-  const timing = computeTiming(sessions, events, filterWho)
-  const reasons = computeRecurringReasons(events, filterWho)
+  // Event attribution needs a proven session owner. The persisted score and
+  // focused percentage do not: those fields were already computed locally for
+  // their session, so legacy rows remain valid trend points after migration.
+  const localEvents = localAuditEventsForSessions(sessions, events)
+  const timing = computeTiming(sessions, localEvents)
+  const reasons = computeRecurringReasons(localEvents)
   const trend = computeTrend(sessions)
   return {
     hasData: timing.total > 0 || reasons.length > 0 || trend.length > 0,

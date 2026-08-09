@@ -31,6 +31,7 @@ import {
   __setCaptureRuntime,
   __setSampleLoopRuntime,
   __setScreenCaptureRuntime,
+  __setSidecarRuntime,
   getSampleLoopRuntime,
   initialScoreMachineState,
   startSampleLoop,
@@ -41,8 +42,11 @@ import {
   type BatteryInfo,
   type CaptureFrame,
   type CaptureRuntime,
+  type SampleLoopOptions,
   type SampleLoopRuntime,
+  type SidecarRuntime,
 } from '@/features/ai'
+import { SCORE_EVENTS_TIMEOUT_MS } from '@/features/ai/sampleLoop'
 import { __resetLog, __setLogRecordSink, type LogRecord } from '@/lib/log'
 import { useSettingsStore } from '@/stores/settingsStore'
 
@@ -352,6 +356,82 @@ describe('startSampleLoop — start failures', () => {
     await handle.stop()
   })
 
+  test('a stopped loop ignores a late model-path rejection', async () => {
+    let rejectPaths!: (error: Error) => void
+    const modelPaths = vi.fn(
+      () =>
+        new Promise<{ modelPath: string; mmprojPath: string }>(
+          (_resolve, reject) => {
+            rejectPaths = reject
+          }
+        )
+    )
+    const onStartFail = vi.fn()
+    const records: LogRecord[] = []
+    __setLogRecordSink((record) => records.push(record))
+    __setSampleLoopRuntime(
+      buildSampleLoopRuntime({
+        clock: new FakeClock(),
+        fetch: vi.fn() as never,
+        modelPaths,
+      })
+    )
+    const handle = startSampleLoop({
+      getTopic: () => 't',
+      modelId: 'test-model',
+      getFaceTrack: () => null,
+      onStartFail,
+    })
+
+    const stopping = handle.stop()
+    rejectPaths(new Error('late missing model'))
+    await stopping
+
+    expect(onStartFail).not.toHaveBeenCalled()
+    expect(
+      records.some(
+        (record) =>
+          record.scope === 'ai.sampleloop' && record.msg === 'boot.refused'
+      )
+    ).toBe(false)
+  })
+
+  test('a stopped loop does not capture after model paths resolve', async () => {
+    let resolvePaths!: (paths: {
+      modelPath: string
+      mmprojPath: string
+    }) => void
+    const modelPaths = vi.fn(
+      () =>
+        new Promise<{ modelPath: string; mmprojPath: string }>((resolve) => {
+          resolvePaths = resolve
+        })
+    )
+    const acquireScreenStream = vi.fn(async () => makeFakeScreenStream())
+    const onStartFail = vi.fn()
+    __setSampleLoopRuntime(
+      buildSampleLoopRuntime({
+        clock: new FakeClock(),
+        fetch: vi.fn() as never,
+        modelPaths,
+        acquireScreenStream,
+      })
+    )
+    const handle = startSampleLoop({
+      getTopic: () => 't',
+      modelId: 'test-model',
+      getFaceTrack: () => null,
+      onStartFail,
+    })
+
+    const stopping = handle.stop()
+    resolvePaths({ modelPath: '/model.gguf', mmprojPath: '/mmproj.gguf' })
+    await stopping
+
+    expect(acquireScreenStream).not.toHaveBeenCalled()
+    expect(onStartFail).not.toHaveBeenCalled()
+  })
+
   test('refuses to start when sidecar.start returns null', async () => {
     const onStartFail = vi.fn()
     const clock = new FakeClock()
@@ -602,6 +682,138 @@ describe('startSampleLoop — happy-path tick', () => {
     await clock.advance(5000)
     expect(fetchMock).toHaveBeenCalledTimes(2)
     await handle.stop()
+  })
+
+  test('a hung score-event callback is bounded so later inference still runs', async () => {
+    const clock = new FakeClock()
+    const fetchMock = vi.fn(async () => judgmentResponse('on_task'))
+    const observed = { callbackSignal: null as AbortSignal | null }
+    const onScoreEvents = vi.fn(
+      (
+        ...args: Parameters<NonNullable<SampleLoopOptions['onScoreEvents']>>
+      ) => {
+        observed.callbackSignal = args[2].signal
+        return new Promise<void>(() => {})
+      }
+    )
+    __setSampleLoopRuntime(
+      buildSampleLoopRuntime({ clock, fetch: fetchMock as never })
+    )
+    const handle = startSampleLoop({
+      getTopic: () => 't',
+      modelId: 'test-model',
+      getFaceTrack: () => makeFakeTrack(),
+      onScoreEvents,
+    })
+    await flushMicrotasks(10)
+
+    await clock.advance(5_000)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(onScoreEvents).toHaveBeenCalledTimes(1)
+    expect(handle.__state().inFlight).toBe(true)
+
+    // The model response already landed, but the post-inference callback
+    // never settles. It must not keep the scheduler in-flight forever.
+    await clock.advance(SCORE_EVENTS_TIMEOUT_MS)
+    await flushMicrotasks(100)
+    expect(observed.callbackSignal?.aborted).toBe(true)
+    expect(handle.__state().inFlight).toBe(false)
+    expect(handle.__state().resolvedSamples).toBe(1)
+
+    await clock.advance(5_000)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    await handle.stop()
+    await flushMicrotasks(20)
+    // The pending callback cannot be cancelled, but its scheduler deadline
+    // and the enclosing tick timeout are both released on teardown.
+    expect(clock.timers).toHaveLength(0)
+  })
+
+  test('a late timed-out callback can honor its abort signal and cannot commit stale effects', async () => {
+    const clock = new FakeClock()
+    let resolveFirstCallback!: () => void
+    const firstCallback = new Promise<void>((resolve) => {
+      resolveFirstCallback = resolve
+    })
+    let fetchCount = 0
+    const fetchMock = vi.fn(async () => {
+      fetchCount += 1
+      return judgmentResponse(fetchCount === 1 ? 'mild' : 'on_task')
+    })
+    const consumerEffects: string[] = []
+    let callbackCount = 0
+    const onScoreEvents: NonNullable<
+      SampleLoopOptions['onScoreEvents']
+    > = async (_events, verdict, context) => {
+      callbackCount += 1
+      if (callbackCount === 1) await firstCallback
+      // Mirrors SessionView: never mutate current-session UI after this
+      // dispatch lost its deadline race.
+      if (context.signal.aborted) return
+      consumerEffects.push(
+        'severity' in verdict ? verdict.severity : 'uncertain'
+      )
+    }
+    __setSampleLoopRuntime(
+      buildSampleLoopRuntime({ clock, fetch: fetchMock as never })
+    )
+    const handle = startSampleLoop({
+      getTopic: () => 't',
+      modelId: 'test-model',
+      getFaceTrack: () => makeFakeTrack(),
+      onScoreEvents,
+    })
+    await flushMicrotasks(10)
+
+    await clock.advance(5_000)
+    await clock.advance(SCORE_EVENTS_TIMEOUT_MS)
+    await clock.advance(5_000)
+    expect(consumerEffects).toEqual(['on_task'])
+
+    resolveFirstCallback()
+    await flushMicrotasks(30)
+    expect(consumerEffects).toEqual(['on_task'])
+    await handle.stop()
+  })
+
+  test('stop aborts an active score-event callback before its late completion can commit effects', async () => {
+    const clock = new FakeClock()
+    let resolveCallback!: () => void
+    const callbackPending = new Promise<void>((resolve) => {
+      resolveCallback = resolve
+    })
+    const consumerEffects: string[] = []
+    const observed = { callbackSignal: null as AbortSignal | null }
+    const onScoreEvents: NonNullable<
+      SampleLoopOptions['onScoreEvents']
+    > = async (_events, _verdict, context) => {
+      observed.callbackSignal = context.signal
+      await callbackPending
+      if (context.signal.aborted) return
+      consumerEffects.push('late effect')
+    }
+    __setSampleLoopRuntime(
+      buildSampleLoopRuntime({
+        clock,
+        fetch: vi.fn(async () => judgmentResponse('on_task')) as never,
+      })
+    )
+    const handle = startSampleLoop({
+      getTopic: () => 't',
+      modelId: 'test-model',
+      getFaceTrack: () => makeFakeTrack(),
+      onScoreEvents,
+    })
+    await flushMicrotasks(10)
+    await clock.advance(5_000)
+    expect(observed.callbackSignal?.aborted).toBe(false)
+
+    await handle.stop()
+    expect(observed.callbackSignal?.aborted).toBe(true)
+    resolveCallback()
+    await flushMicrotasks(30)
+    expect(consumerEffects).toEqual([])
+    expect(clock.timers).toHaveLength(0)
   })
 
   test('A2 — malformed response is an uncertain skip, not a fabricated on_task', async () => {
@@ -1178,9 +1390,11 @@ describe('startSampleLoop — sidecar lifecycle', () => {
   beforeEach(() => {
     resetAllStores()
     __resetSampleLoopRuntime()
+    __resetSidecarRuntime()
   })
   afterEach(() => {
     __resetSampleLoopRuntime()
+    __resetSidecarRuntime()
   })
 
   test('start calls runtime.startSidecar with resolved model_paths and DEFAULT_CTX_SIZE', async () => {
@@ -1249,6 +1463,149 @@ describe('startSampleLoop — sidecar lifecycle', () => {
     await handle.stop()
     expect(abortFired).toBe(true)
     expect(stopSpy).toHaveBeenCalled()
+  })
+
+  test('handles a sidecar stop rejection while boot is still pending', async () => {
+    const clock = new FakeClock()
+    const stopError = new Error('stop failed')
+    let resolveModelPaths!: (paths: {
+      modelPath: string
+      mmprojPath: string
+    }) => void
+    const modelPaths = new Promise<{
+      modelPath: string
+      mmprojPath: string
+    }>((resolve) => {
+      resolveModelPaths = resolve
+    })
+    const unhandledRejections: unknown[] = []
+    const records: LogRecord[] = []
+    const onUnhandledRejection = (reason: unknown) => {
+      unhandledRejections.push(reason)
+    }
+    process.on('unhandledRejection', onUnhandledRejection)
+    __setLogRecordSink((record) => records.push(record))
+
+    __setSampleLoopRuntime(
+      buildSampleLoopRuntime({
+        clock,
+        fetch: vi.fn() as never,
+        modelPaths: () => modelPaths,
+        stopSidecar: () => Promise.reject(stopError),
+      })
+    )
+    const handle = startSampleLoop({
+      getTopic: () => 't',
+      modelId: 'test-model',
+      getFaceTrack: () => makeFakeTrack(),
+    })
+    await flushMicrotasks()
+
+    const stopping = handle.stop()
+    try {
+      // Node reports an unhandled rejection at the end of an event-loop turn.
+      // Boot is deliberately still blocked when that checkpoint runs.
+      await new Promise<void>((resolve) => setImmediate(resolve))
+      expect(unhandledRejections).toEqual([])
+    } finally {
+      process.off('unhandledRejection', onUnhandledRejection)
+      resolveModelPaths({
+        modelPath: '/abs/model.gguf',
+        mmprojPath: '/abs/mmproj.gguf',
+      })
+      await stopping
+    }
+    expect(records).toContainEqual(
+      expect.objectContaining({
+        lvl: 'warn',
+        scope: 'ai.sampleloop',
+        msg: 'sidecar.stop_failed',
+        data: expect.objectContaining({
+          cmd: 'sidecar_stop',
+          err: expect.objectContaining({ message: stopError.message }),
+        }),
+      })
+    )
+  })
+
+  test('an old loop claims its stop before a replacement loop starts', async () => {
+    const clock = new FakeClock()
+    const oldStartFail = vi.fn()
+    let resolveFirstStart!: (port: number) => void
+    let startCalls = 0
+    const nativeStart = vi.fn<SidecarRuntime['start']>(() => {
+      startCalls += 1
+      if (startCalls === 1) {
+        return new Promise<number>((resolve) => {
+          resolveFirstStart = resolve
+        })
+      }
+      return Promise.resolve(9200)
+    })
+    const nativeStop = vi.fn<SidecarRuntime['stop']>(async () => {})
+    __setSidecarRuntime({
+      start: nativeStart,
+      stop: nativeStop,
+      status: async () => ({
+        running: false,
+        starting: false,
+        port: null,
+        model: null,
+        mmproj: null,
+        ctx_size: null,
+        errored: false,
+        last_error: null,
+      }),
+      fetchHealth: async () => true,
+      setInterval: () => 1,
+      clearInterval: () => {},
+      getAiFeaturesEnabled: () => true,
+      getEngineAutoInstall: () => true,
+    })
+    __setSampleLoopRuntime(
+      buildSampleLoopRuntime({
+        clock,
+        fetch: vi.fn() as never,
+        startSidecar: ({ modelPath, mmprojPath, ctxSize }) =>
+          useSidecarStore.getState().start({ modelPath, mmprojPath, ctxSize }),
+        stopSidecar: () => useSidecarStore.getState().stop(),
+      })
+    )
+
+    const oldLoop = startSampleLoop({
+      getTopic: () => 't',
+      modelId: 'test-model',
+      getFaceTrack: () => makeFakeTrack(),
+      onStartFail: oldStartFail,
+    })
+    await flushMicrotasks()
+    expect(nativeStart).toHaveBeenCalledTimes(1)
+
+    // React runs cleanup before constructing the replacement effect, but does
+    // not await the async cleanup. The old loop must enter the global stop
+    // path synchronously so the replacement cannot join its doomed start.
+    const oldStop = oldLoop.stop()
+    const replacementLoop = startSampleLoop({
+      getTopic: () => 't',
+      modelId: 'test-model',
+      getFaceTrack: () => makeFakeTrack(),
+    })
+    await flushMicrotasks()
+
+    expect(nativeStop).toHaveBeenCalledTimes(1)
+    expect(nativeStart).toHaveBeenCalledTimes(2)
+
+    resolveFirstStart(9100)
+    await oldStop
+    await flushMicrotasks()
+
+    expect(useSidecarStore.getState()).toMatchObject({
+      status: 'running',
+      port: 9200,
+    })
+    expect(oldStartFail).not.toHaveBeenCalled()
+
+    await replacementLoop.stop()
   })
 
   test('uses fallback 5s interval if model record lacks a benchmark', async () => {

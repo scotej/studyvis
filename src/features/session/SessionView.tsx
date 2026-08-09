@@ -41,6 +41,7 @@ import {
   isUncertainVerdict,
   preacquireScreenStream,
   startSampleLoop,
+  resetFocusForSessionStart,
   useBreakStore,
   useFocusStore,
   useModelStore,
@@ -212,6 +213,7 @@ export function SessionView({
   const status = useSessionStore((s) => s.status)
   const room = useSessionStore((s) => s.room)
   const isHost = useSessionStore((s) => s.isHost)
+  const isRejoin = useSessionStore((s) => s.isRejoin)
   const sessionLeave = useSessionStore((s) => s.leave)
   const sessionTopic = useSessionStore((s) => s.sessionTopic)
   const startedAt = useSessionStore((s) => s.startedAt)
@@ -1065,7 +1067,7 @@ export function SessionView({
   // ever firing the Report's Close handler).
   useEffect(() => {
     if (status !== 'active' || !startedAt) return
-    useFocusStore.getState().reset()
+    resetFocusForSessionStart(isRejoin)
     useAlertsUiStore.getState().reset()
     useBreakStore.getState().reset(startedAt)
     useAuditStore.getState().reset()
@@ -1081,7 +1083,7 @@ export function SessionView({
     return () => {
       cancelActiveBreakTimer((handle) => window.clearTimeout(handle as number))
     }
-  }, [status, startedAt])
+  }, [status, startedAt, isRejoin])
 
   // I83 — AI on, session live, but no model to run: say so ONCE per session.
   //
@@ -1147,15 +1149,19 @@ export function SessionView({
       isPaused: () =>
         !cameraOnRef.current ||
         usePomodoroStore.getState().phase.startsWith('rest'),
-      onScoreEvents: async (events, verdict) => {
+      onScoreEvents: async (events, verdict, context) => {
         // V2-P6: route every sample's emitted events through the alert
         // dispatcher (warnings → local-only badge + ai_warning audit;
         // alerts → ai_alert audit + signed broadcast + tile highlight).
         // The dispatcher is owned by the hello/audit/pomodoro effect; the
         // ref pattern matches `emitAuditRef` / `pomodoroStartRef`.
         const dispatcher = aiAlertDispatcherRef.current
-        if (!dispatcher) return
-        await dispatcher.handleScoreEvents(events)
+        if (!dispatcher || context.signal.aborted) return
+        await dispatcher.handleScoreEvents(events, context.signal)
+        // The sample loop may have timed out or been torn down while the
+        // dispatcher awaited storage/P2P work. Do not let that old completion
+        // mutate current-session feedback after a newer sample or session end.
+        if (context.signal.aborted) return
         // A2 — an uncertain sample never carries a wire severity and never
         // clears the self-warning badge: a flaky response shouldn't cancel a
         // pending warning. Only a confident judgment drives handleSeverity.

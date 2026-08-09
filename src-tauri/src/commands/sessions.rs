@@ -33,6 +33,12 @@ pub fn sessions_insert(
     // caller didn't say (older frontend). None coalesces, so an omitted value
     // never overwrites a recorded one.
     ai_enabled: Option<i64>,
+    local_ed_pubkey: Option<String>,
+    local_display_name: Option<String>,
+    // A focus score is stateful. If a same-topic stint began without its
+    // predecessor's in-memory state, the frontend passes true so an honest
+    // null can clear the stale score instead of COALESCE retaining it.
+    replace_focus_metrics: Option<bool>,
 ) -> Result<(), String> {
     let conn = lock(&state)?;
     let row = sessions::SessionRow {
@@ -48,8 +54,50 @@ pub fn sessions_insert(
         confident_samples,
         skipped_samples,
         ai_enabled,
+        local_ed_pubkey,
+        local_display_name,
     };
-    sessions::insert(&conn, &row).map_err(|e| e.to_string())
+    sessions::insert_with_focus_metrics_mode(&conn, &row, replace_focus_metrics.unwrap_or(false))
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub fn sessions_insert_if_absent(
+    state: State<'_, DbPool>,
+    id: String,
+    started_at: i64,
+    ended_at: i64,
+    total_minutes: i64,
+    peer_pubkeys: Option<String>,
+    declared_topic: Option<String>,
+    score: Option<i64>,
+    focused_pct: Option<f64>,
+    generated_at: Option<i64>,
+    confident_samples: Option<i64>,
+    skipped_samples: Option<i64>,
+    ai_enabled: Option<i64>,
+    local_ed_pubkey: Option<String>,
+    local_display_name: Option<String>,
+) -> Result<bool, String> {
+    let conn = lock(&state)?;
+    let row = sessions::SessionRow {
+        id,
+        started_at: Some(started_at),
+        ended_at: Some(ended_at),
+        total_minutes: Some(total_minutes),
+        peer_pubkeys,
+        declared_topic,
+        score,
+        focused_pct,
+        generated_at,
+        confident_samples,
+        skipped_samples,
+        ai_enabled,
+        local_ed_pubkey,
+        local_display_name,
+    };
+    sessions::insert_if_absent(&conn, &row).map_err(|e| e.to_string())
 }
 
 #[tauri::command]

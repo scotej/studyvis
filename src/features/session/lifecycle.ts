@@ -5,7 +5,9 @@ import { sessionTopic as deriveSessionTopic } from '@/lib/crypto/topics'
 import {
   sessionsGet,
   sessionsInsert,
+  sessionsInsertIfAbsent,
   type SessionRecord,
+  type SessionRow,
 } from '@/lib/db/sessions'
 import { bytesToBase64 } from '@/lib/encoding'
 import { joinTopic, type TopicRoom } from '@/lib/trystero'
@@ -195,8 +197,8 @@ function logJoinError(details: { error: string }): void {
 // silently breaking streaks, and collapsing stint-1 audit events into the
 // timeline's 00:00. The one caller merges instead: earliest start, summed
 // minutes (the between-stint gap is deliberately not studied time), union
-// of peers. score/focused_pct stay last-scored-stint-wins via the Rust
-// COALESCE — score continuity across a rejoin is a separate, larger change.
+// of peers. Focus score/tallies continue in memory across a rejoin, so this
+// second upsert carries metrics for the whole logical session too.
 export function mergeSessionStints(
   prior: Pick<
     SessionRecord,
@@ -209,6 +211,82 @@ export function mergeSessionStints(
     startedAt: Math.min(prior.started_at ?? stint.startedAt, stint.startedAt),
     totalMinutes: (prior.total_minutes ?? 0) + stint.totalMinutes,
     peerPubkeys: unionPeerPubkeys(prior.peer_pubkeys, stint.peerPubkeys),
+  }
+}
+
+type PersistedFocusMetrics = {
+  score: number | null
+  focusedPct: number | null
+  confidentSamples: number | null
+  skippedSamples: number | null
+  aiEnabled: number | null
+}
+
+function mergeAiEnabled(
+  prior: Pick<
+    SessionRecord,
+    'ai_enabled' | 'confident_samples' | 'skipped_samples'
+  >,
+  stintAiEnabled: number
+): number | null {
+  // Older rows may predate ai_enabled while still carrying sample counters;
+  // those counters prove AI ran. Otherwise preserve unknown unless either
+  // stint positively says AI was enabled.
+  const priorAiEnabled =
+    prior.ai_enabled ??
+    (prior.confident_samples !== null || prior.skipped_samples !== null
+      ? 1
+      : null)
+  if (priorAiEnabled === 1 || stintAiEnabled === 1) return 1
+  if (priorAiEnabled === 0 && stintAiEnabled === 0) return 0
+  return null
+}
+
+// A score contains streak state, so it cannot be mathematically combined once
+// a second stint started from a fresh machine. Focused-time can be combined
+// only from its raw denominator/numerator; if either is unavailable, retain
+// unknown rather than making a percentage for only one part of the session.
+export function mergeDiscontinuousFocusMetrics(
+  prior: Pick<
+    SessionRecord,
+    | 'score'
+    | 'focused_pct'
+    | 'confident_samples'
+    | 'skipped_samples'
+    | 'ai_enabled'
+  >,
+  stint: ReturnType<typeof snapshotFocusForReport>
+): PersistedFocusMetrics {
+  const priorConfident = prior.confident_samples
+  const stintConfident = stint.confidentSamples
+  const totalConfident =
+    priorConfident === null || stintConfident === null
+      ? null
+      : priorConfident + stintConfident
+  const canRecoverPriorFocused =
+    priorConfident === 0 || prior.focused_pct !== null
+  const canRecoverStintFocused =
+    stintConfident === 0 || stint.focusedPct !== null
+  const focusedPct =
+    totalConfident === null ||
+    totalConfident === 0 ||
+    !canRecoverPriorFocused ||
+    !canRecoverStintFocused
+      ? null
+      : (Math.round(priorConfident! * (prior.focused_pct ?? 0)) +
+          Math.round(stintConfident! * (stint.focusedPct ?? 0))) /
+        totalConfident
+  return {
+    // Never revive or average a streak-derived score from independent state
+    // machines. The Rust replace mode below makes this NULL durable.
+    score: null,
+    focusedPct,
+    confidentSamples: totalConfident,
+    skippedSamples:
+      prior.skipped_samples === null || stint.skippedSamples === null
+        ? null
+        : prior.skipped_samples + stint.skippedSamples,
+    aiEnabled: mergeAiEnabled(prior, stint.aiEnabled),
   }
 }
 
@@ -255,6 +333,17 @@ export function buildLeaveHandler(args: {
   startedAt: number
   startedAtMono?: number
   monotonicNow?: () => number
+  // Bound by hostSession/joinSession at the start of this stint. The SQL
+  // upsert preserves the original row verbatim (including legacy unknown),
+  // so a logical session's owner can never be rewritten by a later identity
+  // change or rejoin.
+  localEdPubkey?: string | null
+  localDisplayName?: string | null
+  // True only when the focus store was deliberately carried from the prior
+  // stint (explicit Rejoin or same-topic invite while its Report is open).
+  // False gives cross-process/memory-loss re-entry an honest score-null
+  // fallback instead of silently applying a last-stint score to total time.
+  continuesFocus?: boolean
 }): () => Promise<void> {
   const monotonicNow = args.monotonicNow ?? defaultMonotonicNow
   let alreadyLeft = false
@@ -334,53 +423,120 @@ export function buildLeaveHandler(args: {
       log.error('audit_flush.failed', { phase: 'teardown', err })
     }
 
+    const stint = { startedAt: args.startedAt, totalMinutes, peerPubkeys }
+    const buildSessionRow = (
+      summary: typeof stint,
+      focus: PersistedFocusMetrics,
+      replaceFocusMetrics: boolean
+    ): SessionRow => ({
+      id: args.topic,
+      startedAt: summary.startedAt,
+      endedAt,
+      totalMinutes: summary.totalMinutes,
+      peerPubkeys: summary.peerPubkeys,
+      declaredTopic: initialDeclaredTopic,
+      score: focus.score,
+      focusedPct: focus.focusedPct,
+      generatedAt: endedAt,
+      confidentSamples: focus.confidentSamples,
+      skippedSamples: focus.skippedSamples,
+      aiEnabled: focus.aiEnabled,
+      localEdPubkey: args.localEdPubkey ?? null,
+      localDisplayName: args.localDisplayName ?? null,
+      replaceFocusMetrics,
+    })
+
     // A prior row for this topic can only be an earlier stint of this same
     // session (the topic derives from 32 random bytes) — merge rather than
-    // rewind it. Read failure degrades to stint-only values (pre-merge
-    // behavior) instead of blocking persistence.
-    let merged = { startedAt: args.startedAt, totalMinutes, peerPubkeys }
+    // rewind it. Retry one transient read failure. If the row is still
+    // indeterminate, use an atomic insert-if-absent: that retains a first-ever
+    // stint but cannot overwrite an existing session with tail-stint values.
+    let merged = stint
     let priorStintFound = false
-    try {
-      const prior = await sessionsGet(args.topic)
-      priorStintFound = prior !== null
-      merged = mergeSessionStints(prior, merged)
-      log.debug('sessions_get.succeeded', { priorStintFound })
-    } catch (err) {
-      log.error('sessions_get.failed', { degradedTo: 'stint-only', err })
+    let priorStintReadSucceeded = false
+    let priorStint: SessionRecord | null = null
+    for (let attempt = 1; attempt <= 2; attempt += 1) {
+      try {
+        const prior = await sessionsGet(args.topic)
+        // IPC promises should resolve null for an absent row, but normalize an
+        // undefined mock/older bridge response too: it is absence, never a row
+        // whose focus fields may be read below.
+        priorStintFound = prior != null
+        priorStint = prior ?? null
+        merged = mergeSessionStints(priorStint, stint)
+        priorStintReadSucceeded = true
+        log.debug('sessions_get.succeeded', { priorStintFound, attempt })
+        break
+      } catch (err) {
+        if (attempt === 1) {
+          log.warn('sessions_get.retrying', { attempt, err })
+        } else {
+          log.error('sessions_get.failed', {
+            attempts: attempt,
+            fallback: 'insert-if-absent',
+            err,
+          })
+        }
+      }
     }
 
     let sessionPersisted = false
-    try {
-      await sessionsInsert({
-        id: args.topic,
-        startedAt: merged.startedAt,
-        endedAt,
-        totalMinutes: merged.totalMinutes,
-        peerPubkeys: merged.peerPubkeys,
-        declaredTopic: initialDeclaredTopic,
-        score: focusSnapshot.score,
-        focusedPct: focusSnapshot.focusedPct,
-        generatedAt: endedAt,
-        confidentSamples: focusSnapshot.confidentSamples,
-        skippedSamples: focusSnapshot.skippedSamples,
-        aiEnabled: focusSnapshot.aiEnabled,
-      })
-      sessionPersisted = true
-      log.debug('sessions_insert.succeeded', {
-        priorStintFound,
-        totalMinutes: merged.totalMinutes,
-        seenPeerCount: peerEdPubkeys.length,
-      })
-    } catch (err) {
-      log.error('sessions_insert.failed', {
-        totalMinutes: merged.totalMinutes,
-        peerCount: peerEdPubkeys.length,
-        scoreRecorded: focusSnapshot.score !== null,
-        focusedPctRecorded: focusSnapshot.focusedPct !== null,
-        confidentSamples: focusSnapshot.confidentSamples,
-        skippedSamples: focusSnapshot.skippedSamples,
-        err,
-      })
+    if (priorStintReadSucceeded) {
+      try {
+        const discontinuousFocus = priorStint !== null && !args.continuesFocus
+        const persistedFocus =
+          priorStint !== null && !args.continuesFocus
+            ? mergeDiscontinuousFocusMetrics(priorStint, focusSnapshot)
+            : priorStint !== null
+              ? {
+                  ...focusSnapshot,
+                  aiEnabled: mergeAiEnabled(
+                    priorStint,
+                    focusSnapshot.aiEnabled
+                  ),
+                }
+              : focusSnapshot
+        await sessionsInsert(
+          buildSessionRow(merged, persistedFocus, discontinuousFocus)
+        )
+        sessionPersisted = true
+        log.debug('sessions_insert.succeeded', {
+          priorStintFound,
+          totalMinutes: merged.totalMinutes,
+          seenPeerCount: peerEdPubkeys.length,
+        })
+      } catch (err) {
+        log.error('sessions_insert.failed', {
+          totalMinutes: merged.totalMinutes,
+          peerCount: peerEdPubkeys.length,
+          scoreRecorded: focusSnapshot.score !== null,
+          focusedPctRecorded: focusSnapshot.focusedPct !== null,
+          confidentSamples: focusSnapshot.confidentSamples,
+          skippedSamples: focusSnapshot.skippedSamples,
+          err,
+        })
+      }
+    } else {
+      try {
+        sessionPersisted = await sessionsInsertIfAbsent(
+          buildSessionRow(stint, focusSnapshot, false)
+        )
+        log.debug('sessions_insert_if_absent.succeeded', {
+          inserted: sessionPersisted,
+          totalMinutes: stint.totalMinutes,
+          seenPeerCount: peerEdPubkeys.length,
+        })
+      } catch (err) {
+        log.error('sessions_insert_if_absent.failed', {
+          totalMinutes: stint.totalMinutes,
+          peerCount: peerEdPubkeys.length,
+          scoreRecorded: focusSnapshot.score !== null,
+          focusedPctRecorded: focusSnapshot.focusedPct !== null,
+          confidentSamples: focusSnapshot.confidentSamples,
+          skippedSamples: focusSnapshot.skippedSamples,
+          err,
+        })
+      }
     }
     let friendsUpdated = false
     try {

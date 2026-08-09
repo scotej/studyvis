@@ -1,4 +1,5 @@
 import { usePttStore } from '@/stores/pttStore'
+import { useIdentityStore } from '@/stores/identityStore'
 import { useSessionStore } from '@/stores/sessionStore'
 
 import {
@@ -21,11 +22,21 @@ export function hostSession(): SessionHandle {
   beginSessionDiagnostics(topic, 'host')
   const startedAt = Date.now()
   const startedAtMono = performance.now()
-  const leave = buildLeaveHandler({ room, topic, startedAt, startedAtMono })
+  const identity = useIdentityStore.getState().identity
+  const leave = buildLeaveHandler({
+    room,
+    topic,
+    startedAt,
+    startedAtMono,
+    localEdPubkey: identity?.ed_pubkey_hex ?? null,
+    localDisplayName: identity?.display_name.trim() || null,
+    continuesFocus: false,
+  })
   useSessionStore.getState().begin({
     sessionTopic: topic,
     sessionPassword: password,
     isHost: true,
+    isRejoin: false,
     startedAt,
     startedAtMono,
     room,

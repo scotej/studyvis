@@ -14,7 +14,10 @@ import {
   useFocusStore,
 } from '@/features/ai'
 import type { Judgment, SampleVerdict, UncertainVerdict } from '@/features/ai'
-import { snapshotFocusForReport } from '@/features/ai/focusStore'
+import {
+  resetFocusForSessionStart,
+  snapshotFocusForReport,
+} from '@/features/ai/focusStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 
 const UNCERTAIN: UncertainVerdict = { kind: 'uncertain', reason: 'parse fail' }
@@ -281,6 +284,32 @@ describe('useFocusStore', () => {
     state.applyJudgment(UNCERTAIN)
     expect(useFocusStore.getState().skippedSamples).toBe(1)
     state.reset()
+    expect(useFocusStore.getState().skippedSamples).toBe(0)
+  })
+
+  test('a rejoin preserves score and every focus tally for the logical session', () => {
+    const state = useFocusStore.getState()
+    state.applyJudgment(makeJudgment('on_task'))
+    state.applyJudgment(makeJudgment('mild'))
+    state.applyJudgment(UNCERTAIN)
+    const before = snapshotFocusForReport()
+    const machineBefore = useFocusStore.getState().machine
+
+    resetFocusForSessionStart(true)
+
+    expect(snapshotFocusForReport()).toEqual(before)
+    expect(useFocusStore.getState().machine).toBe(machineBefore)
+  })
+
+  test('a new logical session resets score and focus tallies', () => {
+    const state = useFocusStore.getState()
+    state.applyJudgment(makeJudgment('on_task'))
+    state.applyJudgment(UNCERTAIN)
+
+    resetFocusForSessionStart(false)
+
+    expect(snapshotFocusForReport().score).toBeNull()
+    expect(useFocusStore.getState().totalSamples).toBe(0)
     expect(useFocusStore.getState().skippedSamples).toBe(0)
   })
 })

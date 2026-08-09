@@ -23,12 +23,14 @@ const MIGRATION_001_INITIAL: &str = include_str!("migrations/001_initial.sql");
 const MIGRATION_002_V2: &str = include_str!("migrations/002_v2.sql");
 const MIGRATION_003_SAMPLE_COUNTS: &str = include_str!("migrations/003_sample_counts.sql");
 const MIGRATION_004_AI_ENABLED: &str = include_str!("migrations/004_ai_enabled.sql");
+const MIGRATION_005_SESSION_IDENTITY: &str = include_str!("migrations/005_session_identity.sql");
 
 const MIGRATIONS: &[(u32, &str)] = &[
     (1, MIGRATION_001_INITIAL),
     (2, MIGRATION_002_V2),
     (3, MIGRATION_003_SAMPLE_COUNTS),
     (4, MIGRATION_004_AI_ENABLED),
+    (5, MIGRATION_005_SESSION_IDENTITY),
 ];
 
 pub const MAX_KNOWN_VERSION: u32 = MIGRATIONS[MIGRATIONS.len() - 1].0;
@@ -121,7 +123,7 @@ mod tests {
         .unwrap_or(0)
     }
 
-    const LATEST_VERSION: u32 = 4;
+    const LATEST_VERSION: u32 = 5;
 
     #[test]
     fn applies_full_schema_on_empty_db() {
@@ -204,6 +206,44 @@ mod tests {
             topic, "Calculus",
             "V1 session data must survive the upgrade"
         );
+    }
+
+    #[test]
+    fn upgrades_v4_db_to_v5_with_unknown_identity_on_existing_sessions() {
+        let mut conn = Connection::open_in_memory().expect("open in-memory");
+        {
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS schema_version (version INTEGER PRIMARY KEY)",
+                [],
+            )
+            .expect("schema_version");
+            let tx = conn.transaction().expect("tx");
+            tx.execute_batch(MIGRATION_001_INITIAL).expect("apply 001");
+            tx.execute_batch(MIGRATION_002_V2).expect("apply 002");
+            tx.execute_batch(MIGRATION_003_SAMPLE_COUNTS)
+                .expect("apply 003");
+            tx.execute_batch(MIGRATION_004_AI_ENABLED)
+                .expect("apply 004");
+            tx.execute(
+                "INSERT INTO schema_version (version) VALUES (1), (2), (3), (4)",
+                [],
+            )
+            .expect("record v4");
+            tx.commit().expect("commit v4");
+        }
+        conn.execute("INSERT INTO sessions (id) VALUES ('s1')", [])
+            .expect("insert v4 session");
+
+        let applied = run_migrations(&mut conn).expect("upgrade run");
+        assert_eq!(applied, LATEST_VERSION);
+        let owner: (Option<String>, Option<String>) = conn
+            .query_row(
+                "SELECT local_ed_pubkey, local_display_name FROM sessions WHERE id = 's1'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .expect("read migrated owner");
+        assert_eq!(owner, (None, None));
     }
 
     // #47 D5 acceptance: 003 runs cleanly on a database already at
@@ -359,6 +399,10 @@ mod tests {
             (
                 4,
                 "f394e5e3179254fafb8f682dac3b189687e7ff7c5200b0b280b75cd5a26607e3",
+            ),
+            (
+                5,
+                "e7b9b90e97796876ebaf157170a9c855133b30e99b28b770ec4a20b03d025e9b",
             ),
         ];
         assert_eq!(

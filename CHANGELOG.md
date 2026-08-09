@@ -1,5 +1,58 @@
 # Changelog
 
+## 1.11.0 — 2026-08-09 — Stay connected and look back honestly
+
+### Added
+
+- **Past sessions can be reviewed from Settings.** Historical reports keep the
+  topic timeline, focus summary, breaks, and local audit evidence available on
+  this device, with text export when you want to keep or share a copy.
+
+- **Invites survive restarts and temporary connection failures.** The invite
+  inbox is scoped to the active identity and retains a session credential until
+  an admitted peer has actually authenticated in the room; a delayed join
+  cannot consume a newer replacement invite.
+
+- **Sessions now carry images, direct messages, and an integrated AI chat.**
+  Image notes are signed and session-scoped, private peer messages remain
+  end-to-end within the room, and the local model can answer bounded questions
+  about the current study context.
+
+- **Session alerts can appear in a small desktop overlay.** The overlay uses a
+  restricted native window and only surfaces short-lived notifications while a
+  session is active.
+
+### Fixed
+
+- **Rejoining a session no longer combines whole-session minutes with one
+  stint's focus result.** A same-process rejoin continues the score and sample
+  state. If that state is unavailable after a restart, StudyVis combines the
+  raw sample counts it can prove and leaves the stateful score unknown rather
+  than presenting mismatched figures.
+
+- **Historical reports keep the identity that participated in the session.**
+  Restoring another identity no longer changes which signed events are treated
+  as local or who is labelled “You”; older rows whose owner cannot be proven
+  say so instead of guessing.
+
+- **Oversized peer actions are stopped during receive reassembly.** StudyVis's
+  pinned peer transport now bounds action payloads, metadata, and queued bytes
+  before a complete image can be handed to the app, disconnecting a peer that
+  exceeds the limit.
+
+- **Concurrent AI startup callers now share one native start.** Overlapping
+  requests resolve to the same engine port instead of one caller receiving a
+  false failure while startup is still in progress.
+
+- **Post-inference network work can no longer freeze future focus checks.** A
+  stalled audit or alert callback is bounded and recorded without leaving the
+  sampling loop permanently busy.
+
+- **Fullscreen, screen sharing, and brief disconnects recover more reliably.**
+  Native fullscreen transitions are serialized, Windows sharing requires the
+  entire display, and an accidental leave offers a short same-session re-entry
+  path without counting the gap as study time.
+
 ## 1.10.1 — 2026-08-04 — Accurate AI timing on slower PCs
 
 ### Fixed

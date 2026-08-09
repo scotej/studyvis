@@ -134,13 +134,14 @@ export type TopDistraction = {
 // (persisted locally under the same session_id) don't inflate the local user's
 // distraction list and −deduction total, keeping this consistent with the
 // local-only score gauge beside it. Omitted → aggregates every signer (the raw
-// transform tests exercise this form).
+// transform tests exercise this form); null means the session owner is unknown
+// and therefore returns no purportedly-local rows.
 export function deriveTopDistractions(
   events: ReadonlyArray<AuditEventRecord>,
   filterWho?: string | null
 ): TopDistraction[] {
-  const only =
-    filterWho && filterWho.length > 0 ? filterWho.toLowerCase() : null
+  if (filterWho === null) return []
+  const only = filterWho?.trim().toLowerCase()
   const groups = new Map<string, { count: number; totalDeduction: number }>()
   for (const e of events) {
     if (only && e.who.toLowerCase() !== only) continue
@@ -222,17 +223,19 @@ export type TopicTimelineEntry = {
 // user's own timeline. The anchor (initialTopic) is already the local declared
 // topic and the start offset uses the whole session's first event (shared
 // session start), so only the change rows need scoping. Omitted → walks every
-// signer's topic events (raw-transform tests).
+// signer's topic events (raw-transform tests); null means the owner is unknown
+// and excludes all signer-specific transitions.
 export function deriveTopicTimeline(
   initialTopic: string | null,
   events: ReadonlyArray<AuditEventRecord>,
   filterWho?: string | null
 ): TopicTimelineEntry[] {
-  const only =
-    filterWho && filterWho.length > 0 ? filterWho.toLowerCase() : null
+  const only = filterWho?.trim().toLowerCase()
   const topicEvents = events
     .filter((e) => e.kind === 'topic_change' || e.kind === 'topic_set')
-    .filter((e) => !only || e.who.toLowerCase() === only)
+    .filter((e) =>
+      filterWho === null ? false : !only || e.who.toLowerCase() === only
+    )
     .sort((a, b) => a.ts - b.ts)
   const anchor =
     initialTopic && initialTopic.trim().length > 0

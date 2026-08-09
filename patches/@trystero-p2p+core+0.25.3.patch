@@ -1,0 +1,169 @@
+diff --git a/node_modules/@trystero-p2p/core/dist/action-wire.mjs b/node_modules/@trystero-p2p/core/dist/action-wire.mjs
+index 992caaa..7ec71a7 100644
+--- a/node_modules/@trystero-p2p/core/dist/action-wire.mjs
++++ b/node_modules/@trystero-p2p/core/dist/action-wire.mjs
+@@ -14,6 +14,12 @@ const buffLowEvent = "bufferedamountlow";
+ const channelCloseEvent = "close";
+ const channelErrorEvent = "error";
+ const backpressureWaitTimeoutMs = 1e4;
++const maxIncomingActionPayloadBytes = 5 * 1024 * 1024;
++const maxIncomingActionMetadataBytes = 16 * 1024;
++const maxPendingActionBytesPerPeer = maxIncomingActionPayloadBytes + maxIncomingActionMetadataBytes + 128 * 1024;
++const maxIncomingFragmentsPerTransmission = Math.ceil(maxIncomingActionPayloadBytes / chunkSize) + 1;
++const maxInFlightTransmissionsPerPeer = 32;
++const maxQueuedActionMessagesPerPeer = 64;
+ const toByteArray = (value) => value instanceof ArrayBuffer ? new Uint8Array(value) : new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
+ const waitForBufferedAmountLow = (channel, timeoutMs = backpressureWaitTimeoutMs) => {
+ 	if (channel.readyState !== "open" || channel.bufferedAmount <= channel.bufferedAmountLowThreshold) return Promise.resolve(channel.readyState === "open");
+@@ -43,10 +49,30 @@ const waitForBufferedAmountLow = (channel, timeoutMs = backpressureWaitTimeoutMs
+ 	});
+ };
+ const createActionWireManager = ({ getPeer, getPeerIds, canReceiveFromPeer, throwIfAborted }) => {
+-	const actions = {};
+-	const actionsCache = {};
+-	const pendingTransmissions = {};
+-	const pendingActionPayloads = {};
++	const actions = Object.create(null);
++	const actionsCache = Object.create(null);
++	const pendingTransmissions = Object.create(null);
++	const pendingActionPayloads = Object.create(null);
++	const pendingInboundBytes = Object.create(null);
++	const queuedInboundBytes = Object.create(null);
++	const pendingInboundTransmissionCount = Object.create(null);
++	const queuedInboundMessageCount = Object.create(null);
++	const clearQueuedPayloadsForPeer = (id) => {
++		Object.entries(pendingActionPayloads).forEach(([type, pending]) => {
++			const retained = pending.filter(({ peerId }) => peerId !== id);
++			if (retained.length) pendingActionPayloads[type] = retained;
++			else delete pendingActionPayloads[type];
++		});
++		delete queuedInboundBytes[id];
++		delete queuedInboundMessageCount[id];
++	};
++	const rejectIncomingTransmission = (id) => {
++		delete pendingTransmissions[id];
++		delete pendingInboundBytes[id];
++		delete pendingInboundTransmissionCount[id];
++		clearQueuedPayloadsForPeer(id);
++		getPeer(id, true)?.destroy();
++	};
+ 	const iterate = (targets, f, { includePending = false } = {}) => (targets ? Array.isArray(targets) ? targets : [targets] : getPeerIds(includePending)).flatMap((id) => {
+ 		const peer = getPeer(id, includePending);
+ 		if (!peer) {
+@@ -80,7 +106,13 @@ const createActionWireManager = ({ getPeer, getPeerIds, canReceiveFromPeer, thro
+ 				const pending = pendingActionPayloads[type];
+ 				if (pending?.length) {
+ 					delete pendingActionPayloads[type];
+-					pending.forEach(({ payload, peerId, metadata }) => f(payload, peerId, metadata));
++					pending.forEach(({ peerId, byteLength }) => {
++						queuedInboundBytes[peerId] = Math.max(0, (queuedInboundBytes[peerId] ?? 0) - byteLength);
++						queuedInboundMessageCount[peerId] = Math.max(0, (queuedInboundMessageCount[peerId] ?? 0) - 1);
++					});
++					pending.forEach(({ payload, peerId, metadata }) => {
++						f(payload, peerId, metadata);
++					});
+ 				}
+ 			},
+ 			setOnProgress: (f) => {
+@@ -141,6 +173,10 @@ const createActionWireManager = ({ getPeer, getPeerIds, canReceiveFromPeer, thro
+ 	};
+ 	const handleData = (id, data) => {
+ 		const buffer = new Uint8Array(data);
++		if (buffer.byteLength < payloadIndex) {
++			rejectIncomingTransmission(id);
++			return;
++		}
+ 		const type = decodeBytes(buffer.subarray(typeIndex, nonceIndex)).replaceAll("\0", "");
+ 		const action = actions[type];
+ 		if (!canReceiveFromPeer(id, Boolean(action?.options.receiveWhilePending))) return;
+@@ -152,27 +188,73 @@ const createActionWireManager = ({ getPeer, getPeerIds, canReceiveFromPeer, thro
+ 		const isMeta = Boolean(tag & 2);
+ 		const isBinary = Boolean(tag & 4);
+ 		const isJson = Boolean(tag & 8);
+-		pendingTransmissions[id] ??= {};
+-		pendingTransmissions[id][type] ??= {};
+-		const target = pendingTransmissions[id][type][nonce] ??= { chunks: [] };
+-		if (isMeta) target.meta = fromJson(decodeBytes(payload));
+-		else target.chunks.push(payload);
++		const existing = pendingTransmissions[id]?.[type]?.[nonce];
++		if (!existing && (pendingInboundTransmissionCount[id] ?? 0) >= maxInFlightTransmissionsPerPeer) {
++			rejectIncomingTransmission(id);
++			return;
++		}
++		if (isLast && !action && (queuedInboundMessageCount[id] ?? 0) >= maxQueuedActionMessagesPerPeer) {
++			rejectIncomingTransmission(id);
++			return;
++		}
++		let target = existing;
++		if (!target) {
++			const transmissionsForPeer = pendingTransmissions[id] ??= Object.create(null);
++			const transmissionsForType = transmissionsForPeer[type] ??= Object.create(null);
++			target = transmissionsForType[nonce] = { chunks: [], payloadBytes: 0, metadataBytes: 0, totalBytes: 0, fragmentCount: 0 };
++			pendingInboundTransmissionCount[id] = (pendingInboundTransmissionCount[id] ?? 0) + 1;
++		}
++		if (target.fragmentCount >= maxIncomingFragmentsPerTransmission) {
++			rejectIncomingTransmission(id);
++			return;
++		}
++		const nextMetadataBytes = target.metadataBytes + (isMeta ? payload.byteLength : 0);
++		const nextPayloadBytes = target.payloadBytes + (isMeta ? 0 : payload.byteLength);
++		const totalBeforeChunk = (pendingInboundBytes[id] ?? 0) + (queuedInboundBytes[id] ?? 0);
++		if (nextMetadataBytes > maxIncomingActionMetadataBytes || nextPayloadBytes > maxIncomingActionPayloadBytes || totalBeforeChunk + payload.byteLength > maxPendingActionBytesPerPeer) {
++			rejectIncomingTransmission(id);
++			return;
++		}
++		target.metadataBytes = nextMetadataBytes;
++		target.payloadBytes = nextPayloadBytes;
++		target.totalBytes += payload.byteLength;
++		target.fragmentCount += 1;
++		pendingInboundBytes[id] = (pendingInboundBytes[id] ?? 0) + payload.byteLength;
++		if (isMeta) {
++			try {
++				target.meta = fromJson(decodeBytes(payload));
++			} catch {
++				rejectIncomingTransmission(id);
++				return;
++			}
++		} else target.chunks.push(payload);
+ 		action?.onProgress(progress / oneByteMax, id, target.meta);
+ 		if (!isLast) return;
+-		const full = new Uint8Array(target.chunks.reduce((a, c) => a + c.byteLength, 0));
++		const full = new Uint8Array(target.payloadBytes);
+ 		target.chunks.reduce((a, c) => {
+ 			full.set(c, a);
+ 			return a + c.byteLength;
+ 		}, 0);
+ 		delete pendingTransmissions[id][type][nonce];
+-		const payloadValue = isBinary ? full : isJson ? fromJson(decodeBytes(full)) : decodeBytes(full);
++		pendingInboundBytes[id] = Math.max(0, (pendingInboundBytes[id] ?? 0) - target.totalBytes);
++		pendingInboundTransmissionCount[id] = Math.max(0, (pendingInboundTransmissionCount[id] ?? 0) - 1);
++		let payloadValue;
++		try {
++			payloadValue = isBinary ? full : isJson ? fromJson(decodeBytes(full)) : decodeBytes(full);
++		} catch {
++			rejectIncomingTransmission(id);
++			return;
++		}
+ 		if (action) {
+ 			action.onComplete(payloadValue, id, target.meta);
+ 			return;
+ 		}
++		queuedInboundBytes[id] = (queuedInboundBytes[id] ?? 0) + target.totalBytes;
++		queuedInboundMessageCount[id] = (queuedInboundMessageCount[id] ?? 0) + 1;
+ 		(pendingActionPayloads[type] ??= []).push({
+ 			payload: payloadValue,
+ 			peerId: id,
++			byteLength: target.totalBytes,
+ 			...target.meta === void 0 ? {} : { metadata: target.meta }
+ 		});
+ 	};
+@@ -181,6 +263,9 @@ const createActionWireManager = ({ getPeer, getPeerIds, canReceiveFromPeer, thro
+ 		handleData,
+ 		clearPeer: (id) => {
+ 			delete pendingTransmissions[id];
++			delete pendingInboundBytes[id];
++			delete pendingInboundTransmissionCount[id];
++			clearQueuedPayloadsForPeer(id);
+ 		}
+ 	};
+ };
