@@ -603,18 +603,84 @@ describe('useSidecarStore start/stop races', () => {
     const startPromise = useSidecarStore
       .getState()
       .start({ modelPath: '/new.gguf' })
+    const secondStartPromise = useSidecarStore
+      .getState()
+      .start({ modelPath: '/new.gguf' })
     expect(useSidecarStore.getState().status).toBe('stopping')
     expect(nativeStart).not.toHaveBeenCalled()
 
-    // Once native stop settles, the start may create the replacement process.
+    // Once native stop settles, one waiter creates the replacement and every
+    // other waiter joins that same start instead of reporting a false failure.
     resolveStop()
     await stopPromise
-    await expect(startPromise).resolves.toBe(9200)
+    await expect(
+      Promise.all([startPromise, secondStartPromise])
+    ).resolves.toEqual([9200, 9200])
     const state = useSidecarStore.getState()
     expect(state.status).toBe('running')
     expect(state.port).toBe(9200)
     expect(nativeStart).toHaveBeenCalledTimes(1)
     expect(stopCalls).toBe(1)
+  })
+
+  test('a stale status refresh cannot revoke stop or return a dead port', async () => {
+    let resolveStatus!: (status: SidecarStatus) => void
+    let resolveStop!: () => void
+    const nativeStart = vi.fn(async () => 9200)
+    __setSidecarRuntime({
+      start: nativeStart,
+      stop: () =>
+        new Promise<void>((resolve) => {
+          resolveStop = resolve
+        }),
+      status: () =>
+        new Promise<SidecarStatus>((resolve) => {
+          resolveStatus = resolve
+        }),
+      fetchHealth: async () => true,
+      setInterval: () => 1,
+      clearInterval: () => {},
+      getAiFeaturesEnabled: () => true,
+      getEngineAutoInstall: () => true,
+    })
+    useSidecarStore.setState({
+      status: 'running',
+      port: 9000,
+      model: '/old.gguf',
+    })
+
+    const refreshPromise = useSidecarStore.getState().refreshStatus()
+    const stopPromise = useSidecarStore.getState().stop()
+    const replacementPromise = useSidecarStore
+      .getState()
+      .start({ modelPath: '/new.gguf' })
+    expect(useSidecarStore.getState().status).toBe('stopping')
+
+    // This snapshot describes the old child and arrives after stop owns the
+    // store. Applying it would make stop look superseded and return port 9000
+    // to the replacement even though native stop is about to kill that child.
+    resolveStatus({
+      running: true,
+      starting: false,
+      port: 9000,
+      model: '/old.gguf',
+      mmproj: null,
+      ctx_size: 4096,
+      errored: false,
+      last_error: null,
+    })
+    await refreshPromise
+    expect(useSidecarStore.getState().status).toBe('stopping')
+
+    resolveStop()
+    await stopPromise
+    await expect(replacementPromise).resolves.toBe(9200)
+    expect(nativeStart).toHaveBeenCalledTimes(1)
+    expect(useSidecarStore.getState()).toMatchObject({
+      status: 'running',
+      port: 9200,
+      model: '/new.gguf',
+    })
   })
 
   test("a canceled start's late rejection does not clobber idle", async () => {

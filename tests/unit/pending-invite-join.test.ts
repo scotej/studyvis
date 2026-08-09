@@ -36,7 +36,7 @@ describe('joinAndRemovePendingInvite', () => {
     expect(pending.has(KEY)).toBe(true)
   })
 
-  test('keeps the invite until any admitted peer completes authentication', () => {
+  test('keeps the invite until the original inviter completes authentication', () => {
     const pending = new Set([KEY])
     const calls: string[] = []
     let onPeerAuthenticated: ((edPubkeyHex: string) => void) | undefined
@@ -66,6 +66,13 @@ describe('joinAndRemovePendingInvite', () => {
     expect(pending.has(KEY)).toBe(true)
 
     onPeerAuthenticated?.('another-authenticated-peer')
+    expect(calls).toEqual(['join'])
+    expect(pending.has(KEY)).toBe(true)
+    expect(removePendingInviteIfCurrent).not.toHaveBeenCalled()
+
+    // Signed hellos accept either hex case while inbox storage canonicalizes
+    // the invite sender to lowercase. They still identify the same key.
+    onPeerAuthenticated?.(INVITE.from_ed_pubkey.toUpperCase())
     onPeerAuthenticated?.(INVITE.from_ed_pubkey)
     expect(calls).toEqual(['join', 'remove'])
     expect(pending.has(KEY)).toBe(false)

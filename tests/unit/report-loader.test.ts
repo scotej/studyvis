@@ -1,7 +1,7 @@
 import { describe, expect, test, vi } from 'vitest'
 
 import type { AuditEventRecord } from '@/lib/db/audit'
-import type { SessionRecord } from '@/lib/db/sessions'
+import { sessionsGet, type SessionRecord } from '@/lib/db/sessions'
 
 const ALICE = 'a'.repeat(64)
 const BOB = 'b'.repeat(64)
@@ -71,20 +71,19 @@ describe('loadReportData historical owner provenance', () => {
     expect(serializeReportToText(data)).toContain('### You')
   })
 
-  test('legacy rows stay explicitly unknown instead of assigning local events to a new identity', () => {
-    const legacy = {
+  test('legacy rows stay explicitly unknown instead of assigning local events to a new identity', async () => {
+    const legacy: SessionRecord = {
       ...session,
       local_ed_pubkey: null,
       local_display_name: null,
     }
-    const data = {
-      session: legacy,
-      auditEvents: events,
-      nameByEdPubkey: {},
-      myEdPubkeyHex: null,
-    }
+    vi.mocked(sessionsGet).mockResolvedValueOnce(legacy)
+    const data = await loadReportData(legacy.id)
 
-    expect(deriveTopDistractions(events, null)).toEqual([])
+    expect(data.myEdPubkeyHex).toBeNull()
+    expect(deriveTopDistractions(data.auditEvents, data.myEdPubkeyHex)).toEqual(
+      []
+    )
     const text = serializeReportToText(data)
     expect(text).toContain(strings.report.identityUnavailable)
     expect(text).not.toContain(strings.report.sections.distractions.empty)

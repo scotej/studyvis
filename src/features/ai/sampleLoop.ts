@@ -1540,6 +1540,7 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
     try {
       paths = await runtime.modelPaths(opts.modelId)
     } catch (err) {
+      if (state.stopped) return
       const msg = err instanceof Error ? err.message : String(err)
       log.warn('boot.refused', {
         modelId: opts.modelId,
@@ -1550,6 +1551,9 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
       teardownInternal()
       return
     }
+    // React cleanup cannot await boot(). A path lookup that completes after
+    // teardown belongs to an obsolete loop and must not open a capture prompt.
+    if (state.stopped) return
 
     // Read the measured cadence floor from the model store. The V2-P2
     // benchmark sets sampleIntervalSec; if the user hasn't benchmarked yet
@@ -1622,6 +1626,7 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
           acquireTargetCount = Math.floor(reported)
         }
       } catch (err) {
+        if (state.stopped) return
         // Enumeration failure isn't a session-ending event — fall back to
         // single-display capture (the V2 behavior).
         log.warn('displays.enumerate_failed', {
@@ -1630,6 +1635,7 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
           err,
         })
       }
+      if (state.stopped) return
     }
     log.info('screen_capture.planned', {
       captureMode,
@@ -1646,6 +1652,9 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
     try {
       firstStream = await acquireScreenStreamBounded()
     } catch (err) {
+      // A pending picker may reject after SessionView has replaced this loop.
+      // Its teardown is silent; only the still-active loop may surface errors.
+      if (state.stopped) return
       const code =
         err instanceof CaptureError ? err.code : 'screen_capture_unavailable'
       if (err instanceof CaptureError && err.code === 'screen_capture_denied') {
@@ -1790,6 +1799,10 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
       mmprojPath: paths.mmprojPath,
       ctxSize: DEFAULT_CTX_SIZE,
     })
+    // stop() intentionally cancels an in-flight singleton start before a
+    // replacement loop boots. That obsolete start may resolve null after the
+    // store marks it superseded; it is teardown, not a user-visible failure.
+    if (state.stopped) return
     if (port == null) {
       const lastError = useSidecarStore.getState().lastError
       log.warn('boot.sidecar_failed', {
@@ -1845,6 +1858,9 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
   }
 
   bootPromise = boot().catch((err) => {
+    // A stop can also make the in-flight sidecar start reject. The replacement
+    // loop owns startup now, so the obsolete loop must not emit a false toast.
+    if (state.stopped) return
     log.error('boot.failed', {
       modelId: opts.modelId,
       failCode: 'sidecar_start_failed',
@@ -1875,13 +1891,26 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
       return
     }
     teardownInternal()
+    // Claim the singleton stop before waiting for this loop's boot work. A
+    // replacement React effect can start immediately after cleanup returns;
+    // entering the sidecar store's stop path now makes that new caller wait
+    // for the old process instead of joining a start this loop will later kill.
+    let sidecarStop:
+      | { started: true; promise: Promise<void> }
+      | { started: false; error: unknown }
+    try {
+      sidecarStop = { started: true, promise: runtime.stopSidecar() }
+    } catch (err) {
+      sidecarStop = { started: false, error: err }
+    }
     try {
       await bootPromise
     } catch {
       // boot failures already surfaced through onStartFail
     }
     try {
-      await runtime.stopSidecar()
+      if (!sidecarStop.started) throw sidecarStop.error
+      await sidecarStop.promise
       log.info('stop.completed', {
         alreadyStopped: false,
         elapsedMs: Math.max(0, runtime.now() - stopStartedAt),

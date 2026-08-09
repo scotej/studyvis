@@ -109,6 +109,38 @@ pub fn insert(conn: &Connection, row: &SessionRow) -> Result<()> {
     insert_with_focus_metrics_mode(conn, row, false)
 }
 
+// Used only when the frontend could not determine whether this topic already
+// has a row. The conflict guard is atomic with the insert: it preserves a
+// first-ever stint without allowing stint-only values to rewind prior history.
+pub fn insert_if_absent(conn: &Connection, row: &SessionRow) -> Result<bool> {
+    let inserted = conn.execute(
+        "INSERT INTO sessions
+             (id, started_at, ended_at, total_minutes, peer_pubkeys,
+              declared_topic, score, focused_pct, generated_at,
+              confident_samples, skipped_samples, ai_enabled,
+              local_ed_pubkey, local_display_name)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
+         ON CONFLICT(id) DO NOTHING",
+        params![
+            row.id,
+            row.started_at,
+            row.ended_at,
+            row.total_minutes,
+            row.peer_pubkeys,
+            row.declared_topic,
+            row.score,
+            row.focused_pct,
+            row.generated_at,
+            row.confident_samples,
+            row.skipped_samples,
+            row.ai_enabled,
+            row.local_ed_pubkey,
+            row.local_display_name,
+        ],
+    )?;
+    Ok(inserted == 1)
+}
+
 // `replace_focus_metrics` is used only when a second stint cannot continue
 // the prior in-memory score machine (such as re-entry after app restart). In
 // that case NULL is meaningful: retain it instead of COALESCE reviving a
@@ -410,6 +442,39 @@ mod tests {
         assert_eq!(count, 1);
         let read = get(&conn, "topic-hex").expect("get").expect("present");
         assert_eq!(read.ended_at, Some(99));
+    }
+
+    #[test]
+    fn insert_if_absent_preserves_an_existing_row() {
+        let conn = fresh();
+        let original = lifecycle_row("topic-hex");
+        insert(&conn, &original).expect("insert original");
+
+        let mut tail_stint = lifecycle_row("topic-hex");
+        tail_stint.started_at = Some(1_800_000_000_000);
+        tail_stint.ended_at = Some(1_800_000_600_000);
+        tail_stint.total_minutes = Some(10);
+        assert!(!insert_if_absent(&conn, &tail_stint).expect("guarded insert"));
+
+        let read = get(&conn, "topic-hex").expect("get").expect("present");
+        assert_eq!(read.started_at, original.started_at);
+        assert_eq!(read.ended_at, original.ended_at);
+        assert_eq!(read.total_minutes, original.total_minutes);
+    }
+
+    #[test]
+    fn insert_if_absent_retains_a_first_ever_stint() {
+        let conn = fresh();
+        let row = lifecycle_row("new-topic");
+
+        assert!(insert_if_absent(&conn, &row).expect("guarded insert"));
+        assert_eq!(
+            get(&conn, "new-topic")
+                .expect("get")
+                .expect("present")
+                .total_minutes,
+            row.total_minutes
+        );
     }
 
     #[test]

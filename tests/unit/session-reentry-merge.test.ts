@@ -11,9 +11,14 @@ import type { FocusSnapshot } from '@/features/ai/focusStore'
 // breaking streaks.
 
 const db = new Map<string, Record<string, unknown>>()
+let sessionsGetFailuresRemaining = 0
 
 vi.mock('@/lib/db/sessions', () => ({
   sessionsGet: vi.fn(async (id: string) => {
+    if (sessionsGetFailuresRemaining > 0) {
+      sessionsGetFailuresRemaining -= 1
+      throw new Error('transient sessions_get failure')
+    }
     const row = db.get(id)
     if (!row) return null
     return {
@@ -36,6 +41,13 @@ vi.mock('@/lib/db/sessions', () => ({
   sessionsInsert: vi.fn(
     async (row: { id: string } & Record<string, unknown>) => {
       db.set(row.id, row)
+    }
+  ),
+  sessionsInsertIfAbsent: vi.fn(
+    async (row: { id: string } & Record<string, unknown>) => {
+      if (db.has(row.id)) return false
+      db.set(row.id, row)
+      return true
     }
   ),
 }))
@@ -101,6 +113,7 @@ async function runStint(
 describe('re-entry merge across leave cycles', () => {
   beforeEach(() => {
     db.clear()
+    sessionsGetFailuresRemaining = 0
     focus.snapshot = {
       score: null,
       focusedPct: null,
@@ -218,6 +231,48 @@ describe('re-entry merge across leave cycles', () => {
       replaceFocusMetrics: true,
     })
   })
+
+  test('a failed prior-row read never overwrites the existing session', async () => {
+    await runStint(T0, T0 + 45 * MIN)
+    const persistedFirstStint = db.get('topic-1')
+    expect(persistedFirstStint).toMatchObject({
+      startedAt: T0,
+      totalMinutes: 45,
+    })
+
+    sessionsGetFailuresRemaining = 2
+    const rejoinedAt = T0 + 47 * MIN
+    await runStint(rejoinedAt, rejoinedAt + 10 * MIN)
+
+    expect(db.get('topic-1')).toBe(persistedFirstStint)
+    expect(db.get('topic-1')).toMatchObject({
+      startedAt: T0,
+      totalMinutes: 45,
+    })
+  })
+
+  test('a transient prior-row read failure retries and merges the stint', async () => {
+    await runStint(T0, T0 + 45 * MIN)
+    sessionsGetFailuresRemaining = 1
+
+    const rejoinedAt = T0 + 47 * MIN
+    await runStint(rejoinedAt, rejoinedAt + 10 * MIN)
+
+    expect(db.get('topic-1')).toMatchObject({
+      startedAt: T0,
+      totalMinutes: 55,
+    })
+  })
+
+  test('failed reads still retain a first-ever session atomically', async () => {
+    sessionsGetFailuresRemaining = 2
+    await runStint(T0, T0 + 45 * MIN)
+
+    expect(db.get('topic-1')).toMatchObject({
+      startedAt: T0,
+      totalMinutes: 45,
+    })
+  })
 })
 
 // Wall-clock alone counted OS-sleep as study time: closing the lid on a
@@ -226,6 +281,7 @@ describe('re-entry merge across leave cycles', () => {
 describe('study minutes ignore time the machine spent asleep', () => {
   beforeEach(() => {
     db.clear()
+    sessionsGetFailuresRemaining = 0
     useSessionStore.getState().reset()
     vi.useFakeTimers()
     return () => vi.useRealTimers()

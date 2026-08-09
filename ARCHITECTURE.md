@@ -332,10 +332,11 @@ bytes can remain in the local app-data file until the next successful launch,
 but they are already unusable and are rejected/deleted during reconciliation.
 Accepting an invite does not consume its durable row merely because the local
 room object was created: the row remains retryable until a signed hello binds
-any lifecycle-admitted peer in that room to an Ed25519 key. That authenticated
-admission removes the original identity's exact signed row exactly once; a
-signaling failure leaves it in the pending inbox, and a replacement invite is
-never consumed by an older in-flight join.
+the original inviter in that room to the Ed25519 key that signed the invite.
+That authenticated admission removes the original identity's exact signed row
+exactly once; another admitted invitee cannot consume it, a signaling failure
+leaves it in the pending inbox, and a replacement invite is never consumed by
+an older in-flight join.
 
 ## 7. WebRTC topology
 

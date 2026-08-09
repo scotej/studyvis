@@ -376,6 +376,63 @@ describe('V2-P6 alert round-trip', () => {
     expect(b.playSoundSpy).not.toHaveBeenCalled()
   })
 
+  test('an abort while signing prevents a stale alert broadcast', async () => {
+    const alertSend = vi.fn(async () => {})
+    const room = {
+      makeAction: () => ({
+        send: alertSend,
+        receive: () => {},
+      }),
+    } as unknown as TopicRoom
+    let resolveSign!: (signature: Uint8Array) => void
+    let markSignStarted!: () => void
+    const signStarted = new Promise<void>((resolve) => {
+      markSignStarted = resolve
+    })
+    const signature = new Promise<Uint8Array>((resolve) => {
+      resolveSign = resolve
+    })
+    const emitAudit = vi.fn(async () => {})
+    const playSound = vi.fn()
+    const dispatcher = startAiAlertDispatcher({
+      room,
+      sessionTopic: 'session-topic-fixture',
+      myEdPubkeyHex: 'a'.repeat(64),
+      sign: async () => {
+        markSignStarted()
+        return signature
+      },
+      resolveSenderEdPubkey: () => null,
+      appendLocalAudit: async () => {},
+      emitAudit,
+      playSound,
+      now: () => 1_700_000_000_000,
+    })
+    const controller = new AbortController()
+    const dispatch = dispatcher.handleScoreEvents(
+      [
+        {
+          type: 'alert',
+          severity: 'moderate',
+          reasoning: 'browsing news',
+          deduction: 5,
+          scoreAfter: 95,
+        },
+      ],
+      controller.signal
+    )
+
+    await signStarted
+    controller.abort()
+    resolveSign(new Uint8Array(64))
+    await dispatch
+
+    expect(emitAudit).toHaveBeenCalledTimes(1)
+    expect(alertSend).not.toHaveBeenCalled()
+    expect(useAlertsUiStore.getState().alertedPeers).toEqual({})
+    expect(playSound).not.toHaveBeenCalled()
+  })
+
   test('an alert from a peer whose signed-hello binding is missing is dropped', async () => {
     const bus = new Bus()
     const sessionTopic = 'session-topic-fixture'

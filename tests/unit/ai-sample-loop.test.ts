@@ -31,6 +31,7 @@ import {
   __setCaptureRuntime,
   __setSampleLoopRuntime,
   __setScreenCaptureRuntime,
+  __setSidecarRuntime,
   getSampleLoopRuntime,
   initialScoreMachineState,
   startSampleLoop,
@@ -43,6 +44,7 @@ import {
   type CaptureRuntime,
   type SampleLoopOptions,
   type SampleLoopRuntime,
+  type SidecarRuntime,
 } from '@/features/ai'
 import { SCORE_EVENTS_TIMEOUT_MS } from '@/features/ai/sampleLoop'
 import { __resetLog, __setLogRecordSink, type LogRecord } from '@/lib/log'
@@ -352,6 +354,82 @@ describe('startSampleLoop — start failures', () => {
       'model_path does not exist'
     )
     await handle.stop()
+  })
+
+  test('a stopped loop ignores a late model-path rejection', async () => {
+    let rejectPaths!: (error: Error) => void
+    const modelPaths = vi.fn(
+      () =>
+        new Promise<{ modelPath: string; mmprojPath: string }>(
+          (_resolve, reject) => {
+            rejectPaths = reject
+          }
+        )
+    )
+    const onStartFail = vi.fn()
+    const records: LogRecord[] = []
+    __setLogRecordSink((record) => records.push(record))
+    __setSampleLoopRuntime(
+      buildSampleLoopRuntime({
+        clock: new FakeClock(),
+        fetch: vi.fn() as never,
+        modelPaths,
+      })
+    )
+    const handle = startSampleLoop({
+      getTopic: () => 't',
+      modelId: 'test-model',
+      getFaceTrack: () => null,
+      onStartFail,
+    })
+
+    const stopping = handle.stop()
+    rejectPaths(new Error('late missing model'))
+    await stopping
+
+    expect(onStartFail).not.toHaveBeenCalled()
+    expect(
+      records.some(
+        (record) =>
+          record.scope === 'ai.sampleloop' && record.msg === 'boot.refused'
+      )
+    ).toBe(false)
+  })
+
+  test('a stopped loop does not capture after model paths resolve', async () => {
+    let resolvePaths!: (paths: {
+      modelPath: string
+      mmprojPath: string
+    }) => void
+    const modelPaths = vi.fn(
+      () =>
+        new Promise<{ modelPath: string; mmprojPath: string }>((resolve) => {
+          resolvePaths = resolve
+        })
+    )
+    const acquireScreenStream = vi.fn(async () => makeFakeScreenStream())
+    const onStartFail = vi.fn()
+    __setSampleLoopRuntime(
+      buildSampleLoopRuntime({
+        clock: new FakeClock(),
+        fetch: vi.fn() as never,
+        modelPaths,
+        acquireScreenStream,
+      })
+    )
+    const handle = startSampleLoop({
+      getTopic: () => 't',
+      modelId: 'test-model',
+      getFaceTrack: () => null,
+      onStartFail,
+    })
+
+    const stopping = handle.stop()
+    resolvePaths({ modelPath: '/model.gguf', mmprojPath: '/mmproj.gguf' })
+    await stopping
+
+    expect(acquireScreenStream).not.toHaveBeenCalled()
+    expect(onStartFail).not.toHaveBeenCalled()
   })
 
   test('refuses to start when sidecar.start returns null', async () => {
@@ -1312,9 +1390,11 @@ describe('startSampleLoop — sidecar lifecycle', () => {
   beforeEach(() => {
     resetAllStores()
     __resetSampleLoopRuntime()
+    __resetSidecarRuntime()
   })
   afterEach(() => {
     __resetSampleLoopRuntime()
+    __resetSidecarRuntime()
   })
 
   test('start calls runtime.startSidecar with resolved model_paths and DEFAULT_CTX_SIZE', async () => {
@@ -1383,6 +1463,86 @@ describe('startSampleLoop — sidecar lifecycle', () => {
     await handle.stop()
     expect(abortFired).toBe(true)
     expect(stopSpy).toHaveBeenCalled()
+  })
+
+  test('an old loop claims its stop before a replacement loop starts', async () => {
+    const clock = new FakeClock()
+    const oldStartFail = vi.fn()
+    let resolveFirstStart!: (port: number) => void
+    let startCalls = 0
+    const nativeStart = vi.fn<SidecarRuntime['start']>(() => {
+      startCalls += 1
+      if (startCalls === 1) {
+        return new Promise<number>((resolve) => {
+          resolveFirstStart = resolve
+        })
+      }
+      return Promise.resolve(9200)
+    })
+    const nativeStop = vi.fn<SidecarRuntime['stop']>(async () => {})
+    __setSidecarRuntime({
+      start: nativeStart,
+      stop: nativeStop,
+      status: async () => ({
+        running: false,
+        starting: false,
+        port: null,
+        model: null,
+        mmproj: null,
+        ctx_size: null,
+        errored: false,
+        last_error: null,
+      }),
+      fetchHealth: async () => true,
+      setInterval: () => 1,
+      clearInterval: () => {},
+      getAiFeaturesEnabled: () => true,
+      getEngineAutoInstall: () => true,
+    })
+    __setSampleLoopRuntime(
+      buildSampleLoopRuntime({
+        clock,
+        fetch: vi.fn() as never,
+        startSidecar: ({ modelPath, mmprojPath, ctxSize }) =>
+          useSidecarStore.getState().start({ modelPath, mmprojPath, ctxSize }),
+        stopSidecar: () => useSidecarStore.getState().stop(),
+      })
+    )
+
+    const oldLoop = startSampleLoop({
+      getTopic: () => 't',
+      modelId: 'test-model',
+      getFaceTrack: () => makeFakeTrack(),
+      onStartFail: oldStartFail,
+    })
+    await flushMicrotasks()
+    expect(nativeStart).toHaveBeenCalledTimes(1)
+
+    // React runs cleanup before constructing the replacement effect, but does
+    // not await the async cleanup. The old loop must enter the global stop
+    // path synchronously so the replacement cannot join its doomed start.
+    const oldStop = oldLoop.stop()
+    const replacementLoop = startSampleLoop({
+      getTopic: () => 't',
+      modelId: 'test-model',
+      getFaceTrack: () => makeFakeTrack(),
+    })
+    await flushMicrotasks()
+
+    expect(nativeStop).toHaveBeenCalledTimes(1)
+    expect(nativeStart).toHaveBeenCalledTimes(2)
+
+    resolveFirstStart(9100)
+    await oldStop
+    await flushMicrotasks()
+
+    expect(useSidecarStore.getState()).toMatchObject({
+      status: 'running',
+      port: 9200,
+    })
+    expect(oldStartFail).not.toHaveBeenCalled()
+
+    await replacementLoop.stop()
   })
 
   test('uses fallback 5s interval if model record lacks a benchmark', async () => {

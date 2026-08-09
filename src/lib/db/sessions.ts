@@ -84,6 +84,30 @@ export async function sessionsInsert(row: SessionRow): Promise<void> {
   })
 }
 
+// Recovery path for an indeterminate sessions_get result. The Rust command's
+// INSERT ... ON CONFLICT DO NOTHING is atomic: a first-ever stint is retained,
+// while an existing multi-stint row can never be rewound by stint-only data.
+export async function sessionsInsertIfAbsent(
+  row: SessionRow
+): Promise<boolean> {
+  return invoke<boolean>('sessions_insert_if_absent', {
+    id: row.id,
+    startedAt: row.startedAt,
+    endedAt: row.endedAt,
+    totalMinutes: row.totalMinutes,
+    peerPubkeys: row.peerPubkeys,
+    declaredTopic: row.declaredTopic ?? null,
+    score: row.score ?? null,
+    focusedPct: row.focusedPct ?? null,
+    generatedAt: row.generatedAt ?? null,
+    confidentSamples: row.confidentSamples ?? null,
+    skippedSamples: row.skippedSamples ?? null,
+    aiEnabled: row.aiEnabled ?? null,
+    localEdPubkey: row.localEdPubkey ?? null,
+    localDisplayName: row.localDisplayName ?? null,
+  })
+}
+
 export async function listSessions(): Promise<SessionRecord[]> {
   return invoke<SessionRecord[]>('sessions_list')
 }

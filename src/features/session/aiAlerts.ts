@@ -260,6 +260,7 @@ export function startAiAlertDispatcher(
         ts,
         sign: args.sign,
       })
+      if (signal?.aborted) return
       await alertAction.send(payload)
     } catch (err) {
       log.error('broadcast.failed', { severity, ts, err })

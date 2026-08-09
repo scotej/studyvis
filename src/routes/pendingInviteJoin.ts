@@ -31,11 +31,15 @@ export function joinAndRemovePendingInvite(
     invite.payload.session_topic,
     invite.payload.session_password,
     {
-      onPeerAuthenticated: () => {
-        // Any authenticated, lifecycle-admitted peer proves the room
-        // credential worked. Consume this attempt only once, and only if the
-        // original identity still holds this exact signed invite revision.
-        if (consumed) return
+      onPeerAuthenticated: (edPubkeyHex) => {
+        // Shared session credentials can admit another invitee before the
+        // sender. Keep this sender-specific retry credential until the
+        // original inviter authenticates in the room.
+        if (
+          consumed ||
+          edPubkeyHex.toLowerCase() !== invite.from_ed_pubkey.toLowerCase()
+        )
+          return
         consumed = true
         deps.removePendingInviteIfCurrent(identityEdPubkeyHex, key, invite)
       },

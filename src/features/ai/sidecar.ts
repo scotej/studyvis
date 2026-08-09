@@ -132,10 +132,10 @@ let inFlightStart: Promise<number | null> | null = null
 // have it return the old child's port, and then let the late stop kill the
 // child JS just adopted as the new configuration.
 let inFlightStop: Promise<void> | null = null
-// Monotonic ownership token for async start continuations. A stop or newer
-// start invalidates older callbacks even when the coarse status string has
-// already returned to `starting` for different work.
-let startRequestGeneration = 0
+// Monotonic ownership token for async lifecycle continuations. A stop or newer
+// start invalidates old start and status-refresh callbacks even when the coarse
+// status string has returned to the same value for different work.
+let lifecycleGeneration = 0
 
 export function __setSidecarRuntime(runtime: SidecarRuntime): void {
   activeRuntime = runtime
@@ -233,8 +233,9 @@ export const useSidecarStore = create<SidecarState>((set, get) => ({
       await pendingStop
       // Re-evaluate gates and join any start another waiting caller created.
       // If stopping failed, do not gamble on whatever native process remains.
-      if (get().status !== 'idle') {
-        log.warn('start.blocked_after_stop', { status: get().status })
+      const afterStop = get().status
+      if (afterStop === 'errored' || afterStop === 'stopping') {
+        log.warn('start.blocked_after_stop', { status: afterStop })
         return null
       }
       return get().start({ modelPath, mmprojPath, ctxSize, purpose })
@@ -250,7 +251,7 @@ export const useSidecarStore = create<SidecarState>((set, get) => ({
     }
     const ownedStart = (async (): Promise<number | null> => {
       const startedAt = Date.now()
-      const requestGeneration = ++startRequestGeneration
+      const requestGeneration = ++lifecycleGeneration
       const engineAutoInstall = activeRuntime.getEngineAutoInstall()
       log.info('start.requested', {
         purpose,
@@ -271,7 +272,7 @@ export const useSidecarStore = create<SidecarState>((set, get) => ({
         // generation check prevents the stale JS continuation from adopting a
         // newer request's `starting` state.
         if (
-          requestGeneration !== startRequestGeneration ||
+          requestGeneration !== lifecycleGeneration ||
           get().status !== 'starting'
         ) {
           log.warn('start.superseded', {
@@ -302,7 +303,7 @@ export const useSidecarStore = create<SidecarState>((set, get) => ({
         // Its eventual "superseded" rejection belongs to that stale attempt;
         // do not overwrite the newer idle/stopping/running state with errored.
         if (
-          requestGeneration !== startRequestGeneration ||
+          requestGeneration !== lifecycleGeneration ||
           get().status !== 'starting'
         ) {
           log.info('start_failed.superseded', {
@@ -348,7 +349,7 @@ export const useSidecarStore = create<SidecarState>((set, get) => ({
     const ownedStop = (async (): Promise<void> => {
       const startedAt = Date.now()
       const previousStatus = get().status
-      startRequestGeneration += 1
+      lifecycleGeneration += 1
       log.info('stop.requested', { previousStatus })
       set({ status: 'stopping' })
       stopPolling()
@@ -404,8 +405,28 @@ export const useSidecarStore = create<SidecarState>((set, get) => ({
 
   refreshStatus: async () => {
     const before = get()
+    const requestGeneration = lifecycleGeneration
+    const resultIsStale = (): boolean => {
+      const current = get()
+      return (
+        requestGeneration !== lifecycleGeneration ||
+        current.status !== before.status ||
+        inFlightStart !== null ||
+        inFlightStop !== null
+      )
+    }
     try {
       const status = await activeRuntime.status()
+      // The native snapshot may have been taken before an overlapping start
+      // or stop acquired the singleton. Never let that stale result revoke the
+      // transition and make a replacement adopt a port the stop just killed.
+      if (resultIsStale()) {
+        log.debug('status.refresh_superseded', {
+          from: before.status,
+          currentStatus: get().status,
+        })
+        return
+      }
       const nextStatus = status.errored
         ? 'errored'
         : status.running
@@ -441,6 +462,7 @@ export const useSidecarStore = create<SidecarState>((set, get) => ({
         stopPolling()
       }
     } catch (err) {
+      if (resultIsStale()) return
       const message = err instanceof Error ? err.message : String(err)
       set({ lastError: message })
       log.warn('status.refresh_failed', { previousStatus: before.status, err })

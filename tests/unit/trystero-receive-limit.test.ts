@@ -227,7 +227,7 @@ describe('patched Trystero receive limits', () => {
     expect(received).toEqual(['ab', 'xy'])
   })
 
-  test('releases reassembly and queued-action accounting when a peer clears', () => {
+  test('releases reassembly accounting when a peer clears', () => {
     const wire = createWire()
 
     wire.handleData(
@@ -238,6 +238,36 @@ describe('patched Trystero receive limits', () => {
     wire.handleData(
       'peer-1',
       frame({ nonce: 2, tag: 4, payload: new Uint8Array(2 * 1024 * 1024) })
+    )
+
+    expect(wire.wasDestroyed()).toBe(false)
+  })
+
+  test('releases queued-action accounting when a peer clears', () => {
+    const wire = createWire()
+
+    // Fill both unknown-action budgets: one maximum payload proves byte
+    // accounting resets, while 63 tiny messages bring the count to its cap.
+    wire.handleData(
+      'peer-1',
+      frame({ nonce: 0, tag: 5, payload: new Uint8Array(MAX_IMAGE_BYTES) })
+    )
+    for (let nonce = 1; nonce < MAX_QUEUED_UNKNOWN_ACTIONS; nonce += 1) {
+      wire.handleData(
+        'peer-1',
+        frame({ nonce, tag: 5, payload: new Uint8Array([nonce]) })
+      )
+    }
+    expect(wire.wasDestroyed()).toBe(false)
+
+    wire.clearPeer('peer-1')
+    wire.handleData(
+      'peer-1',
+      frame({
+        nonce: MAX_QUEUED_UNKNOWN_ACTIONS,
+        tag: 5,
+        payload: new Uint8Array(MAX_IMAGE_BYTES),
+      })
     )
 
     expect(wire.wasDestroyed()).toBe(false)
