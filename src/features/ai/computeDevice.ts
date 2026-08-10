@@ -15,6 +15,14 @@ function isTauriRuntime(): boolean {
   )
 }
 
+function hasUnsafeDeviceChar(value: string): boolean {
+  for (const char of value) {
+    const code = char.charCodeAt(0)
+    if (char === ',' || code <= 0x1f || code === 0x7f) return true
+  }
+  return false
+}
+
 export function isAiComputeDeviceSelection(
   value: unknown
 ): value is AiComputeDeviceSelection {
@@ -24,7 +32,7 @@ export function isAiComputeDeviceSelection(
   return (
     deviceId.length > 0 &&
     deviceId.length <= 128 &&
-    !/[\u0000-\u001f\u007f,]/.test(deviceId)
+    !hasUnsafeDeviceChar(deviceId)
   )
 }
 
