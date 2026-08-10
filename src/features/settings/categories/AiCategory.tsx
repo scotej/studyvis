@@ -571,7 +571,9 @@ export function AiCategory() {
         control={
           <select
             value={computeDevice}
-            onChange={(event) => void handleComputeDeviceChange(event.target.value)}
+            onChange={(event) =>
+              void handleComputeDeviceChange(event.target.value)
+            }
             disabled={computeDeviceDisabled}
             aria-label="AI compute hardware"
             className="h-9 max-w-sm rounded-md border border-border-default bg-transparent px-3 py-1 text-sm text-text-primary shadow-xs outline-none transition-[color,box-shadow] focus-visible:border-accent-default focus-visible:ring-3 focus-visible:ring-accent-ring disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50"
