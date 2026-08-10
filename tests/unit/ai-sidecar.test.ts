@@ -722,7 +722,7 @@ describe('useSidecarStore start/stop races', () => {
     expect(useSidecarStore.getState().lastError).toBeNull()
   })
 
-  test("an old start's late rejection does not clobber a newer start", async () => {
+  test("an old start's late rejection does not clobber a newer running start", async () => {
     let rejectOldStart!: (error: Error) => void
     let resolveNewStart!: (port: number) => void
     let startCalls = 0
@@ -761,14 +761,22 @@ describe('useSidecarStore start/stop races', () => {
       .start({ modelPath: '/new.gguf' })
     expect(useSidecarStore.getState().status).toBe('starting')
 
-    rejectOldStart(new Error('sidecar start superseded'))
-    await expect(oldStart).resolves.toBeNull()
-    expect(useSidecarStore.getState().status).toBe('starting')
-    expect(useSidecarStore.getState().lastError).toBeNull()
-
+    // Let the replacement fully own a live sidecar before the canceled
+    // request reports its late native failure. The stale continuation must
+    // not switch this healthy replacement back to errored or stop its poll.
     resolveNewStart(9300)
     await expect(newStart).resolves.toBe(9300)
+    expect(useSidecarStore.getState()).toMatchObject({
+      status: 'running',
+      port: 9300,
+      model: '/new.gguf',
+      lastError: null,
+    })
+
+    rejectOldStart(new Error('sidecar start superseded'))
+    await expect(oldStart).resolves.toBeNull()
     expect(useSidecarStore.getState().status).toBe('running')
+    expect(useSidecarStore.getState().lastError).toBeNull()
     expect(useSidecarStore.getState().port).toBe(9300)
   })
 })

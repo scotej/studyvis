@@ -162,6 +162,7 @@ function mediaConstraints(
 
 type PttPayload = { active: boolean }
 type CameraPayload = { off: boolean }
+type AuditOptions = { now?: () => number; signal?: AbortSignal }
 
 const DEFAULT_PEER_VOLUME = 1
 
@@ -397,7 +398,7 @@ export function SessionView({
     | ((
         kind: AuditEventKind,
         detail?: AuditEventDetail,
-        options?: { now?: () => number }
+        options?: AuditOptions
       ) => Promise<void>)
     | null
   >(null)
@@ -408,7 +409,7 @@ export function SessionView({
     | ((
         kind: AuditEventKind,
         detail?: AuditEventDetail,
-        options?: { now?: () => number }
+        options?: AuditOptions
       ) => Promise<void>)
     | null
   >(null)
@@ -823,8 +824,9 @@ export function SessionView({
     const appendLocalAudit = async (
       kind: AuditEventKind,
       detail: AuditEventDetail = {},
-      options?: { now?: () => number }
+      options?: AuditOptions
     ) => {
+      if (options?.signal?.aborted) return
       const event = await buildAuditEvent({
         sessionTopic,
         myEdPubkeyHex,
@@ -833,6 +835,9 @@ export function SessionView({
         sign,
         now: options?.now,
       })
+      // Signing can outlive SessionView. Never append a previous session's
+      // event into the next session's freshly reset audit store.
+      if (options?.signal?.aborted) return
       useAuditStore.getState().append(event)
     }
     appendLocalAuditRef.current = appendLocalAudit
@@ -840,8 +845,9 @@ export function SessionView({
     const emitAudit = async (
       kind: AuditEventKind,
       detail: AuditEventDetail = {},
-      options?: { now?: () => number }
+      options?: AuditOptions
     ) => {
+      if (options?.signal?.aborted) return
       const event = await buildAuditEvent({
         sessionTopic,
         myEdPubkeyHex,
@@ -850,9 +856,13 @@ export function SessionView({
         sign,
         now: options?.now,
       })
+      if (options?.signal?.aborted) return
       // Append local first so the panel reflects our own actions
       // immediately, even if broadcast fails.
       useAuditStore.getState().append(event)
+      // A signal cannot retract a data-channel send already in flight, but
+      // it prevents a completed old sign from starting one after teardown.
+      if (options?.signal?.aborted) return
       try {
         await auditAction.send(event)
       } catch (err) {
@@ -1318,6 +1328,10 @@ export function SessionView({
   useEffect(() => {
     if (status !== 'active' || !room || !sessionTopic || !startedAt) return
     let cancelled = false
+    // Break requests share a module FIFO so rapid dialog submits serialize.
+    // Bind this effect instance to an abort signal so an old request cannot
+    // acquire that FIFO after this session has ended or been replaced.
+    const breakRequestsAbortController = new AbortController()
     const unlistens: Array<() => void> = []
 
     const buildContextSnapshot = (): AiDialogContextPayload => {
@@ -1354,6 +1368,7 @@ export function SessionView({
     }
 
     const emitToDialog = (event: string, payload: unknown): void => {
+      if (cancelled || breakRequestsAbortController.signal.aborted) return
       // The dialog window may have been closed between request and
       // response; emitTo rejects in that case. Swallow the rejection so
       // it doesn't surface as an unhandled promise rejection.
@@ -1428,9 +1443,11 @@ export function SessionView({
               clearTimeout: (handle) => window.clearTimeout(handle as number),
               snapshot: snapshotBreakState,
               now: () => Date.now(),
+              signal: breakRequestsAbortController.signal,
             }
           )
             .then((verdict) => {
+              if (breakRequestsAbortController.signal.aborted) return
               const response: BreakResponsePayload =
                 verdict.verdict === 'approved'
                   ? {
@@ -1447,6 +1464,7 @@ export function SessionView({
               emitToDialog(AI_DIALOG_BREAK_RESPONSE, response)
             })
             .catch((err) => {
+              if (breakRequestsAbortController.signal.aborted) return
               dialogLog.error('break_flow.failed', {
                 fallbackVerdict: 'denied',
                 err,
@@ -1466,6 +1484,7 @@ export function SessionView({
 
     return () => {
       cancelled = true
+      breakRequestsAbortController.abort()
       for (const off of unlistens) off()
     }
   }, [status, room, sessionTopic, startedAt])

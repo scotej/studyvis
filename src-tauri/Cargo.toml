@@ -69,8 +69,10 @@ objc2-app-kit = "0.3"
 # completion block; block2 is how we invoke it. Already in the graph beneath
 # wry, so this adds no new package.
 block2 = "0.6"
-# Issue #77 — `system_install_context` asks statfs whether the bundle sits on
-# a read-only mount (the app-translocated .dmg case the updater can't swap).
+
+[target.'cfg(unix)'.dependencies]
+# `system_install_context` uses macOS `statfs`, and the backup importer uses
+# `O_NONBLOCK` to reject Unix special files without opening a blocking FIFO.
 libc = "0.2"
 
 [target.'cfg(target_os = "windows")'.dependencies]

@@ -1,0 +1,82 @@
+# Application-command permissions are deliberately separate from plugin/core
+# permissions. `build.rs` generates the individual `allow-*` permissions from
+# its exhaustive command list; these two sets assign them to webviews by role.
+#
+# Keep `main-commands` in lockstep with `APP_COMMANDS` in build.rs. A command
+# left out here is denied to the main window (fail closed), while the dialog
+# set below remains intentionally tiny.
+
+[[set]]
+identifier = "main-commands"
+description = "Allows every StudyVis application command from the main window."
+permissions = [
+  "allow-friends-list",
+  "allow-friends-add",
+  "allow-friends-remove",
+  "allow-friends-update-last-studied",
+  "allow-friends-get-x-pubkey",
+  "allow-friends-export",
+  "allow-friends-import",
+  "allow-sessions-insert",
+  "allow-sessions-insert-if-absent",
+  "allow-sessions-list",
+  "allow-sessions-get",
+  "allow-sessions-delete",
+  "allow-sessions-clear-all",
+  "allow-audit-event-insert",
+  "allow-audit-events-list-for-session",
+  "allow-audit-events-list-all",
+  "allow-identity-save-keys",
+  "allow-identity-exists",
+  "allow-identity-keys-present",
+  "allow-identity-save-record",
+  "allow-identity-load-record",
+  "allow-identity-sign",
+  "allow-identity-box-decrypt",
+  "allow-identity-box-encrypt",
+  "allow-autostart-set-enabled",
+  "allow-autostart-is-enabled",
+  "allow-system-minimize-to-tray-set-enabled",
+  "allow-system-ai-features-set-enabled",
+  "allow-system-open-data-folder",
+  "allow-system-write-text-file",
+  "allow-system-save-image",
+  "allow-system-open-releases",
+  "allow-system-open-screen-capture-settings",
+  "allow-system-open-camera-settings",
+  "allow-system-open-microphone-settings",
+  "allow-system-open-notification-settings",
+  "allow-system-set-global-shortcut",
+  "allow-system-relaunch-app",
+  "allow-system-install-context",
+  "allow-system-battery",
+  "allow-session-set-active",
+  "allow-app-quit",
+  "allow-sidecar-start",
+  "allow-sidecar-stop",
+  "allow-sidecar-status",
+  "allow-engine-info",
+  "allow-engine-install",
+  "allow-diagnostics-reveal-log",
+  "allow-diagnostics-info",
+  "allow-diagnostics-export",
+  "allow-app-log-append",
+  "allow-app-log-tail",
+  "allow-model-paths",
+  "allow-model-install-state",
+  "allow-model-remove",
+  "allow-model-head-check",
+  "allow-model-download",
+  "allow-model-download-cancel",
+  "allow-hf-token-save",
+  "allow-hf-token-present",
+  "allow-hf-token-clear",
+]
+
+[[set]]
+identifier = "ai-dialog-commands"
+description = "Allows only the custom commands required by the floating AI dialog."
+permissions = [
+  "allow-app-log-append",
+  "allow-sidecar-status",
+]

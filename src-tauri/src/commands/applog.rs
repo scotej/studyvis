@@ -24,8 +24,8 @@ pub(crate) const LOG_HISTORY_FILES: usize = 10;
 const APP_LOG_MAX_BYTES: u64 = 2 * 1024 * 1024;
 
 // Per-call ceilings. The JS logger already batches and clamps; these bound what
-// ONE ipc call can write, because with no app-command ACL this is reachable
-// from the ai-dialog webview too.
+// ONE IPC call can write. The app-command ACL grants this command to the main
+// window and the AI dialog only, and never gives the dialog path control.
 const MAX_LINES_PER_CALL: usize = 256;
 const MAX_LINE_BYTES: usize = 8 * 1024;
 
@@ -133,10 +133,9 @@ fn render_batch(lines: &[String]) -> String {
 ///
 /// Payload only — the path is derived here and never taken from the caller.
 /// `system_write_text_file`'s caller-supplied-path shape is deliberately not
-/// the precedent: there is no app-command ACL (ARCHITECTURE §12), so this is
-/// reachable from the ai-dialog webview whose capability grants only
-/// `core:default` + `core:window:allow-close`, and the narrow signature is the
-/// whole mitigation.
+/// the precedent: this command is one of the two custom commands the AI-dialog
+/// capability may invoke, so its narrow payload prevents that secondary
+/// webview from choosing a filesystem target.
 #[tauri::command]
 pub fn app_log_append<R: Runtime>(app: AppHandle<R>, lines: Vec<String>) -> Result<(), String> {
     if lines.is_empty() {

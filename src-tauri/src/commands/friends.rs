@@ -4,6 +4,9 @@
 //! security-critical; see the banner above `BACKUP_MAGIC` before touching the
 //! format.
 
+use std::io::Read;
+use std::path::Path;
+
 use serde::Serialize;
 use tauri::State;
 
@@ -85,6 +88,68 @@ const BACKUP_SIG_LEN: usize = 64;
 // Defensive bound on a hostile/corrupt .svfb: a real friends list is a handful
 // of rows; cap the decoded count so an oversized file can't balloon memory.
 const MAX_IMPORT_ROWS: usize = 10_000;
+// The ciphertext is almost the same size as the sealed JSON (the sealed-box
+// overhead is fixed), so this cap bounds both the initial file read and the
+// plaintext allocation made by `unseal`. It comfortably covers 10,000 normal
+// friend rows while making a hostile picker selection unable to consume
+// unbounded memory before signature verification.
+const MAX_BACKUP_FILE_BYTES: u64 = 16 * 1024 * 1024;
+
+fn backup_too_large_error(size: u64, max_bytes: u64) -> String {
+    format!(
+        "backup is {size} bytes, exceeding the {} byte limit",
+        max_bytes
+    )
+}
+
+#[cfg(unix)]
+fn open_backup_file(path: &Path) -> std::io::Result<std::fs::File> {
+    use std::os::unix::fs::OpenOptionsExt;
+
+    // Open the descriptor non-blocking first: opening a FIFO for reading
+    // otherwise waits for a writer before we can inspect its file type.
+    std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NONBLOCK)
+        .open(path)
+}
+
+#[cfg(not(unix))]
+fn open_backup_file(path: &Path) -> std::io::Result<std::fs::File> {
+    std::fs::File::open(path)
+}
+
+// Do not use `fs::read` here. Its pre-read metadata allocation can be raced by
+// a file that grows after the stat (or a special file), which recreates the
+// unbounded-memory issue this helper exists to close. A `take(max + 1)` reader
+// bounds bytes actually read as well as the initial size hint.
+fn read_backup_bounded_with_limit(path: &Path, max_bytes: u64) -> Result<Vec<u8>, String> {
+    let file = open_backup_file(path).map_err(|e| format!("read {}: {e}", path.display()))?;
+    let metadata = file
+        .metadata()
+        .map_err(|e| format!("stat {}: {e}", path.display()))?;
+    if !metadata.is_file() {
+        return Err(format!("{} is not a regular file", path.display()));
+    }
+    if metadata.len() > max_bytes {
+        return Err(backup_too_large_error(metadata.len(), max_bytes));
+    }
+
+    let capacity = usize::try_from(metadata.len()).unwrap_or(usize::MAX);
+    let mut bytes = Vec::with_capacity(capacity);
+    let mut reader = file.take(max_bytes.saturating_add(1));
+    reader
+        .read_to_end(&mut bytes)
+        .map_err(|e| format!("read {}: {e}", path.display()))?;
+    if bytes.len() as u64 > max_bytes {
+        return Err(backup_too_large_error(bytes.len() as u64, max_bytes));
+    }
+    Ok(bytes)
+}
+
+fn read_backup_bounded(path: &Path) -> Result<Vec<u8>, String> {
+    read_backup_bounded_with_limit(path, MAX_BACKUP_FILE_BYTES)
+}
 
 fn signed_prefix(version: u8, sealed: &[u8]) -> Vec<u8> {
     let mut msg = Vec::with_capacity(BACKUP_MAGIC.len() + 1 + sealed.len());
@@ -226,6 +291,12 @@ pub fn friends_export(state: State<'_, DbPool>, path: String) -> Result<u32, Str
     let my_x_pub = crypto_box::SecretKey::from(my_x_priv).public_key();
     let signing_key = crate::commands::identity::load_ed_signing_key()?;
     let bytes = encode_backup(&signing_key, my_x_pub.as_bytes(), &rows)?;
+    if bytes.len() as u64 > MAX_BACKUP_FILE_BYTES {
+        return Err(backup_too_large_error(
+            bytes.len() as u64,
+            MAX_BACKUP_FILE_BYTES,
+        ));
+    }
     // #47 A4 — atomic like identity_save_record's tmp+rename (I16 pattern): a
     // crash mid-write must not leave a truncated .svfb at the chosen path
     // that a later import would reject as corrupt.
@@ -244,7 +315,7 @@ pub fn friends_import(
     state: State<'_, DbPool>,
     path: String,
 ) -> Result<FriendsImportResult, String> {
-    let bytes = std::fs::read(&path).map_err(|e| format!("read {path}: {e}"))?;
+    let bytes = read_backup_bounded(Path::new(&path))?;
     let my_x_priv = crate::commands::identity::load_x_priv()?;
     let verifying_key = crate::commands::identity::load_ed_signing_key()?.verifying_key();
     let rows = decode_backup(&verifying_key, &my_x_priv, &bytes)?;
@@ -456,6 +527,60 @@ mod tests {
             .collect();
         let bytes = encode_backup(&sign, &x_pub, &rows).expect("encode");
         assert!(decode_backup(&verify, &x_priv, &bytes).is_err());
+    }
+
+    #[test]
+    fn bounded_backup_reader_rejects_a_file_larger_than_its_limit() {
+        let path = std::env::temp_dir().join(format!(
+            "studyvis-friends-bounded-read-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_file(&path);
+        std::fs::write(&path, b"12345").expect("write oversized fixture");
+
+        let err = read_backup_bounded_with_limit(&path, 4).expect_err("must reject oversized");
+        assert!(err.contains("exceeding the 4 byte limit"));
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn bounded_backup_reader_accepts_a_file_at_its_limit() {
+        let path = std::env::temp_dir().join(format!(
+            "studyvis-friends-bounded-read-at-limit-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_file(&path);
+        std::fs::write(&path, b"1234").expect("write limit fixture");
+
+        assert_eq!(
+            read_backup_bounded_with_limit(&path, 4).expect("read at limit"),
+            b"1234"
+        );
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn bounded_backup_reader_rejects_a_fifo_without_waiting_for_a_writer() {
+        use std::ffi::CString;
+        use std::os::unix::ffi::OsStrExt;
+
+        let path = std::env::temp_dir().join(format!(
+            "studyvis-friends-bounded-read-fifo-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_file(&path);
+        let path_c = CString::new(path.as_os_str().as_bytes()).expect("temporary path has no NUL");
+        assert_eq!(
+            unsafe { libc::mkfifo(path_c.as_ptr(), 0o600) },
+            0,
+            "create FIFO: {}",
+            std::io::Error::last_os_error()
+        );
+
+        let err = read_backup_bounded_with_limit(&path, 4).expect_err("must reject FIFO");
+        let _ = std::fs::remove_file(path);
+        assert!(err.contains("is not a regular file"));
     }
 
     #[test]

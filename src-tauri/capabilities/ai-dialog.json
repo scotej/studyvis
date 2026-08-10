@@ -1,7 +1,11 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "ai-dialog",
-  "description": "Floating Ctrl+] AI dialog window — core only (event/window IPC). No plugin (notification/store) surface per ARCHITECTURE.md §12 least-privilege.",
+  "description": "Floating Ctrl+] AI dialog window — event/window IPC plus only its two required custom commands. No notification/store surface per ARCHITECTURE.md §12 least-privilege.",
   "windows": ["ai-dialog"],
-  "permissions": ["core:default", "core:window:allow-close"]
+  "permissions": [
+    "core:default",
+    "core:window:allow-close",
+    "ai-dialog-commands"
+  ]
 }
