@@ -21,7 +21,8 @@ use std::time::{Duration, Instant};
 use futures_util::StreamExt;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
-use tauri::{AppHandle, Emitter, Runtime, State};
+use tauri::{path::BaseDirectory, AppHandle, Emitter, Manager, Runtime, State};
+use tauri_plugin_shell::ShellExt;
 
 use super::models::build_client;
 use super::sidecar::{SidecarState, TARGET_TRIPLE};
@@ -46,8 +47,10 @@ struct EngineAsset {
     sha256: &'static str,
 }
 
-// SHA-256s verified 2026-07-26 against the live b9095 release assets; they
-// match scripts/fetch-llama-server.sh's pins byte-for-byte (test below).
+// SHA-256s verified against the official b9095 release assets; they match
+// scripts/fetch-llama-server.sh's pins byte-for-byte (test below). Windows
+// deliberately uses the Vulkan package so NVIDIA/AMD/Intel/eGPU devices share
+// one backend while CPU remains available through llama.cpp's --device none.
 const ENGINE_ASSETS: &[EngineAsset] = &[
     EngineAsset {
         triple: "aarch64-apple-darwin",
@@ -61,8 +64,8 @@ const ENGINE_ASSETS: &[EngineAsset] = &[
     },
     EngineAsset {
         triple: "x86_64-pc-windows-msvc",
-        asset: "llama-b9095-bin-win-cpu-x64.zip",
-        sha256: "af06a08fd6d62d7333437d186642ea3c0d7bc41ca168b48d14cc0fcf8f0cf4af",
+        asset: "llama-b9095-bin-win-vulkan-x64.zip",
+        sha256: "297209d9f17ac0c25cd146c8e0b11bdb77fc672512aba84045e20ab0d51c96a9",
     },
     EngineAsset {
         triple: "x86_64-unknown-linux-gnu",
@@ -139,6 +142,142 @@ pub fn resolve_candidates<R: Runtime>(app: &AppHandle<R>) -> Vec<(EngineSource, 
     candidates
 }
 
+fn runtime_dir_for<R: Runtime>(
+    app: &AppHandle<R>,
+    source: EngineSource,
+    binary: &Path,
+) -> Option<PathBuf> {
+    match source {
+        EngineSource::Bundled => {
+            let rel = format!("binaries/llama-runtime-{TARGET_TRIPLE}");
+            app.path()
+                .resolve(&rel, BaseDirectory::Resource)
+                .ok()
+                .filter(|path| path.is_dir())
+                .or_else(|| binary.parent().map(Path::to_path_buf))
+        }
+        EngineSource::Managed => binary.parent().map(Path::to_path_buf),
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct EngineDevice {
+    pub id: String,
+    pub label: String,
+}
+
+fn parse_device_list(output: &str) -> Vec<EngineDevice> {
+    let mut devices = Vec::new();
+    for line in output.lines() {
+        let line = line.trim();
+        let Some((raw_id, raw_label)) = line.split_once(':') else {
+            continue;
+        };
+        let id = raw_id.trim().trim_start_matches(['-', '*']).trim();
+        let label = raw_label.trim();
+        if !super::compute_device::valid_device_id(id)
+            || id.eq_ignore_ascii_case("cpu")
+            || label.is_empty()
+            || devices.iter().any(|device: &EngineDevice| device.id == id)
+        {
+            continue;
+        }
+        devices.push(EngineDevice {
+            id: id.to_owned(),
+            label: label.to_owned(),
+        });
+    }
+    devices
+}
+
+fn bounded_command_error(value: &str) -> String {
+    const MAX_CHARS: usize = 512;
+    let compact = value.split_whitespace().collect::<Vec<_>>().join(" ");
+    compact.chars().take(MAX_CHARS).collect()
+}
+
+async fn devices_for_candidate<R: Runtime>(
+    app: &AppHandle<R>,
+    source: EngineSource,
+    binary: &Path,
+) -> Result<Vec<EngineDevice>, String> {
+    let runtime_dir = runtime_dir_for(app, source, binary);
+    let mut command = app.shell().command(binary).arg("--list-devices");
+    if let Some(dir) = runtime_dir.as_deref() {
+        command = command.current_dir(dir);
+        let dir_str = dir.to_string_lossy().into_owned();
+        #[cfg(target_os = "macos")]
+        {
+            const KEY: &str = "DYLD_FALLBACK_LIBRARY_PATH";
+            let combined = match std::env::var(KEY) {
+                Ok(prev) if !prev.is_empty() => format!("{dir_str}:{prev}"),
+                _ => dir_str,
+            };
+            command = command.env(KEY, combined);
+        }
+        #[cfg(target_os = "linux")]
+        {
+            const KEY: &str = "LD_LIBRARY_PATH";
+            let combined = match std::env::var(KEY) {
+                Ok(prev) if !prev.is_empty() => format!("{dir_str}:{prev}"),
+                _ => dir_str,
+            };
+            command = command.env(KEY, combined);
+        }
+        #[cfg(target_os = "windows")]
+        {
+            let combined = match std::env::var("PATH") {
+                Ok(prev) if !prev.is_empty() => format!("{dir_str};{prev}"),
+                _ => dir_str,
+            };
+            command = command.env("PATH", combined);
+        }
+    }
+
+    let output = command
+        .output()
+        .await
+        .map_err(|e| format!("list devices via {}: {e}", binary.display()))?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    if !output.status.success() {
+        let detail = bounded_command_error(if stderr.trim().is_empty() {
+            stdout.as_ref()
+        } else {
+            stderr.as_ref()
+        });
+        return Err(if detail.is_empty() {
+            format!(
+                "{} --list-devices exited with {:?}",
+                binary.display(),
+                output.status.code()
+            )
+        } else {
+            format!("{} --list-devices: {detail}", binary.display())
+        });
+    }
+
+    let mut combined = String::with_capacity(stdout.len() + stderr.len() + 1);
+    combined.push_str(&stdout);
+    combined.push('\n');
+    combined.push_str(&stderr);
+    Ok(parse_device_list(&combined))
+}
+
+async fn discover_devices<R: Runtime>(
+    app: &AppHandle<R>,
+    candidates: &[(EngineSource, PathBuf)],
+) -> (Vec<EngineDevice>, Option<String>) {
+    let mut last_error = None;
+    for (source, binary) in candidates {
+        match devices_for_candidate(app, *source, binary).await {
+            Ok(devices) => return (devices, None),
+            Err(error) => last_error = Some(error),
+        }
+    }
+    (Vec::new(), last_error)
+}
+
 #[derive(Default)]
 struct EngineMeta {
     installing: bool,
@@ -176,14 +315,17 @@ pub struct EngineInfo {
     pub version: String,
     pub installing: bool,
     pub last_error: Option<String>,
+    pub devices: Vec<EngineDevice>,
+    pub device_error: Option<String>,
 }
 
 #[tauri::command]
-pub fn engine_info<R: Runtime>(
+pub async fn engine_info<R: Runtime>(
     app: AppHandle<R>,
     state: State<'_, EngineState>,
 ) -> Result<EngineInfo, String> {
     let candidates = resolve_candidates(&app);
+    let (devices, device_error) = discover_devices(&app, &candidates).await;
     let meta = state.meta.lock().map_err(|e| e.to_string())?;
     Ok(EngineInfo {
         supported: asset_for(TARGET_TRIPLE).is_some(),
@@ -192,6 +334,8 @@ pub fn engine_info<R: Runtime>(
         version: ENGINE_TAG.to_string(),
         installing: meta.installing,
         last_error: meta.last_error.clone(),
+        devices,
+        device_error,
     })
 }
 
@@ -693,11 +837,47 @@ mod tests {
     }
 
     #[test]
+    fn parses_accelerator_devices_from_llama_output() {
+        let output = r#"
+Available devices:
+  Vulkan0: NVIDIA GeForce RTX 4080 (16376 MiB, 15120 MiB free)
+  Vulkan1: AMD Radeon RX 7800 XT (16368 MiB, 14200 MiB free)
+  CPU: AMD Ryzen 9 7950X
+"#;
+        assert_eq!(
+            parse_device_list(output),
+            vec![
+                EngineDevice {
+                    id: "Vulkan0".to_string(),
+                    label: "NVIDIA GeForce RTX 4080 (16376 MiB, 15120 MiB free)".to_string(),
+                },
+                EngineDevice {
+                    id: "Vulkan1".to_string(),
+                    label: "AMD Radeon RX 7800 XT (16368 MiB, 14200 MiB free)".to_string(),
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn device_parser_deduplicates_and_ignores_unusable_lines() {
+        let output = "Vulkan0: First\nVulkan0: Duplicate\nno colon here\nCPU: Host\n: empty\n";
+        assert_eq!(
+            parse_device_list(output),
+            vec![EngineDevice {
+                id: "Vulkan0".to_string(),
+                label: "First".to_string(),
+            }]
+        );
+    }
+
+    #[test]
     fn keeps_engine_binary_and_libs_only() {
         assert!(keep_entry("llama-server", "llama-server"));
         assert!(keep_entry("llama-server.exe", "llama-server.exe"));
         assert!(keep_entry("libllama.0.dylib", "llama-server"));
         assert!(keep_entry("ggml-cpu-haswell.dll", "llama-server.exe"));
+        assert!(keep_entry("ggml-vulkan.dll", "llama-server.exe"));
         assert!(keep_entry("libllama.so", "llama-server"));
         assert!(keep_entry("libllama.so.0.0.9095", "llama-server"));
         assert!(keep_entry("LICENSE", "llama-server"));
