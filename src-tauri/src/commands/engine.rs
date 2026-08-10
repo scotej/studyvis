@@ -5,8 +5,9 @@
 //! module is the runtime fallback that makes a fresh dev checkout and a
 //! damaged install self-heal: download the pinned llama.cpp release archive
 //! for the current target triple, verify its SHA-256, unpack `llama-server`
-//! plus its companion libraries into `data_dir/engine/<tag>-<triple>/`, and
-//! hand spawn-ready candidate paths to `commands/sidecar.rs`.
+//! plus its companion libraries into
+//! `data_dir/engine/<tag>-r<package-revision>-<triple>/`, and hand spawn-ready
+//! candidate paths to `commands/sidecar.rs`.
 //!
 //! The release pins below are in LOCKSTEP with scripts/fetch-llama-server.sh —
 //! `pins_match_fetch_script` fails `cargo test` when they drift. Bumping the
@@ -29,6 +30,12 @@ use super::sidecar::{SidecarState, TARGET_TRIPLE};
 use crate::db::data_dir;
 
 pub const ENGINE_TAG: &str = "b9095";
+// The upstream tag alone is not enough to identify a compatible managed
+// package: #211 switches Windows from b9095's CPU archive to its Vulkan
+// archive without changing the upstream tag. Keep a package revision in the
+// managed directory name so a damaged future bundle never falls back to an
+// old CPU-only cache and then rejects a persisted Vulkan device selection.
+const ENGINE_PACKAGE_REVISION: &str = "2";
 const RELEASE_BASE: &str = "https://github.com/ggml-org/llama.cpp/releases/download";
 const ENGINE_DIR: &str = "engine";
 
@@ -91,7 +98,9 @@ fn engine_root<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, String> {
 }
 
 fn managed_install_dir<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, String> {
-    Ok(engine_root(app)?.join(format!("{ENGINE_TAG}-{TARGET_TRIPLE}")))
+    Ok(engine_root(app)?.join(format!(
+        "{ENGINE_TAG}-r{ENGINE_PACKAGE_REVISION}-{TARGET_TRIPLE}"
+    )))
 }
 
 fn managed_binary_path<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, String> {
@@ -126,9 +135,8 @@ pub enum EngineSource {
 }
 
 // Spawn candidates in preference order: bundled first (the release-tested
-// path), managed second. Both point at the same pinned b9095 build, so the
-// fallback never changes inference behavior — no
-// INFERENCE_ENGINE_FINGERPRINT bump.
+// path), managed second. Both resolve the same pinned tag + package revision,
+// so fallback cannot resurrect a pre-#211 CPU-only Windows engine.
 pub fn resolve_candidates<R: Runtime>(app: &AppHandle<R>) -> Vec<(EngineSource, PathBuf)> {
     let mut candidates = Vec::new();
     if let Some(path) = bundled_binary_path() {
@@ -462,7 +470,9 @@ async fn do_install<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
             error: None,
         },
     );
-    let staging = root.join(format!(".tmp-{ENGINE_TAG}-{TARGET_TRIPLE}"));
+    let staging = root.join(format!(
+        ".tmp-{ENGINE_TAG}-r{ENGINE_PACKAGE_REVISION}-{TARGET_TRIPLE}"
+    ));
     let extract_result = {
         let archive_path = archive_path.clone();
         let staging = staging.clone();
@@ -674,10 +684,11 @@ async fn download_verified<R: Runtime>(
 }
 
 // Best-effort sweep of everything except the current install: superseded
-// engine versions, stale .tmp-* staging dirs, orphaned .download-* archives.
-// The engine root is app-private, so anything unrecognized is ours to drop.
+// engine versions/package revisions, stale .tmp-* staging dirs, orphaned
+// .download-* archives. The engine root is app-private, so anything
+// unrecognized is ours to drop.
 fn cleanup_stale(root: &Path) {
-    let current = format!("{ENGINE_TAG}-{TARGET_TRIPLE}");
+    let current = format!("{ENGINE_TAG}-r{ENGINE_PACKAGE_REVISION}-{TARGET_TRIPLE}");
     let Ok(entries) = fs::read_dir(root) else {
         return;
     };
