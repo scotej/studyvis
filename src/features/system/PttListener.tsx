@@ -140,9 +140,14 @@ export function PttListener() {
       const currentEdgeSeq = edgeSeq
       const now = monotonicNow()
       const activeBefore = usePttStore.getState().active
+      const duplicatePress = edge === 'pressed' && activeBefore
 
       if (edge === 'pressed') {
-        if (activeBefore) {
+        if (duplicatePress) {
+          // Drop repeats at the bridge so a native repeat burst cannot trigger
+          // redundant renders or getStats sampling. The store remains
+          // independently idempotent as a defence-in-depth contract for any
+          // future caller that bypasses this listener.
           log.warn('edge.duplicate_pressed', {
             edgeSeq: currentEdgeSeq,
             heldMs:
@@ -152,8 +157,8 @@ export function PttListener() {
           })
         } else {
           pressStartedAt = now
+          press()
         }
-        press()
       } else {
         release()
       }
@@ -173,8 +178,11 @@ export function PttListener() {
         activeBefore,
         activeAfter,
         heldMs,
+        duplicate: duplicatePress,
         sessionActive: useSessionStore.getState().room !== null,
       })
+
+      if (duplicatePress) return
 
       scheduleMediaSample(
         edge,
