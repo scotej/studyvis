@@ -176,15 +176,26 @@ pub struct EngineDevice {
 
 fn parse_device_list(output: &str) -> Vec<EngineDevice> {
     let mut devices = Vec::new();
+    let mut in_device_list = false;
     for line in output.lines() {
-        let line = line.trim();
-        let Some((raw_id, raw_label)) = line.split_once(':') else {
+        if !in_device_list {
+            if line.trim() == "Available devices:" {
+                in_device_list = true;
+            }
+            continue;
+        }
+        if line.trim().is_empty() {
+            continue;
+        }
+        let Some(device_line) = line.strip_prefix("  ") else {
+            break;
+        };
+        let Some((raw_id, raw_label)) = device_line.split_once(':') else {
             continue;
         };
-        let id = raw_id.trim().trim_start_matches(['-', '*']).trim();
+        let id = raw_id.trim();
         let label = raw_label.trim();
         if !super::compute_device::valid_device_id(id)
-            || id.eq_ignore_ascii_case("cpu")
             || label.is_empty()
             || devices.iter().any(|device: &EngineDevice| device.id == id)
         {
@@ -265,11 +276,7 @@ async fn devices_for_candidate<R: Runtime>(
         });
     }
 
-    let mut combined = String::with_capacity(stdout.len() + stderr.len() + 1);
-    combined.push_str(&stdout);
-    combined.push('\n');
-    combined.push_str(&stderr);
-    Ok(parse_device_list(&combined))
+    Ok(parse_device_list(&stdout))
 }
 
 async fn discover_devices<R: Runtime>(
@@ -848,12 +855,14 @@ mod tests {
     }
 
     #[test]
-    fn parses_accelerator_devices_from_llama_output() {
+    fn parses_only_the_reported_device_section() {
         let output = r#"
+load_backend: loaded Vulkan backend
 Available devices:
   Vulkan0: NVIDIA GeForce RTX 4080 (16376 MiB, 15120 MiB free)
   Vulkan1: AMD Radeon RX 7800 XT (16368 MiB, 14200 MiB free)
-  CPU: AMD Ryzen 9 7950X
+ggml_vulkan: diagnostic after list
+  Bogus0: must not be parsed
 "#;
         assert_eq!(
             parse_device_list(output),
@@ -871,8 +880,9 @@ Available devices:
     }
 
     #[test]
-    fn device_parser_deduplicates_and_ignores_unusable_lines() {
-        let output = "Vulkan0: First\nVulkan0: Duplicate\nno colon here\nCPU: Host\n: empty\n";
+    fn device_parser_deduplicates_and_requires_the_header() {
+        assert!(parse_device_list("Vulkan0: ignored without header\n").is_empty());
+        let output = "Available devices:\n  Vulkan0: First\n  Vulkan0: Duplicate\n  no colon here\n";
         assert_eq!(
             parse_device_list(output),
             vec![EngineDevice {
