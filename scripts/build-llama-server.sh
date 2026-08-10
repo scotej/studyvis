@@ -3,9 +3,9 @@
 # source for the host platform (V2-P1).
 #
 # This is the alternate path to `fetch-llama-server.sh`; both target the same
-# pinned llama.cpp commit so artifacts are equivalent. Use fetch by default
-# (faster, identical bytes on supported platforms); use build when:
-#   - cross-compiling for a triple llama.cpp doesn't publish a CPU prebuild for
+# pinned llama.cpp commit and backend policy. Use fetch by default (faster,
+# release-pinned bytes); use build when:
+#   - cross-compiling for a triple llama.cpp doesn't publish our chosen prebuild for
 #   - you want a statically linked single-binary output (no companion dylibs)
 #   - you need to verify the prebuilt binary's provenance independently
 #
@@ -20,8 +20,8 @@
 #     cross-build for x86_64-apple-darwin (universal SDK required).
 #   - For Linux: gcc/clang with libstdc++ static archives (`libstdc++-*-pic-dev`
 #     on Debian/Ubuntu).
-#   - For Windows: build from a Windows host with MSVC; this script's --windows
-#     flag exists for documentation only and is not exercised here.
+#   - For Windows: build from a Windows host with MSVC plus the Vulkan SDK.
+#     This mirrors the win-vulkan release archive used by fetch-llama-server.sh.
 #
 # What we do NOT support: cross-compiling Linux/Windows from macOS in a single
 # session. The release CI workflow runs this script on the matching matrix host.
@@ -131,7 +131,7 @@ case "$PLATFORM" in
     esac
     ;;
   linux) CMAKE_FLAGS+=("-DGGML_BLAS=OFF") ;;
-  windows) ;;
+  windows) CMAKE_FLAGS+=("-DGGML_VULKAN=ON") ;;
 esac
 
 if command -v ninja >/dev/null 2>&1; then
