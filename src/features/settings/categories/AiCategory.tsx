@@ -549,7 +549,7 @@ export function AiCategory() {
 
       <SettingsRow
         label={copy.engine.auto.label}
-        help={copy.engine.auto.help}
+        help="Fetches the pinned llama.cpp engine from GitHub if it's ever missing when AI starts. Size varies by platform and every download is checksum-verified."
         control={
           <Switch
             checked={engineAutoInstall}
