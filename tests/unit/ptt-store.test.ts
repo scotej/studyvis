@@ -31,9 +31,21 @@ describe('pttStore', () => {
     expect(usePttStore.getState().active).toBe(false)
   })
 
-  test('a second press releases a latch whose release event was dropped', () => {
+  test('a repeated press while active is idempotent', () => {
     usePttStore.getState().press()
     usePttStore.getState().press()
+    expect(usePttStore.getState().active).toBe(true)
+  })
+
+  test('a native-style repeat burst stays active until release', () => {
+    const { press, release } = usePttStore.getState()
+    press()
+    press()
+    press()
+    press()
+    expect(usePttStore.getState().active).toBe(true)
+
+    release()
     expect(usePttStore.getState().active).toBe(false)
   })
 
@@ -97,10 +109,8 @@ describe('pttStore', () => {
       expect(usePttStore.getState().active).toBe(false)
     })
 
-    test('a genuine continuous hold survives the whole window on a single press', () => {
+    test('a genuine continuous hold survives until the failsafe boundary', () => {
       const sched = fakeScheduler()
-      // macOS global hotkeys deliver exactly one Pressed for a physical hold
-      // (no auto-repeat), so a long utterance must stay live off one press().
       usePttStore.getState().press()
       sched.advance(MAX_HOLD_MS - 1)
       expect(usePttStore.getState().active).toBe(true)
@@ -117,24 +127,28 @@ describe('pttStore', () => {
       expect(usePttStore.getState().active).toBe(false)
     })
 
-    test('a recovery press cancels the stale failsafe timer', () => {
+    test('duplicate presses do not extend the original failsafe deadline', () => {
       const sched = fakeScheduler()
       usePttStore.getState().press()
+      expect(sched.pending()).toBe(1)
+
       sched.advance(MAX_HOLD_MS - 1)
-      // The matching release was dropped. A new physical press is an immediate
-      // recovery action, not another two-minute extension of the hot mic.
       usePttStore.getState().press()
+      usePttStore.getState().press()
+      expect(usePttStore.getState().active).toBe(true)
+      expect(sched.pending()).toBe(1)
+
+      // If either duplicate had re-armed the timer, this would still be active.
+      sched.advance(1)
       expect(usePttStore.getState().active).toBe(false)
       expect(sched.pending()).toBe(0)
-      sched.advance(MAX_HOLD_MS)
-      expect(usePttStore.getState().active).toBe(false)
     })
 
-    test('a new press after recovery starts one clean hold', () => {
+    test('a new press after failsafe release starts one clean hold', () => {
       const sched = fakeScheduler()
       usePttStore.getState().press()
-      usePttStore.getState().press()
-      usePttStore.getState().release()
+      sched.advance(MAX_HOLD_MS)
+      expect(usePttStore.getState().active).toBe(false)
       expect(sched.pending()).toBe(0)
 
       usePttStore.getState().press()
