@@ -76,7 +76,8 @@ export function currentInferenceEngineFingerprint(): string {
 // Backwards-compatible constant for call sites/tests that need the shipped
 // default. Runtime stale checks use currentInferenceEngineFingerprint() so a
 // hardware dropdown change invalidates the previous measurement immediately.
-export const INFERENCE_ENGINE_FINGERPRINT = inferenceEngineFingerprintFor('auto')
+export const INFERENCE_ENGINE_FINGERPRINT =
+  inferenceEngineFingerprintFor('auto')
 
 export type BenchmarkResult = {
   // Wall-clock seconds per chat-completion request, in invocation order.
