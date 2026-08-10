@@ -11,10 +11,7 @@ import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 
 import { logger } from '@/lib/log'
 import { usePttStore } from '@/stores/pttStore'
-import {
-  useSessionStore,
-  type PeerSnapshot,
-} from '@/stores/sessionStore'
+import { useSessionStore, type PeerSnapshot } from '@/stores/sessionStore'
 
 import {
   collectPttMediaSnapshot,
