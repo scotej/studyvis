@@ -16,17 +16,17 @@
 //! teardown in `lib.rs` never runs on that path.
 
 use std::str::FromStr;
-use std::sync::atomic::{AtomicBool, Ordering};
 #[cfg(target_os = "macos")]
 use std::sync::atomic::AtomicU64;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 #[cfg(target_os = "macos")]
 use std::time::Duration;
 
 use serde::Serialize;
-use tauri::{AppHandle, Manager, Runtime};
 #[cfg(target_os = "macos")]
 use tauri::Emitter;
+use tauri::{AppHandle, Manager, Runtime};
 use tauri_plugin_autostart::ManagerExt;
 use tauri_plugin_dialog::DialogExt;
 #[cfg(target_os = "macos")]
@@ -915,6 +915,6 @@ mod tests {
     #[cfg(target_os = "macos")]
     #[test]
     fn ptt_physical_key_map_covers_default_binding() {
-        assert_eq!(super::macos_key_code(Code::BracketLeft), Some(0x21));
+        assert_eq!(super::macos_key_code(super::Code::BracketLeft), Some(0x21));
     }
 }
