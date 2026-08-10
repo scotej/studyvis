@@ -35,6 +35,13 @@ function monotonicNow(): number {
   return typeof performance === 'undefined' ? Date.now() : performance.now()
 }
 
+function isTauriRuntime(): boolean {
+  return (
+    typeof window !== 'undefined' &&
+    '__TAURI_INTERNALS__' in (window as Window & Record<string, unknown>)
+  )
+}
+
 export function PttListener() {
   useEffect(() => {
     const unlisteners: UnlistenFn[] = []
@@ -60,10 +67,12 @@ export function PttListener() {
         previousSnapshot = null
       }
 
-      const active = usePttStore.getState().active
       const snapshot = await collectPttMediaSnapshot(room)
       if (cancelled || useSessionStore.getState().room !== room) return
 
+      // Read state after getStats resolves so a release racing the async sample
+      // cannot be reported against stale active=true state.
+      const active = usePttStore.getState().active
       sampleSeq += 1
       const delta = diffPttMediaSnapshot(previousSnapshot, snapshot)
       previousSnapshot = snapshot
@@ -204,9 +213,9 @@ export function PttListener() {
         unlisteners.push(b)
       } catch (err) {
         // Outside a Tauri runtime (Vitest, Storybook, plain web preview) the
-        // event bridge is absent. In a real packaged app this record makes a
-        // broken PTT bridge diagnosable instead of silently inert.
-        log.warn('bridge.listen_failed', { err })
+        // event bridge is expected to be absent. Only a real packaged/runtime
+        // failure is diagnostic-worthy.
+        if (isTauriRuntime()) log.warn('bridge.listen_failed', { err })
       }
     }
 
