@@ -2,8 +2,8 @@
 // (`ptt-friends-pressed` / `-released`) to the PTT store. Deliberately has NO
 // window-blur release failsafe — the shortcut is system-wide, so PTT must
 // keep transmitting while the user holds the key in another app; a dropped
-// release is covered by the store's stuck-key guard and per-session reset
-// (S2). No-op outside the Tauri runtime.
+// release is covered by the macOS physical-key watcher, the store's stuck-key
+// guard, and per-session reset (S2). No-op outside the Tauri runtime.
 
 import { useEffect } from 'react'
 
@@ -21,6 +21,8 @@ import {
 
 export const PTT_FRIENDS_PRESSED = 'ptt-friends-pressed'
 export const PTT_FRIENDS_RELEASED = 'ptt-friends-released'
+export const PTT_FRIENDS_PHYSICAL_RELEASED =
+  'ptt-friends-physical-released'
 
 const log = logger.child('ptt')
 
@@ -33,6 +35,7 @@ const SETTLED_SAMPLE_MS = 350
 
 type DiagnosticSource = 'local' | 'peer'
 type PttEdge = 'pressed' | 'released' | 'changed'
+type LocalEdgeSource = 'shortcut' | 'physical-watch'
 
 function monotonicNow(): number {
   return typeof performance === 'undefined' ? Date.now() : performance.now()
@@ -195,12 +198,16 @@ export function PttListener() {
       diagnosticTimers.add(handle)
     }
 
-    const handleLocalEdge = (edge: 'pressed' | 'released') => {
+    const handleLocalEdge = (
+      edge: 'pressed' | 'released',
+      edgeSource: LocalEdgeSource
+    ) => {
       localEdgeSeq += 1
       const currentEdgeSeq = localEdgeSeq
       const now = monotonicNow()
       const activeBefore = usePttStore.getState().active
       const duplicatePress = edge === 'pressed' && activeBefore
+      const duplicateRelease = edge === 'released' && !activeBefore
 
       if (edge === 'pressed') {
         if (duplicatePress) {
@@ -210,6 +217,7 @@ export function PttListener() {
           // future caller that bypasses this listener.
           log.warn('edge.duplicate_pressed', {
             edgeSeq: currentEdgeSeq,
+            edgeSource,
             heldMs:
               pressStartedAt === null
                 ? undefined
@@ -219,7 +227,7 @@ export function PttListener() {
           pressStartedAt = now
           press()
         }
-      } else {
+      } else if (!duplicateRelease) {
         release()
       }
 
@@ -228,21 +236,23 @@ export function PttListener() {
         pressStartedAt === null
           ? undefined
           : Math.max(0, Math.round(now - pressStartedAt))
+      const duplicate = duplicatePress || duplicateRelease
 
       // Debug records are intentionally never throttled by the structured log
-      // sink, so an issue attachment preserves the exact Pressed/Released order
-      // instead of folding a repeat burst into one line.
+      // sink, so an issue attachment preserves the exact native/recovery edge
+      // order instead of folding repeated events into one line.
       log.debug('edge.received', {
         edge,
+        edgeSource,
         edgeSeq: currentEdgeSeq,
         activeBefore,
         activeAfter,
         heldMs,
-        duplicate: duplicatePress,
+        duplicate,
         sessionActive: useSessionStore.getState().room !== null,
       })
 
-      if (duplicatePress) return
+      if (duplicate) return
 
       scheduleMediaSample(
         'local',
@@ -314,7 +324,7 @@ export function PttListener() {
     const wire = async () => {
       try {
         const a = await listen(PTT_FRIENDS_PRESSED, () =>
-          handleLocalEdge('pressed')
+          handleLocalEdge('pressed', 'shortcut')
         )
         if (cancelled) {
           a()
@@ -323,13 +333,22 @@ export function PttListener() {
         unlisteners.push(a)
 
         const b = await listen(PTT_FRIENDS_RELEASED, () =>
-          handleLocalEdge('released')
+          handleLocalEdge('released', 'shortcut')
         )
         if (cancelled) {
           b()
           return
         }
         unlisteners.push(b)
+
+        const c = await listen(PTT_FRIENDS_PHYSICAL_RELEASED, () =>
+          handleLocalEdge('released', 'physical-watch')
+        )
+        if (cancelled) {
+          c()
+          return
+        }
+        unlisteners.push(c)
       } catch (err) {
         // Outside a Tauri runtime (Vitest, Storybook, plain web preview) the
         // event bridge is expected to be absent. Only a real packaged/runtime
@@ -343,10 +362,9 @@ export function PttListener() {
     // No blur-release failsafe: the friends shortcut is a GLOBAL shortcut whose
     // Released event is delivered system-wide regardless of window focus, so
     // PTT must keep transmitting while the user works in another app (the whole
-    // point of hold-to-talk during a body-doubling session). Releasing on blur
-    // would cut audio mid-sentence in exactly that scenario. The genuinely
-    // dropped-release case is covered by the store's MAX_HOLD_MS stuck-key
-    // failsafe plus the per-session reset().
+    // point of hold-to-talk during a body-doubling session). On macOS the native
+    // physical-key watcher independently recovers a dropped release; the store's
+    // MAX_HOLD_MS guard and per-session reset remain platform-neutral fallbacks.
 
     return () => {
       cancelled = true
