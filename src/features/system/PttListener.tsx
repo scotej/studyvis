@@ -9,37 +9,204 @@ import { useEffect } from 'react'
 
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 
+import { logger } from '@/lib/log'
 import { usePttStore } from '@/stores/pttStore'
+import { useSessionStore } from '@/stores/sessionStore'
+
+import {
+  collectPttMediaSnapshot,
+  diffPttMediaSnapshot,
+  type PttMediaSnapshot,
+} from './pttDiagnostics'
 
 export const PTT_FRIENDS_PRESSED = 'ptt-friends-pressed'
 export const PTT_FRIENDS_RELEASED = 'ptt-friends-released'
 
+const log = logger.child('ptt')
+
+// First sample gives React's PTT effect time to mirror the store onto
+// MediaStreamTrack.enabled. The settled sample is late enough for getStats()
+// counters to show whether outbound RTP progressed through the hold, while
+// remaining short enough to capture the ~200 ms failure reported in #209.
+const POST_EDGE_SAMPLE_MS = 40
+const SETTLED_PRESS_SAMPLE_MS = 350
+
+function monotonicNow(): number {
+  return typeof performance === 'undefined' ? Date.now() : performance.now()
+}
+
 export function PttListener() {
   useEffect(() => {
     const unlisteners: UnlistenFn[] = []
+    const diagnosticTimers = new Set<ReturnType<typeof setTimeout>>()
     let cancelled = false
+    let edgeSeq = 0
+    let sampleSeq = 0
+    let pressStartedAt: number | null = null
+    let previousSnapshot: PttMediaSnapshot | null = null
+    let previousRoom = useSessionStore.getState().room
 
     const press = usePttStore.getState().press
     const release = usePttStore.getState().release
 
+    const sampleMedia = async (
+      edge: 'pressed' | 'released',
+      sourceEdgeSeq: number,
+      phase: 'post-edge' | 'settled'
+    ) => {
+      const room = useSessionStore.getState().room
+      if (room !== previousRoom) {
+        previousRoom = room
+        previousSnapshot = null
+      }
+
+      const active = usePttStore.getState().active
+      const snapshot = await collectPttMediaSnapshot(room)
+      if (cancelled || useSessionStore.getState().room !== room) return
+
+      sampleSeq += 1
+      const delta = diffPttMediaSnapshot(previousSnapshot, snapshot)
+      previousSnapshot = snapshot
+      const heldMs =
+        pressStartedAt === null
+          ? undefined
+          : Math.max(0, Math.round(monotonicNow() - pressStartedAt))
+      const fields = {
+        edge,
+        edgeSeq: sourceEdgeSeq,
+        sampleSeq,
+        phase,
+        active,
+        heldMs,
+        ...snapshot,
+        ...delta,
+      }
+
+      // These are state contradictions, not heuristics: if PTT says active but
+      // every published audio sender is disabled (or absent despite live peer
+      // connections), the peer cannot receive speech. Likewise, an enabled
+      // sender while inactive is a privacy failure. RTP byte deltas remain
+      // debug telemetry only because Opus DTX may legitimately produce little
+      // or no traffic during silence.
+      if (
+        active &&
+        snapshot.peerConnectionCount > 0 &&
+        snapshot.audioSenderCount === 0
+      ) {
+        log.warn('media.active_no_audio_sender', fields)
+      } else if (
+        active &&
+        snapshot.audioSenderCount > 0 &&
+        snapshot.enabledAudioSenderCount !== snapshot.audioSenderCount
+      ) {
+        log.error('media.active_sender_disabled', fields)
+      } else if (!active && snapshot.enabledAudioSenderCount > 0) {
+        log.error('media.inactive_sender_enabled', fields)
+      } else if (
+        active &&
+        snapshot.audioSenderCount > 0 &&
+        snapshot.liveAudioSenderCount !== snapshot.audioSenderCount
+      ) {
+        log.warn('media.audio_track_not_live', fields)
+      } else {
+        log.debug('media.snapshot', fields)
+      }
+    }
+
+    const scheduleMediaSample = (
+      edge: 'pressed' | 'released',
+      sourceEdgeSeq: number,
+      phase: 'post-edge' | 'settled',
+      delayMs: number
+    ) => {
+      const handle = setTimeout(() => {
+        diagnosticTimers.delete(handle)
+        void sampleMedia(edge, sourceEdgeSeq, phase)
+      }, delayMs)
+      diagnosticTimers.add(handle)
+    }
+
+    const handleEdge = (edge: 'pressed' | 'released') => {
+      edgeSeq += 1
+      const currentEdgeSeq = edgeSeq
+      const now = monotonicNow()
+      const activeBefore = usePttStore.getState().active
+
+      if (edge === 'pressed') {
+        if (activeBefore) {
+          log.warn('edge.duplicate_pressed', {
+            edgeSeq: currentEdgeSeq,
+            heldMs:
+              pressStartedAt === null
+                ? undefined
+                : Math.max(0, Math.round(now - pressStartedAt)),
+          })
+        } else {
+          pressStartedAt = now
+        }
+        press()
+      } else {
+        release()
+      }
+
+      const activeAfter = usePttStore.getState().active
+      const heldMs =
+        pressStartedAt === null
+          ? undefined
+          : Math.max(0, Math.round(now - pressStartedAt))
+
+      // Debug records are intentionally never throttled by the structured log
+      // sink, so an issue attachment preserves the exact Pressed/Released order
+      // instead of folding a repeat burst into one line.
+      log.debug('edge.received', {
+        edge,
+        edgeSeq: currentEdgeSeq,
+        activeBefore,
+        activeAfter,
+        heldMs,
+        sessionActive: useSessionStore.getState().room !== null,
+      })
+
+      scheduleMediaSample(
+        edge,
+        currentEdgeSeq,
+        'post-edge',
+        POST_EDGE_SAMPLE_MS
+      )
+      if (edge === 'pressed') {
+        scheduleMediaSample(
+          edge,
+          currentEdgeSeq,
+          'settled',
+          SETTLED_PRESS_SAMPLE_MS
+        )
+      } else {
+        pressStartedAt = null
+      }
+    }
+
     const wire = async () => {
       try {
-        const a = await listen(PTT_FRIENDS_PRESSED, () => press())
+        const a = await listen(PTT_FRIENDS_PRESSED, () => handleEdge('pressed'))
         if (cancelled) {
           a()
           return
         }
         unlisteners.push(a)
 
-        const b = await listen(PTT_FRIENDS_RELEASED, () => release())
+        const b = await listen(PTT_FRIENDS_RELEASED, () =>
+          handleEdge('released')
+        )
         if (cancelled) {
           b()
           return
         }
         unlisteners.push(b)
-      } catch {
+      } catch (err) {
         // Outside a Tauri runtime (Vitest, Storybook, plain web preview) the
-        // event bridge is absent. PTT just stays inactive — no UI fallback.
+        // event bridge is absent. In a real packaged app this record makes a
+        // broken PTT bridge diagnosable instead of silently inert.
+        log.warn('bridge.listen_failed', { err })
       }
     }
 
@@ -55,6 +222,8 @@ export function PttListener() {
 
     return () => {
       cancelled = true
+      for (const handle of diagnosticTimers) clearTimeout(handle)
+      diagnosticTimers.clear()
       for (const u of unlisteners) u()
     }
   }, [])
