@@ -695,7 +695,9 @@ async fn download_verified<R: Runtime>(
 // .download-* archives. The engine root is app-private, so anything
 // unrecognized is ours to drop.
 fn cleanup_stale(root: &Path) {
-    let current = format!("{ENGINE_TAG}-r{ENGINE_PACKAGE_REVISION}-{TARGET_TRIPLE}");
+    let current = format!(
+        "{ENGINE_TAG}-r{ENGINE_PACKAGE_REVISION}-{TARGET_TRIPLE}"
+    );
     let Ok(entries) = fs::read_dir(root) else {
         return;
     };
