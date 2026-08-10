@@ -55,9 +55,7 @@ export function readCachedAiComputeDeviceSelection(): AiComputeDeviceSelection {
   if (typeof window === 'undefined') return DEFAULT_AI_COMPUTE_DEVICE
   try {
     const value = window.localStorage.getItem(AI_COMPUTE_DEVICE_CACHE_KEY)
-    return isAiComputeDeviceSelection(value)
-      ? value
-      : DEFAULT_AI_COMPUTE_DEVICE
+    return isAiComputeDeviceSelection(value) ? value : DEFAULT_AI_COMPUTE_DEVICE
   } catch {
     return DEFAULT_AI_COMPUTE_DEVICE
   }
