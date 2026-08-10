@@ -170,7 +170,7 @@ jobs:
             libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev \
             libxdo-dev libssl-dev libdbus-1-dev build-essential file
 
-      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master; the toolchain input selects the channel
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master; the toolchain input selects the channel
         with:
           # With a master pin the ref no longer selects the toolchain; this
           # input does.
@@ -295,7 +295,7 @@ jobs:
       # policy; the heuristic audits below it would gate merges on
       # low-confidence guesses, which is how a gate gets ignored.
       - name: zizmor (blocking — pinning policy)
-        uses: zizmorcore/zizmor-action@6fc4b006235f201fdab3722e17240ab420d580e5 # v0.6.1
+        uses: zizmorcore/zizmor-action@3dc1ecc9bcb9e94e9b2c709687979e1298497054 # v0.6.2
         with:
           version: 1.28.0
           config: .github/zizmor.yml
@@ -310,7 +310,7 @@ jobs:
       # triage, not a red X on an unrelated PR.
       - name: zizmor (advisory — full findings to code scanning)
         continue-on-error: true
-        uses: zizmorcore/zizmor-action@6fc4b006235f201fdab3722e17240ab420d580e5 # v0.6.1
+        uses: zizmorcore/zizmor-action@3dc1ecc9bcb9e94e9b2c709687979e1298497054 # v0.6.2
         with:
           version: 1.28.0
           config: .github/zizmor.yml
@@ -407,7 +407,7 @@ jobs:
       # ships inside the binary, and a typo there survives until the next
       # release.
       - name: Spell check
-        uses: crate-ci/typos@bee27e3a4fd1ea2111cf90ab89cd076c870fce14 # v1.48.0
+        uses: crate-ci/typos@8a48f81b6c64dcfea44b3633223084c4be58ac5f # v1.49.0
 
       # Advisory: link rot is real (INSTALL.md and README.md both point at
       # tauri.app and GitHub release URLs) but it is caused by other people's
