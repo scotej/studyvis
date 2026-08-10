@@ -108,7 +108,8 @@ export async function collectPttMediaSnapshot(
         const stat = raw as RtpStats
         if (stat.type !== 'outbound-rtp' || !isAudioRtp(stat)) return
         snapshot.outboundReportCount += 1
-        if (typeof stat.bytesSent === 'number') snapshot.bytesSent += stat.bytesSent
+        if (typeof stat.bytesSent === 'number')
+          snapshot.bytesSent += stat.bytesSent
         if (typeof stat.packetsSent === 'number') {
           snapshot.packetsSent += stat.packetsSent
         }
@@ -120,7 +121,8 @@ export async function collectPttMediaSnapshot(
 
   snapshot.audioReceiverCount = audioReceivers.length
   for (const receiver of audioReceivers) {
-    if (receiver.track?.readyState === 'live') snapshot.liveAudioReceiverCount += 1
+    if (receiver.track?.readyState === 'live')
+      snapshot.liveAudioReceiverCount += 1
 
     try {
       const report = await receiver.getStats()
