@@ -21,15 +21,19 @@ import {
   type InvitePayload,
   type InvitePayloadCore,
 } from './envelope'
-import { createInviteRetryManager } from './inviteRetry'
+import {
+  createInviteRetryManager,
+  type InviteDeliveryResult,
+} from './inviteRetry'
 import { logger } from '@/lib/log'
 
 const log = logger.child('friends.invite')
 
 // F6 — process-wide retry manager. `inviteFriend` registers a pending retry on
-// InviteTimeoutError (the friend was offline) and marks (recipient, session)
-// delivered on success; InboxBoot drives `onPresenceOnline` when a friend's
-// presence flips online, and `cancelAll` when the host's session ends.
+// a timeout or an unconfirmed transport send, and marks (recipient, session)
+// delivered only after a verified recipient ACK. InboxBoot drives
+// `onPresenceOnline` when a friend's presence flips online, and `cancelAll`
+// when the host's session ends.
 export const inviteRetryManager = createInviteRetryManager({
   // Never the envelope: it carries the session password.
   onRetryError: (err) => log.warn('retry.failed', { err }),
@@ -111,7 +115,7 @@ const DEFAULT_ACK_TIMEOUT_MS = 5_000
 // pubkey. False means "sent, unconfirmed": an older build, a slow answer, or
 // — the case this exists to surface — a friend who never added you back, so
 // their inbox silently dropped the envelope.
-export type InviteSendResult = { acked: boolean }
+export type InviteSendResult = InviteDeliveryResult
 
 export type SessionInvite = {
   sessionTopic: string
@@ -164,6 +168,76 @@ type SendEnvelopeOpts = {
   ackTimeoutMs?: number
   // F1/F6 test seam — overrides the live relay-reachability read at timeout.
   isRelayUnreachable?: () => boolean
+  // Retry cancellation uses this to abandon an in-flight peer wait or ACK
+  // linger. It is intentionally internal: direct user-initiated sends are not
+  // cancelled by a retry-manager lifecycle event.
+  signal?: AbortSignal
+}
+
+function createAbortError(): Error {
+  const error = new Error('invite send aborted')
+  error.name = 'AbortError'
+  return error
+}
+
+function throwIfAborted(signal: AbortSignal | undefined): void {
+  if (signal?.aborted) throw createAbortError()
+}
+
+function waitForAbortableDelay(
+  ms: number,
+  signal: AbortSignal | undefined
+): Promise<void> {
+  if (signal === undefined) {
+    return new Promise((resolve) => setTimeout(resolve, ms))
+  }
+  const abortSignal: AbortSignal = signal
+  if (abortSignal.aborted) return Promise.reject(createAbortError())
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(done, ms)
+    const onAbort = () => {
+      cleanup()
+      reject(createAbortError())
+    }
+    function cleanup(): void {
+      clearTimeout(timer)
+      abortSignal.removeEventListener('abort', onAbort)
+    }
+    function done(): void {
+      cleanup()
+      resolve()
+    }
+    abortSignal.addEventListener('abort', onAbort, { once: true })
+  })
+}
+
+// The send-chain tail must retain the real lifecycle promise so later sends
+// remain serialized. The caller-facing wrapper can still reject immediately
+// when cancellation happens while this send is queued behind another one.
+function withAbort<T>(
+  promise: Promise<T>,
+  signal: AbortSignal | undefined
+): Promise<T> {
+  if (signal === undefined) return promise
+  if (signal.aborted) return Promise.reject(createAbortError())
+  return new Promise((resolve, reject) => {
+    const onAbort = () => {
+      cleanup()
+      reject(createAbortError())
+    }
+    const cleanup = () => signal.removeEventListener('abort', onAbort)
+    signal.addEventListener('abort', onAbort, { once: true })
+    void promise.then(
+      (result) => {
+        cleanup()
+        resolve(result)
+      },
+      (err) => {
+        cleanup()
+        reject(err)
+      }
+    )
+  })
 }
 
 // Two concurrent sends to the same friend collide inside trystero: its core
@@ -191,17 +265,17 @@ export async function sendInviteEnvelope(
   }
   const chainKey = inboxTopic(recipientEdPub)
   const prev = sendChains.get(chainKey) ?? Promise.resolve()
-  const run = prev.then(() =>
+  const lifecycle = prev.then(() =>
     sendInviteEnvelopeNow(recipientEdPub, recipient, envelope, opts)
   )
   // The chain tail swallows this send's outcome so a failed send never
   // poisons the next one; the map entry is dropped once the topic is idle.
-  const tail = run.catch(() => {})
+  const tail = lifecycle.catch(() => {})
   sendChains.set(chainKey, tail)
   void tail.then(() => {
     if (sendChains.get(chainKey) === tail) sendChains.delete(chainKey)
   })
-  return run
+  return withAbort(lifecycle, opts.signal)
 }
 
 async function sendInviteEnvelopeNow(
@@ -211,6 +285,8 @@ async function sendInviteEnvelopeNow(
   opts: SendEnvelopeOpts
 ): Promise<InviteSendResult> {
   const timeoutMs = opts.sendTimeoutMs ?? DEFAULT_SEND_TIMEOUT_MS
+  const signal = opts.signal
+  throwIfAborted(signal)
   // #47 C1 — the send path now races both transports, so the network-down
   // verdict at timeout must consider both socket maps (the same PR-21
   // rationale as pairing).
@@ -270,14 +346,17 @@ async function sendInviteEnvelopeNow(
     await new Promise<void>((resolve, reject) => {
       let settled = false
       let unsubscribePeerJoin: (() => void) | null = null
+      let timer: ReturnType<typeof setTimeout> | null = null
+      const onAbort = () => settle(() => reject(createAbortError()))
       const settle = (fn: () => void) => {
         if (settled) return
         settled = true
         unsubscribePeerJoin?.()
-        clearTimeout(timer)
+        if (timer !== null) clearTimeout(timer)
+        signal?.removeEventListener('abort', onAbort)
         fn()
       }
-      const timer = setTimeout(() => {
+      timer = setTimeout(() => {
         // F1/F6 — no peer arrived in time. Distinguish "the friend is offline"
         // from "the relays are blocked" by reading the live socket map: if no
         // relay is reachable, it's the user's own network (InviteRelayError, no
@@ -290,6 +369,11 @@ async function sendInviteEnvelopeNow(
           )
         )
       }, timeoutMs)
+      if (signal?.aborted) {
+        onAbort()
+        return
+      }
+      signal?.addEventListener('abort', onAbort, { once: true })
       // Once at least one peer is on the topic, fire the envelope to all
       // listeners and resolve. The timeout above guarantees the promise
       // settles even if no peer ever joins.
@@ -308,9 +392,13 @@ async function sendInviteEnvelopeNow(
       const ackDeadline =
         Date.now() + (opts.ackTimeoutMs ?? DEFAULT_ACK_TIMEOUT_MS)
       while (!ackReceived() && Date.now() < ackDeadline) {
-        await new Promise((r) => setTimeout(r, 100))
+        await waitForAbortableDelay(
+          Math.min(100, Math.max(1, ackDeadline - Date.now())),
+          signal
+        )
       }
     }
+    throwIfAborted(signal)
     return { acked: ackReceived() }
   } finally {
     try {
@@ -329,16 +417,23 @@ export async function inviteFriend(
 ): Promise<InviteSendResult> {
   const envelope = await buildInviteEnvelope(sender, recipient, session, opts)
   const sessionTopic = session.sessionTopic
-  const deliver = () =>
+  const deliver = (signal?: AbortSignal) =>
     sendInviteEnvelope(recipient, envelope, {
       sendTimeoutMs: opts.sendTimeoutMs,
       ackSessionTopic: sessionTopic,
       ackTimeoutMs: opts.ackTimeoutMs,
+      signal,
     })
   try {
     const result = await deliver()
-    // F6 — first send landed; dedupe future retries for this (friend, session).
-    inviteRetryManager.markDelivered(recipient.edPubkeyHex, sessionTopic)
+    // A transport-level send can be observed by anyone on the inbox topic.
+    // Only the signed ACK verified in sendInviteEnvelope proves this recipient
+    // received it, so unconfirmed sends remain eligible for presence retry.
+    if (result.acked) {
+      inviteRetryManager.markDelivered(recipient.edPubkeyHex, sessionTopic)
+    } else {
+      inviteRetryManager.register(recipient.edPubkeyHex, sessionTopic, deliver)
+    }
     return result
   } catch (err) {
     // F6 — the friend was offline (no peer ever joined their inbox topic).

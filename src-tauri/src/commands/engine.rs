@@ -253,6 +253,11 @@ async fn install_locked<R: Runtime>(
     state: &EngineState,
     force: bool,
 ) -> Result<(), String> {
+    // A process loss between the two promotion renames leaves the prior
+    // complete install in the rollback directory. Restore it before deciding
+    // whether an install is needed, so a crash during a forced reinstall does
+    // not turn an otherwise usable offline engine into a fresh download.
+    recover_interrupted_promotion(&managed_install_dir(app)?)?;
     if !force {
         if let Ok(path) = managed_binary_path(app) {
             if path.is_file() {
@@ -349,14 +354,101 @@ async fn do_install<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
         ));
     }
 
-    // Install atomically: the final dir either doesn't exist or is complete.
+    // Promote in a reversible two-rename transaction. `rename(staging,
+    // final_dir)` cannot replace a non-empty directory on every supported
+    // platform, so deleting `final_dir` first (the old implementation) left
+    // users with no engine when the second rename failed. Moving the old
+    // install aside keeps it intact until the staged replacement is known to
+    // be in place; a failed promotion restores it before returning an error.
     // We hold the install gate, so nothing else touches these paths.
     let final_dir = managed_install_dir(app)?;
-    if final_dir.exists() {
-        fs::remove_dir_all(&final_dir).map_err(|e| format!("remove old engine: {e}"))?;
+    let promote_result = promote_staged_install(&staging, &final_dir);
+    if promote_result.is_err() {
+        let _ = fs::remove_dir_all(&staging);
     }
-    fs::rename(&staging, &final_dir).map_err(|e| format!("install engine: {e}"))?;
-    Ok(())
+    promote_result
+}
+
+// The staging directory is deliberately under the same engine root as the
+// final directory, so both moves are same-filesystem renames. The rollback
+// name is a fixed transaction journal: EngineState's gate serializes installs,
+// and the stable path lets the next launch recognize and restore an interrupted
+// promotion instead of discarding the only complete engine copy.
+fn rollback_dir_for(final_dir: &Path) -> Result<PathBuf, String> {
+    let parent = final_dir.parent().ok_or_else(|| {
+        format!(
+            "engine install directory has no parent: {}",
+            final_dir.display()
+        )
+    })?;
+    let name = final_dir
+        .file_name()
+        .ok_or_else(|| {
+            format!(
+                "engine install directory has no name: {}",
+                final_dir.display()
+            )
+        })?
+        .to_string_lossy();
+    Ok(parent.join(format!(".{name}.rollback")))
+}
+
+// Recover the two crash states of a promotion before any cleanup sweep:
+// - no final dir + rollback dir: the old install was moved aside but staging
+//   was not promoted yet, so restore it;
+// - both dirs: staging was promoted and only rollback cleanup was interrupted,
+//   so retain the new final install and drop the old one.
+fn recover_interrupted_promotion(final_dir: &Path) -> Result<(), String> {
+    let rollback_dir = rollback_dir_for(final_dir)?;
+    if !rollback_dir.exists() {
+        return Ok(());
+    }
+    if final_dir.exists() {
+        return fs::remove_dir_all(&rollback_dir)
+            .map_err(|e| format!("clear completed engine rollback: {e}"));
+    }
+    fs::rename(&rollback_dir, final_dir)
+        .map_err(|e| format!("restore interrupted engine install: {e}"))
+}
+
+fn promote_staged_install(staging: &Path, final_dir: &Path) -> Result<(), String> {
+    let rollback_dir = rollback_dir_for(final_dir)?;
+    let had_existing = final_dir.exists();
+
+    if had_existing {
+        if rollback_dir.exists() {
+            fs::remove_dir_all(&rollback_dir)
+                .map_err(|e| format!("clear stale engine rollback: {e}"))?;
+        }
+        fs::rename(final_dir, &rollback_dir)
+            .map_err(|e| format!("stage previous engine for rollback: {e}"))?;
+    }
+
+    match fs::rename(staging, final_dir) {
+        Ok(()) => {
+            if had_existing {
+                // A cleanup failure leaves a recoverable old engine directory,
+                // not a broken installation. The next successful reinstall
+                // retries its removal, so do not turn a successful promotion
+                // into an apparent failure.
+                let _ = fs::remove_dir_all(&rollback_dir);
+            }
+            Ok(())
+        }
+        Err(install_error) => {
+            if !had_existing {
+                return Err(format!("install engine: {install_error}"));
+            }
+            match fs::rename(&rollback_dir, final_dir) {
+                Ok(()) => Err(format!(
+                    "install engine: {install_error}; previous engine restored"
+                )),
+                Err(rollback_error) => Err(format!(
+                    "install engine: {install_error}; failed to restore previous engine: {rollback_error}"
+                )),
+            }
+        }
+    }
 }
 
 async fn download_verified<R: Runtime>(
@@ -706,5 +798,54 @@ mod tests {
         assert!(asset_for("x86_64-apple-darwin").is_some());
         assert!(asset_for("x86_64-unknown-linux-gnu").is_some());
         assert!(asset_for("aarch64-unknown-linux-gnu").is_none());
+    }
+
+    #[test]
+    fn staged_engine_promotion_replaces_the_old_install() {
+        let root = scratch_dir("promote");
+        let staging = root.join("staging");
+        let final_dir = root.join("final");
+        fs::create_dir_all(&staging).unwrap();
+        fs::create_dir_all(&final_dir).unwrap();
+        fs::write(staging.join("llama-server"), b"new").unwrap();
+        fs::write(final_dir.join("llama-server"), b"old").unwrap();
+
+        promote_staged_install(&staging, &final_dir).expect("promote");
+
+        assert!(!staging.exists());
+        assert_eq!(fs::read(final_dir.join("llama-server")).unwrap(), b"new");
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn failed_engine_promotion_restores_the_old_install() {
+        let root = scratch_dir("rollback");
+        let final_dir = root.join("final");
+        let missing_staging = root.join("missing-staging");
+        fs::create_dir_all(&final_dir).unwrap();
+        fs::write(final_dir.join("llama-server"), b"old").unwrap();
+
+        let err = promote_staged_install(&missing_staging, &final_dir)
+            .expect_err("missing staging must fail");
+
+        assert!(err.contains("previous engine restored"));
+        assert_eq!(fs::read(final_dir.join("llama-server")).unwrap(), b"old");
+        assert!(!rollback_dir_for(&final_dir).unwrap().exists());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn interrupted_engine_promotion_restores_the_old_install_before_retry() {
+        let root = scratch_dir("interrupted-rollback");
+        let final_dir = root.join("final");
+        let rollback_dir = rollback_dir_for(&final_dir).unwrap();
+        fs::create_dir_all(&rollback_dir).unwrap();
+        fs::write(rollback_dir.join("llama-server"), b"old").unwrap();
+
+        recover_interrupted_promotion(&final_dir).expect("restore interrupted install");
+
+        assert_eq!(fs::read(final_dir.join("llama-server")).unwrap(), b"old");
+        assert!(!rollback_dir.exists());
+        let _ = fs::remove_dir_all(root);
     }
 }

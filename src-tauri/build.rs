@@ -1,9 +1,81 @@
 use std::fs;
 use std::path::PathBuf;
 
+// Custom commands are denied to every webview unless a capability explicitly
+// grants their generated `allow-*` permission. Keep this exhaustive with the
+// `generate_handler!` table in `src/lib.rs`: an omitted command fails closed
+// instead of silently becoming reachable from a secondary webview.
+const APP_COMMANDS: &[&str] = &[
+    "friends_list",
+    "friends_add",
+    "friends_remove",
+    "friends_update_last_studied",
+    "friends_get_x_pubkey",
+    "friends_export",
+    "friends_import",
+    "sessions_insert",
+    "sessions_insert_if_absent",
+    "sessions_list",
+    "sessions_get",
+    "sessions_delete",
+    "sessions_clear_all",
+    "audit_event_insert",
+    "audit_events_list_for_session",
+    "audit_events_list_all",
+    "identity_save_keys",
+    "identity_exists",
+    "identity_keys_present",
+    "identity_save_record",
+    "identity_load_record",
+    "identity_sign",
+    "identity_box_decrypt",
+    "identity_box_encrypt",
+    "autostart_set_enabled",
+    "autostart_is_enabled",
+    "system_minimize_to_tray_set_enabled",
+    "system_ai_features_set_enabled",
+    "system_open_data_folder",
+    "system_write_text_file",
+    "system_save_image",
+    "system_open_releases",
+    "system_open_screen_capture_settings",
+    "system_open_camera_settings",
+    "system_open_microphone_settings",
+    "system_open_notification_settings",
+    "system_set_global_shortcut",
+    "system_relaunch_app",
+    "system_install_context",
+    "system_battery",
+    "session_set_active",
+    "app_quit",
+    "sidecar_start",
+    "sidecar_stop",
+    "sidecar_status",
+    "engine_info",
+    "engine_install",
+    "diagnostics_reveal_log",
+    "diagnostics_info",
+    "diagnostics_export",
+    "app_log_append",
+    "app_log_tail",
+    "model_paths",
+    "model_install_state",
+    "model_remove",
+    "model_head_check",
+    "model_download",
+    "model_download_cancel",
+    "hf_token_save",
+    "hf_token_present",
+    "hf_token_clear",
+];
+
 fn main() {
     ensure_debug_sidecar_placeholder();
-    tauri_build::build()
+    tauri_build::try_build(
+        tauri_build::Attributes::new()
+            .app_manifest(tauri_build::AppManifest::new().commands(APP_COMMANDS)),
+    )
+    .expect("failed to generate Tauri command permissions");
 }
 
 // I73 — tauri-build hard-fails when the `externalBin` file is missing, which

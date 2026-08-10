@@ -105,6 +105,10 @@ struct SidecarInner {
     port: Option<u16>,
     model: Option<String>,
     mmproj: Option<String>,
+    // Managed model directory identities captured at start. Keep these
+    // separately from the display paths so model_remove/download can safely
+    // stop a child that was started through an equivalent symlink path.
+    managed_model_ids: Vec<String>,
     ctx_size: Option<u32>,
     // generation increments on every explicit start so a stale watcher from a
     // previous run knows to exit instead of re-incarnating the process.
@@ -140,23 +144,22 @@ impl SidecarState {
     // tauri-plugin-shell's CommandChild does not kill on drop — so without
     // this a multi-GB llama-server would outlive the app, holding its model
     // file and port until the user kills it by hand. The exit callback runs
-    // on the main thread (not an async-runtime worker), so a brief bounded
-    // spin to acquire the lock is safe and avoids skipping the kill on lock
-    // contention; the bound keeps a wedged holder from hanging quit.
+    // on the main thread (not an async-runtime worker), so waiting for the
+    // short synchronous critical section is safe. Giving up on lock
+    // contention leaves a child untracked and orphaned after app exit, which
+    // is worse than a brief delayed quit. No SidecarInner lock is held across
+    // an await; the longest critical sections are path/log setup and process
+    // spawn, and the restart path stores a child before releasing it.
     pub fn kill_blocking<R: Runtime>(app: &AppHandle<R>) {
         let Some(state) = app.try_state::<SidecarState>() else {
             return;
         };
         let arc = state.0.clone();
-        let deadline = Instant::now() + Duration::from_millis(500);
         let mut guard = loop {
             match arc.try_lock() {
                 Ok(g) => break g,
                 Err(_) => {
-                    if Instant::now() >= deadline {
-                        return;
-                    }
-                    std::thread::sleep(Duration::from_millis(10));
+                    std::thread::sleep(Duration::from_millis(1));
                 }
             }
         };
@@ -205,21 +208,13 @@ pub async fn sidecar_start<R: Runtime>(
     app: AppHandle<R>,
     state: State<'_, SidecarState>,
     engine: State<'_, super::engine::EngineState>,
+    model_operations: State<'_, super::models::ModelOperationState>,
     model_path: String,
     mmproj_path: Option<String>,
     ctx_size: u32,
     engine_auto_install: bool,
 ) -> Result<u16, String> {
     let arc = state.0.clone();
-    {
-        let guard = arc.lock().await;
-        if guard.child.is_some() {
-            return guard
-                .port
-                .ok_or_else(|| "sidecar running but no port recorded".to_string());
-        }
-    }
-
     if !PathBuf::from(&model_path).is_file() {
         return Err(format!("model_path does not exist: {model_path}"));
     }
@@ -229,17 +224,38 @@ pub async fn sidecar_start<R: Runtime>(
         }
     }
 
+    // Take the managed model gate before even returning an already-running
+    // child. That makes a concurrent download/remove linearizable with start:
+    // whichever operation owns the gate first completes first, rather than a
+    // start returning a port while a remover is about to kill that child.
+    // Custom GGUF paths intentionally have no managed-model gate.
+    let model_ids =
+        super::models::managed_model_ids_for_paths(&app, &model_path, mmproj_path.as_deref())?;
+    let model_gates = model_operations.gates_for(&model_ids).await;
+    let mut _model_guards = Vec::with_capacity(model_gates.len());
+    for gate in &model_gates {
+        _model_guards.push(gate.clone().lock_owned().await);
+    }
+
     // Mark the entire potentially slow install/spawn interval. Before the
     // child exists, model/port are still empty—the same fields an explicit
     // stop exposes—so JS needs this authoritative bit to distinguish "keep
     // waiting" from "the session deliberately stopped the engine".
     let start_epoch = {
         let mut guard = arc.lock().await;
-        // Re-check after path validation; another caller may have completed.
         if guard.child.is_some() {
             return guard
                 .port
                 .ok_or_else(|| "sidecar running but no port recorded".to_string());
+        }
+        // A watcher keeps model metadata during its restart backoff so a
+        // concurrent remove/download can invalidate the pending respawn. An
+        // explicit start while in that state must do the same; otherwise the
+        // stale watcher can spawn the old model between this command's checks
+        // and its eventual spawn, and this start would incorrectly reuse it.
+        if guard.model.is_some() {
+            let child = take_child_and_wipe(&mut guard);
+            debug_assert!(child.is_none(), "missing child must not need a kill");
         }
         if guard.shutting_down {
             return Err("app is shutting down".to_string());
@@ -253,6 +269,7 @@ pub async fn sidecar_start<R: Runtime>(
         &engine,
         model_path,
         mmproj_path,
+        model_ids,
         ctx_size,
         engine_auto_install,
         start_epoch,
@@ -270,6 +287,7 @@ async fn sidecar_start_marked<R: Runtime>(
     engine: &super::engine::EngineState,
     model_path: String,
     mmproj_path: Option<String>,
+    managed_model_ids: Vec<String>,
     ctx_size: u32,
     engine_auto_install: bool,
     start_epoch: u64,
@@ -288,14 +306,27 @@ async fn sidecar_start_marked<R: Runtime>(
 
     // Hold the install gate across resolve + spawn so a concurrent forced
     // reinstall (engine_install) can't swap the managed engine dir under the
-    // child we're about to spawn (PR-88 review). The ONE lock-order invariant
-    // across both modules: engine gate before sidecar lock, never the
-    // reverse. engine_install honors it (gate, then stop_now — which takes
-    // and RELEASES the sidecar lock internally and never touches the gate);
-    // holding a sidecar guard while acquiring the gate anywhere would be an
-    // AB-BA deadlock with this function. ensure_installed above takes and
-    // releases the gate internally, so it must stay before this acquire.
+    // child we're about to spawn. The caller already holds any managed-model
+    // gate(s) across this whole start, including the final file validation
+    // below; model_remove/download use those same gates before they
+    // stop/delete/replace a directory. Lock order is model gates → engine
+    // gate → sidecar lock. Nothing takes a sidecar lock before either of
+    // these, so there is no AB-BA cycle.
+    //
+    // ensure_installed above takes and releases the engine gate internally,
+    // so it must stay before this acquire.
     let _engine_gate = engine.gate.lock().await;
+    // The initial checks above avoid advertising an invalid start. Repeat them
+    // after engine resolution so external filesystem changes also cannot make
+    // us spawn a child against a path that disappeared while waiting.
+    if !PathBuf::from(&model_path).is_file() {
+        return Err(format!("model_path does not exist: {model_path}"));
+    }
+    if let Some(p) = mmproj_path.as_ref() {
+        if !PathBuf::from(p).is_file() {
+            return Err(format!("mmproj_path does not exist: {p}"));
+        }
+    }
 
     let mut guard = arc.lock().await;
     if guard.start_epoch != start_epoch {
@@ -344,6 +375,7 @@ async fn sidecar_start_marked<R: Runtime>(
     guard.port = Some(port);
     guard.model = Some(model_path.clone());
     guard.mmproj = mmproj_path.clone();
+    guard.managed_model_ids = managed_model_ids;
     guard.ctx_size = Some(ctx_size);
     guard.errored = false;
     guard.last_error = None;
@@ -381,6 +413,7 @@ fn take_child_and_wipe(guard: &mut SidecarInner) -> Option<CommandChild> {
     guard.port = None;
     guard.model = None;
     guard.mmproj = None;
+    guard.managed_model_ids.clear();
     guard.ctx_size = None;
     guard.errored = false;
     guard.last_error = None;
@@ -407,23 +440,20 @@ pub async fn sidecar_stop(state: State<'_, SidecarState>) -> Result<(), String> 
     stop_now(&state).await
 }
 
-// model_remove's pre-delete check: when the running sidecar is serving a
-// file under `dir` (its model or mmproj — both recorded at spawn), stop it
-// first and report true. The check lives in Rust because SidecarInner is the
-// truth about the child process — the JS sidecar store can lag the
-// crash-restart watcher's respawns. Paths compare via starts_with on the
-// same model_dir-built prefix the spawn path came from (no canonicalize: the
-// dir is about to be deleted, and Windows canonicalize returns \\?\-prefixed
-// paths that would break the comparison). An advanced user's custom GGUF
-// outside the models root never matches, by design.
-pub async fn stop_if_serving_under(state: &SidecarState, dir: &Path) -> Result<bool, String> {
+fn serves_managed_model(guard: &SidecarInner, model_id: &str) -> bool {
+    guard.managed_model_ids.iter().any(|id| id == model_id)
+}
+
+// model_remove/download's pre-mutation check: SidecarInner is the truth about
+// the child process, while the JS sidecar store can lag crash-restart
+// respawns. Compare the managed model id captured at spawn rather than a path
+// prefix: a caller can reach the same managed GGUF through a symlink or `..`,
+// and deleting it while llama-server maps that file is unsafe. Advanced custom
+// GGUF paths have no managed id and deliberately never match.
+pub async fn stop_if_serving_model(state: &SidecarState, model_id: &str) -> Result<bool, String> {
     let arc = state.0.clone();
     let mut guard = arc.lock().await;
-    let serving = guard
-        .model
-        .iter()
-        .chain(guard.mmproj.iter())
-        .any(|p| Path::new(p).starts_with(dir));
+    let serving = serves_managed_model(&guard, model_id);
     if !serving {
         return Ok(false);
     }
@@ -824,6 +854,10 @@ fn exceeded_total_restarts(total: u32) -> bool {
     total > TOTAL_RESTART_BUDGET
 }
 
+fn watcher_can_respawn(guard: &SidecarInner, generation: u64) -> bool {
+    guard.generation == generation && !guard.shutting_down
+}
+
 async fn watch<R: Runtime>(
     app: AppHandle<R>,
     state: Arc<Mutex<SidecarInner>>,
@@ -886,7 +920,7 @@ async fn watch<R: Runtime>(
         // If a stop or a newer start happened while we were running, this
         // generation is stale — exit without restarting.
         let mut guard = state.lock().await;
-        if guard.generation != generation {
+        if !watcher_can_respawn(&guard, generation) {
             return;
         }
         // Drop the dead child handle and forget the port immediately so a
@@ -950,25 +984,19 @@ async fn watch<R: Runtime>(
         })
         .await;
 
-        // Re-check after the backoff: an explicit stop, a newer start, or an
-        // app-exit/relaunch kill_blocking during the sleep means we must not
-        // respawn. Bailing BEFORE pick_unused_port/spawn_llama is what keeps a
-        // sidecar that crashed in the restart window from being orphaned at
-        // quit time (kill_blocking already ran; it found no child to kill).
-        {
-            let guard = state.lock().await;
-            if guard.generation != generation || guard.shutting_down {
-                return;
-            }
+        // Re-check after the backoff and KEEP this lock through spawn and
+        // child storage. The old code released it after this check, leaving a
+        // window where app exit could find no child, mark shutdown, then the
+        // watcher could spawn one and be terminated before its post-spawn
+        // cleanup ran. `kill_blocking` now waits for this short critical
+        // section and always finds a stored child to kill.
+        let mut guard = state.lock().await;
+        if !watcher_can_respawn(&guard, generation) {
+            return;
         }
-
         let port = match pick_unused_port() {
             Ok(p) => p,
             Err(e) => {
-                let mut guard = state.lock().await;
-                if guard.generation != generation {
-                    return;
-                }
                 guard.errored = true;
                 guard.last_error = Some(e.clone());
                 guard.port = None;
@@ -981,31 +1009,20 @@ async fn watch<R: Runtime>(
         };
         // Same candidate chain as the initial start, but never a download —
         // the respawn path must stay fast and offline-safe.
-        let spawn_result =
-            spawn_with_fallback(&app, &model_path, mmproj_path.as_deref(), ctx_size, port);
-        let (new_rx, new_child) = match spawn_result {
-            Ok(pair) => pair,
-            Err(e) => {
-                let mut guard = state.lock().await;
-                if guard.generation != generation {
+        let (new_rx, new_child) =
+            match spawn_with_fallback(&app, &model_path, mmproj_path.as_deref(), ctx_size, port) {
+                Ok(pair) => pair,
+                Err(e) => {
+                    guard.errored = true;
+                    guard.last_error = Some(e.clone());
+                    guard.port = None;
+                    with_sidecar_log(|| {
+                        let _ = writeln!(log, "[event gen={generation}] respawn failed: {e}");
+                        let _ = log.flush();
+                    });
                     return;
                 }
-                guard.errored = true;
-                guard.last_error = Some(e.clone());
-                guard.port = None;
-                with_sidecar_log(|| {
-                    let _ = writeln!(log, "[event gen={generation}] respawn failed: {e}");
-                    let _ = log.flush();
-                });
-                return;
-            }
-        };
-        let mut guard = state.lock().await;
-        if guard.generation != generation {
-            // Another start replaced us in the gap; let our spawned child die.
-            let _ = new_child.kill();
-            return;
-        }
+            };
         with_sidecar_log(|| {
             let _ = writeln!(log, "[event gen={generation}] respawned on port {port}");
             let _ = log.flush();
@@ -1058,6 +1075,49 @@ mod tests {
         assert!(snapshot_status(&inner).starting);
         unmark_starting(&mut inner, new_epoch);
         assert!(!snapshot_status(&inner).starting);
+    }
+
+    #[test]
+    fn shutdown_or_generation_change_forbids_a_watcher_respawn() {
+        let mut inner = SidecarInner {
+            generation: 9,
+            ..SidecarInner::default()
+        };
+        assert!(watcher_can_respawn(&inner, 9));
+
+        inner.shutting_down = true;
+        assert!(!watcher_can_respawn(&inner, 9));
+
+        inner.shutting_down = false;
+        inner.generation = 10;
+        assert!(!watcher_can_respawn(&inner, 9));
+    }
+
+    #[test]
+    fn managed_model_identity_survives_noncanonical_spawn_paths() {
+        let inner = SidecarInner {
+            model: Some("/outside/symlink/model.gguf".to_string()),
+            managed_model_ids: vec!["qwen".to_string()],
+            ..SidecarInner::default()
+        };
+        assert!(serves_managed_model(&inner, "qwen"));
+        assert!(!serves_managed_model(&inner, "other"));
+    }
+
+    #[test]
+    fn explicit_start_invalidates_a_watcher_in_restart_backoff() {
+        let mut inner = SidecarInner {
+            generation: 4,
+            model: Some("/models/old/model.gguf".to_string()),
+            managed_model_ids: vec!["old".to_string()],
+            ..SidecarInner::default()
+        };
+
+        assert!(take_child_and_wipe(&mut inner).is_none());
+
+        assert!(!watcher_can_respawn(&inner, 4));
+        assert!(inner.model.is_none());
+        assert!(inner.managed_model_ids.is_empty());
     }
 
     fn scratch_log(name: &str) -> PathBuf {

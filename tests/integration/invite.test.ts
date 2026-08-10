@@ -125,6 +125,7 @@ import { joinTopic } from '@/lib/trystero'
 import {
   buildInviteEnvelope,
   INVITE_ACTION,
+  inviteRetryManager,
   inviteFriend,
   InviteRelayError,
   InviteTimeoutError,
@@ -146,6 +147,7 @@ import {
 } from '@/features/friends/envelope'
 
 beforeEach(async () => {
+  inviteRetryManager.cancelAll()
   const mod = (await import('@/lib/trystero')) as unknown as {
     __resetBus: () => void
   }
@@ -153,6 +155,7 @@ beforeEach(async () => {
 })
 
 afterEach(() => {
+  inviteRetryManager.cancelAll()
   vi.useRealTimers()
 })
 
@@ -243,6 +246,14 @@ describe('invite envelope round-trip', () => {
       SAMPLE_SESSION
     )
     expect(result.acked).toBe(true)
+    // The verified ACK suppresses any future retry for this exact recipient
+    // and session.
+    inviteRetryManager.register(
+      alice.edHex,
+      SAMPLE_SESSION.sessionTopic,
+      vi.fn(async () => ({ acked: true }))
+    )
+    expect(inviteRetryManager.pendingCount()).toBe(0)
 
     const invite = await inbox.receive
     expect(invite.from_ed_pubkey).toBe(sam.edHex)
@@ -321,6 +332,11 @@ describe('invite envelope round-trip', () => {
       { ackTimeoutMs: 50 }
     )
     expect(result.acked).toBe(false)
+    // A peer did receive the action, but Bob is not Carol's confirmed friend
+    // and therefore cannot sign a valid ACK. That must remain retryable rather
+    // than suppressing future delivery to the intended recipient.
+    expect(inviteRetryManager.pendingCount()).toBe(1)
+    inviteRetryManager.cancel(bob.edHex)
     // Settle scheduled microtasks.
     await new Promise((r) => setTimeout(r, 5))
 
@@ -465,6 +481,43 @@ describe('invite envelope round-trip', () => {
         { sendTimeoutMs: 50, isRelayUnreachable: () => false }
       )
     ).rejects.toBeInstanceOf(InviteTimeoutError)
+  })
+
+  test('an aborted retry leaves its inbox room without waiting for the send timeout', async () => {
+    const sam = makeApp('Sam')
+    const alice = makeApp('Alice')
+    const envelope = await buildInviteEnvelope(
+      sam.sender,
+      { edPubkeyHex: alice.edHex, xPubkeyHex: alice.xHex },
+      SAMPLE_SESSION
+    )
+    const controller = new AbortController()
+    const pending = sendInviteEnvelope(
+      { edPubkeyHex: alice.edHex, xPubkeyHex: alice.xHex },
+      envelope,
+      {
+        sendTimeoutMs: 30_000,
+        isRelayUnreachable: () => false,
+        signal: controller.signal,
+      }
+    )
+
+    // Let the serialized sender join its per-recipient inbox room first, then
+    // prove cancellation closes that active wait instead of leaving a retry
+    // alive until the 30s timeout.
+    await Promise.resolve()
+    const trystero = (await import('@/lib/trystero')) as unknown as {
+      __getEvents: () => Array<{ type: 'join' | 'leave'; topic: string }>
+    }
+    expect(
+      trystero.__getEvents().filter((e) => e.type === 'join')
+    ).toHaveLength(1)
+    controller.abort()
+
+    await expect(pending).rejects.toMatchObject({ name: 'AbortError' })
+    expect(
+      trystero.__getEvents().filter((e) => e.type === 'leave')
+    ).toHaveLength(1)
   })
 
   test('F1/F6: sendInviteEnvelope rejects with InviteRelayError when no relay is reachable', async () => {

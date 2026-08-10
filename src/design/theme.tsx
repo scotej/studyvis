@@ -8,9 +8,13 @@ import {
 import type { ReactNode } from 'react'
 
 import { ThemeContext, type ThemeMode } from '@/design/theme-context'
-import { useSettingsStore } from '@/stores/settingsStore'
+import { resolveTheme, type ResolvedTheme } from '@/design/theme-resolution'
+import {
+  THEME_LOCALSTORAGE_KEY,
+  useSettingsStore,
+} from '@/stores/settingsStore'
 
-function applyClass(resolved: 'dark' | 'light') {
+function applyClass(resolved: ResolvedTheme) {
   if (typeof document === 'undefined') return
   const root = document.documentElement
   if (resolved === 'light') {
@@ -21,11 +25,78 @@ function applyClass(resolved: 'dark' | 'light') {
   root.dataset.theme = resolved
 }
 
-function detectSystem(): 'dark' | 'light' {
+function detectSystem(): ResolvedTheme {
   if (typeof window === 'undefined' || !window.matchMedia) return 'dark'
   return window.matchMedia('(prefers-color-scheme: light)').matches
     ? 'light'
     : 'dark'
+}
+
+function readThemeBootCache(): ThemeMode {
+  if (typeof window === 'undefined') return 'dark'
+  try {
+    const mode = window.localStorage.getItem(THEME_LOCALSTORAGE_KEY)
+    return mode === 'dark' || mode === 'light' || mode === 'auto'
+      ? mode
+      : 'dark'
+  } catch {
+    // The persistent store remains authoritative in the main window. The AI
+    // dialog has no store hydration, so fall back to the shipped default if
+    // its cross-window boot cache is unavailable.
+    return 'dark'
+  }
+}
+
+function useSystemTheme(): ResolvedTheme {
+  const [system, setSystem] = useState<ResolvedTheme>(() => detectSystem())
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || !window.matchMedia) return
+    const mq = window.matchMedia('(prefers-color-scheme: light)')
+    const onChange = () => setSystem(mq.matches ? 'light' : 'dark')
+    mq.addEventListener('change', onChange)
+    return () => mq.removeEventListener('change', onChange)
+  }, [])
+
+  return system
+}
+
+// The floating AI dialog intentionally does not hydrate the settings store:
+// it is a separate, least-privileged webview and only needs the synchronous
+// theme cache. A storage event is delivered to other same-origin windows when
+// the main window changes Appearance → Theme.
+function useThemeBootCache(): ThemeMode {
+  const [mode, setMode] = useState<ThemeMode>(readThemeBootCache)
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const onStorage = (event: StorageEvent) => {
+      // `null` is the standard key for localStorage.clear(), which should
+      // restore the dialog to the shipped dark default too.
+      if (event.key === THEME_LOCALSTORAGE_KEY || event.key === null) {
+        setMode(readThemeBootCache())
+      }
+    }
+    window.addEventListener('storage', onStorage)
+    return () => window.removeEventListener('storage', onStorage)
+  }, [])
+
+  return mode
+}
+
+// Mount this in a secondary webview that shares the main window's origin but
+// not its React/Zustand realm. It reacts both to Appearance changes (storage)
+// and to the OS light/dark preference while the saved mode is `auto`.
+export function ApplyThemeBootCache(): null {
+  const mode = useThemeBootCache()
+  const system = useSystemTheme()
+  const resolved = resolveTheme(mode, system)
+
+  useLayoutEffect(() => {
+    applyClass(resolved)
+  }, [resolved])
+
+  return null
 }
 
 export function ThemeProvider({
@@ -46,21 +117,13 @@ export function ThemeProvider({
   const mode: ThemeMode =
     settingsStatus === 'ready' ? themeFromStore : (defaultMode ?? 'dark')
 
-  const [system, setSystem] = useState<'dark' | 'light'>(() => detectSystem())
+  const system = useSystemTheme()
 
   useEffect(() => {
     void hydrateSettings()
   }, [hydrateSettings])
 
-  useEffect(() => {
-    if (typeof window === 'undefined' || !window.matchMedia) return
-    const mq = window.matchMedia('(prefers-color-scheme: light)')
-    const onChange = () => setSystem(mq.matches ? 'light' : 'dark')
-    mq.addEventListener('change', onChange)
-    return () => mq.removeEventListener('change', onChange)
-  }, [])
-
-  const resolved: 'dark' | 'light' = mode === 'auto' ? system : mode
+  const resolved = resolveTheme(mode, system)
 
   // PR-28 — before the persistent store hydrates (production has no
   // `defaultMode`), `mode` falls back to 'dark'. Writing that here would strip

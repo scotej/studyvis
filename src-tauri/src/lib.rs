@@ -52,7 +52,7 @@ use commands::models::{hf_token_clear, hf_token_present, hf_token_save};
 #[cfg(desktop)]
 use commands::models::{
     model_download, model_download_cancel, model_head_check, model_install_state, model_paths,
-    model_remove, DownloadState,
+    model_remove, DownloadState, ModelOperationState,
 };
 use commands::sessions::{
     audit_event_insert, audit_events_list_all, audit_events_list_for_session, sessions_clear_all,
@@ -321,6 +321,7 @@ pub fn run() {
                 app.manage(SidecarState::new());
                 app.manage(EngineState::new());
                 app.manage(DownloadState::new());
+                app.manage(ModelOperationState::new());
                 setup_desktop(app)?;
             }
             Ok(())

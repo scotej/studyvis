@@ -55,7 +55,10 @@ function isTauriRuntime(): boolean {
 
 let cachedStore: LazyStore | null = null
 function defaultStoreFactory(): PendingInviteStoreLike {
-  cachedStore ??= new LazyStore(STORE_FILE, { autoSave: false })
+  // plugin-store 2.4 requires an explicit defaults object even when this
+  // store starts empty. Keeping auto-save off is deliberate: mutations are
+  // serialized below and flushed as one transaction-like write.
+  cachedStore ??= new LazyStore(STORE_FILE, { defaults: {}, autoSave: false })
   return cachedStore as unknown as PendingInviteStoreLike
 }
 

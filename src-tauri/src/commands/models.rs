@@ -15,9 +15,9 @@
 use std::collections::HashMap;
 use std::fs::{self, File};
 use std::io::Write;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 use std::time::{Duration, Instant};
 
 use futures_util::StreamExt;
@@ -35,6 +35,7 @@ const MODELS_DIR: &str = "models";
 const MODEL_LOCAL_FILENAME: &str = "model.gguf";
 const MMPROJ_LOCAL_FILENAME: &str = "mmproj.gguf";
 const TMP_SUFFIX: &str = ".tmp";
+const HUGGING_FACE_HOST: &str = "huggingface.co";
 
 // Throttle the volume of progress events. The download loop computes a
 // cumulative byte count after each chunk; we only emit when at least
@@ -94,6 +95,151 @@ fn model_dir<R: Runtime>(app: &AppHandle<R>, model_id: &str) -> Result<PathBuf, 
     validate_model_id(model_id)?;
     let dir = models_root(app)?.join(model_id);
     Ok(dir)
+}
+
+// A model URL comes from the frontend manifest, but it is still IPC input. In
+// particular, the optional Hugging Face token must never be attached to an
+// attacker-controlled URL. Restrict the endpoint to the immutable resolve URL
+// shape produced by `huggingfaceResolveUrl` in `src/features/ai/models.ts`.
+fn trusted_hugging_face_url(raw: &str) -> Result<reqwest::Url, String> {
+    let url = reqwest::Url::parse(raw).map_err(|e| format!("invalid model URL: {e}"))?;
+    if url.scheme() != "https"
+        || url.host_str() != Some(HUGGING_FACE_HOST)
+        || url.port_or_known_default() != Some(443)
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.query().is_some()
+        || url.fragment().is_some()
+    {
+        return Err("model URL must be an HTTPS Hugging Face resolve URL".into());
+    }
+
+    let segments: Vec<_> = url
+        .path_segments()
+        .ok_or_else(|| "model URL must be an HTTPS Hugging Face resolve URL".to_string())?
+        .collect();
+    let valid_path = segments.len() >= 5
+        && !segments[0].is_empty()
+        && !segments[1].is_empty()
+        && segments[2] == "resolve"
+        && !segments[3].is_empty()
+        && segments[4..]
+            .iter()
+            .all(|segment| !segment.is_empty() && *segment != "." && *segment != "..");
+    if !valid_path {
+        return Err("model URL must be an HTTPS Hugging Face resolve URL".into());
+    }
+    Ok(url)
+}
+
+fn validate_model_file_requests(files: &[ModelFileRequest]) -> Result<(), String> {
+    for file in files {
+        trusted_hugging_face_url(&file.url)
+            .map_err(|e| format!("{} file URL: {e}", file.kind.label()))?;
+    }
+    Ok(())
+}
+
+fn managed_model_id_from_relative(relative: &Path) -> Option<String> {
+    let mut components = relative.components();
+    let Component::Normal(model_id) = components.next()? else {
+        return None;
+    };
+    let Component::Normal(filename) = components.next()? else {
+        return None;
+    };
+    if components.next().is_some()
+        || (filename != std::ffi::OsStr::new(MODEL_LOCAL_FILENAME)
+            && filename != std::ffi::OsStr::new(MMPROJ_LOCAL_FILENAME))
+    {
+        return None;
+    }
+    let model_id = model_id.to_str()?.to_string();
+    validate_model_id(&model_id).ok()?;
+    Some(model_id)
+}
+
+// `sidecar_start` accepts advanced/custom GGUF paths, so only take a model
+// operation lock when an input is exactly one of our managed model files. The
+// direct lexical check covers the normal `model_paths` result without I/O; the
+// canonical fallback handles an equivalent path containing `.` / `..`.
+pub(crate) fn managed_model_id_for_path<R: Runtime>(
+    app: &AppHandle<R>,
+    path: &str,
+) -> Result<Option<String>, String> {
+    let root = models_root(app)?;
+    let candidate = Path::new(path);
+    if let Ok(relative) = candidate.strip_prefix(&root) {
+        if let Some(model_id) = managed_model_id_from_relative(relative) {
+            return Ok(Some(model_id));
+        }
+    }
+
+    let Ok(canonical_root) = fs::canonicalize(&root) else {
+        return Ok(None);
+    };
+    let Ok(canonical_path) = fs::canonicalize(candidate) else {
+        return Ok(None);
+    };
+    Ok(canonical_path
+        .strip_prefix(canonical_root)
+        .ok()
+        .and_then(managed_model_id_from_relative))
+}
+
+pub(crate) fn managed_model_ids_for_paths<R: Runtime>(
+    app: &AppHandle<R>,
+    model_path: &str,
+    mmproj_path: Option<&str>,
+) -> Result<Vec<String>, String> {
+    let mut ids = Vec::with_capacity(2);
+    if let Some(model_id) = managed_model_id_for_path(app, model_path)? {
+        ids.push(model_id);
+    }
+    if let Some(mmproj_path) = mmproj_path {
+        if let Some(model_id) = managed_model_id_for_path(app, mmproj_path)? {
+            ids.push(model_id);
+        }
+    }
+    ids.sort_unstable();
+    ids.dedup();
+    Ok(ids)
+}
+
+#[derive(Default)]
+struct ModelOperationInner {
+    // Weak entries are pruned on the next acquisition, so hostile IPC cannot
+    // permanently grow this map by naming arbitrary (but syntactically valid)
+    // model IDs. A live operation or waiter owns the corresponding Arc.
+    gates: HashMap<String, Weak<Mutex<()>>>,
+}
+
+// Coordinates mutations of one managed model directory with starts that use
+// it. The guard is intentionally held through a multi-GB download: remove
+// must either cancel-and-wait for that operation, or run before it, never
+// delete the directory beneath its open temporary file.
+pub struct ModelOperationState(Arc<Mutex<ModelOperationInner>>);
+
+impl ModelOperationState {
+    pub fn new() -> Self {
+        Self(Arc::new(Mutex::new(ModelOperationInner::default())))
+    }
+
+    pub(crate) async fn gates_for(&self, model_ids: &[String]) -> Vec<Arc<Mutex<()>>> {
+        let mut inner = self.0.lock().await;
+        inner.gates.retain(|_, gate| gate.strong_count() > 0);
+        model_ids
+            .iter()
+            .map(|model_id| {
+                if let Some(gate) = inner.gates.get(model_id).and_then(|gate| gate.upgrade()) {
+                    return gate;
+                }
+                let gate = Arc::new(Mutex::new(()));
+                inner.gates.insert(model_id.clone(), Arc::downgrade(&gate));
+                gate
+            })
+            .collect()
+    }
 }
 
 #[derive(Serialize)]
@@ -166,10 +312,19 @@ pub fn model_install_state<R: Runtime>(
 pub async fn model_remove<R: Runtime>(
     app: AppHandle<R>,
     sidecar: State<'_, crate::commands::sidecar::SidecarState>,
+    downloads: State<'_, DownloadState>,
+    operations: State<'_, ModelOperationState>,
     model_id: String,
 ) -> Result<(), String> {
+    validate_model_id(&model_id)?;
+    // If a download already owns this model directory, ask it to stop before
+    // waiting for the operation gate. The next command then removes the
+    // verified files and any resumable .tmp as one serialized operation.
+    request_download_cancel(&downloads, &model_id).await;
+    let operation_gates = operations.gates_for(std::slice::from_ref(&model_id)).await;
+    let _operation_guard = operation_gates[0].clone().lock_owned().await;
     let dir = model_dir(&app, &model_id)?;
-    let stopped = crate::commands::sidecar::stop_if_serving_under(&sidecar, &dir).await?;
+    let stopped = crate::commands::sidecar::stop_if_serving_model(&sidecar, &model_id).await?;
     if !dir.exists() {
         return Ok(());
     }
@@ -222,28 +377,32 @@ pub(crate) fn build_client() -> Result<reqwest::Client, String> {
 
 #[tauri::command]
 pub async fn model_head_check(url: String, with_token: bool) -> Result<HeadResult, String> {
+    let url = trusted_hugging_face_url(&url)?;
     let client = build_client()?;
-    let mut req = client.head(&url);
+    let mut req = client.head(url.clone());
     if with_token {
         if let Some(token) = load_hf_token_internal() {
             req = req.bearer_auth(token);
         }
     }
-    let resp = req.send().await.map_err(|e| format!("HEAD {}: {e}", url))?;
+    let resp = req.send().await.map_err(|e| format!("HEAD {url}: {e}"))?;
     let status = resp.status();
     // I72 — read the Content-Length header, not resp.content_length(): the
     // latter is the body's size hint, and a HEAD response body is always
     // empty over HTTP/1.1, so it reported 0 bytes for every probe and the
     // picker's size preflight rejected every download.
-    let content_length = resp
-        .headers()
-        .get(reqwest::header::CONTENT_LENGTH)
-        .and_then(|v| v.to_str().ok())
-        .and_then(|s| s.parse::<u64>().ok());
+    let content_length = content_length_from_headers(resp.headers());
     Ok(HeadResult {
         status: status.as_u16(),
         content_length,
     })
+}
+
+fn content_length_from_headers(headers: &reqwest::header::HeaderMap) -> Option<u64> {
+    headers
+        .get(reqwest::header::CONTENT_LENGTH)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.parse::<u64>().ok())
 }
 
 // ── Hugging Face access token (mac + win only — Linux deferred with V1-P3) ──
@@ -319,6 +478,14 @@ impl DownloadState {
     }
 }
 
+async fn request_download_cancel(state: &DownloadState, model_id: &str) {
+    let arc = state.0.clone();
+    let guard = arc.lock().await;
+    if let Some(flag) = guard.cancellations.get(model_id) {
+        flag.store(true, Ordering::SeqCst);
+    }
+}
+
 #[derive(Deserialize, Clone)]
 pub struct ModelFileRequest {
     pub url: String,
@@ -382,6 +549,8 @@ fn emit_progress<R: Runtime>(app: &AppHandle<R>, evt: &ProgressEvent) {
 pub async fn model_download<R: Runtime>(
     app: AppHandle<R>,
     state: State<'_, DownloadState>,
+    sidecar: State<'_, crate::commands::sidecar::SidecarState>,
+    operations: State<'_, ModelOperationState>,
     model_id: String,
     files: Vec<ModelFileRequest>,
     use_token: bool,
@@ -390,8 +559,7 @@ pub async fn model_download<R: Runtime>(
         return Err("files must not be empty".into());
     }
     validate_model_id(&model_id)?;
-    let dir = model_dir(&app, &model_id)?;
-    fs::create_dir_all(&dir).map_err(|e| format!("create model dir: {e}"))?;
+    validate_model_file_requests(&files)?;
 
     let cancel = Arc::new(AtomicBool::new(false));
     {
@@ -405,16 +573,41 @@ pub async fn model_download<R: Runtime>(
         guard.cancellations.insert(model_id.clone(), cancel.clone());
     }
 
-    let token = if use_token {
-        load_hf_token_internal()
-    } else {
-        None
-    };
+    // Register cancellation BEFORE waiting for the model-operation gate.
+    // `model_remove` first flips this flag and then waits for that same gate;
+    // registering after acquisition would leave a narrow interval where a
+    // remove misses the flag and must wait for a multi-GB download to finish.
+    let outcome = async {
+        let operation_gates = operations.gates_for(std::slice::from_ref(&model_id)).await;
+        let _operation_guard = operation_gates[0].clone().lock_owned().await;
+        if cancel.load(Ordering::SeqCst) {
+            return Err(DownloadError::Cancelled);
+        }
 
-    // Run the per-file downloads sequentially. We don't parallelize: HF's
-    // CDN throttles per-connection and parallel HTTP/2 streams for the same
-    // origin would just contend. Sequential keeps the progress UI simple.
-    let outcome = run_download(&app, &dir, &model_id, &files, token, &cancel).await;
+        let dir = model_dir(&app, &model_id).map_err(DownloadError::Other)?;
+        // Do not replace a model's files while llama-server could be mapping
+        // the old generation. It also makes post-download state truthful: the
+        // next explicit start always opens the files just verified below.
+        crate::commands::sidecar::stop_if_serving_model(&sidecar, &model_id)
+            .await
+            .map_err(DownloadError::Other)?;
+        fs::create_dir_all(&dir)
+            .map_err(|e| DownloadError::Other(format!("create model dir: {e}")))?;
+
+        // Do not fetch a keychain secret until this queued operation actually
+        // owns the directory and is about to make its validated request.
+        let token = if use_token {
+            load_hf_token_internal()
+        } else {
+            None
+        };
+
+        // Run the per-file downloads sequentially. We don't parallelize: HF's
+        // CDN throttles per-connection and parallel HTTP/2 streams for the
+        // same origin would just contend. Sequential keeps progress simple.
+        run_download(&app, &dir, &model_id, &files, token, &cancel).await
+    }
+    .await;
 
     {
         let arc = state.0.clone();
@@ -483,11 +676,8 @@ pub async fn model_download_cancel(
     state: State<'_, DownloadState>,
     model_id: String,
 ) -> Result<(), String> {
-    let arc = state.0.clone();
-    let guard = arc.lock().await;
-    if let Some(flag) = guard.cancellations.get(&model_id) {
-        flag.store(true, Ordering::SeqCst);
-    }
+    validate_model_id(&model_id)?;
+    request_download_cancel(&state, &model_id).await;
     Ok(())
 }
 
@@ -578,6 +768,10 @@ async fn download_one<R: Runtime>(
     target: &Path,
     cancel: &Arc<AtomicBool>,
 ) -> Result<(), DownloadError> {
+    // Re-validate at the bearer-auth boundary as defense in depth. The command
+    // validates every request before acquiring a model-operation lock, but this
+    // helper is also the one place that constructs the authenticated GET.
+    let url = trusted_hugging_face_url(&file.url).map_err(DownloadError::Other)?;
     let tmp = target.with_extension(format!(
         "{}{}",
         target
@@ -611,7 +805,7 @@ async fn download_one<R: Runtime>(
         }
     }
 
-    let mut req = client.get(&file.url);
+    let mut req = client.get(url.clone());
     if let Some(t) = token {
         req = req.bearer_auth(t);
     }
@@ -621,7 +815,7 @@ async fn download_one<R: Runtime>(
     let resp = req
         .send()
         .await
-        .map_err(|e| DownloadError::Other(format!("GET {}: {e}", file.url)))?;
+        .map_err(|e| DownloadError::Other(format!("GET {url}: {e}")))?;
     if !resp.status().is_success() {
         let status = resp.status().as_u16();
         let hint = match status {
@@ -632,7 +826,7 @@ async fn download_one<R: Runtime>(
         };
         return Err(DownloadError::Other(format!(
             "{} returned HTTP {}{}",
-            file.url, status, hint
+            url, status, hint
         )));
     }
     // A 200 despite the Range header means the server is replaying the full
@@ -756,7 +950,7 @@ async fn download_one<R: Runtime>(
         let _ = fs::remove_file(&tmp);
         return Err(DownloadError::Other(format!(
             "{} short read: expected {} bytes, got {}",
-            file.url, file.size_bytes, bytes_received
+            url, file.size_bytes, bytes_received
         )));
     }
     let computed = hex::encode(hasher.finalize());
@@ -764,7 +958,7 @@ async fn download_one<R: Runtime>(
         let _ = fs::remove_file(&tmp);
         return Err(DownloadError::Other(format!(
             "{} sha256 mismatch: expected {}, got {}",
-            file.url, file.sha256_hex, computed
+            url, file.sha256_hex, computed
         )));
     }
 
@@ -845,36 +1039,17 @@ fn seed_hasher_blocking(path: &Path) -> Result<(Sha256, u64), String> {
 mod tests {
     use super::*;
 
-    fn serve_head_once(response: &'static [u8]) -> std::net::SocketAddr {
-        use std::io::{Read, Write};
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
-        let addr = listener.local_addr().expect("addr");
-        std::thread::spawn(move || {
-            if let Ok((mut stream, _)) = listener.accept() {
-                let mut buf = [0u8; 1024];
-                let _ = stream.read(&mut buf);
-                let _ = stream.write_all(response);
-            }
-        });
-        addr
-    }
-
-    fn head_check(addr: std::net::SocketAddr) -> HeadResult {
-        tauri::async_runtime::block_on(model_head_check(format!("http://{addr}/m.gguf"), false))
-            .expect("head check")
-    }
-
     // I72 — a HEAD response body is empty, so reqwest's content_length()
     // (the body size hint) is always 0 over HTTP/1.1; the command must
     // report the Content-Length header instead.
     #[test]
     fn head_check_reports_header_content_length() {
-        let addr = serve_head_once(
-            b"HTTP/1.1 200 OK\r\nContent-Length: 12345\r\nConnection: close\r\n\r\n",
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.insert(
+            reqwest::header::CONTENT_LENGTH,
+            reqwest::header::HeaderValue::from_static("12345"),
         );
-        let head = head_check(addr);
-        assert_eq!(head.status, 200);
-        assert_eq!(head.content_length, Some(12345));
+        assert_eq!(content_length_from_headers(&headers), Some(12345));
     }
 
     // Absent or malformed Content-Length must degrade to None ("unknown"),
@@ -882,20 +1057,86 @@ mod tests {
     // exact-byte + sha256 checks still gate integrity.
     #[test]
     fn head_check_reports_none_without_content_length() {
-        let addr = serve_head_once(b"HTTP/1.1 200 OK\r\nConnection: close\r\n\r\n");
-        let head = head_check(addr);
-        assert_eq!(head.status, 200);
-        assert_eq!(head.content_length, None);
+        assert_eq!(
+            content_length_from_headers(&reqwest::header::HeaderMap::new()),
+            None
+        );
     }
 
     #[test]
     fn head_check_reports_none_for_malformed_content_length() {
-        let addr = serve_head_once(
-            b"HTTP/1.1 200 OK\r\nContent-Length: 12345abc\r\nConnection: close\r\n\r\n",
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.insert(
+            reqwest::header::CONTENT_LENGTH,
+            reqwest::header::HeaderValue::from_static("12345abc"),
         );
-        let head = head_check(addr);
-        assert_eq!(head.status, 200);
-        assert_eq!(head.content_length, None);
+        assert_eq!(content_length_from_headers(&headers), None);
+    }
+
+    #[test]
+    fn trusted_model_url_accepts_the_catalog_resolve_shape() {
+        let url = trusted_hugging_face_url(
+            "https://huggingface.co/ggml-org/model/resolve/0123456789abcdef/model.gguf",
+        )
+        .expect("catalog URL must be allowed");
+        assert_eq!(url.host_str(), Some(HUGGING_FACE_HOST));
+    }
+
+    #[test]
+    fn trusted_model_url_rejects_non_hugging_face_or_non_resolve_urls() {
+        for url in [
+            "http://huggingface.co/ggml-org/model/resolve/rev/model.gguf",
+            "https://huggingface.co.evil.example/ggml-org/model/resolve/rev/model.gguf",
+            "https://huggingface.co:444/ggml-org/model/resolve/rev/model.gguf",
+            "https://huggingface.co/ggml-org/model/blob/rev/model.gguf",
+            "https://token@huggingface.co/ggml-org/model/resolve/rev/model.gguf",
+            "https://huggingface.co/ggml-org/model/resolve/rev/model.gguf?download=true",
+        ] {
+            assert!(trusted_hugging_face_url(url).is_err(), "must reject {url}");
+        }
+    }
+
+    #[test]
+    fn managed_model_path_parser_only_accepts_our_two_model_filenames() {
+        assert_eq!(
+            managed_model_id_from_relative(Path::new("qwen/model.gguf")),
+            Some("qwen".to_string())
+        );
+        assert_eq!(
+            managed_model_id_from_relative(Path::new("qwen/mmproj.gguf")),
+            Some("qwen".to_string())
+        );
+        assert_eq!(
+            managed_model_id_from_relative(Path::new("qwen/other.gguf")),
+            None
+        );
+        assert_eq!(
+            managed_model_id_from_relative(Path::new("qwen/nested/model.gguf")),
+            None
+        );
+    }
+
+    #[test]
+    fn model_operation_state_reuses_a_live_model_gate() {
+        let state = ModelOperationState::new();
+        let ids = vec!["qwen".to_string()];
+        let first = tauri::async_runtime::block_on(state.gates_for(&ids));
+        let second = tauri::async_runtime::block_on(state.gates_for(&ids));
+        assert!(Arc::ptr_eq(&first[0], &second[0]));
+    }
+
+    #[test]
+    fn cancellation_request_flips_a_registered_download_flag() {
+        let state = DownloadState::new();
+        let flag = Arc::new(AtomicBool::new(false));
+        tauri::async_runtime::block_on(async {
+            {
+                let mut guard = state.0.lock().await;
+                guard.cancellations.insert("qwen".to_string(), flag.clone());
+            }
+            request_download_cancel(&state, "qwen").await;
+        });
+        assert!(flag.load(Ordering::SeqCst));
     }
 
     #[test]

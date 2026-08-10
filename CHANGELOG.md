@@ -1,5 +1,30 @@
 # Changelog
 
+## 1.11.1 — 2026-08-10 — Safer AI and steadier sessions
+
+### Fixed
+
+- **Settings confirmations now stay visible during a study session, and the
+  floating AI chat follows Appearance changes immediately.** Dialogs no longer
+  open behind Settings, while the separate AI window also tracks your system
+  preference when Appearance is set to Auto.
+
+- **Rapid break requests and invitation retries no longer race each other.** A
+  second request cannot approve a duplicate break while the first is being
+  recorded, and an invitation is only considered delivered after the intended
+  friend has verified it. Ending a session now also cancels a retry already in
+  progress.
+
+- **Local AI lifecycle operations recover cleanly under quick changes.** A
+  stale start or shutdown cannot take over a newer engine, interrupted engine
+  replacement preserves the working install, and shutdown leaves no inherited
+  engine process behind after reopening the app.
+
+- **The floating AI window and model downloads have tighter safety boundaries.**
+  The dialog can call only the native commands it needs, model downloads stay
+  on approved Hugging Face endpoints, and friends-backup imports reject
+  oversized input before it can consume excessive memory.
+
 ## 1.11.0 — 2026-08-09 — Stay connected and look back honestly
 
 ### Added

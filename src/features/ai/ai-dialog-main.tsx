@@ -7,6 +7,7 @@ import '@fontsource-variable/jetbrains-mono/index.css'
 import '@/design/index.css'
 
 import { ApplyReduceMotion } from '@/design/reduce-motion'
+import { ApplyThemeBootCache } from '@/design/theme'
 import {
   AiDialogWindow,
   type AiDialogRuntime,
@@ -58,6 +59,7 @@ const liveRuntime: AiDialogRuntime = {
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
+    <ApplyThemeBootCache />
     <ApplyReduceMotion />
     <AiDialogWindow runtime={liveRuntime} />
   </StrictMode>

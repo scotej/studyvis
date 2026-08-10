@@ -154,9 +154,14 @@ export function formatBreakDuration(durationSec: number): string {
 export type BreakAuditPipeline = {
   appendLocalAudit: (
     kind: AuditEventKind,
-    detail: AuditEventDetail
+    detail: AuditEventDetail,
+    options?: { signal?: AbortSignal }
   ) => Promise<void>
-  emitAudit: (kind: AuditEventKind, detail: AuditEventDetail) => Promise<void>
+  emitAudit: (
+    kind: AuditEventKind,
+    detail: AuditEventDetail,
+    options?: { signal?: AbortSignal }
+  ) => Promise<void>
 }
 
 export type RequestBreakOrchestratorDeps = BreakAuditPipeline & {
@@ -173,6 +178,10 @@ export type RequestBreakOrchestratorDeps = BreakAuditPipeline & {
   // Test seam for `now` so the deadline scheduler can be advanced with
   // vi.useFakeTimers without depending on Date.now alignment.
   now: () => number
+  // Bound this request to the SessionView instance that received it. A
+  // process-global FIFO can otherwise run a queued request from a torn-down
+  // session after a new session has reset the global break store.
+  signal?: AbortSignal
 }
 
 // State the orchestrator hands back so consumers (cross-window IPC) can
@@ -181,27 +190,111 @@ export type RequestBreakOrchestratorDeps = BreakAuditPipeline & {
 // verdict to the dialog window.
 export type BreakRequestOutcome = BreakVerdict
 
-let activeBreakTimerHandle: unknown = null
+type ActiveBreakTimer = {
+  handle: unknown
+  token: symbol
+}
 
-// Single-orchestrator hand-off. SessionView is the only caller in V2-P7
-// (it sits behind the cross-window event listener). Re-entrant: a second
-// call while a break is active is denied by the rule layer's `onBreak`
-// check, so we never need to mutex this.
-export async function requestBreak(
+let activeBreakTimer: ActiveBreakTimer | null = null
+
+// SessionView is the only production caller, but the dialog can emit multiple
+// requests before an async audit write settles. Keep the entire decision in a
+// FIFO so the next request snapshots the state *after* the prior request has
+// either started its break or been denied. Without this, two callers can both
+// capture `onBreak: false`, await their audit writes, then both approve.
+let breakRequestQueue: Promise<void> = Promise.resolve()
+
+function createAbortError(): Error {
+  const error = new Error('break request aborted')
+  error.name = 'AbortError'
+  return error
+}
+
+function throwIfAborted(signal: AbortSignal | undefined): void {
+  if (signal?.aborted) throw createAbortError()
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === 'AbortError'
+}
+
+// An audit sign/send may be non-abortable. Let session teardown settle the
+// FIFO immediately anyway; the signal checks around every later side effect
+// keep that detached work from writing into the next session when it finishes.
+function withAbort<T>(
+  promise: Promise<T>,
+  signal: AbortSignal | undefined
+): Promise<T> {
+  if (signal === undefined) return promise
+  if (signal.aborted) {
+    // `promise` may already be running. Observe a later rejection so aborting
+    // before the listener is attached never becomes an unhandled rejection.
+    void promise.catch(() => {})
+    return Promise.reject(createAbortError())
+  }
+  return new Promise((resolve, reject) => {
+    const onAbort = () => {
+      cleanup()
+      reject(createAbortError())
+    }
+    const cleanup = () => signal.removeEventListener('abort', onAbort)
+    signal.addEventListener('abort', onAbort, { once: true })
+    void promise.then(
+      (result) => {
+        cleanup()
+        resolve(result)
+      },
+      (error) => {
+        cleanup()
+        reject(error)
+      }
+    )
+  })
+}
+
+function enqueueBreakRequest<T>(operation: () => Promise<T>): Promise<T> {
+  const result = breakRequestQueue.then(operation, operation)
+  // Keep the queue usable even if a future dependency unexpectedly rejects.
+  breakRequestQueue = result.then(
+    () => undefined,
+    () => undefined
+  )
+  return result
+}
+
+// The public entry point deliberately returns the queued operation instead of
+// being `async`: callers receive the exact result promise, while the module
+// retains a settled queue tail for the next request.
+export function requestBreak(
   input: RequestBreakInput,
   deps: RequestBreakOrchestratorDeps
 ): Promise<BreakRequestOutcome> {
-  const state = deps.snapshot()
+  return enqueueBreakRequest(() => requestBreakNow(input, deps))
+}
+
+async function requestBreakNow(
+  input: RequestBreakInput,
+  deps: RequestBreakOrchestratorDeps
+): Promise<BreakRequestOutcome> {
+  throwIfAborted(deps.signal)
   // Audit the request first (LOCAL-ONLY — mirrors V2-P6 `ai_warning`
   // privacy invariant). The user's intent is private until the verdict
   // resolves; if denied, only the user sees the request happened.
   try {
-    await deps.appendLocalAudit('break_request', {
-      requested_duration_sec: input.requestedDurationSec,
-      ai_recommendation: input.aiRecommendation,
-      ai_reasoning: input.aiReasoning,
-    })
+    await withAbort(
+      deps.appendLocalAudit(
+        'break_request',
+        {
+          requested_duration_sec: input.requestedDurationSec,
+          ai_recommendation: input.aiRecommendation,
+          ai_reasoning: input.aiReasoning,
+        },
+        { signal: deps.signal }
+      ),
+      deps.signal
+    )
   } catch (err) {
+    if (isAbortError(err)) throw err
     // Never the reasoning: it is model output derived from the user's screen.
     log.error('audit.failed', {
       auditKind: 'break_request',
@@ -210,33 +303,78 @@ export async function requestBreak(
       err,
     })
   }
+  throwIfAborted(deps.signal)
 
+  // Snapshot only once the awaited audit write has settled. The FIFO above
+  // prevents a sibling request from passing this point concurrently, while
+  // this fresh read also sees a timer-driven break end or session reset that
+  // happened during the audit operation.
+  const state = deps.snapshot()
   const verdict = evaluateBreakRules(input, state)
 
   if (verdict.verdict === 'denied') {
     try {
-      await deps.emitAudit('break_denied', { reason: verdict.reason })
+      await withAbort(
+        deps.emitAudit(
+          'break_denied',
+          { reason: verdict.reason },
+          { signal: deps.signal }
+        ),
+        deps.signal
+      )
     } catch (err) {
+      if (isAbortError(err)) throw err
       log.error('broadcast.failed', {
         auditKind: 'break_denied',
         verdictReason: verdict.reason,
         err,
       })
     }
+    throwIfAborted(deps.signal)
     return verdict
   }
 
-  // Approve path: bump the store and emit the broadcast.
+  // Approve path: commit the store and its deadline as one synchronous
+  // lifecycle transition before the best-effort broadcast below. `emitAudit`
+  // is abortable; deferring timer setup until it settles can leave onBreak
+  // true forever when SessionView tears down mid-send.
+  throwIfAborted(deps.signal)
   deps.startApprovedBreak({
     durationSec: verdict.durationSec,
     startedAt: input.now,
   })
+  // The handle lives at module scope so session teardown can cancel it (for
+  // example, SessionView unmounting on session end). requestBreak is the only
+  // public surface that arms a new one, and the rule layer denies re-entry
+  // while onBreak is true, so the module-scoped handle is sufficient.
+  if (activeBreakTimer !== null) {
+    deps.clearTimeout(activeBreakTimer.handle)
+  }
+  const timerToken = Symbol('break-timer')
+  const handle = deps.setTimeout(() => {
+    // A cleared timer can already be queued. Do not let its callback erase a
+    // later session's handle. Unlike the audit send, this deadline must outlive
+    // an effect-instance abort: cancelActiveBreakTimer owns session teardown.
+    if (activeBreakTimer?.token !== timerToken) return
+    activeBreakTimer = null
+    deps.endBreak(deps.now())
+  }, verdict.durationSec * 1000)
+  activeBreakTimer = { handle, token: timerToken }
+
   try {
-    await deps.emitAudit('break_approved', {
-      duration_sec: verdict.durationSec,
-      reason: verdict.reason,
-    })
+    await withAbort(
+      deps.emitAudit(
+        'break_approved',
+        {
+          duration_sec: verdict.durationSec,
+          reason: verdict.reason,
+        },
+        { signal: deps.signal }
+      ),
+      deps.signal
+    )
   } catch (err) {
+    if (isAbortError(err)) throw err
     log.error('broadcast.failed', {
       auditKind: 'break_approved',
       durationSec: verdict.durationSec,
@@ -244,19 +382,7 @@ export async function requestBreak(
       err,
     })
   }
-  // Schedule the natural end. The handle lives at module scope so a
-  // teardown can cancel it (e.g. SessionView unmount on session end);
-  // requestBreak itself is the only public surface that arms a new one,
-  // and the rule layer denies re-entry while `onBreak` is true, so the
-  // module-scoped handle is sufficient (no need for a per-call ID).
-  if (activeBreakTimerHandle !== null) {
-    deps.clearTimeout(activeBreakTimerHandle)
-  }
-  activeBreakTimerHandle = deps.setTimeout(() => {
-    activeBreakTimerHandle = null
-    deps.endBreak(deps.now())
-  }, verdict.durationSec * 1000)
-
+  throwIfAborted(deps.signal)
   return verdict
 }
 
@@ -266,12 +392,14 @@ export async function requestBreak(
 export function cancelActiveBreakTimer(
   clearTimeoutFn: (handle: unknown) => void
 ): void {
-  if (activeBreakTimerHandle === null) return
-  clearTimeoutFn(activeBreakTimerHandle)
-  activeBreakTimerHandle = null
+  if (activeBreakTimer === null) return
+  clearTimeoutFn(activeBreakTimer.handle)
+  activeBreakTimer = null
 }
 
-// Test seam — vitest tests reset the module-scoped handle between cases.
+// Test seam — vitest tests reset the module-scoped timer and request queue
+// between cases.
 export function __resetBreakTimerForTests(): void {
-  activeBreakTimerHandle = null
+  activeBreakTimer = null
+  breakRequestQueue = Promise.resolve()
 }
