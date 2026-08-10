@@ -17,12 +17,20 @@
 
 use std::str::FromStr;
 use std::sync::atomic::{AtomicBool, Ordering};
+#[cfg(target_os = "macos")]
+use std::sync::atomic::AtomicU64;
 use std::sync::Mutex;
+#[cfg(target_os = "macos")]
+use std::time::Duration;
 
 use serde::Serialize;
 use tauri::{AppHandle, Manager, Runtime};
+#[cfg(target_os = "macos")]
+use tauri::Emitter;
 use tauri_plugin_autostart::ManagerExt;
 use tauri_plugin_dialog::DialogExt;
+#[cfg(target_os = "macos")]
+use tauri_plugin_global_shortcut::{Code, Modifiers};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut};
 use tauri_plugin_opener::OpenerExt;
 
@@ -177,6 +185,13 @@ impl ShortcutBindings {
 const DEFAULT_PTT_FRIENDS_ACCELERATOR: &str = "CmdOrCtrl+[";
 const DEFAULT_PTT_AI_ACCELERATOR: &str = "CmdOrCtrl+]";
 
+#[cfg(target_os = "macos")]
+static PTT_PHYSICAL_MONITOR_GENERATION: AtomicU64 = AtomicU64::new(0);
+#[cfg(target_os = "macos")]
+const PTT_PHYSICAL_POLL_INTERVAL: Duration = Duration::from_millis(20);
+#[cfg(target_os = "macos")]
+const PTT_PHYSICAL_RELEASE_EVENT: &str = "ptt-friends-physical-released";
+
 // Swap one of the two global shortcuts at runtime. Unregister-then-register
 // (per the tauri-plugin-global-shortcut guidance; double-registering the
 // same combo silently fails on some macOS versions). The Mutex update only
@@ -262,6 +277,7 @@ pub fn session_set_active<R: Runtime>(app: AppHandle<R>, active: bool) -> Result
     // #47 B5 — the friends-PTT global shortcut only exists while a session is
     // live; boot registers just the AI shortcut (see lib.rs).
     apply_ptt_friends_registration(&app, active);
+    update_ptt_physical_monitor(&app, active);
     Ok(())
 }
 
@@ -287,6 +303,199 @@ fn apply_ptt_friends_registration<R: Runtime>(app: &AppHandle<R>, active: bool) 
         if let Err(err) = manager.unregister(friends) {
             eprintln!("[global-shortcut] couldn't release PTT after the session: {err}");
         }
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn update_ptt_physical_monitor<R: Runtime>(_app: &AppHandle<R>, _active: bool) {}
+
+// #209 — Carbon's global-hotkey release edge is useful but not authoritative
+// enough for a privacy-sensitive hold-to-talk latch. While a session is live,
+// macOS also exposes the current physical keyboard state through CoreGraphics.
+// One generation-scoped watcher observes the CURRENT persisted PTT binding and
+// emits a distinct synthetic-release event only after it has first seen the
+// full shortcut physically held and then sees its key/modifiers released.
+//
+// This cannot create a release at session start, cannot arm itself for an
+// unsupported key, and a rebind is picked up on the next 20 ms poll. The normal
+// Carbon Released event remains the fast path; the frontend treats this event
+// as a recovery edge and drops whichever release arrives second.
+#[cfg(target_os = "macos")]
+fn update_ptt_physical_monitor<R: Runtime>(app: &AppHandle<R>, active: bool) {
+    let generation = PTT_PHYSICAL_MONITOR_GENERATION.fetch_add(1, Ordering::AcqRel) + 1;
+    if !active {
+        return;
+    }
+
+    let app = app.clone();
+    std::thread::spawn(move || {
+        let mut was_held = false;
+        while PTT_PHYSICAL_MONITOR_GENERATION.load(Ordering::Acquire) == generation
+            && SessionActiveFlag::is_active(&app)
+        {
+            let shortcut = app.state::<ShortcutBindings>().ptt_friends();
+            match macos_shortcut_is_held(shortcut) {
+                Some(true) => was_held = true,
+                Some(false) if was_held => {
+                    was_held = false;
+                    let _ = app.emit(PTT_PHYSICAL_RELEASE_EVENT, ());
+                }
+                Some(false) | None => {}
+            }
+            std::thread::sleep(PTT_PHYSICAL_POLL_INTERVAL);
+        }
+    });
+}
+
+#[cfg(target_os = "macos")]
+fn macos_shortcut_is_held(shortcut: Shortcut) -> Option<bool> {
+    let key_code = macos_key_code(shortcut.key)?;
+    let key_down = unsafe { CGEventSourceKeyState(CG_EVENT_SOURCE_COMBINED_SESSION, key_code) };
+    if !key_down {
+        return Some(false);
+    }
+    let flags = unsafe { CGEventSourceFlagsState(CG_EVENT_SOURCE_COMBINED_SESSION) };
+    Some(required_modifiers_held(shortcut.mods, flags))
+}
+
+#[cfg(target_os = "macos")]
+fn required_modifiers_held(modifiers: Modifiers, flags: u64) -> bool {
+    (!modifiers.contains(Modifiers::SHIFT) || flags & CG_EVENT_FLAG_SHIFT != 0)
+        && (!modifiers.contains(Modifiers::CONTROL) || flags & CG_EVENT_FLAG_CONTROL != 0)
+        && (!modifiers.contains(Modifiers::ALT) || flags & CG_EVENT_FLAG_ALTERNATE != 0)
+        && (!modifiers.contains(Modifiers::SUPER) || flags & CG_EVENT_FLAG_COMMAND != 0)
+}
+
+#[cfg(target_os = "macos")]
+const CG_EVENT_SOURCE_COMBINED_SESSION: i32 = 0;
+#[cfg(target_os = "macos")]
+const CG_EVENT_FLAG_SHIFT: u64 = 1 << 17;
+#[cfg(target_os = "macos")]
+const CG_EVENT_FLAG_CONTROL: u64 = 1 << 18;
+#[cfg(target_os = "macos")]
+const CG_EVENT_FLAG_ALTERNATE: u64 = 1 << 19;
+#[cfg(target_os = "macos")]
+const CG_EVENT_FLAG_COMMAND: u64 = 1 << 20;
+
+#[cfg(target_os = "macos")]
+#[link(name = "CoreGraphics", kind = "framework")]
+extern "C" {
+    fn CGEventSourceKeyState(state_id: i32, key: u16) -> bool;
+    fn CGEventSourceFlagsState(state_id: i32) -> u64;
+}
+
+// Keep this map byte-for-byte aligned with global-hotkey 0.8's macOS
+// `key_to_scancode`: the physical-state watcher must interpret a custom binding
+// using the same virtual key code Carbon registered for it.
+#[cfg(target_os = "macos")]
+fn macos_key_code(code: Code) -> Option<u16> {
+    match code {
+        Code::KeyA => Some(0x00),
+        Code::KeyS => Some(0x01),
+        Code::KeyD => Some(0x02),
+        Code::KeyF => Some(0x03),
+        Code::KeyH => Some(0x04),
+        Code::KeyG => Some(0x05),
+        Code::KeyZ => Some(0x06),
+        Code::KeyX => Some(0x07),
+        Code::KeyC => Some(0x08),
+        Code::KeyV => Some(0x09),
+        Code::KeyB => Some(0x0b),
+        Code::KeyQ => Some(0x0c),
+        Code::KeyW => Some(0x0d),
+        Code::KeyE => Some(0x0e),
+        Code::KeyR => Some(0x0f),
+        Code::KeyY => Some(0x10),
+        Code::KeyT => Some(0x11),
+        Code::Digit1 => Some(0x12),
+        Code::Digit2 => Some(0x13),
+        Code::Digit3 => Some(0x14),
+        Code::Digit4 => Some(0x15),
+        Code::Digit6 => Some(0x16),
+        Code::Digit5 => Some(0x17),
+        Code::Equal => Some(0x18),
+        Code::Digit9 => Some(0x19),
+        Code::Digit7 => Some(0x1a),
+        Code::Minus => Some(0x1b),
+        Code::Digit8 => Some(0x1c),
+        Code::Digit0 => Some(0x1d),
+        Code::BracketRight => Some(0x1e),
+        Code::KeyO => Some(0x1f),
+        Code::KeyU => Some(0x20),
+        Code::BracketLeft => Some(0x21),
+        Code::KeyI => Some(0x22),
+        Code::KeyP => Some(0x23),
+        Code::Enter => Some(0x24),
+        Code::KeyL => Some(0x25),
+        Code::KeyJ => Some(0x26),
+        Code::Quote => Some(0x27),
+        Code::KeyK => Some(0x28),
+        Code::Semicolon => Some(0x29),
+        Code::Backslash => Some(0x2a),
+        Code::Comma => Some(0x2b),
+        Code::Slash => Some(0x2c),
+        Code::KeyN => Some(0x2d),
+        Code::KeyM => Some(0x2e),
+        Code::Period => Some(0x2f),
+        Code::Tab => Some(0x30),
+        Code::Space => Some(0x31),
+        Code::Backquote => Some(0x32),
+        Code::Backspace => Some(0x33),
+        Code::Escape => Some(0x35),
+        Code::CapsLock => Some(0x39),
+        Code::F17 => Some(0x40),
+        Code::NumpadDecimal => Some(0x41),
+        Code::NumpadMultiply => Some(0x43),
+        Code::NumpadAdd => Some(0x45),
+        Code::PrintScreen => Some(0x46),
+        Code::NumLock => Some(0x47),
+        Code::AudioVolumeUp => Some(0x48),
+        Code::AudioVolumeDown => Some(0x49),
+        Code::AudioVolumeMute => Some(0x4a),
+        Code::NumpadDivide => Some(0x4b),
+        Code::NumpadEnter => Some(0x4c),
+        Code::NumpadSubtract => Some(0x4e),
+        Code::F18 => Some(0x4f),
+        Code::F19 => Some(0x50),
+        Code::NumpadEqual => Some(0x51),
+        Code::Numpad0 => Some(0x52),
+        Code::Numpad1 => Some(0x53),
+        Code::Numpad2 => Some(0x54),
+        Code::Numpad3 => Some(0x55),
+        Code::Numpad4 => Some(0x56),
+        Code::Numpad5 => Some(0x57),
+        Code::Numpad6 => Some(0x58),
+        Code::Numpad7 => Some(0x59),
+        Code::F20 => Some(0x5a),
+        Code::Numpad8 => Some(0x5b),
+        Code::Numpad9 => Some(0x5c),
+        Code::F5 => Some(0x60),
+        Code::F6 => Some(0x61),
+        Code::F7 => Some(0x62),
+        Code::F3 => Some(0x63),
+        Code::F8 => Some(0x64),
+        Code::F9 => Some(0x65),
+        Code::F11 => Some(0x67),
+        Code::F13 => Some(0x69),
+        Code::F16 => Some(0x6a),
+        Code::F14 => Some(0x6b),
+        Code::F10 => Some(0x6d),
+        Code::F12 => Some(0x6f),
+        Code::F15 => Some(0x71),
+        Code::Insert => Some(0x72),
+        Code::Home => Some(0x73),
+        Code::PageUp => Some(0x74),
+        Code::Delete => Some(0x75),
+        Code::F4 => Some(0x76),
+        Code::End => Some(0x77),
+        Code::F2 => Some(0x78),
+        Code::PageDown => Some(0x79),
+        Code::F1 => Some(0x7a),
+        Code::ArrowLeft => Some(0x7b),
+        Code::ArrowRight => Some(0x7c),
+        Code::ArrowDown => Some(0x7d),
+        Code::ArrowUp => Some(0x7e),
+        _ => None,
     }
 }
 
@@ -701,5 +910,11 @@ mod tests {
         assert!(!super::is_on_read_only_volume(Path::new(
             "/no/such/volume/anywhere"
         )));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn ptt_physical_key_map_covers_default_binding() {
+        assert_eq!(super::macos_key_code(Code::BracketLeft), Some(0x21));
     }
 }
