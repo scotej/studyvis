@@ -105,17 +105,17 @@ function buildHistory(
 }
 
 function parseSessionChatReply(raw: string, modelId: string): string {
-  const candidates: string[] = []
+  const candidates = new Set<string>()
   const trimmed = raw.trim()
-  if (trimmed) candidates.push(trimmed)
+  if (trimmed) candidates.add(trimmed)
 
   const fenceMatch = raw.match(/```(?:json)?\s*([\s\S]*?)\s*```/)
-  if (fenceMatch?.[1]) candidates.push(fenceMatch[1].trim())
+  if (fenceMatch?.[1]) candidates.add(fenceMatch[1].trim())
 
   const firstBrace = raw.indexOf('{')
   const lastBrace = raw.lastIndexOf('}')
   if (firstBrace >= 0 && lastBrace > firstBrace) {
-    candidates.push(raw.slice(firstBrace, lastBrace + 1))
+    candidates.add(raw.slice(firstBrace, lastBrace + 1))
   }
 
   let parsedObjectCount = 0
@@ -147,7 +147,7 @@ function parseSessionChatReply(raw: string, modelId: string): string {
   log.warn('reply.parse_failed', {
     modelId,
     rawLength: raw.length,
-    candidateCount: candidates.length,
+    candidateCount: candidates.size,
     parsedObjectCount,
     replyTextPresent,
     replyTextString,

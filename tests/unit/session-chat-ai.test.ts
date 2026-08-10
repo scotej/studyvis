@@ -405,7 +405,7 @@ describe('handleSessionChatText failures and cancellation', () => {
     })
   })
 
-  test('logs only failed reply shape and error metadata', async () => {
+  test('deduplicates failed reply candidates and logs only shape/error metadata', async () => {
     const records: LogRecord[] = []
     __resetLog()
     __setLogRecordSink((record) => records.push(record))
@@ -426,8 +426,8 @@ describe('handleSessionChatText failures and cancellation', () => {
     expect(parseFailed?.data).toEqual({
       modelId: BASE_INPUT.modelId,
       rawLength: privateOutput.length,
-      candidateCount: 2,
-      parsedObjectCount: 2,
+      candidateCount: 1,
+      parsedObjectCount: 1,
       replyTextPresent: false,
       replyTextString: false,
     })
