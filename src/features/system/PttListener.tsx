@@ -21,8 +21,7 @@ import {
 
 export const PTT_FRIENDS_PRESSED = 'ptt-friends-pressed'
 export const PTT_FRIENDS_RELEASED = 'ptt-friends-released'
-export const PTT_FRIENDS_PHYSICAL_RELEASED =
-  'ptt-friends-physical-released'
+export const PTT_FRIENDS_PHYSICAL_RELEASED = 'ptt-friends-physical-released'
 
 const log = logger.child('ptt')
 
@@ -215,7 +214,7 @@ export function PttListener() {
           // redundant renders or getStats sampling. The store remains
           // independently idempotent as a defence-in-depth contract for any
           // future caller that bypasses this listener.
-          log.warn('edge.duplicate_pressed', {
+          log.debug('edge.duplicate_pressed', {
             edgeSeq: currentEdgeSeq,
             edgeSource,
             heldMs:
