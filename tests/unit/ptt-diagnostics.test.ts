@@ -76,7 +76,9 @@ function peer(
 function room(peers: RTCPeerConnection[]): TopicRoom {
   return {
     getPeers: () =>
-      Object.fromEntries(peers.map((connection, i) => [`peer-${i}`, connection])),
+      Object.fromEntries(
+        peers.map((connection, i) => [`peer-${i}`, connection])
+      ),
   } as unknown as TopicRoom
 }
 
@@ -180,7 +182,7 @@ describe('PTT media diagnostics', () => {
     })
   })
 
-  test('getStats failures are counted but never reject the diagnostic sample', async () => {
+  test('getStats failures are non-fatal and counted', async () => {
     const brokenSender = sender({
       track: track('audio', true),
       rejectStats: true,
@@ -206,7 +208,7 @@ describe('PTT media diagnostics', () => {
     })
   })
 
-  test('room/media inspection failures degrade to a flagged snapshot', async () => {
+  test('inspection failures return a flagged snapshot', async () => {
     const badRoom = {
       getPeers: () => {
         throw new Error('peer map unavailable')
