@@ -11,7 +11,10 @@ import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 
 import { logger } from '@/lib/log'
 import { usePttStore } from '@/stores/pttStore'
-import { useSessionStore } from '@/stores/sessionStore'
+import {
+  useSessionStore,
+  type PeerSnapshot,
+} from '@/stores/sessionStore'
 
 import {
   collectPttMediaSnapshot,
@@ -26,10 +29,13 @@ const log = logger.child('ptt')
 
 // First sample gives React's PTT effect time to mirror the store onto
 // MediaStreamTrack.enabled. The settled sample is late enough for getStats()
-// counters to show whether outbound RTP progressed through the hold, while
-// remaining short enough to capture the ~200 ms failure reported in #209.
+// counters to show whether RTP progressed through the hold, while remaining
+// short enough to capture the ~200 ms failure reported in #209.
 const POST_EDGE_SAMPLE_MS = 40
-const SETTLED_PRESS_SAMPLE_MS = 350
+const SETTLED_SAMPLE_MS = 350
+
+type DiagnosticSource = 'local' | 'peer'
+type PttEdge = 'pressed' | 'released' | 'changed'
 
 function monotonicNow(): number {
   return typeof performance === 'undefined' ? Date.now() : performance.now()
@@ -42,102 +48,153 @@ function isTauriRuntime(): boolean {
   )
 }
 
+function activePeerPttCount(peers: Record<string, PeerSnapshot>): number {
+  return Object.values(peers).reduce((count, peer) => count + (peer.ptt ? 1 : 0), 0)
+}
+
+function changedPeerPttCount(
+  current: Record<string, PeerSnapshot>,
+  previous: Record<string, PeerSnapshot>
+): number {
+  const peerIds = new Set([...Object.keys(current), ...Object.keys(previous)])
+  let changed = 0
+  for (const peerId of peerIds) {
+    if ((current[peerId]?.ptt ?? false) !== (previous[peerId]?.ptt ?? false)) {
+      changed += 1
+    }
+  }
+  return changed
+}
+
 export function PttListener() {
   useEffect(() => {
     const unlisteners: UnlistenFn[] = []
     const diagnosticTimers = new Set<ReturnType<typeof setTimeout>>()
     let cancelled = false
-    let edgeSeq = 0
+    let localEdgeSeq = 0
+    let peerEdgeSeq = 0
     let sampleSeq = 0
     let pressStartedAt: number | null = null
-    let previousSnapshot: PttMediaSnapshot | null = null
+    let previousLocalSnapshot: PttMediaSnapshot | null = null
+    let previousPeerSnapshot: PttMediaSnapshot | null = null
     let previousRoom = useSessionStore.getState().room
 
     const press = usePttStore.getState().press
     const release = usePttStore.getState().release
 
     const sampleMedia = async (
-      edge: 'pressed' | 'released',
+      source: DiagnosticSource,
+      edge: PttEdge,
       sourceEdgeSeq: number,
       phase: 'post-edge' | 'settled'
     ) => {
       const room = useSessionStore.getState().room
       if (room !== previousRoom) {
         previousRoom = room
-        previousSnapshot = null
+        previousLocalSnapshot = null
+        previousPeerSnapshot = null
       }
 
       const snapshot = await collectPttMediaSnapshot(room)
       if (cancelled || useSessionStore.getState().room !== room) return
 
       // Read state after getStats resolves so a release racing the async sample
-      // cannot be reported against stale active=true state.
-      const active = usePttStore.getState().active
-      sampleSeq += 1
+      // cannot be reported against stale state.
+      const localActive = usePttStore.getState().active
+      const peerActiveCount = activePeerPttCount(
+        useSessionStore.getState().peers
+      )
+      const previousSnapshot =
+        source === 'local' ? previousLocalSnapshot : previousPeerSnapshot
       const delta = diffPttMediaSnapshot(previousSnapshot, snapshot)
-      previousSnapshot = snapshot
+      if (source === 'local') previousLocalSnapshot = snapshot
+      else previousPeerSnapshot = snapshot
+
+      sampleSeq += 1
       const heldMs =
-        pressStartedAt === null
-          ? undefined
-          : Math.max(0, Math.round(monotonicNow() - pressStartedAt))
+        source === 'local' && pressStartedAt !== null
+          ? Math.max(0, Math.round(monotonicNow() - pressStartedAt))
+          : undefined
       const fields = {
+        source,
         edge,
         edgeSeq: sourceEdgeSeq,
         sampleSeq,
         phase,
-        active,
+        localActive,
+        peerActiveCount,
         heldMs,
         ...snapshot,
         ...delta,
       }
 
-      // These are state contradictions, not heuristics: if PTT says active but
-      // every published audio sender is disabled (or absent despite live peer
-      // connections), the peer cannot receive speech. Likewise, an enabled
-      // sender while inactive is a privacy failure. RTP byte deltas remain
-      // debug telemetry only because Opus DTX may legitimately produce little
-      // or no traffic during silence.
+      // These are state contradictions, not traffic-volume heuristics. RTP byte
+      // deltas remain debug telemetry because Opus DTX may legitimately produce
+      // little/no traffic during silence. Sender contradictions diagnose the
+      // local PTT path; receiver contradictions diagnose the peer path.
       if (
-        active &&
+        source === 'local' &&
+        localActive &&
         snapshot.peerConnectionCount > 0 &&
         snapshot.audioSenderCount === 0
       ) {
         log.warn('media.active_no_audio_sender', fields)
       } else if (
-        active &&
+        source === 'local' &&
+        localActive &&
         snapshot.audioSenderCount > 0 &&
         snapshot.enabledAudioSenderCount !== snapshot.audioSenderCount
       ) {
         log.error('media.active_sender_disabled', fields)
-      } else if (!active && snapshot.enabledAudioSenderCount > 0) {
+      } else if (
+        source === 'local' &&
+        !localActive &&
+        snapshot.enabledAudioSenderCount > 0
+      ) {
         log.error('media.inactive_sender_enabled', fields)
       } else if (
-        active &&
+        source === 'local' &&
+        localActive &&
         snapshot.audioSenderCount > 0 &&
         snapshot.liveAudioSenderCount !== snapshot.audioSenderCount
       ) {
         log.warn('media.audio_track_not_live', fields)
+      } else if (
+        source === 'peer' &&
+        peerActiveCount > 0 &&
+        snapshot.peerConnectionCount > 0 &&
+        snapshot.audioReceiverCount === 0
+      ) {
+        log.warn('media.peer_active_no_audio_receiver', fields)
+      } else if (
+        source === 'peer' &&
+        peerActiveCount > 0 &&
+        snapshot.audioReceiverCount > 0 &&
+        snapshot.liveAudioReceiverCount !== snapshot.audioReceiverCount
+      ) {
+        log.warn('media.peer_audio_track_not_live', fields)
       } else {
         log.debug('media.snapshot', fields)
       }
     }
 
     const scheduleMediaSample = (
-      edge: 'pressed' | 'released',
+      source: DiagnosticSource,
+      edge: PttEdge,
       sourceEdgeSeq: number,
       phase: 'post-edge' | 'settled',
       delayMs: number
     ) => {
       const handle = setTimeout(() => {
         diagnosticTimers.delete(handle)
-        void sampleMedia(edge, sourceEdgeSeq, phase)
+        void sampleMedia(source, edge, sourceEdgeSeq, phase)
       }, delayMs)
       diagnosticTimers.add(handle)
     }
 
-    const handleEdge = (edge: 'pressed' | 'released') => {
-      edgeSeq += 1
-      const currentEdgeSeq = edgeSeq
+    const handleLocalEdge = (edge: 'pressed' | 'released') => {
+      localEdgeSeq += 1
+      const currentEdgeSeq = localEdgeSeq
       const now = monotonicNow()
       const activeBefore = usePttStore.getState().active
       const duplicatePress = edge === 'pressed' && activeBefore
@@ -185,6 +242,7 @@ export function PttListener() {
       if (duplicatePress) return
 
       scheduleMediaSample(
+        'local',
         edge,
         currentEdgeSeq,
         'post-edge',
@@ -192,19 +250,69 @@ export function PttListener() {
       )
       if (edge === 'pressed') {
         scheduleMediaSample(
+          'local',
           edge,
           currentEdgeSeq,
           'settled',
-          SETTLED_PRESS_SAMPLE_MS
+          SETTLED_SAMPLE_MS
         )
       } else {
         pressStartedAt = null
       }
     }
 
+    // `SessionView` writes peer PTT action messages into sessionStore.peers.
+    // Observing that store here gives diagnostics a receiver-side edge without
+    // coupling the logging code to the large session UI component. No peer IDs
+    // are logged; only aggregate transition counts and inbound RTP counters.
+    const unsubscribePeerPtt = useSessionStore.subscribe((state, previous) => {
+      if (state.peers === previous.peers) return
+      const changedPeerCount = changedPeerPttCount(state.peers, previous.peers)
+      if (changedPeerCount === 0) return
+
+      const activeBeforeCount = activePeerPttCount(previous.peers)
+      const activeAfterCount = activePeerPttCount(state.peers)
+      const edge: PttEdge =
+        activeAfterCount > activeBeforeCount
+          ? 'pressed'
+          : activeAfterCount < activeBeforeCount
+            ? 'released'
+            : 'changed'
+      peerEdgeSeq += 1
+      const currentEdgeSeq = peerEdgeSeq
+
+      log.debug('peer.edge.received', {
+        edge,
+        edgeSeq: currentEdgeSeq,
+        activeBeforeCount,
+        activeAfterCount,
+        changedPeerCount,
+        sessionActive: state.room !== null,
+      })
+
+      scheduleMediaSample(
+        'peer',
+        edge,
+        currentEdgeSeq,
+        'post-edge',
+        POST_EDGE_SAMPLE_MS
+      )
+      if (activeAfterCount > 0) {
+        scheduleMediaSample(
+          'peer',
+          edge,
+          currentEdgeSeq,
+          'settled',
+          SETTLED_SAMPLE_MS
+        )
+      }
+    })
+
     const wire = async () => {
       try {
-        const a = await listen(PTT_FRIENDS_PRESSED, () => handleEdge('pressed'))
+        const a = await listen(PTT_FRIENDS_PRESSED, () =>
+          handleLocalEdge('pressed')
+        )
         if (cancelled) {
           a()
           return
@@ -212,7 +320,7 @@ export function PttListener() {
         unlisteners.push(a)
 
         const b = await listen(PTT_FRIENDS_RELEASED, () =>
-          handleEdge('released')
+          handleLocalEdge('released')
         )
         if (cancelled) {
           b()
@@ -239,6 +347,7 @@ export function PttListener() {
 
     return () => {
       cancelled = true
+      unsubscribePeerPtt()
       for (const handle of diagnosticTimers) clearTimeout(handle)
       diagnosticTimers.clear()
       for (const u of unlisteners) u()
