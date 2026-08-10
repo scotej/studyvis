@@ -14,6 +14,11 @@
 
 import benchmarkImageUrl from './assets/benchmark-desk.png'
 import { FACE_FRAME_QUALITY, FACE_FRAME_SIZE } from './captureFace'
+import {
+  computeDeviceFingerprint,
+  readCachedAiComputeDeviceSelection,
+  type AiComputeDeviceSelection,
+} from './computeDevice'
 import { SCREEN_FRAME_MAX_WIDTH, SCREEN_FRAME_QUALITY } from './captureScreen'
 import { getCaptureRuntime, type CaptureFrame } from './captureShared'
 import { buildFocusRequest, type FocusChatRequest } from './focusRequest'
@@ -48,16 +53,30 @@ const BENCHMARK_TOPIC = 'Studying'
 
 // Identifies the inference runtime + benchmark protocol that produced a
 // measurement: the pinned llama.cpp build, throughput-sensitive spawn flags,
-// and the cache-cold request method below. Bump this whenever any of those
-// changes materially. A mismatched record is shown as stale in the picker and
-// is not trusted for live cadence/timeout decisions.
+// selected compute hardware, and the cache-cold request method below. Bump the
+// base whenever any non-hardware part changes materially. A mismatched record
+// is shown as stale in the picker and is not trusted for cadence/timeouts.
 //
-// The `cachecold2` bump invalidates benchmarks written before #171. Those
-// benchmarks reused one byte-identical request for warmup + every measured
-// sample, so llama-server's prompt cache skipped both image encodes and made a
-// ~150 s Windows CPU request look like ~12 s. Deliberately NOT __APP_VERSION__:
-// most releases don't affect inference measurements.
-export const INFERENCE_ENGINE_FINGERPRINT = 'b9095-ngl99-cachecold2'
+// `hwselect1` invalidates the old single-policy b9095-ngl99 records: #211 makes
+// CPU vs Metal/Vulkan/eGPU a user choice, and their timings are not
+// interchangeable. Deliberately NOT __APP_VERSION__: most releases don't
+// affect inference measurements.
+const INFERENCE_ENGINE_FINGERPRINT_BASE = 'b9095-hwselect1-cachecold2'
+
+export function inferenceEngineFingerprintFor(
+  selection: AiComputeDeviceSelection
+): string {
+  return `${INFERENCE_ENGINE_FINGERPRINT_BASE}-${computeDeviceFingerprint(selection)}`
+}
+
+export function currentInferenceEngineFingerprint(): string {
+  return inferenceEngineFingerprintFor(readCachedAiComputeDeviceSelection())
+}
+
+// Backwards-compatible constant for call sites/tests that need the shipped
+// default. Runtime stale checks use currentInferenceEngineFingerprint() so a
+// hardware dropdown change invalidates the previous measurement immediately.
+export const INFERENCE_ENGINE_FINGERPRINT = inferenceEngineFingerprintFor('auto')
 
 export type BenchmarkResult = {
   // Wall-clock seconds per chat-completion request, in invocation order.
@@ -71,19 +90,17 @@ export type BenchmarkResult = {
   sampleIntervalSec: number
   // Unix epoch seconds when the benchmark completed.
   completedAtSec: number
-  // INFERENCE_ENGINE_FINGERPRINT at measurement time. Absent on records
-  // written before the field existed — all of which predate the Metal
-  // offload, so absence correctly reads as stale. Additive JSON: older
-  // builds ignore it.
+  // Hardware-qualified engine fingerprint at measurement time. Additive JSON:
+  // older builds ignore it; records without it are conservatively stale.
   engineFingerprint?: string
 }
 
-// A persisted benchmark measured with a different engine/protocol (or one
-// predating the stamp). The picker shows a re-measure hint, and sampleLoop
+// A persisted benchmark measured with a different engine/protocol/hardware (or
+// one predating the stamp). The picker shows a re-measure hint, and sampleLoop
 // treats its timing numbers as unavailable: #171 proved a stale measurement
 // can be dangerously optimistic rather than conservative.
 export function isBenchmarkStale(result: BenchmarkResult): boolean {
-  return result.engineFingerprint !== INFERENCE_ENGINE_FINGERPRINT
+  return result.engineFingerprint !== currentInferenceEngineFingerprint()
 }
 
 export type BenchmarkProgress =
@@ -297,7 +314,7 @@ export function summariseBenchmark({
     p95Sec,
     sampleIntervalSec,
     completedAtSec,
-    engineFingerprint: INFERENCE_ENGINE_FINGERPRINT,
+    engineFingerprint: currentInferenceEngineFingerprint(),
   }
 }
 
