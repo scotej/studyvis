@@ -49,7 +49,10 @@ function isTauriRuntime(): boolean {
 }
 
 function activePeerPttCount(peers: Record<string, PeerSnapshot>): number {
-  return Object.values(peers).reduce((count, peer) => count + (peer.ptt ? 1 : 0), 0)
+  return Object.values(peers).reduce(
+    (count, peer) => count + (peer.ptt ? 1 : 0),
+    0
+  )
 }
 
 function changedPeerPttCount(
@@ -115,6 +118,9 @@ export function PttListener() {
         source === 'local' && pressStartedAt !== null
           ? Math.max(0, Math.round(monotonicNow() - pressStartedAt))
           : undefined
+      // The structured logger caps each object at 24 keys. Keep the media
+      // snapshot and deltas nested so a full sample never drops the trailing
+      // RTP counters that are most useful when diagnosing silence.
       const fields = {
         source,
         edge,
@@ -124,8 +130,8 @@ export function PttListener() {
         localActive,
         peerActiveCount,
         heldMs,
-        ...snapshot,
-        ...delta,
+        media: snapshot,
+        delta,
       }
 
       // These are state contradictions, not traffic-volume heuristics. RTP byte
