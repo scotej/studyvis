@@ -43,6 +43,12 @@ import {
   useSidecarStore,
   WARNING_THRESHOLD_MAX,
   WARNING_THRESHOLD_MIN,
+  computeDeviceId,
+  hydrateAiComputeDeviceSelection,
+  isAiComputeDeviceSelection,
+  persistAiComputeDeviceSelection,
+  readCachedAiComputeDeviceSelection,
+  type AiComputeDeviceSelection,
   type EngineInfo,
   type EngineProgressEvent,
   type ModelPickerContainerHandle,
@@ -126,6 +132,11 @@ export function AiCategory() {
   const [engineProgress, setEngineProgress] =
     useState<EngineProgressEvent | null>(null)
   const [installingEngine, setInstallingEngine] = useState(false)
+  const [computeDevice, setComputeDevice] = useState<AiComputeDeviceSelection>(
+    readCachedAiComputeDeviceSelection
+  )
+  const [savingComputeDevice, setSavingComputeDevice] = useState(false)
+  const [computeDeviceSaveError, setComputeDeviceSaveError] = useState(false)
   const modelPickerSectionRef = useRef<HTMLDivElement>(null)
   const modelPickerRef = useRef<ModelPickerContainerHandle>(null)
 
@@ -163,6 +174,19 @@ export function AiCategory() {
       unlisten?.()
     }
   }, [refreshEngineInfo])
+
+  // The canonical hardware choice lives in a dedicated Tauri store so it can
+  // be read by Rust before llama-server starts. localStorage is only the
+  // synchronous benchmark-fingerprint mirror used before this hydration lands.
+  useEffect(() => {
+    let disposed = false
+    void hydrateAiComputeDeviceSelection().then((selection) => {
+      if (!disposed) setComputeDevice(selection)
+    })
+    return () => {
+      disposed = true
+    }
+  }, [])
 
   const refreshTokenPresence = useCallback(async () => {
     try {
@@ -370,6 +394,25 @@ export function AiCategory() {
     }
   }, [copy.engine, refreshEngineInfo])
 
+  const handleComputeDeviceChange = useCallback(
+    async (value: string) => {
+      if (!isAiComputeDeviceSelection(value) || value === computeDevice) return
+      const previous = computeDevice
+      setComputeDevice(value)
+      setComputeDeviceSaveError(false)
+      setSavingComputeDevice(true)
+      try {
+        await persistAiComputeDeviceSelection(value)
+      } catch {
+        setComputeDevice(previous)
+        setComputeDeviceSaveError(true)
+      } finally {
+        setSavingComputeDevice(false)
+      }
+    },
+    [computeDevice]
+  )
+
   const engineBusy =
     installingEngine ||
     engineProgress !== null ||
@@ -403,6 +446,32 @@ export function AiCategory() {
       ? copy.engine.helpMissingAuto
       : copy.engine.helpMissingManual
   })()
+
+  const selectedDeviceId = computeDeviceId(computeDevice)
+  const engineDevices = engineInfo?.devices ?? []
+  const selectedDeviceUnavailable =
+    selectedDeviceId !== null &&
+    !engineDevices.some((device) => device.id === selectedDeviceId)
+  const computeDeviceHelp = (() => {
+    if (computeDeviceSaveError)
+      return "Couldn't save that hardware choice. Your previous choice is still active."
+    if (engineInfo?.device_error)
+      return 'Hardware detection failed. Automatic and CPU remain available; reinstall the AI engine if accelerator detection keeps failing.'
+    if (!engineInfo?.installed)
+      return 'Install the AI engine to detect GPUs. Automatic and CPU are always available.'
+    if (selectedDeviceUnavailable)
+      return 'That accelerator is not currently available. StudyVis keeps your choice instead of silently switching hardware.'
+    if (engineDevices.length === 0)
+      return 'No accelerator was reported by the AI engine. Automatic will fall back to CPU.'
+    return 'Choose where local AI inference runs. Automatic uses available acceleration; changing this makes existing model benchmarks stale.'
+  })()
+  const computeDeviceDisabled =
+    savingComputeDevice ||
+    engineBusy ||
+    modelSetupBusy ||
+    sidecarStatus === 'starting' ||
+    sidecarStatus === 'running' ||
+    sidecarStatus === 'stopping'
 
   // Clamp the displayed value through the SAME function the loop uses so the
   // slider can't show a value below `min` (a stale override saved on a faster
@@ -489,6 +558,37 @@ export function AiCategory() {
             }
             aria-label={copy.engine.auto.ariaLabel}
           />
+        }
+      />
+
+      <SettingsRow
+        label="AI hardware"
+        help={
+          <span role="status" aria-live="polite">
+            {computeDeviceHelp}
+          </span>
+        }
+        control={
+          <select
+            value={computeDevice}
+            onChange={(event) => void handleComputeDeviceChange(event.target.value)}
+            disabled={computeDeviceDisabled}
+            aria-label="AI compute hardware"
+            className="h-9 max-w-sm rounded-md border border-border-default bg-transparent px-3 py-1 text-sm text-text-primary shadow-xs outline-none transition-[color,box-shadow] focus-visible:border-accent-default focus-visible:ring-3 focus-visible:ring-accent-ring disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <option value="auto">Automatic (recommended)</option>
+            <option value="cpu">CPU</option>
+            {selectedDeviceUnavailable ? (
+              <option value={computeDevice}>
+                Unavailable — {selectedDeviceId}
+              </option>
+            ) : null}
+            {engineDevices.map((device) => (
+              <option key={device.id} value={`device:${device.id}`}>
+                {device.label}
+              </option>
+            ))}
+          </select>
         }
       />
 
