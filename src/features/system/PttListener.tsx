@@ -41,10 +41,7 @@ function monotonicNow(): number {
 }
 
 function isTauriRuntime(): boolean {
-  return (
-    typeof window !== 'undefined' &&
-    '__TAURI_INTERNALS__' in (window as Window & Record<string, unknown>)
-  )
+  return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
 }
 
 function activePeerPttCount(peers: Record<string, PeerSnapshot>): number {
