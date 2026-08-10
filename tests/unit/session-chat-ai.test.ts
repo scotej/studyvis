@@ -23,6 +23,7 @@ import {
   SESSION_CHAT_SYSTEM_PROMPT,
   type SessionAiMessage,
 } from '@/features/session/sessionChatAi'
+import { __resetLog, __setLogRecordSink, type LogRecord } from '@/lib/log'
 import { strings } from '@/strings'
 
 const BASE_INPUT = {
@@ -100,6 +101,7 @@ function pendingFetch(): typeof fetch {
 
 afterEach(() => {
   __resetAiAgentRuntime()
+  __resetLog()
   vi.useRealTimers()
   vi.restoreAllMocks()
 })
@@ -137,7 +139,21 @@ describe('handleSessionChatText request contract', () => {
 
     const body = requestBody(fetchMock)
     expect(body.model).toBe(BASE_INPUT.modelId)
-    expect(body.response_format).toEqual({ type: 'json_object' })
+    expect(body.response_format).toEqual({
+      type: 'json_object',
+      schema: {
+        type: 'object',
+        properties: {
+          reply_text: {
+            type: 'string',
+            minLength: 1,
+            maxLength: SESSION_CHAT_MAX_REPLY_LENGTH,
+          },
+        },
+        required: ['reply_text'],
+        additionalProperties: false,
+      },
+    })
     expect(body.messages).toHaveLength(SESSION_CHAT_MAX_HISTORY_MESSAGES + 2)
     expect(body.messages[0].role).toBe('system')
     expect(body.messages[0].content).toContain(SESSION_CHAT_SYSTEM_PROMPT)
@@ -216,9 +232,16 @@ describe('handleSessionChatText request contract', () => {
     ])
   })
 
-  test('trims and caps a valid reply without exposing command fields', async () => {
+  test('trims and caps reply_text while ignoring extra command-shaped fields', async () => {
     const fetchMock = vi.fn(async () =>
-      completion(JSON.stringify({ reply_text: `  ${'r'.repeat(700)}  ` }))
+      completion(
+        JSON.stringify({
+          intent: 'topic_change',
+          payload: { new_topic: 'A model-supplied topic must not be applied' },
+          metadata: { confidence: 0.9 },
+          reply_text: `  ${'r'.repeat(700)}  `,
+        })
+      )
     )
     useRuntime({ fetch: fetchMock as unknown as typeof fetch })
 
@@ -250,6 +273,42 @@ describe('handleSessionChatText request contract', () => {
     expect(fetchHealth).toHaveBeenCalledTimes(2)
     expect(fetchMock).toHaveBeenCalledOnce()
     expect(vi.getTimerCount()).toBe(0)
+  })
+
+  test('records bounded outcome metadata without prompts or replies', async () => {
+    const records: LogRecord[] = []
+    __resetLog()
+    __setLogRecordSink((record) => records.push(record))
+    const privatePrompt = 'private prompt 9kJw2R'
+    const privateTopic = 'private topic 4xPq7S'
+    const privateReply = 'private reply 6mNv3T'
+    const fetchMock = vi.fn(async () =>
+      completion(JSON.stringify({ reply_text: privateReply }))
+    )
+    useRuntime({ fetch: fetchMock as unknown as typeof fetch })
+
+    await expect(
+      handleSessionChatText({
+        ...BASE_INPUT,
+        text: privatePrompt,
+        declaredTopic: privateTopic,
+      })
+    ).resolves.toBe(privateReply)
+
+    const succeeded = records.find(
+      (record) =>
+        record.scope === 'ai.session-chat' && record.msg === 'request.succeeded'
+    )
+    expect(succeeded?.data).toEqual({
+      modelId: BASE_INPUT.modelId,
+      elapsedMs: 0,
+      status: 200,
+      contentLength: JSON.stringify({ reply_text: privateReply }).length,
+    })
+    const serialized = JSON.stringify(records)
+    expect(serialized).not.toContain(privatePrompt)
+    expect(serialized).not.toContain(privateTopic)
+    expect(serialized).not.toContain(privateReply)
   })
 })
 
@@ -313,11 +372,13 @@ describe('handleSessionChatText failures and cancellation', () => {
 
   test.each([
     'not JSON',
+    JSON.stringify({}),
+    JSON.stringify({ answer: 'Wrong key.' }),
     JSON.stringify({ reply_text: '' }),
+    JSON.stringify({ reply_text: '   ' }),
     JSON.stringify({ reply_text: 42 }),
-    JSON.stringify({ intent: 'topic_change', reply_text: 'Changed it.' }),
   ])(
-    'rejects malformed or command-shaped model output: %s',
+    'rejects malformed, missing, empty, or non-string reply output: %s',
     async (content) => {
       const fetchMock = vi.fn(async () => completion(content))
       useRuntime({ fetch: fetchMock as unknown as typeof fetch })
@@ -328,6 +389,66 @@ describe('handleSessionChatText failures and cancellation', () => {
       })
     }
   )
+
+  test('rejects a successful completion envelope with no reply content', async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ choices: [{ message: {} }] }), {
+          status: 200,
+        })
+    )
+    useRuntime({ fetch: fetchMock as unknown as typeof fetch })
+
+    await expect(handleSessionChatText(BASE_INPUT)).rejects.toMatchObject({
+      code: 'parse_error',
+      message: strings.session.chat.aiFailed,
+    })
+  })
+
+  test('deduplicates failed reply candidates and logs only shape/error metadata', async () => {
+    const records: LogRecord[] = []
+    __resetLog()
+    __setLogRecordSink((record) => records.push(record))
+    const privatePrompt = 'private failure prompt 2qLm8D'
+    const privateOutput = JSON.stringify({ answer: 'private output 7vRs5C' })
+    const fetchMock = vi.fn(async () => completion(privateOutput))
+    useRuntime({ fetch: fetchMock as unknown as typeof fetch })
+
+    await expect(
+      handleSessionChatText({ ...BASE_INPUT, text: privatePrompt })
+    ).rejects.toMatchObject({ code: 'parse_error' })
+
+    const parseFailed = records.find(
+      (record) =>
+        record.scope === 'ai.session-chat' &&
+        record.msg === 'reply.parse_failed'
+    )
+    expect(parseFailed?.data).toEqual({
+      modelId: BASE_INPUT.modelId,
+      rawLength: privateOutput.length,
+      candidateCount: 1,
+      parsedObjectCount: 1,
+      replyTextPresent: false,
+      replyTextString: false,
+    })
+    expect(
+      records.find(
+        (record) =>
+          record.scope === 'ai.session-chat' && record.msg === 'request.failed'
+      )?.data
+    ).toEqual({
+      modelId: BASE_INPUT.modelId,
+      elapsedMs: 0,
+      stage: 'reply_parse',
+      code: 'parse_error',
+      status: 200,
+      contentLength: privateOutput.length,
+    })
+    const serialized = JSON.stringify(records)
+    expect(serialized).not.toContain(privatePrompt)
+    expect(serialized).not.toContain(privateOutput)
+    expect(serialized).not.toContain('private output 7vRs5C')
+  })
 
   test('classifies an invalid completion response body as a parse error', async () => {
     const fetchMock = vi.fn(
@@ -342,8 +463,8 @@ describe('handleSessionChatText failures and cancellation', () => {
 
   test('aborts a stalled request at the agent timeout', async () => {
     vi.useFakeTimers()
-    const fetchMock = pendingFetch()
-    useRuntime({ fetch: fetchMock })
+    const fetchMock = vi.fn(() => new Promise<Response>(() => {}))
+    useRuntime({ fetch: fetchMock as unknown as typeof fetch })
 
     const request = handleSessionChatText(BASE_INPUT)
     const rejection = expect(request).rejects.toMatchObject({ code: 'timeout' })
@@ -351,6 +472,45 @@ describe('handleSessionChatText failures and cancellation', () => {
     expect(fetchMock).toHaveBeenCalledOnce()
     await vi.advanceTimersByTimeAsync(AGENT_REQUEST_TIMEOUT_MS)
     await rejection
+  })
+
+  test('times out a stalled response body even when it ignores AbortSignal', async () => {
+    vi.useFakeTimers()
+    let bodyReadStarted = false
+    const fetchMock = vi.fn(
+      async () =>
+        ({
+          ok: true,
+          status: 200,
+          json: () => {
+            bodyReadStarted = true
+            return new Promise<never>(() => {})
+          },
+        }) as unknown as Response
+    )
+    useRuntime({ fetch: fetchMock as unknown as typeof fetch })
+
+    const request = handleSessionChatText(BASE_INPUT)
+    let settled = false
+    void request.then(
+      () => {
+        settled = true
+      },
+      () => {
+        settled = true
+      }
+    )
+    const rejection = expect(request).rejects.toMatchObject({ code: 'timeout' })
+
+    await vi.advanceTimersByTimeAsync(0)
+    expect(fetchMock).toHaveBeenCalledOnce()
+    expect(bodyReadStarted).toBe(true)
+    await vi.advanceTimersByTimeAsync(AGENT_REQUEST_TIMEOUT_MS - 1)
+    expect(settled).toBe(false)
+    await vi.advanceTimersByTimeAsync(1)
+    await rejection
+    expect(settled).toBe(true)
+    expect(vi.getTimerCount()).toBe(0)
   })
 
   test('forwards caller cancellation independently of the timeout', async () => {
@@ -367,6 +527,37 @@ describe('handleSessionChatText failures and cancellation', () => {
     const rejection = expect(request).rejects.toBe(reason)
     await vi.advanceTimersByTimeAsync(0)
     expect(fetchMock).toHaveBeenCalledOnce()
+    controller.abort(reason)
+    await rejection
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  test('forwards caller cancellation while a response body ignores AbortSignal', async () => {
+    vi.useFakeTimers()
+    let bodyReadStarted = false
+    const fetchMock = vi.fn(
+      async () =>
+        ({
+          ok: true,
+          status: 200,
+          json: () => {
+            bodyReadStarted = true
+            return new Promise<never>(() => {})
+          },
+        }) as unknown as Response
+    )
+    useRuntime({ fetch: fetchMock as unknown as typeof fetch })
+    const controller = new AbortController()
+    const reason = new DOMException('panel closed', 'AbortError')
+
+    const request = handleSessionChatText({
+      ...BASE_INPUT,
+      signal: controller.signal,
+    })
+    const rejection = expect(request).rejects.toBe(reason)
+    await vi.advanceTimersByTimeAsync(0)
+    expect(bodyReadStarted).toBe(true)
+
     controller.abort(reason)
     await rejection
     expect(vi.getTimerCount()).toBe(0)

@@ -4,7 +4,10 @@ import {
   getAiAgentRuntime,
   waitForSidecarReady,
 } from '@/features/ai/aiAgent'
+import { logger } from '@/lib/log'
 import { strings } from '@/strings'
+
+const log = logger.child('ai.session-chat')
 
 export type SessionAiMessage = {
   role: 'user' | 'assistant'
@@ -17,6 +20,26 @@ export const SESSION_CHAT_MAX_REPLY_LENGTH = 500
 export const SESSION_CHAT_MAX_TOPIC_LENGTH = 120
 export const SESSION_CHAT_MAX_AUDIT_CONTEXT = 8
 export const SESSION_CHAT_MAX_AUDIT_KIND_LENGTH = 64
+
+// llama-server's `json_object` response format constrains only JSON syntax
+// unless a schema is supplied. Keep the grammar aligned with the parser so a
+// small local model cannot satisfy the server while missing `reply_text`.
+// This is the schema shape supported by our pinned llama.cpp b9095 build.
+export const SESSION_CHAT_RESPONSE_FORMAT = {
+  type: 'json_object',
+  schema: {
+    type: 'object',
+    properties: {
+      reply_text: {
+        type: 'string',
+        minLength: 1,
+        maxLength: SESSION_CHAT_MAX_REPLY_LENGTH,
+      },
+    },
+    required: ['reply_text'],
+    additionalProperties: false,
+  },
+} as const
 
 export const SESSION_CHAT_SYSTEM_PROMPT = `You are StudyVis AI, a concise conversational study assistant running entirely on the user's device. Answer the current user message, using the prior conversation and session context when it is helpful.
 
@@ -81,29 +104,36 @@ function buildHistory(
     .filter((message) => message.content.length > 0)
 }
 
-function parseSessionChatReply(raw: string): string {
-  const candidates: string[] = []
+function parseSessionChatReply(raw: string, modelId: string): string {
+  const candidates = new Set<string>()
   const trimmed = raw.trim()
-  if (trimmed) candidates.push(trimmed)
+  if (trimmed) candidates.add(trimmed)
 
   const fenceMatch = raw.match(/```(?:json)?\s*([\s\S]*?)\s*```/)
-  if (fenceMatch?.[1]) candidates.push(fenceMatch[1].trim())
+  if (fenceMatch?.[1]) candidates.add(fenceMatch[1].trim())
 
   const firstBrace = raw.indexOf('{')
   const lastBrace = raw.lastIndexOf('}')
   if (firstBrace >= 0 && lastBrace > firstBrace) {
-    candidates.push(raw.slice(firstBrace, lastBrace + 1))
+    candidates.add(raw.slice(firstBrace, lastBrace + 1))
   }
 
+  let parsedObjectCount = 0
+  let replyTextPresent = false
+  let replyTextString = false
   for (const candidate of candidates) {
     try {
       const parsed: unknown = JSON.parse(candidate)
       if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed))
         continue
-      const keys = Object.keys(parsed)
-      if (keys.length !== 1 || keys[0] !== 'reply_text') continue
+      parsedObjectCount += 1
+      replyTextPresent ||= Object.prototype.hasOwnProperty.call(
+        parsed,
+        'reply_text'
+      )
       const replyText = (parsed as { reply_text?: unknown }).reply_text
       if (typeof replyText !== 'string') continue
+      replyTextString = true
       const bounded = boundedText(replyText, SESSION_CHAT_MAX_REPLY_LENGTH)
       if (bounded) return bounded
     } catch {
@@ -112,6 +142,16 @@ function parseSessionChatReply(raw: string): string {
     }
   }
 
+  // Shape only: prompts, session context, candidate keys, and generated text
+  // must never enter the diagnostic bundle.
+  log.warn('reply.parse_failed', {
+    modelId,
+    rawLength: raw.length,
+    candidateCount: candidates.size,
+    parsedObjectCount,
+    replyTextPresent,
+    replyTextString,
+  })
   throw new AiAgentError('parse_error', strings.session.chat.aiFailed)
 }
 
@@ -126,6 +166,32 @@ function abortReason(signal: AbortSignal | undefined): Error {
 
 function isAbortError(error: unknown): boolean {
   return error instanceof Error && error.name === 'AbortError'
+}
+
+function abortablePromise<T>(
+  promise: Promise<T>,
+  signal: AbortSignal
+): Promise<T> {
+  if (signal.aborted) return Promise.reject(abortReason(signal))
+
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => {
+      cleanup()
+      reject(abortReason(signal))
+    }
+    const cleanup = () => signal.removeEventListener('abort', onAbort)
+    signal.addEventListener('abort', onAbort, { once: true })
+    promise.then(
+      (value) => {
+        cleanup()
+        resolve(value)
+      },
+      (error) => {
+        cleanup()
+        reject(error)
+      }
+    )
+  })
 }
 
 export async function handleSessionChatText(
@@ -150,16 +216,23 @@ export async function handleSessionChatText(
     controller.abort(input.signal?.reason)
   }
   input.signal?.addEventListener('abort', abortFromInput, { once: true })
+  // AbortSignal does not replay an abort event to a listener added after the
+  // transition. Close the narrow race between the post-readiness check above
+  // and listener registration before starting any local-model work.
+  if (input.signal?.aborted) abortFromInput()
   const timer = setTimeout(() => {
     if (abortSource) return
     abortSource = 'timeout'
     controller.abort()
   }, AGENT_REQUEST_TIMEOUT_MS)
+  const requestStartedAt = runtime.now()
+  let stage: 'request' | 'response_body' | 'reply_parse' = 'request'
+  let responseStatus: number | null = null
+  let contentLength: number | null = null
 
   try {
-    const response = await runtime.fetch(
-      `http://127.0.0.1:${port}/v1/chat/completions`,
-      {
+    const response = await abortablePromise(
+      runtime.fetch(`http://127.0.0.1:${port}/v1/chat/completions`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -171,11 +244,13 @@ export async function handleSessionChatText(
           ],
           temperature: 0,
           max_tokens: 300,
-          response_format: { type: 'json_object' },
+          response_format: SESSION_CHAT_RESPONSE_FORMAT,
         }),
         signal: controller.signal,
-      }
+      }),
+      controller.signal
     )
+    responseStatus = response.status
     if (!response.ok) {
       throw new AiAgentError(
         'http_error',
@@ -183,22 +258,56 @@ export async function handleSessionChatText(
       )
     }
 
-    const json = (await response.json()) as {
+    stage = 'response_body'
+    const json = (await abortablePromise(
+      response.json(),
+      controller.signal
+    )) as {
       choices?: Array<{ message?: { content?: unknown } }>
     }
     const content = json?.choices?.[0]?.message?.content
-    return parseSessionChatReply(typeof content === 'string' ? content : '')
+    const rawContent = typeof content === 'string' ? content : ''
+    contentLength = rawContent.length
+    stage = 'reply_parse'
+    const reply = parseSessionChatReply(rawContent, input.modelId)
+    log.info('request.succeeded', {
+      modelId: input.modelId,
+      elapsedMs: Math.max(0, runtime.now() - requestStartedAt),
+      status: responseStatus,
+      contentLength,
+    })
+    return reply
   } catch (error) {
     if (abortSource === 'external') throw abortReason(input.signal)
+    let mappedError: unknown = error
     if (abortSource === 'timeout') {
-      throw new AiAgentError('timeout', strings.session.chat.aiTimedOut)
+      mappedError = new AiAgentError('timeout', strings.session.chat.aiTimedOut)
+    } else if (error instanceof SyntaxError) {
+      mappedError = new AiAgentError(
+        'parse_error',
+        strings.session.chat.aiFailed
+      )
+    } else if (!(error instanceof AiAgentError) && !isAbortError(error)) {
+      mappedError = new AiAgentError(
+        'http_error',
+        strings.session.chat.aiFailed
+      )
     }
-    if (error instanceof AiAgentError) throw error
-    if (error instanceof SyntaxError) {
-      throw new AiAgentError('parse_error', strings.session.chat.aiFailed)
-    }
-    if (isAbortError(error)) throw error
-    throw new AiAgentError('http_error', strings.session.chat.aiFailed)
+
+    log.warn('request.failed', {
+      modelId: input.modelId,
+      elapsedMs: Math.max(0, runtime.now() - requestStartedAt),
+      stage,
+      code:
+        mappedError instanceof AiAgentError
+          ? mappedError.code
+          : isAbortError(mappedError)
+            ? 'aborted'
+            : 'unknown',
+      status: responseStatus,
+      contentLength,
+    })
+    throw mappedError
   } finally {
     clearTimeout(timer)
     input.signal?.removeEventListener('abort', abortFromInput)
