@@ -19,10 +19,12 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
+use futures_util::future::{select, Either};
 use futures_util::StreamExt;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use tauri::{path::BaseDirectory, AppHandle, Emitter, Manager, Runtime, State};
+use tauri_plugin_shell::process::CommandEvent;
 use tauri_plugin_shell::ShellExt;
 
 use super::models::build_client;
@@ -47,6 +49,9 @@ const MIN_REAL_ENGINE_BYTES: u64 = 4 * 1024 * 1024;
 const PROGRESS_EVENT_NAME: &str = "engine:progress";
 const PROGRESS_EVENT_BYTES: u64 = 1024 * 1024;
 const PROGRESS_EVENT_INTERVAL: Duration = Duration::from_millis(250);
+// Device enumeration initializes the native GPU backend and therefore crosses
+// vendor-driver code. Bound it so a broken driver cannot hang Settings → AI.
+const DEVICE_PROBE_TIMEOUT: Duration = Duration::from_secs(5);
 
 struct EngineAsset {
     triple: &'static str,
@@ -253,13 +258,54 @@ async fn devices_for_candidate<R: Runtime>(
         }
     }
 
-    let output = command
-        .output()
-        .await
+    // `Command::output()` has no cancellation handle. Spawn explicitly so a
+    // vendor driver that wedges during enumeration can be killed at the
+    // deadline rather than pinning the settings command forever.
+    let (mut rx, child) = command
+        .spawn()
         .map_err(|e| format!("list devices via {}: {e}", binary.display()))?;
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    if !output.status.success() {
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+    let timeout = tauri::async_runtime::spawn_blocking(|| {
+        std::thread::sleep(DEVICE_PROBE_TIMEOUT);
+    });
+    futures_util::pin_mut!(timeout);
+
+    let exit_code = loop {
+        let next = rx.recv();
+        futures_util::pin_mut!(next);
+        match select(next, timeout.as_mut()).await {
+            Either::Left((event, _)) => match event {
+                Some(CommandEvent::Stdout(bytes)) => stdout.extend_from_slice(&bytes),
+                Some(CommandEvent::Stderr(bytes)) => stderr.extend_from_slice(&bytes),
+                Some(CommandEvent::Terminated(payload)) => break payload.code,
+                Some(CommandEvent::Error(error)) => {
+                    let _ = child.kill();
+                    return Err(format!("{} --list-devices: {error}", binary.display()));
+                }
+                Some(_) => {}
+                None => {
+                    let _ = child.kill();
+                    return Err(format!(
+                        "{} --list-devices ended without an exit status",
+                        binary.display()
+                    ));
+                }
+            },
+            Either::Right((_timer_result, _)) => {
+                let _ = child.kill();
+                return Err(format!(
+                    "{} --list-devices timed out after {} seconds",
+                    binary.display(),
+                    DEVICE_PROBE_TIMEOUT.as_secs()
+                ));
+            }
+        }
+    };
+
+    let stdout = String::from_utf8_lossy(&stdout);
+    let stderr = String::from_utf8_lossy(&stderr);
+    if exit_code != Some(0) {
         let detail = bounded_command_error(if stderr.trim().is_empty() {
             stdout.as_ref()
         } else {
@@ -267,9 +313,8 @@ async fn devices_for_candidate<R: Runtime>(
         });
         return Err(if detail.is_empty() {
             format!(
-                "{} --list-devices exited with {:?}",
-                binary.display(),
-                output.status.code()
+                "{} --list-devices exited with {exit_code:?}",
+                binary.display()
             )
         } else {
             format!("{} --list-devices: {detail}", binary.display())
@@ -293,6 +338,12 @@ async fn discover_devices<R: Runtime>(
     (Vec::new(), last_error)
 }
 
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+struct DeviceDiscovery {
+    devices: Vec<EngineDevice>,
+    error: Option<String>,
+}
+
 #[derive(Default)]
 struct EngineMeta {
     installing: bool,
@@ -309,6 +360,13 @@ pub struct EngineState {
     // never the reverse. Not reentrant — never hold it while calling
     // ensure_installed/engine_install.
     pub(crate) gate: tauri::async_runtime::Mutex<()>,
+    // Serializes the once-per-session native device probe. A forced reinstall
+    // also takes this after `gate`, preventing Windows from replacing loaded
+    // Vulkan DLLs while --list-devices is still running.
+    device_probe_gate: tauri::async_runtime::Mutex<()>,
+    // Device topology is effectively static for one app process. Cache both
+    // success and failure so repeated engine_info calls never respawn probes.
+    device_cache: std::sync::Mutex<Option<DeviceDiscovery>>,
     // Short-hold metadata for engine_info; never held across an await.
     meta: std::sync::Mutex<EngineMeta>,
 }
@@ -317,8 +375,31 @@ impl EngineState {
     pub fn new() -> Self {
         Self {
             gate: tauri::async_runtime::Mutex::new(()),
+            device_probe_gate: tauri::async_runtime::Mutex::new(()),
+            device_cache: std::sync::Mutex::new(None),
             meta: std::sync::Mutex::new(EngineMeta::default()),
         }
+    }
+
+    fn cached_device_discovery(&self) -> Option<DeviceDiscovery> {
+        self.device_cache
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+    }
+
+    fn store_device_discovery(&self, discovery: DeviceDiscovery) {
+        *self
+            .device_cache
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) = Some(discovery);
+    }
+
+    fn clear_device_discovery(&self) {
+        *self
+            .device_cache
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) = None;
     }
 }
 
@@ -340,7 +421,21 @@ pub async fn engine_info<R: Runtime>(
     state: State<'_, EngineState>,
 ) -> Result<EngineInfo, String> {
     let candidates = resolve_candidates(&app);
-    let (devices, device_error) = discover_devices(&app, &candidates).await;
+    let discovery = if candidates.is_empty() {
+        DeviceDiscovery::default()
+    } else if let Some(cached) = state.cached_device_discovery() {
+        cached
+    } else {
+        let _probe_gate = state.device_probe_gate.lock().await;
+        if let Some(cached) = state.cached_device_discovery() {
+            cached
+        } else {
+            let (devices, error) = discover_devices(&app, &candidates).await;
+            let discovery = DeviceDiscovery { devices, error };
+            state.store_device_discovery(discovery.clone());
+            discovery
+        }
+    };
     let meta = state.meta.lock().map_err(|e| e.to_string())?;
     Ok(EngineInfo {
         supported: asset_for(TARGET_TRIPLE).is_some(),
@@ -349,8 +444,8 @@ pub async fn engine_info<R: Runtime>(
         version: ENGINE_TAG.to_string(),
         installing: meta.installing,
         last_error: meta.last_error.clone(),
-        devices,
-        device_error,
+        devices: discovery.devices,
+        device_error: discovery.error,
     })
 }
 
@@ -377,12 +472,10 @@ fn emit_progress<R: Runtime>(app: &AppHandle<R>, event: &EngineProgressEvent) {
 }
 
 // Manual install / reinstall from Settings → AI. Takes the install gate
-// FIRST, then stops the sidecar, then swaps the engine dir — all under one
-// gate hold, so no sidecar_start (which also acquires gate before the
-// sidecar lock) can spawn from the directory mid-swap, and on Windows no
-// child holds the DLLs being replaced. Lock ORDER everywhere: engine gate →
-// sidecar lock, never the reverse (stop_now takes and RELEASES the sidecar
-// lock internally and never touches the gate).
+// FIRST, then the device-probe gate, then stops the sidecar, then swaps the
+// engine dir. No probe or sidecar can therefore keep Windows DLLs loaded while
+// the managed runtime is replaced. Lock ORDER: engine gate → device-probe gate
+// → sidecar lock, never the reverse.
 #[tauri::command]
 pub async fn engine_install<R: Runtime>(
     app: AppHandle<R>,
@@ -390,6 +483,7 @@ pub async fn engine_install<R: Runtime>(
     sidecar: State<'_, SidecarState>,
 ) -> Result<(), String> {
     let _gate = state.gate.lock().await;
+    let _probe_gate = state.device_probe_gate.lock().await;
     super::sidecar::stop_now(&sidecar).await?;
     install_locked(&app, &state, true).await
 }
@@ -430,6 +524,9 @@ async fn install_locked<R: Runtime>(
         meta.last_error = None;
     }
     let result = do_install(app).await;
+    if result.is_ok() {
+        state.clear_device_discovery();
+    }
     {
         let mut meta = state.meta.lock().map_err(|e| e.to_string())?;
         meta.installing = false;
@@ -891,6 +988,23 @@ ggml_vulkan: diagnostic after list
                 label: "First".to_string(),
             }]
         );
+    }
+
+    #[test]
+    fn device_discovery_cache_round_trips_and_clears() {
+        let state = EngineState::new();
+        assert_eq!(state.cached_device_discovery(), None);
+        let discovery = DeviceDiscovery {
+            devices: vec![EngineDevice {
+                id: "Vulkan0".to_string(),
+                label: "GPU".to_string(),
+            }],
+            error: None,
+        };
+        state.store_device_discovery(discovery.clone());
+        assert_eq!(state.cached_device_discovery(), Some(discovery));
+        state.clear_device_discovery();
+        assert_eq!(state.cached_device_discovery(), None);
     }
 
     #[test]
