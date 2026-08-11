@@ -389,17 +389,11 @@ impl EngineState {
     }
 
     fn store_device_discovery(&self, discovery: DeviceDiscovery) {
-        *self
-            .device_cache
-            .lock()
-            .unwrap_or_else(|e| e.into_inner()) = Some(discovery);
+        *self.device_cache.lock().unwrap_or_else(|e| e.into_inner()) = Some(discovery);
     }
 
     fn clear_device_discovery(&self) {
-        *self
-            .device_cache
-            .lock()
-            .unwrap_or_else(|e| e.into_inner()) = None;
+        *self.device_cache.lock().unwrap_or_else(|e| e.into_inner()) = None;
     }
 }
 
