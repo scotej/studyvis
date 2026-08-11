@@ -144,10 +144,8 @@ impl ShortcutBindings {
     // a key the CoreGraphics physical-state watcher can observe; a legacy or
     // hand-edited unsupported key falls back to the safe shipped default.
     pub fn new(initial_ptt_friends: &str, initial_ptt_ai: &str) -> Self {
-        let ptt_friends = Self::parse_or_default(
-            initial_ptt_friends,
-            DEFAULT_PTT_FRIENDS_ACCELERATOR,
-        );
+        let ptt_friends =
+            Self::parse_or_default(initial_ptt_friends, DEFAULT_PTT_FRIENDS_ACCELERATOR);
         #[cfg(target_os = "macos")]
         let ptt_friends = if macos_key_code(ptt_friends.key).is_some() {
             ptt_friends
