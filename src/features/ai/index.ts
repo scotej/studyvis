@@ -22,12 +22,27 @@ export {
   __resetEngineRuntime,
 } from './engine'
 export type {
+  EngineDevice,
   EngineInfo,
   EngineSource,
   EnginePhase,
   EngineProgressEvent,
   EngineRuntime,
 } from './engine'
+
+export {
+  AI_COMPUTE_DEVICE_CACHE_KEY,
+  AI_COMPUTE_DEVICE_KEY,
+  AI_HARDWARE_FILE,
+  DEFAULT_AI_COMPUTE_DEVICE,
+  computeDeviceFingerprint,
+  computeDeviceId,
+  hydrateAiComputeDeviceSelection,
+  isAiComputeDeviceSelection,
+  persistAiComputeDeviceSelection,
+  readCachedAiComputeDeviceSelection,
+} from './computeDevice'
+export type { AiComputeDeviceSelection } from './computeDevice'
 
 export {
   SUPPORTED_MODELS,
@@ -85,6 +100,8 @@ export {
   summariseBenchmark,
   prepareBundledBenchmarkImages,
   isBenchmarkStale,
+  currentInferenceEngineFingerprint,
+  inferenceEngineFingerprintFor,
   INFERENCE_ENGINE_FINGERPRINT,
   __setBenchmarkRuntime,
   __resetBenchmarkRuntime,

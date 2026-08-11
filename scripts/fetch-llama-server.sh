@@ -21,6 +21,11 @@
 # also bump INFERENCE_ENGINE_FINGERPRINT in src/features/ai/benchmark.ts —
 # it flags persisted benchmarks as stale in the model picker.
 #
+# Windows deliberately ships llama.cpp's Vulkan build rather than the CPU-only
+# archive. Vulkan gives one cross-vendor path for NVIDIA, AMD, Intel and eGPUs;
+# the app can still force CPU execution with llama-server's --device none plus
+# --n-gpu-layers 0. macOS keeps the upstream Metal-enabled archive.
+#
 # macOS ships bash 3.2 which has no associative arrays, so this script uses
 # case statements for the per-triple metadata.
 
@@ -35,14 +40,14 @@ LLAMA_RELEASE_BASE="https://github.com/ggml-org/llama.cpp/releases/download/${LL
 
 SUPPORTED_TRIPLES="aarch64-apple-darwin x86_64-apple-darwin x86_64-pc-windows-msvc x86_64-unknown-linux-gnu"
 
-# Per-triple manifest — asset filename + SHA256 verified on 2026-05-10 against
-# the official release. Keep these synchronized: when LLAMA_RELEASE_TAG bumps,
-# refresh every entry by running `gh api repos/ggml-org/llama.cpp/releases/tags/<tag>`.
+# Per-triple manifest — asset filename + SHA256 verified against the official
+# b9095 release. Keep these synchronized: when LLAMA_RELEASE_TAG bumps, refresh
+# every entry by running `gh api repos/ggml-org/llama.cpp/releases/tags/<tag>`.
 asset_name_for() {
   case "$1" in
     aarch64-apple-darwin)     echo "llama-${LLAMA_RELEASE_TAG}-bin-macos-arm64.tar.gz" ;;
     x86_64-apple-darwin)      echo "llama-${LLAMA_RELEASE_TAG}-bin-macos-x64.tar.gz" ;;
-    x86_64-pc-windows-msvc)   echo "llama-${LLAMA_RELEASE_TAG}-bin-win-cpu-x64.zip" ;;
+    x86_64-pc-windows-msvc)   echo "llama-${LLAMA_RELEASE_TAG}-bin-win-vulkan-x64.zip" ;;
     x86_64-unknown-linux-gnu) echo "llama-${LLAMA_RELEASE_TAG}-bin-ubuntu-x64.tar.gz" ;;
     *) return 1 ;;
   esac
@@ -51,7 +56,7 @@ asset_sha256_for() {
   case "$1" in
     aarch64-apple-darwin)     echo "90fea82a8e712274adcdc90ceb6c993d959c1c49bbbb77b97584986c9e366bdd" ;;
     x86_64-apple-darwin)      echo "a9e6c3967d2d0d96b5a72a4b5610b14945d8b8448e510a4b3d012a3c7284566f" ;;
-    x86_64-pc-windows-msvc)   echo "af06a08fd6d62d7333437d186642ea3c0d7bc41ca168b48d14cc0fcf8f0cf4af" ;;
+    x86_64-pc-windows-msvc)   echo "297209d9f17ac0c25cd146c8e0b11bdb77fc672512aba84045e20ab0d51c96a9" ;;
     x86_64-unknown-linux-gnu) echo "167e12288da2dc4dcece7327010844edcfb18ee3a76eb45b2e232a04723865e6" ;;
     *) return 1 ;;
   esac

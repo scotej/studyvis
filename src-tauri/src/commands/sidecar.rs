@@ -345,6 +345,9 @@ async fn sidecar_start_marked<R: Runtime>(
     let port = pick_unused_port()?;
     guard.generation = guard.generation.wrapping_add(1);
     let generation = guard.generation;
+    let compute_device = super::compute_device::read_selection(&app);
+    let gpu_layers = super::compute_device::gpu_layers(&compute_device);
+    let compute_label = super::compute_device::selection_log_label(&compute_device);
     let log_path = ensure_log_path(&app)?;
     // One sidecar generation corresponds to one explicit AI-engine run. Archive
     // the previous run before opening this one, retaining ten generations.
@@ -362,14 +365,20 @@ async fn sidecar_start_marked<R: Runtime>(
     with_sidecar_log(|| {
         let _ = writeln!(
             log_file,
-            "[event gen={generation}] start target={TARGET_TRIPLE} ctx={ctx_size} mmproj={} gpu_layers={N_GPU_LAYERS}",
+            "[event gen={generation}] start target={TARGET_TRIPLE} ctx={ctx_size} mmproj={} gpu_layers={gpu_layers} compute={compute_label}",
             mmproj_path.is_some()
         );
         let _ = log_file.flush();
     });
 
-    let (rx, child) =
-        spawn_with_fallback(&app, &model_path, mmproj_path.as_deref(), ctx_size, port)?;
+    let (rx, child) = spawn_with_fallback(
+        &app,
+        &model_path,
+        mmproj_path.as_deref(),
+        ctx_size,
+        port,
+        &compute_device,
+    )?;
 
     guard.child = Some(child);
     guard.port = Some(port);
@@ -393,6 +402,7 @@ async fn sidecar_start_marked<R: Runtime>(
             model_for_restart,
             mmproj_for_restart,
             ctx_size,
+            compute_device,
         )
         .await;
     });
@@ -644,24 +654,14 @@ fn with_sidecar_log<T>(write: impl FnOnce() -> T) -> T {
     write()
 }
 
-// #47 D2 — Metal offload on Apple Silicon. The bundled macos-arm64 llama.cpp
-// b9095 build is Metal-enabled (scripts/build-llama-server.sh sets
-// -DGGML_METAL=ON), yet inference ran CPU-only via an unconditional
-// "--n-gpu-layers 0" — a direct contributor to the 2–30s p95 latencies in
-// ARCHITECTURE §8 and the heat the cadence-backoff machinery exists to
-// absorb. 99 offloads every layer of the 2–7B catalog models (verified on an
-// M2: 27/27 layers offloaded, Metal init clean). The win-cpu-x64 prebuild has
-// no GPU backend, so 0 stays there. If GPU contention with the WebRTC tiles
-// ever materializes, gate this behind a Settings → AI toggle rather than
-// reverting to CPU-only for everyone.
-//
-// Changing this value changes measured inference speed: bump
-// INFERENCE_ENGINE_FINGERPRINT in src/features/ai/benchmark.ts so persisted
-// benchmarks read as stale and users get the re-measure hint.
-#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-const N_GPU_LAYERS: &str = "99";
-#[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
-const N_GPU_LAYERS: &str = "0";
+// #211 — compute hardware selection. macOS's pinned engine is Metal-enabled
+// and Windows now ships the cross-vendor Vulkan b9095 archive. `auto` and an
+// explicit device therefore offload all catalog-model layers on those release
+// platforms, while CPU explicitly combines --device none with zero GPU layers.
+// Linux remains a dev-only CPU package, so its layer count stays zero. The
+// selection is snapshotted when a sidecar generation starts and is carried
+// through crash respawns; editing the settings file behind the running app
+// cannot silently move a live model to different hardware.
 
 // Try every resolved engine binary in preference order (bundled, then
 // managed). A bundled binary that fails to spawn — deleted, wrong arch,
@@ -674,6 +674,7 @@ fn spawn_with_fallback<R: Runtime>(
     mmproj_path: Option<&str>,
     ctx_size: u32,
     port: u16,
+    compute_device: &super::compute_device::ComputeDeviceSelection,
 ) -> Result<(tauri::async_runtime::Receiver<CommandEvent>, CommandChild), String> {
     let candidates = super::engine::resolve_candidates(app);
     if candidates.is_empty() {
@@ -711,6 +712,7 @@ fn spawn_with_fallback<R: Runtime>(
             ctx_size,
             port,
             runtime_dir.as_deref(),
+            compute_device,
         ) {
             Ok(pair) => return Ok(pair),
             Err(e) => last_err = e,
@@ -757,7 +759,9 @@ fn spawn_llama<R: Runtime>(
     ctx_size: u32,
     port: u16,
     runtime_dir: Option<&Path>,
+    compute_device: &super::compute_device::ComputeDeviceSelection,
 ) -> Result<(tauri::async_runtime::Receiver<CommandEvent>, CommandChild), String> {
+    let gpu_layers = super::compute_device::gpu_layers(compute_device);
     // shell().command() with an absolute path — Command::new sets the same
     // piped stdio + CREATE_NO_WINDOW as the sidecar constructor, minus the
     // exe-relative resolution that I73 showed never matched where the binary
@@ -770,10 +774,16 @@ fn spawn_llama<R: Runtime>(
         "--ctx-size",
         &ctx_size.to_string(),
         "--n-gpu-layers",
-        N_GPU_LAYERS,
+        gpu_layers,
         "--model",
         model_path,
     ]);
+    if let Some(device) = super::compute_device::device_arg(compute_device) {
+        // One argv element, not a shell fragment. `valid_device_id` rejects
+        // llama.cpp's comma separator, so an explicit choice can name exactly
+        // one discovered device and cannot smuggle in a multi-device policy.
+        command = command.args(["--device", device]);
+    }
     if let Some(p) = mmproj_path {
         command = command.args(["--mmproj", p]);
     }
@@ -867,6 +877,7 @@ async fn watch<R: Runtime>(
     model_path: String,
     mmproj_path: Option<String>,
     ctx_size: u32,
+    compute_device: super::compute_device::ComputeDeviceSelection,
 ) {
     let mut log = log_file;
     let mut restart_attempts: u32 = 0;
@@ -1008,21 +1019,28 @@ async fn watch<R: Runtime>(
             }
         };
         // Same candidate chain as the initial start, but never a download —
-        // the respawn path must stay fast and offline-safe.
-        let (new_rx, new_child) =
-            match spawn_with_fallback(&app, &model_path, mmproj_path.as_deref(), ctx_size, port) {
-                Ok(pair) => pair,
-                Err(e) => {
-                    guard.errored = true;
-                    guard.last_error = Some(e.clone());
-                    guard.port = None;
-                    with_sidecar_log(|| {
-                        let _ = writeln!(log, "[event gen={generation}] respawn failed: {e}");
-                        let _ = log.flush();
-                    });
-                    return;
-                }
-            };
+        // the respawn path must stay fast and offline-safe. Keep the original
+        // generation's compute selection so a crash cannot migrate hardware.
+        let (new_rx, new_child) = match spawn_with_fallback(
+            &app,
+            &model_path,
+            mmproj_path.as_deref(),
+            ctx_size,
+            port,
+            &compute_device,
+        ) {
+            Ok(pair) => pair,
+            Err(e) => {
+                guard.errored = true;
+                guard.last_error = Some(e.clone());
+                guard.port = None;
+                with_sidecar_log(|| {
+                    let _ = writeln!(log, "[event gen={generation}] respawn failed: {e}");
+                    let _ = log.flush();
+                });
+                return;
+            }
+        };
         with_sidecar_log(|| {
             let _ = writeln!(log, "[event gen={generation}] respawned on port {port}");
             let _ = log.flush();

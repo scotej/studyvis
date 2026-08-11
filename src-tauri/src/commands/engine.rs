@@ -5,8 +5,9 @@
 //! module is the runtime fallback that makes a fresh dev checkout and a
 //! damaged install self-heal: download the pinned llama.cpp release archive
 //! for the current target triple, verify its SHA-256, unpack `llama-server`
-//! plus its companion libraries into `data_dir/engine/<tag>-<triple>/`, and
-//! hand spawn-ready candidate paths to `commands/sidecar.rs`.
+//! plus its companion libraries into
+//! `data_dir/engine/<tag>-r<package-revision>-<triple>/`, and hand spawn-ready
+//! candidate paths to `commands/sidecar.rs`.
 //!
 //! The release pins below are in LOCKSTEP with scripts/fetch-llama-server.sh —
 //! `pins_match_fetch_script` fails `cargo test` when they drift. Bumping the
@@ -18,16 +19,25 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
+use futures_util::future::{select, Either};
 use futures_util::StreamExt;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
-use tauri::{AppHandle, Emitter, Runtime, State};
+use tauri::{path::BaseDirectory, AppHandle, Emitter, Manager, Runtime, State};
+use tauri_plugin_shell::process::CommandEvent;
+use tauri_plugin_shell::ShellExt;
 
 use super::models::build_client;
 use super::sidecar::{SidecarState, TARGET_TRIPLE};
 use crate::db::data_dir;
 
 pub const ENGINE_TAG: &str = "b9095";
+// The upstream tag alone is not enough to identify a compatible managed
+// package: #211 switches Windows from b9095's CPU archive to its Vulkan
+// archive without changing the upstream tag. Keep a package revision in the
+// managed directory name so a damaged future bundle never falls back to an
+// old CPU-only cache and then rejects a persisted Vulkan device selection.
+const ENGINE_PACKAGE_REVISION: &str = "2";
 const RELEASE_BASE: &str = "https://github.com/ggml-org/llama.cpp/releases/download";
 const ENGINE_DIR: &str = "engine";
 
@@ -39,6 +49,9 @@ const MIN_REAL_ENGINE_BYTES: u64 = 4 * 1024 * 1024;
 const PROGRESS_EVENT_NAME: &str = "engine:progress";
 const PROGRESS_EVENT_BYTES: u64 = 1024 * 1024;
 const PROGRESS_EVENT_INTERVAL: Duration = Duration::from_millis(250);
+// Device enumeration initializes the native GPU backend and therefore crosses
+// vendor-driver code. Bound it so a broken driver cannot hang Settings → AI.
+const DEVICE_PROBE_TIMEOUT: Duration = Duration::from_secs(5);
 
 struct EngineAsset {
     triple: &'static str,
@@ -46,8 +59,10 @@ struct EngineAsset {
     sha256: &'static str,
 }
 
-// SHA-256s verified 2026-07-26 against the live b9095 release assets; they
-// match scripts/fetch-llama-server.sh's pins byte-for-byte (test below).
+// SHA-256s verified against the official b9095 release assets; they match
+// scripts/fetch-llama-server.sh's pins byte-for-byte (test below). Windows
+// deliberately uses the Vulkan package so NVIDIA/AMD/Intel/eGPU devices share
+// one backend while CPU remains available through llama.cpp's --device none.
 const ENGINE_ASSETS: &[EngineAsset] = &[
     EngineAsset {
         triple: "aarch64-apple-darwin",
@@ -61,8 +76,8 @@ const ENGINE_ASSETS: &[EngineAsset] = &[
     },
     EngineAsset {
         triple: "x86_64-pc-windows-msvc",
-        asset: "llama-b9095-bin-win-cpu-x64.zip",
-        sha256: "af06a08fd6d62d7333437d186642ea3c0d7bc41ca168b48d14cc0fcf8f0cf4af",
+        asset: "llama-b9095-bin-win-vulkan-x64.zip",
+        sha256: "297209d9f17ac0c25cd146c8e0b11bdb77fc672512aba84045e20ab0d51c96a9",
     },
     EngineAsset {
         triple: "x86_64-unknown-linux-gnu",
@@ -88,7 +103,9 @@ fn engine_root<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, String> {
 }
 
 fn managed_install_dir<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, String> {
-    Ok(engine_root(app)?.join(format!("{ENGINE_TAG}-{TARGET_TRIPLE}")))
+    Ok(engine_root(app)?.join(format!(
+        "{ENGINE_TAG}-r{ENGINE_PACKAGE_REVISION}-{TARGET_TRIPLE}"
+    )))
 }
 
 fn managed_binary_path<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, String> {
@@ -123,9 +140,8 @@ pub enum EngineSource {
 }
 
 // Spawn candidates in preference order: bundled first (the release-tested
-// path), managed second. Both point at the same pinned b9095 build, so the
-// fallback never changes inference behavior — no
-// INFERENCE_ENGINE_FINGERPRINT bump.
+// path), managed second. Both resolve the same pinned tag + package revision,
+// so fallback cannot resurrect a pre-#211 CPU-only Windows engine.
 pub fn resolve_candidates<R: Runtime>(app: &AppHandle<R>) -> Vec<(EngineSource, PathBuf)> {
     let mut candidates = Vec::new();
     if let Some(path) = bundled_binary_path() {
@@ -137,6 +153,195 @@ pub fn resolve_candidates<R: Runtime>(app: &AppHandle<R>) -> Vec<(EngineSource, 
         }
     }
     candidates
+}
+
+fn runtime_dir_for<R: Runtime>(
+    app: &AppHandle<R>,
+    source: EngineSource,
+    binary: &Path,
+) -> Option<PathBuf> {
+    match source {
+        EngineSource::Bundled => {
+            let rel = format!("binaries/llama-runtime-{TARGET_TRIPLE}");
+            app.path()
+                .resolve(&rel, BaseDirectory::Resource)
+                .ok()
+                .filter(|path| path.is_dir())
+                .or_else(|| binary.parent().map(Path::to_path_buf))
+        }
+        EngineSource::Managed => binary.parent().map(Path::to_path_buf),
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct EngineDevice {
+    pub id: String,
+    pub label: String,
+}
+
+fn parse_device_list(output: &str) -> Vec<EngineDevice> {
+    let mut devices = Vec::new();
+    let mut in_device_list = false;
+    for line in output.lines() {
+        if !in_device_list {
+            if line.trim() == "Available devices:" {
+                in_device_list = true;
+            }
+            continue;
+        }
+        if line.trim().is_empty() {
+            continue;
+        }
+        let Some(device_line) = line.strip_prefix("  ") else {
+            break;
+        };
+        let Some((raw_id, raw_label)) = device_line.split_once(':') else {
+            continue;
+        };
+        let id = raw_id.trim();
+        let label = raw_label.trim();
+        if !super::compute_device::valid_device_id(id)
+            || label.is_empty()
+            || devices.iter().any(|device: &EngineDevice| device.id == id)
+        {
+            continue;
+        }
+        devices.push(EngineDevice {
+            id: id.to_owned(),
+            label: label.to_owned(),
+        });
+    }
+    devices
+}
+
+fn bounded_command_error(value: &str) -> String {
+    const MAX_CHARS: usize = 512;
+    let compact = value.split_whitespace().collect::<Vec<_>>().join(" ");
+    compact.chars().take(MAX_CHARS).collect()
+}
+
+async fn devices_for_candidate<R: Runtime>(
+    app: &AppHandle<R>,
+    source: EngineSource,
+    binary: &Path,
+) -> Result<Vec<EngineDevice>, String> {
+    let runtime_dir = runtime_dir_for(app, source, binary);
+    let mut command = app.shell().command(binary).arg("--list-devices");
+    if let Some(dir) = runtime_dir.as_deref() {
+        command = command.current_dir(dir);
+        let dir_str = dir.to_string_lossy().into_owned();
+        #[cfg(target_os = "macos")]
+        {
+            const KEY: &str = "DYLD_FALLBACK_LIBRARY_PATH";
+            let combined = match std::env::var(KEY) {
+                Ok(prev) if !prev.is_empty() => format!("{dir_str}:{prev}"),
+                _ => dir_str,
+            };
+            command = command.env(KEY, combined);
+        }
+        #[cfg(target_os = "linux")]
+        {
+            const KEY: &str = "LD_LIBRARY_PATH";
+            let combined = match std::env::var(KEY) {
+                Ok(prev) if !prev.is_empty() => format!("{dir_str}:{prev}"),
+                _ => dir_str,
+            };
+            command = command.env(KEY, combined);
+        }
+        #[cfg(target_os = "windows")]
+        {
+            let combined = match std::env::var("PATH") {
+                Ok(prev) if !prev.is_empty() => format!("{dir_str};{prev}"),
+                _ => dir_str,
+            };
+            command = command.env("PATH", combined);
+        }
+    }
+
+    // `Command::output()` has no cancellation handle. Spawn explicitly so a
+    // vendor driver that wedges during enumeration can be killed at the
+    // deadline rather than pinning the settings command forever.
+    let (mut rx, child) = command
+        .spawn()
+        .map_err(|e| format!("list devices via {}: {e}", binary.display()))?;
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+    let timeout = tauri::async_runtime::spawn_blocking(|| {
+        std::thread::sleep(DEVICE_PROBE_TIMEOUT);
+    });
+    futures_util::pin_mut!(timeout);
+
+    let exit_code = loop {
+        let next = rx.recv();
+        futures_util::pin_mut!(next);
+        match select(next, timeout.as_mut()).await {
+            Either::Left((event, _)) => match event {
+                Some(CommandEvent::Stdout(bytes)) => stdout.extend_from_slice(&bytes),
+                Some(CommandEvent::Stderr(bytes)) => stderr.extend_from_slice(&bytes),
+                Some(CommandEvent::Terminated(payload)) => break payload.code,
+                Some(CommandEvent::Error(error)) => {
+                    let _ = child.kill();
+                    return Err(format!("{} --list-devices: {error}", binary.display()));
+                }
+                Some(_) => {}
+                None => {
+                    let _ = child.kill();
+                    return Err(format!(
+                        "{} --list-devices ended without an exit status",
+                        binary.display()
+                    ));
+                }
+            },
+            Either::Right((_timer_result, _)) => {
+                let _ = child.kill();
+                return Err(format!(
+                    "{} --list-devices timed out after {} seconds",
+                    binary.display(),
+                    DEVICE_PROBE_TIMEOUT.as_secs()
+                ));
+            }
+        }
+    };
+
+    let stdout = String::from_utf8_lossy(&stdout);
+    let stderr = String::from_utf8_lossy(&stderr);
+    if exit_code != Some(0) {
+        let detail = bounded_command_error(if stderr.trim().is_empty() {
+            stdout.as_ref()
+        } else {
+            stderr.as_ref()
+        });
+        return Err(if detail.is_empty() {
+            format!(
+                "{} --list-devices exited with {exit_code:?}",
+                binary.display()
+            )
+        } else {
+            format!("{} --list-devices: {detail}", binary.display())
+        });
+    }
+
+    Ok(parse_device_list(&stdout))
+}
+
+async fn discover_devices<R: Runtime>(
+    app: &AppHandle<R>,
+    candidates: &[(EngineSource, PathBuf)],
+) -> (Vec<EngineDevice>, Option<String>) {
+    let mut last_error = None;
+    for (source, binary) in candidates {
+        match devices_for_candidate(app, *source, binary).await {
+            Ok(devices) => return (devices, None),
+            Err(error) => last_error = Some(error),
+        }
+    }
+    (Vec::new(), last_error)
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+struct DeviceDiscovery {
+    devices: Vec<EngineDevice>,
+    error: Option<String>,
 }
 
 #[derive(Default)]
@@ -155,6 +360,13 @@ pub struct EngineState {
     // never the reverse. Not reentrant — never hold it while calling
     // ensure_installed/engine_install.
     pub(crate) gate: tauri::async_runtime::Mutex<()>,
+    // Serializes the once-per-session native device probe. A forced reinstall
+    // also takes this after `gate`, preventing Windows from replacing loaded
+    // Vulkan DLLs while --list-devices is still running.
+    device_probe_gate: tauri::async_runtime::Mutex<()>,
+    // Device topology is effectively static for one app process. Cache both
+    // success and failure so repeated engine_info calls never respawn probes.
+    device_cache: std::sync::Mutex<Option<DeviceDiscovery>>,
     // Short-hold metadata for engine_info; never held across an await.
     meta: std::sync::Mutex<EngineMeta>,
 }
@@ -163,8 +375,25 @@ impl EngineState {
     pub fn new() -> Self {
         Self {
             gate: tauri::async_runtime::Mutex::new(()),
+            device_probe_gate: tauri::async_runtime::Mutex::new(()),
+            device_cache: std::sync::Mutex::new(None),
             meta: std::sync::Mutex::new(EngineMeta::default()),
         }
+    }
+
+    fn cached_device_discovery(&self) -> Option<DeviceDiscovery> {
+        self.device_cache
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+    }
+
+    fn store_device_discovery(&self, discovery: DeviceDiscovery) {
+        *self.device_cache.lock().unwrap_or_else(|e| e.into_inner()) = Some(discovery);
+    }
+
+    fn clear_device_discovery(&self) {
+        *self.device_cache.lock().unwrap_or_else(|e| e.into_inner()) = None;
     }
 }
 
@@ -176,14 +405,31 @@ pub struct EngineInfo {
     pub version: String,
     pub installing: bool,
     pub last_error: Option<String>,
+    pub devices: Vec<EngineDevice>,
+    pub device_error: Option<String>,
 }
 
 #[tauri::command]
-pub fn engine_info<R: Runtime>(
+pub async fn engine_info<R: Runtime>(
     app: AppHandle<R>,
     state: State<'_, EngineState>,
 ) -> Result<EngineInfo, String> {
     let candidates = resolve_candidates(&app);
+    let discovery = if candidates.is_empty() {
+        DeviceDiscovery::default()
+    } else if let Some(cached) = state.cached_device_discovery() {
+        cached
+    } else {
+        let _probe_gate = state.device_probe_gate.lock().await;
+        if let Some(cached) = state.cached_device_discovery() {
+            cached
+        } else {
+            let (devices, error) = discover_devices(&app, &candidates).await;
+            let discovery = DeviceDiscovery { devices, error };
+            state.store_device_discovery(discovery.clone());
+            discovery
+        }
+    };
     let meta = state.meta.lock().map_err(|e| e.to_string())?;
     Ok(EngineInfo {
         supported: asset_for(TARGET_TRIPLE).is_some(),
@@ -192,6 +438,8 @@ pub fn engine_info<R: Runtime>(
         version: ENGINE_TAG.to_string(),
         installing: meta.installing,
         last_error: meta.last_error.clone(),
+        devices: discovery.devices,
+        device_error: discovery.error,
     })
 }
 
@@ -218,12 +466,10 @@ fn emit_progress<R: Runtime>(app: &AppHandle<R>, event: &EngineProgressEvent) {
 }
 
 // Manual install / reinstall from Settings → AI. Takes the install gate
-// FIRST, then stops the sidecar, then swaps the engine dir — all under one
-// gate hold, so no sidecar_start (which also acquires gate before the
-// sidecar lock) can spawn from the directory mid-swap, and on Windows no
-// child holds the DLLs being replaced. Lock ORDER everywhere: engine gate →
-// sidecar lock, never the reverse (stop_now takes and RELEASES the sidecar
-// lock internally and never touches the gate).
+// FIRST, then the device-probe gate, then stops the sidecar, then swaps the
+// engine dir. No probe or sidecar can therefore keep Windows DLLs loaded while
+// the managed runtime is replaced. Lock ORDER: engine gate → device-probe gate
+// → sidecar lock, never the reverse.
 #[tauri::command]
 pub async fn engine_install<R: Runtime>(
     app: AppHandle<R>,
@@ -231,6 +477,7 @@ pub async fn engine_install<R: Runtime>(
     sidecar: State<'_, SidecarState>,
 ) -> Result<(), String> {
     let _gate = state.gate.lock().await;
+    let _probe_gate = state.device_probe_gate.lock().await;
     super::sidecar::stop_now(&sidecar).await?;
     install_locked(&app, &state, true).await
 }
@@ -271,6 +518,9 @@ async fn install_locked<R: Runtime>(
         meta.last_error = None;
     }
     let result = do_install(app).await;
+    if result.is_ok() {
+        state.clear_device_discovery();
+    }
     {
         let mut meta = state.meta.lock().map_err(|e| e.to_string())?;
         meta.installing = false;
@@ -318,7 +568,9 @@ async fn do_install<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
             error: None,
         },
     );
-    let staging = root.join(format!(".tmp-{ENGINE_TAG}-{TARGET_TRIPLE}"));
+    let staging = root.join(format!(
+        ".tmp-{ENGINE_TAG}-r{ENGINE_PACKAGE_REVISION}-{TARGET_TRIPLE}"
+    ));
     let extract_result = {
         let archive_path = archive_path.clone();
         let staging = staging.clone();
@@ -530,10 +782,11 @@ async fn download_verified<R: Runtime>(
 }
 
 // Best-effort sweep of everything except the current install: superseded
-// engine versions, stale .tmp-* staging dirs, orphaned .download-* archives.
-// The engine root is app-private, so anything unrecognized is ours to drop.
+// engine versions/package revisions, stale .tmp-* staging dirs, orphaned
+// .download-* archives. The engine root is app-private, so anything
+// unrecognized is ours to drop.
 fn cleanup_stale(root: &Path) {
-    let current = format!("{ENGINE_TAG}-{TARGET_TRIPLE}");
+    let current = format!("{ENGINE_TAG}-r{ENGINE_PACKAGE_REVISION}-{TARGET_TRIPLE}");
     let Ok(entries) = fs::read_dir(root) else {
         return;
     };
@@ -693,11 +946,68 @@ mod tests {
     }
 
     #[test]
+    fn parses_only_the_reported_device_section() {
+        let output = r#"
+load_backend: loaded Vulkan backend
+Available devices:
+  Vulkan0: NVIDIA GeForce RTX 4080 (16376 MiB, 15120 MiB free)
+  Vulkan1: AMD Radeon RX 7800 XT (16368 MiB, 14200 MiB free)
+ggml_vulkan: diagnostic after list
+  Bogus0: must not be parsed
+"#;
+        assert_eq!(
+            parse_device_list(output),
+            vec![
+                EngineDevice {
+                    id: "Vulkan0".to_string(),
+                    label: "NVIDIA GeForce RTX 4080 (16376 MiB, 15120 MiB free)".to_string(),
+                },
+                EngineDevice {
+                    id: "Vulkan1".to_string(),
+                    label: "AMD Radeon RX 7800 XT (16368 MiB, 14200 MiB free)".to_string(),
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn device_parser_deduplicates_and_requires_the_header() {
+        assert!(parse_device_list("Vulkan0: ignored without header\n").is_empty());
+        let output =
+            "Available devices:\n  Vulkan0: First\n  Vulkan0: Duplicate\n  no colon here\n";
+        assert_eq!(
+            parse_device_list(output),
+            vec![EngineDevice {
+                id: "Vulkan0".to_string(),
+                label: "First".to_string(),
+            }]
+        );
+    }
+
+    #[test]
+    fn device_discovery_cache_round_trips_and_clears() {
+        let state = EngineState::new();
+        assert_eq!(state.cached_device_discovery(), None);
+        let discovery = DeviceDiscovery {
+            devices: vec![EngineDevice {
+                id: "Vulkan0".to_string(),
+                label: "GPU".to_string(),
+            }],
+            error: None,
+        };
+        state.store_device_discovery(discovery.clone());
+        assert_eq!(state.cached_device_discovery(), Some(discovery));
+        state.clear_device_discovery();
+        assert_eq!(state.cached_device_discovery(), None);
+    }
+
+    #[test]
     fn keeps_engine_binary_and_libs_only() {
         assert!(keep_entry("llama-server", "llama-server"));
         assert!(keep_entry("llama-server.exe", "llama-server.exe"));
         assert!(keep_entry("libllama.0.dylib", "llama-server"));
         assert!(keep_entry("ggml-cpu-haswell.dll", "llama-server.exe"));
+        assert!(keep_entry("ggml-vulkan.dll", "llama-server.exe"));
         assert!(keep_entry("libllama.so", "llama-server"));
         assert!(keep_entry("libllama.so.0.0.9095", "llama-server"));
         assert!(keep_entry("LICENSE", "llama-server"));

@@ -7,6 +7,11 @@ import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 
 export type EngineSource = 'bundled' | 'managed'
 
+export type EngineDevice = {
+  id: string
+  label: string
+}
+
 export type EngineInfo = {
   supported: boolean
   installed: boolean
@@ -14,6 +19,8 @@ export type EngineInfo = {
   version: string
   installing: boolean
   last_error: string | null
+  devices: EngineDevice[]
+  device_error: string | null
 }
 
 export type EnginePhase =
