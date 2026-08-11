@@ -1,7 +1,5 @@
 export type LocalEdgeSource =
-  | 'shortcut'
-  | 'physical-watch'
-  | 'physical-reconcile'
+  'shortcut' | 'physical-watch' | 'physical-reconcile'
 
 export type ReconciledPttEdge = {
   edge: 'pressed' | 'released'
