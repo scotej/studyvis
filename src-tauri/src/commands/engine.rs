@@ -52,6 +52,10 @@ const PROGRESS_EVENT_INTERVAL: Duration = Duration::from_millis(250);
 // Device enumeration initializes the native GPU backend and therefore crosses
 // vendor-driver code. Bound it so a broken driver cannot hang Settings → AI.
 const DEVICE_PROBE_TIMEOUT: Duration = Duration::from_secs(5);
+// A successful probe is cheap to reuse while the settings view is rendering,
+// but it must not make a hot-plugged eGPU invisible for the rest of an app
+// session. Sidecar starts force a fresh probe regardless of this short cache.
+const DEVICE_DISCOVERY_TTL: Duration = Duration::from_secs(15);
 
 struct EngineAsset {
     triple: &'static str,
@@ -449,6 +453,12 @@ struct DeviceDiscovery {
     error: Option<String>,
 }
 
+#[derive(Clone, Debug)]
+struct CachedDeviceDiscovery {
+    discovery: DeviceDiscovery,
+    observed_at: Instant,
+}
+
 #[derive(Default)]
 struct EngineMeta {
     installing: bool,
@@ -465,13 +475,14 @@ pub struct EngineState {
     // never the reverse. Not reentrant — never hold it while calling
     // ensure_installed/engine_install.
     pub(crate) gate: tauri::async_runtime::Mutex<()>,
-    // Serializes the once-per-session native device probe. A forced reinstall
+    // Serializes native device probes. A forced reinstall
     // also takes this after `gate`, preventing Windows from replacing loaded
     // Vulkan DLLs while --list-devices is still running.
     device_probe_gate: tauri::async_runtime::Mutex<()>,
-    // Device topology is effectively static for one app process. Cache both
-    // success and failure so repeated engine_info calls never respawn probes.
-    device_cache: std::sync::Mutex<Option<DeviceDiscovery>>,
+    // Cache a successful topology only briefly. Driver failures are never
+    // cached: the next engine_info or sidecar start can recover without an app
+    // restart, and sidecar starts force a probe for hot-plug correctness.
+    device_cache: std::sync::Mutex<Option<CachedDeviceDiscovery>>,
     // Short-hold metadata for engine_info; never held across an await.
     meta: std::sync::Mutex<EngineMeta>,
 }
@@ -486,15 +497,28 @@ impl EngineState {
         }
     }
 
-    fn cached_device_discovery(&self) -> Option<DeviceDiscovery> {
+    fn cached_device_discovery(&self, force_refresh: bool) -> Option<DeviceDiscovery> {
+        if force_refresh {
+            return None;
+        }
         self.device_cache
             .lock()
             .unwrap_or_else(|e| e.into_inner())
-            .clone()
+            .as_ref()
+            .filter(|cached| cached.observed_at.elapsed() < DEVICE_DISCOVERY_TTL)
+            .map(|cached| cached.discovery.clone())
     }
 
     fn store_device_discovery(&self, discovery: DeviceDiscovery) {
-        *self.device_cache.lock().unwrap_or_else(|e| e.into_inner()) = Some(discovery);
+        let mut cache = self.device_cache.lock().unwrap_or_else(|e| e.into_inner());
+        if discovery.error.is_some() {
+            *cache = None;
+            return;
+        }
+        *cache = Some(CachedDeviceDiscovery {
+            discovery,
+            observed_at: Instant::now(),
+        });
     }
 
     fn clear_device_discovery(&self) {
@@ -506,15 +530,17 @@ async fn device_discovery<R: Runtime>(
     app: &AppHandle<R>,
     state: &EngineState,
     candidates: &[(EngineSource, PathBuf)],
+    force_refresh: bool,
 ) -> DeviceDiscovery {
     if candidates.is_empty() {
+        state.clear_device_discovery();
         return DeviceDiscovery::default();
     }
-    if let Some(cached) = state.cached_device_discovery() {
+    if let Some(cached) = state.cached_device_discovery(force_refresh) {
         return cached;
     }
     let _probe_gate = state.device_probe_gate.lock().await;
-    if let Some(cached) = state.cached_device_discovery() {
+    if let Some(cached) = state.cached_device_discovery(force_refresh) {
         return cached;
     }
     let (devices, error) = discover_devices(app, candidates).await;
@@ -540,7 +566,10 @@ pub(crate) async fn resolve_hardware_identity<R: Runtime>(
         return resolved_hardware_identity(selection, &DeviceDiscovery::default(), false);
     }
     let candidates = resolve_candidates(app);
-    let discovery = device_discovery(app, state, &candidates).await;
+    // A spawned sidecar must see a newly attached/removed accelerator even if
+    // Settings looked it up a moment ago, so it intentionally bypasses the UI
+    // cache. Failed probes stay unresolved rather than reusing old topology.
+    let discovery = device_discovery(app, state, &candidates, true).await;
     resolved_hardware_identity(selection, &discovery, !candidates.is_empty())
 }
 
@@ -563,7 +592,7 @@ pub async fn engine_info<R: Runtime>(
     state: State<'_, EngineState>,
 ) -> Result<EngineInfo, String> {
     let candidates = resolve_candidates(&app);
-    let discovery = device_discovery(&app, &state, &candidates).await;
+    let discovery = device_discovery(&app, &state, &candidates, false).await;
     let selection = super::compute_device::read_selection(&app);
     let hardware_identity =
         resolved_hardware_identity(&selection, &discovery, !candidates.is_empty());
@@ -1236,9 +1265,9 @@ ggml_vulkan: diagnostic after list
     }
 
     #[test]
-    fn device_discovery_cache_round_trips_and_clears() {
+    fn device_discovery_cache_is_short_lived_and_never_keeps_failures() {
         let state = EngineState::new();
-        assert_eq!(state.cached_device_discovery(), None);
+        assert_eq!(state.cached_device_discovery(false), None);
         let discovery = DeviceDiscovery {
             devices: vec![EngineDevice {
                 id: "Vulkan0".to_string(),
@@ -1247,9 +1276,30 @@ ggml_vulkan: diagnostic after list
             error: None,
         };
         state.store_device_discovery(discovery.clone());
-        assert_eq!(state.cached_device_discovery(), Some(discovery));
-        state.clear_device_discovery();
-        assert_eq!(state.cached_device_discovery(), None);
+        assert_eq!(state.cached_device_discovery(false), Some(discovery));
+        // Sidecar start always bypasses this cache, making a just-attached
+        // eGPU observable even inside the UI cache window.
+        assert_eq!(state.cached_device_discovery(true), None);
+
+        // A transient driver/process failure must be retried rather than
+        // poisoning accelerator discovery until the next app launch.
+        state.store_device_discovery(DeviceDiscovery {
+            devices: Vec::new(),
+            error: Some("Vulkan backend temporarily unavailable".to_string()),
+        });
+        assert_eq!(state.cached_device_discovery(false), None);
+
+        // Successful results are also bounded: an eGPU attach/detach becomes
+        // visible on the next settings refresh after the short TTL.
+        state.store_device_discovery(DeviceDiscovery::default());
+        *state.device_cache.lock().unwrap_or_else(|e| e.into_inner()) =
+            Some(CachedDeviceDiscovery {
+                discovery: DeviceDiscovery::default(),
+                observed_at: Instant::now()
+                    .checked_sub(DEVICE_DISCOVERY_TTL)
+                    .expect("test duration fits Instant"),
+            });
+        assert_eq!(state.cached_device_discovery(false), None);
     }
 
     #[test]
