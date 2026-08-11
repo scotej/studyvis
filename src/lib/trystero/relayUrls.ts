@@ -25,19 +25,19 @@
 // tokens), so it lives here rather than in src/design/tokens.ts. Relays die:
 // every entry below passed `npm run check-relays` (#47 C4 — the scripted
 // ephemeral-event round-trip; release-prep also runs it as a non-blocking
-// warning) on 2026-07-26. Re-verify before trusting a stale list and drop
-// any that go dark — relay.damus.io and relay.froth.zone were unreachable at
-// the original 2026-06-01 verification and are deliberately omitted despite
-// being in trystero's default pool; offchain.pub was dropped 2026-07-26 after
-// it began rejecting anonymous publishes ("pubkey is not in our web of
-// trust"), which breaks the exact ephemeral-event round-trip rendezvous (and
-// relay presence) depend on.
+// warning) on 2026-08-11. Re-verify before trusting a stale list and drop any
+// that go dark or add anonymous-write restrictions. `relay.nostr.place` was
+// removed after it began requiring proof of work, and `relay.0xchat.com` after
+// repeated socket failures; both reject the exact anonymous ephemeral-event
+// round trip rendezvous and relay presence depend on. `relay.damus.io` and
+// `relay.froth.zone` remain omitted after repeated connection failures, while
+// offchain.pub requires publishers to be in its web of trust.
 export const DEFAULT_RELAY_URLS: string[] = [
   'wss://nos.lol',
   'wss://relay.primal.net',
-  'wss://relay.nostr.place',
+  'wss://strfry.shock.network',
   'wss://relay.mostr.pub',
   'wss://relay.snort.social',
-  'wss://relay.0xchat.com',
+  'wss://relay.mostro.network',
   'wss://purplerelay.com',
 ]
