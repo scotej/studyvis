@@ -206,6 +206,23 @@ fn mark_starting(guard: &mut SidecarInner) -> u64 {
     guard.start_epoch
 }
 
+fn validate_start_epoch(guard: &SidecarInner, epoch: u64) -> Result<(), String> {
+    if guard.start_epoch != epoch {
+        return Err("sidecar start superseded".to_string());
+    }
+    if guard.shutting_down {
+        return Err("app is shutting down".to_string());
+    }
+    Ok(())
+}
+
+fn snapshot_start_epoch(guard: &SidecarInner) -> Result<u64, String> {
+    if guard.shutting_down {
+        return Err("app is shutting down".to_string());
+    }
+    Ok(guard.start_epoch)
+}
+
 fn unmark_starting(guard: &mut SidecarInner, epoch: u64) {
     if guard.start_epoch == epoch {
         guard.starting_attempts = guard.starting_attempts.saturating_sub(1);
@@ -229,6 +246,13 @@ pub async fn sidecar_start<R: Runtime>(
     engine_auto_install: bool,
 ) -> Result<SidecarStartResult, String> {
     let arc = state.0.clone();
+    // Capture request ownership before any filesystem work or managed-model
+    // gate await. A later stop increments this epoch, so this invocation cannot
+    // wake after the stop returns and register itself as brand-new work.
+    let request_epoch = {
+        let guard = arc.lock().await;
+        snapshot_start_epoch(&guard)?
+    };
     if !PathBuf::from(&model_path).is_file() {
         return Err(format!("model_path does not exist: {model_path}"));
     }
@@ -251,12 +275,13 @@ pub async fn sidecar_start<R: Runtime>(
         _model_guards.push(gate.clone().lock_owned().await);
     }
 
-    // Mark the entire potentially slow install/spawn interval. Before the
-    // child exists, model/port are still empty—the same fields an explicit
-    // stop exposes—so JS needs this authoritative bit to distinguish "keep
-    // waiting" from "the session deliberately stopped the engine".
+    // Mark the potentially slow install/probe/spawn interval only after the
+    // managed gates are ours, but first validate the token captured before we
+    // waited. This preserves the existing restart-backoff invalidation below
+    // without allowing a stop-during-gate-wait child leak.
     let start_epoch = {
         let mut guard = arc.lock().await;
+        validate_start_epoch(&guard, request_epoch)?;
         if guard.child.is_some() {
             let port = guard
                 .port
@@ -278,9 +303,6 @@ pub async fn sidecar_start<R: Runtime>(
         if guard.model.is_some() {
             let child = take_child_and_wipe(&mut guard);
             debug_assert!(child.is_none(), "missing child must not need a kill");
-        }
-        if guard.shutting_down {
-            return Err("app is shutting down".to_string());
         }
         mark_starting(&mut guard)
     };
@@ -358,9 +380,7 @@ async fn sidecar_start_marked<R: Runtime>(
         super::engine::resolve_hardware_identity(&app, engine, &compute_device).await;
 
     let mut guard = arc.lock().await;
-    if guard.start_epoch != start_epoch {
-        return Err("sidecar start superseded".to_string());
-    }
+    validate_start_epoch(&guard, start_epoch)?;
     // Re-check after the unlocked window — a concurrent start may have won.
     if guard.child.is_some() {
         let port = guard
@@ -375,10 +395,6 @@ async fn sidecar_start_marked<R: Runtime>(
             hardware_identity,
         });
     }
-    if guard.shutting_down {
-        return Err("app is shutting down".to_string());
-    }
-
     let port = pick_unused_port()?;
     guard.generation = guard.generation.wrapping_add(1);
     let generation = guard.generation;
@@ -1308,6 +1324,29 @@ mod tests {
         assert!(snapshot_status(&inner).starting);
         unmark_starting(&mut inner, new_epoch);
         assert!(!snapshot_status(&inner).starting);
+    }
+
+    #[test]
+    fn stop_during_managed_gate_wait_invalidates_the_snapshotted_start_request() {
+        let mut inner = SidecarInner::default();
+
+        // sidecar_start snapshots this token before waiting for a managed-model
+        // gate. sidecar_stop uses the same cancellation transition while that
+        // wait is pending.
+        let waiting_request = snapshot_start_epoch(&inner).unwrap();
+        assert!(validate_start_epoch(&inner, waiting_request).is_ok());
+        cancel_pending_starts(&mut inner);
+
+        assert_eq!(
+            validate_start_epoch(&inner, waiting_request).unwrap_err(),
+            "sidecar start superseded"
+        );
+        assert_eq!(inner.starting_attempts, 0);
+
+        // A genuinely new command invoked after the stop may snapshot the new
+        // epoch and proceed normally.
+        let post_stop_request = snapshot_start_epoch(&inner).unwrap();
+        assert!(validate_start_epoch(&inner, post_stop_request).is_ok());
     }
 
     #[test]
