@@ -453,17 +453,12 @@ export function AiCategory() {
     selectedDeviceId !== null &&
     !engineDevices.some((device) => device.id === selectedDeviceId)
   const computeDeviceHelp = (() => {
-    if (computeDeviceSaveError)
-      return "Couldn't save that hardware choice. Your previous choice is still active."
-    if (engineInfo?.device_error)
-      return 'Hardware detection failed. Automatic and CPU remain available; reinstall the AI engine if accelerator detection keeps failing.'
-    if (!engineInfo?.installed)
-      return 'Install the AI engine to detect GPUs. Automatic and CPU are always available.'
-    if (selectedDeviceUnavailable)
-      return 'That accelerator is not currently available. StudyVis keeps your choice instead of silently switching hardware.'
-    if (engineDevices.length === 0)
-      return 'No accelerator was reported by the AI engine. Automatic will fall back to CPU.'
-    return 'Choose where local AI inference runs. Automatic uses available acceleration; changing this makes existing model benchmarks stale.'
+    if (computeDeviceSaveError) return copy.computeDevice.helpSaveError
+    if (engineInfo?.device_error) return copy.computeDevice.helpDetectionFailed
+    if (!engineInfo?.installed) return copy.computeDevice.helpEngineMissing
+    if (selectedDeviceUnavailable) return copy.computeDevice.helpUnavailable
+    if (engineDevices.length === 0) return copy.computeDevice.helpNoAccelerator
+    return copy.computeDevice.help
   })()
   const computeDeviceDisabled =
     savingComputeDevice ||
@@ -549,7 +544,7 @@ export function AiCategory() {
 
       <SettingsRow
         label={copy.engine.auto.label}
-        help="Fetches the pinned llama.cpp engine from GitHub if it's ever missing when AI starts. Size varies by platform and every download is checksum-verified."
+        help={copy.engine.auto.help}
         control={
           <Switch
             checked={engineAutoInstall}
@@ -562,7 +557,7 @@ export function AiCategory() {
       />
 
       <SettingsRow
-        label="AI hardware"
+        label={copy.computeDevice.label}
         help={
           <span role="status" aria-live="polite">
             {computeDeviceHelp}
@@ -575,14 +570,14 @@ export function AiCategory() {
               void handleComputeDeviceChange(event.target.value)
             }
             disabled={computeDeviceDisabled}
-            aria-label="AI compute hardware"
+            aria-label={copy.computeDevice.ariaLabel}
             className="h-9 max-w-sm rounded-md border border-border-default bg-transparent px-3 py-1 text-sm text-text-primary shadow-xs outline-none transition-[color,box-shadow] focus-visible:border-accent-default focus-visible:ring-3 focus-visible:ring-accent-ring disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50"
           >
-            <option value="auto">Automatic (recommended)</option>
-            <option value="cpu">CPU</option>
+            <option value="auto">{copy.computeDevice.optionAuto}</option>
+            <option value="cpu">{copy.computeDevice.optionCpu}</option>
             {selectedDeviceUnavailable ? (
               <option value={computeDevice}>
-                Unavailable — {selectedDeviceId}
+                {copy.computeDevice.optionUnavailable(selectedDeviceId ?? '')}
               </option>
             ) : null}
             {engineDevices.map((device) => (
