@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'vitest'
 
 import {
+  classifyPttMediaSnapshot,
   collectPttMediaSnapshot,
   diffPttMediaSnapshot,
   type PttMediaSnapshot,
@@ -73,19 +74,29 @@ function peer(
   } as unknown as RTCPeerConnection
 }
 
-function room(peers: RTCPeerConnection[]): TopicRoom {
+function roomFromEntries(
+  peers: Array<[string, RTCPeerConnection]>
+): TopicRoom {
   return {
-    getPeers: () =>
-      Object.fromEntries(
-        peers.map((connection, i) => [`peer-${i}`, connection])
-      ),
+    getPeers: () => Object.fromEntries(peers),
   } as unknown as TopicRoom
+}
+
+function room(peers: RTCPeerConnection[]): TopicRoom {
+  return roomFromEntries(
+    peers.map((connection, i) => [`peer-${i}`, connection])
+  )
 }
 
 function snapshot(overrides: Partial<PttMediaSnapshot>): PttMediaSnapshot {
   return {
     roomActive: true,
     peerConnectionCount: 1,
+    activePeerCount: 0,
+    activePeerConnectionCount: 0,
+    activePeersMissingConnection: 0,
+    activePeersMissingAudioReceiver: 0,
+    activePeersWithoutLiveAudioReceiver: 0,
     audioSenderCount: 1,
     enabledAudioSenderCount: 1,
     liveAudioSenderCount: 1,
@@ -109,6 +120,11 @@ describe('PTT media diagnostics', () => {
     await expect(collectPttMediaSnapshot(null)).resolves.toEqual({
       roomActive: false,
       peerConnectionCount: 0,
+      activePeerCount: 0,
+      activePeerConnectionCount: 0,
+      activePeersMissingConnection: 0,
+      activePeersMissingAudioReceiver: 0,
+      activePeersWithoutLiveAudioReceiver: 0,
       audioSenderCount: 0,
       enabledAudioSenderCount: 0,
       liveAudioSenderCount: 0,
@@ -165,6 +181,11 @@ describe('PTT media diagnostics', () => {
     ).resolves.toEqual({
       roomActive: true,
       peerConnectionCount: 2,
+      activePeerCount: 0,
+      activePeerConnectionCount: 0,
+      activePeersMissingConnection: 0,
+      activePeersMissingAudioReceiver: 0,
+      activePeersWithoutLiveAudioReceiver: 0,
       audioSenderCount: 2,
       enabledAudioSenderCount: 1,
       liveAudioSenderCount: 1,
@@ -220,6 +241,150 @@ describe('PTT media diagnostics', () => {
       collectionError: true,
       audioSenderCount: 0,
       audioReceiverCount: 0,
+    })
+  })
+
+  test('receiver health follows only peers that claim PTT', async () => {
+    const activeWithoutReceiver = peer([], [])
+    const inactiveWithLiveReceiver = peer(
+      [],
+      [receiver({ track: track('audio', true), bytesReceived: 50 })]
+    )
+
+    const result = await collectPttMediaSnapshot(
+      roomFromEntries([
+        ['active', activeWithoutReceiver],
+        ['inactive', inactiveWithLiveReceiver],
+      ]),
+      new Set(['active'])
+    )
+
+    expect(result).toMatchObject({
+      activePeerCount: 1,
+      activePeerConnectionCount: 1,
+      activePeersMissingConnection: 0,
+      activePeersMissingAudioReceiver: 1,
+      activePeersWithoutLiveAudioReceiver: 0,
+      audioReceiverCount: 1,
+      liveAudioReceiverCount: 1,
+    })
+    expect(
+      classifyPttMediaSnapshot({
+        source: 'peer',
+        localActive: false,
+        stateChangedDuringSample: false,
+        snapshot: result,
+      })
+    ).toEqual({
+      level: 'warn',
+      message: 'media.peer_active_no_audio_receiver',
+    })
+  })
+
+  test('inactive ended receiver cannot poison active verdict', async () => {
+    const activeLive = peer(
+      [],
+      [receiver({ track: track('audio', true), bytesReceived: 50 })]
+    )
+    const inactiveEnded = peer(
+      [],
+      [receiver({ track: track('audio', true, 'ended'), bytesReceived: 25 })]
+    )
+
+    const result = await collectPttMediaSnapshot(
+      roomFromEntries([
+        ['active', activeLive],
+        ['inactive', inactiveEnded],
+      ]),
+      new Set(['active'])
+    )
+
+    expect(result).toMatchObject({
+      activePeersMissingAudioReceiver: 0,
+      activePeersWithoutLiveAudioReceiver: 0,
+      audioReceiverCount: 2,
+      liveAudioReceiverCount: 1,
+    })
+    expect(
+      classifyPttMediaSnapshot({
+        source: 'peer',
+        localActive: false,
+        stateChangedDuringSample: false,
+        snapshot: result,
+      })
+    ).toBeNull()
+  })
+
+  test('track state is captured before stats resolve', async () => {
+    const audioTrack = track('audio', true)
+    let resolveStats!: (report: RTCStatsReport) => void
+    const deferredSender = {
+      track: audioTrack,
+      getStats: () =>
+        new Promise<RTCStatsReport>((resolve) => {
+          resolveStats = resolve
+        }),
+    } as unknown as RTCRtpSender
+
+    const pending = collectPttMediaSnapshot(room([peer([deferredSender])]))
+    await Promise.resolve()
+    audioTrack.enabled = false
+    resolveStats(new Map() as unknown as RTCStatsReport)
+
+    await expect(pending).resolves.toMatchObject({
+      audioSenderCount: 1,
+      enabledAudioSenderCount: 1,
+    })
+  })
+
+  test('sender stats requests start concurrently', async () => {
+    const resolvers: Array<(report: RTCStatsReport) => void> = []
+    let started = 0
+    const deferred = (): RTCRtpSender =>
+      ({
+        track: track('audio', true),
+        getStats: () => {
+          started += 1
+          return new Promise<RTCStatsReport>((resolve) =>
+            resolvers.push(resolve)
+          )
+        },
+      }) as unknown as RTCRtpSender
+
+    const pending = collectPttMediaSnapshot(
+      room([peer([deferred()]), peer([deferred()])])
+    )
+    await Promise.resolve()
+    expect(started).toBe(2)
+    for (const resolve of resolvers) {
+      resolve(new Map() as unknown as RTCStatsReport)
+    }
+    await pending
+  })
+
+  test('raced state suppresses contradiction classification', () => {
+    const contradictory = snapshot({
+      audioSenderCount: 1,
+      enabledAudioSenderCount: 1,
+    })
+    expect(
+      classifyPttMediaSnapshot({
+        source: 'local',
+        localActive: false,
+        stateChangedDuringSample: true,
+        snapshot: contradictory,
+      })
+    ).toBeNull()
+    expect(
+      classifyPttMediaSnapshot({
+        source: 'local',
+        localActive: false,
+        stateChangedDuringSample: false,
+        snapshot: contradictory,
+      })
+    ).toEqual({
+      level: 'error',
+      message: 'media.inactive_sender_enabled',
     })
   })
 

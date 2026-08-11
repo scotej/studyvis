@@ -1,9 +1,8 @@
-// Mounted once in App.tsx: wires the Rust global-shortcut PTT events
-// (`ptt-friends-pressed` / `-released`) to the PTT store. Deliberately has NO
-// window-blur release failsafe — the shortcut is system-wide, so PTT must
-// keep transmitting while the user holds the key in another app; a dropped
-// release is covered by the macOS physical-key watcher, the store's stuck-key
-// guard, and per-session reset (S2). No-op outside the Tauri runtime.
+// Mounted once in App.tsx: wires Rust global-shortcut PTT edges to the PTT
+// store. Carbon/global-hotkey remains the low-latency path; on macOS a
+// CoreGraphics watcher also publishes current physical key state so delayed or
+// dropped native edges can be reconciled without turning Pressed into a toggle.
+// No window-blur release failsafe: the shortcut is intentionally system-wide.
 
 import { useEffect } from 'react'
 
@@ -14,14 +13,20 @@ import { usePttStore } from '@/stores/pttStore'
 import { useSessionStore, type PeerSnapshot } from '@/stores/sessionStore'
 
 import {
+  classifyPttMediaSnapshot,
   collectPttMediaSnapshot,
   diffPttMediaSnapshot,
   type PttMediaSnapshot,
 } from './pttDiagnostics'
+import {
+  createPttEdgeReconciler,
+  type ReconciledPttEdge,
+} from './pttEdgeReconciler'
+import { registerPttEventBridge, type BridgeListen } from './pttEventBridge'
 
 export const PTT_FRIENDS_PRESSED = 'ptt-friends-pressed'
 export const PTT_FRIENDS_RELEASED = 'ptt-friends-released'
-export const PTT_FRIENDS_PHYSICAL_RELEASED = 'ptt-friends-physical-released'
+export const PTT_FRIENDS_PHYSICAL_STATE = 'ptt-friends-physical-state'
 
 const log = logger.child('ptt')
 
@@ -34,7 +39,6 @@ const SETTLED_SAMPLE_MS = 350
 
 type DiagnosticSource = 'local' | 'peer'
 type PttEdge = 'pressed' | 'released' | 'changed'
-type LocalEdgeSource = 'shortcut' | 'physical-watch'
 
 function monotonicNow(): number {
   return typeof performance === 'undefined' ? Date.now() : performance.now()
@@ -51,6 +55,14 @@ function activePeerPttCount(peers: Record<string, PeerSnapshot>): number {
   )
 }
 
+function activePeerIds(peers: Record<string, PeerSnapshot>): Set<string> {
+  const ids = new Set<string>()
+  for (const [peerId, peer] of Object.entries(peers)) {
+    if (peer.ptt) ids.add(peerId)
+  }
+  return ids
+}
+
 function changedPeerPttCount(
   current: Record<string, PeerSnapshot>,
   previous: Record<string, PeerSnapshot>
@@ -65,10 +77,15 @@ function changedPeerPttCount(
   return changed
 }
 
+function physicalStatePayload(payload: unknown): boolean | null {
+  return payload === true ? true : payload === false ? false : null
+}
+
 export function PttListener() {
   useEffect(() => {
     const unlisteners: UnlistenFn[] = []
     const diagnosticTimers = new Set<ReturnType<typeof setTimeout>>()
+    const edgeReconciler = createPttEdgeReconciler()
     let cancelled = false
     let localEdgeSeq = 0
     let peerEdgeSeq = 0
@@ -94,29 +111,46 @@ export function PttListener() {
         previousPeerSnapshot = null
       }
 
-      const snapshot = await collectPttMediaSnapshot(room)
-      if (cancelled || useSessionStore.getState().room !== room) return
-
-      // Read state after getStats resolves so a release racing the async sample
-      // cannot be reported against stale state.
-      const localActive = usePttStore.getState().active
-      const peerActiveCount = activePeerPttCount(
-        useSessionStore.getState().peers
-      )
-      const previousSnapshot =
-        source === 'local' ? previousLocalSnapshot : previousPeerSnapshot
-      const delta = diffPttMediaSnapshot(previousSnapshot, snapshot)
-      if (source === 'local') previousLocalSnapshot = snapshot
-      else previousPeerSnapshot = snapshot
-
-      sampleSeq += 1
-      const heldMs =
+      // Capture PTT state and receiver correlation synchronously BEFORE any
+      // getStats() await. A release/press that lands while stats are pending is
+      // detected through the local revision / peer-edge generation below and
+      // cannot be misclassified as a deterministic media contradiction.
+      const localAtCapture = usePttStore.getState()
+      const peersAtCapture = useSessionStore.getState().peers
+      const activePeerIdsAtCapture = activePeerIds(peersAtCapture)
+      const localRevisionAtCapture = localAtCapture.revision
+      const peerEdgeSeqAtCapture = peerEdgeSeq
+      const heldMsAtCapture =
         source === 'local' && pressStartedAt !== null
           ? Math.max(0, Math.round(monotonicNow() - pressStartedAt))
           : undefined
-      // The structured logger caps each object at 24 keys. Keep the media
-      // snapshot and deltas nested so a full sample never drops the trailing
-      // RTP counters that are most useful when diagnosing silence.
+
+      const snapshot = await collectPttMediaSnapshot(
+        room,
+        activePeerIdsAtCapture
+      )
+      if (cancelled || useSessionStore.getState().room !== room) return
+
+      const stateChangedDuringSample =
+        source === 'local'
+          ? usePttStore.getState().revision !== localRevisionAtCapture
+          : peerEdgeSeq !== peerEdgeSeqAtCapture
+      const localActive = localAtCapture.active
+      const peerActiveCount = activePeerIdsAtCapture.size
+      const previousSnapshot =
+        source === 'local' ? previousLocalSnapshot : previousPeerSnapshot
+      const delta = stateChangedDuringSample
+        ? diffPttMediaSnapshot(null, snapshot)
+        : diffPttMediaSnapshot(previousSnapshot, snapshot)
+
+      // A raced or partial observation is useful debug evidence but must not
+      // become the baseline for the next RTP delta.
+      if (!stateChangedDuringSample && !snapshot.collectionError) {
+        if (source === 'local') previousLocalSnapshot = snapshot
+        else previousPeerSnapshot = snapshot
+      }
+
+      sampleSeq += 1
       const fields = {
         source,
         edge,
@@ -125,56 +159,25 @@ export function PttListener() {
         phase,
         localActive,
         peerActiveCount,
-        heldMs,
+        heldMs: heldMsAtCapture,
+        stateChangedDuringSample,
         media: snapshot,
         delta,
       }
 
-      // These are state contradictions, not traffic-volume heuristics. RTP byte
-      // deltas remain debug telemetry because Opus DTX may legitimately produce
-      // little/no traffic during silence. Sender contradictions diagnose the
-      // local PTT path; receiver contradictions diagnose the peer path.
-      if (
-        source === 'local' &&
-        localActive &&
-        snapshot.peerConnectionCount > 0 &&
-        snapshot.audioSenderCount === 0
-      ) {
-        log.warn('media.active_no_audio_sender', fields)
-      } else if (
-        source === 'local' &&
-        localActive &&
-        snapshot.audioSenderCount > 0 &&
-        snapshot.enabledAudioSenderCount !== snapshot.audioSenderCount
-      ) {
-        log.error('media.active_sender_disabled', fields)
-      } else if (
-        source === 'local' &&
-        !localActive &&
-        snapshot.enabledAudioSenderCount > 0
-      ) {
-        log.error('media.inactive_sender_enabled', fields)
-      } else if (
-        source === 'local' &&
-        localActive &&
-        snapshot.audioSenderCount > 0 &&
-        snapshot.liveAudioSenderCount !== snapshot.audioSenderCount
-      ) {
-        log.warn('media.audio_track_not_live', fields)
-      } else if (
-        source === 'peer' &&
-        peerActiveCount > 0 &&
-        snapshot.peerConnectionCount > 0 &&
-        snapshot.audioReceiverCount === 0
-      ) {
-        log.warn('media.peer_active_no_audio_receiver', fields)
-      } else if (
-        source === 'peer' &&
-        peerActiveCount > 0 &&
-        snapshot.audioReceiverCount > 0 &&
-        snapshot.liveAudioReceiverCount !== snapshot.audioReceiverCount
-      ) {
-        log.warn('media.peer_audio_track_not_live', fields)
+      const issue = classifyPttMediaSnapshot({
+        source,
+        localActive,
+        stateChangedDuringSample,
+        snapshot,
+      })
+      if (issue) {
+        if (issue.level === 'error') log.error(issue.message, fields)
+        else log.warn(issue.message, fields)
+      } else if (stateChangedDuringSample) {
+        log.debug('media.snapshot_raced', fields)
+      } else if (snapshot.collectionError) {
+        log.debug('media.snapshot_partial', fields)
       } else {
         log.debug('media.snapshot', fields)
       }
@@ -194,23 +197,19 @@ export function PttListener() {
       diagnosticTimers.add(handle)
     }
 
-    const handleLocalEdge = (
-      edge: 'pressed' | 'released',
-      edgeSource: LocalEdgeSource
-    ) => {
+    const handleLocalEdge = ({
+      edge,
+      source: edgeSource,
+    }: ReconciledPttEdge) => {
       localEdgeSeq += 1
       const currentEdgeSeq = localEdgeSeq
       const now = monotonicNow()
-      const activeBefore = usePttStore.getState().active
-      const duplicatePress = edge === 'pressed' && activeBefore
-      const duplicateRelease = edge === 'released' && !activeBefore
+      const before = usePttStore.getState()
+      const duplicatePress = edge === 'pressed' && before.awaitingRelease
+      const duplicateRelease = edge === 'released' && !before.awaitingRelease
 
       if (edge === 'pressed') {
         if (duplicatePress) {
-          // Drop repeats at the bridge so a native repeat burst cannot trigger
-          // redundant renders or getStats sampling. The store remains
-          // independently idempotent as a defence-in-depth contract for any
-          // future caller that bypasses this listener.
           log.debug('edge.duplicate_pressed', {
             edgeSeq: currentEdgeSeq,
             edgeSource,
@@ -227,22 +226,21 @@ export function PttListener() {
         release()
       }
 
-      const activeAfter = usePttStore.getState().active
+      const after = usePttStore.getState()
       const heldMs =
         pressStartedAt === null
           ? undefined
           : Math.max(0, Math.round(now - pressStartedAt))
       const duplicate = duplicatePress || duplicateRelease
 
-      // Debug records are intentionally never throttled by the structured log
-      // sink, so an issue attachment preserves the exact native/recovery edge
-      // order instead of folding repeated events into one line.
       log.debug('edge.received', {
         edge,
         edgeSource,
         edgeSeq: currentEdgeSeq,
-        activeBefore,
-        activeAfter,
+        activeBefore: before.active,
+        activeAfter: after.active,
+        awaitingReleaseBefore: before.awaitingRelease,
+        awaitingReleaseAfter: after.awaitingRelease,
         heldMs,
         duplicate,
         sessionActive: useSessionStore.getState().room !== null,
@@ -270,10 +268,13 @@ export function PttListener() {
       }
     }
 
+    const dispatchReconciled = (edges: ReconciledPttEdge[]) => {
+      for (const edge of edges) handleLocalEdge(edge)
+    }
+
     // `SessionView` writes peer PTT action messages into sessionStore.peers.
-    // Observing that store here gives diagnostics a receiver-side edge without
-    // coupling the logging code to the large session UI component. No peer IDs
-    // are logged; only aggregate transition counts and inbound RTP counters.
+    // Peer IDs are used only for in-memory receiver correlation; diagnostics
+    // log aggregate counts and never serialize an identifier.
     const unsubscribePeerPtt = useSessionStore.subscribe((state, previous) => {
       if (state.peers === previous.peers) return
       const changedPeerCount = changedPeerPttCount(state.peers, previous.peers)
@@ -317,57 +318,82 @@ export function PttListener() {
       }
     })
 
+    const bridgeListen: BridgeListen = (eventName, handler) =>
+      listen<unknown>(eventName, handler)
+
     const wire = async () => {
       try {
-        const a = await listen(PTT_FRIENDS_PRESSED, () =>
-          handleLocalEdge('pressed', 'shortcut')
+        const registered = await registerPttEventBridge(
+          bridgeListen,
+          {
+            physicalState: PTT_FRIENDS_PHYSICAL_STATE,
+            released: PTT_FRIENDS_RELEASED,
+            pressed: PTT_FRIENDS_PRESSED,
+          },
+          {
+            onPhysicalState: (payload) => {
+              const held = physicalStatePayload(payload)
+              const before = edgeReconciler.snapshot()
+              const edges = edgeReconciler.physicalState(held)
+              const after = edgeReconciler.snapshot()
+              log.debug('physical.state', {
+                held,
+                previousHeld: before.physicalHeld,
+                deferredBefore: before.deferredShortcutPress,
+                deferredAfter: after.deferredShortcutPress,
+              })
+              dispatchReconciled(edges)
+            },
+            onReleased: () => {
+              const before = edgeReconciler.snapshot()
+              const edges = edgeReconciler.shortcutReleased()
+              if (before.deferredShortcutPress && edges.length === 0) {
+                log.debug('edge.deferred_pressed_cancelled', {})
+              }
+              dispatchReconciled(edges)
+            },
+            onPressed: () => {
+              const before = edgeReconciler.snapshot()
+              const edges = edgeReconciler.shortcutPressed()
+              const after = edgeReconciler.snapshot()
+              if (
+                !before.deferredShortcutPress &&
+                after.deferredShortcutPress &&
+                edges.length === 0
+              ) {
+                log.debug('edge.pressed_deferred_physical_up', {})
+              }
+              dispatchReconciled(edges)
+            },
+          }
         )
         if (cancelled) {
-          a()
+          for (const unlisten of registered) unlisten()
           return
         }
-        unlisteners.push(a)
-
-        const b = await listen(PTT_FRIENDS_RELEASED, () =>
-          handleLocalEdge('released', 'shortcut')
-        )
-        if (cancelled) {
-          b()
-          return
-        }
-        unlisteners.push(b)
-
-        const c = await listen(PTT_FRIENDS_PHYSICAL_RELEASED, () =>
-          handleLocalEdge('released', 'physical-watch')
-        )
-        if (cancelled) {
-          c()
-          return
-        }
-        unlisteners.push(c)
+        unlisteners.push(...registered)
       } catch (err) {
-        // Outside a Tauri runtime (Vitest, Storybook, plain web preview) the
-        // event bridge is expected to be absent. Only a real packaged/runtime
-        // failure is diagnostic-worthy.
+        // `registerPttEventBridge` has already unwound any partially-wired
+        // listeners, so a failure can never leave Pressed active without all
+        // release/reconciliation paths.
         if (isTauriRuntime()) log.warn('bridge.listen_failed', { err })
       }
     }
 
     void wire()
 
-    // No blur-release failsafe: the friends shortcut is a GLOBAL shortcut whose
-    // Released event is delivered system-wide regardless of window focus, so
-    // PTT must keep transmitting while the user works in another app (the whole
-    // point of hold-to-talk during a body-doubling session). On macOS the native
-    // physical-key watcher independently recovers a dropped release; the store's
-    // MAX_HOLD_MS guard and per-session reset remain platform-neutral fallbacks.
+    // No blur-release failsafe: the friends shortcut is GLOBAL, so PTT must
+    // keep transmitting while the user holds the key in another app. macOS
+    // physical-state reconciliation recovers dropped/delayed native edges;
+    // the store's non-renewable MAX_HOLD_MS cutoff and per-session reset remain
+    // platform-neutral final safeguards.
 
     return () => {
       cancelled = true
       unsubscribePeerPtt()
       for (const handle of diagnosticTimers) clearTimeout(handle)
       diagnosticTimers.clear()
-      for (const u of unlisteners) u()
+      for (const unlisten of unlisteners) unlisten()
     }
   }, [])
 
