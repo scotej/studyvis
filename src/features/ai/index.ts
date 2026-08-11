@@ -39,6 +39,7 @@ export {
   clearCurrentAiHardwareIdentity,
   computeDeviceFingerprint,
   computeDeviceId,
+  createAiComputeDeviceSelectionGuard,
   currentAiHardwareIdentity,
   hydrateAiComputeDeviceSelection,
   isAiHardwareIdentity,
@@ -50,6 +51,7 @@ export {
 } from './computeDevice'
 export type {
   AiComputeDeviceSelection,
+  AiComputeDeviceSelectionGuard,
   AiHardwareIdentity,
   AiHardwareTopologyDevice,
 } from './computeDevice'

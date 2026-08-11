@@ -22,7 +22,13 @@ export type AiHardwareIdentity = {
   topology: AiHardwareTopologyDevice[] | null
 }
 
+type HardwareStore = Pick<LazyStore, 'get' | 'set' | 'save'>
+
+let testTauriRuntime: boolean | null = null
+let testHardwareStore: HardwareStore | null = null
+
 function isTauriRuntime(): boolean {
+  if (testTauriRuntime !== null) return testTauriRuntime
   return (
     typeof window !== 'undefined' &&
     ('__TAURI_INTERNALS__' in window || '__TAURI__' in window)
@@ -182,16 +188,60 @@ function writeCache(selection: AiComputeDeviceSelection): void {
 }
 
 let cachedStore: LazyStore | null = null
-function hardwareStore(): LazyStore {
+function hardwareStore(): HardwareStore {
+  if (testHardwareStore) return testHardwareStore
   if (!cachedStore) cachedStore = new LazyStore(AI_HARDWARE_FILE)
   return cachedStore
+}
+
+// Unit-only seam for the delayed canonical-store reads that occur in the
+// Tauri webview. Keeping the real LazyStore behind this narrow interface lets
+// the regression test control get(A) versus save(B) deterministically.
+export function __setAiComputeDeviceTestRuntime(
+  runtime: { tauri: boolean; store: HardwareStore } | null
+): void {
+  testTauriRuntime = runtime?.tauri ?? null
+  testHardwareStore = runtime?.store ?? null
+  selectionOperation = 0
+}
+
+// One operation counter protects both sides of the canonical-store race:
+// a hydration begun from stored A must not later rewrite the expected
+// selection/cache after a user has successfully persisted B.
+let selectionOperation = 0
+
+export type AiComputeDeviceSelectionGuard = {
+  hydrationSnapshot: () => number
+  markUserChoice: () => number
+  isCurrent: (operation: number) => boolean
+}
+
+// Used by AiCategory's async hydration effect. Kept here so the same
+// deterministic operation rule is unit-tested rather than duplicated in JSX.
+export function createAiComputeDeviceSelectionGuard(): AiComputeDeviceSelectionGuard {
+  let operation = 0
+  return {
+    hydrationSnapshot: () => operation,
+    markUserChoice: () => {
+      operation += 1
+      return operation
+    },
+    isCurrent: (candidate) => candidate === operation,
+  }
 }
 
 export async function hydrateAiComputeDeviceSelection(): Promise<AiComputeDeviceSelection> {
   const cached = readCachedAiComputeDeviceSelection()
   if (!isTauriRuntime()) return cached
+  const hydrationOperation = selectionOperation
   try {
     const stored = await hardwareStore().get<unknown>(AI_COMPUTE_DEVICE_KEY)
+    if (hydrationOperation !== selectionOperation) {
+      // A user save began while get() was pending. Return a harmless bootstrap
+      // hint; never let this stale completion alter canonical expectations or
+      // localStorage after the newer save.
+      return readCachedAiComputeDeviceSelection()
+    }
     const selection = isAiComputeDeviceSelection(stored)
       ? stored
       : DEFAULT_AI_COMPUTE_DEVICE
@@ -212,6 +262,7 @@ export async function persistAiComputeDeviceSelection(
   if (!isAiComputeDeviceSelection(selection)) {
     throw new Error('invalid AI compute device selection')
   }
+  const persistOperation = ++selectionOperation
   // Invalidate before the async write: a click changing CPU/Auto/eGPU must
   // never leave the old native identity eligible while persistence is pending.
   expectedCanonicalSelection = selection
@@ -222,12 +273,14 @@ export async function persistAiComputeDeviceSelection(
       await store.set(AI_COMPUTE_DEVICE_KEY, selection)
       await store.save()
     }
-    writeCache(selection)
+    if (persistOperation === selectionOperation) writeCache(selection)
   } catch (error) {
     // The prior canonical value is unknown to this module after a failed
     // write. Accept no identity until a fresh native read establishes it.
-    expectedCanonicalSelection = null
-    discardCurrentAiHardwareIdentity()
+    if (persistOperation === selectionOperation) {
+      expectedCanonicalSelection = null
+      discardCurrentAiHardwareIdentity()
+    }
     throw error
   }
 }
