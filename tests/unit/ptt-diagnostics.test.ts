@@ -74,9 +74,7 @@ function peer(
   } as unknown as RTCPeerConnection
 }
 
-function roomFromEntries(
-  peers: Array<[string, RTCPeerConnection]>
-): TopicRoom {
+function roomFromEntries(peers: Array<[string, RTCPeerConnection]>): TopicRoom {
   return {
     getPeers: () => Object.fromEntries(peers),
   } as unknown as TopicRoom
@@ -345,9 +343,7 @@ describe('PTT media diagnostics', () => {
         track: track('audio', true),
         getStats: () => {
           started += 1
-          return new Promise<RTCStatsReport>((resolve) =>
-            resolvers.push(resolve)
-          )
+          return new Promise<RTCStatsReport>((resolve) => resolvers.push(resolve))
         },
       }) as unknown as RTCRtpSender
 
