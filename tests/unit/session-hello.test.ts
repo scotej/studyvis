@@ -103,6 +103,28 @@ describe('validateHelloPayload (peerId ↔ ed_pubkey gate)', () => {
     })
   })
 
+  test('normalizes an authentically signed uppercase key after verification', () => {
+    const sam = generateIdentity()
+    const edPubkeyHex = bytesToHex(sam.edPub)
+    const core = {
+      v: HELLO_VERSION,
+      peer_id: PEER_ID,
+      ed_pubkey_hex: edPubkeyHex.toUpperCase(),
+      display_name: 'Sam',
+      joined_at: 1000,
+    }
+    const payload: HelloPayload = {
+      ...core,
+      sig: bytesToHex(signMessage(sam.edPriv, serializeHelloForSig(core))),
+    }
+
+    expect(validateHelloPayload(payload, PEER_ID)).toEqual({
+      ed_pubkey_hex: edPubkeyHex,
+      display_name: 'Sam',
+      joined_at: 1000,
+    })
+  })
+
   test('rejects a payload whose peer_id ≠ the wire sender (impersonation)', () => {
     const sam = generateIdentity()
     expect(validateHelloPayload(signHello(sam), 'someone-else')).toBeNull()

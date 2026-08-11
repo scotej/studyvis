@@ -1503,8 +1503,13 @@ export function SessionView({
         await sessionLeave()
       } catch (err) {
         // buildLeaveHandler normally absorbs recoverable room/IPC failures and
-        // still completes teardown. If an unexpected error escapes it, allow
-        // the user to retry instead of leaving the control permanently inert.
+        // still completes teardown. If an error escapes before teardown is
+        // committed, release this attempt's first-writer claim before making
+        // the control retryable. A competing peer-forced reason is preserved.
+        const currentSession = useSessionStore.getState()
+        if (currentSession.leave === sessionLeave) {
+          currentSession.clearPendingEndReason('user')
+        }
         leaveRequestedRef.current = false
         const message =
           err instanceof Error

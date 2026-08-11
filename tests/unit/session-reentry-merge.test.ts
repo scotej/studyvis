@@ -73,7 +73,7 @@ import {
   mergeSessionStints,
 } from '@/features/session/lifecycle'
 import type { TopicRoom } from '@/lib/trystero'
-import { useSessionStore } from '@/stores/sessionStore'
+import { createSessionStore, useSessionStore } from '@/stores/sessionStore'
 
 const T0 = 1_700_000_000_000
 const MIN = 60_000
@@ -274,6 +274,59 @@ describe('re-entry merge across leave cycles', () => {
       startedAt: T0,
       totalMinutes: 45,
     })
+  })
+
+  test('a preflight failure releases its reason and cached attempt for retry', async () => {
+    const store = createSessionStore()
+    const roomLeave = vi.fn(async () => {})
+    const room = { leave: roomLeave } as unknown as TopicRoom
+    store.getState().begin({
+      sessionTopic: 'retry-topic',
+      sessionPassword: 'pw',
+      isHost: true,
+      startedAt: T0,
+      room,
+      leave: async () => {},
+    })
+    store.getState().peerJoined('peer-a')
+
+    const collectPeerPubkeys = store.getState().collectPeerPubkeys
+    let failPreflight = true
+    store.setState({
+      collectPeerPubkeys: () => {
+        if (failPreflight) {
+          failPreflight = false
+          throw new Error('preflight failed')
+        }
+        return collectPeerPubkeys()
+      },
+    })
+    const leave = buildLeaveHandler({
+      room,
+      store,
+      topic: 'retry-topic',
+      startedAt: T0,
+    })
+    vi.setSystemTime(T0 + MIN)
+
+    const failedAttempt = leave()
+    await expect(failedAttempt).rejects.toThrow('preflight failed')
+    expect(store.getState()).toMatchObject({
+      status: 'active',
+      pendingEndReason: null,
+      rejoinDeadline: null,
+    })
+    expect(roomLeave).not.toHaveBeenCalled()
+
+    const retry = leave()
+    expect(retry).not.toBe(failedAttempt)
+    await expect(retry).resolves.toBeUndefined()
+    expect(roomLeave).toHaveBeenCalledTimes(1)
+    expect(store.getState()).toMatchObject({
+      status: 'ended',
+      endedBy: 'user',
+    })
+    expect(db.get('retry-topic')).toBeDefined()
   })
 })
 

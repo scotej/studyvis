@@ -2,7 +2,9 @@
 // sessions row. NULL is a compatibility sentinel (duration precision was not
 // recorded); an empty object is a precise, peerless session.
 
-const ED25519_HEX = /^[0-9a-f]{64}$/i
+// Lowercase only: two spellings of one identity would otherwise split its
+// accumulated overlap across distinct object keys.
+const ED25519_HEX = /^[0-9a-f]{64}$/
 
 export type PeerPresenceMs = ReadonlyMap<string, number>
 
@@ -34,8 +36,8 @@ export function encodePeerPresenceMs(
       )
     }
   }
-  // Code-unit comparison is locale-independent, which keeps persisted bytes
-  // canonical even for a valid signed hello that used uppercase hex.
+  // Code-unit comparison is locale-independent, so persisted key order does
+  // not depend on the runtime locale.
   entries.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
   return JSON.stringify(Object.fromEntries(entries))
 }

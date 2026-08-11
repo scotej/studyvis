@@ -187,7 +187,13 @@ describe('#210 active solo session lifecycle', () => {
 
     harness.leave('peer-1')
     harness.join('replacement')
-    expect(lifecycle.peers()).toEqual(['peer-2', 'peer-3', 'replacement'])
+    expect(lifecycle.peers()).toEqual([
+      ...Array.from(
+        { length: MAX_REMOTE_PEERS - 1 },
+        (_, index) => `peer-${index + 2}`
+      ),
+      'replacement',
+    ])
     expect(localLeave).not.toHaveBeenCalled()
   })
 

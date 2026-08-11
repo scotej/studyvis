@@ -247,8 +247,10 @@ describe('two room handles on the in-process bus observe peer events', () => {
     expect(hostLeave).toBe(host.leave)
     expect(hostLeave).toEqual(expect.any(Function))
 
+    // Install the fake clock before departure so this test would capture any
+    // regression that schedules a survivor-side timeout from the leave event.
+    vi.useFakeTimers()
     await guest.leave()
-    await flushMicrotasks()
 
     // #210 — remote departure changes membership only. The guest persisted
     // its own report; the host remains in the same live room.
@@ -268,7 +270,6 @@ describe('two room handles on the in-process bus observe peer events', () => {
 
     // Advancing past the old survivor-side grace deadline cannot persist or
     // end the host — there is no empty-room timer left to fire.
-    vi.useFakeTimers()
     await vi.advanceTimersByTimeAsync(REJOIN_WINDOW_MS + 1)
     vi.useRealTimers()
     insertCalls = invokeMock.mock.calls.filter(
@@ -323,8 +324,9 @@ describe('two room handles on the in-process bus observe peer events', () => {
     invokeMock.mockClear()
     // Bypass the guest's local teardown/signed-left path: this is a process or
     // network disappearance as observed solely through Trystero membership.
+    // Capture any timer scheduled by the raw membership-loss callback.
+    vi.useFakeTimers()
     await guest.room.leave()
-    await flushMicrotasks()
 
     expect(host.peers()).toEqual([])
     expect(hostStore.getState()).toMatchObject({
@@ -337,7 +339,6 @@ describe('two room handles on the in-process bus observe peer events', () => {
       invokeMock.mock.calls.filter(([cmd]) => cmd === 'sessions_insert')
     ).toHaveLength(0)
 
-    vi.useFakeTimers()
     await vi.advanceTimersByTimeAsync(REJOIN_WINDOW_MS + 1)
     vi.useRealTimers()
     expect(
@@ -552,7 +553,10 @@ describe('leave handler tears down the room and persists a sessions row', () => 
     invokeMock.mockClear()
     invokeMock.mockResolvedValue(undefined)
 
-    await Promise.all([host.leave(), host.leave()])
+    const firstLeave = host.leave()
+    const duplicateLeave = host.leave()
+    expect(duplicateLeave).toBe(firstLeave)
+    await Promise.all([firstLeave, duplicateLeave])
 
     const insertCalls = invokeMock.mock.calls.filter(
       ([cmd]) => cmd === 'sessions_insert'

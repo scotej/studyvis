@@ -48,6 +48,17 @@ describe('local session end reason', () => {
     expect(useSessionStore.getState().endedBy).toBe('user')
   })
 
+  test('a failed attempt clears only its own staged end reason', () => {
+    begin()
+    useSessionStore.getState().setPendingEndReason('user')
+    useSessionStore.getState().clearPendingEndReason('user')
+    expect(useSessionStore.getState().pendingEndReason).toBeNull()
+
+    useSessionStore.getState().setPendingEndReason('peer')
+    useSessionStore.getState().clearPendingEndReason('user')
+    expect(useSessionStore.getState().pendingEndReason).toBe('peer')
+  })
+
   test('a user ending can rejoin before, but not at, its deadline', () => {
     begin()
     useSessionStore.getState().setPendingEndReason('user')

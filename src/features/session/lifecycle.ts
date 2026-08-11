@@ -371,10 +371,9 @@ export function buildLeaveHandler(args: {
 }): () => Promise<void> {
   const monotonicNow = args.monotonicNow ?? defaultMonotonicNow
   const sessionStore = args.store ?? useSessionStore
-  let alreadyLeft = false
-  return async () => {
-    if (alreadyLeft) return
-    alreadyLeft = true
+  let leaveAttempt: Promise<void> | null = null
+  let teardownCommitted = false
+  const performLeave = async () => {
     // Claim the end reason synchronously before the first await. The caller's
     // UI path does the same before broadcasting `left`; this second claim is
     // harmless and keeps direct handle.leave() calls correctly attributed.
@@ -434,6 +433,10 @@ export function buildLeaveHandler(args: {
       awakeMs: monoMs,
     })
 
+    // From the first room-leave attempt onward, retrying the whole stint would
+    // risk merging its minutes/presence twice. Expected teardown failures are
+    // handled below; any preflight failure releases the cached attempt.
+    teardownCommitted = true
     try {
       await args.room.leave()
       log.debug('room.leave_succeeded')
@@ -589,7 +592,10 @@ export function buildLeaveHandler(args: {
         peerCount: peerEdPubkeys.length,
       })
     } catch (err) {
-      log.error('mark_studied.failed', { peerCount: peerEdPubkeys.length, err })
+      log.error('mark_studied.failed', {
+        peerCount: peerEdPubkeys.length,
+        err,
+      })
     }
     log.info('session.end_completed', {
       endReason,
@@ -605,7 +611,13 @@ export function buildLeaveHandler(args: {
     })
     // The next screen is precisely where issue #161 puts the export button.
     // Make the end markers durable before the report can be rendered/saved.
-    await flushLog()
+    try {
+      await flushLog()
+    } catch (err) {
+      // Logging durability is best-effort and must not strand an already-left
+      // user in the active session UI.
+      log.error('log_flush.failed', { phase: 'teardown', err })
+    }
     // Flip to 'ended'. The Report view (mounted by Home.tsx when status ===
     // 'ended') queries the just-persisted sessions row + audit_events for
     // this topic. Reset of audit + pomodoro stores is driven by the V2-P5
@@ -614,6 +626,25 @@ export function buildLeaveHandler(args: {
     // been retired alongside the SessionEndedSplash.
     sessionStore.getState().markEnded()
     setLogContext({ sess: undefined })
+  }
+  return () => {
+    if (leaveAttempt) return leaveAttempt
+    teardownCommitted = false
+    const attempt = performLeave().catch((err) => {
+      if (!teardownCommitted) {
+        sessionStore.getState().clearPendingEndReason('user')
+        sessionStore.getState().setRejoinDeadline(null)
+        leaveAttempt = null
+        throw err
+      }
+      // Once room teardown has started, replaying this whole stint is not
+      // safe. End locally and surface the unexpected failure in diagnostics.
+      log.error('session.end_unexpected_failure', { err })
+      sessionStore.getState().markEnded()
+      setLogContext({ sess: undefined })
+    })
+    leaveAttempt = attempt
+    return attempt
   }
 }
 

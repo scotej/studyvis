@@ -59,8 +59,12 @@ describe('session peer-presence codec', () => {
 
   test('encoder rejects invalid keys and values rather than writing ambiguity', () => {
     expect(() => encodePeerPresenceMs({ short: 1 })).toThrow(TypeError)
+    expect(() => encodePeerPresenceMs({ [A.toUpperCase()]: 1 })).toThrow(
+      TypeError
+    )
     expect(() => encodePeerPresenceMs({ [A]: -1 })).toThrow(TypeError)
     expect(() => encodePeerPresenceMs({ [A]: 1.5 })).toThrow(TypeError)
+    expect(decodePeerPresenceMs(`{"${A.toUpperCase()}":1}`)).toBeNull()
   })
 
   test('requires an exact keyset before stats treats a map as authoritative', () => {

@@ -171,6 +171,10 @@ export type SessionState = {
   // including an empty object for a known-solo session.
   finalizePeerPresence: (clock?: PeerPresenceClock) => FinalizedPeerPresence
   setPendingEndReason: (reason: SessionEndReason) => void
+  // Clears only the caller's own staged reason. The comparison preserves a
+  // competing first writer (for example, a session-full rejection) while a
+  // failed local Leave attempt is made retryable.
+  clearPendingEndReason: (reason: SessionEndReason) => void
   setRejoinDeadline: (deadline: number | null) => void
   getRejoinRequest: (now?: number) => SessionRejoinRequest | null
   // Flip status to 'ended' so Home.tsx can mount the post-session Report
@@ -454,6 +458,10 @@ const sessionStateCreator: StateCreator<SessionState> = (set, get) => ({
   setPendingEndReason: (reason) =>
     set((s) =>
       s.pendingEndReason === null ? { pendingEndReason: reason } : s
+    ),
+  clearPendingEndReason: (reason) =>
+    set((s) =>
+      s.pendingEndReason === reason ? { pendingEndReason: null } : s
     ),
   setRejoinDeadline: (deadline) => set({ rejoinDeadline: deadline }),
   getRejoinRequest: (now = Date.now()) => {
