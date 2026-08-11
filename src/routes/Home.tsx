@@ -87,9 +87,9 @@ export function Home() {
   const settingsStatus = useSettingsStore((s) => s.status)
   const sessionStatus = useSessionStore((s) => s.status)
   const sessionTopic = useSessionStore((s) => s.sessionTopic)
-  // #47 B3 / #190 — auto and deliberate local endings may be rejoinable
-  // until the teardown-time deadline. The store retains credentials and the
-  // prior role until the report closes or a successful rejoin begins.
+  // #47 B3 / #190 — a deliberate local ending may be rejoinable until its
+  // teardown-time deadline. The store retains credentials and the prior role
+  // until the report closes or a successful rejoin begins.
   const sessionEndedBy = useSessionStore((s) => s.endedBy)
   const rejoinDeadline = useSessionStore((s) => s.rejoinDeadline)
   const [addOpen, setAddOpen] = useState(false)
@@ -316,9 +316,8 @@ export function Home() {
 
   const aiOn = () => useSettingsStore.getState().values.aiFeaturesEnabled
 
-  // #47 B3 / #190 — re-enter the still-live room after a grace-window
-  // auto-end or an accidental local Leave. Reuses the already-declared topic
-  // (no AI topic-gate re-prompt) and the
+  // #47 B3 / #190 — re-enter the room after an accidental local Leave. Reuses
+  // the already-declared topic (no AI topic-gate re-prompt) and the
   // credentials the store holds until the Report closes; joinSession's
   // begin() flips status to 'active', unmounting the Report.
   const handleRejoin = useCallback(() => {
@@ -552,8 +551,7 @@ export function Home() {
           topContent={<PendingInvites onAccept={handleInviteAccepted} />}
           onClose={() => useSessionStore.getState().reset()}
           onRejoin={
-            rejoinDeadline !== null &&
-            (sessionEndedBy === 'auto' || sessionEndedBy === 'user')
+            rejoinDeadline !== null && sessionEndedBy === 'user'
               ? handleRejoin
               : undefined
           }

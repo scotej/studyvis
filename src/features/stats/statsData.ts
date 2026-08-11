@@ -13,6 +13,7 @@
 
 import type { Friend } from '@/lib/db/friends'
 import type { SessionRecord } from '@/lib/db/sessions'
+import { decodePeerPresenceMsForPeers } from '@/lib/db/sessionPresence'
 
 export const STREAK_MIN_MINUTES = 25
 export const FOCUS_WINDOW_DAYS = 30
@@ -359,8 +360,8 @@ export function topStudyPartners(
 export type PartnerStudyTotals = {
   sessions: number
   minutes: number
-  // Most recent `started_at` of a session this peer appeared in, or null when
-  // every such session predates the column being written.
+  // Exact friends.last_studied_with when it is current; otherwise the most
+  // recent session start at which this peer appeared is the lower bound.
   lastAt: number | null
 }
 
@@ -373,21 +374,32 @@ export const NO_PARTNER_STUDY: PartnerStudyTotals = {
 // Sessions, study minutes and most-recent date per partner, keyed by
 // ed_pubkey_hex. Same rows and the same "a partner is any peer in
 // sessions.peer_pubkeys" rule as topStudyPartners, so Settings → Friends and
-// the stats dashboard can never disagree about a count. Minutes are the whole
-// session's minutes for EVERY peer present rather than a split of one pot:
-// with three people in the room, those 50 minutes really were 50 minutes
-// spent with each of them, which is what "studied together" means.
+// the stats dashboard can never disagree about a count. New rows use measured
+// overlap per peer. Rows without valid precision retain the legacy whole-
+// session-per-peer interpretation rather than inventing historical timing.
 export function partnerStudyTotals(
-  sessions: readonly SessionRecord[]
+  sessions: readonly SessionRecord[],
+  friends: readonly Friend[] = []
 ): Map<string, PartnerStudyTotals> {
-  const byPeer = new Map<string, PartnerStudyTotals>()
+  type Accumulated = {
+    sessions: number
+    durationMs: number
+    lastAt: number | null
+  }
+  const byPeer = new Map<string, Accumulated>()
   for (const s of sessions) {
-    const minutes = studyMinutesForSession(s)
-    for (const ed of parsePeerPubkeys(s.peer_pubkeys)) {
-      const prev = byPeer.get(ed) ?? NO_PARTNER_STUDY
+    const peers = parsePeerPubkeys(s.peer_pubkeys)
+    const precise = decodePeerPresenceMsForPeers(s.peer_presence_ms, peers)
+    const legacyDurationMs = studyMinutesForSession(s) * 60_000
+    for (const ed of peers) {
+      const prev = byPeer.get(ed) ?? {
+        sessions: 0,
+        durationMs: 0,
+        lastAt: null,
+      }
       byPeer.set(ed, {
         sessions: prev.sessions + 1,
-        minutes: prev.minutes + minutes,
+        durationMs: prev.durationMs + (precise?.get(ed) ?? legacyDurationMs),
         lastAt:
           s.started_at == null
             ? prev.lastAt
@@ -395,7 +407,36 @@ export function partnerStudyTotals(
       })
     }
   }
-  return byPeer
+
+  // New sessions update this column when the real peer-overlap interval
+  // closes. Prefer that exact value without letting a failed/stale best-effort
+  // update undercut the session-start evidence above.
+  for (const friend of friends) {
+    const total = byPeer.get(friend.ed_pubkey_hex)
+    if (total && friend.last_studied_with !== null) {
+      // Presence persistence is best-effort. A stale friend row must never
+      // rewind the date below a newer session we can already prove happened;
+      // for healthy new rows the exact interval close is later than its start
+      // and therefore wins this lower-bound comparison.
+      total.lastAt = Math.max(
+        total.lastAt ?? friend.last_studied_with,
+        friend.last_studied_with
+      )
+    }
+  }
+
+  return new Map(
+    Array.from(byPeer, ([peer, total]) => [
+      peer,
+      {
+        sessions: total.sessions,
+        // Aggregate exact milliseconds across rows before rounding so short
+        // overlaps are not discarded once per session.
+        minutes: Math.floor(total.durationMs / 60_000),
+        lastAt: total.lastAt,
+      },
+    ])
+  )
 }
 
 export type ScoreSummary = {

@@ -436,7 +436,7 @@ Format: one `###` section per finding, ordered by ID. Entries are appended, neve
 
 **Evidence.** A peer's deliberate `left` (signed, on the wire since V1-P9) still armed the 20 s reconnect grace and offered a Rejoin into a dead room.
 
-**Status.** **superseded by #190** — all empty-room departures now receive the same 20-second recovery window. Signed `left` events still preserve accurate `peer` attribution at expiry, while unexplained loss remains `auto`; a returning peer cancels the pending end and clears only its own departure mark. Rejoin is deadline-guarded and preserves the prior host/guest role.
+**Status.** **superseded first by #190 and finally by #210** — #190 gave every empty-room departure the same 20-second recovery window; #210 removes peer-count-driven local teardown entirely. A signed `left` remains useful audit evidence, but neither it nor unexplained transport loss ends the survivor's session. Rejoin is now a deadline-guarded option only for the client that chose Leave, preserving its prior host/guest role; anyone who stayed remains active indefinitely.
 
 ### I54 — Sev3
 
@@ -694,6 +694,14 @@ Format: one `###` section per finding, ordered by ID. Entries are appended, neve
 
 **Status.** **fixed** — a second Pressed event while PTT is already active now clears the failsafe and mutes immediately. This does not turn ordinary hold-to-talk into a toggle: the supported global-hotkey backends suppress repeat Pressed events during one physical hold, so the second event denotes a new press after the previous release edge was lost. The original 120-second guard and per-session reset remain as independent fallbacks. Unit tests pin immediate recovery, stale-timer cancellation, a clean subsequent hold, ordinary press/release, and the continuous-hold window.
 
+### I86 — Sev2
+
+`src/features/session/lifecycle.ts` + `src/stores/sessionStore.ts` + `src/lib/db/sessions.ts` + `src-tauri/src/db/sessions.rs` + `src/features/stats/statsData.ts` + `src/stores/friendsStore.ts`
+
+**Evidence.** User report (issue #210): after the other person left, the participant who stayed could not continue studying alone or use the existing Leave control. The room lifecycle treated zero remote peers as a local termination condition: it armed the #190 20-second disconnect timer and eventually invoked the survivor's own teardown, unmounting the active view and generating a report. Removing only that timer exposed a second correctness defect: `sessions.peer_pubkeys` is cumulative, so a 30-minute shared interval followed by a 90-minute solo tail would credit the departed friend with the whole 120 minutes and update `last_studied_with` 90 minutes late.
+
+**Status.** **fixed** — remote membership now changes membership only; deliberate departure and transport loss both leave the survivor in the same active session until a local Leave, confirmed quit, or forced rejection. The 20-second deadline belongs only to a client that chose Leave and wants to rejoin. New session rows persist canonical per-pubkey overlap milliseconds in nullable `peer_presence_ms` (`{}` for a known-solo row), accumulated on a monotonic clock across leave/rejoin intervals and same-topic stints. `peer_pubkeys` remains the participant/session-count source. NULL, missing, malformed, partial, or invalid presence data is legacy/unknown and falls back for the whole row to the previous whole-session partner-duration interpretation; an unknown earlier stint remains unknown after merging. `friends.last_studied_with` advances monotonically when real overlap ends, using the receiver's local observation rather than the survivor's later teardown or a remote timestamp. Pomodoro hands an active timer to a sole survivor when needed and never freezes or resets merely because the remote count reached zero.
+
 ## Archive — retired backlogs
 
 Two documents used to sit beside this ledger and were deleted once they had no open work left to describe: `BUILD-PROMPTS.md` (the sequenced V0→V3 build plan) and `IMPROVEMENTS.md` (the v1.2.0-era improvement backlog). Git history holds both in full — `git log --diff-filter=D -- BUILD-PROMPTS.md IMPROVEMENTS.md`, then `git show <sha>^:<file>`. What survives here is the part still cited from code.
@@ -737,7 +745,7 @@ Exceptions and judgment calls, so nobody re-litigates them from an item title al
 
 **S — Session robustness**
 
-- `S1` — Grace window before auto-ending on transient disconnect
+- `S1` — Grace window before auto-ending on transient disconnect (later superseded by #210; see I86)
 - `S2` — Make a missed PTT key-release recoverable
 - `S3` — Camera on/off toggle for the live session
 - `S4` — Audio output device + per-peer volume control

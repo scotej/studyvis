@@ -17,7 +17,7 @@ describe('connectionFocusState', () => {
 
   test('"disconnected" is transient: maps to "connecting", never "failed"', () => {
     // Brief packet loss flickers through 'disconnected' and self-heals, so the
-    // tile must not read the terminal "Connection failed" (S1 grace stance).
+    // tile must not read the terminal "Connection failed".
     expect(connectionFocusState('disconnected', null)).toBe('connecting')
     // Media still flowing — defer to the stream fallback ("online").
     expect(connectionFocusState('disconnected', fakeStream)).toBeUndefined()

@@ -104,7 +104,10 @@ export function validateHelloPayload(
   // the sender's, but they choose it: bidi/zero-width chars are stripped and the
   // length is bounded before it reaches the peer tiles, audit rows and notes.
   return {
-    ed_pubkey_hex: data.ed_pubkey_hex,
+    // Hex is case-insensitive on the wire, but every identity-indexed store
+    // and persistence codec uses one lowercase spelling. Verify the sender's
+    // original signed bytes first, then normalize the trusted result.
+    ed_pubkey_hex: data.ed_pubkey_hex.toLowerCase(),
     display_name: normalizeUntrustedName(data.display_name, HELLO_NAME_CAP),
     joined_at: data.joined_at,
   }

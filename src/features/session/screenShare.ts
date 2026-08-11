@@ -208,9 +208,9 @@ export function startScreenShareController({
     announced.delete(peerId)
     screenStreamIds.delete(peerId)
     retiredScreenStreamIds.delete(peerId)
-    // A blip inside the S1 grace window rejoins under the same peerId with a
-    // brand-new RTCPeerConnection, so the stream has to be added again. Holding
-    // them here would leave their screen tile permanently blank.
+    // A peer may reconnect under the same peerId with a brand-new
+    // RTCPeerConnection, so the stream has to be added again. Holding them here
+    // would leave their screen tile permanently blank.
     publishedTo.delete(peerId)
     if (!stopped) onPeerSharingChange(peerId, false)
   })

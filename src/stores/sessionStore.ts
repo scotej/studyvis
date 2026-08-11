@@ -1,24 +1,20 @@
 // Zustand store for the live study-session lifecycle: status, the peers map,
 // the declared-topic trio (see the three per-field comments below — they have
-// distinct lifetimes), and the cumulative seen-peer sets that survive
-// `peerLeft` on purpose so session history stays correct on the
-// everyone-else-leaves auto-end path. Mutated by `features/session/*`
+// distinct lifetimes), and authenticated peer-presence intervals. Mutated by
+// `features/session/*`
 // (host/join/lifecycle/hello); read by SessionView, the AI sample loop, and
 // the leave handler.
 
-import { create } from 'zustand'
+import { create, type StateCreator } from 'zustand'
 
 import type { TopicRoom } from '@/lib/trystero'
 
 export type SessionStatus = 'idle' | 'active' | 'ended'
 
-// #47 B3 / #190 — why the last session ended. 'auto' = the S1 grace window
-// expired after an unexplained transport loss. 'peer' = the grace window
-// expired after every absent peer broadcast a signed `left`, or this client
-// was evicted from a full room. 'user' covers a deliberate local Leave and is
-// rejoinable while the remote peer's matching grace window remains open.
-// null until a session has ended.
-export type SessionEndReason = 'user' | 'auto' | 'peer'
+// Why the local session ended. Remote membership changes never end it:
+// 'user' is an explicit local Leave and may be rejoinable; 'peer' is an
+// externally forced local termination such as admission rejection.
+export type SessionEndReason = 'user' | 'peer'
 
 export type SessionRejoinRequest = {
   sessionTopic: string
@@ -46,6 +42,28 @@ export type PeerSnapshot = {
   joinedAt: number | null
 }
 
+export type PeerPresenceClock = {
+  wallMs: number
+  monoMs: number
+}
+
+export type PeerPresence = {
+  accumulatedMs: number
+  activeSinceWall: number | null
+  activeSinceMono: number | null
+  lastEndedAt: number | null
+}
+
+export type PeerPresenceClose = {
+  edPubkeyHex: string
+  endedAt: number
+}
+
+export type FinalizedPeerPresence = {
+  durationsMs: Record<string, number>
+  lastStudiedAt: Record<string, number>
+}
+
 export type SessionInit = {
   sessionTopic: string
   sessionPassword: string
@@ -66,21 +84,18 @@ export type SessionInit = {
 // literal when resetting the field.
 export const DEFAULT_DECLARED_STUDY_TOPIC = 'Studying'
 
-type SessionState = {
+export type SessionState = {
   status: SessionStatus
   // See SessionEndReason. Set by markEnded, cleared by begin/reset.
   endedBy: SessionEndReason | null
   // One-shot reason staged before the leave handler runs; markEnded consumes
-  // it and defaults to 'user' when nothing was staged. FIRST writer wins
-  // (see setPendingEndReason): the user path stages 'user' synchronously at
-  // the top of buildLeaveHandler and the grace expiry stages 'auto' before
-  // invoking it, so whichever path genuinely initiated the end owns the
-  // attribution — a grace timer firing while a deliberate Leave's async
-  // teardown is mid-flight can no longer rewrite it to 'auto'.
+  // it and defaults to 'user' when nothing was staged. FIRST writer wins so a
+  // local Leave and a simultaneous session-full rejection cannot rewrite one
+  // another while teardown awaits IPC.
   pendingEndReason: SessionEndReason | null
   // Absolute wall-clock deadline captured when teardown begins. It starts
   // before room.leave(), persistence, and report loading, so slow cleanup
-  // cannot accidentally extend the remote peer's recovery window.
+  // cannot accidentally extend this local user's Rejoin opportunity.
   rejoinDeadline: number | null
   sessionTopic: string | null
   sessionPassword: string | null
@@ -120,35 +135,46 @@ type SessionState = {
   pendingInitialTopic: string | null
   // Every distinct ed_pubkey_hex observed via signed-hello during THIS
   // session, accumulated and never pruned by `peerLeft`. The leave handler
-  // and `collectPeerPubkeys` read this so the normal everyone-else-leaves
-  // auto-end path (where `peers` is already empty by the time the handler
-  // snapshots) still records who we studied with. Cleared by begin/reset.
+  // and `collectPeerPubkeys` use it for session membership/history even after
+  // the local user has continued studying solo. Cleared by begin/reset.
   seenPeerEdPubkeys: string[]
   // Cumulative ed_pubkey_hex → display_name observed via signed-hello this
   // session, never pruned by peerLeft (mirrors seenPeerEdPubkeys). The audit
   // panel reads this so a peer who leaves a still-running 3+ person session
   // keeps their name on past rows instead of falling back to a hex fragment.
   seenPeerNames: Record<string, string>
-  // trystero peerIds that broadcast a verified 'left' audit event this
-  // session — the departures we can explain. The lifecycle wiring reads this
-  // to preserve end attribution after the shared grace window; `peerJoined`
-  // drops an id again so a re-invited peer's later blip is treated as an
-  // unexplained disconnect. Cleared by begin/reset.
-  departedPeerIds: string[]
+  // Authenticated overlap per Ed25519 identity. Intervals start only once a
+  // verified hello binds an admitted transport peer. A duplicate connection
+  // for the same identity shares one interval, so it cannot double-count.
+  peerPresence: Record<string, PeerPresence>
   begin: (init: SessionInit) => void
   setPendingInitialTopic: (topic: string | null) => void
   setDeclaredStudyTopic: (next: string) => void
   peerJoined: (peerId: string) => void
-  peerLeft: (peerId: string) => void
-  markPeerDeparted: (peerId: string) => void
+  peerLeft: (
+    peerId: string,
+    clock?: PeerPresenceClock
+  ) => PeerPresenceClose | null
   setPeerStream: (peerId: string, hasStream: boolean) => void
   setPeerPtt: (peerId: string, active: boolean) => void
-  setPeerHello: (peerId: string, hello: PeerHello) => void
+  setPeerHello: (
+    peerId: string,
+    hello: PeerHello,
+    clock?: PeerPresenceClock
+  ) => void
   // Returns sorted (lex) JSON-array string of every ed_pubkey_hex we've
   // observed via signed-hello in this session. Used by the leave handler to
   // populate sessions.peer_pubkeys. NULL until at least one hello arrived.
   collectPeerPubkeys: () => string | null
+  // Closes all still-active overlap intervals exactly once and returns a
+  // persistence snapshot. New sessions always persist the resulting map,
+  // including an empty object for a known-solo session.
+  finalizePeerPresence: (clock?: PeerPresenceClock) => FinalizedPeerPresence
   setPendingEndReason: (reason: SessionEndReason) => void
+  // Clears only the caller's own staged reason. The comparison preserves a
+  // competing first writer (for example, a session-full rejection) while a
+  // failed local Leave attempt is made retryable.
+  clearPendingEndReason: (reason: SessionEndReason) => void
   setRejoinDeadline: (deadline: number | null) => void
   getRejoinRequest: (now?: number) => SessionRejoinRequest | null
   // Flip status to 'ended' so Home.tsx can mount the post-session Report
@@ -181,7 +207,7 @@ const INITIAL: Pick<
   | 'pendingInitialTopic'
   | 'seenPeerEdPubkeys'
   | 'seenPeerNames'
-  | 'departedPeerIds'
+  | 'peerPresence'
 > = {
   status: 'idle',
   endedBy: null,
@@ -202,10 +228,27 @@ const INITIAL: Pick<
   pendingInitialTopic: null,
   seenPeerEdPubkeys: [],
   seenPeerNames: {},
-  departedPeerIds: [],
+  peerPresence: {},
 }
 
-export const useSessionStore = create<SessionState>((set, get) => ({
+function currentPresenceClock(): PeerPresenceClock {
+  return { wallMs: Date.now(), monoMs: performance.now() }
+}
+
+function overlapMs(
+  presence: Pick<PeerPresence, 'activeSinceWall' | 'activeSinceMono'>,
+  end: PeerPresenceClock
+): number {
+  if (presence.activeSinceWall === null || presence.activeSinceMono === null) {
+    return 0
+  }
+  const wallMs = end.wallMs - presence.activeSinceWall
+  const monoMs = end.monoMs - presence.activeSinceMono
+  if (!Number.isFinite(wallMs) || !Number.isFinite(monoMs)) return 0
+  return Math.max(0, Math.floor(Math.min(wallMs, monoMs)))
+}
+
+const sessionStateCreator: StateCreator<SessionState> = (set, get) => ({
   ...INITIAL,
   begin: (init) =>
     set((s) => {
@@ -234,7 +277,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         pendingInitialTopic: null,
         seenPeerEdPubkeys: [],
         seenPeerNames: {},
-        departedPeerIds: [],
+        peerPresence: {},
       }
     }),
   setPendingInitialTopic: (topic) => set({ pendingInitialTopic: topic }),
@@ -242,16 +285,9 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   peerJoined: (peerId) =>
     set((s) => ({
       hadAnyPeer: true,
-      // trystero's peerId is process-stable, so a peer re-invited into the
-      // same live session returns under the id they departed with. Drop the
-      // mark on (re)join or their next genuine blip would skip the grace
-      // window and kill the session instantly.
-      departedPeerIds: s.departedPeerIds.includes(peerId)
-        ? s.departedPeerIds.filter((id) => id !== peerId)
-        : s.departedPeerIds,
       peers: {
         ...s.peers,
-        [peerId]: {
+        [peerId]: s.peers[peerId] ?? {
           peerId,
           hasStream: false,
           ptt: false,
@@ -261,19 +297,46 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         },
       },
     })),
-  peerLeft: (peerId) =>
+  peerLeft: (peerId, clock = currentPresenceClock()) => {
+    let closed: PeerPresenceClose | null = null
     set((s) => {
-      if (!(peerId in s.peers)) return s
-      const next = { ...s.peers }
-      delete next[peerId]
-      return { peers: next }
-    }),
-  markPeerDeparted: (peerId) =>
-    set((s) =>
-      s.departedPeerIds.includes(peerId)
-        ? s
-        : { departedPeerIds: [...s.departedPeerIds, peerId] }
-    ),
+      const departing = s.peers[peerId]
+      if (!departing) return s
+      const peers = { ...s.peers }
+      delete peers[peerId]
+      const edPubkeyHex = departing.edPubkeyHex
+      if (!edPubkeyHex) return { peers }
+
+      const identityStillPresent = Object.values(peers).some(
+        (peer) => peer.edPubkeyHex === edPubkeyHex
+      )
+      const presence = s.peerPresence[edPubkeyHex]
+      if (
+        identityStillPresent ||
+        !presence ||
+        presence.activeSinceWall === null ||
+        presence.activeSinceMono === null
+      ) {
+        return { peers }
+      }
+
+      const accumulatedMs = presence.accumulatedMs + overlapMs(presence, clock)
+      closed = { edPubkeyHex, endedAt: clock.wallMs }
+      return {
+        peers,
+        peerPresence: {
+          ...s.peerPresence,
+          [edPubkeyHex]: {
+            accumulatedMs,
+            activeSinceWall: null,
+            activeSinceMono: null,
+            lastEndedAt: clock.wallMs,
+          },
+        },
+      }
+    })
+    return closed
+  },
   setPeerStream: (peerId, hasStream) =>
     set((s) => {
       const cur = s.peers[peerId]
@@ -286,7 +349,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       if (!cur) return s
       return { peers: { ...s.peers, [peerId]: { ...cur, ptt: active } } }
     }),
-  setPeerHello: (peerId, hello) =>
+  setPeerHello: (peerId, hello, clock = currentPresenceClock()) =>
     set((s) => {
       // Hello can arrive before peerJoined (host->guest race on already-
       // present peers); upsert defensively so the binding always lands.
@@ -298,14 +361,44 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         displayName: null,
         joinedAt: null,
       }
+      // A transport peer is bound to the first verified identity it presents.
+      // Rebinding it would corrupt both audit verification and overlap data.
+      if (cur.edPubkeyHex !== null && cur.edPubkeyHex !== hello.ed_pubkey_hex) {
+        return s
+      }
       const seen = s.seenPeerEdPubkeys.includes(hello.ed_pubkey_hex)
         ? s.seenPeerEdPubkeys
         : [...s.seenPeerEdPubkeys, hello.ed_pubkey_hex]
+      const identityAlreadyActive = Object.entries(s.peers).some(
+        ([id, peer]) =>
+          id !== peerId && peer.edPubkeyHex === hello.ed_pubkey_hex
+      )
+      const priorPresence = s.peerPresence[hello.ed_pubkey_hex] ?? {
+        accumulatedMs: 0,
+        activeSinceWall: null,
+        activeSinceMono: null,
+        lastEndedAt: null,
+      }
+      const shouldStart =
+        cur.edPubkeyHex === null &&
+        !identityAlreadyActive &&
+        priorPresence.activeSinceWall === null &&
+        priorPresence.activeSinceMono === null
       return {
         seenPeerEdPubkeys: seen,
         seenPeerNames: {
           ...s.seenPeerNames,
           [hello.ed_pubkey_hex]: hello.display_name,
+        },
+        peerPresence: {
+          ...s.peerPresence,
+          [hello.ed_pubkey_hex]: shouldStart
+            ? {
+                ...priorPresence,
+                activeSinceWall: clock.wallMs,
+                activeSinceMono: clock.monoMs,
+              }
+            : priorPresence,
         },
         peers: {
           ...s.peers,
@@ -326,16 +419,56 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     const sorted = [...new Set(seen)].sort()
     return JSON.stringify(sorted)
   },
+  finalizePeerPresence: (clock = currentPresenceClock()) => {
+    let result: FinalizedPeerPresence = {
+      durationsMs: {},
+      lastStudiedAt: {},
+    }
+    set((s) => {
+      const peerPresence: Record<string, PeerPresence> = {}
+      const durationsMs: Record<string, number> = {}
+      const lastStudiedAt: Record<string, number> = {}
+      for (const edPubkeyHex of Object.keys(s.peerPresence).sort()) {
+        const presence = s.peerPresence[edPubkeyHex]
+        const active =
+          presence.activeSinceWall !== null && presence.activeSinceMono !== null
+        const finalized: PeerPresence = active
+          ? {
+              accumulatedMs:
+                presence.accumulatedMs + overlapMs(presence, clock),
+              activeSinceWall: null,
+              activeSinceMono: null,
+              lastEndedAt: clock.wallMs,
+            }
+          : presence
+        peerPresence[edPubkeyHex] = finalized
+        durationsMs[edPubkeyHex] = Math.max(
+          0,
+          Math.floor(finalized.accumulatedMs)
+        )
+        if (finalized.lastEndedAt !== null) {
+          lastStudiedAt[edPubkeyHex] = finalized.lastEndedAt
+        }
+      }
+      result = { durationsMs, lastStudiedAt }
+      return { peerPresence }
+    })
+    return result
+  },
   setPendingEndReason: (reason) =>
     set((s) =>
       s.pendingEndReason === null ? { pendingEndReason: reason } : s
+    ),
+  clearPendingEndReason: (reason) =>
+    set((s) =>
+      s.pendingEndReason === reason ? { pendingEndReason: null } : s
     ),
   setRejoinDeadline: (deadline) => set({ rejoinDeadline: deadline }),
   getRejoinRequest: (now = Date.now()) => {
     const s = get()
     if (
       s.status !== 'ended' ||
-      (s.endedBy !== 'auto' && s.endedBy !== 'user') ||
+      s.endedBy !== 'user' ||
       s.rejoinDeadline === null ||
       now >= s.rejoinDeadline ||
       !s.sessionTopic ||
@@ -360,4 +493,14 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         : s
     ),
   reset: () => set({ ...INITIAL }),
-}))
+})
+
+export function createSessionStore() {
+  return create<SessionState>(sessionStateCreator)
+}
+
+export type SessionStore = ReturnType<typeof createSessionStore>
+
+// Production uses one store per desktop webview. Tests that exercise multiple
+// app instances in one process can inject stores created by the factory.
+export const useSessionStore = createSessionStore()

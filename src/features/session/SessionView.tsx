@@ -222,10 +222,10 @@ export function SessionView({
   const peers = useSessionStore((s) => s.peers)
   const setPeerHello = useSessionStore((s) => s.setPeerHello)
   const seenPeerNames = useSessionStore((s) => s.seenPeerNames)
-  // U2×S1 — whether a friend has ever been admitted this session, so the
-  // alone-tile shows invite copy on a never-had-peers start vs reconnect copy
-  // when everyone dropped (during the S1 grace window or after a leave).
-  const hadAnyPeer = useSessionStore((s) => s.seenPeerEdPubkeys.length > 0)
+  // Whether a friend has ever been admitted this session. This is transport-
+  // level membership rather than signed-hello history, so a peer who drops
+  // before their hello lands still moves the empty-room UI into solo mode.
+  const hadAnyPeer = useSessionStore((s) => s.hadAnyPeer)
   const aiFeaturesEnabled = useSettingsStore((s) => s.values.aiFeaturesEnabled)
   // The footer hint must show the PERSISTED binding: rebinding shipped in
   // V3-P3, and a hardcoded default lied every session to exactly the users
@@ -426,12 +426,16 @@ export function SessionView({
   // Two-tap Esc-to-leave: the timestamp of the last "armed" Esc. A ref
   // (not state) so updating it never re-attaches the keydown listener.
   const escLeaveArmedAtRef = useRef<number | null>(null)
+  // Claim a local Leave synchronously, before its signed audit broadcast can
+  // yield. This makes click / double-Esc races one request and lets the store's
+  // first-writer-wins end attribution reflect the action the user took first.
+  const leaveRequestedRef = useRef(false)
 
   // N4 — single chokepoint for the Rust SessionActiveFlag. Every teardown
-  // path (Leave button, everyone-left auto-end, grace-window expiry, this
-  // component unmounting, and the boot/idle reset) funnels through `status`
-  // leaving 'active', so this effect's cleanup is the one place that flips the
-  // flag back off. While active, a quit attempt (window close with
+  // path (local Leave, forced eviction, component unmount, and the boot/idle
+  // reset) funnels through `status` leaving 'active', so this effect's cleanup
+  // is the one place that flips the flag back off. While active, a quit attempt
+  // (window close with
   // minimize-to-tray off, tray Quit, macOS Cmd+Q) is intercepted by Rust and
   // routed to QuitConfirmListener instead of dropping peers mid-session.
   useEffect(() => {
@@ -545,8 +549,9 @@ export function SessionView({
     }
   }, [room, mediaRetryNonce])
 
-  // S2 — on a genuine session teardown (leave, auto-end, unmount) drop PTT so a
-  // held key at the moment the room closes can't latch `active` across sessions.
+  // S2 — on a genuine session teardown (local leave, forced eviction, unmount)
+  // drop PTT so a held key at the moment the room closes can't latch `active`
+  // across sessions.
   // Keyed on `[room]` ONLY, deliberately separate from the media-acquire effect
   // above: a "Try again" re-acquire bumps `mediaRetryNonce`, and resetting PTT
   // on that path would clobber the held state the acquire effect reads back
@@ -884,14 +889,6 @@ export function SessionView({
       // mirrors the ai-alert path's replay guard (aiAlerts.ts). (I8)
       if (verified.session_topic !== sessionTopic) return
       useAuditStore.getState().append(verified)
-      // This mark is what lets the lifecycle layer tell a deliberate
-      // departure from a WiFi blip, and it is reliable only because
-      // handleLeave awaits this broadcast before room.leave() and both ride
-      // the same single ordered data channel — the mark always lands before
-      // trystero's own leave notification. Don't drop that await.
-      if (verified.kind === 'left') {
-        useSessionStore.getState().markPeerDeparted(peerId)
-      }
     })
 
     // #47 B6 — quiet text notes on the same signed-channel trust wiring as
@@ -1490,7 +1487,9 @@ export function SessionView({
   }, [status, room, sessionTopic, startedAt])
 
   const handleLeave = useCallback(() => {
-    if (!sessionLeave) return
+    if (!sessionLeave || leaveRequestedRef.current) return
+    leaveRequestedRef.current = true
+    useSessionStore.getState().setPendingEndReason('user')
     void (async () => {
       const emit = emitAuditRef.current
       if (emit) {
@@ -1503,6 +1502,15 @@ export function SessionView({
       try {
         await sessionLeave()
       } catch (err) {
+        // buildLeaveHandler normally absorbs recoverable room/IPC failures and
+        // still completes teardown. If an error escapes before teardown is
+        // committed, release this attempt's first-writer claim before making
+        // the control retryable. A competing peer-forced reason is preserved.
+        const currentSession = useSessionStore.getState()
+        if (currentSession.leave === sessionLeave) {
+          currentSession.clearPendingEndReason('user')
+        }
+        leaveRequestedRef.current = false
         const message =
           err instanceof Error
             ? err.message
@@ -1948,7 +1956,7 @@ export function SessionView({
             {peerEntries.length === 0 ? (
               <WaitingTile
                 key="waiting"
-                variant={hadAnyPeer ? 'reconnect' : 'invite'}
+                variant={hadAnyPeer ? 'solo' : 'invite'}
               />
             ) : null}
             {peerEntries.flatMap((peer) => {

@@ -67,6 +67,28 @@ fn update_last_studied_writes_the_timestamp() {
 }
 
 #[test]
+fn update_last_studied_never_rewinds_a_newer_timestamp() {
+    let conn = setup();
+    friends::add(&conn, "ed_sam", "x_sam", "Sam", 1_700_000_000).expect("add");
+    assert_eq!(
+        friends::update_last_studied(&conn, "ed_sam", 3_000).expect("newer"),
+        1
+    );
+    assert_eq!(
+        friends::update_last_studied(&conn, "ed_sam", 2_000).expect("older"),
+        0
+    );
+    assert_eq!(
+        friends::update_last_studied(&conn, "ed_sam", 3_000).expect("equal"),
+        0
+    );
+    assert_eq!(
+        friends::list(&conn).expect("list")[0].last_studied_with,
+        Some(3_000)
+    );
+}
+
+#[test]
 fn get_x_pubkey_returns_some_for_known_friend_and_none_for_stranger() {
     let conn = setup();
     friends::add(&conn, "ed_sam", "x_sam_only", "Sam", 1).expect("add");

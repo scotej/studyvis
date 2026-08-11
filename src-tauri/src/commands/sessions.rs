@@ -23,6 +23,7 @@ pub fn sessions_insert(
     ended_at: i64,
     total_minutes: i64,
     peer_pubkeys: Option<String>,
+    peer_presence_ms: Option<String>,
     declared_topic: Option<String>,
     score: Option<i64>,
     focused_pct: Option<f64>,
@@ -56,6 +57,7 @@ pub fn sessions_insert(
         ai_enabled,
         local_ed_pubkey,
         local_display_name,
+        peer_presence_ms,
     };
     sessions::insert_with_focus_metrics_mode(&conn, &row, replace_focus_metrics.unwrap_or(false))
         .map_err(|e| e.to_string())
@@ -70,6 +72,7 @@ pub fn sessions_insert_if_absent(
     ended_at: i64,
     total_minutes: i64,
     peer_pubkeys: Option<String>,
+    peer_presence_ms: Option<String>,
     declared_topic: Option<String>,
     score: Option<i64>,
     focused_pct: Option<f64>,
@@ -96,6 +99,7 @@ pub fn sessions_insert_if_absent(
         ai_enabled,
         local_ed_pubkey,
         local_display_name,
+        peer_presence_ms,
     };
     sessions::insert_if_absent(&conn, &row).map_err(|e| e.to_string())
 }

@@ -1,6 +1,6 @@
 import { usePttStore } from '@/stores/pttStore'
 import { useIdentityStore } from '@/stores/identityStore'
-import { useSessionStore } from '@/stores/sessionStore'
+import { useSessionStore, type SessionStore } from '@/stores/sessionStore'
 
 import {
   buildLeaveHandler,
@@ -14,7 +14,12 @@ import {
 // ARCHITECTURE.md §4, joins the trystero room, registers the session in the
 // session store so `inviteToCurrentSession` and `SessionView` can pick it up,
 // and returns a handle whose `leave` tears the room down + persists the row.
-export function hostSession(): SessionHandle {
+export type HostSessionOptions = {
+  store?: SessionStore
+}
+
+export function hostSession(options?: HostSessionOptions): SessionHandle {
+  const store = options?.store ?? useSessionStore
   // S2 — clear any PTT latched by a dropped Released event before the media-
   // acquire effect reads it, so the first audio track never comes up live.
   usePttStore.getState().reset()
@@ -31,8 +36,9 @@ export function hostSession(): SessionHandle {
     localEdPubkey: identity?.ed_pubkey_hex ?? null,
     localDisplayName: identity?.display_name.trim() || null,
     continuesFocus: false,
+    store,
   })
-  useSessionStore.getState().begin({
+  store.getState().begin({
     sessionTopic: topic,
     sessionPassword: password,
     isHost: true,
@@ -42,7 +48,7 @@ export function hostSession(): SessionHandle {
     room,
     leave,
   })
-  const lifecycle = wireSessionRoom(room, { isHost: true, leave })
+  const lifecycle = wireSessionRoom(room, { isHost: true, leave }, store)
   return {
     sessionTopic: topic,
     sessionPassword: password,

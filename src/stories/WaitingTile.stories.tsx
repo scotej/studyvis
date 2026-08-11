@@ -1,7 +1,9 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
+import { expect, within } from 'storybook/test'
 
 import { VideoTile } from '@/components/VideoTile'
 import { WaitingTile } from '@/components/WaitingTile'
+import { strings } from '@/strings'
 
 // U2 — the "waiting for your friend" tile shown alongside the self tile when
 // you're alone in an active session (DESIGN-SYSTEM §10 empty-state: no spinner).
@@ -22,14 +24,23 @@ export const Default: Story = {
   ),
 }
 
-// U2×S1 — a friend who'd joined dropped (during the S1 grace window): reconnect
-// copy rather than the never-had-peers invite copy.
-export const Reconnect: Story = {
+// A friend who had joined has left or disconnected. The remaining participant
+// can keep studying indefinitely and sees durable solo-session copy.
+export const Solo: Story = {
   render: () => (
     <div className="w-full max-w-md">
-      <WaitingTile variant="reconnect" />
+      <WaitingTile variant="solo" />
     </div>
   ),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(
+      canvas.getByText(strings.session.waiting.soloTitle)
+    ).toBeVisible()
+    await expect(
+      canvas.getByText(strings.session.waiting.soloBody)
+    ).toBeVisible()
+  },
 }
 
 // In context — the self tile + the waiting tile side by side, the exact

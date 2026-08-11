@@ -13,6 +13,7 @@ import { describe, expect, test } from 'vitest'
 
 import type { Friend } from '@/lib/db/friends'
 import type { SessionRecord } from '@/lib/db/sessions'
+import { encodePeerPresenceMs } from '@/lib/db/sessionPresence'
 import {
   addDays,
   averageScore,
@@ -42,6 +43,7 @@ function session(over: Partial<SessionRecord> = {}): SessionRecord {
     ended_at: null,
     total_minutes: 30,
     peer_pubkeys: null,
+    peer_presence_ms: null,
     declared_topic: null,
     score: null,
     focused_pct: null,
@@ -297,6 +299,107 @@ describe('partnerStudyTotals', () => {
     ])
     expect(totals.get(A)?.minutes).toBe(40)
     expect(totals.get(B)?.minutes).toBe(40)
+  })
+
+  test('credits actual overlap rather than a long solo tail', () => {
+    const totals = partnerStudyTotals([
+      session({
+        peer_pubkeys: JSON.stringify([A]),
+        peer_presence_ms: encodePeerPresenceMs({ [A]: 30 * 60_000 }),
+        total_minutes: 120,
+      }),
+    ])
+    expect(totals.get(A)?.minutes).toBe(30)
+  })
+
+  test('uses cumulative leave/rejoin overlap and independent peer durations', () => {
+    const totals = partnerStudyTotals([
+      session({
+        peer_pubkeys: JSON.stringify([A, B]),
+        peer_presence_ms: encodePeerPresenceMs({
+          [A]: (20 + 30) * 60_000,
+          [B]: 15 * 60_000,
+        }),
+        total_minutes: 60,
+      }),
+    ])
+    expect(totals.get(A)?.minutes).toBe(50)
+    expect(totals.get(B)?.minutes).toBe(15)
+  })
+
+  test('NULL precision retains legacy whole-session credit', () => {
+    const totals = partnerStudyTotals([
+      session({
+        peer_pubkeys: JSON.stringify([A]),
+        peer_presence_ms: null,
+        total_minutes: 120,
+      }),
+    ])
+    expect(totals.get(A)?.minutes).toBe(120)
+  })
+
+  test.each([
+    'not-json',
+    JSON.stringify({ [A]: -1 }),
+    JSON.stringify({ [A]: 1.5 }),
+    encodePeerPresenceMs({ [A]: 10 * 60_000 }),
+  ])('invalid or partial precision falls back safely: %s', (peerPresenceMs) => {
+    const totals = partnerStudyTotals([
+      session({
+        peer_pubkeys: JSON.stringify([A, B]),
+        peer_presence_ms: peerPresenceMs,
+        total_minutes: 40,
+      }),
+    ])
+    expect(totals.get(A)?.minutes).toBe(40)
+    expect(totals.get(B)?.minutes).toBe(40)
+  })
+
+  test('aggregates exact milliseconds across rows before rounding to minutes', () => {
+    const totals = partnerStudyTotals([
+      session({
+        peer_pubkeys: JSON.stringify([A]),
+        peer_presence_ms: encodePeerPresenceMs({ [A]: 30_000 }),
+      }),
+      session({
+        peer_pubkeys: JSON.stringify([A]),
+        peer_presence_ms: encodePeerPresenceMs({ [A]: 30_000 }),
+      }),
+    ])
+    expect(totals.get(A)?.minutes).toBe(1)
+  })
+
+  test('uses friends.last_studied_with as the exact last-overlap time', () => {
+    const actualEnd = dayAgo(1) + 25 * 60_000
+    const alice = { ...friend(A, 'Alice'), last_studied_with: actualEnd }
+    const totals = partnerStudyTotals(
+      [
+        session({
+          peer_pubkeys: JSON.stringify([A]),
+          started_at: dayAgo(1),
+        }),
+      ],
+      [alice]
+    )
+    expect(totals.get(A)?.lastAt).toBe(actualEnd)
+  })
+
+  test('a stale best-effort friend timestamp cannot rewind a newer session', () => {
+    const latestStart = dayAgo(1)
+    const alice = {
+      ...friend(A, 'Alice'),
+      last_studied_with: dayAgo(5),
+    }
+    const totals = partnerStudyTotals(
+      [
+        session({
+          peer_pubkeys: JSON.stringify([A]),
+          started_at: latestStart,
+        }),
+      ],
+      [alice]
+    )
+    expect(totals.get(A)?.lastAt).toBe(latestStart)
   })
 
   test('agrees with topStudyPartners on session counts', () => {

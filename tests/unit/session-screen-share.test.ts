@@ -207,8 +207,8 @@ describe('screen-share exactly-once publishing', () => {
     const screen = stream('screen-1')
     controller.publish(screen)
 
-    // The S1 grace window: same peerId, brand-new RTCPeerConnection, so the
-    // stream has to be added again or their tile stays blank for good.
+    // Same peerId, brand-new RTCPeerConnection: the stream has to be added
+    // again or their tile stays blank for good.
     bus.leave('friend')
     bus.join('friend')
     bus.announce('friend', SILENT)

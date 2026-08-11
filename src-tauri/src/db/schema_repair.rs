@@ -68,6 +68,7 @@ const EXPECTED_SCHEMA: &[(&str, &[(&str, &str)])] = &[
             ("ai_enabled", "INTEGER"),
             ("local_ed_pubkey", "TEXT"),
             ("local_display_name", "TEXT"),
+            ("peer_presence_ms", "TEXT"),
         ],
     ),
     (
@@ -233,6 +234,7 @@ mod tests {
             ai_enabled: Some(1),
             local_ed_pubkey: None,
             local_display_name: None,
+            peer_presence_ms: Some("{}".into()),
         };
         sessions::insert(&conn, &row).expect("insert after repair");
         let read = sessions::list(&conn).expect("list after repair");
@@ -303,6 +305,21 @@ mod tests {
         let mut conn = Connection::open_in_memory().expect("open in-memory");
         migrations::run_migrations(&mut conn).expect("migrations");
         assert!(reconcile_schema(&mut conn).expect("reconcile").is_empty());
+    }
+
+    #[test]
+    fn repair_restores_peer_presence_column_when_version_is_already_current() {
+        let mut conn = Connection::open_in_memory().expect("open in-memory");
+        migrations::run_migrations(&mut conn).expect("migrations");
+        conn.execute("ALTER TABLE sessions DROP COLUMN peer_presence_ms", [])
+            .expect("simulate drifted v6 schema");
+        assert!(!column_names(&conn, "sessions").contains("peer_presence_ms"));
+
+        assert_eq!(
+            reconcile_schema(&mut conn).expect("reconcile"),
+            ["sessions.peer_presence_ms"]
+        );
+        assert!(column_names(&conn, "sessions").contains("peer_presence_ms"));
     }
 
     #[test]

@@ -59,7 +59,7 @@ A complete, polished video-study app for friends. Zero AI code present. The app 
 - Session room — full-mesh WebRTC video + audio. Default-muted with `Ctrl+[` / `Cmd+[` push-to-talk for friends. Per-tile presence indicators (online / on-break / disconnected). Audit log panel showing per-user events: joined, took break, returned, left.
 - Pomodoro timer — opt-in, synced across all users via WebRTC data channel. Broadcaster role transfers on disconnect.
 - Free-form sessions also supported (no timer).
-- Session ends after a 20-second grace period when only one user remains; each user can leave individually and rejoin during that window after an accidental exit.
+- Losing or leaving peers never ends another user's session: zero remote peers is an active solo state whose camera, optional AI, timer, and elapsed study time continue until that user chooses Leave. A user who leaves can rejoin the same logical session for 20 seconds after an accidental exit; that personal recovery window never times out anyone who stayed.
 - System tray + autostart-at-login (opt-in) so the user is reachable for invites.
 - Onboarding — welcome → permissions → identity setup (with BIP39 backup) → add first friend (or skip) → tutorial.
 - Settings — friends management, identity export/import, autostart toggle, PTT keybindings (fixed defaults; rebinding lands in V3), theme (dark / light / auto), notification preferences.
@@ -112,7 +112,7 @@ Layers focus detection, scoring, AI break dialogue, and post-session reports on 
 Refinements that make the product feel native rather than functional. Not a single shipping unit — these are independent improvements that can ship in any order.
 
 **Features (in no particular order):**
-- Stats dashboard — focused minutes per day/week, study streaks, favourite study partners. Local only.
+- Stats dashboard — focused minutes per day/week, study streaks, favourite study partners. Partner minutes use authenticated overlap rather than a survivor's later solo time; legacy rows without overlap data retain their historical whole-session interpretation. Local only.
 - Custom keybindings UI for both PTTs (V1 ships fixed defaults).
 - Multi-monitor capture toggle.
 - Light theme polish + auto theme follows OS.

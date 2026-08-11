@@ -5,9 +5,9 @@ import { strings } from '@/strings'
 
 export type WaitingTileProps = {
   // 'invite' — never had a peer this session (just invited, sitting alone).
-  // 'reconnect' — a friend who had joined dropped (S1 grace window); the copy
-  // shouldn't tell them to wait for an invite they already accepted.
-  variant?: 'invite' | 'reconnect'
+  // 'solo' — a friend had joined and has since left or disconnected; the local
+  // session remains live for as long as the user wants to keep studying.
+  variant?: 'invite' | 'solo'
   className?: string
 }
 
@@ -22,10 +22,10 @@ export function WaitingTile({
   className,
 }: WaitingTileProps) {
   const copy =
-    variant === 'reconnect'
+    variant === 'solo'
       ? {
-          title: strings.session.waiting.reconnectTitle,
-          body: strings.session.waiting.reconnectBody,
+          title: strings.session.waiting.soloTitle,
+          body: strings.session.waiting.soloBody,
         }
       : {
           title: strings.session.waiting.title,

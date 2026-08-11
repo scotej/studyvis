@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- **A friend leaving no longer ends the session for the person who stayed.**
+  Zero connected friends is now a supported active solo state: the same room,
+  camera, optional AI checks, elapsed time, Pomodoro, invitations, and Leave
+  control remain available until the local user chooses to finish. The short
+  Rejoin opportunity belongs only to someone who left; it never starts a
+  countdown for the survivor.
+
+- **Partner statistics no longer include a session's later solo time.** New
+  session rows record each authenticated friend's actual overlap across
+  leave/rejoin intervals, and “last studied with” advances when that overlap
+  really ends. Existing rows without reliable overlap data retain their legacy
+  interpretation instead of inventing precision or becoming unreadable.
+
 ## 1.11.1 — 2026-08-10 — Safer AI and steadier sessions
 
 ### Fixed

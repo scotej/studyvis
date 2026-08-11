@@ -77,7 +77,10 @@ export function FriendsCategory({ presence }: FriendsCategoryProps) {
     }
   }, [])
 
-  const totals = useMemo(() => partnerStudyTotals(sessions), [sessions])
+  const totals = useMemo(
+    () => partnerStudyTotals(sessions, friends),
+    [sessions, friends]
+  )
   const localEd = identity?.ed_pubkey_hex ?? null
 
   const details = useMemo<FriendDetail[]>(

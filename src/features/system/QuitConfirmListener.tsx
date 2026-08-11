@@ -68,7 +68,7 @@ export function QuitConfirmListener() {
   // markStudied) before quitting; app_quit alone is QuitFlag::arm + exit(0)
   // and would drop the whole record. leaveBeforeQuit bounds the wait so a
   // hung teardown can't block the quit; the leave handler is idempotent, so
-  // racing an in-flight auto-end is safe.
+  // racing another local leave request is safe.
   const confirmQuit = () => {
     setOpen(false)
     void (async () => {

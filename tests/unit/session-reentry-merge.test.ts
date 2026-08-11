@@ -1,9 +1,10 @@
 import { beforeEach, describe, expect, test, vi } from 'vitest'
 
 import type { FocusSnapshot } from '@/features/ai/focusStore'
+import { encodePeerPresenceMs } from '@/lib/db/sessionPresence'
 
-// Re-entering the same session room (Rejoin after a grace auto-end, or a
-// guest re-invited to a session they left) runs a second leave cycle against
+// Re-entering the same session room (Rejoin after a local Leave, or a guest
+// re-invited to a session they left) runs a second leave cycle against
 // the same topic-keyed sessions row. The Rust upsert overwrites
 // started_at/ended_at/total_minutes authoritatively (I17), so the caller
 // must accumulate across stints — otherwise a 60-minute stint followed by a
@@ -27,6 +28,7 @@ vi.mock('@/lib/db/sessions', () => ({
       ended_at: row.endedAt ?? null,
       total_minutes: row.totalMinutes ?? null,
       peer_pubkeys: row.peerPubkeys ?? null,
+      peer_presence_ms: row.peerPresenceMs ?? null,
       declared_topic: null,
       score: row.score ?? null,
       focused_pct: row.focusedPct ?? null,
@@ -71,7 +73,7 @@ import {
   mergeSessionStints,
 } from '@/features/session/lifecycle'
 import type { TopicRoom } from '@/lib/trystero'
-import { useSessionStore } from '@/stores/sessionStore'
+import { createSessionStore, useSessionStore } from '@/stores/sessionStore'
 
 const T0 = 1_700_000_000_000
 const MIN = 60_000
@@ -127,7 +129,7 @@ describe('re-entry merge across leave cycles', () => {
   })
 
   test('a rejoin stint accumulates minutes instead of rewinding the row', async () => {
-    // Stint 1: 45 minutes, ends via grace auto-end.
+    // Stint 1: 45 minutes, ends via local Leave.
     await runStint(T0, T0 + 45 * MIN)
     expect(db.get('topic-1')).toMatchObject({
       startedAt: T0,
@@ -273,6 +275,59 @@ describe('re-entry merge across leave cycles', () => {
       totalMinutes: 45,
     })
   })
+
+  test('a preflight failure releases its reason and cached attempt for retry', async () => {
+    const store = createSessionStore()
+    const roomLeave = vi.fn(async () => {})
+    const room = { leave: roomLeave } as unknown as TopicRoom
+    store.getState().begin({
+      sessionTopic: 'retry-topic',
+      sessionPassword: 'pw',
+      isHost: true,
+      startedAt: T0,
+      room,
+      leave: async () => {},
+    })
+    store.getState().peerJoined('peer-a')
+
+    const collectPeerPubkeys = store.getState().collectPeerPubkeys
+    let failPreflight = true
+    store.setState({
+      collectPeerPubkeys: () => {
+        if (failPreflight) {
+          failPreflight = false
+          throw new Error('preflight failed')
+        }
+        return collectPeerPubkeys()
+      },
+    })
+    const leave = buildLeaveHandler({
+      room,
+      store,
+      topic: 'retry-topic',
+      startedAt: T0,
+    })
+    vi.setSystemTime(T0 + MIN)
+
+    const failedAttempt = leave()
+    await expect(failedAttempt).rejects.toThrow('preflight failed')
+    expect(store.getState()).toMatchObject({
+      status: 'active',
+      pendingEndReason: null,
+      rejoinDeadline: null,
+    })
+    expect(roomLeave).not.toHaveBeenCalled()
+
+    const retry = leave()
+    expect(retry).not.toBe(failedAttempt)
+    await expect(retry).resolves.toBeUndefined()
+    expect(roomLeave).toHaveBeenCalledTimes(1)
+    expect(store.getState()).toMatchObject({
+      status: 'ended',
+      endedBy: 'user',
+    })
+    expect(db.get('retry-topic')).toBeDefined()
+  })
 })
 
 // Wall-clock alone counted OS-sleep as study time: closing the lid on a
@@ -321,10 +376,17 @@ describe('study minutes ignore time the machine spent asleep', () => {
 })
 
 describe('mergeSessionStints (pure)', () => {
+  const ED_A = 'aa'.repeat(32)
+  const ED_B = 'bb'.repeat(32)
+  const ED_C = 'cc'.repeat(32)
   const stint = {
     startedAt: T0 + 10 * MIN,
     totalMinutes: 10,
-    peerPubkeys: '["bb","aa"]' as string | null,
+    peerPubkeys: JSON.stringify([ED_B, ED_A]) as string | null,
+    peerPresenceMs: encodePeerPresenceMs({
+      [ED_A]: 4 * MIN,
+      [ED_B]: 6 * MIN,
+    }),
   }
 
   test('no prior row → stint passes through', () => {
@@ -333,38 +395,92 @@ describe('mergeSessionStints (pure)', () => {
 
   test('merges start, minutes, and the sorted peer union', () => {
     const merged = mergeSessionStints(
-      { started_at: T0, total_minutes: 45, peer_pubkeys: '["cc","aa"]' },
+      {
+        started_at: T0,
+        total_minutes: 45,
+        peer_pubkeys: JSON.stringify([ED_C, ED_A]),
+        peer_presence_ms: encodePeerPresenceMs({
+          [ED_A]: 5 * MIN,
+          [ED_C]: 40 * MIN,
+        }),
+      },
       stint
     )
     expect(merged.startedAt).toBe(T0)
     expect(merged.totalMinutes).toBe(55)
-    expect(merged.peerPubkeys).toBe('["aa","bb","cc"]')
+    expect(merged.peerPubkeys).toBe(JSON.stringify([ED_A, ED_B, ED_C]))
+    expect(merged.peerPresenceMs).toBe(
+      encodePeerPresenceMs({
+        [ED_A]: 9 * MIN,
+        [ED_B]: 6 * MIN,
+        [ED_C]: 40 * MIN,
+      })
+    )
   })
 
   test('a peerless rejoin stint keeps the prior stint peers', () => {
     const merged = mergeSessionStints(
-      { started_at: T0, total_minutes: 45, peer_pubkeys: '["cc"]' },
-      { ...stint, peerPubkeys: null }
+      {
+        started_at: T0,
+        total_minutes: 45,
+        peer_pubkeys: JSON.stringify([ED_C]),
+        peer_presence_ms: encodePeerPresenceMs({ [ED_C]: 40 * MIN }),
+      },
+      { ...stint, peerPubkeys: null, peerPresenceMs: '{}' }
     )
-    expect(merged.peerPubkeys).toBe('["cc"]')
+    expect(merged.peerPubkeys).toBe(JSON.stringify([ED_C]))
+    expect(merged.peerPresenceMs).toBe(
+      encodePeerPresenceMs({ [ED_C]: 40 * MIN })
+    )
   })
 
   test('NULL prior fields never poison the merge', () => {
     // schema allows NULL started_at/total_minutes on partial rows
     const merged = mergeSessionStints(
-      { started_at: null, total_minutes: null, peer_pubkeys: null },
+      {
+        started_at: null,
+        total_minutes: null,
+        peer_pubkeys: null,
+        peer_presence_ms: null,
+      },
       stint
     )
     expect(merged.startedAt).toBe(stint.startedAt)
     expect(merged.totalMinutes).toBe(10)
-    expect(merged.peerPubkeys).toBe('["aa","bb"]')
+    expect(merged.peerPubkeys).toBe(JSON.stringify([ED_A, ED_B]))
+    expect(merged.peerPresenceMs).toBeNull()
   })
 
   test('malformed stored peer JSON degrades to the stint peers', () => {
     const merged = mergeSessionStints(
-      { started_at: T0, total_minutes: 1, peer_pubkeys: 'not-json' },
+      {
+        started_at: T0,
+        total_minutes: 1,
+        peer_pubkeys: 'not-json',
+        peer_presence_ms: encodePeerPresenceMs({ [ED_C]: MIN }),
+      },
       stint
     )
-    expect(merged.peerPubkeys).toBe('["aa","bb"]')
+    expect(merged.peerPubkeys).toBe(JSON.stringify([ED_A, ED_B]))
+    expect(merged.peerPresenceMs).toBe(
+      encodePeerPresenceMs({
+        [ED_A]: 4 * MIN,
+        [ED_B]: 6 * MIN,
+        [ED_C]: MIN,
+      })
+    )
+  })
+
+  test('malformed prior presence stays unknown after a precise rejoin', () => {
+    const merged = mergeSessionStints(
+      {
+        started_at: T0,
+        total_minutes: 45,
+        peer_pubkeys: JSON.stringify([ED_C]),
+        peer_presence_ms: 'not-json',
+      },
+      stint
+    )
+    expect(merged.peerPresenceMs).toBeNull()
   })
 })
