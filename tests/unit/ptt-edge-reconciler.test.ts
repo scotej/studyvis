@@ -13,6 +13,29 @@ describe('PTT edge reconciler', () => {
     ])
   })
 
+  test('an unreconciled later Pressed fails closed after a lost Released', () => {
+    const reconciler = createPttEdgeReconciler()
+    expect(reconciler.shortcutPressed()).toEqual([
+      { edge: 'pressed', source: 'shortcut' },
+    ])
+
+    // The native Released for the first hold was lost. Without an
+    // authoritative physical watcher this second Pressed is ambiguous, so
+    // mute rather than leave the first hold live across the gap.
+    expect(reconciler.shortcutPressed()).toEqual([
+      { edge: 'released', source: 'shortcut-failsafe' },
+    ])
+
+    // The later hold's Released settles the stream; the next Pressed starts a
+    // fresh, known-good hold instead of remaining latched muted.
+    expect(reconciler.shortcutReleased()).toEqual([
+      { edge: 'released', source: 'shortcut' },
+    ])
+    expect(reconciler.shortcutPressed()).toEqual([
+      { edge: 'pressed', source: 'shortcut' },
+    ])
+  })
+
   test('a shortcut press while the physical key is up is deferred', () => {
     const reconciler = createPttEdgeReconciler()
     expect(reconciler.physicalState(false)).toEqual([])
@@ -60,11 +83,10 @@ describe('PTT edge reconciler', () => {
     expect(reconciler.physicalState(true)).toEqual([
       { edge: 'pressed', source: 'physical-reconcile' },
     ])
-    // The actual Carbon Pressed for this hold is now merely a duplicate at the
-    // store layer; the reconciler may forward it without changing safety.
-    expect(reconciler.shortcutPressed()).toEqual([
-      { edge: 'pressed', source: 'shortcut' },
-    ])
+    // The actual Carbon Pressed for this hold is known to belong to the same
+    // physical hold, so it remains idempotent instead of taking the fallback
+    // emergency-mute path used when physical state is unknown.
+    expect(reconciler.shortcutPressed()).toEqual([])
   })
 
   test('physical release is emitted only on a true-to-false transition', () => {

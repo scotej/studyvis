@@ -233,6 +233,14 @@ export function PttListener() {
           : Math.max(0, Math.round(now - pressStartedAt))
       const duplicate = duplicatePress || duplicateRelease
 
+      if (edgeSource === 'shortcut-failsafe') {
+        log.warn('edge.failsafe_mute', {
+          edgeSeq: currentEdgeSeq,
+          heldMs,
+          sessionActive: useSessionStore.getState().room !== null,
+        })
+      }
+
       log.debug('edge.received', {
         edge,
         edgeSource,
