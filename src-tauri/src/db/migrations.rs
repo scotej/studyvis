@@ -24,6 +24,7 @@ const MIGRATION_002_V2: &str = include_str!("migrations/002_v2.sql");
 const MIGRATION_003_SAMPLE_COUNTS: &str = include_str!("migrations/003_sample_counts.sql");
 const MIGRATION_004_AI_ENABLED: &str = include_str!("migrations/004_ai_enabled.sql");
 const MIGRATION_005_SESSION_IDENTITY: &str = include_str!("migrations/005_session_identity.sql");
+const MIGRATION_006_PEER_PRESENCE_MS: &str = include_str!("migrations/006_peer_presence_ms.sql");
 
 const MIGRATIONS: &[(u32, &str)] = &[
     (1, MIGRATION_001_INITIAL),
@@ -31,6 +32,7 @@ const MIGRATIONS: &[(u32, &str)] = &[
     (3, MIGRATION_003_SAMPLE_COUNTS),
     (4, MIGRATION_004_AI_ENABLED),
     (5, MIGRATION_005_SESSION_IDENTITY),
+    (6, MIGRATION_006_PEER_PRESENCE_MS),
 ];
 
 pub const MAX_KNOWN_VERSION: u32 = MIGRATIONS[MIGRATIONS.len() - 1].0;
@@ -123,7 +125,7 @@ mod tests {
         .unwrap_or(0)
     }
 
-    const LATEST_VERSION: u32 = 5;
+    const LATEST_VERSION: u32 = 6;
 
     #[test]
     fn applies_full_schema_on_empty_db() {
@@ -244,6 +246,49 @@ mod tests {
             )
             .expect("read migrated owner");
         assert_eq!(owner, (None, None));
+    }
+
+    #[test]
+    fn upgrades_v5_db_to_v6_with_unknown_peer_presence_on_existing_sessions() {
+        let mut conn = Connection::open_in_memory().expect("open in-memory");
+        {
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS schema_version (version INTEGER PRIMARY KEY)",
+                [],
+            )
+            .expect("schema_version");
+            let tx = conn.transaction().expect("tx");
+            tx.execute_batch(MIGRATION_001_INITIAL).expect("apply 001");
+            tx.execute_batch(MIGRATION_002_V2).expect("apply 002");
+            tx.execute_batch(MIGRATION_003_SAMPLE_COUNTS)
+                .expect("apply 003");
+            tx.execute_batch(MIGRATION_004_AI_ENABLED)
+                .expect("apply 004");
+            tx.execute_batch(MIGRATION_005_SESSION_IDENTITY)
+                .expect("apply 005");
+            tx.execute(
+                "INSERT INTO schema_version (version) VALUES (1), (2), (3), (4), (5)",
+                [],
+            )
+            .expect("record v5");
+            tx.commit().expect("commit v5");
+        }
+        conn.execute(
+            "INSERT INTO sessions (id, peer_pubkeys) VALUES ('s1', '[\"aa\"]')",
+            [],
+        )
+        .expect("insert v5 session");
+
+        let applied = run_migrations(&mut conn).expect("upgrade run");
+        assert_eq!(applied, LATEST_VERSION);
+        let presence: Option<String> = conn
+            .query_row(
+                "SELECT peer_presence_ms FROM sessions WHERE id = 's1'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("read migrated presence");
+        assert_eq!(presence, None, "pre-006 duration precision stays unknown");
     }
 
     // #47 D5 acceptance: 003 runs cleanly on a database already at
@@ -403,6 +448,10 @@ mod tests {
             (
                 5,
                 "e7b9b90e97796876ebaf157170a9c855133b30e99b28b770ec4a20b03d025e9b",
+            ),
+            (
+                6,
+                "4d039acf0382c1590aab16897e5bc757be4d547084c6a242d814eb1a24cd738f",
             ),
         ];
         assert_eq!(

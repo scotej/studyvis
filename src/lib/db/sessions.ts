@@ -15,6 +15,10 @@ export type SessionRow = {
   // this session, sorted lexicographically (canonical regardless of join
   // order). NULL when no hello was received — solo session or pre-V1-P9.
   peerPubkeys: string | null
+  // Canonical JSON object of ed_pubkey_hex -> cumulative authenticated
+  // overlap milliseconds. New rows always write an object (including `{}`);
+  // null means legacy/unknown precision.
+  peerPresenceMs?: string | null
   // V2-P8 report fields. Populated by the leave handler once the post-
   // session report runs; the V1 lifecycle insert leaves them null and the
   // Rust upsert preserves null-overrides via COALESCE.
@@ -51,6 +55,9 @@ export type SessionRecord = {
   ended_at: number | null
   total_minutes: number | null
   peer_pubkeys: string | null
+  // Optional at the TS boundary for mixed frontend/backend builds. Missing and
+  // NULL both mean the row predates precise per-peer duration accounting.
+  peer_presence_ms?: string | null
   declared_topic: string | null
   score: number | null
   focused_pct: number | null
@@ -71,6 +78,7 @@ export async function sessionsInsert(row: SessionRow): Promise<void> {
     endedAt: row.endedAt,
     totalMinutes: row.totalMinutes,
     peerPubkeys: row.peerPubkeys,
+    peerPresenceMs: row.peerPresenceMs ?? null,
     declaredTopic: row.declaredTopic ?? null,
     score: row.score ?? null,
     focusedPct: row.focusedPct ?? null,
@@ -96,6 +104,7 @@ export async function sessionsInsertIfAbsent(
     endedAt: row.endedAt,
     totalMinutes: row.totalMinutes,
     peerPubkeys: row.peerPubkeys,
+    peerPresenceMs: row.peerPresenceMs ?? null,
     declaredTopic: row.declaredTopic ?? null,
     score: row.score ?? null,
     focusedPct: row.focusedPct ?? null,

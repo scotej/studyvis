@@ -598,13 +598,49 @@ Audit log is also written to local SQLite per session for the post-session repor
 
 The Stats dashboard's **focus-insights** section (R7) reads the cross-session `ai_warning`/`ai_alert` audit rows via the `audit_events_list_all` command — when-distractions-cluster timing, recurring distraction reasons, and a focused-time trend, all derived from the same `ai_warning`/`ai_alert` reasoning the single-session report already shows. Each session row captures the local Ed25519 key and display name at session start; reports and historical distraction filtering use that immutable provenance rather than whichever identity is active now. Legacy rows keep those fields unknown and never borrow a later identity, while their sessions-table focus percentage can still appear in the trend. The command narrows the read to those two kinds (insights ignore every other kind), so the whole table never crosses IPC. The numeric stats tiles (`statsData`) remain **sessions-table-only** (they never query `audit_events`); the cross-session insight transforms live in the pure `features/stats/statsInsights.ts` seam. Strictly local — nothing here transmits.
 
+### Session duration and partner overlap
+
+Zero remote peers is a valid active-session state. `sessions.total_minutes`
+therefore measures the local user's whole awake session, including any solo tail,
+while partner statistics measure only authenticated overlap. `peer_pubkeys`
+remains the cumulative participant set and the source for partner-session counts;
+it must not be used as proof that every listed peer was present for the whole
+session.
+
+`sessions.peer_presence_ms` is nullable `TEXT` containing one canonical, compact
+JSON object whose lexicographically sorted Ed25519-pubkey keys map to
+non-negative safe-integer milliseconds. Presence starts only after the signed
+hello binds a transport peer to that pubkey. Each receiver measures its own
+intervals on a monotonic clock, closes one on `onPeerLeave` (or at local
+leave-handler start for peers still connected), and accumulates repeated
+leave/rejoin intervals. Every newly created logical session stores non-NULL JSON,
+including `{}` for a session that never authenticated a peer. Across same-topic
+rejoin stints, valid maps are summed per key; the legacy-unknown exception is
+described below.
+
+`NULL` or a missing column means legacy/unknown precision, so partner minutes
+retain the old whole-`total_minutes`-per-listed-peer interpretation. Malformed,
+non-object, partial, or invalid-value JSON is also unknown: readers fall back for
+the whole row rather than crashing, treating bad entries as zero, or mixing
+precise and fabricated credit. If a prior same-topic stint is unknown, a later
+valid stint cannot repair it; the merged row remains unknown instead of
+persisting only the later interval and undercounting history.
+
+`friends.last_studied_with` records the receiver-local wall-clock time at which
+the real overlap interval closed, not the survivor's eventual session end and
+not an untrusted remote audit timestamp. Updates are monotonic (`NULL` or older
+than the incoming value) so out-of-order async writes cannot rewind it. That
+friends-table value supplies the exact date for new data when it is at least as
+new as the latest known session start; the session start remains a lower bound
+if a best-effort friend update failed, and the only fallback for legacy rows.
+
 ## 10. Pomodoro sync
 
 One peer is the "broadcaster" — by default, whoever started the timer.
 
 - Broadcaster sends `{ type: "pomodoro", phase, preset, ends_at }` on the data channel every 5 s while a phase is active. `phase` is the 2-state wire form (`"work" | "rest"`); `preset` (`"25/5" | "50/10"`) lets receivers label the active phase without inferring duration. The internal state machine remains 5-state (idle / work-25 / rest-5 / work-50 / rest-10); `(phase, preset)` reconstructs the right UI label on the receiver side. Receivers display the phase; clock skew under 1 s is treated as zero (same Pomodoro phase by definition).
 - **Custom durations (N5).** Splits beyond 25/5 and 50/10 (e.g. 45/15, 90/20) ride alongside the legacy fields as optional `work_ms`/`rest_ms` (see §7). A new broadcaster always also sends the closest legacy `preset`, so an older receiver renders sane work/rest timings and never sees a "custom" it can't parse; a new receiver prefers the explicit durations. This keeps a custom-duration host from stranding a friend on an older build.
-- On broadcaster disconnect: each peer waits 10 s; if no `pomodoro` message arrives, the next-oldest peer (by `joined_at`) takes over and resumes from the same `ends_at`.
+- On broadcaster disconnect: each peer waits 10 s; if no `pomodoro` message arrives, the next-oldest peer (by `joined_at`) takes over and resumes from the same `ends_at`. This includes the sole survivor, who becomes broadcaster rather than staring at a frozen countdown. If the survivor was already broadcaster, the timer continues normally; dropping to zero remote peers never resets it by itself.
 - Phase transitions ("work" → "rest" → "work") are unicast only by the broadcaster; receivers don't transition autonomously, they wait for the message. This avoids drift.
 - During a synced **rest** phase the local AI sample loop pauses (same semantics as camera-off: no sample, no skipped tally, no streak reset) — the app prescribes the break, so it doesn't score what you do during it. A peer parking the shared timer in rest to dodge scoring is accepted under the friends-only trust model (PLAN §4 principle 5).
 
@@ -783,41 +819,59 @@ The `Ctrl+]` AI dialog is a separate Tauri window with:
                        friend accepts, joins
                                   │
                                   ▼
-                       [WebRTC handshake] ─▶ [media live]
+                       [WebRTC handshake] ─▶ [active with peers]
+                                                   │
+                                      all remote peers leave /
+                                             disconnect
                                                    │
                                                    ▼
-                                         [user can: declare topic
-                                                    use PTT
-                                                    take break (V2)
-                                                    leave]
+                                      [active solo: same room,
+                                       media, AI, timer, notes
+                                       and Leave control]
                                                    │
-                                          room empties (peer count 1)
+                                         peer joins/reconnects
                                                    │
-                                                   ▼
-                                      [20 s grace window (S1)]
-                                           │               │
-                           peer reconnects/rejoins        expires
-                                           │               │
-                                           ▼               ▼
-                                      [media live]   [persist row,
-                                        (resume)      generate report]
-                                                           │
-                                         ┌─────────────────┴─────────────────┐
-                                         │ unexplained loss    signed `left` │
-                                         ▼                                  ▼
-                                   [reason `auto`]                    [reason `peer`]
-                                         │
-                              Report offers Rejoin (#47 B3;
-                              re-entry merges into the same row)
-                                         │
-                                         └─────────────────┬─────────────────┘
-                                                           ▼
-                                              [tear down, return to idle]
+                                                   └──────────▶ [active with peers]
+
+                       [either active state]
+                                  │ local Leave / confirmed quit
+                                  ▼
+                       [broadcast signed `left`, tear down locally,
+                        persist row, show Report]
+                                  │
+                         ┌────────┴─────────┐
+                         │                  │
+                  Rejoin within 20 s   deadline passes /
+                         │              Report closes
+                         ▼                  ▼
+                  [same logical row,      [idle]
+                   new merged stint]
 ```
 
-A deliberate local Leave persists and reports immediately with reason `user`, but the other participant keeps the room alive for the same 20-second grace period. The leaver's report offers Rejoin during that window; re-entry uses the existing topic and password and merges the new stint into the same session row. Same-process re-entry keeps the score machine and raw focus counters continuous. If process memory was lost, raw focused/confident/skipped samples are combined only when both stints provide the necessary counts, and the streak-derived score is cleared rather than attaching a last-stint score to the accumulated duration.
+Remote membership never controls local session lifetime. A deliberate peer
+departure, transport loss, or every remote peer disappearing moves the survivor
+to active solo mode indefinitely; it does not call the survivor's Leave handler.
+The room, camera/microphone, optional AI sampling, elapsed-time accounting,
+Pomodoro, notes, invitation capacity, and explicit Leave control stay live. A
+later reconnect or new invitee joins that same room normally, and a departed
+peer frees one place under the four-user cap.
 
-`handleLeave` broadcasts a signed `left` audit event and awaits it before `room.leave()`; both ride the same ordered data channel, so the receiver can retain accurate end attribution while still applying the shared grace period. If the peer returns before expiry, the pending end is cancelled and their departure mark is cleared. If the room remains empty, an unexplained departure ends with reason `auto`, while a fully explained deliberate departure ends with reason `peer`. Session-cap eviction remains non-rejoinable.
+A local session ends only through a local/session-control event: explicit Leave,
+a confirmed app quit, or forced rejection/eviction such as `session-full`.
+`handleLeave` still broadcasts and awaits the signed `left` audit event before
+`room.leave()` so peers retain accurate diagnostics, but that event is evidence,
+not a command to end their sessions. Forced rejection remains non-rejoinable.
+
+A deliberate local Leave persists and reports immediately with reason `user`.
+If another peer participated, the leaver's own Report offers Rejoin for 20
+seconds; this deadline belongs only to the client that left and never limits a
+survivor. Re-entry uses the existing topic and password and merges the new stint
+into the same session row. Same-process re-entry keeps the score machine and raw
+focus counters continuous. If process memory was lost, raw
+focused/confident/skipped samples are combined only when both stints provide the
+necessary counts, and the streak-derived score is cleared rather than attaching
+a last-stint score to the accumulated duration. Per-peer presence maps follow the
+unknown-preserving merge rule in §9.
 
 ## 14. Threat model & known limitations
 

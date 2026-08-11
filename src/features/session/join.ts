@@ -1,6 +1,6 @@
 import { usePttStore } from '@/stores/pttStore'
 import { useIdentityStore } from '@/stores/identityStore'
-import { useSessionStore } from '@/stores/sessionStore'
+import { useSessionStore, type SessionStore } from '@/stores/sessionStore'
 
 import {
   buildLeaveHandler,
@@ -11,6 +11,7 @@ import {
 } from './lifecycle'
 
 export type JoinSessionOptions = {
+  store?: SessionStore
   // Called only after SessionView has verified a signed hello from a peer that
   // the room lifecycle admitted. This is deliberately later than `joinRoom`:
   // creating a local Trystero room says nothing about remote availability or
@@ -41,9 +42,16 @@ export function joinSession(
 export function rejoinSession(
   sessionTopic: string,
   sessionPassword: string,
-  isHost: boolean
+  isHost: boolean,
+  options?: JoinSessionOptions
 ): SessionHandle {
-  return joinExistingSession(sessionTopic, sessionPassword, isHost, true)
+  return joinExistingSession(
+    sessionTopic,
+    sessionPassword,
+    isHost,
+    true,
+    options
+  )
 }
 
 function joinExistingSession(
@@ -53,6 +61,7 @@ function joinExistingSession(
   isRejoin: boolean,
   options?: JoinSessionOptions
 ): SessionHandle {
+  const store = options?.store ?? useSessionStore
   // S2 — clear any PTT latched by a dropped Released event before the media-
   // acquire effect reads it, so the first audio track never comes up live.
   usePttStore.getState().reset()
@@ -60,7 +69,7 @@ function joinExistingSession(
   // post-session Report. That is another stint of the existing logical
   // session just like its explicit Rejoin button; preserve focus state before
   // `begin()` replaces the ended store snapshot.
-  const previousSession = useSessionStore.getState()
+  const previousSession = store.getState()
   const continuesEndedSession =
     previousSession.status === 'ended' &&
     previousSession.sessionTopic === sessionTopic
@@ -69,7 +78,7 @@ function joinExistingSession(
     sessionTopic,
     sessionPassword
   )
-  beginSessionDiagnostics(topic, 'guest')
+  beginSessionDiagnostics(topic, isHost ? 'host' : 'guest')
   const startedAt = Date.now()
   const startedAtMono = performance.now()
   const identity = useIdentityStore.getState().identity
@@ -81,6 +90,7 @@ function joinExistingSession(
     localEdPubkey: identity?.ed_pubkey_hex ?? null,
     localDisplayName: identity?.display_name.trim() || null,
     continuesFocus,
+    store,
   })
   let stopPeerAuthenticationWatch: (() => void) | null = null
   const leave = async (): Promise<void> => {
@@ -90,7 +100,7 @@ function joinExistingSession(
     stopPeerAuthenticationWatch = null
     await leaveBase()
   }
-  useSessionStore.getState().begin({
+  store.getState().begin({
     sessionTopic: topic,
     sessionPassword: password,
     isHost,
@@ -102,27 +112,25 @@ function joinExistingSession(
   })
   const onPeerAuthenticated = options?.onPeerAuthenticated
   if (onPeerAuthenticated) {
-    stopPeerAuthenticationWatch = useSessionStore.subscribe(
-      (state, previousState) => {
-        // setPeerHello is reached only after SessionView validates the hello
-        // signature and confirms the room lifecycle admitted the peer. Notify
-        // once per newly authenticated peer binding, rather than on arbitrary
-        // session-store updates.
-        if (state.sessionTopic !== topic) return
-        for (const [peerId, peer] of Object.entries(state.peers)) {
-          const edPubkeyHex = peer.edPubkeyHex
-          if (
-            !edPubkeyHex ||
-            previousState.peers[peerId]?.edPubkeyHex === edPubkeyHex
-          ) {
-            continue
-          }
-          onPeerAuthenticated(edPubkeyHex)
+    stopPeerAuthenticationWatch = store.subscribe((state, previousState) => {
+      // setPeerHello is reached only after SessionView validates the hello
+      // signature and confirms the room lifecycle admitted the peer. Notify
+      // once per newly authenticated peer binding, rather than on arbitrary
+      // session-store updates.
+      if (state.sessionTopic !== topic) return
+      for (const [peerId, peer] of Object.entries(state.peers)) {
+        const edPubkeyHex = peer.edPubkeyHex
+        if (
+          !edPubkeyHex ||
+          previousState.peers[peerId]?.edPubkeyHex === edPubkeyHex
+        ) {
+          continue
         }
+        onPeerAuthenticated(edPubkeyHex)
       }
-    )
+    })
   }
-  const lifecycle = wireSessionRoom(room, { isHost, leave })
+  const lifecycle = wireSessionRoom(room, { isHost, leave }, store)
   return {
     sessionTopic: topic,
     sessionPassword: password,

@@ -9,13 +9,17 @@ import {
   type SessionRecord,
   type SessionRow,
 } from '@/lib/db/sessions'
+import {
+  encodePeerPresenceMs,
+  mergePeerPresenceMs,
+} from '@/lib/db/sessionPresence'
 import { bytesToBase64 } from '@/lib/encoding'
 import { joinTopic, type TopicRoom } from '@/lib/trystero'
 import { buildIceOptions } from '@/lib/trystero/ice'
 import { userRelayConfig } from '@/lib/trystero/relays'
 import { useAuditStore } from '@/stores/auditStore'
 import { useFriendsStore } from '@/stores/friendsStore'
-import { useSessionStore } from '@/stores/sessionStore'
+import { useSessionStore, type SessionStore } from '@/stores/sessionStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { strings } from '@/strings'
 import { flushLog, logger, setLogContext } from '@/lib/log'
@@ -68,8 +72,8 @@ export const SESSION_FULL_MESSAGE = strings.session.full
 //   - 'disconnected'              → 'connecting' (TRANSIENT: brief packet loss
 //                                   on an otherwise-healthy link flickers
 //                                   through this and self-heals to 'connected'
-//                                   — never the terminal "Connection failed",
-//                                   consistent with the S1 grace-window stance)
+//                                   — never the terminal "Connection failed";
+//                                   the transport may still recover in place)
 //   - 'failed'                    → 'failed'     (terminal: dead / dropped link)
 //   - 'connected' | 'closed' | …  → undefined    (defer to stream fallback)
 // Pure + exported so it's unit-testable without React.
@@ -128,9 +132,9 @@ export type SessionHandle = {
   sessionPassword: string
   room: TopicRoom
   leave: () => Promise<void>
-  // Closure-bound peer set — used by integration tests (session.test.ts) for
-  // per-instance inspection because the singleton `useSessionStore` is
-  // overwritten by each subsequent `begin()`.
+  // Closure-bound peer set for lightweight per-room inspection. The app reads
+  // the corresponding store; integration tests use both views to assert the
+  // room membership and injected-store lifecycle stay aligned.
   peers: () => readonly string[]
 }
 
@@ -187,8 +191,8 @@ function logJoinError(details: { error: string }): void {
   log.warn('join.error', { room: 'session', joinError: details.error })
 }
 
-// Re-entering the same room — Rejoin after a grace-window auto-end (#47 B3)
-// or a guest re-invited to a live session they left earlier — runs a second
+// Re-entering the same room — Rejoin after a local Leave (#47 B3) or a guest
+// re-invited to a live session they left earlier — runs a second
 // leave cycle against the SAME topic-keyed sessions row. The Rust upsert is
 // authoritative-overwrite for started_at/ended_at/total_minutes (I17: a
 // re-summarize must be able to correct them), so persisting the tail stint
@@ -197,20 +201,37 @@ function logJoinError(details: { error: string }): void {
 // silently breaking streaks, and collapsing stint-1 audit events into the
 // timeline's 00:00. The one caller merges instead: earliest start, summed
 // minutes (the between-stint gap is deliberately not studied time), union
-// of peers. Focus score/tallies continue in memory across a rejoin, so this
-// second upsert carries metrics for the whole logical session too.
+// of peers and sums each peer's measured overlap. Focus score/tallies continue
+// in memory across a rejoin, so this second upsert carries metrics for the
+// whole logical session too.
 export function mergeSessionStints(
   prior: Pick<
     SessionRecord,
-    'started_at' | 'total_minutes' | 'peer_pubkeys'
+    'started_at' | 'total_minutes' | 'peer_pubkeys' | 'peer_presence_ms'
   > | null,
-  stint: { startedAt: number; totalMinutes: number; peerPubkeys: string | null }
-): { startedAt: number; totalMinutes: number; peerPubkeys: string | null } {
+  stint: {
+    startedAt: number
+    totalMinutes: number
+    peerPubkeys: string | null
+    peerPresenceMs: string
+  }
+): {
+  startedAt: number
+  totalMinutes: number
+  peerPubkeys: string | null
+  peerPresenceMs: string | null
+} {
   if (!prior) return stint
   return {
     startedAt: Math.min(prior.started_at ?? stint.startedAt, stint.startedAt),
     totalMinutes: (prior.total_minutes ?? 0) + stint.totalMinutes,
     peerPubkeys: unionPeerPubkeys(prior.peer_pubkeys, stint.peerPubkeys),
+    // Unknown precision is contagious. A precisely measured tail cannot make
+    // a legacy or malformed earlier stint precise retroactively.
+    peerPresenceMs: mergePeerPresenceMs(
+      prior.peer_presence_ms,
+      stint.peerPresenceMs
+    ),
   }
 }
 
@@ -318,9 +339,9 @@ const defaultMonotonicNow = (): number => performance.now()
 // report by snapshotting per-user score / focused-time / declared topic
 // from in-memory stores BEFORE reset() clears anything, and upserts a
 // sessions row keyed on session_topic. Each side persists its own row
-// independently when the session ends — ARCHITECTURE.md §13 "peer count
-// drops to 1 → generate report". Idempotent so onPeerLeave + click-Leave
-// races don't double-write.
+// independently when that local user leaves. Remote peer membership never
+// invokes this path. Idempotent so repeated local actions or a session-full
+// callback cannot double-write.
 //
 // The audit-store flush BEFORE the sessions upsert is load-bearing: the
 // 'left' event (and any in-flight ai_alert from the closing exchange) is
@@ -333,6 +354,9 @@ export function buildLeaveHandler(args: {
   startedAt: number
   startedAtMono?: number
   monotonicNow?: () => number
+  // Defaults to the production webview singleton. Integration tests inject
+  // one store per simulated app instance so lifecycle isolation is real.
+  store?: SessionStore
   // Bound by hostSession/joinSession at the start of this stint. The SQL
   // upsert preserves the original row verbatim (including legacy unknown),
   // so a logical session's owner can never be rewritten by a later identity
@@ -346,32 +370,39 @@ export function buildLeaveHandler(args: {
   continuesFocus?: boolean
 }): () => Promise<void> {
   const monotonicNow = args.monotonicNow ?? defaultMonotonicNow
+  const sessionStore = args.store ?? useSessionStore
   let alreadyLeft = false
   return async () => {
     if (alreadyLeft) return
     alreadyLeft = true
-    // #47 B3 follow-up — claim the end-reason SYNCHRONOUSLY, before the first
-    // await: staging is first-writer-wins, so a deliberate Leave locks in
-    // 'user' even if the grace deadline lands mid-teardown (the auto-end path
-    // stages 'auto' before invoking this handler, so it still wins there).
-    useSessionStore.getState().setPendingEndReason('user')
+    // Claim the end reason synchronously before the first await. The caller's
+    // UI path does the same before broadcasting `left`; this second claim is
+    // harmless and keeps direct handle.leave() calls correctly attributed.
+    sessionStore.getState().setPendingEndReason('user')
     const endedAt = Date.now()
+    const endedAtMono = monotonicNow()
     // Snapshot every store field the report needs BEFORE room.leave so a
     // mid-teardown StrictMode / HMR double-mount can't wipe the values
     // (advisor-flagged invariant). The V2-P5 focusStore reset effect only
     // fires on 'active', so the score survives the 'ended' window in
     // practice — but capturing up front decouples us from that gate.
-    const sessionState = useSessionStore.getState()
+    const sessionState = sessionStore.getState()
     const endReason = sessionState.pendingEndReason ?? 'user'
-    const rejoinable =
-      sessionState.hadAnyPeer && (endReason === 'auto' || endReason === 'user')
+    const rejoinable = sessionState.hadAnyPeer && endReason === 'user'
     sessionState.setRejoinDeadline(
-      rejoinable ? endedAt + DISCONNECT_GRACE_MS : null
+      rejoinable ? endedAt + REJOIN_WINDOW_MS : null
     )
     const peerPubkeys = sessionState.collectPeerPubkeys()
-    // Cumulative set, not the live `peers` map: on the everyone-else-leaves
-    // auto-end path `peerLeft` has already pruned every entry by now.
     const peerEdPubkeys = [...new Set(sessionState.seenPeerEdPubkeys)]
+    // Close active authenticated intervals before room.leave() can emit peer
+    // callbacks. The store finalizer is idempotent, so each interval is added
+    // at most once and every new session — including a solo one — writes a
+    // non-null precision object.
+    const finalizedPresence = sessionState.finalizePeerPresence({
+      wallMs: endedAt,
+      monoMs: endedAtMono,
+    })
+    const peerPresenceMs = encodePeerPresenceMs(finalizedPresence.durationsMs)
     const initialDeclaredTopic = sessionState.initialDeclaredTopic
     const focusSnapshot = snapshotFocusForReport()
     // Persisted study minutes are the SHORTER of wall-clock and monotonic
@@ -387,7 +418,7 @@ export function buildLeaveHandler(args: {
     const monoMs =
       args.startedAtMono === undefined
         ? wallMs
-        : monotonicNow() - args.startedAtMono
+        : endedAtMono - args.startedAtMono
     const totalMinutes = Math.max(
       0,
       Math.floor(Math.min(wallMs, monoMs) / 60_000)
@@ -423,9 +454,14 @@ export function buildLeaveHandler(args: {
       log.error('audit_flush.failed', { phase: 'teardown', err })
     }
 
-    const stint = { startedAt: args.startedAt, totalMinutes, peerPubkeys }
+    const stint = {
+      startedAt: args.startedAt,
+      totalMinutes,
+      peerPubkeys,
+      peerPresenceMs,
+    }
     const buildSessionRow = (
-      summary: typeof stint,
+      summary: ReturnType<typeof mergeSessionStints>,
       focus: PersistedFocusMetrics,
       replaceFocusMetrics: boolean
     ): SessionRow => ({
@@ -434,6 +470,7 @@ export function buildLeaveHandler(args: {
       endedAt,
       totalMinutes: summary.totalMinutes,
       peerPubkeys: summary.peerPubkeys,
+      peerPresenceMs: summary.peerPresenceMs,
       declaredTopic: initialDeclaredTopic,
       score: focus.score,
       focusedPct: focus.focusedPct,
@@ -451,7 +488,7 @@ export function buildLeaveHandler(args: {
     // rewind it. Retry one transient read failure. If the row is still
     // indeterminate, use an atomic insert-if-absent: that retains a first-ever
     // stint but cannot overwrite an existing session with tail-stint values.
-    let merged = stint
+    let merged: ReturnType<typeof mergeSessionStints> = stint
     let priorStintFound = false
     let priorStintReadSucceeded = false
     let priorStint: SessionRecord | null = null
@@ -540,7 +577,13 @@ export function buildLeaveHandler(args: {
     }
     let friendsUpdated = false
     try {
-      await useFriendsStore.getState().markStudied(peerEdPubkeys, endedAt)
+      await useFriendsStore
+        .getState()
+        .markStudiedAt(
+          Object.entries(finalizedPresence.lastStudiedAt).map(
+            ([edPubkey, ts]) => ({ edPubkey, ts })
+          )
+        )
       friendsUpdated = true
       log.debug('mark_studied.succeeded', {
         peerCount: peerEdPubkeys.length,
@@ -550,7 +593,7 @@ export function buildLeaveHandler(args: {
     }
     log.info('session.end_completed', {
       endReason,
-      rejoinDeadline: rejoinable ? endedAt + DISCONNECT_GRACE_MS : null,
+      rejoinDeadline: rejoinable ? endedAt + REJOIN_WINDOW_MS : null,
       totalMinutes: merged.totalMinutes,
       seenPeerCount: peerEdPubkeys.length,
       scoreRecorded: focusSnapshot.score !== null,
@@ -569,7 +612,7 @@ export function buildLeaveHandler(args: {
     // reset effect in SessionView the next time a session begins (handles
     // the invite-while-on-report path); the V2-P3 1.5 s auto-reset has
     // been retired alongside the SessionEndedSplash.
-    useSessionStore.getState().markEnded()
+    sessionStore.getState().markEnded()
     setLogContext({ sess: undefined })
   }
 }
@@ -583,94 +626,28 @@ export type RoomLifecycle = {
   peers: () => readonly string[]
 }
 
-// S1 / #190 — grace window before the everyone-else-left auto-end fires. A
-// WiFi blip or an accidental Leave can drop the transport to every peer at
-// once; without a debounce either event irreversibly ends a long session. We
-// arm a timer whenever the room empties and only run the leave handler if it is
-// STILL empty when the timer expires.
-// trystero re-fires onPeerJoin on reconnect (and the cumulative
-// seenPeerEdPubkeys set in the session store survives the gap, so the report
-// still records who we studied with). Injectable scheduler so the unit tests
-// can drive it with a fake clock; production uses window timers.
-export const DISCONNECT_GRACE_MS = 20_000
-
-export type GraceScheduler = {
-  setTimeout: (handler: () => void, ms: number) => number
-  clearTimeout: (handle: number) => void
-}
-
-const defaultGraceScheduler: GraceScheduler = {
-  setTimeout: (handler, ms) =>
-    (globalThis.setTimeout as Window['setTimeout'])(handler, ms),
-  clearTimeout: (handle) =>
-    (globalThis.clearTimeout as Window['clearTimeout'])(handle),
-}
+// A local user who leaves after studying with somebody gets a short recovery
+// opportunity. This deadline belongs only to that leaver; it never controls
+// the lifetime of a participant who remains in the room.
+export const REJOIN_WINDOW_MS = 20_000
 
 // Wires onPeerJoin / onPeerLeave / 'session-full' on the trystero room. The
 // host enforces the 4-user cap here (rejects the 4th remote peer); guests
-// listen for 'session-full' and tear down with a toast. Both sides auto-end
-// when peer count stays at 0 for DISCONNECT_GRACE_MS after at least one peer
-// was present, including after a signed deliberate Leave.
+// listen for 'session-full' and tear down with a toast. Remote peer changes
+// only change membership: zero peers is a valid active solo session.
 export function wireSessionRoom(
   room: TopicRoom,
   hooks: WireHooks,
-  options?: { scheduler?: GraceScheduler; graceMs?: number }
+  store: SessionStore = useSessionStore
 ): RoomLifecycle {
-  const scheduler = options?.scheduler ?? defaultGraceScheduler
-  const graceMs = options?.graceMs ?? DISCONNECT_GRACE_MS
   const peers = new Set<string>()
-  let hadAny = false
-  // Peers that vanished WITHOUT the signed 'left' broadcast a deliberate Leave
-  // sends first, and haven't returned. Tracked per-peer (not a single flag) so
-  // an intervening join by a DIFFERENT peer cannot erase the memory of one
-  // still absent. The set controls end attribution after the shared grace
-  // window: unexplained absence is `auto`; explained absence is `peer`.
-  const unexplainedAbsent = new Set<string>()
-  let graceHandle: number | null = null
   const sessionFull = room.makeAction<null>(SESSION_FULL_ACTION)
-
-  const cancelGrace = (): void => {
-    if (graceHandle !== null) {
-      scheduler.clearTimeout(graceHandle)
-      graceHandle = null
-      log.debug('disconnect_grace.cancelled', { peerCount: peers.size })
-    }
-  }
-
-  const armGrace = (): void => {
-    if (graceHandle !== null) return
-    log.info('disconnect_grace.armed', {
-      graceMs,
-      unexplainedPeerCount: unexplainedAbsent.size,
-    })
-    graceHandle = scheduler.setTimeout(() => {
-      graceHandle = null
-      // Only auto-end if the room is STILL empty — a reconnect within the
-      // window cancels this via cancelGrace(). The leave handler is itself
-      // idempotent, so an explicit user-leave racing the timer is safe.
-      if (peers.size === 0) {
-        log.info('disconnect_grace.expired', {
-          graceMs,
-          unexplainedPeerCount: unexplainedAbsent.size,
-        })
-        // Preserve why the room emptied while still giving every departure
-        // the same recovery window. An unexplained absence may be a transport
-        // blip, while a signed `left` means the peer chose Leave and simply
-        // did not rejoin before the deadline.
-        useSessionStore
-          .getState()
-          .setPendingEndReason(unexplainedAbsent.size > 0 ? 'auto' : 'peer')
-        void hooks.leave()
-      }
-    }, graceMs)
-  }
 
   if (!hooks.isHost) {
     sessionFull.receive(() => {
       log.warn('session_full.received', { role: 'guest' })
       toast.error(SESSION_FULL_MESSAGE)
-      cancelGrace()
-      useSessionStore.getState().setPendingEndReason('peer')
+      store.getState().setPendingEndReason('peer')
       void hooks.leave()
     })
   }
@@ -696,13 +673,8 @@ export function wireSessionRoom(
       }
       return
     }
-    // A (re)join cancels the pending end: either the transport recovered or a
-    // user reversed an accidental Leave before the grace window expired.
-    cancelGrace()
-    unexplainedAbsent.delete(peerId)
     peers.add(peerId)
-    hadAny = true
-    useSessionStore.getState().peerJoined(peerId)
+    store.getState().peerJoined(peerId)
     log.info('peer.joined', {
       role: hooks.isHost ? 'host' : 'guest',
       peerCount: peers.size,
@@ -712,18 +684,29 @@ export function wireSessionRoom(
   room.onPeerLeave((peerId) => {
     if (!peers.has(peerId)) return
     peers.delete(peerId)
-    const store = useSessionStore.getState()
-    const explained = store.departedPeerIds.includes(peerId)
-    if (!explained) unexplainedAbsent.add(peerId)
-    store.peerLeft(peerId)
+    const closedPresence = store.getState().peerLeft(peerId)
+    if (closedPresence) {
+      void useFriendsStore
+        .getState()
+        .markStudiedAt([
+          {
+            edPubkey: closedPresence.edPubkeyHex,
+            ts: closedPresence.endedAt,
+          },
+        ])
+        .catch((err) => {
+          log.error('mark_studied.failed', {
+            peerCount: 1,
+            phase: 'peer-left',
+            err,
+          })
+        })
+    }
     log.info('peer.left', {
       role: hooks.isHost ? 'host' : 'guest',
       peerCount: peers.size,
-      explained,
+      presenceClosed: closedPresence !== null,
     })
-    if (peers.size === 0 && hadAny) {
-      armGrace()
-    }
   })
 
   return {

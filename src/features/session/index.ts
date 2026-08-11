@@ -1,5 +1,5 @@
-export { hostSession } from './host'
-export { joinSession, rejoinSession } from './join'
+export { hostSession, type HostSessionOptions } from './host'
+export { joinSession, rejoinSession, type JoinSessionOptions } from './join'
 export { inviteToCurrentSession, InviteWhileGuestError } from './invite'
 export { SessionView, type SessionViewProps } from './SessionView'
 export {
@@ -9,7 +9,7 @@ export {
 export { invitableFriends } from './invitableFriends'
 export { TopicGateModal, type TopicGateModalProps } from './TopicGateModal'
 export {
-  DISCONNECT_GRACE_MS,
+  REJOIN_WINDOW_MS,
   MAX_REMOTE_PEERS,
   PTT_STATE_ACTION,
   SESSION_FULL_ACTION,

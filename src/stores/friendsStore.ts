@@ -31,9 +31,35 @@ type FriendsState = {
     ts: number
   ) => Promise<void>
   remove: (edPubkey: string) => Promise<void>
-  // Bumps last_studied_with for each peer who participated in a session that
-  // just ended. Called from buildLeaveHandler after sessions_insert.
+  // Compatibility helper for peers that share one interval-close timestamp.
   markStudied: (edPubkeys: readonly string[], ts: number) => Promise<void>
+  // Precise variant for peers whose overlap intervals ended at different
+  // wall-clock times during one still-running local session.
+  markStudiedAt: (entries: readonly PeerStudiedAt[]) => Promise<void>
+}
+
+export type PeerStudiedAt = { edPubkey: string; ts: number }
+
+async function persistStudiedAt(
+  entries: readonly PeerStudiedAt[],
+  setFriends: (friends: Friend[]) => void
+): Promise<void> {
+  const latestByPeer = new Map<string, number>()
+  for (const { edPubkey, ts } of entries) {
+    latestByPeer.set(edPubkey, Math.max(latestByPeer.get(edPubkey) ?? ts, ts))
+  }
+  if (latestByPeer.size === 0) return
+  await Promise.allSettled(
+    Array.from(latestByPeer, ([edPubkey, ts]) =>
+      updateLastStudied(edPubkey, ts)
+    )
+  )
+  try {
+    const friends = await listFriends()
+    setFriends(friends)
+  } catch {
+    // best-effort: leave list as-is; next mount/load will resync.
+  }
 }
 
 export const useFriendsStore = create<FriendsState>((set, get) => ({
@@ -69,16 +95,11 @@ export const useFriendsStore = create<FriendsState>((set, get) => ({
     }))
   },
 
-  markStudied: async (edPubkeys, ts) => {
-    if (edPubkeys.length === 0) return
-    await Promise.allSettled(
-      edPubkeys.map((edPubkey) => updateLastStudied(edPubkey, ts))
-    )
-    try {
-      const friends = await listFriends()
-      set({ friends })
-    } catch {
-      // best-effort: leave list as-is; next mount/load will resync.
-    }
-  },
+  markStudied: async (edPubkeys, ts) =>
+    persistStudiedAt(
+      edPubkeys.map((edPubkey) => ({ edPubkey, ts })),
+      (friends) => set({ friends })
+    ),
+  markStudiedAt: async (entries) =>
+    persistStudiedAt(entries, (friends) => set({ friends })),
 }))

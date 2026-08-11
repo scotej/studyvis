@@ -28,7 +28,7 @@ export const strings = {
   app: {
     name: 'StudyVis',
     homeSrHeading: 'StudyVis',
-    sessionSrHeading: 'Studying with friends',
+    sessionSrHeading: 'Study session',
     error: {
       title: 'Something went wrong',
       body: 'A part of StudyVis ran into an unexpected error. Your identity, friends, and history are safe.',
@@ -159,7 +159,7 @@ export const strings = {
         },
         leave: {
           title: 'Leave any time',
-          body: 'Click Leave to drop out. If that was a mistake, rejoin within 20 seconds before the session ends.',
+          body: 'Click Leave to drop out. If that was a mistake, you can rejoin for 20 seconds. Anyone still there can keep studying.',
         },
         ai: {
           title: 'AI is optional',
@@ -566,11 +566,11 @@ export const strings = {
       // invited and are sitting alone).
       title: 'Waiting for your friend to join…',
       body: "Your session is live. They'll appear here as soon as they accept your invite.",
-      // Emptied-after-peers (S1 grace window): a friend who'd joined dropped.
-      // Reconnect-flavored, not invite copy — they already accepted.
-      reconnectTitle: 'Waiting for your friend to reconnect…',
-      reconnectBody:
-        "Your session is still live. They'll reappear here if they come back.",
+      // A friend participated earlier, but the local session is now continuing
+      // solo indefinitely. Rejoins and newly invited friends use the same tile.
+      soloTitle: 'Studying solo',
+      soloBody:
+        'Your session is still live. Keep studying; friends will appear here if they join or reconnect.',
     },
     peerFallback: (id: string) => `Peer ${id.slice(0, 6)}`,
     selfFallback: 'You',
@@ -793,7 +793,7 @@ export const strings = {
     // invokes app_quit(), cancel just closes.
     quitConfirm: {
       title: 'Leave your session and quit?',
-      body: "You're in a live session. Quitting now drops you from the call and ends your session for everyone.",
+      body: "You're in a live session. Quitting now drops you from the call and ends your session. Anyone else can keep studying.",
       cancelCta: 'Stay',
       confirmCta: 'Leave and quit',
     },
@@ -852,8 +852,7 @@ export const strings = {
   report: {
     notFound: 'Session not found.',
     loadErrorFallback: "Couldn't load the report.",
-    // #47 B3 / #190 — shown after an eligible auto or local-user ending
-    // while the remote room's teardown-time grace deadline is still open.
+    // #47 B3 / #190 — shown briefly after an eligible local-user ending.
     rejoinCta: 'Rejoin session',
     // #47 D5 — calm data-quality caveat when a material share of AI checks
     // couldn't be read (see sampleQualitySummary): the focused-time % above

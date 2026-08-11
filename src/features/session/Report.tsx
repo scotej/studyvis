@@ -100,10 +100,9 @@ export type ReportProps = {
   // Historical reports replace Settings' focused opener. Focus the return
   // action on entry so keyboard and screen-reader users land in the new view.
   autoFocusClose?: boolean
-  // #47 B3 / #190 — present when a transport-loss grace period expired or
-  // the local user deliberately left while the remote room may still be in
-  // its matching 20-second grace period. Rejoining re-enters the same room;
-  // the second leave cycle merges into the topic-keyed row
+  // #47 B3 / #190 — present briefly after the local user deliberately leaves.
+  // Rejoining re-enters the same room; the second leave cycle merges into the
+  // topic-keyed row
   // (mergeSessionStints in lifecycle.ts), so the report after a rejoin shows
   // accumulated whole-session totals.
   onRejoin?: () => void

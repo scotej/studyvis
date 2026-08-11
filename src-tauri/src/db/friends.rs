@@ -94,7 +94,9 @@ pub fn remove(conn: &Connection, ed_pubkey_hex: &str) -> Result<usize> {
 
 pub fn update_last_studied(conn: &Connection, ed_pubkey_hex: &str, ts: i64) -> Result<usize> {
     conn.execute(
-        "UPDATE friends SET last_studied_with = ?1 WHERE ed_pubkey_hex = ?2",
+        "UPDATE friends SET last_studied_with = ?1
+         WHERE ed_pubkey_hex = ?2
+           AND (last_studied_with IS NULL OR last_studied_with < ?1)",
         params![ts, ed_pubkey_hex],
     )
 }

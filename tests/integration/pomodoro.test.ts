@@ -241,6 +241,135 @@ describe('pomodoro broadcaster handover on disconnect', () => {
   })
 })
 
+describe('pomodoro pair-to-solo continuity (#210)', () => {
+  test('the only survivor takes over when the departed peer was broadcaster', async () => {
+    const bus = new Bus()
+    const aliceRoom = new BusRoom(bus, 'peer-a')
+    const bobRoom = new BusRoom(bus, 'peer-b')
+    const liveOrdering = [
+      { ed_pubkey_hex: ED.alice, joined_at: 1_000 },
+      { ed_pubkey_hex: ED.bob, joined_at: 2_000 },
+    ]
+    const senderEd: Record<string, string> = {
+      'peer-a': ED.alice,
+      'peer-b': ED.bob,
+    }
+    const bobSnaps: PomodoroSnapshot[] = []
+
+    const alice = startPomodoroController({
+      room: aliceRoom.asTopicRoom(),
+      myEdPubkeyHex: ED.alice,
+      selfJoinedAt: 1_000,
+      getAllPeerOrdering: () => liveOrdering,
+      resolveSenderEdPubkey: (peerId) => senderEd[peerId] ?? null,
+      onSnapshot: () => {},
+      onPomodoroStart: () => {},
+      onPomodoroEnd: () => {},
+    })
+    const bob = startPomodoroController({
+      room: bobRoom.asTopicRoom(),
+      myEdPubkeyHex: ED.bob,
+      selfJoinedAt: 2_000,
+      getAllPeerOrdering: () => liveOrdering,
+      resolveSenderEdPubkey: (peerId) => senderEd[peerId] ?? null,
+      onSnapshot: (snapshot) => bobSnaps.push(snapshot),
+      onPomodoroStart: () => {},
+      onPomodoroEnd: () => {},
+    })
+
+    vi.setSystemTime(10_000)
+    alice.start({ preset: '25/5' })
+    const originalEndsAt = lastSnapshot(bobSnaps).endsAt
+    expect(originalEndsAt).not.toBeNull()
+
+    // Membership is dynamic in production (`SessionView.collectOrdering`).
+    // Remove Alice before the silence decision so the pair has truly become a
+    // solo session rather than relying on a stale fixture peer list.
+    liveOrdering.splice(0, 1)
+    aliceRoom.closed = true
+    alice.teardown()
+    await vi.advanceTimersByTimeAsync(HANDOVER_SILENCE_MS + 100)
+
+    const afterHandover = lastSnapshot(bobSnaps)
+    expect(afterHandover.iAmBroadcaster).toBe(true)
+    expect(afterHandover.broadcasterEdPubkey).toBe(ED.bob)
+    expect(afterHandover.phase).toBe('work-25')
+    expect(afterHandover.endsAt).toBe(originalEndsAt)
+
+    // A preserved deadline must still drive the next phase while Bob remains
+    // alone; asserting the flip catches a timer that merely looks unfrozen.
+    await vi.advanceTimersByTimeAsync(
+      Math.max(0, (originalEndsAt as number) - Date.now())
+    )
+    const afterBoundary = lastSnapshot(bobSnaps)
+    expect(afterBoundary.phase).toBe('rest-5')
+    expect(afterBoundary.iAmBroadcaster).toBe(true)
+
+    bob.teardown()
+  })
+
+  test('the timer continues when the survivor was already broadcaster', async () => {
+    const bus = new Bus()
+    const aliceRoom = new BusRoom(bus, 'peer-a')
+    const bobRoom = new BusRoom(bus, 'peer-b')
+    const liveOrdering = [
+      { ed_pubkey_hex: ED.alice, joined_at: 1_000 },
+      { ed_pubkey_hex: ED.bob, joined_at: 2_000 },
+    ]
+    const senderEd: Record<string, string> = {
+      'peer-a': ED.alice,
+      'peer-b': ED.bob,
+    }
+    const aliceSnaps: PomodoroSnapshot[] = []
+
+    const alice = startPomodoroController({
+      room: aliceRoom.asTopicRoom(),
+      myEdPubkeyHex: ED.alice,
+      selfJoinedAt: 1_000,
+      getAllPeerOrdering: () => liveOrdering,
+      resolveSenderEdPubkey: (peerId) => senderEd[peerId] ?? null,
+      onSnapshot: (snapshot) => aliceSnaps.push(snapshot),
+      onPomodoroStart: () => {},
+      onPomodoroEnd: () => {},
+    })
+    const bob = startPomodoroController({
+      room: bobRoom.asTopicRoom(),
+      myEdPubkeyHex: ED.bob,
+      selfJoinedAt: 2_000,
+      getAllPeerOrdering: () => liveOrdering,
+      resolveSenderEdPubkey: (peerId) => senderEd[peerId] ?? null,
+      onSnapshot: () => {},
+      onPomodoroStart: () => {},
+      onPomodoroEnd: () => {},
+    })
+
+    vi.setSystemTime(10_000)
+    alice.start({ preset: '25/5' })
+    const originalEndsAt = lastSnapshot(aliceSnaps).endsAt
+    expect(originalEndsAt).not.toBeNull()
+
+    liveOrdering.splice(1, 1)
+    bobRoom.closed = true
+    bob.teardown()
+    await vi.advanceTimersByTimeAsync(HANDOVER_SILENCE_MS + 100)
+
+    const whileSolo = lastSnapshot(aliceSnaps)
+    expect(whileSolo.iAmBroadcaster).toBe(true)
+    expect(whileSolo.broadcasterEdPubkey).toBe(ED.alice)
+    expect(whileSolo.phase).toBe('work-25')
+    expect(whileSolo.endsAt).toBe(originalEndsAt)
+
+    await vi.advanceTimersByTimeAsync(
+      Math.max(0, (originalEndsAt as number) - Date.now())
+    )
+    const afterBoundary = lastSnapshot(aliceSnaps)
+    expect(afterBoundary.phase).toBe('rest-5')
+    expect(afterBoundary.iAmBroadcaster).toBe(true)
+
+    alice.teardown()
+  })
+})
+
 describe('pomodoro deliberate stop propagates (regression: I1)', () => {
   test('broadcaster stop() resets receivers to idle; no handover fires', async () => {
     const bus = new Bus()

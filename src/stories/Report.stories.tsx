@@ -186,10 +186,9 @@ export const HistoricalReportPreservesNewerFocus: Story = {
   },
 }
 
-// #47 B3 — the session auto-ended (S1 grace expiry, e.g. a >20s Wi-Fi
-// blip), so the header offers Rejoin alongside Close: the room may still be
-// live without us.
-export const AutoEndedWithRejoin: Story = {
+// #47 B3 / #190 — the local user chose Leave, so the header briefly offers
+// Rejoin alongside Close. Other participants remain in their live session.
+export const UserLeftWithRejoin: Story = {
   args: {
     ...MostlyOnTask.args,
     onRejoin: () => {

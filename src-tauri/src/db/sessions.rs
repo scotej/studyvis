@@ -43,6 +43,10 @@ pub struct SessionRow {
     // active when the report is opened.
     pub local_ed_pubkey: Option<String>,
     pub local_display_name: Option<String>,
+    // Canonical JSON object of authenticated peer Ed25519 key -> cumulative
+    // overlap milliseconds. NULL is legacy/unknown precision; `{}` is a
+    // precisely measured peerless session.
+    pub peer_presence_ms: Option<String>,
 }
 
 pub fn list(conn: &Connection) -> Result<Vec<SessionRow>> {
@@ -50,7 +54,7 @@ pub fn list(conn: &Connection) -> Result<Vec<SessionRow>> {
         "SELECT id, started_at, ended_at, total_minutes, peer_pubkeys,
                 declared_topic, score, focused_pct, generated_at,
                 confident_samples, skipped_samples, ai_enabled,
-                local_ed_pubkey, local_display_name
+                local_ed_pubkey, local_display_name, peer_presence_ms
          FROM sessions
          ORDER BY started_at DESC, id ASC",
     )?;
@@ -70,6 +74,7 @@ pub fn list(conn: &Connection) -> Result<Vec<SessionRow>> {
             ai_enabled: row.get(11)?,
             local_ed_pubkey: row.get(12)?,
             local_display_name: row.get(13)?,
+            peer_presence_ms: row.get(14)?,
         })
     })?;
     rows.collect()
@@ -80,7 +85,7 @@ pub fn get(conn: &Connection, id: &str) -> Result<Option<SessionRow>> {
         "SELECT id, started_at, ended_at, total_minutes, peer_pubkeys,
                 declared_topic, score, focused_pct, generated_at,
                 confident_samples, skipped_samples, ai_enabled,
-                local_ed_pubkey, local_display_name
+                local_ed_pubkey, local_display_name, peer_presence_ms
          FROM sessions
          WHERE id = ?1",
     )?;
@@ -100,6 +105,7 @@ pub fn get(conn: &Connection, id: &str) -> Result<Option<SessionRow>> {
             ai_enabled: row.get(11)?,
             local_ed_pubkey: row.get(12)?,
             local_display_name: row.get(13)?,
+            peer_presence_ms: row.get(14)?,
         })
     })
     .optional()
@@ -118,8 +124,8 @@ pub fn insert_if_absent(conn: &Connection, row: &SessionRow) -> Result<bool> {
              (id, started_at, ended_at, total_minutes, peer_pubkeys,
               declared_topic, score, focused_pct, generated_at,
               confident_samples, skipped_samples, ai_enabled,
-              local_ed_pubkey, local_display_name)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
+              local_ed_pubkey, local_display_name, peer_presence_ms)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
          ON CONFLICT(id) DO NOTHING",
         params![
             row.id,
@@ -136,6 +142,7 @@ pub fn insert_if_absent(conn: &Connection, row: &SessionRow) -> Result<bool> {
             row.ai_enabled,
             row.local_ed_pubkey,
             row.local_display_name,
+            row.peer_presence_ms,
         ],
     )?;
     Ok(inserted == 1)
@@ -160,29 +167,32 @@ pub fn insert_with_focus_metrics_mode(
     //    stints before writing (mergeSessionStints), so the overwrite
     //    corrects the row upward instead of rewinding it to the tail stint.
     //  - the optional report columns (peer_pubkeys, declared_topic, score,
-    //    focused_pct, generated_at) are additive via COALESCE so a partial
-    //    upsert that omits them does not clobber a prior call's values.
+    //    focused_pct, generated_at, peer_presence_ms) are additive via
+    //    COALESCE so a partial/mixed-version upsert that omits them does not
+    //    clobber a prior call's values. The presence reader treats any retained
+    //    malformed value as unknown with whole-row legacy fallback.
     conn.execute(
         "INSERT INTO sessions
              (id, started_at, ended_at, total_minutes, peer_pubkeys,
               declared_topic, score, focused_pct, generated_at,
               confident_samples, skipped_samples, ai_enabled,
-              local_ed_pubkey, local_display_name)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
+              local_ed_pubkey, local_display_name, peer_presence_ms)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
          ON CONFLICT(id) DO UPDATE SET
              started_at     = excluded.started_at,
              ended_at       = excluded.ended_at,
              total_minutes  = excluded.total_minutes,
              peer_pubkeys   = COALESCE(excluded.peer_pubkeys, sessions.peer_pubkeys),
              declared_topic = COALESCE(excluded.declared_topic, sessions.declared_topic),
-             score          = CASE WHEN ?15 THEN excluded.score ELSE COALESCE(excluded.score, sessions.score) END,
-             focused_pct    = CASE WHEN ?15 THEN excluded.focused_pct ELSE COALESCE(excluded.focused_pct, sessions.focused_pct) END,
+             score          = CASE WHEN ?16 THEN excluded.score ELSE COALESCE(excluded.score, sessions.score) END,
+             focused_pct    = CASE WHEN ?16 THEN excluded.focused_pct ELSE COALESCE(excluded.focused_pct, sessions.focused_pct) END,
              generated_at   = COALESCE(excluded.generated_at, sessions.generated_at),
-             confident_samples = CASE WHEN ?15 THEN excluded.confident_samples ELSE COALESCE(excluded.confident_samples, sessions.confident_samples) END,
-             skipped_samples   = CASE WHEN ?15 THEN excluded.skipped_samples ELSE COALESCE(excluded.skipped_samples, sessions.skipped_samples) END,
-             ai_enabled        = CASE WHEN ?15 THEN excluded.ai_enabled ELSE COALESCE(excluded.ai_enabled, sessions.ai_enabled) END,
+             confident_samples = CASE WHEN ?16 THEN excluded.confident_samples ELSE COALESCE(excluded.confident_samples, sessions.confident_samples) END,
+             skipped_samples   = CASE WHEN ?16 THEN excluded.skipped_samples ELSE COALESCE(excluded.skipped_samples, sessions.skipped_samples) END,
+             ai_enabled        = CASE WHEN ?16 THEN excluded.ai_enabled ELSE COALESCE(excluded.ai_enabled, sessions.ai_enabled) END,
              local_ed_pubkey   = sessions.local_ed_pubkey,
-             local_display_name = sessions.local_display_name",
+             local_display_name = sessions.local_display_name,
+             peer_presence_ms = COALESCE(excluded.peer_presence_ms, sessions.peer_presence_ms)",
         params![
             row.id,
             row.started_at,
@@ -198,6 +208,7 @@ pub fn insert_with_focus_metrics_mode(
             row.ai_enabled,
             row.local_ed_pubkey,
             row.local_display_name,
+            row.peer_presence_ms,
             replace_focus_metrics,
         ],
     )?;
@@ -295,6 +306,7 @@ pub fn synthesize_from_orphaned_audit_events(
                 ai_enabled: None,
                 local_ed_pubkey: None,
                 local_display_name: None,
+                peer_presence_ms: None,
             },
         )?;
         adopted += 1;
@@ -353,19 +365,26 @@ mod tests {
             ai_enabled: None,
             local_ed_pubkey: None,
             local_display_name: None,
+            peer_presence_ms: None,
         }
     }
 
     #[test]
     fn insert_writes_a_row_with_expected_columns() {
         let conn = fresh();
-        insert(&conn, &lifecycle_row("topic-hex")).expect("insert");
+        let mut row = lifecycle_row("topic-hex");
+        row.peer_presence_ms = Some("{\"aa\":120000,\"bb\":300000}".into());
+        insert(&conn, &row).expect("insert");
         let read = get(&conn, "topic-hex").expect("get").expect("present");
         assert_eq!(read.id, "topic-hex");
         assert_eq!(read.started_at, Some(1_700_000_000_000));
         assert_eq!(read.ended_at, Some(1_700_000_300_000));
         assert_eq!(read.total_minutes, Some(5));
         assert_eq!(read.peer_pubkeys.as_deref(), Some("[\"aa\",\"bb\"]"));
+        assert_eq!(
+            read.peer_presence_ms.as_deref(),
+            Some("{\"aa\":120000,\"bb\":300000}")
+        );
     }
 
     #[test]
@@ -465,16 +484,14 @@ mod tests {
     #[test]
     fn insert_if_absent_retains_a_first_ever_stint() {
         let conn = fresh();
-        let row = lifecycle_row("new-topic");
+        let mut row = lifecycle_row("new-topic");
+        row.peer_presence_ms = Some("{\"aa\":90000}".into());
 
         assert!(insert_if_absent(&conn, &row).expect("guarded insert"));
-        assert_eq!(
-            get(&conn, "new-topic")
-                .expect("get")
-                .expect("present")
-                .total_minutes,
-            row.total_minutes
-        );
+        let read = list(&conn).expect("list");
+        assert_eq!(read.len(), 1);
+        assert_eq!(read[0].total_minutes, row.total_minutes);
+        assert_eq!(read[0].peer_presence_ms.as_deref(), Some("{\"aa\":90000}"));
     }
 
     #[test]
@@ -514,10 +531,11 @@ mod tests {
         assert_eq!(read[0].score, None);
         assert_eq!(read[0].focused_pct, None);
         assert_eq!(read[0].generated_at, None);
+        assert_eq!(read[0].peer_presence_ms, None);
     }
 
     #[test]
-    fn insert_preserves_peer_pubkeys_when_subsequent_upsert_omits_them() {
+    fn insert_preserves_peer_pubkeys_and_presence_when_upsert_omits_them() {
         let conn = fresh();
         let row = SessionRow {
             id: "topic-hex".into(),
@@ -534,6 +552,7 @@ mod tests {
             ai_enabled: None,
             local_ed_pubkey: None,
             local_display_name: None,
+            peer_presence_ms: Some("{}".into()),
         };
         insert(&conn, &row).expect("insert 1");
         let again = SessionRow {
@@ -551,10 +570,29 @@ mod tests {
             ai_enabled: None,
             local_ed_pubkey: None,
             local_display_name: None,
+            peer_presence_ms: None,
         };
         insert(&conn, &again).expect("insert 2");
         let read = get(&conn, "topic-hex").expect("get").expect("present");
         assert_eq!(read.peer_pubkeys.as_deref(), Some("[\"aa\"]"));
+        assert_eq!(read.peer_presence_ms.as_deref(), Some("{}"));
+    }
+
+    #[test]
+    fn insert_replaces_peer_presence_with_the_callers_merged_summary() {
+        let conn = fresh();
+        let mut row = lifecycle_row("topic-hex");
+        row.peer_presence_ms = Some("{\"aa\":120000}".into());
+        insert(&conn, &row).expect("insert first summary");
+
+        row.peer_presence_ms = Some("{\"aa\":180000,\"bb\":60000}".into());
+        insert(&conn, &row).expect("insert merged summary");
+
+        let read = get(&conn, "topic-hex").expect("get").expect("present");
+        assert_eq!(
+            read.peer_presence_ms.as_deref(),
+            Some("{\"aa\":180000,\"bb\":60000}")
+        );
     }
 
     #[test]
@@ -581,6 +619,7 @@ mod tests {
             ai_enabled: None,
             local_ed_pubkey: None,
             local_display_name: None,
+            peer_presence_ms: None,
         };
         insert(&conn, &report_row).expect("insert report");
         let read = get(&conn, "topic-hex").expect("get").expect("present");
@@ -729,6 +768,7 @@ mod tests {
         assert_eq!(row.peer_pubkeys, Some(format!("[\"{friend}\"]"))); // self excluded
         assert_eq!(row.score, None);
         assert_eq!(row.skipped_samples, None);
+        assert_eq!(row.peer_presence_ms, None);
 
         // The clean session's row is untouched.
         let kept = get(&conn, "kept-topic").expect("get").expect("kept");

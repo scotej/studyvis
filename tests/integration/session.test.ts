@@ -196,8 +196,11 @@ vi.mock('@/lib/trystero', () => {
 })
 
 import { hostSession, joinSession, rejoinSession } from '@/features/session'
-import { MAX_REMOTE_PEERS } from '@/features/session/lifecycle'
-import { useSessionStore } from '@/stores/sessionStore'
+import {
+  MAX_REMOTE_PEERS,
+  REJOIN_WINDOW_MS,
+} from '@/features/session/lifecycle'
+import { createSessionStore, useSessionStore } from '@/stores/sessionStore'
 
 beforeEach(async () => {
   invokeMock.mockReset()
@@ -206,17 +209,7 @@ beforeEach(async () => {
     __resetBus: () => void
   }
   mod.__resetBus()
-  useSessionStore.setState({
-    status: 'idle',
-    sessionTopic: null,
-    sessionPassword: null,
-    isHost: false,
-    startedAt: null,
-    hadAnyPeer: false,
-    peers: {},
-    room: null,
-    leave: null,
-  })
+  useSessionStore.getState().reset()
 })
 
 afterEach(() => {
@@ -229,10 +222,17 @@ async function flushMicrotasks(times = 4): Promise<void> {
   }
 }
 
-describe('two in-process apps in the same room observe peer events', () => {
-  test('host + guest see each other via onPeerJoin and onPeerLeave', async () => {
-    const host = hostSession()
-    const guest = joinSession(host.sessionTopic, host.sessionPassword)
+// Each handle below has its own Zustand store, mirroring separate desktop
+// webviews while the in-process Trystero bus supplies their shared room.
+describe('two room handles on the in-process bus observe peer events', () => {
+  test('a guest Leave leaves the host live, able to accept another peer, until its own Leave', async () => {
+    const hostStore = createSessionStore()
+    const guestStore = createSessionStore()
+    const replacementStore = createSessionStore()
+    const host = hostSession({ store: hostStore })
+    const guest = joinSession(host.sessionTopic, host.sessionPassword, {
+      store: guestStore,
+    })
     await flushMicrotasks()
 
     // Each side sees exactly the other peer (mesh of 2). The peer ids are
@@ -240,23 +240,130 @@ describe('two in-process apps in the same room observe peer events', () => {
     expect(host.peers()).toHaveLength(1)
     expect(guest.peers()).toHaveLength(1)
     expect(host.peers()[0]).not.toBe(guest.peers()[0])
+    const hostRoom = hostStore.getState().room
+    const hostLeave = hostStore.getState().leave
+    expect(hostStore.getState().status).toBe('active')
+    expect(hostRoom).toBe(host.room)
+    expect(hostLeave).toBe(host.leave)
+    expect(hostLeave).toEqual(expect.any(Function))
 
     await guest.leave()
     await flushMicrotasks()
 
-    // S1 — after the guest leaves, the host's set drops to 0 but the auto-end
-    // is now debounced by DISCONNECT_GRACE_MS (a WiFi blip shouldn't kill a
-    // long session). Within the grace window only the guest's explicit leave
-    // has persisted; the host's auto-end is still pending.
-    const insertCalls = invokeMock.mock.calls.filter(
+    // #210 — remote departure changes membership only. The guest persisted
+    // its own report; the host remains in the same live room.
+    let insertCalls = invokeMock.mock.calls.filter(
       ([cmd]) => cmd === 'sessions_insert'
     )
     expect(insertCalls).toHaveLength(1)
     expect(insertCalls[0]?.[1]).toMatchObject({ id: host.sessionTopic })
+    expect(host.peers()).toEqual([])
+    expect(guestStore.getState().status).toBe('ended')
+    expect(hostStore.getState()).toMatchObject({
+      status: 'active',
+      room: hostRoom,
+      leave: hostLeave,
+      rejoinDeadline: null,
+    })
 
-    // Cleanup — explicit host leave is idempotent with the (still-pending)
-    // grace-armed auto-end, so the host persists exactly once more.
+    // Advancing past the old survivor-side grace deadline cannot persist or
+    // end the host — there is no empty-room timer left to fire.
+    vi.useFakeTimers()
+    await vi.advanceTimersByTimeAsync(REJOIN_WINDOW_MS + 1)
+    vi.useRealTimers()
+    insertCalls = invokeMock.mock.calls.filter(
+      ([cmd]) => cmd === 'sessions_insert'
+    )
+    expect(insertCalls).toHaveLength(1)
+    expect(hostStore.getState()).toMatchObject({
+      status: 'active',
+      room: hostRoom,
+      leave: hostLeave,
+      rejoinDeadline: null,
+    })
+
+    const nextGuest = joinSession(host.sessionTopic, host.sessionPassword, {
+      store: replacementStore,
+    })
+    await flushMicrotasks()
+    expect(host.peers()).toEqual([nextGuest.room.selfId])
+    expect(nextGuest.peers()).toEqual([host.room.selfId])
+    expect(hostStore.getState().status).toBe('active')
+    expect(replacementStore.getState().status).toBe('active')
+
+    // Only the host's explicit local Leave ends its store and persists the
+    // second row; the replacement remains active in its own app instance.
     await host.leave()
+    insertCalls = invokeMock.mock.calls.filter(
+      ([cmd]) => cmd === 'sessions_insert'
+    )
+    expect(insertCalls).toHaveLength(2)
+    expect(insertCalls[1]?.[1]).toMatchObject({
+      id: host.sessionTopic,
+      peerPresenceMs: '{}',
+    })
+    expect(hostStore.getState().status).toBe('ended')
+    expect(guestStore.getState().status).toBe('ended')
+    expect(replacementStore.getState().status).toBe('active')
+    await nextGuest.room.leave()
+  })
+
+  test('an unexplained transport loss also leaves the survivor active', async () => {
+    const hostStore = createSessionStore()
+    const guestStore = createSessionStore()
+    const replacementStore = createSessionStore()
+    const host = hostSession({ store: hostStore })
+    const guest = joinSession(host.sessionTopic, host.sessionPassword, {
+      store: guestStore,
+    })
+    await flushMicrotasks()
+    const hostRoom = hostStore.getState().room
+    const hostLeave = hostStore.getState().leave
+
+    invokeMock.mockClear()
+    // Bypass the guest's local teardown/signed-left path: this is a process or
+    // network disappearance as observed solely through Trystero membership.
+    await guest.room.leave()
+    await flushMicrotasks()
+
+    expect(host.peers()).toEqual([])
+    expect(hostStore.getState()).toMatchObject({
+      status: 'active',
+      room: hostRoom,
+      leave: hostLeave,
+      rejoinDeadline: null,
+    })
+    expect(
+      invokeMock.mock.calls.filter(([cmd]) => cmd === 'sessions_insert')
+    ).toHaveLength(0)
+
+    vi.useFakeTimers()
+    await vi.advanceTimersByTimeAsync(REJOIN_WINDOW_MS + 1)
+    vi.useRealTimers()
+    expect(
+      invokeMock.mock.calls.filter(([cmd]) => cmd === 'sessions_insert')
+    ).toHaveLength(0)
+    expect(hostStore.getState()).toMatchObject({
+      status: 'active',
+      room: hostRoom,
+      leave: hostLeave,
+      rejoinDeadline: null,
+    })
+
+    const replacement = joinSession(host.sessionTopic, host.sessionPassword, {
+      store: replacementStore,
+    })
+    await flushMicrotasks()
+    expect(host.peers()).toEqual([replacement.room.selfId])
+    expect(replacementStore.getState().status).toBe('active')
+
+    await host.leave()
+    expect(
+      invokeMock.mock.calls.filter(([cmd]) => cmd === 'sessions_insert')
+    ).toHaveLength(1)
+    expect(hostStore.getState().status).toBe('ended')
+    expect(replacementStore.getState().status).toBe('active')
+    await replacement.room.leave()
   })
 
   test('guest join observers fire only after a new authenticated peer binding', async () => {
@@ -274,25 +381,25 @@ describe('two in-process apps in the same room observe peer events', () => {
     // and checking admission; this isolates join.ts's one-shot observation of
     // that authenticated binding.
     useSessionStore.getState().setPeerHello(hostPeerId!, {
-      ed_pubkey_hex: 'inviter-key',
+      ed_pubkey_hex: 'a'.repeat(64),
       display_name: 'Inviter',
       joined_at: 1,
     })
     useSessionStore.getState().setPeerHello(hostPeerId!, {
-      ed_pubkey_hex: 'inviter-key',
+      ed_pubkey_hex: 'a'.repeat(64),
       display_name: 'Renamed inviter',
       joined_at: 2,
     })
 
-    expect(authenticatedPeers).toEqual(['inviter-key'])
+    expect(authenticatedPeers).toEqual(['a'.repeat(64)])
 
     await guest.leave()
     useSessionStore.getState().setPeerHello('late-peer', {
-      ed_pubkey_hex: 'late-key',
+      ed_pubkey_hex: 'b'.repeat(64),
       display_name: 'Late peer',
       joined_at: 3,
     })
-    expect(authenticatedPeers).toEqual(['inviter-key'])
+    expect(authenticatedPeers).toEqual(['a'.repeat(64)])
 
     await host.leave()
   })
@@ -324,6 +431,30 @@ describe('mesh hard-cap', () => {
     // Cleanup so rooms don't leak across tests. Each leave is idempotent.
     await host.leave()
     for (const g of guests) await g.leave()
+  })
+
+  test('a peer departure frees capacity for a replacement', async () => {
+    const host = hostSession()
+    const guests = [
+      joinSession(host.sessionTopic, host.sessionPassword),
+      joinSession(host.sessionTopic, host.sessionPassword),
+      joinSession(host.sessionTopic, host.sessionPassword),
+    ]
+    await flushMicrotasks(8)
+    expect(host.peers()).toHaveLength(MAX_REMOTE_PEERS)
+
+    await guests[0].leave()
+    await flushMicrotasks()
+    expect(host.peers()).toHaveLength(MAX_REMOTE_PEERS - 1)
+
+    const replacement = joinSession(host.sessionTopic, host.sessionPassword)
+    await flushMicrotasks(8)
+    expect(host.peers()).toHaveLength(MAX_REMOTE_PEERS)
+    expect(host.peers()).toContain(replacement.room.selfId)
+
+    await host.leave()
+    for (const guest of guests) await guest.leave()
+    await replacement.leave()
   })
 
   test('a rejoined host preserves host role and cap enforcement', async () => {
@@ -386,6 +517,7 @@ describe('leave handler tears down the room and persists a sessions row', () => 
           startedAt: number
           endedAt: number
           totalMinutes: number
+          peerPresenceMs: string | null
           declaredTopic: string | null
           score: number | null
           focusedPct: number | null
@@ -397,6 +529,9 @@ describe('leave handler tears down the room and persists a sessions row', () => 
     expect(args?.endedAt).toBeGreaterThanOrEqual(beforeLeaveAt)
     expect(args?.endedAt).toBeLessThanOrEqual(afterLeaveAt + 5)
     expect(args?.totalMinutes).toBeGreaterThanOrEqual(0)
+    // Every new writer distinguishes a precisely measured peerless/unknown-
+    // hello interval from a legacy row by sending a non-null object.
+    expect(args?.peerPresenceMs).toBe('{}')
     // R1: an AI-off session (the sample loop never ran) persists score=null,
     // not a fabricated 100 — statsData.averageScore skips nulls and the
     // Report renders its no-score state. focused_pct is likewise null. The
@@ -410,15 +545,14 @@ describe('leave handler tears down the room and persists a sessions row', () => 
     await guest.leave()
   })
 
-  test('leave is idempotent — calling twice persists exactly once', async () => {
+  test('concurrent leave calls persist exactly once', async () => {
     const host = hostSession()
     await flushMicrotasks()
 
     invokeMock.mockClear()
     invokeMock.mockResolvedValue(undefined)
 
-    await host.leave()
-    await host.leave()
+    await Promise.all([host.leave(), host.leave()])
 
     const insertCalls = invokeMock.mock.calls.filter(
       ([cmd]) => cmd === 'sessions_insert'
