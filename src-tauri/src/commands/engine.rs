@@ -179,6 +179,111 @@ pub struct EngineDevice {
     pub label: String,
 }
 
+// A benchmark can only be trusted when this native identity still matches.
+// `selection` comes from ai-hardware.json, the canonical store Rust reads at
+// spawn time; `topology` is the accelerator set llama.cpp can actually use.
+// A null topology deliberately remains unbenchmarked after a probe failure.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct ResolvedHardwareIdentity {
+    pub selection: String,
+    pub topology: Option<Vec<EngineDevice>>,
+}
+
+fn canonical_selection(selection: &super::compute_device::ComputeDeviceSelection) -> String {
+    match selection {
+        super::compute_device::ComputeDeviceSelection::Auto => "auto".to_string(),
+        super::compute_device::ComputeDeviceSelection::Cpu => "cpu".to_string(),
+        super::compute_device::ComputeDeviceSelection::Device(id) => format!("device:{id}"),
+    }
+}
+
+// b9095's --list-devices label contains free memory, which changes as other
+// applications allocate VRAM and is not a hardware change. Retain the stable
+// product description *and total VRAM* while stripping only the known
+// `, <free> MiB free` component; total capacity distinguishes otherwise
+// similarly named variants. Parentheses in a device's actual product name
+// remain meaningful.
+fn stable_topology_label(label: &str) -> String {
+    let stable = label
+        .rsplit_once(" (")
+        .and_then(|(prefix, suffix)| {
+            let (total, free) = suffix.split_once(", ")?;
+            let total_mib = total.strip_suffix(" MiB")?;
+            total_mib.parse::<u64>().ok()?;
+            free.strip_suffix(" MiB free)")?.parse::<u64>().ok()?;
+            Some(format!("{prefix} ({total_mib} MiB)"))
+        })
+        .unwrap_or_else(|| label.to_owned());
+    stable.chars().take(256).collect()
+}
+
+fn topology_device(device: &EngineDevice) -> EngineDevice {
+    EngineDevice {
+        id: device.id.clone(),
+        label: stable_topology_label(&device.label),
+    }
+}
+
+fn resolved_hardware_identity(
+    selection: &super::compute_device::ComputeDeviceSelection,
+    discovery: &DeviceDiscovery,
+    engine_available: bool,
+) -> ResolvedHardwareIdentity {
+    resolved_hardware_identity_for_offload(
+        selection,
+        discovery,
+        engine_available,
+        super::compute_device::gpu_layers(selection) != "0",
+    )
+}
+
+fn resolved_hardware_identity_for_offload(
+    selection: &super::compute_device::ComputeDeviceSelection,
+    discovery: &DeviceDiscovery,
+    engine_available: bool,
+    offloads_model: bool,
+) -> ResolvedHardwareIdentity {
+    let topology = if !offloads_model {
+        // CPU is fully selected by --device none / --no-mmproj-offload and
+        // never depends on a GPU probe. This also covers Linux `auto`, whose
+        // packaged b9095 engine deliberately has zero GPU layers even if a
+        // custom build reports accelerators.
+        Some(Vec::new())
+    } else {
+        match selection {
+            super::compute_device::ComputeDeviceSelection::Auto => (engine_available
+                && discovery.error.is_none())
+            .then(|| discovery.devices.iter().map(topology_device).collect()),
+            super::compute_device::ComputeDeviceSelection::Device(id) => (engine_available
+                && discovery.error.is_none())
+            .then(|| {
+                discovery
+                    .devices
+                    .iter()
+                    .find(|device| device.id == *id)
+                    .map(topology_device)
+                    .into_iter()
+                    .collect()
+            })
+            .filter(|devices: &Vec<EngineDevice>| !devices.is_empty()),
+            // `gpu_layers` never offloads a CPU selection, but retain a
+            // defensive resolved identity if that policy changes in future.
+            super::compute_device::ComputeDeviceSelection::Cpu => Some(Vec::new()),
+        }
+    };
+
+    ResolvedHardwareIdentity {
+        selection: canonical_selection(selection),
+        topology,
+    }
+}
+
+fn selection_requires_device_discovery(
+    selection: &super::compute_device::ComputeDeviceSelection,
+) -> bool {
+    super::compute_device::gpu_layers(selection) != "0"
+}
+
 fn parse_device_list(output: &str) -> Vec<EngineDevice> {
     let mut devices = Vec::new();
     let mut in_device_list = false;
@@ -397,6 +502,48 @@ impl EngineState {
     }
 }
 
+async fn device_discovery<R: Runtime>(
+    app: &AppHandle<R>,
+    state: &EngineState,
+    candidates: &[(EngineSource, PathBuf)],
+) -> DeviceDiscovery {
+    if candidates.is_empty() {
+        return DeviceDiscovery::default();
+    }
+    if let Some(cached) = state.cached_device_discovery() {
+        return cached;
+    }
+    let _probe_gate = state.device_probe_gate.lock().await;
+    if let Some(cached) = state.cached_device_discovery() {
+        return cached;
+    }
+    let (devices, error) = discover_devices(app, candidates).await;
+    let discovery = DeviceDiscovery { devices, error };
+    state.store_device_discovery(discovery.clone());
+    discovery
+}
+
+// Called while sidecar_start holds EngineState::gate, after the canonical
+// selection has been snapshotted but before llama-server is spawned. That
+// makes the identity describe the exact hardware policy used by this child,
+// not a best-effort renderer-side mirror.
+pub(crate) async fn resolve_hardware_identity<R: Runtime>(
+    app: &AppHandle<R>,
+    state: &EngineState,
+    selection: &super::compute_device::ComputeDeviceSelection,
+) -> ResolvedHardwareIdentity {
+    // CPU and packaged Linux Auto already have a complete, safe identity:
+    // zero model layers means --device none/--no-mmproj-offload, so invoking
+    // `--list-devices` would only initialize an unused GPU backend. Do not
+    // touch a broken driver merely to describe a known CPU policy.
+    if !selection_requires_device_discovery(selection) {
+        return resolved_hardware_identity(selection, &DeviceDiscovery::default(), false);
+    }
+    let candidates = resolve_candidates(app);
+    let discovery = device_discovery(app, state, &candidates).await;
+    resolved_hardware_identity(selection, &discovery, !candidates.is_empty())
+}
+
 #[derive(Serialize)]
 pub struct EngineInfo {
     pub supported: bool,
@@ -407,6 +554,7 @@ pub struct EngineInfo {
     pub last_error: Option<String>,
     pub devices: Vec<EngineDevice>,
     pub device_error: Option<String>,
+    pub hardware_identity: ResolvedHardwareIdentity,
 }
 
 #[tauri::command]
@@ -415,21 +563,10 @@ pub async fn engine_info<R: Runtime>(
     state: State<'_, EngineState>,
 ) -> Result<EngineInfo, String> {
     let candidates = resolve_candidates(&app);
-    let discovery = if candidates.is_empty() {
-        DeviceDiscovery::default()
-    } else if let Some(cached) = state.cached_device_discovery() {
-        cached
-    } else {
-        let _probe_gate = state.device_probe_gate.lock().await;
-        if let Some(cached) = state.cached_device_discovery() {
-            cached
-        } else {
-            let (devices, error) = discover_devices(&app, &candidates).await;
-            let discovery = DeviceDiscovery { devices, error };
-            state.store_device_discovery(discovery.clone());
-            discovery
-        }
-    };
+    let discovery = device_discovery(&app, &state, &candidates).await;
+    let selection = super::compute_device::read_selection(&app);
+    let hardware_identity =
+        resolved_hardware_identity(&selection, &discovery, !candidates.is_empty());
     let meta = state.meta.lock().map_err(|e| e.to_string())?;
     Ok(EngineInfo {
         supported: asset_for(TARGET_TRIPLE).is_some(),
@@ -440,6 +577,7 @@ pub async fn engine_info<R: Runtime>(
         last_error: meta.last_error.clone(),
         devices: discovery.devices,
         device_error: discovery.error,
+        hardware_identity,
     })
 }
 
@@ -981,6 +1119,119 @@ ggml_vulkan: diagnostic after list
                 id: "Vulkan0".to_string(),
                 label: "First".to_string(),
             }]
+        );
+    }
+
+    #[test]
+    fn hardware_identity_keeps_auto_topology_order_but_ignores_free_vram() {
+        let selection = super::super::compute_device::ComputeDeviceSelection::Auto;
+        let first = DeviceDiscovery {
+            devices: vec![
+                EngineDevice {
+                    id: "Vulkan0".to_string(),
+                    label: "NVIDIA RTX 4080 (16376 MiB, 15120 MiB free)".to_string(),
+                },
+                EngineDevice {
+                    id: "Vulkan1".to_string(),
+                    label: "AMD Radeon RX 7800 XT (16368 MiB, 14200 MiB free)".to_string(),
+                },
+            ],
+            error: None,
+        };
+        let changed_free_memory = DeviceDiscovery {
+            devices: vec![
+                EngineDevice {
+                    id: "Vulkan0".to_string(),
+                    label: "NVIDIA RTX 4080 (16376 MiB, 120 MiB free)".to_string(),
+                },
+                EngineDevice {
+                    id: "Vulkan1".to_string(),
+                    label: "AMD Radeon RX 7800 XT (16368 MiB, 80 MiB free)".to_string(),
+                },
+            ],
+            error: None,
+        };
+
+        let identity = resolved_hardware_identity(&selection, &first, true);
+        assert_eq!(identity.selection, "auto");
+        assert_eq!(
+            identity.topology,
+            Some(vec![
+                EngineDevice {
+                    id: "Vulkan0".to_string(),
+                    label: "NVIDIA RTX 4080 (16376 MiB)".to_string(),
+                },
+                EngineDevice {
+                    id: "Vulkan1".to_string(),
+                    label: "AMD Radeon RX 7800 XT (16368 MiB)".to_string(),
+                },
+            ])
+        );
+        assert_eq!(
+            identity,
+            resolved_hardware_identity(&selection, &changed_free_memory, true)
+        );
+        // Linux Auto keeps text and projector on CPU for the packaged build.
+        // A custom GPU-capable binary may still list devices; identity must
+        // describe the zero-layer policy actually spawned, not that unused
+        // discovery result.
+        assert_eq!(
+            resolved_hardware_identity_for_offload(&selection, &first, true, false).topology,
+            Some(Vec::new())
+        );
+    }
+
+    #[test]
+    fn hardware_identity_rejects_unknown_or_remapped_explicit_device() {
+        let selection =
+            super::super::compute_device::ComputeDeviceSelection::Device("Vulkan1".to_string());
+        let discovery = DeviceDiscovery {
+            devices: vec![EngineDevice {
+                id: "Vulkan0".to_string(),
+                label: "Integrated GPU".to_string(),
+            }],
+            error: None,
+        };
+
+        assert_eq!(
+            resolved_hardware_identity(&selection, &discovery, true).topology,
+            None
+        );
+        assert_eq!(
+            resolved_hardware_identity(
+                &super::super::compute_device::ComputeDeviceSelection::Cpu,
+                &DeviceDiscovery::default(),
+                false,
+            )
+            .topology,
+            Some(Vec::new())
+        );
+    }
+
+    #[test]
+    fn zero_offload_identity_skips_device_discovery_and_stays_cpu_resolved() {
+        let cpu = super::super::compute_device::ComputeDeviceSelection::Cpu;
+        assert!(!selection_requires_device_discovery(&cpu));
+        assert_eq!(
+            resolved_hardware_identity(
+                &cpu,
+                &DeviceDiscovery {
+                    devices: vec![EngineDevice {
+                        id: "Vulkan0".to_string(),
+                        label: "GPU that must not be initialized".to_string(),
+                    }],
+                    error: Some("driver wedged".to_string()),
+                },
+                true,
+            )
+            .topology,
+            Some(Vec::new())
+        );
+
+        let auto = super::super::compute_device::ComputeDeviceSelection::Auto;
+        assert_eq!(
+            selection_requires_device_discovery(&auto),
+            super::super::compute_device::gpu_layers(&auto) != "0"
         );
     }
 

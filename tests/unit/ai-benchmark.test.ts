@@ -3,15 +3,23 @@ import { afterEach, beforeEach, describe, expect, test } from 'vitest'
 import {
   __resetBenchmarkRuntime,
   __setBenchmarkRuntime,
-  INFERENCE_ENGINE_FINGERPRINT,
+  clearCurrentAiHardwareIdentity,
+  inferenceEngineFingerprintFor,
   isBenchmarkStale,
   runBenchmark,
+  setCurrentAiHardwareIdentity,
   summariseBenchmark,
   SUPPORTED_MODELS,
+  type AiHardwareIdentity,
   type BenchmarkProgress,
   type BenchmarkRuntime,
   type ChatCompletionRequest,
 } from '@/features/ai'
+
+const TEST_HARDWARE_IDENTITY: AiHardwareIdentity = {
+  selection: 'device:Vulkan0',
+  topology: [{ id: 'Vulkan0', label: 'NVIDIA RTX 4080' }],
+}
 
 function makeFakeRuntime({
   perCallSec,
@@ -56,7 +64,7 @@ function makeFakeRuntime({
     startSidecar: async (params) => {
       if (startThrows) throw startThrows
       startedWith.push(params)
-      return { port: 31337 }
+      return { port: 31337, hardwareIdentity: TEST_HARDWARE_IDENTITY }
     },
     stopSidecar: async () => {
       stops += 1
@@ -85,9 +93,11 @@ function makeFakeRuntime({
 describe('runBenchmark', () => {
   beforeEach(() => {
     __resetBenchmarkRuntime()
+    setCurrentAiHardwareIdentity(TEST_HARDWARE_IDENTITY)
   })
   afterEach(() => {
     __resetBenchmarkRuntime()
+    clearCurrentAiHardwareIdentity()
   })
 
   test('discards the cold-start warmup sample and stops the sidecar', async () => {
@@ -215,21 +225,37 @@ describe('runBenchmark', () => {
 // stamp entirely) must read as stale so the picker and sample loop do not
 // present or trust incompatible timing numbers.
 describe('benchmark fingerprint staleness', () => {
-  test('summariseBenchmark stamps the current engine fingerprint', () => {
+  beforeEach(() => {
+    setCurrentAiHardwareIdentity(TEST_HARDWARE_IDENTITY)
+  })
+
+  afterEach(() => {
+    clearCurrentAiHardwareIdentity()
+  })
+
+  test('summariseBenchmark stamps the native sidecar hardware identity', () => {
     const result = summariseBenchmark({
       samplesSec: [3, 5, 8],
       completedAtSec: 1_700_000_000,
+      hardwareIdentity: TEST_HARDWARE_IDENTITY,
     })
-    expect(result.engineFingerprint).toBe(INFERENCE_ENGINE_FINGERPRINT)
+    expect(result.hardwareIdentity).toEqual(TEST_HARDWARE_IDENTITY)
+    expect(result.engineFingerprint).toBe(
+      inferenceEngineFingerprintFor(TEST_HARDWARE_IDENTITY)
+    )
     expect(isBenchmarkStale(result)).toBe(false)
   })
 
-  test('a record without a fingerprint (pre-stamp build) is stale', () => {
+  test('a record without a resolved native identity is stale', () => {
     const result = summariseBenchmark({
       samplesSec: [3],
       completedAtSec: 1_700_000_000,
+      hardwareIdentity: TEST_HARDWARE_IDENTITY,
     })
     expect(isBenchmarkStale({ ...result, engineFingerprint: undefined })).toBe(
+      true
+    )
+    expect(isBenchmarkStale({ ...result, hardwareIdentity: undefined })).toBe(
       true
     )
     expect(
@@ -239,5 +265,45 @@ describe('benchmark fingerprint staleness', () => {
     expect(
       isBenchmarkStale({ ...result, engineFingerprint: 'b9095-ngl99' })
     ).toBe(true)
+  })
+
+  test('invalidates Auto after an eGPU or device-order topology change', () => {
+    const auto: AiHardwareIdentity = {
+      selection: 'auto',
+      topology: [{ id: 'Vulkan0', label: 'Integrated GPU' }],
+    }
+    const result = summariseBenchmark({
+      samplesSec: [3],
+      completedAtSec: 1_700_000_000,
+      hardwareIdentity: auto,
+    })
+    setCurrentAiHardwareIdentity(auto)
+    expect(isBenchmarkStale(result)).toBe(false)
+
+    setCurrentAiHardwareIdentity({
+      selection: 'auto',
+      topology: [
+        { id: 'Vulkan0', label: 'eGPU' },
+        { id: 'Vulkan1', label: 'Integrated GPU' },
+      ],
+    })
+    expect(isBenchmarkStale(result)).toBe(true)
+  })
+
+  test('invalidates an explicit ordinal when it resolves to different hardware', () => {
+    const explicit: AiHardwareIdentity = {
+      selection: 'device:Vulkan1',
+      topology: [{ id: 'Vulkan1', label: 'AMD Radeon RX 7800 XT' }],
+    }
+    const result = summariseBenchmark({
+      samplesSec: [3],
+      completedAtSec: 1_700_000_000,
+      hardwareIdentity: explicit,
+    })
+    setCurrentAiHardwareIdentity({
+      selection: 'device:Vulkan1',
+      topology: [{ id: 'Vulkan1', label: 'NVIDIA RTX 4080 eGPU' }],
+    })
+    expect(isBenchmarkStale(result)).toBe(true)
   })
 })

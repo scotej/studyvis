@@ -1550,55 +1550,6 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
     // teardown belongs to an obsolete loop and must not open a capture prompt.
     if (state.stopped) return
 
-    // Read the measured cadence floor from the model store. The V2-P2
-    // benchmark sets sampleIntervalSec; if the user hasn't benchmarked yet
-    // (or the record was forgotten), the fallback floor keeps the loop
-    // ticking but logs. The effective per-tick interval layers the user's
-    // Settings → AI override on top of this floor (see effectiveIntervalSec).
-    const storedBenchmark =
-      useModelStore.getState().records[opts.modelId]?.benchmark ?? null
-    // #171 — the cache-cold benchmark protocol is part of the fingerprint.
-    // Old records can be far too optimistic, so unlike the pre-fix code they
-    // do not drive cadence, slowdown detection, or the live request timeout.
-    const benchmark =
-      storedBenchmark && !isBenchmarkStale(storedBenchmark)
-        ? storedBenchmark
-        : null
-    const benchmarkStale = storedBenchmark !== null && benchmark === null
-    const interval = benchmark?.sampleIntervalSec
-    if (
-      typeof interval === 'number' &&
-      interval >= FALLBACK_SAMPLE_INTERVAL_SEC
-    ) {
-      state.modelFloorSec = interval
-    } else {
-      // Not a fault: an unmeasured or stale model gets the safe fallback until
-      // the user runs the current cache-cold benchmark.
-      log.info(benchmarkStale ? 'benchmark.stale' : 'benchmark.missing', {
-        modelId: opts.modelId,
-        fallbackIntervalSec: FALLBACK_SAMPLE_INTERVAL_SEC,
-        fallbackRequestTimeoutMs: MAX_REQUEST_TIMEOUT_MS,
-      })
-      state.modelFloorSec = FALLBACK_SAMPLE_INTERVAL_SEC
-    }
-    // A6 — the benchmark p95 is the baseline the cadence backoff compares each
-    // tick against. 0 (no benchmark) disables backoff in nextBackoffState.
-    state.modelP95Sec =
-      typeof benchmark?.p95Sec === 'number' && benchmark.p95Sec > 0
-        ? benchmark.p95Sec
-        : 0
-    log.info('boot.cadence', {
-      modelId: opts.modelId,
-      benchmarkPresent: storedBenchmark !== null,
-      benchmarkCurrent: benchmark !== null,
-      modelFloorSec: state.modelFloorSec,
-      modelP95Sec: state.modelP95Sec,
-      effectiveIntervalSec: effectiveIntervalSec(
-        state.modelFloorSec,
-        useSettingsStore.getState().values.sampleIntervalSec
-      ),
-    })
-
     // I83 — screen capture is acquired BEFORE the sidecar, not after. Both
     // orders tear down cleanly, but this one never asks llama-server to load
     // a multi-GB model that a failed acquire is about to kill milliseconds
@@ -1812,6 +1763,55 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
     log.info('sidecar.ready', {
       modelId: opts.modelId,
       elapsedMs: Math.max(0, runtime.now() - sidecarStartedAt),
+    })
+
+    // Read benchmark cadence only after the native sidecar start has resolved
+    // and stored its canonical selection/topology identity. On a normal app
+    // relaunch Settings may never mount, so checking earlier would see no
+    // identity and incorrectly discard a matching persisted benchmark for the
+    // entire session.
+    const storedBenchmark =
+      useModelStore.getState().records[opts.modelId]?.benchmark ?? null
+    // #171 — the cache-cold benchmark protocol is part of the fingerprint.
+    // Old records can be far too optimistic, so unlike the pre-fix code they
+    // do not drive cadence, slowdown detection, or the live request timeout.
+    const benchmark =
+      storedBenchmark && !isBenchmarkStale(storedBenchmark)
+        ? storedBenchmark
+        : null
+    const benchmarkStale = storedBenchmark !== null && benchmark === null
+    const interval = benchmark?.sampleIntervalSec
+    if (
+      typeof interval === 'number' &&
+      interval >= FALLBACK_SAMPLE_INTERVAL_SEC
+    ) {
+      state.modelFloorSec = interval
+    } else {
+      // Not a fault: an unmeasured or stale model gets the safe fallback until
+      // the user runs the current cache-cold benchmark.
+      log.info(benchmarkStale ? 'benchmark.stale' : 'benchmark.missing', {
+        modelId: opts.modelId,
+        fallbackIntervalSec: FALLBACK_SAMPLE_INTERVAL_SEC,
+        fallbackRequestTimeoutMs: MAX_REQUEST_TIMEOUT_MS,
+      })
+      state.modelFloorSec = FALLBACK_SAMPLE_INTERVAL_SEC
+    }
+    // A6 — the benchmark p95 is the baseline the cadence backoff compares each
+    // tick against. 0 (no benchmark) disables backoff in nextBackoffState.
+    state.modelP95Sec =
+      typeof benchmark?.p95Sec === 'number' && benchmark.p95Sec > 0
+        ? benchmark.p95Sec
+        : 0
+    log.info('boot.cadence', {
+      modelId: opts.modelId,
+      benchmarkPresent: storedBenchmark !== null,
+      benchmarkCurrent: benchmark !== null,
+      modelFloorSec: state.modelFloorSec,
+      modelP95Sec: state.modelP95Sec,
+      effectiveIntervalSec: effectiveIntervalSec(
+        state.modelFloorSec,
+        useSettingsStore.getState().values.sampleIntervalSec
+      ),
     })
 
     // Seed the battery cache before scheduling — first tick should use a

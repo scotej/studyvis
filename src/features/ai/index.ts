@@ -35,14 +35,24 @@ export {
   AI_COMPUTE_DEVICE_KEY,
   AI_HARDWARE_FILE,
   DEFAULT_AI_COMPUTE_DEVICE,
+  aiHardwareIdentitiesEqual,
+  clearCurrentAiHardwareIdentity,
   computeDeviceFingerprint,
   computeDeviceId,
+  currentAiHardwareIdentity,
   hydrateAiComputeDeviceSelection,
+  isAiHardwareIdentity,
   isAiComputeDeviceSelection,
+  isResolvedAiHardwareIdentity,
   persistAiComputeDeviceSelection,
   readCachedAiComputeDeviceSelection,
+  setCurrentAiHardwareIdentity,
 } from './computeDevice'
-export type { AiComputeDeviceSelection } from './computeDevice'
+export type {
+  AiComputeDeviceSelection,
+  AiHardwareIdentity,
+  AiHardwareTopologyDevice,
+} from './computeDevice'
 
 export {
   SUPPORTED_MODELS,

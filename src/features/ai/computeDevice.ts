@@ -8,6 +8,20 @@ export type AiComputeDeviceSelection = 'auto' | 'cpu' | `device:${string}`
 
 export const DEFAULT_AI_COMPUTE_DEVICE: AiComputeDeviceSelection = 'auto'
 
+// This is returned by Rust, which reads the canonical Tauri store immediately
+// before spawning llama-server. `topology` is null when the native engine
+// could not safely resolve the accelerator layout; callers must treat that as
+// unbenchmarked rather than accidentally trusting a localStorage mirror.
+export type AiHardwareTopologyDevice = {
+  id: string
+  label: string
+}
+
+export type AiHardwareIdentity = {
+  selection: AiComputeDeviceSelection
+  topology: AiHardwareTopologyDevice[] | null
+}
+
 function isTauriRuntime(): boolean {
   return (
     typeof window !== 'undefined' &&
@@ -51,6 +65,102 @@ export function computeDeviceFingerprint(
   return `device-${encodeURIComponent(computeDeviceId(selection) ?? '')}`
 }
 
+function isAiHardwareTopologyDevice(
+  value: unknown
+): value is AiHardwareTopologyDevice {
+  const id =
+    typeof value === 'object' && value !== null
+      ? (value as { id?: unknown }).id
+      : undefined
+  const label =
+    typeof value === 'object' && value !== null
+      ? (value as { label?: unknown }).label
+      : undefined
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    typeof id === 'string' &&
+    isAiComputeDeviceSelection(`device:${id}`) &&
+    typeof label === 'string' &&
+    label.length > 0 &&
+    label.length <= 256
+  )
+}
+
+export function isAiHardwareIdentity(
+  value: unknown
+): value is AiHardwareIdentity {
+  if (typeof value !== 'object' || value === null) return false
+  const { selection, topology } = value as {
+    selection?: unknown
+    topology?: unknown
+  }
+  return (
+    isAiComputeDeviceSelection(selection) &&
+    (topology === null ||
+      (Array.isArray(topology) &&
+        topology.length <= 128 &&
+        topology.every(isAiHardwareTopologyDevice)))
+  )
+}
+
+function identitiesEqual(
+  left: AiHardwareIdentity,
+  right: AiHardwareIdentity
+): boolean {
+  return JSON.stringify(left) === JSON.stringify(right)
+}
+
+let currentHardwareIdentity: AiHardwareIdentity | null = null
+// Set as soon as hydration or a user write knows which canonical selection we
+// expect. A late engine_info response for the old selection is then ignored
+// instead of re-validating its old benchmark during the write window.
+let expectedCanonicalSelection: AiComputeDeviceSelection | null = null
+
+function discardCurrentAiHardwareIdentity(): void {
+  currentHardwareIdentity = null
+}
+
+// Only Rust can establish this value: it reads the canonical store and probes
+// the engine topology in the same native process that launches the sidecar.
+// The browser cache remains solely a UI bootstrap hint and is deliberately not
+// allowed to make a persisted benchmark current.
+export function setCurrentAiHardwareIdentity(identity: unknown): void {
+  if (!isAiHardwareIdentity(identity)) {
+    discardCurrentAiHardwareIdentity()
+    return
+  }
+  if (
+    expectedCanonicalSelection !== null &&
+    identity.selection !== expectedCanonicalSelection
+  ) {
+    return
+  }
+  currentHardwareIdentity = identity
+}
+
+export function clearCurrentAiHardwareIdentity(): void {
+  expectedCanonicalSelection = null
+  discardCurrentAiHardwareIdentity()
+}
+
+export function currentAiHardwareIdentity(): AiHardwareIdentity | null {
+  return currentHardwareIdentity
+}
+
+export function isResolvedAiHardwareIdentity(
+  identity: AiHardwareIdentity | null
+): identity is AiHardwareIdentity {
+  return identity !== null && identity.topology !== null
+}
+
+export function aiHardwareIdentitiesEqual(
+  left: AiHardwareIdentity,
+  right: AiHardwareIdentity
+): boolean {
+  return identitiesEqual(left, right)
+}
+
 export function readCachedAiComputeDeviceSelection(): AiComputeDeviceSelection {
   if (typeof window === 'undefined') return DEFAULT_AI_COMPUTE_DEVICE
   try {
@@ -85,6 +195,10 @@ export async function hydrateAiComputeDeviceSelection(): Promise<AiComputeDevice
     const selection = isAiComputeDeviceSelection(stored)
       ? stored
       : DEFAULT_AI_COMPUTE_DEVICE
+    expectedCanonicalSelection = selection
+    if (currentHardwareIdentity?.selection !== selection) {
+      discardCurrentAiHardwareIdentity()
+    }
     writeCache(selection)
     return selection
   } catch {
@@ -98,10 +212,22 @@ export async function persistAiComputeDeviceSelection(
   if (!isAiComputeDeviceSelection(selection)) {
     throw new Error('invalid AI compute device selection')
   }
-  if (isTauriRuntime()) {
-    const store = hardwareStore()
-    await store.set(AI_COMPUTE_DEVICE_KEY, selection)
-    await store.save()
+  // Invalidate before the async write: a click changing CPU/Auto/eGPU must
+  // never leave the old native identity eligible while persistence is pending.
+  expectedCanonicalSelection = selection
+  discardCurrentAiHardwareIdentity()
+  try {
+    if (isTauriRuntime()) {
+      const store = hardwareStore()
+      await store.set(AI_COMPUTE_DEVICE_KEY, selection)
+      await store.save()
+    }
+    writeCache(selection)
+  } catch (error) {
+    // The prior canonical value is unknown to this module after a failed
+    // write. Accept no identity until a fresh native read establishes it.
+    expectedCanonicalSelection = null
+    discardCurrentAiHardwareIdentity()
+    throw error
   }
-  writeCache(selection)
 }

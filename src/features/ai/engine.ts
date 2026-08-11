@@ -5,6 +5,11 @@
 import { invoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 
+import {
+  setCurrentAiHardwareIdentity,
+  type AiHardwareIdentity,
+} from './computeDevice'
+
 export type EngineSource = 'bundled' | 'managed'
 
 export type EngineDevice = {
@@ -21,6 +26,7 @@ export type EngineInfo = {
   last_error: string | null
   devices: EngineDevice[]
   device_error: string | null
+  hardware_identity: AiHardwareIdentity
 }
 
 export type EnginePhase =
@@ -44,7 +50,14 @@ export type EngineRuntime = {
 const PROGRESS_EVENT_NAME = 'engine:progress'
 
 const defaultRuntime: EngineRuntime = {
-  info: () => invoke<EngineInfo>('engine_info'),
+  info: async () => {
+    const info = await invoke<EngineInfo>('engine_info')
+    // Native engine_info reads the canonical Tauri store plus its resolved
+    // accelerator topology. This is the only renderer-side source allowed to
+    // make a persisted benchmark current.
+    setCurrentAiHardwareIdentity(info.hardware_identity)
+    return info
+  },
   install: () => invoke<void>('engine_install'),
   subscribeProgress: (handler) =>
     listen<EngineProgressEvent>(PROGRESS_EVENT_NAME, (evt) =>

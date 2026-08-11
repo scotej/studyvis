@@ -110,6 +110,10 @@ struct SidecarInner {
     // stop a child that was started through an equivalent symlink path.
     managed_model_ids: Vec<String>,
     ctx_size: Option<u32>,
+    // Native canonical selection plus the accelerator topology resolved for
+    // this child. The JS benchmark stamps this exact value, never a browser
+    // storage mirror read before the Tauri store hydration has completed.
+    hardware_identity: Option<super::engine::ResolvedHardwareIdentity>,
     // generation increments on every explicit start so a stale watcher from a
     // previous run knows to exit instead of re-incarnating the process.
     generation: u64,
@@ -183,6 +187,16 @@ pub struct SidecarStatus {
     pub ctx_size: Option<u32>,
     pub errored: bool,
     pub last_error: Option<String>,
+    // Present only while the active child is known to use this exact native
+    // selection/topology. Renderer reload recovery adopts it through
+    // sidecar_status; failed crash-restarts deliberately clear it.
+    pub hardware_identity: Option<super::engine::ResolvedHardwareIdentity>,
+}
+
+#[derive(Serialize, Clone)]
+pub struct SidecarStartResult {
+    pub port: u16,
+    pub hardware_identity: super::engine::ResolvedHardwareIdentity,
 }
 
 fn mark_starting(guard: &mut SidecarInner) -> u64 {
@@ -213,7 +227,7 @@ pub async fn sidecar_start<R: Runtime>(
     mmproj_path: Option<String>,
     ctx_size: u32,
     engine_auto_install: bool,
-) -> Result<u16, String> {
+) -> Result<SidecarStartResult, String> {
     let arc = state.0.clone();
     if !PathBuf::from(&model_path).is_file() {
         return Err(format!("model_path does not exist: {model_path}"));
@@ -244,9 +258,17 @@ pub async fn sidecar_start<R: Runtime>(
     let start_epoch = {
         let mut guard = arc.lock().await;
         if guard.child.is_some() {
-            return guard
+            let port = guard
                 .port
-                .ok_or_else(|| "sidecar running but no port recorded".to_string());
+                .ok_or_else(|| "sidecar running but no port recorded".to_string())?;
+            let hardware_identity = guard
+                .hardware_identity
+                .clone()
+                .ok_or_else(|| "sidecar running but no hardware identity recorded".to_string())?;
+            return Ok(SidecarStartResult {
+                port,
+                hardware_identity,
+            });
         }
         // A watcher keeps model metadata during its restart backoff so a
         // concurrent remove/download can invalidate the pending respawn. An
@@ -291,7 +313,7 @@ async fn sidecar_start_marked<R: Runtime>(
     ctx_size: u32,
     engine_auto_install: bool,
     start_epoch: u64,
-) -> Result<u16, String> {
+) -> Result<SidecarStartResult, String> {
     // Engine presence check OUTSIDE the sidecar lock: a first-run download
     // takes a while and sidecar_status polls must stay responsive. The
     // engine module serializes concurrent installs itself.
@@ -328,15 +350,30 @@ async fn sidecar_start_marked<R: Runtime>(
         }
     }
 
+    // Snapshot the native selection and topology before taking the sidecar
+    // lock. The engine gate held by this caller keeps an install/replacement
+    // from changing the executable underneath the probe or spawn.
+    let compute_device = super::compute_device::read_selection(&app);
+    let hardware_identity =
+        super::engine::resolve_hardware_identity(&app, engine, &compute_device).await;
+
     let mut guard = arc.lock().await;
     if guard.start_epoch != start_epoch {
         return Err("sidecar start superseded".to_string());
     }
     // Re-check after the unlocked window — a concurrent start may have won.
     if guard.child.is_some() {
-        return guard
+        let port = guard
             .port
-            .ok_or_else(|| "sidecar running but no port recorded".to_string());
+            .ok_or_else(|| "sidecar running but no port recorded".to_string())?;
+        let hardware_identity = guard
+            .hardware_identity
+            .clone()
+            .ok_or_else(|| "sidecar running but no hardware identity recorded".to_string())?;
+        return Ok(SidecarStartResult {
+            port,
+            hardware_identity,
+        });
     }
     if guard.shutting_down {
         return Err("app is shutting down".to_string());
@@ -345,7 +382,6 @@ async fn sidecar_start_marked<R: Runtime>(
     let port = pick_unused_port()?;
     guard.generation = guard.generation.wrapping_add(1);
     let generation = guard.generation;
-    let compute_device = super::compute_device::read_selection(&app);
     let gpu_layers = super::compute_device::gpu_layers(&compute_device);
     let compute_label = super::compute_device::selection_log_label(&compute_device);
     let log_path = ensure_log_path(&app)?;
@@ -386,6 +422,7 @@ async fn sidecar_start_marked<R: Runtime>(
     guard.mmproj = mmproj_path.clone();
     guard.managed_model_ids = managed_model_ids;
     guard.ctx_size = Some(ctx_size);
+    guard.hardware_identity = Some(hardware_identity.clone());
     guard.errored = false;
     guard.last_error = None;
     let app_for_watcher = app.clone();
@@ -408,7 +445,10 @@ async fn sidecar_start_marked<R: Runtime>(
     });
     drop(guard);
 
-    Ok(port)
+    Ok(SidecarStartResult {
+        port,
+        hardware_identity,
+    })
 }
 
 // Bumping the generation tells the in-flight watcher to exit instead of
@@ -425,6 +465,7 @@ fn take_child_and_wipe(guard: &mut SidecarInner) -> Option<CommandChild> {
     guard.mmproj = None;
     guard.managed_model_ids.clear();
     guard.ctx_size = None;
+    guard.hardware_identity = None;
     guard.errored = false;
     guard.last_error = None;
     child
@@ -494,6 +535,9 @@ fn snapshot_status(guard: &SidecarInner) -> SidecarStatus {
         ctx_size: guard.ctx_size,
         errored: guard.errored,
         last_error: guard.last_error.clone(),
+        // Keep the generation identity internally for the watcher comparison,
+        // but never advertise it while the child is down in restart backoff.
+        hardware_identity: guard.child.as_ref().and(guard.hardware_identity.clone()),
     }
 }
 
@@ -922,6 +966,26 @@ fn watcher_can_respawn(guard: &SidecarInner, generation: u64) -> bool {
     guard.generation == generation && !guard.shutting_down
 }
 
+// A crash restart must never reuse an identity captured for an eGPU/ordinal
+// that disappeared while the child was down. The watcher takes a fresh native
+// snapshot before spawning; only an exact match is safe to restart without an
+// explicit user action and a new benchmark.
+fn restart_identity_matches(
+    guard: &mut SidecarInner,
+    fresh_identity: &super::engine::ResolvedHardwareIdentity,
+) -> bool {
+    if guard.hardware_identity.as_ref() == Some(fresh_identity) {
+        return true;
+    }
+    guard.hardware_identity = None;
+    guard.errored = true;
+    guard.last_error = Some(
+        "AI hardware changed after the engine crashed; restart AI manually to resolve the new hardware"
+            .to_string(),
+    );
+    false
+}
+
 async fn watch<R: Runtime>(
     app: AppHandle<R>,
     state: Arc<Mutex<SidecarInner>>,
@@ -1003,6 +1067,7 @@ async fn watch<R: Runtime>(
         // engine is going to recover.
         if exceeded_total_restarts(total_restarts) {
             guard.errored = true;
+            guard.hardware_identity = None;
             guard.last_error = Some(append_windows_dll_hint(format!(
                 "the AI engine restarted {total_restarts} times this session and kept dying"
             )));
@@ -1018,6 +1083,7 @@ async fn watch<R: Runtime>(
         }
         if restart_attempts > RESTART_BUDGET {
             guard.errored = true;
+            guard.hardware_identity = None;
             // I83 — carry the Windows VC++ hint here too. A child that dies
             // inside the loader spawns successfully (CreateProcess returns a
             // handle before the DLL resolution that kills it), so it never
@@ -1049,6 +1115,16 @@ async fn watch<R: Runtime>(
         })
         .await;
 
+        // Re-resolve under the same engine gate as an explicit start. A crash
+        // can coincide with an eGPU detach or ordinal remap; retrying with the
+        // old generation's identity would make its benchmark timings unsafe.
+        // Keeping this gate through spawn also prevents reinstall from
+        // replacing the executable between the probe and child launch.
+        let engine = app.state::<super::engine::EngineState>();
+        let _engine_gate = engine.gate.lock().await;
+        let fresh_identity =
+            super::engine::resolve_hardware_identity(&app, &engine, &compute_device).await;
+
         // Re-check after the backoff and KEEP this lock through spawn and
         // child storage. The old code released it after this check, leaving a
         // window where app exit could find no child, mark shutdown, then the
@@ -1059,10 +1135,21 @@ async fn watch<R: Runtime>(
         if !watcher_can_respawn(&guard, generation) {
             return;
         }
+        if !restart_identity_matches(&mut guard, &fresh_identity) {
+            with_sidecar_log(|| {
+                let _ = writeln!(
+                    log,
+                    "[event gen={generation}] hardware changed; refusing automatic respawn"
+                );
+                let _ = log.flush();
+            });
+            return;
+        }
         let port = match pick_unused_port() {
             Ok(p) => p,
             Err(e) => {
                 guard.errored = true;
+                guard.hardware_identity = None;
                 guard.last_error = Some(e.clone());
                 guard.port = None;
                 with_sidecar_log(|| {
@@ -1086,6 +1173,7 @@ async fn watch<R: Runtime>(
             Ok(pair) => pair,
             Err(e) => {
                 guard.errored = true;
+                guard.hardware_identity = None;
                 guard.last_error = Some(e.clone());
                 guard.port = None;
                 with_sidecar_log(|| {
@@ -1236,6 +1324,39 @@ mod tests {
         inner.shutting_down = false;
         inner.generation = 10;
         assert!(!watcher_can_respawn(&inner, 9));
+    }
+
+    #[test]
+    fn watcher_refuses_a_restart_when_native_hardware_identity_changes() {
+        let expected = super::super::engine::ResolvedHardwareIdentity {
+            selection: "auto".to_string(),
+            topology: Some(vec![super::super::engine::EngineDevice {
+                id: "Vulkan0".to_string(),
+                label: "eGPU (16376 MiB)".to_string(),
+            }]),
+        };
+        let mut inner = SidecarInner {
+            hardware_identity: Some(expected.clone()),
+            ..SidecarInner::default()
+        };
+
+        assert!(restart_identity_matches(&mut inner, &expected));
+        assert!(inner.hardware_identity.is_some());
+
+        let remapped = super::super::engine::ResolvedHardwareIdentity {
+            selection: "auto".to_string(),
+            topology: Some(vec![super::super::engine::EngineDevice {
+                id: "Vulkan0".to_string(),
+                label: "Integrated GPU (8192 MiB)".to_string(),
+            }]),
+        };
+        assert!(!restart_identity_matches(&mut inner, &remapped));
+        assert!(inner.errored);
+        assert!(inner.hardware_identity.is_none());
+        assert!(inner
+            .last_error
+            .as_deref()
+            .is_some_and(|message| message.contains("hardware changed")));
     }
 
     #[test]

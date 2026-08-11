@@ -1,12 +1,20 @@
-import { describe, expect, test } from 'vitest'
+import { afterEach, describe, expect, test } from 'vitest'
 
 import {
+  clearCurrentAiHardwareIdentity,
   computeDeviceFingerprint,
   computeDeviceId,
+  currentAiHardwareIdentity,
   inferenceEngineFingerprintFor,
   isAiComputeDeviceSelection,
+  persistAiComputeDeviceSelection,
   readCachedAiComputeDeviceSelection,
+  setCurrentAiHardwareIdentity,
 } from '@/features/ai'
+
+afterEach(() => {
+  clearCurrentAiHardwareIdentity()
+})
 
 describe('AI compute device selection', () => {
   test('accepts automatic, CPU, and one explicit llama device', () => {
@@ -32,15 +40,50 @@ describe('AI compute device selection', () => {
   })
 
   test('benchmarks are hardware-qualified', () => {
-    expect(inferenceEngineFingerprintFor('auto')).not.toBe(
-      inferenceEngineFingerprintFor('cpu')
+    expect(
+      inferenceEngineFingerprintFor({ selection: 'auto', topology: [] })
+    ).not.toBe(
+      inferenceEngineFingerprintFor({ selection: 'cpu', topology: [] })
     )
-    expect(inferenceEngineFingerprintFor('device:Vulkan0')).not.toBe(
-      inferenceEngineFingerprintFor('device:Vulkan1')
+    expect(
+      inferenceEngineFingerprintFor({
+        selection: 'device:Vulkan0',
+        topology: [{ id: 'Vulkan0', label: 'GPU A' }],
+      })
+    ).not.toBe(
+      inferenceEngineFingerprintFor({
+        selection: 'device:Vulkan1',
+        topology: [{ id: 'Vulkan1', label: 'GPU B' }],
+      })
     )
   })
 
   test('node environments safely default to automatic hardware', () => {
     expect(readCachedAiComputeDeviceSelection()).toBe('auto')
+  })
+
+  test('a late native identity for the old choice cannot win a newer canonical write', async () => {
+    setCurrentAiHardwareIdentity({
+      selection: 'auto',
+      topology: [{ id: 'Vulkan0', label: 'Integrated GPU' }],
+    })
+    await persistAiComputeDeviceSelection('device:Vulkan1')
+
+    // Simulates an engine_info request started before the click completing
+    // after it. The canonical-write expectation rejects this stale response.
+    setCurrentAiHardwareIdentity({
+      selection: 'auto',
+      topology: [{ id: 'Vulkan0', label: 'Integrated GPU' }],
+    })
+    expect(currentAiHardwareIdentity()).toBeNull()
+
+    setCurrentAiHardwareIdentity({
+      selection: 'device:Vulkan1',
+      topology: [{ id: 'Vulkan1', label: 'eGPU' }],
+    })
+    expect(currentAiHardwareIdentity()).toEqual({
+      selection: 'device:Vulkan1',
+      topology: [{ id: 'Vulkan1', label: 'eGPU' }],
+    })
   })
 })
