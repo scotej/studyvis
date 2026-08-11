@@ -5,17 +5,28 @@ import { create } from 'zustand'
 // Pressed edges during one physical hold. PTT is hold-to-talk, so a Pressed
 // edge must never mean "release": repeated press() calls are idempotent.
 //
+// `awaitingRelease` is deliberately distinct from `active`. The first Pressed
+// edge starts one physical hold and sets both. The 120-second safety timer may
+// force `active` false, but it MUST leave `awaitingRelease` true: otherwise a
+// repeated Pressed from the same still-held key could be mistaken for a new
+// hold and re-open the microphone for another two minutes. Only an actual
+// Released edge (or a session reset) ends the physical hold and permits the
+// next Pressed to activate again.
+//
 // Three independent guards keep the microphone fail-safe:
 //   1. `reset()` is called by SessionView's per-session reset effect AND on
 //      teardown so a stuck state never bleeds into the next session's first
 //      audio track (PLAN §5 default-muted).
-//   2. Duplicate/repeated `press()` calls while already active are ignored and
-//      DO NOT re-arm the failsafe. This preserves one continuous hold even if
-//      the native bridge repeats Pressed, and keeps the original timeout bound
-//      if the matching Released edge is genuinely lost.
+//   2. Duplicate/repeated `press()` calls while `awaitingRelease` are ignored
+//      and DO NOT re-arm the failsafe, including after that failsafe has muted
+//      the current hold.
 //   3. `MAX_HOLD_MS` is the last-resort stuck-key guard: the first press arms a
-//      self-release timer, so a missing release eventually returns to muted.
-//      The threshold is intentionally far beyond a normal utterance (2 min).
+//      self-mute timer. The physical hold remains latched until Released so the
+//      cutoff is authoritative rather than a renewable timeout.
+//
+// `revision` is a monotonic local state generation used by diagnostics to
+// detect an edge/failsafe racing an async WebRTC stats sample. It changes only
+// when the logical PTT state changes, never for duplicate edges.
 //
 // The timer is module-scoped (not store state) so it never participates in
 // equality checks / re-renders. Unit-tested via the injectable clock seam.
@@ -58,6 +69,8 @@ function clearHoldTimer(): void {
 
 type PttState = {
   active: boolean
+  awaitingRelease: boolean
+  revision: number
   press: () => void
   release: () => void
   reset: () => void
@@ -65,25 +78,48 @@ type PttState = {
 
 export const usePttStore = create<PttState>((set, get) => ({
   active: false,
+  awaitingRelease: false,
+  revision: 0,
   press: () => {
-    // A repeat/duplicate Pressed edge during one physical hold is a no-op.
-    // Never clear/re-arm the timer here: if Released was genuinely lost, the
-    // original MAX_HOLD_MS deadline must remain authoritative.
-    if (get().active) return
+    // A repeat from the current physical hold is always a no-op. In
+    // particular, the failsafe may already have muted `active`; the hold is
+    // still not eligible to activate again until its Released edge arrives.
+    if (get().awaitingRelease) return
 
     clearHoldTimer()
     holdTimer = activeScheduler.setTimeout(() => {
       holdTimer = null
-      set({ active: false })
+      const current = get()
+      if (!current.awaitingRelease || !current.active) return
+      set((state) => ({
+        active: false,
+        revision: state.revision + 1,
+      }))
     }, MAX_HOLD_MS)
-    set({ active: true })
+    set((state) => ({
+      active: true,
+      awaitingRelease: true,
+      revision: state.revision + 1,
+    }))
   },
   release: () => {
     clearHoldTimer()
-    set({ active: false })
+    const current = get()
+    if (!current.active && !current.awaitingRelease) return
+    set((state) => ({
+      active: false,
+      awaitingRelease: false,
+      revision: state.revision + 1,
+    }))
   },
   reset: () => {
     clearHoldTimer()
-    set({ active: false })
+    const current = get()
+    if (!current.active && !current.awaitingRelease) return
+    set((state) => ({
+      active: false,
+      awaitingRelease: false,
+      revision: state.revision + 1,
+    }))
   },
 }))
