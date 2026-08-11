@@ -343,7 +343,9 @@ describe('PTT media diagnostics', () => {
         track: track('audio', true),
         getStats: () => {
           started += 1
-          return new Promise<RTCStatsReport>((resolve) => resolvers.push(resolve))
+          return new Promise<RTCStatsReport>((resolve) =>
+            resolvers.push(resolve)
+          )
         },
       }) as unknown as RTCRtpSender
 
