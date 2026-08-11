@@ -41,8 +41,14 @@ pub(crate) fn read_selection<R: Runtime>(app: &AppHandle<R>) -> ComputeDeviceSel
 }
 
 pub(crate) fn gpu_layers(selection: &ComputeDeviceSelection) -> &'static str {
-    if matches!(selection, ComputeDeviceSelection::Cpu) {
-        return "0";
+    match selection {
+        ComputeDeviceSelection::Cpu => return "0",
+        // An explicit device only reaches this point after llama.cpp reports
+        // an accelerator. Honour that choice even on dev platforms whose
+        // packaged default engine is CPU-only; custom GPU-enabled Linux builds
+        // must not silently keep all model layers on the CPU.
+        ComputeDeviceSelection::Device(_) => return "99",
+        ComputeDeviceSelection::Auto => {}
     }
 
     #[cfg(any(target_os = "macos", target_os = "windows"))]
@@ -102,8 +108,9 @@ mod tests {
     }
 
     #[test]
-    fn explicit_selection_is_passed_as_one_device_argument() {
+    fn explicit_selection_enables_offload_and_passes_one_device_argument() {
         let selection = ComputeDeviceSelection::Device("Vulkan0".to_string());
+        assert_eq!(gpu_layers(&selection), "99");
         assert_eq!(device_arg(&selection), Some("Vulkan0"));
         assert_eq!(selection_log_label(&selection), "explicit");
     }
