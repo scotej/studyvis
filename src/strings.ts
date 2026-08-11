@@ -240,9 +240,6 @@ export const strings = {
           `That's ${wordCount} words. A backup has exactly 24.`,
         invalid:
           "Those 24 words don't add up. Check for a typo or a word out of place against your written copy.",
-        // `shown` is the (up to 3) named tokens, `total` the full count of
-        // words that aren't in the backup wordlist. Reads correctly at
-        // total = 24 (a comma-paste where every token is flagged).
         unknownWords: (shown: string[], total: number) => {
           const quoted = shown.map((w) => `"${w}"`)
           if (total === 1) {
@@ -257,9 +254,6 @@ export const strings = {
         },
       },
     },
-    // D1 — shown when identity.json exists but couldn't be read. The keys are
-    // still in the keychain; this screen never offers create-new (which would
-    // overwrite them), only Retry and Recover-from-backup.
     loadError: {
       ariaLabel: "Couldn't read your identity",
       heading: "We couldn't read your identity file",
@@ -269,10 +263,6 @@ export const strings = {
       retryCta: 'Try again',
       recoverCta: 'Restore from backup',
     },
-    // #47 E1 — identity.json parsed fine but the keychain holds no private
-    // keys (file-level backup restore, keychain/Credential Manager reset).
-    // Signing and decrypting are impossible, so the 24-word restore leads;
-    // retrying is offered only as the check-again fallback.
     keysMissing: {
       ariaLabel: 'Identity keys are missing',
       heading: 'Your identity keys are missing from this device',
@@ -285,31 +275,21 @@ export const strings = {
   },
 
   friends: {
-    // Stored by the friends store when the local friends table can't be
-    // read; friendly stand-in for the raw backend string (which goes to the
-    // console instead).
     loadError: "Couldn't load your friends list.",
     list: {
       heading: 'Friends',
       addCta: 'Add friend',
       empty: 'Add a friend to start studying together.',
       available: 'Available',
-      // I74 — relay heartbeats are landing but no P2P heartbeat has for the
-      // settle window: the friend is genuinely around, and a video session
-      // very likely won't connect. Both facts in one short label.
       availableLimited: 'Available · limited connection',
       limitedTitle:
         "You can see each other, but a direct connection isn't forming — video sessions may not connect.",
       offline: 'Offline',
-      // I74 — session-scoped recency once a friend drops offline. Beyond a
-      // day we stop counting and show the plain label.
       offlineSeen: {
         justNow: 'Offline · seen just now',
         minutesAgo: (n: number) => `Offline · seen ${n} min ago`,
         hoursAgo: (n: number) => `Offline · seen ${n} hr ago`,
       },
-      // I74 — shown once above the list while ANY friend is in the limited
-      // state; the one place that says what to do about it.
       limitedHint: {
         body: "A direct connection to some friends isn't forming, so video sessions may not connect. A TURN relay in Network settings usually fixes this.",
         cta: 'Network settings',
@@ -348,7 +328,6 @@ export const strings = {
         codeAriaLabel: 'One-time pairing code',
         qrAlt: 'QR code containing your one-time pairing link',
         qrCaption: 'Have your friend scan this — or send them the link below.',
-        // F9 — the ~10-minute one-time-use lifetime is otherwise invisible.
         freshnessNote:
           'One-time use. If a while has passed, close and reopen this to generate a fresh code.',
         copyAriaLabel: 'Copy pairing link to clipboard',
@@ -358,12 +337,8 @@ export const strings = {
         waiting: 'Waiting for your friend to enter the code.',
         stillWaiting:
           'Still waiting. Make sure your friend opened the Enter-code tab and typed this exact code.',
-        // F1 — distinct from stillWaiting: this blames the network, not the
-        // friend. Shown when trystero reports a join error (e.g. the relays
-        // are unreachable, or the other side is on a different code).
         networkTrouble:
           'Trouble reaching the network. Check your connection — some school or office networks block it. You can see relay status in Settings → Network.',
-        // F5 — peer arrived but no direct link formed (strict NAT, no TURN).
         linkStalled:
           "Connected to the network, but couldn't open a direct link to your friend. A strict firewall or NAT may be in the way — add a relay or TURN server in Settings → Network and try again.",
         introBody: (wordCount: number) =>
@@ -393,11 +368,8 @@ export const strings = {
           "Couldn't open the camera. Check its permission, or paste the code instead.",
         stillSearching:
           'Still searching. Make sure the other device generated this exact code and is online.',
-        // F1 — network-trouble variant of stillSearching (blames the network,
-        // not the other device).
         networkTrouble:
           'Trouble reaching the network. Check your connection — some school or office networks block it. You can see relay status in Settings → Network.',
-        // F5 — peer found but no direct link formed (strict NAT, no TURN).
         linkStalled:
           "Found your friend, but couldn't open a direct link. A strict firewall or NAT may be in the way — add a relay or TURN server in Settings → Network and try again.",
         clearCta: 'Clear',
@@ -413,9 +385,6 @@ export const strings = {
         pairingFailed: "Couldn't pair. Try again?",
       },
       defaultFriendName: 'your friend',
-      // Offline ContactCard surface — the primary way to add a friend. You swap
-      // self-contained codes (each carries only public keys) instead of meeting
-      // live on a relay, so it works even when one of you is offline.
       card: {
         title: 'Add a friend',
         description:
@@ -447,8 +416,6 @@ export const strings = {
         legacyLink: 'Friend on an older StudyVis? Use a pairing code',
         backToCards: '← Back',
       },
-      // Confirm sheet shown after a friend's code is decoded — the safety-number
-      // check is the man-in-the-middle defense on the remote (paste/link) path.
       importCard: {
         title: 'Add this friend?',
         body: (name: string) => `This code is for ${name}.`,
@@ -477,8 +444,6 @@ export const strings = {
       senderFallback: 'A friend',
       inviteBody: (name: string) => `${name} invites you to study`,
       acceptAction: 'Accept',
-      // #47 B1 — persistent pending-invite rows on the main view (invites
-      // are valid 5 minutes; the toast alone was missable).
       pending: {
         listAriaLabel: 'Pending invites',
         expiresIn: (min: number) => `Expires in ${min} min`,
@@ -491,21 +456,12 @@ export const strings = {
       },
     },
     inviteSent: (name: string) => `Invite sent to ${name}.`,
-    // #47 C2 — sent but no signed delivery confirmation came back: an older
-    // build, a slow answer, or a friend who never added you back (their
-    // inbox silently drops envelopes from non-friends).
     inviteSentUnconfirmed: (name: string) =>
       `Invite sent to ${name} — no confirmation from their app yet. If nothing happens, make sure they've added you back.`,
     inviteSendErrorFallback: "Couldn't send the invite.",
     joinErrorFallback: "Couldn't join the session.",
-    // F6 — friend was offline; we couldn't deliver now, but the invite is held
-    // and re-sent automatically the moment they come online (within a few
-    // minutes). Distinct from inviteRelayError below, which blames the network.
     inviteTimeout:
       "Your friend looks offline. We'll deliver this the moment they come online — keep your session open.",
-    // F1/F6 — the relays themselves were unreachable, so this is the user's own
-    // network, not an offline friend. No retry is queued (the relay would be
-    // just as unreachable), so the copy points at the network, not the friend.
     inviteRelayError:
       "Couldn't reach the network to send the invite. Check your connection — see relay status in Settings → Network.",
     inviteWhileGuest: 'Only the host can invite others to this session.',
@@ -515,8 +471,6 @@ export const strings = {
     footerHoldBefore: 'Hold ',
     footerHoldAfter: ' to talk.',
     mainAriaLabel: 'Active session',
-    // #96 — the grid holds shared screens as well as people now, so the label
-    // can no longer say "participants" and stay true.
     gridAriaLabel: 'Session participants and shared screens',
     mediaErrors: {
       denied: {
@@ -544,9 +498,6 @@ export const strings = {
     },
     leaveCta: 'Leave',
     escLeaveHint: 'Press Esc again to leave.',
-    // #47 A2 — mid-session invite (host only). Without it the first Invite
-    // click locked the host into a 1:1 session; the 4-user mesh was
-    // unreachable from the UI.
     invite: {
       cta: 'Invite',
       ctaAriaLabel: 'Invite a friend to this session',
@@ -559,15 +510,9 @@ export const strings = {
       invitedLabel: 'Invited',
       rowInviteAriaLabel: (name: string) => `Invite ${name} to this session`,
     },
-    // U2 — empty-peer waiting state (DESIGN-SYSTEM §10 empty-state: no
-    // spinner, calm copy) shown alongside the self tile while alone.
     waiting: {
-      // Never-had-peers: the most common first-session moment (you just
-      // invited and are sitting alone).
       title: 'Waiting for your friend to join…',
       body: "Your session is live. They'll appear here as soon as they accept your invite.",
-      // Emptied-after-peers (S1 grace window): a friend who'd joined dropped.
-      // Reconnect-flavored, not invite copy — they already accepted.
       reconnectTitle: 'Waiting for your friend to reconnect…',
       reconnectBody:
         "Your session is still live. They'll reappear here if they come back.",
@@ -588,8 +533,6 @@ export const strings = {
       panelHeading: 'Session log',
       empty: 'Events will appear here as people join, leave, and take breaks.',
     },
-    // #47 B6 — quiet in-session text notes. Ephemeral by design: nothing is
-    // recorded or persisted (PLAN §6 non-goal), notes die with the session.
     notes: {
       heading: 'Notes',
       empty:
@@ -650,9 +593,6 @@ export const strings = {
       online: 'Online',
       offline: 'Offline',
       onBreak: 'On break',
-      // F4 — WebRTC connection states surfaced on peer tiles so a mid-ICE
-      // handshake or a failed connection no longer reads as a frozen offline
-      // tile.
       connecting: 'Connecting…',
       failed: 'Connection failed',
     },
@@ -665,8 +605,6 @@ export const strings = {
     },
     aiStatus: {
       off: 'AI off',
-      // I83 — AI is on but has no model to run. Deliberately not "AI off":
-      // that wording sent the #92 reporter looking at the wrong setting.
       unconfigured: 'AI needs a model',
       active: 'AI watching',
       paused: 'AI paused',
@@ -683,20 +621,11 @@ export const strings = {
       menuLabel: 'Microphone',
       empty: 'No microphones detected',
     },
-    // S3 — local camera on/off control + the explicit peer presentation when
-    // someone has their camera off (a paused tile, never a frozen frame).
     camera: {
-      // Constant toggle label — pairs with aria-pressed so screen readers
-      // announce "Camera, pressed/not pressed" rather than double-encoding the
-      // state ("Turn camera on, pressed").
       toggleAriaLabel: 'Camera',
       offTileLabel: 'Camera off',
     },
-    // #96 — screen sharing. Everyone in the session can publish their screen
-    // alongside their camera; the tiles below sit in the same grid.
     screenShare: {
-      // Constant toggle label paired with aria-pressed, matching the camera
-      // control above rather than double-encoding state in the label.
       toggleAriaLabel: 'Share screen',
       startCta: 'Share',
       stopCta: 'Stop sharing',
@@ -709,15 +638,11 @@ export const strings = {
         "Try again and choose Entire Screen in the Windows picker. StudyVis won't share a single window or app.",
       entireScreenUnverifiedToast:
         "StudyVis couldn't verify that you chose Entire Screen, so sharing didn't start. Update Microsoft Edge WebView2, then try again.",
-      // NotAllowedError covers both "you dismissed the picker" and "the OS has
-      // not granted screen recording", and the two are indistinguishable from
-      // the rejection — so the copy has to hold for either.
       blockedToast:
         "Screen sharing didn't start. If you didn't cancel it, allow StudyVis under Screen Recording, then try again.",
       failedToast: "Couldn't start screen sharing.",
       openSettingsCta: 'Open settings',
     },
-    // S4 — audio output device picker + per-peer volume.
     output: {
       menuLabel: 'Speaker',
       ariaLabel: (label: string) => `Speaker, currently ${label}`,
@@ -729,14 +654,8 @@ export const strings = {
       leaveFailedFallback: "Couldn't leave the session.",
       switchMicFailedFallback: "Couldn't switch microphone.",
       requestAccessFallback: "Couldn't request access.",
-      // #47 B2 — toast action that opens the in-session settings overlay at
-      // the AI category (the copy above names it; the button honors it).
       openSettingsAction: 'Open settings',
       pickModel: 'Pick a model in Settings → AI.',
-      // I83 — the model store's own read failed (a locked or corrupt
-      // models.json), which is indistinguishable from "no model picked" to
-      // every other surface but needs different advice: nothing is wrong with
-      // the user's choice, the list just couldn't be loaded.
       modelListUnreadable:
         "Your AI model list couldn't be read, so AI sat out this session. Open Settings → AI to try again.",
       modelFilesMissing:
@@ -744,8 +663,6 @@ export const strings = {
       aiFailedToStart: 'AI failed to start.',
       aiFailedToStartDetail: (detail: string) =>
         `AI failed to start: ${detail}.`,
-      // I73 — engine missing with auto-install off: a setup state, not a
-      // crash. Calm copy, no scary detail string.
       engineNotInstalled:
         "The AI engine isn't installed. Install it in Settings → AI.",
       aiCaptureError: (message: string) => `AI capture error: ${message}.`,
@@ -755,15 +672,8 @@ export const strings = {
       aiPausedForBattery: (percent: number) =>
         `AI paused to save battery (${percent}%). Plug in or charge above 20% to resume.`,
       aiResumed: 'AI resumed.',
-      // A6 — one-shot notice when the duration-based cadence backoff engages
-      // (the model is running slower than measured, so checks are spaced out
-      // to give your machine room to cool).
       aiSlowedDown:
         'Checks are running slower than usual, so StudyVis is spacing them out to ease the load on your machine.',
-      // I82 — the AI loop has gone a sustained stretch without a single
-      // reading. Keys match `SampleBlockReason` in features/ai/sampleLoop.ts;
-      // the toast copy names the blocker, the log copy is the short "why"
-      // that rides on the session-log row.
       aiNoReading: {
         engine_warming:
           "AI hasn't managed a check yet — the engine is still starting up.",
@@ -787,10 +697,6 @@ export const strings = {
       aiReadingsResumed: 'AI is checking in again.',
     },
     full: 'This session is full (4 friends max).',
-    // N4 — quit-during-session confirm. Fired when the user tries to quit
-    // (window close with minimize-to-tray off, tray Quit, macOS Cmd+Q) while
-    // a session is live. The quit was already prevented by Rust; confirm
-    // invokes app_quit(), cancel just closes.
     quitConfirm: {
       title: 'Leave your session and quit?',
       body: "You're in a live session. Quitting now drops you from the call and ends your session for everyone.",
@@ -852,12 +758,7 @@ export const strings = {
   report: {
     notFound: 'Session not found.',
     loadErrorFallback: "Couldn't load the report.",
-    // #47 B3 / #190 — shown after an eligible auto or local-user ending
-    // while the remote room's teardown-time grace deadline is still open.
     rejoinCta: 'Rejoin session',
-    // #47 D5 — calm data-quality caveat when a material share of AI checks
-    // couldn't be read (see sampleQualitySummary): the focused-time % above
-    // it was computed over fewer checks than the session ran.
     dataQuality: (skipped: number, total: number) =>
       `${skipped} of ${total} AI checks couldn't be read and don't count toward focused time.`,
     loading: `Loading report${ELLIPSIS}`,
@@ -876,14 +777,7 @@ export const strings = {
       distractions: {
         heading: 'Top distractions',
         empty: 'No distractions detected. Nice work.',
-        // I83 — the same section when nothing was measured. "Nice work" is
-        // earned praise for a session the AI watched and found clean; on a
-        // session it never watched it was a fabricated all-clear, and it read
-        // as one right beside a score card admitting no score was recorded.
         emptyNoChecks: 'No AI checks ran, so nothing was measured here.',
-        // Distinct from emptyNoChecks: checks DID run, so "No AI checks ran"
-        // would be false. None of them could be read, so nothing was measured
-        // and the praise is still unearned.
         emptyNoReadableChecks:
           'AI checks ran but none could be read, so nothing was measured here.',
       },
@@ -898,17 +792,10 @@ export const strings = {
     detailsFallback: 'Session details',
     error: "Couldn't load the report.",
     scoreLine: (n: number) => `Score: ${n}/100`,
-    // R1 — unscored session: no gauge, no fabricated 100. Score is null both
-    // when AI was off AND when AI ran but no sample was ever confident, so the
-    // copy stays cause-neutral rather than asserting "AI was off".
     noScore: {
       heading: 'No focus score',
       body: 'No focus score was recorded for this session.',
       copyLine: 'Score: not recorded',
-      // I83 — R1 kept this copy cause-neutral because the sessions row held no
-      // way to tell the causes apart. The 004 migration records `ai_enabled`,
-      // so two of the three cases can now be named honestly. `body` above
-      // stays the wording for rows that predate it.
       bodyOff: 'AI focus detection was off for this session.',
       bodyNoChecks:
         'AI was on but never ran a check, so nothing was measured. Check Settings → AI.',
@@ -989,9 +876,6 @@ export const strings = {
       resultCount: (n: number) =>
         n === 1 ? '1 setting matches' : `${n} settings match`,
     },
-    // Extra terms the nav search matches beyond each pane's label + group, so
-    // a setting is findable by the concept it owns rather than the pane name.
-    // Keyed by SettingsCategoryId; kept here with the other settings copy.
     searchKeywords: {
       identity: [
         'name',
@@ -1056,6 +940,10 @@ export const strings = {
         'model',
         'engine',
         'llama',
+        'hardware',
+        'gpu',
+        'egpu',
+        'cpu',
         'threshold',
         'warning',
         'alert',
@@ -1108,20 +996,12 @@ export const strings = {
       },
       recoveryPhrase: {
         label: 'Recovery phrase',
-        // D4 — honest copy: the 24 words are never persisted, so they cannot
-        // be re-shown here and lost words are unrecoverable by design.
-        // Replacement semantics live in the Restore flow.
         help: "Your 24 words were shown once during setup and never saved — keep the original safe. Lost words can't be recovered; you'd start fresh and pair with your friends again.",
         restoreCta: 'Restore a different identity',
       },
-      // D3 — local friends-list backup/restore, encrypted to your own key.
-      // Pairs with the 24-word recovery, which restores only the keypair.
       friendsBackup: {
         label: 'Friends backup',
         help: 'Your 24 words restore your identity, but not your friends list. Save an encrypted copy to keep alongside them — only this identity can open it.',
-        // Aria labels start with the visible button text (WCAG 2.5.3
-        // label-in-name) so voice-control users can target them by what
-        // they read.
         exportCta: 'Export friends',
         exportAriaLabel: 'Export friends to an encrypted backup file',
         importCta: 'Import friends',
@@ -1163,9 +1043,6 @@ export const strings = {
       removeErrorFallback: "Couldn't remove that friend.",
       defaultFriendName: 'your friend',
       defaultFriendDisplay: 'This friend',
-      // Per-friend detail panel. Everything here is derived on the device from
-      // the friends row, the live presence map, and local session history —
-      // nothing new is stored and nothing is fetched.
       detail: {
         toggleCta: 'Details',
         showAriaLabel: (name: string) => `Show details for ${name}`,
@@ -1185,8 +1062,6 @@ export const strings = {
         addedUnknown: 'Unknown',
         studiedLabel: 'Studied together',
         studiedNone: 'No sessions together yet',
-        // "3 sessions · 2 h 15 min". Minutes are each session's full length,
-        // counted for every friend who was in it — not split between them.
         studiedSummary: (sessions: string, duration: string) =>
           `${sessions} · ${duration}`,
         studiedSessions: (n: number) =>
@@ -1216,10 +1091,6 @@ export const strings = {
         minutes: (n: number) => `${n} min`,
         score: (n: number) => `${n} / 100`,
         unknown: 'Details unavailable',
-        // I83 — Settings → Sessions is the second place a user looks for a
-        // missing score, and a row with no score used to be indistinguishable
-        // from one where AI was off. Only rendered when the row actually
-        // recorded that AI was on (ai_enabled === 1), never inferred.
         notMeasured: 'not measured',
       },
       review: {
@@ -1228,9 +1099,6 @@ export const strings = {
           `View report for session ${ordinal} from ${when}`,
         backCta: 'Back to sessions',
       },
-      // R4 — per-session delete behind an AlertDialog confirm, mirroring the
-      // Friends remove pattern. Deleting removes the session row and its
-      // audit events; stats/report read SQLite, so the change flows through.
       delete: {
         cta: 'Delete',
         ariaLabel: (ordinal: number, when: string) =>
@@ -1285,7 +1153,6 @@ export const strings = {
           label: 'Window size',
           help: 'Back to the default size, centered on your screen.',
           resetCta: 'Reset',
-          // Starts with the visible button text (WCAG 2.5.3 label-in-name).
           resetAriaLabel: 'Reset window size and position',
           resetToast: 'Window size reset.',
           resetError: "Couldn't reset the window size.",
@@ -1295,10 +1162,6 @@ export const strings = {
 
     notifications: {
       heading: 'Notifications',
-      // #47 B7 — surface the OS-level permission so denied-but-toggled-on
-      // stops being an invisible dead end (all three send paths silently
-      // drop when the system permission is denied, and macOS never
-      // re-prompts after a hard denial).
       systemPermission: {
         checkingAriaLabel: 'Checking notification permission',
         label: 'System permission',
@@ -1322,21 +1185,16 @@ export const strings = {
         help: 'When on, closing the window keeps StudyVis in the tray so friends can still reach you. When off, closing exits the app.',
         ariaLabel: 'Minimize to tray on close',
       },
-      // N2 — opt-out: ON by default. The boundary is invisible when the
-      // window is minimized to the tray, so this is the most-wanted nudge.
       pomodoro: {
         label: 'Pomodoro break notifications',
         help: "OS prompt when your focus block flips to a break, and back. Skipped while you're looking at the timer.",
         ariaLabel: 'Pomodoro break notifications',
       },
-      // N6 — opt-in: OFF by default (the calm default IS the accommodation;
-      // no extra reduced-motion gate needed since nothing plays unless asked).
       pomodoroSound: {
         label: 'Pomodoro chime',
         help: 'Plays a short, quiet chime when your focus block flips to a break, and back. Off by default.',
         ariaLabel: 'Pomodoro chime',
       },
-      // N3 — opt-in: OFF by default. Honest about the ~60s presence latency.
       friendOnline: {
         label: 'Friend-online notifications',
         help: "OS prompt when a friend comes online — a good moment to invite them. Off by default; can lag a friend's arrival by up to a minute.",
@@ -1366,15 +1224,8 @@ export const strings = {
 
     ai: {
       heading: 'AI',
-      // One privacy statement for the pane; the enable row's help and the
-      // model row already say what turning AI on unlocks. Scoped to captures
-      // (PR-88 review): model + engine downloads DO fetch from Hugging Face /
-      // GitHub, and their own rows disclose that.
       intro:
         'The vision model runs on this machine and only looks at your camera and screen — none of that ever leaves your computer. Downloading a model or the engine fetches files from the internet; nothing about you is sent.',
-      // D5 — canonical screen-recording indicator note: the OS indicator
-      // stays lit while sampling, and macOS grant/revoke lives in System
-      // Settings. Rendered only while the AI gate is on.
       screenIndicatorNote:
         "While the AI is sampling, your operating system's screen-recording indicator stays on for the whole session. That's expected — it turns off when you leave. On macOS, screen-recording access is granted and revoked only in System Settings → Privacy & Security → Screen Recording; StudyVis can open it for you when needed.",
       enable: {
@@ -1423,19 +1274,11 @@ export const strings = {
         help: 'Consecutive off-task samples before your friends see you flagged. Always kept above the warning count.',
         ariaLabel: 'Alert peers after N off-task samples',
       },
-      // A3 — off-task sensitivity. The slider is the on-topic-confidence floor
-      // an off-task call must clear to be SKIPPED, so higher = more off-task
-      // calls survive the gate and count = more flags. Copy below reads in that
-      // (correct) direction; the code gate lives in scoreMachine.step().
       confidenceFloor: {
         label: 'Off-task sensitivity',
         help: 'Higher counts more of the model’s off-task calls against you (more flags). Lower skips the calls the model only half-doubts, so only confident off-task moments count (fewer false alarms). Skipped samples are never held against you.',
         ariaLabel: 'Off-task sensitivity',
       },
-      // D5/V3-P4 — captureDisplays. Note: sharpened to match the V3-P4
-      // contract: "All displays" prompts the OS share picker once per
-      // monitor at session start; switching primary→all mid-session takes
-      // effect on the next session (the no-mid-session-prompt invariant).
       captureDisplays: {
         label: 'Capture displays',
         help: 'All displays sends every monitor to the local AI as one image. Peers never see your screen. The OS share picker runs once per monitor at session start; changes between primary and all apply on the next session.',
@@ -1468,7 +1311,6 @@ export const strings = {
         restartErrorFallback: "Couldn't restart the model.",
         pickModelFirstToast: 'Pick a model first.',
       },
-      // I73 — the llama.cpp engine row + auto-install toggle.
       engine: {
         label: 'AI engine',
         helpBundled: (version: string) =>
@@ -1493,14 +1335,32 @@ export const strings = {
         installAria: 'Install the AI engine',
         auto: {
           label: 'Install engine automatically',
-          help: "Fetches the llama.cpp engine from GitHub if it's ever missing when AI starts. About 8–16 MB, verified against a pinned checksum.",
+          help: "Fetches the pinned llama.cpp engine from GitHub if it's ever missing when AI starts. Size varies by platform and every download is checksum-verified.",
           ariaLabel: 'Install engine automatically',
         },
+      },
+      computeDevice: {
+        label: 'AI hardware',
+        ariaLabel: 'AI compute hardware',
+        helpSaveError:
+          "Couldn't save that hardware choice. Your previous choice is still active.",
+        helpDetectionFailed:
+          'Hardware detection failed. Automatic and CPU remain available; reinstall the AI engine if accelerator detection keeps failing.',
+        helpEngineMissing:
+          'Install the AI engine to detect GPUs. Automatic and CPU are always available.',
+        helpUnavailable:
+          'That accelerator is not currently available. StudyVis keeps your choice instead of silently switching hardware.',
+        helpNoAccelerator:
+          'No accelerator was reported by the AI engine. Automatic will fall back to CPU.',
+        help:
+          'Choose where local AI inference runs. Automatic uses available acceleration; changing this makes existing model benchmarks stale.',
+        optionAuto: 'Automatic (recommended)',
+        optionCpu: 'CPU',
+        optionUnavailable: (deviceId: string) => `Unavailable — ${deviceId}`,
       },
       permissions: {
         grantedToast: 'Screen recording granted.',
         requestErrorFallback: "Couldn't request access.",
-        // D5 — onboarding/first-session prompt before screen access exists.
         pickModelFirstBody:
           'Pick and download a model now. StudyVis asks for screen access when AI is on — your OS recording indicator will stay lit for the whole session.',
       },
@@ -1510,18 +1370,10 @@ export const strings = {
       heading: 'Network',
       about: {
         label: 'About connections',
-        // F8 — STUN-only by default. No TURN relay ships, so the old "a relay
-        // passes the traffic along" promise was untrue on a fresh install. Be
-        // honest: direct only, unless YOU add a TURN server (F3, below).
         help: 'StudyVis connects you to friends directly. If a strict network (corporate firewall, locked-down Wi-Fi) blocks that, add your own TURN relay below — traffic stays end-to-end encrypted either way.',
       },
       preference: {
         label: 'TURN preference',
-        // F8 — the help no longer claims a relay that doesn't exist. The
-        // preference only does anything once a TURN server is configured (F3);
-        // with none, every option is STUN-only.
-        // The radio labels below spell out what each option does; the help
-        // carries only what the labels can't — the no-server caveat.
         help: 'Only takes effect once you add a TURN server below; with none configured, every option is direct-only.',
         ariaLabel: 'TURN preference',
         options: {
@@ -1530,16 +1382,10 @@ export const strings = {
           never: 'Never use TURN',
         },
       },
-      // F2 — connection-diagnostics panel (per-relay live status).
       diagnostics: {
         label: 'Connection',
         help: 'Live status of the signaling relays StudyVis uses to find your friends. This is a local read — nothing is sent anywhere.',
         empty: 'No relay connections yet. They open a moment after launch.',
-        // #47 C3 — two transports, labelled so a Nostr-blocked/MQTT-working
-        // network reads honestly. Since #47 C1 the MQTT brokers back
-        // presence, invites, and pairing alongside the Nostr relays, so
-        // these sockets are open from launch — the old '(used while
-        // pairing)' qualifier misdescribed what the user was looking at.
         transport: {
           nostr: 'Nostr relays',
           mqtt: 'MQTT brokers',
@@ -1549,11 +1395,8 @@ export const strings = {
           connecting: 'Connecting…',
           down: 'Not connected',
         },
-        // Screen-reader summary of the per-relay dot (color is never the only
-        // signal — the text label above carries the same meaning visually).
         dotAriaLabel: (url: string, status: string) => `${url}: ${status}`,
       },
-      // F3 — Advanced disclosure for user-supplied relay URLs + one TURN server.
       advanced: {
         toggleLabel: 'Advanced connection settings',
         toggleHelp:
@@ -1578,10 +1421,6 @@ export const strings = {
           credentialAriaLabel: 'TURN password',
           invalidUrl: 'TURN URL must start with turn: or turns:',
           active: 'TURN server active — the preference above now applies.',
-          // #47 C5 — reachability probe: a throwaway relay-only
-          // RTCPeerConnection against the user's own server, so a typo'd
-          // credential is distinguishable from a network problem before a
-          // session depends on it.
           test: {
             cta: 'Test connection',
             testing: `Testing${'…'}`,
@@ -1649,9 +1488,6 @@ export const strings = {
         replayCta: 'Replay',
         scheduledToast: 'Onboarding will play on the next launch.',
       },
-      // R4 — destructive "Clear all history" with a stronger confirm than the
-      // per-session delete. Wipes every session row and all audit events;
-      // identity and friends are untouched (different tables / the keychain).
       clearHistory: {
         label: 'Clear all session history',
         help: 'Permanently deletes every past session and its focus history from this device. Your identity and friends are kept.',
@@ -1685,9 +1521,6 @@ export const strings = {
         openCta: 'Open',
         errorFallback: "Couldn't open the Releases page.",
       },
-      // X6 — auto-update replaces X4's opt-in tag check. ON by default (the
-      // widened PLAN §3 carve-out); off means zero outbound, same guarantee
-      // the X4 toggle used to carry.
       autoUpdate: {
         label: 'Automatic updates',
         help: 'StudyVis checks GitHub for new releases, downloads them in the background, and installs on restart. It sends no data about you. Turn this off and nothing goes out.',
@@ -1718,9 +1551,6 @@ export const strings = {
         `Across ${scoredSessions} scored ${
           scoredSessions === 1 ? 'session' : 'sessions'
         }`,
-      // R6 — when only a small share of sessions are AI-scored, the average
-      // over-reads. Surface the denominator prominently ("from 2 of 40
-      // sessions") so the number is read honestly.
       coverage: (scored: number, total: number) =>
         `From ${scored} of ${total} ${total === 1 ? 'session' : 'sessions'}`,
       limitedData: 'Limited data',
@@ -1732,8 +1562,6 @@ export const strings = {
     heatmap: {
       heading: 'Your year of studying',
       help: 'One square per day, darker for a longer day. Hover a square for the date.',
-      // Read out as the whole grid's alt text: the numbers below repeat in
-      // plain text, so nothing here is carried by colour alone.
       ariaLabel: (daysStudied: number, days: number) =>
         `Study heatmap: ${daysStudied} of the last ${days} days studied`,
       empty: 'Nothing on the calendar yet. Your first session fills a square.',
@@ -1742,13 +1570,10 @@ export const strings = {
       legend: {
         less: 'Less',
         more: 'More',
-        // Level 0 is "no study"; 1–4 read as the minute band they stand for.
         level: (from: number, to: number | null) =>
           to === null ? `${from}+ min` : `${from}–${to} min`,
         none: 'No study',
       },
-      // Three of the seven rows carry a name — enough to orient, few enough
-      // to stay legible against 10px rows.
       weekdays: {
         monday: 'Mon',
         wednesday: 'Wed',
@@ -1780,8 +1605,6 @@ export const strings = {
     },
     insights: {
       heading: 'Focus insights',
-      // No subheading: the pane-level stats.disclaimer carries the on-device
-      // privacy note and trend.help scopes the data to AI-scored sessions.
       noDistractions: 'No distractions recorded yet. Nice work.',
       empty:
         'No focus insights yet. Study a few sessions with AI focus detection on and patterns will show up here.',
@@ -1817,21 +1640,11 @@ export const strings = {
       ariaLabel: 'Vision model picker',
       heading: 'Pick a vision model',
       body: 'Download, choose, and benchmark separately. Benchmarking is recommended for tuned timing, but it is not required. The model runs only on this machine.',
-      // Settings is reachable mid-session (#47 B2); the mutating picker
-      // actions share the live sample loop's sidecar, so they stay locked
-      // until the session ends.
       lockedDuringSession:
         'Model changes are locked while AI is running in this session. Turn AI off or wait until the session ends.',
-      // I73 — the benchmark needs the engine; the bare sentinel would
-      // otherwise print on the card.
       engineMissing: 'Install the AI engine first (see the AI engine row).',
-      // Shown when a persisted benchmark predates the current inference
-      // engine (INFERENCE_ENGINE_FINGERPRINT) — e.g. CPU-era numbers after
-      // the Metal-offload update.
       staleBenchmark:
         'Measured on an older StudyVis — re-run the benchmark for current numbers.',
-      // A download that resolves mid-session must not chain into the
-      // benchmark (it would stop the live sample loop's sidecar).
       benchmarkWhileAiEnabled:
         'Turn AI off before benchmarking. This keeps the benchmark from sharing the model process with live focus checks.',
       modelChangesWhileAiRunning:
@@ -1842,8 +1655,6 @@ export const strings = {
         active: 'In use',
         incomplete: 'Incomplete',
       },
-      // Quant-variant selector on cards that offer the same model at
-      // several quantization levels (currently Gemma 3 4B).
       quantPicker: {
         legend: 'Quantization',
         ariaLabel: (model: string) => `${model} quantization`,
@@ -1862,8 +1673,6 @@ export const strings = {
       reBenchmarkCta: 'Re-benchmark',
       reDownloadCta: 'Re-download',
       downloadCta: 'Download',
-      // A4 — shown when a partial download is known on disk; the backend
-      // resumes from where it stopped via an HTTP Range request.
       resumeCta: 'Resume download',
       resumeNote: (received: string) =>
         `Picks up from where it stopped (${received} downloaded).`,
@@ -1914,8 +1723,6 @@ export const strings = {
     },
     tokenPaste: {
       heading: 'Paste your Hugging Face access token',
-      // Split around the two URL fragments so the component can render
-      // them in font-mono while keeping the sentence body here.
       bodyBeforeRepo: 'This model is gated. Accept the terms at ',
       bodyAfterRepo: ' first, then paste a read-scope token from ',
       bodyTokensUrl: 'huggingface.co/settings/tokens',
@@ -1966,10 +1773,6 @@ export const strings = {
       considering: (minutes: number) => `Considering a ${minutes}-min break.`,
       noReply: '(no reply)',
     },
-    // Break-rule verdict reasons. These render inside an AiResponseBubble
-    // after an icon, as standalone sentences — cap + period per §14.
-    // Existing unit-test matchers (`/at least/`, `/capped/`, `/25 minutes/`,
-    // MAX_BREAKS_PER_SESSION digit) still pass.
     breakReasons: {
       alreadyOnBreak: "You're already on a break.",
       quotaExceeded: (max: number) =>
@@ -1992,8 +1795,6 @@ export const strings = {
         `StudyVis needs to capture a still image of your screen so the on-device AI can check that your study session stays on topic. Screen frames never leave this ${
           isMac ? 'Mac' : 'computer'
         }.`,
-      // D5 — canonical indicator note (matches settings.ai.screenIndicatorNote
-      // content but in a shorter form for the overlay).
       indicatorNote:
         "Heads-up: your OS screen-recording indicator stays on for the whole session. That's expected — it turns off when you leave.",
       stepsMac: [
@@ -2058,26 +1859,19 @@ export const strings = {
   notifications: {
     invite: {
       title: 'StudyVis',
-      // Body comes from friends.inbox.inviteBody — sender-dependent.
     },
-    // N2 — pomodoro work↔rest transition copy, both directions. §14 voice:
-    // warm, brief, second person.
     pomodoro: {
       breakTitle: 'Time for a break',
       breakBody: 'Step away and rest your eyes for a bit.',
       workTitle: 'Back to work',
       workBody: 'Break over — settle back into your focus block.',
     },
-    // N3 — "friend came online" copy. Body carries the friend's display name.
     friendOnline: {
       title: 'StudyVis',
       body: (name: string) => `${name} is now online`,
     },
   },
 
-  // X6 — auto-update. The banner is the only place an update ever interrupts
-  // you, and it only appears once the new version is already downloaded and
-  // verified, so "Restart now" is instant. Nothing here fires mid-session.
   updater: {
     banner: {
       ariaLabel: 'Update ready',
@@ -2088,9 +1882,6 @@ export const strings = {
       dismissAriaLabel: 'Dismiss until next launch',
       notesCta: 'Release notes',
       installing: 'Installing…',
-      // Issue #77 — the app is running somewhere it can't swap its own
-      // bundle (macOS: opened straight from the mounted .dmg). No Restart
-      // button to offer; the instruction *is* the action.
       blockedAriaLabel: 'Update available — a move to Applications is needed',
       blockedTitle: (version: string) => `StudyVis ${version} is available`,
       blockedBody:
@@ -2099,8 +1890,6 @@ export const strings = {
       blockedDismissAriaLabel: 'Dismiss until next launch',
     },
     settings: {
-      // Mirrors the banner in Settings → About so the update is reachable
-      // after the banner is dismissed.
       readyLabel: 'Update ready',
       readyHelp: (version: string) =>
         `Version ${version} is downloaded and waiting. Restart to finish.`,
@@ -2112,37 +1901,21 @@ export const strings = {
         `Version ${version} — ${percent}%`,
       checkingHelp: 'Checking for updates…',
       upToDateHelp: (version: string) => `You're on ${version}, the latest.`,
-      // Label for the state-driven status row, so it stops duplicating the
-      // read-only Version row.
       statusLabel: 'Updates',
-      // Step-agnostic on purpose: a background check failure and a background
-      // download failure both land in (error, null), and this row must not
-      // name a step it can't distinguish.
       lastCheckFailedHelp:
         "The last update check didn't finish. Press Check now to retry.",
-      // For idle before the first check (and the session-deferral reset) — no
-      // claim of currency, and no false "not checked yet" (idle is also
-      // reached after a check that ran).
       unknownHelp: 'Update status unknown — press Check now.',
       checkCta: 'Check now',
       restartCta: 'Restart now',
-      // Mid-session lock, mirroring strings.ai.picker.lockedDuringSession:
-      // restarting into an update tears down the live mesh, so the affordance
-      // is disabled with the reason stated (no info by color alone).
       lockedDuringSession: (version: string) =>
         `Version ${version} is downloaded and waiting — updating restarts StudyVis, so it unlocks after your session ends.`,
       checkLockedDuringSession:
         'Update checks pause during a session so the download stays off your call.',
     },
     errors: {
-      // Surfaced only on a user-initiated check / restart. Background failures
-      // stay silent — a flaky network shouldn't nag anyone mid-study.
       checkFailed: "Couldn't reach GitHub to check for updates.",
       downloadFailed:
         "Couldn't download the update. StudyVis will retry later.",
-      // macOS: the app bundle has to be writable to swap itself out. Living in
-      // a root-owned /Applications, or still running from the .dmg, both land
-      // here.
       installFailed:
         "Couldn't install the update. Download the installer from the Releases page instead.",
     },
