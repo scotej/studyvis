@@ -9,6 +9,7 @@ import { useEffect } from 'react'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 
 import { logger } from '@/lib/log'
+import type { TopicRoom } from '@/lib/trystero'
 import { usePttStore } from '@/stores/pttStore'
 import { useSessionStore, type PeerSnapshot } from '@/stores/sessionStore'
 
@@ -39,6 +40,18 @@ const SETTLED_SAMPLE_MS = 350
 
 type DiagnosticSource = 'local' | 'peer'
 type PttEdge = 'pressed' | 'released' | 'changed'
+
+// A timer must describe the edge that scheduled it, rather than whatever PTT
+// state happens to exist when it eventually fires. The store revision catches
+// local changes; peerEdgeSeq does the same for remote PTT correlation.
+type PttDiagnosticBinding = {
+  room: TopicRoom | null
+  localActive: boolean
+  localRevision: number
+  activePeerIds: ReadonlySet<string>
+  peerEdgeSeq: number
+  heldMs: number | undefined
+}
 
 function monotonicNow(): number {
   return typeof performance === 'undefined' ? Date.now() : performance.now()
@@ -98,12 +111,9 @@ export function PttListener() {
     const press = usePttStore.getState().press
     const release = usePttStore.getState().release
 
-    const sampleMedia = async (
-      source: DiagnosticSource,
-      edge: PttEdge,
-      sourceEdgeSeq: number,
-      phase: 'post-edge' | 'settled'
-    ) => {
+    const captureDiagnosticBinding = (
+      source: DiagnosticSource
+    ): PttDiagnosticBinding => {
       const room = useSessionStore.getState().room
       if (room !== previousRoom) {
         previousRoom = room
@@ -111,32 +121,72 @@ export function PttListener() {
         previousPeerSnapshot = null
       }
 
-      // Capture PTT state and receiver correlation synchronously BEFORE any
-      // getStats() await. A release/press that lands while stats are pending is
-      // detected through the local revision / peer-edge generation below and
-      // cannot be misclassified as a deterministic media contradiction.
-      const localAtCapture = usePttStore.getState()
-      const peersAtCapture = useSessionStore.getState().peers
-      const activePeerIdsAtCapture = activePeerIds(peersAtCapture)
-      const localRevisionAtCapture = localAtCapture.revision
-      const peerEdgeSeqAtCapture = peerEdgeSeq
-      const heldMsAtCapture =
-        source === 'local' && pressStartedAt !== null
-          ? Math.max(0, Math.round(monotonicNow() - pressStartedAt))
-          : undefined
+      const local = usePttStore.getState()
+      const peers = useSessionStore.getState().peers
+      return {
+        room,
+        localActive: local.active,
+        localRevision: local.revision,
+        activePeerIds: activePeerIds(peers),
+        peerEdgeSeq,
+        heldMs:
+          source === 'local' && pressStartedAt !== null
+            ? Math.max(0, Math.round(monotonicNow() - pressStartedAt))
+            : undefined,
+      }
+    }
+
+    const bindingRaced = (
+      source: DiagnosticSource,
+      binding: PttDiagnosticBinding
+    ): boolean =>
+      useSessionStore.getState().room !== binding.room ||
+      (source === 'local'
+        ? usePttStore.getState().revision !== binding.localRevision
+        : peerEdgeSeq !== binding.peerEdgeSeq)
+
+    const sampleMedia = async (
+      source: DiagnosticSource,
+      edge: PttEdge,
+      sourceEdgeSeq: number,
+      phase: 'post-edge' | 'settled',
+      binding: PttDiagnosticBinding
+    ) => {
+      // An edge can change during the 40/350 ms delay, before getStats starts.
+      // Do not sample its successor under the old edge label: that would let an
+      // inactive release baseline/classify a prior press (or vice versa).
+      if (bindingRaced(source, binding)) {
+        sampleSeq += 1
+        log.debug('media.snapshot_raced', {
+          source,
+          edge,
+          edgeSeq: sourceEdgeSeq,
+          sampleSeq,
+          phase,
+          localActive: binding.localActive,
+          peerActiveCount: binding.activePeerIds.size,
+          heldMs: binding.heldMs,
+          stateChangedBeforeSample: true,
+          stateChangedDuringSample: true,
+          localRevisionAtEdge: binding.localRevision,
+          localRevisionNow: usePttStore.getState().revision,
+          peerEdgeSeqAtEdge: binding.peerEdgeSeq,
+          peerEdgeSeqNow: peerEdgeSeq,
+        })
+        return
+      }
 
       const snapshot = await collectPttMediaSnapshot(
-        room,
-        activePeerIdsAtCapture
+        binding.room,
+        binding.activePeerIds
       )
-      if (cancelled || useSessionStore.getState().room !== room) return
+      if (cancelled) return
 
-      const stateChangedDuringSample =
-        source === 'local'
-          ? usePttStore.getState().revision !== localRevisionAtCapture
-          : peerEdgeSeq !== peerEdgeSeqAtCapture
-      const localActive = localAtCapture.active
-      const peerActiveCount = activePeerIdsAtCapture.size
+      // Retain the existing async-race guard too: a change while getStats is
+      // pending is equally unsuitable for a baseline or contradiction verdict.
+      const stateChangedDuringSample = bindingRaced(source, binding)
+      const localActive = binding.localActive
+      const peerActiveCount = binding.activePeerIds.size
       const previousSnapshot =
         source === 'local' ? previousLocalSnapshot : previousPeerSnapshot
       const delta = stateChangedDuringSample
@@ -159,8 +209,13 @@ export function PttListener() {
         phase,
         localActive,
         peerActiveCount,
-        heldMs: heldMsAtCapture,
+        heldMs: binding.heldMs,
+        stateChangedBeforeSample: false,
         stateChangedDuringSample,
+        localRevisionAtEdge: binding.localRevision,
+        localRevisionNow: usePttStore.getState().revision,
+        peerEdgeSeqAtEdge: binding.peerEdgeSeq,
+        peerEdgeSeqNow: peerEdgeSeq,
         media: snapshot,
         delta,
       }
@@ -190,9 +245,10 @@ export function PttListener() {
       phase: 'post-edge' | 'settled',
       delayMs: number
     ) => {
+      const binding = captureDiagnosticBinding(source)
       const handle = setTimeout(() => {
         diagnosticTimers.delete(handle)
-        void sampleMedia(source, edge, sourceEdgeSeq, phase)
+        void sampleMedia(source, edge, sourceEdgeSeq, phase, binding)
       }, delayMs)
       diagnosticTimers.add(handle)
     }
