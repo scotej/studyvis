@@ -695,9 +695,7 @@ async fn download_verified<R: Runtime>(
 // .download-* archives. The engine root is app-private, so anything
 // unrecognized is ours to drop.
 fn cleanup_stale(root: &Path) {
-    let current = format!(
-        "{ENGINE_TAG}-r{ENGINE_PACKAGE_REVISION}-{TARGET_TRIPLE}"
-    );
+    let current = format!("{ENGINE_TAG}-r{ENGINE_PACKAGE_REVISION}-{TARGET_TRIPLE}");
     let Ok(entries) = fs::read_dir(root) else {
         return;
     };
@@ -884,7 +882,8 @@ ggml_vulkan: diagnostic after list
     #[test]
     fn device_parser_deduplicates_and_requires_the_header() {
         assert!(parse_device_list("Vulkan0: ignored without header\n").is_empty());
-        let output = "Available devices:\n  Vulkan0: First\n  Vulkan0: Duplicate\n  no colon here\n";
+        let output =
+            "Available devices:\n  Vulkan0: First\n  Vulkan0: Duplicate\n  no colon here\n";
         assert_eq!(
             parse_device_list(output),
             vec![EngineDevice {
