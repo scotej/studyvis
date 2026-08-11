@@ -140,14 +140,26 @@ impl ShortcutBindings {
     // Always returns a valid binding pair: a malformed `initial_*` (empty
     // string, unparseable accelerator from a manually-edited settings.json,
     // etc.) silently falls back to the shipped default so boot registration
-    // is as forgiving as the JS hydrator. The defaults are known-parseable
-    // string constants, so the inner `expect` cannot trip.
+    // is as forgiving as the JS hydrator. On macOS friends-PTT also requires
+    // a key the CoreGraphics physical-state watcher can observe; a legacy or
+    // hand-edited unsupported key falls back to the safe shipped default.
     pub fn new(initial_ptt_friends: &str, initial_ptt_ai: &str) -> Self {
-        Self {
-            ptt_friends: Mutex::new(Self::parse_or_default(
-                initial_ptt_friends,
+        let ptt_friends = Self::parse_or_default(
+            initial_ptt_friends,
+            DEFAULT_PTT_FRIENDS_ACCELERATOR,
+        );
+        #[cfg(target_os = "macos")]
+        let ptt_friends = if macos_key_code(ptt_friends.key).is_some() {
+            ptt_friends
+        } else {
+            Self::parse_or_default(
                 DEFAULT_PTT_FRIENDS_ACCELERATOR,
-            )),
+                DEFAULT_PTT_FRIENDS_ACCELERATOR,
+            )
+        };
+
+        Self {
+            ptt_friends: Mutex::new(ptt_friends),
             ptt_ai: Mutex::new(Self::parse_or_default(
                 initial_ptt_ai,
                 DEFAULT_PTT_AI_ACCELERATOR,
@@ -190,7 +202,7 @@ static PTT_PHYSICAL_MONITOR_GENERATION: AtomicU64 = AtomicU64::new(0);
 #[cfg(target_os = "macos")]
 const PTT_PHYSICAL_POLL_INTERVAL: Duration = Duration::from_millis(20);
 #[cfg(target_os = "macos")]
-const PTT_PHYSICAL_RELEASE_EVENT: &str = "ptt-friends-physical-released";
+const PTT_PHYSICAL_STATE_EVENT: &str = "ptt-friends-physical-state";
 
 // Swap one of the two global shortcuts at runtime. Unregister-then-register
 // (per the tauri-plugin-global-shortcut guidance; double-registering the
@@ -205,6 +217,19 @@ pub fn system_set_global_shortcut<R: Runtime>(
 ) -> Result<(), String> {
     let new_shortcut = Shortcut::from_str(&accelerator)
         .map_err(|e| format!("Couldn't read {accelerator}: {e}"))?;
+
+    // Hold-to-talk recovery on macOS is only safe when CoreGraphics can query
+    // the same virtual key Carbon registered. Reject an unsupported custom
+    // friends-PTT key BEFORE unregistering the working binding, so settings
+    // never silently downgrade to a two-minute-only stuck-key fallback.
+    #[cfg(target_os = "macos")]
+    if action == "ptt-friends" && macos_key_code(new_shortcut.key).is_none() {
+        return Err(
+            "That Push to Talk key cannot be monitored safely on macOS. Choose a standard keyboard key."
+                .to_string(),
+        );
+    }
+
     let bindings = app.state::<ShortcutBindings>();
     let (old_shortcut, other_shortcut) = match action.as_str() {
         "ptt-friends" => (bindings.ptt_friends(), bindings.ptt_ai()),
@@ -309,17 +334,18 @@ fn apply_ptt_friends_registration<R: Runtime>(app: &AppHandle<R>, active: bool) 
 #[cfg(not(target_os = "macos"))]
 fn update_ptt_physical_monitor<R: Runtime>(_app: &AppHandle<R>, _active: bool) {}
 
-// #209 — Carbon's global-hotkey release edge is useful but not authoritative
+// #209 — Carbon's global-hotkey edges are useful but are not authoritative
 // enough for a privacy-sensitive hold-to-talk latch. While a session is live,
-// macOS also exposes the current physical keyboard state through CoreGraphics.
-// One generation-scoped watcher observes the CURRENT persisted PTT binding and
-// emits a distinct synthetic-release event only after it has first seen the
-// full shortcut physically held and then sees its key/modifiers released.
+// macOS also exposes the CURRENT physical keyboard state through CoreGraphics.
+// One generation-scoped watcher observes the current persisted PTT binding and
+// emits its state whenever it changes, including the first observation:
+// `true` = physically held, `false` = physically up, `null` = unobservable.
 //
-// This cannot create a release at session start, cannot arm itself for an
-// unsupported key, and a rebind is picked up on the next 20 ms poll. The normal
-// Carbon Released event remains the fast path; the frontend treats this event
-// as a recovery edge and drops whichever release arrives second.
+// The frontend can therefore defer a Carbon Pressed that arrives while the key
+// is known-up instead of letting a late event re-open the microphone. Carbon
+// remains the low-latency fast path when physical state is held/unknown, and a
+// true→false watcher transition independently recovers a dropped Released.
+// Runtime rebinding is picked up on the next 20 ms poll.
 #[cfg(target_os = "macos")]
 fn update_ptt_physical_monitor<R: Runtime>(app: &AppHandle<R>, active: bool) {
     let generation = PTT_PHYSICAL_MONITOR_GENERATION.fetch_add(1, Ordering::AcqRel) + 1;
@@ -329,18 +355,17 @@ fn update_ptt_physical_monitor<R: Runtime>(app: &AppHandle<R>, active: bool) {
 
     let app = app.clone();
     std::thread::spawn(move || {
-        let mut was_held = false;
+        // Outer Option distinguishes "no sample emitted yet" from the inner
+        // None meaning "the configured key is not observable".
+        let mut previous_state: Option<Option<bool>> = None;
         while PTT_PHYSICAL_MONITOR_GENERATION.load(Ordering::Acquire) == generation
             && SessionActiveFlag::is_active(&app)
         {
             let shortcut = app.state::<ShortcutBindings>().ptt_friends();
-            match macos_shortcut_is_held(shortcut) {
-                Some(true) => was_held = true,
-                Some(false) if was_held => {
-                    was_held = false;
-                    let _ = app.emit(PTT_PHYSICAL_RELEASE_EVENT, ());
-                }
-                Some(false) | None => {}
+            let current_state = macos_shortcut_is_held(shortcut);
+            if previous_state != Some(current_state) {
+                previous_state = Some(current_state);
+                let _ = app.emit(PTT_PHYSICAL_STATE_EVENT, current_state);
             }
             std::thread::sleep(PTT_PHYSICAL_POLL_INTERVAL);
         }
@@ -386,7 +411,9 @@ extern "C" {
 
 // Keep this map byte-for-byte aligned with global-hotkey 0.8's macOS
 // `key_to_scancode`: the physical-state watcher must interpret a custom binding
-// using the same virtual key code Carbon registered for it.
+// using the same virtual key code Carbon registered for it. Friends-PTT rebinds
+// are rejected when they fall through to None, so this map is a safety boundary
+// rather than a best-effort diagnostic convenience.
 #[cfg(target_os = "macos")]
 fn macos_key_code(code: Code) -> Option<u16> {
     match code {
@@ -916,5 +943,18 @@ mod tests {
     #[test]
     fn ptt_physical_key_map_covers_default_binding() {
         assert_eq!(super::macos_key_code(super::Code::BracketLeft), Some(0x21));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn ptt_physical_key_map_marks_unobservable_keys_unsupported() {
+        assert_eq!(super::macos_key_code(super::Code::F24), None);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn unsupported_persisted_ptt_binding_falls_back_to_safe_default() {
+        let bindings = super::ShortcutBindings::new("CmdOrCtrl+F24", "CmdOrCtrl+]");
+        assert_eq!(bindings.ptt_friends().key, super::Code::BracketLeft);
     }
 }
