@@ -662,6 +662,47 @@ fn with_sidecar_log<T>(write: impl FnOnce() -> T) -> T {
 // selection is snapshotted when a sidecar generation starts and is carried
 // through crash respawns; editing the settings file behind the running app
 // cannot silently move a live model to different hardware.
+//
+// The model's `--device` alone is not sufficient for vision models. In the
+// pinned b9095 source, server-context passes `--mmproj-offload` through to
+// `mtmd_context_params::use_gpu`, and MTMD's CLIP implementation reads
+// MTMD_BACKEND_DEVICE to choose a named accelerator. Keep these choices in one
+// policy so CPU cannot initialize a projector GPU backend and an explicit
+// device cannot leave the projector on a different accelerator.
+#[derive(Debug, PartialEq, Eq)]
+struct LlamaSpawnPolicy<'a> {
+    gpu_layers: &'static str,
+    model_device: Option<&'a str>,
+    projector_offload: Option<bool>,
+    projector_device: Option<&'a str>,
+}
+
+fn llama_spawn_policy<'a>(
+    compute_device: &'a super::compute_device::ComputeDeviceSelection,
+    has_projector: bool,
+) -> LlamaSpawnPolicy<'a> {
+    // Keep the projector on precisely the same offload path as the text
+    // model. In particular, Linux `auto` is intentionally CPU-only for the
+    // packaged engine even if a local llama.cpp build happens to have GPU
+    // backends available; an explicit device remains an explicit opt-in.
+    let offloads_model = super::compute_device::gpu_layers(compute_device) != "0";
+    let projector_offload = has_projector.then_some(offloads_model);
+    let projector_device = match compute_device {
+        // b9095's MTMD implementation does not receive common_params.devices.
+        // Its documented selection hook is MTMD_BACKEND_DEVICE instead.
+        super::compute_device::ComputeDeviceSelection::Device(id) if has_projector => {
+            Some(id.as_str())
+        }
+        _ => None,
+    };
+
+    LlamaSpawnPolicy {
+        gpu_layers: super::compute_device::gpu_layers(compute_device),
+        model_device: super::compute_device::device_arg(compute_device),
+        projector_offload,
+        projector_device,
+    }
+}
 
 // Try every resolved engine binary in preference order (bundled, then
 // managed). A bundled binary that fails to spawn — deleted, wrong arch,
@@ -761,7 +802,7 @@ fn spawn_llama<R: Runtime>(
     runtime_dir: Option<&Path>,
     compute_device: &super::compute_device::ComputeDeviceSelection,
 ) -> Result<(tauri::async_runtime::Receiver<CommandEvent>, CommandChild), String> {
-    let gpu_layers = super::compute_device::gpu_layers(compute_device);
+    let policy = llama_spawn_policy(compute_device, mmproj_path.is_some());
     // shell().command() with an absolute path — Command::new sets the same
     // piped stdio + CREATE_NO_WINDOW as the sidecar constructor, minus the
     // exe-relative resolution that I73 showed never matched where the binary
@@ -774,11 +815,11 @@ fn spawn_llama<R: Runtime>(
         "--ctx-size",
         &ctx_size.to_string(),
         "--n-gpu-layers",
-        gpu_layers,
+        policy.gpu_layers,
         "--model",
         model_path,
     ]);
-    if let Some(device) = super::compute_device::device_arg(compute_device) {
+    if let Some(device) = policy.model_device {
         // One argv element, not a shell fragment. `valid_device_id` rejects
         // llama.cpp's comma separator, so an explicit choice can name exactly
         // one discovered device and cannot smuggle in a multi-device policy.
@@ -786,6 +827,19 @@ fn spawn_llama<R: Runtime>(
     }
     if let Some(p) = mmproj_path {
         command = command.args(["--mmproj", p]);
+    }
+    if let Some(projector_offload) = policy.projector_offload {
+        command = command.arg(if projector_offload {
+            "--mmproj-offload"
+        } else {
+            "--no-mmproj-offload"
+        });
+    }
+    if let Some(device) = policy.projector_device {
+        // b9095's MTMD path reads this environment variable after the server
+        // has parsed `--device`; it is the only upstream hook that selects a
+        // particular projector accelerator instead of MTMD's default GPU.
+        command = command.env("MTMD_BACKEND_DEVICE", device);
     }
     if let Some(dir) = runtime_dir {
         // I75: the prebuilt llama.cpp binary is a GGML_BACKEND_DL build —
@@ -1056,6 +1110,79 @@ async fn watch<R: Runtime>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // These assertions pin the split b9095 policy rather than merely checking
+    // the model flags. b9095 reads `--no-mmproj-offload` into
+    // mtmd_context_params::use_gpu and reads MTMD_BACKEND_DEVICE only from the
+    // MTMD path, so both controls are necessary to keep projector placement
+    // aligned with the selected compute hardware.
+    #[test]
+    fn b9095_auto_policy_matches_the_platform_text_offload_without_forcing_a_device() {
+        let policy = llama_spawn_policy(
+            &super::super::compute_device::ComputeDeviceSelection::Auto,
+            true,
+        );
+
+        assert_eq!(
+            policy,
+            LlamaSpawnPolicy {
+                gpu_layers: super::super::compute_device::gpu_layers(
+                    &super::super::compute_device::ComputeDeviceSelection::Auto,
+                ),
+                model_device: None,
+                projector_offload: Some(
+                    super::super::compute_device::gpu_layers(
+                        &super::super::compute_device::ComputeDeviceSelection::Auto,
+                    ) != "0",
+                ),
+                projector_device: None,
+            }
+        );
+    }
+
+    #[test]
+    fn b9095_cpu_policy_forbids_gpu_for_both_model_and_projector() {
+        let selection = super::super::compute_device::ComputeDeviceSelection::Cpu;
+        let policy = llama_spawn_policy(&selection, true);
+
+        assert_eq!(
+            policy,
+            LlamaSpawnPolicy {
+                gpu_layers: "0",
+                model_device: Some("none"),
+                projector_offload: Some(false),
+                projector_device: None,
+            }
+        );
+    }
+
+    #[test]
+    fn b9095_explicit_device_binds_model_and_projector_to_the_same_accelerator() {
+        let selection =
+            super::super::compute_device::ComputeDeviceSelection::Device("Vulkan1".to_string());
+        let policy = llama_spawn_policy(&selection, true);
+
+        assert_eq!(
+            policy,
+            LlamaSpawnPolicy {
+                gpu_layers: "99",
+                model_device: Some("Vulkan1"),
+                projector_offload: Some(true),
+                projector_device: Some("Vulkan1"),
+            }
+        );
+    }
+
+    #[test]
+    fn b9095_policy_never_emits_projector_controls_without_a_projector() {
+        let explicit =
+            super::super::compute_device::ComputeDeviceSelection::Device("Vulkan0".to_string());
+        let cpu = super::super::compute_device::ComputeDeviceSelection::Cpu;
+
+        assert_eq!(llama_spawn_policy(&explicit, false).projector_offload, None);
+        assert_eq!(llama_spawn_policy(&explicit, false).projector_device, None);
+        assert_eq!(llama_spawn_policy(&cpu, false).projector_offload, None);
+    }
 
     #[test]
     fn starting_counter_is_authoritative_and_clears_previous_errors() {
