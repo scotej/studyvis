@@ -10,53 +10,98 @@ import {
 describe('pttStore', () => {
   beforeEach(() => {
     __resetPttScheduler()
-    usePttStore.setState({ active: false })
+    usePttStore.setState({ active: false, awaitingRelease: false, revision: 0 })
   })
   afterEach(() => {
     __resetPttScheduler()
   })
 
-  test('starts inactive', () => {
-    expect(usePttStore.getState().active).toBe(false)
+  test('starts inactive with no physical hold latched', () => {
+    expect(usePttStore.getState()).toMatchObject({
+      active: false,
+      awaitingRelease: false,
+      revision: 0,
+    })
   })
 
-  test('press flips active to true', () => {
+  test('press flips active and latches the physical hold', () => {
     usePttStore.getState().press()
-    expect(usePttStore.getState().active).toBe(true)
+    expect(usePttStore.getState()).toMatchObject({
+      active: true,
+      awaitingRelease: true,
+      revision: 1,
+    })
   })
 
-  test('release flips active to false', () => {
+  test('release flips active false and ends the physical hold', () => {
     usePttStore.getState().press()
     usePttStore.getState().release()
-    expect(usePttStore.getState().active).toBe(false)
+    expect(usePttStore.getState()).toMatchObject({
+      active: false,
+      awaitingRelease: false,
+      revision: 2,
+    })
   })
 
-  test('a second press releases a latch whose release event was dropped', () => {
+  test('a repeated press while the hold is latched is idempotent', () => {
     usePttStore.getState().press()
     usePttStore.getState().press()
-    expect(usePttStore.getState().active).toBe(false)
+    expect(usePttStore.getState()).toMatchObject({
+      active: true,
+      awaitingRelease: true,
+      revision: 1,
+    })
   })
 
-  test('release without prior press stays inactive', () => {
-    usePttStore.getState().release()
-    expect(usePttStore.getState().active).toBe(false)
-  })
-
-  test('press then release then press flips correctly', () => {
+  test('a native-style repeat burst stays active until release', () => {
     const { press, release } = usePttStore.getState()
     press()
-    expect(usePttStore.getState().active).toBe(true)
-    release()
-    expect(usePttStore.getState().active).toBe(false)
     press()
-    expect(usePttStore.getState().active).toBe(true)
+    press()
+    press()
+    expect(usePttStore.getState()).toMatchObject({
+      active: true,
+      awaitingRelease: true,
+      revision: 1,
+    })
+
+    release()
+    expect(usePttStore.getState()).toMatchObject({
+      active: false,
+      awaitingRelease: false,
+      revision: 2,
+    })
   })
 
-  test('reset clears active', () => {
+  test('release without prior press stays inactive without changing generation', () => {
+    usePttStore.getState().release()
+    expect(usePttStore.getState()).toMatchObject({
+      active: false,
+      awaitingRelease: false,
+      revision: 0,
+    })
+  })
+
+  test('press then release then press starts a distinct new hold', () => {
+    const { press, release } = usePttStore.getState()
+    press()
+    release()
+    press()
+    expect(usePttStore.getState()).toMatchObject({
+      active: true,
+      awaitingRelease: true,
+      revision: 3,
+    })
+  })
+
+  test('reset clears active and the physical hold latch', () => {
     usePttStore.getState().press()
-    expect(usePttStore.getState().active).toBe(true)
     usePttStore.getState().reset()
-    expect(usePttStore.getState().active).toBe(false)
+    expect(usePttStore.getState()).toMatchObject({
+      active: false,
+      awaitingRelease: false,
+      revision: 2,
+    })
   })
 
   describe('S2 max-hold failsafe', () => {
@@ -88,69 +133,117 @@ describe('pttStore', () => {
       }
     }
 
-    test('a held key with a dropped release auto-releases after MAX_HOLD_MS', () => {
+    test('a held key with a dropped release is muted after MAX_HOLD_MS', () => {
       const sched = fakeScheduler()
       usePttStore.getState().press()
-      expect(usePttStore.getState().active).toBe(true)
-      // No matching release ever arrives (the dropped-event bug).
       sched.advance(MAX_HOLD_MS)
-      expect(usePttStore.getState().active).toBe(false)
+      expect(usePttStore.getState()).toMatchObject({
+        active: false,
+        // The same physical hold is still latched until Released arrives.
+        awaitingRelease: true,
+        revision: 2,
+      })
     })
 
-    test('a genuine continuous hold survives the whole window on a single press', () => {
+    test('a genuine continuous hold survives until the failsafe boundary', () => {
       const sched = fakeScheduler()
-      // macOS global hotkeys deliver exactly one Pressed for a physical hold
-      // (no auto-repeat), so a long utterance must stay live off one press().
       usePttStore.getState().press()
       sched.advance(MAX_HOLD_MS - 1)
-      expect(usePttStore.getState().active).toBe(true)
+      expect(usePttStore.getState()).toMatchObject({
+        active: true,
+        awaitingRelease: true,
+      })
     })
 
     test('an explicit release before the timeout cancels the failsafe', () => {
       const sched = fakeScheduler()
       usePttStore.getState().press()
       usePttStore.getState().release()
-      expect(usePttStore.getState().active).toBe(false)
-      // No stray timer left to flip a future session's state.
       expect(sched.pending()).toBe(0)
       sched.advance(MAX_HOLD_MS)
-      expect(usePttStore.getState().active).toBe(false)
+      expect(usePttStore.getState()).toMatchObject({
+        active: false,
+        awaitingRelease: false,
+        revision: 2,
+      })
     })
 
-    test('a recovery press cancels the stale failsafe timer', () => {
+    test('duplicate presses do not extend the original failsafe deadline', () => {
       const sched = fakeScheduler()
       usePttStore.getState().press()
+      expect(sched.pending()).toBe(1)
+
       sched.advance(MAX_HOLD_MS - 1)
-      // The matching release was dropped. A new physical press is an immediate
-      // recovery action, not another two-minute extension of the hot mic.
       usePttStore.getState().press()
-      expect(usePttStore.getState().active).toBe(false)
+      usePttStore.getState().press()
+      expect(usePttStore.getState()).toMatchObject({
+        active: true,
+        awaitingRelease: true,
+        revision: 1,
+      })
+      expect(sched.pending()).toBe(1)
+
+      sched.advance(1)
+      expect(usePttStore.getState()).toMatchObject({
+        active: false,
+        awaitingRelease: true,
+        revision: 2,
+      })
       expect(sched.pending()).toBe(0)
-      sched.advance(MAX_HOLD_MS)
-      expect(usePttStore.getState().active).toBe(false)
     })
 
-    test('a new press after recovery starts one clean hold', () => {
+    test('repeats after the safety cutoff cannot re-open the same hold', () => {
       const sched = fakeScheduler()
       usePttStore.getState().press()
-      usePttStore.getState().press()
-      usePttStore.getState().release()
-      expect(sched.pending()).toBe(0)
+      sched.advance(MAX_HOLD_MS)
+      expect(usePttStore.getState()).toMatchObject({
+        active: false,
+        awaitingRelease: true,
+      })
 
       usePttStore.getState().press()
-      expect(usePttStore.getState().active).toBe(true)
+      usePttStore.getState().press()
+      expect(usePttStore.getState()).toMatchObject({
+        active: false,
+        awaitingRelease: true,
+        revision: 2,
+      })
+      expect(sched.pending()).toBe(0)
+    })
+
+    test('a release after the safety cutoff permits one clean new hold', () => {
+      const sched = fakeScheduler()
+      usePttStore.getState().press()
+      sched.advance(MAX_HOLD_MS)
+
+      usePttStore.getState().release()
+      expect(usePttStore.getState()).toMatchObject({
+        active: false,
+        awaitingRelease: false,
+        revision: 3,
+      })
+
+      usePttStore.getState().press()
+      expect(usePttStore.getState()).toMatchObject({
+        active: true,
+        awaitingRelease: true,
+        revision: 4,
+      })
       expect(sched.pending()).toBe(1)
 
       usePttStore.getState().release()
-      expect(usePttStore.getState().active).toBe(false)
       expect(sched.pending()).toBe(0)
     })
 
-    test('reset cancels a pending failsafe timer', () => {
+    test('reset cancels a pending failsafe timer and ends the hold', () => {
       const sched = fakeScheduler()
       usePttStore.getState().press()
       usePttStore.getState().reset()
       expect(sched.pending()).toBe(0)
+      expect(usePttStore.getState()).toMatchObject({
+        active: false,
+        awaitingRelease: false,
+      })
     })
   })
 })

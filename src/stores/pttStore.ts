@@ -1,23 +1,32 @@
 import { create } from 'zustand'
 
-// S2 / I85 — A missed `ptt-friends-released` event (the Rust side emits it
-// best-effort) latches `active` true, holding the mic open. Three guards:
+// S2 / I85 / #209 — a missed `ptt-friends-released` event can latch `active`
+// true, while some native shortcut stacks can also deliver duplicate/repeated
+// Pressed edges during one physical hold. PTT is hold-to-talk, so a Pressed
+// edge must never mean "release": repeated press() calls are idempotent.
+//
+// `awaitingRelease` is deliberately distinct from `active`. The first Pressed
+// edge starts one physical hold and sets both. The 120-second safety timer may
+// force `active` false, but it MUST leave `awaitingRelease` true: otherwise a
+// repeated Pressed from the same still-held key could be mistaken for a new
+// hold and re-open the microphone for another two minutes. Only an actual
+// Released edge (or a session reset) ends the physical hold and permits the
+// next Pressed to activate again.
+//
+// Three independent guards keep the microphone fail-safe:
 //   1. `reset()` is called by SessionView's per-session reset effect AND on
 //      teardown so a stuck state never bleeds into the next session's first
 //      audio track (PLAN §5 default-muted).
-//   2. A second `press()` while active immediately mutes. global-hotkey
-//      suppresses auto-repeat on every supported backend, so a second Pressed
-//      event represents a new physical press whose previous Released event was
-//      lost, not the original key still being held.
-//   3. `MAX_HOLD_MS` failsafe — `press()` arms a self-release timer so a hold
-//      whose matching release is never delivered falls back to muted. This is
-//      a STUCK-KEY guard, not a hold limit: macOS global hotkeys
-//      (tauri_plugin_global_shortcut → Carbon RegisterEventHotKey) fire
-//      `Pressed` exactly once per physical key-down with NO auto-repeat, so a
-//      genuine continuous hold gets a single `press()` and must survive the
-//      whole window. The threshold is set well beyond any plausible single
-//      utterance (2 min) so it only bites a truly dropped release; the
-//      PttIndicator flip is the user's signal that the failsafe fired.
+//   2. Duplicate/repeated `press()` calls while `awaitingRelease` are ignored
+//      and DO NOT re-arm the failsafe, including after that failsafe has muted
+//      the current hold.
+//   3. `MAX_HOLD_MS` is the last-resort stuck-key guard: the first press arms a
+//      self-mute timer. The physical hold remains latched until Released so the
+//      cutoff is authoritative rather than a renewable timeout.
+//
+// `revision` is a monotonic local state generation used by diagnostics to
+// detect an edge/failsafe racing an async WebRTC stats sample. It changes only
+// when the logical PTT state changes, never for duplicate edges.
 //
 // The timer is module-scoped (not store state) so it never participates in
 // equality checks / re-renders. Unit-tested via the injectable clock seam.
@@ -60,6 +69,8 @@ function clearHoldTimer(): void {
 
 type PttState = {
   active: boolean
+  awaitingRelease: boolean
+  revision: number
   press: () => void
   release: () => void
   reset: () => void
@@ -67,31 +78,48 @@ type PttState = {
 
 export const usePttStore = create<PttState>((set, get) => ({
   active: false,
+  awaitingRelease: false,
+  revision: 0,
   press: () => {
-    // A second physical press means the prior release edge was lost. Treat it
-    // as an emergency mute instead of extending the hot-mic window by another
-    // two minutes (issue #156).
-    if (get().active) {
-      clearHoldTimer()
-      set({ active: false })
-      return
-    }
+    // A repeat from the current physical hold is always a no-op. In
+    // particular, the failsafe may already have muted `active`; the hold is
+    // still not eligible to activate again until its Released edge arrives.
+    if (get().awaitingRelease) return
 
-    // Arm the stuck-key failsafe. A single press whose matching release never
-    // arrives falls back to muted after MAX_HOLD_MS.
     clearHoldTimer()
     holdTimer = activeScheduler.setTimeout(() => {
       holdTimer = null
-      set({ active: false })
+      const current = get()
+      if (!current.awaitingRelease || !current.active) return
+      set((state) => ({
+        active: false,
+        revision: state.revision + 1,
+      }))
     }, MAX_HOLD_MS)
-    set({ active: true })
+    set((state) => ({
+      active: true,
+      awaitingRelease: true,
+      revision: state.revision + 1,
+    }))
   },
   release: () => {
     clearHoldTimer()
-    set({ active: false })
+    const current = get()
+    if (!current.active && !current.awaitingRelease) return
+    set((state) => ({
+      active: false,
+      awaitingRelease: false,
+      revision: state.revision + 1,
+    }))
   },
   reset: () => {
     clearHoldTimer()
-    set({ active: false })
+    const current = get()
+    if (!current.active && !current.awaitingRelease) return
+    set((state) => ({
+      active: false,
+      awaitingRelease: false,
+      revision: state.revision + 1,
+    }))
   },
 }))
