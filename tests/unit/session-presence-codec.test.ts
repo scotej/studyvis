@@ -4,6 +4,8 @@ import {
   decodePeerPresenceMs,
   decodePeerPresenceMsForPeers,
   encodePeerPresenceMs,
+  capPeerPresenceMs,
+  maxPeerPresenceMs,
   mergePeerPresenceMs,
 } from '@/lib/db/sessionPresence'
 
@@ -83,6 +85,16 @@ describe('session peer-presence codec', () => {
     )
     expect(mergePeerPresenceMs(null, stint)).toBeNull()
     expect(mergePeerPresenceMs('malformed', stint)).toBeNull()
+  })
+
+  test('bounds canonical peer overlap by the logical study duration', () => {
+    const raw = encodePeerPresenceMs({ [A]: 90_000, [B]: 30_000 })
+    expect(maxPeerPresenceMs(raw)).toBe(90_000)
+    expect(capPeerPresenceMs(raw, 60_000)).toBe(
+      encodePeerPresenceMs({ [A]: 60_000, [B]: 30_000 })
+    )
+    expect(capPeerPresenceMs('malformed', 60_000)).toBeNull()
+    expect(capPeerPresenceMs(raw, -1)).toBeNull()
   })
 
   test('overflow during a merge degrades to unknown', () => {

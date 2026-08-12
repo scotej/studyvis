@@ -12,7 +12,6 @@ import {
   CaptureError,
   discardPendingScreenStream,
   initialBackoffState,
-  INFERENCE_ENGINE_FINGERPRINT,
   nextBackoffState,
   preacquireScreenStream,
   SLOW_TICK_FACTOR,
@@ -32,8 +31,11 @@ import {
   __setSampleLoopRuntime,
   __setScreenCaptureRuntime,
   __setSidecarRuntime,
+  clearCurrentAiHardwareIdentity,
   getSampleLoopRuntime,
+  inferenceEngineFingerprintFor,
   initialScoreMachineState,
+  setCurrentAiHardwareIdentity,
   startSampleLoop,
   useBreakStore,
   useFocusStore,
@@ -54,6 +56,11 @@ type DeferredTimer = {
   id: number
   fireAt: number
   handler: () => void
+}
+
+const TEST_HARDWARE_IDENTITY = {
+  selection: 'auto' as const,
+  topology: [],
 }
 
 class FakeClock {
@@ -114,10 +121,12 @@ function seedSidecarStoreRunning(): void {
     lastHealthCheckAt: Date.now(),
     lastError: null,
     pollHandle: null,
+    hardwareIdentity: TEST_HARDWARE_IDENTITY,
   })
 }
 
 function resetAllStores(): void {
+  setCurrentAiHardwareIdentity(TEST_HARDWARE_IDENTITY)
   useSidecarStore.setState({
     status: 'idle',
     port: null,
@@ -128,6 +137,7 @@ function resetAllStores(): void {
     lastHealthCheckAt: null,
     lastError: null,
     pollHandle: null,
+    hardwareIdentity: null,
   })
   useFocusStore.setState({
     machine: initialScoreMachineState(),
@@ -157,7 +167,10 @@ function resetAllStores(): void {
           p95Sec: 3,
           sampleIntervalSec: 5,
           completedAtSec: 0,
-          engineFingerprint: INFERENCE_ENGINE_FINGERPRINT,
+          engineFingerprint: inferenceEngineFingerprintFor(
+            TEST_HARDWARE_IDENTITY
+          ),
+          hardwareIdentity: TEST_HARDWARE_IDENTITY,
         },
         installedAt: 0,
       },
@@ -297,6 +310,7 @@ beforeEach(() => {
 afterEach(() => {
   __resetCaptureRuntime()
   __resetLog()
+  clearCurrentAiHardwareIdentity()
 })
 
 describe('startSampleLoop — start failures', () => {
@@ -1531,16 +1545,21 @@ describe('startSampleLoop — sidecar lifecycle', () => {
   test('an old loop claims its stop before a replacement loop starts', async () => {
     const clock = new FakeClock()
     const oldStartFail = vi.fn()
-    let resolveFirstStart!: (port: number) => void
+    let resolveFirstStart!: (result: {
+      port: number
+      hardwareIdentity: null
+    }) => void
     let startCalls = 0
     const nativeStart = vi.fn<SidecarRuntime['start']>(() => {
       startCalls += 1
       if (startCalls === 1) {
-        return new Promise<number>((resolve) => {
-          resolveFirstStart = resolve
-        })
+        return new Promise<{ port: number; hardwareIdentity: null }>(
+          (resolve) => {
+            resolveFirstStart = resolve
+          }
+        )
       }
-      return Promise.resolve(9200)
+      return Promise.resolve({ port: 9200, hardwareIdentity: null })
     })
     const nativeStop = vi.fn<SidecarRuntime['stop']>(async () => {})
     __setSidecarRuntime({
@@ -1595,7 +1614,7 @@ describe('startSampleLoop — sidecar lifecycle', () => {
     expect(nativeStop).toHaveBeenCalledTimes(1)
     expect(nativeStart).toHaveBeenCalledTimes(2)
 
-    resolveFirstStart(9100)
+    resolveFirstStart({ port: 9100, hardwareIdentity: null })
     await oldStop
     await flushMicrotasks()
 
@@ -1709,7 +1728,10 @@ describe('startSampleLoop — sidecar lifecycle', () => {
             p95Sec: 20,
             sampleIntervalSec: 21,
             completedAtSec: 0,
-            engineFingerprint: INFERENCE_ENGINE_FINGERPRINT,
+            engineFingerprint: inferenceEngineFingerprintFor(
+              TEST_HARDWARE_IDENTITY
+            ),
+            hardwareIdentity: TEST_HARDWARE_IDENTITY,
           },
           installedAt: 0,
         },
@@ -1732,6 +1754,56 @@ describe('startSampleLoop — sidecar lifecycle', () => {
     expect(fetchMock).not.toHaveBeenCalled()
     await clock.advance(1_000)
     expect(fetchMock).toHaveBeenCalledTimes(1)
+    await handle.stop()
+  })
+
+  test('uses a matching persisted benchmark after native sidecar identity resolves on relaunch', async () => {
+    const clock = new FakeClock()
+    useModelStore.setState((s) => ({
+      ...s,
+      records: {
+        'test-model': {
+          modelId: 'test-model',
+          benchmark: {
+            samplesSec: [18, 19, 20],
+            p50Sec: 19,
+            p95Sec: 20,
+            sampleIntervalSec: 21,
+            completedAtSec: 0,
+            engineFingerprint: inferenceEngineFingerprintFor(
+              TEST_HARDWARE_IDENTITY
+            ),
+            hardwareIdentity: TEST_HARDWARE_IDENTITY,
+          },
+          installedAt: 0,
+        },
+      },
+      activeModelId: 'test-model',
+    }))
+    // Settings has not mounted on a normal relaunch, so there is no renderer
+    // hardware identity until the native sidecar start completes.
+    clearCurrentAiHardwareIdentity()
+    __setSampleLoopRuntime(
+      buildSampleLoopRuntime({
+        clock,
+        fetch: vi.fn(async () => judgmentResponse('on_task')) as never,
+        startSidecar: async () => {
+          setCurrentAiHardwareIdentity(TEST_HARDWARE_IDENTITY)
+          seedSidecarStoreRunning()
+          return 9999
+        },
+      })
+    )
+
+    const handle = startSampleLoop({
+      getTopic: () => 't',
+      modelId: 'test-model',
+      getFaceTrack: () => makeFakeTrack(),
+    })
+    await flushMicrotasks(10)
+
+    expect(handle.__state().modelFloorSec).toBe(21)
+    expect(handle.__state().modelP95Sec).toBe(20)
     await handle.stop()
   })
 })

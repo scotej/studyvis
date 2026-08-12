@@ -27,6 +27,7 @@ vi.mock('@/lib/db/sessions', () => ({
       started_at: row.startedAt ?? null,
       ended_at: row.endedAt ?? null,
       total_minutes: row.totalMinutes ?? null,
+      total_duration_ms: row.totalDurationMs ?? null,
       peer_pubkeys: row.peerPubkeys ?? null,
       peer_presence_ms: row.peerPresenceMs ?? null,
       declared_topic: null,
@@ -144,6 +145,20 @@ describe('re-entry merge across leave cycles', () => {
       startedAt: T0, // earliest stint anchors the report timeline
       totalMinutes: 55, // 45 + 10 — the 2-minute gap is not studied time
       endedAt: t2 + 10 * MIN,
+    })
+  })
+
+  test('two fractional same-topic stints retain a whole accumulated minute', async () => {
+    await runStint(T0, T0 + 30_000)
+    expect(db.get('topic-1')).toMatchObject({
+      totalMinutes: 0,
+      totalDurationMs: 30_000,
+    })
+
+    await runStint(T0 + 2 * MIN, T0 + 2 * MIN + 30_000)
+    expect(db.get('topic-1')).toMatchObject({
+      totalMinutes: 1,
+      totalDurationMs: 60_000,
     })
   })
 
@@ -266,6 +281,158 @@ describe('re-entry merge across leave cycles', () => {
     })
   })
 
+  test('reconciles a stale durable duration with measured overlap before merging', () => {
+    const peer = 'a'.repeat(64)
+    const merged = mergeSessionStints(
+      {
+        started_at: T0,
+        total_minutes: 1,
+        total_duration_ms: 60_000,
+        peer_pubkeys: JSON.stringify([peer]),
+        peer_presence_ms: encodePeerPresenceMs(new Map([[peer, 90_000]])),
+      },
+      {
+        startedAt: T0 + MIN,
+        totalMinutes: 0,
+        totalDurationMs: 30_000,
+        peerPubkeys: JSON.stringify([peer]),
+        peerPresenceMs: encodePeerPresenceMs(new Map([[peer, 30_000]])),
+      }
+    )
+
+    expect(merged).toMatchObject({
+      totalMinutes: 1,
+      totalDurationMs: 90_000,
+      peerPresenceMs: encodePeerPresenceMs(new Map([[peer, 90_000]])),
+    })
+  })
+
+  test('reconciles a nonnegative but inconsistent durable duration with legacy lower bounds', () => {
+    const peer = 'd'.repeat(64)
+    const merged = mergeSessionStints(
+      {
+        started_at: T0,
+        total_minutes: 1,
+        total_duration_ms: 0,
+        peer_pubkeys: JSON.stringify([peer]),
+        peer_presence_ms: encodePeerPresenceMs(new Map([[peer, 90_000]])),
+      },
+      {
+        startedAt: T0 + MIN,
+        totalMinutes: 0,
+        totalDurationMs: 30_000,
+        peerPubkeys: JSON.stringify([peer]),
+        peerPresenceMs: encodePeerPresenceMs(new Map([[peer, 30_000]])),
+      }
+    )
+
+    expect(merged).toMatchObject({
+      totalMinutes: 2,
+      totalDurationMs: null,
+      peerPresenceMs: encodePeerPresenceMs(new Map([[peer, 120_000]])),
+    })
+  })
+
+  test('uses a legacy precise peer overlap as the lower bound before adding a stint', () => {
+    const peer = 'b'.repeat(64)
+    const merged = mergeSessionStints(
+      {
+        started_at: T0,
+        total_minutes: 1,
+        total_duration_ms: null,
+        peer_pubkeys: JSON.stringify([peer]),
+        peer_presence_ms: encodePeerPresenceMs(new Map([[peer, 90_000]])),
+      },
+      {
+        startedAt: T0 + MIN,
+        totalMinutes: 0,
+        totalDurationMs: 30_000,
+        peerPubkeys: JSON.stringify([peer]),
+        peerPresenceMs: encodePeerPresenceMs(new Map([[peer, 30_000]])),
+      }
+    )
+
+    expect(merged).toMatchObject({
+      totalMinutes: 2,
+      totalDurationMs: null,
+      peerPresenceMs: encodePeerPresenceMs(new Map([[peer, 120_000]])),
+    })
+  })
+
+  test('keeps an orphaned unknown duration unknown after any rejoin tail', () => {
+    const merged = mergeSessionStints(
+      {
+        started_at: T0,
+        total_minutes: null,
+        total_duration_ms: null,
+        peer_pubkeys: null,
+        peer_presence_ms: null,
+      },
+      {
+        startedAt: T0 + MIN,
+        totalMinutes: 10,
+        totalDurationMs: 10 * MIN,
+        peerPubkeys: null,
+        peerPresenceMs: '{}',
+      }
+    )
+
+    expect(merged.totalMinutes).toBeNull()
+    expect(merged.totalDurationMs).toBeNull()
+  })
+
+  test('reconciles a valid zero exact duration with stronger legacy lower bounds', () => {
+    const peer = 'd'.repeat(64)
+    const merged = mergeSessionStints(
+      {
+        started_at: T0,
+        total_minutes: 1,
+        total_duration_ms: 0,
+        peer_pubkeys: JSON.stringify([peer]),
+        peer_presence_ms: encodePeerPresenceMs(new Map([[peer, 90_000]])),
+      },
+      {
+        startedAt: T0 + MIN,
+        totalMinutes: 0,
+        totalDurationMs: 30_000,
+        peerPubkeys: JSON.stringify([peer]),
+        peerPresenceMs: encodePeerPresenceMs(new Map([[peer, 30_000]])),
+      }
+    )
+
+    expect(merged).toMatchObject({
+      totalMinutes: 2,
+      totalDurationMs: null,
+      peerPresenceMs: encodePeerPresenceMs(new Map([[peer, 120_000]])),
+    })
+  })
+
+  test('falls back to legacy lower bounds when durable duration is invalid', () => {
+    const peer = 'c'.repeat(64)
+    const merged = mergeSessionStints(
+      {
+        started_at: T0,
+        total_minutes: 1,
+        total_duration_ms: -1,
+        peer_pubkeys: JSON.stringify([peer]),
+        peer_presence_ms: encodePeerPresenceMs(new Map([[peer, 90_000]])),
+      },
+      {
+        startedAt: T0 + MIN,
+        totalMinutes: 0,
+        totalDurationMs: 30_000,
+        peerPubkeys: JSON.stringify([peer]),
+        peerPresenceMs: encodePeerPresenceMs(new Map([[peer, 30_000]])),
+      }
+    )
+
+    expect(merged).toMatchObject({
+      totalMinutes: 2,
+      totalDurationMs: null,
+      peerPresenceMs: encodePeerPresenceMs(new Map([[peer, 120_000]])),
+    })
+  })
+
   test('failed reads still retain a first-ever session atomically', async () => {
     sessionsGetFailuresRemaining = 2
     await runStint(T0, T0 + 45 * MIN)
@@ -382,6 +549,7 @@ describe('mergeSessionStints (pure)', () => {
   const stint = {
     startedAt: T0 + 10 * MIN,
     totalMinutes: 10,
+    totalDurationMs: 10 * MIN,
     peerPubkeys: JSON.stringify([ED_B, ED_A]) as string | null,
     peerPresenceMs: encodePeerPresenceMs({
       [ED_A]: 4 * MIN,
@@ -434,7 +602,7 @@ describe('mergeSessionStints (pure)', () => {
     )
   })
 
-  test('NULL prior fields never poison the merge', () => {
+  test('NULL prior duration keeps the merged duration unknown', () => {
     // schema allows NULL started_at/total_minutes on partial rows
     const merged = mergeSessionStints(
       {
@@ -446,7 +614,7 @@ describe('mergeSessionStints (pure)', () => {
       stint
     )
     expect(merged.startedAt).toBe(stint.startedAt)
-    expect(merged.totalMinutes).toBe(10)
+    expect(merged.totalMinutes).toBeNull()
     expect(merged.peerPubkeys).toBe(JSON.stringify([ED_A, ED_B]))
     expect(merged.peerPresenceMs).toBeNull()
   })
@@ -482,5 +650,57 @@ describe('mergeSessionStints (pure)', () => {
       stint
     )
     expect(merged.peerPresenceMs).toBeNull()
+  })
+
+  test('does not credit a new tail peer with an unmeasured legacy prior stint', () => {
+    const merged = mergeSessionStints(
+      {
+        started_at: T0,
+        total_minutes: 5,
+        total_duration_ms: null,
+        peer_pubkeys: JSON.stringify([ED_A]),
+        peer_presence_ms: null,
+      },
+      {
+        startedAt: T0 + 5 * MIN,
+        totalMinutes: 0,
+        totalDurationMs: 30_000,
+        peerPubkeys: JSON.stringify([ED_B]),
+        peerPresenceMs: encodePeerPresenceMs({ [ED_B]: 30_000 }),
+      }
+    )
+
+    expect(merged).toMatchObject({
+      peerPubkeys: JSON.stringify([ED_A]),
+      peerPresenceMs: null,
+      totalMinutes: 5,
+      totalDurationMs: null,
+    })
+  })
+
+  test('does not attach a tail peer to an unmeasured legacy solo prior stint', () => {
+    const merged = mergeSessionStints(
+      {
+        started_at: T0,
+        total_minutes: 5,
+        total_duration_ms: null,
+        peer_pubkeys: null,
+        peer_presence_ms: null,
+      },
+      {
+        startedAt: T0 + 5 * MIN,
+        totalMinutes: 0,
+        totalDurationMs: 30_000,
+        peerPubkeys: JSON.stringify([ED_B]),
+        peerPresenceMs: encodePeerPresenceMs({ [ED_B]: 30_000 }),
+      }
+    )
+
+    expect(merged).toMatchObject({
+      peerPubkeys: null,
+      peerPresenceMs: null,
+      totalMinutes: 5,
+      totalDurationMs: null,
+    })
   })
 })

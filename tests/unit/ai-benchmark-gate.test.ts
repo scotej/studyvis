@@ -1,10 +1,17 @@
-import { describe, expect, test } from 'vitest'
+import { afterEach, beforeEach, describe, expect, test } from 'vitest'
 
 import {
+  clearCurrentAiHardwareIdentity,
   getAiEnableReadiness,
+  setCurrentAiHardwareIdentity,
   summariseBenchmark,
   type ModelRecord,
 } from '@/features/ai'
+
+const HARDWARE_IDENTITY = {
+  selection: 'auto' as const,
+  topology: [{ id: 'Metal0', label: 'Apple M2' }],
+}
 
 function record(
   modelId: string,
@@ -18,6 +25,14 @@ function record(
 }
 
 describe('getAiEnableReadiness', () => {
+  beforeEach(() => {
+    setCurrentAiHardwareIdentity(HARDWARE_IDENTITY)
+  })
+
+  afterEach(() => {
+    clearCurrentAiHardwareIdentity()
+  })
+
   test.each([
     ['loading', 'loading'],
     ['error', 'error'],
@@ -81,6 +96,7 @@ describe('getAiEnableReadiness', () => {
     const benchmark = summariseBenchmark({
       samplesSec: [2, 3, 4],
       completedAtSec: 99,
+      hardwareIdentity: HARDWARE_IDENTITY,
     })
 
     expect(
@@ -97,6 +113,7 @@ describe('getAiEnableReadiness', () => {
       ...summariseBenchmark({
         samplesSec: [11.303, 12.573, 8.997],
         completedAtSec: 99,
+        hardwareIdentity: HARDWARE_IDENTITY,
       }),
       engineFingerprint: 'b9095-ngl99',
     }

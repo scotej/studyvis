@@ -25,6 +25,7 @@ const MIGRATION_003_SAMPLE_COUNTS: &str = include_str!("migrations/003_sample_co
 const MIGRATION_004_AI_ENABLED: &str = include_str!("migrations/004_ai_enabled.sql");
 const MIGRATION_005_SESSION_IDENTITY: &str = include_str!("migrations/005_session_identity.sql");
 const MIGRATION_006_PEER_PRESENCE_MS: &str = include_str!("migrations/006_peer_presence_ms.sql");
+const MIGRATION_007_TOTAL_DURATION_MS: &str = include_str!("migrations/007_total_duration_ms.sql");
 
 const MIGRATIONS: &[(u32, &str)] = &[
     (1, MIGRATION_001_INITIAL),
@@ -33,6 +34,7 @@ const MIGRATIONS: &[(u32, &str)] = &[
     (4, MIGRATION_004_AI_ENABLED),
     (5, MIGRATION_005_SESSION_IDENTITY),
     (6, MIGRATION_006_PEER_PRESENCE_MS),
+    (7, MIGRATION_007_TOTAL_DURATION_MS),
 ];
 
 pub const MAX_KNOWN_VERSION: u32 = MIGRATIONS[MIGRATIONS.len() - 1].0;
@@ -125,7 +127,7 @@ mod tests {
         .unwrap_or(0)
     }
 
-    const LATEST_VERSION: u32 = 6;
+    const LATEST_VERSION: u32 = 7;
 
     #[test]
     fn applies_full_schema_on_empty_db() {
@@ -291,6 +293,52 @@ mod tests {
         assert_eq!(presence, None, "pre-006 duration precision stays unknown");
     }
 
+    #[test]
+    fn upgrades_v6_db_to_v7_with_unknown_total_duration_on_existing_sessions() {
+        let mut conn = Connection::open_in_memory().expect("open in-memory");
+        {
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS schema_version (version INTEGER PRIMARY KEY)",
+                [],
+            )
+            .expect("schema_version");
+            let tx = conn.transaction().expect("tx");
+            tx.execute_batch(MIGRATION_001_INITIAL).expect("apply 001");
+            tx.execute_batch(MIGRATION_002_V2).expect("apply 002");
+            tx.execute_batch(MIGRATION_003_SAMPLE_COUNTS)
+                .expect("apply 003");
+            tx.execute_batch(MIGRATION_004_AI_ENABLED)
+                .expect("apply 004");
+            tx.execute_batch(MIGRATION_005_SESSION_IDENTITY)
+                .expect("apply 005");
+            tx.execute_batch(MIGRATION_006_PEER_PRESENCE_MS)
+                .expect("apply 006");
+            tx.execute(
+                "INSERT INTO schema_version (version) VALUES (1), (2), (3), (4), (5), (6)",
+                [],
+            )
+            .expect("record v6");
+            tx.commit().expect("commit v6");
+        }
+        conn.execute(
+            "INSERT INTO sessions (id, total_minutes, peer_presence_ms)
+             VALUES ('s1', 1, '{\"aa\":90000}')",
+            [],
+        )
+        .expect("insert v6 session");
+
+        let applied = run_migrations(&mut conn).expect("upgrade run");
+        assert_eq!(applied, LATEST_VERSION);
+        let duration: Option<i64> = conn
+            .query_row(
+                "SELECT total_duration_ms FROM sessions WHERE id = 's1'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("read migrated duration");
+        assert_eq!(duration, None, "pre-007 duration precision stays unknown");
+    }
+
     // #47 D5 acceptance: 003 runs cleanly on a database already at
     // schema_version 2 with real session rows — the columns appear and the
     // pre-migration rows read back NULL counts ("unknown", not zero).
@@ -452,6 +500,10 @@ mod tests {
             (
                 6,
                 "4d039acf0382c1590aab16897e5bc757be4d547084c6a242d814eb1a24cd738f",
+            ),
+            (
+                7,
+                "689ca525dc403affc9fcd191486afe91f4aca876e197e9d9fdf90cd83194177e",
             ),
         ];
         assert_eq!(

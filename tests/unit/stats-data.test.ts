@@ -327,6 +327,30 @@ describe('partnerStudyTotals', () => {
     expect(totals.get(B)?.minutes).toBe(15)
   })
 
+  test('never credits a partner beyond the durable logical study duration', () => {
+    const totals = partnerStudyTotals([
+      session({
+        peer_pubkeys: JSON.stringify([A]),
+        peer_presence_ms: encodePeerPresenceMs({ [A]: 90_000 }),
+        total_minutes: 1,
+        total_duration_ms: 60_000,
+      }),
+    ])
+    expect(totals.get(A)?.minutes).toBe(1)
+  })
+
+  test('reconciles a nonnegative stale durable total before capping partner overlap', () => {
+    const totals = partnerStudyTotals([
+      session({
+        peer_pubkeys: JSON.stringify([A]),
+        peer_presence_ms: encodePeerPresenceMs({ [A]: 120_000 }),
+        total_minutes: 1,
+        total_duration_ms: 0,
+      }),
+    ])
+    expect(totals.get(A)?.minutes).toBe(2)
+  })
+
   test('NULL precision retains legacy whole-session credit', () => {
     const totals = partnerStudyTotals([
       session({
@@ -336,6 +360,32 @@ describe('partnerStudyTotals', () => {
       }),
     ])
     expect(totals.get(A)?.minutes).toBe(120)
+  })
+
+  test('unknown legacy attribution cannot credit an omitted rejoin-tail peer', () => {
+    const totals = partnerStudyTotals([
+      session({
+        peer_pubkeys: JSON.stringify([A]),
+        peer_presence_ms: null,
+        total_minutes: 5,
+        total_duration_ms: null,
+      }),
+    ])
+    expect(totals.get(A)?.minutes).toBe(5)
+    expect(totals.has(B)).toBe(false)
+  })
+
+  test('a legacy solo summary cannot credit a rejoin-tail peer with old minutes', () => {
+    const totals = partnerStudyTotals([
+      session({
+        peer_pubkeys: null,
+        peer_presence_ms: null,
+        total_minutes: 5,
+        total_duration_ms: null,
+      }),
+    ])
+    expect(totals.has(A)).toBe(false)
+    expect(totals.has(B)).toBe(false)
   })
 
   test.each([

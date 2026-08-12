@@ -69,6 +69,9 @@ describe('local session end reason', () => {
       sessionTopic: 'topic',
       sessionPassword: 'pw',
       isHost: false,
+      expectedAuthorityEdPubkeyHex: null,
+      reservedReconnectPeerIds: [],
+      frozenGuestAdmission: null,
     })
     expect(useSessionStore.getState().getRejoinRequest(20_000)).toBeNull()
   })
@@ -89,6 +92,24 @@ describe('local session end reason', () => {
     expect(useSessionStore.getState().getRejoinRequest(19_999)?.isHost).toBe(
       true
     )
+  })
+
+  test('a host rejoin request retains only its pre-leave incumbent slots', () => {
+    begin(true)
+    useSessionStore
+      .getState()
+      .setReservedReconnectPeerIds([
+        'incumbent-a',
+        'incumbent-b',
+        'incumbent-a',
+        'fourth',
+      ])
+    useSessionStore.getState().setRejoinDeadline(20_000)
+    useSessionStore.getState().markEnded()
+
+    expect(useSessionStore.getState().getRejoinRequest(19_999)).toMatchObject({
+      reservedReconnectPeerIds: ['incumbent-a', 'incumbent-b', 'fourth'],
+    })
   })
 
   test('begin and reset clear stale reason and deadline state', () => {

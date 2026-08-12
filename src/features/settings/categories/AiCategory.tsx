@@ -44,6 +44,7 @@ import {
   WARNING_THRESHOLD_MAX,
   WARNING_THRESHOLD_MIN,
   computeDeviceId,
+  createAiComputeDeviceSelectionGuard,
   hydrateAiComputeDeviceSelection,
   isAiComputeDeviceSelection,
   persistAiComputeDeviceSelection,
@@ -137,6 +138,9 @@ export function AiCategory() {
   )
   const [savingComputeDevice, setSavingComputeDevice] = useState(false)
   const [computeDeviceSaveError, setComputeDeviceSaveError] = useState(false)
+  const computeDeviceSelectionGuardRef = useRef(
+    createAiComputeDeviceSelectionGuard()
+  )
   const modelPickerSectionRef = useRef<HTMLDivElement>(null)
   const modelPickerRef = useRef<ModelPickerContainerHandle>(null)
 
@@ -180,8 +184,15 @@ export function AiCategory() {
   // synchronous benchmark-fingerprint mirror used before this hydration lands.
   useEffect(() => {
     let disposed = false
+    const hydrationOperation =
+      computeDeviceSelectionGuardRef.current.hydrationSnapshot()
     void hydrateAiComputeDeviceSelection().then((selection) => {
-      if (!disposed) setComputeDevice(selection)
+      if (
+        !disposed &&
+        computeDeviceSelectionGuardRef.current.isCurrent(hydrationOperation)
+      ) {
+        setComputeDevice(selection)
+      }
     })
     return () => {
       disposed = true
@@ -398,16 +409,26 @@ export function AiCategory() {
     async (value: string) => {
       if (!isAiComputeDeviceSelection(value) || value === computeDevice) return
       const previous = computeDevice
+      const persistOperation =
+        computeDeviceSelectionGuardRef.current.markUserChoice()
       setComputeDevice(value)
       setComputeDeviceSaveError(false)
       setSavingComputeDevice(true)
       try {
         await persistAiComputeDeviceSelection(value)
       } catch {
-        setComputeDevice(previous)
-        setComputeDeviceSaveError(true)
+        if (
+          computeDeviceSelectionGuardRef.current.isCurrent(persistOperation)
+        ) {
+          setComputeDevice(previous)
+          setComputeDeviceSaveError(true)
+        }
       } finally {
-        setSavingComputeDevice(false)
+        if (
+          computeDeviceSelectionGuardRef.current.isCurrent(persistOperation)
+        ) {
+          setSavingComputeDevice(false)
+        }
       }
     },
     [computeDevice]

@@ -15,9 +15,12 @@
 import benchmarkImageUrl from './assets/benchmark-desk.png'
 import { FACE_FRAME_QUALITY, FACE_FRAME_SIZE } from './captureFace'
 import {
+  aiHardwareIdentitiesEqual,
   computeDeviceFingerprint,
-  readCachedAiComputeDeviceSelection,
-  type AiComputeDeviceSelection,
+  currentAiHardwareIdentity,
+  isAiHardwareIdentity,
+  isResolvedAiHardwareIdentity,
+  type AiHardwareIdentity,
 } from './computeDevice'
 import { SCREEN_FRAME_MAX_WIDTH, SCREEN_FRAME_QUALITY } from './captureScreen'
 import { getCaptureRuntime, type CaptureFrame } from './captureShared'
@@ -57,27 +60,42 @@ const BENCHMARK_TOPIC = 'Studying'
 // base whenever any non-hardware part changes materially. A mismatched record
 // is shown as stale in the picker and is not trusted for cadence/timeouts.
 //
-// `hwselect1` invalidates the old single-policy b9095-ngl99 records: #211 makes
-// CPU vs Metal/Vulkan/eGPU a user choice, and their timings are not
-// interchangeable. Deliberately NOT __APP_VERSION__: most releases don't
-// affect inference measurements.
-const INFERENCE_ENGINE_FINGERPRINT_BASE = 'b9095-hwselect1-cachecold2'
+// `hwidentity2` invalidates the prior browser-cache selection stamp. #211 made
+// CPU vs Metal/Vulkan/eGPU selectable, but the localStorage mirror could lag
+// the canonical Tauri store and said nothing about Auto's actual accelerator
+// order. Persist the native spawn identity below instead. Deliberately NOT
+// __APP_VERSION__: most releases don't affect inference measurements.
+const INFERENCE_ENGINE_FINGERPRINT_BASE = 'b9095-hwidentity2-cachecold2'
 
 export function inferenceEngineFingerprintFor(
-  selection: AiComputeDeviceSelection
+  identity: AiHardwareIdentity
 ): string {
-  return `${INFERENCE_ENGINE_FINGERPRINT_BASE}-${computeDeviceFingerprint(selection)}`
+  const topology =
+    identity.topology === null
+      ? 'unresolved'
+      : identity.topology
+          .map(
+            (device) =>
+              `${encodeURIComponent(device.id)}=${encodeURIComponent(device.label)}`
+          )
+          .join(',') || 'cpu'
+  return `${INFERENCE_ENGINE_FINGERPRINT_BASE}-${computeDeviceFingerprint(identity.selection)}-${topology}`
 }
 
-export function currentInferenceEngineFingerprint(): string {
-  return inferenceEngineFingerprintFor(readCachedAiComputeDeviceSelection())
+export function currentInferenceEngineFingerprint(): string | null {
+  const identity = currentAiHardwareIdentity()
+  return isResolvedAiHardwareIdentity(identity)
+    ? inferenceEngineFingerprintFor(identity)
+    : null
 }
 
 // Backwards-compatible constant for call sites/tests that need the shipped
 // default. Runtime stale checks use currentInferenceEngineFingerprint() so a
 // hardware dropdown change invalidates the previous measurement immediately.
-export const INFERENCE_ENGINE_FINGERPRINT =
-  inferenceEngineFingerprintFor('auto')
+export const INFERENCE_ENGINE_FINGERPRINT = inferenceEngineFingerprintFor({
+  selection: 'auto',
+  topology: [],
+})
 
 export type BenchmarkResult = {
   // Wall-clock seconds per chat-completion request, in invocation order.
@@ -94,6 +112,10 @@ export type BenchmarkResult = {
   // Hardware-qualified engine fingerprint at measurement time. Additive JSON:
   // older builds ignore it; records without it are conservatively stale.
   engineFingerprint?: string
+  // Exact canonical selection and resolved native topology from the sidecar
+  // that produced the samples. This is intentionally separate from the
+  // opaque fingerprint so migrations and support diagnostics can inspect it.
+  hardwareIdentity?: AiHardwareIdentity
 }
 
 // A persisted benchmark measured with a different engine/protocol/hardware (or
@@ -101,7 +123,19 @@ export type BenchmarkResult = {
 // treats its timing numbers as unavailable: #171 proved a stale measurement
 // can be dangerously optimistic rather than conservative.
 export function isBenchmarkStale(result: BenchmarkResult): boolean {
-  return result.engineFingerprint !== currentInferenceEngineFingerprint()
+  const current = currentAiHardwareIdentity()
+  const measured = result.hardwareIdentity
+  if (
+    !isResolvedAiHardwareIdentity(current) ||
+    !isAiHardwareIdentity(measured) ||
+    !isResolvedAiHardwareIdentity(measured)
+  ) {
+    return true
+  }
+  return (
+    !aiHardwareIdentitiesEqual(measured, current) ||
+    result.engineFingerprint !== inferenceEngineFingerprintFor(current)
+  )
 }
 
 export type BenchmarkProgress =
@@ -127,7 +161,7 @@ export type BenchmarkRuntime = {
     modelPath: string
     mmprojPath: string | null
     ctxSize: number
-  }) => Promise<{ port: number }>
+  }) => Promise<{ port: number; hardwareIdentity: AiHardwareIdentity }>
   stopSidecar: () => Promise<void>
   // Wait for the sidecar's HTTP server to be ready. Returns once /health
   // responds 2xx; rejects if the sidecar errors out.
@@ -205,7 +239,13 @@ const defaultRuntime: BenchmarkRuntime = {
       const err = useSidecarStore.getState().lastError
       throw new Error(err ?? 'sidecar_start returned null')
     }
-    return { port }
+    const hardwareIdentity = useSidecarStore.getState().hardwareIdentity
+    if (!isResolvedAiHardwareIdentity(hardwareIdentity)) {
+      throw new Error(
+        'AI hardware topology could not be resolved; retry after accelerator detection succeeds.'
+      )
+    }
+    return { port, hardwareIdentity }
   },
   stopSidecar: async () => {
     await useSidecarStore.getState().stop()
@@ -294,11 +334,13 @@ export type BenchmarkOptions = {
 export type BenchmarkSamplesInput = {
   samplesSec: number[]
   completedAtSec: number
+  hardwareIdentity?: AiHardwareIdentity
 }
 
 export function summariseBenchmark({
   samplesSec,
   completedAtSec,
+  hardwareIdentity,
 }: BenchmarkSamplesInput): BenchmarkResult {
   if (samplesSec.length === 0) {
     throw new Error('benchmark requires at least one sample')
@@ -309,13 +351,26 @@ export function summariseBenchmark({
     sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid]
   const p95Sec = sorted[sorted.length - 1]
   const sampleIntervalSec = Math.max(5, Math.ceil(p95Sec + 1))
+  const candidateHardwareIdentity = hardwareIdentity ?? null
+  const resolvedHardwareIdentity = isResolvedAiHardwareIdentity(
+    candidateHardwareIdentity
+  )
+    ? candidateHardwareIdentity
+    : null
   return {
     samplesSec,
     p50Sec,
     p95Sec,
     sampleIntervalSec,
     completedAtSec,
-    engineFingerprint: currentInferenceEngineFingerprint(),
+    ...(resolvedHardwareIdentity
+      ? {
+          engineFingerprint: inferenceEngineFingerprintFor(
+            resolvedHardwareIdentity
+          ),
+          hardwareIdentity: resolvedHardwareIdentity,
+        }
+      : {}),
   }
 }
 
@@ -335,12 +390,15 @@ export async function runBenchmark(
   onProgress({ phase: 'starting-sidecar' })
 
   const samplesSec: number[] = []
+  let hardwareIdentity: AiHardwareIdentity | undefined
   try {
-    const { port } = await runtime.startSidecar({
+    const started = await runtime.startSidecar({
       modelPath: opts.modelPath,
       mmprojPath: opts.mmprojPath,
       ctxSize: opts.ctxSize ?? 4096,
     })
+    const { port } = started
+    hardwareIdentity = started.hardwareIdentity
     await runtime.waitForHealthy(port, SIDECAR_HEALTH_TIMEOUT_MS)
 
     // A1 — mirror the live tick's two-image shape (a camera frame + a screen
@@ -399,6 +457,7 @@ export async function runBenchmark(
   const result = summariseBenchmark({
     samplesSec,
     completedAtSec: Math.floor(runtime.now() / 1000),
+    hardwareIdentity,
   })
   onProgress({ phase: 'done', result })
   return result

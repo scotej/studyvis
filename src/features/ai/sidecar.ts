@@ -18,6 +18,11 @@ import { create } from 'zustand'
 
 import { logger } from '@/lib/log'
 import { useSettingsStore } from '@/stores/settingsStore'
+import {
+  isAiHardwareIdentity,
+  setCurrentAiHardwareIdentity,
+  type AiHardwareIdentity,
+} from './computeDevice'
 
 const log = logger.child('ai.sidecar')
 
@@ -33,9 +38,22 @@ export type SidecarStatus = {
   ctx_size: number | null
   errored: boolean
   last_error: string | null
+  // Omitted/null means the active child is not safe to associate with a
+  // previous benchmark (for example, a crash-restart hardware change).
+  hardware_identity?: unknown | null
 }
 
 export type SidecarStartPurpose = 'live' | 'benchmark'
+
+type NativeSidecarStartResult = {
+  port: number
+  hardware_identity: unknown
+}
+
+export type SidecarStartResult = {
+  port: number
+  hardwareIdentity: AiHardwareIdentity | null
+}
 
 export const HEALTH_POLL_INTERVAL_MS = 2000
 // Cold CPU starts can spend over a minute loading the model and projector.
@@ -51,7 +69,7 @@ export type SidecarRuntime = {
     mmprojPath: string | null
     ctxSize: number
     engineAutoInstall: boolean
-  }) => Promise<number>
+  }) => Promise<SidecarStartResult>
   stop: () => Promise<void>
   status: () => Promise<SidecarStatus>
   fetchHealth: (port: number) => Promise<boolean>
@@ -66,13 +84,26 @@ async function defaultStart(params: {
   mmprojPath: string | null
   ctxSize: number
   engineAutoInstall: boolean
-}): Promise<number> {
-  return invoke<number>('sidecar_start', {
+}): Promise<SidecarStartResult> {
+  const result = await invoke<NativeSidecarStartResult>('sidecar_start', {
     modelPath: params.modelPath,
     mmprojPath: params.mmprojPath ?? null,
     ctxSize: params.ctxSize,
     engineAutoInstall: params.engineAutoInstall,
   })
+  if (
+    !Number.isInteger(result.port) ||
+    result.port <= 0 ||
+    result.port > 65535
+  ) {
+    throw new Error('sidecar_start returned an invalid port')
+  }
+  return {
+    port: result.port,
+    hardwareIdentity: isAiHardwareIdentity(result.hardware_identity)
+      ? result.hardware_identity
+      : null,
+  }
 }
 
 async function defaultStop(): Promise<void> {
@@ -136,7 +167,6 @@ let inFlightStop: Promise<void> | null = null
 // start invalidates old start and status-refresh callbacks even when the coarse
 // status string has returned to the same value for different work.
 let lifecycleGeneration = 0
-
 export function __setSidecarRuntime(runtime: SidecarRuntime): void {
   activeRuntime = runtime
 }
@@ -158,6 +188,7 @@ type SidecarState = {
   lastHealthCheckAt: number | null
   lastError: string | null
   pollHandle: unknown | null
+  hardwareIdentity: AiHardwareIdentity | null
   start: (params: {
     modelPath: string
     mmprojPath?: string | null
@@ -191,6 +222,7 @@ export const useSidecarStore = create<SidecarState>((set, get) => ({
   lastHealthCheckAt: null,
   lastError: null,
   pollHandle: null,
+  hardwareIdentity: null,
 
   start: async ({
     modelPath,
@@ -261,7 +293,7 @@ export const useSidecarStore = create<SidecarState>((set, get) => ({
       })
       set({ status: 'starting', lastError: null })
       try {
-        const port = await activeRuntime.start({
+        const started = await activeRuntime.start({
           modelPath,
           mmprojPath,
           ctxSize,
@@ -281,6 +313,7 @@ export const useSidecarStore = create<SidecarState>((set, get) => ({
           })
           return null
         }
+        const { port, hardwareIdentity } = started
         set({
           status: 'running',
           port,
@@ -289,7 +322,12 @@ export const useSidecarStore = create<SidecarState>((set, get) => ({
           ctxSize,
           healthy: false,
           lastError: null,
+          hardwareIdentity,
         })
+        // Apply a native identity only after this generation still owns the
+        // lifecycle state. A late successful old start must not overwrite a
+        // newer Auto/eGPU topology after stop or replacement work wins.
+        setCurrentAiHardwareIdentity(hardwareIdentity)
         log.info('start.succeeded', {
           purpose,
           elapsedMs: Date.now() - startedAt,
@@ -342,14 +380,14 @@ export const useSidecarStore = create<SidecarState>((set, get) => ({
       log.debug('stop.joined', { status: get().status })
       return inFlightStop
     }
-    if (get().status === 'idle') {
-      log.debug('stop.skipped', { status: get().status })
-      return Promise.resolve()
-    }
     const ownedStop = (async (): Promise<void> => {
       const startedAt = Date.now()
       const previousStatus = get().status
       lifecycleGeneration += 1
+      // Rust owns the process and pending-start epoch across renderer reloads.
+      // A freshly reloaded Zustand store may say `idle` while a native start
+      // is still installing/probing, so even an apparently idle stop must
+      // reach the idempotent native command and invalidate that request.
       log.info('stop.requested', { previousStatus })
       set({ status: 'stopping' })
       stopPolling()
@@ -371,6 +409,7 @@ export const useSidecarStore = create<SidecarState>((set, get) => ({
           healthy: false,
           lastHealthCheckAt: null,
           lastError: null,
+          hardwareIdentity: null,
         })
         log.info('stop.succeeded', { elapsedMs: Date.now() - startedAt })
       } catch (err) {
@@ -434,6 +473,9 @@ export const useSidecarStore = create<SidecarState>((set, get) => ({
           : status.starting
             ? 'starting'
             : 'idle'
+      const hardwareIdentity = isAiHardwareIdentity(status.hardware_identity)
+        ? status.hardware_identity
+        : null
       set((s) => ({
         ...s,
         status: nextStatus,
@@ -442,7 +484,14 @@ export const useSidecarStore = create<SidecarState>((set, get) => ({
         mmproj: status.mmproj,
         ctxSize: status.ctx_size,
         lastError: status.last_error,
+        hardwareIdentity,
       }))
+      // A renderer reload can recover a still-running native child only from
+      // this authoritative snapshot. Conversely, a crash-restart refusal
+      // sends null here so stale eGPU timings stop reading as current.
+      if (status.running || status.model !== null || status.errored) {
+        setCurrentAiHardwareIdentity(hardwareIdentity)
+      }
       if (
         before.status !== nextStatus ||
         before.ctxSize !== status.ctx_size ||

@@ -197,6 +197,7 @@ vi.mock('@/lib/trystero', () => {
 
 import { hostSession, joinSession, rejoinSession } from '@/features/session'
 import {
+  ADMISSION_AUTHENTICATION_TIMEOUT_MS,
   MAX_REMOTE_PEERS,
   REJOIN_WINDOW_MS,
 } from '@/features/session/lifecycle'
@@ -407,23 +408,122 @@ describe('two room handles on the in-process bus observe peer events', () => {
 })
 
 describe('mesh hard-cap', () => {
-  test(`host evicts the 4th remote peer (5th total user)`, async () => {
-    const host = hostSession()
-    const guests = [
-      joinSession(host.sessionTopic, host.sessionPassword),
-      joinSession(host.sessionTopic, host.sessionPassword),
-      joinSession(host.sessionTopic, host.sessionPassword),
-      joinSession(host.sessionTopic, host.sessionPassword),
-    ]
-    // 4 joiners attempt to join; only MAX_REMOTE_PEERS = 3 should stick on
-    // the host's side. The 4th joiner receives 'session-full' and tears down.
+  test('a solo guest rejects delayed invite joins after the original host leaves', async () => {
+    const hostStore = createSessionStore()
+    const survivorStore = createSessionStore()
+    const host = hostSession({ store: hostStore })
+    const survivor = joinSession(host.sessionTopic, host.sessionPassword, {
+      store: survivorStore,
+    })
+    await flushMicrotasks()
+    expect(survivor.peers()).toHaveLength(1)
+
+    // The last original host may leave while an invited guest keeps studying
+    // solo. That is an intended active room, not a 20-second grace period.
+    await host.leave()
+    expect(survivorStore.getState().status).toBe('active')
+    expect(survivor.peers()).toEqual([])
+
+    // Exercise the old survivor-side deadline as well: durable pending
+    // invites can arrive after it, and their admission must still be bounded.
+    vi.useFakeTimers()
+    await vi.advanceTimersByTimeAsync(REJOIN_WINDOW_MS + 1)
+    vi.useRealTimers()
+
+    const inviteeStores = Array.from({ length: MAX_REMOTE_PEERS + 1 }, () =>
+      createSessionStore()
+    )
+    const invitees = inviteeStores.map((store) =>
+      joinSession(host.sessionTopic, host.sessionPassword, { store })
+    )
+    await flushMicrotasks(16)
+    vi.useFakeTimers()
+    await vi.advanceTimersByTimeAsync(ADMISSION_AUTHENTICATION_TIMEOUT_MS)
+    vi.useRealTimers()
+
+    // Original-host authority is not transferable. The survivor is protected
+    // from every unseen delayed invite, rather than allowing an entrant to
+    // become an authority that could evict one of the valid incumbents.
+    expect(survivorStore.getState().status).toBe('active')
+    expect(survivor.peers()).toEqual([])
+    for (const store of inviteeStores) {
+      // A guest cannot force local Leave; each delayed client remains locally
+      // active but has no authenticated room transport and cannot mesh with
+      // the other delayed invites.
+      expect(store.getState().status).toBe('active')
+      expect(Object.keys(store.getState().peers)).toEqual([])
+    }
+
+    await survivor.leave()
+    for (const invitee of invitees) await invitee.leave()
+  })
+
+  test('hostless incumbents remain active while delayed invitees are rejected', async () => {
+    const hostStore = createSessionStore()
+    const incumbentStores = Array.from({ length: MAX_REMOTE_PEERS }, () =>
+      createSessionStore()
+    )
+    const host = hostSession({ store: hostStore })
+    const incumbents = incumbentStores.map((store) =>
+      joinSession(host.sessionTopic, host.sessionPassword, { store })
+    )
+    await flushMicrotasks(12)
+
+    await host.leave()
+    vi.useFakeTimers()
+    await vi.advanceTimersByTimeAsync(REJOIN_WINDOW_MS + 1)
+    vi.useRealTimers()
+
+    const delayedStores = [createSessionStore(), createSessionStore()]
+    const delayed = delayedStores.map((store) =>
+      joinSession(host.sessionTopic, host.sessionPassword, { store })
+    )
+    await flushMicrotasks(16)
+    vi.useFakeTimers()
+    await vi.advanceTimersByTimeAsync(ADMISSION_AUTHENTICATION_TIMEOUT_MS)
+    vi.useRealTimers()
+
+    for (const store of incumbentStores) {
+      expect(store.getState().status).toBe('active')
+      expect(Object.keys(store.getState().peers)).toHaveLength(
+        MAX_REMOTE_PEERS - 1
+      )
+    }
+    for (const store of delayedStores) {
+      expect(store.getState().status).toBe('active')
+      expect(Object.keys(store.getState().peers)).toEqual([])
+    }
+
+    for (const incumbent of incumbents) await incumbent.leave()
+    for (const invitee of delayed) await invitee.leave()
+  })
+
+  test('a fifth entrant cannot evict anyone from a full four-person mesh', async () => {
+    const hostStore = createSessionStore()
+    const guestStores = Array.from({ length: MAX_REMOTE_PEERS + 1 }, () =>
+      createSessionStore()
+    )
+    const host = hostSession({ store: hostStore })
+    const guests = guestStores.map((store) =>
+      joinSession(host.sessionTopic, host.sessionPassword, { store })
+    )
+    // 4 joiners attempt to connect. The original host owns the only capacity
+    // decision, so the fourth joins briefly enough to receive session-full;
+    // it never gets to evict the incumbent it sees as a fourth remote peer.
     await flushMicrotasks(12)
 
     expect(host.peers()).toHaveLength(MAX_REMOTE_PEERS)
+    for (const store of [
+      hostStore,
+      ...guestStores.slice(0, MAX_REMOTE_PEERS),
+    ]) {
+      expect(store.getState().status).toBe('active')
+      expect(Object.keys(store.getState().peers)).toHaveLength(MAX_REMOTE_PEERS)
+    }
+    expect(guestStores[MAX_REMOTE_PEERS]?.getState().status).toBe('ended')
 
-    // Exactly one guest auto-left (received 'session-full', then ran its
-    // leave handler which upserts a single sessions row before any
-    // explicit cleanup runs). Host + 3 remaining guests are still open.
+    // Exactly the rejected fifth auto-left (received 'session-full', then ran
+    // its leave handler which upserts one row before explicit cleanup runs).
     const insertCallsBeforeCleanup = invokeMock.mock.calls.filter(
       ([cmd]) => cmd === 'sessions_insert'
     )
@@ -458,24 +558,46 @@ describe('mesh hard-cap', () => {
     await replacement.leave()
   })
 
-  test('a rejoined host preserves host role and cap enforcement', async () => {
-    const topic = 'rejoin-host-topic'
-    const password = 'rejoin-host-password'
-    const host = rejoinSession(topic, password, true)
-    expect(useSessionStore.getState().isHost).toBe(true)
-
-    const guests = [
-      joinSession(topic, password),
-      joinSession(topic, password),
-      joinSession(topic, password),
-      joinSession(topic, password),
-    ]
+  test('a report rejoined host reserves pre-leave incumbents against a delayed fifth', async () => {
+    const hostStore = createSessionStore()
+    const incumbentStores = Array.from({ length: MAX_REMOTE_PEERS }, () =>
+      createSessionStore()
+    )
+    const host = hostSession({ store: hostStore })
+    const incumbents = incumbentStores.map((store) =>
+      joinSession(host.sessionTopic, host.sessionPassword, { store })
+    )
     await flushMicrotasks(12)
-
-    expect(host.peers()).toHaveLength(MAX_REMOTE_PEERS)
+    const incumbentIds = incumbents.map((guest) => guest.room.selfId)
+    expect(host.peers()).toEqual(incumbentIds)
 
     await host.leave()
-    for (const guest of guests) await guest.leave()
+    const request = hostStore.getState().getRejoinRequest()
+    expect(request).toMatchObject({
+      isHost: true,
+      reservedReconnectPeerIds: incumbentIds,
+    })
+
+    const rejoined = rejoinSession(
+      host.sessionTopic,
+      host.sessionPassword,
+      true,
+      { store: hostStore }
+    )
+    expect(hostStore.getState().isHost).toBe(true)
+
+    // Existing transports reconnect to the returning original host before a
+    // delayed fifth can consume the preserved incumbent reservation.
+    const delayed = joinSession(host.sessionTopic, host.sessionPassword, {
+      store: createSessionStore(),
+    })
+    await flushMicrotasks(12)
+    expect(rejoined.peers()).toEqual(incumbentIds)
+    expect(rejoined.peers()).not.toContain(delayed.room.selfId)
+
+    await rejoined.leave()
+    await delayed.leave()
+    for (const incumbent of incumbents) await incumbent.leave()
   })
 
   test('a same-topic invite accepted from the prior report preserves focus continuity', async () => {
@@ -562,5 +684,41 @@ describe('leave handler tears down the room and persists a sessions row', () => 
       ([cmd]) => cmd === 'sessions_insert'
     )
     expect(insertCalls).toHaveLength(1)
+  })
+
+  test('host and guest wrappers keep a preflight failure retryable without disposing admission', async () => {
+    const hostStore = createSessionStore()
+    const guestStore = createSessionStore()
+    const host = hostSession({ store: hostStore })
+    const guest = joinSession(host.sessionTopic, host.sessionPassword, {
+      store: guestStore,
+    })
+    await flushMicrotasks()
+
+    for (const [handle, store] of [
+      [host, hostStore],
+      [guest, guestStore],
+    ] as const) {
+      const collectPeerPubkeys = store.getState().collectPeerPubkeys
+      let failPreflight = true
+      store.setState({
+        collectPeerPubkeys: () => {
+          if (failPreflight) {
+            failPreflight = false
+            throw new Error('preflight failed')
+          }
+          return collectPeerPubkeys()
+        },
+      })
+
+      const first = handle.leave()
+      expect(handle.leave()).toBe(first)
+      await expect(first).rejects.toThrow('preflight failed')
+      expect(store.getState().status).toBe('active')
+
+      const retry = handle.leave()
+      expect(retry).not.toBe(first)
+      await retry
+    }
   })
 })

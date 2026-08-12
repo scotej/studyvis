@@ -125,7 +125,10 @@ export function serializeReportToText(data: ResolvedReportData): string {
   const distractions = deriveTopDistractions(auditEvents, myEdPubkeyHex)
   const breaks = deriveBreaksSummary(auditEvents)
   const coverage = aiCoverage(session)
-  const totalMinutes = session.total_minutes ?? 0
+  const totalMinutesLabel =
+    session.total_minutes == null
+      ? strings.report.summaryUnknownDuration
+      : strings.report.summaryMinutes(session.total_minutes)
   const focusedPctLabel =
     session.focused_pct == null
       ? '—'
@@ -136,7 +139,7 @@ export function serializeReportToText(data: ResolvedReportData): string {
 
   const lines: string[] = [
     formatTopicHeading(session.declared_topic),
-    `${strings.report.summaryPrefix}${strings.report.summaryMinutes(totalMinutes)}${strings.report.summaryMiddle}${focusedPctLabel}`,
+    `${strings.report.summaryPrefix}${totalMinutesLabel}${strings.report.summaryMiddle}${focusedPctLabel}`,
     // R1 — never emit a fabricated 100 for an unscored (AI-off) session.
     // I83 — and name the cause when the row recorded one.
     session.score == null

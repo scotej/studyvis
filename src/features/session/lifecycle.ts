@@ -10,7 +10,10 @@ import {
   type SessionRow,
 } from '@/lib/db/sessions'
 import {
+  capPeerPresenceMs,
+  decodePeerPresenceMsForPeers,
   encodePeerPresenceMs,
+  maxPeerPresenceMs,
   mergePeerPresenceMs,
 } from '@/lib/db/sessionPresence'
 import { bytesToBase64 } from '@/lib/encoding'
@@ -19,7 +22,11 @@ import { buildIceOptions } from '@/lib/trystero/ice'
 import { userRelayConfig } from '@/lib/trystero/relays'
 import { useAuditStore } from '@/stores/auditStore'
 import { useFriendsStore } from '@/stores/friendsStore'
-import { useSessionStore, type SessionStore } from '@/stores/sessionStore'
+import {
+  useSessionStore,
+  type GuestAdmissionSnapshot,
+  type SessionStore,
+} from '@/stores/sessionStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { strings } from '@/strings'
 import { flushLog, logger, setLogContext } from '@/lib/log'
@@ -200,39 +207,148 @@ function logJoinError(details: { error: string }): void {
 // recorded 10 minutes starting at the rejoin, under-counting daily stats,
 // silently breaking streaks, and collapsing stint-1 audit events into the
 // timeline's 00:00. The one caller merges instead: earliest start, summed
-// minutes (the between-stint gap is deliberately not studied time), union
-// of peers and sums each peer's measured overlap. Focus score/tallies continue
+// duration (the between-stint gap is deliberately not studied time), union
+// of peers and sums each peer's measured overlap. `total_duration_ms` retains
+// sub-minute residue, so two 30-second stints become one minute. Focus score/tallies continue
 // in memory across a rejoin, so this second upsert carries metrics for the
 // whole logical session too.
 export function mergeSessionStints(
   prior: Pick<
     SessionRecord,
-    'started_at' | 'total_minutes' | 'peer_pubkeys' | 'peer_presence_ms'
+    | 'started_at'
+    | 'total_minutes'
+    | 'total_duration_ms'
+    | 'peer_pubkeys'
+    | 'peer_presence_ms'
   > | null,
   stint: {
     startedAt: number
-    totalMinutes: number
+    totalMinutes: number | null
+    totalDurationMs: number
     peerPubkeys: string | null
     peerPresenceMs: string
   }
 ): {
   startedAt: number
-  totalMinutes: number
+  totalMinutes: number | null
+  totalDurationMs: number | null
   peerPubkeys: string | null
   peerPresenceMs: string | null
 } {
   if (!prior) return stint
+  const priorDuration = priorDurationMs(prior)
+  const mergedLowerBoundMs = addDurationMs(
+    priorDuration.lowerBoundMs,
+    normalizeDurationMs(stint.totalDurationMs)
+  )
+  const totalDurationMs =
+    priorDuration.exactMs === null
+      ? null
+      : addDurationMs(
+          priorDuration.exactMs,
+          normalizeDurationMs(stint.totalDurationMs)
+        )
+  const priorPeers = parsePeerList(prior.peer_pubkeys)
+  const hasAuthoritativePriorPeerPresence =
+    decodePeerPresenceMsForPeers(prior.peer_presence_ms, priorPeers) !== null
+  // A legacy row can identify its earlier partner(s) without measuring each
+  // overlap. Adding a new tail peer to that row would make legacy stats credit
+  // the new peer with the entire historical total. Keep that bounded older
+  // attribution intact; the tail remains visible in audit/friend metadata.
+  const preservePriorPeerAttribution =
+    totalDurationMs === null &&
+    !hasAuthoritativePriorPeerPresence &&
+    // A legacy solo row can still carry proven whole minutes while containing
+    // no peer identities at all. Attaching a rejoin-tail peer to that row
+    // would credit it with the older solo time in legacy stats.
+    (priorPeers.length > 0 ||
+      (prior.peer_pubkeys === null && (prior.total_minutes ?? 0) > 0))
   return {
     startedAt: Math.min(prior.started_at ?? stint.startedAt, stint.startedAt),
-    totalMinutes: (prior.total_minutes ?? 0) + stint.totalMinutes,
-    peerPubkeys: unionPeerPubkeys(prior.peer_pubkeys, stint.peerPubkeys),
+    // A trusted exact total remains the source of truth. The lower-bound path
+    // is only for legacy/invalid precision, where the peer map is useful but
+    // must not be mistaken for a cap.
+    totalMinutes:
+      totalDurationMs === null && prior.total_minutes === null
+        ? null
+        : totalDurationMs === null && mergedLowerBoundMs < 60_000
+          ? null
+          : Math.floor((totalDurationMs ?? mergedLowerBoundMs) / 60_000),
+    totalDurationMs,
+    peerPubkeys: preservePriorPeerAttribution
+      ? prior.peer_pubkeys
+      : unionPeerPubkeys(prior.peer_pubkeys, stint.peerPubkeys),
     // Unknown precision is contagious. A precisely measured tail cannot make
     // a legacy or malformed earlier stint precise retroactively.
-    peerPresenceMs: mergePeerPresenceMs(
-      prior.peer_presence_ms,
-      stint.peerPresenceMs
-    ),
+    peerPresenceMs: preservePriorPeerAttribution
+      ? null
+      : totalDurationMs === null
+        ? mergePeerPresenceMs(prior.peer_presence_ms, stint.peerPresenceMs)
+        : capPeerPresenceMs(
+            mergePeerPresenceMs(prior.peer_presence_ms, stint.peerPresenceMs),
+            totalDurationMs
+          ),
   }
+}
+
+function normalizeDurationMs(value: number | null | undefined): number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
+    ? value
+    : 0
+}
+
+function addDurationMs(a: number, b: number): number {
+  const total = a + b
+  // An actual study session cannot approach this boundary, but a corrupted
+  // local row must not turn a Leave into an unrepresentable IPC number.
+  return Number.isSafeInteger(total) ? total : Number.MAX_SAFE_INTEGER
+}
+
+function priorDurationMs(
+  prior: Pick<
+    SessionRecord,
+    'total_duration_ms' | 'total_minutes' | 'peer_presence_ms'
+  >
+): { exactMs: number | null; lowerBoundMs: number } {
+  // A durable exact value can still be stale after an interrupted old/new
+  // writer upgrade. Reconcile every representation rather than trusting an
+  // apparently valid zero and silently truncating known study time.
+  const exact = trustedDurationMs(prior)
+  // 006 can already contain exact per-peer intervals while the local total
+  // was still rounded down to minutes. Keep the largest representation as an
+  // honest lower bound when a 007 writer continues that logical session.
+  const wholeMinuteLowerBound = Math.min(
+    Number.MAX_SAFE_INTEGER,
+    normalizeDurationMs(prior.total_minutes) * 60_000
+  )
+  const lowerBoundMs = Math.max(
+    exact ?? 0,
+    wholeMinuteLowerBound,
+    maxPeerPresenceMs(prior.peer_presence_ms) ?? 0
+  )
+  return { exactMs: exact, lowerBoundMs }
+}
+
+function trustedDurationMs(
+  session: Pick<SessionRecord, 'total_duration_ms' | 'total_minutes'>
+): number | null {
+  const duration = session.total_duration_ms
+  const minutes = session.total_minutes
+  if (
+    typeof duration !== 'number' ||
+    !Number.isSafeInteger(duration) ||
+    duration < 0 ||
+    typeof minutes !== 'number' ||
+    !Number.isSafeInteger(minutes) ||
+    minutes < 0
+  ) {
+    return null
+  }
+  // A 007 value is exact only when its persisted whole-minute projection
+  // agrees. Old/new writers and interrupted re-entries can leave a plausible
+  // number beside incompatible legacy data; treating that as exact would cap
+  // known peer overlap and manufacture precision on the next rejoin.
+  return Math.floor(duration / 60_000) === minutes ? duration : null
 }
 
 type PersistedFocusMetrics = {
@@ -368,6 +484,11 @@ export function buildLeaveHandler(args: {
   // False gives cross-process/memory-loss re-entry an honest score-null
   // fallback instead of silently applying a last-stint score to total time.
   continuesFocus?: boolean
+  // Invoked exactly once after all synchronous/preflight state is captured
+  // and immediately before room teardown becomes non-retryable. Wrappers use
+  // this to dispose room-scoped observers without sacrificing a retry when a
+  // preflight read throws.
+  onTeardownCommitted?: () => void
 }): () => Promise<void> {
   const monotonicNow = args.monotonicNow ?? defaultMonotonicNow
   const sessionStore = args.store ?? useSessionStore
@@ -390,6 +511,13 @@ export function buildLeaveHandler(args: {
     const rejoinable = sessionState.hadAnyPeer && endReason === 'user'
     sessionState.setRejoinDeadline(
       rejoinable ? endedAt + REJOIN_WINDOW_MS : null
+    )
+    // Trystero's local leave clears peer state and can synchronously fire the
+    // lifecycle's peer-left listeners. Preserve the host's live incumbents
+    // before that teardown so its same-ID rejoin can reserve exactly those
+    // slots against a delayed fifth connection.
+    sessionState.setReservedReconnectPeerIds(
+      rejoinable && sessionState.isHost ? Object.keys(sessionState.peers) : []
     )
     const peerPubkeys = sessionState.collectPeerPubkeys()
     const peerEdPubkeys = [...new Set(sessionState.seenPeerEdPubkeys)]
@@ -418,10 +546,8 @@ export function buildLeaveHandler(args: {
       args.startedAtMono === undefined
         ? wallMs
         : endedAtMono - args.startedAtMono
-    const totalMinutes = Math.max(
-      0,
-      Math.floor(Math.min(wallMs, monoMs) / 60_000)
-    )
+    const totalDurationMs = Math.max(0, Math.floor(Math.min(wallMs, monoMs)))
+    const totalMinutes = Math.floor(totalDurationMs / 60_000)
 
     log.info('session.end_started', {
       role: sessionState.isHost ? 'host' : 'guest',
@@ -437,6 +563,13 @@ export function buildLeaveHandler(args: {
     // risk merging its minutes/presence twice. Expected teardown failures are
     // handled below; any preflight failure releases the cached attempt.
     teardownCommitted = true
+    try {
+      args.onTeardownCommitted?.()
+    } catch (err) {
+      // Wrapper-local teardown (subscriptions/UI) cannot prevent the durable
+      // room leave and session persistence after this non-retryable boundary.
+      log.warn('session.teardown_commit_hook_failed', { err })
+    }
     try {
       await args.room.leave()
       log.debug('room.leave_succeeded')
@@ -460,6 +593,7 @@ export function buildLeaveHandler(args: {
     const stint = {
       startedAt: args.startedAt,
       totalMinutes,
+      totalDurationMs,
       peerPubkeys,
       peerPresenceMs,
     }
@@ -472,6 +606,7 @@ export function buildLeaveHandler(args: {
       startedAt: summary.startedAt,
       endedAt,
       totalMinutes: summary.totalMinutes,
+      totalDurationMs: summary.totalDurationMs,
       peerPubkeys: summary.peerPubkeys,
       peerPresenceMs: summary.peerPresenceMs,
       declaredTopic: initialDeclaredTopic,
@@ -650,11 +785,76 @@ export function buildLeaveHandler(args: {
 
 type WireHooks = {
   isHost: boolean
+  // A guest that joined from a signed inbox envelope binds original-host
+  // authority to that envelope's authenticated inviter identity. Undefined
+  // preserves the pre-anchor direct-join API for older callers.
+  expectedAuthorityEdPubkeyHex?: string | null
+  // An original host carries incumbent transport IDs captured before its own
+  // Leave into a same-ID rejoin. Until they reconnect (or grace expires),
+  // unseen invitees cannot consume their reserved slots.
+  reservedReconnectPeerIds?: readonly string[]
+  // A guest that locally left after the authenticated original host had
+  // already departed carries this frozen roster into its short rejoin window.
+  // It is local state, checked again against the signed invite anchor below.
+  frozenGuestAdmission?: GuestAdmissionSnapshot | null
   leave: () => Promise<void>
 }
 
 export type RoomLifecycle = {
   peers: () => readonly string[]
+  // Called only after SessionView validates the peer's signed hello. A guest
+  // with a signed inbox invite uses this to bind authority to its inviter.
+  authenticateAuthority: (peerId: string, edPubkeyHex: string) => void
+  // Room.leave() clears Trystero's peer maps without promising to replay the
+  // peer-leave callbacks registered by this lifecycle. Make locally-owned
+  // authentication/reservation timers inert before that happens.
+  dispose: () => void
+  getFrozenGuestAdmission: () => GuestAdmissionSnapshot | null
+}
+
+type AdmissionAuthorityPayload = {
+  v: 1
+  authority_peer_id: string
+  admitted_peer_ids: string[]
+  roster_revision: number
+}
+
+export const ADMISSION_AUTHORITY_ACTION = 'session-admission'
+const ADMISSION_CAPABILITY_ACK_ACTION = 'session-admission-ack'
+
+type AdmissionCapabilityAck = { v: 1 }
+
+function isAdmissionCapabilityAck(
+  data: unknown
+): data is AdmissionCapabilityAck {
+  return (
+    !!data &&
+    typeof data === 'object' &&
+    (data as Partial<AdmissionCapabilityAck>).v === 1
+  )
+}
+
+function isAdmissionAuthorityPayload(
+  data: unknown
+): data is AdmissionAuthorityPayload {
+  if (!data || typeof data !== 'object') return false
+  const payload = data as Partial<AdmissionAuthorityPayload>
+  return (
+    payload.v === 1 &&
+    typeof payload.authority_peer_id === 'string' &&
+    payload.authority_peer_id.length > 0 &&
+    payload.authority_peer_id.length <= 256 &&
+    typeof payload.roster_revision === 'number' &&
+    Number.isSafeInteger(payload.roster_revision) &&
+    payload.roster_revision >= 0 &&
+    Array.isArray(payload.admitted_peer_ids) &&
+    payload.admitted_peer_ids.length <= MAX_REMOTE_PEERS &&
+    payload.admitted_peer_ids.every(
+      (peerId) =>
+        typeof peerId === 'string' && peerId.length > 0 && peerId.length <= 256
+    ) &&
+    new Set(payload.admitted_peer_ids).size === payload.admitted_peer_ids.length
+  )
 }
 
 // A local user who leaves after studying with somebody gets a short recovery
@@ -662,59 +862,811 @@ export type RoomLifecycle = {
 // the lifetime of a participant who remains in the room.
 export const REJOIN_WINDOW_MS = 20_000
 
+// A guest waits only long enough for the original host's data-channel roster
+// announcement. Without one it must not form a hostless mesh with another
+// unverified invitee, but it also must not let that peer force local teardown.
+export const ADMISSION_AUTHENTICATION_TIMEOUT_MS = 3_000
+const LEGACY_AUTHORITY_FALLBACK_MS = 350
+const MAX_ADMISSION_ROSTER_PROBES = 3
+
 // Wires onPeerJoin / onPeerLeave / 'session-full' on the trystero room. The
-// host enforces the 4-user cap here (rejects the 4th remote peer); guests
-// listen for 'session-full' and tear down with a toast. Remote peer changes
-// only change membership: zero peers is a valid active solo session.
+// original host is the only admission authority: it announces its stable peer
+// id to guests while it is present. When that peer disappears, survivors keep
+// studying but fail closed for unseen IDs; an already admitted peer may still
+// reconnect. This prevents delayed invitees from becoming admission authority
+// and evicting a valid incumbent. If the original host reconnects with its
+// same Trystero ID, it reopens admission and resumes the usual 4-user cap.
 export function wireSessionRoom(
   room: TopicRoom,
   hooks: WireHooks,
   store: SessionStore = useSessionStore
 ): RoomLifecycle {
   const peers = new Set<string>()
+  // A guest's onPeerJoin only observes transport. The original host's
+  // authority-checked roster below is the only source of reconnect eligibility.
+  const reconnectPeerIds = new Set<string>()
+  const announcedAdmittedPeerIds = new Set<string>()
+  const reservedReconnectPeerIds = new Set(
+    hooks.isHost
+      ? (hooks.reservedReconnectPeerIds ?? []).slice(0, MAX_REMOTE_PEERS)
+      : []
+  )
+  const hostAdmittedPeerIds = new Set(reservedReconnectPeerIds)
+  const pendingPeerJoins = new Set<string>()
+  const pendingPeerJoinTimers = new Map<string, ReturnType<typeof setTimeout>>()
+  // Only meaningful for a signed-invite guest during the short legacy hello
+  // grace. It distinguishes a full pre-hello mesh from a merely reordered
+  // three-peer join, without admitting or evicting an arbitrary transport.
+  let pendingLegacyMeshOverflow = false
+  const rejectionFlushTimers = new Map<
+    ReturnType<typeof setTimeout>,
+    () => void
+  >()
   const sessionFull = room.makeAction<null>(SESSION_FULL_ACTION)
+  const admissionAuthority = room.makeAction<AdmissionAuthorityPayload>(
+    ADMISSION_AUTHORITY_ACTION
+  )
+  const admissionCapabilityAck = room.makeAction<AdmissionCapabilityAck>(
+    ADMISSION_CAPABILITY_ACK_ACTION
+  )
+  const requiresBoundAuthority =
+    !hooks.isHost && hooks.expectedAuthorityEdPubkeyHex != null
+  const expectedAuthorityEdPubkeyHex =
+    typeof hooks.expectedAuthorityEdPubkeyHex === 'string' &&
+    /^[0-9a-f]{64}$/i.test(hooks.expectedAuthorityEdPubkeyHex)
+      ? hooks.expectedAuthorityEdPubkeyHex.toLowerCase()
+      : ''
+  const frozenGuestAdmission =
+    !hooks.isHost &&
+    hooks.frozenGuestAdmission?.authorityEdPubkeyHex.toLowerCase() ===
+      expectedAuthorityEdPubkeyHex &&
+    hooks.frozenGuestAdmission.admittedPeerIds.length <= MAX_REMOTE_PEERS
+      ? hooks.frozenGuestAdmission
+      : null
+  let authorityPeerId = hooks.isHost
+    ? room.selfId
+    : (frozenGuestAdmission?.authorityPeerId ?? null)
+  // Trystero may deliver an action as soon as the data channel activates,
+  // before this room's onPeerJoin callback. Retain a host announcement only
+  // until its named peer actually joins; it cannot make a non-member an
+  // authority.
+  let pendingAuthorityPeerId: string | null = null
+  let admissionsClosed = frozenGuestAdmission !== null
+  let nextAuthorityRosterRevision = 0
+  let announcedRosterRevision: number | null = null
+  let hasAuthenticatedRoster = hooks.isHost || frozenGuestAdmission !== null
+  let rejectedByAuthority = false
+  let authenticatedAuthorityPeerId: string | null = hooks.isHost
+    ? room.selfId
+    : null
+  // Unlike `authenticatedAuthorityPeerId`, this survives an authority's
+  // transport departure solely to serialize a locally verified frozen roster
+  // for the current user's short rejoin window. It never authorizes a live
+  // session-full or a new entrant.
+  let historicallyAuthenticatedAuthorityPeerId: string | null = hooks.isHost
+    ? room.selfId
+    : (frozenGuestAdmission?.authorityPeerId ?? null)
+  const pendingAuthorityAnnouncements = new Map<
+    string,
+    AdmissionAuthorityPayload
+  >()
+  const pendingSessionFullPeerIds = new Set<string>()
+  let reservationExpiryTimer: ReturnType<typeof setTimeout> | null = null
+  let legacyAuthorityFallbackTimer: ReturnType<typeof setTimeout> | null = null
+  let disposed = false
+  let admissionCapabilityAckInFlight = false
+  const rosterCapablePeerIds = new Set<string>()
+  const rosterProbeAttempts = new Map<string, number>()
+  const rosterProbeRetryTimers = new Map<
+    string,
+    ReturnType<typeof setTimeout>
+  >()
 
-  if (!hooks.isHost) {
-    sessionFull.receive(() => {
-      log.warn('session_full.received', { role: 'guest' })
-      toast.error(SESSION_FULL_MESSAGE)
-      store.getState().setPendingEndReason('peer')
-      void hooks.leave()
+  if (frozenGuestAdmission) {
+    for (const peerId of frozenGuestAdmission.admittedPeerIds) {
+      announcedAdmittedPeerIds.add(peerId)
+      reconnectPeerIds.add(peerId)
+    }
+    reconnectPeerIds.add(frozenGuestAdmission.authorityPeerId)
+  }
+
+  const dispose = () => {
+    if (disposed) return
+    disposed = true
+    for (const timeout of pendingPeerJoinTimers.values()) {
+      clearTimeout(timeout)
+    }
+    pendingPeerJoinTimers.clear()
+    pendingPeerJoins.clear()
+    if (reservationExpiryTimer !== null) {
+      clearTimeout(reservationExpiryTimer)
+      reservationExpiryTimer = null
+    }
+    if (legacyAuthorityFallbackTimer !== null) {
+      clearTimeout(legacyAuthorityFallbackTimer)
+      legacyAuthorityFallbackTimer = null
+    }
+    for (const [timeout, finish] of rejectionFlushTimers) {
+      clearTimeout(timeout)
+      finish()
+    }
+    rejectionFlushTimers.clear()
+    pendingAuthorityAnnouncements.clear()
+    pendingSessionFullPeerIds.clear()
+    for (const timeout of rosterProbeRetryTimers.values()) {
+      clearTimeout(timeout)
+    }
+    rosterProbeRetryTimers.clear()
+    rosterProbeAttempts.clear()
+  }
+
+  const getFrozenGuestAdmission = (): GuestAdmissionSnapshot | null => {
+    if (
+      hooks.isHost ||
+      !requiresBoundAuthority ||
+      authorityPeerId === null ||
+      historicallyAuthenticatedAuthorityPeerId !== authorityPeerId
+    ) {
+      return null
+    }
+    const admittedPeerIds = hasAuthenticatedRoster
+      ? Array.from(announcedAdmittedPeerIds).filter(
+          (peerId) => peerId !== authorityPeerId
+        )
+      : Array.from(
+          new Set([
+            room.selfId,
+            ...Array.from(peers).filter((id) => id !== authorityPeerId),
+          ])
+        )
+    if (!admittedPeerIds.includes(room.selfId)) return null
+    return {
+      authorityPeerId,
+      authorityEdPubkeyHex: expectedAuthorityEdPubkeyHex,
+      admittedPeerIds: admittedPeerIds.slice(0, MAX_REMOTE_PEERS),
+    }
+  }
+
+  const closePeerTransport = (peerId: string) => {
+    if (disposed) return
+    try {
+      room.getPeers()[peerId]?.close()
+    } catch {
+      // The in-process bus used by tests intentionally has only a no-op close.
+    }
+  }
+
+  const closePeersExcludedByRoster = (allowedPeerIds: ReadonlySet<string>) => {
+    if (hooks.isHost) return
+    for (const peerId of peers) {
+      if (peerId !== authorityPeerId && !allowedPeerIds.has(peerId)) {
+        // Do not mutate `peers` or the session store here. Trystero owns the
+        // transport lifecycle and will deliver the idempotent onPeerLeave
+        // callback after close; doing it eagerly would double-close presence.
+        closePeerTransport(peerId)
+      }
+    }
+  }
+
+  const clearPendingPeerJoin = (peerId: string) => {
+    pendingPeerJoins.delete(peerId)
+    const timeout = pendingPeerJoinTimers.get(peerId)
+    if (timeout !== undefined) {
+      clearTimeout(timeout)
+      pendingPeerJoinTimers.delete(peerId)
+    }
+  }
+
+  const queuePendingPeerJoin = (peerId: string) => {
+    if (disposed || pendingPeerJoins.has(peerId) || peers.has(peerId)) return
+    if (pendingPeerJoins.size >= MAX_REMOTE_PEERS) {
+      if (requiresBoundAuthority && !hasAuthenticatedRoster) {
+        pendingLegacyMeshOverflow = true
+      }
+      rejectPeer(peerId, 'closed')
+      return
+    }
+    pendingPeerJoins.add(peerId)
+    pendingPeerJoinTimers.set(
+      peerId,
+      setTimeout(() => {
+        if (disposed || !pendingPeerJoins.has(peerId)) return
+        clearPendingPeerJoin(peerId)
+        rejectPeer(peerId, 'closed')
+        // Before an authority has supplied a roster, this local join attempt
+        // has no safe mesh to remain in. Once an authenticated roster exists,
+        // however, an unknown candidate must never tear down an incumbent.
+        if (
+          !hasAuthenticatedRoster &&
+          (authorityPeerId === null ||
+            authenticatedAuthorityPeerId !== authorityPeerId)
+        ) {
+          endRejectedGuest('timeout')
+        }
+      }, ADMISSION_AUTHENTICATION_TIMEOUT_MS)
+    )
+  }
+
+  const resolvePendingPeerJoin = (peerId: string) => {
+    if (disposed) return
+    if (!pendingPeerJoins.has(peerId)) return
+    clearPendingPeerJoin(peerId)
+    completePeerJoin(peerId)
+  }
+
+  const endRejectedGuest = (reason: 'authority' | 'timeout') => {
+    if (disposed || hooks.isHost || rejectedByAuthority) return
+    rejectedByAuthority = true
+    log.warn('session_admission.guest_rejected', { reason })
+    toast.error(SESSION_FULL_MESSAGE)
+    store.getState().setPendingEndReason('peer')
+    void hooks.leave().catch((err) => {
+      log.warn('session_admission.guest_leave_failed', { reason, err })
     })
   }
 
-  room.onPeerJoin((peerId) => {
-    if (peers.has(peerId)) return
-    if (hooks.isHost && peers.size >= MAX_REMOTE_PEERS) {
-      log.warn('session_full.rejected_peer', {
-        role: 'host',
-        peerCount: peers.size,
+  const clearExpiredReservations = () => {
+    reservationExpiryTimer = null
+    if (disposed) return
+    for (const peerId of reservedReconnectPeerIds) {
+      hostAdmittedPeerIds.delete(peerId)
+    }
+    reservedReconnectPeerIds.clear()
+    if (hooks.isHost) {
+      void announceAdmissionRoster().catch((err) => {
+        log.warn('session_admission.announce_failed', { err })
       })
-      // Reject the 4th remote peer (5th total user). The targeted action
-      // lets the rejected peer show a toast and leave cleanly; the
-      // .close() is a best-effort production safety net in case the
-      // peer ignores the action — the bus mock used in tests has no
-      // real RTCPeerConnection so the close is a no-op there.
-      void sessionFull.send(null, peerId)
-      try {
-        const conn = room.getPeers()[peerId]
-        conn?.close()
-      } catch {
-        // bus mock may not implement a real RTCPeerConnection
+    }
+  }
+  if (reservedReconnectPeerIds.size > 0) {
+    reservationExpiryTimer = setTimeout(
+      clearExpiredReservations,
+      REJOIN_WINDOW_MS
+    )
+  }
+
+  sessionFull.receive((_, senderPeerId) => {
+    if (disposed) return
+    // A normal participant never gets to evict another one. A rejected guest
+    // may accept the original host's targeted notice while its preceding
+    // authority announcement is still pending on the join callback.
+    const senderIsAuthority = requiresBoundAuthority
+      ? senderPeerId === authenticatedAuthorityPeerId
+      : senderPeerId === authorityPeerId ||
+        senderPeerId === pendingAuthorityPeerId
+    // Session termination is authority-checked, not cryptographically signed:
+    // only the announced original host (or its in-flight announcement) can
+    // end a guest. A host never accepts remote termination.
+    if (hooks.isHost) {
+      return
+    }
+    if (!senderIsAuthority) {
+      // An origin/main host may reject before its signed hello reaches this
+      // client. Remember a few candidate notices, but consume one only after
+      // the existing hello verification binds that exact sender to the invite.
+      if (
+        requiresBoundAuthority &&
+        pendingSessionFullPeerIds.size < MAX_REMOTE_PEERS + 1
+      ) {
+        pendingSessionFullPeerIds.add(senderPeerId)
       }
       return
     }
+    log.warn('session_full.received', { role: hooks.isHost ? 'host' : 'guest' })
+    toast.error(SESSION_FULL_MESSAGE)
+    store.getState().setPendingEndReason('peer')
+    void hooks.leave().catch((err) => {
+      // Leave deliberately persists end state even if the underlying room's
+      // departure broadcast fails. Do not turn that expected failure into an
+      // unhandled action callback rejection.
+      log.warn('session_full.leave_failed', { err })
+    })
+  })
+
+  const rejectPeer = (peerId: string, reason: 'full' | 'closed') => {
+    if (disposed) return
+    log.warn('session_admission.rejected_peer', {
+      role: hooks.isHost ? 'host' : 'guest',
+      reason,
+      peerCount: peers.size,
+    })
+    // Only the original host may ask a client to end. Hostless survivors
+    // instead close the unknown transport; this is intentionally enough to
+    // preserve their bounded mesh without reintroducing forged eviction.
+    if (hooks.isHost) {
+      void (async () => {
+        try {
+          // Broadcast the current roster before the targeted termination so
+          // incumbent guests also close this peer if its leave callback races
+          // the original host's own departure.
+          await announceAdmissionRoster(peerId)
+        } catch (err) {
+          log.warn('session_admission.reject_roster_failed', { err })
+        }
+        try {
+          await sessionFull.send(null, peerId)
+        } catch (err) {
+          log.warn('session_admission.reject_notice_failed', { err })
+        } finally {
+          // Action sends enqueue data before resolving. Keep the transport
+          // alive for the same bounded window Trystero normally used so the
+          // roster (which makes a rejected guest leave itself) can flush.
+          await new Promise<void>((resolve) => {
+            const timeout = setTimeout(() => {
+              rejectionFlushTimers.delete(timeout)
+              resolve()
+            }, 99)
+            const finish = () => {
+              rejectionFlushTimers.delete(timeout)
+              resolve()
+            }
+            rejectionFlushTimers.set(timeout, finish)
+          })
+          if (!disposed) closePeerTransport(peerId)
+        }
+      })()
+      return
+    }
+    closePeerTransport(peerId)
+  }
+
+  const announceAdmissionRoster = (targetPeerId?: string) => {
+    if (disposed || !hooks.isHost) return Promise.resolve()
+    const rosterRevision = nextAuthorityRosterRevision
+    nextAuthorityRosterRevision += 1
+    const payload = {
+      v: 1 as const,
+      authority_peer_id: room.selfId,
+      admitted_peer_ids: Array.from(hostAdmittedPeerIds).sort(),
+      roster_revision: rosterRevision,
+    }
+    // Older guests have no receiver for session-admission. The patched action
+    // wire deliberately queues unknown actions only up to a hard limit, so a
+    // broadcast on every churn would disconnect an otherwise valid legacy
+    // client. Probe a freshly admitted transport exactly once; thereafter
+    // publish updates only to peers that explicitly ACK this capability.
+    const targets = targetPeerId
+      ? [targetPeerId]
+      : Array.from(rosterCapablePeerIds)
+    return Promise.all(
+      targets.map((peerId) => admissionAuthority.send(payload, peerId))
+    ).then(() => undefined)
+  }
+
+  const clearRosterProbe = (peerId: string) => {
+    const timeout = rosterProbeRetryTimers.get(peerId)
+    if (timeout !== undefined) clearTimeout(timeout)
+    rosterProbeRetryTimers.delete(peerId)
+    rosterProbeAttempts.delete(peerId)
+  }
+
+  const probeAdmissionRoster = (peerId: string) => {
+    if (disposed || !hooks.isHost || !hostAdmittedPeerIds.has(peerId)) return
+    const attempt = (rosterProbeAttempts.get(peerId) ?? 0) + 1
+    rosterProbeAttempts.set(peerId, attempt)
+    // Queue success is not delivery proof. Keep a tiny, targeted probe window
+    // until a modern guest ACKs; a legacy peer sees three unknown actions at
+    // most, safely below action-wire's 64-message containment limit.
+    void announceAdmissionRoster(peerId)
+      .catch((err) => {
+        log.warn('session_admission.probe_failed', { peerId, attempt, err })
+      })
+      .finally(() => {
+        if (
+          attempt >= MAX_ADMISSION_ROSTER_PROBES ||
+          disposed ||
+          rosterCapablePeerIds.has(peerId)
+        ) {
+          return
+        }
+        rosterProbeRetryTimers.set(
+          peerId,
+          setTimeout(() => {
+            rosterProbeRetryTimers.delete(peerId)
+            probeAdmissionRoster(peerId)
+          }, 100)
+        )
+      })
+  }
+
+  const completePeerJoin = (peerId: string) => {
+    if (disposed) return
+    if (peers.has(peerId)) return
+    if (
+      (admissionsClosed && !reconnectPeerIds.has(peerId)) ||
+      (hooks.isHost &&
+        reservedReconnectPeerIds.size > 0 &&
+        !reservedReconnectPeerIds.has(peerId))
+    ) {
+      rejectPeer(peerId, 'closed')
+      return
+    }
+    // Once a modern, authenticated roster exists, data-channel membership is
+    // not admission. Keep a possibly rejected fifth provisional until the
+    // original host's roster explicitly names it; a lost/reordered rejection
+    // packet or host departure cannot otherwise strand it in an incumbent
+    // mesh. Legacy hosts never set this bit and retain their hello fallback.
+    if (
+      !hooks.isHost &&
+      hasAuthenticatedRoster &&
+      peerId !== authorityPeerId &&
+      peerId !== pendingAuthorityPeerId &&
+      !announcedAdmittedPeerIds.has(peerId)
+    ) {
+      queuePendingPeerJoin(peerId)
+      return
+    }
+    // A legacy/origin-main authority has no roster updates. Once its bounded
+    // mesh is stabilized, preserve all incumbent connections and locally
+    // reject later transports rather than depending on an old session-full
+    // packet to survive every ordering race.
+    if (
+      !hooks.isHost &&
+      !hasAuthenticatedRoster &&
+      peers.size >= MAX_REMOTE_PEERS
+    ) {
+      rejectPeer(peerId, 'full')
+      return
+    }
+    // Only the original host makes the capacity decision while admission is
+    // open. A prospective fifth participant can transiently see all four
+    // incumbents in Trystero's mesh; letting that entrant reject its fourth
+    // remote peer would evict a valid member before the host rejects it.
+    if (hooks.isHost && peers.size >= MAX_REMOTE_PEERS) {
+      rejectPeer(peerId, 'full')
+      return
+    }
     peers.add(peerId)
+    if (hooks.isHost) {
+      hostAdmittedPeerIds.add(peerId)
+      reservedReconnectPeerIds.delete(peerId)
+    }
+    if (pendingAuthorityPeerId === peerId) {
+      authorityPeerId = peerId
+      pendingAuthorityPeerId = null
+    }
+    if (
+      admissionsClosed &&
+      peerId === authorityPeerId &&
+      (!requiresBoundAuthority || authenticatedAuthorityPeerId === peerId)
+    ) {
+      admissionsClosed = false
+      log.info('session_admission.authority_reconnected', {
+        role: hooks.isHost ? 'host' : 'guest',
+      })
+    }
     store.getState().peerJoined(peerId)
+    const rosterUpdate = hooks.isHost
+      ? Promise.all([
+          // One bounded compatibility probe for the arriving peer.
+          Promise.resolve(probeAdmissionRoster(peerId)),
+          // Existing modern peers need the new incumbent in their frozen
+          // roster if the authority disappears next; legacy peers are absent
+          // from rosterCapablePeerIds and receive nothing here.
+          announceAdmissionRoster(),
+        ])
+      : announceAdmissionRoster()
+    void rosterUpdate.catch((err) => {
+      log.warn('session_admission.announce_failed', { err })
+    })
     log.info('peer.joined', {
       role: hooks.isHost ? 'host' : 'guest',
       peerCount: peers.size,
     })
+  }
+
+  const applyAuthorityAnnouncement = (
+    data: AdmissionAuthorityPayload,
+    senderPeerId: string
+  ) => {
+    if (disposed) return
+    if (legacyAuthorityFallbackTimer !== null) {
+      clearTimeout(legacyAuthorityFallbackTimer)
+      legacyAuthorityFallbackTimer = null
+    }
+    // The original host is not transferable. Once established, its stable
+    // transport ID stays authoritative until that same ID reconnects.
+    if (
+      data.authority_peer_id !== senderPeerId ||
+      (authorityPeerId !== null && authorityPeerId !== senderPeerId)
+    ) {
+      return
+    }
+    const acceptRoster = () => {
+      if (
+        announcedRosterRevision !== null &&
+        data.roster_revision < announcedRosterRevision
+      ) {
+        return false
+      }
+      announcedAdmittedPeerIds.clear()
+      for (const admittedPeerId of data.admitted_peer_ids) {
+        announcedAdmittedPeerIds.add(admittedPeerId)
+      }
+      announcedRosterRevision = data.roster_revision
+      hasAuthenticatedRoster = true
+      if (
+        requiresBoundAuthority &&
+        !announcedAdmittedPeerIds.has(room.selfId)
+      ) {
+        // An authority-authenticated roster is sufficient rejection proof.
+        // Do not depend on a subsequent session-full action surviving a
+        // teardown race after its bytes have merely been queued.
+        endRejectedGuest('authority')
+        return false
+      }
+      closePeersExcludedByRoster(announcedAdmittedPeerIds)
+      if (!hooks.isHost && !admissionCapabilityAckInFlight) {
+        admissionCapabilityAckInFlight = true
+        void admissionCapabilityAck
+          .send({ v: 1 }, senderPeerId)
+          .catch((err) => {
+            log.warn('session_admission.capability_ack_failed', { err })
+          })
+          .finally(() => {
+            admissionCapabilityAckInFlight = false
+          })
+      }
+      for (const pendingPeerId of Array.from(pendingPeerJoins)) {
+        if (
+          pendingPeerId === senderPeerId ||
+          announcedAdmittedPeerIds.has(pendingPeerId)
+        ) {
+          resolvePendingPeerJoin(pendingPeerId)
+        }
+      }
+      return true
+    }
+    if (peers.has(senderPeerId)) {
+      authorityPeerId = data.authority_peer_id
+      if (!acceptRoster()) return
+      if (
+        admissionsClosed &&
+        (!requiresBoundAuthority ||
+          authenticatedAuthorityPeerId === senderPeerId)
+      ) {
+        admissionsClosed = false
+        log.info('session_admission.authority_reconnected', {
+          role: hooks.isHost ? 'host' : 'guest',
+        })
+      }
+      return
+    }
+    // After the original host disappears, only its known peer ID may reopen
+    // admission from onPeerJoin. A delayed entrant's early action must not
+    // queue a claim that later turns it into an authority.
+    if (admissionsClosed) return
+    pendingAuthorityPeerId = data.authority_peer_id
+    acceptRoster()
+  }
+
+  admissionAuthority.receive((data, senderPeerId) => {
+    if (disposed) return
+    if (!isAdmissionAuthorityPayload(data)) return
+    if (
+      data.authority_peer_id !== senderPeerId ||
+      (authorityPeerId !== null && authorityPeerId !== senderPeerId)
+    ) {
+      return
+    }
+    if (
+      requiresBoundAuthority &&
+      authenticatedAuthorityPeerId !== senderPeerId
+    ) {
+      // SessionView owns hello signature validation. Keep one bounded roster
+      // until it reports the signed inviter binding through this lifecycle.
+      // Preserve each candidate independently: an attacker's later action
+      // must not overwrite the original inviter's buffered roster before its
+      // signed hello arrives. Candidate peers are transport-bounded; retain a
+      // small hard cap as a malformed-room backstop.
+      if (
+        pendingAuthorityAnnouncements.has(senderPeerId) ||
+        pendingAuthorityAnnouncements.size < MAX_REMOTE_PEERS + 1
+      ) {
+        pendingAuthorityAnnouncements.set(senderPeerId, data)
+      }
+      return
+    }
+    applyAuthorityAnnouncement(data, senderPeerId)
+  })
+
+  admissionCapabilityAck.receive((data, senderPeerId) => {
+    if (
+      disposed ||
+      !hooks.isHost ||
+      !isAdmissionCapabilityAck(data) ||
+      !hostAdmittedPeerIds.has(senderPeerId)
+    ) {
+      return
+    }
+    const wasCapable = rosterCapablePeerIds.has(senderPeerId)
+    rosterCapablePeerIds.add(senderPeerId)
+    clearRosterProbe(senderPeerId)
+    if (!wasCapable) {
+      // An arrival may have raced before its ACK reached the host. A fresh,
+      // targeted catch-up roster closes that gap without exposing legacy peers
+      // to repeated unknown actions.
+      probeAdmissionRoster(senderPeerId)
+    }
+  })
+
+  const authenticateAuthority = (peerId: string, edPubkeyHex: string) => {
+    if (disposed || hooks.isHost || !requiresBoundAuthority) return
+    if (edPubkeyHex.toLowerCase() !== expectedAuthorityEdPubkeyHex) return
+    if (authorityPeerId !== null && authorityPeerId !== peerId) return
+    if (authenticatedAuthorityPeerId === peerId) return
+    // The verified inviter identity fixes the original host transport before
+    // its roster/onPeerJoin ordering resolves. It is not admission by itself.
+    authorityPeerId = peerId
+    authenticatedAuthorityPeerId = peerId
+    historicallyAuthenticatedAuthorityPeerId = peerId
+    if (pendingSessionFullPeerIds.delete(peerId)) {
+      endRejectedGuest('authority')
+      return
+    }
+    const pending = pendingAuthorityAnnouncements.get(peerId)
+    if (pending) {
+      if (legacyAuthorityFallbackTimer !== null) {
+        clearTimeout(legacyAuthorityFallbackTimer)
+        legacyAuthorityFallbackTimer = null
+      }
+      pendingAuthorityAnnouncements.delete(peerId)
+      applyAuthorityAnnouncement(pending, peerId)
+      return
+    }
+    // A frozen guest snapshot is already an authenticated roster from the
+    // preceding room. The original host may rejoin before or after its signed
+    // hello; once both identity and membership are present it alone can reopen
+    // admission. New peers still need a fresh roster inclusion below.
+    if (
+      hasAuthenticatedRoster &&
+      admissionsClosed &&
+      authorityPeerId === peerId &&
+      peers.has(peerId)
+    ) {
+      admissionsClosed = false
+      log.info('session_admission.authority_reconnected', {
+        role: hooks.isHost ? 'host' : 'guest',
+      })
+      return
+    }
+    // origin/main sends the existing signed hello but not an admission roster.
+    // Keep that interoperable only for the identity named by the signed inbox
+    // envelope; it can establish the original host but cannot transfer it.
+    if (authorityPeerId !== null && authorityPeerId !== peerId) return
+    // A current host's initial modern roster can be queued then silently lost.
+    // Give its bounded targeted probes time to arrive before treating this as
+    // a legacy/origin-main host; otherwise a full-room rejection could briefly
+    // promote history through the legacy compatibility path.
+    legacyAuthorityFallbackTimer = setTimeout(() => {
+      legacyAuthorityFallbackTimer = null
+      if (
+        disposed ||
+        authenticatedAuthorityPeerId !== peerId ||
+        hasAuthenticatedRoster
+      ) {
+        return
+      }
+      pendingAuthorityPeerId = peerId
+      // A valid legacy joiner sees at most host + two other remotes. Seeing a
+      // fourth pending transport proves that this local client is the fifth;
+      // reject itself instead of evicting whichever incumbent happened to be
+      // delivered last by the transport callbacks.
+      if (
+        pendingLegacyMeshOverflow ||
+        peers.size + pendingPeerJoins.size > MAX_REMOTE_PEERS
+      ) {
+        endRejectedGuest('authority')
+        return
+      }
+      // A legacy/origin-main host sends the signed hello but no roster. Its
+      // immutable signed identity is sufficient to stabilize the already
+      // connected bounded mesh; modern rosters remain authoritative whenever
+      // they exist.
+      resolvePendingPeerJoin(peerId)
+      for (const pendingPeerId of Array.from(pendingPeerJoins)) {
+        if (peers.size >= MAX_REMOTE_PEERS) {
+          clearPendingPeerJoin(pendingPeerId)
+          rejectPeer(pendingPeerId, 'full')
+          continue
+        }
+        resolvePendingPeerJoin(pendingPeerId)
+      }
+      if (admissionsClosed && authorityPeerId === peerId) {
+        admissionsClosed = false
+        log.info('session_admission.authority_reconnected', {
+          role: hooks.isHost ? 'host' : 'guest',
+        })
+      }
+    }, LEGACY_AUTHORITY_FALLBACK_MS)
+  }
+
+  room.onPeerJoin((peerId) => {
+    if (disposed) return
+    if (peers.has(peerId) || pendingPeerJoins.has(peerId)) return
+    if (admissionsClosed && !reconnectPeerIds.has(peerId)) {
+      rejectPeer(peerId, 'closed')
+      return
+    }
+    if (!hooks.isHost && authenticatedAuthorityPeerId === peerId) {
+      if (!hasAuthenticatedRoster && !admissionsClosed) {
+        // Hello can arrive before onPeerJoin. Do not promote a modern host
+        // solely from its identity: wait for its buffered roster or the
+        // bounded legacy fallback so a self-excluding full-room roster cannot
+        // leave provisional hello history behind.
+        queuePendingPeerJoin(peerId)
+        return
+      }
+      pendingAuthorityPeerId = peerId
+      completePeerJoin(peerId)
+      return
+    }
+    if (
+      !hooks.isHost &&
+      hasAuthenticatedRoster &&
+      peerId !== authorityPeerId &&
+      peerId !== pendingAuthorityPeerId &&
+      !announcedAdmittedPeerIds.has(peerId)
+    ) {
+      queuePendingPeerJoin(peerId)
+      return
+    }
+    if (
+      !hooks.isHost &&
+      !admissionsClosed &&
+      authorityPeerId === null &&
+      pendingAuthorityPeerId === null
+    ) {
+      queuePendingPeerJoin(peerId)
+      return
+    }
+    completePeerJoin(peerId)
   })
 
   room.onPeerLeave((peerId) => {
+    if (disposed) return
+    // A capacity-rejected transport need not be in either membership set.
+    // Always drop its pre-hello candidates so repeated throwaway IDs cannot
+    // exhaust the bounded real-host roster buffer.
+    pendingAuthorityAnnouncements.delete(peerId)
+    pendingSessionFullPeerIds.delete(peerId)
+    clearRosterProbe(peerId)
+    if (pendingPeerJoins.has(peerId)) {
+      clearPendingPeerJoin(peerId)
+      if (authorityPeerId === peerId) {
+        authenticatedAuthorityPeerId = null
+        admissionCapabilityAckInFlight = false
+        reconnectPeerIds.clear()
+        // A signed legacy hello establishes who could admit us, not that it
+        // did. If that host disappears before its bounded compatibility grace
+        // completes, partial callback ordering can hide an incumbent and make
+        // this client the fifth. Fail this local attempt closed rather than
+        // promote a hostless provisional mesh.
+        if (!hasAuthenticatedRoster) {
+          if (legacyAuthorityFallbackTimer !== null) {
+            clearTimeout(legacyAuthorityFallbackTimer)
+            legacyAuthorityFallbackTimer = null
+          }
+          endRejectedGuest('authority')
+          return
+        }
+      }
+      return
+    }
     if (!peers.has(peerId)) return
+    const lostAdmissionAuthority = authorityPeerId === peerId
     peers.delete(peerId)
+    if (hooks.isHost) {
+      const removed = hostAdmittedPeerIds.delete(peerId)
+      reservedReconnectPeerIds.delete(peerId)
+      rosterCapablePeerIds.delete(peerId)
+      clearRosterProbe(peerId)
+      if (removed) {
+        void announceAdmissionRoster().catch((err) => {
+          log.warn('session_admission.announce_failed', { err })
+        })
+      }
+    }
     const closedPresence = store.getState().peerLeft(peerId)
     if (closedPresence) {
       void useFriendsStore
@@ -738,9 +1690,53 @@ export function wireSessionRoom(
       peerCount: peers.size,
       presenceClosed: closedPresence !== null,
     })
+    if (lostAdmissionAuthority) {
+      authenticatedAuthorityPeerId = hooks.isHost ? room.selfId : null
+      // A same-ID host rejoin creates a fresh room lifecycle and a fresh
+      // capability registry on the host. Its next authenticated roster needs
+      // a new ACK from this guest before it can receive later churn updates.
+      admissionCapabilityAckInFlight = false
+      pendingAuthorityAnnouncements.delete(peerId)
+      reconnectPeerIds.clear()
+      if (hasAuthenticatedRoster) {
+        for (const admittedPeerId of announcedAdmittedPeerIds) {
+          reconnectPeerIds.add(admittedPeerId)
+        }
+      } else {
+        for (const incumbentPeerId of peers) {
+          reconnectPeerIds.add(incumbentPeerId)
+        }
+      }
+      reconnectPeerIds.add(peerId)
+      // A same-ID original-host reconnect starts a fresh room lifecycle and
+      // therefore restarts its revision counter. Forget this departed
+      // authority's revision while retaining its frozen roster.
+      announcedRosterRevision = null
+      admissionsClosed = true
+      // A modern host's frozen roster decides which still-provisional
+      // transports may survive its departure. Close excluded candidates now
+      // so a rejected fifth cannot retain a live mesh edge for its timeout.
+      for (const candidatePeerId of Array.from(pendingPeerJoins)) {
+        if (!reconnectPeerIds.has(candidatePeerId)) {
+          clearPendingPeerJoin(candidatePeerId)
+          rejectPeer(candidatePeerId, 'closed')
+        }
+      }
+      // A host-rejected entrant can be briefly present in a guest's transport
+      // mesh when the host itself disappears. The last authoritative roster
+      // excludes it, so actively close it instead of letting it survive until
+      // an arbitrary future peer callback.
+      closePeersExcludedByRoster(reconnectPeerIds)
+      log.warn('session_admission.authority_lost', {
+        role: hooks.isHost ? 'host' : 'guest',
+      })
+    }
   })
 
   return {
     peers: () => Array.from(peers),
+    authenticateAuthority,
+    dispose,
+    getFrozenGuestAdmission,
   }
 }

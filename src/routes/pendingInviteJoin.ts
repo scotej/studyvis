@@ -8,6 +8,7 @@ export type PendingInviteJoinDeps = {
     sessionTopic: string,
     sessionPassword: string,
     options: {
+      expectedAuthorityEdPubkeyHex: string
       onPeerAuthenticated: (edPubkeyHex: string) => void
     }
   ) => unknown
@@ -31,6 +32,7 @@ export function joinAndRemovePendingInvite(
     invite.payload.session_topic,
     invite.payload.session_password,
     {
+      expectedAuthorityEdPubkeyHex: invite.from_ed_pubkey,
       onPeerAuthenticated: (edPubkeyHex) => {
         // Shared session credentials can admit another invitee before the
         // sender. Keep this sender-specific retry credential until the

@@ -28,7 +28,9 @@ export function hostSession(options?: HostSessionOptions): SessionHandle {
   const startedAt = Date.now()
   const startedAtMono = performance.now()
   const identity = useIdentityStore.getState().identity
-  const leave = buildLeaveHandler({
+  let lifecycle: ReturnType<typeof wireSessionRoom> | null = null
+  let teardownCommitted = false
+  const leaveBase = buildLeaveHandler({
     room,
     topic,
     startedAt,
@@ -37,7 +39,42 @@ export function hostSession(options?: HostSessionOptions): SessionHandle {
     localDisplayName: identity?.display_name.trim() || null,
     continuesFocus: false,
     store,
+    onTeardownCommitted: () => {
+      teardownCommitted = true
+      lifecycle?.dispose()
+    },
   })
+  let leaveAttempt: Promise<void> | null = null
+  const leave = (): Promise<void> => {
+    if (leaveAttempt) return leaveAttempt
+    let resolveAttempt!: () => void
+    let rejectAttempt!: (reason: unknown) => void
+    const attempt = new Promise<void>((resolve, reject) => {
+      resolveAttempt = resolve
+      rejectAttempt = reject
+    })
+    // Cache before any synchronous getter/store work. A re-entrant observer
+    // triggered during preflight must receive this exact attempt, not launch a
+    // second room teardown.
+    leaveAttempt = attempt
+    teardownCommitted = false
+    let inner: Promise<void>
+    try {
+      inner = leaveBase()
+    } catch (err) {
+      if (leaveAttempt === attempt) leaveAttempt = null
+      rejectAttempt(err)
+      return attempt
+    }
+    void inner.then(
+      () => resolveAttempt(),
+      (err) => {
+        if (!teardownCommitted && leaveAttempt === attempt) leaveAttempt = null
+        rejectAttempt(err)
+      }
+    )
+    return attempt
+  }
   store.getState().begin({
     sessionTopic: topic,
     sessionPassword: password,
@@ -48,12 +85,12 @@ export function hostSession(options?: HostSessionOptions): SessionHandle {
     room,
     leave,
   })
-  const lifecycle = wireSessionRoom(room, { isHost: true, leave }, store)
+  lifecycle = wireSessionRoom(room, { isHost: true, leave }, store)
   return {
     sessionTopic: topic,
     sessionPassword: password,
     room,
     leave,
-    peers: lifecycle.peers,
+    peers: () => lifecycle?.peers() ?? [],
   }
 }

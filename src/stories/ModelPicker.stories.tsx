@@ -1,5 +1,6 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { Meta, StoryObj } from '@storybook/react-vite'
+import { expect, within } from 'storybook/test'
 
 import { Toaster } from '@/components/ui/sonner'
 import {
@@ -8,6 +9,8 @@ import {
   emptyPickerState,
   INFERENCE_ENGINE_FINGERPRINT,
   SUPPORTED_MODELS,
+  clearCurrentAiHardwareIdentity,
+  setCurrentAiHardwareIdentity,
   type PickerStateForModel,
   type ModelRecord,
 } from '@/features/ai'
@@ -23,6 +26,7 @@ function makeRecord(p95Sec: number, p50Sec = p95Sec * 0.85): ModelRecord {
       sampleIntervalSec: Math.max(5, Math.ceil(p95Sec + 1)),
       completedAtSec: Math.floor(Date.now() / 1000),
       engineFingerprint: INFERENCE_ENGINE_FINGERPRINT,
+      hardwareIdentity: { selection: 'auto', topology: [] },
     },
     installedAt: Date.now(),
   }
@@ -44,6 +48,18 @@ function Harness({
   actionsLocked,
 }: StoryArgs) {
   const [hfPresent, setHfPresent] = useState(hfTokenPresent)
+  // Storybook does not mount the native engine/sidecar bridges. Seed the same
+  // resolved identity used by the speed records before ModelPicker renders,
+  // so its non-reactive benchmark freshness check cannot see an initial null.
+  // The effect is cleanup only between story switches.
+  const [identityReady] = useState(() => {
+    setCurrentAiHardwareIdentity({ selection: 'auto', topology: [] })
+    return true
+  })
+  useEffect(() => {
+    return () => clearCurrentAiHardwareIdentity()
+  }, [])
+  if (!identityReady) return null
   const baseline = emptyPickerState()
   const perModel: Record<string, PickerStateForModel> = Object.fromEntries(
     SUPPORTED_MODELS.map((spec) => {
@@ -118,6 +134,17 @@ export const OneInstalled: Story = {
     },
     activeModelId: 'qwen2_5-vl-3b',
     hfTokenPresent: false,
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    expect(
+      canvas.getByText('Speed on your machine: 8.4 seconds per check')
+    ).toBeVisible()
+    expect(
+      canvas.queryByText(
+        'Measured on an older StudyVis — re-run the benchmark for current numbers.'
+      )
+    ).not.toBeInTheDocument()
   },
 }
 

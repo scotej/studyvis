@@ -96,7 +96,7 @@ import {
   type AuditEventKind,
 } from './audit'
 import { swapAudioInput } from './audioDevices'
-import { startHelloProtocol } from './hello'
+import { startHelloProtocol, type Hello } from './hello'
 import {
   CAMERA_STATE_ACTION,
   connectionFocusState,
@@ -215,6 +215,9 @@ export function SessionView({
   const room = useSessionStore((s) => s.room)
   const isHost = useSessionStore((s) => s.isHost)
   const isRejoin = useSessionStore((s) => s.isRejoin)
+  const expectedAuthorityEdPubkeyHex = useSessionStore(
+    (s) => s.expectedAuthorityEdPubkeyHex
+  )
   const sessionLeave = useSessionStore((s) => s.leave)
   const sessionTopic = useSessionStore((s) => s.sessionTopic)
   const startedAt = useSessionStore((s) => s.startedAt)
@@ -264,6 +267,10 @@ export function SessionView({
   const sessionImages = useNotesStore((s) => s.images)
   const sendNoteRef = useRef<((text: string) => Promise<void>) | null>(null)
   const sendImageRef = useRef<((file: File) => Promise<void>) | null>(null)
+  // A valid inbox inviter hello can race its admission roster/onPeerJoin.
+  // Keep it in component-local memory until lifecycle admission, never in the
+  // session store where a rejected full-room attempt would pollute history.
+  const provisionalAuthorityHellosRef = useRef(new Map<string, Hello>())
   // useShallow stops the hello+audit+pomodoro effect from re-firing on every
   // 5-second broadcaster tick: without it the selector returns a fresh
   // object literal each store mutation, which would re-render SessionView
@@ -285,6 +292,7 @@ export function SessionView({
   // acquisition effect when the user clicks "Try again".
   const [mediaErrorName, setMediaErrorName] = useState<string | null>(null)
   const [mediaRetryNonce, setMediaRetryNonce] = useState(0)
+
   const [remoteStreams, setRemoteStreams] = useState<
     Record<string, MediaStream>
   >({})
@@ -792,6 +800,21 @@ export function SessionView({
     const myDisplayName =
       useIdentityStore.getState().identity?.display_name ?? ''
     const sign = signWithKeyring
+    const provisionalAuthorityHellos = provisionalAuthorityHellosRef.current
+    const promoteProvisionalHellos = () => {
+      const session = useSessionStore.getState()
+      if (stopped || session.room !== room) return
+      for (const [peerId, hello] of provisionalAuthorityHellos) {
+        if (!session.peers[peerId]) continue
+        provisionalAuthorityHellos.delete(peerId)
+        setPeerHello(peerId, hello)
+      }
+    }
+    // A hello action cannot unregister its receiver in Trystero, so scope
+    // this promotion to the exact room object and release it with the effect.
+    const stopHelloPromotionWatch = useSessionStore.subscribe(() => {
+      promoteProvisionalHellos()
+    })
 
     const helloHandle = startHelloProtocol({
       room,
@@ -800,18 +823,32 @@ export function SessionView({
       selfJoinedAt: startedAt,
       sign,
       onPeerHello: (peerId, hello) => {
-        // Ignore hellos from peers the room never admitted (e.g. a 4th peer
-        // the host cap bounced before its hello landed) so they don't
-        // pollute seenPeerEdPubkeys → markStudied. An admitted peer always
-        // has a peers[peerId] entry by the time its hello arrives.
-        if (useSessionStore.getState().peers[peerId]) {
-          setPeerHello(peerId, hello)
+        const session = useSessionStore.getState()
+        if (stopped || session.room !== room) return
+        // Cache every verified hello outside durable session history. A
+        // roster/onPeerJoin may arrive later; an unadmitted transport never
+        // gets promoted and is discarded at teardown.
+        provisionalAuthorityHellos.set(peerId, hello)
+        // Keep the signed inviter's identity provisional until the lifecycle
+        // authenticates its authority roster and actually admits this
+        // transport. A full-room rejection must not create peer history,
+        // presence, mark-studied data, or consume the pending invite.
+        if (
+          session.expectedAuthorityEdPubkeyHex?.toLowerCase() ===
+          hello.ed_pubkey_hex.toLowerCase()
+        ) {
+          session.authenticateAuthority?.(peerId, hello.ed_pubkey_hex)
         }
+        promoteProvisionalHellos()
       },
-      onPeerLeave: () => {
+      onPeerLeave: (peerId) => {
         // The session store's peerLeft handler drops the binding via
-        // `peers` map mutation; nothing to do here beyond the existing
-        // wireSessionRoom listener.
+        // `peers` map mutation. A provisional hello belongs to exactly one
+        // transport incarnation, so never let a recycled peer ID inherit it.
+        // Action receivers can outlive a torn-down Trystero room; an old
+        // callback must not erase a same-ID hello cached by the current room.
+        if (stopped || useSessionStore.getState().room !== room) return
+        provisionalAuthorityHellos.delete(peerId)
       },
     })
 
@@ -1050,6 +1087,8 @@ export function SessionView({
 
     return () => {
       stopped = true
+      provisionalAuthorityHellos.clear()
+      stopHelloPromotionWatch()
       controller.teardown()
       helloHandle.teardown()
       dispatcher.teardown()
@@ -1061,7 +1100,15 @@ export function SessionView({
       sendNoteRef.current = null
       sendImageRef.current = null
     }
-  }, [room, myEdPubkeyHex, myXPubkeyHex, sessionTopic, startedAt, setPeerHello])
+  }, [
+    room,
+    myEdPubkeyHex,
+    myXPubkeyHex,
+    sessionTopic,
+    startedAt,
+    setPeerHello,
+    expectedAuthorityEdPubkeyHex,
+  ])
 
   // V2-P5 focus-score reset: fires exactly once per session start, keyed on
   // startedAt rather than the sample-loop effect's deps. Without this split,

@@ -20,6 +20,21 @@ export type SessionRejoinRequest = {
   sessionTopic: string
   sessionPassword: string
   isHost: boolean
+  expectedAuthorityEdPubkeyHex: string | null
+  // Transport IDs captured before the local room tears down. A same-ID host
+  // rejoin keeps these incumbent slots reserved briefly, so a delayed fifth
+  // cannot arrive first and consume one of the original mesh's places.
+  reservedReconnectPeerIds: string[]
+  frozenGuestAdmission: GuestAdmissionSnapshot | null
+}
+
+// Captured only from a locally authenticated, host-loss-frozen lifecycle.
+// It lets a guest rejoin surviving incumbents without giving a new peer any
+// opportunity to invent authority while the original host is gone.
+export type GuestAdmissionSnapshot = {
+  authorityPeerId: string
+  authorityEdPubkeyHex: string
+  admittedPeerIds: string[]
 }
 
 // Mirrors the validated payload shape returned by the V1-P9 signed-hello
@@ -68,6 +83,9 @@ export type SessionInit = {
   sessionTopic: string
   sessionPassword: string
   isHost: boolean
+  // For guests, the signed inbox inviter that is allowed to become the
+  // original admission authority. Retained through a local Leave/Rejoin.
+  expectedAuthorityEdPubkeyHex?: string | null
   startedAt: number
   // performance.now() taken alongside startedAt. Optional so non-production
   // callers (tests, stories) can omit it; consumers fall back to wall clock.
@@ -77,6 +95,10 @@ export type SessionInit = {
   isRejoin?: boolean
   room: TopicRoom
   leave: () => Promise<void>
+  // Bound by join.ts after it creates the room lifecycle. SessionView calls
+  // this only for an already signature-validated inviter hello that is not
+  // yet admitted, keeping that provisional identity out of durable history.
+  authenticateAuthority?: (peerId: string, edPubkeyHex: string) => void
 }
 
 // V2-P7 default until V2-P9 ships the required session-start topic input.
@@ -97,9 +119,12 @@ export type SessionState = {
   // before room.leave(), persistence, and report loading, so slow cleanup
   // cannot accidentally extend this local user's Rejoin opportunity.
   rejoinDeadline: number | null
+  reservedReconnectPeerIds: string[]
+  frozenGuestAdmission: GuestAdmissionSnapshot | null
   sessionTopic: string | null
   sessionPassword: string | null
   isHost: boolean
+  expectedAuthorityEdPubkeyHex: string | null
   isRejoin: boolean
   startedAt: number | null
   // Monotonic origin for the same session start, so the live elapsed clock
@@ -109,6 +134,7 @@ export type SessionState = {
   peers: Record<string, PeerSnapshot>
   room: TopicRoom | null
   leave: (() => Promise<void>) | null
+  authenticateAuthority: ((peerId: string, edPubkeyHex: string) => void) | null
   // User's declared study topic, consumed by the AI sample loop (V2-P5)
   // and the Ctrl+] AI dialog (V2-P7). Defaults to
   // DEFAULT_DECLARED_STUDY_TOPIC until V2-P9's session-start prompt
@@ -176,6 +202,8 @@ export type SessionState = {
   // failed local Leave attempt is made retryable.
   clearPendingEndReason: (reason: SessionEndReason) => void
   setRejoinDeadline: (deadline: number | null) => void
+  setReservedReconnectPeerIds: (peerIds: readonly string[]) => void
+  setFrozenGuestAdmission: (snapshot: GuestAdmissionSnapshot | null) => void
   getRejoinRequest: (now?: number) => SessionRejoinRequest | null
   // Flip status to 'ended' so Home.tsx can mount the post-session Report
   // (V2-P8). The Report queries SQLite for the just-persisted sessions
@@ -192,9 +220,12 @@ const INITIAL: Pick<
   | 'endedBy'
   | 'pendingEndReason'
   | 'rejoinDeadline'
+  | 'reservedReconnectPeerIds'
+  | 'frozenGuestAdmission'
   | 'sessionTopic'
   | 'sessionPassword'
   | 'isHost'
+  | 'expectedAuthorityEdPubkeyHex'
   | 'isRejoin'
   | 'startedAt'
   | 'startedAtMono'
@@ -202,6 +233,7 @@ const INITIAL: Pick<
   | 'peers'
   | 'room'
   | 'leave'
+  | 'authenticateAuthority'
   | 'declaredStudyTopic'
   | 'initialDeclaredTopic'
   | 'pendingInitialTopic'
@@ -213,9 +245,12 @@ const INITIAL: Pick<
   endedBy: null,
   pendingEndReason: null,
   rejoinDeadline: null,
+  reservedReconnectPeerIds: [],
+  frozenGuestAdmission: null,
   sessionTopic: null,
   sessionPassword: null,
   isHost: false,
+  expectedAuthorityEdPubkeyHex: null,
   isRejoin: false,
   startedAt: null,
   startedAtMono: null,
@@ -223,6 +258,7 @@ const INITIAL: Pick<
   peers: {},
   room: null,
   leave: null,
+  authenticateAuthority: null,
   declaredStudyTopic: DEFAULT_DECLARED_STUDY_TOPIC,
   initialDeclaredTopic: DEFAULT_DECLARED_STUDY_TOPIC,
   pendingInitialTopic: null,
@@ -262,9 +298,13 @@ const sessionStateCreator: StateCreator<SessionState> = (set, get) => ({
         endedBy: null,
         pendingEndReason: null,
         rejoinDeadline: null,
+        reservedReconnectPeerIds: [],
+        frozenGuestAdmission: null,
         sessionTopic: init.sessionTopic,
         sessionPassword: init.sessionPassword,
         isHost: init.isHost,
+        expectedAuthorityEdPubkeyHex:
+          init.expectedAuthorityEdPubkeyHex?.toLowerCase() ?? null,
         isRejoin: init.isRejoin ?? false,
         startedAt: init.startedAt,
         startedAtMono: init.startedAtMono ?? null,
@@ -272,6 +312,7 @@ const sessionStateCreator: StateCreator<SessionState> = (set, get) => ({
         peers: {},
         room: init.room,
         leave: init.leave,
+        authenticateAuthority: init.authenticateAuthority ?? null,
         declaredStudyTopic: topic,
         initialDeclaredTopic: topic,
         pendingInitialTopic: null,
@@ -464,6 +505,22 @@ const sessionStateCreator: StateCreator<SessionState> = (set, get) => ({
       s.pendingEndReason === reason ? { pendingEndReason: null } : s
     ),
   setRejoinDeadline: (deadline) => set({ rejoinDeadline: deadline }),
+  setReservedReconnectPeerIds: (peerIds) =>
+    set({ reservedReconnectPeerIds: [...new Set(peerIds)].slice(0, 3) }),
+  setFrozenGuestAdmission: (snapshot) =>
+    set({
+      frozenGuestAdmission:
+        snapshot === null
+          ? null
+          : {
+              authorityPeerId: snapshot.authorityPeerId,
+              authorityEdPubkeyHex: snapshot.authorityEdPubkeyHex.toLowerCase(),
+              admittedPeerIds: [...new Set(snapshot.admittedPeerIds)].slice(
+                0,
+                3
+              ),
+            },
+    }),
   getRejoinRequest: (now = Date.now()) => {
     const s = get()
     if (
@@ -480,6 +537,9 @@ const sessionStateCreator: StateCreator<SessionState> = (set, get) => ({
       sessionTopic: s.sessionTopic,
       sessionPassword: s.sessionPassword,
       isHost: s.isHost,
+      expectedAuthorityEdPubkeyHex: s.expectedAuthorityEdPubkeyHex,
+      reservedReconnectPeerIds: s.reservedReconnectPeerIds,
+      frozenGuestAdmission: s.frozenGuestAdmission,
     }
   },
   markEnded: () =>

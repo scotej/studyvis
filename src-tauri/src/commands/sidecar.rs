@@ -110,6 +110,10 @@ struct SidecarInner {
     // stop a child that was started through an equivalent symlink path.
     managed_model_ids: Vec<String>,
     ctx_size: Option<u32>,
+    // Native canonical selection plus the accelerator topology resolved for
+    // this child. The JS benchmark stamps this exact value, never a browser
+    // storage mirror read before the Tauri store hydration has completed.
+    hardware_identity: Option<super::engine::ResolvedHardwareIdentity>,
     // generation increments on every explicit start so a stale watcher from a
     // previous run knows to exit instead of re-incarnating the process.
     generation: u64,
@@ -183,6 +187,16 @@ pub struct SidecarStatus {
     pub ctx_size: Option<u32>,
     pub errored: bool,
     pub last_error: Option<String>,
+    // Present only while the active child is known to use this exact native
+    // selection/topology. Renderer reload recovery adopts it through
+    // sidecar_status; failed crash-restarts deliberately clear it.
+    pub hardware_identity: Option<super::engine::ResolvedHardwareIdentity>,
+}
+
+#[derive(Serialize, Clone)]
+pub struct SidecarStartResult {
+    pub port: u16,
+    pub hardware_identity: super::engine::ResolvedHardwareIdentity,
 }
 
 fn mark_starting(guard: &mut SidecarInner) -> u64 {
@@ -190,6 +204,23 @@ fn mark_starting(guard: &mut SidecarInner) -> u64 {
     guard.errored = false;
     guard.last_error = None;
     guard.start_epoch
+}
+
+fn validate_start_epoch(guard: &SidecarInner, epoch: u64) -> Result<(), String> {
+    if guard.start_epoch != epoch {
+        return Err("sidecar start superseded".to_string());
+    }
+    if guard.shutting_down {
+        return Err("app is shutting down".to_string());
+    }
+    Ok(())
+}
+
+fn snapshot_start_epoch(guard: &SidecarInner) -> Result<u64, String> {
+    if guard.shutting_down {
+        return Err("app is shutting down".to_string());
+    }
+    Ok(guard.start_epoch)
 }
 
 fn unmark_starting(guard: &mut SidecarInner, epoch: u64) {
@@ -213,8 +244,15 @@ pub async fn sidecar_start<R: Runtime>(
     mmproj_path: Option<String>,
     ctx_size: u32,
     engine_auto_install: bool,
-) -> Result<u16, String> {
+) -> Result<SidecarStartResult, String> {
     let arc = state.0.clone();
+    // Capture request ownership before any filesystem work or managed-model
+    // gate await. A later stop increments this epoch, so this invocation cannot
+    // wake after the stop returns and register itself as brand-new work.
+    let request_epoch = {
+        let guard = arc.lock().await;
+        snapshot_start_epoch(&guard)?
+    };
     if !PathBuf::from(&model_path).is_file() {
         return Err(format!("model_path does not exist: {model_path}"));
     }
@@ -237,16 +275,25 @@ pub async fn sidecar_start<R: Runtime>(
         _model_guards.push(gate.clone().lock_owned().await);
     }
 
-    // Mark the entire potentially slow install/spawn interval. Before the
-    // child exists, model/port are still empty—the same fields an explicit
-    // stop exposes—so JS needs this authoritative bit to distinguish "keep
-    // waiting" from "the session deliberately stopped the engine".
+    // Mark the potentially slow install/probe/spawn interval only after the
+    // managed gates are ours, but first validate the token captured before we
+    // waited. This preserves the existing restart-backoff invalidation below
+    // without allowing a stop-during-gate-wait child leak.
     let start_epoch = {
         let mut guard = arc.lock().await;
+        validate_start_epoch(&guard, request_epoch)?;
         if guard.child.is_some() {
-            return guard
+            let port = guard
                 .port
-                .ok_or_else(|| "sidecar running but no port recorded".to_string());
+                .ok_or_else(|| "sidecar running but no port recorded".to_string())?;
+            let hardware_identity = guard
+                .hardware_identity
+                .clone()
+                .ok_or_else(|| "sidecar running but no hardware identity recorded".to_string())?;
+            return Ok(SidecarStartResult {
+                port,
+                hardware_identity,
+            });
         }
         // A watcher keeps model metadata during its restart backoff so a
         // concurrent remove/download can invalidate the pending respawn. An
@@ -256,9 +303,6 @@ pub async fn sidecar_start<R: Runtime>(
         if guard.model.is_some() {
             let child = take_child_and_wipe(&mut guard);
             debug_assert!(child.is_none(), "missing child must not need a kill");
-        }
-        if guard.shutting_down {
-            return Err("app is shutting down".to_string());
         }
         mark_starting(&mut guard)
     };
@@ -291,7 +335,7 @@ async fn sidecar_start_marked<R: Runtime>(
     ctx_size: u32,
     engine_auto_install: bool,
     start_epoch: u64,
-) -> Result<u16, String> {
+) -> Result<SidecarStartResult, String> {
     // Engine presence check OUTSIDE the sidecar lock: a first-run download
     // takes a while and sidecar_status polls must stay responsive. The
     // engine module serializes concurrent installs itself.
@@ -328,24 +372,32 @@ async fn sidecar_start_marked<R: Runtime>(
         }
     }
 
+    // Snapshot the native selection and topology before taking the sidecar
+    // lock. The engine gate held by this caller keeps an install/replacement
+    // from changing the executable underneath the probe or spawn.
+    let compute_device = super::compute_device::read_selection(&app);
+    let hardware_identity =
+        super::engine::resolve_hardware_identity(&app, engine, &compute_device).await;
+
     let mut guard = arc.lock().await;
-    if guard.start_epoch != start_epoch {
-        return Err("sidecar start superseded".to_string());
-    }
+    validate_start_epoch(&guard, start_epoch)?;
     // Re-check after the unlocked window — a concurrent start may have won.
     if guard.child.is_some() {
-        return guard
+        let port = guard
             .port
-            .ok_or_else(|| "sidecar running but no port recorded".to_string());
+            .ok_or_else(|| "sidecar running but no port recorded".to_string())?;
+        let hardware_identity = guard
+            .hardware_identity
+            .clone()
+            .ok_or_else(|| "sidecar running but no hardware identity recorded".to_string())?;
+        return Ok(SidecarStartResult {
+            port,
+            hardware_identity,
+        });
     }
-    if guard.shutting_down {
-        return Err("app is shutting down".to_string());
-    }
-
     let port = pick_unused_port()?;
     guard.generation = guard.generation.wrapping_add(1);
     let generation = guard.generation;
-    let compute_device = super::compute_device::read_selection(&app);
     let gpu_layers = super::compute_device::gpu_layers(&compute_device);
     let compute_label = super::compute_device::selection_log_label(&compute_device);
     let log_path = ensure_log_path(&app)?;
@@ -386,6 +438,7 @@ async fn sidecar_start_marked<R: Runtime>(
     guard.mmproj = mmproj_path.clone();
     guard.managed_model_ids = managed_model_ids;
     guard.ctx_size = Some(ctx_size);
+    guard.hardware_identity = Some(hardware_identity.clone());
     guard.errored = false;
     guard.last_error = None;
     let app_for_watcher = app.clone();
@@ -408,7 +461,10 @@ async fn sidecar_start_marked<R: Runtime>(
     });
     drop(guard);
 
-    Ok(port)
+    Ok(SidecarStartResult {
+        port,
+        hardware_identity,
+    })
 }
 
 // Bumping the generation tells the in-flight watcher to exit instead of
@@ -425,6 +481,7 @@ fn take_child_and_wipe(guard: &mut SidecarInner) -> Option<CommandChild> {
     guard.mmproj = None;
     guard.managed_model_ids.clear();
     guard.ctx_size = None;
+    guard.hardware_identity = None;
     guard.errored = false;
     guard.last_error = None;
     child
@@ -494,6 +551,9 @@ fn snapshot_status(guard: &SidecarInner) -> SidecarStatus {
         ctx_size: guard.ctx_size,
         errored: guard.errored,
         last_error: guard.last_error.clone(),
+        // Keep the generation identity internally for the watcher comparison,
+        // but never advertise it while the child is down in restart backoff.
+        hardware_identity: guard.child.as_ref().and(guard.hardware_identity.clone()),
     }
 }
 
@@ -662,6 +722,47 @@ fn with_sidecar_log<T>(write: impl FnOnce() -> T) -> T {
 // selection is snapshotted when a sidecar generation starts and is carried
 // through crash respawns; editing the settings file behind the running app
 // cannot silently move a live model to different hardware.
+//
+// The model's `--device` alone is not sufficient for vision models. In the
+// pinned b9095 source, server-context passes `--mmproj-offload` through to
+// `mtmd_context_params::use_gpu`, and MTMD's CLIP implementation reads
+// MTMD_BACKEND_DEVICE to choose a named accelerator. Keep these choices in one
+// policy so CPU cannot initialize a projector GPU backend and an explicit
+// device cannot leave the projector on a different accelerator.
+#[derive(Debug, PartialEq, Eq)]
+struct LlamaSpawnPolicy<'a> {
+    gpu_layers: &'static str,
+    model_device: Option<&'a str>,
+    projector_offload: Option<bool>,
+    projector_device: Option<&'a str>,
+}
+
+fn llama_spawn_policy<'a>(
+    compute_device: &'a super::compute_device::ComputeDeviceSelection,
+    has_projector: bool,
+) -> LlamaSpawnPolicy<'a> {
+    // Keep the projector on precisely the same offload path as the text
+    // model. In particular, Linux `auto` is intentionally CPU-only for the
+    // packaged engine even if a local llama.cpp build happens to have GPU
+    // backends available; an explicit device remains an explicit opt-in.
+    let offloads_model = super::compute_device::gpu_layers(compute_device) != "0";
+    let projector_offload = has_projector.then_some(offloads_model);
+    let projector_device = match compute_device {
+        // b9095's MTMD implementation does not receive common_params.devices.
+        // Its documented selection hook is MTMD_BACKEND_DEVICE instead.
+        super::compute_device::ComputeDeviceSelection::Device(id) if has_projector => {
+            Some(id.as_str())
+        }
+        _ => None,
+    };
+
+    LlamaSpawnPolicy {
+        gpu_layers: super::compute_device::gpu_layers(compute_device),
+        model_device: super::compute_device::device_arg(compute_device),
+        projector_offload,
+        projector_device,
+    }
+}
 
 // Try every resolved engine binary in preference order (bundled, then
 // managed). A bundled binary that fails to spawn — deleted, wrong arch,
@@ -761,7 +862,7 @@ fn spawn_llama<R: Runtime>(
     runtime_dir: Option<&Path>,
     compute_device: &super::compute_device::ComputeDeviceSelection,
 ) -> Result<(tauri::async_runtime::Receiver<CommandEvent>, CommandChild), String> {
-    let gpu_layers = super::compute_device::gpu_layers(compute_device);
+    let policy = llama_spawn_policy(compute_device, mmproj_path.is_some());
     // shell().command() with an absolute path — Command::new sets the same
     // piped stdio + CREATE_NO_WINDOW as the sidecar constructor, minus the
     // exe-relative resolution that I73 showed never matched where the binary
@@ -774,11 +875,11 @@ fn spawn_llama<R: Runtime>(
         "--ctx-size",
         &ctx_size.to_string(),
         "--n-gpu-layers",
-        gpu_layers,
+        policy.gpu_layers,
         "--model",
         model_path,
     ]);
-    if let Some(device) = super::compute_device::device_arg(compute_device) {
+    if let Some(device) = policy.model_device {
         // One argv element, not a shell fragment. `valid_device_id` rejects
         // llama.cpp's comma separator, so an explicit choice can name exactly
         // one discovered device and cannot smuggle in a multi-device policy.
@@ -786,6 +887,19 @@ fn spawn_llama<R: Runtime>(
     }
     if let Some(p) = mmproj_path {
         command = command.args(["--mmproj", p]);
+    }
+    if let Some(projector_offload) = policy.projector_offload {
+        command = command.arg(if projector_offload {
+            "--mmproj-offload"
+        } else {
+            "--no-mmproj-offload"
+        });
+    }
+    if let Some(device) = policy.projector_device {
+        // b9095's MTMD path reads this environment variable after the server
+        // has parsed `--device`; it is the only upstream hook that selects a
+        // particular projector accelerator instead of MTMD's default GPU.
+        command = command.env("MTMD_BACKEND_DEVICE", device);
     }
     if let Some(dir) = runtime_dir {
         // I75: the prebuilt llama.cpp binary is a GGML_BACKEND_DL build —
@@ -866,6 +980,26 @@ fn exceeded_total_restarts(total: u32) -> bool {
 
 fn watcher_can_respawn(guard: &SidecarInner, generation: u64) -> bool {
     guard.generation == generation && !guard.shutting_down
+}
+
+// A crash restart must never reuse an identity captured for an eGPU/ordinal
+// that disappeared while the child was down. The watcher takes a fresh native
+// snapshot before spawning; only an exact match is safe to restart without an
+// explicit user action and a new benchmark.
+fn restart_identity_matches(
+    guard: &mut SidecarInner,
+    fresh_identity: &super::engine::ResolvedHardwareIdentity,
+) -> bool {
+    if guard.hardware_identity.as_ref() == Some(fresh_identity) {
+        return true;
+    }
+    guard.hardware_identity = None;
+    guard.errored = true;
+    guard.last_error = Some(
+        "AI hardware changed after the engine crashed; restart AI manually to resolve the new hardware"
+            .to_string(),
+    );
+    false
 }
 
 async fn watch<R: Runtime>(
@@ -949,6 +1083,7 @@ async fn watch<R: Runtime>(
         // engine is going to recover.
         if exceeded_total_restarts(total_restarts) {
             guard.errored = true;
+            guard.hardware_identity = None;
             guard.last_error = Some(append_windows_dll_hint(format!(
                 "the AI engine restarted {total_restarts} times this session and kept dying"
             )));
@@ -964,6 +1099,7 @@ async fn watch<R: Runtime>(
         }
         if restart_attempts > RESTART_BUDGET {
             guard.errored = true;
+            guard.hardware_identity = None;
             // I83 — carry the Windows VC++ hint here too. A child that dies
             // inside the loader spawns successfully (CreateProcess returns a
             // handle before the DLL resolution that kills it), so it never
@@ -995,6 +1131,16 @@ async fn watch<R: Runtime>(
         })
         .await;
 
+        // Re-resolve under the same engine gate as an explicit start. A crash
+        // can coincide with an eGPU detach or ordinal remap; retrying with the
+        // old generation's identity would make its benchmark timings unsafe.
+        // Keeping this gate through spawn also prevents reinstall from
+        // replacing the executable between the probe and child launch.
+        let engine = app.state::<super::engine::EngineState>();
+        let _engine_gate = engine.gate.lock().await;
+        let fresh_identity =
+            super::engine::resolve_hardware_identity(&app, &engine, &compute_device).await;
+
         // Re-check after the backoff and KEEP this lock through spawn and
         // child storage. The old code released it after this check, leaving a
         // window where app exit could find no child, mark shutdown, then the
@@ -1005,10 +1151,21 @@ async fn watch<R: Runtime>(
         if !watcher_can_respawn(&guard, generation) {
             return;
         }
+        if !restart_identity_matches(&mut guard, &fresh_identity) {
+            with_sidecar_log(|| {
+                let _ = writeln!(
+                    log,
+                    "[event gen={generation}] hardware changed; refusing automatic respawn"
+                );
+                let _ = log.flush();
+            });
+            return;
+        }
         let port = match pick_unused_port() {
             Ok(p) => p,
             Err(e) => {
                 guard.errored = true;
+                guard.hardware_identity = None;
                 guard.last_error = Some(e.clone());
                 guard.port = None;
                 with_sidecar_log(|| {
@@ -1032,6 +1189,7 @@ async fn watch<R: Runtime>(
             Ok(pair) => pair,
             Err(e) => {
                 guard.errored = true;
+                guard.hardware_identity = None;
                 guard.last_error = Some(e.clone());
                 guard.port = None;
                 with_sidecar_log(|| {
@@ -1056,6 +1214,79 @@ async fn watch<R: Runtime>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // These assertions pin the split b9095 policy rather than merely checking
+    // the model flags. b9095 reads `--no-mmproj-offload` into
+    // mtmd_context_params::use_gpu and reads MTMD_BACKEND_DEVICE only from the
+    // MTMD path, so both controls are necessary to keep projector placement
+    // aligned with the selected compute hardware.
+    #[test]
+    fn b9095_auto_policy_matches_the_platform_text_offload_without_forcing_a_device() {
+        let policy = llama_spawn_policy(
+            &super::super::compute_device::ComputeDeviceSelection::Auto,
+            true,
+        );
+
+        assert_eq!(
+            policy,
+            LlamaSpawnPolicy {
+                gpu_layers: super::super::compute_device::gpu_layers(
+                    &super::super::compute_device::ComputeDeviceSelection::Auto,
+                ),
+                model_device: None,
+                projector_offload: Some(
+                    super::super::compute_device::gpu_layers(
+                        &super::super::compute_device::ComputeDeviceSelection::Auto,
+                    ) != "0",
+                ),
+                projector_device: None,
+            }
+        );
+    }
+
+    #[test]
+    fn b9095_cpu_policy_forbids_gpu_for_both_model_and_projector() {
+        let selection = super::super::compute_device::ComputeDeviceSelection::Cpu;
+        let policy = llama_spawn_policy(&selection, true);
+
+        assert_eq!(
+            policy,
+            LlamaSpawnPolicy {
+                gpu_layers: "0",
+                model_device: Some("none"),
+                projector_offload: Some(false),
+                projector_device: None,
+            }
+        );
+    }
+
+    #[test]
+    fn b9095_explicit_device_binds_model_and_projector_to_the_same_accelerator() {
+        let selection =
+            super::super::compute_device::ComputeDeviceSelection::Device("Vulkan1".to_string());
+        let policy = llama_spawn_policy(&selection, true);
+
+        assert_eq!(
+            policy,
+            LlamaSpawnPolicy {
+                gpu_layers: "99",
+                model_device: Some("Vulkan1"),
+                projector_offload: Some(true),
+                projector_device: Some("Vulkan1"),
+            }
+        );
+    }
+
+    #[test]
+    fn b9095_policy_never_emits_projector_controls_without_a_projector() {
+        let explicit =
+            super::super::compute_device::ComputeDeviceSelection::Device("Vulkan0".to_string());
+        let cpu = super::super::compute_device::ComputeDeviceSelection::Cpu;
+
+        assert_eq!(llama_spawn_policy(&explicit, false).projector_offload, None);
+        assert_eq!(llama_spawn_policy(&explicit, false).projector_device, None);
+        assert_eq!(llama_spawn_policy(&cpu, false).projector_offload, None);
+    }
 
     #[test]
     fn starting_counter_is_authoritative_and_clears_previous_errors() {
@@ -1096,6 +1327,29 @@ mod tests {
     }
 
     #[test]
+    fn stop_during_managed_gate_wait_invalidates_the_snapshotted_start_request() {
+        let mut inner = SidecarInner::default();
+
+        // sidecar_start snapshots this token before waiting for a managed-model
+        // gate. sidecar_stop uses the same cancellation transition while that
+        // wait is pending.
+        let waiting_request = snapshot_start_epoch(&inner).unwrap();
+        assert!(validate_start_epoch(&inner, waiting_request).is_ok());
+        cancel_pending_starts(&mut inner);
+
+        assert_eq!(
+            validate_start_epoch(&inner, waiting_request).unwrap_err(),
+            "sidecar start superseded"
+        );
+        assert_eq!(inner.starting_attempts, 0);
+
+        // A genuinely new command invoked after the stop may snapshot the new
+        // epoch and proceed normally.
+        let post_stop_request = snapshot_start_epoch(&inner).unwrap();
+        assert!(validate_start_epoch(&inner, post_stop_request).is_ok());
+    }
+
+    #[test]
     fn shutdown_or_generation_change_forbids_a_watcher_respawn() {
         let mut inner = SidecarInner {
             generation: 9,
@@ -1109,6 +1363,39 @@ mod tests {
         inner.shutting_down = false;
         inner.generation = 10;
         assert!(!watcher_can_respawn(&inner, 9));
+    }
+
+    #[test]
+    fn watcher_refuses_a_restart_when_native_hardware_identity_changes() {
+        let expected = super::super::engine::ResolvedHardwareIdentity {
+            selection: "auto".to_string(),
+            topology: Some(vec![super::super::engine::EngineDevice {
+                id: "Vulkan0".to_string(),
+                label: "eGPU (16376 MiB)".to_string(),
+            }]),
+        };
+        let mut inner = SidecarInner {
+            hardware_identity: Some(expected.clone()),
+            ..SidecarInner::default()
+        };
+
+        assert!(restart_identity_matches(&mut inner, &expected));
+        assert!(inner.hardware_identity.is_some());
+
+        let remapped = super::super::engine::ResolvedHardwareIdentity {
+            selection: "auto".to_string(),
+            topology: Some(vec![super::super::engine::EngineDevice {
+                id: "Vulkan0".to_string(),
+                label: "Integrated GPU (8192 MiB)".to_string(),
+            }]),
+        };
+        assert!(!restart_identity_matches(&mut inner, &remapped));
+        assert!(inner.errored);
+        assert!(inner.hardware_identity.is_none());
+        assert!(inner
+            .last_error
+            .as_deref()
+            .is_some_and(|message| message.contains("hardware changed")));
     }
 
     #[test]

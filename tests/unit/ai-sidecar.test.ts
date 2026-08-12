@@ -12,6 +12,10 @@ import {
   type SidecarRuntime,
   type SidecarStatus,
 } from '@/features/ai/sidecar'
+import {
+  clearCurrentAiHardwareIdentity,
+  currentAiHardwareIdentity,
+} from '@/features/ai/computeDevice'
 
 type Tick = () => void
 
@@ -19,6 +23,7 @@ function makeFakeRuntime(opts: {
   aiEnabled: boolean
   engineAutoInstall?: boolean
   startReturns?: number
+  hardwareIdentity?: { selection: 'auto'; topology: [] } | null
   // Tauri invoke rejects with plain STRINGS from Rust `Err(String)`; pass a
   // string here to exercise that path (an Error covers JS-side throws).
   startThrows?: Error | string
@@ -47,6 +52,7 @@ function makeFakeRuntime(opts: {
     ctx_size: null,
     errored: false,
     last_error: null,
+    hardware_identity: null,
   }
 
   const runtime: SidecarRuntime = {
@@ -63,8 +69,9 @@ function makeFakeRuntime(opts: {
         ctx_size: params.ctxSize,
         errored: false,
         last_error: null,
+        hardware_identity: opts.hardwareIdentity ?? null,
       }
-      return port
+      return { port, hardwareIdentity: opts.hardwareIdentity ?? null }
     },
     stop: async () => {
       stopCalls += 1
@@ -77,6 +84,7 @@ function makeFakeRuntime(opts: {
         ctx_size: null,
         errored: false,
         last_error: null,
+        hardware_identity: null,
       }
     },
     status: async () => {
@@ -141,6 +149,7 @@ function resetStore(): void {
     lastHealthCheckAt: null,
     lastError: null,
     pollHandle: null,
+    hardwareIdentity: null,
   })
 }
 
@@ -150,6 +159,7 @@ describe('useSidecarStore.start', () => {
   })
   afterEach(() => {
     __resetSidecarRuntime()
+    clearCurrentAiHardwareIdentity()
   })
 
   test('refuses a live start when AI features are disabled', async () => {
@@ -277,10 +287,13 @@ describe('useSidecarStore.start', () => {
   })
 
   test('joins 10 concurrent cold starts; the first request owns configuration', async () => {
-    let resolveStart!: (port: number) => void
+    let resolveStart!: (result: {
+      port: number
+      hardwareIdentity: null
+    }) => void
     const nativeStart = vi.fn(
       () =>
-        new Promise<number>((resolve) => {
+        new Promise<{ port: number; hardwareIdentity: null }>((resolve) => {
           resolveStart = resolve
         })
     )
@@ -333,7 +346,7 @@ describe('useSidecarStore.start', () => {
       port: null,
     })
 
-    resolveStart(8124)
+    resolveStart({ port: 8124, hardwareIdentity: null })
     await expect(Promise.all(callers)).resolves.toEqual(Array(10).fill(8124))
     expect(useSidecarStore.getState()).toMatchObject({
       status: 'running',
@@ -345,10 +358,13 @@ describe('useSidecarStore.start', () => {
   })
 
   test('an incompatible request cannot supersede an in-flight live start', async () => {
-    let resolveStart!: (port: number) => void
+    let resolveStart!: (result: {
+      port: number
+      hardwareIdentity: null
+    }) => void
     const nativeStart = vi.fn(
       () =>
-        new Promise<number>((resolve) => {
+        new Promise<{ port: number; hardwareIdentity: null }>((resolve) => {
           resolveStart = resolve
         })
     )
@@ -386,7 +402,7 @@ describe('useSidecarStore.start', () => {
     })
     expect(nativeStart).toHaveBeenCalledTimes(1)
 
-    resolveStart(8125)
+    resolveStart({ port: 8125, hardwareIdentity: null })
     await expect(liveStart).resolves.toBe(8125)
     expect(useSidecarStore.getState()).toMatchObject({
       status: 'running',
@@ -462,6 +478,7 @@ describe('useSidecarStore.refreshStatus', () => {
   })
   afterEach(() => {
     __resetSidecarRuntime()
+    clearCurrentAiHardwareIdentity()
   })
 
   test('promotes idle store to running when Rust reports the sidecar is up', async () => {
@@ -476,12 +493,13 @@ describe('useSidecarStore.refreshStatus', () => {
       ctx_size: 4096,
       errored: false,
       last_error: null,
+      hardware_identity: { selection: 'auto', topology: [] },
     }
     const handles = new Set<number>()
     let nextHandle = 1
     let scheduled: (() => void) | null = null
     __setSidecarRuntime({
-      start: async () => 8200,
+      start: async () => ({ port: 8200, hardwareIdentity: null }),
       stop: async () => undefined,
       status: async () => baseStatus,
       fetchHealth: async () => true,
@@ -505,6 +523,7 @@ describe('useSidecarStore.refreshStatus', () => {
     expect(state.status).toBe('running')
     expect(state.port).toBe(8200)
     expect(state.model).toBe('/m.gguf')
+    expect(state.hardwareIdentity).toEqual({ selection: 'auto', topology: [] })
     expect(handles.size).toBe(1)
     // Health probe fires synchronously on poll-start; let microtasks settle.
     await Promise.resolve()
@@ -517,7 +536,7 @@ describe('useSidecarStore.refreshStatus', () => {
     const fetchHealth = vi.fn(async () => true)
     const setInterval = vi.fn(() => 1)
     __setSidecarRuntime({
-      start: async () => 8200,
+      start: async () => ({ port: 8200, hardwareIdentity: null }),
       stop: async () => undefined,
       status: async () => ({
         running: false,
@@ -554,13 +573,52 @@ describe('useSidecarStore start/stop races', () => {
   })
   afterEach(() => {
     __resetSidecarRuntime()
+    clearCurrentAiHardwareIdentity()
+  })
+
+  test('an idle renderer still cancels native work left across reload', async () => {
+    let nativeStarting = true
+    const nativeStop = vi.fn(async () => {
+      nativeStarting = false
+    })
+    __setSidecarRuntime({
+      start: async () => ({ port: 9200, hardwareIdentity: null }),
+      stop: nativeStop,
+      status: async () => ({
+        running: false,
+        starting: nativeStarting,
+        port: null,
+        model: null,
+        mmproj: null,
+        ctx_size: null,
+        errored: false,
+        last_error: null,
+      }),
+      fetchHealth: async () => true,
+      setInterval: () => 1,
+      clearInterval: () => undefined,
+      getAiFeaturesEnabled: () => true,
+      getEngineAutoInstall: () => true,
+    })
+
+    // Zustand starts idle after a WebView reload, while Rust/Tauri survives
+    // and can still be inside sidecar_start's managed-model or engine gates.
+    expect(useSidecarStore.getState().status).toBe('idle')
+    await useSidecarStore.getState().stop()
+
+    expect(nativeStop).toHaveBeenCalledTimes(1)
+    expect(nativeStarting).toBe(false)
+    expect(useSidecarStore.getState().status).toBe('idle')
   })
 
   test('replacement start waits for native stop before it can adopt a port', async () => {
     let resolveStop!: () => void
     let nativeStopCompleted = false
     let stopCalls = 0
-    const nativeStart = vi.fn(async () => (nativeStopCompleted ? 9200 : 9000))
+    const nativeStart = vi.fn(async () => ({
+      port: nativeStopCompleted ? 9200 : 9000,
+      hardwareIdentity: null,
+    }))
     const runtime: SidecarRuntime = {
       start: nativeStart,
       stop: () => {
@@ -623,10 +681,78 @@ describe('useSidecarStore start/stop races', () => {
     expect(stopCalls).toBe(1)
   })
 
+  test('a late old start cannot replace the newer generation hardware identity', async () => {
+    const oldIdentity = {
+      selection: 'auto' as const,
+      topology: [{ id: 'Vulkan0', label: 'eGPU (16376 MiB)' }],
+    }
+    const newIdentity = {
+      selection: 'auto' as const,
+      topology: [{ id: 'Vulkan0', label: 'Integrated GPU (8192 MiB)' }],
+    }
+    let resolveOld!: (result: {
+      port: number
+      hardwareIdentity: typeof oldIdentity
+    }) => void
+    let starts = 0
+    __setSidecarRuntime({
+      start: () => {
+        starts += 1
+        if (starts === 1) {
+          return new Promise<{
+            port: number
+            hardwareIdentity: typeof oldIdentity
+          }>((resolve) => {
+            resolveOld = resolve
+          })
+        }
+        return Promise.resolve({ port: 9300, hardwareIdentity: newIdentity })
+      },
+      stop: async () => undefined,
+      status: async () => ({
+        running: false,
+        starting: false,
+        port: null,
+        model: null,
+        mmproj: null,
+        ctx_size: null,
+        errored: false,
+        last_error: null,
+      }),
+      fetchHealth: async () => true,
+      setInterval: () => 1,
+      clearInterval: () => undefined,
+      getAiFeaturesEnabled: () => true,
+      getEngineAutoInstall: () => true,
+    })
+
+    const oldStart = useSidecarStore
+      .getState()
+      .start({ modelPath: '/old.gguf' })
+    await useSidecarStore.getState().stop()
+    const newStart = useSidecarStore
+      .getState()
+      .start({ modelPath: '/new.gguf' })
+    await expect(newStart).resolves.toBe(9300)
+    expect(currentAiHardwareIdentity()).toEqual(newIdentity)
+
+    resolveOld({ port: 9200, hardwareIdentity: oldIdentity })
+    await expect(oldStart).resolves.toBeNull()
+    expect(useSidecarStore.getState()).toMatchObject({
+      status: 'running',
+      port: 9300,
+      hardwareIdentity: newIdentity,
+    })
+    expect(currentAiHardwareIdentity()).toEqual(newIdentity)
+  })
+
   test('a stale status refresh cannot revoke stop or return a dead port', async () => {
     let resolveStatus!: (status: SidecarStatus) => void
     let resolveStop!: () => void
-    const nativeStart = vi.fn(async () => 9200)
+    const nativeStart = vi.fn(async () => ({
+      port: 9200,
+      hardwareIdentity: null,
+    }))
     __setSidecarRuntime({
       start: nativeStart,
       stop: () =>
@@ -687,9 +813,11 @@ describe('useSidecarStore start/stop races', () => {
     let rejectStart!: (error: Error) => void
     __setSidecarRuntime({
       start: () =>
-        new Promise<number>((_resolve, reject) => {
-          rejectStart = reject
-        }),
+        new Promise<{ port: number; hardwareIdentity: null }>(
+          (_resolve, reject) => {
+            rejectStart = reject
+          }
+        ),
       stop: async () => undefined,
       status: async () => ({
         running: false,
@@ -724,15 +852,20 @@ describe('useSidecarStore start/stop races', () => {
 
   test("an old start's late rejection does not clobber a newer running start", async () => {
     let rejectOldStart!: (error: Error) => void
-    let resolveNewStart!: (port: number) => void
+    let resolveNewStart!: (result: {
+      port: number
+      hardwareIdentity: null
+    }) => void
     let startCalls = 0
     __setSidecarRuntime({
       start: () => {
         startCalls += 1
-        return new Promise<number>((resolve, reject) => {
-          if (startCalls === 1) rejectOldStart = reject
-          else resolveNewStart = resolve
-        })
+        return new Promise<{ port: number; hardwareIdentity: null }>(
+          (resolve, reject) => {
+            if (startCalls === 1) rejectOldStart = reject
+            else resolveNewStart = resolve
+          }
+        )
       },
       stop: async () => undefined,
       status: async () => ({
@@ -764,7 +897,7 @@ describe('useSidecarStore start/stop races', () => {
     // Let the replacement fully own a live sidecar before the canceled
     // request reports its late native failure. The stale continuation must
     // not switch this healthy replacement back to errored or stop its poll.
-    resolveNewStart(9300)
+    resolveNewStart({ port: 9300, hardwareIdentity: null })
     await expect(newStart).resolves.toBe(9300)
     expect(useSidecarStore.getState()).toMatchObject({
       status: 'running',

@@ -447,7 +447,10 @@ export function ReportView({
 
   const startedAt = session.started_at
   const endedAt = session.ended_at
-  const totalMinutes = session.total_minutes ?? 0
+  const totalMinutesLabel =
+    session.total_minutes == null
+      ? strings.report.summaryUnknownDuration
+      : strings.report.summaryMinutes(session.total_minutes)
   // R1 — a null score means AI focus detection was off (or no confident
   // sample ran). Render the no-score state, never a fabricated 100/100 gauge.
   const score = session.score
@@ -560,7 +563,7 @@ export function ReportView({
             <p className="text-sm text-text-secondary">
               {strings.report.summaryPrefix}
               <span className="font-medium text-text-primary">
-                {strings.report.summaryMinutes(totalMinutes)}
+                {totalMinutesLabel}
               </span>
               {strings.report.summaryMiddle}
               <span className="font-medium text-text-primary">
