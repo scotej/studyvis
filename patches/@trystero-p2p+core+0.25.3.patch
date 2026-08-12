@@ -1,5 +1,5 @@
 diff --git a/node_modules/@trystero-p2p/core/dist/action-wire.mjs b/node_modules/@trystero-p2p/core/dist/action-wire.mjs
-index 992caaa..7ec71a7 100644
+index 992caaa..b6e80f0 100644
 --- a/node_modules/@trystero-p2p/core/dist/action-wire.mjs
 +++ b/node_modules/@trystero-p2p/core/dist/action-wire.mjs
 @@ -14,6 +14,12 @@ const buffLowEvent = "bufferedamountlow";
@@ -167,3 +167,189 @@ index 992caaa..7ec71a7 100644
  		}
  	};
  };
+diff --git a/node_modules/@trystero-p2p/core/dist/room.mjs b/node_modules/@trystero-p2p/core/dist/room.mjs
+index a09d8b9..b188cc6 100644
+--- a/node_modules/@trystero-p2p/core/dist/room.mjs
++++ b/node_modules/@trystero-p2p/core/dist/room.mjs
+@@ -5,6 +5,7 @@ import { createMediaManager } from "./media.mjs";
+ //#region src/room.ts
+ const unloadEvent = "beforeunload";
+ const defaultHandshakeTimeoutMs = 1e4;
++const leaveSignalTimeoutMs = 1e3;
+ const internalNs = (ns) => "@_" + ns;
+ const beforeUnloadRoomCleanups = /* @__PURE__ */ new Set();
+ const cleanupActiveRoomsOnBeforeUnload = () => beforeUnloadRoomCleanups.forEach((cleanup) => cleanup());
+@@ -26,6 +27,7 @@ var room_default = (onPeer, onPeerLeave, onSelfLeave, { onPeerHandshake, onHands
+ 	};
+ 	let unregisterBeforeUnloadCleanup = noOp;
+ 	let handshakeManager = null;
++	let leavePromise = null;
+ 	const iterate = (targets, f, { includePending = false } = {}) => (targets ? Array.isArray(targets) ? targets : [targets] : keys(includePending ? peerMap : activePeerMap)).flatMap((id) => {
+ 		const peer = includePending ? peerMap[id] : activePeerMap[id];
+ 		if (!peer) {
+@@ -67,16 +69,55 @@ var room_default = (onPeer, onPeerLeave, onSelfLeave, { onPeerHandshake, onHands
+ 		if (wasActive) listeners.onPeerLeave?.(id);
+ 		onPeerLeave(id);
+ 	};
+-	const leave = async () => {
+-		await leaveAction.send("");
++	const leave = () => leavePromise ??= (async () => {
++		let signalingFailure;
++		let cleanupFailure;
++		let leaveSignalTimeout;
++		try {
++			const leaveSignal = leaveAction.send("");
++			// The timeout below intentionally permits cleanup before a congested
++			// data channel settles. Retain a rejection observer for that detached
++			// signal attempt so it cannot surface as an unhandled rejection later.
++			leaveSignal.catch(noOp);
++			await Promise.race([
++				leaveSignal,
++				new Promise((resolve) => {
++					leaveSignalTimeout = setTimeout(resolve, leaveSignalTimeoutMs);
++				})
++			]);
++		} catch (err) {
++			signalingFailure = { err };
++		} finally {
++			if (leaveSignalTimeout !== void 0) clearTimeout(leaveSignalTimeout);
++		}
+ 		await new Promise((res) => setTimeout(res, 99));
+ 		entries(peerMap).forEach(([id, peer]) => {
+-			peer.destroy();
+-			clearPeerState(id, mkErr("room left"));
++			try {
++				// Clear maps/handlers before destroy: a synchronous close callback
++				// must not re-enter exitPeer and destroy this same transport twice.
++				clearPeerState(id, mkErr("room left"));
++			} catch (err) {
++				cleanupFailure ??= { err };
++			}
++			try {
++				peer.destroy();
++			} catch (err) {
++				cleanupFailure ??= { err };
++			}
+ 		});
+-		unregisterBeforeUnloadCleanup();
+-		onSelfLeave();
+-	};
++		try {
++			unregisterBeforeUnloadCleanup();
++		} catch (err) {
++			cleanupFailure ??= { err };
++		}
++		try {
++			onSelfLeave();
++		} catch (err) {
++			cleanupFailure ??= { err };
++		}
++		if (signalingFailure) throw signalingFailure.err;
++		if (cleanupFailure) throw cleanupFailure.err;
++	})();
+ 	const pingAction = makeActionInternal(internalNs("ping"));
+ 	const pongAction = makeActionInternal(internalNs("pong"));
+ 	const signalAction = makeActionInternal(internalNs("signal"));
+diff --git a/node_modules/@trystero-p2p/core/dist/strategy.mjs b/node_modules/@trystero-p2p/core/dist/strategy.mjs
+index a75dfcf..e6800ec 100644
+--- a/node_modules/@trystero-p2p/core/dist/strategy.mjs
++++ b/node_modules/@trystero-p2p/core/dist/strategy.mjs
+@@ -298,43 +298,67 @@ var strategy_default = ({ init, subscribe, announce, deactivate }) => {
+ 		}, () => {
+ 			didLeaveRoom = true;
+ 			onPeerConnect = noOp;
++			// Room.leave may call us after its own signaling failure. Never let a
++			// best-effort strategy cleanup retain this stale public room object.
++			// Continue cleanup after the first error; room.mjs preserves its earlier
++			// signaling failure over any error we report from this callback.
++			let cleanupFailure;
++			const cleanup = (fn) => {
++				try {
++					fn();
++				} catch (err) {
++					cleanupFailure ??= { err };
++				}
++			};
++			cleanup(() => {
++				if (occupiedRooms[appId]) {
++					delete occupiedRooms[appId][roomId];
++					if (keys(occupiedRooms[appId]).length === 0) delete occupiedRooms[appId];
++				}
++			});
+ 			const registration = roomRegistrations[appId]?.[roomId];
+ 			if (registration?.roomToken) {
+-				advertiseRoomPresenceToAll(appId, registration.roomToken, false);
+-				delete roomIdsByToken[appId]?.[registration.roomToken];
+-				if (roomIdsByToken[appId] && !keys(roomIdsByToken[appId]).length) delete roomIdsByToken[appId];
+-			}
+-			if (roomRegistrations[appId]) {
+-				delete roomRegistrations[appId][roomId];
+-				if (!keys(roomRegistrations[appId]).length) delete roomRegistrations[appId];
++				cleanup(() => advertiseRoomPresenceToAll(appId, registration.roomToken, false));
++				cleanup(() => {
++					delete roomIdsByToken[appId]?.[registration.roomToken];
++					if (roomIdsByToken[appId] && !keys(roomIdsByToken[appId]).length) delete roomIdsByToken[appId];
++				});
+ 			}
+-			entries(ctx.peerStates).forEach(([peerId, state]) => {
+-				state.answeringExpiryTimer = resetTimer(state.answeringExpiryTimer);
+-				if (state.connectedPeer && !state.connectedPeer.isDead) {
+-					const shared = sharedPeerMap[peerId];
+-					if (!shared || shared.peer !== state.connectedPeer) state.connectedPeer.destroy();
++			cleanup(() => {
++				if (roomRegistrations[appId]) {
++					delete roomRegistrations[appId][roomId];
++					if (!keys(roomRegistrations[appId]).length) delete roomRegistrations[appId];
+ 				}
+-				if (state.answeringPeer && !state.answeringPeer.isDead) state.answeringPeer.destroy();
+-				resetOfferState(state, pool);
+-				state.connectedPeer = null;
+-				state.answeringPeer = null;
+-				updateStatus(state);
+ 			});
+-			if (occupiedRooms[appId]) {
+-				delete occupiedRooms[appId][roomId];
+-				if (keys(occupiedRooms[appId]).length === 0) delete occupiedRooms[appId];
+-			}
+-			announceTimeouts.forEach(resetTimer);
+-			passiveActivationTimeout = resetTimer(passiveActivationTimeout);
+-			unsubFns.forEach(async (f) => {
+-				(await f)();
++			entries(ctx.peerStates).forEach(([peerId, state]) => {
++				cleanup(() => {
++					state.answeringExpiryTimer = resetTimer(state.answeringExpiryTimer);
++					if (state.connectedPeer && !state.connectedPeer.isDead) {
++						const shared = sharedPeerMap[peerId];
++						if (!shared || shared.peer !== state.connectedPeer) state.connectedPeer.destroy();
++					}
++					if (state.answeringPeer && !state.answeringPeer.isDead) state.answeringPeer.destroy();
++					resetOfferState(state, pool);
++					state.connectedPeer = null;
++					state.answeringPeer = null;
++					updateStatus(state);
++				});
++			});
++			cleanup(() => announceTimeouts.forEach(resetTimer));
++			cleanup(() => passiveActivationTimeout = resetTimer(passiveActivationTimeout));
++			unsubFns.forEach((f) => {
++				Promise.resolve(f).then((unsubscribe) => cleanup(unsubscribe)).catch(noOp);
+ 			});
+-			if (hasActiveRooms()) return;
+-			didInit = false;
+-			pool.destroy();
+-			offerPool = null;
+-			cleanupWatchOnline();
+-			cleanupRoomPresenceHandler(appId);
++			if (!hasActiveRooms()) {
++				cleanup(() => {
++					didInit = false;
++					pool.destroy();
++					offerPool = null;
++					cleanupWatchOnline();
++					cleanupRoomPresenceHandler(appId);
++				});
++			}
++			if (cleanupFailure) throw cleanupFailure.err;
+ 		}, roomOptions);
+ 		roomRegistration = {
+ 			roomToken: null,
