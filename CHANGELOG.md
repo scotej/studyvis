@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## 1.11.2 — 2026-08-12 — More dependable study sessions
+
+### Added
+
+- **AI can now use the hardware you choose.** In Settings → AI, select
+  Automatic, CPU, or a detected accelerator. The choice is remembered and
+  used consistently for both live checks and benchmarks; Windows builds now
+  include the cross-vendor Vulkan engine while retaining an explicit CPU
+  fallback.
+
 ### Fixed
 
 - **A friend leaving no longer ends the session for the person who stayed.**
@@ -16,6 +26,20 @@
   leave/rejoin intervals, and “last studied with” advances when that overlap
   really ends. Existing rows without reliable overlap data retain their legacy
   interpretation instead of inventing precision or becoming unreadable.
+
+- **In-session AI chat accepts replies from the local engine reliably.**
+  Structured requests and bounded response handling keep valid local replies
+  from being discarded, while timeouts and cancellations stay contained.
+
+- **Push-to-talk is safer through duplicate or missing shortcut events.** A
+  repeated press cannot mute an active hold, an ambiguous repeat fails closed
+  instead of leaving the microphone live, and diagnostics now preserve the
+  relevant shortcut and media timeline without recording speech.
+
+- **Sessions, local AI, and connections recover more predictably at their
+  boundaries.** The default relay pool has been refreshed; reconnects and host
+  changes keep mesh membership bounded and authenticated; and stale sidecar,
+  hardware, benchmark, or cleanup work cannot take over newer state.
 
 ## 1.11.1 — 2026-08-10 — Safer AI and steadier sessions
 
