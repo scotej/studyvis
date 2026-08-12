@@ -18,6 +18,12 @@ const { SharedPeerManager } = await import(
     import.meta.url
   ).href
 )
+const { OfferPool } = await import(
+  new URL(
+    '../../node_modules/@trystero-p2p/core/dist/offer-pool.mjs',
+    import.meta.url
+  ).href
+)
 
 const decoder = new TextDecoder()
 
@@ -28,10 +34,11 @@ function pendingPeer(args: {
   blockedLeaveSend?: boolean
 }) {
   let handlers: { close?: () => void } | undefined
+  const emitClose = vi.fn(() => handlers?.close?.())
   return {
     destroy: vi.fn(() => {
       if (args.destroyError) throw args.destroyError
-      if (args.synchronouslyClose) handlers?.close?.()
+      if (args.synchronouslyClose) emitClose()
     }),
     sendData: vi.fn((data: Uint8Array) => {
       const actionType = decoder
@@ -53,6 +60,7 @@ function pendingPeer(args: {
     setHandlers: vi.fn((next) => {
       handlers = next as { close?: () => void }
     }),
+    emitClose,
   }
 }
 
@@ -120,34 +128,108 @@ describe('patched Trystero room leave cleanup', () => {
     registerPeer?.(peer, 'pending')
 
     await expect(room.leave()).rejects.toBe(leaveError)
+    expect(peer.emitClose).toHaveBeenCalledTimes(1)
     expect(peer.destroy).toHaveBeenCalledTimes(1)
   })
 
   test('bounds a backpressured leave notification before room cleanup', async () => {
     vi.useFakeTimers()
-    const leaveError = new Error('leave notification failed')
-    let registerPeer: ((peer: unknown, peerId: string) => void) | undefined
-    const onSelfLeave = vi.fn()
-    const room = createRoom(
-      (register: (peer: unknown, peerId: string) => void) => {
-        registerPeer = register
-      },
-      vi.fn(),
-      onSelfLeave,
-      { onPeerHandshake: () => new Promise<void>(() => {}) }
-    )
-    const peer = pendingPeer({ leaveError, blockedLeaveSend: true })
-    registerPeer?.(peer, 'backpressured')
+    try {
+      const leaveError = new Error('leave notification failed')
+      let registerPeer: ((peer: unknown, peerId: string) => void) | undefined
+      const onSelfLeave = vi.fn()
+      const room = createRoom(
+        (register: (peer: unknown, peerId: string) => void) => {
+          registerPeer = register
+        },
+        vi.fn(),
+        onSelfLeave,
+        { onPeerHandshake: () => new Promise<void>(() => {}) }
+      )
+      const peer = pendingPeer({ leaveError, blockedLeaveSend: true })
+      registerPeer?.(peer, 'backpressured')
 
-    const firstLeave = room.leave()
-    const secondLeave = room.leave()
-    expect(secondLeave).toBe(firstLeave)
-    await vi.advanceTimersByTimeAsync(1_099)
-    await expect(firstLeave).resolves.toBeUndefined()
-    expect(peer.destroy).toHaveBeenCalledTimes(1)
-    expect(onSelfLeave).toHaveBeenCalledTimes(1)
-    expect(room.leave()).toBe(firstLeave)
-    vi.useRealTimers()
+      const firstLeave = room.leave()
+      const secondLeave = room.leave()
+      expect(secondLeave).toBe(firstLeave)
+      await vi.advanceTimersByTimeAsync(1_099)
+      await expect(firstLeave).resolves.toBeUndefined()
+      expect(peer.destroy).toHaveBeenCalledTimes(1)
+      expect(onSelfLeave).toHaveBeenCalledTimes(1)
+      expect(room.leave()).toBe(firstLeave)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  test('keeps leave bounded while safely cleaning a deferred subscription', async () => {
+    vi.useFakeTimers()
+    try {
+      const unsubscribeError = new Error('unsubscribe failed')
+      const unsubscribe = vi.fn(() => {
+        throw unsubscribeError
+      })
+      let resolveSubscription: (unsubscribe: () => void) => void
+      const subscription = new Promise<() => void>((resolve) => {
+        resolveSubscription = resolve
+      })
+      const joinRoom = createStrategy({
+        init: () => ({}),
+        subscribe: () => subscription,
+        announce: async () => 60_000,
+      })
+      const room = joinRoom(
+        { appId: 'deferred-unsubscribe-app', passive: true },
+        'same-room'
+      )
+
+      const leave = room.leave()
+      await vi.advanceTimersByTimeAsync(99)
+      await expect(leave).resolves.toBeUndefined()
+      expect(unsubscribe).not.toHaveBeenCalled()
+
+      resolveSubscription!(unsubscribe)
+      await vi.advanceTimersByTimeAsync(0)
+      expect(unsubscribe).toHaveBeenCalledTimes(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  test('finishes remaining shared cleanup when offer-pool destruction fails', async () => {
+    const cleanupError = new Error('offer pool destroy failed')
+    const cleanupRoomPresenceHandler = vi.fn()
+    const setRoomPresenceHandler = vi
+      .spyOn(SharedPeerManager.prototype, 'setRoomPresenceHandler')
+      .mockReturnValue(cleanupRoomPresenceHandler)
+    const originalDestroy = OfferPool.prototype.destroy
+    const destroy = vi.spyOn(OfferPool.prototype, 'destroy')
+    destroy.mockImplementation(function (this: InstanceType<typeof OfferPool>) {
+      originalDestroy.call(this)
+      throw cleanupError
+    })
+    try {
+      const joinRoom = createStrategy({
+        init: () => ({}),
+        subscribe: async () => () => {},
+        announce: async () => 60_000,
+      })
+      const config = { appId: 'pool-destroy-failure-app', passive: true }
+      const firstRoom = joinRoom(config, 'same-room')
+
+      await expect(firstRoom.leave()).rejects.toBe(cleanupError)
+      expect(destroy).toHaveBeenCalledTimes(1)
+      expect(cleanupRoomPresenceHandler).toHaveBeenCalledTimes(1)
+
+      destroy.mockRestore()
+      const replacementRoom = joinRoom(config, 'same-room')
+      expect(replacementRoom).not.toBe(firstRoom)
+      await expect(replacementRoom.leave()).resolves.toBeUndefined()
+      expect(cleanupRoomPresenceHandler).toHaveBeenCalledTimes(2)
+    } finally {
+      destroy.mockRestore()
+      setRoomPresenceHandler.mockRestore()
+    }
   })
 
   test('evicts a public strategy room when leave-presence cleanup throws', async () => {

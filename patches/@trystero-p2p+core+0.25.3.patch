@@ -168,7 +168,7 @@ index 992caaa..b6e80f0 100644
  	};
  };
 diff --git a/node_modules/@trystero-p2p/core/dist/room.mjs b/node_modules/@trystero-p2p/core/dist/room.mjs
-index a09d8b9..b188cc6 100644
+index a09d8b9..3c5134d 100644
 --- a/node_modules/@trystero-p2p/core/dist/room.mjs
 +++ b/node_modules/@trystero-p2p/core/dist/room.mjs
 @@ -5,6 +5,7 @@ import { createMediaManager } from "./media.mjs";
@@ -240,7 +240,7 @@ index a09d8b9..b188cc6 100644
 +			cleanupFailure ??= { err };
 +		}
 +		try {
-+			onSelfLeave();
++			await onSelfLeave();
 +		} catch (err) {
 +			cleanupFailure ??= { err };
 +		}
@@ -251,11 +251,15 @@ index a09d8b9..b188cc6 100644
  	const pongAction = makeActionInternal(internalNs("pong"));
  	const signalAction = makeActionInternal(internalNs("signal"));
 diff --git a/node_modules/@trystero-p2p/core/dist/strategy.mjs b/node_modules/@trystero-p2p/core/dist/strategy.mjs
-index a75dfcf..e6800ec 100644
+index a75dfcf..68ebb96 100644
 --- a/node_modules/@trystero-p2p/core/dist/strategy.mjs
 +++ b/node_modules/@trystero-p2p/core/dist/strategy.mjs
-@@ -298,43 +298,67 @@ var strategy_default = ({ init, subscribe, announce, deactivate }) => {
- 		}, () => {
+@@ -295,46 +295,74 @@ var strategy_default = ({ init, subscribe, announce, deactivate }) => {
+ 				updateStatus(state);
+ 				checkDeactivate();
+ 			}
+-		}, () => {
++		}, async () => {
  			didLeaveRoom = true;
  			onPeerConnect = noOp;
 +			// Room.leave may call us after its own signaling failure. Never let a
@@ -328,11 +332,6 @@ index a75dfcf..e6800ec 100644
 +					state.answeringPeer = null;
 +					updateStatus(state);
 +				});
-+			});
-+			cleanup(() => announceTimeouts.forEach(resetTimer));
-+			cleanup(() => passiveActivationTimeout = resetTimer(passiveActivationTimeout));
-+			unsubFns.forEach((f) => {
-+				Promise.resolve(f).then((unsubscribe) => cleanup(unsubscribe)).catch(noOp);
  			});
 -			if (hasActiveRooms()) return;
 -			didInit = false;
@@ -340,14 +339,23 @@ index a75dfcf..e6800ec 100644
 -			offerPool = null;
 -			cleanupWatchOnline();
 -			cleanupRoomPresenceHandler(appId);
++			cleanup(() => announceTimeouts.forEach(resetTimer));
++			cleanup(() => passiveActivationTimeout = resetTimer(passiveActivationTimeout));
++			unsubFns.forEach((subscription) => {
++				// A relay subscription may still be establishing when the room leaves.
++				// Do not let it make leave unbounded; detach it if it eventually settles.
++				Promise.resolve(subscription).then((unsubscribe) => {
++					try {
++						unsubscribe();
++					} catch {}
++				}).catch(noOp);
++			});
 +			if (!hasActiveRooms()) {
-+				cleanup(() => {
-+					didInit = false;
-+					pool.destroy();
-+					offerPool = null;
-+					cleanupWatchOnline();
-+					cleanupRoomPresenceHandler(appId);
-+				});
++				cleanup(() => didInit = false);
++				cleanup(() => pool.destroy());
++				cleanup(() => offerPool = null);
++				cleanup(cleanupWatchOnline);
++				cleanup(() => cleanupRoomPresenceHandler(appId));
 +			}
 +			if (cleanupFailure) throw cleanupFailure.err;
  		}, roomOptions);
