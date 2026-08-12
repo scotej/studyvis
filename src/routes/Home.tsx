@@ -341,7 +341,10 @@ export function Home() {
       rejoinSession(
         request.sessionTopic,
         request.sessionPassword,
-        request.isHost
+        request.isHost,
+        {
+          expectedAuthorityEdPubkeyHex: request.expectedAuthorityEdPubkeyHex,
+        }
       )
     } catch (err) {
       // I83 — the rejoin failed, so no SessionView will mount to consume (or
