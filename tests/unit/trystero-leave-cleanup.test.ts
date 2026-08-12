@@ -34,11 +34,11 @@ function pendingPeer(args: {
   blockedLeaveSend?: boolean
 }) {
   let handlers: { close?: () => void } | undefined
-  const emitClose = vi.fn(() => handlers?.close?.())
+  const closeCallbackRuns = vi.fn()
   return {
     destroy: vi.fn(() => {
       if (args.destroyError) throw args.destroyError
-      if (args.synchronouslyClose) emitClose()
+      if (args.synchronouslyClose) handlers?.close?.()
     }),
     sendData: vi.fn((data: Uint8Array) => {
       const actionType = decoder
@@ -58,9 +58,20 @@ function pendingPeer(args: {
         }
       : {}),
     setHandlers: vi.fn((next) => {
-      handlers = next as { close?: () => void }
+      const nextHandlers = next as { close?: () => void }
+      handlers = {
+        ...nextHandlers,
+        ...(nextHandlers.close
+          ? {
+              close: () => {
+                closeCallbackRuns()
+                nextHandlers.close?.()
+              },
+            }
+          : {}),
+      }
     }),
-    emitClose,
+    closeCallbackRuns,
   }
 }
 
@@ -128,7 +139,8 @@ describe('patched Trystero room leave cleanup', () => {
     registerPeer?.(peer, 'pending')
 
     await expect(room.leave()).rejects.toBe(leaveError)
-    expect(peer.emitClose).toHaveBeenCalledTimes(1)
+    expect(peer.setHandlers).toHaveBeenCalled()
+    expect(peer.closeCallbackRuns).toHaveBeenCalledTimes(1)
     expect(peer.destroy).toHaveBeenCalledTimes(1)
   })
 
