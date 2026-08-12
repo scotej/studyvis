@@ -380,14 +380,14 @@ export const useSidecarStore = create<SidecarState>((set, get) => ({
       log.debug('stop.joined', { status: get().status })
       return inFlightStop
     }
-    if (get().status === 'idle') {
-      log.debug('stop.skipped', { status: get().status })
-      return Promise.resolve()
-    }
     const ownedStop = (async (): Promise<void> => {
       const startedAt = Date.now()
       const previousStatus = get().status
       lifecycleGeneration += 1
+      // Rust owns the process and pending-start epoch across renderer reloads.
+      // A freshly reloaded Zustand store may say `idle` while a native start
+      // is still installing/probing, so even an apparently idle stop must
+      // reach the idempotent native command and invalidate that request.
       log.info('stop.requested', { previousStatus })
       set({ status: 'stopping' })
       stopPolling()

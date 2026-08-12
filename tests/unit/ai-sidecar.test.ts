@@ -576,6 +576,41 @@ describe('useSidecarStore start/stop races', () => {
     clearCurrentAiHardwareIdentity()
   })
 
+  test('an idle renderer still cancels native work left across reload', async () => {
+    let nativeStarting = true
+    const nativeStop = vi.fn(async () => {
+      nativeStarting = false
+    })
+    __setSidecarRuntime({
+      start: async () => ({ port: 9200, hardwareIdentity: null }),
+      stop: nativeStop,
+      status: async () => ({
+        running: false,
+        starting: nativeStarting,
+        port: null,
+        model: null,
+        mmproj: null,
+        ctx_size: null,
+        errored: false,
+        last_error: null,
+      }),
+      fetchHealth: async () => true,
+      setInterval: () => 1,
+      clearInterval: () => undefined,
+      getAiFeaturesEnabled: () => true,
+      getEngineAutoInstall: () => true,
+    })
+
+    // Zustand starts idle after a WebView reload, while Rust/Tauri survives
+    // and can still be inside sidecar_start's managed-model or engine gates.
+    expect(useSidecarStore.getState().status).toBe('idle')
+    await useSidecarStore.getState().stop()
+
+    expect(nativeStop).toHaveBeenCalledTimes(1)
+    expect(nativeStarting).toBe(false)
+    expect(useSidecarStore.getState().status).toBe('idle')
+  })
+
   test('replacement start waits for native stop before it can adopt a port', async () => {
     let resolveStop!: () => void
     let nativeStopCompleted = false
