@@ -10,7 +10,10 @@ export type SessionRow = {
   id: string
   startedAt: number
   endedAt: number
-  totalMinutes: number
+  totalMinutes: number | null
+  // Exact accumulated awake study duration. New writers keep sub-minute
+  // residue here while totalMinutes remains the derived display/stats count.
+  totalDurationMs: number | null
   // JSON-array string of every ed_pubkey_hex observed via signed-hello in
   // this session, sorted lexicographically (canonical regardless of join
   // order). NULL when no hello was received — solo session or pre-V1-P9.
@@ -54,6 +57,8 @@ export type SessionRecord = {
   started_at: number | null
   ended_at: number | null
   total_minutes: number | null
+  // Null/omitted means the row predates durable fractional-duration storage.
+  total_duration_ms?: number | null
   peer_pubkeys: string | null
   // Optional at the TS boundary for mixed frontend/backend builds. Missing and
   // NULL both mean the row predates precise per-peer duration accounting.
@@ -77,6 +82,7 @@ export async function sessionsInsert(row: SessionRow): Promise<void> {
     startedAt: row.startedAt,
     endedAt: row.endedAt,
     totalMinutes: row.totalMinutes,
+    totalDurationMs: row.totalDurationMs,
     peerPubkeys: row.peerPubkeys,
     peerPresenceMs: row.peerPresenceMs ?? null,
     declaredTopic: row.declaredTopic ?? null,
@@ -103,6 +109,7 @@ export async function sessionsInsertIfAbsent(
     startedAt: row.startedAt,
     endedAt: row.endedAt,
     totalMinutes: row.totalMinutes,
+    totalDurationMs: row.totalDurationMs,
     peerPubkeys: row.peerPubkeys,
     peerPresenceMs: row.peerPresenceMs ?? null,
     declaredTopic: row.declaredTopic ?? null,

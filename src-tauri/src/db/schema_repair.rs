@@ -69,6 +69,7 @@ const EXPECTED_SCHEMA: &[(&str, &[(&str, &str)])] = &[
             ("local_ed_pubkey", "TEXT"),
             ("local_display_name", "TEXT"),
             ("peer_presence_ms", "TEXT"),
+            ("total_duration_ms", "INTEGER"),
         ],
     ),
     (
@@ -224,6 +225,7 @@ mod tests {
             started_at: Some(1_700_000_000_000),
             ended_at: Some(1_700_000_300_000),
             total_minutes: Some(5),
+            total_duration_ms: Some(300_000),
             peer_pubkeys: None,
             declared_topic: Some("Calculus".into()),
             score: Some(88),
@@ -296,7 +298,8 @@ mod tests {
         let read = sessions::list(&conn).expect("list");
         assert_eq!(read.len(), 1);
         assert_eq!(read[0].id, "lost-topic");
-        assert_eq!(read[0].total_minutes, Some(30));
+        assert_eq!(read[0].total_minutes, None);
+        assert_eq!(read[0].total_duration_ms, None);
         assert_eq!(read[0].peer_pubkeys, Some(format!("[\"{friend}\"]")));
     }
 

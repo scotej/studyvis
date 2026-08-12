@@ -36,6 +36,32 @@ export function studyMinutesForSession(session: SessionRecord): number {
   return session.total_minutes ?? 0
 }
 
+function logicalStudyDurationMs(session: SessionRecord): number | null {
+  const duration = session.total_duration_ms
+  // NULL means this is a pre-007 row: use its precise map unchanged. A
+  // present-but-invalid/stale durable value instead falls back to the legacy
+  // minute/presence lower bounds, exactly as session re-entry does.
+  if (duration === null || duration === undefined) return null
+  const minuteCount =
+    typeof session.total_minutes === 'number' &&
+    Number.isSafeInteger(session.total_minutes) &&
+    session.total_minutes >= 0
+      ? session.total_minutes
+      : null
+  // A valid 007 total is the authoritative local awake duration. A malformed
+  // old/new write may fall back to peer timing, but a partner must never make
+  // a known exact session longer merely by claiming excess overlap.
+  const exact =
+    typeof duration === 'number' &&
+    Number.isSafeInteger(duration) &&
+    duration >= 0 &&
+    minuteCount !== null &&
+    Math.floor(duration / 60_000) === minuteCount
+      ? duration
+      : null
+  return exact
+}
+
 // Local calendar day key, YYYY-MM-DD. `timeZone` defaults to the runtime
 // local zone (what a local-first user expects); tests pass an explicit
 // zone for determinism. en-CA formats as ISO-like YYYY-MM-DD, which sorts
@@ -391,6 +417,7 @@ export function partnerStudyTotals(
     const peers = parsePeerPubkeys(s.peer_pubkeys)
     const precise = decodePeerPresenceMsForPeers(s.peer_presence_ms, peers)
     const legacyDurationMs = studyMinutesForSession(s) * 60_000
+    const logicalDurationMs = logicalStudyDurationMs(s)
     for (const ed of peers) {
       const prev = byPeer.get(ed) ?? {
         sessions: 0,
@@ -399,7 +426,18 @@ export function partnerStudyTotals(
       }
       byPeer.set(ed, {
         sessions: prev.sessions + 1,
-        durationMs: prev.durationMs + (precise?.get(ed) ?? legacyDurationMs),
+        // 007 rows preserve the logical duration below one minute. Reconcile
+        // a stale durable total with the minute/presence lower bounds before
+        // using it as a cap; pre-007 maps have no matching total precision,
+        // so preserve their existing exact overlap rather than rounding it
+        // down to zero.
+        durationMs:
+          prev.durationMs +
+          (precise?.get(ed) === undefined
+            ? legacyDurationMs
+            : logicalDurationMs === null
+              ? precise.get(ed)!
+              : Math.min(precise.get(ed)!, logicalDurationMs)),
         lastAt:
           s.started_at == null
             ? prev.lastAt

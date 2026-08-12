@@ -71,6 +71,20 @@ function headingIndex(text: string, heading: string): number {
 }
 
 describe('serializeReportToText section order (R5)', () => {
+  test('renders a recovered unknown duration without fabricating zero minutes', () => {
+    const text = serializeReportToText(
+      buildData(
+        baseSession({ total_minutes: null, total_duration_ms: null }),
+        []
+      )
+    )
+
+    expect(text).toContain(
+      `${strings.report.summaryPrefix}${strings.report.summaryUnknownDuration}`
+    )
+    expect(text).not.toContain(`${strings.report.summaryPrefix}0 min`)
+  })
+
   test('emits Topic → Timeline → Distractions → Breaks, matching the render', () => {
     const text = serializeReportToText(
       buildData(baseSession(), [

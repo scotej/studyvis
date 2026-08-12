@@ -864,6 +864,7 @@ export const strings = {
     eyebrow: 'Session report',
     summaryPrefix: 'Studied for ',
     summaryMinutes: (n: number) => `${n} min`,
+    summaryUnknownDuration: 'unknown duration',
     summaryMiddle: ' · Focused-time ',
     privacy:
       'Reports stay on this device. Friends never see your score breakdown unless you share it.',

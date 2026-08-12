@@ -83,6 +83,43 @@ export function decodePeerPresenceMsForPeers(
   return decoded
 }
 
+// The largest individual overlap in a canonical map. This is useful when a
+// legacy row has precise partner timing but only whole study minutes: a later
+// rejoin must never synthesize a logical session shorter than one of the
+// overlaps it already records.
+export function maxPeerPresenceMs(
+  raw: string | null | undefined
+): number | null {
+  const decoded = decodePeerPresenceMs(raw)
+  if (decoded === null) return null
+  let max = 0
+  for (const durationMs of decoded.values()) {
+    max = Math.max(max, durationMs)
+  }
+  return max
+}
+
+// A participant can overlap the local session for at most the local session's
+// duration. Cap only canonical maps; unknown/malformed legacy data remains
+// unknown rather than being partially repaired into a misleading precision
+// claim.
+export function capPeerPresenceMs(
+  raw: string | null | undefined,
+  maximumMs: number
+): string | null {
+  if (!Number.isSafeInteger(maximumMs) || maximumMs < 0) return null
+  const decoded = decodePeerPresenceMs(raw)
+  if (decoded === null) return null
+  return encodePeerPresenceMs(
+    new Map(
+      Array.from(decoded, ([peer, durationMs]) => [
+        peer,
+        Math.min(durationMs, maximumMs),
+      ])
+    )
+  )
+}
+
 // Used when another stint re-enters the same topic-keyed logical session.
 // Unknown precision is contagious: adding a precisely measured tail to a
 // legacy/invalid head cannot make the whole row precise.

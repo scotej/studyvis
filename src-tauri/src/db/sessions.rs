@@ -1,7 +1,7 @@
 //! `sessions` table queries, backing the post-session report and Stats.
 //!
 //! `insert` is a split-semantics upsert: the lifecycle fields (`started_at`,
-//! `ended_at`, `total_minutes`) overwrite authoritatively so a re-summarize
+//! `ended_at`, `total_minutes`, `total_duration_ms`) overwrite authoritatively so a re-summarize
 //! can correct them, while the report fields coalesce (a partial upsert never
 //! clobbers an earlier value). There is no FK to `audit_events` — `delete` /
 //! `clear_all` cascade manually inside one transaction. Serde emits verbatim
@@ -9,6 +9,39 @@
 
 use rusqlite::{params, Connection, OptionalExtension, Result, TransactionBehavior};
 use serde::{Deserialize, Serialize};
+use std::time::{SystemTime, UNIX_EPOCH};
+
+// JavaScript Date's documented finite range. Recovery rows travel through
+// Tauri IPC, so an arbitrary remote audit clock must not create a timestamp
+// the renderer cannot represent even when it is in the past.
+const MIN_SAFE_JS_DATE_MS: i64 = -8_640_000_000_000_000;
+
+fn bounded_recovery_timestamp(value: i64, now_ms: i64) -> i64 {
+    value.clamp(MIN_SAFE_JS_DATE_MS, now_ms)
+}
+
+fn normalized_peer_pubkeys<I>(peers: I, local_ed_pubkey_hex: Option<&str>) -> Option<String>
+where
+    I: IntoIterator<Item = String>,
+{
+    let mut peers: Vec<String> = peers
+        .into_iter()
+        .filter(|p| p.len() == 64 && p.bytes().all(|b| b.is_ascii_hexdigit()))
+        .filter(|p| local_ed_pubkey_hex != Some(p.as_str()))
+        .collect();
+    peers.sort();
+    peers.dedup();
+    (!peers.is_empty()).then(|| {
+        format!(
+            "[{}]",
+            peers
+                .iter()
+                .map(|p| format!("\"{p}\""))
+                .collect::<Vec<_>>()
+                .join(",")
+        )
+    })
+}
 
 // All numeric columns are NULLable in 001_initial.sql; insert() always writes
 // Some(...) for the V1 lifecycle fields, but a SELECT path that hit a NULL
@@ -22,6 +55,9 @@ pub struct SessionRow {
     pub started_at: Option<i64>,
     pub ended_at: Option<i64>,
     pub total_minutes: Option<i64>,
+    // Exact accumulated awake duration. NULL means this row predates the
+    // migration that made sub-minute rejoin residue durable.
+    pub total_duration_ms: Option<i64>,
     // JSON-array string of ed_pubkey_hex values observed via signed-hello in
     // the session, sorted lexicographically. NULL when no hello arrived.
     pub peer_pubkeys: Option<String>,
@@ -51,7 +87,7 @@ pub struct SessionRow {
 
 pub fn list(conn: &Connection) -> Result<Vec<SessionRow>> {
     let mut stmt = conn.prepare(
-        "SELECT id, started_at, ended_at, total_minutes, peer_pubkeys,
+        "SELECT id, started_at, ended_at, total_minutes, total_duration_ms, peer_pubkeys,
                 declared_topic, score, focused_pct, generated_at,
                 confident_samples, skipped_samples, ai_enabled,
                 local_ed_pubkey, local_display_name, peer_presence_ms
@@ -64,17 +100,18 @@ pub fn list(conn: &Connection) -> Result<Vec<SessionRow>> {
             started_at: row.get(1)?,
             ended_at: row.get(2)?,
             total_minutes: row.get(3)?,
-            peer_pubkeys: row.get(4)?,
-            declared_topic: row.get(5)?,
-            score: row.get(6)?,
-            focused_pct: row.get(7)?,
-            generated_at: row.get(8)?,
-            confident_samples: row.get(9)?,
-            skipped_samples: row.get(10)?,
-            ai_enabled: row.get(11)?,
-            local_ed_pubkey: row.get(12)?,
-            local_display_name: row.get(13)?,
-            peer_presence_ms: row.get(14)?,
+            total_duration_ms: row.get(4)?,
+            peer_pubkeys: row.get(5)?,
+            declared_topic: row.get(6)?,
+            score: row.get(7)?,
+            focused_pct: row.get(8)?,
+            generated_at: row.get(9)?,
+            confident_samples: row.get(10)?,
+            skipped_samples: row.get(11)?,
+            ai_enabled: row.get(12)?,
+            local_ed_pubkey: row.get(13)?,
+            local_display_name: row.get(14)?,
+            peer_presence_ms: row.get(15)?,
         })
     })?;
     rows.collect()
@@ -82,7 +119,7 @@ pub fn list(conn: &Connection) -> Result<Vec<SessionRow>> {
 
 pub fn get(conn: &Connection, id: &str) -> Result<Option<SessionRow>> {
     let mut stmt = conn.prepare(
-        "SELECT id, started_at, ended_at, total_minutes, peer_pubkeys,
+        "SELECT id, started_at, ended_at, total_minutes, total_duration_ms, peer_pubkeys,
                 declared_topic, score, focused_pct, generated_at,
                 confident_samples, skipped_samples, ai_enabled,
                 local_ed_pubkey, local_display_name, peer_presence_ms
@@ -95,17 +132,18 @@ pub fn get(conn: &Connection, id: &str) -> Result<Option<SessionRow>> {
             started_at: row.get(1)?,
             ended_at: row.get(2)?,
             total_minutes: row.get(3)?,
-            peer_pubkeys: row.get(4)?,
-            declared_topic: row.get(5)?,
-            score: row.get(6)?,
-            focused_pct: row.get(7)?,
-            generated_at: row.get(8)?,
-            confident_samples: row.get(9)?,
-            skipped_samples: row.get(10)?,
-            ai_enabled: row.get(11)?,
-            local_ed_pubkey: row.get(12)?,
-            local_display_name: row.get(13)?,
-            peer_presence_ms: row.get(14)?,
+            total_duration_ms: row.get(4)?,
+            peer_pubkeys: row.get(5)?,
+            declared_topic: row.get(6)?,
+            score: row.get(7)?,
+            focused_pct: row.get(8)?,
+            generated_at: row.get(9)?,
+            confident_samples: row.get(10)?,
+            skipped_samples: row.get(11)?,
+            ai_enabled: row.get(12)?,
+            local_ed_pubkey: row.get(13)?,
+            local_display_name: row.get(14)?,
+            peer_presence_ms: row.get(15)?,
         })
     })
     .optional()
@@ -121,17 +159,18 @@ pub fn insert(conn: &Connection, row: &SessionRow) -> Result<()> {
 pub fn insert_if_absent(conn: &Connection, row: &SessionRow) -> Result<bool> {
     let inserted = conn.execute(
         "INSERT INTO sessions
-             (id, started_at, ended_at, total_minutes, peer_pubkeys,
+             (id, started_at, ended_at, total_minutes, total_duration_ms, peer_pubkeys,
               declared_topic, score, focused_pct, generated_at,
               confident_samples, skipped_samples, ai_enabled,
               local_ed_pubkey, local_display_name, peer_presence_ms)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)
          ON CONFLICT(id) DO NOTHING",
         params![
             row.id,
             row.started_at,
             row.ended_at,
             row.total_minutes,
+            row.total_duration_ms,
             row.peer_pubkeys,
             row.declared_topic,
             row.score,
@@ -158,7 +197,7 @@ pub fn insert_with_focus_metrics_mode(
     replace_focus_metrics: bool,
 ) -> Result<()> {
     // Two distinct upsert semantics, deliberately (I17):
-    //  - started_at / ended_at / total_minutes are authoritative-overwrite:
+    //  - started_at / ended_at / total_minutes / total_duration_ms are authoritative-overwrite:
     //    the sole caller (lifecycle.ts leave handler) always supplies real
     //    values in one call, and a later re-summarize MUST be able to
     //    correct them. COALESCE here would silently swallow a legitimate
@@ -173,23 +212,24 @@ pub fn insert_with_focus_metrics_mode(
     //    malformed value as unknown with whole-row legacy fallback.
     conn.execute(
         "INSERT INTO sessions
-             (id, started_at, ended_at, total_minutes, peer_pubkeys,
+             (id, started_at, ended_at, total_minutes, total_duration_ms, peer_pubkeys,
               declared_topic, score, focused_pct, generated_at,
               confident_samples, skipped_samples, ai_enabled,
               local_ed_pubkey, local_display_name, peer_presence_ms)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)
          ON CONFLICT(id) DO UPDATE SET
              started_at     = excluded.started_at,
              ended_at       = excluded.ended_at,
              total_minutes  = excluded.total_minutes,
+             total_duration_ms = excluded.total_duration_ms,
              peer_pubkeys   = COALESCE(excluded.peer_pubkeys, sessions.peer_pubkeys),
              declared_topic = COALESCE(excluded.declared_topic, sessions.declared_topic),
-             score          = CASE WHEN ?16 THEN excluded.score ELSE COALESCE(excluded.score, sessions.score) END,
-             focused_pct    = CASE WHEN ?16 THEN excluded.focused_pct ELSE COALESCE(excluded.focused_pct, sessions.focused_pct) END,
+             score          = CASE WHEN ?17 THEN excluded.score ELSE COALESCE(excluded.score, sessions.score) END,
+             focused_pct    = CASE WHEN ?17 THEN excluded.focused_pct ELSE COALESCE(excluded.focused_pct, sessions.focused_pct) END,
              generated_at   = COALESCE(excluded.generated_at, sessions.generated_at),
-             confident_samples = CASE WHEN ?16 THEN excluded.confident_samples ELSE COALESCE(excluded.confident_samples, sessions.confident_samples) END,
-             skipped_samples   = CASE WHEN ?16 THEN excluded.skipped_samples ELSE COALESCE(excluded.skipped_samples, sessions.skipped_samples) END,
-             ai_enabled        = CASE WHEN ?16 THEN excluded.ai_enabled ELSE COALESCE(excluded.ai_enabled, sessions.ai_enabled) END,
+             confident_samples = CASE WHEN ?17 THEN excluded.confident_samples ELSE COALESCE(excluded.confident_samples, sessions.confident_samples) END,
+             skipped_samples   = CASE WHEN ?17 THEN excluded.skipped_samples ELSE COALESCE(excluded.skipped_samples, sessions.skipped_samples) END,
+             ai_enabled        = CASE WHEN ?17 THEN excluded.ai_enabled ELSE COALESCE(excluded.ai_enabled, sessions.ai_enabled) END,
              local_ed_pubkey   = sessions.local_ed_pubkey,
              local_display_name = sessions.local_display_name,
              peer_presence_ms = COALESCE(excluded.peer_presence_ms, sessions.peer_presence_ms)",
@@ -198,6 +238,7 @@ pub fn insert_with_focus_metrics_mode(
             row.started_at,
             row.ended_at,
             row.total_minutes,
+            row.total_duration_ms,
             row.peer_pubkeys,
             row.declared_topic,
             row.score,
@@ -221,62 +262,71 @@ pub fn insert_with_focus_metrics_mode(
 // session (auditStore.append fires per event). The orphaned events are then
 // unreachable everywhere: no sessions row means no report, no stats credit,
 // and no per-session delete path (only clear_all removes them). Adopt them
-// at boot: one row per orphaned session_id, spanning the events' timestamps.
+// at boot: one row per orphaned session_id, retaining only timestamps and
+// identities that recovery can prove (not an inferred awake-time span).
 // Boot-time-only is race-free — this runs in db::init before the webview can
 // begin a session, and the single-instance plugin rejects a second process.
-// The span under-counts slightly (last event ts, not the true crash
-// instant): an honest lower bound. Report fields stay NULL — the report
-// already renders NULL score/counts as unknown (D5 contract). The active
+// Report fields stay NULL — the report already renders NULL score/counts as
+// unknown (D5 contract). The active
 // identity can help exclude itself from peer_pubkeys, but cannot prove it
 // owned a crashed session after an identity restore, so provenance stays NULL.
 pub fn synthesize_from_orphaned_audit_events(
     conn: &mut Connection,
     local_ed_pubkey_hex: Option<&str>,
 ) -> Result<u32> {
+    let now_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_millis().min(i64::MAX as u128) as i64)
+        .unwrap_or(i64::MAX);
     let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
     let orphans: Vec<(String, i64, i64)> = {
         let mut stmt = tx.prepare(
-            "SELECT a.session_id, MIN(a.ts), MAX(a.ts)
+            "SELECT a.session_id,
+                    COALESCE(
+                        MIN(CASE WHEN a.ts BETWEEN ?1 AND ?2 THEN a.ts END),
+                        MIN(a.ts)
+                    ),
+                    COALESCE(
+                        MAX(CASE WHEN a.ts BETWEEN ?1 AND ?2 THEN a.ts END),
+                        MAX(a.ts)
+                    )
              FROM audit_events a
              LEFT JOIN sessions s ON s.id = a.session_id
              WHERE s.id IS NULL AND a.session_id IS NOT NULL AND a.ts IS NOT NULL
              GROUP BY a.session_id",
         )?;
-        let rows = stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?;
+        let rows = stmt.query_map(params![MIN_SAFE_JS_DATE_MS, now_ms], |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+        })?;
         rows.collect::<Result<Vec<_>>>()?
     };
     let mut adopted = 0u32;
-    for (session_id, started_at, ended_at) in orphans {
+    for (session_id, started_at, raw_ended_at) in orphans {
+        // A remote signed audit timestamp can be clock-skewed. Recovery must
+        // not pin report/friend ordering into an arbitrary future date.
+        let ended_at = bounded_recovery_timestamp(raw_ended_at, now_ms);
+        let started_at = bounded_recovery_timestamp(started_at, now_ms).min(ended_at);
         let mut peers: Vec<String> = {
             let mut stmt = tx.prepare(
                 "SELECT DISTINCT who FROM audit_events
-                 WHERE session_id = ?1 AND kind = 'joined' AND who IS NOT NULL",
+                 WHERE session_id = ?1 AND kind = 'joined' AND who IS NOT NULL
+                   AND ts BETWEEN ?3 AND ?2",
             )?;
-            let rows = stmt.query_map(params![session_id], |row| row.get(0))?;
+            let rows = stmt.query_map(params![session_id, now_ms, MIN_SAFE_JS_DATE_MS], |row| {
+                row.get(0)
+            })?;
             rows.collect::<Result<Vec<_>>>()?
         };
         // Peers = signed-hello-verified senders of 'joined' events, minus
         // ourselves (each side persists its own row; peer_pubkeys means THE
-        // OTHERS). Constrain to the 64-hex shape every verified `who`
-        // carries, which also makes the hand-rolled JSON below safe.
+        // OTHERS). Use the same normalized list for friend timestamps.
         peers.retain(|p| p.len() == 64 && p.bytes().all(|b| b.is_ascii_hexdigit()));
         if let Some(local) = local_ed_pubkey_hex {
             peers.retain(|p| p != local);
         }
         peers.sort();
         peers.dedup();
-        let peer_pubkeys = if peers.is_empty() {
-            None
-        } else {
-            Some(format!(
-                "[{}]",
-                peers
-                    .iter()
-                    .map(|p| format!("\"{p}\""))
-                    .collect::<Vec<_>>()
-                    .join(",")
-            ))
-        };
+        let peer_pubkeys = normalized_peer_pubkeys(peers.clone(), local_ed_pubkey_hex);
         // Mirror the live leave path's markStudied for the adopted peers —
         // but monotonic: the crashed session may predate sessions studied
         // since, and rewinding last_studied_with would corrupt friends-list
@@ -295,7 +345,14 @@ pub fn synthesize_from_orphaned_audit_events(
                 id: session_id,
                 started_at: Some(started_at),
                 ended_at: Some(ended_at),
-                total_minutes: Some(((ended_at - started_at).max(0)) / 60_000),
+                // Audit timestamps cannot distinguish awake time from sleep or
+                // wall-clock skew, so recovery leaves both duration forms
+                // unknown instead of fabricating study minutes.
+                total_minutes: None,
+                // Audit timestamps are wall clock only; a crash can span
+                // suspend, so this recovery path cannot honestly claim the
+                // exact awake duration that a live lifecycle measures.
+                total_duration_ms: None,
                 peer_pubkeys,
                 declared_topic: None,
                 score: None,
@@ -308,6 +365,63 @@ pub fn synthesize_from_orphaned_audit_events(
                 local_display_name: None,
                 peer_presence_ms: None,
             },
+        )?;
+        adopted += 1;
+    }
+
+    // A clean first stint can already have a sessions row when a same-topic
+    // rejoin crashes. Detect only a *locally authored* joined event after that
+    // row's end: remote timestamps alone are not authority to invalidate an
+    // otherwise precise local summary. The tail has no monotonic checkpoint,
+    // so retain all proven first-stint fields/minutes but make exact precision
+    // unknown. Tail identities remain in audit/friend metadata; attaching them
+    // to the earlier summary would falsely credit them with prior duration.
+    let continued_rows: Vec<(String, i64, String)> = {
+        let mut stmt = tx.prepare(
+            "SELECT s.id, s.ended_at, s.local_ed_pubkey
+             FROM sessions s
+             WHERE s.ended_at IS NOT NULL
+               AND s.local_ed_pubkey IS NOT NULL
+               AND EXISTS (
+                   SELECT 1 FROM audit_events a
+                   WHERE a.session_id = s.id
+                     AND a.kind = 'joined'
+                     AND a.who = s.local_ed_pubkey
+                     AND a.ts > s.ended_at
+                     AND a.ts <= ?1
+               )",
+        )?;
+        let rows = stmt.query_map(params![now_ms], |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+        })?;
+        rows.collect::<Result<Vec<_>>>()?
+    };
+    for (session_id, prior_ended_at, local_ed_pubkey) in continued_rows {
+        // Only the immutable local identity can establish that this process
+        // continued the row; remote audit timestamps have no trusted receipt
+        // time and must not extend it or alter partner chronology.
+        let latest_local_rejoin: Option<i64> = tx.query_row(
+            "SELECT MAX(ts) FROM audit_events
+             WHERE session_id = ?1 AND kind = 'joined' AND who = ?2
+               AND ts > ?3 AND ts BETWEEN ?4 AND ?5",
+            params![
+                session_id,
+                local_ed_pubkey,
+                prior_ended_at,
+                MIN_SAFE_JS_DATE_MS,
+                now_ms
+            ],
+            |row| row.get(0),
+        )?;
+        let ended_at = latest_local_rejoin
+            .map(|ts| bounded_recovery_timestamp(ts, now_ms))
+            .unwrap_or(prior_ended_at)
+            .max(prior_ended_at);
+        tx.execute(
+            "UPDATE sessions
+             SET ended_at = ?2, total_duration_ms = NULL
+             WHERE id = ?1",
+            params![session_id, ended_at],
         )?;
         adopted += 1;
     }
@@ -355,6 +469,7 @@ mod tests {
             started_at: Some(1_700_000_000_000),
             ended_at: Some(1_700_000_300_000),
             total_minutes: Some(5),
+            total_duration_ms: Some(300_000),
             peer_pubkeys: Some("[\"aa\",\"bb\"]".into()),
             declared_topic: None,
             score: None,
@@ -380,6 +495,7 @@ mod tests {
         assert_eq!(read.started_at, Some(1_700_000_000_000));
         assert_eq!(read.ended_at, Some(1_700_000_300_000));
         assert_eq!(read.total_minutes, Some(5));
+        assert_eq!(read.total_duration_ms, Some(300_000));
         assert_eq!(read.peer_pubkeys.as_deref(), Some("[\"aa\",\"bb\"]"));
         assert_eq!(
             read.peer_presence_ms.as_deref(),
@@ -454,6 +570,7 @@ mod tests {
         insert(&conn, &row).expect("insert 1");
         row.ended_at = Some(99);
         row.total_minutes = Some(1);
+        row.total_duration_ms = Some(90_000);
         insert(&conn, &row).expect("insert 2");
         let count: i64 = conn
             .query_row("SELECT COUNT(*) FROM sessions", [], |r| r.get(0))
@@ -461,6 +578,7 @@ mod tests {
         assert_eq!(count, 1);
         let read = get(&conn, "topic-hex").expect("get").expect("present");
         assert_eq!(read.ended_at, Some(99));
+        assert_eq!(read.total_duration_ms, Some(90_000));
     }
 
     #[test]
@@ -491,6 +609,7 @@ mod tests {
         let read = list(&conn).expect("list");
         assert_eq!(read.len(), 1);
         assert_eq!(read[0].total_minutes, row.total_minutes);
+        assert_eq!(read[0].total_duration_ms, row.total_duration_ms);
         assert_eq!(read[0].peer_presence_ms.as_deref(), Some("{\"aa\":90000}"));
     }
 
@@ -526,6 +645,7 @@ mod tests {
         assert_eq!(read[0].started_at, None);
         assert_eq!(read[0].ended_at, None);
         assert_eq!(read[0].total_minutes, None);
+        assert_eq!(read[0].total_duration_ms, None);
         assert_eq!(read[0].peer_pubkeys, None);
         assert_eq!(read[0].declared_topic, None);
         assert_eq!(read[0].score, None);
@@ -542,6 +662,7 @@ mod tests {
             started_at: Some(1),
             ended_at: Some(2),
             total_minutes: Some(0),
+            total_duration_ms: Some(0),
             peer_pubkeys: Some("[\"aa\"]".into()),
             declared_topic: None,
             score: None,
@@ -560,6 +681,7 @@ mod tests {
             started_at: Some(1),
             ended_at: Some(9),
             total_minutes: Some(0),
+            total_duration_ms: Some(0),
             peer_pubkeys: None,
             declared_topic: None,
             score: None,
@@ -609,6 +731,7 @@ mod tests {
             started_at: Some(1_700_000_000_000),
             ended_at: Some(1_700_000_300_000),
             total_minutes: Some(5),
+            total_duration_ms: Some(300_000),
             peer_pubkeys: None,
             declared_topic: Some("Studying".into()),
             score: Some(87),
@@ -764,7 +887,8 @@ mod tests {
             "the current identity can filter peers but cannot be assigned as the orphan owner"
         );
         assert_eq!(row.ended_at, Some(1_700_002_760_000));
-        assert_eq!(row.total_minutes, Some(45)); // floor(2_700_000ms / 60_000)
+        assert_eq!(row.total_minutes, None);
+        assert_eq!(row.total_duration_ms, None);
         assert_eq!(row.peer_pubkeys, Some(format!("[\"{friend}\"]"))); // self excluded
         assert_eq!(row.score, None);
         assert_eq!(row.skipped_samples, None);
@@ -791,7 +915,8 @@ mod tests {
         let adopted = synthesize_from_orphaned_audit_events(&mut conn, None).expect("synthesize");
         assert_eq!(adopted, 1);
         let row = get(&conn, "blip-topic").expect("get").expect("adopted");
-        assert_eq!(row.total_minutes, Some(0));
+        assert_eq!(row.total_minutes, None);
+        assert_eq!(row.total_duration_ms, None);
         assert_eq!(row.started_at, row.ended_at);
     }
 
@@ -841,5 +966,214 @@ mod tests {
         assert_eq!(adopted, 1);
         let row = get(&conn, "odd-topic").expect("get").expect("adopted");
         assert_eq!(row.peer_pubkeys, None);
+    }
+
+    #[test]
+    fn synthesize_marks_a_crashed_same_topic_rejoin_unknown_without_rewriting_prior_credit() {
+        let mut conn = fresh();
+        let me = hex64("aa");
+        let old_peer = hex64("bb");
+        let new_peer = hex64("cc");
+        let mut row = lifecycle_row("continued-topic");
+        row.local_ed_pubkey = Some(me.clone());
+        row.peer_pubkeys = Some(format!("[\"{old_peer}\"]"));
+        row.total_minutes = Some(5);
+        row.total_duration_ms = Some(300_000);
+        row.peer_presence_ms = Some(format!("{{\"{old_peer}\":120000}}"));
+        row.ended_at = Some(1_700_000_300_000);
+        insert(&conn, &row).expect("insert first stint");
+        crate::db::friends::add(&conn, &old_peer, "old", "Old", 0).expect("add old");
+        crate::db::friends::add(&conn, &new_peer, "new", "New", 0).expect("add new");
+        crate::db::friends::update_last_studied(&conn, &old_peer, 1).expect("seed old");
+        audit_events::insert(
+            &conn,
+            &orphan_audit_row("continued-topic", 1_700_000_300_001, &me, "joined"),
+        )
+        .expect("local rejoin");
+        audit_events::insert(
+            &conn,
+            &orphan_audit_row("continued-topic", 1_700_000_310_000, &new_peer, "joined"),
+        )
+        .expect("new peer");
+        let future_peer = hex64("dd");
+        audit_events::insert(
+            &conn,
+            &orphan_audit_row("continued-topic", i64::MAX, &future_peer, "joined"),
+        )
+        .expect("future peer");
+
+        assert_eq!(
+            synthesize_from_orphaned_audit_events(&mut conn, Some(&me)).expect("recover"),
+            1
+        );
+        let read = get(&conn, "continued-topic").expect("get").expect("row");
+        assert_eq!(read.total_minutes, Some(5));
+        assert_eq!(read.total_duration_ms, None);
+        assert_eq!(
+            read.peer_presence_ms,
+            Some(format!("{{\"{old_peer}\":120000}}"))
+        );
+        assert_eq!(read.peer_pubkeys, Some(format!("[\"{old_peer}\"]")));
+        assert_eq!(read.ended_at, Some(1_700_000_300_001));
+        let friends = crate::db::friends::list(&conn).expect("friends");
+        let friend_at = |key: &str| {
+            friends
+                .iter()
+                .find(|friend| friend.ed_pubkey_hex == key)
+                .expect("friend")
+                .last_studied_with
+        };
+        assert_eq!(friend_at(&old_peer), Some(1));
+        assert_eq!(friend_at(&new_peer), None);
+        assert_eq!(
+            synthesize_from_orphaned_audit_events(&mut conn, Some(&me)).expect("idempotent"),
+            0
+        );
+    }
+
+    #[test]
+    fn remote_future_audit_does_not_invalidate_a_precise_completed_row() {
+        let mut conn = fresh();
+        let me = hex64("aa");
+        let remote = hex64("bb");
+        let mut row = lifecycle_row("remote-only-topic");
+        row.local_ed_pubkey = Some(me);
+        insert(&conn, &row).expect("insert");
+        audit_events::insert(
+            &conn,
+            &orphan_audit_row("remote-only-topic", i64::MAX, &remote, "joined"),
+        )
+        .expect("remote event");
+
+        assert_eq!(
+            synthesize_from_orphaned_audit_events(&mut conn, None).expect("recover"),
+            0
+        );
+        assert_eq!(
+            get(&conn, "remote-only-topic")
+                .expect("get")
+                .expect("row")
+                .total_duration_ms,
+            Some(300_000)
+        );
+    }
+
+    #[test]
+    fn future_local_rejoin_marker_does_not_invalidate_a_precise_completed_row() {
+        let mut conn = fresh();
+        let me = hex64("aa");
+        let mut row = lifecycle_row("future-local-topic");
+        row.local_ed_pubkey = Some(me.clone());
+        insert(&conn, &row).expect("insert");
+        audit_events::insert(
+            &conn,
+            &orphan_audit_row("future-local-topic", i64::MAX, &me, "joined"),
+        )
+        .expect("future local event");
+
+        assert_eq!(
+            synthesize_from_orphaned_audit_events(&mut conn, None).expect("recover"),
+            0
+        );
+        assert_eq!(
+            get(&conn, "future-local-topic")
+                .expect("get")
+                .expect("row")
+                .total_duration_ms,
+            Some(300_000)
+        );
+    }
+
+    #[test]
+    fn old_local_join_marker_does_not_invalidate_a_precise_completed_row() {
+        let mut conn = fresh();
+        let me = hex64("aa");
+        let mut row = lifecycle_row("old-local-topic");
+        row.local_ed_pubkey = Some(me.clone());
+        insert(&conn, &row).expect("insert");
+        audit_events::insert(
+            &conn,
+            &orphan_audit_row("old-local-topic", 1_700_000_300_000, &me, "joined"),
+        )
+        .expect("old event");
+
+        assert_eq!(
+            synthesize_from_orphaned_audit_events(&mut conn, None).expect("recover"),
+            0
+        );
+        assert_eq!(
+            get(&conn, "old-local-topic")
+                .expect("get")
+                .expect("row")
+                .total_duration_ms,
+            Some(300_000)
+        );
+    }
+
+    #[test]
+    fn synthesis_ignores_out_of_range_orphan_clocks_when_safe_events_exist() {
+        let mut conn = fresh();
+        let who = hex64("aa");
+        let invalid_peer = hex64("bb");
+        crate::db::friends::add(&conn, &invalid_peer, "invalid", "Invalid", 0)
+            .expect("add invalid peer");
+        crate::db::friends::update_last_studied(&conn, &invalid_peer, 7)
+            .expect("seed invalid peer");
+        audit_events::insert(
+            &conn,
+            &orphan_audit_row("mixed-clock-topic", 1_700_000_000_000, &who, "joined"),
+        )
+        .expect("safe event");
+        audit_events::insert(
+            &conn,
+            &orphan_audit_row("mixed-clock-topic", i64::MIN, &who, "left"),
+        )
+        .expect("past skew");
+        audit_events::insert(
+            &conn,
+            &orphan_audit_row("mixed-clock-topic", i64::MAX, &who, "alert"),
+        )
+        .expect("future skew");
+        audit_events::insert(
+            &conn,
+            &orphan_audit_row("all-invalid-topic", i64::MIN, &invalid_peer, "joined"),
+        )
+        .expect("all invalid past");
+        audit_events::insert(
+            &conn,
+            &orphan_audit_row("all-invalid-topic", i64::MAX, &who, "left"),
+        )
+        .expect("all invalid future");
+
+        assert_eq!(
+            synthesize_from_orphaned_audit_events(&mut conn, None).expect("recover"),
+            2
+        );
+        let mixed = get(&conn, "mixed-clock-topic")
+            .expect("get")
+            .expect("mixed");
+        assert_eq!(mixed.started_at, Some(1_700_000_000_000));
+        assert_eq!(mixed.ended_at, Some(1_700_000_000_000));
+        let invalid = get(&conn, "all-invalid-topic")
+            .expect("get")
+            .expect("invalid");
+        let start = invalid.started_at.expect("start");
+        let end = invalid.ended_at.expect("end");
+        assert!((MIN_SAFE_JS_DATE_MS..=i64::MAX).contains(&start));
+        assert!(start <= end);
+        assert!(
+            end <= SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("wall time")
+                .as_millis()
+                .min(i64::MAX as u128) as i64
+        );
+        assert_eq!(invalid.peer_pubkeys, None);
+        let invalid_friend = crate::db::friends::list(&conn)
+            .expect("friends")
+            .into_iter()
+            .find(|friend| friend.ed_pubkey_hex == invalid_peer)
+            .expect("invalid peer");
+        assert_eq!(invalid_friend.last_studied_with, Some(7));
     }
 }

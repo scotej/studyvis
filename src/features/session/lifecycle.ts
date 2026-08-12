@@ -10,7 +10,10 @@ import {
   type SessionRow,
 } from '@/lib/db/sessions'
 import {
+  capPeerPresenceMs,
+  decodePeerPresenceMsForPeers,
   encodePeerPresenceMs,
+  maxPeerPresenceMs,
   mergePeerPresenceMs,
 } from '@/lib/db/sessionPresence'
 import { bytesToBase64 } from '@/lib/encoding'
@@ -200,39 +203,148 @@ function logJoinError(details: { error: string }): void {
 // recorded 10 minutes starting at the rejoin, under-counting daily stats,
 // silently breaking streaks, and collapsing stint-1 audit events into the
 // timeline's 00:00. The one caller merges instead: earliest start, summed
-// minutes (the between-stint gap is deliberately not studied time), union
-// of peers and sums each peer's measured overlap. Focus score/tallies continue
+// duration (the between-stint gap is deliberately not studied time), union
+// of peers and sums each peer's measured overlap. `total_duration_ms` retains
+// sub-minute residue, so two 30-second stints become one minute. Focus score/tallies continue
 // in memory across a rejoin, so this second upsert carries metrics for the
 // whole logical session too.
 export function mergeSessionStints(
   prior: Pick<
     SessionRecord,
-    'started_at' | 'total_minutes' | 'peer_pubkeys' | 'peer_presence_ms'
+    | 'started_at'
+    | 'total_minutes'
+    | 'total_duration_ms'
+    | 'peer_pubkeys'
+    | 'peer_presence_ms'
   > | null,
   stint: {
     startedAt: number
-    totalMinutes: number
+    totalMinutes: number | null
+    totalDurationMs: number
     peerPubkeys: string | null
     peerPresenceMs: string
   }
 ): {
   startedAt: number
-  totalMinutes: number
+  totalMinutes: number | null
+  totalDurationMs: number | null
   peerPubkeys: string | null
   peerPresenceMs: string | null
 } {
   if (!prior) return stint
+  const priorDuration = priorDurationMs(prior)
+  const mergedLowerBoundMs = addDurationMs(
+    priorDuration.lowerBoundMs,
+    normalizeDurationMs(stint.totalDurationMs)
+  )
+  const totalDurationMs =
+    priorDuration.exactMs === null
+      ? null
+      : addDurationMs(
+          priorDuration.exactMs,
+          normalizeDurationMs(stint.totalDurationMs)
+        )
+  const priorPeers = parsePeerList(prior.peer_pubkeys)
+  const hasAuthoritativePriorPeerPresence =
+    decodePeerPresenceMsForPeers(prior.peer_presence_ms, priorPeers) !== null
+  // A legacy row can identify its earlier partner(s) without measuring each
+  // overlap. Adding a new tail peer to that row would make legacy stats credit
+  // the new peer with the entire historical total. Keep that bounded older
+  // attribution intact; the tail remains visible in audit/friend metadata.
+  const preservePriorPeerAttribution =
+    totalDurationMs === null &&
+    !hasAuthoritativePriorPeerPresence &&
+    // A legacy solo row can still carry proven whole minutes while containing
+    // no peer identities at all. Attaching a rejoin-tail peer to that row
+    // would credit it with the older solo time in legacy stats.
+    (priorPeers.length > 0 ||
+      (prior.peer_pubkeys === null && (prior.total_minutes ?? 0) > 0))
   return {
     startedAt: Math.min(prior.started_at ?? stint.startedAt, stint.startedAt),
-    totalMinutes: (prior.total_minutes ?? 0) + stint.totalMinutes,
-    peerPubkeys: unionPeerPubkeys(prior.peer_pubkeys, stint.peerPubkeys),
+    // A trusted exact total remains the source of truth. The lower-bound path
+    // is only for legacy/invalid precision, where the peer map is useful but
+    // must not be mistaken for a cap.
+    totalMinutes:
+      totalDurationMs === null && prior.total_minutes === null
+        ? null
+        : totalDurationMs === null && mergedLowerBoundMs < 60_000
+          ? null
+          : Math.floor((totalDurationMs ?? mergedLowerBoundMs) / 60_000),
+    totalDurationMs,
+    peerPubkeys: preservePriorPeerAttribution
+      ? prior.peer_pubkeys
+      : unionPeerPubkeys(prior.peer_pubkeys, stint.peerPubkeys),
     // Unknown precision is contagious. A precisely measured tail cannot make
     // a legacy or malformed earlier stint precise retroactively.
-    peerPresenceMs: mergePeerPresenceMs(
-      prior.peer_presence_ms,
-      stint.peerPresenceMs
-    ),
+    peerPresenceMs: preservePriorPeerAttribution
+      ? null
+      : totalDurationMs === null
+        ? mergePeerPresenceMs(prior.peer_presence_ms, stint.peerPresenceMs)
+        : capPeerPresenceMs(
+            mergePeerPresenceMs(prior.peer_presence_ms, stint.peerPresenceMs),
+            totalDurationMs
+          ),
   }
+}
+
+function normalizeDurationMs(value: number | null | undefined): number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
+    ? value
+    : 0
+}
+
+function addDurationMs(a: number, b: number): number {
+  const total = a + b
+  // An actual study session cannot approach this boundary, but a corrupted
+  // local row must not turn a Leave into an unrepresentable IPC number.
+  return Number.isSafeInteger(total) ? total : Number.MAX_SAFE_INTEGER
+}
+
+function priorDurationMs(
+  prior: Pick<
+    SessionRecord,
+    'total_duration_ms' | 'total_minutes' | 'peer_presence_ms'
+  >
+): { exactMs: number | null; lowerBoundMs: number } {
+  // A durable exact value can still be stale after an interrupted old/new
+  // writer upgrade. Reconcile every representation rather than trusting an
+  // apparently valid zero and silently truncating known study time.
+  const exact = trustedDurationMs(prior)
+  // 006 can already contain exact per-peer intervals while the local total
+  // was still rounded down to minutes. Keep the largest representation as an
+  // honest lower bound when a 007 writer continues that logical session.
+  const wholeMinuteLowerBound = Math.min(
+    Number.MAX_SAFE_INTEGER,
+    normalizeDurationMs(prior.total_minutes) * 60_000
+  )
+  const lowerBoundMs = Math.max(
+    exact ?? 0,
+    wholeMinuteLowerBound,
+    maxPeerPresenceMs(prior.peer_presence_ms) ?? 0
+  )
+  return { exactMs: exact, lowerBoundMs }
+}
+
+function trustedDurationMs(
+  session: Pick<SessionRecord, 'total_duration_ms' | 'total_minutes'>
+): number | null {
+  const duration = session.total_duration_ms
+  const minutes = session.total_minutes
+  if (
+    typeof duration !== 'number' ||
+    !Number.isSafeInteger(duration) ||
+    duration < 0 ||
+    typeof minutes !== 'number' ||
+    !Number.isSafeInteger(minutes) ||
+    minutes < 0
+  ) {
+    return null
+  }
+  // A 007 value is exact only when its persisted whole-minute projection
+  // agrees. Old/new writers and interrupted re-entries can leave a plausible
+  // number beside incompatible legacy data; treating that as exact would cap
+  // known peer overlap and manufacture precision on the next rejoin.
+  return Math.floor(duration / 60_000) === minutes ? duration : null
 }
 
 type PersistedFocusMetrics = {
@@ -418,10 +530,8 @@ export function buildLeaveHandler(args: {
       args.startedAtMono === undefined
         ? wallMs
         : endedAtMono - args.startedAtMono
-    const totalMinutes = Math.max(
-      0,
-      Math.floor(Math.min(wallMs, monoMs) / 60_000)
-    )
+    const totalDurationMs = Math.max(0, Math.floor(Math.min(wallMs, monoMs)))
+    const totalMinutes = Math.floor(totalDurationMs / 60_000)
 
     log.info('session.end_started', {
       role: sessionState.isHost ? 'host' : 'guest',
