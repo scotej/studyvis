@@ -114,7 +114,20 @@ function identitiesEqual(
   left: AiHardwareIdentity,
   right: AiHardwareIdentity
 ): boolean {
-  return JSON.stringify(left) === JSON.stringify(right)
+  if (left.selection !== right.selection) return false
+  const leftTopology = left.topology
+  const rightTopology = right.topology
+  if (leftTopology === null || rightTopology === null) {
+    return leftTopology === rightTopology
+  }
+  if (leftTopology.length !== rightTopology.length) return false
+  return leftTopology.every((leftDevice, index) => {
+    const rightDevice = rightTopology[index]
+    if (rightDevice === undefined) return false
+    return (
+      leftDevice.id === rightDevice.id && leftDevice.label === rightDevice.label
+    )
+  })
 }
 
 let currentHardwareIdentity: AiHardwareIdentity | null = null

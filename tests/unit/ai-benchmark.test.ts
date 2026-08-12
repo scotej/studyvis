@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'vitest'
 import {
   __resetBenchmarkRuntime,
   __setBenchmarkRuntime,
+  aiHardwareIdentitiesEqual,
   clearCurrentAiHardwareIdentity,
   inferenceEngineFingerprintFor,
   isBenchmarkStale,
@@ -243,6 +244,31 @@ describe('benchmark fingerprint staleness', () => {
     expect(result.engineFingerprint).toBe(
       inferenceEngineFingerprintFor(TEST_HARDWARE_IDENTITY)
     )
+    expect(isBenchmarkStale(result)).toBe(false)
+  })
+
+  test('keeps a benchmark current when persisted identity object keys differ in order', () => {
+    const nativeIdentity: AiHardwareIdentity = {
+      selection: 'device:Vulkan0',
+      topology: [{ id: 'Vulkan0', label: 'NVIDIA RTX 4080' }],
+    }
+    const persistedIdentity: AiHardwareIdentity = {
+      topology: [{ label: 'NVIDIA RTX 4080', id: 'Vulkan0' }],
+      selection: 'device:Vulkan0',
+    }
+    const result = summariseBenchmark({
+      samplesSec: [3],
+      completedAtSec: 1_700_000_000,
+      hardwareIdentity: persistedIdentity,
+    })
+
+    expect(JSON.stringify(persistedIdentity)).not.toBe(
+      JSON.stringify(nativeIdentity)
+    )
+    expect(aiHardwareIdentitiesEqual(persistedIdentity, nativeIdentity)).toBe(
+      true
+    )
+    setCurrentAiHardwareIdentity(nativeIdentity)
     expect(isBenchmarkStale(result)).toBe(false)
   })
 
