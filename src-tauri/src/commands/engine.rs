@@ -1181,7 +1181,11 @@ ggml_vulkan: diagnostic after list
             error: None,
         };
 
-        let identity = resolved_hardware_identity(&selection, &first, true);
+        // Exercise the GPU-offload identity path explicitly so this
+        // normalization test is independent of the host platform. Linux Auto
+        // deliberately selects zero GPU layers; that policy is asserted
+        // separately below.
+        let identity = resolved_hardware_identity_for_offload(&selection, &first, true, true);
         assert_eq!(identity.selection, "auto");
         assert_eq!(
             identity.topology,
@@ -1198,7 +1202,7 @@ ggml_vulkan: diagnostic after list
         );
         assert_eq!(
             identity,
-            resolved_hardware_identity(&selection, &changed_free_memory, true)
+            resolved_hardware_identity_for_offload(&selection, &changed_free_memory, true, true)
         );
         // Linux Auto keeps text and projector on CPU for the packaged build.
         // A custom GPU-capable binary may still list devices; identity must
