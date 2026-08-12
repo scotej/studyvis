@@ -243,4 +243,39 @@ describe('PTT listener diagnostic timers', () => {
       }
     )
   })
+
+  test('clears an unreleased native hold when the session room changes', async () => {
+    const track = {
+      kind: 'audio',
+      enabled: false,
+      readyState: 'live',
+    } as unknown as MediaStreamTrack
+    useSessionStore.setState({ room: mediaRoom(track) })
+    await mountListener()
+
+    emit(PTT_FRIENDS_PRESSED)
+    expect(usePttStore.getState()).toMatchObject({
+      active: true,
+      awaitingRelease: true,
+    })
+
+    // Teardown unregisters the shortcut before this hold's native Released
+    // arrives. The session owner resets the store and publishes a new room,
+    // while the app-lifetime listener instance remains mounted.
+    usePttStore.getState().reset()
+    useSessionStore.setState({ room: null })
+    useSessionStore.setState({ room: mediaRoom(track) })
+
+    emit(PTT_FRIENDS_PRESSED)
+    expect(usePttStore.getState()).toMatchObject({
+      active: true,
+      awaitingRelease: true,
+    })
+    expect(
+      records.some(
+        (record) =>
+          record.msg === 'edge.failsafe_mute' && record.data?.edgeSeq === 2
+      )
+    ).toBe(false)
+  })
 })

@@ -15,6 +15,7 @@ export type PttEdgeReconciler = {
   shortcutPressed: () => ReconciledPttEdge[]
   shortcutReleased: () => ReconciledPttEdge[]
   physicalState: (held: boolean | null) => ReconciledPttEdge[]
+  reset: () => void
   snapshot: () => PttEdgeReconcilerSnapshot
 }
 
@@ -111,6 +112,16 @@ export function createPttEdgeReconciler(): PttEdgeReconciler {
       return previous === true
         ? [{ edge: 'released', source: 'physical-watch' }]
         : []
+    },
+
+    reset: () => {
+      // A session owns exactly one logical PTT hold. Native shortcut delivery
+      // may be unregistered before the old hold's Released edge arrives, so
+      // never carry that latch (or a deferred macOS edge) into the next room.
+      // Keep the latest physical observation: it remains authoritative until
+      // the watcher publishes another state for the current key binding.
+      shortcutHoldActive = false
+      deferredShortcutPress = false
     },
 
     snapshot,

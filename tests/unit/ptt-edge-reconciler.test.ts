@@ -36,6 +36,24 @@ describe('PTT edge reconciler', () => {
     ])
   })
 
+  test('a session reset cannot discard the next session first hold', () => {
+    const reconciler = createPttEdgeReconciler()
+    expect(reconciler.shortcutPressed()).toEqual([
+      { edge: 'pressed', source: 'shortcut' },
+    ])
+
+    // The first session tears down while held, and native shortcut teardown
+    // loses its Released edge. The next room starts with a clean logical hold
+    // even though this app-lifetime reconciler instance is reused.
+    reconciler.reset()
+    expect(reconciler.shortcutPressed()).toEqual([
+      { edge: 'pressed', source: 'shortcut' },
+    ])
+    expect(reconciler.shortcutReleased()).toEqual([
+      { edge: 'released', source: 'shortcut' },
+    ])
+  })
+
   test('a shortcut press while the physical key is up is deferred', () => {
     const reconciler = createPttEdgeReconciler()
     expect(reconciler.physicalState(false)).toEqual([])

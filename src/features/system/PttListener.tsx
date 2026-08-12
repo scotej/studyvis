@@ -339,7 +339,18 @@ export function PttListener() {
     // `SessionView` writes peer PTT action messages into sessionStore.peers.
     // Peer IDs are used only for in-memory receiver correlation; diagnostics
     // log aggregate counts and never serialize an identifier.
-    const unsubscribePeerPtt = useSessionStore.subscribe((state, previous) => {
+    const unsubscribeSession = useSessionStore.subscribe((state, previous) => {
+      if (state.room !== previous.room) {
+        // PTT state is reset by the session owner, but this listener and its
+        // native-edge reconciler live for the entire app. A Released edge can
+        // be lost while the shortcut is unregistered during teardown; clear
+        // that old hold before the next room's first Pressed edge arrives.
+        edgeReconciler.reset()
+        pressStartedAt = null
+        previousRoom = state.room
+        previousLocalSnapshot = null
+        previousPeerSnapshot = null
+      }
       if (state.peers === previous.peers) return
       const changedPeerCount = changedPeerPttCount(state.peers, previous.peers)
       if (changedPeerCount === 0) return
@@ -454,7 +465,7 @@ export function PttListener() {
 
     return () => {
       cancelled = true
-      unsubscribePeerPtt()
+      unsubscribeSession()
       for (const handle of diagnosticTimers) clearTimeout(handle)
       diagnosticTimers.clear()
       for (const unlisten of unlisteners) unlisten()
