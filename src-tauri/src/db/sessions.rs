@@ -266,10 +266,15 @@ pub fn insert_with_focus_metrics_mode(
 // identities that recovery can prove (not an inferred awake-time span).
 // Boot-time-only is race-free — this runs in db::init before the webview can
 // begin a session, and the single-instance plugin rejects a second process.
+// A local same-topic rejoin can also crash after its first stint has a row;
+// recovery reconciles that row by clearing its no-longer-precise duration.
 // Report fields stay NULL — the report already renders NULL score/counts as
 // unknown (D5 contract). The active
 // identity can help exclude itself from peer_pubkeys, but cannot prove it
 // owned a crashed session after an identity restore, so provenance stays NULL.
+//
+// Returns the total number of session rows changed: both newly synthesized
+// orphan rows and existing rows reconciled for a crashed same-topic rejoin.
 pub fn synthesize_from_orphaned_audit_events(
     conn: &mut Connection,
     local_ed_pubkey_hex: Option<&str>,
@@ -300,7 +305,7 @@ pub fn synthesize_from_orphaned_audit_events(
         })?;
         rows.collect::<Result<Vec<_>>>()?
     };
-    let mut adopted = 0u32;
+    let mut changed_rows = 0u32;
     for (session_id, started_at, raw_ended_at) in orphans {
         // A remote signed audit timestamp can be clock-skewed. Recovery must
         // not pin report/friend ordering into an arbitrary future date.
@@ -366,7 +371,7 @@ pub fn synthesize_from_orphaned_audit_events(
                 peer_presence_ms: None,
             },
         )?;
-        adopted += 1;
+        changed_rows += 1;
     }
 
     // A clean first stint can already have a sessions row when a same-topic
@@ -423,10 +428,10 @@ pub fn synthesize_from_orphaned_audit_events(
              WHERE id = ?1",
             params![session_id, ended_at],
         )?;
-        adopted += 1;
+        changed_rows += 1;
     }
     tx.commit()?;
-    Ok(adopted)
+    Ok(changed_rows)
 }
 
 // Session deletion removes the audit_events for the same topic in the same
@@ -918,6 +923,38 @@ mod tests {
         assert_eq!(row.total_minutes, None);
         assert_eq!(row.total_duration_ms, None);
         assert_eq!(row.started_at, row.ended_at);
+    }
+
+    #[test]
+    fn synthesize_counts_adopted_orphans_and_reconciled_same_topic_rows() {
+        let mut conn = fresh();
+        let me = hex64("aa");
+        let mut continued = lifecycle_row("continued-topic");
+        continued.local_ed_pubkey = Some(me.clone());
+        insert(&conn, &continued).expect("insert first stint");
+        audit_events::insert(
+            &conn,
+            &orphan_audit_row("continued-topic", 1_700_000_300_001, &me, "joined"),
+        )
+        .expect("insert continued local join");
+        audit_events::insert(
+            &conn,
+            &orphan_audit_row("orphan-topic", 1_700_000_400_000, &me, "joined"),
+        )
+        .expect("insert orphan");
+
+        assert_eq!(
+            synthesize_from_orphaned_audit_events(&mut conn, Some(&me)).expect("recover"),
+            2
+        );
+        assert!(get(&conn, "orphan-topic").expect("get orphan").is_some());
+        assert_eq!(
+            get(&conn, "continued-topic")
+                .expect("get continued")
+                .expect("continued row")
+                .total_duration_ms,
+            None
+        );
     }
 
     #[test]

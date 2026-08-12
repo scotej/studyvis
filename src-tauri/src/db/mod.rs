@@ -72,7 +72,7 @@ fn adopt_orphaned_sessions<R: Runtime>(app: &AppHandle<R>, pool: &DbPool) {
     };
     match sessions::synthesize_from_orphaned_audit_events(&mut conn, local_ed.as_deref()) {
         Ok(0) => {}
-        Ok(n) => eprintln!("db: adopted {n} crash-orphaned session(s) from audit events"),
+        Ok(n) => eprintln!("db: reconciled {n} session row(s) from audit-event recovery"),
         Err(e) => eprintln!("db: orphaned-session synthesis failed (continuing): {e}"),
     }
 }
