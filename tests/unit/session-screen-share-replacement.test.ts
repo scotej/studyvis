@@ -37,22 +37,24 @@ test('a same-id replacement can reuse the active screen id before announcing', (
     onPeerSharingChange: () => {},
   })
 
-  join('friend')
-  receive({ sharing: true, stream_id: 'their-screen' }, 'friend')
+  try {
+    join('friend')
+    receive({ sharing: true, stream_id: 'their-screen' }, 'friend')
 
-  // Trystero's same-id replacement detaches the old room binding before it
-  // emits this new join. A stream arriving now belongs to the replacement
-  // transport and may precede its screen-share announce while retaining the
-  // surviving sharer's original MediaStream.id.
-  join('friend')
+    // Trystero's same-id replacement detaches the old room binding before it
+    // emits this new join. A stream arriving now belongs to the replacement
+    // transport and may precede its screen-share announce while retaining the
+    // surviving sharer's original MediaStream.id.
+    join('friend')
 
-  expect(
-    controller.classify(
-      'friend',
-      { id: 'their-screen' } as unknown as MediaStream,
-      { kind: 'screen', stream_id: 'their-screen' }
-    )
-  ).toBe('screen')
-
-  controller.teardown()
+    expect(
+      controller.classify(
+        'friend',
+        { id: 'their-screen' } as unknown as MediaStream,
+        { kind: 'screen', stream_id: 'their-screen' }
+      )
+    ).toBe('screen')
+  } finally {
+    controller.teardown()
+  }
 })
