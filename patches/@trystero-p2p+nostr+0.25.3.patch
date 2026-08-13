@@ -1,0 +1,24 @@
+diff --git a/node_modules/@trystero-p2p/nostr/dist/index.mjs b/node_modules/@trystero-p2p/nostr/dist/index.mjs
+index a8a2d31..635a6dc 100644
+--- a/node_modules/@trystero-p2p/nostr/dist/index.mjs
++++ b/node_modules/@trystero-p2p/nostr/dist/index.mjs
+@@ -73,11 +73,12 @@ const batchAdd = (client, topic, handler) => {
+ 	batcher.topics.set(topic, handler);
+ 	scheduleBatchFlush(client, batcher);
+ };
+-const batchRemove = (client, topic) => {
++const batchRemove = (client, topic, handler) => {
+ 	const batcher = batchers[client.url];
+ 	if (!batcher) return;
++	if (batcher.topics.get(topic) !== handler) return;
+ 	batcher.topics.delete(topic);
+ 	if (batcher.topics.size === 0) {
+ 		if (batcher.updateTimer !== null) {
+@@ -174,7 +175,7 @@ const joinRoom = createTopicStrategy({
+ 		batchAdd(client, topic, handler);
+ 		return () => {
+-			batchRemove(client, topic);
++			batchRemove(client, topic, handler);
+ 		};
+ 	},
+ 	publishTopic: async (client, topic, msg) => client.send(await createEvent(topic, typeof msg === "string" ? msg : toJson(msg)))
