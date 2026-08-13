@@ -1,4 +1,5 @@
-import { emitTo } from '@tauri-apps/api/event'
+import { LogicalSize } from '@tauri-apps/api/dpi'
+import { emitTo, listen } from '@tauri-apps/api/event'
 import { WebviewWindow } from '@tauri-apps/api/webviewWindow'
 import {
   currentMonitor,
@@ -8,34 +9,57 @@ import {
   primaryMonitor,
 } from '@tauri-apps/api/window'
 
-import { isMacLikePlatform } from '@/lib/utils'
 import { strings } from '@/strings'
 
 import {
+  buildSessionOverlayWindowOptions,
+  normalizeSessionOverlayPresentPayload,
+  sessionOverlayMeasurementTarget,
   SESSION_OVERLAY_CREATE_TIMEOUT_MS,
   SESSION_OVERLAY_DISMISS,
+  SESSION_OVERLAY_LAYOUT_TIMEOUT_MS,
+  SESSION_OVERLAY_PRESENT,
   SESSION_OVERLAY_QUEUE_CAP,
   SESSION_OVERLAY_READY,
   SESSION_OVERLAY_UPDATE,
-  SESSION_OVERLAY_WINDOW_HEIGHT,
   SESSION_OVERLAY_WINDOW_LABEL,
   SESSION_OVERLAY_WINDOW_MARGIN,
+  SESSION_OVERLAY_WINDOW_MAX_HEIGHT,
   SESSION_OVERLAY_WINDOW_WIDTH,
   SessionOverlayQueue,
+  type SessionOverlayItem,
   type SessionOverlayItemInput,
+  type SessionOverlayUpdatePayload,
 } from './sessionOverlay'
+
+type PendingPresentation = {
+  revision: number
+  itemKey: string
+}
+
+type VisiblePresentation = PendingPresentation & {
+  height: number
+}
 
 const queue = new SessionOverlayQueue(SESSION_OVERLAY_QUEUE_CAP)
 let expiryTimer: ReturnType<typeof setTimeout> | null = null
+let layoutTimer: ReturnType<typeof setTimeout> | null = null
 let windowReady = false
 let creatingWindow: Promise<WebviewWindow | null> | null = null
 let serial: Promise<void> = Promise.resolve()
+let nextRevision = 0
+let pendingPresentation: PendingPresentation | null = null
+let visiblePresentation: VisiblePresentation | null = null
+let presentationListenerPromise: Promise<void> | null = null
+let presentationUnlisten: (() => void) | null = null
+let runtimeDisposed = false
 
 export function pushSessionOverlayItem(
   input: SessionOverlayItemInput
 ): Promise<void> {
   return runSerial(async () => {
     if (!(await mainWindowNeedsOverlay())) return
+    await ensurePresentationListener().catch(() => {})
     queue.enqueue(input, Date.now())
     await syncOverlayWindow()
   })
@@ -57,8 +81,81 @@ export function clearSessionOverlay(): Promise<void> {
 
 export function markSessionOverlayReady(): Promise<void> {
   return runSerial(async () => {
+    await ensurePresentationListener().catch(() => {})
     windowReady = true
     await syncOverlayWindow()
+  })
+}
+
+// The renderer reports its intrinsic CSS height only after the new content has
+// laid out. The main window remains the sole owner of native window geometry:
+// it validates the revision and height, resizes, then reveals the overlay. A
+// late measurement from superseded content is ignored rather than flashing a
+// stale or incorrectly sized card.
+export function presentSessionOverlayItem(payload: unknown): Promise<void> {
+  const normalized = normalizeSessionOverlayPresentPayload(payload)
+  if (!normalized) return Promise.resolve()
+
+  return runSerial(async () => {
+    const pending = pendingPresentation
+    const visible = visiblePresentation
+    const target = sessionOverlayMeasurementTarget(
+      normalized.revision,
+      pending?.revision ?? null,
+      visible?.revision ?? null
+    )
+    if (target === null) return
+
+    if (target === 'pending' && pending) {
+      const snapshot = queue.snapshot(Date.now())
+      if (!snapshot.item || itemLayoutKey(snapshot.item) !== pending.itemKey) {
+        await syncOverlayWindow()
+        return
+      }
+
+      const overlayWindow = await getOverlayWindow()
+      if (!overlayWindow) {
+        resetPresentationState()
+        windowReady = false
+        return
+      }
+
+      try {
+        await overlayWindow.setSize(
+          new LogicalSize(SESSION_OVERLAY_WINDOW_WIDTH, normalized.height)
+        )
+        await overlayWindow.show()
+        clearLayoutTimer()
+        pendingPresentation = null
+        visiblePresentation = {
+          ...pending,
+          height: normalized.height,
+        }
+      } catch {
+        await abandonOverlayWindow(overlayWindow)
+      }
+      return
+    }
+
+    // ResizeObserver can legitimately report a second height after bundled
+    // fonts finish loading. Accept it only for the currently visible revision;
+    // once a newer presentation is pending, old measurements are stale.
+    if (!visible || normalized.height === visible.height) return
+
+    const overlayWindow = await getOverlayWindow()
+    if (!overlayWindow) {
+      resetPresentationState()
+      windowReady = false
+      return
+    }
+    try {
+      await overlayWindow.setSize(
+        new LogicalSize(SESSION_OVERLAY_WINDOW_WIDTH, normalized.height)
+      )
+      visiblePresentation = { ...visible, height: normalized.height }
+    } catch {
+      await abandonOverlayWindow(overlayWindow)
+    }
   })
 }
 
@@ -84,6 +181,14 @@ export const sessionOverlayEvents = {
   dismiss: SESSION_OVERLAY_DISMISS,
 } as const
 
+if (import.meta.hot) {
+  import.meta.hot.dispose(() => {
+    runtimeDisposed = true
+    presentationUnlisten?.()
+    presentationUnlisten = null
+  })
+}
+
 function runSerial(task: () => Promise<void>): Promise<void> {
   const next = serial.then(task, task)
   serial = next.catch(() => {})
@@ -103,11 +208,27 @@ async function syncOverlayWindow(): Promise<void> {
   const overlayWindow = await ensureOverlayWindow()
   if (!overlayWindow || !windowReady) return
 
+  const itemKey = itemLayoutKey(snapshot.item)
+  if (
+    pendingPresentation?.itemKey === itemKey ||
+    (!pendingPresentation && visiblePresentation?.itemKey === itemKey)
+  ) {
+    return
+  }
+
+  const revision = ++nextRevision
+  pendingPresentation = { revision, itemKey }
+  clearLayoutTimer()
+
+  const payload: SessionOverlayUpdatePayload = { revision, snapshot }
   try {
-    await emitTo(SESSION_OVERLAY_WINDOW_LABEL, SESSION_OVERLAY_UPDATE, snapshot)
-    await overlayWindow.show()
+    // New content stays hidden until its measured size is applied. `hide()` is
+    // best-effort because a newly created window starts hidden already.
+    await overlayWindow.hide().catch(() => {})
+    await emitTo(SESSION_OVERLAY_WINDOW_LABEL, SESSION_OVERLAY_UPDATE, payload)
+    scheduleLayoutFallback(revision)
   } catch {
-    windowReady = false
+    await abandonOverlayWindow(overlayWindow)
   }
 }
 
@@ -126,6 +247,46 @@ function scheduleExpiry(expiresAt: number | null, now: number): void {
   )
 }
 
+function scheduleLayoutFallback(revision: number): void {
+  clearLayoutTimer()
+  layoutTimer = setTimeout(() => {
+    layoutTimer = null
+    // A renderer regression must not make session events disappear entirely.
+    // The maximum safe height exposes the full bounded body region and a later
+    // real measurement for this revision can still shrink it.
+    void presentSessionOverlayItem({
+      revision,
+      height: SESSION_OVERLAY_WINDOW_MAX_HEIGHT,
+    })
+  }, SESSION_OVERLAY_LAYOUT_TIMEOUT_MS)
+}
+
+function clearLayoutTimer(): void {
+  if (layoutTimer === null) return
+  clearTimeout(layoutTimer)
+  layoutTimer = null
+}
+
+async function ensurePresentationListener(): Promise<void> {
+  if (runtimeDisposed || presentationUnlisten) return
+  if (!presentationListenerPromise) {
+    presentationListenerPromise = listen<unknown>(
+      SESSION_OVERLAY_PRESENT,
+      (event) => {
+        void presentSessionOverlayItem(event.payload)
+      }
+    )
+      .then((unlisten) => {
+        if (runtimeDisposed) unlisten()
+        else presentationUnlisten = unlisten
+      })
+      .finally(() => {
+        presentationListenerPromise = null
+      })
+  }
+  await presentationListenerPromise
+}
+
 async function ensureOverlayWindow(): Promise<WebviewWindow | null> {
   try {
     const existing = await WebviewWindow.getByLabel(
@@ -138,6 +299,7 @@ async function ensureOverlayWindow(): Promise<WebviewWindow | null> {
 
   if (creatingWindow) return creatingWindow
   windowReady = false
+  resetPresentationState()
   creatingWindow = createOverlayWindow().finally(() => {
     creatingWindow = null
   })
@@ -146,26 +308,10 @@ async function ensureOverlayWindow(): Promise<WebviewWindow | null> {
 
 async function createOverlayWindow(): Promise<WebviewWindow | null> {
   const position = await resolveOverlayPosition()
-  const overlayWindow = new WebviewWindow(SESSION_OVERLAY_WINDOW_LABEL, {
-    url: 'session-overlay.html',
-    title: strings.app.name,
-    width: SESSION_OVERLAY_WINDOW_WIDTH,
-    height: SESSION_OVERLAY_WINDOW_HEIGHT,
-    x: position?.x,
-    y: position?.y,
-    decorations: false,
-    transparent: true,
-    acceptFirstMouse: true,
-    alwaysOnTop: true,
-    skipTaskbar: true,
-    focus: false,
-    focusable: true,
-    resizable: false,
-    visible: false,
-    visibleOnAllWorkspaces: true,
-    preventOverflow: true,
-    shadow: !isMacLikePlatform(),
-  })
+  const overlayWindow = new WebviewWindow(
+    SESSION_OVERLAY_WINDOW_LABEL,
+    buildSessionOverlayWindowOptions(position, strings.app.name)
+  )
 
   return new Promise((resolve) => {
     let settled = false
@@ -210,12 +356,29 @@ async function resolveOverlayPosition(): Promise<{
   }
 }
 
+async function getOverlayWindow(): Promise<WebviewWindow | null> {
+  try {
+    return await WebviewWindow.getByLabel(SESSION_OVERLAY_WINDOW_LABEL)
+  } catch {
+    return null
+  }
+}
+
+async function abandonOverlayWindow(
+  overlayWindow: WebviewWindow
+): Promise<void> {
+  windowReady = false
+  resetPresentationState()
+  await overlayWindow.close().catch(() => {})
+}
+
 async function closeOverlayWindow(): Promise<void> {
   if (expiryTimer !== null) {
     clearTimeout(expiryTimer)
     expiryTimer = null
   }
   windowReady = false
+  resetPresentationState()
   try {
     const overlayWindow =
       (await WebviewWindow.getByLabel(SESSION_OVERLAY_WINDOW_LABEL)) ??
@@ -224,4 +387,14 @@ async function closeOverlayWindow(): Promise<void> {
   } catch {
     // The overlay may already have closed itself after receiving an empty queue.
   }
+}
+
+function resetPresentationState(): void {
+  clearLayoutTimer()
+  pendingPresentation = null
+  visiblePresentation = null
+}
+
+function itemLayoutKey(item: SessionOverlayItem): string {
+  return JSON.stringify([item.id, item.title, item.body, item.tone])
 }

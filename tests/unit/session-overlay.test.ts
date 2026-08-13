@@ -1,8 +1,18 @@
+import { createElement } from 'react'
+import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, test } from 'vitest'
 
+import { SessionOverlayWindow } from '@/features/session/SessionOverlayWindow'
 import {
+  buildSessionOverlayWindowOptions,
+  normalizeSessionOverlayPresentPayload,
+  normalizeSessionOverlayWindowHeight,
   overlayItemFromToast,
   overlayToastSignature,
+  SESSION_OVERLAY_WINDOW_MAX_HEIGHT,
+  SESSION_OVERLAY_WINDOW_MIN_HEIGHT,
+  SESSION_OVERLAY_WINDOW_WIDTH,
+  sessionOverlayMeasurementTarget,
   SessionOverlayQueue,
 } from '@/features/session/sessionOverlay'
 
@@ -67,6 +77,82 @@ describe('toast mirroring', () => {
     expect(overlayToastSignature({ id: 1, title: 'first' })).not.toBe(
       overlayToastSignature({ id: 1, title: 'second' })
     )
+  })
+})
+
+describe('session overlay presentation', () => {
+  test('starts hidden at the minimum height with no native window shadow', () => {
+    expect(
+      buildSessionOverlayWindowOptions({ x: 10, y: 20 }, 'StudyVis')
+    ).toMatchObject({
+      width: SESSION_OVERLAY_WINDOW_WIDTH,
+      height: SESSION_OVERLAY_WINDOW_MIN_HEIGHT,
+      x: 10,
+      y: 20,
+      decorations: false,
+      transparent: true,
+      visible: false,
+      shadow: false,
+    })
+  })
+
+  test('rounds measured content and clamps it to safe window bounds', () => {
+    expect(normalizeSessionOverlayWindowHeight(80)).toBe(
+      SESSION_OVERLAY_WINDOW_MIN_HEIGHT
+    )
+    expect(normalizeSessionOverlayWindowHeight(211.2)).toBe(212)
+    expect(normalizeSessionOverlayWindowHeight(999)).toBe(
+      SESSION_OVERLAY_WINDOW_MAX_HEIGHT
+    )
+    expect(normalizeSessionOverlayWindowHeight(Number.NaN)).toBeNull()
+    expect(normalizeSessionOverlayWindowHeight('212')).toBeNull()
+  })
+
+  test('rejects stale-shaped or malformed renderer measurements', () => {
+    expect(
+      normalizeSessionOverlayPresentPayload({ revision: 7, height: 211.2 })
+    ).toEqual({ revision: 7, height: 212 })
+    expect(
+      normalizeSessionOverlayPresentPayload({ revision: 0, height: 212 })
+    ).toBeNull()
+    expect(
+      normalizeSessionOverlayPresentPayload({ revision: 7, height: Infinity })
+    ).toBeNull()
+    expect(normalizeSessionOverlayPresentPayload(null)).toBeNull()
+  })
+
+  test('never lets an old visible measurement outrank newer pending content', () => {
+    expect(sessionOverlayMeasurementTarget(7, 8, 7)).toBeNull()
+    expect(sessionOverlayMeasurementTarget(8, 8, 7)).toBe('pending')
+    expect(sessionOverlayMeasurementTarget(8, null, 8)).toBe('visible')
+    expect(sessionOverlayMeasurementTarget(7, null, 8)).toBeNull()
+  })
+
+  test('keeps long notification text available instead of line-clamping it', () => {
+    const body = Array.from(
+      { length: 8 },
+      (_, index) => `Detailed notification line ${index + 1}.`
+    ).join('\n')
+    const html = renderToStaticMarkup(
+      createElement(SessionOverlayWindow, {
+        initialSnapshot: {
+          item: {
+            id: 'long',
+            title: 'Detailed update',
+            body,
+            tone: 'warning',
+            createdAt: 1,
+            expiresAt: 60_001,
+          },
+          queued: 0,
+        },
+      })
+    )
+
+    expect(html).toContain('data-testid="session-overlay-body"')
+    expect(html).toContain('overflow-y-auto')
+    expect(html).not.toContain('line-clamp')
+    expect(html).toContain('Detailed notification line 8.')
   })
 })
 

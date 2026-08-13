@@ -17,7 +17,7 @@ const meta = {
   component: SessionOverlayWindow,
   decorators: [
     (Story) => (
-      <div className="h-40 w-96 bg-bg-base">
+      <div className="w-[420px] bg-bg-base">
         <Story />
       </div>
     ),
@@ -28,7 +28,7 @@ const meta = {
 export default meta
 type Story = StoryObj<typeof meta>
 
-function snapshot(tone: SessionOverlayTone) {
+function snapshot(tone: SessionOverlayTone, body?: string) {
   return {
     item: {
       id: tone,
@@ -39,9 +39,10 @@ function snapshot(tone: SessionOverlayTone) {
             ? 'Heads up, looking off-task.'
             : 'Off task',
       body:
-        tone === 'neutral'
+        body ??
+        (tone === 'neutral'
           ? 'Sam: I will be back in five minutes.'
-          : 'The current screen does not appear related to the study topic.',
+          : 'The current screen does not appear related to the study topic.'),
       tone,
       createdAt: Date.now(),
       expiresAt: Date.now() + 60_000,
@@ -60,4 +61,18 @@ export const Warning: Story = {
 
 export const Alert: Story = {
   args: { initialSnapshot: snapshot('alerted'), runtime },
+}
+
+export const LongMessage: Story = {
+  args: {
+    initialSnapshot: snapshot(
+      'warning',
+      [
+        'The current screen does not appear related to the study topic.',
+        'This explanation deliberately spans several lines to exercise the same variable-length content that previously overflowed the fixed-height notification window.',
+        'The card should grow naturally until its bounded, keyboard-scrollable body region is reached.',
+      ].join('\n\n')
+    ),
+    runtime,
+  },
 }
