@@ -28,6 +28,12 @@ export type PttEdgeReconciler = {
 // deferred edge is consumed at that real key-down. If its matching shortcut
 // Released arrives first, the deferred edge is discarded entirely.
 //
+// Physical state is a LEVEL, not another best-effort edge. A current `false`
+// therefore ends any logical hold this reconciler emitted even when its first
+// physical sample (normally the initial `false` baseline or the intervening
+// `true`) was not delivered to the renderer. This is the fail-closed boundary
+// that lets a repeated native level heal a dropped Carbon Released.
+//
 // On platforms without an authoritative physical state, the second Pressed
 // before a Released is ambiguous: it might be a duplicate from one hold, or it
 // might be a distinct new hold whose Released edge was lost. Treating it as a
@@ -108,8 +114,14 @@ export function createPttEdgeReconciler(): PttEdgeReconciler {
         return []
       }
 
+      // `false` is authoritative current state. Do not require a previously
+      // delivered `true`: the native monitor may have observed it while its
+      // event was in flight or while the renderer listener was unavailable.
+      // A logical shortcut hold is sufficient evidence that a release must be
+      // emitted. Repeated false confirmations become harmless no-ops after it.
+      const logicalHoldActive = shortcutHoldActive
       shortcutHoldActive = false
-      return previous === true
+      return previous === true || logicalHoldActive
         ? [{ edge: 'released', source: 'physical-watch' }]
         : []
     },
