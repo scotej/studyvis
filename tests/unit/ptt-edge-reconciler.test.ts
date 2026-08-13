@@ -13,6 +13,17 @@ describe('PTT edge reconciler', () => {
     ])
   })
 
+  test('a first physical-up sample releases a logical hold', () => {
+    const reconciler = createPttEdgeReconciler()
+    expect(reconciler.shortcutPressed()).toEqual([
+      { edge: 'pressed', source: 'shortcut' },
+    ])
+    expect(reconciler.physicalState(false)).toEqual([
+      { edge: 'released', source: 'physical-watch' },
+    ])
+    expect(reconciler.physicalState(false)).toEqual([])
+  })
+
   test('an unreconciled later Pressed fails closed after a lost Released', () => {
     const reconciler = createPttEdgeReconciler()
     expect(reconciler.shortcutPressed()).toEqual([

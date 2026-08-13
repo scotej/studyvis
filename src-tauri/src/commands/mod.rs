@@ -28,6 +28,9 @@ pub mod diagnostics;
 pub mod engine;
 
 #[cfg(desktop)]
+mod level_confirmation;
+
+#[cfg(desktop)]
 pub mod models;
 
 #[cfg(desktop)]

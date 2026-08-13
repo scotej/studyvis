@@ -200,6 +200,10 @@ static PTT_PHYSICAL_MONITOR_GENERATION: AtomicU64 = AtomicU64::new(0);
 #[cfg(target_os = "macos")]
 const PTT_PHYSICAL_POLL_INTERVAL: Duration = Duration::from_millis(20);
 #[cfg(target_os = "macos")]
+const PTT_PHYSICAL_CONFIRMATION_SENDS: u8 = 11;
+#[cfg(target_os = "macos")]
+const PTT_PHYSICAL_CONFIRMATION_EVERY_POLLS: u8 = 5;
+#[cfg(target_os = "macos")]
 const PTT_PHYSICAL_STATE_EVENT: &str = "ptt-friends-physical-state";
 
 // Swap one of the two global shortcuts at runtime. Unregister-then-register
@@ -332,17 +336,24 @@ fn apply_ptt_friends_registration<R: Runtime>(app: &AppHandle<R>, active: bool) 
 #[cfg(not(target_os = "macos"))]
 fn update_ptt_physical_monitor<R: Runtime>(_app: &AppHandle<R>, _active: bool) {}
 
-// #209 — Carbon's global-hotkey edges are useful but are not authoritative
-// enough for a privacy-sensitive hold-to-talk latch. While a session is live,
-// macOS also exposes the CURRENT physical keyboard state through CoreGraphics.
-// One generation-scoped watcher observes the current persisted PTT binding and
-// emits its state whenever it changes, including the first observation:
+// #209 / #226 — Carbon's global-hotkey edges are useful but are not
+// authoritative enough for a privacy-sensitive hold-to-talk latch. While a
+// session is live, macOS also exposes the CURRENT physical keyboard state
+// through CoreGraphics. One generation-scoped watcher observes the current
+// persisted PTT binding and publishes every new level immediately:
 // `true` = physically held, `false` = physically up, `null` = unobservable.
+// It then confirms that same level every 100 ms for one second. Only a
+// successful Tauri emit consumes a confirmation; an emitter failure is due
+// again on the next 20 ms poll.
 //
-// The frontend can therefore defer a Carbon Pressed that arrives while the key
-// is known-up instead of letting a late event re-open the microphone. Carbon
-// remains the low-latency fast path when physical state is held/unknown, and a
-// true→false watcher transition independently recovers a dropped Released.
+// The bounded confirmation window is deliberate anti-entropy. The previous
+// watcher remembered a level before knowing the renderer received it and then
+// suppressed the unchanged value forever, accidentally turning an
+// authoritative level back into another one-shot edge. A dropped `false`
+// could therefore recreate the exact stuck indicator the watcher was meant to
+// eliminate. Repeated current-state copies are idempotent in the frontend and
+// let any delivered `false` heal a dropped Carbon Released or an unavailable
+// renderer listener without producing steady-state session traffic.
 // Runtime rebinding is picked up on the next 20 ms poll.
 #[cfg(target_os = "macos")]
 fn update_ptt_physical_monitor<R: Runtime>(app: &AppHandle<R>, active: bool) {
@@ -353,17 +364,19 @@ fn update_ptt_physical_monitor<R: Runtime>(app: &AppHandle<R>, active: bool) {
 
     let app = app.clone();
     std::thread::spawn(move || {
-        // Outer Option distinguishes "no sample emitted yet" from the inner
-        // None meaning "the configured key is not observable".
-        let mut previous_state: Option<Option<bool>> = None;
+        let mut confirmation = super::level_confirmation::LevelConfirmation::new(
+            PTT_PHYSICAL_CONFIRMATION_SENDS,
+            PTT_PHYSICAL_CONFIRMATION_EVERY_POLLS,
+        );
         while PTT_PHYSICAL_MONITOR_GENERATION.load(Ordering::Acquire) == generation
             && SessionActiveFlag::is_active(&app)
         {
             let shortcut = app.state::<ShortcutBindings>().ptt_friends();
             let current_state = macos_shortcut_is_held(shortcut);
-            if previous_state != Some(current_state) {
-                previous_state = Some(current_state);
-                let _ = app.emit(PTT_PHYSICAL_STATE_EVENT, current_state);
+            if confirmation.should_publish(current_state)
+                && app.emit(PTT_PHYSICAL_STATE_EVENT, current_state).is_ok()
+            {
+                confirmation.mark_published();
             }
             std::thread::sleep(PTT_PHYSICAL_POLL_INTERVAL);
         }
