@@ -12,6 +12,7 @@ import {
   normalizeSessionOverlayWindowHeight,
   SESSION_OVERLAY_BODY_MAX_HEIGHT,
   SESSION_OVERLAY_DISMISS,
+  SESSION_OVERLAY_LAYOUT_TIMEOUT_MS,
   SESSION_OVERLAY_PRESENT,
   SESSION_OVERLAY_READY,
   SESSION_OVERLAY_UPDATE,
@@ -103,40 +104,47 @@ export function SessionOverlayWindow({
     if (!frame) return
 
     let cancelled = false
-    let animationFrame: number | null = null
     let lastHeight: number | null = null
 
-    const measure = () => {
-      if (animationFrame !== null) cancelAnimationFrame(animationFrame)
-      animationFrame = requestAnimationFrame(() => {
-        animationFrame = null
-        if (cancelled) return
-        const measured = Math.max(
-          frame.scrollHeight,
-          frame.getBoundingClientRect().height
-        )
-        const height = normalizeSessionOverlayWindowHeight(measured)
-        if (height === null || height === lastHeight) return
-        lastHeight = height
-        void runtime
-          .emit(SESSION_OVERLAY_PRESENT, {
-            revision: renderState.revision,
-            height,
-          })
-          .catch(() => runtime.close())
-      })
+    const measure = (force = false) => {
+      if (cancelled) return
+      const measured = Math.max(
+        frame.scrollHeight,
+        frame.getBoundingClientRect().height
+      )
+      const height = normalizeSessionOverlayWindowHeight(measured)
+      if (height === null || (!force && height === lastHeight)) return
+      lastHeight = height
+      void runtime
+        .emit(SESSION_OVERLAY_PRESENT, {
+          revision: renderState.revision,
+          height,
+        })
+        .catch(() => runtime.close())
     }
 
     const observer =
       typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure)
     observer?.observe(frame)
+    // Do not defer the first measurement to requestAnimationFrame: native
+    // hidden windows can pause animation frames, and this window intentionally
+    // stays hidden until a valid measurement has been applied.
     measure()
-    void document.fonts.ready.then(measure).catch(() => {})
+    if ('fonts' in document) {
+      void document.fonts.ready.then(() => measure()).catch(() => {})
+    }
+    // Force one post-fallback report. It is harmless when the runtime already
+    // has the same height and repairs the narrow timeout-edge race where a
+    // fallback was queued behind the real measurement.
+    const settleTimer = setTimeout(
+      () => measure(true),
+      SESSION_OVERLAY_LAYOUT_TIMEOUT_MS + 250
+    )
 
     return () => {
       cancelled = true
+      clearTimeout(settleTimer)
       observer?.disconnect()
-      if (animationFrame !== null) cancelAnimationFrame(animationFrame)
     }
   }, [item, renderState, runtime])
 
