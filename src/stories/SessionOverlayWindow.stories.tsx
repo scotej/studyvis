@@ -4,7 +4,10 @@ import {
   SessionOverlayWindow,
   type SessionOverlayRuntime,
 } from '@/features/session/SessionOverlayWindow'
-import type { SessionOverlayTone } from '@/features/session/sessionOverlay'
+import {
+  SESSION_OVERLAY_WINDOW_WIDTH,
+  type SessionOverlayTone,
+} from '@/features/session/sessionOverlay'
 
 const runtime: SessionOverlayRuntime = {
   listen: async () => () => {},
@@ -17,7 +20,10 @@ const meta = {
   component: SessionOverlayWindow,
   decorators: [
     (Story) => (
-      <div className="w-[420px] bg-bg-base">
+      <div
+        className="bg-bg-base"
+        style={{ width: SESSION_OVERLAY_WINDOW_WIDTH }}
+      >
         <Story />
       </div>
     ),
