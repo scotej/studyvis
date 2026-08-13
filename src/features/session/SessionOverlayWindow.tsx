@@ -124,7 +124,9 @@ export function SessionOverlayWindow({
     }
 
     const observer =
-      typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure)
+      typeof ResizeObserver === 'undefined'
+        ? null
+        : new ResizeObserver(() => measure())
     observer?.observe(frame)
     // Do not defer the first measurement to requestAnimationFrame: native
     // hidden windows can pause animation frames, and this window intentionally

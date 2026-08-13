@@ -29,6 +29,7 @@ import {
   SessionOverlayQueue,
   type SessionOverlayItem,
   type SessionOverlayItemInput,
+  type SessionOverlayPresentPayload,
   type SessionOverlayUpdatePayload,
 } from './sessionOverlay'
 
@@ -95,68 +96,7 @@ export function markSessionOverlayReady(): Promise<void> {
 export function presentSessionOverlayItem(payload: unknown): Promise<void> {
   const normalized = normalizeSessionOverlayPresentPayload(payload)
   if (!normalized) return Promise.resolve()
-
-  return runSerial(async () => {
-    const pending = pendingPresentation
-    const visible = visiblePresentation
-    const target = sessionOverlayMeasurementTarget(
-      normalized.revision,
-      pending?.revision ?? null,
-      visible?.revision ?? null
-    )
-    if (target === null) return
-
-    if (target === 'pending' && pending) {
-      const snapshot = queue.snapshot(Date.now())
-      if (!snapshot.item || itemLayoutKey(snapshot.item) !== pending.itemKey) {
-        await syncOverlayWindow()
-        return
-      }
-
-      const overlayWindow = await getOverlayWindow()
-      if (!overlayWindow) {
-        resetPresentationState()
-        windowReady = false
-        return
-      }
-
-      try {
-        await overlayWindow.setSize(
-          new LogicalSize(SESSION_OVERLAY_WINDOW_WIDTH, normalized.height)
-        )
-        await overlayWindow.show()
-        clearLayoutTimer()
-        pendingPresentation = null
-        visiblePresentation = {
-          ...pending,
-          height: normalized.height,
-        }
-      } catch {
-        await abandonOverlayWindow(overlayWindow)
-      }
-      return
-    }
-
-    // ResizeObserver can legitimately report a second height after bundled
-    // fonts finish loading. Accept it only for the currently visible revision;
-    // once a newer presentation is pending, old measurements are stale.
-    if (!visible || normalized.height === visible.height) return
-
-    const overlayWindow = await getOverlayWindow()
-    if (!overlayWindow) {
-      resetPresentationState()
-      windowReady = false
-      return
-    }
-    try {
-      await overlayWindow.setSize(
-        new LogicalSize(SESSION_OVERLAY_WINDOW_WIDTH, normalized.height)
-      )
-      visiblePresentation = { ...visible, height: normalized.height }
-    } catch {
-      await abandonOverlayWindow(overlayWindow)
-    }
-  })
+  return runSerial(() => applySessionOverlayPresentation(normalized))
 }
 
 export async function mainWindowNeedsOverlay(): Promise<boolean> {
@@ -193,6 +133,70 @@ function runSerial(task: () => Promise<void>): Promise<void> {
   const next = serial.then(task, task)
   serial = next.catch(() => {})
   return next
+}
+
+async function applySessionOverlayPresentation(
+  normalized: SessionOverlayPresentPayload
+): Promise<void> {
+  const pending = pendingPresentation
+  const visible = visiblePresentation
+  const target = sessionOverlayMeasurementTarget(
+    normalized.revision,
+    pending?.revision ?? null,
+    visible?.revision ?? null
+  )
+  if (target === null) return
+
+  if (target === 'pending' && pending) {
+    const snapshot = queue.snapshot(Date.now())
+    if (!snapshot.item || itemLayoutKey(snapshot.item) !== pending.itemKey) {
+      await syncOverlayWindow()
+      return
+    }
+
+    const overlayWindow = await getOverlayWindow()
+    if (!overlayWindow) {
+      resetPresentationState()
+      windowReady = false
+      return
+    }
+
+    try {
+      await overlayWindow.setSize(
+        new LogicalSize(SESSION_OVERLAY_WINDOW_WIDTH, normalized.height)
+      )
+      await overlayWindow.show()
+      clearLayoutTimer()
+      pendingPresentation = null
+      visiblePresentation = {
+        ...pending,
+        height: normalized.height,
+      }
+    } catch {
+      await abandonOverlayWindow(overlayWindow)
+    }
+    return
+  }
+
+  // ResizeObserver can legitimately report a second height after bundled
+  // fonts finish loading. Accept it only for the currently visible revision;
+  // once a newer presentation is pending, old measurements are stale.
+  if (!visible || normalized.height === visible.height) return
+
+  const overlayWindow = await getOverlayWindow()
+  if (!overlayWindow) {
+    resetPresentationState()
+    windowReady = false
+    return
+  }
+  try {
+    await overlayWindow.setSize(
+      new LogicalSize(SESSION_OVERLAY_WINDOW_WIDTH, normalized.height)
+    )
+    visiblePresentation = { ...visible, height: normalized.height }
+  } catch {
+    await abandonOverlayWindow(overlayWindow)
+  }
 }
 
 async function syncOverlayWindow(): Promise<void> {
@@ -251,12 +255,15 @@ function scheduleLayoutFallback(revision: number): void {
   clearLayoutTimer()
   layoutTimer = setTimeout(() => {
     layoutTimer = null
-    // A renderer regression must not make session events disappear entirely.
-    // The maximum safe height exposes the full bounded body region and a later
-    // real measurement for this revision can still shrink it.
-    void presentSessionOverlayItem({
-      revision,
-      height: SESSION_OVERLAY_WINDOW_MAX_HEIGHT,
+    void runSerial(async () => {
+      // Check within the serialized queue. A real measurement already queued
+      // ahead of this timeout clears `pendingPresentation`, so the fallback can
+      // never resize a correctly presented card back to the maximum height.
+      if (pendingPresentation?.revision !== revision) return
+      await applySessionOverlayPresentation({
+        revision,
+        height: SESSION_OVERLAY_WINDOW_MAX_HEIGHT,
+      })
     })
   }, SESSION_OVERLAY_LAYOUT_TIMEOUT_MS)
 }
