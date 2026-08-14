@@ -1,5 +1,4 @@
 import { useEffect, useRef } from 'react'
-import { listen } from '@tauri-apps/api/event'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { useSonner } from 'sonner'
 
@@ -9,17 +8,10 @@ import { useSessionStore } from '@/stores/sessionStore'
 import { strings } from '@/strings'
 
 import { useNotesStore } from './notesStore'
-import {
-  overlayItemFromToast,
-  overlayToastSignature,
-  type SessionOverlayDismissPayload,
-} from './sessionOverlay'
+import { overlayItemFromToast, overlayToastSignature } from './sessionOverlay'
 import {
   clearSessionOverlay,
-  dismissSessionOverlayItem,
-  markSessionOverlayReady,
   pushSessionOverlayItem,
-  sessionOverlayEvents,
 } from './sessionOverlayRuntime'
 
 export function useSessionOverlayBridge(): void {
@@ -149,34 +141,6 @@ export function useSessionOverlayBridge(): void {
 
   useEffect(() => {
     let cancelled = false
-    const unlistens: Array<() => void> = []
-
-    const register = async <T>(
-      eventName: string,
-      handler: (payload: T) => void
-    ): Promise<void> => {
-      const off = await listen<T>(eventName, (event) => {
-        if (!cancelled) handler(event.payload)
-      })
-      if (cancelled) {
-        off()
-        return
-      }
-      unlistens.push(off)
-    }
-
-    void register(sessionOverlayEvents.ready, () => {
-      void markSessionOverlayReady()
-    }).catch(() => {})
-    void register<SessionOverlayDismissPayload>(
-      sessionOverlayEvents.dismiss,
-      (payload) => {
-        if (payload && typeof payload.id === 'string') {
-          void dismissSessionOverlayItem(payload.id)
-        }
-      }
-    ).catch(() => {})
-
     const clear = () => {
       void clearSessionOverlay()
     }
@@ -200,7 +164,6 @@ export function useSessionOverlayBridge(): void {
       window.removeEventListener('focus', clear)
       document.removeEventListener('visibilitychange', clearWhenVisible)
       offTauriFocus?.()
-      for (const off of unlistens) off()
     }
   }, [])
 }

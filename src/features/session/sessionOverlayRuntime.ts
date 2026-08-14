@@ -1,6 +1,9 @@
 import { LogicalSize } from '@tauri-apps/api/dpi'
-import { emitTo, listen } from '@tauri-apps/api/event'
-import { WebviewWindow } from '@tauri-apps/api/webviewWindow'
+import { emitTo } from '@tauri-apps/api/event'
+import {
+  getCurrentWebviewWindow,
+  WebviewWindow,
+} from '@tauri-apps/api/webviewWindow'
 import {
   currentMonitor,
   cursorPosition,
@@ -51,16 +54,24 @@ let serial: Promise<void> = Promise.resolve()
 let nextRevision = 0
 let pendingPresentation: PendingPresentation | null = null
 let visiblePresentation: VisiblePresentation | null = null
-let presentationListenerPromise: Promise<void> | null = null
-let presentationUnlisten: (() => void) | null = null
+let eventListenerPromise: Promise<void> | null = null
+let eventUnlistens: Array<() => void> = []
 let runtimeDisposed = false
 
 export function pushSessionOverlayItem(
   input: SessionOverlayItemInput
 ): Promise<void> {
   return runSerial(async () => {
-    if (!(await mainWindowNeedsOverlay())) return
-    await ensurePresentationListener().catch(() => {})
+    if (runtimeDisposed || !(await mainWindowNeedsOverlay())) return
+    try {
+      // Register every overlay-to-main event before constructing the webview.
+      // Otherwise a fast renderer can emit READY before React's bridge effect
+      // has subscribed, leaving the first queued notification hidden forever.
+      await ensureOverlayEventListeners()
+    } catch {
+      return
+    }
+    if (runtimeDisposed) return
     queue.enqueue(input, Date.now())
     await syncOverlayWindow()
   })
@@ -68,6 +79,7 @@ export function pushSessionOverlayItem(
 
 export function dismissSessionOverlayItem(id: string): Promise<void> {
   return runSerial(async () => {
+    if (runtimeDisposed) return
     queue.dismiss(id, Date.now())
     await syncOverlayWindow()
   })
@@ -75,6 +87,7 @@ export function dismissSessionOverlayItem(id: string): Promise<void> {
 
 export function clearSessionOverlay(): Promise<void> {
   return runSerial(async () => {
+    if (runtimeDisposed) return
     queue.clear()
     await syncOverlayWindow()
   })
@@ -82,7 +95,11 @@ export function clearSessionOverlay(): Promise<void> {
 
 export function markSessionOverlayReady(): Promise<void> {
   return runSerial(async () => {
-    await ensurePresentationListener().catch(() => {})
+    if (runtimeDisposed) return
+    // READY identifies a fresh renderer lifecycle, not merely a native window.
+    // Invalidate the prior render state so a reloaded webview always receives
+    // the current snapshot instead of remaining visible-but-blank.
+    resetPresentationState()
     windowReady = true
     await syncOverlayWindow()
   })
@@ -95,7 +112,7 @@ export function markSessionOverlayReady(): Promise<void> {
 // stale or incorrectly sized card.
 export function presentSessionOverlayItem(payload: unknown): Promise<void> {
   const normalized = normalizeSessionOverlayPresentPayload(payload)
-  if (!normalized) return Promise.resolve()
+  if (!normalized || runtimeDisposed) return Promise.resolve()
   return runSerial(() => applySessionOverlayPresentation(normalized))
 }
 
@@ -116,16 +133,16 @@ export async function mainWindowNeedsOverlay(): Promise<boolean> {
   }
 }
 
-export const sessionOverlayEvents = {
-  ready: SESSION_OVERLAY_READY,
-  dismiss: SESSION_OVERLAY_DISMISS,
-} as const
-
 if (import.meta.hot) {
   import.meta.hot.dispose(() => {
     runtimeDisposed = true
-    presentationUnlisten?.()
-    presentationUnlisten = null
+    if (expiryTimer !== null) {
+      clearTimeout(expiryTimer)
+      expiryTimer = null
+    }
+    clearLayoutTimer()
+    for (const unlisten of eventUnlistens) unlisten()
+    eventUnlistens = []
   })
 }
 
@@ -274,24 +291,46 @@ function clearLayoutTimer(): void {
   layoutTimer = null
 }
 
-async function ensurePresentationListener(): Promise<void> {
-  if (runtimeDisposed || presentationUnlisten) return
-  if (!presentationListenerPromise) {
-    presentationListenerPromise = listen<unknown>(
-      SESSION_OVERLAY_PRESENT,
-      (event) => {
-        void presentSessionOverlayItem(event.payload)
-      }
-    )
-      .then((unlisten) => {
-        if (runtimeDisposed) unlisten()
-        else presentationUnlisten = unlisten
-      })
-      .finally(() => {
-        presentationListenerPromise = null
-      })
+async function ensureOverlayEventListeners(): Promise<void> {
+  if (runtimeDisposed || eventUnlistens.length > 0) return
+  if (!eventListenerPromise) {
+    eventListenerPromise = registerOverlayEventListeners().finally(() => {
+      eventListenerPromise = null
+    })
   }
-  await presentationListenerPromise
+  await eventListenerPromise
+}
+
+async function registerOverlayEventListeners(): Promise<void> {
+  const mainWebview = getCurrentWebviewWindow()
+  const unlistens: Array<() => void> = []
+  try {
+    unlistens.push(
+      await mainWebview.listen<unknown>(SESSION_OVERLAY_READY, () => {
+        void markSessionOverlayReady()
+      })
+    )
+    unlistens.push(
+      await mainWebview.listen<unknown>(SESSION_OVERLAY_DISMISS, (event) => {
+        const id = sessionOverlayDismissId(event.payload)
+        if (id !== null) void dismissSessionOverlayItem(id)
+      })
+    )
+    unlistens.push(
+      await mainWebview.listen<unknown>(SESSION_OVERLAY_PRESENT, (event) => {
+        void presentSessionOverlayItem(event.payload)
+      })
+    )
+  } catch (error) {
+    for (const unlisten of unlistens) unlisten()
+    throw error
+  }
+
+  if (runtimeDisposed) {
+    for (const unlisten of unlistens) unlisten()
+    return
+  }
+  eventUnlistens = unlistens
 }
 
 async function ensureOverlayWindow(): Promise<WebviewWindow | null> {
@@ -330,8 +369,12 @@ async function createOverlayWindow(): Promise<WebviewWindow | null> {
       resolve(result)
     }
     timeout = setTimeout(() => finish(null), SESSION_OVERLAY_CREATE_TIMEOUT_MS)
-    void overlayWindow.once('tauri://created', () => finish(overlayWindow))
-    void overlayWindow.once('tauri://error', () => finish(null))
+    void overlayWindow
+      .once('tauri://created', () => finish(overlayWindow))
+      .catch(() => finish(null))
+    void overlayWindow
+      .once('tauri://error', () => finish(null))
+      .catch(() => finish(null))
   })
 }
 
@@ -400,6 +443,12 @@ function resetPresentationState(): void {
   clearLayoutTimer()
   pendingPresentation = null
   visiblePresentation = null
+}
+
+function sessionOverlayDismissId(payload: unknown): string | null {
+  if (typeof payload !== 'object' || payload === null) return null
+  const id = (payload as Record<string, unknown>).id
+  return typeof id === 'string' && id.length > 0 ? id : null
 }
 
 function itemLayoutKey(item: SessionOverlayItem): string {

@@ -1,6 +1,6 @@
 import { StrictMode, createElement } from 'react'
 import { createRoot } from 'react-dom/client'
-import { emit, type Event } from '@tauri-apps/api/event'
+import { emitTo, type Event } from '@tauri-apps/api/event'
 import { getCurrentWindow, Window } from '@tauri-apps/api/window'
 import '@fontsource-variable/inter/index.css'
 import '@fontsource-variable/jetbrains-mono/index.css'
@@ -13,6 +13,7 @@ import {
   type SessionOverlayRuntime,
 } from './SessionOverlayWindow'
 
+const MAIN_WINDOW_LABEL = 'main'
 const overlayWindow = getCurrentWindow()
 const runtime: SessionOverlayRuntime = {
   listen: (event, handler) =>
@@ -20,14 +21,16 @@ const runtime: SessionOverlayRuntime = {
       handler(message.payload as never)
     ),
   emit: async (event, payload) => {
-    await emit(event, payload)
+    // Overlay lifecycle events are private control messages for the owning
+    // main webview, not application-wide broadcasts.
+    await emitTo(MAIN_WINDOW_LABEL, event, payload)
   },
   close: async () => {
     await overlayWindow.close().catch(() => {})
   },
 }
 
-void Window.getByLabel('main')
+void Window.getByLabel(MAIN_WINDOW_LABEL)
   .then((mainWindow) =>
     mainWindow?.once('tauri://destroyed', () => {
       void runtime.close()
