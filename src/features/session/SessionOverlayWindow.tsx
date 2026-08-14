@@ -185,6 +185,8 @@ export function SessionOverlayWindow({
           </strong>
           <div
             data-testid="session-overlay-body"
+            role="region"
+            aria-label={item.title}
             tabIndex={0}
             className="mt-1 overflow-y-auto whitespace-pre-wrap break-words rounded-sm text-sm leading-snug text-text-secondary outline-none focus-visible:ring-2 focus-visible:ring-accent-ring"
             style={{ maxHeight: SESSION_OVERLAY_BODY_MAX_HEIGHT }}
