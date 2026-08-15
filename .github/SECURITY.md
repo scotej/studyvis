@@ -113,14 +113,14 @@ copy rests on three things:
    AppRun, and llama.cpp source/notice inputs. All four source assets are
    mandatory, re-downloaded, and verified before publication, and an unmapped
    modeled byte/source/checksum fails closed. The system-source pair includes
-   StudyVis's source-built AppImage type-2 runtime revision 1 with hash-pinned
+   StudyVis's source-built AppImage type-2 runtime revision 2 with hash-pinned
    type2, musl, zlib, decompression-only-zstd, libfuse, squashfuse, and Meson
-   sources/licenses; exact Jammy toolchain/CRT provenance; build metadata; a
+   sources/licenses; exact Noble toolchain/CRT provenance; build metadata; a
    link map; and per-input hashes. Verification requires an
    `x86_64-linux-musl` static PIE with no interpreter or dynamic dependencies,
    using musl mallocng and no mimalloc. This completes the pre-SquashFS
-   runtime's static source/notice/link closure. The Ubuntu 22.04 hosted image
-   and Jammy apt indexes remain a bounded, mutable baseline rather than a bit-reproducible
+   runtime's static source/notice/link closure. The Ubuntu 24.04 hosted image
+   and Noble apt indexes remain a bounded, mutable baseline rather than a bit-reproducible
    build environment. Neither checksum pair replaces immutable releases or the
    protected publication path, and none is legal sign-off.
    Maintainers must monitor both upstreams, review and re-pin every update,

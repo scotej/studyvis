@@ -191,7 +191,7 @@ binding. StudyVis therefore builds that binding into a private AppImage runtime,
 explicitly reasserts media streams, and keeps the rest of WebKit's experimental
 feature set disabled.
 
-The pinned, hash-verified input tuple for runtime revision 3 is:
+The pinned, hash-verified input tuple for runtime revision 4 is:
 
 | Input                              | Pinned source                                                        | SHA-256                                                            |
 | ---------------------------------- | -------------------------------------------------------------------- | ------------------------------------------------------------------ |
@@ -218,13 +218,18 @@ StudyVis executable. It does not weaken or disable the Web/GPU/Network process
 sandbox.
 
 This is a pinned, reviewable build recipe, not a claim that independent builds
-are bit-for-bit identical. Production builds use Ubuntu 22.04, Rust 1.97.1,
+are bit-for-bit identical. Production builds use Ubuntu 24.04, Rust 1.97.1,
 `cargo-c` 0.10.24, and the workflow's declared source-build dependency set.
+Ubuntu 24.04 is the floor its GStreamer sets: WebKit's librice ICE agent
+subclasses `GstWebRTCICE`, which exists only from GStreamer 1.22, so Ubuntu
+22.04's 1.20.3 could not build this runtime. The AppImage therefore needs
+glibc 2.39 or newer on the machine that runs it, which every rolling
+distribution — CachyOS and Arch included — already satisfies.
 CI/preview cache keys cover the runtime tuple, builder, librice notice generator,
 patch, and toolchain pins, and the verified builder runs after a restore. Tagged
 releases deliberately restore no compiled Rust or WebKit state and cold-build
-the runtime from the verified tuple. The hosted runner image and Jammy apt
-indexes remain mutable, so this is a bounded Jammy baseline, not a fully pinned
+the runtime from the verified tuple. The hosted runner image and Noble apt
+indexes remain mutable, so this is a bounded Noble baseline, not a fully pinned
 build environment. Stronger future closure would require a snapshot-pinned apt
 repository or digest-pinned build container plus a complete build-host dpkg
 inventory. The AppImage carries
@@ -266,15 +271,15 @@ GTK/GStreamer hook, and llama.cpp source/notice inputs. An unclassified byte,
 missing modeled copyright/source, unavailable exact Ubuntu source version, or
 checksum failure stops release creation. The bundle includes the complete
 evidence directory for StudyVis's source-built AppImage type-2 runtime revision
-1: hash-pinned type2, musl 1.2.5, zlib 1.3.1, decompression-only zstd 1.5.6,
+2: hash-pinned type2, musl 1.2.5, zlib 1.3.1, decompression-only zstd 1.5.6,
 libfuse 3.15.0, squashfuse 0.5.2, and Meson 1.7.2 sources and license texts;
-exact Jammy gcc-11, clang-14, binutils, CRT, and libgcc provenance; build
+exact Noble gcc-11, clang-14, binutils, CRT, and libgcc provenance; build
 metadata; a link map; and hashes for every selected link input. The runtime is
 an `x86_64-linux-musl` `ET_DYN` static PIE with no `PT_INTERP` or `DT_NEEDED`.
 Its allocator is musl mallocng; mimalloc is neither linked nor shipped. This
 completes the pre-SquashFS runtime's static source/notice/link closure. Publication still
 downloads and verifies both Linux source pairs, but these mechanical checks are
-not legal sign-off and do not make the mutable Jammy baseline bit-reproducible.
+not legal sign-off and do not make the mutable Noble baseline bit-reproducible.
 
 Because the host package manager cannot update this private copy, every
 WebKitGTK or librice security bump must update the tuple, rebase and re-hash the

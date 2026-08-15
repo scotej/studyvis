@@ -3,7 +3,7 @@
 # matching Ubuntu sources/copyrights plus the exact pinned packaging toolset.
 # The inventory starts from artifact bytes, never our apt install list. An ELF
 # must be classified as StudyVis, pinned WebKit/llama/AppRun, or tied
-# unambiguously to the installed Jammy package by byte hash or GNU build-id.
+# unambiguously to the installed Noble package by byte hash or GNU build-id.
 
 set -euo pipefail
 export LC_ALL=C
@@ -19,7 +19,7 @@ usage:
   build-linux-system-sources.sh --appimage <StudyVis.AppImage> --output <bundle.tar.gz>
   build-linux-system-sources.sh --appimage <StudyVis.AppImage> --inventory-only <directory>
 
-The full bundle mode requires an amd64 Ubuntu 22.04 host with enabled deb-src
+The full bundle mode requires an amd64 Ubuntu 24.04 host with enabled deb-src
 entries for every configured binary repository.  Inventory-only mode performs
 the same exact-payload/package/copyright audit without downloading sources.
 EOF
@@ -88,8 +88,8 @@ fi
 [[ -r /etc/os-release ]] || die "cannot identify the packaging operating system"
 # shellcheck disable=SC1091
 source /etc/os-release
-[[ ${ID:-} == ubuntu && ${VERSION_ID:-} == 22.04 ]] || {
-  die "official system-source bundles must be generated on Ubuntu 22.04 (found ${ID:-unknown} ${VERSION_ID:-unknown})"
+[[ ${ID:-} == ubuntu && ${VERSION_ID:-} == 24.04 ]] || {
+  die "official system-source bundles must be generated on Ubuntu 24.04 (found ${ID:-unknown} ${VERSION_ID:-unknown})"
 }
 [[ $(dpkg --print-architecture) == amd64 ]] || die "the package database is not amd64"
 
@@ -433,7 +433,7 @@ printf '@appimage-runtime-prefix\t%s\t%s\tpinned-appimage-runtime\t%s\n' \
   "StudyVis runtime r${STUDYVIS_APPIMAGE_RUNTIME_BUILD_REVISION}; type2 ${STUDYVIS_APPIMAGE_RUNTIME_COMMIT}; complete source-built static closure" \
   >>"$classified_inventory"
 
-# Do not let the Jammy runner make an incomplete AppImage appear closed by
+# Do not let the Noble runner make an incomplete AppImage appear closed by
 # resolving arbitrary host libraries. This covers every ELF found above plus
 # the pre-SquashFS runtime and records each bundled/external resolution.
 bash "$script_dir/audit-linux-appimage-elf-closure.sh" \
@@ -667,7 +667,7 @@ cat >"$payload_dir/README.txt" <<EOF
 StudyVis Ubuntu-derived AppImage source and notice bundle
 
 AppImage SHA256: $appimage_sha
-Packaging base: Ubuntu 22.04 amd64
+Packaging base: Ubuntu 24.04 amd64
 Inventory format: 2
 
 Every regular ELF below the AppImage's SquashFS root is classified. Ubuntu
@@ -693,7 +693,7 @@ Build-inputs records StudyVis staging/config inputs, notices, and generated
 top-level/GTK/GStreamer AppRun hooks. The tagged
 StudyVis repository supplies the remaining application and Cargo/npm sources.
 
-The pre-SquashFS runtime is built on Jammy from immutable type2, musl, zlib,
+The pre-SquashFS runtime is built on Noble from immutable type2, musl, zlib,
 decompression-only zstd, libfuse and squashfuse sources. Exact compiler/CRT
 inputs and source-package versions are inventoried, and the artifact prefix is
 compared after normalising only appimagetool-reserved fields.
@@ -773,7 +773,7 @@ if [[ $mode == bundle ]]; then
   # shellcheck disable=SC2016
   if ! apt-get indextargets --format '$(IDENTIFIER)' 2>/dev/null \
     | grep -Fxq 'Sources'; then
-    die "no apt Sources indexes are enabled; add matching Jammy deb-src entries and run apt-get update"
+    die "no apt Sources indexes are enabled; add matching Noble deb-src entries and run apt-get update"
   fi
 
   mapfile -t ordered_sources < <(printf '%s\n' "${!source_rows[@]}" | LC_ALL=C sort)

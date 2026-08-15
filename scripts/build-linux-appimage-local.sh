@@ -2,7 +2,7 @@
 # Build an unsigned local AppImage on Arch/CachyOS. linuxdeploy's embedded
 # binutils predates rolling-distro DT_RELR sections, so local packaging must
 # skip its redundant strip pass; Cargo has already produced the optimized
-# release binary. Official release artifacts are still built on Ubuntu 22.04.
+# release binary. Official release artifacts are still built on Ubuntu 24.04.
 
 set -euo pipefail
 

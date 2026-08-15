@@ -17,7 +17,7 @@ usage() {
   cat >&2 <<'EOF'
 usage: build-linux-appimage-runtime.sh --output <absolute-new-directory> [--source-cache <absolute-directory>]
 
-The official build requires amd64 Ubuntu 22.04 with the exact Jammy
+The official build requires amd64 Ubuntu 24.04 with the exact Noble
 clang-14/gcc-11/libgcc-11-dev/binutils versions recorded in
 linux-appimage-runtime.env.  A source cache may contain any of the exact
 archive filenames; every cached or downloaded byte is SHA256-verified.
@@ -85,8 +85,8 @@ fi
 [[ -r /etc/os-release ]] || die "cannot identify build operating system"
 # shellcheck disable=SC1091
 source /etc/os-release
-[[ ${ID:-} == ubuntu && ${VERSION_ID:-} == 22.04 ]] || {
-  die "official runtime builds require Ubuntu 22.04 (found ${ID:-unknown} ${VERSION_ID:-unknown})"
+[[ ${ID:-} == ubuntu && ${VERSION_ID:-} == 24.04 ]] || {
+  die "official runtime builds require Ubuntu 24.04 (found ${ID:-unknown} ${VERSION_ID:-unknown})"
 }
 [[ $(dpkg --print-architecture) == amd64 ]] || die "official runtime builds require the amd64 package database"
 
@@ -97,7 +97,7 @@ verify_package() {
   local expected_source_version=$4
   local metadata
   metadata=$(dpkg-query -W -f='${Version}\t${source:Package}\t${source:Version}\n' "$binary_package" 2>/dev/null) || {
-    die "required Jammy package is not installed: $binary_package"
+    die "required Noble package is not installed: $binary_package"
   }
   local version source_name source_version
   IFS=$'\t' read -r version source_name source_version <<<"$metadata"
@@ -332,7 +332,7 @@ fuse_build="$build_root/libfuse"
 # libfuse probes a few target functions with Meson's `cc.run()`.  musl-gcc
 # would otherwise make those temporary probes dynamically linked against a
 # loader that is intentionally absent from the static runtime prefix.  Make
-# just its probe/link mode static so the native Jammy build can execute them.
+# just its probe/link mode static so the native Noble build can execute them.
 fuse_cc="$CC -static"
 CC="$fuse_cc" CFLAGS="$common_cflags" \
 PKG_CONFIG_PATH='' PKG_CONFIG_LIBDIR="$PKG_CONFIG_LIBDIR" \

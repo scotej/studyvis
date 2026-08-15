@@ -163,6 +163,7 @@ expected_manifest() {
     'librice-cargo-closure=union of locked/offline x86_64 normal edges for rice-proto/capi and rice-io/capi' \
     "cargo-c-version=$cargo_c_version" \
     'compiler-policy=GCC >= 12.2 or Clang; release CI pins GCC 12' \
+    'gstreamer-policy=gstreamer-webrtc-1.0 >= 1.22 for the librice GstWebRTCICE agent; release CI pins Ubuntu 24.04 GStreamer 1.24' \
     'cmake-generator=Ninja' \
     "appimage-runtime-relative-directory=$appimage_runtime_dirname" \
     "appimage-runtime-install-directory=/usr/bin/$appimage_runtime_dirname" \
@@ -521,6 +522,14 @@ done
   die "required sandbox helper is not executable: /usr/bin/xdg-dbus-proxy"
 }
 [[ $(uname -m) == x86_64 ]] || die "the published Linux runtime is pinned to x86_64"
+
+# WebKit's own configure gate still accepts GStreamer 1.20, but the librice ICE
+# agent it compiles under USE_LIBRICE subclasses GstWebRTCICE, which exists only
+# from 1.22. Assert the real requirement before anything expensive runs: on
+# Ubuntu 22.04's 1.20.3 this surfaced two hours into the unified build instead.
+if ! pkg-config --atleast-version=1.22 gstreamer-webrtc-1.0; then
+  die "gstreamer-webrtc-1.0 >= 1.22 is required for the librice ICE agent (found $(pkg-config --modversion gstreamer-webrtc-1.0 2>/dev/null || echo none))"
+fi
 
 cargo_c_output=$(cargo cinstall --version 2>&1) || die "cargo-c is required"
 [[ $cargo_c_output =~ (^|[[:space:]])${cargo_c_version}([+[:space:]]|$) ]] || {

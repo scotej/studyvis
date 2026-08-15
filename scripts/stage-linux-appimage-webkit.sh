@@ -119,7 +119,7 @@ ptp_helper="$gstreamer_helper_dir/gst-ptp-helper"
 [[ -f $ptp_helper && -x $ptp_helper ]] || die "GStreamer PTP helper is not executable: $ptp_helper"
 
 # The upstream linuxdeploy plugin copies every file in GSTREAMER_PLUGINS_DIR.
-# Never point it at the system directory: Jammy's broad packages also contain
+# Never point it at the system directory: the distro's broad packages also contain
 # libav/x264/x265 and scores of codecs StudyVis neither needs nor has audited.
 system_gstreamer_plugins=${STUDYVIS_SYSTEM_GSTREAMER_PLUGINS_DIR:-}
 if [[ -z $system_gstreamer_plugins ]]; then

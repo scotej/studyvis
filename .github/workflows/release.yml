@@ -195,7 +195,7 @@ jobs:
             args: --bundles nsis
             llama-triples: x86_64-pc-windows-msvc
           - label: Linux (x86_64 AppImage)
-            platform: ubuntu-22.04
+            platform: ubuntu-24.04
             timeout: 360
             rust-targets: ''
             args: --bundles appimage
@@ -230,13 +230,13 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            autoconf automake binutils=2.38-4ubuntu2.12 build-essential bison \
-            bubblewrap ca-certificates clang-14=1:14.0.0-1ubuntu1.1 cmake curl dbus-x11 \
-            desktop-file-utils file flex g++-12 gcc-11=11.4.0-1ubuntu1~22.04.3 gcc-12 gettext \
+            autoconf automake binutils=2.42-4ubuntu2.10 build-essential bison \
+            bubblewrap ca-certificates clang-14=1:14.0.6-19build4 cmake curl dbus-x11 \
+            desktop-file-utils file flex g++-12 gcc-11=11.5.0-1ubuntu1~24.04.1 gcc-12 gettext \
             gperf libayatana-appindicator3-dev \
             libcairo2-dev libdbus-1-dev libdrm-dev libegl-dev \
             libenchant-2-dev libepoxy-dev libfontconfig-dev libfreetype-dev \
-            libfuse2 libgbm-dev libgcc-11-dev=11.4.0-1ubuntu1~22.04.3 libgcrypt20-dev libgl-dev libgles-dev libglib2.0-dev \
+            libfuse2t64 libgbm-dev libgcc-11-dev=11.5.0-1ubuntu1~24.04.1 libgcrypt20-dev libgl-dev libgles-dev libglib2.0-dev \
             libglib2.0-dev-bin libgstreamer-plugins-bad1.0-dev \
             libgstreamer-plugins-base1.0-dev libgstreamer1.0-dev \
             libgtk-3-dev libgudev-1.0-dev libharfbuzz-dev libhyphen-dev \
@@ -253,16 +253,32 @@ jobs:
             gstreamer1.0-plugins-base gstreamer1.0-plugins-good \
             gstreamer1.0-nice gstreamer1.0-pipewire gstreamer1.0-tools
 
-      - name: Enable authenticated Jammy source indexes
+      # Ubuntu 24.04 restricts unprivileged user namespaces through AppArmor,
+      # which is exactly what WebKit's bubblewrap sandbox needs to start. This
+      # is a runner accommodation only: the shipped AppImage relies on the
+      # user's own desktop allowing it, as CachyOS and Arch do.
+      - name: Allow the packaged WebKit sandbox to create user namespaces
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          knob=/proc/sys/kernel/apparmor_restrict_unprivileged_userns
+          if [ -e "$knob" ]; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          else
+            echo "AppArmor user-namespace restriction knob is absent; nothing to relax."
+          fi
+
+      - name: Enable authenticated Noble source indexes
         if: runner.os == 'Linux'
         shell: bash
         run: |
           set -euo pipefail
           sudo tee /etc/apt/sources.list.d/studyvis-deb-src.list >/dev/null <<'EOF'
-          deb-src https://archive.ubuntu.com/ubuntu jammy main restricted universe multiverse
-          deb-src https://archive.ubuntu.com/ubuntu jammy-updates main restricted universe multiverse
-          deb-src https://archive.ubuntu.com/ubuntu jammy-backports main restricted universe multiverse
-          deb-src https://security.ubuntu.com/ubuntu jammy-security main restricted universe multiverse
+          deb-src https://archive.ubuntu.com/ubuntu noble main restricted universe multiverse
+          deb-src https://archive.ubuntu.com/ubuntu noble-updates main restricted universe multiverse
+          deb-src https://archive.ubuntu.com/ubuntu noble-backports main restricted universe multiverse
+          deb-src https://security.ubuntu.com/ubuntu noble-security main restricted universe multiverse
           EOF
           sudo apt-get -o Acquire::Retries=3 update
 
@@ -340,7 +356,7 @@ jobs:
           bash scripts/prepare-linuxdeploy-tools.sh "$TOOL_CACHE_HOME"
           {
             echo "XDG_CACHE_HOME=$TOOL_CACHE_HOME"
-            echo "LDAI_RUNTIME_FILE=$TOOL_CACHE_HOME/studyvis-appimage-runtime-r1/runtime-x86_64"
+            echo "LDAI_RUNTIME_FILE=$TOOL_CACHE_HOME/studyvis-appimage-runtime-r2/runtime-x86_64"
             echo "GSTREAMER_PLUGINS_DIR=$GITHUB_WORKSPACE/src-tauri/target/appimage-webkit/gstreamer-plugins"
             echo "GSTREAMER_HELPERS_DIR=$GITHUB_WORKSPACE/src-tauri/target/appimage-webkit/gstreamer"
           } >> "$GITHUB_ENV"
