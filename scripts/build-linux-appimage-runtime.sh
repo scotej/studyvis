@@ -315,8 +315,10 @@ make -C "$zstd_source/lib" install-static install-includes install-pc \
   PREFIX="$prefix" CC="$CC" AR="$AR" CFLAGS="$common_cflags" \
   ZSTD_LIB_COMPRESSION=0 ZSTD_LIB_DECOMPRESSION=1 \
   ZSTD_LIB_DICTBUILDER=0 ZSTD_LIB_DEPRECATED=0 ZSTD_LEGACY_SUPPORT=0
-if ar t "$prefix/lib/libzstd.a" | grep -Eq \
-  '(^|/)(zstd_compress|zstd_compress_superblock|zstd_double_fast|zstd_fast|zstd_lazy|zstd_ldm|zstdmt_compress|zstd_v0[1-7]|zdict)\.o$'; then
+zstd_archive_members=$(ar t "$prefix/lib/libzstd.a")
+if grep -Eq \
+  '(^|/)(zstd_compress|zstd_compress_superblock|zstd_double_fast|zstd_fast|zstd_lazy|zstd_ldm|zstdmt_compress|zstd_v0[1-7]|zdict)\.o$' \
+  <<<"$zstd_archive_members"; then
   die "zstd archive contains a disabled compressor/dictionary/legacy object"
 fi
 
@@ -448,12 +450,23 @@ install -m 0755 -- "$runtime_unstripped" "$runtime"
 strip --strip-all -- "$runtime"
 printf 'AI\002' | dd of="$runtime" bs=1 seek=8 conv=notrunc status=none
 
+# `grep -q` stops reading at its first match. Piping into it sends SIGPIPE to a
+# producer that is still writing, and `set -o pipefail` reports that as a failed
+# pipeline — so a *matching* pattern can score as "no match" and skip the `die`
+# below it, while a required match can spuriously fail. Every gate from here on
+# matches against captured text instead of piping into an early-exit reader.
+runtime_program_headers=$(readelf -lW "$runtime")
+runtime_dynamic=$(readelf -dW "$runtime")
+runtime_notes=$(readelf -nW "$runtime")
+runtime_symbols=$(nm "$runtime_unstripped")
+runtime_strings=$(strings "$runtime_unstripped")
+
 elf_type=$(readelf -hW "$runtime" | awk -F: '/^[[:space:]]*Type:/{gsub(/^[[:space:]]+/, "", $2); print $2}')
 [[ $elf_type == DYN\ \(* ]] || die "runtime is not an ET_DYN static PIE: $elf_type"
-if readelf -lW "$runtime" | grep -Eq '(^|[[:space:]])INTERP([[:space:]]|$)'; then
+if grep -Eq '(^|[[:space:]])INTERP([[:space:]]|$)' <<<"$runtime_program_headers"; then
   die "runtime unexpectedly has a PT_INTERP"
 fi
-if readelf -dW "$runtime" | grep -Eq '\(NEEDED\)'; then
+if grep -Eq '\(NEEDED\)' <<<"$runtime_dynamic"; then
   die "runtime unexpectedly has a dynamic dependency"
 fi
 [[ -z $(nm -u "$runtime_unstripped") ]] || die "runtime contains undefined symbols"
@@ -475,17 +488,17 @@ version_output=$($runtime --appimage-version 2>&1)
   die "runtime version marker is wrong: $version_output"
 }
 for symbol in sqfs_open_image fuse_session_loop ZSTD_decompress inflate; do
-  nm "$runtime_unstripped" | grep -Eq "[[:space:]]${symbol}$" || {
+  grep -Eq "[[:space:]]${symbol}$" <<<"$runtime_symbols" || {
     die "runtime is missing required linked symbol: $symbol"
   }
 done
-if nm "$runtime_unstripped" | grep -Eq '[[:space:]](mi_|ZSTD_compress|ZSTD_createCCtx|ZSTDv0[1-7])'; then
+if grep -Eq '[[:space:]](mi_|ZSTD_compress|ZSTD_createCCtx|ZSTDv0[1-7])' <<<"$runtime_symbols"; then
   die "runtime contains deliberately excluded mimalloc/compressor/legacy code"
 fi
-if readelf -nW "$runtime" | grep -Eq 'x86 ISA needed:.*x86-64-(v[234]|v[2-4])'; then
+if grep -Eq 'x86 ISA needed:.*x86-64-(v[234]|v[2-4])' <<<"$runtime_notes"; then
   die "runtime requires a post-baseline x86-64 ISA level"
 fi
-if strings "$runtime_unstripped" | grep -Fq "$work_root"; then
+if grep -Fq "$work_root" <<<"$runtime_strings"; then
   die "runtime embeds the runner's temporary build path"
 fi
 
@@ -547,7 +560,8 @@ runtime_sha=${runtime_sha%% *}
 runtime_unstripped_sha=$(sha256sum -- "$runtime_unstripped")
 runtime_unstripped_sha=${runtime_unstripped_sha%% *}
 runtime_size=$(wc -c <"$runtime")
-build_id=$(readelf -nW "$runtime" | sed -n 's/.*Build ID: \([0-9A-Fa-f][0-9A-Fa-f]*\).*/\1/p' | head -n 1)
+build_id=$(sed -n 's/.*Build ID: \([0-9A-Fa-f][0-9A-Fa-f]*\).*/\1/p' <<<"$runtime_notes")
+build_id=${build_id%%$'\n'*}
 [[ $build_id =~ ^[0-9a-fA-F]{40}$ ]] || die "runtime build-id is missing or malformed"
 {
   printf 'key\tvalue\n'
