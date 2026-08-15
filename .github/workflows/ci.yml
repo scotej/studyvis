@@ -316,7 +316,7 @@ jobs:
             libgstreamer-plugins-base1.0-dev libgstreamer1.0-dev \
             libgtk-3-dev libgudev-1.0-dev libharfbuzz-dev libhyphen-dev \
             libicu-dev libjpeg-dev liblcms2-dev libnice-dev libopenjp2-7-dev \
-            libpng-dev librsvg2-dev libseccomp-dev \
+            libpng-dev librsvg2-dev libseccomp-dev libunwind-dev \
             libsecret-1-dev libsecret-tools libsoup-3.0-dev libsqlite3-dev \
             libssl-dev libsysprof-capture-4-dev libsystemd-dev \
             libtasn1-6-dev libwayland-dev libwebkit2gtk-4.1-dev libwebp-dev \

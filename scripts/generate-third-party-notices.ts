@@ -10,8 +10,8 @@
 //   npm run check-notices     # regenerate in memory and require an exact diff
 //
 // Cargo metadata is offline on purpose. CI fetches every supported desktop
-// target from Cargo.lock first; locally, run the three `cargo fetch --locked
-// --target ...` commands documented in INSTALL.md if the cache is cold.
+// target from Cargo.lock first, then fetches the complete lockfile. Locally,
+// run the documented `cargo fetch --locked` commands if the cache is cold.
 
 import { spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
@@ -25,6 +25,7 @@ import {
 import { mkdir } from 'node:fs/promises'
 import { dirname, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { format } from 'prettier'
 
 const ROOT = resolve(fileURLToPath(import.meta.url), '..', '..')
 const OVERRIDES_PATH = join(
@@ -899,11 +900,11 @@ function inputHashes(
     .map((path) => ({ path, sha256: sha256(readUtf8(join(ROOT, path))) }))
 }
 
-function renderManifest(
+async function renderManifest(
   components: NoticeComponent[],
   overrides: Overrides,
   notice: string
-): string {
+): Promise<string> {
   const manifestComponents: ManifestComponent[] = components.map(
     (component) => ({
       ...component,
@@ -940,7 +941,13 @@ function renderManifest(
     },
     components: manifestComponents,
   }
-  return `${JSON.stringify(manifest, null, 2)}\n`
+  // Keep the generator's bytes identical to the repository-wide Prettier gate.
+  // A plain JSON.stringify output is valid JSON but can wrap differently from
+  // Prettier, which would make `check-notices` and `format:check` disagree.
+  return format(JSON.stringify(manifest), {
+    filepath: MANIFEST_PATH,
+    parser: 'json',
+  })
 }
 
 function exactCheck(path: string, expected: string): string | null {
@@ -973,7 +980,7 @@ async function main() {
     ids.add(component.id)
   }
   const notice = renderNotice(components, overrides.cargoTargets)
-  const manifest = renderManifest(components, overrides, notice)
+  const manifest = await renderManifest(components, overrides, notice)
 
   if (mode === '--write') {
     await mkdir(dirname(BUNDLE_NOTICE_PATH), { recursive: true })
