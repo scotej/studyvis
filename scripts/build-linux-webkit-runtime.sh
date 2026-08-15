@@ -678,14 +678,24 @@ for option in "${webkit_cmake_options[@]}"; do
   }
 done
 for expected_cache_line in \
-  "CMAKE_C_COMPILER:FILEPATH=$cc" \
-  "CMAKE_CXX_COMPILER:FILEPATH=$cxx" \
   "Rice_PROTO_LIBRARY:FILEPATH=$rice_proto_library" \
   "Rice_IO_LIBRARY:FILEPATH=$rice_io_library" \
   "RiceProto_INCLUDE_DIR:PATH=$rice_include" \
   "RiceIo_INCLUDE_DIR:PATH=$rice_include"; do
   grep -Fqx "$expected_cache_line" "$cmake_cache" || {
     die "WebKitGTK configure did not retain $expected_cache_line"
+  }
+done
+for compiler_cache in "CMAKE_C_COMPILER=$cc" "CMAKE_CXX_COMPILER=$cxx"; do
+  compiler_variable=${compiler_cache%%=*}
+  expected_compiler=${compiler_cache#*=}
+  configured_compiler=$(sed -n "s|^${compiler_variable}:[^=]*=||p" "$cmake_cache")
+  [[ -n $configured_compiler && -x $configured_compiler ]] || {
+    die "WebKitGTK configure did not retain an executable $compiler_variable"
+  }
+  configured_compiler=$(realpath --canonicalize-existing -- "$configured_compiler")
+  [[ $configured_compiler == "$expected_compiler" ]] || {
+    die "WebKitGTK configure retained $compiler_variable=$configured_compiler, expected $expected_compiler"
   }
 done
 
