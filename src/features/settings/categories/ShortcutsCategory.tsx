@@ -1,4 +1,5 @@
 import { useCallback, useMemo } from 'react'
+import { invoke } from '@tauri-apps/api/core'
 import { toast } from 'sonner'
 
 import { KeybindCapture } from '@/components/KeybindCapture'
@@ -18,6 +19,12 @@ import { strings } from '@/strings'
 
 function detectPlatform(): Platform {
   return isMacLikePlatform() ? 'mac' : 'other'
+}
+
+function isLinuxPlatform(): boolean {
+  return (
+    typeof navigator !== 'undefined' && /Linux|X11/.test(navigator.userAgent)
+  )
 }
 
 function comboFromAccelerator(accelerator: string, fallback: Combo): Combo {
@@ -112,6 +119,31 @@ export function ShortcutsCategory() {
           />
         }
       />
+      {isLinuxPlatform() ? (
+        <SettingsRow
+          label={copy.pttAi.fallbackLabel}
+          help={copy.pttAi.fallbackHelp}
+          control={
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              disabled={!aiFeaturesEnabled}
+              onClick={() => {
+                void invoke('ai_dialog_toggle').catch((err) => {
+                  toast.error(
+                    copy.pttAi.fallbackError(
+                      err instanceof Error ? err.message : String(err)
+                    )
+                  )
+                })
+              }}
+            >
+              {copy.pttAi.fallbackCta}
+            </Button>
+          }
+        />
+      ) : null}
       <SettingsRow
         label={copy.reset.label}
         help={copy.reset.help}

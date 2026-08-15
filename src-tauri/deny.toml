@@ -11,14 +11,15 @@
 # than copied from a template — see the comments on the unusual entries.
 
 [graph]
-# Only the two platforms StudyVis actually ships. Without this, cargo-deny
-# walks every target's dependencies — including the Linux/Android/wasm trees
-# that this repo never builds — and reports advisories against crates that
-# are not in any shipped binary. Linux joins the list when PLAN §8's
-# WebKitGTK trigger is met.
+# Only the three release-matrix platforms (two shipped plus the Linux candidate).
+# Without this, cargo-deny
+# walks every target's dependencies — including Android/wasm trees that this
+# repo never builds — and reports advisories against crates that are not in a
+# release artifact.
 targets = [
   "aarch64-apple-darwin",
   "x86_64-pc-windows-msvc",
+  "x86_64-unknown-linux-gnu",
 ]
 all-features = false
 
@@ -70,8 +71,10 @@ allow = [
   # under a permissive data licence.
   "CDLA-Permissive-2.0",
   # Servo's CSS stack (cssparser, selectors, dtoa-short) and option-ext,
-  # pulled in through wry/tauri. MPL-2.0 is file-level copyleft: it obliges
-  # publishing changes to *those files*, which this repo does not make.
+  # pulled in through wry/tauri. MPL-2.0 executable-form distribution requires
+  # making the Covered Source available and telling recipients how to obtain
+  # it, not only publishing local modifications. This allowlist records license
+  # compatibility; the notice/source packaging gates carry delivery duties.
   "MPL-2.0",
 ]
 # Crates offering a copyleft option alongside permissive ones resolve to the

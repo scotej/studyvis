@@ -55,7 +55,24 @@ body:
         - macOS (Apple Silicon)
         - Windows 10
         - Windows 11
-        - Built from source on something else
+        - CachyOS (x86_64 AppImage)
+        - Other Linux (x86_64 AppImage; best effort)
+        - Built from source / unsupported architecture
+    validations:
+      required: true
+
+  - type: textarea
+    id: platform-details
+    attributes:
+      label: Desktop and install details
+      description: |
+        Especially for Linux: distro/version, desktop, Wayland or X11, normal
+        AppImage or `--appimage-extract-and-run`, whether the AppImage location
+        is writable, Secret Service provider, and portal backend. For another
+        OS, include anything unusual about the install.
+      placeholder: |
+        CachyOS, KDE Plasma, Wayland; normal AppImage in ~/.local/bin;
+        gnome-keyring; xdg-desktop-portal-kde + PipeWire.
     validations:
       required: true
 
@@ -80,6 +97,7 @@ body:
         - label: A peer was connected (not a solo session)
         - label: Screen sharing / screen capture was active
         - label: The app had just auto-updated
+        - label: Linux desktop portal or Secret Service was involved
         - label: Push-to-talk or a custom keybinding was involved
 
   - type: textarea

@@ -1,10 +1,11 @@
 //! System commands and the app's managed runtime flags.
 //!
 //! Defines the atomic flag types (`QuitFlag`, `MinimizeToTrayFlag`,
-//! `AiFeaturesFlag`, `SessionActiveFlag`, `ShortcutBindings`) that `lib.rs`
+//! `AiFeaturesFlag`, `WindowStyleAppliedFlag`, `SessionActiveFlag`,
+//! `ShortcutBindings`) that `lib.rs`
 //! `manage()`s at setup and consults in the window/run-event handlers, plus
 //! assorted commands: autostart, global-shortcut rebinding, quit/relaunch,
-//! text-file export, opening OS settings panes (macOS-only deep links), and
+//! text-file export, opening OS settings panes, and
 //! the battery probe. (X6 retired the hand-rolled GitHub tag check that used
 //! to live here — tauri-plugin-updater owns update discovery now.) All flags
 //! use `Ordering::Relaxed` deliberately — last-write-wins between the JS setters
@@ -101,6 +102,32 @@ impl AiFeaturesFlag {
     pub fn is_enabled<R: Runtime>(app: &AppHandle<R>) -> bool {
         app.state::<Self>().0.load(Ordering::Relaxed)
     }
+}
+
+// The browser-side window-style cache is only a pre-paint hint; it can be
+// cleared or fail independently of settings.json. `apply_window_style` marks
+// this flag only after the native API succeeds, and the main webview queries
+// it before rendering its TitleBar. That keeps the React chrome coupled to the
+// frame the OS actually applied instead of to a second persistence mechanism.
+pub struct WindowStyleAppliedFlag(pub AtomicBool);
+
+impl WindowStyleAppliedFlag {
+    pub fn new() -> Self {
+        Self(AtomicBool::new(false))
+    }
+
+    pub fn set<R: Runtime>(app: &AppHandle<R>, custom: bool) {
+        app.state::<Self>().0.store(custom, Ordering::Relaxed);
+    }
+
+    pub fn is_custom<R: Runtime>(app: &AppHandle<R>) -> bool {
+        app.state::<Self>().0.load(Ordering::Relaxed)
+    }
+}
+
+#[tauri::command]
+pub fn system_window_style_is_custom_applied<R: Runtime>(app: AppHandle<R>) -> bool {
+    WindowStyleAppliedFlag::is_custom(&app)
 }
 
 // N4 quit-confirm gate. The JS session store pushes the live-session state
@@ -660,9 +687,9 @@ pub fn system_open_releases<R: Runtime>(app: AppHandle<R>) -> Result<(), String>
 // user_on_battery and battery_pct < 20: pause AI". Returned shape matches
 // the `RawBattery` interface in `src/features/ai/battery.ts`.
 //
-// Desktops / VMs without a battery and Linux machines without UPower return
-// a graceful "on AC, 100%" so the sample loop keeps ticking; that's safer
-// than refusing inference on hardware the crate can't introspect.
+// Desktops / VMs without a battery, and platforms whose battery source cannot
+// be read, return a graceful "on AC, 100%" so the sample loop keeps ticking;
+// that's safer than refusing inference on hardware the crate can't introspect.
 #[derive(Serialize)]
 pub struct BatteryInfo {
     pub on_battery: bool,
@@ -765,7 +792,78 @@ pub fn system_open_camera_settings<R: Runtime>(app: AppHandle<R>) -> Result<(), 
 // #47 B7 — jump to the OS notification settings so a user whose system-level
 // permission is denied (macOS never re-prompts after a hard denial) can fix
 // the state the Settings → Notifications status row diagnoses. macOS opens
-// the Notifications pane; Windows opens ms-settings:notifications.
+// the Notifications pane; Windows opens ms-settings:notifications; Linux
+// starts the native KDE or GNOME settings panel for the active desktop.
+#[cfg(target_os = "linux")]
+const KDE_NOTIFICATION_SETTINGS: (&str, &str) = ("systemsettings", "kcm_notifications");
+#[cfg(target_os = "linux")]
+const GNOME_NOTIFICATION_SETTINGS: (&str, &str) = ("gnome-control-center", "notifications");
+
+#[cfg(target_os = "linux")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum LinuxDesktop {
+    Kde,
+    Gnome,
+}
+
+#[cfg(target_os = "linux")]
+fn linux_desktop(value: Option<&str>) -> Option<LinuxDesktop> {
+    value?.split([':', ';', ',']).find_map(|token| {
+        let token = token.trim().to_ascii_lowercase();
+        if token == "kde" || token.starts_with("plasma") {
+            Some(LinuxDesktop::Kde)
+        } else if token.starts_with("gnome") {
+            Some(LinuxDesktop::Gnome)
+        } else {
+            None
+        }
+    })
+}
+
+#[cfg(target_os = "linux")]
+fn linux_notification_settings_candidates(
+    current_desktop: Option<&str>,
+    desktop_session: Option<&str>,
+) -> [(&'static str, &'static str); 2] {
+    // XDG_CURRENT_DESKTOP describes the current session more precisely than
+    // DESKTOP_SESSION, which is retained as a fallback for older desktops.
+    match linux_desktop(current_desktop).or_else(|| linux_desktop(desktop_session)) {
+        Some(LinuxDesktop::Gnome) => [GNOME_NOTIFICATION_SETTINGS, KDE_NOTIFICATION_SETTINGS],
+        Some(LinuxDesktop::Kde) | None => [KDE_NOTIFICATION_SETTINGS, GNOME_NOTIFICATION_SETTINGS],
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn open_linux_notification_settings() -> Result<(), String> {
+    let current_desktop = std::env::var("XDG_CURRENT_DESKTOP").ok();
+    let desktop_session = std::env::var("DESKTOP_SESSION").ok();
+    let candidates = linux_notification_settings_candidates(
+        current_desktop.as_deref(),
+        desktop_session.as_deref(),
+    );
+    let mut failures = Vec::with_capacity(candidates.len());
+
+    for (program, argument) in candidates {
+        match std::process::Command::new(program).arg(argument).spawn() {
+            Ok(mut child) => {
+                // Dropping `Child` does not reap it on Unix. The settings app
+                // is independent of StudyVis, so wait on a detached helper
+                // thread without blocking the Tauri command handler.
+                std::thread::spawn(move || {
+                    let _ = child.wait();
+                });
+                return Ok(());
+            }
+            Err(err) => failures.push(format!("{program}: {err}")),
+        }
+    }
+
+    Err(format!(
+        "couldn't open notification settings ({})",
+        failures.join("; ")
+    ))
+}
+
 #[tauri::command]
 pub fn system_open_notification_settings<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
     #[cfg(target_os = "macos")]
@@ -781,7 +879,12 @@ pub fn system_open_notification_settings<R: Runtime>(app: AppHandle<R>) -> Resul
             .open_url("ms-settings:notifications", None::<&str>)
             .map_err(|e| e.to_string())
     }
-    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    #[cfg(target_os = "linux")]
+    {
+        let _ = app;
+        open_linux_notification_settings()
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
     {
         let _ = app;
         Err("not supported on this platform".to_string())
@@ -807,18 +910,16 @@ pub fn system_open_microphone_settings<R: Runtime>(app: AppHandle<R>) -> Result<
 }
 
 // X6 / issue #77 — whether tauri-plugin-updater can swap this bundle in
-// place. On macOS an app opened straight from the mounted .dmg runs under
-// Gatekeeper App Translocation: the bundle is served from a read-only mount
-// at a randomized /private/var/…/AppTranslocation/… path. The plugin
-// installs by renaming the .app derived from `current_exe()`, which can
-// never succeed there, so the JS updater store asks this command before
-// downloading and, when blocked, points the user at Applications instead of
-// offering a Restart that always errors.
+// place. On macOS, reject translocated or read-only bundles. On Linux, only a
+// real AppImage named by APPIMAGE is eligible, and both it and its containing
+// directory/filesystem must be writable. The JS updater store asks this
+// command before downloading so it never offers a restart that cannot install.
 #[derive(Serialize)]
 pub struct InstallContext {
     pub updatable: bool,
-    // "translocated" | "readOnlyVolume"; `None` when updatable. Logged by
-    // the JS store for diagnosis — the user-facing copy doesn't branch on it.
+    // "translocated" | "notAppImage" | "readOnlyVolume"; `None` when
+    // updatable. Logged by the JS store for diagnosis — the user-facing copy
+    // doesn't branch on it.
     pub reason: Option<&'static str>,
 }
 
@@ -842,6 +943,113 @@ fn is_on_read_only_volume(path: &std::path::Path) -> bool {
         return false;
     }
     fs_stat.f_flags & libc::MNT_RDONLY as u32 != 0
+}
+
+#[cfg(target_os = "linux")]
+fn linux_path_has_access(path: &std::path::Path, mode: libc::c_int) -> bool {
+    use std::os::unix::ffi::OsStrExt;
+
+    let Ok(c_path) = std::ffi::CString::new(path.as_os_str().as_bytes()) else {
+        return false;
+    };
+    unsafe { libc::access(c_path.as_ptr(), mode) == 0 }
+}
+
+#[cfg(target_os = "linux")]
+fn linux_filesystem_is_writable(path: &std::path::Path) -> bool {
+    use std::os::unix::ffi::OsStrExt;
+
+    let Ok(c_path) = std::ffi::CString::new(path.as_os_str().as_bytes()) else {
+        return false;
+    };
+    let mut fs_stat: libc::statvfs = unsafe { std::mem::zeroed() };
+    if unsafe { libc::statvfs(c_path.as_ptr(), &mut fs_stat) } != 0 {
+        return false;
+    }
+    fs_stat.f_flag & libc::ST_RDONLY == 0
+}
+
+#[cfg(target_os = "linux")]
+fn linux_is_appimage(path: &std::path::Path) -> bool {
+    use std::io::Read;
+
+    // AppImage embeds its format marker in the ELF identification padding:
+    // bytes 0..4 are ELF, bytes 8..10 are "AI", and byte 10 is the AppImage
+    // format version. Accept both published AppImage formats; Tauri currently
+    // emits type 2. Read only the fixed header so a 200 MB image is not loaded.
+    let Ok(mut file) = std::fs::File::open(path) else {
+        return false;
+    };
+    let mut header = [0_u8; 11];
+    file.read_exact(&mut header).is_ok()
+        && &header[..4] == b"\x7fELF"
+        && &header[8..10] == b"AI"
+        && matches!(header[10], 1 | 2)
+}
+
+#[cfg(target_os = "linux")]
+fn linux_install_context(appimage: Option<&std::ffi::OsStr>) -> InstallContext {
+    let Some(appimage) = appimage.filter(|value| !value.is_empty()) else {
+        return InstallContext {
+            updatable: false,
+            reason: Some("notAppImage"),
+        };
+    };
+    let path = std::path::Path::new(appimage);
+    let Ok(metadata) = std::fs::metadata(path) else {
+        return InstallContext {
+            updatable: false,
+            reason: Some("notAppImage"),
+        };
+    };
+    let Some(parent) = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+    else {
+        return InstallContext {
+            updatable: false,
+            reason: Some("notAppImage"),
+        };
+    };
+    let Ok(parent_metadata) = std::fs::metadata(parent) else {
+        return InstallContext {
+            updatable: false,
+            reason: Some("notAppImage"),
+        };
+    };
+    if !path.is_absolute()
+        || !metadata.is_file()
+        || !parent_metadata.is_dir()
+        || !linux_is_appimage(path)
+    {
+        return InstallContext {
+            updatable: false,
+            reason: Some("notAppImage"),
+        };
+    }
+
+    // The updater replaces the AppImage in place. Both the current file and
+    // its containing directory must be writable by this process, and neither
+    // may be hosted on a read-only filesystem. Permission-bit checks make the
+    // result deterministic even when tests run as root; access(2) additionally
+    // accounts for the effective user's ownership, groups, and ACLs.
+    let appimage_writable = !metadata.permissions().readonly()
+        && linux_path_has_access(path, libc::W_OK)
+        && linux_filesystem_is_writable(path);
+    let parent_writable = !parent_metadata.permissions().readonly()
+        && linux_path_has_access(parent, libc::W_OK | libc::X_OK)
+        && linux_filesystem_is_writable(parent);
+    if !appimage_writable || !parent_writable {
+        return InstallContext {
+            updatable: false,
+            reason: Some("readOnlyVolume"),
+        };
+    }
+
+    InstallContext {
+        updatable: true,
+        reason: None,
+    }
 }
 
 #[tauri::command]
@@ -871,9 +1079,14 @@ pub fn system_install_context() -> InstallContext {
             reason: None,
         }
     }
+    #[cfg(target_os = "linux")]
+    {
+        let appimage = std::env::var_os("APPIMAGE");
+        linux_install_context(appimage.as_deref())
+    }
     // Windows: the NSIS installer elevates and replaces the install dir
     // itself — there is no translocation equivalent to detect.
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
     {
         InstallContext {
             updatable: true,
@@ -905,6 +1118,106 @@ mod tests {
     #[test]
     fn releases_url_points_at_the_studyvis_repo() {
         assert_eq!(RELEASES_URL, "https://github.com/scotej/studyvis/releases");
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn linux_notification_settings_follow_the_active_desktop() {
+        assert_eq!(
+            super::linux_notification_settings_candidates(Some("KDE"), None),
+            [
+                super::KDE_NOTIFICATION_SETTINGS,
+                super::GNOME_NOTIFICATION_SETTINGS
+            ]
+        );
+        assert_eq!(
+            super::linux_notification_settings_candidates(
+                Some("ubuntu:GNOME"),
+                Some("plasmawayland")
+            ),
+            [
+                super::GNOME_NOTIFICATION_SETTINGS,
+                super::KDE_NOTIFICATION_SETTINGS
+            ]
+        );
+        assert_eq!(
+            super::linux_notification_settings_candidates(None, Some("gnome-classic")),
+            [
+                super::GNOME_NOTIFICATION_SETTINGS,
+                super::KDE_NOTIFICATION_SETTINGS
+            ]
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn linux_notification_settings_use_a_stable_fallback_order() {
+        assert_eq!(
+            super::linux_notification_settings_candidates(None, None),
+            [
+                super::KDE_NOTIFICATION_SETTINGS,
+                super::GNOME_NOTIFICATION_SETTINGS
+            ]
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn linux_updater_requires_an_appimage_path() {
+        let missing = super::linux_install_context(None);
+        assert!(!missing.updatable);
+        assert_eq!(missing.reason, Some("notAppImage"));
+
+        let relative =
+            super::linux_install_context(Some(std::ffi::OsStr::new("StudyVis.AppImage")));
+        assert!(!relative.updatable);
+        assert_eq!(relative.reason, Some("notAppImage"));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn linux_updater_requires_a_writable_appimage_and_parent() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!(
+            "studyvis-install-context-{}-{unique}",
+            std::process::id()
+        ));
+        std::fs::create_dir(&dir).unwrap();
+        let appimage = dir.join("StudyVis.AppImage");
+
+        std::fs::write(&appimage, b"not an AppImage").unwrap();
+        let fake = super::linux_install_context(Some(appimage.as_os_str()));
+        assert!(!fake.updatable);
+        assert_eq!(fake.reason, Some("notAppImage"));
+
+        // Minimal type-2 AppImage identification header. The install-context
+        // probe intentionally validates the fixed magic without parsing or
+        // loading the image's full SquashFS payload.
+        std::fs::write(&appimage, b"\x7fELF\x02\x01\x01\x00AI\x02").unwrap();
+        std::fs::set_permissions(&appimage, std::fs::Permissions::from_mode(0o700)).unwrap();
+
+        let writable = super::linux_install_context(Some(appimage.as_os_str()));
+        assert!(writable.updatable);
+        assert_eq!(writable.reason, None);
+
+        std::fs::set_permissions(&appimage, std::fs::Permissions::from_mode(0o500)).unwrap();
+        let read_only_file = super::linux_install_context(Some(appimage.as_os_str()));
+        assert!(!read_only_file.updatable);
+        assert_eq!(read_only_file.reason, Some("readOnlyVolume"));
+
+        std::fs::set_permissions(&appimage, std::fs::Permissions::from_mode(0o700)).unwrap();
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o500)).unwrap();
+        let read_only_parent = super::linux_install_context(Some(appimage.as_os_str()));
+        assert!(!read_only_parent.updatable);
+        assert_eq!(read_only_parent.reason, Some("readOnlyVolume"));
+
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     // Issue #77 — the exact path shape Gatekeeper produced for the .dmg-run

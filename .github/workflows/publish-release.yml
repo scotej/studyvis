@@ -1,0 +1,631 @@
+name: Publish verified release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Draft tag to publish (vX.Y.Z or vX.Y.Z-prerelease)'
+        required: true
+        type: string
+      linux_appimage_sha256:
+        description: 'Lowercase SHA-256 recorded while physically testing the exact draft AppImage'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+# Publishing immediately exposes an update to clients and must be treated as
+# irreversible. Use release.yml's exact per-tag group so publishing queues
+# behind an in-progress build/verifier, and queue repeated attempts rather than
+# cancelling or racing them. Repository administrators must separately protect
+# `v*` tags, restrict the ruleset's bypass actors as documented below, and
+# enable immutable releases before production use.
+concurrency:
+  group: release-${{ inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  # Do not put this check only inside the environment-bound `publish` job:
+  # merely referencing a missing environment can auto-create it without
+  # protections. This read-only prerequisite detects either an absent or an
+  # auto-created-but-unprotected environment before `publish` can start.
+  publication-controls:
+    name: Verify publication controls
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read # required by GitHub's read-environment REST endpoint
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Require protected release environment and protected release tags
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if ! environment=$(gh api \
+            -H 'X-GitHub-Api-Version: 2026-03-10' \
+            "repos/${{ github.repository }}/environments/release"); then
+            echo "::error::The release environment is absent or unreadable. Create it with at least one required reviewer before publishing."
+            exit 1
+          fi
+          if ! jq -e '
+            .name == "release" and
+            any(.protection_rules[]?;
+              .type == "required_reviewers" and
+              (.reviewers | type == "array" and length > 0)
+            )
+          ' <<< "$environment" >/dev/null; then
+            echo "::error::The release environment must have at least one required reviewer."
+            exit 1
+          fi
+
+          if ! summaries=$(gh api --paginate \
+            -H 'X-GitHub-Api-Version: 2026-03-10' \
+            "repos/${{ github.repository }}/rulesets?targets=tag&includes_parents=true&per_page=100"); then
+            echo "::error::Could not read repository tag rulesets; refusing to publish."
+            exit 1
+          fi
+          rulesets='[]'
+          while IFS= read -r id; do
+            if ! ruleset=$(gh api \
+              -H 'X-GitHub-Api-Version: 2026-03-10' \
+              "repos/${{ github.repository }}/rulesets/$id?includes_parents=true"); then
+              echo "::error::Could not inspect tag ruleset $id; refusing to publish."
+              exit 1
+            fi
+            rulesets=$(jq -c --argjson ruleset "$ruleset" '. + [$ruleset]' \
+              <<< "$rulesets")
+          done < <(jq -r '.[] | select(.target == "tag" and .enforcement == "active") | .id' \
+            <<< "$summaries")
+
+          # GitHub ruleset include patterns use fnmatch. Requiring the canonical
+          # refs/tags/v* scope with no exclusions avoids pretending that an
+          # unrelated or partially exempted tag ruleset protects every release.
+          # Creation, update, and deletion restrictions limit all three lifecycle
+          # operations to the ruleset's bypass actors. GitHub omits bypass_actors
+          # unless the caller can write the ruleset; this least-privilege token
+          # therefore cannot prove that the actor list itself is narrow.
+          if ! jq -e '
+            any(.[];
+              .target == "tag" and
+              .enforcement == "active" and
+              (.conditions.ref_name.include | index("refs/tags/v*") != null) and
+              (.conditions.ref_name.exclude | length == 0) and
+              ([.rules[].type] as $types |
+                ($types | index("creation") != null) and
+                ($types | index("update") != null) and
+                ($types | index("deletion") != null)
+              )
+            )
+          ' <<< "$rulesets" >/dev/null; then
+            echo "::error::An active refs/tags/v* ruleset with no exclusions and restrictions on creation, update, and deletion is required. This read-only check cannot inspect its bypass actors."
+            exit 1
+          fi
+
+          echo "::notice::Manually verify the tag ruleset's sole Always-bypass entry is RepositoryRole 5 (admin), used by the owner-scoped RELEASE_PAT; do not grant Write, Maintain, team, or integration bypass. GitHub hides bypass_actors from this read-only token."
+          echo "Release environment approval plus v* tag scope and lifecycle restrictions are verified."
+
+  publish:
+    name: Revalidate and publish ${{ inputs.tag }}
+    needs: publication-controls
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    permissions:
+      contents: write
+      actions: read
+      attestations: read
+    # External prerequisites in repository settings: configure required
+    # reviewers on this environment; give the v* tag ruleset only one Always
+    # bypass entry, RepositoryRole 5 (admin), for the owner RELEASE_PAT; and
+    # enable immutable releases. The environment approval happens before this
+    # job receives its write-scoped token. This workflow verifies tag scope and
+    # rule types, but GitHub hides bypass actors from its read-only API token.
+    environment:
+      name: release
+      url: ${{ github.server_url }}/${{ github.repository }}/releases
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      TAG: ${{ inputs.tag }}
+      EXPECTED_LINUX_APPIMAGE_SHA256: ${{ inputs.linux_appimage_sha256 }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Assert the remote tag is an origin/main release commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]]; then
+            echo "::error::tag '$TAG' is not vX.Y.Z (optionally -prerelease)"
+            exit 1
+          fi
+          if [[ ! "$EXPECTED_LINUX_APPIMAGE_SHA256" =~ ^[0-9a-f]{64}$ ]]; then
+            echo "::error::linux_appimage_sha256 must be the lowercase 64-hex digest recorded from the physically tested draft AppImage"
+            exit 1
+          fi
+          git fetch --no-tags origin \
+            +refs/heads/main:refs/remotes/origin/main
+          git fetch --force origin "refs/tags/$TAG:refs/tags/$TAG"
+          sha=$(git rev-parse "$TAG^{commit}")
+          if ! git merge-base --is-ancestor "$sha" refs/remotes/origin/main; then
+            echo "::error::Draft tag $TAG points at $sha, which is not on origin/main."
+            exit 1
+          fi
+          echo "RELEASE_SHA=$sha" >> "$GITHUB_ENV"
+          echo "Publishing candidate $TAG is origin/main commit $sha."
+
+      - name: Revalidate draft, notes, updater manifest, assets, and CI
+        shell: bash
+        run: |
+          set -euo pipefail
+          metadata=$(gh release view "$TAG" \
+            --json tagName,name,isDraft,isPrerelease,targetCommitish,body,assets)
+
+          if ! jq -e --arg tag "$TAG" --arg sha "$RELEASE_SHA" '
+            .tagName == $tag and
+            .targetCommitish == $sha and
+            .name == ("StudyVis " + $tag) and
+            .isDraft == true and
+            (.body | type == "string" and length > 0) and
+            (.body | contains("Linux x86_64"))
+          ' <<< "$metadata" >/dev/null; then
+            echo "::error::Release must be the exact draft '$TAG' for commit $RELEASE_SHA, have its clean title, and include Linux x86_64 release notes."
+            exit 1
+          fi
+
+          tag_sha=$RELEASE_SHA
+          response=$(gh api \
+            "repos/${{ github.repository }}/actions/workflows/ci.yml/runs?branch=main&event=push&head_sha=$tag_sha&per_page=10")
+          ci=$(jq -r --arg sha "$tag_sha" '
+            [.workflow_runs[] | select(.head_sha == $sha)]
+            | sort_by(.run_number) | last
+            | if . == null then "none" else "\(.status):\(.conclusion // "")" end
+          ' <<< "$response")
+          if [ "$ci" != "completed:success" ]; then
+            echo "::error::Exact tag commit $tag_sha no longer has a successful main-push CI run (got '$ci')."
+            exit 1
+          fi
+
+          release_response=$(gh api \
+            "repos/${{ github.repository }}/actions/workflows/release.yml/runs?head_sha=$tag_sha&per_page=20")
+          release_run=$(jq -c --arg sha "$tag_sha" --arg tag "$TAG" '
+            [.workflow_runs[] |
+              select(.head_sha == $sha and .head_branch == $tag)]
+            | sort_by(.run_number) | last
+          ' <<< "$release_response")
+          release_state=$(jq -r '
+            if . == null then "none" else "\(.status):\(.conclusion // "")" end
+          ' <<< "$release_run")
+          release_run_id=$(jq -r 'if . == null then "" else (.id | tostring) end' \
+            <<< "$release_run")
+          if [ "$release_state" != "completed:success" ] || \
+             [[ ! "$release_run_id" =~ ^[1-9][0-9]*$ ]]; then
+            echo "::error::The latest Release workflow for exact tag $TAG at $tag_sha did not complete successfully (got '$release_state'). Its exact Linux AppImage smoke must pass before publishing."
+            exit 1
+          fi
+          export RELEASE_RUN_ID="$release_run_id"
+          echo "RELEASE_RUN_ID=$RELEASE_RUN_ID" >> "$GITHUB_ENV"
+
+          artifact_dir=$(mktemp -d "${RUNNER_TEMP}/studyvis-publish-assets.XXXXXX")
+
+          # Resolve an asset by its immutable API URL from this exact metadata
+          # snapshot. This avoids glob matching and makes every subsequent
+          # digest/provenance check operate on the precise draft asset that
+          # latest.json names.
+          asset_api_url() {
+            local name=$1
+            jq -er \
+              --arg name "$name" \
+              --arg prefix "${GITHUB_API_URL}/repos/${{ github.repository }}/releases/assets/" '
+              [.assets[] | select(.name == $name)] |
+              if length == 1 and (.[0].apiUrl | startswith($prefix))
+              then .[0].apiUrl
+              else error("asset name is absent, duplicated, or outside this repository")
+              end
+            ' <<< "$metadata"
+          }
+
+          download_exact_asset() {
+            local name=$1
+            local destination api_url temporary downloaded
+            if [[ "$name" == "." || "$name" == ".." ||
+                  ! "$name" =~ ^[[:alnum:]_.+-]+$ ]]; then
+              echo "::error::Unsafe or unsupported release asset name '$name'."
+              return 1
+            fi
+            destination="$artifact_dir/$name"
+            api_url=$(asset_api_url "$name") || return 1
+            downloaded=false
+            for attempt in 1 2 3; do
+              temporary=$(mktemp "${destination}.partial.XXXXXX")
+              if gh api --method GET \
+                -H 'Accept: application/octet-stream' \
+                "$api_url" > "$temporary" && [ -s "$temporary" ]; then
+                mv -- "$temporary" "$destination"
+                downloaded=true
+                break
+              fi
+              rm -f -- "$temporary"
+              echo "Exact asset '$name' download attempt $attempt failed; retrying..."
+              sleep 5
+            done
+            if [ "$downloaded" != true ]; then
+              echo "::error::Could not download exact draft asset '$name' after three attempts."
+              return 1
+            fi
+          }
+
+          download_exact_asset latest.json
+          manifest="$artifact_dir/latest.json"
+
+          # tauri-action writes GitHub's authenticated API asset URL into
+          # latest.json; `gh release view` exposes that value as `apiUrl`.
+          # Bind each updater URL to the filename it actually names, not merely
+          # to some asset on this draft. Otherwise a swapped platform URL could
+          # satisfy the membership check while delivering the wrong installer.
+          asset_names=$(jq -c '
+            [.assets[] | {key: .apiUrl, value: .name}] | from_entries
+          ' <<< "$metadata")
+          names=$(jq -c '[.assets[].name]' <<< "$metadata")
+          version=${TAG#v}
+          source_bundle="StudyVis_${version}_linux-webkit-sources.tar.gz"
+          source_checksum="${source_bundle}.sha256"
+          system_bundle="StudyVis_${version}_linux-system-sources.tar.gz"
+          system_checksum="${system_bundle}.sha256"
+          if ! jq -e --arg version "$version" \
+            --argjson asset_names "$asset_names" --argjson names "$names" '
+            (.version == $version) and
+            (.notes | type == "string" and length > 0) and
+            (.pub_date | type == "string" and length > 0) and
+            (.platforms | type == "object") and
+            (.platforms as $p |
+              all(["darwin-aarch64", "windows-x86_64", "linux-x86_64"][];
+                . as $key |
+                ($p[$key] | type == "object") and
+                ($p[$key].signature | type == "string" and length > 0) and
+                ($p[$key].url | type == "string" and length > 0) and
+                ($asset_names[$p[$key].url] | type == "string")
+              ) and
+              (try ($asset_names[$p["darwin-aarch64"].url] | endswith(".app.tar.gz")) catch false) and
+              (try ($asset_names[$p["windows-x86_64"].url] | endswith("-setup.exe")) catch false) and
+              (try ($asset_names[$p["linux-x86_64"].url] | endswith(".AppImage")) catch false) and
+              all(["darwin-aarch64", "windows-x86_64", "linux-x86_64"][];
+                . as $key |
+                ($names | index($asset_names[$p[$key].url] + ".sig") != null)
+              ) and
+              ($p["darwin-aarch64-app"] == $p["darwin-aarch64"]) and
+              ($p["windows-x86_64-nsis"] == $p["windows-x86_64"]) and
+              ($p["linux-x86_64-appimage"] == $p["linux-x86_64"])
+            )
+          ' "$manifest" >/dev/null; then
+            echo "::error::latest.json is invalid, incomplete, lacks matching base/new keys or signature assets, or maps a platform to the wrong asset type; refusing to publish."
+            exit 1
+          fi
+
+          if ! jq -e \
+            --arg source_bundle "$source_bundle" \
+            --arg source_checksum "$source_checksum" \
+            --arg system_bundle "$system_bundle" \
+            --arg system_checksum "$system_checksum" '
+            any(.[]; . == "latest.json") and
+            ([.[] | select(endswith(".dmg"))] | length == 1) and
+            any(.[]; endswith("-setup.exe")) and
+            any(.[]; endswith(".AppImage")) and
+            any(.[]; . == $source_bundle) and
+            any(.[]; . == $source_checksum) and
+            any(.[]; . == $system_bundle) and
+            any(.[]; . == $system_checksum)
+          ' <<< "$names" >/dev/null; then
+            echo "::error::Draft needs latest.json, DMG, NSIS setup EXE, AppImage, both Linux source bundles, and both checksum sidecars. Assets: $names"
+            exit 1
+          fi
+
+          dmg_name=$(jq -er '
+            [.assets[].name | select(endswith(".dmg"))] |
+            if length == 1 then .[0] else error("expected exactly one DMG") end
+          ' <<< "$metadata")
+          mac_updater=$(jq -er --argjson asset_names "$asset_names" '
+            $asset_names[.platforms["darwin-aarch64"].url]
+          ' "$manifest")
+          windows_updater=$(jq -er --argjson asset_names "$asset_names" '
+            $asset_names[.platforms["windows-x86_64"].url]
+          ' "$manifest")
+          linux_updater=$(jq -er --argjson asset_names "$asset_names" '
+            $asset_names[.platforms["linux-x86_64"].url]
+          ' "$manifest")
+
+          artifact_names=(
+            "$dmg_name"
+            "$mac_updater" "${mac_updater}.sig"
+            "$windows_updater" "${windows_updater}.sig"
+            "$linux_updater" "${linux_updater}.sig"
+            "$source_bundle" "$source_checksum"
+            "$system_bundle" "$system_checksum"
+            latest.json
+          )
+          unique_count=$(printf '%s\n' "${artifact_names[@]}" | sort -u | wc -l)
+          if [ "$unique_count" -ne "${#artifact_names[@]}" ]; then
+            echo "::error::Draft asset roles must resolve to distinct filenames."
+            exit 1
+          fi
+          expected_names=$(printf '%s\n' "${artifact_names[@]}" | jq -R . | jq -sc sort)
+          actual_names=$(jq -cS sort <<< "$names")
+          if [ "$actual_names" != "$expected_names" ]; then
+            echo "::error::Draft assets must be exactly the 12 approved files: DMG, three manifest-selected updaters and sidecars, latest.json, and two Linux source/checksum pairs. Expected: $expected_names; got: $actual_names"
+            exit 1
+          fi
+          for name in "${artifact_names[@]}"; do
+            if [ "$name" != latest.json ]; then
+              download_exact_asset "$name"
+            fi
+          done
+
+          assert_sidecar_matches_manifest() {
+            local key=$1
+            local updater=$2
+            local expected_signature="$artifact_dir/${key}.expected.sig"
+            jq -je --arg key "$key" '.platforms[$key].signature' \
+              "$manifest" > "$expected_signature"
+            if ! cmp -s -- "$artifact_dir/${updater}.sig" "$expected_signature"; then
+              echo "::error::${updater}.sig does not exactly match latest.json's $key signature."
+              return 1
+            fi
+          }
+          assert_sidecar_matches_manifest darwin-aarch64 "$mac_updater"
+          assert_sidecar_matches_manifest windows-x86_64 "$windows_updater"
+          assert_sidecar_matches_manifest linux-x86_64 "$linux_updater"
+
+          linux_appimage_sha256=$(sha256sum "$artifact_dir/$linux_updater" | cut -d' ' -f1)
+          if [ "$linux_appimage_sha256" != "$EXPECTED_LINUX_APPIMAGE_SHA256" ]; then
+            echo "::error::The exact draft AppImage is $linux_appimage_sha256, not the physically tested $EXPECTED_LINUX_APPIMAGE_SHA256."
+            exit 1
+          fi
+
+          for pair in \
+            "$source_bundle:$source_checksum" \
+            "$system_bundle:$system_checksum"; do
+            bundle=${pair%%:*}
+            checksum=${pair#*:}
+            expected_checksum_file="$artifact_dir/${checksum}.expected"
+            (
+              cd "$artifact_dir"
+              sha256sum "$bundle"
+            ) > "$expected_checksum_file"
+            if ! cmp -s -- \
+              "$artifact_dir/$checksum" "$expected_checksum_file"; then
+              echo "::error::$checksum must contain exactly the source-bundle SHA256 and basename for $bundle."
+              exit 1
+            fi
+            (
+              cd "$artifact_dir"
+              sha256sum --check --strict "$checksum"
+            )
+          done
+
+          # Attestations can take a few seconds to become queryable after the
+          # release workflow finishes. Retry only that propagation window, and
+          # otherwise fail closed on signer, source, runner, or digest mismatch.
+          verify_release_attestation() {
+            local name=$1
+            local verification_json run_prefix
+            run_prefix="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${RELEASE_RUN_ID}/attempts/"
+            for attempt in 1 2 3 4 5; do
+              if verification_json=$(gh attestation verify "$artifact_dir/$name" \
+                --repo "${{ github.repository }}" \
+                --signer-workflow "${{ github.repository }}/.github/workflows/release.yml" \
+                --signer-digest "$RELEASE_SHA" \
+                --source-ref "refs/tags/$TAG" \
+                --source-digest "$RELEASE_SHA" \
+                --deny-self-hosted-runners \
+                --format json); then
+                if jq -e --arg prefix "$run_prefix" '
+                  type == "array" and
+                  any(.[];
+                    .verificationResult.signature.certificate.runInvocationURI as $uri |
+                    ($uri | type == "string") and
+                    ($uri | startswith($prefix)) and
+                    ($uri[($prefix | length):] | test("^[1-9][0-9]*$"))
+                  )
+                ' <<< "$verification_json" >/dev/null; then
+                  return 0
+                fi
+              fi
+              echo "Attestation for '$name' not yet verifiable (attempt $attempt/5)."
+              if [ "$attempt" -lt 5 ]; then
+                sleep 10
+              fi
+            done
+            echo "::error::No valid release.yml attestation binds '$name' to $TAG at $RELEASE_SHA and selected run $RELEASE_RUN_ID on a GitHub-hosted runner."
+            return 1
+          }
+          for name in "${artifact_names[@]}"; do
+            verify_release_attestation "$name"
+          done
+
+          snapshot_metadata=$(jq -cS '
+            {
+              tagName,
+              name,
+              isDraft,
+              isPrerelease,
+              targetCommitish,
+              body,
+              assets: ([.assets[] | {apiUrl, name}] | sort_by(.apiUrl, .name))
+            }
+          ' <<< "$metadata")
+          snapshot_manifest=$(jq -cS . "$manifest")
+          snapshot=$(
+            printf '%s\n%s\n%s\n%s\n' \
+              "$snapshot_metadata" "$snapshot_manifest" \
+              "$EXPECTED_LINUX_APPIMAGE_SHA256" "$RELEASE_RUN_ID" \
+              | sha256sum | cut -d' ' -f1
+          )
+          echo "RELEASE_SNAPSHOT=$snapshot" >> "$GITHUB_ENV"
+          echo "Draft metadata, 12 exact assets attested by release run $RELEASE_RUN_ID, updater sidecars, physically tested AppImage digest, and both checksummed Linux source bundles all verified."
+
+      - name: Publish the revalidated draft
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin \
+            +refs/heads/main:refs/remotes/origin/main
+          git fetch --force origin "refs/tags/$TAG:refs/tags/$TAG"
+          current_sha=$(git rev-parse "$TAG^{commit}")
+          if [ "$current_sha" != "$RELEASE_SHA" ]; then
+            echo "::error::Remote tag moved from approved commit $RELEASE_SHA to $current_sha; refusing to publish."
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor "$current_sha" refs/remotes/origin/main; then
+            echo "::error::Approved tag commit $current_sha is no longer on origin/main; refusing to publish."
+            exit 1
+          fi
+
+          response=$(gh api \
+            "repos/${{ github.repository }}/actions/workflows/ci.yml/runs?branch=main&event=push&head_sha=$current_sha&per_page=10")
+          ci=$(jq -r --arg sha "$current_sha" '
+            [.workflow_runs[] | select(.head_sha == $sha)]
+            | sort_by(.run_number) | last
+            | if . == null then "none" else "\(.status):\(.conclusion // "")" end
+          ' <<< "$response")
+          if [ "$ci" != "completed:success" ]; then
+            echo "::error::Exact tag commit $current_sha no longer has a successful main-push CI run (got '$ci')."
+            exit 1
+          fi
+
+          release_response=$(gh api \
+            "repos/${{ github.repository }}/actions/workflows/release.yml/runs?head_sha=$current_sha&per_page=20")
+          release_run=$(jq -c --arg sha "$current_sha" --arg tag "$TAG" '
+            [.workflow_runs[] |
+              select(.head_sha == $sha and .head_branch == $tag)]
+            | sort_by(.run_number) | last
+          ' <<< "$release_response")
+          release_state=$(jq -r '
+            if . == null then "none" else "\(.status):\(.conclusion // "")" end
+          ' <<< "$release_run")
+          release_run_id=$(jq -r 'if . == null then "" else (.id | tostring) end' \
+            <<< "$release_run")
+          if [ "$release_state" != "completed:success" ] || \
+             [ "$release_run_id" != "$RELEASE_RUN_ID" ]; then
+            echo "::error::Selected Release workflow run $RELEASE_RUN_ID for exact tag $TAG at $current_sha is no longer the latest successful run (latest ID '$release_run_id', state '$release_state')."
+            exit 1
+          fi
+
+          metadata=$(gh release view "$TAG" \
+            --json tagName,name,isDraft,isPrerelease,targetCommitish,body,assets)
+
+          final_asset_dir=$(mktemp -d "${RUNNER_TEMP}/studyvis-publish-final.XXXXXX")
+
+          asset_api_url() {
+            local name=$1
+            jq -er \
+              --arg name "$name" \
+              --arg prefix "${GITHUB_API_URL}/repos/${{ github.repository }}/releases/assets/" '
+              [.assets[] | select(.name == $name)] |
+              if length == 1 and (.[0].apiUrl | startswith($prefix))
+              then .[0].apiUrl
+              else error("asset name is absent, duplicated, or outside this repository")
+              end
+            ' <<< "$metadata"
+          }
+
+          download_final_asset() {
+            local name=$1
+            local destination api_url temporary downloaded
+            if [[ "$name" == "." || "$name" == ".." ||
+                  ! "$name" =~ ^[[:alnum:]_.+-]+$ ]]; then
+              echo "::error::Unsafe or unsupported release asset name '$name'."
+              return 1
+            fi
+            destination="$final_asset_dir/$name"
+            api_url=$(asset_api_url "$name") || return 1
+            downloaded=false
+            for attempt in 1 2 3; do
+              temporary=$(mktemp "${destination}.partial.XXXXXX")
+              if gh api --method GET \
+                -H 'Accept: application/octet-stream' \
+                "$api_url" > "$temporary" && [ -s "$temporary" ]; then
+                mv -- "$temporary" "$destination"
+                downloaded=true
+                break
+              fi
+              rm -f -- "$temporary"
+              echo "Final exact asset '$name' download attempt $attempt failed; retrying..."
+              sleep 5
+            done
+            if [ "$downloaded" != true ]; then
+              echo "::error::Could not re-download exact draft asset '$name' immediately before publish."
+              return 1
+            fi
+          }
+
+          download_final_asset latest.json
+          manifest="$final_asset_dir/latest.json"
+
+          snapshot_metadata=$(jq -cS '
+            {
+              tagName,
+              name,
+              isDraft,
+              isPrerelease,
+              targetCommitish,
+              body,
+              assets: ([.assets[] | {apiUrl, name}] | sort_by(.apiUrl, .name))
+            }
+          ' <<< "$metadata")
+          snapshot_manifest=$(jq -cS . "$manifest")
+          current_snapshot=$(
+            printf '%s\n%s\n%s\n%s\n' \
+              "$snapshot_metadata" "$snapshot_manifest" \
+              "$EXPECTED_LINUX_APPIMAGE_SHA256" "$RELEASE_RUN_ID" \
+              | sha256sum | cut -d' ' -f1
+          )
+          if [ "$current_snapshot" != "$RELEASE_SNAPSHOT" ]; then
+            echo "::error::Draft metadata, assets, or latest.json changed after validation; refusing to publish."
+            exit 1
+          fi
+
+          expected_prerelease=false
+          if [[ "$TAG" == *-* ]]; then
+            expected_prerelease=true
+          fi
+          actual_prerelease=$(jq -r '.isPrerelease' <<< "$metadata")
+          if [ "$actual_prerelease" != "$expected_prerelease" ]; then
+            echo "::error::Draft prerelease state '$actual_prerelease' does not match tag '$TAG'."
+            exit 1
+          fi
+
+          asset_names=$(jq -c '
+            [.assets[] | {key: .apiUrl, value: .name}] | from_entries
+          ' <<< "$metadata")
+          linux_updater=$(jq -er --argjson asset_names "$asset_names" '
+            $asset_names[.platforms["linux-x86_64"].url]
+          ' "$manifest")
+          if [[ ! "$linux_updater" =~ \.AppImage$ ]]; then
+            echo "::error::Final latest.json no longer resolves linux-x86_64 to an AppImage."
+            exit 1
+          fi
+          download_final_asset "$linux_updater"
+          final_linux_sha256=$(sha256sum "$final_asset_dir/$linux_updater" | cut -d' ' -f1)
+          if [ "$final_linux_sha256" != "$EXPECTED_LINUX_APPIMAGE_SHA256" ]; then
+            echo "::error::Immediately before publish, the exact draft AppImage is $final_linux_sha256, not the physically tested $EXPECTED_LINUX_APPIMAGE_SHA256."
+            exit 1
+          fi
+
+          if [ "$expected_prerelease" = true ]; then
+            gh release edit "$TAG" --draft=false
+          else
+            gh release edit "$TAG" --draft=false --latest
+          fi
+
+          if ! gh release view "$TAG" --json isDraft \
+            --jq '.isDraft == false' | grep -qx true; then
+            echo "::error::GitHub did not report '$TAG' as published."
+            exit 1
+          fi
+          echo "Published $TAG through the release environment." \
+            | tee -a "$GITHUB_STEP_SUMMARY"

@@ -173,8 +173,9 @@ export const ModelPickerContainer = forwardRef<
     }
   }, [updateCard])
 
-  // Probe HF-token presence once. The keychain commands aren't wired on
-  // Linux (Linux is V3+); a thrown invoke is treated as "no token".
+  // Probe HF-token presence once. A thrown invoke (Storybook, a locked
+  // keychain/Secret Service, or an unavailable native runtime) is treated as
+  // "no token" here; the save path surfaces the actionable native error.
   useEffect(() => {
     let cancelled = false
     void (async () => {

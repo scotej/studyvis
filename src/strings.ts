@@ -125,7 +125,7 @@ export const strings = {
         },
         microphone: {
           title: 'Microphone',
-          description: 'Stays muted until you hold the talk key.',
+          description: 'Stays muted until you hold the talk key or button.',
         },
         notifications: {
           title: 'Notifications',
@@ -155,7 +155,8 @@ export const strings = {
         talk: {
           title: 'Talk when you mean to',
           bodyBeforeKbd: "You're muted by default. Hold ",
-          bodyAfterKbd: ' to talk; let go to mute.',
+          bodyAfterKbd:
+            ' to talk; let go to mute. On Wayland, use the in-session Hold to talk button instead.',
         },
         leave: {
           title: 'Leave any time',
@@ -174,6 +175,8 @@ export const strings = {
   },
 
   identity: {
+    secretServiceError:
+      'Unlock your Linux keyring, then try again. StudyVis needs gnome-keyring, KWallet, KeePassXC, or another Secret Service provider to protect your identity keys.',
     setup: {
       ariaLabel: 'Save your recovery phrase',
       heading: 'Save these 24 words somewhere safe',
@@ -281,6 +284,17 @@ export const strings = {
         'Restoring from your 24-word backup brings back the exact same identity — your friends and history stay intact.',
       retryCta: 'Check again',
       recoverCta: 'Restore from backup',
+    },
+    // identity.json parsed, but the OS credential store rejected the probe.
+    // This is deliberately separate from keysMissing: a locked provider does
+    // not prove the keys are gone, and offering recovery could overwrite them.
+    keychainUnavailable: {
+      ariaLabel: 'Identity keychain is unavailable',
+      heading: 'Unlock your keychain to continue',
+      body: "StudyVis found your identity file, but couldn't open the protected keys in this device's credential store. Unlock it, then try again. On Linux, start or unlock gnome-keyring, KWallet, KeePassXC, or another Secret Service provider.",
+      recoverNote:
+        "StudyVis hasn't treated your keys as missing and won't overwrite them while the credential store is unavailable.",
+      retryCta: 'Try again',
     },
   },
 
@@ -514,6 +528,9 @@ export const strings = {
   session: {
     footerHoldBefore: 'Hold ',
     footerHoldAfter: ' to talk.',
+    holdToTalkCta: 'Hold to talk',
+    talkingCta: 'Talking',
+    holdToTalkAriaLabel: 'Hold to talk to everyone in the session',
     mainAriaLabel: 'Active session',
     // #96 — the grid holds shared screens as well as people now, so the label
     // can no longer say "participants" and stay true.
@@ -1352,8 +1369,15 @@ export const strings = {
       },
       pttAi: {
         label: 'Talk to AI',
-        helpOn: 'Opens the floating AI dialog over any app.',
+        helpOn:
+          'Opens the floating AI dialog globally on macOS, Windows, and X11. Wayland may require the button below.',
         helpOff: 'Active when AI features are on.',
+        fallbackLabel: 'Wayland fallback',
+        fallbackHelp:
+          'Use this when the global shortcut cannot fire over a native Wayland app.',
+        fallbackCta: 'Open AI dialog',
+        fallbackError: (message: string) =>
+          `Couldn't open the AI dialog: ${message}`,
       },
       reset: {
         label: 'Reset to defaults',
@@ -2002,7 +2026,7 @@ export const strings = {
         'macOS may ask you to quit and reopen StudyVis. Do that, then come back and click **Try again**.',
       ] as const,
       stepsOther: [
-        'When the screen-share picker appears, choose your primary display.',
+        'When the screen-share picker appears, choose the display or window you want the AI to inspect.',
         'Click **Share** to allow the on-device AI to read the frame.',
         'If the prompt was dismissed, click **Try again** below.',
       ] as const,
@@ -2088,13 +2112,11 @@ export const strings = {
       dismissAriaLabel: 'Dismiss until next launch',
       notesCta: 'Release notes',
       installing: 'Installing…',
-      // Issue #77 — the app is running somewhere it can't swap its own
-      // bundle (macOS: opened straight from the mounted .dmg). No Restart
-      // button to offer; the instruction *is* the action.
-      blockedAriaLabel: 'Update available — a move to Applications is needed',
+      // Issue #77 — the app is running somewhere it can't swap its own bundle.
+      blockedAriaLabel: 'Update available — a writable install is needed',
       blockedTitle: (version: string) => `StudyVis ${version} is available`,
       blockedBody:
-        "StudyVis can't update itself from where it's running — usually the installer disk image. Quit StudyVis, drag it into Applications (replacing any old copy), and open it from there. Updates take care of themselves after that.",
+        "StudyVis can't update itself from where it's running. Download the current installer; on macOS, move StudyVis into Applications, or on Linux, keep the AppImage in a writable folder such as ~/Applications. Open that installed copy and updates take care of themselves after that.",
       blockedDismissCta: 'Got it',
       blockedDismissAriaLabel: 'Dismiss until next launch',
     },
@@ -2106,7 +2128,7 @@ export const strings = {
         `Version ${version} is downloaded and waiting. Restart to finish.`,
       blockedLabel: 'Update available',
       blockedHelp: (version: string) =>
-        `Version ${version} is out, but StudyVis can't update itself from where it's running — usually the installer disk image. Quit, drag StudyVis into Applications, and open it from there.`,
+        `Version ${version} is out, but StudyVis can't update itself from where it's running. Download the current installer; use Applications on macOS or a writable AppImage folder on Linux.`,
       downloadingLabel: 'Downloading update',
       downloadingHelp: (version: string, percent: number) =>
         `Version ${version} — ${percent}%`,

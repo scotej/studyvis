@@ -4,10 +4,15 @@ on:
   push:
     tags:
       - 'v*.*.*'
-  # release-prep pushes the tag with GITHUB_TOKEN, which can't fire the push
-  # trigger above (GitHub's recursive-workflow guard), so it dispatches this
-  # workflow on the tag ref instead — which requires this trigger to exist.
+  # Retained for an intentional re-run on an existing tag.
   workflow_dispatch:
+
+# Never cancel a release for a tag, and never allow two attempts for the same
+# version tag to race while mutating its draft and latest.json. Repository
+# settings must separately protect `v*` tags and enable immutable releases.
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: false
 
 # See ci.yml's pinning note: third-party actions are SHA-pinned because this
 # workflow mints the unsigned installers friends manually install. The publish
@@ -26,14 +31,18 @@ jobs:
   #     Releases page IS the update channel friends read to decide whether
   #     to re-install, and the old static body had zero actual notes.
   preflight:
-    name: Tag / version / changelog preflight
+    name: Tag / main / CI / version preflight
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 130
+    permissions:
+      contents: read
+      actions: read
     outputs:
       release-body: ${{ steps.notes.outputs.body }}
     steps:
       - uses: actions/checkout@v7
         with:
+          fetch-depth: 0
           persist-credentials: false
 
       - name: Assert this run is on a release tag
@@ -47,6 +56,55 @@ jobs:
             echo "::error::tag '$GITHUB_REF_NAME' is not vX.Y.Z (optionally -prerelease)"
             exit 1
           fi
+
+      - name: Assert the tagged commit is on origin/main
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin \
+            +refs/heads/main:refs/remotes/origin/main
+          sha=$(git rev-parse HEAD)
+          if ! git merge-base --is-ancestor "$sha" refs/remotes/origin/main; then
+            echo "::error::Release tag $GITHUB_REF_NAME points at $sha, which is not on origin/main. Move to a new version tag after merging the commit to main."
+            exit 1
+          fi
+          echo "Tag $GITHUB_REF_NAME points at origin/main commit $sha."
+
+      - name: Wait for exact tagged commit to pass CI
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          sha=$(git rev-parse HEAD)
+          echo "Waiting for CI on exact release commit $sha"
+          for attempt in $(seq 1 240); do
+            response=$(gh api \
+              "repos/${{ github.repository }}/actions/workflows/ci.yml/runs?branch=main&event=push&head_sha=$sha&per_page=10" \
+              2>/dev/null || printf '{"workflow_runs":[]}')
+            state=$(jq -r '
+              [.workflow_runs[] | select(.head_sha == $sha)]
+              | sort_by(.run_number) | last
+              | if . == null then "none" else "\(.status):\(.conclusion // "")" end
+            ' --arg sha "$sha" <<< "$response")
+            echo "CI for ${sha}: ${state} (poll ${attempt}/240)"
+            case "$state" in
+              completed:success)
+                exit 0
+                ;;
+              completed:*)
+                echo "::error::Exact release commit $sha completed CI without success ($state). Fix forward, cut a new tag, and release that commit."
+                exit 1
+                ;;
+              none|queued:|in_progress:|requested:|waiting:|pending:)
+                sleep 30
+                ;;
+              *)
+                echo "::error::Unexpected CI state '$state' for exact release commit $sha"
+                exit 1
+                ;;
+            esac
+          done
+          echo "::error::Timed out waiting for CI success on exact release commit $sha"
+          exit 1
 
       - name: Assert the tag matches all five version files
         run: bash scripts/check-version-lockstep.sh "${GITHUB_REF_NAME#v}"
@@ -79,14 +137,15 @@ jobs:
           # markdown rather than being run as a command.
           # shellcheck disable=SC2016
           boiler='Friends-only release — the macOS app is ad-hoc signed (not notarized);
-          the Windows installer is unsigned. See INSTALL.md for first-run steps:
+          the Windows installer and Linux AppImage are unsigned. See INSTALL.md for first-run steps:
           macOS users right-click the app and choose Open the first time;
-          Windows users click "More info" → "Run anyway" on the SmartScreen warning.
+          Windows users click "More info" → "Run anyway" on the SmartScreen warning;
+          Linux x86_64 users download the AppImage, make it executable, and run it
+          (CachyOS/Arch users may need the `fuse2` package).
 
-          If you are already on StudyVis 1.5.0 or newer, you do not need to download
-          anything — the app picks this up on its own and offers to restart into it.
-          Auto-update reads `latest.json` from the LATEST published release, so this
-          draft has to be published before anyone receives it.'
+          Auto-update reads `latest.json` from the LATEST published full release.
+          Once a clean vX.Y.Z draft is published, StudyVis 1.5.0+ installs pick it
+          up and offer to restart; prerelease candidates remain manual downloads.'
           {
             echo "body<<CHANGELOG_SECTION_EOF"
             printf '%s\n\n---\n\n%s\n' "$section" "$boiler"
@@ -98,9 +157,12 @@ jobs:
     needs: preflight
     permissions:
       contents: write
+      id-token: write
+      attestations: write
+      artifact-metadata: write
     strategy:
       fail-fast: false
-      # X6 — serialized deliberately. Both jobs append their platform's entry
+      # X6 — serialized deliberately. All jobs append their platform's entry
       # to the SAME `latest.json` on the release, and tauri-action does that
       # as a read-merge-write with no locking: run in parallel and the slower
       # job can overwrite the faster one's entry, silently stranding a whole
@@ -116,6 +178,7 @@ jobs:
           # separately matches what the codebase + fetch script support.
           - label: macOS (Apple Silicon)
             platform: macos-latest
+            timeout: 90
             rust-targets: aarch64-apple-darwin
             args: --target aarch64-apple-darwin --bundles app,dmg
             llama-triples: aarch64-apple-darwin
@@ -127,11 +190,18 @@ jobs:
           # update applies with a progress bar and no interaction.
           - label: Windows
             platform: windows-latest
+            timeout: 90
             rust-targets: ''
             args: --bundles nsis
             llama-triples: x86_64-pc-windows-msvc
+          - label: Linux (x86_64 AppImage)
+            platform: ubuntu-22.04
+            timeout: 360
+            rust-targets: ''
+            args: --bundles appimage
+            llama-triples: x86_64-unknown-linux-gnu
     runs-on: ${{ matrix.platform }}
-    timeout-minutes: 60
+    timeout-minutes: ${{ matrix.timeout }}
     steps:
       # This job holds `contents: write` — the highest-privilege token in the
       # repo, since it mints the installers friends auto-update from. Leaving
@@ -143,9 +213,62 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Reclaim runner disk for a cold WebKitGTK build
+        if: runner.os == 'Linux'
+        run: |
+          df -h /
+          sudo rm -rf -- \
+            /usr/local/lib/android /usr/share/dotnet /usr/local/.ghcup \
+            /usr/local/share/boost /usr/share/swift \
+            /opt/ghc /opt/hostedtoolcache/CodeQL
+          docker image prune --all --force || true
+          sudo apt-get clean
+          df -h /
+
+      - name: Install WebKitGTK build and Linux packaging dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            autoconf automake binutils=2.38-4ubuntu2.12 build-essential bison \
+            bubblewrap ca-certificates clang-14=1:14.0.0-1ubuntu1.1 cmake curl dbus-x11 \
+            desktop-file-utils file flex g++-12 gcc-11=11.4.0-1ubuntu1~22.04.3 gcc-12 gettext \
+            gperf libayatana-appindicator3-dev \
+            libcairo2-dev libdbus-1-dev libdrm-dev libegl-dev \
+            libenchant-2-dev libepoxy-dev libfontconfig-dev libfreetype-dev \
+            libfuse2 libgbm-dev libgcc-11-dev=11.4.0-1ubuntu1~22.04.3 libgcrypt20-dev libgl-dev libgles-dev libglib2.0-dev \
+            libglib2.0-dev-bin libgstreamer-plugins-bad1.0-dev \
+            libgstreamer-plugins-base1.0-dev libgstreamer1.0-dev \
+            libgtk-3-dev libgudev-1.0-dev libharfbuzz-dev libhyphen-dev \
+            libicu-dev libjpeg-dev liblcms2-dev libnice-dev libopenjp2-7-dev \
+            libpng-dev librsvg2-dev libseccomp-dev \
+            libsecret-1-dev libsoup-3.0-dev libsqlite3-dev libssl-dev \
+            libsysprof-capture-4-dev libsystemd-dev libtasn1-6-dev \
+            libwayland-dev libwebkit2gtk-4.1-dev libwebp-dev libwoff-dev \
+            libx11-dev libxcomposite-dev libxdo-dev libxml2-dev \
+            libxml2-utils libxslt1-dev libxt-dev libtool ninja-build \
+            patch patchelf perl pkg-config python3 ruby tar unifdef \
+            wayland-protocols xauth xdg-dbus-proxy xdg-utils xz-utils xvfb \
+            gstreamer1.0-plugins-bad \
+            gstreamer1.0-plugins-base gstreamer1.0-plugins-good \
+            gstreamer1.0-nice gstreamer1.0-pipewire gstreamer1.0-tools
+
+      - name: Enable authenticated Jammy source indexes
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo tee /etc/apt/sources.list.d/studyvis-deb-src.list >/dev/null <<'EOF'
+          deb-src https://archive.ubuntu.com/ubuntu jammy main restricted universe multiverse
+          deb-src https://archive.ubuntu.com/ubuntu jammy-updates main restricted universe multiverse
+          deb-src https://archive.ubuntu.com/ubuntu jammy-backports main restricted universe multiverse
+          deb-src https://security.ubuntu.com/ubuntu jammy-security main restricted universe multiverse
+          EOF
+          sudo apt-get -o Acquire::Retries=3 update
+
       - uses: actions/setup-node@v7
         with:
-          node-version: '20'
+          node-version: '24'
           cache: 'npm'
 
       - name: Install Rust toolchain
@@ -153,12 +276,49 @@ jobs:
         with:
           # With a master pin the ref no longer selects the toolchain; this
           # input does.
-          toolchain: stable
+          toolchain: '1.97.1'
           targets: ${{ matrix.rust-targets }}
 
-      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
-        with:
-          workspaces: src-tauri -> target
+      - name: Configure the pinned WebKitGTK runtime prefix
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -v PKG_CONFIG_SYSROOT_DIR ]]; then
+            echo "::error::PKG_CONFIG_SYSROOT_DIR must be unset for the mixed runtime/system dependency graph"
+            exit 1
+          fi
+          # shellcheck source=scripts/linux-webkit-runtime.env
+          source scripts/linux-webkit-runtime.env
+          export STUDYVIS_WEBKIT_RUNTIME_DIR="${RUNNER_TEMP}/studyvis-webkit-runtime"
+          export STUDYVIS_WEBKIT_BUILD_DIR="${RUNNER_TEMP}/studyvis-webkit-build"
+          runtime_dir=$(bash scripts/build-linux-webkit-runtime.sh --print-prefix)
+          runtime_pkgconfig=$(bash scripts/build-linux-webkit-runtime.sh --print-pkg-config-path)
+          runtime_lib=${runtime_pkgconfig%/pkgconfig}
+          {
+            echo "STUDYVIS_WEBKIT_RUNTIME_DIR=${runtime_dir}"
+            echo "STUDYVIS_WEBKIT_BUILD_DIR=${STUDYVIS_WEBKIT_BUILD_DIR}"
+            echo "STUDYVIS_CARGO_C_VERSION=${STUDYVIS_CARGO_C_VERSION}"
+            echo "PKG_CONFIG_PATH=${runtime_pkgconfig}${PKG_CONFIG_PATH:+:${PKG_CONFIG_PATH}}"
+            echo "LD_LIBRARY_PATH=${runtime_lib}:${GITHUB_WORKSPACE}/src-tauri/binaries/llama-runtime-x86_64-unknown-linux-gnu${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
+          } >> "$GITHUB_ENV"
+
+      - name: Install pinned cargo-c
+        if: runner.os == 'Linux'
+        run: |
+          set -euo pipefail
+          cargo install cargo-c --version "=${STUDYVIS_CARGO_C_VERSION}" --locked --force
+          cargo_c_output=$(cargo cinstall --version)
+          case "$cargo_c_output" in
+            *" ${STUDYVIS_CARGO_C_VERSION}"|*" ${STUDYVIS_CARGO_C_VERSION}+"*) ;;
+            *) echo "Unexpected cargo-c version: $cargo_c_output" >&2; exit 1 ;;
+          esac
+
+      # Tagged releases deliberately restore no compiled Rust or WebKit state.
+      # Build the pinned runtime from verified sources on this hosted runner.
+      - name: Cold-build the pinned WebKitGTK runtime
+        if: runner.os == 'Linux'
+        run: bash scripts/build-linux-webkit-runtime.sh
 
       - name: Install frontend dependencies
         run: npm ci
@@ -169,6 +329,29 @@ jobs:
           for t in ${{ matrix.llama-triples }}; do
             bash scripts/fetch-llama-server.sh --triple "$t"
           done
+
+      - name: Prepare the pinned linuxdeploy toolchain
+        if: runner.os == 'Linux'
+        shell: bash
+        env:
+          TOOL_CACHE_HOME: ${{ runner.temp }}/studyvis-tauri-cache-release
+        run: |
+          set -euo pipefail
+          bash scripts/prepare-linuxdeploy-tools.sh "$TOOL_CACHE_HOME"
+          {
+            echo "XDG_CACHE_HOME=$TOOL_CACHE_HOME"
+            echo "LDAI_RUNTIME_FILE=$TOOL_CACHE_HOME/studyvis-appimage-runtime-r1/runtime-x86_64"
+            echo "GSTREAMER_PLUGINS_DIR=$GITHUB_WORKSPACE/src-tauri/target/appimage-webkit/gstreamer-plugins"
+            echo "GSTREAMER_HELPERS_DIR=$GITHUB_WORKSPACE/src-tauri/target/appimage-webkit/gstreamer"
+          } >> "$GITHUB_ENV"
+
+      - name: Remove any pre-existing Linux release output
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          version=$(node -p "require('./package.json').version")
+          appimage="${GITHUB_WORKSPACE}/src-tauri/target/release/bundle/appimage/StudyVis_${version}_amd64.AppImage"
+          rm -f "$appimage" "${appimage}.sig"
 
       - name: Build & publish via tauri-action
         uses: tauri-apps/tauri-action@1deb371b0cd8bd54025b384f1cd735e725c4060f # v1.0.0
@@ -191,30 +374,203 @@ jobs:
           # Tags with a prerelease suffix (e.g. v1.1.0-rc.1) publish as GitHub
           # prereleases; clean vX.Y.Z tags are full releases.
           prerelease: ${{ contains(github.ref_name, '-') }}
-          # X6 — both matrix jobs write `latest.json` on the same release;
+          # X6 — all matrix jobs write `latest.json` on the same release;
           # tauri-action merges each platform's entry into the existing file
           # rather than overwriting it, so the published release ends up with
-          # both darwin-aarch64 and windows-x86_64.
-          includeUpdaterJson: true
+          # darwin-aarch64, windows-x86_64, and linux-x86_64.
+          uploadUpdaterJson: true
           args: ${{ matrix.args }}
 
-  # X6 — a human publishes the draft, and a draft can exist with only the
-  # platform whose build leg survived (the other tripped on fetch-llama-server,
-  # a clippy break, a runner timeout — fail-fast is off above). Publishing that
-  # half-built draft strands every friend on the missing platform: their
-  # updater rejects a latest.json with no matching key. Nothing else asserts
-  # the manifest is complete, so this job stamps the draft's own title — where
-  # the publish button is — when a platform key is missing, and also catches a
-  # tauri-action bump regressing the unlocked read-merge-write the design leans
-  # on. It fails hard only on a genuinely missing platform key; its own
-  # gh/transport errors stay non-blocking so a chronically-red gate never
-  # trains the one reviewer to publish past it.
+      - name: Verify notices in the exact macOS release app archive
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          bundle_root="src-tauri/target/aarch64-apple-darwin/release/bundle"
+          count=$(find "$bundle_root" -type f -name '*.app.tar.gz' -print | awk 'END { print NR + 0 }')
+          if [ "$count" -ne 1 ]; then
+            echo "::error::Expected exactly one freshly built app archive, found $count"
+            exit 1
+          fi
+          archive=$(find "$bundle_root" -type f -name '*.app.tar.gz' -print)
+          unpack=$(mktemp -d "${RUNNER_TEMP}/studyvis-app.XXXXXX")
+          trap 'rm -rf -- "$unpack"' EXIT
+          tar --extract --gzip --file "$archive" --directory "$unpack"
+          npm run check-notice-bundle -- "$unpack"
+
+      - name: Verify notices in the exact Windows release installer
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $installers = @(Get-ChildItem 'src-tauri/target/release/bundle' -Recurse -File -Filter '*-setup.exe')
+          if ($installers.Count -ne 1) {
+            throw "Expected exactly one freshly built NSIS installer, found $($installers.Count)"
+          }
+          $unpack = Join-Path $env:RUNNER_TEMP "studyvis-nsis-$([guid]::NewGuid())"
+          New-Item -ItemType Directory -Path $unpack | Out-Null
+          try {
+            & 7z x '-y' "-o$unpack" $installers[0].FullName
+            if ($LASTEXITCODE -ne 0) {
+              throw "7-Zip could not extract the exact NSIS installer (exit $LASTEXITCODE)"
+            }
+            npm run check-notice-bundle -- $unpack
+            if ($LASTEXITCODE -ne 0) {
+              throw "Bundled third-party notice verification failed (exit $LASTEXITCODE)"
+            }
+          } finally {
+            Remove-Item -Recurse -Force $unpack -ErrorAction SilentlyContinue
+          }
+
+      # CI validates its own independently built AppImage. Repeat the native
+      # runtime inspection here so the exact signed artifact already uploaded
+      # to the draft cannot differ and still reach the publish gate.
+      - name: Validate the exact Linux release AppImage
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          version=$(node -p "require('./package.json').version")
+          appimage="${GITHUB_WORKSPACE}/src-tauri/target/release/bundle/appimage/StudyVis_${version}_amd64.AppImage"
+          test -f "$appimage"
+          bash scripts/check-linux-appimage.sh "$appimage"
+
+      - name: Launch the exact Linux release AppImage under Xvfb
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=$(node -p "require('./package.json').version")
+          appimage="${GITHUB_WORKSPACE}/src-tauri/target/release/bundle/appimage/StudyVis_${version}_amd64.AppImage"
+          log="$RUNNER_TEMP/release-appimage-startup.log"
+          smoke_data=$(mktemp -d "${RUNNER_TEMP}/studyvis-release-app-data.XXXXXX")
+          export APPIMAGE="$appimage"
+          export SMOKE_DATA="$smoke_data"
+          set +e
+          # The nested Bash process intentionally expands the single-quoted variables.
+          # shellcheck disable=SC2016
+          timeout --signal=TERM --kill-after=5s 20s \
+            dbus-run-session -- bash -euo pipefail -c '
+              chmod 700 "$SMOKE_DATA"
+              export XDG_DATA_HOME="$SMOKE_DATA"
+              # The packaged AppRun must supply WebKit/Rice itself; the build
+              # prefix is deliberately unavailable to this launch.
+              exec xvfb-run -a env -u LD_LIBRARY_PATH \
+                APPIMAGE_EXTRACT_AND_RUN=1 \
+                WEBKIT_DISABLE_COMPOSITING_MODE=1 \
+                "$APPIMAGE"
+            ' >"$log" 2>&1
+          status=$?
+          set -e
+          cat "$log"
+          if [ "$status" -ne 124 ]; then
+            echo "::error::Exact release AppImage did not stay alive for the 20-second startup smoke (exit $status)"
+            exit 1
+          fi
+          runtime_log="$smoke_data/studyvis/logs/studyvis.log"
+          if ! grep -F '"scope":"runtime.webrtc","msg":"ready"' "$runtime_log"; then
+            echo "::error::Exact release AppImage did not complete a first-document WebRTC data-channel offer"
+            exit 1
+          fi
+          echo "Exact release AppImage stayed alive and attested a first-document WebRTC data-channel offer."
+
+      # Inventory the exact post-smoke AppImage, map every Ubuntu-owned byte to
+      # its exact binary/source version and copyright, and download those
+      # sources without exposing a release-write token to apt/curl or parsers.
+      - name: Build deterministic Linux system source and notice bundle
+        if: runner.os == 'Linux'
+        shell: bash
+        env:
+          GITHUB_TOKEN: ''
+          GH_TOKEN: ''
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          version=${TAG#v}
+          appimage="${GITHUB_WORKSPACE}/src-tauri/target/release/bundle/appimage/StudyVis_${version}_amd64.AppImage"
+          bundle_name="StudyVis_${version}_linux-system-sources.tar.gz"
+          bundle="${RUNNER_TEMP}/${bundle_name}"
+          checksum="${bundle}.sha256"
+          test -f "$appimage"
+          bash scripts/build-linux-system-sources.sh \
+            --appimage "$appimage" --output "$bundle"
+          (
+            cd "$RUNNER_TEMP"
+            sha256sum "$bundle_name" >"${bundle_name}.sha256"
+            sha256sum --check --strict "${bundle_name}.sha256"
+          )
+          {
+            echo "LINUX_SYSTEM_SOURCE_BUNDLE=$bundle"
+            echo "LINUX_SYSTEM_SOURCE_CHECKSUM=$checksum"
+          } >> "$GITHUB_ENV"
+
+      - name: Upload deterministic Linux system source and notice bundle
+        if: runner.os == 'Linux'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          gh release upload "$TAG" \
+            "$LINUX_SYSTEM_SOURCE_BUNDLE" "$LINUX_SYSTEM_SOURCE_CHECKSUM" \
+            --clobber
+
+      # Ship the LGPL corresponding source beside the binary it reconstructs.
+      # The helper includes the verified upstream WebKitGTK/librice archives,
+      # StudyVis patch and build inputs, and its deterministic manifest.
+      - name: Upload deterministic Linux WebKit corresponding source
+        if: runner.os == 'Linux'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          version=${TAG#v}
+          source_bundle_name="StudyVis_${version}_linux-webkit-sources.tar.gz"
+          source_bundle="${RUNNER_TEMP}/${source_bundle_name}"
+          checksum="${source_bundle}.sha256"
+
+          bash scripts/build-linux-webkit-runtime.sh \
+            --source-bundle "$source_bundle"
+          (
+            cd "$RUNNER_TEMP"
+            sha256sum "$source_bundle_name" >"${source_bundle_name}.sha256"
+            sha256sum --check --strict "${source_bundle_name}.sha256"
+          )
+          gh release upload "$TAG" "$source_bundle" "$checksum" --clobber
+
+      # Bind every downloadable file produced by this matrix leg to this exact
+      # tag, commit, hosted runner, and release workflow. The publish workflow
+      # verifies this Sigstore provenance against the downloaded draft assets,
+      # so a replacement file cannot inherit an earlier green build result.
+      - name: Attest release artifacts from this build leg
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: |
+            ${{ github.workspace }}/src-tauri/target/release/bundle/**/*.dmg
+            ${{ github.workspace }}/src-tauri/target/release/bundle/**/*.app.tar.gz
+            ${{ github.workspace }}/src-tauri/target/release/bundle/**/*.app.tar.gz.sig
+            ${{ github.workspace }}/src-tauri/target/release/bundle/**/*-setup.exe
+            ${{ github.workspace }}/src-tauri/target/release/bundle/**/*-setup.exe.sig
+            ${{ github.workspace }}/src-tauri/target/release/bundle/**/*.AppImage
+            ${{ github.workspace }}/src-tauri/target/release/bundle/**/*.AppImage.sig
+            ${{ runner.temp }}/StudyVis_*_linux-webkit-sources.tar.gz
+            ${{ runner.temp }}/StudyVis_*_linux-webkit-sources.tar.gz.sha256
+            ${{ runner.temp }}/StudyVis_*_linux-system-sources.tar.gz
+            ${{ runner.temp }}/StudyVis_*_linux-system-sources.tar.gz.sha256
+
+  # Fail closed before the dedicated publish workflow can be used. Once the
+  # repository's `release` environment is protected, that workflow also adds
+  # the human approval boundary. This checks
+  # the three updater keys, their signatures and backing release assets, plus a
+  # user-installable artifact for every platform. Transport/API errors are
+  # failures too: inability to prove a draft complete is not evidence it is safe.
   verify-updater-manifest:
     name: Verify draft latest.json carries every platform
     needs: publish
-    # !cancelled(), not always(): still run when a build leg failed, but handle
-    # "both legs died before any draft existed" as its own no-release branch
-    # below rather than reporting it as "latest.json is missing a platform".
+    # Still run when a build leg failed so an incomplete draft is stamped at
+    # the same UI surface as its publish control.
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -224,14 +580,18 @@ jobs:
     # contents: read would 404 on every release.
     permissions:
       contents: write
+      id-token: write
+      attestations: write
+      artifact-metadata: write
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       TAG: ${{ github.ref_name }}
+      PUBLISH_RESULT: ${{ needs.publish.result }}
     steps:
       - name: Assert every platform is present before the draft can be published
         shell: bash
         run: |
-          set -uo pipefail
+          set -euo pipefail
 
           stamp_and_fail() {
             echo "::error::$1"
@@ -243,35 +603,140 @@ jobs:
             exit 1
           }
 
-          # No-release branch: both build legs can fail before tauri-action
-          # creates any draft. There is nothing to publish and nothing to
-          # stamp — the failed publish job already reddens the run.
-          if ! gh release view "$TAG" >/dev/null 2>&1; then
-            echo "No draft release '$TAG' was created — nothing to verify." \
-              | tee -a "$GITHUB_STEP_SUMMARY"
-            exit 0
+          if [ "$PUBLISH_RESULT" != success ]; then
+            stamp_and_fail "At least one release build or exact-artifact validation failed. Do not publish this draft; re-run release.yml successfully first."
           fi
 
-          # gh transport errors (or a wholly absent asset) must not redden the
-          # gate; only a genuinely missing platform key does.
-          if ! gh release download "$TAG" --pattern latest.json --clobber; then
-            echo "::warning::Could not fetch latest.json for '$TAG' (gh transport error or asset absent) — skipping the completeness check." \
-              | tee -a "$GITHUB_STEP_SUMMARY"
-            exit 0
+          if ! metadata=$(gh release view "$TAG" \
+            --json tagName,isDraft,assets 2>/dev/null); then
+            stamp_and_fail "Could not read draft release '$TAG'. Verification fails closed; re-run after the release/API is available."
           fi
 
-          # Assert the two base keys the plugin resolves. The file also carries
-          # darwin-aarch64-app and windows-x86_64-nsis, so do not assume an
-          # exact entry count — check membership only.
-          if jq -e '.platforms | has("darwin-aarch64") and has("windows-x86_64")' latest.json >/dev/null; then
-            echo "latest.json carries darwin-aarch64 and windows-x86_64." \
-              | tee -a "$GITHUB_STEP_SUMMARY"
-            # A prior failed run may have stamped the title; a good run clears it
-            # back to the name tauri-action used, or a fixed release stays
-            # labelled DO NOT PUBLISH.
-            gh release edit "$TAG" --draft --title "StudyVis $TAG" || true
-            exit 0
+          if ! jq -e --arg tag "$TAG" \
+            '.tagName == $tag and .isDraft == true' \
+            <<< "$metadata" >/dev/null; then
+            stamp_and_fail "Release '$TAG' is absent, has the wrong tag, or is not a draft."
           fi
 
-          keys="$(jq -c '.platforms | keys' latest.json 2>/dev/null || echo '?')"
-          stamp_and_fail "Draft release '$TAG' latest.json is missing a platform: has $keys, needs darwin-aarch64 and windows-x86_64. Do NOT publish — re-run the failed build leg, then re-run this workflow."
+          downloaded=false
+          for attempt in 1 2 3; do
+            if gh release download "$TAG" --pattern latest.json --clobber; then
+              downloaded=true
+              break
+            fi
+            echo "latest.json download attempt $attempt failed; retrying..."
+            sleep 5
+          done
+          if [ "$downloaded" != true ]; then
+            stamp_and_fail "Could not download latest.json for '$TAG' after three attempts. Verification fails closed."
+          fi
+
+          # tauri-action writes GitHub's authenticated API asset URL into
+          # latest.json; `gh release view` exposes that value as `apiUrl`.
+          # Bind each updater URL to the filename it actually names, not merely
+          # to some asset on this draft. Otherwise a swapped platform URL could
+          # satisfy the membership check while delivering the wrong installer.
+          asset_names=$(jq -c '
+            [.assets[] | {key: .apiUrl, value: .name}] | from_entries
+          ' <<< "$metadata")
+          names=$(jq -c '[.assets[].name]' <<< "$metadata")
+          version=${TAG#v}
+          source_bundle="StudyVis_${version}_linux-webkit-sources.tar.gz"
+          source_checksum="${source_bundle}.sha256"
+          system_bundle="StudyVis_${version}_linux-system-sources.tar.gz"
+          system_checksum="${system_bundle}.sha256"
+
+          if ! jq -e --arg version "$version" \
+            --argjson asset_names "$asset_names" --argjson names "$names" '
+            (.version == $version) and
+            (.platforms | type == "object") and
+            (.platforms as $p |
+              all(["darwin-aarch64", "windows-x86_64", "linux-x86_64"][];
+                . as $key |
+                ($p[$key] | type == "object") and
+                ($p[$key].signature | type == "string" and length > 0) and
+                ($p[$key].url | type == "string" and length > 0) and
+                ($asset_names[$p[$key].url] | type == "string")
+              ) and
+              (try ($asset_names[$p["darwin-aarch64"].url] | endswith(".app.tar.gz")) catch false) and
+              (try ($asset_names[$p["windows-x86_64"].url] | endswith("-setup.exe")) catch false) and
+              (try ($asset_names[$p["linux-x86_64"].url] | endswith(".AppImage")) catch false) and
+              all(["darwin-aarch64", "windows-x86_64", "linux-x86_64"][];
+                . as $key |
+                ($names | index($asset_names[$p[$key].url] + ".sig") != null)
+              ) and
+              ($p["darwin-aarch64-app"] == $p["darwin-aarch64"]) and
+              ($p["windows-x86_64-nsis"] == $p["windows-x86_64"]) and
+              ($p["linux-x86_64-appimage"] == $p["linux-x86_64"])
+            )
+          ' latest.json >/dev/null; then
+            keys=$(jq -c '.platforms | keys' latest.json 2>/dev/null || echo '?')
+            stamp_and_fail "Draft '$TAG' has invalid latest.json data (keys: $keys). Require matching base/new platform keys and signed darwin-aarch64, windows-x86_64, and linux-x86_64 entries backed respectively by this draft's .app.tar.gz, -setup.exe, and .AppImage assets plus their .sig files."
+          fi
+
+          if ! jq -e \
+            --arg source_bundle "$source_bundle" \
+            --arg source_checksum "$source_checksum" \
+            --arg system_bundle "$system_bundle" \
+            --arg system_checksum "$system_checksum" '
+            any(.[]; . == "latest.json") and
+            any(.[]; endswith(".dmg")) and
+            any(.[]; endswith("-setup.exe")) and
+            any(.[]; endswith(".AppImage")) and
+            any(.[]; . == $source_bundle) and
+            any(.[]; . == $source_checksum) and
+            any(.[]; . == $system_bundle) and
+            any(.[]; . == $system_checksum)
+          ' <<< "$names" >/dev/null; then
+            stamp_and_fail "Draft '$TAG' must contain latest.json, DMG, NSIS setup EXE, AppImage, both Linux source bundles, and both checksum sidecars. Assets: $names"
+          fi
+
+          source_dir=$(mktemp -d "${RUNNER_TEMP}/studyvis-release-source.XXXXXX")
+          source_downloaded=false
+          for attempt in 1 2 3; do
+            if gh release download "$TAG" \
+              --pattern "$source_bundle" --pattern "$source_checksum" \
+              --pattern "$system_bundle" --pattern "$system_checksum" \
+              --dir "$source_dir" --clobber; then
+              source_downloaded=true
+              break
+            fi
+            echo "Corresponding-source download attempt $attempt failed; retrying..."
+            sleep 5
+          done
+          if [ "$source_downloaded" != true ]; then
+            stamp_and_fail "Could not download both Linux source/checksum pairs after three attempts. Verification fails closed."
+          fi
+          for pair in \
+            "$source_bundle:$source_checksum" \
+            "$system_bundle:$system_checksum"; do
+            bundle=${pair%%:*}
+            checksum=${pair#*:}
+            expected_checksum_line=$(
+              cd "$source_dir"
+              sha256sum "$bundle"
+            )
+            actual_checksum_line=$(<"$source_dir/$checksum")
+            if [ "$actual_checksum_line" != "$expected_checksum_line" ]; then
+              stamp_and_fail "$checksum must contain exactly the SHA256 and basename for $bundle."
+            fi
+            if ! (
+              cd "$source_dir"
+              sha256sum --check --strict "$checksum"
+            ); then
+              stamp_and_fail "$checksum does not verify."
+            fi
+          done
+
+          echo "latest.json has signed darwin-aarch64, windows-x86_64, and linux-x86_64 entries backed by complete draft assets; both Linux source/checksum pairs verify." \
+            | tee -a "$GITHUB_STEP_SUMMARY"
+          # Clear a warning title left by a prior failed attempt only after
+          # every fail-closed assertion above passes.
+          gh release edit "$TAG" --draft --title "StudyVis $TAG"
+
+      # Produce provenance only for the fully merged manifest. Each matrix leg
+      # sees an intentionally incomplete intermediate latest.json.
+      - name: Attest the final verified updater manifest
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: latest.json

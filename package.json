@@ -3,9 +3,15 @@
   "private": true,
   "version": "1.11.2",
   "type": "module",
+  "engines": {
+    "node": ">=24.0.0 <25",
+    "npm": ">=11.0.0 <13"
+  },
+  "packageManager": "npm@12.0.2",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "build:linux": "bash scripts/build-linux-appimage-local.sh",
     "lint": "eslint .",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -23,6 +29,9 @@
     "prepare": "husky",
     "check-migrations": "tsx scripts/check-migrations.ts",
     "check-stories": "tsx scripts/check-stories.ts",
+    "generate-notices": "tsx scripts/generate-third-party-notices.ts --write",
+    "check-notices": "tsx scripts/generate-third-party-notices.ts --check",
+    "check-notice-bundle": "tsx scripts/check-third-party-notices-bundle.ts",
     "postinstall": "patch-package"
   },
   "dependencies": {

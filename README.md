@@ -11,7 +11,9 @@ streams anywhere — and gently nudges you when you drift off-topic.
 After the session, each of you sees a quiet report of how the time
 went.
 
-This is the 1.x release line. It runs on macOS and Windows.
+This is the 1.x release line. The current release runs on macOS and Windows;
+the next release candidate adds x86_64 Linux AppImage support. CachyOS with
+KDE on Wayland is the reference Linux desktop for its required sign-off.
 
 ## What running StudyVis means
 
@@ -37,28 +39,33 @@ A few honest disclosures, in the spirit of "no surprises":
 - **Camera and microphone permission** are requested the first time
   you join a session. They live with the OS, not with StudyVis — you
   can revoke them in your OS privacy panel any time.
-- **Screen-recording permission** is only requested when you turn the
-  AI on. While the AI is sampling, your OS's screen-recording
-  indicator stays lit for the whole session. That's expected — it
-  turns off when you leave the session. On macOS the toggle lives in
-  System Settings → Privacy & Security → Screen Recording; StudyVis
-  can open that pane for you when needed.
+- **Screen-recording permission** is requested when you share a screen
+  or turn the AI on. While the AI is sampling, your OS's
+  screen-recording indicator stays lit for the whole session. That's
+  expected — it turns off when you leave the session. On macOS the
+  toggle lives in System Settings → Privacy & Security → Screen
+  Recording; StudyVis can open that pane for you when needed. KDE
+  Wayland presents its own desktop-portal picker and requires a working
+  `xdg-desktop-portal-kde` + PipeWire session.
 - **Zero outbound data beyond the above.** No telemetry, no crash
   uploads, no analytics. One exception: auto-update (Settings → About,
   ON by default) fetches the release manifest from GitHub and downloads
   new versions. Those requests are unauthenticated and carry no
   identifiers and no payload — nothing about you, your friends, or your
-  sessions. Turn the toggle off for literal zero outbound. If something
+  sessions. Turn the toggle off to stop update checks/downloads; the disclosed
+  signaling sockets, WebRTC traffic, and user-initiated AI downloads are
+  separate. If something
   goes wrong, download a diagnostics archive from the fresh post-session
   report or Settings → Advanced. The archive is created locally and is
   never uploaded by StudyVis; you decide whether and where to share it.
 
 ## Install
 
-Friends-only unsigned installers. Each OS warns the first time you
-run; the steps below clear those warnings. The OS remembers your
-decision afterwards. See [`INSTALL.md`](./INSTALL.md) for the full
-walkthrough.
+Friends-only downloads. macOS and Windows warn on first launch because
+their installers lack commercial OS code signing; the steps below clear
+those warnings. The Linux candidate runs from its AppImage without a system
+installer.
+See [`INSTALL.md`](./INSTALL.md) for the full walkthrough.
 
 **macOS (Apple Silicon)** — download the `aarch64` `.dmg` from
 [Releases](https://github.com/scotej/studyvis/releases) (Apple Silicon
@@ -76,15 +83,33 @@ menu. **Upgrading from v1.4.0 or earlier?** Those shipped as an
 Windows lists two copies. Your data is untouched. (This is a one-time
 step — from v1.5.0 on, updates are automatic.)
 
-**Linux** — not in 1.0. WebKitGTK's `getDisplayMedia` support was not
-validated; Linux returns when the V0 sanity pass is re-run on it. If
-you want to try the dev build today, clone the repo and run
-`npm run tauri dev`.
+**Linux (x86_64, next release candidate)** — once the candidate appears on
+[Releases](https://github.com/scotej/studyvis/releases), download its
+`.AppImage`, make it executable, and run it from a writable location. The Linux
+AI engine is the upstream CPU build, so benchmark the selected model and prefer
+a lighter model on slower machines. CachyOS prerequisites, FUSE-free fallback,
+KDE Wayland portals, Secret Service setup, and updater details are in
+[`INSTALL.md`](./INSTALL.md#linux-x86_64-appimage). ARM64 Linux and native
+`.pkg.tar.zst`, `.deb`, and `.rpm` packages are not shipped.
 
-StudyVis keeps itself up to date. It checks for new releases in the
-background, downloads them, and offers a "Restart now" button when one is
-ready — never during a session. Only your first install is manual. You can
-turn this off in Settings → About.
+The candidate does not rely on the host distribution's WebKit for sessions.
+Official distro WebKitGTK release builds in the maintained Linux path compile
+the GTK `ENABLE_WEB_RTC` peer-connection binding out, so installing or upgrading
+that package cannot make `RTCPeerConnection` available (its media-device API is
+still present). The AppImage instead carries the StudyVis-built WebKitGTK 2.52.5
+and librice 0.4.3 runtime. Linux remains a release candidate until that exact
+AppImage—not a dev build using host libraries—passes the data-channel,
+camera/microphone, screen-capture, AI-capture, and physical cross-platform peer
+matrix in [`PLAN.md`](./PLAN.md#platform-completion-and-deferred-scope).
+
+StudyVis keeps itself up to date on the currently shipped platforms. It checks
+for new releases in the background, downloads them, and offers a "Restart now"
+button when one is ready — never during a session. Only your first install is
+manual. For the Linux candidate, the AppImage and its containing directory must
+be writable so the updater can replace it in place. This remains true with
+`--appimage-extract-and-run`: Tauri updates and relaunches the original
+AppImage, not its temporary extracted tree.
+You can turn updates off in Settings → About.
 
 ## First run
 
@@ -126,6 +151,8 @@ the OS user-data directory:
 
 - **macOS** — `~/Library/Application Support/studyvis/`
 - **Windows** — `%APPDATA%\studyvis\` (i.e. `~/AppData/Roaming/studyvis/`)
+- **Linux** — `$XDG_DATA_HOME/studyvis/` when `XDG_DATA_HOME` is set;
+  otherwise `~/.local/share/studyvis/`
 
 `com.studyvis.app` is the bundle identifier + the keychain service
 name; it is NOT the data folder name. The data folder name is
@@ -134,8 +161,11 @@ name; it is NOT the data folder name. The data folder name is
 Inside:
 
 - `identity.json` — your public key + display name + creation
-  timestamp. Private keys are in the OS keychain (macOS Keychain /
-  Windows Credential Manager), not in this file.
+  timestamp. Private keys are in the OS credential store (macOS
+  Keychain / Windows Credential Manager / Linux Secret Service), not
+  in this file. Linux needs a provider owning
+  `org.freedesktop.secrets`, such as gnome-keyring or KeePassXC with
+  its Secret Service integration enabled.
 - `app.db` — local SQLite with your friends list, session
   history, and audit log per session. Used for the post-session
   report and the Stats dashboard.
@@ -192,7 +222,9 @@ During an AI session:
   deny, the rule layer is the final arbiter (cooldown, cap, quota).
 
 The model runs only on your machine. Camera and screen pixels never
-go to peers.
+go to peers. The packaged Linux-candidate x86_64 engine is CPU-only; GPU
+acceleration is not promised by the AppImage build, even if the machine has a
+supported GPU.
 
 ## Friends-only trust model
 
@@ -233,18 +265,53 @@ Instead:
    (Settings → About), OS version and only the relevant log lines.
 4. **Crash logs** stay local — macOS routes them to
    `~/Library/Logs/DiagnosticReports/StudyVis*`, Windows routes them
-   to Event Viewer. Share manually if asked.
+   to Event Viewer, and Linux users should start with
+   `logs/studyvis.log` in the data directory (plus the desktop journal,
+   when available). Share manually if asked.
 
-## What's intentionally not in 1.0
+## Current production limitations
 
 These are decisions, not oversights. Each entry names the reason and
 where you'd see it surface.
 
-- **Linux installers.** WebKitGTK's `getDisplayMedia` support was
-  never validated; the V0 sanity pass deferred Linux. Returns when
-  that pass runs again. (PLAN §5, V3.) Includes the Linux keyring
-  `sync-secret-service` feature and any Linux-side
-  `identity_box_decrypt` hardening.
+- **Linux packaging targets x86_64 AppImage only.** CachyOS KDE Wayland is
+  the mandatory release-candidate sign-off path. ARM64 Linux, AUR/pacman,
+  Flatpak, Snap, `.deb`, and `.rpm` packages are not release targets. Screen capture
+  depends on the desktop portal + PipeWire, key custody depends on a
+  Secret Service provider, and the bundled AI engine uses the CPU.
+  Automatic update also requires the AppImage to live on a writable
+  filesystem. The FUSE-free extraction fallback still targets that original
+  file and does not remove the write requirement. Because StudyVis bundles its
+  WebKitGTK/librice copy, distro security updates do not update it: maintainers
+  own advisory monitoring, runtime rebuilds, license/source compliance, and
+  delivery through the signed updater before Linux can become a supported
+  release.
+- **Release publication still needs external repository hardening.** The
+  dedicated publish workflow revalidates the exact tag, CI run, signed
+  three-platform manifest, artifacts, and successful latest tagged
+  `release.yml` run for that exact tag/commit—the run that includes the uploaded
+  AppImage's runtime smoke. That run attests the exact downloadable assets and
+  final updater manifest. Publishing requires the SHA-256 recorded during the
+  physical AppImage matrix, downloads the exact twelve-file draft set, requires
+  each updater sidecar to match `latest.json` byte for byte, verifies every
+  artifact's exact-workflow/tag/commit provenance, and rechecks the AppImage
+  digest immediately before publication. Workflow YAML cannot configure the
+  repository controls around it. Before production publication,
+  an administrator must create the GitHub `release` environment with required
+  reviewers, protect matching `v*` tags against
+  creation, update, or deletion, and enable immutable releases. On this
+  personal repository, the tag ruleset's sole `Always` bypass entry must be
+  `RepositoryRole 5` (admin), which lets the owner-scoped `RELEASE_PAT` create
+  the tag; do not add Write, Maintain, team, or integration bypasses. GitHub
+  hides `bypass_actors` from the workflow's read-only ruleset response, so the
+  workflow verifies scope and rule types while an admin must verify this list. This
+  sole-owner repository requires `scotej` as its reviewer and permits self-review;
+  add an independent reviewer and enable self-review prevention before relying on
+  a second-person approval boundary.
+  As of 2026-08-13 the environment is confirmed absent; the tag ruleset and
+  immutable-release setting must also be verified/configured. Until then, the
+  workflow does not provide the intended independent, tamper-resistant release
+  boundary.
 - **Signed installers.** No code-signing credentials. macOS
   notarization and Windows code-signing wait for a Developer ID and an
   EV cert, so friends still right-click → Open on macOS and click
@@ -295,10 +362,12 @@ where you'd see it surface.
   hoisted manually by V3-P8 but are not exhaustively guarded; the
   second pair of eyes (manual review or Storybook a11y) is the
   remaining safety net.
-- **`/style` route exhibits `ui/` primitives only.** The composed
-  layer (VideoTile, AuditLogPanel, ScoreGauge, AI dialog, …) lives in
-  Storybook stories instead. The Storybook a11y gate
-  (`npm run check-a11y`) covers every composed component.
+- **`/style` is a curated primitive/status gallery, not a coverage gate.**
+  Covered composed components (VideoTile, AuditLogPanel, ScoreGauge, AI
+  dialog, …) live in Storybook instead. The Storybook a11y gate
+  (`npm run check-a11y`) audits every story that exists; three older
+  component-level exceptions and 33 older feature components remain a frozen
+  no-story baseline, while new uncovered modules fail CI.
 - **`LEGACY_THEME_LOCALSTORAGE_KEY` keeps its V1-P11 name.** The
   constant correctly scopes the pre-paint boot cache for theme /
   windowStyle / reduceMotion, but the name suggests "deprecated"
@@ -313,7 +382,9 @@ where you'd see it surface.
 ## Architecture, in one minute
 
 - **Tauri 2** desktop shell — native WebView per OS, Rust on the
-  back. ~10 MB installer per platform.
+  back. Bundle size varies by platform; the candidate AppImage includes the
+  Linux runtime and packaged AI sidecar and is substantially larger
+  than a minimal web shell.
 - **React 19 + Vite 8 + Tailwind v4 + shadcn/ui** for the UI. One
   design-token file (`src/design/tokens.ts`) is the only place colors
   / spacing / motion values live. Two-layer component split:
@@ -333,7 +404,8 @@ where you'd see it surface.
   mnemonic.
 - **rusqlite** for local persistence (friends, sessions, audit log).
 - **llama-server (llama.cpp build) sidecar** for V2 vision-model
-  inference. Bundled per platform, started on demand.
+  inference. Bundled per platform, started on demand. The packaged
+  Linux-candidate build deliberately runs CPU-only.
 
 `PLAN.md`, `ARCHITECTURE.md`, and `DESIGN-SYSTEM.md` are the
 canonical specs — each the source of truth for its concern.
@@ -343,10 +415,12 @@ coding agents. This README is the user-facing entry point.
 
 ## Developing
 
-The stack is Tauri 2 + React 19 + Vite 8 + TypeScript strict. You
-need Node 20.19+ (or 22.12+ — Vite 8's floor), npm, and a Rust stable
-toolchain with the Tauri 2 platform prerequisites for your OS
-(<https://tauri.app/start/prerequisites/>).
+The stack is Tauri 2 + React 19 + Vite 8 + TypeScript strict. Use
+Node 24.x, npm 11 or 12, and Rust 1.97.1 (the repository pins both
+runtime/toolchain versions), plus the Tauri 2 platform prerequisites for your OS
+(<https://tauri.app/start/prerequisites/>). CachyOS/Arch package names and
+desktop-service prerequisites are listed in
+[`INSTALL.md`](./INSTALL.md#building-on-cachyos--arch-linux).
 
 ```sh
 npm install                      # frontend + tooling deps
@@ -367,9 +441,11 @@ Two lighter loops when you don't need the desktop shell:
   are absent, so identity, DB, P2P-adjacent commands, and the AI
   sidecar don't function.
 - `npm run storybook` — component workbench at
-  <http://localhost:6006>. Every primitive and feature component has
-  a story; a dev-only primitive gallery also lives at `/style` in the
-  running app.
+  <http://localhost:6006>. New components must have stories; three older
+  component-level exceptions (one UI primitive and two composed components)
+  plus 33 older feature components remain a frozen coverage baseline in
+  `scripts/check-stories.ts`. A dev-only primitive gallery also lives at
+  `/style` in the running app.
 
 Before opening a PR, all gates must pass (husky pre-commit enforces
 only a subset — lint, prettier, `tsc --noEmit`, token/string/migration/
@@ -386,26 +462,30 @@ npm run build-storybook && npm run check-a11y
 
 CI runs all of that on every pull request and adds what only makes
 sense with a repository around it: workflow linting (`actionlint` +
-`zizmor`), dependency review, `cargo-deny`, spell-checking, and a
-conventional-commit PR title. Most roll up into one required check,
-**All pre-merge checks**; the title check is its own required check
-(**PR title**) because it has to re-run when a title is edited. CodeQL runs alongside as its own workflow
-(JavaScript/TypeScript, Rust, and the workflows themselves) and
-reports into the Security tab. Storybook publishes to GitHub Pages from
+`zizmor`), dependency review, `cargo-deny`, spell-checking, a packaged
+Linux AppImage startup/Secret Service smoke, and a conventional-commit
+PR title. Most roll up into one required check, **All pre-merge checks**;
+the title check is its own required check (**PR title**) because it has
+to re-run when a title is edited. The AppImage smoke builds the portable
+artifact, checks a gnome-keyring Secret Service round-trip, and keeps it
+alive under Xvfb for 20 seconds. It is not a substitute for the physical
+CachyOS KDE matrix in PLAN §8. CodeQL runs alongside as a non-required workflow
+(JavaScript/TypeScript, Rust, and the workflows themselves) and reports into
+the Security tab. Storybook publishes to GitHub Pages from
 `main` and is attached to each PR as an artifact.
 
 Every pull request also gets a deployment, and no pull request waits
 for one. `deploy.yml` builds each commit that reaches a PR or `main`
-into a real unsigned installer per platform that you can install and
-smoke-test — `StudyVis-macOS-arm64-pr<n>` and
-`StudyVis-Windows-x64-pr<n>`, attached to the run for seven days. Each
-platform records its own GitHub Deployment (`preview-macos`,
-`preview-windows`), so a broken Windows build is visible without
-hiding a good macOS one.
+into a real installable preview bundle for macOS, Windows, and the Linux
+release candidate that you can smoke-test — `StudyVis-macOS-arm64-pr<n>` and
+`StudyVis-Windows-x64-pr<n>`, plus the x86_64 Linux AppImage artifact,
+attached to the run for seven days. Each platform records its own GitHub
+Deployment (`preview-macos`, `preview-windows`, `preview-linux`), so one
+broken platform is visible without hiding the others.
 
 Its **Deployed** check is an _indicator only_ — a full build takes
-30–60 minutes per platform, so merging waits on the two fast checks
-above, never on this one. Red means a platform stopped building and is
+30–60 minutes per platform, so merging waits on the two branch-protection
+checks above, never on this one. Red means a platform stopped building and is
 worth acting on; it still will not block the merge. A commit touching
 only docs or workflow files builds nothing and is recorded as a
 documentation deployment. These bundles carry no updater manifest and
@@ -418,8 +498,8 @@ one breath: every design value comes from `src/design/tokens.ts`;
 user-facing copy lives in `src/strings.ts`; Radix/shadcn primitives
 are imported only inside `src/components/ui/`; SQLite migrations are
 forward-only; peer wire formats and identity derivation are
-cross-version compatibility contracts (friends update manually and
-at different times); accessibility (WCAG AA, axe-clean stories,
+cross-version compatibility contracts (friends can update at different
+times); accessibility (WCAG AA, axe-clean stories,
 reduced-motion) is a gate, not a nicety; and no telemetry, ever.
 
 `ISSUES.md` entries `I9` and `I18` are accepted deviations under the
@@ -430,7 +510,10 @@ essentially all of it shipped, so nothing there is open work.
 
 ## Versioning
 
-1.x is the running release series, all friends-only unsigned builds.
+1.x is the running release series, all friends-only builds without
+macOS notarization or Windows Authenticode signing. The Linux release-candidate
+AppImage is covered by the same updater minisign integrity chain but is not a
+native distro package and cannot publish before its physical sign-off.
 v1.0.0–v1.0.3 shipped during V1 + V2 + the audit pass. **v1.0.5** is
 the polished 1.0 — it landed the V3 phase (recovery from a 24-word
 backup, custom keybindings, multi-monitor capture, light + auto
@@ -462,3 +545,48 @@ automatically.
 
 UNLICENSED (private; friends-only distribution). Source available on
 GitHub for transparency and re-pairing.
+
+Every desktop bundle carries `THIRD-PARTY-NOTICES.txt` and its machine-readable
+`THIRD-PARTY-NOTICES.json` manifest under its Tauri resources. The repository
+generator derives them from the locked npm production tree, the normal Rust
+dependency closures for all three release targets, and the pinned llama.cpp
+runtime. Version-bound overrides cover vendored Wry's selected MIT alternative,
+llama.cpp b9095, both OFL font packages, victory-vendor's omitted root MIT text
+and 13 nested licenses, and package archives that declare a license but omit its
+text. CI regenerates the files offline after populating the locked caches and
+requires an exact diff; artifact checks require the packaged copies and hashes.
+This mechanical inventory aids review and release gating—it is not legal advice
+or legal sign-off.
+
+The Linux candidate also bundles separately licensed WebKitGTK and librice
+components. Their notices, the local portability patch, and other staged
+license material ship under
+`usr/share/licenses/studyvis-webkit-runtime/` in the AppImage. That directory's
+`BUILD-MANIFEST.txt` records the source URLs/hashes, patch hash, tool/config
+inputs, and payload list; `WEBKIT-THIRD-PARTY-LICENSES.txt` and
+`WEBKIT-LICENSE-FILES.sha256` carry the readable 59-file upstream inventory.
+`LIBRICE-THIRD-PARTY-NOTICES.txt` and its JSON manifest separately inventory
+the exact locked normal-dependency union selected by the `rice-proto` and
+`rice-io` `cargo-c` builds, including their `capi` features and source hashes.
+Each tagged Linux draft also carries
+`StudyVis_X.Y.Z_linux-webkit-sources.tar.gz` and its `.sha256` sidecar, providing
+the verified upstream archives, complete patch, and build inputs separately
+from the installed AppImage. Its companion
+`StudyVis_X.Y.Z_linux-system-sources.tar.gz` and `.sha256` pair starts from the
+finished AppImage: it maps every ELF and symlink to an exact Ubuntu package or a
+recorded non-Ubuntu input, records byte hashes/build IDs and dynamic
+dependencies, and carries matching Ubuntu source/copyright material plus the
+modeled packaging-tool, AppRun, and llama.cpp sources/notices. It also carries
+the complete evidence set for StudyVis's source-built AppImage type-2 runtime
+revision 1: the hash-pinned type2 commit, musl 1.2.5, zlib 1.3.1,
+decompression-only zstd 1.5.6, libfuse 3.15.0, squashfuse 0.5.2, and Meson 1.7.2
+sources and licenses; exact Jammy compiler/linker source and package versions;
+build metadata; a link map; and hashes for every selected link input. The gate
+requires an `x86_64-linux-musl` `ET_DYN` static PIE with no `PT_INTERP` or
+`DT_NEEDED`. It uses musl mallocng; mimalloc is neither linked nor shipped.
+This completes the pre-SquashFS runtime's static source, notice, and link
+closure. The source pairs are mechanical release evidence, not legal sign-off.
+The hosted Ubuntu 22.04 image and Jammy apt indexes remain a bounded build
+baseline, not a bit-reproducible environment.
+The build recipe remains tracked here and is documented in
+[`INSTALL.md`](./INSTALL.md#pinned-linux-webkit-runtime).

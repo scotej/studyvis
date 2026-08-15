@@ -1,8 +1,8 @@
 name: Release prep
 
 # One-click release cutting. Bumps the version across all five tracked files,
-# commits + tags on main, and kicks off the Release build (which produces a
-# draft GitHub Release for you to review and publish). Run from the Actions tab.
+# commits + tags on main, and lets the tag push trigger the Release build
+# (which produces a draft GitHub Release). Run from the Actions tab.
 
 on:
   workflow_dispatch:
@@ -19,7 +19,7 @@ on:
 
 # Job-scoped (not workflow-level) so the gate job — which runs the
 # third-party toolchain action — never holds a write token; only prep pushes
-# the bump commit + tag and dispatches release.yml. Third-party actions are
+# the bump commit + tag. Third-party actions are
 # SHA-pinned; see ci.yml's pinning note.
 permissions:
   contents: read
@@ -51,7 +51,7 @@ jobs:
 
       - uses: actions/setup-node@v7
         with:
-          node-version: '20'
+          node-version: '24'
           cache: 'npm'
 
       - name: Install dependencies
@@ -98,17 +98,17 @@ jobs:
         with:
           # With a master pin the ref no longer selects the toolchain; this
           # input does.
-          toolchain: stable
+          toolchain: '1.97.1'
           components: rustfmt
 
       - name: cargo fmt
         working-directory: src-tauri
         run: cargo fmt --check
 
-      # PR-19 — compiling the Rust targets (both macOS + Windows legs) on this
+      # PR-19 — compiling the Rust targets (macOS, Windows, and Linux) on this
       # ubuntu gate is impractical, and shipping a release over a clippy or
       # cargo-test failure the pre-commit hook can silently miss is the exact
-      # gap this closes. Require that CI (which DOES compile/clippy/test both
+      # gap this closes. Require that CI (which DOES compile/clippy/test every
       # host targets and runs check-a11y) has gone green on the precise main SHA
       # being tagged, so the irreversible bump+tag+push can't outrun it.
       # Same reasoning as release.yml's signing-key preflight: a missing
@@ -136,9 +136,14 @@ jobs:
           sha=$(git rev-parse HEAD)
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
           echo "Requiring a successful CI run for main @ $sha"
-          run=$(gh api \
-            "repos/${{ github.repository }}/actions/workflows/ci.yml/runs?head_sha=$sha&per_page=1" \
-            --jq '.workflow_runs[0] | "\(.status):\(.conclusion)"' 2>/dev/null || echo "none")
+          response=$(gh api \
+            "repos/${{ github.repository }}/actions/workflows/ci.yml/runs?branch=main&event=push&head_sha=$sha&per_page=10" \
+            2>/dev/null || printf '{"workflow_runs":[]}')
+          run=$(jq -r --arg sha "$sha" '
+            [.workflow_runs[] | select(.head_sha == $sha)]
+            | sort_by(.run_number) | last
+            | if . == null then "none" else "\(.status):\(.conclusion // "")" end
+          ' <<< "$response")
           echo "CI run for $sha: $run"
           if [ "$run" != "completed:success" ]; then
             echo "::error::CI has not passed on main @ $sha (got '$run'). Push the fix, wait for CI to go green, then re-run Release prep."
@@ -147,9 +152,10 @@ jobs:
 
   prep:
     permissions:
-      contents: write # push the bump commit + tag to main
-      actions: write # dispatch release.yml
-    name: Bump, tag, trigger build
+      # The persisted RELEASE_PAT below performs both pushes. Keep the separate
+      # GITHUB_TOKEN read-only so the job holds only one write credential.
+      contents: read
+    name: Bump and tag
     needs: gate
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -161,10 +167,11 @@ jobs:
       # GITHUB_TOKEN's push is rejected outright (verified against a probe
       # branch: "Changes must be made through a pull request").
       #
-      # A repository-owner PAT is what gets through: the ruleset's only
-      # bypass actor is RepositoryRole 5 (admin), and Integration bypass —
-      # which would have let GITHUB_TOKEN through directly — is not offered
-      # on a user-owned repository, only inside an organization.
+      # A repository-owner PAT is what gets through. Both the main ruleset and
+      # the required refs/tags/v* ruleset need the same sole Always-bypass
+      # entry: RepositoryRole 5 (admin). Integration bypass — which would have
+      # let GITHUB_TOKEN through directly — is not offered on a user-owned
+      # repository, only inside an organization.
       #
       # Scope it as narrowly as GitHub allows: a fine-grained PAT limited to
       # this repository with Contents: read and write. Nothing else.
@@ -193,7 +200,7 @@ jobs:
 
       - uses: actions/setup-node@v7
         with:
-          node-version: '20'
+          node-version: '24'
 
       - name: Compute next version
         id: ver
@@ -253,7 +260,7 @@ jobs:
           echo "Changed files:" && git --no-pager diff --name-only
 
       # #47 F1 — `perl -0pi` exits 0 whether or not its pattern matched, so a
-      # regex drift would bake a silent partial bump into an immutable tag.
+      # regex drift would bake a silent partial bump into a version tag.
       # Re-read all five files and require the bump actually landed.
       - name: Verify the bump landed in all five files
         env:
@@ -271,27 +278,13 @@ jobs:
                   src-tauri/Cargo.toml src-tauri/tauri.conf.json src-tauri/Cargo.lock
           git commit -m "chore(release): v$NEW"
           git tag -a "v$NEW" -m "StudyVis v$NEW"
-          git push origin main
-          git push origin "v$NEW"
-
-      - name: Trigger Release build
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          NEW: ${{ steps.ver.outputs.new }}
-        run: |
-          set -euo pipefail
-          # The tag push above used GITHUB_TOKEN, so it did not fire release.yml's
-          # push trigger. Dispatch it explicitly on the new tag ref. Retry: the
-          # ref can lag a beat behind the push.
-          for attempt in 1 2 3; do
-            if gh workflow run release.yml --ref "v$NEW"; then
-              echo "Dispatched release.yml on v$NEW"; exit 0
-            fi
-            echo "Attempt $attempt failed; retrying in 5s..."
-            sleep 5
-          done
-          echo "::error::could not dispatch release.yml; the tag v$NEW is pushed — run Release manually on it"
-          exit 1
+          # Push the commit and its annotated tag in one transaction. A
+          # main-only push followed by a rejected tag would leave version
+          # metadata advanced with no releasable ref.
+          if ! git push --atomic origin main "v$NEW"; then
+            echo "::error::Atomic release push failed. If GitHub reported a ruleset violation, verify both main and refs/tags/v* rulesets have only an Always RepositoryRole 5 (admin) bypass and that RELEASE_PAT belongs to the repository owner/admin with Contents read+write."
+            exit 1
+          fi
 
       - name: Summary
         if: always()
@@ -302,8 +295,8 @@ jobs:
             echo "### Release prep: v${NEW:-?}"
             echo ""
             echo "- Bumped version to **v${NEW}** and pushed tag \`v${NEW}\` to main"
-            echo "- Triggered the **Release** build (draft GitHub Release)"
+            echo "- The RELEASE_PAT tag push triggers the **Release** build once"
             echo ""
-            echo "Review and publish the draft once the build finishes:"
-            echo "<https://github.com/${{ github.repository }}/releases>"
+            echo 'After the draft verifies, run **Publish verified release** for `v'"${NEW}"'`:'
+            echo "<https://github.com/${{ github.repository }}/actions/workflows/publish-release.yml>"
           } >> "$GITHUB_STEP_SUMMARY"

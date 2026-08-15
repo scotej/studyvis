@@ -25,15 +25,16 @@
 // tokens), so it lives here rather than in src/design/tokens.ts. Relays die:
 // every entry below passed `npm run check-relays` (#47 C4 — the scripted
 // ephemeral-event round-trip; release-prep also runs it as a non-blocking
-// warning) on 2026-08-11. Re-verify before trusting a stale list and drop any
+// warning) on 2026-08-13. Re-verify before trusting a stale list and drop any
 // that go dark or add anonymous-write restrictions. `relay.nostr.place` was
 // removed after it began requiring proof of work, and `relay.0xchat.com` after
 // repeated socket failures; both reject the exact anonymous ephemeral-event
-// round trip rendezvous and relay presence depend on. `relay.damus.io` and
-// `relay.froth.zone` remain omitted after repeated connection failures, while
-// offchain.pub requires publishers to be in its web of trust.
+// round trip rendezvous and relay presence depend on. `nos.lol` is also omitted
+// after it began requiring 28-bit proof of work for anonymous events.
+// `relay.damus.io` and `relay.froth.zone` remain omitted after repeated
+// connection failures, while offchain.pub requires publishers to be in its web
+// of trust.
 export const DEFAULT_RELAY_URLS: string[] = [
-  'wss://nos.lol',
   'wss://relay.primal.net',
   'wss://strfry.shock.network',
   'wss://relay.mostr.pub',

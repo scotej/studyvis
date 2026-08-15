@@ -4,63 +4,51 @@ This file documents decisions that aren't obvious from the code itself.
 Canonical product/architecture docs are still `PLAN.md`, `ARCHITECTURE.md`,
 and `DESIGN-SYSTEM.md` at the repo root — read those first.
 
-## Capture pipeline (V2-P3)
+## Live capture pipeline (current V3 path)
 
-Two snapshot functions feed the AI sample loop (wired in V2-P5):
+The AI sample loop has two local still-image inputs:
 
-- `captureFace(track)` pulls a frame off the existing local camera track
-  (the same `MediaStreamTrack` already published over WebRTC), encodes it as a
-  384×384 JPEG at quality 0.8, and returns base64.
-- `captureScreen()` acquires a fresh `getDisplayMedia({ video: true })`
-  stream, snapshots a single frame, downscales to 1024 px wide preserving
-  aspect, encodes JPEG at quality 0.7, and stops the stream before
-  returning.
+- `captureFace(track)` snapshots the existing local camera track (the same
+  `MediaStreamTrack` published over WebRTC), crops it to 384×384, encodes a
+  quality-0.8 JPEG, and returns base64.
+- `sampleLoop.ts` acquires screen media once when the loop boots, keeps the
+  selected stream or streams alive, and snapshots them on each inference tick.
+  A single display is downscaled to at most 1024 px wide; multiple displays are
+  composited into one horizontal image at most 2048 px wide. Screen tracks used
+  by the AI loop are never published to peers.
 
-Both functions are local-only. The face track is shared with peers via
-WebRTC, but the AI's still-frame snapshot is a separate side path. The
-screen track is never published — it exists only for the AI loop and is
-released between ticks.
+`captureScreen()` is still exported as a one-shot utility: it acquires one
+`getDisplayMedia({ video: true })` stream, snapshots and encodes one frame, and
+always stops the stream. It is covered by capture unit tests, but it is **not**
+the live sample-loop implementation. `requestScreenCapturePermission()` uses
+the same acquire-and-release shape only to seed/check an OS permission grant.
 
-### Multi-monitor in V2 = no programmatic selection
+### Long-lived streams and user gestures
 
-`getDisplayMedia` in both WKWebView (macOS) and WebView2 (Windows) always
-surfaces an OS picker on each acquire. The user — not the app — chooses
-which display, window, or app surface to share. V2 makes **no programmatic
-display selection**: we don't enumerate displays, and we don't pre-select
-the primary monitor. If the user wants the primary display, they pick it in
-the OS picker once and the same surface is reused on subsequent acquires
-within the same grant.
+Calling `getDisplayMedia` repeatedly can show an OS picker repeatedly, and the
+desktop webviews require acquisition to begin from a user gesture. UI entry
+points therefore call `preacquireScreenStream()` synchronously from the click;
+`sampleLoop.ts` consumes that pending promise at boot and keeps the resulting
+stream alive until the loop stops. The screen-recording indicator consequently
+stays visible for the session rather than going dark between samples.
 
-V3's "multi-monitor toggle" therefore means one of:
+The primary acquire is required. Denial latches capture as unavailable and
+surfaces the permission recovery UI. An ended track is dropped; losing the last
+track stops capture. Teardown stops every retained stream and clears listeners.
 
-- enumerate displays Tauri-side (Rust) and present an in-app picker,
-- or stitch frames from multiple `getDisplayMedia` streams.
+### Multi-monitor capture
 
-Both require new Tauri commands and a UI affordance. Out of V2 scope.
+When `captureDisplays === 'primary'`, the loop acquires one stream. For
+`'all'`, it reads Tauri's `availableMonitors()` count and asks for one stream per
+reported display at boot. The operating-system picker remains authoritative:
+StudyVis cannot silently select or retain portal authority. The user chooses a
+surface for each acquire. Cancelling an additional picker is a soft fallback to
+the streams already granted, and each tick composites the surviving tracks.
 
-### Acquire strategy: per-tick vs long-lived
-
-The V2-P3 prompt asks the function to acquire a fresh `getDisplayMedia`,
-snapshot, and immediately release on every tick (so the OS screen-recording
-indicator goes dark between samples and battery drain is minimised). That's
-what `captureScreen()` does.
-
-The trade-off the prompt anticipates: if the OS picker fires on **every**
-acquire — which is the documented behaviour of both WKWebView and WebView2
-— a once-every-5–30-seconds tick interrupts the user constantly. Empirical
-verification belongs to V2-P5 (the sample-loop owner). If the per-tick
-acquire turns out to prompt every tick:
-
-1. V2-P5 switches to a long-lived `MediaStream` that's acquired once when
-   the session starts (or when AI is enabled), kept alive for the
-   session, and snapshotted via the same `CaptureRuntime.extractFrame`
-   pipeline `captureScreen` already uses.
-2. The OS screen-recording indicator stays on for the whole session — same
-   visibility as the camera tile. Documented in onboarding when V2-P5
-   lands.
-3. The long-lived path is intentionally not exported from this directory in
-   V2-P3 to keep the API surface small (one prompt, one function); V2-P5
-   adds the helpers when it has measurements to justify the second mode.
+Changing from all displays to primary during a session immediately releases
+the extra streams. Changing from primary to all waits for the next loop boot,
+because adding streams mid-session would require another picker outside the
+original user gesture.
 
 ### macOS: the webview has to be taught to ask (I79)
 
@@ -71,10 +59,10 @@ or by the private
 `_webView:requestDisplayCapturePermissionForOrigin:initiatedByFrame:withSystemAudio:decisionHandler:`
 delegate, and it denies the call outright when an app implements the public
 camera/mic delegate without that private one. wry is exactly that app, so
-until `src-tauri/src/macos_display_capture.rs` adds the missing method to
-wry's delegate class at startup, every acquire here rejects with
-`NotAllowedError` no matter what the user has granted. Upstream is
-tauri-apps/wry#1195 (open) / #1196 (unmerged); drop our patch if it lands.
+`src-tauri/src/macos_display_capture.rs` adds the missing method to wry's
+delegate class at startup; without that patch every acquire rejects with
+`NotAllowedError` no matter what the user has granted. The workaround was
+tracked in tauri-apps/wry#1195/#1196; re-evaluate it when upgrading wry.
 
 ### macOS Sequoia permission flow
 
@@ -90,28 +78,33 @@ the user to the right settings pane.
 On Windows the prompt is the per-call screen-share picker and there is no
 analogous OS-level grant; denial means the user dismissed the picker.
 
+### Linux / KDE Wayland
+
+The Linux release candidate uses WebKitGTK. On the reference CachyOS KDE
+Wayland desktop, `getDisplayMedia` crosses `xdg-desktop-portal-kde` and PipeWire,
+so a working portal/PipeWire session and the user's picker approval are runtime
+prerequisites. The code path and AppImage packaging exist, but a headless Xvfb
+startup test does not validate the real portal: PLAN §8 requires physical KDE
+Wayland capture with the exact release artifact before publication.
+
 ### Privacy invariant
 
-Neither snapshot is written to disk except as a transient JPEG buffer
-inside the closure that's about to POST it to `127.0.0.1:<sidecar-port>`.
-No telemetry. No remote upload. The Tauri build has `connect-src` open via
-`security.csp: null`; if a later phase tightens CSP, the sample loop must
-keep `http://127.0.0.1:*` allowed.
+Neither snapshot is written to disk; it exists as a transient JPEG buffer sent
+only to `127.0.0.1:<sidecar-port>`. No telemetry and no remote upload. The Tauri
+CSP is explicit, and its `connect-src` directive deliberately includes
+`http://127.0.0.1:*` for the randomly bound local llama-server port.
 
 ## Files
 
-```
-src/features/ai/
-├─ captureFace.ts        ← face frame: 384×384, JPEG q=0.8
-├─ captureScreen.ts      ← screen frame: 1024w, JPEG q=0.7, acquire+release
-├─ captureShared.ts      ← CaptureRuntime + DOM defaults (OffscreenCanvas)
-├─ benchmark.ts          ← V2-P2: model picker benchmark
-├─ models.ts             ← V2-P2: registry of supported vision models
-├─ modelStore.ts         ← V2-P2: persisted per-model records
-├─ sidecar.ts            ← V2-P1: llama-server JS bridge
-├─ download.ts           ← V2-P2: GGUF download orchestration
-├─ hfToken.ts            ← V2-P2: HF access token (keyring)
-├─ ModelPicker.tsx       ← V2-P2: picker UI
-├─ ModelPickerContainer.tsx
-└─ ModelGuide.tsx
-```
+- `captureFace.ts` — camera crop/encode.
+- `captureScreen.ts` — one-shot capture, permission seeding, user-gesture
+  pre-acquire handoff, and display-media error classification.
+- `captureShared.ts` / `composite.ts` — frame extraction, JPEG encoding, and
+  multi-display layout/compositing.
+- `sampleLoop.ts` — long-lived screen streams, cadence, capture, inference, and
+  focus-store application.
+- `focusRequest.ts` / `systemPrompt.ts` / `parseJudgment.ts` — model request and
+  response contract.
+- `models.ts` / `modelStore.ts` / `download.ts` / `benchmark.ts` — model
+  catalogue, persistence, download, and device benchmark.
+- `sidecar.ts` / `engine.ts` — packaged llama-server lifecycle and health.

@@ -558,7 +558,7 @@ pub(crate) async fn resolve_hardware_identity<R: Runtime>(
     state: &EngineState,
     selection: &super::compute_device::ComputeDeviceSelection,
 ) -> ResolvedHardwareIdentity {
-    // CPU and packaged Linux Auto already have a complete, safe identity:
+    // CPU and packaged Linux-candidate Auto already have a complete, safe identity:
     // zero model layers means --device none/--no-mmproj-offload, so invoking
     // `--list-devices` would only initialize an unused GPU backend. Do not
     // touch a broken driver merely to describe a known CPU policy.

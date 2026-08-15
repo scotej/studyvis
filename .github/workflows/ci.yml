@@ -42,7 +42,7 @@ jobs:
 
       - uses: actions/setup-node@v7
         with:
-          node-version: '20'
+          node-version: '24'
           cache: 'npm'
 
       - name: Install dependencies
@@ -94,11 +94,13 @@ jobs:
       - name: Contrast audit (WCAG AA over token pairs, both themes)
         run: npm run check-contrast
 
-      # Storybook is the ONLY component-test surface here (vitest is node-env,
-      # there are no *.test.tsx), and check-a11y can only audit a component
-      # that has a story — so a component landing without one silently opts
-      # out of both. Three current gaps are frozen in the script with reasons.
-      - name: Storybook coverage (every component has a story)
+      # Storybook is the ONLY automated rendered component/a11y surface here
+      # (vitest is node-env, there are no *.test.tsx), and check-a11y can only
+      # audit a component that has a story. The gate rejects new uncovered
+      # modules; three older component exceptions (one UI primitive, two
+      # composed) and 33 older feature components remain a frozen baseline in
+      # check-stories.ts.
+      - name: Storybook coverage (no new uncovered components)
         run: npm run check-stories
 
       # Compatibility surfaces (CLAUDE.md). Both of these guard a mistake
@@ -114,21 +116,54 @@ jobs:
       - name: Version lockstep across the five tracked files
         run: bash scripts/check-version-lockstep.sh "$(node -p "require('./package.json').version")"
 
+  third-party-notices:
+    name: Third-party notice closure
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master; the toolchain input selects the channel
+        with:
+          toolchain: '1.97.1'
+
+      # The generator itself is network-free. Populate Cargo's cache from the
+      # exact lock first so it can traverse and read the three target-specific
+      # crate closures with `cargo metadata --locked --offline`.
+      - name: Fetch locked Cargo release closures
+        run: |
+          cargo fetch --locked --manifest-path src-tauri/Cargo.toml --target aarch64-apple-darwin
+          cargo fetch --locked --manifest-path src-tauri/Cargo.toml --target x86_64-pc-windows-msvc
+          cargo fetch --locked --manifest-path src-tauri/Cargo.toml --target x86_64-unknown-linux-gnu
+
+      - name: Verify committed third-party notices
+        run: npm run check-notices
+
   rust:
     name: Rust (${{ matrix.label }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     strategy:
-      # PR-17 — compile BOTH shipped host targets on every push/PR. Building
+      # PR-17 — compile every host in the release matrix on every push/PR. Building
       # only aarch64-apple-darwin left every #[cfg(target_os = "windows")] path
       # (custom-chrome set_decorations, the sidecar PATH block, the
       # windows-native keyring backend) uncompiled until release.yml's
       # windows-latest job — which runs AFTER release-prep has already pushed
-      # the immutable vX.Y.Z tag, so a Windows-only break burned a version.
+      # the vX.Y.Z tag, so a Windows-only break burned a version.
       #
-      # Linux is NOT a release target (PLAN §8), and it is here for exactly the
-      # reason quoted above: the identity/keyring command surface now compiles
-      # on Linux too, and an uncompiled platform is one nobody notices breaking.
+      # Linux is a release-candidate target too: the identity/keyring command
+      # surface must compile on Linux, and an uncompiled platform is one nobody
+      # notices breaking.
       # Without this leg the whole `cfg(target_os = "linux")` keyring block
       # would be verified only on a maintainer's dev box.
       fail-fast: false
@@ -153,15 +188,9 @@ jobs:
       # ours specifically: keyring's `sync-secret-service` backend links libdbus
       # to reach org.freedesktop.secrets (src-tauri/Cargo.toml).
       #
-      # This leg is deliberately COMPILE-ONLY for the keychain. libdbus-1-dev is
-      # the build-time dependency; it is not an org.freedesktop.secrets provider,
-      # and no runner here has one. That costs nothing today because no test
-      # touches the Secret Service — the keyring is reached only through Tauri
-      # commands, which need a live app. Standing up gnome-keyring under
-      # dbus-run-session would therefore be scaffolding around zero assertions.
-      # The runtime round-trip is verified by hand on a Linux dev box instead
-      # (dbus-run-session + gnome-keyring --components=secrets). Revisit if a
-      # test ever exercises `keyring::Entry` directly.
+      # This matrix leg compiles the keychain backend. The packaged AppImage job
+      # below separately starts gnome-keyring on an isolated session bus,
+      # performs a Secret Service round-trip, and launches the built artifact.
       - name: Linux system dependencies
         if: runner.os == 'Linux'
         run: |
@@ -174,7 +203,7 @@ jobs:
         with:
           # With a master pin the ref no longer selects the toolchain; this
           # input does.
-          toolchain: stable
+          toolchain: '1.97.1'
           components: rustfmt, clippy
 
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
@@ -184,7 +213,7 @@ jobs:
       # tauri.conf.json's bundle.externalBin entry requires the file to exist on
       # disk during the cargo build script (V2-P1). Each runner is its own host
       # triple (macos-latest = Apple Silicon, windows-latest = x86_64-msvc), so
-      # cargo check/test build natively for the shipped target. `shell: bash`
+      # cargo check/test build natively for the matrix target. `shell: bash`
       # runs the fetch script identically on the Windows runner.
       - name: Fetch llama-server prebuild
         shell: bash
@@ -235,6 +264,241 @@ jobs:
             echo "Advisory. Promote a group into the blocking step in ci.yml once it reaches zero."
           } >> "$GITHUB_STEP_SUMMARY"
 
+  linux-appimage:
+    name: Linux AppImage startup smoke
+    runs-on: ubuntu-22.04
+    # A cache miss compiles WebKitGTK itself. Keep the hard ceiling large
+    # enough for that fail-safe path rather than making the cache mandatory.
+    timeout-minutes: 360
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      # WebKit's unified C++ build cannot share the stock runner's small free
+      # partition with the unused hosted Android/.NET/Haskell/Swift/CodeQL
+      # toolchains and container images. The directories are fixed paths on
+      # this disposable Linux runner, and the job uses no containers.
+      - name: Reclaim runner disk for a cold WebKitGTK build
+        run: |
+          df -h /
+          sudo rm -rf -- \
+            /usr/local/lib/android /usr/share/dotnet /usr/local/.ghcup \
+            /usr/local/share/boost /usr/share/swift \
+            /opt/ghc /opt/hostedtoolcache/CodeQL
+          docker image prune --all --force || true
+          sudo apt-get clean
+          df -h /
+
+      # Build and launch the same portable artifact Linux users receive. The
+      # GStreamer packages are intentionally present at bundle time so
+      # AppImage's media-framework bundling can carry WebRTC playback support.
+      # The -dev set is the Jammy WebKitGTK source-build surface for the GTK3 /
+      # Soup3 / GStreamer configuration selected by the pinned build script.
+      - name: Install WebKitGTK build, packaging, and smoke dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            autoconf automake binutils=2.38-4ubuntu2.12 build-essential bison \
+            bubblewrap ca-certificates clang-14=1:14.0.0-1ubuntu1.1 cmake curl dbus-x11 \
+            desktop-file-utils file flex g++-12 gcc-11=11.4.0-1ubuntu1~22.04.3 gcc-12 gettext gnome-keyring \
+            gperf libayatana-appindicator3-dev \
+            libcairo2-dev libdbus-1-dev libdrm-dev libegl-dev \
+            libenchant-2-dev libepoxy-dev libfontconfig-dev libfreetype-dev \
+            libfuse2 libgbm-dev libgcc-11-dev=11.4.0-1ubuntu1~22.04.3 libgcrypt20-dev libgl-dev libgles-dev libglib2.0-dev \
+            libglib2.0-dev-bin libgstreamer-plugins-bad1.0-dev \
+            libgstreamer-plugins-base1.0-dev libgstreamer1.0-dev \
+            libgtk-3-dev libgudev-1.0-dev libharfbuzz-dev libhyphen-dev \
+            libicu-dev libjpeg-dev liblcms2-dev libnice-dev libopenjp2-7-dev \
+            libpng-dev librsvg2-dev libseccomp-dev \
+            libsecret-1-dev libsecret-tools libsoup-3.0-dev libsqlite3-dev \
+            libssl-dev libsysprof-capture-4-dev libsystemd-dev \
+            libtasn1-6-dev libwayland-dev libwebkit2gtk-4.1-dev libwebp-dev \
+            libwoff-dev libx11-dev libxcomposite-dev libxdo-dev libxml2-dev \
+            libxml2-utils libxslt1-dev libxt-dev \
+            libtool ninja-build patch patchelf perl pkg-config python3 ruby tar \
+            unifdef wayland-protocols xauth xdg-dbus-proxy xdg-utils xz-utils xvfb \
+            gstreamer1.0-plugins-bad \
+            gstreamer1.0-plugins-base gstreamer1.0-plugins-good \
+            gstreamer1.0-nice gstreamer1.0-pipewire gstreamer1.0-tools
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: 'npm'
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master; the toolchain input selects the channel
+        with:
+          toolchain: '1.97.1'
+
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          workspaces: src-tauri -> target
+
+      - name: Configure the pinned WebKitGTK runtime prefix
+        id: webkit-runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -v PKG_CONFIG_SYSROOT_DIR ]]; then
+            echo "::error::PKG_CONFIG_SYSROOT_DIR must be unset for the mixed runtime/system dependency graph"
+            exit 1
+          fi
+          # shellcheck source=scripts/linux-webkit-runtime.env
+          source scripts/linux-webkit-runtime.env
+          export STUDYVIS_WEBKIT_RUNTIME_DIR="${RUNNER_TEMP}/studyvis-webkit-runtime"
+          export STUDYVIS_WEBKIT_BUILD_DIR="${RUNNER_TEMP}/studyvis-webkit-build"
+          runtime_dir=$(bash scripts/build-linux-webkit-runtime.sh --print-prefix)
+          runtime_pkgconfig=$(bash scripts/build-linux-webkit-runtime.sh --print-pkg-config-path)
+          runtime_lib=${runtime_pkgconfig%/pkgconfig}
+          {
+            echo "STUDYVIS_WEBKIT_RUNTIME_DIR=${runtime_dir}"
+            echo "STUDYVIS_WEBKIT_BUILD_DIR=${STUDYVIS_WEBKIT_BUILD_DIR}"
+            echo "STUDYVIS_CARGO_C_VERSION=${STUDYVIS_CARGO_C_VERSION}"
+            echo "PKG_CONFIG_PATH=${runtime_pkgconfig}${PKG_CONFIG_PATH:+:${PKG_CONFIG_PATH}}"
+            echo "LD_LIBRARY_PATH=${runtime_lib}:${GITHUB_WORKSPACE}/src-tauri/binaries/llama-runtime-x86_64-unknown-linux-gnu${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
+          } >> "$GITHUB_ENV"
+          {
+            echo "runtime-dir=${runtime_dir}"
+            echo "cargo-c-version=${STUDYVIS_CARGO_C_VERSION}"
+          } >> "$GITHUB_OUTPUT"
+
+      # Cache only the installed runtime, never the source/build tree. The key
+      # covers the supply-chain tuple, effective build logic, and portability
+      # patch. The build step still runs on a hit and validates completeness,
+      # so an absent or partial cache safely falls back to a cold build.
+      - name: Restore pinned WebKitGTK runtime
+        id: webkit-runtime-cache
+        uses: actions/cache@v5
+        with:
+          path: ${{ steps.webkit-runtime.outputs.runtime-dir }}
+          key: studyvis-webkitgtk-jammy-x86_64-rust-1.97.1-cargo-c-${{ steps.webkit-runtime.outputs.cargo-c-version }}-${{ hashFiles('scripts/linux-webkit-runtime.env', 'scripts/build-linux-webkit-runtime.sh', 'scripts/generate-librice-third-party-notices.mjs', 'scripts/patches/*.patch') }}
+
+      - name: Install pinned cargo-c
+        run: |
+          set -euo pipefail
+          cargo install cargo-c --version "=${STUDYVIS_CARGO_C_VERSION}" --locked
+          cargo_c_output=$(cargo cinstall --version)
+          case "$cargo_c_output" in
+            *" ${STUDYVIS_CARGO_C_VERSION}"|*" ${STUDYVIS_CARGO_C_VERSION}+"*) ;;
+            *) echo "Unexpected cargo-c version: $cargo_c_output" >&2; exit 1 ;;
+          esac
+
+      - name: Build or verify the pinned WebKitGTK runtime
+        run: bash scripts/build-linux-webkit-runtime.sh
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Fetch llama-server prebuild
+        run: bash scripts/fetch-llama-server.sh --triple x86_64-unknown-linux-gnu
+
+      - name: Exercise the StudyVis Secret Service backend
+        working-directory: src-tauri
+        shell: bash
+        run: |
+          # The nested Bash process intentionally expands the single-quoted variables.
+          # shellcheck disable=SC2016
+          dbus-run-session -- bash -euo pipefail -c '
+            keyring_data=$(mktemp -d "${RUNNER_TEMP}/studyvis-keyring.XXXXXX")
+            chmod 700 "$keyring_data"
+            export XDG_DATA_HOME="$keyring_data"
+            printf "studyvis-ci\n" | gnome-keyring-daemon \
+              --components=secrets --daemonize --unlock
+            cargo test --locked \
+              commands::identity::tests::secret_service_round_trip -- \
+              --ignored --exact --nocapture
+          '
+
+      - name: Prepare the pinned linuxdeploy toolchain
+        shell: bash
+        env:
+          TOOL_CACHE_HOME: ${{ runner.temp }}/studyvis-tauri-cache-ci
+        run: |
+          set -euo pipefail
+          bash scripts/prepare-linuxdeploy-tools.sh "$TOOL_CACHE_HOME"
+          {
+            echo "XDG_CACHE_HOME=$TOOL_CACHE_HOME"
+            echo "LDAI_RUNTIME_FILE=$TOOL_CACHE_HOME/studyvis-appimage-runtime-r1/runtime-x86_64"
+            echo "GSTREAMER_PLUGINS_DIR=$GITHUB_WORKSPACE/src-tauri/target/appimage-webkit/gstreamer-plugins"
+            echo "GSTREAMER_HELPERS_DIR=$GITHUB_WORKSPACE/src-tauri/target/appimage-webkit/gstreamer"
+          } >> "$GITHUB_ENV"
+
+      - name: Build unsigned AppImage without updater artifacts
+        run: |
+          version=$(node -p "require('./package.json').version")
+          appimage="${GITHUB_WORKSPACE}/src-tauri/target/release/bundle/appimage/StudyVis_${version}_amd64.AppImage"
+          # rust-cache restores target/. Remove only the exact output this
+          # build must recreate, so a stale same-version bundle cannot satisfy
+          # the assertions when packaging silently stops producing output.
+          rm -f "$appimage"
+          npm run tauri -- build --bundles appimage \
+            --config '{"bundle":{"createUpdaterArtifacts":false,"linux":{"appimage":{"bundleMediaFramework":true}}}}'
+          test -f "$appimage"
+          echo "APPIMAGE_PATH=$appimage" >> "$GITHUB_ENV"
+
+      - name: Assert packaged WebKit, PipeWire, and AI runtimes
+        shell: bash
+        run: |
+          bash scripts/check-linux-appimage.sh "$APPIMAGE_PATH"
+
+      - name: Launch the packaged AppImage under Xvfb
+        shell: bash
+        run: |
+          set -euo pipefail
+          log="$RUNNER_TEMP/appimage-startup.log"
+          smoke_data=$(mktemp -d "${RUNNER_TEMP}/studyvis-app-data.XXXXXX")
+          export APPIMAGE="$APPIMAGE_PATH"
+          export SMOKE_DATA="$smoke_data"
+          set +e
+          # The nested Bash process intentionally expands the single-quoted variables.
+          # shellcheck disable=SC2016
+          timeout --signal=TERM --kill-after=5s 20s \
+            dbus-run-session -- bash -euo pipefail -c '
+              chmod 700 "$SMOKE_DATA"
+              export XDG_DATA_HOME="$SMOKE_DATA"
+              printf "studyvis-ci\n" | gnome-keyring-daemon \
+                --components=secrets --daemonize --unlock
+              secret="studyvis-ci-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+              printf "%s" "$secret" | secret-tool store \
+                --label="StudyVis CI Secret Service smoke" \
+                application studyvis purpose packaged-smoke
+              recovered=$(secret-tool lookup \
+                application studyvis purpose packaged-smoke)
+              if [ "$recovered" != "$secret" ]; then
+                echo "Secret Service returned the wrong value" >&2
+                exit 1
+              fi
+              secret-tool clear application studyvis purpose packaged-smoke
+              echo "Secret Service round-trip passed."
+              # Do not let the build-only loader path mask a missing library in
+              # the AppImage: AppRun must supply its own staged dependencies.
+              exec xvfb-run -a env -u LD_LIBRARY_PATH \
+                APPIMAGE_EXTRACT_AND_RUN=1 \
+                WEBKIT_DISABLE_COMPOSITING_MODE=1 \
+                "$APPIMAGE"
+            ' >"$log" 2>&1
+          status=$?
+          set -e
+          cat "$log"
+          if ! grep -Fqx 'Secret Service round-trip passed.' "$log"; then
+            echo "::error::Secret Service round-trip did not complete before the packaged-app smoke"
+            exit 1
+          fi
+          if [ "$status" -ne 124 ]; then
+            echo "::error::Packaged AppImage did not stay alive for the 20-second startup smoke (exit $status)"
+            exit 1
+          fi
+          runtime_log="$smoke_data/studyvis/logs/studyvis.log"
+          if ! grep -F '"scope":"runtime.webrtc","msg":"ready"' "$runtime_log"; then
+            echo "::error::The first packaged StudyVis document did not complete a WebRTC data-channel offer"
+            exit 1
+          fi
+          echo "Packaged AppImage stayed alive and attested a first-document WebRTC data-channel offer."
+
   # ---------------------------------------------------------------------
   # Everything below is new pre-merge surface (#102). Each job is cheap and
   # independent, so they fan out beside the two slow ones above rather than
@@ -259,7 +523,7 @@ jobs:
       # actionlint catches the boring-but-real class: a typo'd `runs-on`, an
       # expression that cannot type-check, a `run:` block shellcheck can
       # prove wrong. Those fail a workflow at dispatch time — which for
-      # release.yml means discovering it after the immutable tag is pushed.
+      # release.yml means discovering it after the version tag is pushed.
       #
       # Installed from the release tarball with its published checksum
       # verified before extraction rather than via a third-party action:
@@ -347,6 +611,10 @@ jobs:
           # binary. Do not read this step as licence coverage.
           comment-summary-in-pr: false
 
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+
       # The whole-graph npm picture, deliberately NON-blocking. `npm audit`
       # is red on this repo today and has been since ISSUES.md I19 logged it:
       # the findings are dev-chain (storybook's test-runner pulling nyc /
@@ -385,6 +653,7 @@ jobs:
       - name: cargo-deny (advisories, licenses, bans, sources)
         uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
         with:
+          rust-version: '1.97.1'
           manifest-path: src-tauri/Cargo.toml
           arguments: --config src-tauri/deny.toml
           command: check
@@ -443,7 +712,16 @@ jobs:
     # Hand-maintained on purpose, and the one line to update when adding a
     # job to this file — a job missing from here is a job branch protection
     # does not gate on.
-    needs: [frontend, rust, workflows, supply-chain, hygiene]
+    needs:
+      [
+        frontend,
+        third-party-notices,
+        rust,
+        linux-appimage,
+        workflows,
+        supply-chain,
+        hygiene,
+      ]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -459,12 +737,12 @@ jobs:
         run: |
           set -euo pipefail
           echo "$NEEDS" | jq -r 'to_entries[] | "\(.value.result)\t\(.key)"' | sort
-          # "skipped" counts as a pass ONLY because no job in this workflow
-          # depends on another — the sole skip is pr-title on a push event.
-          # If an inter-job `needs:` is ever added here, revisit this: a job
-          # skipped because its dependency failed would sail through.
+          # Every job named in `needs` is unconditional, so anything other
+          # than success is a failed aggregate gate. Keeping this fail-closed
+          # also prevents a future job-level condition from silently turning
+          # a required check green by returning `skipped`.
           failed=$(echo "$NEEDS" | jq -r '
-            [to_entries[] | select(.value.result != "success" and .value.result != "skipped") | .key]
+            [to_entries[] | select(.value.result != "success") | .key]
             | join(", ")')
           if [ -n "$failed" ]; then
             echo "::error::pre-merge gates did not pass: $failed"

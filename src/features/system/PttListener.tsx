@@ -261,8 +261,9 @@ export function PttListener() {
       const currentEdgeSeq = localEdgeSeq
       const now = monotonicNow()
       const before = usePttStore.getState()
-      const duplicatePress = edge === 'pressed' && before.awaitingRelease
-      const duplicateRelease = edge === 'released' && !before.awaitingRelease
+      const nativeHeld = before.heldSources.includes('native-shortcut')
+      const duplicatePress = edge === 'pressed' && nativeHeld
+      const duplicateRelease = edge === 'released' && !nativeHeld
 
       if (edge === 'pressed') {
         if (duplicatePress) {
@@ -276,10 +277,10 @@ export function PttListener() {
           })
         } else {
           pressStartedAt = now
-          press()
+          press('native-shortcut')
         }
       } else if (!duplicateRelease) {
-        release()
+        release('native-shortcut')
       }
 
       const after = usePttStore.getState()

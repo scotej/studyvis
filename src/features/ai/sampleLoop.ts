@@ -15,12 +15,12 @@
 //     ─ focusStore.applyJudgment(value or fallback)
 //     sleep(effective_sample_interval)   // user override clamped to floor
 //
-// Screen capture: README §"Acquire strategy" documents that getDisplayMedia
-// in both WKWebView (macOS) and WebView2 (Windows) surfaces an OS picker on
-// EVERY acquire. captureScreen()'s acquire-snapshot-release per tick would
-// therefore pop the picker every 5–30 s. V2-P9 takes the documented
-// contingency: one getDisplayMedia at boot, kept alive for the session,
-// snapshotted per tick via the shared CaptureRuntime.extractFrame pipeline.
+// Screen capture: README §"Live capture pipeline" documents why
+// getDisplayMedia acquisition stays outside the tick. Desktop webviews and the
+// Linux portal surface an OS picker for acquisition; captureScreen()'s
+// acquire-snapshot-release shape per tick would therefore repeatedly interrupt
+// the user. The live path acquires at boot, keeps streams for the session, and
+// snapshots them per tick via the shared CaptureRuntime.extractFrame pipeline.
 // The OS screen-recording indicator stays lit for the whole session (same
 // visibility as the camera tile); onboarding documents this.
 //

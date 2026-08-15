@@ -2,20 +2,11 @@ import { useEffect, useRef } from 'react'
 
 import { tokens } from '@/design/tokens'
 import type { PresenceMap } from '@/features/friends'
+import { useAppliedWindowStyle } from '@/lib/appliedWindowStyle'
 import { titleBarHeightPx } from '@/lib/windowChrome'
-import { readWindowStyleBootCache } from '@/stores/settingsStore'
 import { strings } from '@/strings'
 
 import { Settings, type SettingsCategoryId } from './Settings'
-
-// Frozen at module import — imports run at boot, before any Appearance
-// toggle can rewrite the localStorage cache. Reading the cache per render
-// would desync the inset from the chrome actually applied this process the
-// moment the user flips Window style with the relaunch still pending
-// (re-covering the custom titlebar's window controls — the exact defect
-// the inset exists to fix). A useState initializer isn't enough here: the
-// overlay remounts on every open.
-const BOOTED_WINDOW_STYLE = readWindowStyleBootCache()
 
 export type SettingsOverlayProps = {
   initialCategory?: SettingsCategoryId
@@ -39,6 +30,7 @@ export function SettingsOverlay({
 }: SettingsOverlayProps) {
   const rootRef = useRef<HTMLDivElement | null>(null)
   const openerRef = useRef<HTMLElement | null>(null)
+  const appliedWindowStyle = useAppliedWindowStyle()
 
   // Esc closes the overlay — but only when no Radix modal is open: a
   // dialog inside Settings (confirm sheets, etc.) portals to <body> and owns
@@ -90,7 +82,7 @@ export function SettingsOverlay({
   // and interactive above this overlay — covering it hides the min/restore/
   // close cluster and the drag region for as long as Settings is open.
   const chromeInsetTop =
-    BOOTED_WINDOW_STYLE === 'custom' ? titleBarHeightPx() : 0
+    appliedWindowStyle === 'custom' ? titleBarHeightPx() : 0
 
   return (
     <div

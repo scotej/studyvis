@@ -36,7 +36,7 @@ pub fn toggle_ai_dialog<R: Runtime>(app: &AppHandle<R>) -> Result<(), tauri::Err
     }
 
     let url = WebviewUrl::App("ai-dialog.html".into());
-    let mut builder = WebviewWindowBuilder::new(app, AI_DIALOG_LABEL, url)
+    let builder = WebviewWindowBuilder::new(app, AI_DIALOG_LABEL, url)
         .title("StudyVis · Ask the AI")
         .inner_size(DIALOG_WIDTH, DIALOG_HEIGHT)
         .center()
@@ -50,13 +50,13 @@ pub fn toggle_ai_dialog<R: Runtime>(app: &AppHandle<R>) -> Result<(), tauri::Err
     // Hide the dock icon entry for the dialog on macOS — `skip_taskbar`
     // covers Windows; on macOS the same flag maps to the dock surface.
     #[cfg(target_os = "macos")]
-    {
+    let builder = {
         // Setting visible_on_all_workspaces gives us the canJoinAllSpaces
         // bit via tao, but it also OR's in transient+stationary which we
         // override below. We set it here for parity on the off-chance
         // the AppKit cast fails — better to show on all spaces than to
         // get stuck on one.
-        builder = builder.visible_on_all_workspaces(true);
+        let builder = builder.visible_on_all_workspaces(true);
 
         // I81 — AppKit draws its window rim (a black outer hairline over a
         // grey inner one) around the *alpha silhouette* of a borderless
@@ -68,8 +68,8 @@ pub fn toggle_ai_dialog<R: Runtime>(app: &AppHandle<R>) -> Result<(), tauri::Err
         // shadow-and-rim pass off; the panel keeps its own CSS shadow.
         // macOS-only — on Windows this same flag is what gives an
         // undecorated window its 1 px border and Windows 11 rounded corners.
-        builder = builder.shadow(false);
-    }
+        builder.shadow(false)
+    };
 
     let window = builder.build()?;
 
@@ -89,6 +89,14 @@ pub fn toggle_ai_dialog<R: Runtime>(app: &AppHandle<R>) -> Result<(), tauri::Err
     }
 
     Ok(())
+}
+
+/// Main-window IPC fallback for Linux/Wayland, where X11 global grabs cannot
+/// fire while a native Wayland client owns focus. Keeping this as the same
+/// toggle function means the shortcut and the visible button cannot drift.
+#[tauri::command]
+pub fn ai_dialog_toggle(app: AppHandle) -> Result<(), String> {
+    toggle_ai_dialog(&app).map_err(|error| format!("toggle AI dialog: {error}"))
 }
 
 #[cfg(target_os = "macos")]

@@ -45,10 +45,12 @@ Each machine is fully self-contained. AI inference runs only on the user's own m
 
 ## 2. Tech stack
 
-Pinned versions are the floor; bump as needed but never silently downgrade.
+Pinned application-dependency versions are the floor; bump as needed but never
+silently downgrade. The Linux WebKitGTK/librice production tuple below is an
+exact artifact identity, not a minimum-version range.
 
 ### Frontend
-- **Tauri 2.x** — desktop shell. Native WebView per OS (WKWebView on macOS, WebView2 on Windows, WebKitGTK on Linux).
+- **Tauri 2.x** — desktop shell. Native WebView per OS (WKWebView on macOS, WebView2 on Windows, WebKitGTK on Linux). The Linux release-candidate AppImage carries StudyVis's pinned WebKitGTK runtime; it does not delegate the production session surface to the host distro package.
 - **React 19+** with **Vite 8+** — UI framework and build (V1-P1 landed Vite 8.0.10; floor is whatever current major is at re-pin time).
 - **Tailwind CSS v4** — styling (uses CSS variables, native CSS layer support).
 - **shadcn/ui** — component primitives, Radix-based, source vendored under `src/components/ui/`.
@@ -85,17 +87,175 @@ Pinned versions are the floor; bump as needed but never silently downgrade.
 
 **Scheduling** lives in `src/features/updater/UpdaterBoot.tsx`, not in the store. Two rules: nothing outbound while the `auto_update_enabled` setting is off, and nothing at all during a session — a WebRTC mesh has no bandwidth to spare for an installer download. The first check is delayed 20 s after boot so it doesn't race P2P discovery; thereafter every 6 h.
 
-**Apply.** Downloads run unattended; only the restart waits for a person, via `UpdateReadyBanner` on the dashboard (and a mirrored row in Settings → About). The store stops the llama-server sidecar before `install()` — on Windows the NSIS installer cannot overwrite a running `llama-server.exe`, and on macOS an orphan would survive the relaunch holding its port and model file.
+**Apply.** Downloads run unattended; only the restart waits for a person, via `UpdateReadyBanner` on the dashboard (and a mirrored row in Settings → About). The store stops the llama-server sidecar before `install()` — on Windows the NSIS installer cannot overwrite a running `llama-server.exe`, on macOS an orphan would survive the relaunch holding its port and model file, and on Linux no bundled child may survive replacement of the AppImage. The Linux updater uses Tauri's `env.appimage`/`APPIMAGE` path for both replacement and relaunch. Both that original file and its containing directory must therefore be writable. AppImage's `--appimage-extract-and-run` still supplies the original path, so it is slower than FUSE mounting but does not redirect an update into the temporary extracted tree.
 
 **Windows packaging.** NSIS (`-setup.exe`), per-user install, `installMode: "passive"`. MSI was dropped at X6: applying an MSI update requires msiexec elevation every time, which is a UAC prompt per release.
 
+**Linux packaging.** The next release candidate targets
+`x86_64-unknown-linux-gnu`, bundled as an AppImage. It has no native package
+manager integration and no root requirement. FUSE 2 is the normal mount path;
+AppImage's `--appimage-extract-and-run` mode is the documented fallback. The
+runtime also relies on a desktop Secret Service provider and, on KDE Wayland,
+`xdg-desktop-portal-kde` + PipeWire for screen selection and capture.
+
+**Bundled WebKit/WebRTC runtime.** WebKitGTK's GTK release configuration makes
+`ENABLE_WEB_RTC` follow `ENABLE_EXPERIMENTAL_FEATURES`, while
+`ENABLE_MEDIA_STREAM` defaults on independently. Official distro production
+builds in the maintained CachyOS/Arch path leave the experimental umbrella off:
+the native probe therefore had `navigator.mediaDevices` but no
+`RTCPeerConnection`. A preference cannot restore that compiled-out
+peer-connection binding. StudyVis instead builds a narrow private runtime with
+experimental features still off but WebRTC explicitly on; it also reasserts
+media streams, GStreamer WebRTC, librice, and the bubblewrap sandbox. librice
+keeps ICE/network work in WebKit's sandboxed NetworkProcess.
+
+Runtime revision 3 has this reviewable input identity:
+
+| Input | Version/source | SHA-256 |
+|-|-|-|
+| WebKitGTK | `webkitgtk-2.52.5.tar.xz` from `webkitgtk.org/releases` | `8a531a9abd2215936e8a8a914c077b586c0228b31d652f205286a8ec90f3364b` |
+| librice | GitHub tag archive `v0.4.3` | `4671e1835f9ab0f8d87e8d9e22b6bfb06f928aeae442841ab81881dff61e3f4b` |
+| WebKit AppImage portability delta | `scripts/patches/webkitgtk-2.52.5-appimage-sandbox.patch` | `907380c80b541f89924bfd0d9709ac9a20d353b99d361d785dbe017324837eb8` |
+
+`scripts/linux-webkit-runtime.env` is the version/hash authority;
+`scripts/build-linux-webkit-runtime.sh` verifies the downloads, applies that
+one patch, and asserts the effective CMake cache. The same tuple also pins the
+source URLs, patch hash, `cargo-c` 0.10.24, runtime revision, and AppImage
+runtime-directory name. The builder's
+`--print-manifest` renders the expected provenance without compiling. The patch
+first resolves the packaged Network/Web/GPU subprocesses and injected bundle
+from `studyvis-webkit-runtime/` beside the AppImage executable, and packaged
+`bwrap`/`xdg-dbus-proxy` directly beside it, before falling back to WebKit's
+compiled native locations. This avoids silently resolving the host's
+`PKGLIBEXEC`/`PKGLIBDIR` while retaining native-package/development fallbacks;
+it does not disable the sandbox. Reproducibility here means pinned and checked
+source inputs, local delta, build environment, and configuration—not a claim of
+bit-for-bit identical output from arbitrary machines. Production builds use
+Ubuntu 22.04, Rust 1.97.1, and `cargo-c` 0.10.24. The hosted image and Jammy apt
+indexes are mutable, so this is a bounded build baseline rather than a fully
+pinned or bit-reproducible environment. A stronger future boundary would use a
+snapshot-pinned apt repository or digest-pinned build container and record the
+full build-host dpkg inventory. The release build reconstructs the private
+runtime from its verified tuple rather than treating a restored binary prefix
+as provenance.
+
+Every platform bundle also carries identical generated
+`THIRD-PARTY-NOTICES.txt` and `THIRD-PARTY-NOTICES.json` Tauri resources. The
+repository generator uses npm's locked production tree, target-filtered normal
+Cargo dependency closures for macOS arm64, Windows x86_64, and Linux x86_64,
+and the pinned llama.cpp runtime. Explicit, version-bound exceptions select
+vendored Wry's MIT alternative, preserve both OFL font texts, supply
+victory-vendor's omitted root MIT text plus all 13 embedded d3/internmap
+licenses, and cover other locked archives that omit their declared text. CI
+populates the locked caches, regenerates offline, and requires an exact diff;
+artifact checks byte-compare the packaged pair and its recorded notice hash.
+This is mechanical inventory/delivery evidence, not legal advice or sign-off.
+
+The private Linux runtime has an additional generated
+`LIBRICE-THIRD-PARTY-NOTICES.txt`/`.json` pair. Its repository-owned generator
+unions the exact locked/offline normal edges selected for `rice-proto` and
+`rice-io` with `capi` enabled, records both root commands and the librice
+`Cargo.lock` hash, and fails on ambiguous packages or missing/unreviewed license
+evidence. The pair ships beside the WebKit runtime notices and remains
+verifiable after the extracted librice source tree is removed.
+
+Bundling transfers update ownership from the distro to StudyVis. A pacman/apt
+WebKit upgrade cannot patch an installed AppImage, so WebKitGTK/librice advisory
+monitoring, version/hash/patch review, rebuild, packaged validation, physical
+matrix, and signed updater delivery are part of maintaining Linux. The bundle
+also carries the selected WebKit core texts, librice's Apache/MIT licenses, and
+the applied patch under `usr/share/licenses/studyvis-webkit-runtime/`.
+`BUILD-MANIFEST.txt` records the exact runtime/source/tool/config/payload
+identity, including the AppImage-relative subprocess, injected-bundle, and
+sandbox-helper layout, while `WEBKIT-THIRD-PARTY-LICENSES.txt` and
+`WEBKIT-LICENSE-FILES.sha256` preserve a readable and hash-addressed inventory
+of all 59 upstream WebKit license/notice files discovered by the pinned source
+build. The builder's `--source-bundle` mode separately creates a deterministic
+corresponding-source archive containing the exact verified WebKitGTK/librice
+archives, complete patch, pinned env, builder, expected manifest, reconstruction
+README, and internal checksums. Tagged Linux builds attach it as
+`StudyVis_X.Y.Z_linux-webkit-sources.tar.gz` with a basename-only `.sha256`
+sidecar after the exact-AppImage smoke; it is kept outside the AppImage to avoid
+duplicating the source payload in every install. Maintainers remain responsible
+for notices and corresponding-source obligations on every runtime bump.
+
+A second deterministic pair,
+`StudyVis_X.Y.Z_linux-system-sources.tar.gz` and its basename-only `.sha256`, is
+built from that same finished AppImage. It inventories every regular ELF and
+symlink with SHA-256/build-ID evidence; proves every `DT_NEEDED`/`PT_INTERP`
+edge resolves inside the image or to the reviewed base ABI; maps Ubuntu bytes
+to exact binary/source versions and Debian copyright files; and downloads the
+matching apt source components. Modeled linuxdeploy/appimagetool/type-2-runtime,
+AppRun, GTK/GStreamer hook, and llama.cpp source/notice inputs cover the modeled
+non-Ubuntu payload. An unmapped byte, modeled source/version/copyright gap, or
+failed checksum stops release creation. The bundle also preserves the complete
+build evidence for StudyVis's source-built AppImage type-2 runtime revision 1:
+hash-pinned type2, musl 1.2.5, zlib 1.3.1, decompression-only zstd 1.5.6,
+libfuse 3.15.0, squashfuse 0.5.2, and Meson 1.7.2 sources/licenses; exact Jammy
+compiler, linker, CRT, and libgcc provenance; build metadata; the link map; and
+per-input hashes. Verification requires an `x86_64-linux-musl` `ET_DYN` static
+PIE without `PT_INTERP` or `DT_NEEDED`, using musl mallocng and no mimalloc.
+That completes the pre-SquashFS runtime's static source/notice/link closure.
+The mutable Jammy build baseline is independently not bit-reproducible, and
+none of these gates constitutes legal sign-off.
+
+**Release artifact gate.** CI keeps all three Rust hosts compiled. Its blocking
+Linux package job builds the pinned private runtime, packages it with the
+media-framework and sandbox helpers, validates runtime/license files, ELF
+dependencies, the shipped build manifest and 59-file license inventory, and the
+packaged-only GStreamer WebRTC/SCTP elements, verifies a gnome-keyring Secret
+Service round-trip, and starts the extracted AppImage under Xvfb. The first
+document must log `runtime.webrtc ready` after constructing a
+local peer-connection data-channel offer; this proves more than a live process
+but less than an exchanged data channel or real media session. Preview
+deployments additionally build installable macOS arm64, Windows x86_64, and
+Linux x86_64 artifacts from the exact commit. A tagged release fetches the
+pinned sidecar for each target and emits signed updater artifacts. The Linux leg
+repeats the native inspection on the exact AppImage it produced/uploaded and
+extraction-launches it for 20 seconds with build-time library paths removed,
+again requiring the first-document offer attestation. Its draft is incomplete
+unless `latest.json` contains `darwin-aarch64`, `windows-x86_64`, and
+`linux-x86_64` and both Linux source archives and checksum sidecars are present
+and verify; aggregate failure stamps it `INCOMPLETE, DO NOT PUBLISH`.
+Headless build and startup success does not prove a desktop media or in-app
+key-custody path: publishing also requires the PLAN §8 exact-AppImage physical
+CachyOS KDE Wayland data-channel/media/cross-platform-peer matrix.
+`publish-release.yml` is designed as the publication boundary: it queues behind
+the tag build, revalidates the tag's `main` ancestry and exact-commit CI, and
+requires the latest `release.yml` run for that exact tag (`head_branch`) and tag
+commit (`head_sha`) to have completed successfully. This closes the interval
+where `tauri-action` has uploaded an artifact but the tagged Linux job's
+exact-AppImage runtime smoke can still fail. It then rechecks the draft
+metadata and notes, requires the exact twelve expected files, downloads them by
+their draft asset API URLs, compares every updater signature sidecar byte for
+byte with `latest.json`, and verifies GitHub build provenance tying every
+binary, sidecar, source asset, and the final manifest to `release.yml` at that
+exact tag/commit on hosted runners. The required dispatch input is the lowercase
+SHA-256 recorded by the PLAN §8 physical AppImage pass; the publisher checks it
+during validation and re-downloads/re-hashes that AppImage immediately before
+changing the draft to published. Before production use, repository
+settings must therefore add three controls that workflow YAML cannot establish:
+create the `release` environment with required reviewer approval, protect matching `v*` tags against
+creation/update/deletion, and enable immutable releases. This sole-owner repository
+uses `scotej` as its reviewer and permits self-review; an independent reviewer plus
+self-review prevention is required for a two-person approval boundary. The tag ruleset's sole
+`Always` bypass entry must be `RepositoryRole 5` (admin), used by the
+owner-scoped `RELEASE_PAT`; do not add Write, Maintain, team, or integration
+bypasses. GitHub hides `bypass_actors` from the workflow's read-only ruleset
+response, so its gate verifies scope and rule types while an admin must verify
+the actor list. As of 2026-08-13 the environment is confirmed absent; the tag
+ruleset and immutable-release setting must also be verified/configured. Without
+these controls the YAML checks still fail closed, but there is no independent
+approval boundary or repository-level
+guarantee against later tag/release mutation.
+
 ### AI inference (V2+)
-- **llama-server** (binary from llama.cpp build) — Tauri sidecar. The release matrix bundles `mac-arm64` + `win-x64` (matching the Apple-Silicon/Windows-only install story in INSTALL.md / README.md); `mac-x64` and `linux-x64` remain fetchable for local dev (`scripts/fetch-llama-server.sh` supports all four triples — see the Linux unblock trigger in PLAN §8).
+- **llama-server** (binary from llama.cpp build) — Tauri sidecar. The release matrix bundles `aarch64-apple-darwin`, `x86_64-pc-windows-msvc`, and `x86_64-unknown-linux-gnu`; Intel macOS remains fetchable for local development. `scripts/fetch-llama-server.sh` pins and SHA-256-verifies all four upstream archives. The Linux archive is the upstream Ubuntu x64 CPU build: the candidate's `auto` policy uses zero GPU layers. A custom GPU-capable engine can expose an explicit device, but GPU acceleration is not a property promised by the AppImage.
 - App spawns sidecar on demand, communicates via OpenAI-compatible HTTP on `127.0.0.1:<random-port>`. Exact request shape (image content block field names, multipart vs. base64) verified against the pinned llama-server build at V2-P1 time; the sample-loop pseudocode in §8 is illustrative.
 - Vision models loaded with paired `--mmproj` projector files.
 
 ### Battery awareness (V2+)
-- Tauri 2 has no first-party battery API. Use the `battery` Rust crate inside `src-tauri/src/commands/system.rs` to expose `system_battery() -> { on_battery: bool, percent: u8 }`. The V2 sample loop polls this every 60 s and pauses inference when on battery and percent <20. Linux requires UPower; document fallback if absent.
+- Tauri 2 has no first-party battery API. Use the `battery` Rust crate inside `src-tauri/src/commands/system.rs` to expose `system_battery() -> { on_battery: bool, percent: u8 }`. The V2 sample loop polls this every 60 s and pauses inference when on battery and percent <20. Linux normally obtains this through UPower; a desktop/VM without a readable battery service deliberately returns the safe availability fallback `{ on_battery: false, percent: 100 }` so inference is not permanently disabled.
 
 ### Why not...
 - **llama-cpp-2 Rust crate** directly: as of v0.1.146 it doesn't expose multimodal/mmproj; llama-server's HTTP API does. Using llama-server keeps us on llama.cpp's well-maintained vision path.
@@ -125,7 +285,7 @@ On first launch:
 This gives two independent keypairs both recoverable from the same 24 words. HKDF guarantees the two derived secrets are computationally independent even though they share a master seed.
 
 ### Storage
-- **Both private keys**: stored in OS keychain via Tauri. On macOS: Keychain; Windows: Credential Manager; Linux: Secret Service (libsecret). Stored as a single JSON record `{ ed_priv_hex, x_priv_hex }` keyed by app + user identity. Never written to plaintext disk.
+- **Both private keys**: stored in the OS credential store via Tauri. On macOS: Keychain; Windows: Credential Manager; Linux: the freedesktop Secret Service over D-Bus (`keyring`'s `sync-secret-service` + `crypto-rust` features, not a plaintext `libsecret` file). Stored as a single JSON record `{ ed_priv_hex, x_priv_hex }` keyed by app + user identity. Never written to plaintext disk. A Linux user session must provide `org.freedesktop.secrets` through gnome-keyring, KeePassXC's Secret Service integration, or a compatible configured KDE wallet service.
 - **Both public keys + display name + seed-fingerprint**: stored in `~/.local/share/studyvis/identity.json` (paths via Tauri's `path::data_dir()`). Schema: `{ version: 1, ed_pubkey_hex, x_pubkey_hex, display_name, created_at, mnemonic_fingerprint }`. The Ed25519 public key is the user's stable display identifier (used in friends.db, signatures, audit logs); the X25519 public key is exchanged alongside it during pairing.
 - **BIP39 mnemonic**: shown once during onboarding, copyable, never persisted to disk by the app. User is told plainly: "If you lose this and your laptop, you cannot recover this identity."
 
@@ -153,7 +313,7 @@ The `trystero` package uses Nostr by default — a network of public WebSocket r
 We never ship Firebase or Supabase strategies; both require keys we'd own (= backend we operate).
 
 ### Relay selection
-Trystero does **not** pick relays at random per peer. Its Nostr strategy shuffles its bundled relay list with a seed derived **only from the `appId`** (`'studyvis'`) and takes the first `redundancy` (default 5) — so every peer on the same version deterministically targets the *identical* relays. Discovery overlap between two peers is therefore 100% by construction; the failure mode is not "no shared relay" but the chosen relays being low-uptime or unreachable from a given network, with no per-peer diversity to fall back on. We therefore **pin a curated `relayConfig.urls`** (`src/lib/trystero/relays.ts`) of relays verified to speak Nostr and accept anonymous ephemeral events, applied to every room rendezvous via `joinTopic`. Passing `urls` makes trystero use the entire list (its `redundancy` knob is then ignored).
+Trystero does **not** pick relays at random per peer. Its Nostr strategy shuffles its bundled relay list with a seed derived **only from the `appId`** (`'studyvis'`) and takes the first `redundancy` (default 5) — so every peer on the same version deterministically targets the *identical* relays. Discovery overlap between two peers is therefore 100% by construction; the failure mode is not "no shared relay" but the chosen relays being low-uptime or unreachable from a given network, with no per-peer diversity to fall back on. We therefore **pin curated `relayConfig.urls` lists** for Nostr (`src/lib/trystero/relayUrls.ts`) and MQTT (`src/lib/trystero/mqttRelayUrls.ts`). The Nostr entries are verified to accept anonymous ephemeral events; the MQTT entries are verified with a public-access subscribe/publish/receive round-trip (Shiftr uses its documented shared `public:public` credential, not a private StudyVis secret). `npm run check-relays` imports and probes these exact shipped lists. Passing `urls` makes each trystero strategy use the entire corresponding list (its `redundancy` knob is then ignored). User-configured relay overrides extend only the Nostr list; MQTT keeps its independent broker pin.
 
 ### Topic derivations
 
@@ -651,11 +811,12 @@ studyvis/
 ├─ src-tauri/                     # Rust side
 │  ├─ Cargo.toml
 │  ├─ tauri.conf.json
-│  ├─ binaries/                   # sidecars (release bundles mac-arm64 + win-x64; mac-x64/linux-x64 are dev-fetchable)
-│  │  ├─ llama-server-mac-arm64
-│  │  ├─ llama-server-mac-x64
-│  │  ├─ llama-server-win-x64.exe
-│  │  └─ llama-server-linux-x64
+│  ├─ binaries/                   # per-target sidecars + companion runtime directories
+│  │  ├─ llama-server-aarch64-apple-darwin
+│  │  ├─ llama-server-x86_64-apple-darwin
+│  │  ├─ llama-server-x86_64-pc-windows-msvc.exe
+│  │  ├─ llama-server-x86_64-unknown-linux-gnu
+│  │  └─ llama-runtime-<target-triple>/
 │  ├─ capabilities/
 │  │  ├─ default.json             # Tauri 2 ACL — main window
 │  │  └─ ai-dialog.json           # scoped ACL — floating AI dialog
@@ -726,6 +887,14 @@ The `commands/` tree above is illustrative; the actual command modules are `iden
 
 ## 12. Permissions and entitlements
 
+Every desktop webview installs the Rust `trusted-navigation` policy before it
+loads content. Production top-level navigation is limited to the exact Tauri
+app origin (`tauri://localhost`, or WebView2's `http://tauri.localhost` form on
+Windows); debug builds additionally admit only the configured loopback origin
+on port 1420. Userinfo, alternate ports, lookalike hosts, and all external
+origins are rejected. Intended external links use the system opener instead of
+loading an external document into a webview that has privileged IPC.
+
 ### macOS (`Info.plist`)
 V1 ships unsigned `.dmg` artifacts (Tauri's default ad-hoc signing only). No Apple Developer ID, no notarization, no formal entitlements file — `Entitlements.plist` is therefore not bundled in V1. Per-resource access is gated entirely through `Info.plist` usage-description strings, which Tauri merges from `src-tauri/Info.plist` (a sibling file to `tauri.conf.json`):
 - `NSCameraUsageDescription` — explanation the OS shows on first camera prompt (V1).
@@ -739,11 +908,56 @@ When code-signing credentials become available (V3 or later), an `Entitlements.p
 - WebView2 handles camera/mic/screen prompts natively.
 - Ships an unsigned NSIS `-setup.exe` (per-user; the MSI target was dropped at X6 — see the updater section's "Windows packaging" note for why). Windows SmartScreen will warn on first launch ("Windows protected your PC") — friends click "More info" → "Run anyway". A code-signing certificate (and ideally an EV cert for instant SmartScreen reputation) would remove the warning; deferred until creds are available. Note this governs only the *first* install — X6 auto-update carries its own minisign signature, independent of Authenticode.
 
-### Linux (deferred)
-Linux is not part of the V1 release matrix — V0 deferred WebKitGTK `getDisplayMedia` validation, and the friends-only V1 audience is macOS + Windows only (the V1-P12 release workflow excludes Linux). When V0 is re-run on Linux, V3 lights up Linux: fully if `getDisplayMedia` passes, otherwise as the **AI-off** build PLAN §8 step 3 describes — camera + mic body-doubling, no AI loop and no outbound screen share. A `getDisplayMedia` failure narrows the Linux build; it does not block the platform. PLAN §8 is the authority on that policy.
-- WebKitGTK handles camera/mic — verified 2026-07 on 2.52.3, `getUserMedia` opens both. `getDisplayMedia` remains the open question pending V0 re-run.
-- Key custody is already wired: `keyring` uses the freedesktop Secret Service (`sync-secret-service`) under `cfg(target_os = "linux")`, so `commands/identity.rs` compiles on all three desktops rather than vanishing from this one. `ci.yml`'s Rust matrix has a Linux leg so it stays compiled. Running the app needs something owning `org.freedesktop.secrets` — gnome-keyring, KWallet or KeePassXC.
-- Distribution: `.AppImage` (no install, no sudo); `.deb`/`.rpm` only if there's a clear friends-need. Not built today.
+### Linux (x86_64 AppImage)
+Linux is implemented as a release-candidate target. Its intended maintained
+support path is a current x86_64 CachyOS installation with KDE Plasma on
+Wayland; the candidate cannot publish until the PLAN §8 matrix passes against
+its exact AppImage built from `x86_64-unknown-linux-gnu`.
+
+- WebKitGTK owns the webview WebRTC and camera/microphone APIs. The bundled
+  runtime supplies the compile-time feature; Wry must still opt the browsing
+  context into it. StudyVis's vendored wry 0.55.1 delta constructs a
+  `Settings` object with `enable_webrtc(true)` and
+  `enable_media_stream(true)`, passes it to `WebView::builder()` before
+  `build()`, and therefore guarantees that both preferences are present in the
+  initial WebKit page configuration. This constructor boundary avoids depending
+  on the timing or semantics of a later native-handle mutation; the
+  compile-gated distro binary could not establish whether such a mutation would
+  otherwise be early enough. The preference still cannot help a distro library
+  where the peer-connection binding was compiled out.
+- WebKit's unhandled `permission-request` default denies capture.
+  `linux_media_permissions.rs` handles only
+  `WebKitUserMediaPermissionRequest`. WebKitGTK 2.52.5's public request wrapper
+  does not expose its camera/microphone `SecurityOrigin` values, so this is a
+  top-level-view boundary rather than a claim of per-request-origin
+  authentication: the handler reads the current `webview.uri()` and allows only
+  when every parsed component matches `tauri://localhost` (and, in debug builds
+  only, the configured `http://localhost:1420`/`127.0.0.1:1420` URI). It
+  explicitly denies the same request class whenever the current URI is outside
+  that allowlist, as defense in depth behind the cross-platform top-level
+  navigation policy. The app CSP's `default-src 'self'` restricts child frames
+  and unrelated permission classes stay at WebKit's default. This is not a
+  blanket “allow all permissions” handler. Outbound screen sharing and AI capture call
+  `getDisplayMedia` and, on KDE Wayland, cross `xdg-desktop-portal-kde` and
+  PipeWire. The user must accept the desktop picker's selection; StudyVis does
+  not bypass or persist portal authority.
+- Key custody uses the freedesktop Secret Service backend described in §3.
+  `ci.yml` compiles this cfg-gated path, while release validation must perform a
+  live create/read/restore round-trip against a real provider. A development
+  library by itself is not a provider.
+- The updater signature chain is identical to the other platforms, but apply
+  semantics are AppImage-specific: keep the AppImage and containing directory
+  writable. Extraction mode retains the original AppImage as the update and
+  relaunch target; its temporary tree is never treated as the installation.
+- The packaged llama.cpp runtime is CPU-only by default. Model benchmarking is
+  strongly recommended; users should choose a lighter model when cadence is
+  too slow.
+- Notification recovery attempts to launch KDE or GNOME's settings panel; the
+  physical matrix must verify the maintained KDE path. Camera, microphone, and
+  screen-capture settings do not have portable Linux deep links, so those
+  failures use textual portal/privacy recovery steps instead.
+- No ARM64 AppImage, native pacman/AUR package, `.deb`, `.rpm`, Flatpak, Snap,
+  or guaranteed non-KDE desktop support is included in the candidate scope.
 
 ### Tauri capabilities
 
@@ -888,7 +1102,8 @@ unknown-preserving merge rule in §9.
 | Prompt injection of vision model via on-screen text | System prompt enumerates patterns; small models still fail sometimes. | Friend-acceptable; V3 may add structured-observation alternative. |
 | Lost laptop, no BIP39 backup | Re-pair with friends as a new identity. | User-bears. |
 | Strict NAT / firewall blocks direct connection | No public TURN ships (STUN-only by default — see §4); user can add their own TURN server in Settings → Network. Document the symptom in onboarding. | ~15% of network setups; sessions may fail to connect until a TURN server is configured. |
-| Linux WebKitGTK getDisplayMedia broken | V0 verifies; if broken, Linux deferred to V3. | Known. |
+| Linux bundled WebKitGTK/librice becomes stale | Pin and hash every input; monitor both upstreams; ship license/source material; rebuild, re-run packaged checks plus the exact-AppImage physical matrix, and deliver fixes through the signed updater. | Distro WebKit security upgrades do not patch the AppImage; StudyVis owns response time and compliance for its private copy. |
+| Linux desktop service missing or misconfigured | CachyOS prerequisites install a Secret Service provider plus the KDE portal/PipeWire host services; the WebKit/WebRTC runtime itself is bundled. Release sign-off must exercise `getUserMedia`/`getDisplayMedia` on the exact AppImage. | Screen capture or secure credential storage cannot work until the missing user-session service is restored; other Linux desktops are best-effort. |
 | Battery drain from continuous inference | Auto-pause on battery <20%. | Low. |
 | Inference cadence stalls UI | Sample loop runs in worker; HTTP request is async. UI never blocks on AI. | Low if implemented correctly. |
 | Local data files read by anyone with disk access | Private keys live in the OS keychain. `app.db` (friends' pubkeys, full session history, signed audit log) and `identity.json` (public keys + display name) are **plaintext at rest by design** — confidentiality relies on the OS account boundary, not on-disk encryption. | Acceptable under friends-only (no public users, no synced cloud copy). SQLCipher-style encryption of the social graph is a deliberate flagged future scope, not a shipped guarantee. |
@@ -902,6 +1117,8 @@ Anything that becomes part of the wire format or local DB has a `_v` field. Unkn
 - Trystero docs: <https://github.com/dmotz/trystero>
 - llama.cpp + llama-server: <https://github.com/ggerganov/llama.cpp>
 - Tauri 2 plugins: <https://github.com/tauri-apps/plugins-workspace>
+- WebKitGTK releases: <https://webkitgtk.org/releases/>
+- librice: <https://github.com/ystreet/librice>
 - BIP-39 wordlist: <https://github.com/bitcoin/bips/blob/master/bip-0039/english.txt>
 - Verified vision model GGUFs (HF Hub):
   - moondream2: <https://hf.co/ggml-org/moondream2-20250414-GGUF>

@@ -29,3 +29,9 @@ export const Retrying: Story = {
 export const KeysMissing: Story = {
   args: { variant: 'keysMissing' },
 }
+
+// A locked/unavailable credential store is not evidence that keys are gone:
+// show actionable retry guidance without the destructive recovery action.
+export const KeychainUnavailable: Story = {
+  args: { variant: 'keychainUnavailable' },
+}

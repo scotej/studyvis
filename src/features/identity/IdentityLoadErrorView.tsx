@@ -8,7 +8,9 @@ export type IdentityLoadErrorViewProps = {
   // 'file' (D1) — identity.json unreadable; keys presumed intact, so Retry
   // leads. 'keysMissing' (#47 E1) — the keychain definitively holds no keys;
   // retrying can't fix that, so the 24-word restore leads.
-  variant?: 'file' | 'keysMissing'
+  // 'keychainUnavailable' — the credential store could not be opened; Retry
+  // leads and Recover is withheld because the keys may still be present.
+  variant?: 'file' | 'keysMissing' | 'keychainUnavailable'
   retrying: boolean
   onRetry: () => void
   onRecover: () => void
@@ -28,12 +30,20 @@ export function IdentityLoadErrorView({
   const copy =
     variant === 'keysMissing'
       ? strings.identity.keysMissing
-      : strings.identity.loadError
+      : variant === 'keychainUnavailable'
+        ? strings.identity.keychainUnavailable
+        : strings.identity.loadError
+  const recoverCta =
+    variant === 'keysMissing'
+      ? strings.identity.keysMissing.recoverCta
+      : variant === 'file'
+        ? strings.identity.loadError.recoverCta
+        : null
   const retryButton = (
     <Button
       size="lg"
       variant={variant === 'keysMissing' ? 'outline' : 'default'}
-      autoFocus={variant === 'file'}
+      autoFocus={variant !== 'keysMissing'}
       onClick={onRetry}
       disabled={retrying}
       aria-disabled={retrying || undefined}
@@ -41,16 +51,16 @@ export function IdentityLoadErrorView({
       {copy.retryCta}
     </Button>
   )
-  const recoverButton = (
+  const recoverButton = recoverCta ? (
     <Button
       size="lg"
       variant={variant === 'keysMissing' ? 'default' : 'outline'}
       autoFocus={variant === 'keysMissing'}
       onClick={onRecover}
     >
-      {copy.recoverCta}
+      {recoverCta}
     </Button>
-  )
+  ) : null
   return (
     <main
       aria-label={copy.ariaLabel}

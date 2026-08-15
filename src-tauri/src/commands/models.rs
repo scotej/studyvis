@@ -405,11 +405,12 @@ fn content_length_from_headers(headers: &reqwest::header::HeaderMap) -> Option<u
         .and_then(|s| s.parse::<u64>().ok())
 }
 
-// ── Hugging Face access token (mac + win only — Linux deferred with V1-P3) ──
+// ── Hugging Face access token (native keyring / Secret Service) ──
 
 #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 fn hf_token_entry() -> Result<Entry, String> {
-    Entry::new(KEYRING_SERVICE, KEYRING_USER_HF_TOKEN).map_err(|e| e.to_string())
+    Entry::new(KEYRING_SERVICE, KEYRING_USER_HF_TOKEN)
+        .map_err(|e| super::identity::format_keyring_error("open keyring", e))
 }
 
 #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
@@ -424,7 +425,7 @@ pub fn hf_token_save(token: String) -> Result<(), String> {
     }
     hf_token_entry()?
         .set_password(trimmed)
-        .map_err(|e| format!("keyring set: {e}"))
+        .map_err(|e| super::identity::format_keyring_error("save Hugging Face token", e))
 }
 
 #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
@@ -433,7 +434,10 @@ pub fn hf_token_present() -> Result<bool, String> {
     match hf_token_entry()?.get_password() {
         Ok(s) => Ok(!s.is_empty()),
         Err(keyring::Error::NoEntry) => Ok(false),
-        Err(e) => Err(format!("keyring get: {e}")),
+        Err(e) => Err(super::identity::format_keyring_error(
+            "read Hugging Face token",
+            e,
+        )),
     }
 }
 
@@ -443,7 +447,10 @@ pub fn hf_token_clear() -> Result<(), String> {
     match hf_token_entry()?.delete_credential() {
         Ok(()) => Ok(()),
         Err(keyring::Error::NoEntry) => Ok(()),
-        Err(e) => Err(format!("keyring delete: {e}")),
+        Err(e) => Err(super::identity::format_keyring_error(
+            "delete Hugging Face token",
+            e,
+        )),
     }
 }
 

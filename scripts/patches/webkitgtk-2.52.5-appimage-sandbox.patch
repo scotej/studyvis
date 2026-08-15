@@ -1,0 +1,198 @@
+diff --git a/Source/WTF/wtf/glib/Sandbox.h b/Source/WTF/wtf/glib/Sandbox.h
+index 43a3f4db29d2..baf7500b1fc2 100644
+--- a/Source/WTF/wtf/glib/Sandbox.h
++++ b/Source/WTF/wtf/glib/Sandbox.h
+@@ -22,6 +22,10 @@
+ 
+ namespace WTF {
+ 
++#if ENABLE(BUBBLEWRAP_SANDBOX)
++WTF_EXPORT_PRIVATE const CString& bubblewrapExecutable();
++WTF_EXPORT_PRIVATE const CString& dbusProxyExecutable();
++#endif
+ WTF_EXPORT_PRIVATE bool isInsideFlatpak();
+ WTF_EXPORT_PRIVATE bool isInsideUnsupportedContainer();
+ WTF_EXPORT_PRIVATE bool isInsideSnap();
+@@ -33,6 +37,10 @@ WTF_EXPORT_PRIVATE const CString& sandboxedUserRuntimeDirectory();
+ 
+ } // namespace WTF
+ 
++#if ENABLE(BUBBLEWRAP_SANDBOX)
++using WTF::bubblewrapExecutable;
++using WTF::dbusProxyExecutable;
++#endif
+ using WTF::isInsideFlatpak;
+ using WTF::isInsideUnsupportedContainer;
+ using WTF::isInsideSnap;
+diff --git a/Source/WTF/wtf/glib/Sandbox.cpp b/Source/WTF/wtf/glib/Sandbox.cpp
+index b99a94fd7f0a..e9aa1df1c48b 100644
+--- a/Source/WTF/wtf/glib/Sandbox.cpp
++++ b/Source/WTF/wtf/glib/Sandbox.cpp
+@@ -28,6 +28,7 @@
+ #include <wtf/FileSystem.h>
+ #include <wtf/NeverDestroyed.h>
+ #include <wtf/glib/GRefPtr.h>
++#include <wtf/glib/GUniquePtr.h>
+ #include <wtf/text/CString.h>
+ 
+ namespace WTF {
+@@ -41,6 +42,33 @@ bool isInsideFlatpak()
+ }
+ 
+ #if ENABLE(BUBBLEWRAP_SANDBOX)
++static CString packagedSandboxHelper(const char* name, const char* fallback)
++{
++    // AppImages are not chroots, so WebKit's normal /usr/bin paths refer to
++    // the host. Prefer a helper shipped beside the StudyVis executable and
++    // keep the configured path as the native-package/development fallback.
++    CString executable = FileSystem::currentExecutablePath();
++    if (!executable.isNull()) {
++        GUniquePtr<char> directory(g_path_get_dirname(executable.data()));
++        GUniquePtr<char> candidate(g_build_filename(directory.get(), name, nullptr));
++        if (g_file_test(candidate.get(), G_FILE_TEST_IS_EXECUTABLE))
++            return candidate.get();
++    }
++    return fallback;
++}
++
++const CString& bubblewrapExecutable()
++{
++    static NeverDestroyed<CString> executable = packagedSandboxHelper("bwrap", BWRAP_EXECUTABLE);
++    return executable;
++}
++
++const CString& dbusProxyExecutable()
++{
++    static NeverDestroyed<CString> executable = packagedSandboxHelper("xdg-dbus-proxy", DBUS_PROXY_EXECUTABLE);
++    return executable;
++}
++
+ bool isInsideUnsupportedContainer()
+ {
+     static bool inContainer = g_file_test("/run/.containerenv", G_FILE_TEST_EXISTS);
+@@ -51,7 +79,7 @@ bool isInsideUnsupportedContainer()
+     // So this just does a basic test of if `bwrap` runs successfully.
+     if (inContainer && supportedContainer == -1) {
+         const char* bwrapArgs[] = {
+-            BWRAP_EXECUTABLE,
++            bubblewrapExecutable().data(),
+             "--ro-bind", "/", "/",
+             "--proc", "/proc",
+             "--dev", "/dev",
+diff --git a/Source/WebKit/UIProcess/Launcher/glib/BubblewrapLauncher.cpp b/Source/WebKit/UIProcess/Launcher/glib/BubblewrapLauncher.cpp
+index 67eb870f16fd..b52b78f29271 100644
+--- a/Source/WebKit/UIProcess/Launcher/glib/BubblewrapLauncher.cpp
++++ b/Source/WebKit/UIProcess/Launcher/glib/BubblewrapLauncher.cpp
+@@ -851,7 +851,7 @@ static void bindDBusProxyPaths(ProcessLauncher::LaunchOptions& launchOptions, Ve
+ 
+     if (launchOptions.processType == ProcessLauncher::ProcessType::DBusProxy) {
+         sandboxArgs.appendVector(Vector<CString>({
+-            "--ro-bind", DBUS_PROXY_EXECUTABLE, DBUS_PROXY_EXECUTABLE,
++            "--ro-bind", dbusProxyExecutable(), dbusProxyExecutable(),
+             "--bind", sandboxedUserRuntimeDirectory().data(), sandboxedUserRuntimeDirectory().data(),
+         }));
+ 
+@@ -986,7 +986,7 @@ GRefPtr<GSubprocess> bubblewrapSpawn(GSubprocessLauncher* launcher, const Proces
+     g_subprocess_launcher_take_fd(launcher, bwrapFd, bwrapFd);
+ 
+     Vector<CString> bwrapArgs = {
+-        BWRAP_EXECUTABLE,
++        bubblewrapExecutable(),
+         "--args",
+         bwrapFdStr.get(),
+         "--",
+diff --git a/Source/WebKit/UIProcess/Launcher/glib/XDGDBusProxy.cpp b/Source/WebKit/UIProcess/Launcher/glib/XDGDBusProxy.cpp
+index eb0c6b529ce3..f0afed5bc614 100644
+--- a/Source/WebKit/UIProcess/Launcher/glib/XDGDBusProxy.cpp
++++ b/Source/WebKit/UIProcess/Launcher/glib/XDGDBusProxy.cpp
+@@ -197,7 +197,7 @@ void XDGDBusProxy::launch(const CString& proxyPath, CompletionHandler<void()>&&
+     int proxyFd = argumentsToFileDescriptor(proxyArgs, "dbus-proxy");
+     GUniquePtr<char> proxyArgsStr(g_strdup_printf("--args=%d", proxyFd));
+     Vector<CString> args = {
+-        DBUS_PROXY_EXECUTABLE,
++        dbusProxyExecutable(),
+         proxyArgsStr.get(),
+     };
+     int nargs = args.size() + 1;
+diff --git a/Source/WebKit/Shared/glib/ProcessExecutablePathGLib.cpp b/Source/WebKit/Shared/glib/ProcessExecutablePathGLib.cpp
+--- a/Source/WebKit/Shared/glib/ProcessExecutablePathGLib.cpp
++++ b/Source/WebKit/Shared/glib/ProcessExecutablePathGLib.cpp
+@@ -29,9 +29,25 @@
+ 
+ #include <glib.h>
+ #include <wtf/FileSystem.h>
++#include <wtf/glib/GUniquePtr.h>
+ 
+ namespace WebKit {
+ 
++static String packagedWebKitProcess(const char* processName)
++{
++    // AppImages are not chroots. Resolve the subprocesses in a stable
++    // directory beside the application executable before trying the native
++    // installation prefix compiled into WebKit.
++    CString executablePath = FileSystem::currentExecutablePath();
++    if (executablePath.isNull())
++        return { };
++    GUniquePtr<char> executableDirectory(g_path_get_dirname(executablePath.data()));
++    GUniquePtr<char> processPath(g_build_filename(executableDirectory.get(), "studyvis-webkit-runtime", processName, nullptr));
++    if (g_file_test(processPath.get(), G_FILE_TEST_IS_EXECUTABLE))
++        return FileSystem::stringFromFileSystemRepresentation(processPath.get());
++    return { };
++}
++
+ #if ENABLE(DEVELOPER_MODE)
+ static String getExecutablePath()
+ {
+@@ -44,6 +60,10 @@ static String getExecutablePath()
+ 
+ static String findWebKitProcess(const char* processName)
+ {
++    String packagedProcessPath = packagedWebKitProcess(processName);
++    if (!packagedProcessPath.isNull())
++        return packagedProcessPath;
++
+ #if ENABLE(DEVELOPER_MODE)
+     static const char* execDirectory = g_getenv("WEBKIT_EXEC_PATH");
+     if (execDirectory) {
+diff --git a/Source/cmake/FindRice.cmake b/Source/cmake/FindRice.cmake
+--- a/Source/cmake/FindRice.cmake
++++ b/Source/cmake/FindRice.cmake
+@@ -109,6 +109,7 @@ if (Rice_IO_LIBRARY AND NOT TARGET Rice::Io)
+     set_target_properties(Rice::Io PROPERTIES
+         IMPORTED_LOCATION "${Rice_IO_LIBRARY}"
+         INTERFACE_INCLUDE_DIRECTORIES "${RiceIo_INCLUDE_DIR}"
++        INTERFACE_LINK_LIBRARIES Rice::Proto
+     )
+ endif ()
+ 
+diff --git a/Source/WebKit/UIProcess/API/glib/WebKitWebContext.cpp b/Source/WebKit/UIProcess/API/glib/WebKitWebContext.cpp
+--- a/Source/WebKit/UIProcess/API/glib/WebKitWebContext.cpp
++++ b/Source/WebKit/UIProcess/API/glib/WebKitWebContext.cpp
+@@ -344,8 +344,27 @@ static void webkitWebContextInvalidateAutomationSession(WebKitWebContext* webCon
+ #define INJECTED_BUNDLE_FILENAME "libWPEInjectedBundle.so"
+ #endif
+ 
++static CString packagedInjectedBundleDirectory()
++{
++    // Keep the injected bundle in the same relocatable AppImage runtime as
++    // the subprocesses. Native packages still use PKGLIBDIR below.
++    CString executablePath = FileSystem::currentExecutablePath();
++    if (executablePath.isNull())
++        return { };
++    GUniquePtr<char> executableDirectory(g_path_get_dirname(executablePath.data()));
++    GUniquePtr<char> bundleDirectory(g_build_filename(executableDirectory.get(), "studyvis-webkit-runtime", "injected-bundle", nullptr));
++    GUniquePtr<char> bundlePath(g_build_filename(bundleDirectory.get(), INJECTED_BUNDLE_FILENAME, nullptr));
++    if (g_file_test(bundlePath.get(), G_FILE_TEST_IS_REGULAR))
++        return bundleDirectory.get();
++    return { };
++}
++
+ static const char* injectedBundleDirectory()
+ {
++    static NeverDestroyed<CString> packagedDirectory = packagedInjectedBundleDirectory();
++    if (!packagedDirectory.get().isNull())
++        return packagedDirectory.get().data();
++
+     const char* bundleDirectory = g_getenv("WEBKIT_INJECTED_BUNDLE_PATH");
+     if (bundleDirectory && g_file_test(bundleDirectory, G_FILE_TEST_IS_DIR))
+         return bundleDirectory;
