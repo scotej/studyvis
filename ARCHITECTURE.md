@@ -243,11 +243,11 @@ self-review prevention is required for a two-person approval boundary. The tag r
 owner-scoped `RELEASE_PAT`; do not add Write, Maintain, team, or integration
 bypasses. GitHub hides `bypass_actors` from the workflow's read-only ruleset
 response, so its gate verifies scope and rule types while an admin must verify
-the actor list. As of 2026-08-13 the environment is confirmed absent; the tag
-ruleset and immutable-release setting must also be verified/configured. Without
-these controls the YAML checks still fail closed, but there is no independent
-approval boundary or repository-level
-guarantee against later tag/release mutation.
+the actor list. On 2026-08-15, the `release` environment (with `scotej` as its
+required reviewer), active `v*` lifecycle rule, and immutable releases were
+configured and verified. It is still a sole-owner approval boundary until an
+independent reviewer is added, and the physical candidate matrix remains a
+separate publication gate.
 
 ### AI inference (V2+)
 - **llama-server** (binary from llama.cpp build) — Tauri sidecar. The release matrix bundles `aarch64-apple-darwin`, `x86_64-pc-windows-msvc`, and `x86_64-unknown-linux-gnu`; Intel macOS remains fetchable for local development. `scripts/fetch-llama-server.sh` pins and SHA-256-verifies all four upstream archives. The Linux archive is the upstream Ubuntu x64 CPU build: the candidate's `auto` policy uses zero GPU layers. A custom GPU-capable engine can expose an explicit device, but GPU acceleration is not a property promised by the AppImage.

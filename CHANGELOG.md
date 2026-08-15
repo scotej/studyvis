@@ -97,15 +97,12 @@
   AppImage SHA-256, downloads the exact twelve expected assets, byte-compares the
   updater sidecars, verifies exact-workflow/tag/commit provenance for every
   asset, and re-downloads/re-hashes the AppImage immediately before making the
-  draft public. Production use remains blocked until a repository admin
-  creates its `release` environment with required reviewers, adds a `v*` tag
-  ruleset that restricts creation/update/deletion with only an `Always`
-  `RepositoryRole 5` (admin) bypass for the owner-scoped `RELEASE_PAT`, and
-  enables immutable releases.
+  draft public. On 2026-08-15, the required `release` environment, active
+  `v*` lifecycle rule with its `Always` `RepositoryRole 5` (admin) bypass for
+  the owner-scoped `RELEASE_PAT`, and immutable releases were configured.
   GitHub hides the bypass list from the workflow's read-only ruleset response,
-  so an admin must verify that no broader bypass is configured. Only the missing
-  environment has been verified directly; the other two settings
-  still require verification/configuration.
+  so an admin must verify that no broader bypass is configured. The physical
+  candidate matrix remains a separate publication gate.
 - **Linux install and support boundaries are documented end to end.** The
   install guide covers CachyOS dependencies, FUSE and extraction launch paths,
   Secret Service providers, KDE Wayland portals/PipeWire, automatic-update

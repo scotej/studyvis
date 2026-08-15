@@ -188,21 +188,18 @@ Releasing bumps the version in **five tracked files** (kept in lockstep): `packa
   tagged Linux leg creates and uploads both corresponding/system-source pairs only after
   its freshly built AppImage passes native inspection and the Xvfb
   data-channel-offer smoke; the final manifest is attested after aggregation.
-  **External prerequisite:** as of 2026-08-13 the environment is not configured
-  (the GitHub API returns 404).
-  Before production publication, a repository admin must create `release`, add
-  required reviewers; add a `v*` tag
-  ruleset that restricts creation/update/deletion. This sole-owner repository
-  uses `scotej` as its reviewer and permits self-review; add an independent
-  reviewer and enable self-review prevention for two-person approval;
-  and enable immutable releases. Its sole `Always` bypass entry must be
+  **Repository controls:** on 2026-08-15, `release` was configured with
+  `scotej` as its required reviewer, the active `v*` tag rule restricts
+  creation/update/deletion, and immutable releases were enabled. This
+  sole-owner repository permits self-review; add an independent reviewer and
+  enable self-review prevention for two-person approval. Its sole `Always`
+  bypass entry must be
   `RepositoryRole 5` (admin), so the owner-scoped `RELEASE_PAT` can create the
   tag; do not add Write, Maintain, team, or integration bypasses. GitHub hides
   `bypass_actors` from the workflow's read-only ruleset response, so the gate
   verifies scope and rule types but an admin must verify the actor list.
-  Workflow YAML cannot create these controls. The environment is confirmed
-  absent; the tag ruleset and immutable-release setting must also be
-  verified/configured before production publication.
+  Workflow YAML cannot create these controls; re-verify them before any
+  production publish.
 
 Update `CHANGELOG.md` as part of the release. `package.json#version` flows through `__APP_VERSION__` into Settings → About automatically. Do not publish a draft unless `latest.json` contains `darwin-aarch64`, `windows-x86_64`, and `linux-x86_64`, both Linux source archives and checksum sidecars are present and verify, and the exact Linux AppImage has passed PLAN §8's physical CachyOS KDE Wayland matrix. That matrix requires an exchanged bidirectional data channel, Linux media send/receive, Linux AI capture, and physical same-draft Linux↔Linux, Linux↔macOS, and Linux↔Windows artifact pairs—not merely CI's local offer probe. It also covers FUSE/extraction launch, Secret Service, N-1 updater/relaunch with preserved data, packaged CPU-only inference, Linux `studyvis://` registration/import, KDE notification-settings launch, custom-chrome drag/window controls, the in-session Wayland hold-to-talk control, and the Settings Talk-to-AI fallback. Record the AppImage SHA-256, artifact/OS versions, direction, and result for every row. The external `release` environment/tag-ruleset/immutable-release blockers above remain independent gates.
 

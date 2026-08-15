@@ -79,10 +79,11 @@ copy rests on three things:
    (admin), used by the owner-scoped `RELEASE_PAT`; do not add Write, Maintain,
    team, or integration bypasses. GitHub hides `bypass_actors` from the
    workflow's read-only ruleset API response, so an admin must verify that list.
-   As of 2026-08-13 the environment is confirmed absent; the tag ruleset and
-   immutable-release setting must also be verified/configured. The
-   YAML's asset checks are not a substitute for independent approval or for
-   preventing later tag/release mutation.
+   On 2026-08-15, the `release` environment (with `scotej` as reviewer), active
+   `v*` lifecycle rule, and immutable releases were configured and verified.
+   This is a sole-owner approval boundary until an independent reviewer is
+   added. The YAML's asset checks are not a substitute for independent approval
+   or for preventing later tag/release mutation.
    Every platform artifact must also carry the generated
    `THIRD-PARTY-NOTICES.txt`/`.json` pair. Its offline regeneration gate derives
    the npm production and three target-filtered normal Cargo closures plus the

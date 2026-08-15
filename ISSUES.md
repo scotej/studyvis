@@ -585,19 +585,15 @@ successful CI for the exact tag commit on `main` and a successful latest
 `release.yml` run whose `head_branch` is the exact tag and whose `head_sha` is
 that commit (so an upload followed by a failed exact-AppImage smoke cannot
 publish), and is the documented path that changes the draft to published.
-**Operational prerequisite:** the
-repository's `release` environment does not yet exist (verified 2026-08-13);
-create it with required reviewers before production publication so the workflow
-has the independent approval boundary its YAML is designed to use. A repository
-admin must also add a `v*` tag ruleset that restricts creation/update/deletion
-and enable immutable releases. Its sole `Always` bypass entry must be
+**Operational controls:** on 2026-08-15, the repository configured its
+`release` environment with `scotej` as required reviewer, enabled immutable
+releases, and added an active `v*` tag rule restricting creation/update/deletion.
+Its sole `Always` bypass entry is
 `RepositoryRole 5` (admin), used by the owner-scoped `RELEASE_PAT`; no Write,
 Maintain, team, or integration bypass may be added. GitHub hides
 `bypass_actors` from the workflow's read-only ruleset response, so the gate
-verifies scope and rule types while an admin must verify the actor list.
-Those latter two settings have not been verified and must be
-verified/configured before production publication; workflow YAML cannot create
-any of the three controls.
+verifies scope and rule types while an admin must periodically verify the actor
+list. This sole-owner configuration is not independent two-person approval.
 
 ### I71 — Sev2
 
@@ -734,6 +730,10 @@ any of the three controls.
 **Evidence.** The Linux candidate could compile and open a window while its core peer session was structurally unavailable. WebKitGTK's GTK release configuration makes `ENABLE_WEB_RTC` follow the experimental-feature umbrella but defaults `ENABLE_MEDIA_STREAM` on independently. Official distro production builds in the maintained CachyOS/Arch path leave the umbrella off, so the native probe exposed `navigator.mediaDevices` while the code behind `RTCPeerConnection` was compiled out. A Wry preference cannot restore that compile-time binding. Supplying it during construction is still the strongest boundary because it places the preference in the initial page configuration; the same compile-gated-off probe could not prove whether a later native-handle mutation would otherwise have been early enough. A live process or rendered frontend therefore was not evidence that Trystero could construct its data channel, much less exchange media with a peer. Leaving WebKit's `permission-request` signal unanswered separately denied capture, while a broad allow handler would have granted navigated external pages more authority than the app needs. WebKitGTK 2.52.5's public user-media request wrapper does not expose the requesting `SecurityOrigin` values, so the available boundary is the allowlisted current top-level WebView URI together with the app's self-only frame CSP, not independent authentication of each request origin.
 
 **Status.** **fixed at the implementation/package level; release validation remains open** — the x86_64 AppImage now owns a private runtime revision 3: WebKitGTK 2.52.5 source SHA-256 `8a531a9abd2215936e8a8a914c077b586c0228b31d652f205286a8ec90f3364b`, librice 0.4.3 tag archive SHA-256 `4671e1835f9ab0f8d87e8d9e22b6bfb06f928aeae442841ab81881dff61e3f4b`, and the AppImage runtime portability patch SHA-256 `907380c80b541f89924bfd0d9709ac9a20d353b99d361d785dbe017324837eb8`. The patch resolves the packaged Web/Network/GPU subprocesses and injected bundle from `studyvis-webkit-runtime/` beside the executable, and packaged `bwrap`/`xdg-dbus-proxy` directly beside it, before native fallbacks. The build keeps the general experimental umbrella off while asserting `ENABLE_WEB_RTC`, `ENABLE_MEDIA_STREAM`, GStreamer WebRTC, librice, and bubblewrap on; packages WebKit's processes, media/sandbox helpers, exact `BUILD-MANIFEST.txt`, readable/hash-addressed inventory of all 59 upstream WebKit license/notice files, librice licenses, and applied patch; and verifies the exact AppImage's dependencies/elements. Tagged builds also emit the deterministic `StudyVis_X.Y.Z_linux-webkit-sources.tar.gz` corresponding-source archive and checksum sidecar after the exact-AppImage smoke, and both must verify before publication. The companion system-source pair carries StudyVis's source-built AppImage type-2 runtime revision 1, including exact hash-pinned type2/musl/zlib/decompression-only-zstd/libfuse/squashfuse/Meson sources and licenses, Jammy toolchain/CRT provenance, build metadata, link map, and link-input hashes. Verification requires an `x86_64-linux-musl` static PIE with no interpreter or dynamic dependencies, using musl mallocng and no mimalloc; this completes the pre-SquashFS runtime's static source/notice/link closure but is not legal sign-off or a bit-reproducibility claim for the mutable Jammy baseline. Vendored wry passes WebRTC/media settings into `WebView::builder()` before construction. The Rust bridge handles only `WebKitUserMediaPermissionRequest`, allowing it when the current top-level WebView URI exactly matches the app URI (plus the fixed debug URI in debug builds), denying it after external top-level navigation, and leaving other request classes untouched; because the wrapper does not expose requesting origins, the CSP's self-only frame policy is part of this boundary. CI additionally requires the first document to create a local data-channel offer and log `runtime.webrtc ready`, but that is intentionally not called a peer pass. Linux remains a release candidate until PLAN §8 records the exact draft AppImage's physical Linux↔Linux/macOS/Windows data-channel/media matrix; the external GitHub release environment, tag ruleset, and immutable-release controls remain separate publication blockers. Bundling also transfers WebKitGTK/librice advisory response and license/corresponding-source obligations from the distro to StudyVis.
+
+**Update (2026-08-15).** The `release` environment, active `v*` lifecycle rule,
+and immutable releases are now configured. The exact-draft physical Linux
+candidate matrix remains the outstanding release gate.
 
 ## Archive — retired backlogs
 

@@ -308,10 +308,10 @@ where you'd see it surface.
   sole-owner repository requires `scotej` as its reviewer and permits self-review;
   add an independent reviewer and enable self-review prevention before relying on
   a second-person approval boundary.
-  As of 2026-08-13 the environment is confirmed absent; the tag ruleset and
-  immutable-release setting must also be verified/configured. Until then, the
-  workflow does not provide the intended independent, tamper-resistant release
-  boundary.
+  On 2026-08-15, the `release` environment (with `scotej` as required reviewer),
+  the active `v*` lifecycle rule, and immutable releases were configured and
+  verified. This is a sole-owner approval control, not an independent
+  two-person boundary; the physical candidate matrix remains a separate gate.
 - **Signed installers.** No code-signing credentials. macOS
   notarization and Windows code-signing wait for a Developer ID and an
   EV cert, so friends still right-click → Open on macOS and click

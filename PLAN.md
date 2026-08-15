@@ -283,13 +283,11 @@ Promoting it to shipped support requires all of the following:
    This sole-owner repository uses `scotej` as its required reviewer and permits
    self-review; add an independent reviewer and enable self-review prevention before
    treating it as a two-person approval boundary. Workflow YAML cannot establish
-   those repository controls. As of 2026-08-13
-   the environment is confirmed absent; the tag ruleset and immutable-release
-   setting must also be verified/configured, so publication remains
-   operationally blocked even though the workflow's repository-side checks are
-   implemented. Linux stays a release candidate until both this exact-AppImage
-   matrix and those external repository controls pass; neither substitutes for
-   the other. A failed release aggregate stamps the draft `INCOMPLETE, DO NOT
+   those repository controls. On 2026-08-15, the `release` environment (with
+   `scotej` as reviewer), active `v*` lifecycle rule, and immutable releases
+   were configured and verified. Linux stays a release candidate until its
+   exact-AppImage physical matrix passes; that matrix is independent of these
+   repository controls. A failed release aggregate stamps the draft `INCOMPLETE, DO NOT
    PUBLISH`; that warning is another fail-safe, not permission to bypass either
    gate after a green build.
 
