@@ -551,7 +551,24 @@ cxx=$(command -v "$cxx_name") || die "C++ compiler is not executable: $cxx_name"
 cc=$(realpath --canonicalize-existing -- "$cc")
 cxx=$(realpath --canonicalize-existing -- "$cxx")
 
-webkit_jobs=${STUDYVIS_WEBKIT_JOBS:-2}
+# WebKit's unified translation units routinely need ~2 GB of RAM each, so the
+# job count is the smaller of the CPU count and what memory can actually feed.
+# A fixed 2 left hosted runners half idle for two hours; an OOM kill deep in
+# the build costs far more than the parallelism saves.
+detect_webkit_jobs() {
+  local cpus memory_kilobytes memory_jobs
+  cpus=$(nproc)
+  memory_kilobytes=$(awk '/^MemTotal:/ { print $2 }' /proc/meminfo)
+  memory_jobs=$((memory_kilobytes / 2 / 1024 / 1024))
+  [[ $memory_jobs -ge 1 ]] || memory_jobs=1
+  [[ $cpus -ge 1 ]] || cpus=1
+  if [[ $cpus -lt $memory_jobs ]]; then
+    printf '%s\n' "$cpus"
+  else
+    printf '%s\n' "$memory_jobs"
+  fi
+}
+webkit_jobs=${STUDYVIS_WEBKIT_JOBS:-$(detect_webkit_jobs)}
 require_match STUDYVIS_WEBKIT_JOBS "$webkit_jobs" '^[1-9][0-9]*$'
 webkit_keep_build=${STUDYVIS_WEBKIT_KEEP_BUILD:-0}
 require_match STUDYVIS_WEBKIT_KEEP_BUILD "$webkit_keep_build" '^[01]$'
@@ -763,6 +780,8 @@ for protocol_xml in \
   }
 done
 
+printf 'Compiling WebKitGTK with %s parallel jobs (%s CPUs, %s kB MemTotal)\n' \
+  "$webkit_jobs" "$(nproc)" "$(awk '/^MemTotal:/ { print $2 }' /proc/meminfo)"
 cmake --build "$webkit_build" --parallel "$webkit_jobs"
 DESTDIR="$runtime_dir" cmake --install "$webkit_build" --strip
 

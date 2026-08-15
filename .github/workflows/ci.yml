@@ -397,19 +397,37 @@ jobs:
           path: ${{ steps.webkit-runtime.outputs.runtime-dir }}
           key: studyvis-webkitgtk-${{ runner.os }}-ubuntu-24.04-x86_64-rust-1.97.1-cargo-c-${{ steps.webkit-runtime.outputs.cargo-c-version }}-${{ hashFiles('scripts/linux-webkit-runtime.env', 'scripts/build-linux-webkit-runtime.sh', 'scripts/generate-librice-third-party-notices.mjs', 'scripts/patches/*.patch') }}
 
+      # cargo-c is compiled from source and took ~5 minutes of every run. The
+      # key pins the exact version and toolchain, so a hit is the same binary
+      # the install step would have produced; the version assertion below runs
+      # either way.
+      - name: Restore pinned cargo-c
+        id: cargo-c-cache
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/bin/cargo-capi
+            ~/.cargo/bin/cargo-cbuild
+            ~/.cargo/bin/cargo-cinstall
+          key: studyvis-cargo-c-${{ runner.os }}-ubuntu-24.04-rust-1.97.1-${{ steps.webkit-runtime.outputs.cargo-c-version }}
+
       - name: Install pinned cargo-c
+        if: steps.cargo-c-cache.outputs.cache-hit != 'true'
+        run: cargo install cargo-c --version "=${STUDYVIS_CARGO_C_VERSION}" --locked
+
+      - name: Assert the pinned cargo-c version
         run: |
           set -euo pipefail
-          cargo install cargo-c --version "=${STUDYVIS_CARGO_C_VERSION}" --locked
           cargo_c_output=$(cargo cinstall --version)
           case "$cargo_c_output" in
             *" ${STUDYVIS_CARGO_C_VERSION}"|*" ${STUDYVIS_CARGO_C_VERSION}+"*) ;;
             *) echo "Unexpected cargo-c version: $cargo_c_output" >&2; exit 1 ;;
           esac
 
-      - name: Build or verify the pinned WebKitGTK runtime
-        run: bash scripts/build-linux-webkit-runtime.sh
-
+      # Everything below that does not need the private WebKit runtime runs
+      # before the hour-long compile. A missing npm dependency, a broken
+      # keyring, or a type-2 runtime that will not build on this image used to
+      # take an hour to surface because they sat behind it.
       - name: Install frontend dependencies
         run: npm ci
 
@@ -446,6 +464,53 @@ jobs:
             echo "GSTREAMER_PLUGINS_DIR=$GITHUB_WORKSPACE/src-tauri/target/appimage-webkit/gstreamer-plugins"
             echo "GSTREAMER_HELPERS_DIR=$GITHUB_WORKSPACE/src-tauri/target/appimage-webkit/gstreamer"
           } >> "$GITHUB_ENV"
+
+      # Pre-merge and preview compiles reuse WebKit object files across runs.
+      # The tagged release leg deliberately has no equivalent step: "the
+      # release build reconstructs the private runtime from its verified
+      # tuple" is a provenance claim in ARCHITECTURE.md §2, and restored
+      # object files are not that. Installed from the release tarball with its
+      # published checksum verified before extraction, like actionlint below.
+      - name: Install pinned sccache
+        env:
+          SCCACHE_VERSION: 0.17.0
+          SCCACHE_SHA256: 67c4a96dd237c1f518f6b36083f270f9976d516f1e57fce891755ea782e50006
+        run: |
+          set -euo pipefail
+          tarball="sccache-v${SCCACHE_VERSION}-x86_64-unknown-linux-musl.tar.gz"
+          curl --fail --silent --show-error --location --proto '=https' \
+            --tlsv1.2 --retry 3 -o "$tarball" \
+            "https://github.com/mozilla/sccache/releases/download/v${SCCACHE_VERSION}/${tarball}"
+          echo "${SCCACHE_SHA256}  ${tarball}" | sha256sum --check --strict -
+          tar --extract --file "$tarball" --strip-components=1 \
+            "sccache-v${SCCACHE_VERSION}-x86_64-unknown-linux-musl/sccache"
+          sudo install -m 0755 sccache /usr/local/bin/sccache
+          rm -f -- "$tarball" sccache
+          sccache --version
+
+      # Bounded well below the repository's 10 GB cache budget so it cannot
+      # evict the runtime prefix above. The restore key deliberately falls
+      # back to any earlier compile of the same tuple: object reuse is what
+      # makes an edit to the builder script cheap again.
+      - name: Restore the WebKit compiler cache
+        uses: actions/cache@v5
+        with:
+          path: ${{ runner.temp }}/studyvis-sccache
+          key: studyvis-sccache-webkit-ubuntu-24.04-${{ hashFiles('scripts/linux-webkit-runtime.env', 'scripts/patches/*.patch') }}-${{ github.sha }}
+          restore-keys: |
+            studyvis-sccache-webkit-ubuntu-24.04-${{ hashFiles('scripts/linux-webkit-runtime.env', 'scripts/patches/*.patch') }}-
+            studyvis-sccache-webkit-ubuntu-24.04-
+
+      - name: Build or verify the pinned WebKitGTK runtime
+        env:
+          SCCACHE_DIR: ${{ runner.temp }}/studyvis-sccache
+          SCCACHE_CACHE_SIZE: 3G
+          CMAKE_C_COMPILER_LAUNCHER: sccache
+          CMAKE_CXX_COMPILER_LAUNCHER: sccache
+        run: |
+          set -euo pipefail
+          bash scripts/build-linux-webkit-runtime.sh
+          sccache --show-stats
 
       - name: Build unsigned AppImage without updater artifacts
         run: |
@@ -732,16 +797,18 @@ jobs:
     # Hand-maintained on purpose, and the one line to update when adding a
     # job to this file — a job missing from here is a job branch protection
     # does not gate on.
+    #
+    # `linux-appimage` is deliberately NOT in this list. It compiles WebKitGTK
+    # from source, so gating merges on it made every merge wait about an hour
+    # behind a job whose real verification value is the packaged artifact, not
+    # the pull request. It still runs on every PR and reports its own
+    # `Linux AppImage startup smoke` check — read it, and do not merge Linux
+    # changes while it is red — but it no longer blocks unrelated work. The
+    # release path is unaffected: `release.yml` builds and smokes the exact
+    # AppImage before a draft can be published, and PLAN §8's physical matrix
+    # remains mandatory.
     needs:
-      [
-        frontend,
-        third-party-notices,
-        rust,
-        linux-appimage,
-        workflows,
-        supply-chain,
-        hygiene,
-      ]
+      [frontend, third-party-notices, rust, workflows, supply-chain, hygiene]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:

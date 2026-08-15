@@ -143,7 +143,12 @@ pinned or bit-reproducible environment. A stronger future boundary would use a
 snapshot-pinned apt repository or digest-pinned build container and record the
 full build-host dpkg inventory. The release build reconstructs the private
 runtime from its verified tuple rather than treating a restored binary prefix
-as provenance.
+as provenance. Pre-merge and preview compiles of the same runtime run under a
+hash-pinned `sccache`, so editing the builder no longer costs a full rebuild;
+the tagged release leg has no compiler cache, for the same reason it restores
+no binary prefix. The builder also scales its own parallelism to the smaller of
+the host's CPU count and one job per 2 GB of RAM, which is what WebKit's
+unified translation units actually consume.
 
 Every platform bundle also carries identical generated
 `THIRD-PARTY-NOTICES.txt` and `THIRD-PARTY-NOTICES.json` Tauri resources. The
@@ -205,8 +210,11 @@ That completes the pre-SquashFS runtime's static source/notice/link closure.
 The mutable Noble build baseline is independently not bit-reproducible, and
 none of these gates constitutes legal sign-off.
 
-**Release artifact gate.** CI keeps all three Rust hosts compiled. Its blocking
-Linux package job builds the pinned private runtime, packages it with the
+**Release artifact gate.** CI keeps all three Rust hosts compiled. Its Linux
+package job — advisory on pull requests, since compiling WebKitGTK from source
+is not something a merge should wait behind, and mandatory in substance because
+the tagged release leg repeats it against the exact shipped artifact — builds
+the pinned private runtime, packages it with the
 media-framework and sandbox helpers, validates runtime/license files, ELF
 dependencies, the shipped build manifest and 59-file license inventory, and the
 packaged-only GStreamer WebRTC/SCTP elements, verifies a gnome-keyring Secret

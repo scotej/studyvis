@@ -332,6 +332,11 @@ jobs:
 
       # Tagged releases deliberately restore no compiled Rust or WebKit state.
       # Build the pinned runtime from verified sources on this hosted runner.
+      # That includes compiler caches: ci.yml and deploy.yml run this same
+      # script under sccache to keep iteration cheap, and this leg must not,
+      # because restored object files are not "reconstructed from the verified
+      # tuple". The builder now scales its own job count to the runner, so
+      # this stays a full compile without staying a two-hour one.
       - name: Cold-build the pinned WebKitGTK runtime
         if: runner.os == 'Linux'
         run: bash scripts/build-linux-webkit-runtime.sh

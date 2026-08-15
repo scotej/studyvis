@@ -181,7 +181,9 @@ Promoting it to shipped support requires all of the following:
    Secret Service backend enabled. Its separate notice job populates all three
    locked Cargo target caches, regenerates the Cargo/npm/llama third-party
    inventory offline, and requires the committed base Tauri resources to match.
-2. Its blocking `Linux AppImage startup smoke` job builds the pinned WebKitGTK
+2. Its advisory `Linux AppImage startup smoke` job — excluded from the
+   `All pre-merge checks` aggregator because it compiles WebKitGTK from
+   source, but run and reported on every pull request — builds the pinned WebKitGTK
    2.52.5 + librice 0.4.3 runtime, packages that private copy with the
    media-framework and sandbox helpers, verifies the expected runtime files,
    build manifest, complete upstream license inventory, cross-platform notice

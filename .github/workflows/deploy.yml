@@ -374,20 +374,76 @@ jobs:
           path: ${{ steps.webkit-runtime.outputs.runtime-dir }}
           key: studyvis-webkitgtk-${{ runner.os }}-ubuntu-24.04-x86_64-rust-1.97.1-cargo-c-${{ steps.webkit-runtime.outputs.cargo-c-version }}-${{ hashFiles('scripts/linux-webkit-runtime.env', 'scripts/build-linux-webkit-runtime.sh', 'scripts/generate-librice-third-party-notices.mjs', 'scripts/patches/*.patch') }}
 
+      # Same pinned-version-in-the-key reasoning as ci.yml: a hit is the same
+      # binary the install below would have produced, and the assertion runs
+      # either way.
+      - name: Restore pinned cargo-c
+        id: cargo-c-cache
+        if: env.SHIPPABLE == 'true' && runner.os == 'Linux'
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/bin/cargo-capi
+            ~/.cargo/bin/cargo-cbuild
+            ~/.cargo/bin/cargo-cinstall
+          key: studyvis-cargo-c-${{ runner.os }}-ubuntu-24.04-rust-1.97.1-${{ steps.webkit-runtime.outputs.cargo-c-version }}
+
       - name: Install pinned cargo-c
+        if: env.SHIPPABLE == 'true' && runner.os == 'Linux' && steps.cargo-c-cache.outputs.cache-hit != 'true'
+        run: cargo install cargo-c --version "=${STUDYVIS_CARGO_C_VERSION}" --locked
+
+      - name: Assert the pinned cargo-c version
         if: env.SHIPPABLE == 'true' && runner.os == 'Linux'
         run: |
           set -euo pipefail
-          cargo install cargo-c --version "=${STUDYVIS_CARGO_C_VERSION}" --locked
           cargo_c_output=$(cargo cinstall --version)
           case "$cargo_c_output" in
             *" ${STUDYVIS_CARGO_C_VERSION}"|*" ${STUDYVIS_CARGO_C_VERSION}+"*) ;;
             *) echo "Unexpected cargo-c version: $cargo_c_output" >&2; exit 1 ;;
           esac
 
+      # Preview builds are throwaway artifacts, so they reuse WebKit object
+      # files across runs. The tagged release leg has no equivalent step on
+      # purpose; see ci.yml's copy of this comment and ARCHITECTURE.md §2.
+      - name: Install pinned sccache
+        if: env.SHIPPABLE == 'true' && runner.os == 'Linux'
+        env:
+          SCCACHE_VERSION: 0.17.0
+          SCCACHE_SHA256: 67c4a96dd237c1f518f6b36083f270f9976d516f1e57fce891755ea782e50006
+        run: |
+          set -euo pipefail
+          tarball="sccache-v${SCCACHE_VERSION}-x86_64-unknown-linux-musl.tar.gz"
+          curl --fail --silent --show-error --location --proto '=https' \
+            --tlsv1.2 --retry 3 -o "$tarball" \
+            "https://github.com/mozilla/sccache/releases/download/v${SCCACHE_VERSION}/${tarball}"
+          echo "${SCCACHE_SHA256}  ${tarball}" | sha256sum --check --strict -
+          tar --extract --file "$tarball" --strip-components=1 \
+            "sccache-v${SCCACHE_VERSION}-x86_64-unknown-linux-musl/sccache"
+          sudo install -m 0755 sccache /usr/local/bin/sccache
+          rm -f -- "$tarball" sccache
+          sccache --version
+
+      - name: Restore the WebKit compiler cache
+        if: env.SHIPPABLE == 'true' && runner.os == 'Linux'
+        uses: actions/cache@v5
+        with:
+          path: ${{ runner.temp }}/studyvis-sccache
+          key: studyvis-sccache-webkit-ubuntu-24.04-${{ hashFiles('scripts/linux-webkit-runtime.env', 'scripts/patches/*.patch') }}-${{ github.sha }}
+          restore-keys: |
+            studyvis-sccache-webkit-ubuntu-24.04-${{ hashFiles('scripts/linux-webkit-runtime.env', 'scripts/patches/*.patch') }}-
+            studyvis-sccache-webkit-ubuntu-24.04-
+
       - name: Build or verify the pinned WebKitGTK runtime
         if: env.SHIPPABLE == 'true' && runner.os == 'Linux'
-        run: bash scripts/build-linux-webkit-runtime.sh
+        env:
+          SCCACHE_DIR: ${{ runner.temp }}/studyvis-sccache
+          SCCACHE_CACHE_SIZE: 3G
+          CMAKE_C_COMPILER_LAUNCHER: sccache
+          CMAKE_CXX_COMPILER_LAUNCHER: sccache
+        run: |
+          set -euo pipefail
+          bash scripts/build-linux-webkit-runtime.sh
+          sccache --show-stats
 
       - name: Install frontend dependencies
         if: env.SHIPPABLE == 'true'
