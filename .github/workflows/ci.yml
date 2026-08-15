@@ -145,6 +145,10 @@ jobs:
           cargo fetch --locked --manifest-path src-tauri/Cargo.toml --target aarch64-apple-darwin
           cargo fetch --locked --manifest-path src-tauri/Cargo.toml --target x86_64-pc-windows-msvc
           cargo fetch --locked --manifest-path src-tauri/Cargo.toml --target x86_64-unknown-linux-gnu
+          # Cargo's platform fetch can omit a package that is selected through
+          # a nested Windows cfg. Fetch the complete locked graph as well so
+          # the subsequent, deliberately offline metadata pass is complete.
+          cargo fetch --locked --manifest-path src-tauri/Cargo.toml
 
       - name: Verify committed third-party notices
         run: npm run check-notices
