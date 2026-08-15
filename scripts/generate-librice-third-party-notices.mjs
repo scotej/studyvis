@@ -169,6 +169,8 @@ function runCargo(sourceRoot, args, purpose) {
 function treeArgs(sourceRoot, root) {
   return [
     'tree',
+    '--color',
+    'never',
     '--manifest-path',
     join(sourceRoot, 'Cargo.toml'),
     '--locked',
@@ -197,6 +199,8 @@ function logicalInvocation(root) {
     command: [
       'cargo',
       'tree',
+      '--color',
+      'never',
       '--manifest-path',
       'Cargo.toml',
       '--locked',
