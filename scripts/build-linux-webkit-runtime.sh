@@ -163,6 +163,7 @@ expected_manifest() {
     'librice-cargo-closure=union of locked/offline x86_64 normal edges for rice-proto/capi and rice-io/capi' \
     "cargo-c-version=$cargo_c_version" \
     'compiler-policy=GCC >= 12.2 or Clang; release CI pins GCC 12' \
+    'gstreamer-policy=gstreamer-webrtc-1.0 >= 1.22 for the librice GstWebRTCICE agent; release CI pins Ubuntu 24.04 GStreamer 1.24' \
     'cmake-generator=Ninja' \
     "appimage-runtime-relative-directory=$appimage_runtime_dirname" \
     "appimage-runtime-install-directory=/usr/bin/$appimage_runtime_dirname" \
@@ -522,6 +523,14 @@ done
 }
 [[ $(uname -m) == x86_64 ]] || die "the published Linux runtime is pinned to x86_64"
 
+# WebKit's own configure gate still accepts GStreamer 1.20, but the librice ICE
+# agent it compiles under USE_LIBRICE subclasses GstWebRTCICE, which exists only
+# from 1.22. Assert the real requirement before anything expensive runs: on
+# Ubuntu 22.04's 1.20.3 this surfaced two hours into the unified build instead.
+if ! pkg-config --atleast-version=1.22 gstreamer-webrtc-1.0; then
+  die "gstreamer-webrtc-1.0 >= 1.22 is required for the librice ICE agent (found $(pkg-config --modversion gstreamer-webrtc-1.0 2>/dev/null || echo none))"
+fi
+
 cargo_c_output=$(cargo cinstall --version 2>&1) || die "cargo-c is required"
 [[ $cargo_c_output =~ (^|[[:space:]])${cargo_c_version}([+[:space:]]|$) ]] || {
   die "cargo-c $cargo_c_version is required (got: $cargo_c_output)"
@@ -542,7 +551,24 @@ cxx=$(command -v "$cxx_name") || die "C++ compiler is not executable: $cxx_name"
 cc=$(realpath --canonicalize-existing -- "$cc")
 cxx=$(realpath --canonicalize-existing -- "$cxx")
 
-webkit_jobs=${STUDYVIS_WEBKIT_JOBS:-2}
+# WebKit's unified translation units routinely need ~2 GB of RAM each, so the
+# job count is the smaller of the CPU count and what memory can actually feed.
+# A fixed 2 left hosted runners half idle for two hours; an OOM kill deep in
+# the build costs far more than the parallelism saves.
+detect_webkit_jobs() {
+  local cpus memory_kilobytes memory_jobs
+  cpus=$(nproc)
+  memory_kilobytes=$(awk '/^MemTotal:/ { print $2 }' /proc/meminfo)
+  memory_jobs=$((memory_kilobytes / 2 / 1024 / 1024))
+  [[ $memory_jobs -ge 1 ]] || memory_jobs=1
+  [[ $cpus -ge 1 ]] || cpus=1
+  if [[ $cpus -lt $memory_jobs ]]; then
+    printf '%s\n' "$cpus"
+  else
+    printf '%s\n' "$memory_jobs"
+  fi
+}
+webkit_jobs=${STUDYVIS_WEBKIT_JOBS:-$(detect_webkit_jobs)}
 require_match STUDYVIS_WEBKIT_JOBS "$webkit_jobs" '^[1-9][0-9]*$'
 webkit_keep_build=${STUDYVIS_WEBKIT_KEEP_BUILD:-0}
 require_match STUDYVIS_WEBKIT_KEEP_BUILD "$webkit_keep_build" '^[01]$'
@@ -754,6 +780,8 @@ for protocol_xml in \
   }
 done
 
+printf 'Compiling WebKitGTK with %s parallel jobs (%s CPUs, %s kB MemTotal)\n' \
+  "$webkit_jobs" "$(nproc)" "$(awk '/^MemTotal:/ { print $2 }' /proc/meminfo)"
 cmake --build "$webkit_build" --parallel "$webkit_jobs"
 DESTDIR="$runtime_dir" cmake --install "$webkit_build" --strip
 

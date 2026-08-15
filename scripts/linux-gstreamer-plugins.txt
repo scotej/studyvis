@@ -28,4 +28,5 @@ libgstdtls.so
 libgstsctp.so
 libgstsrtp.so
 libgstwebrtc.so
-libgstwebrtcdsp.so
+# libgstwebrtcdsp.so is deliberately absent: Ubuntu 24.04 ships no
+# webrtc-audio-processing build of it, and WebKitGTK never loads that element.

@@ -54,17 +54,29 @@
   AppRun, and llama.cpp sources/notices. Both archive/checksum pairs are
   mandatory and fail closed on an unmapped modeled byte, unavailable modeled
   source, or bad checksum. The system-source pair now includes StudyVis's
-  source-built AppImage type-2 runtime revision 1: exact hash-pinned
+  source-built AppImage type-2 runtime revision 2: exact hash-pinned
   type2/musl/zlib/decompression-only-zstd/libfuse/squashfuse/Meson sources and
-  licenses, exact Jammy toolchain/CRT provenance, build metadata, a link map,
+  licenses, exact Noble toolchain/CRT provenance, build metadata, a link map,
   and per-input hashes. Verification requires an `x86_64-linux-musl` static PIE
   with no interpreter or dynamic dependencies, using musl mallocng and no
   mimalloc. This completes the pre-SquashFS runtime's static source/notice/link
-  closure. The hosted Jammy image and apt indexes remain a bounded baseline,
+  closure. The hosted Noble image and apt indexes remain a bounded baseline,
   not a bit-reproducible environment, and the evidence is not legal sign-off.
   Because distro upgrades cannot service this copy, StudyVis now owns WebKitGTK/librice
   advisory response, rebuilds, license/source obligations, physical
   revalidation, and updater delivery.
+- **The Linux build baseline is Ubuntu 24.04.** WebKit's librice ICE agent
+  subclasses GStreamer's `GstWebRTCICE`, which exists only from GStreamer 1.22,
+  while WebKit's own configure gate still accepts 1.20 — Ubuntu 22.04 therefore
+  configured cleanly and failed hours later inside the unified build. The
+  private WebKit runtime (now revision 4), the AppImage, and the source-built
+  type-2 runtime (now revision 2, same sources and compiler generations
+  re-pinned to Noble packages) all build on Ubuntu 24.04 with GStreamer 1.24,
+  and the builder now asserts `gstreamer-webrtc-1.0 >= 1.22` up front. The
+  AppImage consequently needs glibc 2.39 or newer — every rolling desktop,
+  CachyOS included, already satisfies that — and no longer carries the
+  `webrtcdsp` GStreamer element, which Ubuntu 24.04 does not ship and
+  WebKitGTK never loads.
 - **Linux peer-connection preferences and media permission are applied at the
   correct boundaries.** The vendored wry 0.55.1 constructor passes WebRTC and
   media-stream settings into `WebView::builder()` before the first document is

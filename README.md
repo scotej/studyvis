@@ -578,15 +578,15 @@ recorded non-Ubuntu input, records byte hashes/build IDs and dynamic
 dependencies, and carries matching Ubuntu source/copyright material plus the
 modeled packaging-tool, AppRun, and llama.cpp sources/notices. It also carries
 the complete evidence set for StudyVis's source-built AppImage type-2 runtime
-revision 1: the hash-pinned type2 commit, musl 1.2.5, zlib 1.3.1,
+revision 2: the hash-pinned type2 commit, musl 1.2.5, zlib 1.3.1,
 decompression-only zstd 1.5.6, libfuse 3.15.0, squashfuse 0.5.2, and Meson 1.7.2
-sources and licenses; exact Jammy compiler/linker source and package versions;
+sources and licenses; exact Noble compiler/linker source and package versions;
 build metadata; a link map; and hashes for every selected link input. The gate
 requires an `x86_64-linux-musl` `ET_DYN` static PIE with no `PT_INTERP` or
 `DT_NEEDED`. It uses musl mallocng; mimalloc is neither linked nor shipped.
 This completes the pre-SquashFS runtime's static source, notice, and link
 closure. The source pairs are mechanical release evidence, not legal sign-off.
-The hosted Ubuntu 22.04 image and Jammy apt indexes remain a bounded build
+The hosted Ubuntu 24.04 image and Noble apt indexes remain a bounded build
 baseline, not a bit-reproducible environment.
 The build recipe remains tracked here and is documented in
 [`INSTALL.md`](./INSTALL.md#pinned-linux-webkit-runtime).

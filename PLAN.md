@@ -181,7 +181,9 @@ Promoting it to shipped support requires all of the following:
    Secret Service backend enabled. Its separate notice job populates all three
    locked Cargo target caches, regenerates the Cargo/npm/llama third-party
    inventory offline, and requires the committed base Tauri resources to match.
-2. Its blocking `Linux AppImage startup smoke` job builds the pinned WebKitGTK
+2. Its advisory `Linux AppImage startup smoke` job — excluded from the
+   `All pre-merge checks` aggregator because it compiles WebKitGTK from
+   source, but run and reported on every pull request — builds the pinned WebKitGTK
    2.52.5 + librice 0.4.3 runtime, packages that private copy with the
    media-framework and sandbox helpers, verifies the expected runtime files,
    build manifest, complete upstream license inventory, cross-platform notice
@@ -205,14 +207,14 @@ Promoting it to shipped support requires all of the following:
    audits the finished artifact's complete ELF/symlink/hash/build-ID/dynamic
    closure, maps Ubuntu bytes to exact package/source/copyright inputs, and
    carries pinned packaging-tool, AppRun, and llama.cpp sources/notices. The
-   hosted Jammy image and apt indexes remain a bounded mutable build baseline,
+   hosted Noble image and apt indexes remain a bounded mutable build baseline,
    not a bit-reproducible environment. The WebKit runtime additionally packages
    a generated, source-free-verifiable librice text/JSON notice pair for the
    exact locked `rice-proto`/`rice-io` `capi` normal-dependency union. The
    system-source bundle also carries StudyVis's source-built AppImage type-2
-   runtime revision 1: exact hash-pinned type2, musl, zlib,
+   runtime revision 2: exact hash-pinned type2, musl, zlib,
    decompression-only-zstd, libfuse, squashfuse, and Meson sources/licenses;
-   exact Jammy toolchain/CRT provenance; build metadata; a link map; and hashes
+   exact Noble toolchain/CRT provenance; build metadata; a link map; and hashes
    for every selected input. Verification requires an `x86_64-linux-musl`
    static PIE with no interpreter or dynamic dependencies, musl mallocng, and
    no mimalloc.
@@ -222,7 +224,7 @@ Promoting it to shipped support requires all of the following:
    sidecars are present and verify. Any unmapped byte, unavailable modeled exact
    source, or failed checksum blocks the draft. Those mechanical checks include
    the pre-SquashFS runtime's complete static source/notice/link closure but are
-   not legal sign-off and do not make the mutable Jammy baseline
+   not legal sign-off and do not make the mutable Noble baseline
    bit-reproducible.
 5. Before publishing, a human records the SHA-256 of the exact draft AppImage,
    installs that same file on current physical x86_64 CachyOS KDE Wayland

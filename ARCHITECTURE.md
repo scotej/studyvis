@@ -109,7 +109,7 @@ experimental features still off but WebRTC explicitly on; it also reasserts
 media streams, GStreamer WebRTC, librice, and the bubblewrap sandbox. librice
 keeps ICE/network work in WebKit's sandboxed NetworkProcess.
 
-Runtime revision 3 has this reviewable input identity:
+Runtime revision 4 has this reviewable input identity:
 
 | Input | Version/source | SHA-256 |
 |-|-|-|
@@ -131,13 +131,24 @@ compiled native locations. This avoids silently resolving the host's
 it does not disable the sandbox. Reproducibility here means pinned and checked
 source inputs, local delta, build environment, and configuration—not a claim of
 bit-for-bit identical output from arbitrary machines. Production builds use
-Ubuntu 22.04, Rust 1.97.1, and `cargo-c` 0.10.24. The hosted image and Jammy apt
+Ubuntu 24.04, Rust 1.97.1, and `cargo-c` 0.10.24. Ubuntu 24.04 is the floor
+that WebKit's librice ICE agent forces: it subclasses `GstWebRTCICE`, which
+GStreamer only exposes from 1.22, while WebKit's own configure gate still
+accepts 1.20. Ubuntu 22.04's GStreamer 1.20.3 therefore configured cleanly and
+failed hours later inside the unified build, so the builder now asserts
+`gstreamer-webrtc-1.0 >= 1.22` before compiling anything. That floor also sets
+the artifact's own glibc 2.39 floor. The hosted image and Noble apt
 indexes are mutable, so this is a bounded build baseline rather than a fully
 pinned or bit-reproducible environment. A stronger future boundary would use a
 snapshot-pinned apt repository or digest-pinned build container and record the
 full build-host dpkg inventory. The release build reconstructs the private
 runtime from its verified tuple rather than treating a restored binary prefix
-as provenance.
+as provenance. Pre-merge and preview compiles of the same runtime run under a
+hash-pinned `sccache`, so editing the builder no longer costs a full rebuild;
+the tagged release leg has no compiler cache, for the same reason it restores
+no binary prefix. The builder also scales its own parallelism to the smaller of
+the host's CPU count and one job per 2 GB of RAM, which is what WebKit's
+unified translation units actually consume.
 
 Every platform bundle also carries identical generated
 `THIRD-PARTY-NOTICES.txt` and `THIRD-PARTY-NOTICES.json` Tauri resources. The
@@ -189,18 +200,21 @@ matching apt source components. Modeled linuxdeploy/appimagetool/type-2-runtime,
 AppRun, GTK/GStreamer hook, and llama.cpp source/notice inputs cover the modeled
 non-Ubuntu payload. An unmapped byte, modeled source/version/copyright gap, or
 failed checksum stops release creation. The bundle also preserves the complete
-build evidence for StudyVis's source-built AppImage type-2 runtime revision 1:
+build evidence for StudyVis's source-built AppImage type-2 runtime revision 2:
 hash-pinned type2, musl 1.2.5, zlib 1.3.1, decompression-only zstd 1.5.6,
-libfuse 3.15.0, squashfuse 0.5.2, and Meson 1.7.2 sources/licenses; exact Jammy
+libfuse 3.15.0, squashfuse 0.5.2, and Meson 1.7.2 sources/licenses; exact Noble
 compiler, linker, CRT, and libgcc provenance; build metadata; the link map; and
 per-input hashes. Verification requires an `x86_64-linux-musl` `ET_DYN` static
 PIE without `PT_INTERP` or `DT_NEEDED`, using musl mallocng and no mimalloc.
 That completes the pre-SquashFS runtime's static source/notice/link closure.
-The mutable Jammy build baseline is independently not bit-reproducible, and
+The mutable Noble build baseline is independently not bit-reproducible, and
 none of these gates constitutes legal sign-off.
 
-**Release artifact gate.** CI keeps all three Rust hosts compiled. Its blocking
-Linux package job builds the pinned private runtime, packages it with the
+**Release artifact gate.** CI keeps all three Rust hosts compiled. Its Linux
+package job — advisory on pull requests, since compiling WebKitGTK from source
+is not something a merge should wait behind, and mandatory in substance because
+the tagged release leg repeats it against the exact shipped artifact — builds
+the pinned private runtime, packages it with the
 media-framework and sandbox helpers, validates runtime/license files, ELF
 dependencies, the shipped build manifest and 59-file license inventory, and the
 packaged-only GStreamer WebRTC/SCTP elements, verifies a gnome-keyring Secret

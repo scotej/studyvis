@@ -270,7 +270,7 @@ jobs:
 
   linux-appimage:
     name: Linux AppImage startup smoke
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     # A cache miss compiles WebKitGTK itself. Keep the hard ceiling large
     # enough for that fail-safe path rather than making the cache mandatory.
     timeout-minutes: 360
@@ -299,19 +299,21 @@ jobs:
       # Build and launch the same portable artifact Linux users receive. The
       # GStreamer packages are intentionally present at bundle time so
       # AppImage's media-framework bundling can carry WebRTC playback support.
-      # The -dev set is the Jammy WebKitGTK source-build surface for the GTK3 /
+      # The -dev set is the Noble WebKitGTK source-build surface for the GTK3 /
       # Soup3 / GStreamer configuration selected by the pinned build script.
+      # Noble supplies GStreamer 1.24: the librice ICE agent needs the 1.22+
+      # GstWebRTCICE base class that Jammy's 1.20 does not have.
       - name: Install WebKitGTK build, packaging, and smoke dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            autoconf automake binutils=2.38-4ubuntu2.12 build-essential bison \
-            bubblewrap ca-certificates clang-14=1:14.0.0-1ubuntu1.1 cmake curl dbus-x11 \
-            desktop-file-utils file flex g++-12 gcc-11=11.4.0-1ubuntu1~22.04.3 gcc-12 gettext gnome-keyring \
+            autoconf automake binutils=2.42-4ubuntu2.10 build-essential bison \
+            bubblewrap ca-certificates clang-14=1:14.0.6-19build4 cmake curl dbus-x11 \
+            desktop-file-utils file flex g++-12 gcc-11=11.5.0-1ubuntu1~24.04.1 gcc-12 gettext gnome-keyring \
             gperf libayatana-appindicator3-dev \
             libcairo2-dev libdbus-1-dev libdrm-dev libegl-dev \
             libenchant-2-dev libepoxy-dev libfontconfig-dev libfreetype-dev \
-            libfuse2 libgbm-dev libgcc-11-dev=11.4.0-1ubuntu1~22.04.3 libgcrypt20-dev libgl-dev libgles-dev libglib2.0-dev \
+            libfuse2t64 libgbm-dev libgcc-11-dev=11.5.0-1ubuntu1~24.04.1 libgcrypt20-dev libgl-dev libgles-dev libglib2.0-dev \
             libglib2.0-dev-bin libgstreamer-plugins-bad1.0-dev \
             libgstreamer-plugins-base1.0-dev libgstreamer1.0-dev \
             libgtk-3-dev libgudev-1.0-dev libharfbuzz-dev libhyphen-dev \
@@ -327,6 +329,20 @@ jobs:
             gstreamer1.0-plugins-bad \
             gstreamer1.0-plugins-base gstreamer1.0-plugins-good \
             gstreamer1.0-nice gstreamer1.0-pipewire gstreamer1.0-tools
+
+      # Ubuntu 24.04 restricts unprivileged user namespaces through AppArmor,
+      # which is exactly what WebKit's bubblewrap sandbox needs to start. This
+      # is a runner accommodation only: the shipped AppImage relies on the
+      # user's own desktop allowing it, as CachyOS and Arch do.
+      - name: Allow the packaged WebKit sandbox to create user namespaces
+        run: |
+          set -euo pipefail
+          knob=/proc/sys/kernel/apparmor_restrict_unprivileged_userns
+          if [ -e "$knob" ]; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          else
+            echo "AppArmor user-namespace restriction knob is absent; nothing to relax."
+          fi
 
       - uses: actions/setup-node@v7
         with:
@@ -379,21 +395,39 @@ jobs:
         uses: actions/cache@v5
         with:
           path: ${{ steps.webkit-runtime.outputs.runtime-dir }}
-          key: studyvis-webkitgtk-jammy-x86_64-rust-1.97.1-cargo-c-${{ steps.webkit-runtime.outputs.cargo-c-version }}-${{ hashFiles('scripts/linux-webkit-runtime.env', 'scripts/build-linux-webkit-runtime.sh', 'scripts/generate-librice-third-party-notices.mjs', 'scripts/patches/*.patch') }}
+          key: studyvis-webkitgtk-${{ runner.os }}-ubuntu-24.04-x86_64-rust-1.97.1-cargo-c-${{ steps.webkit-runtime.outputs.cargo-c-version }}-${{ hashFiles('scripts/linux-webkit-runtime.env', 'scripts/build-linux-webkit-runtime.sh', 'scripts/generate-librice-third-party-notices.mjs', 'scripts/patches/*.patch') }}
+
+      # cargo-c is compiled from source and took ~5 minutes of every run. The
+      # key pins the exact version and toolchain, so a hit is the same binary
+      # the install step would have produced; the version assertion below runs
+      # either way.
+      - name: Restore pinned cargo-c
+        id: cargo-c-cache
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/bin/cargo-capi
+            ~/.cargo/bin/cargo-cbuild
+            ~/.cargo/bin/cargo-cinstall
+          key: studyvis-cargo-c-${{ runner.os }}-ubuntu-24.04-rust-1.97.1-${{ steps.webkit-runtime.outputs.cargo-c-version }}
 
       - name: Install pinned cargo-c
+        if: steps.cargo-c-cache.outputs.cache-hit != 'true'
+        run: cargo install cargo-c --version "=${STUDYVIS_CARGO_C_VERSION}" --locked
+
+      - name: Assert the pinned cargo-c version
         run: |
           set -euo pipefail
-          cargo install cargo-c --version "=${STUDYVIS_CARGO_C_VERSION}" --locked
           cargo_c_output=$(cargo cinstall --version)
           case "$cargo_c_output" in
             *" ${STUDYVIS_CARGO_C_VERSION}"|*" ${STUDYVIS_CARGO_C_VERSION}+"*) ;;
             *) echo "Unexpected cargo-c version: $cargo_c_output" >&2; exit 1 ;;
           esac
 
-      - name: Build or verify the pinned WebKitGTK runtime
-        run: bash scripts/build-linux-webkit-runtime.sh
-
+      # Everything below that does not need the private WebKit runtime runs
+      # before the hour-long compile. A missing npm dependency, a broken
+      # keyring, or a type-2 runtime that will not build on this image used to
+      # take an hour to surface because they sat behind it.
       - name: Install frontend dependencies
         run: npm ci
 
@@ -426,10 +460,57 @@ jobs:
           bash scripts/prepare-linuxdeploy-tools.sh "$TOOL_CACHE_HOME"
           {
             echo "XDG_CACHE_HOME=$TOOL_CACHE_HOME"
-            echo "LDAI_RUNTIME_FILE=$TOOL_CACHE_HOME/studyvis-appimage-runtime-r1/runtime-x86_64"
+            echo "LDAI_RUNTIME_FILE=$TOOL_CACHE_HOME/studyvis-appimage-runtime-r2/runtime-x86_64"
             echo "GSTREAMER_PLUGINS_DIR=$GITHUB_WORKSPACE/src-tauri/target/appimage-webkit/gstreamer-plugins"
             echo "GSTREAMER_HELPERS_DIR=$GITHUB_WORKSPACE/src-tauri/target/appimage-webkit/gstreamer"
           } >> "$GITHUB_ENV"
+
+      # Pre-merge and preview compiles reuse WebKit object files across runs.
+      # The tagged release leg deliberately has no equivalent step: "the
+      # release build reconstructs the private runtime from its verified
+      # tuple" is a provenance claim in ARCHITECTURE.md §2, and restored
+      # object files are not that. Installed from the release tarball with its
+      # published checksum verified before extraction, like actionlint below.
+      - name: Install pinned sccache
+        env:
+          SCCACHE_VERSION: 0.17.0
+          SCCACHE_SHA256: 67c4a96dd237c1f518f6b36083f270f9976d516f1e57fce891755ea782e50006
+        run: |
+          set -euo pipefail
+          tarball="sccache-v${SCCACHE_VERSION}-x86_64-unknown-linux-musl.tar.gz"
+          curl --fail --silent --show-error --location --proto '=https' \
+            --tlsv1.2 --retry 3 -o "$tarball" \
+            "https://github.com/mozilla/sccache/releases/download/v${SCCACHE_VERSION}/${tarball}"
+          echo "${SCCACHE_SHA256}  ${tarball}" | sha256sum --check --strict -
+          tar --extract --file "$tarball" --strip-components=1 \
+            "sccache-v${SCCACHE_VERSION}-x86_64-unknown-linux-musl/sccache"
+          sudo install -m 0755 sccache /usr/local/bin/sccache
+          rm -f -- "$tarball" sccache
+          sccache --version
+
+      # Bounded well below the repository's 10 GB cache budget so it cannot
+      # evict the runtime prefix above. The restore key deliberately falls
+      # back to any earlier compile of the same tuple: object reuse is what
+      # makes an edit to the builder script cheap again.
+      - name: Restore the WebKit compiler cache
+        uses: actions/cache@v5
+        with:
+          path: ${{ runner.temp }}/studyvis-sccache
+          key: studyvis-sccache-webkit-ubuntu-24.04-${{ hashFiles('scripts/linux-webkit-runtime.env', 'scripts/patches/*.patch') }}-${{ github.sha }}
+          restore-keys: |
+            studyvis-sccache-webkit-ubuntu-24.04-${{ hashFiles('scripts/linux-webkit-runtime.env', 'scripts/patches/*.patch') }}-
+            studyvis-sccache-webkit-ubuntu-24.04-
+
+      - name: Build or verify the pinned WebKitGTK runtime
+        env:
+          SCCACHE_DIR: ${{ runner.temp }}/studyvis-sccache
+          SCCACHE_CACHE_SIZE: 3G
+          CMAKE_C_COMPILER_LAUNCHER: sccache
+          CMAKE_CXX_COMPILER_LAUNCHER: sccache
+        run: |
+          set -euo pipefail
+          bash scripts/build-linux-webkit-runtime.sh
+          sccache --show-stats
 
       - name: Build unsigned AppImage without updater artifacts
         run: |
@@ -716,16 +797,18 @@ jobs:
     # Hand-maintained on purpose, and the one line to update when adding a
     # job to this file — a job missing from here is a job branch protection
     # does not gate on.
+    #
+    # `linux-appimage` is deliberately NOT in this list. It compiles WebKitGTK
+    # from source, so gating merges on it made every merge wait about an hour
+    # behind a job whose real verification value is the packaged artifact, not
+    # the pull request. It still runs on every PR and reports its own
+    # `Linux AppImage startup smoke` check — read it, and do not merge Linux
+    # changes while it is red — but it no longer blocks unrelated work. The
+    # release path is unaffected: `release.yml` builds and smokes the exact
+    # AppImage before a draft can be published, and PLAN §8's physical matrix
+    # remains mandatory.
     needs:
-      [
-        frontend,
-        third-party-notices,
-        rust,
-        linux-appimage,
-        workflows,
-        supply-chain,
-        hygiene,
-      ]
+      [frontend, third-party-notices, rust, workflows, supply-chain, hygiene]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
