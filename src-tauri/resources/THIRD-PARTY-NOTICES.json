@@ -28,7 +28,7 @@
     },
     {
       "path": "scripts/generate-third-party-notices.ts",
-      "sha256": "79d1e6979ed3148236a3500bf8dfd5b84bf50322f64c17e4d7c6caeedca5fddf"
+      "sha256": "53fc8bc3b4e6f4501af7481b7bc1e517a1cd0f08992a3a9a33c28dd8cf381454"
     },
     {
       "path": "scripts/licenses/LLAMA.CPP-MIT.txt",
