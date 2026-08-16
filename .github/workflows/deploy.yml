@@ -370,13 +370,27 @@ jobs:
       # Restore/save split for the same reason as ci.yml: actions/cache's post
       # step is post-if: success(), so a failure anywhere downstream threw away
       # the WebKitGTK compile that had already succeeded.
+      #
+      # The key is split at the manifest boundary so restore-keys can fall back
+      # without ever reusing a runtime the build refuses to accept. The first
+      # hash covers what `expected_manifest` is derived from — the pinned source
+      # tuple in linux-webkit-runtime.env and the portability patches; the
+      # second covers the two scripts that change the key but NOT the manifest.
+      # Editing the builder used to invalidate a 3.86h compile that
+      # `runtime_is_complete` would have accepted unchanged, because the cache
+      # key was stricter than the correctness check. The prefix fallback hands
+      # that decision back to the script, which byte-compares BUILD-MANIFEST.txt,
+      # re-checks the patch/notice SHAs and every packaged ELF, and `rm -rf`s the
+      # tree and rebuilds if any of it drifts.
       - name: Restore pinned WebKitGTK runtime
         id: webkit-runtime-cache
         if: env.SHIPPABLE == 'true' && runner.os == 'Linux'
         uses: actions/cache/restore@v5
         with:
           path: ${{ steps.webkit-runtime.outputs.runtime-dir }}
-          key: studyvis-webkitgtk-${{ runner.os }}-ubuntu-24.04-x86_64-rust-1.97.1-cargo-c-${{ steps.webkit-runtime.outputs.cargo-c-version }}-${{ hashFiles('scripts/linux-webkit-runtime.env', 'scripts/build-linux-webkit-runtime.sh', 'scripts/generate-librice-third-party-notices.mjs', 'scripts/patches/*.patch') }}
+          key: studyvis-webkitgtk-${{ runner.os }}-ubuntu-24.04-x86_64-rust-1.97.1-cargo-c-${{ steps.webkit-runtime.outputs.cargo-c-version }}-${{ hashFiles('scripts/linux-webkit-runtime.env', 'scripts/patches/*.patch') }}-${{ hashFiles('scripts/build-linux-webkit-runtime.sh', 'scripts/generate-librice-third-party-notices.mjs') }}
+          restore-keys: |
+            studyvis-webkitgtk-${{ runner.os }}-ubuntu-24.04-x86_64-rust-1.97.1-cargo-c-${{ steps.webkit-runtime.outputs.cargo-c-version }}-${{ hashFiles('scripts/linux-webkit-runtime.env', 'scripts/patches/*.patch') }}-
 
       # Same pinned-version-in-the-key reasoning as ci.yml: a hit is the same
       # binary the install below would have produced, and the assertion runs
@@ -477,10 +491,15 @@ jobs:
           SCCACHE_CACHE_SIZE: 3G
           CMAKE_C_COMPILER_LAUNCHER: sccache
           CMAKE_CXX_COMPILER_LAUNCHER: sccache
+          RUNTIME_DIR: ${{ steps.webkit-runtime.outputs.runtime-dir }}
         run: |
           set -euo pipefail
           bash scripts/build-linux-webkit-runtime.sh
           sccache --show-stats
+          # Both of these land in the 10 GB per-repository cache budget, which
+          # the rust-cache entries already crowd. Print the sizes so a future
+          # eviction is diagnosable from the log instead of inferred.
+          du -sh "$RUNTIME_DIR" "$SCCACHE_DIR"
 
       - name: Save the WebKit compiler cache
         if: ${{ !cancelled() && env.SHIPPABLE == 'true' && runner.os == 'Linux' && steps.webkit-sccache.outputs.cache-hit != 'true' }}
@@ -494,7 +513,7 @@ jobs:
         uses: actions/cache/save@v5
         with:
           path: ${{ steps.webkit-runtime.outputs.runtime-dir }}
-          key: studyvis-webkitgtk-${{ runner.os }}-ubuntu-24.04-x86_64-rust-1.97.1-cargo-c-${{ steps.webkit-runtime.outputs.cargo-c-version }}-${{ hashFiles('scripts/linux-webkit-runtime.env', 'scripts/build-linux-webkit-runtime.sh', 'scripts/generate-librice-third-party-notices.mjs', 'scripts/patches/*.patch') }}
+          key: studyvis-webkitgtk-${{ runner.os }}-ubuntu-24.04-x86_64-rust-1.97.1-cargo-c-${{ steps.webkit-runtime.outputs.cargo-c-version }}-${{ hashFiles('scripts/linux-webkit-runtime.env', 'scripts/patches/*.patch') }}-${{ hashFiles('scripts/build-linux-webkit-runtime.sh', 'scripts/generate-librice-third-party-notices.mjs') }}
 
       - name: Remove a cached Linux preview output
         if: env.SHIPPABLE == 'true' && runner.os == 'Linux'
