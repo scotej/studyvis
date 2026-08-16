@@ -398,7 +398,7 @@ jobs:
       - name: Restore pinned cargo-c
         id: cargo-c-cache
         if: env.SHIPPABLE == 'true' && runner.os == 'Linux'
-        uses: actions/cache@v5
+        uses: actions/cache/restore@v5
         with:
           path: |
             ~/.cargo/bin/cargo-capi
@@ -419,6 +419,23 @@ jobs:
             *" ${STUDYVIS_CARGO_C_VERSION}"|*" ${STUDYVIS_CARGO_C_VERSION}+"*) ;;
             *) echo "Unexpected cargo-c version: $cargo_c_output" >&2; exit 1 ;;
           esac
+
+      # Same restore/save split as the WebKitGTK runtime above, for the same
+      # reason: as a combined actions/cache the post step is post-if: success(),
+      # so a failure in the installer build hours later threw away a cargo-c
+      # install that had already been asserted good. Saving here — immediately
+      # after the assertion and before the WebKitGTK compile — means success()
+      # can only mean "cargo-c is the pinned version", which is exactly the
+      # condition this cache should record.
+      - name: Save pinned cargo-c
+        if: ${{ success() && env.SHIPPABLE == 'true' && runner.os == 'Linux' && steps.cargo-c-cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v5
+        with:
+          path: |
+            ~/.cargo/bin/cargo-capi
+            ~/.cargo/bin/cargo-cbuild
+            ~/.cargo/bin/cargo-cinstall
+          key: studyvis-cargo-c-${{ runner.os }}-ubuntu-24.04-rust-1.97.1-${{ steps.webkit-runtime.outputs.cargo-c-version }}
 
       - name: Install frontend dependencies
         if: env.SHIPPABLE == 'true'
@@ -498,8 +515,11 @@ jobs:
           sccache --show-stats
           # Both of these land in the 10 GB per-repository cache budget, which
           # the rust-cache entries already crowd. Print the sizes so a future
-          # eviction is diagnosable from the log instead of inferred.
-          du -sh "$RUNTIME_DIR" "$SCCACHE_DIR"
+          # eviction is diagnosable from the log instead of inferred. Reporting
+          # only: on the cached path the script exits before sccache is ever
+          # invoked, so SCCACHE_DIR need not exist, and under set -e a missing
+          # path here would fail a build that had already succeeded.
+          du -sh "$RUNTIME_DIR" "$SCCACHE_DIR" 2>/dev/null || true
 
       - name: Save the WebKit compiler cache
         if: ${{ !cancelled() && env.SHIPPABLE == 'true' && runner.os == 'Linux' && steps.webkit-sccache.outputs.cache-hit != 'true' }}
