@@ -28,7 +28,11 @@ build_dir=$(realpath --canonicalize-existing -- "$1")
 [[ ${build_dir##*/} == "studyvis-appimage-runtime-r${STUDYVIS_APPIMAGE_RUNTIME_BUILD_REVISION}" ]] || {
   die "runtime build directory has the wrong revision: $build_dir"
 }
-if find "$build_dir" -type l -print -quit | grep -q .; then
+# Captured, not piped: `grep -q` stops at its first match, which SIGPIPEs a
+# still-writing producer and, under `set -o pipefail`, turns the match into a
+# failed pipeline — silently skipping the `die` it was supposed to trigger.
+runtime_symlink=$(find "$build_dir" -type l -print -quit)
+if [[ -n $runtime_symlink ]]; then
   die "runtime build output contains a symlink"
 fi
 
@@ -80,9 +84,16 @@ runtime_sha=${runtime_sha%% *}
 [[ $($runtime --appimage-version 2>&1) == "AppImage runtime version: $STUDYVIS_APPIMAGE_RUNTIME_VERSION" ]] || {
   die "runtime executable has the wrong version marker"
 }
-readelf -hW "$runtime" | grep -Eq 'Type:[[:space:]]+DYN' || die "runtime is not ET_DYN"
-readelf -lW "$runtime" | grep -Eq '(^|[[:space:]])INTERP([[:space:]]|$)' && die "runtime has PT_INTERP"
-readelf -dW "$runtime" | grep -Eq '\(NEEDED\)' && die "runtime has DT_NEEDED"
+runtime_header=$(readelf -hW "$runtime")
+runtime_program_headers=$(readelf -lW "$runtime")
+runtime_dynamic=$(readelf -dW "$runtime")
+grep -Eq 'Type:[[:space:]]+DYN' <<<"$runtime_header" || die "runtime is not ET_DYN"
+if grep -Eq '(^|[[:space:]])INTERP([[:space:]]|$)' <<<"$runtime_program_headers"; then
+  die "runtime has PT_INTERP"
+fi
+if grep -Eq '\(NEEDED\)' <<<"$runtime_dynamic"; then
+  die "runtime has DT_NEEDED"
+fi
 
 [[ $# -eq 2 ]] || exit 0
 prefix=$(realpath --canonicalize-existing -- "$2")
