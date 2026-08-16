@@ -196,3 +196,29 @@ diff --git a/Source/WebKit/UIProcess/API/glib/WebKitWebContext.cpp b/Source/WebK
      const char* bundleDirectory = g_getenv("WEBKIT_INJECTED_BUNDLE_PATH");
      if (bundleDirectory && g_file_test(bundleDirectory, G_FILE_TEST_IS_DIR))
          return bundleDirectory;
+diff --git a/Source/WebCore/Modules/mediastream/gstreamer/GStreamerIceAgent.cpp b/Source/WebCore/Modules/mediastream/gstreamer/GStreamerIceAgent.cpp
+--- a/Source/WebCore/Modules/mediastream/gstreamer/GStreamerIceAgent.cpp
++++ b/Source/WebCore/Modules/mediastream/gstreamer/GStreamerIceAgent.cpp
+@@ -46,6 +46,22 @@
+ #include <wtf/text/StringBuilder.h>
+ #include <wtf/text/WTFString.h>
+ 
++// GStreamer 1.24.2 ships gst/webrtc/webrtc_fwd.h without G_BEGIN_DECLS, so a
++// C++ translation unit declares gst_webrtc_error_quark() with C++ linkage and
++// emits a mangled reference that libgstwebrtc-1.0's C symbol cannot satisfy.
++// Upstream added the guard before 1.24.12, but Ubuntu 24.04 - the Linux build
++// baseline - is frozen at 1.24.2 in every pocket. Resolve the error domain by
++// its documented name instead of through the symbol: the library derives the
++// identical quark from the same static string.
++#if !GST_CHECK_VERSION(1, 24, 12)
++static GQuark webkitGstWebRTCErrorQuark()
++{
++    return g_quark_from_static_string("gst-webrtc-error-quark");
++}
++#undef GST_WEBRTC_ERROR
++#define GST_WEBRTC_ERROR webkitGstWebRTCErrorQuark()
++#endif
++
+ using namespace WTF;
+ using namespace WebCore;
+ 
