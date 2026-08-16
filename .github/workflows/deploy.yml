@@ -454,6 +454,21 @@ jobs:
       # downloads hash-pinned tools and builds the AppImage type-2 runtime, so
       # a bad pin or a runtime build break should surface in minutes instead of
       # after a two-hour compile that the failure discards anyway.
+      # Exact key, no restore-keys, deliberately: prepare-linuxdeploy-tools.sh
+      # builds the type-2 runtime only when the directory is absent but runs
+      # verify-linux-appimage-runtime.sh over it either way, and a reused tree
+      # that fails verification aborts the script rather than rebuilding. A
+      # prefix fallback could therefore hand it a runtime it can only die on,
+      # so every pin and every script in that path is in the key and any change
+      # to them simply misses and rebuilds.
+      - name: Restore the pinned linuxdeploy toolchain
+        id: linuxdeploy-cache
+        if: env.SHIPPABLE == 'true' && runner.os == 'Linux'
+        uses: actions/cache/restore@v5
+        with:
+          path: ${{ runner.temp }}/studyvis-tauri-cache-deploy
+          key: studyvis-linuxdeploy-ubuntu-24.04-x86_64-${{ hashFiles('scripts/linuxdeploy-tools.env', 'scripts/linux-appimage-runtime.env', 'scripts/linux-appimage-runtime-sources.tsv', 'scripts/prepare-linuxdeploy-tools.sh', 'scripts/build-linux-appimage-runtime.sh', 'scripts/verify-linux-appimage-runtime.sh') }}
+
       - name: Prepare the pinned linuxdeploy toolchain
         if: env.SHIPPABLE == 'true' && runner.os == 'Linux'
         shell: bash
@@ -468,6 +483,16 @@ jobs:
             echo "GSTREAMER_PLUGINS_DIR=$GITHUB_WORKSPACE/src-tauri/target/appimage-webkit/gstreamer-plugins"
             echo "GSTREAMER_HELPERS_DIR=$GITHUB_WORKSPACE/src-tauri/target/appimage-webkit/gstreamer"
           } >> "$GITHUB_ENV"
+
+      # Saved here rather than as a combined actions/cache post step for the
+      # same reason as the WebKitGTK runtime and cargo-c above: the verified
+      # toolchain must survive a failure in the installer build hours later.
+      - name: Save the pinned linuxdeploy toolchain
+        if: ${{ success() && env.SHIPPABLE == 'true' && runner.os == 'Linux' && steps.linuxdeploy-cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v5
+        with:
+          path: ${{ runner.temp }}/studyvis-tauri-cache-deploy
+          key: studyvis-linuxdeploy-ubuntu-24.04-x86_64-${{ hashFiles('scripts/linuxdeploy-tools.env', 'scripts/linux-appimage-runtime.env', 'scripts/linux-appimage-runtime-sources.tsv', 'scripts/prepare-linuxdeploy-tools.sh', 'scripts/build-linux-appimage-runtime.sh', 'scripts/verify-linux-appimage-runtime.sh') }}
 
       # Preview builds are throwaway artifacts, so they reuse WebKit object
       # files across runs. The tagged release leg has no equivalent step on
