@@ -402,6 +402,38 @@ jobs:
             *) echo "Unexpected cargo-c version: $cargo_c_output" >&2; exit 1 ;;
           esac
 
+      - name: Install frontend dependencies
+        if: env.SHIPPABLE == 'true'
+        run: npm ci
+
+      # Release-profile builds fail without a real sidecar binary, by design
+      # (build.rs only writes a placeholder for debug builds).
+      - name: Fetch llama-server prebuild
+        if: env.SHIPPABLE == 'true'
+        shell: bash
+        env:
+          LLAMA_TRIPLE: ${{ matrix.llama-triple }}
+        run: bash scripts/fetch-llama-server.sh --triple "$LLAMA_TRIPLE"
+
+      # Ordered ahead of the WebKitGTK compile on purpose, matching ci.yml: it
+      # downloads hash-pinned tools and builds the AppImage type-2 runtime, so
+      # a bad pin or a runtime build break should surface in minutes instead of
+      # after a two-hour compile that the failure discards anyway.
+      - name: Prepare the pinned linuxdeploy toolchain
+        if: env.SHIPPABLE == 'true' && runner.os == 'Linux'
+        shell: bash
+        env:
+          TOOL_CACHE_HOME: ${{ runner.temp }}/studyvis-tauri-cache-deploy
+        run: |
+          set -euo pipefail
+          bash scripts/prepare-linuxdeploy-tools.sh "$TOOL_CACHE_HOME"
+          {
+            echo "XDG_CACHE_HOME=$TOOL_CACHE_HOME"
+            echo "LDAI_RUNTIME_FILE=$TOOL_CACHE_HOME/studyvis-appimage-runtime-r2/runtime-x86_64"
+            echo "GSTREAMER_PLUGINS_DIR=$GITHUB_WORKSPACE/src-tauri/target/appimage-webkit/gstreamer-plugins"
+            echo "GSTREAMER_HELPERS_DIR=$GITHUB_WORKSPACE/src-tauri/target/appimage-webkit/gstreamer"
+          } >> "$GITHUB_ENV"
+
       # Preview builds are throwaway artifacts, so they reuse WebKit object
       # files across runs. The tagged release leg has no equivalent step on
       # purpose; see ci.yml's copy of this comment and ARCHITECTURE.md §2.
@@ -444,34 +476,6 @@ jobs:
           set -euo pipefail
           bash scripts/build-linux-webkit-runtime.sh
           sccache --show-stats
-
-      - name: Install frontend dependencies
-        if: env.SHIPPABLE == 'true'
-        run: npm ci
-
-      # Release-profile builds fail without a real sidecar binary, by design
-      # (build.rs only writes a placeholder for debug builds).
-      - name: Fetch llama-server prebuild
-        if: env.SHIPPABLE == 'true'
-        shell: bash
-        env:
-          LLAMA_TRIPLE: ${{ matrix.llama-triple }}
-        run: bash scripts/fetch-llama-server.sh --triple "$LLAMA_TRIPLE"
-
-      - name: Prepare the pinned linuxdeploy toolchain
-        if: env.SHIPPABLE == 'true' && runner.os == 'Linux'
-        shell: bash
-        env:
-          TOOL_CACHE_HOME: ${{ runner.temp }}/studyvis-tauri-cache-deploy
-        run: |
-          set -euo pipefail
-          bash scripts/prepare-linuxdeploy-tools.sh "$TOOL_CACHE_HOME"
-          {
-            echo "XDG_CACHE_HOME=$TOOL_CACHE_HOME"
-            echo "LDAI_RUNTIME_FILE=$TOOL_CACHE_HOME/studyvis-appimage-runtime-r2/runtime-x86_64"
-            echo "GSTREAMER_PLUGINS_DIR=$GITHUB_WORKSPACE/src-tauri/target/appimage-webkit/gstreamer-plugins"
-            echo "GSTREAMER_HELPERS_DIR=$GITHUB_WORKSPACE/src-tauri/target/appimage-webkit/gstreamer"
-          } >> "$GITHUB_ENV"
 
       - name: Remove a cached Linux preview output
         if: env.SHIPPABLE == 'true' && runner.os == 'Linux'

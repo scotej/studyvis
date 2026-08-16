@@ -2,7 +2,7 @@
 # packaged ELF must either have an ELF provider inside the AppImage or appear
 # here. The library entries are the reviewed exclusion set compiled into the
 # pinned linuxdeploy byte; the dynamic loader is the sole PT_INTERP entry.
-# linuxdeploy SHA256: 20eebde3c18ae2e44279bd624fc72482503aece216d5d77f10932235342f71c1
+# linuxdeploy SHA256: e762bea85c8eb0d4b3508d46e5c1f037f717d0f9303ae3b4aafc8b04991fa1ef
 # Sorted library-only list SHA256: c4c853f5199e08e13bb2125de088d9df615a8d911e47f7c460d1ca5d3e0b613d
 ld-linux-x86-64.so.2
 libBrokenLocale.so.1
