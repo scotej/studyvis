@@ -303,6 +303,10 @@ jobs:
       # Soup3 / GStreamer configuration selected by the pinned build script.
       # Noble supplies GStreamer 1.24: the librice ICE agent needs the 1.22+
       # GstWebRTCICE base class that Jammy's 1.20 does not have.
+      # Noble folded the PulseAudio elements into plugins-good but still ships
+      # the ALSA ones only in gstreamer1.0-alsa, which nothing else here pulls
+      # in. Without it the curated manifest's libgstalsa.so has no provider and
+      # AppImage staging fails after the WebKit compile.
       - name: Install WebKitGTK build, packaging, and smoke dependencies
         run: |
           sudo apt-get update
@@ -326,7 +330,7 @@ jobs:
             libxml2-utils libxslt1-dev libxt-dev \
             libtool ninja-build patch patchelf perl pkg-config python3 ruby tar \
             unifdef wayland-protocols xauth xdg-dbus-proxy xdg-utils xz-utils xvfb \
-            gstreamer1.0-plugins-bad \
+            gstreamer1.0-alsa gstreamer1.0-plugins-bad \
             gstreamer1.0-plugins-base gstreamer1.0-plugins-good \
             gstreamer1.0-nice gstreamer1.0-pipewire gstreamer1.0-tools
 

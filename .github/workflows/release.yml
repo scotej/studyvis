@@ -249,7 +249,7 @@ jobs:
             libxml2-utils libxslt1-dev libxt-dev libtool ninja-build \
             patch patchelf perl pkg-config python3 ruby tar unifdef \
             wayland-protocols xauth xdg-dbus-proxy xdg-utils xz-utils xvfb \
-            gstreamer1.0-plugins-bad \
+            gstreamer1.0-alsa gstreamer1.0-plugins-bad \
             gstreamer1.0-plugins-base gstreamer1.0-plugins-good \
             gstreamer1.0-nice gstreamer1.0-pipewire gstreamer1.0-tools
 
