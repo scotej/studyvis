@@ -394,9 +394,15 @@ jobs:
       # covers the supply-chain tuple, effective build logic, and portability
       # patch. The build step still runs on a hit and validates completeness,
       # so an absent or partial cache safely falls back to a cold build.
+      # Restore/save split rather than the combined action: actions/cache saves
+      # in a post step declared post-if: success(), so any failure downstream —
+      # packaging, the runtime assertions, the Xvfb smoke — discarded a
+      # three-hour WebKitGTK compile and made the next run rebuild it. Saving
+      # right after the build step keeps the expensive, already-validated half
+      # of this job and leaves only the cheap half to re-run.
       - name: Restore pinned WebKitGTK runtime
         id: webkit-runtime-cache
-        uses: actions/cache@v5
+        uses: actions/cache/restore@v5
         with:
           path: ${{ steps.webkit-runtime.outputs.runtime-dir }}
           key: studyvis-webkitgtk-${{ runner.os }}-ubuntu-24.04-x86_64-rust-1.97.1-cargo-c-${{ steps.webkit-runtime.outputs.cargo-c-version }}-${{ hashFiles('scripts/linux-webkit-runtime.env', 'scripts/build-linux-webkit-runtime.sh', 'scripts/generate-librice-third-party-notices.mjs', 'scripts/patches/*.patch') }}
@@ -497,7 +503,8 @@ jobs:
       # back to any earlier compile of the same tuple: object reuse is what
       # makes an edit to the builder script cheap again.
       - name: Restore the WebKit compiler cache
-        uses: actions/cache@v5
+        id: webkit-sccache
+        uses: actions/cache/restore@v5
         with:
           path: ${{ runner.temp }}/studyvis-sccache
           key: studyvis-sccache-webkit-ubuntu-24.04-${{ hashFiles('scripts/linux-webkit-runtime.env', 'scripts/patches/*.patch') }}-${{ github.sha }}
@@ -515,6 +522,22 @@ jobs:
           set -euo pipefail
           bash scripts/build-linux-webkit-runtime.sh
           sccache --show-stats
+
+      # Objects from a compile that died partway are still worth keeping, so
+      # this one saves even when the build step failed.
+      - name: Save the WebKit compiler cache
+        if: ${{ !cancelled() && steps.webkit-sccache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v5
+        with:
+          path: ${{ runner.temp }}/studyvis-sccache
+          key: studyvis-sccache-webkit-ubuntu-24.04-${{ hashFiles('scripts/linux-webkit-runtime.env', 'scripts/patches/*.patch') }}-${{ github.sha }}
+
+      - name: Save the pinned WebKitGTK runtime
+        if: ${{ success() && steps.webkit-runtime-cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v5
+        with:
+          path: ${{ steps.webkit-runtime.outputs.runtime-dir }}
+          key: studyvis-webkitgtk-${{ runner.os }}-ubuntu-24.04-x86_64-rust-1.97.1-cargo-c-${{ steps.webkit-runtime.outputs.cargo-c-version }}-${{ hashFiles('scripts/linux-webkit-runtime.env', 'scripts/build-linux-webkit-runtime.sh', 'scripts/generate-librice-third-party-notices.mjs', 'scripts/patches/*.patch') }}
 
       - name: Build unsigned AppImage without updater artifacts
         run: |

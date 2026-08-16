@@ -367,9 +367,13 @@ jobs:
             echo "cargo-c-version=${STUDYVIS_CARGO_C_VERSION}"
           } >> "$GITHUB_OUTPUT"
 
+      # Restore/save split for the same reason as ci.yml: actions/cache's post
+      # step is post-if: success(), so a failure anywhere downstream threw away
+      # the WebKitGTK compile that had already succeeded.
       - name: Restore pinned WebKitGTK runtime
+        id: webkit-runtime-cache
         if: env.SHIPPABLE == 'true' && runner.os == 'Linux'
-        uses: actions/cache@v5
+        uses: actions/cache/restore@v5
         with:
           path: ${{ steps.webkit-runtime.outputs.runtime-dir }}
           key: studyvis-webkitgtk-${{ runner.os }}-ubuntu-24.04-x86_64-rust-1.97.1-cargo-c-${{ steps.webkit-runtime.outputs.cargo-c-version }}-${{ hashFiles('scripts/linux-webkit-runtime.env', 'scripts/build-linux-webkit-runtime.sh', 'scripts/generate-librice-third-party-notices.mjs', 'scripts/patches/*.patch') }}
@@ -456,8 +460,9 @@ jobs:
           sccache --version
 
       - name: Restore the WebKit compiler cache
+        id: webkit-sccache
         if: env.SHIPPABLE == 'true' && runner.os == 'Linux'
-        uses: actions/cache@v5
+        uses: actions/cache/restore@v5
         with:
           path: ${{ runner.temp }}/studyvis-sccache
           key: studyvis-sccache-webkit-ubuntu-24.04-${{ hashFiles('scripts/linux-webkit-runtime.env', 'scripts/patches/*.patch') }}-${{ github.sha }}
@@ -476,6 +481,20 @@ jobs:
           set -euo pipefail
           bash scripts/build-linux-webkit-runtime.sh
           sccache --show-stats
+
+      - name: Save the WebKit compiler cache
+        if: ${{ !cancelled() && env.SHIPPABLE == 'true' && runner.os == 'Linux' && steps.webkit-sccache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v5
+        with:
+          path: ${{ runner.temp }}/studyvis-sccache
+          key: studyvis-sccache-webkit-ubuntu-24.04-${{ hashFiles('scripts/linux-webkit-runtime.env', 'scripts/patches/*.patch') }}-${{ github.sha }}
+
+      - name: Save the pinned WebKitGTK runtime
+        if: ${{ success() && env.SHIPPABLE == 'true' && runner.os == 'Linux' && steps.webkit-runtime-cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v5
+        with:
+          path: ${{ steps.webkit-runtime.outputs.runtime-dir }}
+          key: studyvis-webkitgtk-${{ runner.os }}-ubuntu-24.04-x86_64-rust-1.97.1-cargo-c-${{ steps.webkit-runtime.outputs.cargo-c-version }}-${{ hashFiles('scripts/linux-webkit-runtime.env', 'scripts/build-linux-webkit-runtime.sh', 'scripts/generate-librice-third-party-notices.mjs', 'scripts/patches/*.patch') }}
 
       - name: Remove a cached Linux preview output
         if: env.SHIPPABLE == 'true' && runner.os == 'Linux'
