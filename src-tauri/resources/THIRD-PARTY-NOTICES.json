@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "generatedBy": "scripts/generate-third-party-notices.ts",
   "noticePath": "THIRD-PARTY-NOTICES.txt",
-  "noticeSha256": "3345d53c7e47bdcfb3f9f81c3ec9e88cd4c104a788f0619fc4b25ea2931dd586",
+  "noticeSha256": "78f6624a06a68352230d5afb128bbb84779a358187cefc9c7360a85fdf82b379",
   "scope": {
     "npm": "package-lock.json v3 entries beneath node_modules whose dev flag is not true",
     "cargo": "normal dependency edges reachable from the StudyVis root under each release target; build/dev edges excluded",
@@ -16,11 +16,11 @@
   "inputs": [
     {
       "path": "package-lock.json",
-      "sha256": "99e2b7c61e162e8451449bc9ed3ca0e39a0063f949f15125e30c0e5b71296400"
+      "sha256": "d24635c1bdc445424f93932c176162ebd82a6d780aac12176c51d42326dee3dd"
     },
     {
       "path": "package.json",
-      "sha256": "a003b54846b1a21f738910a9b8c22a63b96cc63ced78b03316d90af08c45145a"
+      "sha256": "de351e7d49a8fc992678649ae42077638ea196a62ddc20a22cf8daeab940a86d"
     },
     {
       "path": "scripts/fetch-llama-server.sh",
@@ -15053,14 +15053,14 @@
       ]
     },
     {
-      "id": "npm:node_modules/lucide-react@1.27.0",
+      "id": "npm:node_modules/lucide-react@1.28.0",
       "ecosystem": "npm",
       "name": "lucide-react",
-      "version": "1.27.0",
+      "version": "1.28.0",
       "licenseExpression": "ISC",
-      "source": "https://registry.npmjs.org/lucide-react/-/lucide-react-1.27.0.tgz",
+      "source": "https://registry.npmjs.org/lucide-react/-/lucide-react-1.28.0.tgz",
       "repository": "https://github.com/lucide-icons/lucide.git",
-      "integrity": "sha512-rJicGl/3Fly/E0rOH1YmPZ6e49JCnKknh1ox1vpHnkfjujAkKA6sqUZvH3MTAaXXjgexyUwgNwTJzTtYuAFYJw==",
+      "integrity": "sha512-fARAFJULsGuDDydjp6+6blekG/sBIM29TerzLjc9bQUKAcEfrSc4ZQKb25KRz4OMKd87cZTb5dgq0w/T6KufVg==",
       "lockPath": "node_modules/lucide-react",
       "targets": ["frontend"],
       "licenseFiles": [
