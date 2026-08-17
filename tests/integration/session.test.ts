@@ -310,6 +310,58 @@ describe('two room handles on the in-process bus observe peer events', () => {
     await nextGuest.room.leave()
   })
 
+  test('a departed guest rejoins the same live room on a fresh invite', async () => {
+    const hostStore = createSessionStore()
+    const guestStore = createSessionStore()
+    const host = hostSession({ store: hostStore })
+    let guest = joinSession(host.sessionTopic, host.sessionPassword, {
+      store: guestStore,
+    })
+    await flushMicrotasks()
+    expect(host.peers()).toHaveLength(1)
+
+    // I225 — the reported reproduction, from the departing app instance's own
+    // side: leave, then accept another invite carrying the same credentials.
+    // Repeated, because the transport defect behind it only surfaced once a
+    // replacement room had been built on top of a still-unwinding one.
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      await guest.leave()
+      await flushMicrotasks()
+      expect(guestStore.getState().status).toBe('ended')
+      expect(hostStore.getState().status).toBe('active')
+      expect(host.peers()).toEqual([])
+
+      guest = joinSession(host.sessionTopic, host.sessionPassword, {
+        store: guestStore,
+      })
+      await flushMicrotasks()
+
+      // Not an empty room on either side.
+      expect(host.peers()).toEqual([guest.room.selfId])
+      expect(guest.peers()).toEqual([host.room.selfId])
+      expect(guestStore.getState()).toMatchObject({
+        status: 'active',
+        sessionTopic: host.sessionTopic,
+        // Re-entering the room we just left continues the same logical
+        // session, so the stint merges rather than starting a second row.
+        isRejoin: true,
+        peers: { [host.room.selfId]: expect.anything() },
+      })
+      // The survivor never rebuilt its room; it is the same one throughout.
+      expect(hostStore.getState().room).toBe(host.room)
+    }
+
+    await guest.leave()
+    await host.leave()
+
+    // Every stint merges into the one topic-keyed row.
+    const insertedIds = invokeMock.mock.calls
+      .filter(([cmd]) => cmd === 'sessions_insert')
+      .map(([, args]) => (args as { id: string }).id)
+    expect(insertedIds).toHaveLength(5)
+    expect(new Set(insertedIds)).toEqual(new Set([host.sessionTopic]))
+  })
+
   test('an unexplained transport loss also leaves the survivor active', async () => {
     const hostStore = createSessionStore()
     const guestStore = createSessionStore()
