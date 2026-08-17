@@ -52,7 +52,7 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "jsqr": "^1.4.0",
-    "lucide-react": "^1.27.0",
+    "lucide-react": "^1.28.0",
     "qrcode": "^1.5.4",
     "radix-ui": "^1.6.7",
     "react": "^19.2.8",
