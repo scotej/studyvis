@@ -1,0 +1,296 @@
+{
+  "schemaVersion": 1,
+  "cargoTargets": [
+    "aarch64-apple-darwin",
+    "x86_64-pc-windows-msvc",
+    "x86_64-unknown-linux-gnu"
+  ],
+  "cargoOverrides": [
+    {
+      "name": "wry",
+      "version": "0.55.1",
+      "declaredLicense": "Apache-2.0 OR MIT",
+      "selectedLicense": "MIT",
+      "source": "vendored:path:src-tauri/vendor/wry",
+      "reason": "StudyVis ships this patched source tree and elects its MIT alternative.",
+      "licenseFiles": [
+        {
+          "repositoryPath": "src-tauri/vendor/wry/LICENSE-MIT",
+          "expectedSha256": "ef88893533af22ffbb68ceef0724ba1389518df26165a34f3c99ad30b884df4f"
+        }
+      ]
+    }
+  ],
+  "cargoFallbacks": [
+    {
+      "reason": "These crates.io archives omit their workspace-root license file; each declaration permits the MIT alternative selected here.",
+      "selectedLicense": "MIT",
+      "components": [
+        { "name": "block2", "version": "0.6.2", "declaredLicense": "MIT" },
+        {
+          "name": "dispatch2",
+          "version": "0.3.1",
+          "declaredLicense": "Zlib OR Apache-2.0 OR MIT"
+        },
+        { "name": "objc2", "version": "0.6.4", "declaredLicense": "MIT" },
+        {
+          "name": "objc2-app-kit",
+          "version": "0.3.2",
+          "declaredLicense": "Zlib OR Apache-2.0 OR MIT"
+        },
+        {
+          "name": "objc2-cloud-kit",
+          "version": "0.3.2",
+          "declaredLicense": "Zlib OR Apache-2.0 OR MIT"
+        },
+        {
+          "name": "objc2-core-data",
+          "version": "0.3.2",
+          "declaredLicense": "Zlib OR Apache-2.0 OR MIT"
+        },
+        {
+          "name": "objc2-core-foundation",
+          "version": "0.3.2",
+          "declaredLicense": "Zlib OR Apache-2.0 OR MIT"
+        },
+        {
+          "name": "objc2-core-graphics",
+          "version": "0.3.2",
+          "declaredLicense": "Zlib OR Apache-2.0 OR MIT"
+        },
+        {
+          "name": "objc2-core-image",
+          "version": "0.3.2",
+          "declaredLicense": "Zlib OR Apache-2.0 OR MIT"
+        },
+        {
+          "name": "objc2-core-text",
+          "version": "0.3.2",
+          "declaredLicense": "Zlib OR Apache-2.0 OR MIT"
+        },
+        {
+          "name": "objc2-core-video",
+          "version": "0.3.2",
+          "declaredLicense": "Zlib OR Apache-2.0 OR MIT"
+        },
+        {
+          "name": "objc2-encode",
+          "version": "4.1.0",
+          "declaredLicense": "MIT"
+        },
+        {
+          "name": "objc2-exception-helper",
+          "version": "0.1.1",
+          "declaredLicense": "Zlib OR Apache-2.0 OR MIT"
+        },
+        {
+          "name": "objc2-foundation",
+          "version": "0.3.2",
+          "declaredLicense": "MIT"
+        },
+        {
+          "name": "objc2-io-surface",
+          "version": "0.3.2",
+          "declaredLicense": "Zlib OR Apache-2.0 OR MIT"
+        },
+        {
+          "name": "objc2-osa-kit",
+          "version": "0.3.2",
+          "declaredLicense": "Zlib OR Apache-2.0 OR MIT"
+        },
+        {
+          "name": "objc2-quartz-core",
+          "version": "0.3.2",
+          "declaredLicense": "Zlib OR Apache-2.0 OR MIT"
+        },
+        {
+          "name": "objc2-web-kit",
+          "version": "0.3.2",
+          "declaredLicense": "Zlib OR Apache-2.0 OR MIT"
+        }
+      ],
+      "licenseFiles": [
+        { "cargoPackage": "serde@1.0.229", "path": "LICENSE-MIT" }
+      ]
+    },
+    {
+      "reason": "These rust-unic crates.io archives omit the workspace-root dual-license files.",
+      "components": [
+        {
+          "name": "unic-char-property",
+          "version": "0.9.0",
+          "declaredLicense": "MIT/Apache-2.0"
+        },
+        {
+          "name": "unic-char-range",
+          "version": "0.9.0",
+          "declaredLicense": "MIT/Apache-2.0"
+        },
+        {
+          "name": "unic-common",
+          "version": "0.9.0",
+          "declaredLicense": "MIT/Apache-2.0"
+        },
+        {
+          "name": "unic-ucd-ident",
+          "version": "0.9.0",
+          "declaredLicense": "MIT/Apache-2.0"
+        },
+        {
+          "name": "unic-ucd-version",
+          "version": "0.9.0",
+          "declaredLicense": "MIT/Apache-2.0"
+        }
+      ],
+      "licenseFiles": [
+        { "cargoPackage": "serde@1.0.229", "path": "LICENSE-MIT" },
+        { "cargoPackage": "serde@1.0.229", "path": "LICENSE-APACHE" }
+      ]
+    },
+    {
+      "reason": "The selectors crates.io archive omits the workspace-root MPL-2.0 text.",
+      "components": [
+        {
+          "name": "selectors",
+          "version": "0.36.1",
+          "declaredLicense": "MPL-2.0"
+        }
+      ],
+      "licenseFiles": [
+        { "cargoPackage": "cssparser@0.36.0", "path": "LICENSE" }
+      ]
+    },
+    {
+      "reason": "alloc-stdlib omits the shared Dropbox BSD-3-Clause text from its crates.io archive.",
+      "components": [
+        {
+          "name": "alloc-stdlib",
+          "version": "0.2.2",
+          "declaredLicense": "BSD-3-Clause"
+        }
+      ],
+      "licenseFiles": [
+        { "cargoPackage": "brotli-decompressor@5.0.0", "path": "LICENSE" }
+      ]
+    },
+    {
+      "reason": "These crates.io archives declare MIT but omit a license file.",
+      "selectedLicense": "MIT",
+      "components": [
+        { "name": "dlopen2", "version": "0.8.2", "declaredLicense": "MIT" },
+        {
+          "name": "dlopen2_derive",
+          "version": "0.4.3",
+          "declaredLicense": "MIT"
+        },
+        {
+          "name": "libappindicator-sys",
+          "version": "0.9.0",
+          "declaredLicense": "Apache-2.0 OR MIT"
+        },
+        { "name": "sigchld", "version": "0.2.4", "declaredLicense": "MIT" },
+        {
+          "name": "webview2-com",
+          "version": "0.38.2",
+          "declaredLicense": "MIT"
+        },
+        {
+          "name": "webview2-com-macros",
+          "version": "0.8.1",
+          "declaredLicense": "MIT"
+        },
+        {
+          "name": "webview2-com-sys",
+          "version": "0.38.2",
+          "declaredLicense": "MIT"
+        }
+      ],
+      "licenseFiles": [
+        { "cargoPackage": "serde@1.0.229", "path": "LICENSE-MIT" }
+      ]
+    },
+    {
+      "reason": "The crate declares the historical MIT/Apache-2.0 dual-license spelling but omits both texts.",
+      "components": [
+        {
+          "name": "mac-notification-sys",
+          "version": "0.6.12",
+          "declaredLicense": "MIT/Apache-2.0"
+        }
+      ],
+      "licenseFiles": [
+        { "cargoPackage": "serde@1.0.229", "path": "LICENSE-MIT" },
+        { "cargoPackage": "serde@1.0.229", "path": "LICENSE-APACHE" }
+      ]
+    }
+  ],
+  "npmOverrides": [
+    {
+      "lockPath": "node_modules/react-remove-scroll-bar",
+      "name": "react-remove-scroll-bar",
+      "version": "2.3.8",
+      "declaredLicense": "MIT",
+      "reason": "The 2.3.8 package archive declares MIT but omits the text; retain the same author's locked react-remove-scroll MIT notice.",
+      "licenseFiles": [
+        { "npmLockPath": "node_modules/react-remove-scroll", "path": "LICENSE" }
+      ]
+    },
+    {
+      "lockPath": "node_modules/victory-vendor",
+      "name": "victory-vendor",
+      "version": "37.3.6",
+      "declaredLicense": "MIT AND ISC",
+      "reason": "The package archive omits Victory's root MIT text; it also embeds these separately licensed d3/internmap sources.",
+      "sourceRevision": "https://github.com/FormidableLabs/victory/tree/d9d9ca2d5038d6ef9de91f2cef39e6fb2733baa6",
+      "licenseFiles": [
+        {
+          "repositoryPath": "scripts/third-party-licenses/victory-vendor-37.3.6-MIT.txt"
+        },
+        { "packagePath": "lib-vendor/d3-array/LICENSE" },
+        { "packagePath": "lib-vendor/d3-color/LICENSE" },
+        { "packagePath": "lib-vendor/d3-ease/LICENSE" },
+        { "packagePath": "lib-vendor/d3-format/LICENSE" },
+        { "packagePath": "lib-vendor/d3-interpolate/LICENSE" },
+        { "packagePath": "lib-vendor/d3-path/LICENSE" },
+        { "packagePath": "lib-vendor/d3-scale/LICENSE" },
+        { "packagePath": "lib-vendor/d3-shape/LICENSE" },
+        { "packagePath": "lib-vendor/d3-time-format/LICENSE" },
+        { "packagePath": "lib-vendor/d3-time/LICENSE" },
+        { "packagePath": "lib-vendor/d3-timer/LICENSE" },
+        { "packagePath": "lib-vendor/d3-voronoi/LICENSE" },
+        { "packagePath": "lib-vendor/internmap/LICENSE" }
+      ]
+    }
+  ],
+  "externalComponents": [
+    {
+      "name": "llama.cpp",
+      "version": "b9095",
+      "commit": "f3c3e0e9a087835639733485b8900b195ba4ca47",
+      "declaredLicense": "MIT",
+      "source": "https://github.com/ggml-org/llama.cpp/tree/f3c3e0e9a087835639733485b8900b195ba4ca47",
+      "licenseFiles": [
+        {
+          "repositoryPath": "scripts/licenses/LLAMA.CPP-MIT.txt",
+          "expectedSha256": "94f29bbed6a22c35b992c5c6ebf0e7c92f13b836b90f36f461c9cf2f0f1d010d"
+        }
+      ]
+    }
+  ],
+  "requiredNpmComponents": [
+    {
+      "name": "@fontsource-variable/inter",
+      "version": "5.3.0",
+      "declaredLicense": "OFL-1.1",
+      "licenseFile": "LICENSE",
+      "expectedSha256": "3b0a5fca3d17942cde889069889dedbbbd075e9b599968c82a95f4d944e9b345"
+    },
+    {
+      "name": "@fontsource-variable/jetbrains-mono",
+      "version": "5.3.0",
+      "declaredLicense": "OFL-1.1",
+      "licenseFile": "LICENSE",
+      "expectedSha256": "403581b69dac5cff4079205e01c6b467e56af449ecbd7247693ddb1baafa005b"
+    }
+  ]
+}

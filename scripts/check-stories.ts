@@ -1,11 +1,10 @@
 #!/usr/bin/env tsx
-// Storybook coverage guard. CLAUDE.md ends its stack section with "Storybook
-// for every primitive and feature component; mandatory", and its test-harness
-// note explains why that is load-bearing rather than decorative: vitest runs
-// node-env with no jsdom or RTL, there are no *.test.tsx files, so "component
-// behaviour is covered by Storybook + the axe-core gate". A component with no
-// story is therefore a component with no test AND no accessibility check —
-// `npm run check-a11y` can only audit stories that exist.
+// Storybook coverage guard. New primitive and feature components must have a
+// story; the explicit legacy baseline below may only shrink. This is
+// load-bearing because vitest runs node-env with no jsdom or RTL and there are
+// no *.test.tsx files. Storybook + axe provide static rendered accessibility
+// coverage for stories that exist, not interaction/behaviour tests. A component
+// with no story receives neither that render smoke nor that axe audit.
 //
 // Coverage is resolved by IMPORT, not by filename: src/stories/Button.stories.tsx
 // covers src/components/ui/button.tsx because it imports it. Filename matching
@@ -25,11 +24,10 @@ const ROOT = resolve(fileURLToPath(import.meta.url), '..', '..')
 // src/stories/ would count a colocated Foo.stories.tsx as neither coverage
 // nor a story — it would be reported as an uncovered "component" instead.
 const SRC = join(ROOT, 'src')
-// CLAUDE.md says "every primitive and feature component", so features/ counts:
-// scoping this to components/ would quietly exempt the whole feature tree
-// while the CI step still claimed to cover it. Both trees are walked
-// recursively — a new src/components/<group>/ subdirectory is a component
-// directory like any other.
+// The new-component rule covers both primitives and feature components, so
+// scoping this to components/ would quietly exempt the feature tree. Both trees
+// are walked recursively — a new src/components/<group>/ subdirectory is a
+// component directory like any other.
 const COMPONENT_DIRS: string[] = [
   join(ROOT, 'src', 'components'),
   join(ROOT, 'src', 'features'),
@@ -165,7 +163,7 @@ async function main() {
     )
     for (const c of uncovered) process.stderr.write(`  ${c}\n`)
     process.stderr.write(
-      '\nStorybook is the only component-test surface in this repo (CLAUDE.md test-harness note),\n' +
+      '\nStorybook is the only automated rendered component/a11y surface in this repo (CLAUDE.md test-harness note),\n' +
         'and check-a11y can only audit components that have a story. Add one in src/stories/,\n' +
         'or add a KNOWN_UNCOVERED entry in scripts/check-stories.ts saying why it cannot have one.\n'
     )

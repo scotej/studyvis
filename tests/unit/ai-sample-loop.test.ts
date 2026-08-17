@@ -93,10 +93,9 @@ class FakeClock {
       this.now = next.fireAt
       next.handler()
       // Drain microtasks aggressively — the tick chain is await-heavy
-      // (Promise.all capture → fetch → response.json → applyJudgment), and
-      // Node 20 in CI is slower to settle than Node 24 locally. A generous
-      // flush here keeps the per-tick async chain fully resolved before
-      // the next assertion runs.
+      // (Promise.all capture → fetch → response.json → applyJudgment).
+      // A generous flush keeps the per-tick async chain fully resolved before
+      // the next assertion runs across Node 24 runner platforms.
       await flushMicrotasks(30)
     }
     this.now = target

@@ -12,10 +12,10 @@ export type { CreatedIdentity, IdentityErrorKind, IdentityStatus }
 export type UseIdentityResult = {
   identity: IdentityRecord | null
   status: IdentityStatus
-  // #47 E1 — which failure produced status 'error' ('file' vs
-  // 'keys-missing'); null outside the error state.
+  // #47 E1 — which failure produced status 'error' (identity file, missing
+  // keys, or an unavailable credential store); null outside the error state.
   errorKind: IdentityErrorKind | null
-  // The parsed identity.json behind a 'keys-missing' error — carries the
+  // The parsed identity.json behind a key-related error — carries the
   // fingerprint + display name the Recover flow preserves. Null otherwise.
   staleRecord: IdentityRecord | null
   actions: IdentityActions

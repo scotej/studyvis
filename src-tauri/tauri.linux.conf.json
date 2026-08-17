@@ -1,0 +1,48 @@
+{
+  "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
+  "build": {
+    "beforeBundleCommand": {
+      "script": "bash scripts/stage-linux-appimage-webkit.sh",
+      "cwd": ".."
+    }
+  },
+  "bundle": {
+    "targets": ["appimage"],
+    "linux": {
+      "appimage": {
+        "bundleMediaFramework": true,
+        "files": {
+          "/usr/share/licenses/studyvis-runtime/APPIMAGEKIT-MIT.txt": "target/appimage-webkit/notices/APPIMAGEKIT-MIT.txt",
+          "/usr/lib/libwebkit2gtk-4.1.so.0": "target/appimage-webkit/libraries/libwebkit2gtk-4.1.so.0",
+          "/usr/lib/libjavascriptcoregtk-4.1.so.0": "target/appimage-webkit/libraries/libjavascriptcoregtk-4.1.so.0",
+          "/usr/lib/librice-proto.so.0": "target/appimage-webkit/libraries/librice-proto.so.0",
+          "/usr/lib/librice-io.so.0": "target/appimage-webkit/libraries/librice-io.so.0",
+          "/usr/bin/studyvis-webkit-runtime/WebKitNetworkProcess": "target/appimage-webkit/processes/WebKitNetworkProcess",
+          "/usr/bin/studyvis-webkit-runtime/WebKitWebProcess": "target/appimage-webkit/processes/WebKitWebProcess",
+          "/usr/bin/studyvis-webkit-runtime/WebKitGPUProcess": "target/appimage-webkit/processes/WebKitGPUProcess",
+          "/usr/bin/studyvis-webkit-runtime/injected-bundle/libwebkit2gtkinjectedbundle.so": "target/appimage-webkit/processes/injected-bundle/libwebkit2gtkinjectedbundle.so",
+          "/usr/bin/bwrap": "target/appimage-webkit/sandbox/bwrap",
+          "/usr/bin/xdg-dbus-proxy": "target/appimage-webkit/sandbox/xdg-dbus-proxy",
+          "/usr/lib/gstreamer1.0/gstreamer-1.0/gst-plugin-scanner": "target/appimage-webkit/gstreamer/gst-plugin-scanner",
+          "/usr/lib/gstreamer1.0/gstreamer-1.0/gst-ptp-helper": "target/appimage-webkit/gstreamer/gst-ptp-helper",
+          "/usr/share/licenses/studyvis-webkit-runtime/BUILD-MANIFEST.txt": "target/appimage-webkit/licenses/BUILD-MANIFEST.txt",
+          "/usr/share/licenses/studyvis-webkit-runtime/COPYING.LIB": "target/appimage-webkit/licenses/COPYING.LIB",
+          "/usr/share/licenses/studyvis-webkit-runtime/LICENSE-APPLE": "target/appimage-webkit/licenses/LICENSE-APPLE",
+          "/usr/share/licenses/studyvis-webkit-runtime/LICENSE-LGPL-2": "target/appimage-webkit/licenses/LICENSE-LGPL-2",
+          "/usr/share/licenses/studyvis-webkit-runtime/LICENSE-LGPL-2.1": "target/appimage-webkit/licenses/LICENSE-LGPL-2.1",
+          "/usr/share/licenses/studyvis-webkit-runtime/LIBRICE-THIRD-PARTY-NOTICES.json": "target/appimage-webkit/licenses/LIBRICE-THIRD-PARTY-NOTICES.json",
+          "/usr/share/licenses/studyvis-webkit-runtime/LIBRICE-THIRD-PARTY-NOTICES.txt": "target/appimage-webkit/licenses/LIBRICE-THIRD-PARTY-NOTICES.txt",
+          "/usr/share/licenses/studyvis-webkit-runtime/librice-LICENSE-APACHE": "target/appimage-webkit/licenses/librice-LICENSE-APACHE",
+          "/usr/share/licenses/studyvis-webkit-runtime/librice-LICENSE-MIT": "target/appimage-webkit/licenses/librice-LICENSE-MIT",
+          "/usr/share/licenses/studyvis-webkit-runtime/webkitgtk-appimage-sandbox.patch": "target/appimage-webkit/licenses/webkitgtk-appimage-sandbox.patch",
+          "/usr/share/licenses/studyvis-webkit-runtime/WEBKIT-LICENSE-FILES.sha256": "target/appimage-webkit/licenses/WEBKIT-LICENSE-FILES.sha256",
+          "/usr/share/licenses/studyvis-webkit-runtime/WEBKIT-THIRD-PARTY-LICENSES.txt": "target/appimage-webkit/licenses/WEBKIT-THIRD-PARTY-LICENSES.txt",
+          "/usr/share/licenses/studyvis-runtime/LLAMA.CPP-MIT.txt": "target/appimage-webkit/notices/LLAMA.CPP-MIT.txt",
+          "/usr/share/licenses/studyvis-runtime/TAURI-BINARY-RELEASES-MIT.txt": "target/appimage-webkit/notices/TAURI-BINARY-RELEASES-MIT.txt",
+          "/usr/share/licenses/studyvis-runtime/WRY-MIT.txt": "target/appimage-webkit/notices/WRY-MIT.txt",
+          "/usr/share/licenses/studyvis-runtime/WRY-APACHE-2.0.txt": "target/appimage-webkit/notices/WRY-APACHE-2.0.txt"
+        }
+      }
+    }
+  }
+}

@@ -318,12 +318,12 @@ These components only import from `ui/`, `design/tokens.ts`, and shared utilitie
 | `SettingsRow` | Label + control + helper text. |
 | `KeybindCapture` | Listens for next key combo, displays `Kbd`s. |
 | `Disclosure` | Native default-collapsed `<details>` disclosure (Settings → Network → Advanced, AI model guide); instant chevron rotation, no transition. |
-| `TitleBar` | Opt-in custom window chrome: §15 wordmark left, OS-correct controls (macOS keeps the native traffic lights, Windows renders min / restore / close), drag region between. |
+| `TitleBar` | Opt-in custom window chrome: §15 wordmark left, OS-correct controls (macOS keeps the native traffic lights; Windows and Linux render min / restore / close), drag region between. |
 | `UpdateReadyBanner` | Quiet "update ready" banner (X6) shown once the new version is downloaded and signature-verified; `Restart now` / `Later`, never mid-session. |
 | `ErrorBoundary` | Class-component render-fault boundary: catches an uncaught render throw, keeps the app shell mounted, offers a retry that remounts the subtree. |
 | `Logo` | App mark: rounded square + focus dot, sizes 24/32/48/96, `monochrome` variant. |
 
-Feature-owned surfaces — the friends list, the add-friend flow, the model picker (its download and benchmark progress render inline on the card, not as a separate component), cross-session focus insights, the identity-load-error screen, and the onboarding / settings / session views — live under `src/features/*`, obey the same wall (`eslint.config.js` applies the Radix restriction tree-wide), and are exhibited in Storybook rather than enumerated here.
+Feature-owned surfaces — the friends list, the add-friend flow, the model picker (its download and benchmark progress render inline on the card, not as a separate component), cross-session focus insights, the identity-load-error screen, and the onboarding / settings / session views — live under `src/features/*` and obey the same wall (`eslint.config.js` applies the Radix restriction tree-wide). New modules must have stories; 33 feature components that predate the gate remain a frozen, explicitly listed coverage baseline in `scripts/check-stories.ts`.
 
 ## 5. Themes
 
@@ -356,8 +356,8 @@ Everything else — layout, transform, and decorative motion — is instant. No 
 1. **All color, spacing, font, radius, shadow, motion values come from `tokens.ts`.** No hex codes, no `px` literals, no `cubic-bezier` strings outside the tokens file. Pre-commit: `scripts/check-tokens.ts` greps the codebase and fails the build on violations.
 2. **All primitives come from `src/components/ui/`.** Application code imports from `components/`, `components/` imports from `ui/`. Reverse imports are an ESLint error.
 3. **One typeface, one accent.** A new design that needs a second accent color or a third font is a redesign — open a discussion, not a hex value.
-4. **Every primitive and composed component gets a Storybook story** (V1-P2 sets up Storybook + the lint rule). `npm run check-a11y` runs axe-core over every story that exists in CI, and `npm run check-stories` (pre-commit + CI) is the coverage half: it resolves coverage by import across `src/components/**` and `src/features/**`, so a new component without a story fails the build rather than relying on review. Three primitives and the 33 feature components that predate the gate are frozen in explicit lists in `scripts/check-stories.ts`; those lists may only shrink.
-5. **`/style` dev route shows every `ui/` primitive and every status state side by side.** Smoke-check before each release; visible in dev builds, hidden in production. Keeps primitive-layer drift visible. Composed app components (`src/components/*`, the AI dialog, the audit panel, ScoreGauge, etc.) live in Storybook stories — that's the canonical exhibit for the composed layer, and the same a11y / visual axe-core gate runs against it (`npm run check-a11y`). Reducing `/style`'s scope to `ui/` keeps the dev route fast to walk without losing coverage.
+4. **Every new primitive and composed component gets a Storybook story.** `npm run check-a11y` runs axe-core over every story that exists in CI, and `npm run check-stories` (pre-commit + CI) is the coverage half: it resolves coverage by import across `src/components/**` and `src/features/**`, so a new component without a story fails the build rather than relying on review. Three older component-level exceptions (one UI primitive and two composed components) and the 33 feature components that predate the gate are frozen in explicit lists in `scripts/check-stories.ts`; those lists may only shrink.
+5. **`/style` is a curated dev-only primitive/status gallery.** Smoke-check it before each release; it is visible in dev builds and hidden in production. It keeps the represented primitive-layer states visible but is not an exhaustive coverage gate. Storybook is the canonical exhibit for covered components, and axe-core runs against each existing story (`npm run check-a11y`). The frozen baselines in rule 4 are not represented automatically.
 6. **No inline `style={...}` with raw values.** All styling is Tailwind classes (which derive from the token map) or component variants. Inline `style` allowed only for genuinely dynamic numeric values (e.g. video tile aspect ratio); ESLint rule forbids string literals in `style`.
 
 ## 8. Wireframes (ASCII)
@@ -527,7 +527,7 @@ Every component that fetches or computes anything async ships three states:
 ## 11. Accessibility
 
 - Every interactive element keyboard-reachable (Tab order matches DOM order; `tabIndex={0}` only when needed).
-- Visible focus ring on the focused element, painted by `focus-visible:ring-3 focus-visible:ring-accent-ring` (the `shadow.glow` token describes the same 3px/`accent.ring` geometry but is not what the primitives use). Implementation uses the existing tokens via per-component `focus-visible:` utilities (every primitive in `src/components/ui/` and the V3-P6 `<TitleBar />` controls ship one); the global `:focus-visible { outline: none }` reset relies on this convention. The axe-core gate (`npm run check-a11y`) covers DOM and ARIA semantics; pixel-level focus-indicator visibility is verified by manual walk-through on the live app.
+- Visible focus ring on the focused element, painted by `focus-visible:ring-3 focus-visible:ring-accent-ring` (the `shadow.glow` token describes the same 3px/`accent.ring` geometry but is not what the primitives use). Implementation uses the existing tokens via per-component `focus-visible:` utilities (every primitive in `src/components/ui/` and the V3-P6 `<TitleBar />` controls ship one); the global `:focus-visible { outline: none }` reset relies on this convention. The axe-core gate (`npm run check-a11y`) covers DOM and ARIA semantics; pixel-level focus-indicator visibility requires a manual walk-through on the live app.
 - Icon-only buttons get `aria-label`.
 - Color contrast ≥ WCAG AA on all text + background pairings (verified by `scripts/check-contrast.ts` over both themes; V3-P5).
 - Dynamic events (audit log) use `role="log"` + `aria-live="polite"`; alerts use `role="alert"` + `aria-live="assertive"`; status surfaces (AI response bubble, self-warning badge, break countdown) use `role="status"` + `aria-live="polite"`.
@@ -536,7 +536,7 @@ Every component that fetches or computes anything async ships three states:
 - One `h1` per route, no skipped levels. `Home`/`SessionView` use a visually-hidden `h1`; other routes have visible headings.
 - Reduced motion (V3-P7): `[data-reduce-motion='true']` on the document element collapses every animation and transition to ~1ms via a `@layer base` CSS rule. The attribute is set OR-of-two-sources (the V1-P11 setting and `prefers-reduced-motion: reduce`), pre-painted by an inline script in `index.html` / `ai-dialog.html`, kept in sync after hydration by `<ApplyReduceMotion />` (the central source in `src/design/reduce-motion.ts`). Because the kill switch is CSS-driven and not per-component, new motion sites are gated by default — no future component can forget.
 
-V3 ships: full screen-reader pass, reduced-motion mode, axe-core CI gate over every Storybook story. Customizable font sizing is **deferred to post-1.0**.
+V3 includes screen-reader semantics, reduced-motion mode, and an axe-core CI gate over every existing Storybook story. Axe is a static rendered audit, not proof of a full screen-reader interaction pass; changed flows still require a manual assistive-technology walk-through. Customizable font sizing is **deferred to post-1.0**.
 
 ## 12. Layout grids
 
@@ -550,7 +550,7 @@ V3 ships: full screen-reader pass, reduced-motion mode, axe-core CI gate over ev
 - **Sidebar (settings)**: fluid — `clamp(224px, 22vw, 280px)` (`sizes.settingsRailMinWidth` → `sizes.sidebarWidth`, expressed as `--settings-rail-width` in `src/design/index.css`). A fixed 280 was 27% of the window at the 1024 minimum and squeezed the content column below its 768 measure; wide windows still get the full 280.
 - **Video grid**: flex-wrap, filling everything the session view has between the media banner and the footer. Tiles are always 16:9, and are sized to the largest they can be: the grid measures its slot and picks the row/column split that maximizes tile size for the current tile count, so two people in a window shorter than 32:9 of usable area stack rather than sit side by side (#95). Floor of 180 px tall (`sizes.videoTileMinHeight`) — reachable only with several screen shares open at the window minimum, and the grid scrolls internally rather than shrink past it. The floor protects against the *height* running out, not the width: a tile is never widened past its own column to reach it, because that costs a whole column the moment a scrollbar appears. The grid also reserves a stable scrollbar gutter, so its measured width doesn't move when it starts scrolling. No ceiling.
 - **Spacing**: page padding `space.5` (24); section gap `space.6` (32); inline gap `space.3` (12). The route shells (Home, Onboarding, Report) use `px-4 py-4 sm:px-6 sm:py-6` so the page padding steps down to `space.4` (16) below the `sm` breakpoint — a deliberate responsive concession; ≥ `sm` (the realistic minimum window) is on-grid at `space.5`. The Settings pane uses a constant `px-6 py-6`: its `sm:` step-down could never trigger inside the 1024-minimum window, and dead phone branches mislead edits (the same rationale removed the `sm:` variants inside the settings categories and the dialog/input primitives).
-- **Custom titlebar (V3-P6, opt-in)**: 38 px tall (`sizes.titleBarHeight`). macOS reserves 78 px on the left (`sizes.titleBarMacInset`) for the system traffic-light cluster; the wordmark sits to its right. Windows hosts the app-painted min/restore/close cluster on the right edge. Native chrome is the default; this row of the grid only applies when the user has opted in.
+- **Custom titlebar (V3-P6, opt-in)**: 38 px tall (`sizes.titleBarHeight`). macOS reserves 78 px on the left (`sizes.titleBarMacInset`) for the system traffic-light cluster; the wordmark sits to its right. Windows and Linux host the app-painted min/restore/close cluster on the right edge. Native chrome is the default; this row of the grid only applies when the user has opted in.
 
 ## 13. Sound
 
@@ -592,13 +592,13 @@ Period at the end of full sentences, none on labels, none on button text. Use co
 
 ## 17. Keybindings
 
-Two global shortcuts, registered in the system layer via `tauri-plugin-global-shortcut` so they fire even when the StudyVis window is not focused. Their registration windows differ (#47 B5):
+Two global shortcuts are registered in the system layer via `tauri-plugin-global-shortcut`. They fire unfocused on macOS, Windows, and X11. Native Wayland deliberately blocks X11 global grabs while another native client owns focus, so Linux also exposes an in-session hold-to-talk button and a Settings → Shortcuts button for the AI dialog. Their registration windows differ (#47 B5):
 
 | Action | macOS | Windows / Linux | Registered |
 | --- | --- | --- | --- |
 | Push to talk · friends | `⌘ [` | `Ctrl [` | Only while a session is live — registered on session start, released on end, so a tray-idle StudyVis never swallows `⌘ [` ("back" in Safari/Finder/IDEs) system-wide. |
 | Talk to AI | `⌘ ]` | `Ctrl ]` | For the app's lifetime, gated by the AI-features flag; opens the floating AI dialog window (V2-P7). |
 
-**Conflicts to know about.** During a session, the friends-PTT shortcut wins over app-level `⌘ [` bindings in whatever app is foreground. This is intentional: PTT must be reliable mid-session regardless of focus. Both shortcuts are rebindable in Settings → Shortcuts (V3-P3).
+**Conflicts to know about.** During a session on macOS, Windows, or X11, the friends-PTT shortcut wins over app-level `⌘ [` bindings in whatever app is foreground. Native Wayland clients use the visible fallbacks above. Both shortcuts are rebindable in Settings → Shortcuts (V3-P3).
 
 **Surface in the UI.** Show the active binding via `<Kbd>` in any session-time UI that mentions PTT (the wireframe footer in §8.3, the onboarding tutorial). The label derives from the persisted binding — never hardcode the default. Use the `⌘` glyph on macOS, the literal `Ctrl` on other platforms — match the OS-native rendering convention.

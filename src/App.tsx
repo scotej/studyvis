@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react'
+import type { ReactNode } from 'react'
 import { BrowserRouter, Route, Routes } from 'react-router'
 
 import { ErrorBoundary } from '@/components/ErrorBoundary'
@@ -14,22 +14,28 @@ import {
   WindowLayoutListener,
 } from '@/features/system'
 import { UpdaterBoot } from '@/features/updater'
+import {
+  AppliedWindowStyleContext,
+  useAppliedWindowStyle,
+} from '@/lib/appliedWindowStyle'
 import { Home } from '@/routes/Home'
 import { StyleGuide } from '@/routes/StyleGuide'
-import { readWindowStyleBootCache } from '@/stores/settingsStore'
+import type { WindowStyleMode } from '@/stores/settingsStore'
 
 const isDev = import.meta.env.DEV
 
 // V3-P6 — The custom titlebar is mounted only when the user opted in
 // AND Rust has actually applied the decoration / title-bar-style change
-// (which happens during `setup()` at process boot). We freeze the value
-// at first render: a mid-process toggle writes to disk but doesn't flip
+// (which happens during `setup()` at process boot). main.tsx resolves that
+// applied state before first render and we freeze it for this process: a
+// mid-process toggle writes to disk but doesn't flip
 // the TitleBar visibility, because Rust has not had the chance to change
 // the OS chrome yet — rendering the TitleBar over the still-native
 // decoration would create a double titlebar. The setting row triggers a
-// process relaunch instead, and the next process reads the cache here.
+// process relaunch instead, and the next process reports the newly applied
+// native state through the same provider.
 function ChromeAwareShell({ children }: { children: ReactNode }) {
-  const [bootedStyle] = useState(readWindowStyleBootCache)
+  const bootedStyle = useAppliedWindowStyle()
   if (bootedStyle !== 'custom') {
     // Native chrome — the shell owns the bounded slot in both branches:
     // route shells size with `min-h-full`/`h-full`, and this wrapper (not an
@@ -46,29 +52,37 @@ function ChromeAwareShell({ children }: { children: ReactNode }) {
   )
 }
 
-function App() {
+function App({
+  bootedWindowStyle = 'system',
+}: {
+  bootedWindowStyle?: WindowStyleMode
+}) {
   useSessionOverlayBridge()
 
   return (
-    <ThemeProvider>
-      <ApplyReduceMotion />
-      <PttListener />
-      <QuitConfirmListener />
-      <PomodoroNotifyListener />
-      <WindowLayoutListener />
-      <UpdaterBoot />
-      <BrowserRouter>
-        <ChromeAwareShell>
-          <ErrorBoundary surface="routes">
-            <Routes>
-              <Route path="/" element={<Home />} />
-              {isDev ? <Route path="/style" element={<StyleGuide />} /> : null}
-            </Routes>
-          </ErrorBoundary>
-        </ChromeAwareShell>
-        <Toaster position="bottom-right" />
-      </BrowserRouter>
-    </ThemeProvider>
+    <AppliedWindowStyleContext.Provider value={bootedWindowStyle}>
+      <ThemeProvider>
+        <ApplyReduceMotion />
+        <PttListener />
+        <QuitConfirmListener />
+        <PomodoroNotifyListener />
+        <WindowLayoutListener />
+        <UpdaterBoot />
+        <BrowserRouter>
+          <ChromeAwareShell>
+            <ErrorBoundary surface="routes">
+              <Routes>
+                <Route path="/" element={<Home />} />
+                {isDev ? (
+                  <Route path="/style" element={<StyleGuide />} />
+                ) : null}
+              </Routes>
+            </ErrorBoundary>
+          </ChromeAwareShell>
+          <Toaster position="bottom-right" />
+        </BrowserRouter>
+      </ThemeProvider>
+    </AppliedWindowStyleContext.Provider>
   )
 }
 

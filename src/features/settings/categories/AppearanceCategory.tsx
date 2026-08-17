@@ -1,4 +1,3 @@
-import { useState } from 'react'
 import { toast } from 'sonner'
 
 import { SettingsRow, SettingsSection } from '@/components/SettingsRow'
@@ -8,10 +7,10 @@ import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { Switch } from '@/components/ui/switch'
 import { useTheme } from '@/design/theme-context'
 import { resetWindowToDefault } from '@/features/system'
+import { useAppliedWindowStyle } from '@/lib/appliedWindowStyle'
 import {
   isThemeMode,
   isWindowStyleMode,
-  readWindowStyleBootCache,
   useSettingsStore,
   type ThemeMode,
   type WindowStyleMode,
@@ -33,14 +32,13 @@ export function AppearanceCategory() {
   )
   const clearWindowLayout = useSettingsStore((s) => s.clearWindowLayout)
   const copy = strings.settings.appearance
+  const appliedWindowStyle = useAppliedWindowStyle()
 
-  // The chrome that Rust actually applied this process — frozen at first
-  // render. If the user toggles below, `windowStyle` (the saved value)
-  // diverges from this until the next launch. We compare against the
-  // booted value rather than the saved value so the "Relaunch now"
-  // affordance only appears when there's a real pending difference.
-  const [bootedWindowStyle] = useState(readWindowStyleBootCache)
-  const relaunchPending = windowStyle !== bootedWindowStyle
+  // Compare the saved choice against the frame Rust actually applied at boot.
+  // The applied value is process-stable even when this pane remounts after the
+  // user changes the setting, so the relaunch affordance cannot be fooled by
+  // the best-effort localStorage cache changing underneath it.
+  const relaunchPending = windowStyle !== appliedWindowStyle
 
   const handleThemeChange = (value: string) => {
     if (isThemeMode(value)) setMode(value as ThemeMode)

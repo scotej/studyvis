@@ -6,10 +6,10 @@ authors = ["StudyVis"]
 license = ""
 repository = ""
 edition = "2021"
-# ed25519-dalek 3 is edition 2024 and needs 1.85. Nothing enforces this — the
-# workflows all build on `stable` and resolver 2 ignores rust-version — so the
-# declared floor is documentation that has to be kept honest by hand.
-rust-version = "1.85"
+# Keep the declared compiler requirement aligned with the exact toolchain used
+# by local, CI, and release verification. We do not claim an older MSRV without
+# continuously testing it.
+rust-version = "1.97.1"
 # This crate is the application, not a library anyone consumes — it has no
 # license expression and must never reach crates.io. Marking it explicitly is
 # also what lets cargo-deny's `[licenses.private] ignore` skip it instead of
@@ -43,7 +43,7 @@ sha2 = "0.11"
 futures-util = "0.3"
 # I73 engine auto-install — unpack the pinned llama.cpp release archives
 # (mac/linux .tar.gz, windows .zip). All three compile everywhere so the
-# extraction code and its tests run on both CI legs.
+# extraction code and its tests run on all three CI legs.
 flate2 = "1"
 tar = "0.4"
 zip = { version = "8", default-features = false, features = ["deflate"] }
@@ -85,11 +85,23 @@ keyring = { version = "3.6", features = ["windows-native"] }
 # the session transport with RustCrypto rather than linking OpenSSL. Building
 # this target needs libdbus-1-dev — see the Linux leg in .github/workflows/ci.yml.
 #
-# Linux is NOT a release target (PLAN §8): this exists so the app is runnable
-# and testable on a Linux dev box, and so the shared identity code stops
-# silently vanishing from that platform's build.
+# The Linux candidate is an x86_64 AppImage (PLAN §8). Secret Service is a
+# candidate runtime dependency, not merely a compile-time portability check.
 [target.'cfg(target_os = "linux")'.dependencies]
 keyring = { version = "3.6", default-features = false, features = [
   "sync-secret-service",
   "crypto-rust",
 ] }
+# Tauri exposes the native WebKitGTK handle but not the permission-request
+# traits. Keep this exact version aligned with wry 0.55.1 so the Linux bridge
+# can allow camera/mic/display requests only while the top-level webview URI is
+# StudyVis-owned. WebKitGTK does not expose the request SecurityOrigins here.
+webkit2gtk = { version = "=2.0.2", features = ["v2_38"] }
+
+[patch.crates-io]
+# Tauri/wry exposes its WebKitGTK handle only after native WebView construction.
+# This exact 0.55.1 source copy supplies WebRTC/media settings in that native
+# construction phase so the first document receives the preference enabled by
+# StudyVis's bundled WebKitGTK build; see vendor/wry/src/webkitgtk/mod.rs. Remove
+# the patch as soon as upstream wry grows an equivalent supported builder option.
+wry = { path = "vendor/wry" }

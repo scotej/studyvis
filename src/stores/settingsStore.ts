@@ -445,9 +445,8 @@ function writeWindowStyleBootCache(mode: WindowStyleMode): void {
     window.localStorage.setItem(WINDOW_STYLE_LOCALSTORAGE_KEY, mode)
   } catch {
     // Best-effort: Rust still reads the canonical value from settings.json
-    // during `setup()`, so a missing cache only costs us one frame of
-    // potential mismatch between the OS chrome and the React layer at
-    // launch — which is harmless if both agree on 'system'.
+    // during `setup()`, and main.tsx queries the applied native state before
+    // rendering, so a missing browser cache cannot split the two chrome layers.
   }
 }
 
@@ -461,6 +460,21 @@ export function readWindowStyleBootCache(): WindowStyleMode {
     return v === 'custom' ? 'custom' : 'system'
   } catch {
     return 'system'
+  }
+}
+
+// Resolve the shell against the frame Rust actually applied. The browser
+// cache remains a fail-safe for Storybook/web preview and an exceptionally
+// early IPC failure, but it is no longer an independent source of truth.
+export async function resolveWindowStyleAtBoot(
+  readApplied: (() => Promise<boolean>) | null
+): Promise<WindowStyleMode> {
+  const cached = readWindowStyleBootCache()
+  if (!readApplied) return cached
+  try {
+    return (await readApplied()) ? 'custom' : 'system'
+  } catch {
+    return cached
   }
 }
 

@@ -67,10 +67,13 @@ vi.mock('trystero', () => ({
 }))
 
 vi.mock('@trystero-p2p/mqtt', () => ({
+  getRelaySockets: () => ({}),
   joinRoom: (config: Record<string, unknown>) => makeMockRoom('mqtt', config),
 }))
 
 const { joinTopic } = await import('@/lib/trystero')
+const { DEFAULT_MQTT_BROKER_URLS } =
+  await import('@/lib/trystero/mqttRelayUrls')
 
 const byStrategy = (s: string) => rooms.find((r) => r.strategy === s)!
 
@@ -92,7 +95,7 @@ describe('joinTopic multi-strategy race + mergeRooms', () => {
     expect(rooms.map((r) => r.strategy).sort()).toEqual(['mqtt', 'nostr'])
   })
 
-  test('does NOT forward the Nostr relayConfig to the MQTT room', () => {
+  test('keeps caller Nostr relays separate from the pinned MQTT brokers', () => {
     joinTopic({
       topic: 't',
       password: 'p',
@@ -102,7 +105,9 @@ describe('joinTopic multi-strategy race + mergeRooms', () => {
     expect(byStrategy('nostr').config.relayConfig).toEqual({
       urls: ['wss://relay.example.test'],
     })
-    expect(byStrategy('mqtt').config.relayConfig).toBeUndefined()
+    expect(byStrategy('mqtt').config.relayConfig).toEqual({
+      urls: DEFAULT_MQTT_BROKER_URLS,
+    })
     // both still carry the shared room identity + WebRTC params
     expect(byStrategy('mqtt').config).toMatchObject({
       appId: 'studyvis',

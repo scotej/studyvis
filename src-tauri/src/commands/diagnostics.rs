@@ -11,7 +11,7 @@ use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
-use tauri::{AppHandle, Manager, Runtime};
+use tauri::{AppHandle, Runtime};
 use zip::write::SimpleFileOptions;
 
 use super::applog::{app_log_guard, rotated_log_path, APP_LOG_FILE, LOG_HISTORY_FILES};

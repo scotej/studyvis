@@ -6,9 +6,10 @@ body:
     attributes:
       value: |
         `PLAN.md` §6 lists permanent non-goals (mobile clients, stranger/public
-        rooms, session recording, cloud sync, telemetry). §8 lists things
-        deferred with a concrete unblock trigger — Linux is the big one, gated
-        on re-verifying WebKitGTK `getDisplayMedia`.
+        rooms, session recording, cloud sync, telemetry). §8 also records
+        platform support boundaries. Linux targets x86_64 AppImage with
+        CachyOS KDE Wayland as its physical reference desktop; other desktop
+        environments and architectures are best effort.
 
         Worth a look before writing: a "no" that is already written down saves
         us both the round trip.

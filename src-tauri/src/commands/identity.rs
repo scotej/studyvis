@@ -32,6 +32,8 @@ const KEYRING_SERVICE: &str = "com.studyvis.app";
 const KEYRING_USER: &str = "identity-keys";
 const IDENTITY_FILE: &str = "identity.json";
 const PRIV_KEY_LEN: usize = 32;
+pub(crate) const LINUX_SECRET_SERVICE_ERROR_MARKER: &str =
+    "Linux Secret Service is unavailable or locked";
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct StoredKeys {
@@ -49,8 +51,21 @@ pub struct IdentityRecord {
     pub mnemonic_fingerprint: String,
 }
 
+pub(crate) fn format_keyring_error(context: &str, error: keyring::Error) -> String {
+    #[cfg(target_os = "linux")]
+    {
+        format!(
+            "{LINUX_SECRET_SERVICE_ERROR_MARKER}. Start or unlock gnome-keyring, KWallet, or another org.freedesktop.secrets provider, then try again ({context}: {error})"
+        )
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        format!("{context}: {error}")
+    }
+}
+
 fn keys_entry() -> Result<Entry, String> {
-    Entry::new(KEYRING_SERVICE, KEYRING_USER).map_err(|e| e.to_string())
+    Entry::new(KEYRING_SERVICE, KEYRING_USER).map_err(|e| format_keyring_error("open keyring", e))
 }
 
 fn identity_path(app: &AppHandle) -> Result<PathBuf, String> {
@@ -69,7 +84,9 @@ fn validate_priv_hex(label: &str, value: &str) -> Result<(), String> {
 }
 
 fn load_stored() -> Result<StoredKeys, String> {
-    let payload = keys_entry()?.get_password().map_err(|e| e.to_string())?;
+    let payload = keys_entry()?
+        .get_password()
+        .map_err(|e| format_keyring_error("read identity keys", e))?;
     serde_json::from_str(&payload).map_err(|e| format!("parse stored keys: {e}"))
 }
 
@@ -135,10 +152,12 @@ pub fn identity_save_keys(
                 ))
             }
             Err(keyring::Error::NoEntry) => {}
-            Err(e) => return Err(e.to_string()),
+            Err(e) => return Err(format_keyring_error("read identity keys", e)),
         }
     }
-    entry.set_password(&payload).map_err(|e| e.to_string())?;
+    entry
+        .set_password(&payload)
+        .map_err(|e| format_keyring_error("save identity keys", e))?;
     Ok(())
 }
 
@@ -161,7 +180,7 @@ pub fn identity_keys_present() -> Result<bool, String> {
     match keys_entry()?.get_password() {
         Ok(_) => Ok(true),
         Err(keyring::Error::NoEntry) => Ok(false),
-        Err(e) => Err(format!("keyring get: {e}")),
+        Err(e) => Err(format_keyring_error("read identity keys", e)),
     }
 }
 
@@ -272,4 +291,46 @@ pub fn identity_box_encrypt(
         nonce_b64: BASE64.encode(nonce),
         ciphertext_b64: BASE64.encode(&ciphertext),
     })
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod tests {
+    use super::Entry;
+
+    // This is ignored in the ordinary unit suite because it deliberately
+    // requires a live org.freedesktop.secrets provider on the session bus.
+    // Linux CI runs it explicitly inside an isolated gnome-keyring session;
+    // the CachyOS acceptance pass must repeat it against the desktop's real
+    // provider. It exercises the exact keyring crate and
+    // Secret Service backend used by identity_save_keys/load_stored without
+    // touching the user's real com.studyvis.app credential.
+    #[test]
+    #[ignore = "requires a live Linux Secret Service session"]
+    fn secret_service_round_trip() {
+        let unique = format!(
+            "com.studyvis.app.smoke.{}.{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock must be after Unix epoch")
+                .as_nanos()
+        );
+        let entry = Entry::new(&unique, "identity-keys")
+            .expect("create isolated Secret Service smoke-test entry");
+        let secret = format!("studyvis-secret-service-smoke-{}", std::process::id());
+
+        entry
+            .set_password(&secret)
+            .expect("write through the Linux keyring backend");
+        assert_eq!(
+            entry
+                .get_password()
+                .expect("read through the Linux keyring backend"),
+            secret
+        );
+        entry
+            .delete_credential()
+            .expect("delete isolated Secret Service smoke-test entry");
+        assert!(matches!(entry.get_password(), Err(keyring::Error::NoEntry)));
+    }
 }

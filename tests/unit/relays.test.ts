@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'vitest'
 
+import { DEFAULT_MQTT_BROKER_URLS } from '@/lib/trystero/mqttRelayUrls'
 import { DEFAULT_RELAY_URLS, mergedRelayUrls } from '@/lib/trystero/relays'
 
 describe('DEFAULT_RELAY_URLS', () => {
@@ -12,6 +13,26 @@ describe('DEFAULT_RELAY_URLS', () => {
 
   test('has no duplicate entries', () => {
     expect(new Set(DEFAULT_RELAY_URLS).size).toBe(DEFAULT_RELAY_URLS.length)
+  })
+
+  test('omits nos.lol now that anonymous ephemeral events require proof of work', () => {
+    expect(DEFAULT_RELAY_URLS).not.toContain('wss://nos.lol')
+  })
+})
+
+describe('DEFAULT_MQTT_BROKER_URLS', () => {
+  test('pins the health-checked secure-WebSocket broker set', () => {
+    expect(DEFAULT_MQTT_BROKER_URLS).toEqual([
+      'wss://broker.emqx.io:8084/mqtt',
+      'wss://public:public@public.cloud.shiftr.io',
+      'wss://broker-cn.emqx.io:8084/mqtt',
+    ])
+  })
+
+  test('has no duplicate entries', () => {
+    expect(new Set(DEFAULT_MQTT_BROKER_URLS).size).toBe(
+      DEFAULT_MQTT_BROKER_URLS.length
+    )
   })
 })
 

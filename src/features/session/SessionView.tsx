@@ -5,6 +5,8 @@ import {
   ScreenShareIcon,
   ScreenShareOffIcon,
   Settings2Icon,
+  MicIcon,
+  MicOffIcon,
   UserPlusIcon,
   VideoIcon,
   VideoOffIcon,
@@ -65,6 +67,7 @@ import {
   parseAccelerator,
 } from '@/lib/keybindings'
 import { isMacLikePlatform } from '@/lib/utils'
+import { detectChromePlatform } from '@/lib/windowChrome'
 import {
   buildAuditEvent,
   useAuditStore,
@@ -240,6 +243,7 @@ export function SessionView({
     parseAccelerator(pttFriendsAccelerator) ?? DEFAULT_PTT_FRIENDS_COMBO,
     isMacLikePlatform() ? 'mac' : 'other'
   )
+  const showLinuxHoldFallback = detectChromePlatform() === 'linux'
   // #47 B4 — persisted per-friend volumes (ed_pubkey → 0..1); the fallback
   // when this session hasn't touched a peer's slider yet.
   const persistedPeerVolumes = useSettingsStore((s) => s.values.peerVolumes)
@@ -1815,6 +1819,18 @@ export function SessionView({
     pomodoroStopRef.current?.()
   }, [])
 
+  // Native global shortcuts remain the fastest path on macOS/Windows/X11.
+  // Wayland intentionally prevents an X11 client from grabbing keys while a
+  // native client owns focus, so every session also exposes this press/release
+  // control. Pointer capture guarantees a release even when the pointer moves
+  // off the button; blur/cancel/lost-capture are independent stuck-mic guards.
+  const pressHoldToTalk = useCallback(() => {
+    usePttStore.getState().press('session-button')
+  }, [])
+  const releaseHoldToTalk = useCallback(() => {
+    usePttStore.getState().release('session-button')
+  }, [])
+
   // "Try again" — clear the error and bump the nonce so the acquisition
   // effect (keyed on [room, mediaRetryNonce]) re-runs getUserMedia.
   // I83 — a camera/mic retry re-acquires `localStream`, which is in the
@@ -2088,11 +2104,55 @@ export function SessionView({
       />
       <footer className="flex shrink-0 items-center justify-between gap-4 border-t border-border-subtle bg-bg-surface px-6 py-4 text-sm">
         <span className="flex items-center gap-3 text-text-secondary">
-          <span className="flex items-center gap-2">
-            {strings.session.footerHoldBefore}
-            <Kbd>{pttFriendsLabel}</Kbd>
-            {strings.session.footerHoldAfter}
-          </span>
+          {showLinuxHoldFallback ? (
+            <Button
+              type="button"
+              variant={pttActive ? 'secondary' : 'ghost'}
+              size="sm"
+              aria-pressed={pttActive}
+              aria-label={strings.session.holdToTalkAriaLabel}
+              onPointerDown={(event) => {
+                if (!event.isPrimary || event.button !== 0) return
+                event.currentTarget.setPointerCapture(event.pointerId)
+                pressHoldToTalk()
+              }}
+              onPointerUp={(event) => {
+                if (!event.isPrimary || event.button !== 0) return
+                releaseHoldToTalk()
+                if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+                  event.currentTarget.releasePointerCapture(event.pointerId)
+                }
+              }}
+              onPointerCancel={releaseHoldToTalk}
+              onLostPointerCapture={releaseHoldToTalk}
+              onKeyDown={(event) => {
+                if (
+                  !event.repeat &&
+                  (event.key === ' ' || event.key === 'Enter')
+                ) {
+                  pressHoldToTalk()
+                }
+              }}
+              onKeyUp={(event) => {
+                if (event.key === ' ' || event.key === 'Enter') {
+                  releaseHoldToTalk()
+                }
+              }}
+              onBlur={releaseHoldToTalk}
+              className="gap-2"
+            >
+              {pttActive ? <MicIcon /> : <MicOffIcon />}
+              {pttActive
+                ? strings.session.talkingCta
+                : strings.session.holdToTalkCta}
+            </Button>
+          ) : (
+            <span className="flex items-center gap-2">
+              {strings.session.footerHoldBefore}
+              <Kbd>{pttFriendsLabel}</Kbd>
+              {strings.session.footerHoldAfter}
+            </span>
+          )}
           <AudioDevicePicker
             currentDeviceId={activeAudioDeviceId}
             onSelect={handleSwapAudioDevice}

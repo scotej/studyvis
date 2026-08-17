@@ -26,15 +26,13 @@ import { strings } from '@/strings'
 // component reserves a left inset for those lights and shows no controls
 // of its own.
 //
-// Windows: the OS chrome is fully off (`set_decorations(false)`); the
-// component renders the platform-standard min / restore / close cluster
-// on the right.
+// Windows/Linux: the OS chrome is fully off (`set_decorations(false)`); the
+// component renders min / restore / close on the right.
 //
 // Drag: a `data-tauri-drag-region` strip sits between the wordmark and the
 // control cluster so the user can grab the bar anywhere in the middle.
 // The edge gutters (left of wordmark, right of controls) intentionally
-// leave a few pixels for the OS resize hit-test on Windows (Aero Snap
-// from the top edge keeps working).
+// leave a few pixels for the OS resize hit-test on Windows/Linux.
 
 export type TitleBarProps = {
   // Test seam: callers can pass a platform explicitly (Storybook, unit
@@ -160,7 +158,7 @@ export function TitleBar({
         className="h-full flex-1"
         aria-hidden="true"
       />
-      {detected === 'windows' ? (
+      {detected !== 'mac' ? (
         <div
           className="flex h-full items-center"
           aria-label={strings.chrome.titleBar.controlsAriaLabel}

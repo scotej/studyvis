@@ -17,6 +17,8 @@ import {
 import { logger } from '@/lib/log'
 
 const log = logger.child('identity.recover')
+const LINUX_SECRET_SERVICE_ERROR_MARKER =
+  'Linux Secret Service is unavailable or locked'
 
 export type RecoverProps = {
   progress?: OnboardingStepProgress
@@ -85,7 +87,12 @@ export function Recover({
         phase: 'submitting',
         err,
       })
-      toast.error(strings.common.errors.savingIdentity)
+      const raw = err instanceof Error ? err.message : String(err)
+      toast.error(
+        raw.includes(LINUX_SECRET_SERVICE_ERROR_MARKER)
+          ? strings.identity.secretServiceError
+          : strings.common.errors.savingIdentity
+      )
       setPhase('input')
     }
   }
