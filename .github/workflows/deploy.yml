@@ -320,12 +320,12 @@ jobs:
 
       - name: Install Rust toolchain
         if: env.SHIPPABLE == 'true'
-        uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master; the toolchain input selects the channel
+        uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master; the toolchain input selects the channel
         with:
           toolchain: '1.97.1'
           targets: ${{ matrix.rust-targets }}
 
-      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         if: env.SHIPPABLE == 'true'
         with:
           workspaces: src-tauri -> target
@@ -385,7 +385,7 @@ jobs:
       - name: Restore pinned WebKitGTK runtime
         id: webkit-runtime-cache
         if: env.SHIPPABLE == 'true' && runner.os == 'Linux'
-        uses: actions/cache/restore@v5
+        uses: actions/cache/restore@v6
         with:
           path: ${{ steps.webkit-runtime.outputs.runtime-dir }}
           key: studyvis-webkitgtk-${{ runner.os }}-ubuntu-24.04-x86_64-rust-1.97.1-cargo-c-${{ steps.webkit-runtime.outputs.cargo-c-version }}-${{ hashFiles('scripts/linux-webkit-runtime.env', 'scripts/patches/*.patch') }}-${{ hashFiles('scripts/build-linux-webkit-runtime.sh', 'scripts/generate-librice-third-party-notices.mjs') }}
@@ -398,7 +398,7 @@ jobs:
       - name: Restore pinned cargo-c
         id: cargo-c-cache
         if: env.SHIPPABLE == 'true' && runner.os == 'Linux'
-        uses: actions/cache/restore@v5
+        uses: actions/cache/restore@v6
         with:
           path: |
             ~/.cargo/bin/cargo-capi
@@ -429,7 +429,7 @@ jobs:
       # condition this cache should record.
       - name: Save pinned cargo-c
         if: ${{ success() && env.SHIPPABLE == 'true' && runner.os == 'Linux' && steps.cargo-c-cache.outputs.cache-hit != 'true' }}
-        uses: actions/cache/save@v5
+        uses: actions/cache/save@v6
         with:
           path: |
             ~/.cargo/bin/cargo-capi
@@ -464,7 +464,7 @@ jobs:
       - name: Restore the pinned linuxdeploy toolchain
         id: linuxdeploy-cache
         if: env.SHIPPABLE == 'true' && runner.os == 'Linux'
-        uses: actions/cache/restore@v5
+        uses: actions/cache/restore@v6
         with:
           path: ${{ runner.temp }}/studyvis-tauri-cache-deploy
           key: studyvis-linuxdeploy-ubuntu-24.04-x86_64-${{ hashFiles('scripts/linuxdeploy-tools.env', 'scripts/linux-appimage-runtime.env', 'scripts/linux-appimage-runtime-sources.tsv', 'scripts/prepare-linuxdeploy-tools.sh', 'scripts/build-linux-appimage-runtime.sh', 'scripts/verify-linux-appimage-runtime.sh') }}
@@ -489,7 +489,7 @@ jobs:
       # toolchain must survive a failure in the installer build hours later.
       - name: Save the pinned linuxdeploy toolchain
         if: ${{ success() && env.SHIPPABLE == 'true' && runner.os == 'Linux' && steps.linuxdeploy-cache.outputs.cache-hit != 'true' }}
-        uses: actions/cache/save@v5
+        uses: actions/cache/save@v6
         with:
           path: ${{ runner.temp }}/studyvis-tauri-cache-deploy
           key: studyvis-linuxdeploy-ubuntu-24.04-x86_64-${{ hashFiles('scripts/linuxdeploy-tools.env', 'scripts/linux-appimage-runtime.env', 'scripts/linux-appimage-runtime-sources.tsv', 'scripts/prepare-linuxdeploy-tools.sh', 'scripts/build-linux-appimage-runtime.sh', 'scripts/verify-linux-appimage-runtime.sh') }}
@@ -518,7 +518,7 @@ jobs:
       - name: Restore the WebKit compiler cache
         id: webkit-sccache
         if: env.SHIPPABLE == 'true' && runner.os == 'Linux'
-        uses: actions/cache/restore@v5
+        uses: actions/cache/restore@v6
         with:
           path: ${{ runner.temp }}/studyvis-sccache
           key: studyvis-sccache-webkit-ubuntu-24.04-${{ hashFiles('scripts/linux-webkit-runtime.env', 'scripts/patches/*.patch') }}-${{ github.sha }}
@@ -548,14 +548,14 @@ jobs:
 
       - name: Save the WebKit compiler cache
         if: ${{ !cancelled() && env.SHIPPABLE == 'true' && runner.os == 'Linux' && steps.webkit-sccache.outputs.cache-hit != 'true' }}
-        uses: actions/cache/save@v5
+        uses: actions/cache/save@v6
         with:
           path: ${{ runner.temp }}/studyvis-sccache
           key: studyvis-sccache-webkit-ubuntu-24.04-${{ hashFiles('scripts/linux-webkit-runtime.env', 'scripts/patches/*.patch') }}-${{ github.sha }}
 
       - name: Save the pinned WebKitGTK runtime
         if: ${{ success() && env.SHIPPABLE == 'true' && runner.os == 'Linux' && steps.webkit-runtime-cache.outputs.cache-hit != 'true' }}
-        uses: actions/cache/save@v5
+        uses: actions/cache/save@v6
         with:
           path: ${{ steps.webkit-runtime.outputs.runtime-dir }}
           key: studyvis-webkitgtk-${{ runner.os }}-ubuntu-24.04-x86_64-rust-1.97.1-cargo-c-${{ steps.webkit-runtime.outputs.cargo-c-version }}-${{ hashFiles('scripts/linux-webkit-runtime.env', 'scripts/patches/*.patch') }}-${{ hashFiles('scripts/build-linux-webkit-runtime.sh', 'scripts/generate-librice-third-party-notices.mjs') }}
