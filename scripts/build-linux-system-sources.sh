@@ -719,7 +719,8 @@ if [[ $mode == bundle ]]; then
     [[ $url == https://* && $expected_sha =~ ^[0-9a-f]{64}$ ]] || {
       die "invalid pinned source tuple for $name"
     }
-    curl --fail --location --proto '=https' --tlsv1.2 --retry 3 \
+    curl --fail --location --proto '=https' --tlsv1.2 \
+      --retry 3 --retry-all-errors --connect-timeout 30 \
       --output "$destination" -- "$url"
     local actual_sha
     actual_sha=$(sha256sum -- "$destination")
