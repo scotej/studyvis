@@ -145,8 +145,13 @@ import {
   type StartArgs as PomodoroStartArgs,
 } from './pomodoro'
 import { logger } from '@/lib/log'
+import { recordPttBroadcast } from '@/features/system/pttBroadcastMirror'
+import { readPttRenderState } from '@/features/system/pttRenderProbe'
 
 const log = logger.child('session')
+// #226 — PTT records share the `ptt` scope wherever they are emitted from, so
+// one grep reconstructs the whole path regardless of which file wrote a line.
+const pttLog = logger.child('ptt')
 const dialogLog = log.child('aidialog')
 
 // #47 B4 — honor the persisted mic pick on acquisition. `ideal` (never
@@ -452,9 +457,45 @@ export function SessionView({
   // routed to QuitConfirmListener instead of dropping peers mid-session.
   useEffect(() => {
     if (status !== 'active') return
-    void invoke('session_set_active', { active: true }).catch(() => {})
+    // #226 — this invoke is what registers the global PTT shortcut and starts
+    // the macOS physical watcher. Both swallows are replaced: a lost or failed
+    // arm meant PTT was inert for the whole session with nothing in the log to
+    // say so, and Rust writes its own matching record from the other side.
+    const armAt = performance.now()
+    void invoke('session_set_active', { active: true }).then(
+      () =>
+        pttLog.info('session.armed', {
+          active: true,
+          ok: true,
+          elapsedMs: Math.round(performance.now() - armAt),
+          status,
+        }),
+      (err: unknown) =>
+        pttLog.warn('session.arm_failed', {
+          active: true,
+          elapsedMs: Math.round(performance.now() - armAt),
+          status,
+          err,
+        })
+    )
     return () => {
-      void invoke('session_set_active', { active: false }).catch(() => {})
+      const disarmAt = performance.now()
+      void invoke('session_set_active', { active: false }).then(
+        () =>
+          pttLog.info('session.armed', {
+            active: false,
+            ok: true,
+            elapsedMs: Math.round(performance.now() - disarmAt),
+            status,
+          }),
+        (err: unknown) =>
+          pttLog.warn('session.arm_failed', {
+            active: false,
+            elapsedMs: Math.round(performance.now() - disarmAt),
+            status,
+            err,
+          })
+      )
     }
   }, [status])
 
@@ -694,7 +735,17 @@ export function SessionView({
     // while we're mid-transmit would never light our PTT indicator until we
     // re-press. Send our current state directly to each new peer on join.
     const offJoin = room.onPeerJoin((peerId) => {
-      void action.send({ active: usePttStore.getState().active }, peerId)
+      const want = usePttStore.getState().active
+      void action.send({ active: want }, peerId).then(
+        () => {
+          recordPttBroadcast({ active: want, kind: 'resend', ok: true })
+          pttLog.debug('broadcast.resend', { want, ok: true })
+        },
+        (err: unknown) => {
+          recordPttBroadcast({ active: want, kind: 'resend', ok: false })
+          pttLog.warn('broadcast.failed', { reason: 'resend', want, err })
+        }
+      )
     })
     return () => {
       offJoin()
@@ -706,11 +757,81 @@ export function SessionView({
   // peers can light their PTT indicator while we're transmitting.
   useEffect(() => {
     const stream = localStreamRef.current
+    // #226 — read the tracks BACK in the same turn as the write. This is the
+    // only direct observation anywhere that the mute actually took effect; a
+    // store that says transmitting over a disabled track is the reported shape.
+    let audioTracks = 0
+    let enabledTracks = 0
     if (stream) {
       for (const t of stream.getAudioTracks()) t.enabled = pttActive
+      for (const t of stream.getAudioTracks()) {
+        audioTracks += 1
+        if (t.enabled) enabledTracks += 1
+      }
     }
+    const revision = usePttStore.getState().revision
     const send = pttSendRef.current
-    if (send) void send({ active: pttActive })
+    if (send) {
+      void send({ active: pttActive }).then(
+        () => {
+          recordPttBroadcast({
+            active: pttActive,
+            kind: 'state-change',
+            ok: true,
+          })
+          pttLog.debug('broadcast.sent', {
+            reason: 'state-change',
+            want: pttActive,
+            storeRevision: revision,
+            ok: true,
+            audioTracks,
+            enabledTracks,
+          })
+        },
+        (err: unknown) => {
+          recordPttBroadcast({
+            active: pttActive,
+            kind: 'state-change',
+            ok: false,
+          })
+          pttLog.warn('broadcast.failed', {
+            reason: 'state-change',
+            want: pttActive,
+            storeRevision: revision,
+            err,
+          })
+        }
+      )
+    } else {
+      pttLog.debug('broadcast.sent', {
+        reason: 'state-change',
+        want: pttActive,
+        storeRevision: revision,
+        ok: false,
+        audioTracks,
+        enabledTracks,
+      })
+    }
+  }, [pttActive])
+
+  // #226 — effects run after the DOM is committed, so this is the earliest
+  // point the rendered indicator can be compared with the state it is supposed
+  // to show. Only a disagreement is recorded: the watchdog already carries the
+  // agreeing case on its heartbeat, and a record per hold would double the
+  // per-hold volume to say "it worked".
+  useEffect(() => {
+    const render = readPttRenderState(
+      typeof document === 'undefined' ? null : document
+    )
+    if (render.probeError || render.selfLit === pttActive) return
+    pttLog.debug('render.committed', {
+      pttActive,
+      storeRevision: usePttStore.getState().revision,
+      selfLit: render.selfLit,
+      peerLit: render.peerLit,
+      peerTiles: render.peerTiles,
+      surfaces: render.surfaces,
+    })
   }, [pttActive])
 
   // S3 — camera-state broadcast: peers render an explicit camera-off tile
@@ -1824,10 +1945,30 @@ export function SessionView({
   // native client owns focus, so every session also exposes this press/release
   // control. Pointer capture guarantees a release even when the pointer moves
   // off the button; blur/cancel/lost-capture are independent stuck-mic guards.
-  const pressHoldToTalk = useCallback(() => {
+  // #226 — the button has two press triggers and five release triggers, and a
+  // hold that ended on `blur` or a lost pointer capture looks identical to a
+  // normal release from the store alone. Naming the trigger is the whole
+  // answer to "why did my hold end".
+  const pressHoldToTalk = useCallback((trigger: string) => {
+    const before = usePttStore.getState()
+    pttLog.debug('button.intent', {
+      action: 'press',
+      trigger,
+      storeActiveBefore: before.active,
+      awaitingReleaseBefore: before.awaitingRelease,
+      heldSourcesBefore: before.heldSources,
+    })
     usePttStore.getState().press('session-button')
   }, [])
-  const releaseHoldToTalk = useCallback(() => {
+  const releaseHoldToTalk = useCallback((trigger: string) => {
+    const before = usePttStore.getState()
+    pttLog.debug('button.intent', {
+      action: 'release',
+      trigger,
+      storeActiveBefore: before.active,
+      awaitingReleaseBefore: before.awaitingRelease,
+      heldSourcesBefore: before.heldSources,
+    })
     usePttStore.getState().release('session-button')
   }, [])
 
@@ -2111,34 +2252,37 @@ export function SessionView({
               size="sm"
               aria-pressed={pttActive}
               aria-label={strings.session.holdToTalkAriaLabel}
+              data-ptt-hold={String(pttActive)}
               onPointerDown={(event) => {
                 if (!event.isPrimary || event.button !== 0) return
                 event.currentTarget.setPointerCapture(event.pointerId)
-                pressHoldToTalk()
+                pressHoldToTalk('pointerdown')
               }}
               onPointerUp={(event) => {
                 if (!event.isPrimary || event.button !== 0) return
-                releaseHoldToTalk()
+                releaseHoldToTalk('pointerup')
                 if (event.currentTarget.hasPointerCapture(event.pointerId)) {
                   event.currentTarget.releasePointerCapture(event.pointerId)
                 }
               }}
-              onPointerCancel={releaseHoldToTalk}
-              onLostPointerCapture={releaseHoldToTalk}
+              onPointerCancel={() => releaseHoldToTalk('pointercancel')}
+              onLostPointerCapture={() =>
+                releaseHoldToTalk('lostpointercapture')
+              }
               onKeyDown={(event) => {
                 if (
                   !event.repeat &&
                   (event.key === ' ' || event.key === 'Enter')
                 ) {
-                  pressHoldToTalk()
+                  pressHoldToTalk('keydown')
                 }
               }}
               onKeyUp={(event) => {
                 if (event.key === ' ' || event.key === 'Enter') {
-                  releaseHoldToTalk()
+                  releaseHoldToTalk('keyup')
                 }
               }}
-              onBlur={releaseHoldToTalk}
+              onBlur={() => releaseHoldToTalk('blur')}
               className="gap-2"
             >
               {pttActive ? <MicIcon /> : <MicOffIcon />}

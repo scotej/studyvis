@@ -35,7 +35,11 @@ import { Switch } from '@/components/ui/switch'
 import { useOnboardingState } from '@/features/onboarding'
 import { useAutostart } from '@/features/system'
 import { sessionsClearAll } from '@/lib/db/sessions'
-import { saveDiagnosticsArchive } from '@/lib/diagnostics'
+import {
+  captureDiagnosticsSnapshot,
+  saveDiagnosticsArchive,
+} from '@/lib/diagnostics'
+import { useSessionStore } from '@/stores/sessionStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { strings } from '@/strings'
 
@@ -86,6 +90,7 @@ export function AdvancedCategory() {
       // records and the previous run's, and "it crashed and restarted" is the
       // case a bug report is usually about. Everything in the file was
       // redacted at record time, so reading it back adds no exposure.
+      captureDiagnosticsSnapshot('settings-clipboard')
       await flushLog()
       const info = await invoke<DiagnosticsInfo>('diagnostics_info')
       const lines = await invoke<string[]>('app_log_tail', {
@@ -118,8 +123,15 @@ export function AdvancedCategory() {
     setExportingDiagnostics(true)
     try {
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
+      // #226 — this path always produced `manifest.session_prefix: null`, so an
+      // archive saved from Settings could not be joined to the peer's archive
+      // for the same session. Report.tsx already passes the same 8 characters
+      // the logger stamps as `sess`.
       const result = await saveDiagnosticsArchive({
         defaultPath: `studyvis-diagnostics-${timestamp}.zip`,
+        sessionPrefix:
+          useSessionStore.getState().sessionTopic?.slice(0, 8) ?? null,
+        trigger: 'settings-archive',
       })
       if (result.kind === 'saved') {
         toast.success(strings.diagnostics.savedToast)

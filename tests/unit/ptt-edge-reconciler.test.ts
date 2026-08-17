@@ -26,9 +26,13 @@ describe('PTT edge reconciler', () => {
     expect(reconciler.physicalState(false)).toEqual([
       { edge: 'released', source: 'physical-watch' },
     ])
+    // The logical hold is gone, but the unmatched Carbon intent is retained so
+    // a later physical `true` can restore this same press.
     expect(reconciler.snapshot()).toEqual({
       physicalHeld: false,
       deferredShortcutPress: true,
+      shortcutDown: true,
+      logicalHoldActive: false,
     })
 
     // Confirmation copies remain harmless, and a later Carbon Released only
@@ -89,12 +93,19 @@ describe('PTT edge reconciler', () => {
     expect(reconciler.snapshot()).toEqual({
       physicalHeld: false,
       deferredShortcutPress: true,
+      shortcutDown: true,
+      logicalHoldActive: false,
     })
 
     expect(reconciler.physicalState(true)).toEqual([
       { edge: 'pressed', source: 'physical-reconcile' },
     ])
-    expect(reconciler.snapshot().deferredShortcutPress).toBe(false)
+    expect(reconciler.snapshot()).toEqual({
+      physicalHeld: true,
+      deferredShortcutPress: false,
+      shortcutDown: true,
+      logicalHoldActive: true,
+    })
   })
 
   test('a delayed press cannot reactivate after physical release', () => {
@@ -192,10 +203,14 @@ describe('PTT edge reconciler', () => {
     reconciler.shortcutPressed()
     expect(reconciler.snapshot().deferredShortcutPress).toBe(true)
 
+    // No logical hold was emitted, so the unobservable rebind drops the native
+    // intent with it rather than carrying it into the new binding.
     expect(reconciler.physicalState(null)).toEqual([])
     expect(reconciler.snapshot()).toEqual({
       physicalHeld: null,
       deferredShortcutPress: false,
+      shortcutDown: false,
+      logicalHoldActive: false,
     })
     expect(reconciler.shortcutPressed()).toEqual([
       { edge: 'pressed', source: 'shortcut' },

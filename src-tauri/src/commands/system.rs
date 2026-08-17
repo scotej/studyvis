@@ -33,6 +33,8 @@ use tauri_plugin_dialog::DialogExt;
 #[cfg(target_os = "macos")]
 use tauri_plugin_global_shortcut::{Code, Modifiers};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut};
+
+use super::native_log;
 use tauri_plugin_opener::OpenerExt;
 
 use crate::db::data_dir;
@@ -325,6 +327,33 @@ pub fn autostart_is_enabled<R: Runtime>(app: AppHandle<R>) -> Result<bool, Strin
     app.autolaunch().is_enabled().map_err(|e| e.to_string())
 }
 
+// #226 — per-keystroke emit outcomes. Incremented from the global-shortcut
+// handler, which must stay allocation- and lock-free, and flushed to the log at
+// session end. Renderer-side counts of RECEIVED edges are logged separately;
+// the difference between the two is the only proof of a lost delivery.
+static PTT_PRESSED_EMIT_OK: AtomicU64 = AtomicU64::new(0);
+static PTT_PRESSED_EMIT_ERR: AtomicU64 = AtomicU64::new(0);
+static PTT_RELEASED_EMIT_OK: AtomicU64 = AtomicU64::new(0);
+static PTT_RELEASED_EMIT_ERR: AtomicU64 = AtomicU64::new(0);
+
+pub fn count_ptt_pressed_emit(ok: bool) {
+    let counter = if ok {
+        &PTT_PRESSED_EMIT_OK
+    } else {
+        &PTT_PRESSED_EMIT_ERR
+    };
+    counter.fetch_add(1, Ordering::Relaxed);
+}
+
+pub fn count_ptt_released_emit(ok: bool) {
+    let counter = if ok {
+        &PTT_RELEASED_EMIT_OK
+    } else {
+        &PTT_RELEASED_EMIT_ERR
+    };
+    counter.fetch_add(1, Ordering::Relaxed);
+}
+
 #[tauri::command]
 pub fn session_set_active<R: Runtime>(app: AppHandle<R>, active: bool) -> Result<(), String> {
     SessionActiveFlag::set(&app, active);
@@ -332,6 +361,47 @@ pub fn session_set_active<R: Runtime>(app: AppHandle<R>, active: bool) -> Result
     // live; boot registers just the AI shortcut (see lib.rs).
     apply_ptt_friends_registration(&app, active);
     update_ptt_physical_monitor(&app, active);
+
+    // #226 — the renderer logs `ptt/session.armed` for the same transition.
+    // Both records present means PTT really was armed; a renderer record with
+    // no native counterpart means the invoke never landed.
+    let (friends_registered, ai_registered) = {
+        let bindings = app.state::<ShortcutBindings>();
+        let manager = app.global_shortcut();
+        (
+            manager.is_registered(bindings.ptt_friends()),
+            manager.is_registered(bindings.ptt_ai()),
+        )
+    };
+    native_log::record(
+        native_log::NativeLevel::Info,
+        "ptt.native",
+        "session.state",
+        &[
+            ("active", native_log::NativeValue::Bool(active)),
+            (
+                "friendsRegistered",
+                native_log::NativeValue::Bool(friends_registered),
+            ),
+            ("aiRegistered", native_log::NativeValue::Bool(ai_registered)),
+            (
+                "pressedEmitOk",
+                native_log::NativeValue::U64(PTT_PRESSED_EMIT_OK.load(Ordering::Relaxed)),
+            ),
+            (
+                "pressedEmitErr",
+                native_log::NativeValue::U64(PTT_PRESSED_EMIT_ERR.load(Ordering::Relaxed)),
+            ),
+            (
+                "releasedEmitOk",
+                native_log::NativeValue::U64(PTT_RELEASED_EMIT_OK.load(Ordering::Relaxed)),
+            ),
+            (
+                "releasedEmitErr",
+                native_log::NativeValue::U64(PTT_RELEASED_EMIT_ERR.load(Ordering::Relaxed)),
+            ),
+        ],
+    );
     Ok(())
 }
 
@@ -347,21 +417,68 @@ fn apply_ptt_friends_registration<R: Runtime>(app: &AppHandle<R>, active: bool) 
     let friends = bindings.ptt_friends();
     let ai = bindings.ptt_ai();
     let manager = app.global_shortcut();
-    if active {
-        if !manager.is_registered(friends) {
-            if let Err(err) = manager.register(friends) {
-                eprintln!("[global-shortcut] couldn't register PTT for the session: {err}");
-            }
+    // #226 — these eprintln!s went to a stderr no packaged .app or .exe has, so
+    // a session where PTT was never registered looked identical to one where it
+    // worked. Every branch now leaves a record, including the two skips.
+    let (op, ok, skipped) = if active {
+        if manager.is_registered(friends) {
+            ("register", true, Some("already-registered"))
+        } else if let Err(err) = manager.register(friends) {
+            eprintln!("[global-shortcut] couldn't register PTT for the session: {err}");
+            ("register", false, None)
+        } else {
+            ("register", true, None)
         }
-    } else if friends != ai && manager.is_registered(friends) {
-        if let Err(err) = manager.unregister(friends) {
-            eprintln!("[global-shortcut] couldn't release PTT after the session: {err}");
-        }
-    }
+    } else if friends == ai {
+        ("unregister", true, Some("shared-combo"))
+    } else if !manager.is_registered(friends) {
+        ("unregister", true, Some("not-registered"))
+    } else if let Err(err) = manager.unregister(friends) {
+        eprintln!("[global-shortcut] couldn't release PTT after the session: {err}");
+        ("unregister", false, None)
+    } else {
+        ("unregister", true, None)
+    };
+
+    native_log::record(
+        if ok {
+            native_log::NativeLevel::Info
+        } else {
+            native_log::NativeLevel::Error
+        },
+        "ptt.native",
+        "shortcut.state",
+        &[
+            ("op", native_log::NativeValue::Word(op)),
+            ("target", native_log::NativeValue::Word("ptt-friends")),
+            ("ok", native_log::NativeValue::Bool(ok)),
+            (
+                "skipped",
+                match skipped {
+                    Some(reason) => native_log::NativeValue::Word(reason),
+                    None => native_log::NativeValue::Null,
+                },
+            ),
+            ("sessionActive", native_log::NativeValue::Bool(active)),
+        ],
+    );
 }
 
+// #226 — Windows and Linux have no physical-state watcher at all. Saying so
+// once per session turns "no physical records in this archive" from an
+// ambiguous silence into a statement about the platform.
 #[cfg(not(target_os = "macos"))]
-fn update_ptt_physical_monitor<R: Runtime>(_app: &AppHandle<R>, _active: bool) {}
+fn update_ptt_physical_monitor<R: Runtime>(_app: &AppHandle<R>, active: bool) {
+    native_log::record(
+        native_log::NativeLevel::Info,
+        "ptt.native",
+        "monitor.unsupported",
+        &[
+            ("active", native_log::NativeValue::Bool(active)),
+            ("os", native_log::NativeValue::Word(std::env::consts::OS)),
+        ],
+    );
+}
 
 // #209 / #226 — Carbon's global-hotkey edges are useful but are not
 // authoritative enough for a privacy-sensitive hold-to-talk latch. While a
@@ -391,6 +508,36 @@ fn update_ptt_physical_monitor<R: Runtime>(app: &AppHandle<R>, active: bool) {
 
     let app = app.clone();
     std::thread::spawn(move || {
+        // #226 — the loop body below runs every 20 ms and must stay free of
+        // allocation, locks and I/O. It accumulates counters; the records are
+        // written once on entry and once on exit.
+        native_log::record(
+            native_log::NativeLevel::Info,
+            "ptt.native",
+            "watcher.armed",
+            &[
+                ("gen", native_log::NativeValue::U64(generation)),
+                ("pollMs", native_log::NativeValue::U64(20)),
+                (
+                    "sends",
+                    native_log::NativeValue::U64(PTT_PHYSICAL_CONFIRMATION_SENDS as u64),
+                ),
+                (
+                    "everyPolls",
+                    native_log::NativeValue::U64(PTT_PHYSICAL_CONFIRMATION_EVERY_POLLS as u64),
+                ),
+            ],
+        );
+
+        let started = std::time::Instant::now();
+        let mut polls: u64 = 0;
+        let mut levels: u64 = 0;
+        let mut emit_ok: u64 = 0;
+        let mut emit_err: u64 = 0;
+        let mut unobservable_polls: u64 = 0;
+        let mut last_state: Option<Option<bool>> = None;
+        let mut emit_failure_logged = false;
+
         let mut confirmation = super::level_confirmation::LevelConfirmation::new(
             PTT_PHYSICAL_CONFIRMATION_SENDS,
             PTT_PHYSICAL_CONFIRMATION_EVERY_POLLS,
@@ -398,15 +545,85 @@ fn update_ptt_physical_monitor<R: Runtime>(app: &AppHandle<R>, active: bool) {
         while PTT_PHYSICAL_MONITOR_GENERATION.load(Ordering::Acquire) == generation
             && SessionActiveFlag::is_active(&app)
         {
+            polls += 1;
             let shortcut = app.state::<ShortcutBindings>().ptt_friends();
             let current_state = macos_shortcut_is_held(shortcut);
-            if confirmation.should_publish(current_state)
-                && app.emit(PTT_PHYSICAL_STATE_EVENT, current_state).is_ok()
-            {
-                confirmation.mark_published();
+            if current_state.is_none() {
+                unobservable_polls += 1;
+            }
+            if last_state != Some(current_state) {
+                last_state = Some(current_state);
+                levels += 1;
+            }
+            if confirmation.should_publish(current_state) {
+                if app.emit(PTT_PHYSICAL_STATE_EVENT, current_state).is_ok() {
+                    emit_ok += 1;
+                    confirmation.mark_published();
+                } else {
+                    emit_err += 1;
+                    // Proven undelivered, from the only side that can see it.
+                    // Written once per watcher generation: by the time this
+                    // fires the channel is already broken, and a record per
+                    // 20 ms poll would bury the history that explains it.
+                    if !emit_failure_logged {
+                        emit_failure_logged = true;
+                        native_log::record(
+                            native_log::NativeLevel::Error,
+                            "ptt.native",
+                            "emit.failed",
+                            &[
+                                ("source", native_log::NativeValue::Word("physical")),
+                                ("gen", native_log::NativeValue::U64(generation)),
+                                (
+                                    "level",
+                                    match current_state {
+                                        Some(true) => native_log::NativeValue::Word("true"),
+                                        Some(false) => native_log::NativeValue::Word("false"),
+                                        None => native_log::NativeValue::Null,
+                                    },
+                                ),
+                                ("polls", native_log::NativeValue::U64(polls)),
+                            ],
+                        );
+                    }
+                }
             }
             std::thread::sleep(PTT_PHYSICAL_POLL_INTERVAL);
         }
+
+        // `emitOk` against the renderer's received `physicalEvents` count is
+        // the arithmetic that proves a delivery loss, and the exit reason
+        // distinguishes a superseded generation from a closed session — two
+        // completely different explanations for a hold that never released.
+        let superseded = PTT_PHYSICAL_MONITOR_GENERATION.load(Ordering::Acquire) != generation;
+        native_log::record(
+            native_log::NativeLevel::Info,
+            "ptt.native",
+            "watcher.exited",
+            &[
+                ("gen", native_log::NativeValue::U64(generation)),
+                (
+                    "reason",
+                    native_log::NativeValue::Word(if superseded {
+                        "superseded"
+                    } else {
+                        "session-inactive"
+                    }),
+                ),
+                (
+                    "uptimeMs",
+                    native_log::NativeValue::U64(started.elapsed().as_millis() as u64),
+                ),
+                ("polls", native_log::NativeValue::U64(polls)),
+                ("levels", native_log::NativeValue::U64(levels)),
+                ("emitOk", native_log::NativeValue::U64(emit_ok)),
+                ("emitErr", native_log::NativeValue::U64(emit_err)),
+                (
+                    "unobservablePolls",
+                    native_log::NativeValue::U64(unobservable_polls),
+                ),
+            ],
+        );
     });
 }
 
