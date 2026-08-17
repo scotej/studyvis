@@ -31,6 +31,8 @@ import { useSettingsStore } from '@/stores/settingsStore'
 import { strings } from '@/strings'
 import { flushLog, logger, setLogContext } from '@/lib/log'
 
+import { clearSessionRecoveryOnLeave } from './recovery'
+
 const log = logger.child('session.lifecycle')
 
 export type SessionRole = 'host' | 'guest'
@@ -563,6 +565,10 @@ export function buildLeaveHandler(args: {
     // risk merging its minutes/presence twice. Expected teardown failures are
     // handled below; any preflight failure releases the cached attempt.
     teardownCommitted = true
+    // #225 — the local session is definitively ending, so the launch-time
+    // recovery record goes with it. A confirmed quit is the one exception:
+    // it runs this same handler, and being able to come back is the point.
+    void clearSessionRecoveryOnLeave()
     try {
       args.onTeardownCommitted?.()
     } catch (err) {

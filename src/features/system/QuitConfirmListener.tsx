@@ -11,6 +11,9 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+// Imported from the module rather than the feature barrel: the barrel pulls
+// SessionView and Report, and this listener mounts at the app root.
+import { retainSessionRecoveryForQuit } from '@/features/session/recovery'
 import { leaveBeforeQuit } from '@/features/system/quitLeave'
 import { useSessionStore } from '@/stores/sessionStore'
 import { strings } from '@/strings'
@@ -72,6 +75,10 @@ export function QuitConfirmListener() {
   const confirmQuit = () => {
     setOpen(false)
     void (async () => {
+      // #225 — the leave handler below clears the launch-time recovery record
+      // on every other ending. Quitting mid-session is the one the user is
+      // meant to be able to walk back into, so keep it.
+      retainSessionRecoveryForQuit()
       await leaveBeforeQuit(useSessionStore.getState().leave)
       await invoke('app_quit').catch(() => {})
     })()

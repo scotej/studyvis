@@ -1,4 +1,4 @@
-// I225 — the patched @trystero-p2p/nostr relay batcher. Rejoining the same
+// #225 — the patched @trystero-p2p/nostr relay batcher. Rejoining the same
 // session reuses the root and self topics byte-identically (trystero's selfId
 // is a per-process constant), so a leaving room's relay unsubscribe must only
 // retract the handler it registered itself. The installed artifact is imported

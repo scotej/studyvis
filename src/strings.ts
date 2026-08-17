@@ -810,9 +810,32 @@ export const strings = {
     // invokes app_quit(), cancel just closes.
     quitConfirm: {
       title: 'Leave your session and quit?',
-      body: "You're in a live session. Quitting now drops you from the call and ends your session. Anyone else can keep studying.",
+      body: "You're in a live session. Quitting drops you from the call, and anyone else can keep studying. We'll offer to put you back in next time you open StudyVis.",
       cancelCta: 'Stay',
       confirmCta: 'Leave and quit',
+    },
+    // #225 — the full-screen prompt on the next launch after StudyVis closed
+    // during a session. Shown before the dashboard, and only ever with the
+    // user's own choice: nothing rejoins on its own.
+    interrupted: {
+      ariaLabel: 'Interrupted session',
+      eyebrow: 'Session left open',
+      heading: 'Pick up where you left off',
+      body: 'StudyVis closed while you were in a session. If anyone is still in the room, rejoining puts you straight back with them.',
+      // Split so the topic itself carries the emphasis, the way the session
+      // footer's hold-to-talk copy wraps its keybinding.
+      topicBefore: 'You were working on ',
+      topicAfter: '.',
+      startedJustNow: 'It started a few moments ago.',
+      startedMinutesAgo: (minutes: number) =>
+        `It started ${minutes} ${minutes === 1 ? 'minute' : 'minutes'} ago.`,
+      startedHoursAgo: (hours: number) =>
+        `It started about ${hours} ${hours === 1 ? 'hour' : 'hours'} ago.`,
+      footnote: 'Either way, the time you already studied is saved.',
+      rejoinCta: 'Rejoin session',
+      endCta: 'End session',
+      rejoining: 'Rejoining…',
+      rejoinError: "Couldn't rejoin that session.",
     },
   },
 

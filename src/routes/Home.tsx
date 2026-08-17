@@ -48,6 +48,7 @@ import type { ValidInvite } from '@/features/friends'
 import { IdentityLoadError, useIdentity } from '@/features/identity'
 import { Onboarding, useOnboardingState } from '@/features/onboarding'
 import {
+  InterruptedSessionView,
   inviteToCurrentSession,
   InviteWhileGuestError,
   joinSession,
@@ -55,6 +56,8 @@ import {
   Report,
   SessionView,
   TopicGateModal,
+  useInterruptedSession,
+  type SessionRecoveryRecord,
 } from '@/features/session'
 import { Settings, SettingsOverlay } from '@/features/settings'
 import type { SettingsCategoryId } from '@/features/settings'
@@ -62,7 +65,10 @@ import type { Friend } from '@/lib/db/friends'
 import { boxEncryptWithKeyring } from '@/lib/db/identity'
 import { useFriendsStore } from '@/stores/friendsStore'
 import { useIdentityStore } from '@/stores/identityStore'
-import { useSessionStore } from '@/stores/sessionStore'
+import {
+  DEFAULT_DECLARED_STUDY_TOPIC,
+  useSessionStore,
+} from '@/stores/sessionStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { strings } from '@/strings'
 
@@ -75,6 +81,12 @@ type View = 'main' | 'settings'
 export function Home() {
   const { identity, status, actions } = useIdentity()
   const onboarding = useOnboardingState()
+  // #225 — did StudyVis close while a session was live? Probed once the
+  // identity resolves, and answered before the dashboard is reachable.
+  const interrupted = useInterruptedSession(
+    identity?.ed_pubkey_hex ?? null,
+    identity?.x_pubkey_hex ?? null
+  )
   const friendsStatus = useFriendsStore((s) => s.status)
   const loadFriends = useFriendsStore((s) => s.load)
   // F3 — InboxBoot opens the boot-time presence + inbox trystero rooms, and
@@ -358,6 +370,58 @@ export function Home() {
     }
   }, [])
 
+  // #225 — re-enter the room StudyVis was in when it closed. Same shape as
+  // handleRejoin above (including spending this click on the AI screen
+  // pre-acquire); the credentials come from the sealed launch-time record
+  // instead of a store that did not survive the process.
+  const dismissInterrupted = interrupted.dismiss
+  const handleInterruptedRejoin = useCallback(
+    (record: SessionRecoveryRecord) => {
+      if (useSessionStore.getState().status === 'active') return
+      if (aiOn()) {
+        const models = useModelStore.getState()
+        if (models.activeModelId || models.status === 'loading') {
+          void preacquireScreenStream()
+        }
+        useSessionStore
+          .getState()
+          .setPendingInitialTopic(
+            record.declaredStudyTopic ?? DEFAULT_DECLARED_STUDY_TOPIC
+          )
+      }
+      try {
+        rejoinSession(
+          record.sessionTopic,
+          record.sessionPassword,
+          record.isHost,
+          {
+            expectedAuthorityEdPubkeyHex: record.expectedAuthorityEdPubkeyHex,
+          }
+        )
+      } catch (err) {
+        // Only release the pre-acquired stream if no session actually began;
+        // once begin() has run, SessionView mounts and consumes it, and
+        // discarding here would kill the live capture instead of an orphan.
+        if (useSessionStore.getState().status !== 'active') {
+          discardPendingScreenStream()
+        }
+        const message =
+          err instanceof Error
+            ? err.message
+            : strings.session.interrupted.rejoinError
+        toast.error(message)
+      } finally {
+        // begin() flips the store before the rest of the join wiring runs, so
+        // a later failure must still take the prompt down — it would otherwise
+        // sit full-screen over a session that is already live.
+        if (useSessionStore.getState().status === 'active') {
+          dismissInterrupted()
+        }
+      }
+    },
+    [dismissInterrupted]
+  )
+
   const handleInvite = useCallback(
     (friend: Friend) => {
       if (aiOn()) setPendingStart({ kind: 'host', friend })
@@ -430,7 +494,25 @@ export function Home() {
     [pendingStart, runHostInvite, runGuestJoin, identity]
   )
 
-  if (status === 'loading' || onboarding.status === 'loading') {
+  // #225 — hold the dashboard until the interrupted-session probe answers, so
+  // a recoverable session never flashes past behind the friends list. Only
+  // while the probe can actually run: an identity without an X25519 key would
+  // otherwise wait forever.
+  const canProbeInterrupted = Boolean(
+    identity?.ed_pubkey_hex && identity?.x_pubkey_hex
+  )
+  const interruptedPending =
+    status === 'ready' &&
+    onboarding.status !== 'pending' &&
+    canProbeInterrupted &&
+    (interrupted.state.status === 'idle' ||
+      interrupted.state.status === 'loading')
+
+  if (
+    status === 'loading' ||
+    onboarding.status === 'loading' ||
+    interruptedPending
+  ) {
     return (
       <main
         className="flex min-h-full items-center justify-center bg-bg-base text-text-secondary"
@@ -450,6 +532,23 @@ export function Home() {
 
   if (status === 'absent' || onboarding.status === 'pending') {
     return <Onboarding onComplete={onboarding.complete} />
+  }
+
+  // #225 — StudyVis closed mid-session and the room may still be live. This
+  // is a full-screen decision rather than a banner, and it deliberately
+  // returns before `tail`: nothing joins, invites, or opens a deep link until
+  // the user has answered it. Nothing rejoins on its own either.
+  if (interrupted.state.status === 'prompt') {
+    const record = interrupted.state.record
+    return (
+      <InterruptedSessionView
+        studyTopic={record.declaredStudyTopic}
+        startedAt={record.startedAt}
+        now={interrupted.state.loadedAt}
+        onRejoin={() => handleInterruptedRejoin(record)}
+        onEnd={interrupted.end}
+      />
+    )
   }
 
   // InboxBoot is rendered exactly once, outside the view selector, so React

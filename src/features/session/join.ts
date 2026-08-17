@@ -13,6 +13,7 @@ import {
   wireSessionRoom,
   type SessionHandle,
 } from './lifecycle'
+import { rememberActiveSession } from './recovery'
 
 export type JoinSessionOptions = {
   store?: SessionStore
@@ -199,6 +200,17 @@ function joinExistingSession(
     },
     store
   )
+  // #225 — after begin(), so the declared topic the store just resolved is
+  // the one a launch-time recovery prompt shows.
+  rememberActiveSession({
+    identity,
+    sessionTopic: topic,
+    sessionPassword: password,
+    isHost,
+    expectedAuthorityEdPubkeyHex: options?.expectedAuthorityEdPubkeyHex ?? null,
+    declaredStudyTopic: store.getState().declaredStudyTopic,
+    startedAt,
+  })
   const onPeerAuthenticated = options?.onPeerAuthenticated
   if (onPeerAuthenticated) {
     const notifiedPeerIdentities = new Set<string>()
