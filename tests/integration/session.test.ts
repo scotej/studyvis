@@ -310,6 +310,142 @@ describe('two room handles on the in-process bus observe peer events', () => {
     await nextGuest.room.leave()
   })
 
+  test('a departed guest rejoins the same live room on a fresh invite', async () => {
+    const hostStore = createSessionStore()
+    const guestStore = createSessionStore()
+    const host = hostSession({ store: hostStore })
+    let guest = joinSession(host.sessionTopic, host.sessionPassword, {
+      store: guestStore,
+    })
+    await flushMicrotasks()
+    expect(host.peers()).toHaveLength(1)
+
+    // #225 — the reported reproduction, from the departing app instance's own
+    // side: leave, then accept another invite carrying the same credentials.
+    // Repeated, because the transport defect behind it only surfaced once a
+    // replacement room had been built on top of a still-unwinding one.
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      await guest.leave()
+      await flushMicrotasks()
+      expect(guestStore.getState().status).toBe('ended')
+      expect(hostStore.getState().status).toBe('active')
+      expect(host.peers()).toEqual([])
+
+      guest = joinSession(host.sessionTopic, host.sessionPassword, {
+        store: guestStore,
+      })
+      await flushMicrotasks()
+
+      // Not an empty room on either side.
+      expect(host.peers()).toEqual([guest.room.selfId])
+      expect(guest.peers()).toEqual([host.room.selfId])
+      expect(guestStore.getState()).toMatchObject({
+        status: 'active',
+        sessionTopic: host.sessionTopic,
+        // Re-entering the room we just left continues the same logical
+        // session, so the stint merges rather than starting a second row.
+        isRejoin: true,
+        peers: { [host.room.selfId]: expect.anything() },
+      })
+      // The survivor never rebuilt its room; it is the same one throughout.
+      expect(hostStore.getState().room).toBe(host.room)
+    }
+
+    await guest.leave()
+    await host.leave()
+
+    // Every stint merges into the one topic-keyed row.
+    const insertedIds = invokeMock.mock.calls
+      .filter(([cmd]) => cmd === 'sessions_insert')
+      .map(([, args]) => (args as { id: string }).id)
+    expect(insertedIds).toHaveLength(5)
+    expect(new Set(insertedIds)).toEqual(new Set([host.sessionTopic]))
+  })
+
+  // #225 — what a launch-time recovery rejoin actually walks into. A restarted
+  // app instance gets a fresh Trystero peer id, which the bus mock reproduces
+  // by handing the replacement store the next `peer-N`.
+  test('a restarted guest is readmitted by the host that stayed', async () => {
+    const hostStore = createSessionStore()
+    const guestStore = createSessionStore()
+    const restartedStore = createSessionStore()
+    const host = hostSession({ store: hostStore })
+    const guest = joinSession(host.sessionTopic, host.sessionPassword, {
+      store: guestStore,
+    })
+    await flushMicrotasks()
+    expect(host.peers()).toHaveLength(1)
+
+    // The guest quits StudyVis: the leave handler still runs, and the host
+    // keeps the room.
+    await guest.leave()
+    await flushMicrotasks()
+    expect(hostStore.getState().status).toBe('active')
+
+    // Relaunch: a brand-new store and peer id, re-entering with the stored
+    // credentials and role exactly as the recovery prompt does.
+    const restarted = rejoinSession(
+      host.sessionTopic,
+      host.sessionPassword,
+      false,
+      { store: restartedStore }
+    )
+    await flushMicrotasks(12)
+
+    expect(host.peers()).toEqual([restarted.room.selfId])
+    expect(restarted.peers()).toEqual([host.room.selfId])
+    expect(restartedStore.getState().status).toBe('active')
+
+    await restarted.leave()
+    await host.leave()
+  })
+
+  // The mirror case, and the one that decides whether the recovery prompt may
+  // offer a host-role rejoin at all.
+  test('a restarted host is not readmitted by the guest that stayed', async () => {
+    const hostStore = createSessionStore()
+    const survivorStore = createSessionStore()
+    const restartedStore = createSessionStore()
+    const host = hostSession({ store: hostStore })
+    const survivor = joinSession(host.sessionTopic, host.sessionPassword, {
+      store: survivorStore,
+    })
+    await flushMicrotasks()
+    expect(survivor.peers()).toHaveLength(1)
+
+    await host.leave()
+    await flushMicrotasks()
+    // #219 — the survivor keeps studying solo, with admissions frozen to the
+    // roster it last authenticated.
+    expect(survivorStore.getState().status).toBe('active')
+    expect(survivor.peers()).toEqual([])
+
+    const restarted = rejoinSession(
+      host.sessionTopic,
+      host.sessionPassword,
+      true,
+      { store: restartedStore }
+    )
+    await flushMicrotasks(16)
+    vi.useFakeTimers()
+    await vi.advanceTimersByTimeAsync(ADMISSION_AUTHENTICATION_TIMEOUT_MS)
+    vi.useRealTimers()
+
+    // #219 froze the survivor's admissions to the departed host's TRANSPORT
+    // id, and a restarted process presents a new one. So the survivor never
+    // readmits it, and the returning host is talking to nobody — the returning
+    // side's own peer list is not evidence to the contrary, because the bus
+    // mock cannot propagate the survivor's transport close back across it.
+    // This is why the launch-time recovery prompt covers guest records only;
+    // reopening it for hosts means identity-based authority rebinding, which
+    // is a wire-contract change, not a UI one.
+    expect(survivor.peers()).toEqual([])
+    expect(survivorStore.getState().status).toBe('active')
+
+    await restarted.leave()
+    await survivor.leave()
+  })
+
   test('an unexplained transport loss also leaves the survivor active', async () => {
     const hostStore = createSessionStore()
     const guestStore = createSessionStore()

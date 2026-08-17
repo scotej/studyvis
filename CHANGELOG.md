@@ -23,6 +23,23 @@
   generated text/JSON inventory of the exact locked `rice-proto`/`rice-io`
   normal dependency union selected by `cargo-c`, including `capi` features,
   direct source checksums, and hash-checked license evidence.
+- **StudyVis now offers to put you back into a session it closed on.** If the
+  app quits or crashes while you are in a friend's session, the next launch
+  opens on a full-screen prompt to rejoin that room or end it — nothing
+  reconnects on its own. The record it uses is sealed to your own identity key,
+  so the room's topic and password are never written to disk in the clear, and
+  it expires after twelve hours. An ordinary Leave clears it; only quitting
+  keeps it. Sessions you hosted are not offered, because the friends who stayed
+  froze admission against your previous connection and cannot readmit a
+  restarted app.
+
+### Fixed
+
+- **Rejoining a session you just left no longer drops you into an empty room.**
+  Accepting a fresh invite to the same room reuses its discovery topics exactly,
+  and the old room's still-unwinding relay cleanup could delete the new room's
+  subscription — permanently silencing that relay, so neither side ever saw the
+  other. A leaving room now retracts only the subscription it registered itself.
 
 ### Changed
 

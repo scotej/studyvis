@@ -17,6 +17,21 @@ export {
   type SessionHandle,
 } from './lifecycle'
 export {
+  InterruptedSessionView,
+  type InterruptedSessionViewProps,
+} from './InterruptedSessionView'
+export {
+  useInterruptedSession,
+  type InterruptedSession,
+  type InterruptedSessionState,
+} from './interruptedSession'
+export {
+  clearSessionRecovery,
+  retainSessionRecoveryForQuit,
+  SESSION_RECOVERY_MAX_AGE_MS,
+  type SessionRecoveryRecord,
+} from './recovery'
+export {
   Report,
   ReportView,
   type ReportProps,

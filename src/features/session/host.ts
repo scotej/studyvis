@@ -9,6 +9,7 @@ import {
   wireSessionRoom,
   type SessionHandle,
 } from './lifecycle'
+import { rememberActiveSession } from './recovery'
 
 // Generates a session_id + session_password, derives the session_topic per
 // ARCHITECTURE.md §4, joins the trystero room, registers the session in the
@@ -86,6 +87,17 @@ export function hostSession(options?: HostSessionOptions): SessionHandle {
     leave,
   })
   lifecycle = wireSessionRoom(room, { isHost: true, leave }, store)
+  // #225 — after begin(), so the declared topic the store just resolved is
+  // the one a launch-time recovery prompt shows.
+  rememberActiveSession({
+    identity,
+    sessionTopic: topic,
+    sessionPassword: password,
+    isHost: true,
+    expectedAuthorityEdPubkeyHex: null,
+    declaredStudyTopic: store.getState().declaredStudyTopic,
+    startedAt,
+  })
   return {
     sessionTopic: topic,
     sessionPassword: password,

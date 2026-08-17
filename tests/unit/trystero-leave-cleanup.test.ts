@@ -201,7 +201,13 @@ describe('patched Trystero room leave cleanup', () => {
       expect(unsubscribe).not.toHaveBeenCalled()
 
       resolveSubscription!(unsubscribe)
-      await vi.advanceTimersByTimeAsync(0)
+      // The deferred cleanup can only run once the strategy's own topic
+      // promises resolve, and those are WebCrypto digests that settle off the
+      // timer queue. One tick is usually enough and occasionally is not, so
+      // give the event loop a bounded number of real turns instead.
+      for (let i = 0; i < 20 && unsubscribe.mock.calls.length === 0; i += 1) {
+        await vi.advanceTimersByTimeAsync(0)
+      }
       expect(unsubscribe).toHaveBeenCalledTimes(1)
     } finally {
       vi.useRealTimers()
