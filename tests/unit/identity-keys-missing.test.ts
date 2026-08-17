@@ -8,23 +8,26 @@ import { beforeEach, describe, expect, test, vi } from 'vitest'
 // disables invite sending). The parsed record is now retained as
 // `staleRecord` and threaded through both paths.
 
-const saved: { keys: unknown[]; records: unknown[] } = {
-  keys: [],
-  records: [],
-}
-let storedRecord: Record<string, unknown> | null = null
-let keysPresent = false
+const mockState = vi.hoisted(() => ({
+  saved: { keys: [] as unknown[], records: [] as unknown[] },
+  storedRecord: null as Record<string, unknown> | null,
+  keysPresent: false,
+  keysProbeError: null as unknown,
+}))
 
 vi.mock('@/lib/db/identity', () => ({
   IDENTITY_VERSION: 1,
-  identityExists: vi.fn(async () => storedRecord !== null),
-  loadIdentityRecord: vi.fn(async () => storedRecord),
-  identityKeysPresent: vi.fn(async () => keysPresent),
+  identityExists: vi.fn(async () => mockState.storedRecord !== null),
+  loadIdentityRecord: vi.fn(async () => mockState.storedRecord),
+  identityKeysPresent: vi.fn(async () => {
+    if (mockState.keysProbeError !== null) throw mockState.keysProbeError
+    return mockState.keysPresent
+  }),
   saveKeys: vi.fn(async (...args: unknown[]) => {
-    saved.keys.push(args)
+    mockState.saved.keys.push(args)
   }),
   saveIdentityRecord: vi.fn(async (record: unknown) => {
-    saved.records.push(record)
+    mockState.saved.records.push(record)
   }),
   signWithKeyring: vi.fn(async () => new Uint8Array(64)),
 }))
@@ -37,10 +40,11 @@ describe('keys-missing retains the parsed record (#47 E1 follow-up)', () => {
   const id = generateIdentity()
 
   beforeEach(() => {
-    saved.keys.length = 0
-    saved.records.length = 0
-    keysPresent = false
-    storedRecord = {
+    mockState.saved.keys.length = 0
+    mockState.saved.records.length = 0
+    mockState.keysPresent = false
+    mockState.keysProbeError = null
+    mockState.storedRecord = {
       version: 1,
       ed_pubkey_hex: 'aa'.repeat(32),
       x_pubkey_hex: 'bb'.repeat(32),
@@ -85,17 +89,59 @@ describe('keys-missing retains the parsed record (#47 E1 follow-up)', () => {
     expect(s.status).toBe('ready')
     expect(s.identity?.display_name).toBe('Sam')
     expect(s.staleRecord).toBeNull()
-    expect(saved.records).toHaveLength(1)
-    expect((saved.records[0] as { display_name: string }).display_name).toBe(
-      'Sam'
-    )
+    expect(mockState.saved.records).toHaveLength(1)
+    expect(
+      (mockState.saved.records[0] as { display_name: string }).display_name
+    ).toBe('Sam')
   })
 
   test('a ready boot (keys present) leaves staleRecord null', async () => {
-    keysPresent = true
+    mockState.keysPresent = true
     await useIdentityStore.getState().actions.refresh()
     const s = useIdentityStore.getState()
     expect(s.status).toBe('ready')
+    expect(s.staleRecord).toBeNull()
+  })
+
+  test('a rejected credential probe blocks boot without claiming the keys are missing', async () => {
+    mockState.keysProbeError = new Error(
+      'Linux Secret Service is unavailable or locked. Start or unlock KWallet.'
+    )
+    const consoleError = vi
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined)
+    try {
+      await useIdentityStore.getState().actions.refresh()
+    } finally {
+      consoleError.mockRestore()
+    }
+
+    const s = useIdentityStore.getState()
+    expect(s.status).toBe('error')
+    expect(s.errorKind).toBe('keychain-unavailable')
+    expect(s.identity).toBeNull()
+    expect(s.staleRecord?.display_name).toBe('Sam')
+  })
+
+  test('retry can leave the unavailable state once the credential store unlocks', async () => {
+    mockState.keysProbeError = new Error('credential store locked')
+    const consoleError = vi
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined)
+    try {
+      await useIdentityStore.getState().actions.refresh()
+    } finally {
+      consoleError.mockRestore()
+    }
+
+    mockState.keysProbeError = null
+    mockState.keysPresent = true
+    await useIdentityStore.getState().actions.refresh()
+
+    const s = useIdentityStore.getState()
+    expect(s.status).toBe('ready')
+    expect(s.errorKind).toBeNull()
+    expect(s.identity?.display_name).toBe('Sam')
     expect(s.staleRecord).toBeNull()
   })
 })

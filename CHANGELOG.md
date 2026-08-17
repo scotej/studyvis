@@ -1,6 +1,131 @@
 # Changelog
 
-## Unreleased
+## 1.11.3-rc.1 — 2026-08-15
+
+### Added
+
+- **StudyVis adds an x86_64 Linux AppImage release candidate.** CachyOS with KDE
+  Plasma on Wayland is the reference Linux desktop. The packaged build includes
+  a pinned WebRTC-enabled WebKitGTK 2.52.5 + librice 0.4.3 runtime and CPU-only
+  llama.cpp engine, stores private credentials through the freedesktop Secret
+  Service, and uses the KDE desktop portal + PipeWire for screen sharing and
+  optional AI capture. Linux is not promoted to supported-release status by
+  this implementation alone.
+- **Every desktop artifact now carries a locked third-party notice inventory.**
+  `THIRD-PARTY-NOTICES.txt` and its machine-readable JSON manifest cover the
+  npm production tree, all three target-filtered normal Cargo closures, and the
+  pinned llama.cpp runtime. Explicit version-bound handling includes vendored
+  Wry's MIT alternative, Inter and JetBrains Mono's OFL texts, llama.cpp b9095,
+  and victory-vendor's omitted root MIT plus all 13 nested licenses. CI
+  regenerates offline and fails on drift; extracted-artifact checks require the
+  packaged bytes and hashes. The inventory supports review but is not legal
+  advice or sign-off. Linux's separately built librice libraries also carry a
+  generated text/JSON inventory of the exact locked `rice-proto`/`rice-io`
+  normal dependency union selected by `cargo-c`, including `capi` features,
+  direct source checksums, and hash-checked license evidence.
+
+### Changed
+
+- **Discovery defaults now use the endpoints verified by the release health
+  check.** Nostr no longer depends on `nos.lol` after it began requiring proof
+  of work for anonymous events, and MQTT now pins three brokers that passed the
+  same subscribe/publish/receive path used by rendezvous instead of inheriting
+  `@trystero-p2p/mqtt`'s unavailable first default.
+- **The Linux candidate now carries its production WebRTC runtime instead of
+  trusting distro WebKitGTK.** Official distro release builds in the maintained
+  path compile GTK's `ENABLE_WEB_RTC` peer-connection binding out while leaving
+  the media-device API present; no runtime preference can reverse that compile
+  gate. StudyVis therefore builds the bundled runtime from hash-verified
+  WebKitGTK 2.52.5 (`8a531a9…f3364b`) and librice 0.4.3
+  (`4671e183…1e3f4b`) sources plus the reviewed AppImage runtime portability
+  patch (`907380c8…837eb8`). The patch resolves the packaged Web/Network/GPU
+  subprocesses, injected bundle, and sandbox helpers relative to the AppImage
+  executable before native fallbacks. The full hashes and source URLs live in
+  `INSTALL.md` and `ARCHITECTURE.md`. The build keeps other experimental
+  features off, preserves WebKit's Web/GPU/Network process sandbox, and packages
+  an exact build manifest, the applied patch, librice licenses, and a
+  readable/hash-addressed inventory of all 59 upstream WebKit license/notice
+  files. Tagged builds also create a deterministic corresponding-source archive
+  containing the exact upstream archives, full patch, pinned env, builder,
+  manifest, reconstruction README, and internal checksums. A companion
+  deterministic Linux system-source bundle inventories the finished AppImage's
+  ELF/symlink/hash/build-ID and dynamic-link closure, maps Ubuntu bytes to exact
+  package/source/copyright material, and includes pinned packaging-tool,
+  AppRun, and llama.cpp sources/notices. Both archive/checksum pairs are
+  mandatory and fail closed on an unmapped modeled byte, unavailable modeled
+  source, or bad checksum. The system-source pair now includes StudyVis's
+  source-built AppImage type-2 runtime revision 2: exact hash-pinned
+  type2/musl/zlib/decompression-only-zstd/libfuse/squashfuse/Meson sources and
+  licenses, exact Noble toolchain/CRT provenance, build metadata, a link map,
+  and per-input hashes. Verification requires an `x86_64-linux-musl` static PIE
+  with no interpreter or dynamic dependencies, using musl mallocng and no
+  mimalloc. This completes the pre-SquashFS runtime's static source/notice/link
+  closure. The hosted Noble image and apt indexes remain a bounded baseline,
+  not a bit-reproducible environment, and the evidence is not legal sign-off.
+  Because distro upgrades cannot service this copy, StudyVis now owns WebKitGTK/librice
+  advisory response, rebuilds, license/source obligations, physical
+  revalidation, and updater delivery.
+- **The Linux build baseline is Ubuntu 24.04.** WebKit's librice ICE agent
+  subclasses GStreamer's `GstWebRTCICE`, which exists only from GStreamer 1.22,
+  while WebKit's own configure gate still accepts 1.20 — Ubuntu 22.04 therefore
+  configured cleanly and failed hours later inside the unified build. The
+  private WebKit runtime (now revision 5), the AppImage, and the source-built
+  type-2 runtime (now revision 2, same sources and compiler generations
+  re-pinned to Noble packages) all build on Ubuntu 24.04 with GStreamer 1.24,
+  and the builder now asserts `gstreamer-webrtc-1.0 >= 1.22` up front. Noble's
+  own GStreamer 1.24.2 then broke the final link of `libwebkit2gtk-4.1.so`:
+  its `gst/webrtc/webrtc_fwd.h` ships without `G_BEGIN_DECLS`, so WebKit's C++
+  translation units declared `gst_webrtc_error_quark()` with C++ linkage and
+  emitted a mangled reference `libgstwebrtc-1.0`'s C symbol cannot satisfy.
+  Upstream added the guard before 1.24.12 and Ubuntu 24.04 is frozen at 1.24.2
+  in every pocket, so the portability patch now resolves that error domain by
+  its documented quark name below 1.24.12. The
+  AppImage consequently needs glibc 2.39 or newer — every rolling desktop,
+  CachyOS included, already satisfies that — and no longer carries the
+  `webrtcdsp` GStreamer element, which Ubuntu 24.04 does not ship and
+  WebKitGTK never loads.
+- **Linux peer-connection preferences and media permission are applied at the
+  correct boundaries.** The vendored wry 0.55.1 constructor passes WebRTC and
+  media-stream settings into `WebView::builder()` before the first document is
+  created. The native permission bridge then handles only WebKit's user-media
+  request class. Because WebKitGTK's public wrapper does not expose the
+  requesting `SecurityOrigin` values, it checks the current top-level WebView
+  URI: the exact bundled `tauri://localhost` URI (plus the fixed loopback dev
+  URI in debug builds) can receive user-media permission, the same request is
+  denied whenever the current top-level URI is external, the CSP keeps child
+  frames self-only, and unrelated permission types stay at WebKit's default.
+  Independently, a cross-platform trusted-navigation plugin rejects top-level
+  navigation outside the exact production app origin (plus the fixed debug
+  loopback origin); intended external links remain in the system opener.
+- **Preview and tagged-release coverage now includes Linux.** Installable
+  x86_64 AppImages are built beside macOS arm64 and Windows x86_64 artifacts;
+  a release draft is incomplete until its signed updater manifest carries all
+  three platform keys. Pull-request CI also builds and starts a packaged
+  AppImage under Xvfb after checking a Secret Service round-trip. Release
+  builds repeat the native inspection and first-document data-channel-offer
+  startup check against the exact Linux AppImage they produced and uploaded.
+  Release publication is blocked on the PLAN §8 physical CachyOS KDE Wayland
+  matrix for the exact draft AppImage: an exchanged WebRTC data channel,
+  bidirectional camera/microphone/screen media, AI capture, and same-draft
+  Linux↔Linux, Linux↔macOS, and Linux↔Windows physical peer runs, plus launch,
+  in-app key custody, bundled AI, and writable-AppImage update behaviour. A
+  dedicated publication workflow now revalidates exact-commit CI, requires the
+  latest `release.yml` run for the exact tag/commit to have succeeded after its
+  uploaded-AppImage runtime smoke. That run now attests each downloadable build
+  output and the final updater manifest. Publishing accepts the physical-test
+  AppImage SHA-256, downloads the exact twelve expected assets, byte-compares the
+  updater sidecars, verifies exact-workflow/tag/commit provenance for every
+  asset, and re-downloads/re-hashes the AppImage immediately before making the
+  draft public. On 2026-08-15, the required `release` environment, active
+  `v*` lifecycle rule with its `Always` `RepositoryRole 5` (admin) bypass for
+  the owner-scoped `RELEASE_PAT`, and immutable releases were configured.
+  GitHub hides the bypass list from the workflow's read-only ruleset response,
+  so an admin must verify that no broader bypass is configured. The physical
+  candidate matrix remains a separate publication gate.
+- **Linux install and support boundaries are documented end to end.** The
+  install guide covers CachyOS dependencies, FUSE and extraction launch paths,
+  Secret Service providers, KDE Wayland portals/PipeWire, automatic-update
+  write permissions, and the current x86_64/CPU-only/native-package limits.
 
 ## 1.11.2 — 2026-08-12 — More dependable study sessions
 

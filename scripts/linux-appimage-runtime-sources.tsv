@@ -1,0 +1,8 @@
+component	version	archive	url	sha256	license	license_paths
+type2-runtime	75849dce7cc37e4319b633df1f116ca895c71a12	type2-runtime-75849dce7cc37e4319b633df1f116ca895c71a12.tar.gz	https://codeload.github.com/AppImage/type2-runtime/tar.gz/75849dce7cc37e4319b633df1f116ca895c71a12	b7af4960da4b90364e935a3281d04fad6560da4813c012414fa2f738291ad443	MIT	LICENSE
+musl	1.2.5	musl-1.2.5.tar.gz	https://musl.libc.org/releases/musl-1.2.5.tar.gz	a9a118bbe84d8764da0ea0d28b3ab3fae8477fc7e4085d90102b8596fc7c75e4	MIT	COPYRIGHT
+zlib	1.3.1	zlib-1.3.1.tar.gz	https://github.com/madler/zlib/releases/download/v1.3.1/zlib-1.3.1.tar.gz	9a93b2b7dfdac77ceba5a558a580e74667dd6fede4585b91eefb60f03b72df23	Zlib	LICENSE
+zstd	1.5.6	zstd-1.5.6.tar.gz	https://github.com/facebook/zstd/releases/download/v1.5.6/zstd-1.5.6.tar.gz	8c29e06cf42aacc1eafc4077ae2ec6c6fcb96a626157e0593d5e82a34fd403c1	BSD-3-Clause	LICENSE
+libfuse	3.15.0	fuse-3.15.0.tar.xz	https://github.com/libfuse/libfuse/releases/download/fuse-3.15.0/fuse-3.15.0.tar.xz	70589cfd5e1cff7ccd6ac91c86c01be340b227285c5e200baa284e401eea2ca0	LGPL-2.1-only	LICENSE;LGPL2.txt
+squashfuse	0.5.2	squashfuse-0.5.2.tar.gz	https://github.com/vasi/squashfuse/archive/0.5.2.tar.gz	db0238c5981dabbd80ee09ae15387f390091668ca060a7bc38047912491443d3	BSD-2-Clause	LICENSE
+meson	1.7.2	meson-1.7.2.tar.gz	https://github.com/mesonbuild/meson/releases/download/1.7.2/meson-1.7.2.tar.gz	4d40d63aa748a9c139cc41ab9bffe43edd113c5639d78bde81544ca955aea890	Apache-2.0	COPYING

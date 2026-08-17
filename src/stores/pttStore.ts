@@ -6,12 +6,12 @@ import { create } from 'zustand'
 // edge must never mean "release": repeated press() calls are idempotent.
 //
 // `awaitingRelease` is deliberately distinct from `active`. The first Pressed
-// edge starts one physical hold and sets both. The 120-second safety timer may
-// force `active` false, but it MUST leave `awaitingRelease` true: otherwise a
-// repeated Pressed from the same still-held key could be mistaken for a new
-// hold and re-open the microphone for another two minutes. Only an actual
-// Released edge (or a session reset) ends the physical hold and permits the
-// next Pressed to activate again.
+// edge starts one logical hold and sets both. More than one input source can
+// own that hold on Linux (the native shortcut plus the in-window Wayland
+// fallback), so `heldSources` keeps a release from one source from cancelling
+// another source that is still physically down. The 120-second safety timer
+// may force `active` false, but it MUST leave the hold latched: otherwise a
+// repeated Pressed edge could re-open the microphone for another two minutes.
 //
 // Three independent guards keep the microphone fail-safe:
 //   1. `reset()` is called by SessionView's per-session reset effect AND on
@@ -32,6 +32,8 @@ import { create } from 'zustand'
 // equality checks / re-renders. Unit-tested via the injectable clock seam.
 
 export const MAX_HOLD_MS = 120_000
+
+export type PttSource = 'native-shortcut' | 'session-button'
 
 type Scheduler = {
   setTimeout: (handler: () => void, ms: number) => number
@@ -70,21 +72,27 @@ function clearHoldTimer(): void {
 type PttState = {
   active: boolean
   awaitingRelease: boolean
+  heldSources: PttSource[]
   revision: number
-  press: () => void
-  release: () => void
+  press: (source?: PttSource) => void
+  release: (source?: PttSource) => void
   reset: () => void
 }
 
 export const usePttStore = create<PttState>((set, get) => ({
   active: false,
   awaitingRelease: false,
+  heldSources: [],
   revision: 0,
-  press: () => {
-    // A repeat from the current physical hold is always a no-op. In
-    // particular, the failsafe may already have muted `active`; the hold is
-    // still not eligible to activate again until its Released edge arrives.
-    if (get().awaitingRelease) return
+  press: (source = 'native-shortcut') => {
+    const current = get()
+    // A repeat from this physical source is always a no-op. A second source
+    // joins the existing hold without extending its failsafe deadline.
+    if (current.heldSources.includes(source)) return
+    if (current.awaitingRelease) {
+      set({ heldSources: [...current.heldSources, source] })
+      return
+    }
 
     clearHoldTimer()
     holdTimer = activeScheduler.setTimeout(() => {
@@ -99,16 +107,24 @@ export const usePttStore = create<PttState>((set, get) => ({
     set((state) => ({
       active: true,
       awaitingRelease: true,
+      heldSources: [source],
       revision: state.revision + 1,
     }))
   },
-  release: () => {
-    clearHoldTimer()
+  release: (source = 'native-shortcut') => {
     const current = get()
-    if (!current.active && !current.awaitingRelease) return
+    if (!current.heldSources.includes(source)) return
+    const heldSources = current.heldSources.filter((held) => held !== source)
+    if (heldSources.length > 0) {
+      set({ heldSources })
+      return
+    }
+
+    clearHoldTimer()
     set((state) => ({
       active: false,
       awaitingRelease: false,
+      heldSources: [],
       revision: state.revision + 1,
     }))
   },
@@ -119,6 +135,7 @@ export const usePttStore = create<PttState>((set, get) => ({
     set((state) => ({
       active: false,
       awaitingRelease: false,
+      heldSources: [],
       revision: state.revision + 1,
     }))
   },

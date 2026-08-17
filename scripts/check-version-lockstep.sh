@@ -10,7 +10,7 @@
 #     "StudyVis main" release).
 #   - release-prep.yml post-bump: `perl -0pi` exits 0 whether or not its
 #     pattern matched, so a regex drift would bake a silent partial bump
-#     into an immutable tag without this re-read.
+#     into a version tag without this re-read.
 #
 # The ::error:: prefix renders as an annotation on GitHub Actions and is
 # harmless noise when run locally.

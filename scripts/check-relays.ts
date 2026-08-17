@@ -1,10 +1,9 @@
 #!/usr/bin/env tsx
 // #47 C4 — health check for BOTH halves of the dual-strategy rendezvous:
-// the pinned Nostr relays (DEFAULT_RELAY_URLS) and the MQTT brokers baked
-// into @trystero-p2p/mqtt. Relays and public test brokers die, and with no
-// auto-update a dead pinned endpoint degrades default-config discovery for
-// every install simultaneously — fixing either list means shipping a
-// release, so their health AT RELEASE TIME is load-bearing. (MQTT is the
+// the pinned Nostr relays (DEFAULT_RELAY_URLS) and pinned MQTT brokers
+// (DEFAULT_MQTT_BROKER_URLS). Relays and public brokers die, and a dead pin
+// degrades default-config discovery until an update ships, so their health AT
+// RELEASE TIME is load-bearing. (MQTT is the
 // redundancy that fixed the v1.2.2 clock-skew/Nostr-blocked failure; if its
 // brokers rot silently, that failure quietly returns.)
 //
@@ -18,25 +17,17 @@
 import { createHash, randomBytes } from 'node:crypto'
 
 import { schnorr } from '@noble/curves/secp256k1.js'
-// The same broker list the shipped strategy resolves (no override is
-// forwarded in src/lib/trystero/index.ts, so these are what installs use).
-import { defaultRelayUrls as MQTT_BROKER_URLS } from '@trystero-p2p/mqtt'
 import mqtt from 'mqtt'
 
+import { DEFAULT_MQTT_BROKER_URLS } from '../src/lib/trystero/mqttRelayUrls'
 import { DEFAULT_RELAY_URLS } from '../src/lib/trystero/relayUrls'
 
-// Node 20 — the version CI and release-prep run — has no global WebSocket
-// (it stabilized in Node 22), so the Nostr probe silently failed every run
-// with 'WebSocket is not defined' behind release-prep's continue-on-error.
-// Fall back to `ws` (already in the tree via mqtt), whose addEventListener
-// surface matches the browser API this probe uses.
+// CI and release-prep run Node 24, whose global WebSocket is stable. Keep the
+// `ws` fallback for a developer shell that has not yet picked up .node-version;
+// its addEventListener surface matches the browser API this probe uses.
 const WebSocketImpl: typeof WebSocket =
   (globalThis as { WebSocket?: typeof WebSocket }).WebSocket ??
   ((await import('ws')).default as unknown as typeof WebSocket)
-
-// @trystero-p2p/mqtt's un-exported defaultRedundancy: getRelays takes the
-// FIRST 4 entries, unshuffled, so every install talks to exactly these.
-const MQTT_REDUNDANCY = 4
 
 const TIMEOUT_MS = 10_000
 // Ephemeral kind range (20000–29999): relays broadcast to live subscribers
@@ -189,10 +180,9 @@ function checkMqttBroker(url: string): Promise<CheckResult> {
   })
 }
 
-const activeBrokers = MQTT_BROKER_URLS.slice(0, MQTT_REDUNDANCY)
 const [nostrResults, mqttResults] = await Promise.all([
   Promise.all(DEFAULT_RELAY_URLS.map(checkRelay)),
-  Promise.all(activeBrokers.map(checkMqttBroker)),
+  Promise.all(DEFAULT_MQTT_BROKER_URLS.map(checkMqttBroker)),
 ])
 
 function report(label: string, results: CheckResult[]): number {
@@ -211,7 +201,7 @@ function report(label: string, results: CheckResult[]): number {
 
 const nostrFailures = report('Nostr relays (DEFAULT_RELAY_URLS):', nostrResults)
 const mqttFailures = report(
-  `MQTT brokers (@trystero-p2p/mqtt defaults, first ${MQTT_REDUNDANCY}):`,
+  'MQTT brokers (DEFAULT_MQTT_BROKER_URLS):',
   mqttResults
 )
 const total = nostrResults.length + mqttResults.length
@@ -225,7 +215,7 @@ if (nostrFailures > 0) {
 }
 if (mqttFailures > 0) {
   console.log(
-    'Dead brokers silently degrade the dual-strategy rendezvous to Nostr-only. The broker list ships inside @trystero-p2p/mqtt; to override it, pin a curated list via relayConfig.urls in the joinRoomMqtt call (src/lib/trystero/index.ts).'
+    'Dead brokers silently degrade the dual-strategy rendezvous to Nostr-only; update DEFAULT_MQTT_BROKER_URLS (src/lib/trystero/mqttRelayUrls.ts) before the next release.'
   )
 }
 if (nostrFailures + mqttFailures > 0) {

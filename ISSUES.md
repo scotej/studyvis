@@ -356,7 +356,10 @@ Format: one `###` section per finding, ordered by ID. Entries are appended, neve
 
 **Evidence.** CI compiled only aarch64-apple-darwin, so `#[cfg(target_os="windows")]` code first built inside `release.yml` AFTER the tag was pushed.
 
-**Status.** **fixed** — macOS + Windows Rust matrix on every push/PR.
+**Status.** **fixed** — the two shipped Rust hosts (macOS arm64 and Windows
+x86_64) plus the Linux x86_64 release-candidate host compile/test on every
+push/PR; CI also builds and starts the packaged AppImage under an isolated
+desktop/session bus.
 
 ### I44 — Sev3
 
@@ -572,7 +575,25 @@ Format: one `###` section per finding, ordered by ID. Entries are appended, neve
 
 **Evidence.** A half-built draft (one platform's artifact missing from `latest.json`) could be published, stranding every friend on the missing platform with no update path and a false "you're on the latest".
 
-**Status.** **fixed** — a job asserts both platforms are present in the draft's `latest.json` and, on failure, stamps the draft title "INCOMPLETE, DO NOT PUBLISH" (needs `contents: write` to read a draft). Not runnable on this box; validated by YAML parse + reading.
+**Status.** **fixed** — the draft verifier fails closed unless `latest.json`
+contains signed `darwin-aarch64`, `windows-x86_64`, and `linux-x86_64` entries
+whose URLs resolve to assets on that draft, and unless the release also carries
+a DMG, NSIS setup EXE, and AppImage. On failure it stamps the draft title
+"INCOMPLETE, DO NOT PUBLISH" (the job needs `contents: write` to read/edit a
+draft). The dedicated publish workflow repeats those checks, also requires
+successful CI for the exact tag commit on `main` and a successful latest
+`release.yml` run whose `head_branch` is the exact tag and whose `head_sha` is
+that commit (so an upload followed by a failed exact-AppImage smoke cannot
+publish), and is the documented path that changes the draft to published.
+**Operational controls:** on 2026-08-15, the repository configured its
+`release` environment with `scotej` as required reviewer, enabled immutable
+releases, and added an active `v*` tag rule restricting creation/update/deletion.
+Its sole `Always` bypass entry is
+`RepositoryRole 5` (admin), used by the owner-scoped `RELEASE_PAT`; no Write,
+Maintain, team, or integration bypass may be added. GitHub hides
+`bypass_actors` from the workflow's read-only ruleset response, so the gate
+verifies scope and rule types while an admin must periodically verify the actor
+list. This sole-owner configuration is not independent two-person approval.
 
 ### I71 — Sev2
 
@@ -702,17 +723,42 @@ Format: one `###` section per finding, ordered by ID. Entries are appended, neve
 
 **Status.** **fixed** — remote membership now changes membership only; deliberate departure and transport loss both leave the survivor in the same active session until a local Leave, confirmed quit, or forced rejection. The 20-second deadline belongs only to a client that chose Leave and wants to rejoin. New session rows persist canonical per-pubkey overlap milliseconds in nullable `peer_presence_ms` (`{}` for a known-solo row), accumulated on a monotonic clock across leave/rejoin intervals and same-topic stints. `peer_pubkeys` remains the participant/session-count source. NULL, missing, malformed, partial, or invalid presence data is legacy/unknown and falls back for the whole row to the previous whole-session partner-duration interpretation; an unknown earlier stint remains unknown after merging. `friends.last_studied_with` advances monotonically when real overlap ends, using the receiver's local observation rather than the survivor's later teardown or a remote timestamp. Pomodoro hands an active timer to a sole survivor when needed and never freezes or resets merely because the remote count reached zero.
 
+### I87 — Sev1
+
+`scripts/linux-webkit-runtime.env` + `scripts/build-linux-webkit-runtime.sh` + `scripts/patches/webkitgtk-2.52.5-appimage-sandbox.patch` + `src-tauri/vendor/wry/src/webkitgtk/mod.rs` + `src-tauri/src/linux_media_permissions.rs` + Linux AppImage build/check paths
+
+**Evidence.** The Linux candidate could compile and open a window while its core peer session was structurally unavailable. WebKitGTK's GTK release configuration makes `ENABLE_WEB_RTC` follow the experimental-feature umbrella but defaults `ENABLE_MEDIA_STREAM` on independently. Official distro production builds in the maintained CachyOS/Arch path leave the umbrella off, so the native probe exposed `navigator.mediaDevices` while the code behind `RTCPeerConnection` was compiled out. A Wry preference cannot restore that compile-time binding. Supplying it during construction is still the strongest boundary because it places the preference in the initial page configuration; the same compile-gated-off probe could not prove whether a later native-handle mutation would otherwise have been early enough. A live process or rendered frontend therefore was not evidence that Trystero could construct its data channel, much less exchange media with a peer. Leaving WebKit's `permission-request` signal unanswered separately denied capture, while a broad allow handler would have granted navigated external pages more authority than the app needs. WebKitGTK 2.52.5's public user-media request wrapper does not expose the requesting `SecurityOrigin` values, so the available boundary is the allowlisted current top-level WebView URI together with the app's self-only frame CSP, not independent authentication of each request origin.
+
+**Status.** **fixed at the implementation/package level; release validation remains open** — the x86_64 AppImage now owns a private runtime revision 5: WebKitGTK 2.52.5 source SHA-256 `8a531a9abd2215936e8a8a914c077b586c0228b31d652f205286a8ec90f3364b`, librice 0.4.3 tag archive SHA-256 `4671e1835f9ab0f8d87e8d9e22b6bfb06f928aeae442841ab81881dff61e3f4b`, and the AppImage runtime portability patch SHA-256 `12a6cf019e883c9f13c84a904e7410247678dca094289124fc6b76fc4a66bb0b`. The patch resolves the packaged Web/Network/GPU subprocesses and injected bundle from `studyvis-webkit-runtime/` beside the executable, and packaged `bwrap`/`xdg-dbus-proxy` directly beside it, before native fallbacks. The build keeps the general experimental umbrella off while asserting `ENABLE_WEB_RTC`, `ENABLE_MEDIA_STREAM`, GStreamer WebRTC, librice, and bubblewrap on; packages WebKit's processes, media/sandbox helpers, exact `BUILD-MANIFEST.txt`, readable/hash-addressed inventory of all 59 upstream WebKit license/notice files, librice licenses, and applied patch; and verifies the exact AppImage's dependencies/elements. Tagged builds also emit the deterministic `StudyVis_X.Y.Z_linux-webkit-sources.tar.gz` corresponding-source archive and checksum sidecar after the exact-AppImage smoke, and both must verify before publication. The companion system-source pair carries StudyVis's source-built AppImage type-2 runtime revision 2, including exact hash-pinned type2/musl/zlib/decompression-only-zstd/libfuse/squashfuse/Meson sources and licenses, Noble toolchain/CRT provenance, build metadata, link map, and link-input hashes. Verification requires an `x86_64-linux-musl` static PIE with no interpreter or dynamic dependencies, using musl mallocng and no mimalloc; this completes the pre-SquashFS runtime's static source/notice/link closure but is not legal sign-off or a bit-reproducibility claim for the mutable Noble baseline. The entire Linux leg builds on Ubuntu 24.04: WebKit's librice ICE agent subclasses GStreamer's `GstWebRTCICE`, which exists only from GStreamer 1.22, so Ubuntu 22.04's 1.20.3 configured cleanly and then failed inside the unified build. Noble's own GStreamer 1.24.2 then broke the final link: its `gst/webrtc/webrtc_fwd.h` carries no `G_BEGIN_DECLS`, so every C++ translation unit declared `gst_webrtc_error_quark()` with C++ linkage and emitted a mangled reference that `libgstwebrtc-1.0`'s C symbol cannot satisfy. Upstream added the guard before 1.24.12 and Noble ships 1.24.2 in every pocket, so the portability patch resolves that error domain by its documented quark name instead of through the symbol. The AppImage's glibc floor is therefore 2.39, and `webrtcdsp` — absent from Ubuntu 24.04 and never loaded by WebKitGTK — is no longer in the curated GStreamer set. Vendored wry passes WebRTC/media settings into `WebView::builder()` before construction. The Rust bridge handles only `WebKitUserMediaPermissionRequest`, allowing it when the current top-level WebView URI exactly matches the app URI (plus the fixed debug URI in debug builds), denying it after external top-level navigation, and leaving other request classes untouched; because the wrapper does not expose requesting origins, the CSP's self-only frame policy is part of this boundary. CI additionally requires the first document to create a local data-channel offer and log `runtime.webrtc ready`, but that is intentionally not called a peer pass. Linux remains a release candidate until PLAN §8 records the exact draft AppImage's physical Linux↔Linux/macOS/Windows data-channel/media matrix; the external GitHub release environment, tag ruleset, and immutable-release controls remain separate publication blockers. Bundling also transfers WebKitGTK/librice advisory response and license/corresponding-source obligations from the distro to StudyVis.
+
+**Update (2026-08-15).** The `release` environment, active `v*` lifecycle rule,
+and immutable releases are now configured. The exact-draft physical Linux
+candidate matrix remains the outstanding release gate.
+
+### I88 — Sev3
+
+`scripts/build-linux-appimage-runtime.sh` + `scripts/prepare-linuxdeploy-tools.sh` + `scripts/build-linux-system-sources.sh` + `scripts/linux-appimage-runtime-sources.tsv`
+
+**Evidence.** A cold Linux build could abort at random on a pinned source archive that every signal curl reports said had downloaded cleanly. `--retry`'s transient set covers connection failures and 408/429/5xx; a 200 whose body arrives truncated is `CURLE_PARTIAL_FILE` (18), outside that set, so curl exited 0 without re-fetching, the short archive reached the `sha256sum` gate, mismatched its pinned hash, and killed the build. Fail-closed, so a corrupt runtime could never be packaged — but the failure wears the exact shape of a supply-chain event, which is expensive to re-triage each time it resurfaces. Observed twice on `zlib` within one PR, returning a *different* wrong digest each time (`cdab9112…`, then `298a5335…`) from a URL whose bytes still hashed to the pinned `9a93b2b7…` when fetched by hand; two digests from one immutable URL is a truncated transfer, not upstream drift. Every one of the seven pinned components is a draw from the same loop. The preview and pre-merge legs cache the built runtime, so a cache hit hides this; the tagged release leg is cache-free by policy and therefore always cold-downloads with no fallback.
+
+**Status.** **fixed** — `zlib` now resolves from its GitHub release asset, which is byte-identical (same pinned `9a93b2b7…`) and removes `zlib.net` as the last outlier host in a manifest otherwise served by codeload, `musl.libc.org`, and GitHub releases. The three lagging fetch sites adopted the retry shape `build-linux-webkit-runtime.sh:272` already proves out (`--retry 3 --retry-all-errors --connect-timeout 30`; `fetch-llama-server.sh` uses the same idea), so a truncated transfer is re-fetched rather than hash-failed. The SHA gate is untouched and remains the authority: a retry that still mismatches aborts exactly as before, so this changes only how many transport faults reach the gate, never what the gate accepts. No pinned tuple changed, so no runtime revision bump and no license/source review. Editing `linux-appimage-runtime-sources.tsv` or `build-linux-appimage-runtime.sh` is safe against a stale cached tree only because the `studyvis-linuxdeploy-` key hashes both — `verify-linux-appimage-runtime.sh` byte-compares them and aborts rather than rebuilds, so the cache key is what forces the clean rebuild.
+
 ## Archive — retired backlogs
 
-Two documents used to sit beside this ledger and were deleted once they had no open work left to describe: `BUILD-PROMPTS.md` (the sequenced V0→V3 build plan) and `IMPROVEMENTS.md` (the v1.2.0-era improvement backlog). Git history holds both in full — `git log --diff-filter=D -- BUILD-PROMPTS.md IMPROVEMENTS.md`, then `git show <sha>^:<file>`. What survives here is the part still cited from code.
+Two documents used to sit beside this ledger and were deleted once their implementation backlog had no open code work left: `BUILD-PROMPTS.md` (the sequenced V0→V3 build plan) and `IMPROVEMENTS.md` (the v1.2.0-era improvement backlog). Git history holds both in full — `git log --diff-filter=D -- BUILD-PROMPTS.md IMPROVEMENTS.md`, then `git show <sha>^:<file>`. Linux's implementation checklist is complete, but its operational release sign-off remains pending. What survives here is the part still cited from code.
 
 ### Improvement backlog (2026-06, v1.2.0-era)
 
-**Retired, not live.** A code-level audit on 2026-07-10 verified every item against the source: **55 of 56 shipped** (largely in v1.2.1, with v1.2.2 and v1.3.1 following), **1 partial (P1)**, **0 open**. The IDs below appear as comment tags at the exact code sites that implemented them; the letter-to-section legend is in `CLAUDE.md`. Item text described the **v1.2.0-era gap** it was written against, not today's code — which is why only the titles are kept here, as a decoder for those tags rather than as a backlog.
+**Retired, not live.** The original code-level audit on 2026-07-10 found 55 of 56 items shipped and P1 partial. The Linux production-support pass completes P1's implementation checklist, so the code tally is **56 of 56 implemented**, **0 partial**, **0 open**; operational sign-off on the exact release candidate remains a publication gate, not an archived code item. The IDs below appear as comment tags at the exact code sites that implemented them; the letter-to-section legend is in `CLAUDE.md`. Item text described the **v1.2.0-era gap** it was written against, not today's code — which is why only the titles are kept here, as a decoder for those tags rather than as a backlog.
 
 Exceptions and judgment calls, so nobody re-litigates them from an item title alone:
 
-- **P1 (Linux deferral checklist) — partial.** Its literal ask shipped — the deferral now has a concrete trigger + unblock checklist (PLAN §8) — but the Linux work the checklist describes (keyring feature, `.AppImage` job, smoke-test re-run) has not started.
+- **P1 (Linux deferral checklist) — implementation complete, release-blocked.** The trigger fired and the
+  checklist is now the maintained release gate rather than deferred work:
+  Secret Service key custody, Linux CI, x86_64 AppImage preview/release jobs,
+  three-platform updater-manifest validation, and a physical CachyOS KDE
+  Wayland smoke-test matrix are documented in PLAN §8 and ARCHITECTURE §2/§12.
+  The exact candidate must still pass that matrix before this becomes shipped.
 - **X2** shipped via its sanctioned alternative: the Intel-Mac claim was dropped from the docs rather than adding an `x64.dmg` build.
 - **X7** shipped as the documented triage (ISSUES.md I19); the "when convenient" dev-dep bumps remain untaken by design.
 - **S2** closed the privacy defect with a stuck-key guard (120 s, not ~30 s) + per-session reset; the suggested blur-release was considered and deliberately rejected (`PttListener.tsx`) because the PTT shortcut is system-wide.

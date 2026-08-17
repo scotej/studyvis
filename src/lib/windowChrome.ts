@@ -8,12 +8,10 @@
 
 import { tokens } from '@/design/tokens'
 
-// 'mac' and 'windows' are the two platforms StudyVis ships installers for
-// (PLAN.md §5). Linux is not part of the V1+V2 release matrix; if the app
-// somehow runs there, we fall through to 'windows' chrome shape — a
-// functional rendering rather than a hard-coded "macOS only" fallback. The
-// custom chrome setting itself stays opt-in everywhere.
-export type ChromePlatform = 'mac' | 'windows'
+// Linux uses the same right-side control order as Windows, but stays explicit
+// in the type so platform-specific behavior cannot silently fall through when
+// the supported desktop matrix changes again.
+export type ChromePlatform = 'mac' | 'windows' | 'linux'
 
 // Detects the host platform from `navigator.userAgent`. Mirror the regex
 // used by `isMacLikePlatform` in `src/lib/utils.ts` so the two helpers
@@ -21,6 +19,7 @@ export type ChromePlatform = 'mac' | 'windows'
 // tests can drive both branches without monkey-patching `navigator`.
 export function detectChromePlatformFromUA(userAgent: string): ChromePlatform {
   if (/Mac|iPhone|iPad|iPod/.test(userAgent)) return 'mac'
+  if (/Linux|X11/.test(userAgent)) return 'linux'
   return 'windows'
 }
 
@@ -29,10 +28,8 @@ export function detectChromePlatform(): ChromePlatform {
   return detectChromePlatformFromUA(navigator.userAgent)
 }
 
-// The order of Windows window controls, left-to-right inside the cluster
-// on the right edge of the titlebar. macOS hosts the system traffic
-// lights (rendered by AppKit via `TitleBarStyle::Overlay`) on the left,
-// so the cluster is empty on that platform.
+// Windows and Linux host controls on the right. macOS keeps the native system
+// traffic lights on the left, so the React cluster is empty there.
 export type WindowControl = 'minimize' | 'maximize' | 'close'
 
 export function windowControlOrder(

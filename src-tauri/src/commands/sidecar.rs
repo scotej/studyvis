@@ -45,8 +45,8 @@ use crate::db::data_dir;
 // to src-tauri/binaries/ and the path under bundle.resources where companion
 // dylibs/dlls land. tauri_build::build() emits this from cargo's TARGET, so it
 // always names the triple actually being built. The hand-written #[cfg] arms
-// this replaces left the const undefined on any unlisted triple (aarch64
-// Linux, the dev host) — an E0425 raised far from its cause. The build-time
+// this replaces left the const undefined on any unlisted triple (such as
+// aarch64 Linux) — an E0425 raised far from its cause. The build-time
 // gate is softer since I73: build.rs writes a placeholder for debug-profile
 // builds (release-profile builds still fail outright when
 // binaries/llama-server-<triple> is missing).
@@ -718,7 +718,7 @@ fn with_sidecar_log<T>(write: impl FnOnce() -> T) -> T {
 // and Windows now ships the cross-vendor Vulkan b9095 archive. `auto` and an
 // explicit device therefore offload all catalog-model layers on those release
 // platforms, while CPU explicitly combines --device none with zero GPU layers.
-// Linux remains a dev-only CPU package, so its layer count stays zero. The
+// The pinned Linux x64 package is CPU-only, so its layer count stays zero. The
 // selection is snapshotted when a sidecar generation starts and is carried
 // through crash respawns; editing the settings file behind the running app
 // cannot silently move a live model to different hardware.

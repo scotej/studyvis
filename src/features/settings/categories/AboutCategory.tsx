@@ -75,9 +75,9 @@ export function AboutCategory() {
   // One row that changes shape with the updater's state, rather than four
   // rows that are empty most of the time.
   const updateStatusRow = () => {
-    // Issue #77: the bundle can't swap itself in place (macOS running off
-    // the mounted .dmg), so there is no button to offer — the help text
-    // carries the way out. Shown regardless of the toggle, like "ready":
+    // Issue #77: the bundle can't swap itself in place, so there is no button
+    // to offer — the help text carries the way out. Shown regardless of the
+    // toggle, like "ready":
     // the knowledge is already in hand and nothing outbound follows.
     if (status === 'blocked' && pendingVersion) {
       return (

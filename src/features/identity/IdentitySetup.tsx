@@ -26,6 +26,8 @@ export type IdentitySetupProps = {
 // identity.json was lost but the keychain survived), steer the user to Back →
 // "I have a backup" instead of dead-ending on the generic save error.
 const KEYS_EXIST_MARKER = 'identity keys already exist'
+const LINUX_SECRET_SERVICE_ERROR_MARKER =
+  'Linux Secret Service is unavailable or locked'
 
 export function IdentitySetup({
   mnemonic,
@@ -49,7 +51,9 @@ export function IdentitySetup({
       toast.error(
         raw.includes(KEYS_EXIST_MARKER)
           ? strings.identity.setup.keysExistError
-          : strings.common.errors.savingIdentity
+          : raw.includes(LINUX_SECRET_SERVICE_ERROR_MARKER)
+            ? strings.identity.secretServiceError
+            : strings.common.errors.savingIdentity
       )
     } finally {
       setSubmitting(false)

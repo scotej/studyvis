@@ -43,9 +43,8 @@ export type UpdaterStatus =
   | 'upToDate'
   | 'error'
   // An update exists but this bundle can't swap itself in place (issue #77:
-  // macOS running translocated off the mounted .dmg, or any read-only
-  // volume). Process-permanent — the fix is quitting and moving the app —
-  // so it short-circuits every later check.
+  // macOS running translocated off the mounted .dmg, or Linux not running a
+  // writable AppImage). Process-permanent, so later checks short-circuit.
   | 'blocked'
 
 export type InstallContext = {
@@ -160,8 +159,8 @@ export const useUpdaterStore = create<UpdaterState>((set, get) => ({
 
     // Issue #77: a bundle the plugin can never swap in place used to download
     // the installer on every launch just to fail at "Restart now". Ask first;
-    // when blocked, keep the version for the UI's move-to-Applications
-    // guidance and move no bytes. Fail open on a probe error — the worst
+    // when blocked, keep the version for the UI's manual-install guidance and
+    // move no bytes. Fail open on a probe error — the worst
     // case is the old behavior (install errors with the generic toast).
     let context: InstallContext = { updatable: true, reason: null }
     try {

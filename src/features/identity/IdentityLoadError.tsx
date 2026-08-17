@@ -14,7 +14,9 @@ type Mode = 'error' | 'recover'
 // #47 E1 — the 'keys-missing' errorKind (file parsed fine but the keychain
 // definitively holds no keys) renders the same screen with recovery-first
 // copy: retrying can't fix an empty keychain, so the 24-word restore is the
-// primary action there.
+// primary action there. An unavailable/locked credential store is different:
+// the keys may still exist, so it offers Retry only and never invites an
+// overwrite through Recover.
 export function IdentityLoadError() {
   const { errorKind, staleRecord, actions } = useIdentity()
   const [mode, setMode] = useState<Mode>('error')
@@ -42,7 +44,13 @@ export function IdentityLoadError() {
 
   return (
     <IdentityLoadErrorView
-      variant={errorKind === 'keys-missing' ? 'keysMissing' : 'file'}
+      variant={
+        errorKind === 'keys-missing'
+          ? 'keysMissing'
+          : errorKind === 'keychain-unavailable'
+            ? 'keychainUnavailable'
+            : 'file'
+      }
       retrying={retrying}
       onRetry={() => {
         setRetrying(true)

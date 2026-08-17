@@ -23,7 +23,7 @@
 //! runtime just gains one more. `WKDisplayCapturePermissionDecisionScreenPrompt`
 //! hands the surface choice back to the OS picker, which is the behaviour the
 //! rest of the AI capture path is written against (see
-//! `src/features/ai/README.md` §"Acquire strategy").
+//! `src/features/ai/README.md` §"Live capture pipeline").
 //!
 //! Fail-safe by construction: if the selector is ever renamed or the delegate
 //! can't be reached, `install` logs and returns, leaving the pre-fix behaviour

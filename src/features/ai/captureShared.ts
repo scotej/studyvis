@@ -1,6 +1,7 @@
-// Shared frame-extraction + JPEG-encoding pipeline used by captureFace and
-// captureScreen. Both flows resolve to a base64 JPEG that slots directly into
-// an OpenAI-compatible image content block (data URI built by the caller).
+// Shared frame-extraction + JPEG-encoding pipeline used by captureFace, the
+// one-shot captureScreen utility, and sampleLoop's long-lived screen streams.
+// Each path resolves to a base64 JPEG that slots directly into an
+// OpenAI-compatible image content block (data URI built by the caller).
 //
 // The pipeline is split behind a `CaptureRuntime` interface so unit tests can
 // substitute fakes without spinning a real DOM — Vitest runs in node and has
@@ -463,7 +464,7 @@ export function getCaptureRuntime(): CaptureRuntime {
 
 // Aspect-preserving downscale: returns the (w, h) pair that fits the source
 // inside `maxWidth` keeping its aspect ratio, rounded to integer pixels.
-// Used by captureScreen; captureFace uses a fixed square.
+// Used by both screen-capture paths; captureFace uses a fixed square.
 export function fitWidth(
   sourceWidth: number,
   sourceHeight: number,

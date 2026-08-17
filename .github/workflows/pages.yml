@@ -2,12 +2,11 @@ name: Storybook
 
 # Publishes the component workbench to GitHub Pages from main.
 #
-# Storybook is already mandatory here — DESIGN-SYSTEM.md requires a story for
-# every primitive and feature component, and the axe-core gate in ci.yml runs
-# over every one of them. But reading it has always meant cloning the repo and
-# running `npm run storybook`, which is a lot of ceremony for "what does the
-# new dialog look like in the light theme?". Publishing it makes the design
-# system reviewable from a link.
+# Storybook is mandatory for new primitive and feature components. The coverage
+# gate rejects new gaps while preserving the explicit frozen baseline in
+# scripts/check-stories.ts; axe audits every story that exists, not components
+# in that baseline. Publishing the workbench makes covered UI reviewable from a
+# link without cloning the repository and running it locally.
 #
 # Nothing secret goes up: stories render components against fixture props, and
 # the build has no Tauri APIs, no database, and no identity material. PR
@@ -41,7 +40,7 @@ jobs:
 
       - uses: actions/setup-node@v7
         with:
-          node-version: '20'
+          node-version: '24'
           cache: 'npm'
 
       # Deliberately NO actions/configure-pages step. Its `enablement: true`

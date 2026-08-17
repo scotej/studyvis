@@ -1,6 +1,12 @@
+import { createElement } from 'react'
+import { renderToStaticMarkup } from 'react-dom/server'
 import { afterEach, beforeEach, describe, expect, test } from 'vitest'
 
 import { tokens } from '@/design/tokens'
+import {
+  AppliedWindowStyleContext,
+  useAppliedWindowStyle,
+} from '@/lib/appliedWindowStyle'
 import {
   detectChromePlatformFromUA,
   titleBarHeightPx,
@@ -12,6 +18,7 @@ import {
   __setSettingsStoreDeps,
   DEFAULT_SETTINGS,
   readWindowStyleBootCache,
+  resolveWindowStyleAtBoot,
   useSettingsStore,
   type SettingsStoreDeps,
 } from '@/stores/settingsStore'
@@ -45,9 +52,9 @@ describe('detectChromePlatformFromUA', () => {
       'windows' as const,
     ],
     [
-      "Ubuntu (Linux falls through to windows-shape — V3-P6 doesn't ship Linux)",
+      'Ubuntu WebKitGTK',
       'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36',
-      'windows' as const,
+      'linux' as const,
     ],
     ['Empty UA', '', 'windows' as const],
   ])('%s → %s', (_label, ua, expected) => {
@@ -62,6 +69,14 @@ describe('windowControlOrder', () => {
 
   test('Windows shows min / maximize / close in platform-standard order', () => {
     expect(windowControlOrder('windows')).toEqual([
+      'minimize',
+      'maximize',
+      'close',
+    ])
+  })
+
+  test('Linux shows the same right-side control order', () => {
+    expect(windowControlOrder('linux')).toEqual([
       'minimize',
       'maximize',
       'close',
@@ -89,6 +104,10 @@ describe('titleBarLeftInsetPx', () => {
   test('Windows uses the calm space.4 left padding (no traffic lights)', () => {
     expect(titleBarLeftInsetPx('windows')).toBe(tokens.space[4])
     expect(tokens.space[4]).toBe(16)
+  })
+
+  test('Linux uses the calm space.4 left padding', () => {
+    expect(titleBarLeftInsetPx('linux')).toBe(tokens.space[4])
   })
 })
 
@@ -189,5 +208,42 @@ describe('useSettingsStore — windowStyle setter + relaunchApp bridge', () => {
     // No `window`, so the function takes the `typeof window === 'undefined'`
     // fallback. Mirrors the v1.0.3 default-on-first-launch state.
     expect(readWindowStyleBootCache()).toBe('system')
+  })
+
+  test('boot chrome follows the frame Rust actually applied', async () => {
+    await expect(resolveWindowStyleAtBoot(async () => true)).resolves.toBe(
+      'custom'
+    )
+    await expect(resolveWindowStyleAtBoot(async () => false)).resolves.toBe(
+      'system'
+    )
+  })
+
+  test('applied custom remains authoritative when the boot cache is missing', async () => {
+    // node-env has no window/localStorage, so the cache falls back to system.
+    // Rust's applied-frame result must still reach every chrome-sensitive UI
+    // consumer through the single process-lifetime provider.
+    expect(readWindowStyleBootCache()).toBe('system')
+    const applied = await resolveWindowStyleAtBoot(async () => true)
+
+    function AppliedStyleProbe() {
+      return createElement('span', null, useAppliedWindowStyle())
+    }
+
+    const markup = renderToStaticMarkup(
+      createElement(AppliedWindowStyleContext.Provider, {
+        value: applied,
+        children: createElement(AppliedStyleProbe),
+      })
+    )
+    expect(markup).toBe('<span>custom</span>')
+  })
+
+  test('boot chrome falls back to the cache when IPC is unavailable', async () => {
+    await expect(
+      resolveWindowStyleAtBoot(async () => {
+        throw new Error('bridge unavailable')
+      })
+    ).resolves.toBe('system')
   })
 })
