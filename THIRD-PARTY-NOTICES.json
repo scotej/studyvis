@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "generatedBy": "scripts/generate-third-party-notices.ts",
   "noticePath": "THIRD-PARTY-NOTICES.txt",
-  "noticeSha256": "78f6624a06a68352230d5afb128bbb84779a358187cefc9c7360a85fdf82b379",
+  "noticeSha256": "b583707fa0e70d5db1073364814e1febbba312c747f30fd445ee00719aba5860",
   "scope": {
     "npm": "package-lock.json v3 entries beneath node_modules whose dev flag is not true",
     "cargo": "normal dependency edges reachable from the StudyVis root under each release target; build/dev edges excluded",
@@ -16,11 +16,11 @@
   "inputs": [
     {
       "path": "package-lock.json",
-      "sha256": "d24635c1bdc445424f93932c176162ebd82a6d780aac12176c51d42326dee3dd"
+      "sha256": "3dbb2a6f8024986e050402b6f6f209bafed2fd2215b1e36cb8a76c994c8f3729"
     },
     {
       "path": "package.json",
-      "sha256": "de351e7d49a8fc992678649ae42077638ea196a62ddc20a22cf8daeab940a86d"
+      "sha256": "66e991618130ba3f60d48ad1c449b95d4edfede5e749c5e0bc1232cdaa30186c"
     },
     {
       "path": "scripts/fetch-llama-server.sh",
@@ -13955,14 +13955,14 @@
       ]
     },
     {
-      "id": "npm:node_modules/@types/node@26.1.1",
+      "id": "npm:node_modules/@types/node@26.2.0",
       "ecosystem": "npm",
       "name": "@types/node",
-      "version": "26.1.1",
+      "version": "26.2.0",
       "licenseExpression": "MIT",
-      "source": "https://registry.npmjs.org/@types/node/-/node-26.1.1.tgz",
+      "source": "https://registry.npmjs.org/@types/node/-/node-26.2.0.tgz",
       "repository": "https://github.com/DefinitelyTyped/DefinitelyTyped.git",
-      "integrity": "sha512-nxAkRSVkN1Y0JC1W8ky/fTfkGsMmcrRsbx+3XoZE+rMOX71kLYTV7fLXpqud1GpbpP5TuffXFqfX7fH2GgZREw==",
+      "integrity": "sha512-5IviulTZeRNp2vAJ514cc/HUlY5nZ9fCbq9DMyC52BrhFZACo3nI0R7qBxhQmo/d27NFe96ur/b7Wwxklda+kg==",
       "lockPath": "node_modules/@types/node",
       "targets": ["frontend"],
       "licenseFiles": [
@@ -13973,14 +13973,14 @@
       ]
     },
     {
-      "id": "npm:node_modules/@types/react@19.2.17",
+      "id": "npm:node_modules/@types/react@19.2.18",
       "ecosystem": "npm",
       "name": "@types/react",
-      "version": "19.2.17",
+      "version": "19.2.18",
       "licenseExpression": "MIT",
-      "source": "https://registry.npmjs.org/@types/react/-/react-19.2.17.tgz",
+      "source": "https://registry.npmjs.org/@types/react/-/react-19.2.18.tgz",
       "repository": "https://github.com/DefinitelyTyped/DefinitelyTyped.git",
-      "integrity": "sha512-MXfmqaVPEVgkBT/aY0aGCkRWWtByiYQXo3xdQ8r5RzuFrPiRn8Gar2tQdXSUQ2GKV3bkXckek89V8wQBY2Q/Aw==",
+      "integrity": "sha512-AnzbBERsrLKtk2XSfTbYRLjQPdy116Sty4q+T+Bp3IC4l6jNBvreVPAHmpq9qhXQM7CXZPjLVmGMw9sy+hxQ3w==",
       "lockPath": "node_modules/@types/react",
       "targets": ["frontend"],
       "licenseFiles": [
@@ -13991,14 +13991,14 @@
       ]
     },
     {
-      "id": "npm:node_modules/@types/react-dom@19.2.3",
+      "id": "npm:node_modules/@types/react-dom@19.2.4",
       "ecosystem": "npm",
       "name": "@types/react-dom",
-      "version": "19.2.3",
+      "version": "19.2.4",
       "licenseExpression": "MIT",
-      "source": "https://registry.npmjs.org/@types/react-dom/-/react-dom-19.2.3.tgz",
+      "source": "https://registry.npmjs.org/@types/react-dom/-/react-dom-19.2.4.tgz",
       "repository": "https://github.com/DefinitelyTyped/DefinitelyTyped.git",
-      "integrity": "sha512-jp2L/eY6fn+KgVVQAOqYItbF0VY/YApe5Mz2F0aykSO8gx31bYCZyvSeYxCHKvzHG5eZjc+zyaS5BrBWya2+kQ==",
+      "integrity": "sha512-Bsc+QHgp+P/F02XDzNCY9jnZNCUuLki36KT7VKrTXXLdHf+vHMNZnW1rVu5DNW/rCK+fya3DATySbLM4yhtKUw==",
       "lockPath": "node_modules/@types/react-dom",
       "targets": ["frontend"],
       "licenseFiles": [
@@ -16191,14 +16191,14 @@
       ]
     },
     {
-      "id": "npm:node_modules/ws@8.21.1",
+      "id": "npm:node_modules/ws@8.21.3",
       "ecosystem": "npm",
       "name": "ws",
-      "version": "8.21.1",
+      "version": "8.21.3",
       "licenseExpression": "MIT",
-      "source": "https://registry.npmjs.org/ws/-/ws-8.21.1.tgz",
+      "source": "https://registry.npmjs.org/ws/-/ws-8.21.3.tgz",
       "repository": "git+https://github.com/websockets/ws.git",
-      "integrity": "sha512-+0NTnW77fFN/DjQi6k/Sq/Yvk4Sgajw7urW8V+asjXnRgDs9gyGkdb7EzgfhA4goXsRIZKE28fzIXBHEzhuiWw==",
+      "integrity": "sha512-201TZ/kPWxoPr/OKWjquZR1SWKXcvxdH+e1xrx89b3YbmzLMFCLfnaG1HFIgWzJOEWZ7MvpK++odZufgYR50Rw==",
       "lockPath": "node_modules/ws",
       "targets": ["frontend"],
       "licenseFiles": [
