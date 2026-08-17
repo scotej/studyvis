@@ -650,7 +650,7 @@ jobs:
           status=$?
           set -e
           cat "$log"
-          if ! grep -Fqx 'Secret Service round-trip passed.' "$log"; then
+          if ! grep -Fq 'Secret Service round-trip passed.' "$log"; then
             echo "::error::Secret Service round-trip did not complete before the packaged-app smoke"
             exit 1
           fi
