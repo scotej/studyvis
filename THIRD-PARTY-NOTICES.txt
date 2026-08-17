@@ -4777,22 +4777,22 @@ NPM
   source: https://registry.npmjs.org/@types/d3-timer/-/d3-timer-3.0.2.tgz
   license: npm:node_modules/@types/d3-timer/LICENSE (SHA-256 c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383)
 
-- @types/node 26.1.1 — MIT
-  id: npm:node_modules/@types/node@26.1.1
+- @types/node 26.2.0 — MIT
+  id: npm:node_modules/@types/node@26.2.0
   targets: frontend
-  source: https://registry.npmjs.org/@types/node/-/node-26.1.1.tgz
+  source: https://registry.npmjs.org/@types/node/-/node-26.2.0.tgz
   license: npm:node_modules/@types/node/LICENSE (SHA-256 c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383)
 
-- @types/react 19.2.17 — MIT
-  id: npm:node_modules/@types/react@19.2.17
+- @types/react 19.2.18 — MIT
+  id: npm:node_modules/@types/react@19.2.18
   targets: frontend
-  source: https://registry.npmjs.org/@types/react/-/react-19.2.17.tgz
+  source: https://registry.npmjs.org/@types/react/-/react-19.2.18.tgz
   license: npm:node_modules/@types/react/LICENSE (SHA-256 c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383)
 
-- @types/react-dom 19.2.3 — MIT
-  id: npm:node_modules/@types/react-dom@19.2.3
+- @types/react-dom 19.2.4 — MIT
+  id: npm:node_modules/@types/react-dom@19.2.4
   targets: frontend
-  source: https://registry.npmjs.org/@types/react-dom/-/react-dom-19.2.3.tgz
+  source: https://registry.npmjs.org/@types/react-dom/-/react-dom-19.2.4.tgz
   license: npm:node_modules/@types/react-dom/LICENSE (SHA-256 c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383)
 
 - @types/readable-stream 4.0.23 — MIT
@@ -5518,10 +5518,10 @@ NPM
   source: https://registry.npmjs.org/wrap-ansi/-/wrap-ansi-6.2.0.tgz
   license: npm:node_modules/qrcode/node_modules/wrap-ansi/license (SHA-256 48da2f39e100d4085767e94966b43f4fa95ff6a0698fba57ed460914e35f94a0)
 
-- ws 8.21.1 — MIT
-  id: npm:node_modules/ws@8.21.1
+- ws 8.21.3 — MIT
+  id: npm:node_modules/ws@8.21.3
   targets: frontend
-  source: https://registry.npmjs.org/ws/-/ws-8.21.1.tgz
+  source: https://registry.npmjs.org/ws/-/ws-8.21.3.tgz
   license: npm:node_modules/ws/LICENSE (SHA-256 2b29dcfe0d6471f7e8c92c5fb38c9f93edee10330937055440192f1832b1ecef)
 
 - y18n 4.0.3 — ISC
@@ -10537,7 +10537,7 @@ SOFTWARE.
 
 SHA-256 2b29dcfe0d6471f7e8c92c5fb38c9f93edee10330937055440192f1832b1ecef
 Applies to:
-- npm:node_modules/ws@8.21.1 — npm:node_modules/ws/LICENSE
+- npm:node_modules/ws@8.21.3 — npm:node_modules/ws/LICENSE
 
 --------------------------------------------------------------------------------
 
@@ -24168,9 +24168,9 @@ Applies to:
 - npm:node_modules/@types/d3-shape@3.1.8 — npm:node_modules/@types/d3-shape/LICENSE
 - npm:node_modules/@types/d3-time@3.0.4 — npm:node_modules/@types/d3-time/LICENSE
 - npm:node_modules/@types/d3-timer@3.0.2 — npm:node_modules/@types/d3-timer/LICENSE
-- npm:node_modules/@types/node@26.1.1 — npm:node_modules/@types/node/LICENSE
-- npm:node_modules/@types/react-dom@19.2.3 — npm:node_modules/@types/react-dom/LICENSE
-- npm:node_modules/@types/react@19.2.17 — npm:node_modules/@types/react/LICENSE
+- npm:node_modules/@types/node@26.2.0 — npm:node_modules/@types/node/LICENSE
+- npm:node_modules/@types/react-dom@19.2.4 — npm:node_modules/@types/react-dom/LICENSE
+- npm:node_modules/@types/react@19.2.18 — npm:node_modules/@types/react/LICENSE
 - npm:node_modules/@types/readable-stream@4.0.23 — npm:node_modules/@types/readable-stream/LICENSE
 - npm:node_modules/@types/use-sync-external-store@0.0.6 — npm:node_modules/@types/use-sync-external-store/LICENSE
 - npm:node_modules/@types/ws@8.18.1 — npm:node_modules/@types/ws/LICENSE
