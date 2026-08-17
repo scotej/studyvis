@@ -194,7 +194,8 @@ while IFS=$'\t' read -r component version archive url expected_sha license licen
   if [[ -n $source_cache && -f $source_cache/$archive && ! -L $source_cache/$archive ]]; then
     install -m 0644 -- "$source_cache/$archive" "$archive_path"
   else
-    curl --fail --location --proto '=https' --tlsv1.2 --retry 3 \
+    curl --fail --location --proto '=https' --tlsv1.2 \
+      --retry 3 --retry-all-errors --connect-timeout 30 \
       --output "$archive_path" -- "$url"
   fi
   actual_sha=$(sha256sum -- "$archive_path")

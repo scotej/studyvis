@@ -61,7 +61,8 @@ install_verified() {
   local temporary
   temporary=$(mktemp "$cache_dir/.${name}.XXXXXX")
   trap 'rm -f -- "$temporary"' RETURN
-  curl --fail --location --proto '=https' --tlsv1.2 --retry 3 \
+  curl --fail --location --proto '=https' --tlsv1.2 \
+    --retry 3 --retry-all-errors --connect-timeout 30 \
     --output "$temporary" -- "$url"
   actual_sha=$(sha256sum -- "$temporary")
   actual_sha=${actual_sha%% *}

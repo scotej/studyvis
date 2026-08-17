@@ -164,6 +164,7 @@ expected_manifest() {
     "cargo-c-version=$cargo_c_version" \
     'compiler-policy=GCC >= 12.2 or Clang; release CI pins GCC 12' \
     'gstreamer-policy=gstreamer-webrtc-1.0 >= 1.22 for the librice GstWebRTCICE agent; release CI pins Ubuntu 24.04 GStreamer 1.24' \
+    'gstreamer-error-quark-policy=1.24.2 declares gst_webrtc_error_quark() without G_BEGIN_DECLS; the portability patch resolves that error domain by name below 1.24.12' \
     'cmake-generator=Ninja' \
     "appimage-runtime-relative-directory=$appimage_runtime_dirname" \
     "appimage-runtime-install-directory=/usr/bin/$appimage_runtime_dirname" \

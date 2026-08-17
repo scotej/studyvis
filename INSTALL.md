@@ -191,13 +191,13 @@ binding. StudyVis therefore builds that binding into a private AppImage runtime,
 explicitly reasserts media streams, and keeps the rest of WebKit's experimental
 feature set disabled.
 
-The pinned, hash-verified input tuple for runtime revision 4 is:
+The pinned, hash-verified input tuple for runtime revision 5 is:
 
 | Input                              | Pinned source                                                        | SHA-256                                                            |
 | ---------------------------------- | -------------------------------------------------------------------- | ------------------------------------------------------------------ |
 | WebKitGTK                          | `https://webkitgtk.org/releases/webkitgtk-2.52.5.tar.xz`             | `8a531a9abd2215936e8a8a914c077b586c0228b31d652f205286a8ec90f3364b` |
 | librice                            | `https://github.com/ystreet/librice/archive/refs/tags/v0.4.3.tar.gz` | `4671e1835f9ab0f8d87e8d9e22b6bfb06f928aeae442841ab81881dff61e3f4b` |
-| AppImage runtime portability patch | `scripts/patches/webkitgtk-2.52.5-appimage-sandbox.patch`            | `907380c80b541f89924bfd0d9709ac9a20d353b99d361d785dbe017324837eb8` |
+| AppImage runtime portability patch | `scripts/patches/webkitgtk-2.52.5-appimage-sandbox.patch`            | `12a6cf019e883c9f13c84a904e7410247678dca094289124fc6b76fc4a66bb0b` |
 
 `scripts/linux-webkit-runtime.env` is the exact source URL/version/hash,
 portability-patch hash, `cargo-c` version, runtime revision, and AppImage

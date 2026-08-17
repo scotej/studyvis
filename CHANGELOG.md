@@ -69,10 +69,17 @@
   subclasses GStreamer's `GstWebRTCICE`, which exists only from GStreamer 1.22,
   while WebKit's own configure gate still accepts 1.20 — Ubuntu 22.04 therefore
   configured cleanly and failed hours later inside the unified build. The
-  private WebKit runtime (now revision 4), the AppImage, and the source-built
+  private WebKit runtime (now revision 5), the AppImage, and the source-built
   type-2 runtime (now revision 2, same sources and compiler generations
   re-pinned to Noble packages) all build on Ubuntu 24.04 with GStreamer 1.24,
-  and the builder now asserts `gstreamer-webrtc-1.0 >= 1.22` up front. The
+  and the builder now asserts `gstreamer-webrtc-1.0 >= 1.22` up front. Noble's
+  own GStreamer 1.24.2 then broke the final link of `libwebkit2gtk-4.1.so`:
+  its `gst/webrtc/webrtc_fwd.h` ships without `G_BEGIN_DECLS`, so WebKit's C++
+  translation units declared `gst_webrtc_error_quark()` with C++ linkage and
+  emitted a mangled reference `libgstwebrtc-1.0`'s C symbol cannot satisfy.
+  Upstream added the guard before 1.24.12 and Ubuntu 24.04 is frozen at 1.24.2
+  in every pocket, so the portability patch now resolves that error domain by
+  its documented quark name below 1.24.12. The
   AppImage consequently needs glibc 2.39 or newer — every rolling desktop,
   CachyOS included, already satisfies that — and no longer carries the
   `webrtcdsp` GStreamer element, which Ubuntu 24.04 does not ship and
