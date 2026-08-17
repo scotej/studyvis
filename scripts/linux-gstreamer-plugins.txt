@@ -1,0 +1,32 @@
+# Exact GStreamer plugin surface allowed in the Linux AppImage. Each non-empty
+# line is one required logical plugin; `|` separates distro-version filename
+# alternatives. The first existing candidate is staged. No directory wildcard
+# reaches linuxdeploy.
+libgstcoreelements.so
+libgstapp.so
+libgstaudioconvert.so
+libgstaudiorate.so
+libgstaudioresample.so
+libgstgio.so
+libgstopus.so
+libgstplayback.so
+libgsttypefindfunctions.so
+libgstvideoconvert.so|libgstvideoconvertscale.so
+libgstvideorate.so
+libgstvideoscale.so|libgstvideoconvertscale.so
+libgstvolume.so
+libgstautodetect.so
+libgstpulseaudio.so
+libgstalsa.so
+libgstvideo4linux2.so
+libgstrtp.so
+libgstrtpmanager.so
+libgstvpx.so
+libgstnice.so
+libgstpipewire.so
+libgstdtls.so
+libgstsctp.so
+libgstsrtp.so
+libgstwebrtc.so
+# libgstwebrtcdsp.so is deliberately absent: Ubuntu 24.04 ships no
+# webrtc-audio-processing build of it, and WebKitGTK never loads that element.

@@ -80,9 +80,8 @@ export type UpdateBlockedBannerViewProps = {
 }
 
 // Issue #77 — the update exists but this bundle can't swap itself in place
-// (macOS running straight off the mounted .dmg). Same quiet shell as the
-// ready banner, but no Restart: the instruction is the action, so the only
-// button acknowledges it.
+// (a mounted macOS installer or a non-writable/non-AppImage Linux launch).
+// Same quiet shell as the ready banner, but no Restart.
 export function UpdateBlockedBannerView({
   version,
   onDismiss,

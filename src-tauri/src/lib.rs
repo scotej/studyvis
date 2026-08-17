@@ -17,9 +17,13 @@
 //!   `tauri.conf.json` and is only shown at the end of `setup_desktop`, after
 //!   `apply_window_style`, to avoid a one-frame native-chrome flash.
 
+#[cfg(desktop)]
+mod app_navigation;
 mod commands;
 pub mod crypto;
 pub mod db;
+#[cfg(target_os = "linux")]
+mod linux_media_permissions;
 #[cfg(target_os = "macos")]
 mod macos_display_capture;
 pub mod window_layout;
@@ -27,7 +31,7 @@ pub mod window_layout;
 use tauri::Manager;
 
 #[cfg(desktop)]
-use commands::ai_dialog::toggle_ai_dialog;
+use commands::ai_dialog::{ai_dialog_toggle, toggle_ai_dialog};
 #[cfg(desktop)]
 use commands::applog::{app_log_append, app_log_tail};
 #[cfg(desktop)]
@@ -70,8 +74,9 @@ use commands::system::{
     system_minimize_to_tray_set_enabled, system_open_camera_settings, system_open_data_folder,
     system_open_microphone_settings, system_open_notification_settings, system_open_releases,
     system_open_screen_capture_settings, system_relaunch_app, system_save_image,
-    system_set_global_shortcut, system_write_text_file, AiFeaturesFlag, MinimizeToTrayFlag,
-    QuitFlag, SessionActiveFlag, ShortcutBindings,
+    system_set_global_shortcut, system_window_style_is_custom_applied, system_write_text_file,
+    AiFeaturesFlag, MinimizeToTrayFlag, QuitFlag, SessionActiveFlag, ShortcutBindings,
+    WindowStyleAppliedFlag,
 };
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -86,6 +91,13 @@ pub fn run() {
     let builder = builder.plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
         show_main_window(app);
     }));
+
+    // Privileged Tauri IPC belongs only to the embedded application origin
+    // (and the exact dev server in debug builds). External links are opened by
+    // tauri-plugin-opener; never render an arbitrary top-level document inside
+    // either app webview.
+    #[cfg(desktop)]
+    let builder = builder.plugin(app_navigation::init());
 
     let builder = builder
         .plugin(tauri_plugin_shell::init())
@@ -178,6 +190,8 @@ pub fn run() {
         #[cfg(desktop)]
         system_install_context,
         #[cfg(desktop)]
+        system_window_style_is_custom_applied,
+        #[cfg(desktop)]
         system_battery,
         #[cfg(desktop)]
         session_set_active,
@@ -203,6 +217,8 @@ pub fn run() {
         app_log_append,
         #[cfg(desktop)]
         app_log_tail,
+        #[cfg(desktop)]
+        ai_dialog_toggle,
         #[cfg(desktop)]
         model_paths,
         #[cfg(desktop)]
@@ -309,6 +325,7 @@ pub fn run() {
             {
                 app.manage(QuitFlag::new());
                 app.manage(SessionActiveFlag::new());
+                app.manage(WindowStyleAppliedFlag::new());
                 let initial_minimize_to_tray =
                     read_minimize_to_tray_from_settings(app.handle()).unwrap_or(true);
                 app.manage(MinimizeToTrayFlag::new(initial_minimize_to_tray));
@@ -475,7 +492,7 @@ fn read_ai_features_from_settings<R: tauri::Runtime>(app: &tauri::AppHandle<R>) 
 //     wordmark sits in the overlap. We also clear the window title with
 //     `set_title("")` so the OS-rendered title text doesn't paint over
 //     the wordmark.
-//   * Windows: `set_decorations(false)` removes the native frame; the
+//   * Windows/Linux: `set_decorations(false)` removes the native frame; the
 //     `<TitleBar />` React component renders our own min/restore/close
 //     cluster. `data-tauri-drag-region` provides the drag surface.
 //
@@ -506,6 +523,7 @@ fn read_window_style_is_custom_from_settings<R: tauri::Runtime>(app: &tauri::App
 fn apply_window_style<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     use tauri::Manager;
 
+    WindowStyleAppliedFlag::set(app, false);
     if !read_window_style_is_custom_from_settings(app) {
         return;
     }
@@ -514,27 +532,24 @@ fn apply_window_style<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     };
     #[cfg(target_os = "macos")]
     {
-        if let Err(err) = window.set_title_bar_style(tauri::TitleBarStyle::Overlay) {
-            eprintln!("[window-chrome] set_title_bar_style failed: {err}");
+        match window.set_title_bar_style(tauri::TitleBarStyle::Overlay) {
+            Ok(()) => {
+                WindowStyleAppliedFlag::set(app, true);
+                // Clear the title so the OS doesn't paint title text on top of
+                // our wordmark in the overlay band. The menubar's app entry
+                // still shows "StudyVis" from the bundle Info.plist.
+                let _ = window.set_title("");
+            }
+            Err(err) => eprintln!("[window-chrome] set_title_bar_style failed: {err}"),
         }
-        // Clear the title so the OS doesn't paint title text on top of
-        // our wordmark in the overlay band. The menubar's app entry
-        // still shows "StudyVis" from the bundle Info.plist.
-        let _ = window.set_title("");
     }
-    #[cfg(target_os = "windows")]
+    #[cfg(any(target_os = "windows", target_os = "linux"))]
     {
-        if let Err(err) = window.set_decorations(false) {
-            eprintln!("[window-chrome] set_decorations(false) failed: {err}");
+        match window.set_decorations(false) {
+            Ok(()) => WindowStyleAppliedFlag::set(app, true),
+            Err(err) => eprintln!("[window-chrome] set_decorations(false) failed: {err}"),
         }
     }
-    // Linux / other unix targets: V3-P6 explicitly scopes to macOS +
-    // Windows (PLAN.md §5 release matrix). If a user runs the dev build
-    // on another platform and somehow toggled custom, the window keeps
-    // its native chrome and the React `<TitleBar />` still renders — a
-    // visible double-titlebar that signals "not supported here." The
-    // setting default is 'system' on every platform, so this path is
-    // only reached if the user actively opted in.
 }
 
 // One-shot read of the persisted accelerator strings (V3-P3). Any missing
@@ -611,6 +626,14 @@ fn setup_desktop(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>>
     #[cfg(target_os = "macos")]
     macos_display_capture::install(app.handle());
 
+    // WebKitGTK denies camera, microphone, and display-capture requests when
+    // its embedding client does not answer `permission-request`. The bundled
+    // WebKit build and vendored wry patch establish the compile/runtime WebRTC
+    // gates; this handler separately accepts user-media requests only while
+    // the main webview's current top-level URI is StudyVis-owned.
+    #[cfg(target_os = "linux")]
+    linux_media_permissions::install(app.handle());
+
     app.handle().plugin(tauri_plugin_autostart::init(
         tauri_plugin_autostart::MacosLauncher::LaunchAgent,
         None::<Vec<&str>>,
@@ -618,9 +641,19 @@ fn setup_desktop(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>>
 
     // macOS registers the studyvis:// scheme at bundle time (CFBundleURLTypes
     // generated from `plugins.deep-link` in tauri.conf.json); Windows release
-    // builds register via the installer. Dev builds on Windows/Linux need the
+    // builds register via the installer. Linux and Windows dev builds need the
     // runtime registration to point the scheme at the current executable.
-    #[cfg(any(target_os = "linux", all(debug_assertions, windows)))]
+    // Linux registration calls desktop integration utilities such as
+    // `xdg-mime`; a minimal desktop may omit them, but pairing can still work
+    // through the in-app code path, so their absence must not abort startup.
+    #[cfg(target_os = "linux")]
+    {
+        use tauri_plugin_deep_link::DeepLinkExt;
+        if let Err(err) = app.deep_link().register_all() {
+            eprintln!("[deep-link] Linux runtime registration failed: {err}");
+        }
+    }
+    #[cfg(all(debug_assertions, windows))]
     {
         use tauri_plugin_deep_link::DeepLinkExt;
         app.deep_link().register_all()?;

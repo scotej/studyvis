@@ -10,7 +10,12 @@ import {
 describe('pttStore', () => {
   beforeEach(() => {
     __resetPttScheduler()
-    usePttStore.setState({ active: false, awaitingRelease: false, revision: 0 })
+    usePttStore.setState({
+      active: false,
+      awaitingRelease: false,
+      heldSources: [],
+      revision: 0,
+    })
   })
   afterEach(() => {
     __resetPttScheduler()
@@ -69,6 +74,28 @@ describe('pttStore', () => {
     expect(usePttStore.getState()).toMatchObject({
       active: false,
       awaitingRelease: false,
+      revision: 2,
+    })
+  })
+
+  test('releasing one input source does not cancel another held source', () => {
+    const { press, release } = usePttStore.getState()
+    press('native-shortcut')
+    press('session-button')
+
+    release('session-button')
+    expect(usePttStore.getState()).toMatchObject({
+      active: true,
+      awaitingRelease: true,
+      heldSources: ['native-shortcut'],
+      revision: 1,
+    })
+
+    release('native-shortcut')
+    expect(usePttStore.getState()).toMatchObject({
+      active: false,
+      awaitingRelease: false,
+      heldSources: [],
       revision: 2,
     })
   })

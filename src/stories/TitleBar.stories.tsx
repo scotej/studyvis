@@ -4,8 +4,8 @@ import { TitleBar } from '@/components/TitleBar'
 
 // V3-P6 — Drift check for the opt-in custom titlebar. The Storybook
 // toolbar (`.storybook/preview.tsx`) flips between dark and light themes
-// for free; this file enumerates the two platform-shape variants
-// (macOS overlay, Windows control cluster) and the Windows
+// for free; this file enumerates all three release-matrix desktop platforms
+// (shipped macOS/Windows plus the Linux candidate) and the
 // maximized-vs-restored visual swap.
 
 const meta = {
@@ -23,8 +23,7 @@ const meta = {
 export default meta
 type Story = StoryObj<typeof meta>
 
-// `min-h-32` so the band is visible against a generous canvas without
-// flexbox surprises. Two app-canvas swatches sit underneath each story so
+// `min-h-32` keeps the band visible against a generous app-canvas swatch so
 // the drag region's border-bottom is verifiable against `bg-bg-base`.
 
 function Frame({ children }: { children: React.ReactNode }) {
@@ -56,6 +55,15 @@ export const Windows: Story = {
   ),
 }
 
+export const Linux: Story = {
+  args: { platform: 'linux' },
+  render: (args) => (
+    <Frame>
+      <TitleBar {...args} />
+    </Frame>
+  ),
+}
+
 export const WindowsMaximized: Story = {
   args: { platform: 'windows', forceMaximized: true },
   render: (args) => (
@@ -65,11 +73,11 @@ export const WindowsMaximized: Story = {
   ),
 }
 
-// Side-by-side comparison so a reviewer can spot drift between the two
+// Side-by-side comparison so a reviewer can spot drift between all three
 // platforms in one screenshot. Useful when validating that the wordmark
-// vertical centre and the chrome band height are visually identical
-// across the macOS overlay inset and the Windows controls cluster.
-export const BothPlatforms: Story = {
+// vertical centre and chrome band height stay aligned across the macOS overlay
+// inset and the Windows/Linux control clusters.
+export const AllPlatforms: Story = {
   render: () => (
     <div className="flex flex-col gap-6 p-6">
       <div className="overflow-hidden rounded-md border border-border-default">
@@ -80,6 +88,11 @@ export const BothPlatforms: Story = {
       <div className="overflow-hidden rounded-md border border-border-default">
         <Frame>
           <TitleBar platform="windows" onControl={() => undefined} />
+        </Frame>
+      </div>
+      <div className="overflow-hidden rounded-md border border-border-default">
+        <Frame>
+          <TitleBar platform="linux" onControl={() => undefined} />
         </Frame>
       </div>
       <div className="overflow-hidden rounded-md border border-border-default">

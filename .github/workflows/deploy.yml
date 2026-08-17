@@ -3,14 +3,14 @@ name: Deploy
 # AN INDICATOR, NOT A GATE. Nothing waits for this workflow.
 #
 # Read this before adding `Deployed` to branch protection: it is not meant to
-# be there. A full Tauri build is ~30-60 minutes per platform, so requiring it
-# would put every docs fix and dependency bump behind an hour of wall-clock
-# for a signal that is almost always "yes, it still builds". Merging waits on
-# the FAST checks — `All pre-merge checks` (ci.yml) and `PR title`
-# (pr-title.yml) — and those two remain the only required ones. This workflow
-# runs alongside them and reports: green means the commit produced installable
-# bundles, red means a platform stopped building. Either way the merge button
-# is live as soon as the fast checks finish.
+# be there. CI now gates a real Linux AppImage build/startup smoke, but this
+# workflow additionally spends ~30-60 minutes each on the macOS and Windows
+# preview installers. Merging waits on `All pre-merge checks` (ci.yml) and
+# `PR title` (pr-title.yml); those two remain the only required checks. This
+# workflow runs alongside them and reports: green means the commit produced
+# installable previews for macOS, Windows, and the Linux release candidate; red
+# means a release-matrix platform stopped packaging. It remains an indicator,
+# not an additional required check.
 #
 # So a red `Deployed` is information, not a blocker. Look at it before you
 # merge if the change is shippable; act on it when it is red; never sit and
@@ -19,11 +19,11 @@ name: Deploy
 # deliberate future decision, not the current setup.
 #
 # What it actually does: every commit that reaches a pull request or main is
-# built into a real, installable StudyVis bundle for each shipped platform
-# from that exact SHA, published as the run's artifacts, and recorded as a
-# GitHub Deployment — one per platform, to `preview-macos` and
-# `preview-windows`, because the two artifacts succeed and fail
-# independently.
+# built into a real, installable StudyVis bundle for each release-matrix
+# platform from that exact SHA, published as the run's artifacts, and recorded
+# as a GitHub Deployment — one per platform, to `preview-macos`,
+# `preview-windows`, and `preview-linux`, because the artifacts succeed and
+# fail independently.
 #
 # This replaces .github/workflows/pr-build.yml ("PR installers"), which ran
 # the same build behind a `build-installers` label. The reasoning for that
@@ -34,14 +34,12 @@ name: Deploy
 # What is gone is having to opt IN: a shippable change now always gets its
 # bundle, whether or not anyone thought to ask for one.
 #
-# Why this matters more here than on a typical project: CI proves the code
-# compiles, lints, and passes the automated gates, and that is genuinely all
-# it proves. There are no component tests (vitest is node-env only), no
-# desktop smoke test, and the things this app gets wrong most often — a
-# camera stream that never reaches a late joiner, a sidecar that dies at
-# session start — are only visible with two real builds talking to each
+# Why this matters more here than on a typical project: CI compiles, lints,
+# builds, and launches a packaged Linux AppImage, but the things this
+# app gets wrong most often — a camera stream that never reaches a late joiner,
+# a sidecar that dies at session start — need two real builds talking to each
 # other. Before this workflow, the first installable build of any change
-# appeared AFTER release-prep had already pushed an immutable tag.
+# appeared AFTER release-prep had already pushed the version tag.
 #
 # These bundles are NOT releases. `createUpdaterArtifacts` is switched off
 # below, so no `latest.json` is produced and nothing here can be mistaken
@@ -156,7 +154,7 @@ jobs:
             echo "installable=true" >> "$GITHUB_OUTPUT"
             {
               echo
-              echo "Shippable files changed — building an installer for both platforms:"
+              echo "Shippable files changed — building every release-matrix artifact:"
               echo
               echo '```'
               printf '%s\n' "$shippable" | head -40
@@ -176,11 +174,10 @@ jobs:
     name: Installer (${{ matrix.label }})
     needs: scope
     runs-on: ${{ matrix.platform }}
-    # 90, not the 60 release.yml uses: this job does everything that one does
-    # plus `npm ci` and the sidecar fetch, and a build can take up to 60
-    # minutes on its own. A timeout that can kill a slow-but-valid run after
-    # an hour of work is worth nothing — public-repo minutes are free.
-    timeout-minutes: 90
+    # macOS and Windows retain release.yml's 90-minute ceiling. Linux gets six
+    # hours because a missing runtime cache deliberately falls back to compiling
+    # WebKitGTK; the cache is an optimisation, never a packaging prerequisite.
+    timeout-minutes: ${{ matrix.timeout }}
     permissions:
       contents: read
     # The guard is on the STEPS, not on the job, and that is deliberate — do
@@ -191,25 +188,25 @@ jobs:
     # and every docs PR grew a check literally called
     # "Build ${{ matrix.label }}" — observed on PR #141, not theoretical.
     # Letting the job start and no-op costs ~20s of free public-repo runner
-    # time and gives both platforms a correctly-named, always-present
+    # time and gives every platform a correctly-named, always-present
     # indicator instead.
     #
-    # The cost of that choice: a docs-only commit still mints both deployment
+    # The cost of that choice: a docs-only commit still mints three deployment
     # records below, having built nothing. The step summary and the `Deployed`
-    # rollup both say so. Avoiding it would mean per-leg job outputs feeding
-    # two extra statically-named jobs, which is a lot of machinery for two
+    # rollup says so. Avoiding it would mean per-leg job outputs feeding
+    # three extra statically-named jobs, which is a lot of machinery for three
     # rows in a low-traffic tab.
     env:
       SHIPPABLE: ${{ needs.scope.outputs.installable }}
     # One deployment record PER PLATFORM, minted here rather than on the
     # rollup job below. It has to be here: a matrix job's `result` collapses
     # every leg into a single value, so a job downstream of this one cannot
-    # tell "macOS shipped, Windows broke" from "both broke" — it would mint
-    # one deployment for two independent artifacts. Each leg deploying to its
+    # tell which platform broke from the collapsed result — it would mint one
+    # deployment for three independent artifacts. Each leg deploying to its
     # own environment means the Deployments tab shows exactly what exists.
     environment:
       name: ${{ matrix.environment }}
-      # No stable per-artifact URL exists at this point, so both point at the
+      # No stable per-artifact URL exists at this point, so all point at the
       # run, which is where the download actually is.
       url: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
     strategy:
@@ -220,6 +217,7 @@ jobs:
             arch: arm64
             environment: preview-macos
             platform: macos-latest
+            timeout: 90
             rust-targets: aarch64-apple-darwin
             args: --target aarch64-apple-darwin --bundles dmg
             llama-triple: aarch64-apple-darwin
@@ -227,9 +225,18 @@ jobs:
             arch: x64
             environment: preview-windows
             platform: windows-latest
+            timeout: 90
             rust-targets: ''
             args: --bundles nsis
             llama-triple: x86_64-pc-windows-msvc
+          - label: Linux
+            arch: x64
+            environment: preview-linux
+            platform: ubuntu-24.04
+            timeout: 360
+            rust-targets: ''
+            args: --bundles appimage
+            llama-triple: x86_64-unknown-linux-gnu
 
     steps:
       # Green on a docs commit means "nothing needed building", not "the
@@ -265,17 +272,57 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
 
+      - name: Reclaim runner disk for a cold WebKitGTK build
+        if: env.SHIPPABLE == 'true' && runner.os == 'Linux'
+        run: |
+          df -h /
+          sudo rm -rf -- \
+            /usr/local/lib/android /usr/share/dotnet /usr/local/.ghcup \
+            /usr/local/share/boost /usr/share/swift \
+            /opt/ghc /opt/hostedtoolcache/CodeQL
+          docker image prune --all --force || true
+          sudo apt-get clean
+          df -h /
+
+      - name: Install WebKitGTK build and Linux packaging dependencies
+        if: env.SHIPPABLE == 'true' && runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            autoconf automake binutils=2.42-4ubuntu2.10 build-essential bison \
+            bubblewrap ca-certificates clang-14=1:14.0.6-19build4 cmake curl dbus-x11 \
+            desktop-file-utils file flex g++-12 gcc-11=11.5.0-1ubuntu1~24.04.1 gcc-12 gettext \
+            gperf libayatana-appindicator3-dev \
+            libcairo2-dev libdbus-1-dev libdrm-dev libegl-dev \
+            libenchant-2-dev libepoxy-dev libfontconfig-dev libfreetype-dev \
+            libfuse2t64 libgbm-dev libgcc-11-dev=11.5.0-1ubuntu1~24.04.1 libgcrypt20-dev libgl-dev libgles-dev libglib2.0-dev \
+            libglib2.0-dev-bin libgstreamer-plugins-bad1.0-dev \
+            libgstreamer-plugins-base1.0-dev libgstreamer1.0-dev \
+            libgtk-3-dev libgudev-1.0-dev libharfbuzz-dev libhyphen-dev \
+            libicu-dev libjpeg-dev liblcms2-dev libnice-dev libopenjp2-7-dev \
+            libpng-dev librsvg2-dev libseccomp-dev libunwind-dev \
+            libsecret-1-dev libsoup-3.0-dev libsqlite3-dev libssl-dev \
+            libsysprof-capture-4-dev libsystemd-dev libtasn1-6-dev \
+            libwayland-dev libwebkit2gtk-4.1-dev libwebp-dev libwoff-dev \
+            libx11-dev libxcomposite-dev libxdo-dev libxml2-dev \
+            libxml2-utils libxslt1-dev libxt-dev libtool ninja-build \
+            patch patchelf perl pkg-config python3 ruby tar unifdef \
+            wayland-protocols xdg-dbus-proxy xdg-utils xz-utils \
+            gstreamer1.0-alsa gstreamer1.0-plugins-bad \
+            gstreamer1.0-plugins-base gstreamer1.0-plugins-good \
+            gstreamer1.0-nice gstreamer1.0-pipewire gstreamer1.0-tools
+
       - uses: actions/setup-node@v7
         if: env.SHIPPABLE == 'true'
         with:
-          node-version: '20'
+          node-version: '24'
           cache: 'npm'
 
       - name: Install Rust toolchain
         if: env.SHIPPABLE == 'true'
         uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # master; the toolchain input selects the channel
         with:
-          toolchain: stable
+          toolchain: '1.97.1'
           targets: ${{ matrix.rust-targets }}
 
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
@@ -291,6 +338,105 @@ jobs:
           # per-PR build closer to 30 minutes than 60.
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
+      - name: Configure the pinned WebKitGTK runtime prefix
+        id: webkit-runtime
+        if: env.SHIPPABLE == 'true' && runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -v PKG_CONFIG_SYSROOT_DIR ]]; then
+            echo "::error::PKG_CONFIG_SYSROOT_DIR must be unset for the mixed runtime/system dependency graph"
+            exit 1
+          fi
+          # shellcheck source=scripts/linux-webkit-runtime.env
+          source scripts/linux-webkit-runtime.env
+          export STUDYVIS_WEBKIT_RUNTIME_DIR="${RUNNER_TEMP}/studyvis-webkit-runtime"
+          export STUDYVIS_WEBKIT_BUILD_DIR="${RUNNER_TEMP}/studyvis-webkit-build"
+          runtime_dir=$(bash scripts/build-linux-webkit-runtime.sh --print-prefix)
+          runtime_pkgconfig=$(bash scripts/build-linux-webkit-runtime.sh --print-pkg-config-path)
+          runtime_lib=${runtime_pkgconfig%/pkgconfig}
+          {
+            echo "STUDYVIS_WEBKIT_RUNTIME_DIR=${runtime_dir}"
+            echo "STUDYVIS_WEBKIT_BUILD_DIR=${STUDYVIS_WEBKIT_BUILD_DIR}"
+            echo "STUDYVIS_CARGO_C_VERSION=${STUDYVIS_CARGO_C_VERSION}"
+            echo "PKG_CONFIG_PATH=${runtime_pkgconfig}${PKG_CONFIG_PATH:+:${PKG_CONFIG_PATH}}"
+            echo "LD_LIBRARY_PATH=${runtime_lib}:${GITHUB_WORKSPACE}/src-tauri/binaries/llama-runtime-x86_64-unknown-linux-gnu${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
+          } >> "$GITHUB_ENV"
+          {
+            echo "runtime-dir=${runtime_dir}"
+            echo "cargo-c-version=${STUDYVIS_CARGO_C_VERSION}"
+          } >> "$GITHUB_OUTPUT"
+
+      # Restore/save split for the same reason as ci.yml: actions/cache's post
+      # step is post-if: success(), so a failure anywhere downstream threw away
+      # the WebKitGTK compile that had already succeeded.
+      #
+      # The key is split at the manifest boundary so restore-keys can fall back
+      # without ever reusing a runtime the build refuses to accept. The first
+      # hash covers what `expected_manifest` is derived from — the pinned source
+      # tuple in linux-webkit-runtime.env and the portability patches; the
+      # second covers the two scripts that change the key but NOT the manifest.
+      # Editing the builder used to invalidate a 3.86h compile that
+      # `runtime_is_complete` would have accepted unchanged, because the cache
+      # key was stricter than the correctness check. The prefix fallback hands
+      # that decision back to the script, which byte-compares BUILD-MANIFEST.txt,
+      # re-checks the patch/notice SHAs and every packaged ELF, and `rm -rf`s the
+      # tree and rebuilds if any of it drifts.
+      - name: Restore pinned WebKitGTK runtime
+        id: webkit-runtime-cache
+        if: env.SHIPPABLE == 'true' && runner.os == 'Linux'
+        uses: actions/cache/restore@v5
+        with:
+          path: ${{ steps.webkit-runtime.outputs.runtime-dir }}
+          key: studyvis-webkitgtk-${{ runner.os }}-ubuntu-24.04-x86_64-rust-1.97.1-cargo-c-${{ steps.webkit-runtime.outputs.cargo-c-version }}-${{ hashFiles('scripts/linux-webkit-runtime.env', 'scripts/patches/*.patch') }}-${{ hashFiles('scripts/build-linux-webkit-runtime.sh', 'scripts/generate-librice-third-party-notices.mjs') }}
+          restore-keys: |
+            studyvis-webkitgtk-${{ runner.os }}-ubuntu-24.04-x86_64-rust-1.97.1-cargo-c-${{ steps.webkit-runtime.outputs.cargo-c-version }}-${{ hashFiles('scripts/linux-webkit-runtime.env', 'scripts/patches/*.patch') }}-
+
+      # Same pinned-version-in-the-key reasoning as ci.yml: a hit is the same
+      # binary the install below would have produced, and the assertion runs
+      # either way.
+      - name: Restore pinned cargo-c
+        id: cargo-c-cache
+        if: env.SHIPPABLE == 'true' && runner.os == 'Linux'
+        uses: actions/cache/restore@v5
+        with:
+          path: |
+            ~/.cargo/bin/cargo-capi
+            ~/.cargo/bin/cargo-cbuild
+            ~/.cargo/bin/cargo-cinstall
+          key: studyvis-cargo-c-${{ runner.os }}-ubuntu-24.04-rust-1.97.1-${{ steps.webkit-runtime.outputs.cargo-c-version }}
+
+      - name: Install pinned cargo-c
+        if: env.SHIPPABLE == 'true' && runner.os == 'Linux' && steps.cargo-c-cache.outputs.cache-hit != 'true'
+        run: cargo install cargo-c --version "=${STUDYVIS_CARGO_C_VERSION}" --locked
+
+      - name: Assert the pinned cargo-c version
+        if: env.SHIPPABLE == 'true' && runner.os == 'Linux'
+        run: |
+          set -euo pipefail
+          cargo_c_output=$(cargo cinstall --version)
+          case "$cargo_c_output" in
+            *" ${STUDYVIS_CARGO_C_VERSION}"|*" ${STUDYVIS_CARGO_C_VERSION}+"*) ;;
+            *) echo "Unexpected cargo-c version: $cargo_c_output" >&2; exit 1 ;;
+          esac
+
+      # Same restore/save split as the WebKitGTK runtime above, for the same
+      # reason: as a combined actions/cache the post step is post-if: success(),
+      # so a failure in the installer build hours later threw away a cargo-c
+      # install that had already been asserted good. Saving here — immediately
+      # after the assertion and before the WebKitGTK compile — means success()
+      # can only mean "cargo-c is the pinned version", which is exactly the
+      # condition this cache should record.
+      - name: Save pinned cargo-c
+        if: ${{ success() && env.SHIPPABLE == 'true' && runner.os == 'Linux' && steps.cargo-c-cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v5
+        with:
+          path: |
+            ~/.cargo/bin/cargo-capi
+            ~/.cargo/bin/cargo-cbuild
+            ~/.cargo/bin/cargo-cinstall
+          key: studyvis-cargo-c-${{ runner.os }}-ubuntu-24.04-rust-1.97.1-${{ steps.webkit-runtime.outputs.cargo-c-version }}
+
       - name: Install frontend dependencies
         if: env.SHIPPABLE == 'true'
         run: npm ci
@@ -303,6 +449,124 @@ jobs:
         env:
           LLAMA_TRIPLE: ${{ matrix.llama-triple }}
         run: bash scripts/fetch-llama-server.sh --triple "$LLAMA_TRIPLE"
+
+      # Ordered ahead of the WebKitGTK compile on purpose, matching ci.yml: it
+      # downloads hash-pinned tools and builds the AppImage type-2 runtime, so
+      # a bad pin or a runtime build break should surface in minutes instead of
+      # after a two-hour compile that the failure discards anyway.
+      # Exact key, no restore-keys, deliberately: prepare-linuxdeploy-tools.sh
+      # builds the type-2 runtime only when the directory is absent but runs
+      # verify-linux-appimage-runtime.sh over it either way, and a reused tree
+      # that fails verification aborts the script rather than rebuilding. A
+      # prefix fallback could therefore hand it a runtime it can only die on,
+      # so every pin and every script in that path is in the key and any change
+      # to them simply misses and rebuilds.
+      - name: Restore the pinned linuxdeploy toolchain
+        id: linuxdeploy-cache
+        if: env.SHIPPABLE == 'true' && runner.os == 'Linux'
+        uses: actions/cache/restore@v5
+        with:
+          path: ${{ runner.temp }}/studyvis-tauri-cache-deploy
+          key: studyvis-linuxdeploy-ubuntu-24.04-x86_64-${{ hashFiles('scripts/linuxdeploy-tools.env', 'scripts/linux-appimage-runtime.env', 'scripts/linux-appimage-runtime-sources.tsv', 'scripts/prepare-linuxdeploy-tools.sh', 'scripts/build-linux-appimage-runtime.sh', 'scripts/verify-linux-appimage-runtime.sh') }}
+
+      - name: Prepare the pinned linuxdeploy toolchain
+        if: env.SHIPPABLE == 'true' && runner.os == 'Linux'
+        shell: bash
+        env:
+          TOOL_CACHE_HOME: ${{ runner.temp }}/studyvis-tauri-cache-deploy
+        run: |
+          set -euo pipefail
+          bash scripts/prepare-linuxdeploy-tools.sh "$TOOL_CACHE_HOME"
+          {
+            echo "XDG_CACHE_HOME=$TOOL_CACHE_HOME"
+            echo "LDAI_RUNTIME_FILE=$TOOL_CACHE_HOME/studyvis-appimage-runtime-r2/runtime-x86_64"
+            echo "GSTREAMER_PLUGINS_DIR=$GITHUB_WORKSPACE/src-tauri/target/appimage-webkit/gstreamer-plugins"
+            echo "GSTREAMER_HELPERS_DIR=$GITHUB_WORKSPACE/src-tauri/target/appimage-webkit/gstreamer"
+          } >> "$GITHUB_ENV"
+
+      # Saved here rather than as a combined actions/cache post step for the
+      # same reason as the WebKitGTK runtime and cargo-c above: the verified
+      # toolchain must survive a failure in the installer build hours later.
+      - name: Save the pinned linuxdeploy toolchain
+        if: ${{ success() && env.SHIPPABLE == 'true' && runner.os == 'Linux' && steps.linuxdeploy-cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v5
+        with:
+          path: ${{ runner.temp }}/studyvis-tauri-cache-deploy
+          key: studyvis-linuxdeploy-ubuntu-24.04-x86_64-${{ hashFiles('scripts/linuxdeploy-tools.env', 'scripts/linux-appimage-runtime.env', 'scripts/linux-appimage-runtime-sources.tsv', 'scripts/prepare-linuxdeploy-tools.sh', 'scripts/build-linux-appimage-runtime.sh', 'scripts/verify-linux-appimage-runtime.sh') }}
+
+      # Preview builds are throwaway artifacts, so they reuse WebKit object
+      # files across runs. The tagged release leg has no equivalent step on
+      # purpose; see ci.yml's copy of this comment and ARCHITECTURE.md §2.
+      - name: Install pinned sccache
+        if: env.SHIPPABLE == 'true' && runner.os == 'Linux'
+        env:
+          SCCACHE_VERSION: 0.17.0
+          SCCACHE_SHA256: 67c4a96dd237c1f518f6b36083f270f9976d516f1e57fce891755ea782e50006
+        run: |
+          set -euo pipefail
+          tarball="sccache-v${SCCACHE_VERSION}-x86_64-unknown-linux-musl.tar.gz"
+          curl --fail --silent --show-error --location --proto '=https' \
+            --tlsv1.2 --retry 3 -o "$tarball" \
+            "https://github.com/mozilla/sccache/releases/download/v${SCCACHE_VERSION}/${tarball}"
+          echo "${SCCACHE_SHA256}  ${tarball}" | sha256sum --check --strict -
+          tar --extract --file "$tarball" --strip-components=1 \
+            "sccache-v${SCCACHE_VERSION}-x86_64-unknown-linux-musl/sccache"
+          sudo install -m 0755 sccache /usr/local/bin/sccache
+          rm -f -- "$tarball" sccache
+          sccache --version
+
+      - name: Restore the WebKit compiler cache
+        id: webkit-sccache
+        if: env.SHIPPABLE == 'true' && runner.os == 'Linux'
+        uses: actions/cache/restore@v5
+        with:
+          path: ${{ runner.temp }}/studyvis-sccache
+          key: studyvis-sccache-webkit-ubuntu-24.04-${{ hashFiles('scripts/linux-webkit-runtime.env', 'scripts/patches/*.patch') }}-${{ github.sha }}
+          restore-keys: |
+            studyvis-sccache-webkit-ubuntu-24.04-${{ hashFiles('scripts/linux-webkit-runtime.env', 'scripts/patches/*.patch') }}-
+            studyvis-sccache-webkit-ubuntu-24.04-
+
+      - name: Build or verify the pinned WebKitGTK runtime
+        if: env.SHIPPABLE == 'true' && runner.os == 'Linux'
+        env:
+          SCCACHE_DIR: ${{ runner.temp }}/studyvis-sccache
+          SCCACHE_CACHE_SIZE: 3G
+          CMAKE_C_COMPILER_LAUNCHER: sccache
+          CMAKE_CXX_COMPILER_LAUNCHER: sccache
+          RUNTIME_DIR: ${{ steps.webkit-runtime.outputs.runtime-dir }}
+        run: |
+          set -euo pipefail
+          bash scripts/build-linux-webkit-runtime.sh
+          sccache --show-stats
+          # Both of these land in the 10 GB per-repository cache budget, which
+          # the rust-cache entries already crowd. Print the sizes so a future
+          # eviction is diagnosable from the log instead of inferred. Reporting
+          # only: on the cached path the script exits before sccache is ever
+          # invoked, so SCCACHE_DIR need not exist, and under set -e a missing
+          # path here would fail a build that had already succeeded.
+          du -sh "$RUNTIME_DIR" "$SCCACHE_DIR" 2>/dev/null || true
+
+      - name: Save the WebKit compiler cache
+        if: ${{ !cancelled() && env.SHIPPABLE == 'true' && runner.os == 'Linux' && steps.webkit-sccache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v5
+        with:
+          path: ${{ runner.temp }}/studyvis-sccache
+          key: studyvis-sccache-webkit-ubuntu-24.04-${{ hashFiles('scripts/linux-webkit-runtime.env', 'scripts/patches/*.patch') }}-${{ github.sha }}
+
+      - name: Save the pinned WebKitGTK runtime
+        if: ${{ success() && env.SHIPPABLE == 'true' && runner.os == 'Linux' && steps.webkit-runtime-cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v5
+        with:
+          path: ${{ steps.webkit-runtime.outputs.runtime-dir }}
+          key: studyvis-webkitgtk-${{ runner.os }}-ubuntu-24.04-x86_64-rust-1.97.1-cargo-c-${{ steps.webkit-runtime.outputs.cargo-c-version }}-${{ hashFiles('scripts/linux-webkit-runtime.env', 'scripts/patches/*.patch') }}-${{ hashFiles('scripts/build-linux-webkit-runtime.sh', 'scripts/generate-librice-third-party-notices.mjs') }}
+
+      - name: Remove a cached Linux preview output
+        if: env.SHIPPABLE == 'true' && runner.os == 'Linux'
+        shell: bash
+        run: |
+          version=$(node -p "require('./package.json').version")
+          appimage="${GITHUB_WORKSPACE}/src-tauri/target/release/bundle/appimage/StudyVis_${version}_amd64.AppImage"
+          rm -f "$appimage" "${appimage}.sig"
 
       # The config override is what makes this safe to run without secrets:
       # with createUpdaterArtifacts on, the bundler demands the minisign key
@@ -319,7 +583,63 @@ jobs:
           # split, so it stays unquoted here on purpose.
           # shellcheck disable=SC2086
           npm run tauri -- build $BUILD_ARGS \
-            --config '{"bundle":{"createUpdaterArtifacts":false}}'
+            --config '{"bundle":{"createUpdaterArtifacts":false,"linux":{"appimage":{"bundleMediaFramework":true}}}}'
+
+      - name: Verify notices in the exact macOS preview DMG
+        if: env.SHIPPABLE == 'true' && runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          bundle_root="src-tauri/target/aarch64-apple-darwin/release/bundle"
+          count=$(find "$bundle_root" -type f -name '*.dmg' -print | awk 'END { print NR + 0 }')
+          if [ "$count" -ne 1 ]; then
+            echo "::error::Expected exactly one freshly built DMG, found $count"
+            exit 1
+          fi
+          dmg=$(find "$bundle_root" -type f -name '*.dmg' -print)
+          mountpoint=$(mktemp -d "${RUNNER_TEMP}/studyvis-dmg.XXXXXX")
+          attached=false
+          cleanup() {
+            if $attached; then hdiutil detach "$mountpoint"; fi
+            rmdir "$mountpoint" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+          hdiutil attach "$dmg" -nobrowse -readonly -mountpoint "$mountpoint"
+          attached=true
+          npm run check-notice-bundle -- "$mountpoint"
+
+      - name: Verify notices in the exact Windows preview installer
+        if: env.SHIPPABLE == 'true' && runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $installers = @(Get-ChildItem 'src-tauri/target/release/bundle' -Recurse -File -Filter '*-setup.exe')
+          if ($installers.Count -ne 1) {
+            throw "Expected exactly one freshly built NSIS installer, found $($installers.Count)"
+          }
+          $unpack = Join-Path $env:RUNNER_TEMP "studyvis-nsis-$([guid]::NewGuid())"
+          New-Item -ItemType Directory -Path $unpack | Out-Null
+          try {
+            & 7z x '-y' "-o$unpack" $installers[0].FullName
+            if ($LASTEXITCODE -ne 0) {
+              throw "7-Zip could not extract the exact NSIS installer (exit $LASTEXITCODE)"
+            }
+            npm run check-notice-bundle -- $unpack
+            if ($LASTEXITCODE -ne 0) {
+              throw "Bundled third-party notice verification failed (exit $LASTEXITCODE)"
+            }
+          } finally {
+            Remove-Item -Recurse -Force $unpack -ErrorAction SilentlyContinue
+          }
+
+      - name: Validate the exact Linux preview AppImage
+        if: env.SHIPPABLE == 'true' && runner.os == 'Linux'
+        shell: bash
+        run: |
+          version=$(node -p "require('./package.json').version")
+          appimage="${GITHUB_WORKSPACE}/src-tauri/target/release/bundle/appimage/StudyVis_${version}_amd64.AppImage"
+          test -f "$appimage"
+          bash scripts/check-linux-appimage.sh "$appimage"
 
       - name: Collect the installer
         if: env.SHIPPABLE == 'true'
@@ -328,7 +648,7 @@ jobs:
           set -euo pipefail
           mkdir -p out
           find src-tauri/target -type f \
-            \( -name '*.dmg' -o -name '*-setup.exe' \) \
+            \( -name '*.dmg' -o -name '*-setup.exe' -o -name '*.AppImage' \) \
             -exec cp {} out/ \;
           ls -la out
 
@@ -361,12 +681,12 @@ jobs:
             echo "### ${LABEL} installer (${ARCH})"
             echo
             echo "Unsigned, **not** a release, no auto-update manifest."
-            echo "Expect the usual Gatekeeper/SmartScreen warning (INSTALL.md)."
+            echo "See INSTALL.md for platform-specific first-run requirements."
             echo "Installing this over a real StudyVis install replaces it."
           } >> "$GITHUB_STEP_SUMMARY"
 
-  # One check summarising both platforms, so the PR has a single line to read
-  # rather than two to correlate. It mints no deployment record of its own —
+  # One check summarising every platform, so the PR has a single line to read
+  # rather than three to correlate. It mints no deployment record of its own —
   # those belong to the per-platform jobs above, which are the only things
   # that know what actually got built.
   #
@@ -389,9 +709,8 @@ jobs:
       # `installer` has no job-level `if:`, so once `scope` succeeds it always
       # runs and its result is a genuine pass/fail rather than a `skipped` that
       # could mean either "nothing to build" or "the dependency died". That is
-      # what lets this be a plain two-step check instead of ci.yml's jq sweep
-      # over `needs` — whose "skipped counts as a pass" shortcut is only safe
-      # there because no job in that file depends on another.
+      # what lets this be a plain two-step check. ci.yml separately sweeps all
+      # of its unconditional `needs` entries and fails closed on non-success.
       - name: Report whether this commit deployed
         env:
           SCOPE_RESULT: ${{ needs.scope.result }}
@@ -421,13 +740,13 @@ jobs:
           fi
 
           if [ "$INSTALLER_RESULT" != "success" ]; then
-            echo "::error::the installer build did not succeed (${INSTALLER_RESULT}) — this commit changes shippable code that no longer builds on at least one platform. Check Installer (macOS) and Installer (Windows) to see which. This does NOT block the merge; it is telling you something is broken."
+            echo "::error::the installer build did not succeed (${INSTALLER_RESULT}) — this commit changes shippable code that no longer builds on at least one platform. Check the macOS, Windows, and Linux installer legs to see which. This does NOT block the merge; it is telling you something is broken."
             exit 1
           fi
           {
             echo "### Deployed"
             echo
-            echo "macOS (arm64) and Windows (x64) installers were built from"
+            echo "macOS (arm64), Windows (x64), and Linux (x64) installers were built from"
             echo "this commit and attached to the run. Download them from the"
             echo "**Artifacts** section of this page if you want to smoke-test."
             echo

@@ -375,7 +375,7 @@ describe('settingsStore — V3-P3 shortcut persistence & runtime push', () => {
 describe('resetShortcutsToDefaults — collision recovery (item 22)', () => {
   // Stateful fake: each action "holds" a combo, and registering a combo the
   // *other* action currently holds throws AlreadyRegistered, mirroring
-  // global-hotkey's real duplicate-registration error on both shipped OSes.
+  // global-hotkey's real duplicate-registration error on shipped desktops.
   let held: Record<'ptt-friends' | 'ptt-ai', string>
   let attempts: Array<{ action: string; accelerator: string }>
 

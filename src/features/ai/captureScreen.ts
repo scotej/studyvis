@@ -1,18 +1,14 @@
-// V2-P3 — Screen frame snapshot for the AI sample loop. Acquires a fresh
-// getDisplayMedia track exclusively for the AI side path (never published
-// to peers), snapshots a single frame, downscales to 1024 px wide preserving
-// aspect, encodes JPEG quality 0.7, then stops the track so the OS screen-
-// recording indicator disappears between ticks.
+// One-shot screen-frame utility. `captureScreen()` acquires one
+// getDisplayMedia stream for the local AI side path (never published to
+// peers), snapshots a frame, downscales it to 1024 px wide, encodes a
+// quality-0.7 JPEG, and always stops the stream.
 //
-// Multi-monitor: V2 makes no programmatic display selection. The OS picker
-// shown by getDisplayMedia is the only selector; the user picks once per
-// acquire. V3 will add a multi-monitor toggle (see src/features/ai/README.md).
-//
-// Track lifetime: the default flow re-acquires on every call. If the OS
-// shows the picker every tick (which is the Tauri webview behavior on macOS
-// + Windows once the orchestrator wires this in V2-P5), the sample loop
-// switches to a long-lived track; that path is documented in README.md and
-// stays out of this file to keep its surface small.
+// This is NOT the live sample loop: sampleLoop.ts acquires long-lived screen
+// streams once at boot, snapshots them on each tick, and composites surviving
+// streams when the user selected all displays. The OS picker remains the
+// selector for every acquire on macOS, Windows, and Linux/desktop portals.
+// Helpers in this file seed permissions and hand a gesture-started acquire to
+// that long-lived loop. See src/features/ai/README.md.
 
 import {
   CaptureError,
@@ -114,7 +110,7 @@ async function acquireScreenStream(): Promise<MediaStream> {
   }
 }
 
-// V2-P9 gesture fix — WebView2 (Windows) and WKWebView (macOS) require
+// V2-P9 gesture fix — desktop webviews require
 // getDisplayMedia() to run inside live transient user activation on EVERY
 // call, not just the first. sampleLoop.ts's boot() acquires the long-lived
 // screen stream from a useEffect (no gesture in its call stack), which is
@@ -178,8 +174,8 @@ export function discardPendingScreenStream(): void {
 // getDisplayMedia rejections to the same CaptureError codes (the
 // macOS-Sequoia NotAllowedError → `screen_capture_denied` mapping is
 // load-bearing for the permission overlay; duplicating it would risk drift).
-// The long-lived acquire+snapshot loop itself still lives in sampleLoop.ts,
-// per README §"Acquire strategy" — only this error classifier is shared.
+// The long-lived acquire+snapshot loop itself still lives in sampleLoop.ts;
+// only this error classifier is shared (see README §"Live capture pipeline").
 export function mapDisplayMediaError(err: unknown): CaptureError {
   if (err instanceof CaptureError) return err
   if (err instanceof DOMException) {
@@ -236,9 +232,9 @@ function stopStream(stream: MediaStream): void {
   }
 }
 
-// Caller-facing helper: trigger the one-shot OS permission prompt on macOS
-// Sequoia / Windows. Throws CaptureError on denial — callers map error.code
-// to the right UI affordance (e.g. the ScreenCapturePermissionOverlay).
+// Caller-facing helper: trigger the one-shot OS permission/picker flow on
+// macOS, Windows, or Linux. Throws CaptureError on denial — callers map
+// error.code to the right UI affordance (e.g. ScreenCapturePermissionOverlay).
 // Used by V2-P9's "Enable AI features" toggle to seed the permission
 // before the first sample-loop tick.
 export async function requestScreenCapturePermission(): Promise<void> {

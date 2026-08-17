@@ -5,9 +5,11 @@ worth changing. Link the issue if there is one (Fixes #123). -->
 
 ## Manual test
 
-<!-- CI proves the code compiles, lints, and passes the automated gates. It
-cannot prove the app still works — there are no component tests (vitest runs
-node-env only) and no desktop smoke test. Say what you actually exercised.
+<!-- CI proves the code compiles, lints, and passes the automated gates. Its
+Linux job performs a headless packaged-startup smoke, but cannot prove an
+interactive desktop/media flow still works. There are no Vitest/RTL
+`*.test.tsx` component tests; Storybook provides rendered/axe coverage for
+existing stories and a few play functions. Say what you actually exercised.
 
 Mark each line as machine-walked (driven by an agent via windows-mcp) or
 user-walked (a human at the keyboard), per CLAUDE.md's desktop-testing note.
@@ -18,6 +20,17 @@ reach the running app. -->
       — _machine-walked / user-walked / n-a_
 - [ ] Checked in both themes and at reduced-motion — _machine-walked /
       user-walked / n-a_
+- [ ] If packaging, updater, media, key custody, or platform code changed:
+      installed the exact affected-platform preview artifact — _platform(s) +
+      machine-walked / user-walked / n-a_
+
+For a Linux release-path change, include the PLAN §8 CachyOS KDE Wayland
+results: normal FUSE AppImage launch, live Secret Service round-trip,
+camera/mic, portal + PipeWire screen capture, peer session, packaged CPU-only
+AI, writable-AppImage update/relaunch, data preservation, `studyvis://`
+registration/import, KDE notification-settings launch, custom chrome, and both
+Wayland input fallbacks. Extraction mode must retain the writable original
+AppImage—not its temporary tree—as the update and relaunch target.
 
 ## Compatibility surfaces
 
@@ -31,6 +44,7 @@ box is ticked, say in one line what keeps the old side working. -->
 - [ ] Identity derivation (BIP39 → ed25519/x25519, pair links, contact links)
 - [ ] Persisted settings shape / store keys
 - [ ] Updater manifest or release artifact names
+- [ ] Supported-platform matrix / AppImage write-and-replace semantics
 
 ## Gates
 
@@ -48,9 +62,9 @@ tsc --noEmit, and cargo fmt — everything else below is yours to run. -->
 - [ ] `cd src-tauri && cargo deny check` — supply chain
 
 CI-only, nothing to run locally: `actionlint` + `zizmor` (workflow lint),
-`dependency-review`, `typos`, the version-lockstep assertion, the PR-title
-check, and CodeQL. They gate the merge; they just have no useful local
-form.
+`dependency-review`, `typos`, and the version-lockstep assertion roll into the
+required **All pre-merge checks** result; **PR title** is separately required.
+CodeQL runs and reports to the Security tab, but is not a required merge check.
 
 ## Merge style
 

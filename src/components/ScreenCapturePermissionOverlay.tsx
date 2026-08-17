@@ -107,7 +107,7 @@ export function ScreenCapturePermissionOverlay({
             <li key={i}>{renderStep(step)}</li>
           ))}
         </ol>
-        {/* D5 — the macOS recording indicator (and its Windows counterpart)
+        {/* D5 — the OS recording indicator (including the KDE portal indicator)
             stays on for the whole AI session. The id is referenced from
             DialogContent's aria-describedby so SRs read it on open. */}
         <p

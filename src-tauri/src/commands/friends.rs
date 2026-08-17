@@ -1,8 +1,8 @@
 //! Friends commands: thin sync wrappers over `db::friends`, plus the
-//! encrypted `.svfb` friends-list backup (export/import, macOS/Windows only —
-//! it needs the keychain identity). The backup's authenticity envelope is
-//! security-critical; see the banner above `BACKUP_MAGIC` before touching the
-//! format.
+//! encrypted `.svfb` friends-list backup (export/import on release-matrix
+//! desktops — it needs the keychain/Secret Service identity). The backup's
+//! authenticity envelope is security-critical; see the banner above
+//! `BACKUP_MAGIC` before touching the format.
 
 use std::io::Read;
 use std::path::Path;

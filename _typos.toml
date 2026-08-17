@@ -15,6 +15,20 @@ extend-exclude = [
   "storybook-static",
   "src-tauri/target",
   "src-tauri/gen",
+  # Vendored Wry source remains byte-close to its upstream revision; its
+  # historical comment spelling is not StudyVis product copy.
+  "src-tauri/vendor",
+  # These notice inventories preserve third-party package names, attributions,
+  # and license text verbatim. Their generator verifies integrity separately.
+  "THIRD-PARTY-NOTICES.txt",
+  "THIRD-PARTY-NOTICES.json",
+  "src-tauri/resources/THIRD-PARTY-NOTICES.txt",
+  "src-tauri/resources/THIRD-PARTY-NOTICES.json",
+  "scripts/licenses",
+  "scripts/third-party-licenses",
+  # The frozen WebKit patch is hash-pinned and validated against pristine
+  # upstream source; checking its inherited context would make it mutable.
+  "scripts/patches",
 ]
 
 [default]
@@ -39,6 +53,8 @@ extend-ignore-re = [
   "\\bNULLable\\b",
   # `PNGs` in generate-icons.mjs, split into "PN" + "Gs".
   "\\bPNGs?\\b",
+  # musl's generated configuration filename in the pinned runtime builder.
+  "\\bconfig\\.mak\\b",
 ]
 
 [default.extend-identifiers]
@@ -57,3 +73,5 @@ unparseable = "unparseable"
 missable = "missable"
 # ISSUES.md counts advisories by severity: "criticals: concurrently@9 → ...".
 criticals = "criticals"
+# Proper name of the reference MQTT broker used only in explanatory comments.
+mosquitto = "mosquitto"

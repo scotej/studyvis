@@ -43,7 +43,11 @@ export type IdentityStatus = 'loading' | 'absent' | 'ready' | 'error'
 //                    holds no keys (file-level backup restore, Credential
 //                    Manager reset, the I15 residual). Every sign/decrypt
 //                    would fail; the 24-word Recover flow is the only fix.
-export type IdentityErrorKind = 'file' | 'keys-missing'
+//   'keychain-unavailable' — identity.json parsed fine, but the credential
+//                    store could not be opened (for example, a locked Linux
+//                    Secret Service provider). Retry after unlocking; do not
+//                    treat the keys as missing or offer to overwrite them.
+export type IdentityErrorKind = 'file' | 'keys-missing' | 'keychain-unavailable'
 
 export type CreatedIdentity = {
   mnemonic: Mnemonic
@@ -73,14 +77,15 @@ type IdentityState = {
   status: IdentityStatus
   // Set only while status === 'error'; null otherwise.
   errorKind: IdentityErrorKind | null
-  // The successfully PARSED identity.json backing a 'keys-missing' error
+  // The successfully PARSED identity.json backing a key-related error
   // (#47 E1 follow-up). Kept separate from `identity` — consumers treat
-  // `identity` as usable, and these keys are gone — so the Recover flow can
-  // still (a) recognize the user's own 24 words via the stored fingerprint
-  // (no false "replace identity?" scare, correct "friends stay intact" done
-  // copy) and (b) preserve the display name across the restore instead of
-  // silently blanking it (a blank name never re-prompts — onboarding is
-  // already complete — and silently disables invite sending).
+  // `identity` as usable, while neither missing nor currently inaccessible
+  // keys are usable — so the Recover flow can still (a) recognize the user's
+  // own 24 words via the stored fingerprint (no false "replace identity?"
+  // scare, correct "friends stay intact" done copy) and (b) preserve the
+  // display name across a restore instead of silently blanking it (a blank
+  // name never re-prompts — onboarding is already complete — and silently
+  // disables invite sending).
   staleRecord: IdentityRecord | null
   // Stable object reference — actions never change identity across renders,
   // so consumers can safely include `actions.signWithKeyring` in dep arrays
@@ -164,9 +169,9 @@ export const useIdentityStore = create<IdentityState>((set, get) => {
     // hold the private keys, or every identity_sign / identity_box_decrypt
     // fails deep inside pairing/invites/audit signing with raw keyring
     // errors. Only a definitive keyring NoEntry (probe resolves false) routes
-    // to the keys-missing error; a rejected probe (locked keychain, non-Tauri
-    // test env) is inconclusive and must not block boot or steer the user
-    // into the key-overwriting Recover flow.
+    // to the keys-missing Recover flow. A rejected probe means the credential
+    // store itself is unavailable or locked: block boot with retry guidance,
+    // but do not mislabel the keys as missing or offer to overwrite them.
     try {
       const keysPresent = await identityKeysPresent()
       if (!keysPresent) {
@@ -181,11 +186,19 @@ export const useIdentityStore = create<IdentityState>((set, get) => {
         return
       }
     } catch (err) {
-      log.warn('keychain.inconclusive', {
+      log.error('keychain.probe.failed', {
         cmd: 'identity_keys_present',
-        outcome: 'continue',
+        errorKind: 'keychain-unavailable',
+        outcome: 'block',
         err,
       })
+      set({
+        identity: null,
+        status: 'error',
+        errorKind: 'keychain-unavailable',
+        staleRecord: record,
+      })
+      return
     }
     set({
       identity: record,
@@ -209,9 +222,9 @@ export const useIdentityStore = create<IdentityState>((set, get) => {
     // recovery of the SAME identity (D5 harmless re-commit, no confirm shown)
     // doesn't silently blank it. Onboarding create starts from no identity, so
     // this degrades to '' there (DisplayNameStep sets it next). On the
-    // keys-missing path (#47 E1) the record parsed fine — staleRecord carries
-    // its display name through the restore; only the truly-unreadable 'file'
-    // path has nothing to preserve.
+    // key-related error paths (#47 E1) the record parsed fine — staleRecord
+    // carries its display name through a restore; only the truly-unreadable
+    // 'file' path has nothing to preserve.
     const record = recordFromIdentity(
       id,
       get().identity?.display_name ?? get().staleRecord?.display_name ?? ''

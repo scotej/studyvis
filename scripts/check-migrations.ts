@@ -10,8 +10,9 @@
 // three hashes (and this script's values match it byte for byte, CRLF
 // normalization included — that agreement is deliberate). Two reasons this
 // exists anyway:
-//   - it runs in the `frontend` job in seconds, rather than behind a full
-//     Tauri compile on macOS and Windows, so the feedback arrives first;
+//   - it runs in the `frontend` job in seconds, rather than behind full Tauri
+//     compiles across the macOS, Windows, and Linux matrix, so feedback arrives
+//     first;
 //   - it checks two things the Rust test does not, below.
 //
 // Three failures, all of which reach a friend's disk before anyone notices:

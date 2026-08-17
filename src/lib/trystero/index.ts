@@ -30,6 +30,7 @@ import {
 } from 'trystero'
 
 import { logger } from '@/lib/log'
+import { DEFAULT_MQTT_BROKER_URLS } from './mqttRelayUrls'
 import { DEFAULT_RELAY_URLS } from './relays'
 
 const log = logger.child('p2p.trystero')
@@ -37,10 +38,11 @@ const log = logger.child('p2p.trystero')
 export const APP_ID = 'studyvis'
 
 // Discovery transports trystero can rendezvous over. 'nostr' is the default
-// (curated relay pin in ./relays); 'mqtt' uses @trystero-p2p/mqtt's public
-// brokers and is raced alongside Nostr for pairing so a single failing layer
-// (dead relays, blocked relay hostnames, or a clock-skewed peer) doesn't strand
-// the pair. Both share one @trystero-p2p/core, hence one peerId per peer.
+// (curated relay pin in ./relays); 'mqtt' uses the separate curated broker pin
+// in ./mqttRelayUrls and is raced alongside Nostr for pairing so a single
+// failing layer (dead relays, blocked relay hostnames, or a clock-skewed peer)
+// doesn't strand the pair. Both share one @trystero-p2p/core, hence one peerId
+// per peer.
 export type Strategy = 'nostr' | 'mqtt'
 
 export type { JoinError }
@@ -208,12 +210,19 @@ export const joinTopic: JoinTopicFn = (
 
   const rooms = strategies.map((strategy): TopicRoom => {
     if (strategy === 'mqtt') {
-      // MQTT rendezvouses over @trystero-p2p/mqtt's own broker list — the Nostr
-      // `relayConfig` is deliberately NOT forwarded (wss Nostr relays are not
-      // MQTT brokers). turnConfig/rtcConfig still apply: the WebRTC leg is the
-      // same regardless of which strategy carried the signaling.
+      // The Nostr `relayConfig` is deliberately NOT forwarded (wss Nostr relays
+      // are not MQTT brokers). MQTT gets its own curated broker pin so package
+      // default changes or a dead first-party test broker cannot silently alter
+      // shipped rendezvous. turnConfig/rtcConfig still apply: the WebRTC leg is
+      // the same regardless of which strategy carried the signaling.
       const mqttRoom: Room = joinRoomMqtt(
-        { appId: APP_ID, password, turnConfig, rtcConfig },
+        {
+          appId: APP_ID,
+          password,
+          turnConfig,
+          rtcConfig,
+          relayConfig: { urls: DEFAULT_MQTT_BROKER_URLS },
+        },
         topic,
         mergedCallbacks
       )

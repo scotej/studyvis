@@ -94,7 +94,12 @@ describe('PTT listener diagnostic timers', () => {
     __resetLog()
     __setLogRecordSink((record) => records.push(record))
     __resetPttScheduler()
-    usePttStore.setState({ active: false, awaitingRelease: false, revision: 0 })
+    usePttStore.setState({
+      active: false,
+      awaitingRelease: false,
+      heldSources: [],
+      revision: 0,
+    })
     useSessionStore.getState().reset()
   })
 
@@ -105,7 +110,12 @@ describe('PTT listener diagnostic timers', () => {
     __setLogRecordSink(null)
     __resetLog()
     __resetPttScheduler()
-    usePttStore.setState({ active: false, awaitingRelease: false, revision: 0 })
+    usePttStore.setState({
+      active: false,
+      awaitingRelease: false,
+      heldSources: [],
+      revision: 0,
+    })
     useSessionStore.getState().reset()
     vi.useRealTimers()
   })
@@ -242,6 +252,37 @@ describe('PTT listener diagnostic timers', () => {
         stateChangedDuringSample: false,
       }
     )
+  })
+
+  test('keeps a session-button hold active across a later native press and release', async () => {
+    await mountListener()
+
+    const { press, release } = usePttStore.getState()
+    press('session-button')
+    emit(PTT_FRIENDS_PRESSED)
+
+    expect(usePttStore.getState()).toMatchObject({
+      active: true,
+      awaitingRelease: true,
+      heldSources: ['session-button', 'native-shortcut'],
+      revision: 1,
+    })
+
+    emit(PTT_FRIENDS_RELEASED)
+    expect(usePttStore.getState()).toMatchObject({
+      active: true,
+      awaitingRelease: true,
+      heldSources: ['session-button'],
+      revision: 1,
+    })
+
+    release('session-button')
+    expect(usePttStore.getState()).toMatchObject({
+      active: false,
+      awaitingRelease: false,
+      heldSources: [],
+      revision: 2,
+    })
   })
 
   test('clears an unreleased native hold when the session room changes', async () => {
