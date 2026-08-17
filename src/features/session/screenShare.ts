@@ -113,8 +113,8 @@ export type ScreenShareController = {
 
 export type ScreenShareControllerArgs = {
   room: TopicRoom
-  // Fires on a peer's start/stop, and with `false` when a peer leaves, so the
-  // consumer retires the tile in one place.
+  // Fires on a peer's start/stop, and with `false` when a peer leaves or its
+  // transport is replaced, so the consumer retires the tile in one place.
   onPeerSharingChange: (peerId: string, sharing: boolean) => void
 }
 
@@ -122,8 +122,8 @@ export function startScreenShareController({
   room,
   onPeerSharingChange,
 }: ScreenShareControllerArgs): ScreenShareController {
-  // Peers that have sent us an announce — i.e. builds that can render a screen
-  // tile. See the capability note at the top of this file.
+  // Peers whose current transport incarnation has sent us an announce — i.e.
+  // builds that can render a screen tile. See the capability note above.
   const announced = new Set<string>()
   // peerId → the stream id that peer is currently sharing.
   const screenStreamIds = new Map<string, string>()
@@ -135,8 +135,8 @@ export function startScreenShareController({
   // `addStream` of the same stream object is a no-op inside trystero's shared
   // peer (shared-peer.mjs:206-211, `shouldAttach = owners.size === 0`) but
   // room.mjs still emits the stream-meta packet, and that orphan meta desyncs
-  // the receiver's FIFO for every later stream. "Exactly once per (peer,
-  // stream)" is the invariant this set exists to hold.
+  // the receiver's FIFO for every later stream. "Exactly once per (peer
+  // incarnation, stream)" is the invariant this set exists to hold.
   const publishedTo = new Set<string>()
   let localStream: MediaStream | null = null
   let stopped = false
@@ -197,21 +197,28 @@ export function startScreenShareController({
     publishTo(peerId)
   })
 
+  const clearPeerIncarnation = (peerId: string): boolean => {
+    const hadAnnounced = announced.delete(peerId)
+    const hadScreen = screenStreamIds.delete(peerId)
+    const hadRetiredScreens = retiredScreenStreamIds.delete(peerId)
+    const hadPublishedStream = publishedTo.delete(peerId)
+    return hadAnnounced || hadScreen || hadRetiredScreens || hadPublishedStream
+  }
+
   const offJoin = room.onPeerJoin((peerId) => {
     if (stopped) return
-    // Announce only — publishing waits for their announce back, which is what
-    // proves they can render a screen tile.
+    // Trystero replaces an active same-id PeerHandle by clearing its core state
+    // and later emitting a fresh join, without emitting a leave for the old
+    // transport. Treat every join as a new transport incarnation: forget the
+    // old capability and exactly-once marker, retire any stale incoming tile,
+    // then wait for the replacement to prove capability before publishing.
+    const replacedKnownPeer = clearPeerIncarnation(peerId)
+    if (replacedKnownPeer) onPeerSharingChange(peerId, false)
     announce(peerId)
   })
 
   const offLeave = room.onPeerLeave((peerId) => {
-    announced.delete(peerId)
-    screenStreamIds.delete(peerId)
-    retiredScreenStreamIds.delete(peerId)
-    // A peer may reconnect under the same peerId with a brand-new
-    // RTCPeerConnection, so the stream has to be added again. Holding them here
-    // would leave their screen tile permanently blank.
-    publishedTo.delete(peerId)
+    clearPeerIncarnation(peerId)
     if (!stopped) onPeerSharingChange(peerId, false)
   })
 

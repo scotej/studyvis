@@ -1,10 +1,10 @@
-// #96 — screen sharing rides the session room alongside the camera stream, so
+// #96 / #223 — screen sharing rides the session room alongside the camera, so
 // the controller has two invariants worth pinning:
 //
-//   1. A screen stream reaches a peer EXACTLY once. A repeat `addStream` of the
-//      same stream object is a no-op inside trystero's shared peer
-//      (shared-peer.mjs:206-211) but room.mjs still emits the stream-meta
-//      packet, and the receiver pairs metas to incoming streams FIFO
+//   1. A screen stream reaches each peer transport incarnation EXACTLY once. A
+//      repeat `addStream` of the same stream object is a no-op inside trystero's
+//      shared peer (shared-peer.mjs:206-211) but room.mjs still emits the
+//      stream-meta packet, and the receiver pairs metas to incoming streams FIFO
 //      (room.mjs:438-443). One orphan meta mislabels every later stream on that
 //      connection — invisible before this feature, because there was only ever
 //      one stream.
@@ -81,6 +81,12 @@ function fakeRoom() {
     removed,
     sent,
     join(peerId: string) {
+      active.add(peerId)
+      for (const fn of joinSubs) fn(peerId)
+    },
+    // Trystero replaces an active same-id peer by emitting another join without
+    // first emitting a leave for the old transport.
+    replace(peerId: string) {
       active.add(peerId)
       for (const fn of joinSubs) fn(peerId)
     },
@@ -169,6 +175,27 @@ describe('screen-share capability gate', () => {
       },
     ])
   })
+
+  test('requires a same-id replacement to announce capability again', () => {
+    const bus = fakeRoom()
+    const { controller } = start(bus)
+    bus.join('friend')
+    bus.announce('friend', SILENT)
+    const first = stream('screen-1')
+    const second = stream('screen-2')
+    controller.publish(first)
+
+    bus.replace('friend')
+    controller.publish(second)
+
+    // The replacement could be an older build. Until it announces on the
+    // current connection, it must not inherit the old connection's capability.
+    expect(bus.added.map((a) => a.stream)).toEqual([first])
+
+    bus.announce('friend', SILENT)
+
+    expect(bus.added.map((a) => a.stream)).toEqual([first, second])
+  })
 })
 
 describe('screen-share exactly-once publishing', () => {
@@ -214,6 +241,25 @@ describe('screen-share exactly-once publishing', () => {
     bus.announce('friend', SILENT)
 
     expect(bus.added.map((a) => a.peerId)).toEqual(['friend', 'friend'])
+  })
+
+  test('a same-id replacement is published to again without a leave', () => {
+    const bus = fakeRoom()
+    const { controller } = start(bus)
+    bus.join('friend')
+    bus.announce('friend', SILENT)
+    const screen = stream('screen-1')
+    controller.publish(screen)
+
+    // Trystero's replacement path emits only the second join. The replacement
+    // must receive the already-active share after it announces on its new data
+    // channel, but repeated announces must not emit a third metadata packet.
+    bus.replace('friend')
+    bus.announce('friend', SILENT)
+    bus.announce('friend', SILENT)
+
+    expect(bus.added.map((a) => a.peerId)).toEqual(['friend', 'friend'])
+    expect(bus.added.map((a) => a.stream)).toEqual([screen, screen])
   })
 
   test('re-sharing retires the old stream and publishes the new one', () => {
@@ -277,6 +323,25 @@ describe('screen-share stop', () => {
       { peerId: 'friend', sharing: false },
       { peerId: 'friend', sharing: true },
       { peerId: 'friend', sharing: false },
+    ])
+  })
+
+  test("a same-id replacement retires the old peer's screen state", () => {
+    const bus = fakeRoom()
+    const { changes } = start(bus)
+    bus.join('friend')
+    bus.announce('friend', { sharing: true, stream_id: 'their-screen' })
+
+    bus.replace('friend')
+    bus.announce('friend', {
+      sharing: true,
+      stream_id: 'their-rejoined-screen',
+    })
+
+    expect(changes).toEqual([
+      { peerId: 'friend', sharing: true },
+      { peerId: 'friend', sharing: false },
+      { peerId: 'friend', sharing: true },
     ])
   })
 
