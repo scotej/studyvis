@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   AlertTriangleIcon,
   CircleAlertIcon,
@@ -9,11 +9,16 @@ import {
 import { strings } from '@/strings'
 
 import {
+  normalizeSessionOverlayWindowHeight,
+  SESSION_OVERLAY_BODY_MAX_HEIGHT,
   SESSION_OVERLAY_DISMISS,
+  SESSION_OVERLAY_LAYOUT_TIMEOUT_MS,
+  SESSION_OVERLAY_PRESENT,
   SESSION_OVERLAY_READY,
   SESSION_OVERLAY_UPDATE,
   type SessionOverlaySnapshot,
   type SessionOverlayTone,
+  type SessionOverlayUpdatePayload,
 } from './sessionOverlay'
 
 export type SessionOverlayRuntime = {
@@ -30,13 +35,26 @@ export type SessionOverlayWindowProps = {
   runtime?: SessionOverlayRuntime
 }
 
+type SessionOverlayRenderState = {
+  revision: number
+  snapshot: SessionOverlaySnapshot
+}
+
 export function SessionOverlayWindow({
   initialSnapshot = null,
   runtime,
 }: SessionOverlayWindowProps) {
-  const [snapshot, setSnapshot] = useState<SessionOverlaySnapshot | null>(
-    initialSnapshot
-  )
+  const [renderState, setRenderState] =
+    useState<SessionOverlayRenderState | null>(() =>
+      initialSnapshot
+        ? {
+            revision: 0,
+            snapshot: initialSnapshot,
+          }
+        : null
+    )
+  const frameRef = useRef<HTMLDivElement>(null)
+  const snapshot = renderState?.snapshot ?? null
   const item = snapshot?.item ?? null
 
   const dismiss = useCallback(() => {
@@ -51,9 +69,12 @@ export function SessionOverlayWindow({
     let cancelled = false
     let unlisten: (() => void) | null = null
     void runtime
-      .listen<SessionOverlaySnapshot>(SESSION_OVERLAY_UPDATE, (payload) => {
-        if (!cancelled) setSnapshot(payload)
-      })
+      .listen<SessionOverlayUpdatePayload>(
+        SESSION_OVERLAY_UPDATE,
+        (payload) => {
+          if (!cancelled) setRenderState(payload)
+        }
+      )
       .then((off) => {
         if (cancelled) off()
         else unlisten = off
@@ -73,6 +94,62 @@ export function SessionOverlayWindow({
     void runtime.close()
   }, [runtime, snapshot])
 
+  // Measure the actual rendered card rather than estimating from character
+  // counts. This follows font metrics, wrapping, explicit newlines, theme, and
+  // display scaling on both WebView2 and WKWebView. ResizeObserver catches the
+  // second layout pass when bundled fonts finish loading.
+  useEffect(() => {
+    if (!runtime || !item || !renderState || renderState.revision <= 0) return
+    const frame = frameRef.current
+    if (!frame) return
+
+    let cancelled = false
+    let lastHeight: number | null = null
+
+    const measure = (force = false) => {
+      if (cancelled) return
+      const measured = Math.max(
+        frame.scrollHeight,
+        frame.getBoundingClientRect().height
+      )
+      const height = normalizeSessionOverlayWindowHeight(measured)
+      if (height === null || (!force && height === lastHeight)) return
+      lastHeight = height
+      void runtime
+        .emit(SESSION_OVERLAY_PRESENT, {
+          revision: renderState.revision,
+          height,
+        })
+        .catch(() => runtime.close())
+    }
+
+    const observer =
+      typeof ResizeObserver === 'undefined'
+        ? null
+        : new ResizeObserver(() => measure())
+    observer?.observe(frame)
+    // Do not defer the first measurement to requestAnimationFrame: native
+    // hidden windows can pause animation frames, and this window intentionally
+    // stays hidden until a valid measurement has been applied.
+    measure()
+    if ('fonts' in document) {
+      void document.fonts.ready.then(() => measure()).catch(() => {})
+    }
+    // Force one post-fallback report. It is harmless when the runtime already
+    // has the same height and repairs the narrow timeout-edge race where a
+    // fallback was queued behind the real measurement.
+    const settleTimer = setTimeout(
+      () => measure(true),
+      SESSION_OVERLAY_LAYOUT_TIMEOUT_MS + 250
+    )
+
+    return () => {
+      cancelled = true
+      clearTimeout(settleTimer)
+      observer?.disconnect()
+    }
+  }, [item, renderState, runtime])
+
   useEffect(() => {
     if (!item) return
     const onKeyDown = (event: KeyboardEvent) => {
@@ -89,24 +166,34 @@ export function SessionOverlayWindow({
   }
 
   return (
-    <div className="flex h-full w-full items-start justify-end bg-transparent p-4">
+    <div
+      ref={frameRef}
+      className="flex w-full items-start justify-end bg-transparent p-4"
+    >
       <section
         data-testid="session-overlay-window"
         role={item.tone === 'neutral' ? 'status' : 'alert'}
         aria-atomic="true"
-        className={`group relative flex min-h-24 w-full gap-3 rounded-xl border bg-bg-raised p-4 pr-12 shadow-lg ${toneBorder(item.tone)}`}
+        className={`group relative flex min-h-24 w-full gap-3 rounded-xl border bg-bg-raised p-4 pr-12 shadow-md ${toneBorder(item.tone)}`}
       >
         <span className={`mt-0.5 shrink-0 ${toneText(item.tone)}`} aria-hidden>
           {toneIcon(item.tone)}
         </span>
-        <span className="min-w-0">
+        <div className="min-w-0 flex-1">
           <strong className="block text-sm font-semibold text-text-primary">
             {item.title}
           </strong>
-          <span className="mt-1 line-clamp-3 whitespace-pre-wrap break-words text-sm leading-snug text-text-secondary">
+          <div
+            data-testid="session-overlay-body"
+            role="region"
+            aria-label={item.title}
+            tabIndex={0}
+            className="mt-1 overflow-y-auto whitespace-pre-wrap break-words rounded-sm text-sm leading-snug text-text-secondary outline-none focus-visible:ring-2 focus-visible:ring-accent-ring"
+            style={{ maxHeight: SESSION_OVERLAY_BODY_MAX_HEIGHT }}
+          >
             {item.body}
-          </span>
-        </span>
+          </div>
+        </div>
         <button
           type="button"
           onClick={dismiss}
