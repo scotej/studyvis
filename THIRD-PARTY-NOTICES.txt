@@ -5143,10 +5143,10 @@ NPM
   source: https://registry.npmjs.org/lru-cache/-/lru-cache-10.4.3.tgz
   license: npm:node_modules/mqtt/node_modules/lru-cache/LICENSE (SHA-256 451ec07eeb9c4e1b86de9abdaa426462a8be48f887ec7421cf0bbb9c769555ab)
 
-- lucide-react 1.27.0 — ISC
-  id: npm:node_modules/lucide-react@1.27.0
+- lucide-react 1.28.0 — ISC
+  id: npm:node_modules/lucide-react@1.28.0
   targets: frontend
-  source: https://registry.npmjs.org/lucide-react/-/lucide-react-1.27.0.tgz
+  source: https://registry.npmjs.org/lucide-react/-/lucide-react-1.28.0.tgz
   license: npm:node_modules/lucide-react/LICENSE (SHA-256 b495047bd93a9b06913511076f504daba17d5bbeb3e0650f3bb53a4220329c57)
 
 - minimist 1.2.8 — MIT
@@ -23468,7 +23468,7 @@ Applies to:
 
 SHA-256 b495047bd93a9b06913511076f504daba17d5bbeb3e0650f3bb53a4220329c57
 Applies to:
-- npm:node_modules/lucide-react@1.27.0 — npm:node_modules/lucide-react/LICENSE
+- npm:node_modules/lucide-react@1.28.0 — npm:node_modules/lucide-react/LICENSE
 
 --------------------------------------------------------------------------------
 
