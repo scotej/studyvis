@@ -400,12 +400,25 @@ jobs:
       # three-hour WebKitGTK compile and made the next run rebuild it. Saving
       # right after the build step keeps the expensive, already-validated half
       # of this job and leaves only the cheap half to re-run.
+      #
+      # The key splits at the manifest boundary and must stay byte-identical to
+      # deploy.yml's copy: both jobs install to ${RUNNER_TEMP}/studyvis-webkit-runtime,
+      # so a single entry serves them both and whichever compiles first warms
+      # the other. The first hash covers what `expected_manifest` derives from
+      # — the pinned tuple in linux-webkit-runtime.env and the patches; the
+      # second covers the two scripts that change the key but NOT the manifest.
+      # restore-keys falls back across the second only, handing the decision to
+      # `runtime_is_complete`, which byte-compares BUILD-MANIFEST.txt, re-checks
+      # the patch/notice SHAs and every packaged ELF, and rm -rf's the tree and
+      # rebuilds on any drift.
       - name: Restore pinned WebKitGTK runtime
         id: webkit-runtime-cache
         uses: actions/cache/restore@v5
         with:
           path: ${{ steps.webkit-runtime.outputs.runtime-dir }}
-          key: studyvis-webkitgtk-${{ runner.os }}-ubuntu-24.04-x86_64-rust-1.97.1-cargo-c-${{ steps.webkit-runtime.outputs.cargo-c-version }}-${{ hashFiles('scripts/linux-webkit-runtime.env', 'scripts/build-linux-webkit-runtime.sh', 'scripts/generate-librice-third-party-notices.mjs', 'scripts/patches/*.patch') }}
+          key: studyvis-webkitgtk-${{ runner.os }}-ubuntu-24.04-x86_64-rust-1.97.1-cargo-c-${{ steps.webkit-runtime.outputs.cargo-c-version }}-${{ hashFiles('scripts/linux-webkit-runtime.env', 'scripts/patches/*.patch') }}-${{ hashFiles('scripts/build-linux-webkit-runtime.sh', 'scripts/generate-librice-third-party-notices.mjs') }}
+          restore-keys: |
+            studyvis-webkitgtk-${{ runner.os }}-ubuntu-24.04-x86_64-rust-1.97.1-cargo-c-${{ steps.webkit-runtime.outputs.cargo-c-version }}-${{ hashFiles('scripts/linux-webkit-runtime.env', 'scripts/patches/*.patch') }}-
 
       # cargo-c is compiled from source and took ~5 minutes of every run. The
       # key pins the exact version and toolchain, so a hit is the same binary
@@ -413,7 +426,7 @@ jobs:
       # either way.
       - name: Restore pinned cargo-c
         id: cargo-c-cache
-        uses: actions/cache@v5
+        uses: actions/cache/restore@v5
         with:
           path: |
             ~/.cargo/bin/cargo-capi
@@ -433,6 +446,22 @@ jobs:
             *" ${STUDYVIS_CARGO_C_VERSION}"|*" ${STUDYVIS_CARGO_C_VERSION}+"*) ;;
             *) echo "Unexpected cargo-c version: $cargo_c_output" >&2; exit 1 ;;
           esac
+
+      # Same restore/save split as the WebKitGTK runtime above, for the same
+      # reason: as a combined actions/cache the post step is post-if: success(),
+      # so a failure in packaging or the Xvfb smoke hours later threw away a
+      # cargo-c install that had already been asserted good. Saving immediately
+      # after the assertion means success() can only mean "cargo-c is the
+      # pinned version", which is exactly what this cache should record.
+      - name: Save pinned cargo-c
+        if: ${{ success() && steps.cargo-c-cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v5
+        with:
+          path: |
+            ~/.cargo/bin/cargo-capi
+            ~/.cargo/bin/cargo-cbuild
+            ~/.cargo/bin/cargo-cinstall
+          key: studyvis-cargo-c-${{ runner.os }}-ubuntu-24.04-rust-1.97.1-${{ steps.webkit-runtime.outputs.cargo-c-version }}
 
       # Everything below that does not need the private WebKit runtime runs
       # before the hour-long compile. A missing npm dependency, a broken
@@ -461,6 +490,21 @@ jobs:
               --ignored --exact --nocapture
           '
 
+      # Exact key, no restore-keys, deliberately: prepare-linuxdeploy-tools.sh
+      # builds the type-2 runtime only when the directory is absent but runs
+      # verify-linux-appimage-runtime.sh over it either way, and a reused tree
+      # that fails verification aborts the script rather than rebuilding. A
+      # prefix fallback could hand it a runtime it can only die on. The key
+      # carries a -ci suffix because this job stages into a different absolute
+      # path than deploy.yml's copy, and an archive of one cannot be unpacked
+      # over the other.
+      - name: Restore the pinned linuxdeploy toolchain
+        id: linuxdeploy-cache
+        uses: actions/cache/restore@v5
+        with:
+          path: ${{ runner.temp }}/studyvis-tauri-cache-ci
+          key: studyvis-linuxdeploy-ci-ubuntu-24.04-x86_64-${{ hashFiles('scripts/linuxdeploy-tools.env', 'scripts/linux-appimage-runtime.env', 'scripts/linux-appimage-runtime-sources.tsv', 'scripts/prepare-linuxdeploy-tools.sh', 'scripts/build-linux-appimage-runtime.sh', 'scripts/verify-linux-appimage-runtime.sh') }}
+
       - name: Prepare the pinned linuxdeploy toolchain
         shell: bash
         env:
@@ -474,6 +518,16 @@ jobs:
             echo "GSTREAMER_PLUGINS_DIR=$GITHUB_WORKSPACE/src-tauri/target/appimage-webkit/gstreamer-plugins"
             echo "GSTREAMER_HELPERS_DIR=$GITHUB_WORKSPACE/src-tauri/target/appimage-webkit/gstreamer"
           } >> "$GITHUB_ENV"
+
+      # Saved here rather than as a combined actions/cache post step, for the
+      # same reason as the runtime and cargo-c above: the verified toolchain
+      # must survive a failure in packaging or the Xvfb smoke further down.
+      - name: Save the pinned linuxdeploy toolchain
+        if: ${{ success() && steps.linuxdeploy-cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v5
+        with:
+          path: ${{ runner.temp }}/studyvis-tauri-cache-ci
+          key: studyvis-linuxdeploy-ci-ubuntu-24.04-x86_64-${{ hashFiles('scripts/linuxdeploy-tools.env', 'scripts/linux-appimage-runtime.env', 'scripts/linux-appimage-runtime-sources.tsv', 'scripts/prepare-linuxdeploy-tools.sh', 'scripts/build-linux-appimage-runtime.sh', 'scripts/verify-linux-appimage-runtime.sh') }}
 
       # Pre-merge and preview compiles reuse WebKit object files across runs.
       # The tagged release leg deliberately has no equivalent step: "the
@@ -537,7 +591,7 @@ jobs:
         uses: actions/cache/save@v5
         with:
           path: ${{ steps.webkit-runtime.outputs.runtime-dir }}
-          key: studyvis-webkitgtk-${{ runner.os }}-ubuntu-24.04-x86_64-rust-1.97.1-cargo-c-${{ steps.webkit-runtime.outputs.cargo-c-version }}-${{ hashFiles('scripts/linux-webkit-runtime.env', 'scripts/build-linux-webkit-runtime.sh', 'scripts/generate-librice-third-party-notices.mjs', 'scripts/patches/*.patch') }}
+          key: studyvis-webkitgtk-${{ runner.os }}-ubuntu-24.04-x86_64-rust-1.97.1-cargo-c-${{ steps.webkit-runtime.outputs.cargo-c-version }}-${{ hashFiles('scripts/linux-webkit-runtime.env', 'scripts/patches/*.patch') }}-${{ hashFiles('scripts/build-linux-webkit-runtime.sh', 'scripts/generate-librice-third-party-notices.mjs') }}
 
       - name: Build unsigned AppImage without updater artifacts
         run: |
