@@ -35,6 +35,15 @@
 
 ### Fixed
 
+- **Push-to-talk can no longer stay lit after you let go.** On macOS StudyVis
+  reads the real state of the key so a native release event that never arrives
+  cannot leave your microphone open. It published each reading once and assumed
+  it landed, so a single reading the app never received was treated as delivered
+  and never sent again — leaving you shown as transmitting until the two-minute
+  safety cutoff or your next session. Each reading is now repeated for a second,
+  counted only once it is genuinely delivered, and a reading that says the key
+  is up ends the hold even if StudyVis never saw the key go down.
+
 - **Rejoining a session you just left no longer drops you into an empty room.**
   Accepting a fresh invite to the same room reuses its discovery topics exactly,
   and the old room's still-unwinding relay cleanup could delete the new room's

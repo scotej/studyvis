@@ -412,12 +412,18 @@ export function PttListener() {
               const before = edgeReconciler.snapshot()
               const edges = edgeReconciler.physicalState(held)
               const after = edgeReconciler.snapshot()
-              log.debug('physical.state', {
-                held,
-                previousHeld: before.physicalHeld,
-                deferredBefore: before.deferredShortcutPress,
-                deferredAfter: after.deferredShortcutPress,
-              })
+              // #226 — the watcher now repeats each level for a bounded window,
+              // so most of these events are confirmations of a state this
+              // reconciler already holds. Logging every copy would push the
+              // press/release history out of an exported diagnostic tail.
+              if (held !== before.physicalHeld || edges.length > 0) {
+                log.debug('physical.state', {
+                  held,
+                  previousHeld: before.physicalHeld,
+                  deferredBefore: before.deferredShortcutPress,
+                  deferredAfter: after.deferredShortcutPress,
+                })
+              }
               dispatchReconciled(edges)
             },
             onReleased: () => {

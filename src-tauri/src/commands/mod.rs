@@ -27,6 +27,11 @@ pub mod diagnostics;
 #[cfg(desktop)]
 pub mod engine;
 
+// Only the macOS physical-key watcher in `system` publishes a level; gating the
+// module to its single consumer keeps it off the Windows/Linux legs entirely.
+#[cfg(target_os = "macos")]
+mod level_confirmation;
+
 #[cfg(desktop)]
 pub mod models;
 
