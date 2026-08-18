@@ -145,7 +145,10 @@ import {
   type StartArgs as PomodoroStartArgs,
 } from './pomodoro'
 import { logger } from '@/lib/log'
-import { recordPttBroadcast } from '@/features/system/pttBroadcastMirror'
+import {
+  recordPttBroadcast,
+  recordPttBroadcastFailure,
+} from '@/features/system/pttBroadcastMirror'
 import { readPttRenderState } from '@/features/system/pttRenderProbe'
 
 const log = logger.child('session')
@@ -736,13 +739,11 @@ export function SessionView({
     // re-press. Send our current state directly to each new peer on join.
     const offJoin = room.onPeerJoin((peerId) => {
       const want = usePttStore.getState().active
+      recordPttBroadcast({ active: want, kind: 'resend' })
       void action.send({ active: want }, peerId).then(
-        () => {
-          recordPttBroadcast({ active: want, kind: 'resend', ok: true })
-          pttLog.debug('broadcast.resend', { want, ok: true })
-        },
+        () => pttLog.debug('broadcast.resend', { want, ok: true }),
         (err: unknown) => {
-          recordPttBroadcast({ active: want, kind: 'resend', ok: false })
+          recordPttBroadcastFailure()
           pttLog.warn('broadcast.failed', { reason: 'resend', want, err })
         }
       )
@@ -772,13 +773,9 @@ export function SessionView({
     const revision = usePttStore.getState().revision
     const send = pttSendRef.current
     if (send) {
+      recordPttBroadcast({ active: pttActive, kind: 'state-change' })
       void send({ active: pttActive }).then(
         () => {
-          recordPttBroadcast({
-            active: pttActive,
-            kind: 'state-change',
-            ok: true,
-          })
           pttLog.debug('broadcast.sent', {
             reason: 'state-change',
             want: pttActive,
@@ -789,11 +786,7 @@ export function SessionView({
           })
         },
         (err: unknown) => {
-          recordPttBroadcast({
-            active: pttActive,
-            kind: 'state-change',
-            ok: false,
-          })
+          recordPttBroadcastFailure()
           pttLog.warn('broadcast.failed', {
             reason: 'state-change',
             want: pttActive,

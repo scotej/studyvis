@@ -22,6 +22,11 @@
 //   undelivered    — a `win:"native"` count exceeds the renderer's count for
 //                    the same stream. An event left Rust and never arrived.
 //
+// Watcher liveness is NOT an invariant here — see the note under the table.
+// Read `ptt.native` `watcher.armed` / `watcher.exited` instead: a thread that
+// armed without a matching exit, or an exit whose `emitOk` exceeds the
+// renderer's `native.physicalEvents`, is the real evidence.
+//
 // Step 0 is always coverage, never the symptom: read `ptt.watchdog/armed`
 // (platform, whether a physical watcher exists at all) and the last
 // `ptt/export.snapshot` (live state at the user's click, plus `logHealth`)
@@ -118,7 +123,6 @@ export type PttInvariantId =
   | 'track.enabled_while_inactive'
   | 'track.disabled_while_active'
   | 'indicator.disagrees_with_store'
-  | 'indicator.peer_count_mismatch'
   | 'broadcast.disagrees_with_store'
   | 'hold.muted_while_latched'
   | 'hold.store_without_reconciler'
@@ -167,7 +171,10 @@ export const PTT_INVARIANTS: readonly Invariant[] = [
     predicate: (o) =>
       !o.store.active &&
       !o.track.collectionError &&
-      o.track.enabledAudioSenders > 0,
+      o.track.enabledAudioSenders > 0 &&
+      // An `enabled` but ENDED sender is not a live microphone; reporting it as
+      // one would be a permanent privacy-level error about nothing.
+      o.track.liveAudioSenders > 0,
   },
   // The literal #226 shape from the other side: the app says transmitting, the
   // sender track is muted. The user sees a lit indicator and is not heard.
@@ -182,7 +189,10 @@ export const PTT_INVARIANTS: readonly Invariant[] = [
       o.store.active &&
       !o.track.collectionError &&
       o.track.audioSenders > 0 &&
-      o.track.enabledAudioSenders === 0,
+      // `< audioSenders`, not `=== 0`: with several peers, one sender left
+      // disabled is the same fault for that listener and must not hide behind
+      // the others. Matches `classifyPttMediaSnapshot`'s edge-triggered rule.
+      o.track.enabledAudioSenders < o.track.audioSenders,
   },
   // A pure render fault: the committed DOM disagrees with the store. This is
   // the one shape the old instrumentation could not see at all, because every
@@ -196,20 +206,13 @@ export const PTT_INVARIANTS: readonly Invariant[] = [
     requiresSession: true,
     predicate: (o) =>
       !o.render.probeError &&
-      o.render.selfLit !== null &&
-      o.render.selfLit !== o.store.active,
-  },
-  {
-    id: 'indicator.peer_count_mismatch',
-    level: 'warn',
-    dwellTicks: 3,
-    minDwellMs: 2_500,
-    requiresPhysicalWatch: false,
-    requiresSession: true,
-    predicate: (o) =>
-      !o.render.probeError &&
-      o.render.peerTiles > 0 &&
-      o.render.peerLit !== o.peerPttActive,
+      ((o.render.selfLit !== null && o.render.selfLit !== o.store.active) ||
+        // The badge is shown by opacity, so what the user SEES can disagree
+        // with the committed attribute. #226 was reported as a visibly lit
+        // indicator; measuring this and never asserting on it would leave the
+        // literal symptom undetected.
+        (o.render.opacityLit !== null &&
+          o.render.opacityLit !== o.store.active)),
   },
   // We told peers one thing and believe another. `msSinceSend` keeps a send
   // that is merely in flight from counting.
@@ -271,20 +274,26 @@ export const PTT_INVARIANTS: readonly Invariant[] = [
       o.store.active &&
       heldByShortcut(o),
   },
-  // The watcher publishes every level repeatedly for a bounded window, so a
-  // long silence during a live macOS session means the thread died, was
-  // superseded, or its emits are not arriving.
-  {
-    id: 'physical.watcher_silent',
-    level: 'warn',
-    dwellTicks: 3,
-    minDwellMs: 5_000,
-    requiresPhysicalWatch: true,
-    requiresSession: true,
-    predicate: (o) =>
-      o.native.msSincePhysical !== null && o.native.msSincePhysical > 30_000,
-  },
 ]
+
+// There is deliberately NO `physical.watcher_silent` invariant. The obvious one
+// — "no physical-state event for N seconds means the watcher died" — is wrong
+// here, in both directions. The macOS watcher (#240) is a bounded level
+// confirmer: it republishes a level about eleven times over one second and then
+// goes intentionally quiet until the level CHANGES, precisely so an idle
+// session produces no steady-state IPC. So silence is the normal state of a
+// healthy session in which nobody has touched the key, and asserting on it
+// would fire on the single most common runtime condition and spend the shared
+// budget that the media, render and broadcast invariants depend on — producing
+// the "archive looks clean" failure this whole module exists to prevent. It is
+// also unable to detect the fault it names: a watcher that dies before its
+// first delivery leaves `msSincePhysical` null forever.
+//
+// Watcher liveness is answered properly from the other side instead, by the
+// `ptt.native` `watcher.armed` / `watcher.exited` records, which state the
+// generation, the exit reason and the emit counts as facts rather than
+// inferring them from an absence. Do not add this invariant back without first
+// making the watcher republish on a real keepalive cadence.
 
 // A permanently stuck state must cost a handful of records, not a flood. Each
 // invariant re-asserts on this schedule; the 15 s floor clears
@@ -303,6 +312,7 @@ export type PttInvariantMonitor = {
   observe: (observation: PttObservation) => PttInvariantEvent[]
   openViolations: () => number
   budgetLeft: () => number
+  resetDwell: () => void
   reset: () => void
 }
 
@@ -362,7 +372,13 @@ export function createPttInvariantMonitor(options?: {
         const violated = applicable && invariant.predicate(o)
 
         if (!violated) {
-          if (state.open) {
+          // A `cleared` is a full-payload record like any other, so it spends
+          // budget like any other. Without this a predicate that flaps every
+          // other tick writes an unbounded stream of them — and keeps writing
+          // after `budget-exhausted` has told the reader the monitor went
+          // quiet, which is worse than silence because it is a lie.
+          if (state.open && spent < budget) {
+            spent += 1
             events.push({
               kind: 'cleared',
               id: invariant.id,
@@ -377,8 +393,11 @@ export function createPttInvariantMonitor(options?: {
           state.open = false
           state.ticks = 0
           state.firstAtMs = null
-          state.emitCount = 0
-          state.lastEmitAtMs = null
+          // `emitCount`/`lastEmitAtMs` deliberately SURVIVE a clear: the
+          // backoff ladder is per-invariant-per-session, not per-episode.
+          // Resetting them let a flapping predicate re-enter at full rate and
+          // land inside THROTTLE_WINDOW_MS, where a repeated warn/error folds
+          // onto `n` and loses every field that explains it.
           continue
         }
 
@@ -449,6 +468,14 @@ export function createPttInvariantMonitor(options?: {
     },
 
     budgetLeft: () => Math.max(0, budget - spent),
+
+    // Dwell counted across a suspend or a long stall would be fiction, because
+    // the ticks either side are not consecutive observations. The BUDGET is
+    // deliberately untouched: a gap is not a new session, and letting one hand
+    // back a fresh allowance would defeat the ceiling entirely.
+    resetDwell: () => {
+      states.clear()
+    },
 
     // A session owns its own budget and its own dwell history: a divergence
     // that spanned a room change is a different fact from one inside a room.

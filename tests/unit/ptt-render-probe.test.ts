@@ -14,6 +14,7 @@ import {
   __setPttBroadcastClock,
   readPttBroadcastMirror,
   recordPttBroadcast,
+  recordPttBroadcastFailure,
   resetPttBroadcastMirror,
 } from '@/features/system/pttBroadcastMirror'
 
@@ -125,7 +126,7 @@ describe('PTT broadcast mirror', () => {
   test('records what we told peers, and how long ago', () => {
     let now = 1_000
     __setPttBroadcastClock(() => now)
-    recordPttBroadcast({ active: true, kind: 'state-change', ok: true })
+    recordPttBroadcast({ active: true, kind: 'state-change' })
     now = 1_400
     const mirror = readPttBroadcastMirror()
     expect(mirror.lastActive).toBe(true)
@@ -137,9 +138,9 @@ describe('PTT broadcast mirror', () => {
   test('a failed send counts but never moves the last known value', () => {
     let now = 0
     __setPttBroadcastClock(() => now)
-    recordPttBroadcast({ active: true, kind: 'state-change', ok: true })
+    recordPttBroadcast({ active: true, kind: 'state-change' })
     now = 100
-    recordPttBroadcast({ active: false, kind: 'state-change', ok: false })
+    recordPttBroadcastFailure()
 
     const mirror = readPttBroadcastMirror()
     expect(mirror.lastActive).toBe(true)
@@ -154,7 +155,7 @@ describe('PTT broadcast mirror', () => {
   })
 
   test('reset clears the room history', () => {
-    recordPttBroadcast({ active: true, kind: 'resend', ok: true })
+    recordPttBroadcast({ active: true, kind: 'resend' })
     resetPttBroadcastMirror()
     expect(readPttBroadcastMirror().lastActive).toBeNull()
     expect(readPttBroadcastMirror().sends).toBe(0)

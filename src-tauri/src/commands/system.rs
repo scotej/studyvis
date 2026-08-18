@@ -595,7 +595,14 @@ fn update_ptt_physical_monitor<R: Runtime>(app: &AppHandle<R>, active: bool) {
         // the arithmetic that proves a delivery loss, and the exit reason
         // distinguishes a superseded generation from a closed session — two
         // completely different explanations for a hold that never released.
-        let superseded = PTT_PHYSICAL_MONITOR_GENERATION.load(Ordering::Acquire) != generation;
+        // Check the session flag FIRST. `update_ptt_physical_monitor` bumps the
+        // generation on EVERY call, including the session-end one, so testing
+        // the generation first labelled every ordinary session end
+        // "superseded" and the field could never make the distinction it
+        // exists for.
+        let session_ended = !SessionActiveFlag::is_active(&app);
+        let superseded =
+            !session_ended && PTT_PHYSICAL_MONITOR_GENERATION.load(Ordering::Acquire) != generation;
         native_log::record(
             native_log::NativeLevel::Info,
             "ptt.native",

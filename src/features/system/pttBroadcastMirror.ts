@@ -43,17 +43,16 @@ export function __resetPttBroadcastClock(): void {
   clock = defaultClock
 }
 
+// Record at SEND time, not at resolution. trystero's `send` resolves a
+// `Promise.all` across every peer, so a single peer with a closing data channel
+// delays or rejects the whole thing — and a mirror updated on resolution would
+// then hold a value the app had already moved on from, tripping the
+// error-level `broadcast.disagrees_with_store` on a perfectly healthy app.
+// `lastActive` is "what we last told peers", which is decided when we send.
 export function recordPttBroadcast(entry: {
   active: boolean
   kind: PttBroadcastKind
-  ok: boolean
 }): void {
-  if (!entry.ok) {
-    // A rejected send did NOT change what the peer believes, so the last
-    // known-good value must stand — moving it would manufacture agreement.
-    mirror = { ...mirror, sendFails: mirror.sendFails + 1 }
-    return
-  }
   mirror = {
     lastActive: entry.active,
     lastKind: entry.kind,
@@ -61,6 +60,12 @@ export function recordPttBroadcast(entry: {
     sends: mirror.sends + 1,
     sendFails: mirror.sendFails,
   }
+}
+
+// A rejection is counted without moving `lastActive`: the failure is a fact
+// worth carrying, but it does not tell us what any peer now believes.
+export function recordPttBroadcastFailure(): void {
+  mirror = { ...mirror, sendFails: mirror.sendFails + 1 }
 }
 
 export function readPttBroadcastMirror(): PttBroadcastMirror & {

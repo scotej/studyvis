@@ -168,8 +168,10 @@ export function createPttWatchdog(deps: PttWatchdogDeps): PttWatchdog {
     lastTickWallMs = wallMs
 
     // A gap means the ticks either side are not consecutive, so dwell streaks
-    // built across it would be fiction. Start the dwell history over.
-    if (gap) monitor.reset()
+    // built across it would be fiction. Clear the dwell history only — a gap is
+    // not a new session, and `reset()` would also hand back the whole violation
+    // budget, so a periodically stalling machine would never hit the ceiling.
+    if (gap) monitor.resetDwell()
 
     const events = monitor.observe(observation)
 

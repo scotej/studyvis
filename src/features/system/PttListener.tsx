@@ -34,6 +34,8 @@ import { readPttRenderState } from './pttRenderProbe'
 import {
   classifyPttStoreChange,
   createPttWatchdog,
+  PTT_WATCHDOG_ACTIVE_MS,
+  PTT_WATCHDOG_IDLE_MS,
   type PttWatchdogTick,
 } from './pttWatchdog'
 import {
@@ -456,6 +458,11 @@ export function PttListener() {
       const duplicatePress = edge === 'pressed' && nativeHeld
       const duplicateRelease = edge === 'released' && !nativeHeld
 
+      // Set BEFORE the mutation: zustand notifies subscribers synchronously
+      // inside `set`, so a marker written afterwards is always too late and the
+      // subscriber would duplicate every edge this record already explains.
+      nativeEdgeAtMs = now
+
       if (edge === 'pressed') {
         if (duplicatePress) {
           log.debug('edge.duplicate_pressed', {
@@ -488,10 +495,6 @@ export function PttListener() {
           sessionActive: useSessionStore.getState().room !== null,
         })
       }
-
-      // This edge already explains whatever the store did, so the store
-      // subscriber must not write a second record for it.
-      nativeEdgeAtMs = now
 
       const reconcilerAfter = edgeReconciler.snapshot()
       log.debug('edge.received', {
@@ -757,6 +760,19 @@ export function PttListener() {
     }
     setDiagnosticsSnapshotHook(snapshotHook)
     watchdog.start()
+    // Step 0 of the reading guide in pttInvariants.ts: what this run can and
+    // cannot observe, stated before any symptom. On Windows and Linux
+    // `physicalWatchExpected:false` is what tells a reader that the absence of
+    // every physical record is the platform rather than a defect.
+    watchdogLog.info('armed', {
+      cadenceMs: PTT_WATCHDOG_ACTIVE_MS,
+      idleCadenceMs: PTT_WATCHDOG_IDLE_MS,
+      platform,
+      physicalWatchExpected: watchExpected,
+      maxHoldMs: MAX_HOLD_MS,
+      probeAvailable: typeof document !== 'undefined',
+      sessionActive: useSessionStore.getState().room !== null,
+    })
 
     // No blur-release failsafe: the friends shortcut is GLOBAL, so PTT must
     // keep transmitting while the user holds the key in another app. macOS

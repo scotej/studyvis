@@ -261,8 +261,11 @@ pub(crate) fn record(
         PRE_INIT_DROPPED.fetch_add(1, Ordering::Relaxed);
         return;
     };
-    // Allocated under the same ordering as the write below, so file order and
-    // seq order agree without a channel to invert them.
+    // `seq` is monotonic per producer and is the ordering authority for native
+    // records, exactly as `log.ts` documents for a renderer realm. It is
+    // allocated before the shared file lock, so with two native producers (the
+    // watcher thread and the main thread) file order can differ from seq order
+    // under contention. Order by `seq`, not by position in the file.
     let seq = SEQ.fetch_add(1, Ordering::Relaxed) + 1;
     let line = render_record(
         &iso8601_millis(epoch_millis()),

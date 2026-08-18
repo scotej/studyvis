@@ -528,15 +528,25 @@ describe('flush and sink', () => {
   })
 
   test('a chunk rejection keeps the chunks already written', async () => {
+    // Drain the sink's own run.start first, so the rejection below lands on a
+    // genuinely mid-batch chunk rather than the first call of a later drain.
+    const seen: string[][] = []
     let call = 0
-    installWriter(async () => {
+    installWriter(async (lines) => {
       call += 1
-      if (call === 2) throw new Error('nope')
+      if (call === 3) throw new Error('nope')
+      seen.push(lines)
     })
-    for (let i = 0; i < SINK_MAX_LINES_PER_CALL * 3; i += 1) {
+    for (let i = 0; i < SINK_MAX_LINES_PER_CALL * 4; i += 1) {
       logger.debug(`burst${i}`)
     }
     await flushLog()
+
+    // Chunks written before the failing one survive; the remainder is dropped
+    // exactly as a whole failed batch is, so nothing is written twice.
+    expect(call).toBe(3)
+    const written = seen.flat()
+    expect(new Set(written).size).toBe(written.length)
     // One failed drain, not one per chunk — the sink must survive a single
     // transient rejection rather than spending its whole failure budget.
     expect(logHealth().writeFailures).toBe(1)

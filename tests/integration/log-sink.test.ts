@@ -13,6 +13,7 @@ import {
   flushLog,
   formatRecords,
   installLogSink,
+  SINK_MAX_LINES_PER_CALL,
   logger,
   parseRecordLines,
   type LogRecord,
@@ -136,6 +137,13 @@ describe('native records share the renderer schema', () => {
     expect(record?.msg).toBe('watcher.exited')
     // The count a reader compares against the renderer's received total.
     expect(record?.data?.emitOk).toBe(42)
+  })
+
+  // The JS half of the #226 data-loss fix is only correct if this constant is
+  // <= applog.rs's private MAX_LINES_PER_CALL. Rust cannot be compiled on the
+  // dev box, so this is the pin that catches a drift in either direction.
+  test('the sink chunk size matches the documented Rust ceiling', () => {
+    expect(SINK_MAX_LINES_PER_CALL).toBe(256)
   })
 
   test('scope stays immediately before msg, which CI greps for', () => {

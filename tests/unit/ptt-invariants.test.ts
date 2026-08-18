@@ -4,6 +4,7 @@ import {
   createPttInvariantMonitor,
   PTT_INVARIANTS,
   PTT_INVARIANT_BACKOFF_MS,
+  PTT_INVARIANT_BUDGET,
   type PttInvariantEvent,
   type PttInvariantId,
   type PttObservation,
@@ -44,7 +45,10 @@ function healthy(overrides: Partial<PttObservation> = {}): PttObservation {
     },
     render: {
       selfLit: false,
-      opacityLit: false,
+      // Opacity is sampled on one tick in ten, so "not observed" is both the
+      // common case and the honest default; a test that wants the opacity
+      // clause sets it explicitly.
+      opacityLit: null,
       peerLit: 0,
       peerTiles: 1,
       holdButtonPressed: null,
@@ -60,7 +64,11 @@ function healthy(overrides: Partial<PttObservation> = {}): PttObservation {
     },
     native: {
       lastPhysicalHeld: false,
-      msSincePhysical: 200,
+      // Grows with the clock, like the real thing: the macOS watcher goes
+      // deliberately silent once a level settles, so this climbs through every
+      // quiet stretch. Freezing it here is what previously hid an invariant
+      // that fired on healthy idle sessions.
+      msSincePhysical: (overrides.atMs ?? 0) + 200,
       physicalEvents: 40,
       pressedEvents: 20,
       releasedEvents: 20,
@@ -137,15 +145,6 @@ describe('PTT invariants', () => {
       },
     },
     {
-      id: 'indicator.peer_count_mismatch',
-      perturb: (atMs) => {
-        const o = healthy({ atMs })
-        o.render.peerLit = 1
-        o.peerPttActive = 0
-        return o
-      },
-    },
-    {
       id: 'broadcast.disagrees_with_store',
       perturb: (atMs) => {
         const o = healthy({ atMs })
@@ -205,15 +204,120 @@ describe('PTT invariants', () => {
         return o
       },
     },
-    {
-      id: 'physical.watcher_silent',
-      perturb: (atMs) => {
+  ]
+
+  // The defect this suite previously missed: the macOS watcher stops publishing
+  // once a level settles (#240), so an idle session's msSincePhysical climbs
+  // without bound. Nothing may fire on that — a false positive here spends the
+  // shared budget and silences the invariants that matter.
+  test('a long quiet macOS session stays completely silent', () => {
+    const monitor = createPttInvariantMonitor()
+    // Half an hour at 1 Hz with nobody touching the key.
+    const events = settle(monitor, (atMs) => healthy({ atMs }), 1_800)
+    expect(events).toEqual([])
+    expect(monitor.budgetLeft()).toBe(PTT_INVARIANT_BUDGET)
+  })
+
+  test('a visibly lit badge over an inactive store is caught', () => {
+    const monitor = createPttInvariantMonitor()
+    // The committed attribute agrees with the store; only what the user can
+    // SEE disagrees. This is the literal #226 symptom.
+    const fired = violationIds(
+      settle(monitor, (atMs) => {
         const o = healthy({ atMs })
-        o.native.msSincePhysical = 60_000
+        o.render.selfLit = false
+        o.render.opacityLit = true
+        return o
+      })
+    )
+    expect(fired).toContain('indicator.disagrees_with_store')
+  })
+
+  test('one stuck sender among several is not hidden by the others', () => {
+    const monitor = createPttInvariantMonitor()
+    const fired = violationIds(
+      settle(monitor, (atMs) => {
+        const o = healthy({ atMs })
+        o.store.active = true
+        o.store.awaitingRelease = true
+        o.store.heldSources = ['native-shortcut']
+        o.reconciler.logicalHoldActive = true
+        o.reconciler.shortcutDown = true
+        o.reconciler.physicalHeld = true
+        o.render.selfLit = true
+        o.broadcast.lastActive = true
+        o.track.audioSenders = 3
+        o.track.enabledAudioSenders = 2
+        return o
+      })
+    )
+    expect(fired).toContain('track.disabled_while_active')
+  })
+
+  test('an enabled but ended sender is not reported as an open microphone', () => {
+    const monitor = createPttInvariantMonitor()
+    const events = settle(
+      monitor,
+      (atMs) => {
+        const o = healthy({ atMs })
+        o.track.enabledAudioSenders = 1
+        o.track.liveAudioSenders = 0
         return o
       },
-    },
-  ]
+      20
+    )
+    expect(violationIds(events)).toEqual([])
+  })
+
+  test('a flapping predicate cannot write an unbounded stream of records', () => {
+    const monitor = createPttInvariantMonitor({ budget: 6 })
+    // Alternates violated/ok every few ticks for an hour.
+    const events = settle(
+      monitor,
+      (atMs) => {
+        const o = healthy({ atMs })
+        o.render.selfLit = Math.floor(atMs / 4_000) % 2 === 0
+        return o
+      },
+      3_600
+    )
+    expect(events.length).toBeLessThanOrEqual(7)
+    expect(monitor.budgetLeft()).toBe(0)
+  })
+
+  test('the backoff ladder survives a clear rather than restarting', () => {
+    const monitor = createPttInvariantMonitor()
+    const stuck = (atMs: number) => {
+      const o = healthy({ atMs })
+      o.render.selfLit = true
+      return o
+    }
+    settle(monitor, stuck, 4)
+    const afterFirst = monitor.budgetLeft()
+    // Clear, then immediately re-enter: the re-entry must still owe the
+    // backoff, not emit at full rate inside the throttle window.
+    monitor.observe(healthy({ atMs: 10_000 }))
+    const events = settle(monitor, (atMs) => stuck(11_000 + atMs), 4)
+    expect(events.filter((e) => e.kind === 'violation')).toHaveLength(0)
+    expect(monitor.budgetLeft()).toBeLessThan(afterFirst)
+  })
+
+  test('resetDwell clears history but never refunds the budget', () => {
+    const monitor = createPttInvariantMonitor({ budget: 3 })
+    settle(
+      monitor,
+      (atMs) => {
+        const o = healthy({ atMs })
+        o.render.selfLit = true
+        return o
+      },
+      4
+    )
+    const left = monitor.budgetLeft()
+    expect(left).toBeLessThan(3)
+    monitor.resetDwell()
+    expect(monitor.budgetLeft()).toBe(left)
+  })
 
   test('every invariant has a case', () => {
     expect(cases.map((c) => c.id).sort()).toEqual(
@@ -303,10 +407,15 @@ describe('PTT invariants', () => {
     expect(monitor.openViolations()).toBe(0)
     expect(monitor.observe(healthy({ atMs: 11_000 }))).toEqual([])
 
-    const again = settle(monitor, (atMs) => stuck(20_000 + atMs), 4).filter(
+    // Re-entry is counted, but the record is not written again until the
+    // backoff elapses — that is what keeps a flapping predicate bounded.
+    settle(monitor, (atMs) => stuck(20_000 + atMs), 4)
+    expect(monitor.openViolations()).toBe(1)
+
+    const later = settle(monitor, (atMs) => stuck(60_000 + atMs), 4).filter(
       (e) => e.kind === 'violation'
     ) as Array<{ enterCount: number }>
-    expect(again[0]?.enterCount).toBe(2)
+    expect(later[0]?.enterCount).toBe(2)
   })
 
   test('budget exhaustion reports once and then goes quiet', () => {
