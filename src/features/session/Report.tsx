@@ -384,6 +384,7 @@ export function ReportView({
     setExportingDiagnostics(true)
     try {
       const result = await saveDiagnosticsArchive({
+        trigger: 'report-archive',
         defaultPath: `${fileStem}-diagnostics.zip`,
         sessionPrefix: session.id.slice(0, 8),
       })

@@ -142,14 +142,23 @@ pub fn app_log_append<R: Runtime>(app: AppHandle<R>, lines: Vec<String>) -> Resu
         return Ok(());
     }
     let path = app_log_path(&app)?;
-    let body = render_batch(&lines);
+    append_rendered_lines(&path, &lines)
+}
+
+/// The shared write path for both producers: the JS sink through
+/// `app_log_append`, and `native_log` writing Rust records into the same file
+/// (#226). Every existing guarantee holds for both because they share this
+/// function — `APP_LOG_LOCK` serialises them, the roll happens inside the guard
+/// while this call holds the only writer, and the `File` is dropped here rather
+/// than cached (on Windows `fs::rename` fails against an open handle).
+pub(crate) fn append_rendered_lines(path: &Path, lines: &[String]) -> Result<(), String> {
+    if lines.is_empty() {
+        return Ok(());
+    }
+    let body = render_batch(lines);
     let _guard = app_log_guard();
-    // Roll before opening, while this call holds the only writer — the same
-    // precondition sidecar.rs's roll relies on. On Windows `fs::rename` fails
-    // against an open handle, which is why the File below is dropped inside
-    // this call rather than cached in managed state.
-    rotate_if_needed(&path, APP_LOG_MAX_BYTES);
-    let mut file = open_append(&path)?;
+    rotate_if_needed(path, APP_LOG_MAX_BYTES);
+    let mut file = open_append(path)?;
     file.write_all(body.as_bytes())
         .map_err(|e| format!("append app log: {e}"))
 }

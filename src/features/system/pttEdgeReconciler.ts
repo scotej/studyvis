@@ -9,6 +9,12 @@ export type ReconciledPttEdge = {
 export type PttEdgeReconcilerSnapshot = {
   physicalHeld: boolean | null
   deferredShortcutPress: boolean
+  // The two raw latches behind `deferredShortcutPress`. They are reported so
+  // the watchdog can compare native intent against the PTT store: a hold the
+  // reconciler still believes in while the store has none (or the reverse) is
+  // a desync no single-layer record could show.
+  shortcutDown: boolean
+  logicalHoldActive: boolean
 }
 
 export type PttEdgeReconciler = {
@@ -55,6 +61,8 @@ export function createPttEdgeReconciler(): PttEdgeReconciler {
   const snapshot = (): PttEdgeReconcilerSnapshot => ({
     physicalHeld,
     deferredShortcutPress: deferredShortcutPress(),
+    shortcutDown,
+    logicalHoldActive,
   })
 
   return {

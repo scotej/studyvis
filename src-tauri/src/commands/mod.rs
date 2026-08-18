@@ -32,6 +32,11 @@ pub mod engine;
 #[cfg(target_os = "macos")]
 mod level_confirmation;
 
+// Platform-neutral on purpose, unlike `level_confirmation`: every desktop leg
+// records session and shortcut lifecycle, so its tests run on all three.
+#[cfg(desktop)]
+pub mod native_log;
+
 #[cfg(desktop)]
 pub mod models;
 

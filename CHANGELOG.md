@@ -33,7 +33,33 @@
   froze admission against your previous connection and cannot readmit a
   restarted app.
 
+### Changed
+
+- **A push-to-talk problem can now be diagnosed from the diagnostics you
+  export.** The last report arrived with logs from both machines that showed
+  push-to-talk working perfectly, because nothing recorded the layers between
+  the app's own state and what you actually saw and heard. StudyVis now checks
+  those layers against each other about once a second and writes a single
+  labelled record the moment they disagree for more than a moment — a lit
+  indicator over a muted microphone, a hold the two-minute cutoff ended, a key
+  the system reports as released while the app is still transmitting. Exporting
+  diagnostics also records what was live at the instant you clicked, and the
+  macOS shortcut layer now writes its own entries, so an event the app sent and
+  the interface never received is visible as the gap it is. A healthy session
+  adds a handful of entries an hour; a stuck one is capped so it can never bury
+  the history that explains it.
+
 ### Fixed
+
+- **Exported diagnostics no longer silently lose their most recent entries.**
+  When more than 256 records were written at once — a burst is exactly what a
+  problem produces — everything past the first 256 was discarded while the app
+  recorded the write as successful. The newest entries are the ones a report
+  needs, and they were the ones being dropped.
+
+- **Diagnostics saved from Settings now identify their session.** They were
+  always written without the session marker, so an archive from one machine
+  could not be matched up with a friend's archive of the same session.
 
 - **Push-to-talk can no longer stay lit after you let go.** On macOS StudyVis
   reads the real state of the key so a native release event that never arrives

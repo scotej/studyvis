@@ -11,6 +11,7 @@ import {
   REDACTED_MNEMONIC,
   RING_CAPACITY,
   SINK_FAILURE_LIMIT,
+  SINK_MAX_LINES_PER_CALL,
   STACK_MAX_CHARS,
   THROTTLE_KEYS_MAX,
   THROTTLE_WINDOW_MS,
@@ -497,6 +498,59 @@ describe('flush and sink', () => {
     await flushLog()
     expect(writeLines).toHaveBeenCalledTimes(2)
     expect(logHealth().pending).toBe(0)
+  })
+
+  // #226 — applog.rs's render_batch writes the FIRST MAX_LINES_PER_CALL lines
+  // of a batch and returns Ok for the rest, so an over-ceiling batch silently
+  // lost its NEWEST records: precisely the incident tail a bug report is
+  // exported for. `enqueue` drops oldest-first, so the two ends disagreed.
+  test('a batch over the sink ceiling is chunked, in order, with no loss', async () => {
+    const seen: string[][] = []
+    const writeLines = installWriter(async (lines) => {
+      seen.push(lines)
+    })
+    const total = SINK_MAX_LINES_PER_CALL * 2 + 37
+    for (let i = 0; i < total; i += 1) logger.debug(`burst${i}`)
+    await flushLog()
+
+    expect(writeLines.mock.calls.length).toBeGreaterThan(1)
+    for (const chunk of seen) {
+      expect(chunk.length).toBeLessThanOrEqual(SINK_MAX_LINES_PER_CALL)
+    }
+    // Order across the chunk boundaries must be the emission order, and every
+    // burst record must survive — `run.start` rides along ahead of them.
+    const burst = seen
+      .flat()
+      .map((line) => JSON.parse(line).msg as string)
+      .filter((msg) => msg.startsWith('burst'))
+    expect(burst).toEqual(Array.from({ length: total }, (_, i) => `burst${i}`))
+    expect(logHealth().pending).toBe(0)
+  })
+
+  test('a chunk rejection keeps the chunks already written', async () => {
+    // Drain the sink's own run.start first, so the rejection below lands on a
+    // genuinely mid-batch chunk rather than the first call of a later drain.
+    const seen: string[][] = []
+    let call = 0
+    installWriter(async (lines) => {
+      call += 1
+      if (call === 3) throw new Error('nope')
+      seen.push(lines)
+    })
+    for (let i = 0; i < SINK_MAX_LINES_PER_CALL * 4; i += 1) {
+      logger.debug(`burst${i}`)
+    }
+    await flushLog()
+
+    // Chunks written before the failing one survive; the remainder is dropped
+    // exactly as a whole failed batch is, so nothing is written twice.
+    expect(call).toBe(3)
+    const written = seen.flat()
+    expect(new Set(written).size).toBe(written.length)
+    // One failed drain, not one per chunk — the sink must survive a single
+    // transient rejection rather than spending its whole failure budget.
+    expect(logHealth().writeFailures).toBe(1)
+    expect(logHealth().sinkDisabled).toBe(false)
   })
 
   test('a rejecting sink never throws into the caller', async () => {

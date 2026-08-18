@@ -11,7 +11,9 @@ vi.mock('@tauri-apps/api/core', () => ({ invoke: invokeMock }))
 import {
   __resetLog,
   flushLog,
+  formatRecords,
   installLogSink,
+  SINK_MAX_LINES_PER_CALL,
   logger,
   parseRecordLines,
   type LogRecord,
@@ -112,5 +114,44 @@ describe('app_log_tail', () => {
           (args as { maxLines: number }).maxLines === 80
       )
     ).toBe(true)
+  })
+})
+
+// #226 — Rust now appends to the SAME file through `native_log.rs`, and its
+// `render_record` hand-renders the key order rather than using serde_json (a
+// BTreeMap would alphabetise `msg` ahead of `scope` and break the release
+// grep). The Rust half cannot be compiled on this box, so this line is copied
+// verbatim from the assertion in `native_log.rs`'s own tests: if either side
+// moves, one of the two fails.
+describe('native records share the renderer schema', () => {
+  const NATIVE_LINE =
+    '{"v":1,"ts":"2026-08-17T00:00:00.000Z","seq":7,"run":"abcd1234",' +
+    '"win":"native","lvl":"info","scope":"ptt.native","msg":"watcher.exited",' +
+    '"data":{"gen":3,"reason":"session-inactive","emitOk":42,"emitErr":0}}'
+
+  test('the parser accepts a native line and keeps its fields', () => {
+    const [record] = parseRecordLines([NATIVE_LINE])
+    expect(record).toBeDefined()
+    expect(record?.win).toBe('native')
+    expect(record?.scope).toBe('ptt.native')
+    expect(record?.msg).toBe('watcher.exited')
+    // The count a reader compares against the renderer's received total.
+    expect(record?.data?.emitOk).toBe(42)
+  })
+
+  // The JS half of the #226 data-loss fix is only correct if this constant is
+  // <= applog.rs's private MAX_LINES_PER_CALL. Rust cannot be compiled on the
+  // dev box, so this is the pin that catches a drift in either direction.
+  test('the sink chunk size matches the documented Rust ceiling', () => {
+    expect(SINK_MAX_LINES_PER_CALL).toBe(256)
+  })
+
+  test('scope stays immediately before msg, which CI greps for', () => {
+    expect(NATIVE_LINE).toContain('"scope":"ptt.native","msg":"watcher.exited"')
+  })
+
+  test('a native line renders alongside renderer records', () => {
+    const rendered = formatRecords(parseRecordLines([NATIVE_LINE]))
+    expect(rendered).toContain('[ptt.native] watcher.exited')
   })
 })

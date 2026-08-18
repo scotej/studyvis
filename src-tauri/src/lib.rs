@@ -335,6 +335,9 @@ pub fn run() {
                 let (initial_ptt_friends, initial_ptt_ai) =
                     read_shortcut_accelerators_from_settings(app.handle());
                 app.manage(ShortcutBindings::new(&initial_ptt_friends, &initial_ptt_ai));
+                // #226 — resolve the native log path before anything PTT-shaped
+                // can happen, so no lifecycle record is dropped pre-init.
+                commands::native_log::init(app.handle(), env!("CARGO_PKG_VERSION"));
                 app.manage(SidecarState::new());
                 app.manage(EngineState::new());
                 app.manage(DownloadState::new());
@@ -674,12 +677,24 @@ fn setup_desktop(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>>
                 let ptt_friends = bindings.ptt_friends();
                 let ptt_ai = bindings.ptt_ai();
                 if shortcut == &ptt_friends {
+                    // #226 — this runs per keystroke, so it counts and does
+                    // nothing else. The counters are flushed to the log at
+                    // session end, where comparing them against the renderer's
+                    // received counts proves whether an edge was delivered.
                     match event.state() {
                         ShortcutState::Pressed => {
-                            let _ = app.emit("ptt-friends-pressed", ());
+                            if app.emit("ptt-friends-pressed", ()).is_ok() {
+                                commands::system::count_ptt_pressed_emit(true);
+                            } else {
+                                commands::system::count_ptt_pressed_emit(false);
+                            }
                         }
                         ShortcutState::Released => {
-                            let _ = app.emit("ptt-friends-released", ());
+                            if app.emit("ptt-friends-released", ()).is_ok() {
+                                commands::system::count_ptt_released_emit(true);
+                            } else {
+                                commands::system::count_ptt_released_emit(false);
+                            }
                         }
                     }
                 } else if shortcut == &ptt_ai {

@@ -24,7 +24,17 @@ export type LogLevel = 'debug' | 'info' | 'warn' | 'error'
 // Two independent JS realms (index.html, ai-dialog.html). Each gets its own
 // module instance, run id and ring buffer; only the shared file interleaves
 // the two timelines.
-export type LogWindow = 'main' | 'ai-dialog'
+//
+// 'native' is the Rust producer (src-tauri/src/commands/native_log.rs), which
+// appends to the same file through the same lock. It is a distinct value
+// because the whole point of a native record is to be compared against a
+// renderer one: an event Rust counted as emitted and 'main' never logged is a
+// delivery loss, and no renderer-written record could ever show that.
+export type LogWindow = 'main' | 'ai-dialog' | 'native'
+
+// Only a JS realm may install a sink, so a renderer can never claim the native
+// identity by construction.
+export type RendererLogWindow = Exclude<LogWindow, 'native'>
 
 // Call sites pass raw peer / relay / model / error values straight in.
 // Redaction and bounding happen here, never at the call site.
@@ -98,6 +108,14 @@ export const PENDING_MAX = 1_000
 // Consecutive rejections after which the sink is dropped for the run. A broken
 // sink must not retry-thrash into the thing it is observing.
 export const SINK_FAILURE_LIMIT = 3
+// Mirrors applog.rs's private MAX_LINES_PER_CALL. That ceiling is a DoS bound
+// on the AI-dialog webview, and `render_batch` enforces it by writing the FIRST
+// 256 lines and returning Ok for the rest — so a batch over the ceiling loses
+// its NEWEST records while reporting success. `enqueue` drops oldest-first for
+// exactly the opposite reason, which made a busy burst silently discard the
+// incident tail. Chunk here so the two ends agree; the integration test pins
+// this constant against the documented Rust ceiling.
+export const SINK_MAX_LINES_PER_CALL = 256
 
 export type LogRuntime = {
   now: () => number
@@ -313,7 +331,7 @@ let head = 0
 let filled = 0
 let seq = 0
 let runId = makeRunId()
-let activeWindow: LogWindow = 'main'
+let activeWindow: RendererLogWindow = 'main'
 let sessionKey: string | undefined
 let debugGate: () => boolean = () => false
 let writeLines: ((lines: string[]) => Promise<void>) | null = null
@@ -573,13 +591,23 @@ function drain(): Promise<void> {
     const batch = pending
     if (batch.length === 0) return
     pending = []
+    let written = 0
     try {
-      await sink(batch)
+      while (written < batch.length) {
+        const chunk = batch.slice(written, written + SINK_MAX_LINES_PER_CALL)
+        await sink(chunk)
+        written += chunk.length
+      }
       consecutiveFailures = 0
     } catch {
       // Swallowed exactly like the Rust rotate_if_needed: a failed write must
       // never surface as an error the app has to handle, and the logger must
-      // never report its own failure through itself.
+      // never report its own failure through itself. Chunks already written
+      // stay written; the remainder is dropped exactly as a whole failed batch
+      // is today. Re-queueing it instead would be worse: `flushLog` re-drains
+      // while `pending` is non-empty, so one transient rejection would burn all
+      // three SINK_FAILURE_LIMIT attempts in a single flush and disable the
+      // sink for the run — losing every later record to save a few.
       writeFailures += 1
       consecutiveFailures += 1
       if (consecutiveFailures >= SINK_FAILURE_LIMIT) {
@@ -683,7 +711,7 @@ export function logHealth(): {
 // ── installation ───────────────────────────────────────────────────────────
 
 export type InstallLogSinkOptions = {
-  window: LogWindow
+  window: RendererLogWindow
   // __APP_VERSION__ from the entry point; stamped on the run.start header
   // only, which keeps the Vite global out of this module.
   appVersion: string

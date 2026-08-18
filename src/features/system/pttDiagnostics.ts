@@ -1,5 +1,68 @@
 import type { TopicRoom } from '@/lib/trystero'
 
+import type { PttTrackObservation } from './pttInvariants'
+
+// #226 — the watchdog samples every second for a whole session, so it needs
+// the sender/receiver half WITHOUT `getStats`. Kept as its own small function
+// rather than carved out of `collectPttMediaSnapshot`: that collector is the
+// edge-triggered RTP path and restructuring it to serve a second caller would
+// be a refactor riding along with an observability change.
+export function collectPttTrackSnapshot(
+  room: TopicRoom | null
+): PttTrackObservation {
+  const snapshot: PttTrackObservation = {
+    roomActive: room !== null,
+    peerConnections: 0,
+    audioSenders: 0,
+    enabledAudioSenders: 0,
+    liveAudioSenders: 0,
+    audioReceivers: 0,
+    liveAudioReceivers: 0,
+    collectionError: false,
+  }
+  if (!room) return snapshot
+
+  let peersById: Record<string, RTCPeerConnection>
+  try {
+    peersById = room.getPeers()
+  } catch {
+    snapshot.collectionError = true
+    return snapshot
+  }
+
+  const peers = Object.values(peersById)
+  snapshot.peerConnections = peers.length
+
+  for (const peer of peers) {
+    let senders: RTCRtpSender[]
+    let receivers: RTCRtpReceiver[]
+    try {
+      senders = peer.getSenders()
+      receivers = peer.getReceivers()
+    } catch {
+      snapshot.collectionError = true
+      continue
+    }
+
+    for (const sender of senders) {
+      const track = sender.track
+      if (track?.kind !== 'audio') continue
+      snapshot.audioSenders += 1
+      if (track.enabled) snapshot.enabledAudioSenders += 1
+      if (track.readyState === 'live') snapshot.liveAudioSenders += 1
+    }
+
+    for (const receiver of receivers) {
+      const track = receiver.track
+      if (track?.kind !== 'audio') continue
+      snapshot.audioReceivers += 1
+      if (track.readyState === 'live') snapshot.liveAudioReceivers += 1
+    }
+  }
+
+  return snapshot
+}
+
 export type PttMediaSnapshot = {
   roomActive: boolean
   peerConnectionCount: number

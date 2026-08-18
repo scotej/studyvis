@@ -203,7 +203,9 @@ export function VideoTile({
               className="w-20"
             />
           ) : null}
-          {isScreen ? null : <PttIndicator active={ptt} />}
+          {isScreen ? null : (
+            <PttIndicator active={ptt} scope={isLocal ? 'self' : 'peer'} />
+          )}
         </div>
       </figcaption>
     </figure>
