@@ -298,7 +298,7 @@ These components only import from `ui/`, `design/tokens.ts`, and shared utilitie
 | `AudioDevicePicker` | Session-footer dropdown that swaps the active microphone mid-session without renegotiating SDP; refreshes on `devicechange`. |
 | `FocusIndicator` | Per-tile dot: `focused` / `warning` / `alerted` / `offline`. |
 | `PttIndicator` | Visible while a peer is transmitting audio. |
-| `SelfWarningBadge` | Silent, off-task-user-only warning surface, fixed bottom-right above the audit panel; `aria-live=polite`, presentational (TTL owned by the alerts store). |
+| `SelfWarningBadge` | Silent, off-task-user-only warning surface, fixed bottom-right above the audit panel; `aria-live=polite`, presentational (TTL owned by the alerts store). Hover/focus reveals a dismiss `X` that clears it early. |
 | `BreakCountdownBadge` | Fixed bottom-right countdown badge while an approved break is active; ticks mm:ss once per second. |
 | `MediaErrorBanner` | Inline recovery banner when camera/mic acquisition fails at session join; calm copy keyed on the error name + "Try again". |
 | `ScreenCapturePermissionOverlay` | Dialog tutorial for the macOS screen-recording grant when `getDisplayMedia` is denied; deep-links to System Settings, textual fallback elsewhere. |

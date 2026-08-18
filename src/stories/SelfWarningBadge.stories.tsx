@@ -8,7 +8,12 @@ const meta = {
   // Use fullscreen so the fixed-position badge anchors to the
   // bottom-right of the canvas — same behavior as inside a real session.
   parameters: { layout: 'fullscreen' },
-  args: { reasoning: 'Looking away from the screen.' },
+  args: {
+    reasoning: 'Looking away from the screen.',
+    // Hover (or tab to) the card to reveal the dismiss button; the store
+    // owns real dismissal in the app, so the story just no-ops.
+    onDismiss: () => {},
+  },
 } satisfies Meta<typeof SelfWarningBadge>
 
 export default meta

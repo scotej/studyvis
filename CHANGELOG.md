@@ -51,6 +51,12 @@
 
 ### Fixed
 
+- **The private "looking off-task" warning can now be waved off.** It ignored
+  the mouse entirely, so the only way past it was to wait out its thirty-second
+  timer. Hovering the card — or tabbing to it — now reveals an X that clears it
+  immediately, matching the dismiss already on the same warning when it appears
+  over another app.
+
 - **Exported diagnostics no longer silently lose their most recent entries.**
   When more than 256 records were written at once — a burst is exactly what a
   problem produces — everything past the first 256 was discarded while the app
