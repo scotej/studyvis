@@ -260,6 +260,7 @@ export function SessionView({
   // yet". Only the former is worth telling the user about.
   const modelStatus = useModelStore((s) => s.status)
   const selfWarning = useAlertsUiStore((s) => s.selfWarning)
+  const clearSelfWarning = useAlertsUiStore((s) => s.clearSelfWarning)
   const alertedPeers = useAlertsUiStore((s) => s.alertedPeers)
   const onBreak = useBreakStore((s) => s.onBreak)
   const breakEndsAt = useBreakStore((s) => s.breakEndsAt)
@@ -2403,7 +2404,10 @@ export function SessionView({
         </span>
       </footer>
       {selfWarning && !onBreak ? (
-        <SelfWarningBadge reasoning={selfWarning.reasoning} />
+        <SelfWarningBadge
+          reasoning={selfWarning.reasoning}
+          onDismiss={clearSelfWarning}
+        />
       ) : null}
       {onBreak ? <BreakCountdownBadge endsAt={breakEndsAt} /> : null}
       <ScreenCapturePermissionOverlay

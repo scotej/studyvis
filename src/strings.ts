@@ -676,6 +676,7 @@ export const strings = {
     badges: {
       selfWarningAriaLabel: 'Self-warning',
       selfWarningTitle: 'Heads up, looking off-task.',
+      selfWarningDismissAriaLabel: 'Dismiss off-task warning',
       breakAriaLabel: 'Break countdown',
       breakTitle: 'On a break',
       breakRemaining: (label: string) => `${label} remaining`,
