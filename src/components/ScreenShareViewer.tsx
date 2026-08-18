@@ -4,7 +4,7 @@
 // Tauri to put the native window into fullscreen; the full-webview layout is
 // also the browser/Storybook fallback when native fullscreen is unavailable.
 
-import { useEffect, useRef } from 'react'
+import { useCallback, useEffect, useRef } from 'react'
 
 import {
   Dialog,
@@ -33,18 +33,28 @@ export function ScreenShareViewer({
   name,
   stream,
 }: ScreenShareViewerProps) {
-  const videoRef = useRef<HTMLVideoElement | null>(null)
   const onOpenChangeRef = useRef(onOpenChange)
 
   useEffect(() => {
     onOpenChangeRef.current = onOpenChange
   }, [onOpenChange])
 
-  useEffect(() => {
-    const el = videoRef.current
-    if (!el) return
-    if (el.srcObject !== stream) el.srcObject = stream
-  }, [stream, open])
+  // #234 — bind when the element attaches, not from an effect. Radix's portal
+  // renders null until its own layout effect flips a `mounted` flag, so this
+  // <video> arrives a commit after the one that opened the dialog: an effect
+  // keyed on `[stream, open]` ran against a ref that was still null and never
+  // ran again, because a screen that is already being shared when the viewer
+  // opens never changes identity afterwards. The element stayed unbound and
+  // the viewer was a blank box. A ref callback fires exactly when the element
+  // attaches and again whenever `stream` changes, which is the binding rule.
+  const bindVideo = useCallback(
+    (el: HTMLVideoElement | null) => {
+      if (!el) return
+      if (el.srcObject !== stream) el.srcObject = stream
+      log.info('video.bound', { hasStream: stream !== null })
+    },
+    [stream]
+  )
 
   useEffect(() => {
     if (!open) return
@@ -89,7 +99,7 @@ export function ScreenShareViewer({
           <DialogTitle className="pr-8 text-base">{name}</DialogTitle>
         </DialogHeader>
         <video
-          ref={videoRef}
+          ref={bindVideo}
           autoPlay
           playsInline
           muted

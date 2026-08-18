@@ -51,6 +51,14 @@
 
 ### Fixed
 
+- **Expanding a shared screen now actually shows the screen.** The full-size
+  viewer opened onto an empty box every time, because the video element it
+  fills is created one frame after the dialog opens and the share was already
+  running by then — so nothing ever handed it the picture. It is now wired up
+  the moment the element exists, and the tile it was opened from keeps playing
+  underneath. Expanding still puts the whole window into fullscreen, which is
+  deliberate: a screen is only readable at that size.
+
 - **The private "looking off-task" warning can now be waved off.** It ignored
   the mouse entirely, so the only way past it was to wait out its thirty-second
   timer. Hovering the card — or tabbing to it — now reveals an X that clears it
