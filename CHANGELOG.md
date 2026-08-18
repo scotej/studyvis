@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.11.3-rc.1 — 2026-08-15
+## 1.11.3-rc.1 — 2026-08-18 — Linux release candidate
 
 ### Added
 
@@ -48,49 +48,6 @@
   the interface never received is visible as the gap it is. A healthy session
   adds a handful of entries an hour; a stuck one is capped so it can never bury
   the history that explains it.
-
-### Fixed
-
-- **Expanding a shared screen now actually shows the screen.** The full-size
-  viewer opened onto an empty box every time, because the video element it
-  fills is created one frame after the dialog opens and the share was already
-  running by then — so nothing ever handed it the picture. It is now wired up
-  the moment the element exists, and the tile it was opened from keeps playing
-  underneath. Expanding still puts the whole window into fullscreen, which is
-  deliberate: a screen is only readable at that size.
-
-- **The private "looking off-task" warning can now be waved off.** It ignored
-  the mouse entirely, so the only way past it was to wait out its thirty-second
-  timer. Hovering the card — or tabbing to it — now reveals an X that clears it
-  immediately, matching the dismiss already on the same warning when it appears
-  over another app.
-
-- **Exported diagnostics no longer silently lose their most recent entries.**
-  When more than 256 records were written at once — a burst is exactly what a
-  problem produces — everything past the first 256 was discarded while the app
-  recorded the write as successful. The newest entries are the ones a report
-  needs, and they were the ones being dropped.
-
-- **Diagnostics saved from Settings now identify their session.** They were
-  always written without the session marker, so an archive from one machine
-  could not be matched up with a friend's archive of the same session.
-
-- **Push-to-talk can no longer stay lit after you let go.** On macOS StudyVis
-  reads the real state of the key so a native release event that never arrives
-  cannot leave your microphone open. It published each reading once and assumed
-  it landed, so a single reading the app never received was treated as delivered
-  and never sent again — leaving you shown as transmitting until the two-minute
-  safety cutoff or your next session. Each reading is now repeated for a second,
-  counted only once it is genuinely delivered, and a reading that says the key
-  is up ends the hold even if StudyVis never saw the key go down.
-
-- **Rejoining a session you just left no longer drops you into an empty room.**
-  Accepting a fresh invite to the same room reuses its discovery topics exactly,
-  and the old room's still-unwinding relay cleanup could delete the new room's
-  subscription — permanently silencing that relay, so neither side ever saw the
-  other. A leaving room now retracts only the subscription it registered itself.
-
-### Changed
 
 - **Discovery defaults now use the endpoints verified by the release health
   check.** Nostr no longer depends on `nos.lol` after it began requiring proof
@@ -192,6 +149,61 @@
   install guide covers CachyOS dependencies, FUSE and extraction launch paths,
   Secret Service providers, KDE Wayland portals/PipeWire, automatic-update
   write permissions, and the current x86_64/CPU-only/native-package limits.
+
+### Fixed
+
+- **Expanding a shared screen now actually shows the screen.** The full-size
+  viewer opened onto an empty box every time, because the video element it
+  fills is created one frame after the dialog opens and the share was already
+  running by then — so nothing ever handed it the picture. It is now wired up
+  the moment the element exists, and the tile it was opened from keeps playing
+  underneath. Expanding still puts the whole window into fullscreen, which is
+  deliberate: a screen is only readable at that size.
+
+- **The private "looking off-task" warning can now be waved off.** It ignored
+  the mouse entirely, so the only way past it was to wait out its thirty-second
+  timer. Hovering the card — or tabbing to it — now reveals an X that clears it
+  immediately, matching the dismiss already on the same warning when it appears
+  over another app.
+
+- **Exported diagnostics no longer silently lose their most recent entries.**
+  When more than 256 records were written at once — a burst is exactly what a
+  problem produces — everything past the first 256 was discarded while the app
+  recorded the write as successful. The newest entries are the ones a report
+  needs, and they were the ones being dropped.
+
+- **Diagnostics saved from Settings now identify their session.** They were
+  always written without the session marker, so an archive from one machine
+  could not be matched up with a friend's archive of the same session.
+
+- **Push-to-talk can no longer stay lit after you let go.** On macOS StudyVis
+  reads the real state of the key so a native release event that never arrives
+  cannot leave your microphone open. It published each reading once and assumed
+  it landed, so a single reading the app never received was treated as delivered
+  and never sent again — leaving you shown as transmitting until the two-minute
+  safety cutoff or your next session. Each reading is now repeated for a second,
+  counted only once it is genuinely delivered, and a reading that says the key
+  is up ends the hold even if StudyVis never saw the key go down.
+
+- **Rejoining a session you just left no longer drops you into an empty room.**
+  Accepting a fresh invite to the same room reuses its discovery topics exactly,
+  and the old room's still-unwinding relay cleanup could delete the new room's
+  subscription — permanently silencing that relay, so neither side ever saw the
+  other. A leaving room now retracts only the subscription it registered itself.
+
+- **A friend's shared screen comes back when you rejoin.** Rejoining a room you
+  were already in replaces your earlier connection without ever reporting the
+  old one as gone, so the replacement was treated as already served: your
+  friend's screen never reappeared, and a share of your own was never re-sent
+  to them. Every join is now treated as a fresh connection — the stale tile is
+  retired, and the share has to be re-announced before it is re-attached.
+
+- **Overlay notifications are no longer cut off after three lines.** The small
+  window that shows session alerts over other apps was a fixed size with the
+  message clamped to three lines, so anything longer was silently truncated
+  with no way to read the rest. It now measures the message and sizes itself to
+  fit; past a bounded maximum the text scrolls and can be reached from the
+  keyboard.
 
 ## 1.11.2 — 2026-08-12 — More dependable study sessions
 
