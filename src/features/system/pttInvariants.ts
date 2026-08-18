@@ -128,7 +128,6 @@ export type PttInvariantId =
   | 'hold.store_without_reconciler'
   | 'hold.reconciler_without_store'
   | 'physical.up_while_active'
-  | 'physical.watcher_silent'
 
 export type PttInvariantEvent =
   | {
@@ -260,8 +259,9 @@ export const PTT_INVARIANTS: readonly Invariant[] = [
     predicate: (o) => o.reconciler.logicalHoldActive && !heldByShortcut(o),
   },
   // macOS reports the chord physically up while the store keeps transmitting
-  // from the shortcut. This is the single most diagnostic line the #226
-  // archives could have carried and did not.
+  // from the shortcut. It overlaps heavily with `hold.store_without_reconciler`
+  // — most instances trip both — but it is the one that names the PHYSICAL key
+  // as the authority, which is the distinction #226 turned on.
   {
     id: 'physical.up_while_active',
     level: 'error',
