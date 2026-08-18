@@ -568,7 +568,15 @@ jobs:
       - name: Attest release artifacts from this build leg
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
+          # The macOS leg is the only one that passes `--target`, so tauri
+          # bundles it under the triple rather than plain `target/release`.
+          # Both roots are listed for every leg: the action only fails when the
+          # whole set resolves to zero subjects, so each leg matching its own
+          # patterns and missing the others is the intended steady state.
           subject-path: |
+            ${{ github.workspace }}/src-tauri/target/aarch64-apple-darwin/release/bundle/**/*.dmg
+            ${{ github.workspace }}/src-tauri/target/aarch64-apple-darwin/release/bundle/**/*.app.tar.gz
+            ${{ github.workspace }}/src-tauri/target/aarch64-apple-darwin/release/bundle/**/*.app.tar.gz.sig
             ${{ github.workspace }}/src-tauri/target/release/bundle/**/*.dmg
             ${{ github.workspace }}/src-tauri/target/release/bundle/**/*.app.tar.gz
             ${{ github.workspace }}/src-tauri/target/release/bundle/**/*.app.tar.gz.sig
