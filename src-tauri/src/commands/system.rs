@@ -17,7 +17,8 @@
 //! teardown in `lib.rs` never runs on that path.
 
 use std::str::FromStr;
-#[cfg(target_os = "macos")]
+// Not macOS-gated: the watcher generation is macOS-only, but the PTT emit
+// counters (#226) are recorded on every desktop platform.
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
