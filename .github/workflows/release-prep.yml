@@ -158,7 +158,9 @@ jobs:
     name: Bump and tag
     needs: gate
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # The three target-filtered `cargo fetch` closures below take minutes, not
+    # seconds; 10 was sized for a job that only rewrote five version strings.
+    timeout-minutes: 25
     steps:
       # RELEASE_PAT, not GITHUB_TOKEN. main is protected by a ruleset that
       # requires a pull request and the "All pre-merge checks" status check,
@@ -201,6 +203,10 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: '24'
+
+      # The notice regeneration below runs through tsx.
+      - name: Install dependencies
+        run: npm ci
 
       - name: Compute next version
         id: ver
@@ -267,6 +273,50 @@ jobs:
           NEW: ${{ steps.ver.outputs.new }}
         run: bash scripts/check-version-lockstep.sh "$NEW"
 
+      # THIRD-PARTY-NOTICES.json records a SHA-256 for each input it was
+      # derived from, and four of those inputs — package.json,
+      # package-lock.json, Cargo.toml, Cargo.lock — are exactly the files the
+      # bump above rewrites. So every release invalidates the committed
+      # manifests by construction, with no dependency or license change behind
+      # it: v1.11.3-rc.1 pushed a tag whose commit CI then rejected for stale
+      # notices, burning that version. Regenerate here so the bump commit is
+      # self-consistent. Only the manifests' input hashes move; the notice text
+      # is untouched unless the dependency closure genuinely changed, in which
+      # case the review obligation in CLAUDE.md applies to that PR, not here.
+      #
+      # rustup rather than dtolnay/rust-toolchain on purpose: this job holds the
+      # persisted RELEASE_PAT, and the header comment above keeps third-party
+      # toolchain actions out of the job that carries the write credential.
+      - name: Install the pinned Rust toolchain
+        run: |
+          set -euo pipefail
+          rustup toolchain install 1.97.1 --profile minimal
+          rustup default 1.97.1
+
+      # The generator itself is network-free. Populate Cargo's cache from the
+      # exact lock first so it can traverse and read the three target-specific
+      # crate closures with `cargo metadata --locked --offline`.
+      - name: Fetch locked Cargo release closures
+        run: |
+          cargo fetch --locked --manifest-path src-tauri/Cargo.toml --target aarch64-apple-darwin
+          cargo fetch --locked --manifest-path src-tauri/Cargo.toml --target x86_64-pc-windows-msvc
+          cargo fetch --locked --manifest-path src-tauri/Cargo.toml --target x86_64-unknown-linux-gnu
+          # Cargo's platform fetch can omit a package that is selected through
+          # a nested Windows cfg. Fetch the complete locked graph as well so
+          # the subsequent, deliberately offline metadata pass is complete.
+          cargo fetch --locked --manifest-path src-tauri/Cargo.toml
+
+      - name: Regenerate third-party notices for the bumped version
+        run: npm run generate-notices
+
+      # Same re-read-before-the-irreversible-step idiom as the lockstep check
+      # above: run the exact gate ci.yml runs, so a generator that silently
+      # wrote nothing fails HERE, before anything is committed, tagged, or
+      # pushed — rather than on the tagged commit, where the tag cannot be
+      # moved.
+      - name: Verify the regenerated notices are current
+        run: npm run check-notices
+
       - name: Commit, tag, push
         env:
           NEW: ${{ steps.ver.outputs.new }}
@@ -275,7 +325,10 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add package.json package-lock.json \
-                  src-tauri/Cargo.toml src-tauri/tauri.conf.json src-tauri/Cargo.lock
+                  src-tauri/Cargo.toml src-tauri/tauri.conf.json src-tauri/Cargo.lock \
+                  THIRD-PARTY-NOTICES.txt THIRD-PARTY-NOTICES.json \
+                  src-tauri/resources/THIRD-PARTY-NOTICES.txt \
+                  src-tauri/resources/THIRD-PARTY-NOTICES.json
           git commit -m "chore(release): v$NEW"
           git tag -a "v$NEW" -m "StudyVis v$NEW"
           # Push the commit and its annotated tag in one transaction. A
