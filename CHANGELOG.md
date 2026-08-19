@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.11.3-rc.3 — 2026-08-19 — Linux release candidate
+## 1.11.3-rc.4 — 2026-08-19 — Linux release candidate
 
 ### Added
 

@@ -606,6 +606,32 @@ while IFS= read -r -d '' evidence; do
   install -m 0644 -- "$evidence" "$runtime_evidence_dir/licenses/${evidence##*/}"
 done < <(find "$runtime_build_dir/licenses" -mindepth 1 -maxdepth 1 -type f -print0 | sort -z)
 
+# Once its tool cache is ready, Tauri's AppImage bundler zeroes the three-byte
+# AppImage magic at offset 8 of linuxdeploy-x86_64.AppImage so desktop AppImage
+# integration daemons never register linuxdeploy itself -- the trailing `dd
+# if=/dev/zero bs=1 count=3 seek=8 conv=notrunc` in tauri-bundler's
+# appimage/linuxdeploy.rs. It runs on every build, whether the tool was
+# pre-seeded here or downloaded by Tauri, so a tool read back after packaging
+# can never equal its pristine pin.
+#
+# Restore the magic before hashing rather than pinning the patched bytes: every
+# byte outside that documented three-byte window must still match the audited
+# download, which is exactly what the pin exists to prove. Restoring is a no-op
+# on a tool that was never patched, so one path covers both states, and it is
+# applied to every AppImage-format tool because the same blanking may reach any
+# of them.
+appimage_pinned_sha() {
+  local path=$1
+  local size
+  size=$(wc -c <"$path")
+  [[ $size -ge 11 ]] || die "packaging tool is too small to be an AppImage: $path"
+  {
+    head -c 8 -- "$path"
+    printf '\x41\x49\x02'
+    tail -c +12 -- "$path"
+  } | sha256sum
+}
+
 record_tool_input() {
   local filename=$1
   local input_url=$2
@@ -617,7 +643,14 @@ record_tool_input() {
   local source_path="$tool_cache/$filename"
   [[ -f $source_path && ! -L $source_path ]] || die "verified packaging tool is missing: $filename"
   local actual_sha
-  actual_sha=$(sha256sum -- "$source_path")
+  case $filename in
+  *.AppImage)
+    actual_sha=$(appimage_pinned_sha "$source_path")
+    ;;
+  *)
+    actual_sha=$(sha256sum -- "$source_path")
+    ;;
+  esac
   actual_sha=${actual_sha%% *}
   [[ $actual_sha == "$expected_sha" ]] || {
     die "cached packaging tool changed after verification: $filename ($actual_sha)"
