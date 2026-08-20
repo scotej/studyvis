@@ -614,6 +614,15 @@ jobs:
       artifact-metadata: write
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # This job deliberately does not check out the repository -- it only
+      # talks to the releases API -- so `gh` has no git remote to infer the
+      # repository from and every call here died with "failed to run git:
+      # fatal: not a git repository". That was invisible until this job was
+      # made fail-closed: the older `set -uo pipefail` version read the same
+      # failure as "no draft release was created -- nothing to verify" and
+      # exited 0, so it passed vacuously on every release through v1.11.2
+      # without ever checking a draft.
+      GH_REPO: ${{ github.repository }}
       TAG: ${{ github.ref_name }}
       PUBLISH_RESULT: ${{ needs.publish.result }}
     steps:
