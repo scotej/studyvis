@@ -68,6 +68,19 @@ export async function fill(
   })
 }
 
+/** Hover a container. Needed for controls that are `pointer-events-none` until
+ *  their group is hovered — a click alone cannot reach those, because the hit
+ *  test lands on the parent before the hover rule has applied. */
+export async function hover(
+  page: Page,
+  name: string,
+  options: ClickOptions = {}
+): Promise<void> {
+  await target(page, name, options).hover({
+    timeout: options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+  })
+}
+
 export async function press(page: Page, keys: string): Promise<void> {
   await page.keyboard.press(keys)
 }

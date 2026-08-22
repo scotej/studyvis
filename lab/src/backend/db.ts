@@ -287,6 +287,19 @@ export class LabDb {
       .all(sessionId) as unknown as AuditEventRecord[]
   }
 
+  /** Every audit row, every kind. No Rust twin — the app never needs this, but
+   *  a scenario does: asserting on the log means reading all of it, not the
+   *  distraction-only slice the insights view asks for. */
+  auditRows(): AuditEventRecord[] {
+    return this.db
+      .prepare(
+        `SELECT session_id, ts, who, kind, detail, sig
+         FROM audit_events
+         ORDER BY session_id ASC, ts ASC, id ASC`
+      )
+      .all() as unknown as AuditEventRecord[]
+  }
+
   auditListAll(): AuditEventRecord[] {
     return this.db
       .prepare(

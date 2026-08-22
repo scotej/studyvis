@@ -24,6 +24,11 @@ import { startNostrRelay, type NostrRelayHandle } from './net/nostrRelay'
 
 export const WORK_ROOT = path.resolve(import.meta.dirname, '../.work')
 
+/** The model id a lab machine reports as installed and selected. Nothing ever
+ *  downloads it; the sidecar commands answer for it and the llama stub serves
+ *  its inferences. */
+export const LAB_MODEL_ID = 'lab-stub-model'
+
 export type LabOptions = {
   mode?: AppServerMode
   headless?: boolean
@@ -40,6 +45,11 @@ export type AddMachineOptions = {
   clockSkewMs?: number
   settings?: Record<string, unknown>
   appState?: Record<string, unknown>
+  models?: Record<string, unknown>
+  /** Give this machine a working AI: an installed, selected model and a
+   *  sidecar that reports the lab's llama stub. Off by default, because a
+   *  scenario that does not test AI should not carry its state. */
+  ai?: boolean
 }
 
 export class Lab {
@@ -129,8 +139,23 @@ export class Lab {
         // discovery/invite/session trace a failure is diagnosed from. A
         // scenario that wants shipped-default logging can override it.
         debug_log_enabled: true,
+        ...(options.ai ? { ai_features_enabled: true } : {}),
         ...options.settings,
       },
+      models: options.ai
+        ? {
+            records: {
+              [LAB_MODEL_ID]: {
+                modelId: LAB_MODEL_ID,
+                benchmark: null,
+                installedAt: 0,
+              },
+            },
+            active_model_id: LAB_MODEL_ID,
+            ...options.models,
+          }
+        : options.models,
+      llamaPort: options.ai ? this.llama.port : undefined,
       appState: options.appState,
       chromeChannel: this.options.chromeChannel,
       chromeExecutable: this.options.chromeExecutable,

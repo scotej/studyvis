@@ -107,14 +107,35 @@ export async function inviteAndAccept(
   host: LabMachine,
   guest: LabMachine,
   guestFriendName: string,
-  hostFriendName: string
+  hostFriendName: string,
+  topic = 'Lab work'
 ): Promise<void> {
   await ui.waitForText(host.page(), 'Available', 30_000)
   await ui.click(host.page(), `Invite ${guestFriendName}`)
+  await declareTopicIfAsked(host, topic)
   await ui.waitForText(host.page(), 'Study session', 20_000)
   await ui.waitForText(guest.page(), 'invites you to study', 30_000)
   await ui.click(guest.page(), `Accept the invite from ${hostFriendName}`)
+  await declareTopicIfAsked(guest, topic)
   await ui.waitForText(guest.page(), 'Study session', 20_000)
+}
+
+/** The topic gate only appears when AI features are on, so a scenario cannot
+ *  know in advance whether it is coming. Answering it when it shows, and
+ *  moving on when it does not, keeps one flow usable for both. */
+export async function declareTopicIfAsked(
+  machine: LabMachine,
+  topic: string
+): Promise<void> {
+  const page = machine.page()
+  const gate = page.getByRole('dialog', { name: 'What are you working on?' })
+  const appeared = await gate
+    .waitFor({ state: 'visible', timeout: 3000 })
+    .then(() => true)
+    .catch(() => false)
+  if (!appeared) return
+  await ui.fill(page, 'Study topic', topic)
+  await ui.click(page, 'Start studying')
 }
 
 /** Every <video> the page is currently rendering, with the state a scenario

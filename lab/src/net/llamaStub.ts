@@ -42,6 +42,16 @@ export async function startLlamaStub(
   let last: LlamaVerdict = { content: '{"focused":true,"confidence":0.9}' }
 
   const server = createServer((req, res) => {
+    // llama-server answers every origin, and the app fetches it from the
+    // app-origin document. Without the same headers the browser blocks the
+    // request before the stub ever sees a body, which reads as a dead model.
+    res.setHeader('access-control-allow-origin', '*')
+    res.setHeader('access-control-allow-headers', '*')
+    res.setHeader('access-control-allow-methods', 'GET, POST, OPTIONS')
+    if (req.method === 'OPTIONS') {
+      res.writeHead(204).end()
+      return
+    }
     if (req.url === '/health') {
       res.writeHead(200, { 'content-type': 'application/json' })
       res.end(JSON.stringify({ status: 'ok' }))

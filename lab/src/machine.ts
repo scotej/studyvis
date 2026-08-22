@@ -33,6 +33,11 @@ export type MachineOptions = {
   settings?: Record<string, unknown>
   /** Written into app-state.json before the app boots (onboarding state). */
   appState?: Record<string, unknown>
+  /** Written into models.json before the app boots — an installed, selected
+   *  model, which the AI pipeline needs before any of it runs. */
+  models?: Record<string, unknown>
+  /** Port of the lab's llama stub; enables the simulated sidecar. */
+  llamaPort?: number
   chromeChannel?: string
   chromeExecutable?: string
 }
@@ -60,6 +65,7 @@ export class LabMachine {
       emit: (event, payload, label) => {
         void this.emit(event, payload, label)
       },
+      llamaPort: options.llamaPort,
     })
   }
 
@@ -76,6 +82,9 @@ export class LabMachine {
     }
     if (options.appState) {
       this.backend.stores.seed('app-state.json', options.appState)
+    }
+    if (options.models) {
+      this.backend.stores.seed('models.json', options.models)
     }
 
     const args = [

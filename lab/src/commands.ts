@@ -105,6 +105,14 @@ export const commands: Record<
     return { filled: args.name }
   },
 
+  async hover({ lab }, args) {
+    await ui.hover(pageOf(lab, args), String(args.name), {
+      role: args.role as string | undefined,
+      within: args.within as { role: string; name?: string } | undefined,
+    })
+    return { hovered: args.name }
+  },
+
   async press({ lab }, args) {
     await ui.press(pageOf(lab, args), String(args.keys))
     return { pressed: args.keys }
@@ -196,7 +204,9 @@ export const commands: Record<
         return {
           rows: args.sessionId
             ? backend.db.auditListForSession(String(args.sessionId))
-            : backend.db.auditListAll(),
+            : args.all === true
+              ? backend.db.auditRows()
+              : backend.db.auditListAll(),
         }
       default:
         throw new Error(`lab: unknown table '${String(args.table)}'`)

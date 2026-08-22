@@ -33,6 +33,7 @@ const USAGE = `studyvis lab — run the real app as N virtual machines on this b
   snapshot <machine> [--window W]     accessibility view of the screen
   text <machine>                      visible text
   click <machine> <name> [--role R] [--nth N]
+  hover <machine> <name> [--role R]   reveal a hover-gated control
   fill <machine> <name> <value> [--role R]
   press <machine> <keys>
   wait-for <machine> <text> [--timeout-ms N]
@@ -57,6 +58,7 @@ const USAGE = `studyvis lab — run the real app as N virtual machines on this b
   fault relay|broker --faults JSON
 
   run <scenario.ts> [args...]  run a scenario file against a fresh lab
+  verify [--dev]               run every scenario and report one verdict
   scenarios                    list the scenarios in lab/scenarios/
 `
 
@@ -186,6 +188,60 @@ async function doctor(): Promise<void> {
   if (!ok) process.exit(1)
 }
 
+// One command that runs the whole suite, because "is the app still working"
+// should not require knowing the scenario list.
+async function verify(flags: Flags): Promise<void> {
+  const dir = path.join(import.meta.dirname, '../scenarios')
+  const { readdirSync } = await import('node:fs')
+  const files = readdirSync(dir)
+    .filter((file) => file.endsWith('.ts'))
+    .sort()
+  const results: {
+    scenario: string
+    ok: boolean
+    ms: number
+    error?: string
+  }[] = []
+  for (const file of files) {
+    process.stderr.write(`\n── ${file}\n`)
+    const child = spawn(
+      process.execPath,
+      [
+        '--import',
+        'tsx',
+        path.join(dir, file),
+        ...(flags.dev === true ? ['--dev'] : []),
+      ],
+      { cwd: REPO_ROOT, stdio: ['ignore', 'pipe', 'inherit'] }
+    )
+    let out = ''
+    child.stdout?.on('data', (chunk: Buffer) => {
+      out += chunk.toString('utf8')
+    })
+    await new Promise((resolve) => child.on('exit', resolve))
+    const start = out.indexOf('{')
+    try {
+      const parsed = JSON.parse(out.slice(start)) as {
+        scenario: string
+        ok: boolean
+        ms: number
+        error?: string
+      }
+      results.push({
+        scenario: parsed.scenario,
+        ok: parsed.ok,
+        ms: parsed.ms,
+        error: parsed.error,
+      })
+    } catch {
+      results.push({ scenario: file, ok: false, ms: 0, error: 'no result' })
+    }
+  }
+  const ok = results.every((result) => result.ok)
+  json({ ok, scenarios: results })
+  if (!ok) process.exit(1)
+}
+
 async function run(argv: string[]): Promise<void> {
   const file = argv[0]
   if (!file) fail('lab: run needs a scenario file')
@@ -217,6 +273,7 @@ async function main(): Promise<void> {
   if (command === 'up') return up(flags)
   if (command === 'doctor') return doctor()
   if (command === 'run') return run(positional)
+  if (command === 'verify') return verify(flags)
   if (command === 'scenarios') {
     const dir = path.join(import.meta.dirname, '../scenarios')
     const { readdirSync } = await import('node:fs')
@@ -256,6 +313,7 @@ async function main(): Promise<void> {
       args.machine = positional[0]
       break
     case 'click':
+    case 'hover':
     case 'wait-for':
     case 'press':
     case 'eval':

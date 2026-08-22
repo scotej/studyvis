@@ -55,14 +55,18 @@ export type LabBackendOptions = {
   /** Queued answers for the next file dialogs, so a scenario can drive an
    *  export/import without a native picker. */
   dialogAnswers?: string[]
+  /** Port of the lab's llama stub. Given one, the sidecar commands report a
+   *  running engine on that port instead of refusing: the AI pipeline is the
+   *  one place the lab has to SIMULATE rather than decline, because everything
+   *  interesting about it — thresholds, streaks, alerts, audit rows — lives
+   *  downstream of the one call that needs a model. */
+  llamaPort?: number
 }
 
-const AI_FEATURE_DEFAULT_SIDECAR_STATUS = {
-  running: false,
-  port: null,
-  model_id: null,
-  pid: null,
-}
+// Mirrors the serde shape of `sidecar_status` (src/features/ai/sidecar.ts).
+const LAB_MODEL_ID = 'lab-stub-model'
+const LAB_CTX_SIZE = 4096
+const LAB_HARDWARE_IDENTITY = { selection: 'cpu', topology: null }
 
 export class LabBackend {
   readonly name: string
@@ -79,6 +83,8 @@ export class LabBackend {
   private readonly emit: EmitToPage
   private readonly logFile: string
   private readonly dialogAnswers: string[]
+  private readonly llamaPort: number | null
+  private sidecarRunning = false
   private readonly shortcuts = new Map<string, string>()
   private sessionActive = false
   private notificationPermission: 'granted' | 'denied' | 'default' = 'granted'
@@ -93,6 +99,7 @@ export class LabBackend {
     this.stores = new LabStores(this.dir)
     this.emit = options.emit
     this.dialogAnswers = [...(options.dialogAnswers ?? [])]
+    this.llamaPort = options.llamaPort ?? null
     this.logFile = path.join(this.dir, 'studyvis.log')
   }
 
@@ -279,19 +286,37 @@ export class LabBackend {
       case 'sidecar_status':
         return this.sidecar(cmd)
       case 'engine_info':
-        return { installed: false, version: null, path: null }
+        return this.llamaPort === null
+          ? { installed: false, version: null, path: null }
+          : { installed: true, version: 'lab-stub', path: this.dir }
       case 'engine_install':
       case 'model_download':
       case 'model_head_check':
         throw new Error(
-          `lab: '${cmd}' is refused — the lab is offline; point the AI at the llama stub instead`
+          `lab: '${cmd}' is refused — the lab is offline and downloads nothing; start it with a llama stub instead`
         )
       case 'model_download_cancel':
         return null
-      case 'model_paths':
-        return { model_dir: path.join(this.dir, 'models'), files: [] }
+      case 'model_paths': {
+        const dir = path.join(this.dir, 'models', String(a.modelId))
+        return {
+          dir,
+          model_path: path.join(dir, 'model.gguf'),
+          mmproj_path: path.join(dir, 'mmproj.gguf'),
+        }
+      }
       case 'model_install_state':
-        return { state: 'absent', bytes: 0 }
+        // A model the lab never downloaded still has to read as installed, or
+        // nothing downstream of the picker ever runs.
+        return this.llamaPort === null
+          ? {
+              model: { exists: false, size: 0 },
+              mmproj: { exists: false, size: 0 },
+            }
+          : {
+              model: { exists: true, size: 1 },
+              mmproj: { exists: true, size: 1 },
+            }
       case 'model_remove':
         return null
       case 'hf_token_present':
@@ -312,10 +337,46 @@ export class LabBackend {
   }
 
   private sidecar(cmd: string): unknown {
-    if (cmd === 'sidecar_status') return AI_FEATURE_DEFAULT_SIDECAR_STATUS
-    throw new Error(
-      `lab: '${cmd}' is refused — the lab never spawns llama-server; use the lab's llama stub`
-    )
+    if (this.llamaPort === null) {
+      if (cmd === 'sidecar_status') {
+        return {
+          running: false,
+          starting: false,
+          port: null,
+          model: null,
+          mmproj: null,
+          ctx_size: null,
+          errored: false,
+          last_error: null,
+          hardware_identity: null,
+        }
+      }
+      throw new Error(
+        `lab: '${cmd}' is refused — this lab has no llama stub, and it never spawns the real llama-server`
+      )
+    }
+    if (cmd === 'sidecar_start') {
+      this.sidecarRunning = true
+      return {
+        port: this.llamaPort,
+        hardware_identity: LAB_HARDWARE_IDENTITY,
+      }
+    }
+    if (cmd === 'sidecar_stop') {
+      this.sidecarRunning = false
+      return null
+    }
+    return {
+      running: this.sidecarRunning,
+      starting: false,
+      port: this.sidecarRunning ? this.llamaPort : null,
+      model: this.sidecarRunning ? LAB_MODEL_ID : null,
+      mmproj: null,
+      ctx_size: this.sidecarRunning ? LAB_CTX_SIZE : null,
+      errored: false,
+      last_error: null,
+      hardware_identity: this.sidecarRunning ? LAB_HARDWARE_IDENTITY : null,
+    }
   }
 
   // --- plugin commands ----------------------------------------------------
