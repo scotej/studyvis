@@ -28,7 +28,9 @@ export class LabStores {
   seed(storePath: string, values: Record<string, unknown>): void {
     const file = path.join(this.dir, storePath)
     const existing = this.readFile(file)
-    writeFileSync(file, JSON.stringify({ ...existing, ...values }, null, 2))
+    writeFileSync(file, JSON.stringify({ ...existing, ...values }, null, 2), {
+      mode: 0o600,
+    })
     const rid = this.ridByPath.get(storePath)
     if (rid !== undefined) {
       const entry = this.byRid.get(rid)
@@ -123,6 +125,8 @@ export class LabStores {
   }
 
   private flush(entry: StoreFile): void {
-    writeFileSync(entry.file, JSON.stringify(entry.values, null, 2))
+    writeFileSync(entry.file, JSON.stringify(entry.values, null, 2), {
+      mode: 0o600,
+    })
   }
 }

@@ -224,7 +224,7 @@ export class LabBackend {
       case 'app_log_append': {
         const lines = (a.lines as string[]) ?? []
         if (lines.length > 0) {
-          appendFileSync(this.logFile, `${lines.join('\n')}\n`)
+          appendFileSync(this.logFile, `${lines.join('\n')}\n`, { mode: 0o600 })
         }
         return null
       }
@@ -281,7 +281,12 @@ export class LabBackend {
         // so it is confined to this machine's workdir: a harness running on
         // someone's real machine must not be able to write outside its own
         // sandbox, however a scenario misbehaves.
-        writeFileSync(this.confine(String(a.path)), String(a.contents))
+        // Owner-only: these land in a workdir under the repo on a real
+        // machine, and a file the app "saved" should not be readable by every
+        // account on the box just because a harness wrote it.
+        writeFileSync(this.confine(String(a.path)), String(a.contents), {
+          mode: 0o600,
+        })
         return null
       }
       case 'ai_dialog_toggle':

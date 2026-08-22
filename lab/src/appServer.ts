@@ -78,15 +78,15 @@ async function startViteServer(): Promise<AppServerHandle> {
 async function startStaticServer(): Promise<AppServerHandle> {
   const root = path.join(REPO_ROOT, 'dist')
   await buildIfStale(root)
+  // The bundle's file set is known the moment the server starts, so requests are
+  // answered from a manifest built by walking it once. A request string is only
+  // ever a KEY into that map — it never becomes a path — which makes traversal
+  // unrepresentable rather than something a containment check has to catch.
+  const manifest = buildManifest(root)
   const server = createServer((req, res) => {
     const requested = decodeURIComponent((req.url ?? '/').split('?')[0])
-    const relative = requested === '/' ? 'index.html' : requested.slice(1)
-    const file = path.join(root, relative)
-    // Directory traversal would let a page under test read the repo.
-    // Anchored to a directory boundary: a bare prefix test would also accept a
-    // sibling whose name merely starts with the root's.
-    const inRoot = file === root || file.startsWith(`${root}${path.sep}`)
-    if (!inRoot || !existsSync(file) || !statSync(file).isFile()) {
+    const file = manifest.get(requested === '/' ? '/index.html' : requested)
+    if (file === undefined) {
       res.writeHead(404).end()
       return
     }
@@ -105,6 +105,21 @@ async function startStaticServer(): Promise<AppServerHandle> {
         server.close(() => resolve())
       }),
   }
+}
+
+// Every file the bundle contains, keyed by the url path that serves it.
+function buildManifest(root: string): Map<string, string> {
+  const manifest = new Map<string, string>()
+  const walk = (dir: string, prefix: string) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const absolute = path.join(dir, entry.name)
+      const url = `${prefix}/${entry.name}`
+      if (entry.isDirectory()) walk(absolute, url)
+      else if (entry.isFile()) manifest.set(url, absolute)
+    }
+  }
+  walk(root, '')
+  return manifest
 }
 
 // Running a scenario against yesterday's bundle and believing the result is the

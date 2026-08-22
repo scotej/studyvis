@@ -52,7 +52,9 @@ export class LabIdentity {
   /** Seed a peer with a ready-made identity, skipping the onboarding UI. */
   preload(keys: StoredKeys, record: IdentityRecord): void {
     this.keys = keys
-    writeFileSync(this.recordPath, JSON.stringify(record, null, 2))
+    writeFileSync(this.recordPath, JSON.stringify(record, null, 2), {
+      mode: 0o600,
+    })
   }
 
   exists(): boolean {
@@ -72,7 +74,9 @@ export class LabIdentity {
   }
 
   saveRecord(record: IdentityRecord): void {
-    writeFileSync(this.recordPath, JSON.stringify(record, null, 2))
+    writeFileSync(this.recordPath, JSON.stringify(record, null, 2), {
+      mode: 0o600,
+    })
   }
 
   saveKeys(edPrivHex: string, xPrivHex: string, overwrite: boolean): void {
