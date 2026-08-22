@@ -247,21 +247,21 @@ binary, sidecar, source asset, and the final manifest to `release.yml` at that
 exact tag/commit on hosted runners. The required dispatch input is the lowercase
 SHA-256 recorded by the PLAN §8 physical AppImage pass; the publisher checks it
 during validation and re-downloads/re-hashes that AppImage immediately before
-changing the draft to published. Before production use, repository
-settings must therefore add three controls that workflow YAML cannot establish:
-create the `release` environment with required reviewer approval, protect matching `v*` tags against
-creation/update/deletion, and enable immutable releases. This sole-owner repository
-uses `scotej` as its reviewer and permits self-review; an independent reviewer plus
-self-review prevention is required for a two-person approval boundary. The tag ruleset's sole
+changing the draft to published. Publication is unattended: the workflow derives
+the AppImage digest itself and waits on no approval, so every gate it enforces is
+machine-checkable. Repository settings must still add two controls that workflow
+YAML cannot establish: protect matching `v*` tags against
+creation/update/deletion, and enable immutable releases. The tag ruleset's sole
 `Always` bypass entry must be `RepositoryRole 5` (admin), used by the
 owner-scoped `RELEASE_PAT`; do not add Write, Maintain, team, or integration
 bypasses. GitHub hides `bypass_actors` from the workflow's read-only ruleset
 response, so its gate verifies scope and rule types while an admin must verify
-the actor list. On 2026-08-15, the `release` environment (with `scotej` as its
-required reviewer), active `v*` lifecycle rule, and immutable releases were
-configured and verified. It is still a sole-owner approval boundary until an
-independent reviewer is added, and the physical candidate matrix remains a
-separate publication gate.
+the actor list. On 2026-08-15 the active `v*` lifecycle rule and immutable
+releases were configured and verified. The `release` environment's reviewer gate
+was removed when publication became unattended — on a sole-owner repository
+permitting self-review it was never an independent two-person boundary. The
+physical AppImage matrix is the standard for a full Linux sign-off but no longer
+gates publication.
 
 ### AI inference (V2+)
 - **llama-server** (binary from llama.cpp build) — Tauri sidecar. The release matrix bundles `aarch64-apple-darwin`, `x86_64-pc-windows-msvc`, and `x86_64-unknown-linux-gnu`; Intel macOS remains fetchable for local development. `scripts/fetch-llama-server.sh` pins and SHA-256-verifies all four upstream archives. The Linux archive is the upstream Ubuntu x64 CPU build: the candidate's `auto` policy uses zero GPU layers. A custom GPU-capable engine can expose an explicit device, but GPU acceleration is not a property promised by the AppImage.

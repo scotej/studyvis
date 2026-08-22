@@ -213,27 +213,28 @@ Releasing bumps the version in **five tracked files** (kept in lockstep): `packa
 
 - **One-click:** the `Release prep` workflow (Actions tab, `.github/workflows/release-prep.yml`) bumps all five files, commits + atomically pushes `main` and a `vX.Y.Z` tag; that PAT-authenticated tag push triggers the release build. It needs the **`RELEASE_PAT`** secret — a fine-grained PAT scoped to this repo with Contents: read+write. `main` is protected by a ruleset requiring a PR plus the `All pre-merge checks` status check, and `GITHUB_TOKEN` cannot bypass that on a user-owned repo (Integration bypass actors are organization-only), so the bump commit is pushed with an owner PAT — the ruleset's one bypass actor is RepositoryRole 5 (admin). The gate job fails fast with that explanation if the secret is missing.
 - **Manual:** bump the five files yourself, commit `chore(release): vX.Y.Z`, and push a `v*.*.*` tag — `release.yml` builds the macOS arm64, Windows x86_64, and Linux x86_64 artifacts as a **draft** GitHub Release to review and publish.
-- **Publish:** after the draft verifier and the PLAN §8 physical CachyOS matrix
-  pass, run **Publish verified release** (`publish-release.yml`) with the exact
-  tag and the lowercase AppImage SHA-256 recorded by that matrix. Do not use the
-  release-page publish button. The job runs through the
-  `release` environment, queues behind the tag build, and fails closed unless
+- **Publish:** once the draft verifier is green, run **Publish verified
+  release** (`publish-release.yml`) with the tag alone — it derives the AppImage
+  digest itself and needs no approval, so publishing is unattended. Do not use
+  the release-page publish button. The job queues behind the tag build and
+  fails closed unless
   the tag is on `main`, exact-commit CI succeeded, and the latest `release.yml`
   run with `head_branch` equal to that tag and `head_sha` equal to its commit
   completed successfully after the exact-AppImage runtime smoke. It also checks
   that the draft and release notes are intact and contains exactly the expected
   twelve assets. It downloads those exact assets, compares updater sidecars with
   `latest.json`, verifies their GitHub attestations against `release.yml` at the
-  exact tag/commit, checks the physical-test AppImage digest, and re-downloads
-  that AppImage for one final hash check immediately before publication. The
+  exact tag/commit, pins the AppImage digest it computed during validation, and
+  re-downloads that AppImage for one final hash check immediately before
+  publication, so the bytes cannot change underneath a validated draft. The
   tagged Linux leg creates and uploads both corresponding/system-source pairs only after
   its freshly built AppImage passes native inspection and the Xvfb
   data-channel-offer smoke; the final manifest is attested after aggregation.
-  **Repository controls:** on 2026-08-15, `release` was configured with
-  `scotej` as its required reviewer, the active `v*` tag rule restricts
-  creation/update/deletion, and immutable releases were enabled. This
-  sole-owner repository permits self-review; add an independent reviewer and
-  enable self-review prevention for two-person approval. Its sole `Always`
+  **Repository controls:** the active `v*` tag rule restricts
+  creation/update/deletion and immutable releases are enabled. The `release`
+  environment's reviewer gate was removed when publication became unattended —
+  on a sole-owner repository permitting self-review it was never a two-person
+  boundary, only a click to wait on. Its sole `Always`
   bypass entry must be
   `RepositoryRole 5` (admin), so the owner-scoped `RELEASE_PAT` can create the
   tag; do not add Write, Maintain, team, or integration bypasses. GitHub hides
@@ -242,7 +243,7 @@ Releasing bumps the version in **five tracked files** (kept in lockstep): `packa
   Workflow YAML cannot create these controls; re-verify them before any
   production publish.
 
-Update `CHANGELOG.md` as part of the release. `package.json#version` flows through `__APP_VERSION__` into Settings → About automatically. Do not publish a draft unless `latest.json` contains `darwin-aarch64`, `windows-x86_64`, and `linux-x86_64`, both Linux source archives and checksum sidecars are present and verify, and the exact Linux AppImage has passed PLAN §8's physical CachyOS KDE Wayland matrix. That matrix requires an exchanged bidirectional data channel, Linux media send/receive, Linux AI capture, and physical same-draft Linux↔Linux, Linux↔macOS, and Linux↔Windows artifact pairs—not merely CI's local offer probe. It also covers FUSE/extraction launch, Secret Service, N-1 updater/relaunch with preserved data, packaged CPU-only inference, Linux `studyvis://` registration/import, KDE notification-settings launch, custom-chrome drag/window controls, the in-session Wayland hold-to-talk control, and the Settings Talk-to-AI fallback. Record the AppImage SHA-256, artifact/OS versions, direction, and result for every row. The external `release` environment/tag-ruleset/immutable-release blockers above remain independent gates.
+Update `CHANGELOG.md` as part of the release. `package.json#version` flows through `__APP_VERSION__` into Settings → About automatically. Do not publish a draft unless `latest.json` contains `darwin-aarch64`, `windows-x86_64`, and `linux-x86_64`, both Linux source archives and checksum sidecars are present and verify, and the draft verifier is green. PLAN §8's physical CachyOS KDE Wayland matrix is the standard for a complete Linux sign-off and should be run whenever the hardware is free, but it no longer gates publication. That matrix requires an exchanged bidirectional data channel, Linux media send/receive, Linux AI capture, and physical same-draft Linux↔Linux, Linux↔macOS, and Linux↔Windows artifact pairs—not merely CI's local offer probe. It also covers FUSE/extraction launch, Secret Service, N-1 updater/relaunch with preserved data, packaged CPU-only inference, Linux `studyvis://` registration/import, KDE notification-settings launch, custom-chrome drag/window controls, the in-session Wayland hold-to-talk control, and the Settings Talk-to-AI fallback. Record the AppImage SHA-256, artifact/OS versions, direction, and result for every row. The external `release` environment/tag-ruleset/immutable-release blockers above remain independent gates.
 
 ## When in doubt
 

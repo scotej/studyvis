@@ -226,11 +226,19 @@ Promoting it to shipped support requires all of the following:
    the pre-SquashFS runtime's complete static source/notice/link closure but are
    not legal sign-off and do not make the mutable Noble baseline
    bit-reproducible.
-5. Before publishing, a human records the SHA-256 of the exact draft AppImage,
-   installs that same file on current physical x86_64 CachyOS KDE Wayland
-   hardware, and records every row below. A local source build, a repackaged
-   artifact, a VM-only pass, or a run that resolves WebKit from the host does
-   not count.
+5. Publication does **not** block on physical testing. `publish-release.yml`
+   runs unattended: it computes the draft AppImage's digest itself, pins it for
+   the run, and re-verifies it immediately before going live, so nothing is
+   hand-entered and no approval is waited on. The matrix below is still the
+   definition of a complete Linux sign-off and is the standard to exercise
+   whenever the hardware is available — but it is a quality practice, not a
+   gate. When it is run, it must use the exact published AppImage on current
+   physical x86_64 CachyOS KDE Wayland hardware; a local source build, a
+   repackaged artifact, a VM-only pass, or a run that resolves WebKit from the
+   host does not count. The tradeoff is explicit: between releases where nobody
+   runs it, Linux rests on the automated evidence in items 1–4 — a packaged
+   startup and `runtime.webrtc ready` probe on the exact artifact — which
+   proves the runtime loads, not that two physical peers exchange media.
 
    | Gate | Required physical evidence from the exact AppImage |
    |-|-|
@@ -267,29 +275,26 @@ Promoting it to shipped support requires all of the following:
    `tauri-action` uploads before the tagged Linux leg performs its exact-AppImage
    runtime smoke. The publisher also rechecks that the draft and notes are
    intact, all three signed updater entries point at draft assets, and the exact
-   twelve expected files are present. Invoke it with both the tag and the lowercase
-   AppImage SHA-256 recorded in step 5. It downloads every asset by its exact API
+   twelve expected files are present. Invoke it with the tag alone; it derives the
+   AppImage digest itself. It downloads every asset by its exact API
    URL, requires the three updater sidecars to equal the manifest signatures,
    verifies GitHub provenance tying every binary, signature, source asset, and
    final manifest to `release.yml` at that tag/commit on hosted runners, and
    re-downloads/re-hashes the AppImage immediately before publication.
-   Before the first production publish, a repository admin must create the
-   workflow's `release` environment and configure required reviewer approval,
-   add a tag ruleset matching `v*` that
-   restricts tag creation/update/deletion, and enable immutable releases. The
+   A repository admin must add a tag ruleset matching `v*` that
+   restricts tag creation/update/deletion, and keep immutable releases on. The
    ruleset's sole `Always` bypass entry must be `RepositoryRole 5` (admin), so
    the owner-scoped `RELEASE_PAT` can create the tag; do not add Write, Maintain,
    team, or integration bypasses. GitHub hides `bypass_actors` from the
    workflow's read-only ruleset response, so its gate verifies scope and rule
    types while an admin must verify the actor list.
-   This sole-owner repository uses `scotej` as its required reviewer and permits
-   self-review; add an independent reviewer and enable self-review prevention before
-   treating it as a two-person approval boundary. Workflow YAML cannot establish
-   those repository controls. On 2026-08-15, the `release` environment (with
-   `scotej` as reviewer), active `v*` lifecycle rule, and immutable releases
-   were configured and verified. Linux stays a release candidate until its
-   exact-AppImage physical matrix passes; that matrix is independent of these
-   repository controls. A failed release aggregate stamps the draft `INCOMPLETE, DO NOT
+   Workflow YAML cannot establish those repository controls. On 2026-08-15 the
+   active `v*` lifecycle rule and immutable releases were configured and
+   verified. The former `release` environment reviewer gate was removed when
+   publication became unattended: a sole-owner repository permitting self-review
+   was never a two-person boundary, and keeping it only meant the release waited
+   on a click. Restore a required reviewer here if an independent approver ever
+   exists. A failed release aggregate stamps the draft `INCOMPLETE, DO NOT
    PUBLISH`; that warning is another fail-safe, not permission to bypass either
    gate after a green build.
 

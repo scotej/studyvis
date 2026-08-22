@@ -291,8 +291,9 @@ where you'd see it surface.
   three-platform manifest, artifacts, and successful latest tagged
   `release.yml` run for that exact tag/commit—the run that includes the uploaded
   AppImage's runtime smoke. That run attests the exact downloadable assets and
-  final updater manifest. Publishing requires the SHA-256 recorded during the
-  physical AppImage matrix, downloads the exact twelve-file draft set, requires
+  final updater manifest. Publishing runs unattended — it computes the AppImage
+  digest itself rather than taking one by hand — downloads the exact
+  twelve-file draft set, requires
   each updater sidecar to match `latest.json` byte for byte, verifies every
   artifact's exact-workflow/tag/commit provenance, and rechecks the AppImage
   digest immediately before publication. Workflow YAML cannot configure the
@@ -305,13 +306,12 @@ where you'd see it surface.
   the tag; do not add Write, Maintain, team, or integration bypasses. GitHub
   hides `bypass_actors` from the workflow's read-only ruleset response, so the
   workflow verifies scope and rule types while an admin must verify this list. This
-  sole-owner repository requires `scotej` as its reviewer and permits self-review;
-  add an independent reviewer and enable self-review prevention before relying on
-  a second-person approval boundary.
-  On 2026-08-15, the `release` environment (with `scotej` as required reviewer),
-  the active `v*` lifecycle rule, and immutable releases were configured and
-  verified. This is a sole-owner approval control, not an independent
-  two-person boundary; the physical candidate matrix remains a separate gate.
+  active `v*` lifecycle rule and immutable releases were configured and verified
+  on 2026-08-15. The `release` environment's reviewer gate was removed when
+  publication became unattended: on a sole-owner repository permitting
+  self-review it was never an independent two-person boundary. The physical
+  AppImage matrix is the standard for a full Linux sign-off but no longer gates
+  publication.
 - **Signed installers.** No code-signing credentials. macOS
   notarization and Windows code-signing wait for a Developer ID and an
   EV cert, so friends still right-click → Open on macOS and click
@@ -513,7 +513,7 @@ essentially all of it shipped, so nothing there is open work.
 1.x is the running release series, all friends-only builds without
 macOS notarization or Windows Authenticode signing. The Linux release-candidate
 AppImage is covered by the same updater minisign integrity chain but is not a
-native distro package and cannot publish before its physical sign-off.
+native distro package.
 v1.0.0–v1.0.3 shipped during V1 + V2 + the audit pass. **v1.0.5** is
 the polished 1.0 — it landed the V3 phase (recovery from a 24-word
 backup, custom keybindings, multi-monitor capture, light + auto
