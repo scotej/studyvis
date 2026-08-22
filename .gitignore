@@ -46,3 +46,6 @@ src-tauri/binaries/llama-runtime-*/
 
 # Impeccable critique-tool output (local review scratch).
 .impeccable/
+
+# StudyVis lab: per-run machine disks, logs and the daemon socket.
+lab/.work/
