@@ -53,18 +53,3 @@ libxcb-dri2.so.0
 libxcb-dri3.so.0
 libxcb.so.1
 libz.so.1
-
-# StudyVis additions beyond linuxdeploy's set. The hash above covers only the
-# linuxdeploy-derived entries; keep those unchanged and record each addition
-# here with the reason it cannot be packaged.
-#
-# libsystemd.so.0 is a DT_NEEDED of the packaged
-# libpipewire-module-protocol-native.so (ISSUES.md I89). Packaging Ubuntu's
-# copy would drag libcap, libgcrypt, liblz4, liblzma, and libzstd into the
-# bundle so that a StudyVis session could talk to the host's own journal and
-# socket APIs through a foreign build of them. Every desktop this AppImage
-# targets already runs systemd — StudyVis requires its user D-Bus session for
-# portals and the Secret Service regardless — so the host copy is both the
-# smaller and the more correct dependency. libselinux, protocol-native's other
-# non-libc dependency, is packaged instead: Arch does not install it at all.
-libsystemd.so.0

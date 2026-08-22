@@ -13,9 +13,9 @@
 //! those three lookups, so the packaged payload is declared here, relative to
 //! the running executable, exactly as the WebKit portability patch resolves
 //! its subprocesses. A source or `tauri dev` build has no payload beside its
-//! executable and is left untouched, as is anything the user set themselves.
+//! executable and is left untouched.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 /// Points the packaged PipeWire client at the packaged payload.
 ///
@@ -47,19 +47,20 @@ pub fn install() {
         return;
     }
 
-    set_if_unset("SPA_PLUGIN_DIR", &spa);
-    set_if_unset("PIPEWIRE_MODULE_DIR", &modules);
-    set_if_unset("PIPEWIRE_CONFIG_DIR", &config);
+    // Overwrite rather than fill in: the updater relaunches through the
+    // `APPIMAGE` path, and the relaunched process inherits this environment
+    // while mounting at a *new* /tmp/.mount_* directory. Honouring an
+    // already-set value would leave the new process pointed at the previous
+    // mount, which unmounts as the old process exits — reinstating I89 after
+    // every automatic update. A packaged payload is always the right one for
+    // the executable that found it, so it wins.
+    std::env::set_var("SPA_PLUGIN_DIR", &spa);
+    std::env::set_var("PIPEWIRE_MODULE_DIR", &modules);
+    std::env::set_var("PIPEWIRE_CONFIG_DIR", &config);
 }
 
 /// `/usr` inside the mounted AppImage, from `/usr/bin/studyvis`.
 fn packaged_prefix() -> Option<PathBuf> {
     let executable = std::env::current_exe().ok()?;
     Some(executable.parent()?.parent()?.to_path_buf())
-}
-
-fn set_if_unset(name: &str, value: &Path) {
-    if std::env::var_os(name).is_none() {
-        std::env::set_var(name, value);
-    }
 }

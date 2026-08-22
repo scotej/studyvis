@@ -532,6 +532,7 @@ for build_input in \
   scripts/linux-webkit-runtime.env \
   scripts/linux-appimage-external-sonames.txt \
   scripts/linux-gstreamer-plugins.txt \
+  scripts/linux-pipewire-payload.txt \
   scripts/licenses/APPIMAGEKIT-MIT.txt \
   scripts/licenses/LLAMA.CPP-MIT.txt \
   scripts/licenses/TAURI-BINARY-RELEASES-MIT.txt \

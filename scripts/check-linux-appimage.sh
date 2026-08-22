@@ -310,7 +310,6 @@ pipewire_config="$root/usr/share/pipewire"
 require_file "$spa_plugins/support/libspa-support.so"
 require_file "$spa_plugins/audioconvert/libspa-audioconvert.so"
 require_file "$pipewire_config/client.conf"
-require_file "$pipewire_config/client-rt.conf"
 for module in protocol-native client-node client-device adapter metadata session-manager; do
   require_file "$pipewire_modules/libpipewire-module-$module.so"
 done

@@ -12,7 +12,6 @@
 #            (libspa-0.2.pc sits in a dev package nothing here requires)
 #   module   context module, relative to `--variable=moduledir libpipewire-0.3`
 #   config   client configuration, relative to the PipeWire data directory
-#   library  extra shared object the payload needs, relative to that libdir
 #
 # The spa and module sets are not a judgement call: they are exactly the
 # factories named by `context.spa-libs` and the modules named by
@@ -38,13 +37,15 @@ module libpipewire-module-adapter.so
 module libpipewire-module-metadata.so
 module libpipewire-module-session-manager.so
 
-# client-rt.conf is the realtime variant GStreamer selects for capture.
+# client.conf is the only configuration the packaged client ever loads: the
+# GStreamer element builds its context with NULL properties, so PipeWire falls
+# back to it. The realtime variant is deliberately not listed — upstream
+# dropped client-rt.conf after 1.0.x, so requiring it would pin this manifest
+# to the builder's PipeWire version and break a local build on any host
+# shipping a newer one.
 config client.conf
-config client-rt.conf
 
-# libpipewire-module-protocol-native.so pulls libselinux, which Arch does not
-# install at all, so the module would fail to dlopen on the reference desktop.
-# libsystemd, its other non-libc dependency, is host-provided on every systemd
-# desktop and is declared in linux-appimage-external-sonames.txt instead.
-library libselinux.so.1
-library libpcre2-8.so.0
+# No `library` entries are needed: protocol-native's non-libc dependencies
+# (libsystemd, libselinux, and libselinux's own libpcre2) are already in the
+# bundle, and AppRun prepends the packaged libdir to LD_LIBRARY_PATH, so the
+# module resolves them from there on every host.

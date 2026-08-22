@@ -231,7 +231,6 @@ stage_directories=(
   "$stage_root/pipewire/spa"
   "$stage_root/pipewire/modules"
   "$stage_root/pipewire/config"
-  "$stage_root/pipewire/libraries"
   "$stage_root/sandbox"
   "$stage_root/licenses"
   "$stage_root/notices"
@@ -303,7 +302,6 @@ while IFS= read -r payload_line || [[ -n $payload_line ]]; do
     spa) payload_source="$pipewire_spa_dir/$payload_path" payload_stage=spa ;;
     module) payload_source="$pipewire_module_dir/$payload_path" payload_stage=modules ;;
     config) payload_source="$pipewire_config_dir/$payload_path" payload_stage=config ;;
-    library) payload_source="$pipewire_libdir/$payload_path" payload_stage=libraries ;;
     *) die "unknown PipeWire payload kind: $payload_kind" ;;
   esac
   [[ -f $payload_source ]] || die "PipeWire payload entry is missing: $payload_source"
@@ -316,7 +314,7 @@ while IFS= read -r payload_line || [[ -n $payload_line ]]; do
 done <"$pipewire_manifest"
 # pw_context_new() treats every context.modules entry as mandatory, so a short
 # payload fails closed at runtime rather than degrading.
-[[ ${#staged_pipewire[@]} -ge 12 ]] || die "curated PipeWire payload is unexpectedly small"
+[[ ${#staged_pipewire[@]} -ge 9 ]] || die "curated PipeWire payload is unexpectedly small"
 
 library_destination="$stage_root/libraries"
 for library in "${required_libraries[@]}"; do
