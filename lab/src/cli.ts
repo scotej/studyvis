@@ -27,7 +27,9 @@ const USAGE = `studyvis lab — run the real app as N virtual machines on this b
   status                      what is running, plus every error counter
   doctor                      prove the transports round-trip and nothing left the box
 
-  add-machine <name> [--clock-skew-ms N] [--video FILE] [--audio FILE]
+  add-machine <name> [--ai true] [--clock-skew-ms N] [--video FILE] [--audio FILE]
+                              --ai gives the machine an installed, selected model
+                              and a sidecar pointed at the llama stub
   onboard <machine> [display-name]    walk the six onboarding screens
   mnemonic <machine>                  the 24 words currently on screen
   snapshot <machine> [--window W]     accessibility view of the screen
