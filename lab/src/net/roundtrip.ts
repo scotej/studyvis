@@ -13,6 +13,28 @@ const CHECK_TAG = 'studyvis-lab-check'
 
 export type ProbeResult = { ok: boolean; ms: number; reason?: string }
 
+// Both probes are handed a url that came off disk — `lab doctor` reads the
+// running daemon's metadata file to find its own servers. A probe that would
+// dial whatever that file happens to say is the one place the harness could
+// make an outbound request it did not intend, so the address is checked before
+// a socket is opened rather than trusted because of where it came from. The
+// lab's own servers always bind 127.0.0.1; anything else is a bug or a
+// tampered file, and either way it must not be dialled.
+function requireLoopback(url: string): string {
+  let parsed: URL
+  try {
+    parsed = new URL(url)
+  } catch {
+    throw new Error(`lab: '${url}' is not a url`)
+  }
+  if (parsed.hostname !== '127.0.0.1' && parsed.hostname !== 'localhost') {
+    throw new Error(
+      `lab: refusing to probe non-loopback host '${parsed.hostname}' — the lab only ever talks to itself`
+    )
+  }
+  return parsed.href
+}
+
 function signedEvent(): { id: string; event: Record<string, unknown> } {
   const priv = randomBytes(32)
   const pubkey = Buffer.from(schnorr.getPublicKey(priv)).toString('hex')
@@ -45,10 +67,11 @@ export function probeNostrRelay(
   url: string,
   timeoutMs = 5000
 ): Promise<ProbeResult> {
+  const address = requireLoopback(url)
   return new Promise((resolve) => {
     const started = Date.now()
     let settled = false
-    const socket = new WebSocket(url)
+    const socket = new WebSocket(address)
     const subId = `lab-${randomBytes(4).toString('hex')}`
     const { id, event } = signedEvent()
     const finish = (result: ProbeResult) => {
@@ -108,12 +131,13 @@ export function probeMqttBroker(
   url: string,
   timeoutMs = 5000
 ): Promise<ProbeResult> {
+  const address = requireLoopback(url)
   return new Promise((resolve) => {
     const started = Date.now()
     let settled = false
     const topic = `studyvis-lab-check/${randomBytes(8).toString('hex')}`
     const payload = randomBytes(8).toString('hex')
-    const client = mqtt.connect(url, { connectTimeout: timeoutMs })
+    const client = mqtt.connect(address, { connectTimeout: timeoutMs })
     const finish = (result: ProbeResult) => {
       if (settled) return
       settled = true
