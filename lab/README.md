@@ -70,6 +70,7 @@ CLAUDE.md stands: never put a real mnemonic into a chat with any AI service.
 | `ai`         | scripted verdicts drive streaks, thresholds, a signed peer alert, audit and session rows |
 | `recover`    | a second machine restores the same keys from the 24 words                                |
 | `dark-relay` | every Nostr relay refused, and the invite still lands over MQTT                          |
+| `exports`    | the save path is honoured, replaced not appended, and confined to the machine            |
 
 Write a new one against `src/scenario.ts`: it hands you a lab, `step`, `check`
 and the `ui` verbs, dumps every machine's screen and log on failure, and fails

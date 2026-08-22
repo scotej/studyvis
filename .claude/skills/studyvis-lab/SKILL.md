@@ -30,7 +30,7 @@ disambiguate. Use `hover` for controls that only become clickable on hover.
 ## Checking a change
 
 ```bash
-npm run lab -- verify        # all five scenarios, one JSON verdict, ~80s
+npm run lab -- verify        # all eight scenarios, one JSON verdict, ~110s
 npm run lab -- run pair.ts   # one scenario
 ```
 

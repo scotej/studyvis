@@ -14,7 +14,13 @@
 // The distinction matters: a stub that silently succeeds turns an untested
 // surface into a green scenario, which is worse than no scenario at all.
 
-import { appendFileSync, mkdirSync, readFileSync, existsSync } from 'node:fs'
+import {
+  appendFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  writeFileSync,
+} from 'node:fs'
 import path from 'node:path'
 
 import { LabDb, type AuditEventRecord, type SessionRecord } from './db'
@@ -268,7 +274,14 @@ export class LabBackend {
       case 'system_open_notification_settings':
         return null
       case 'system_write_text_file': {
-        appendFileSync(String(a.path), String(a.contents))
+        // The Rust command is a truncating `std::fs::write`, so appending here
+        // would let a second export concatenate onto the first — a difference
+        // a scenario asserting on file contents would have to work around.
+        // The path arrives from the app (whatever the save dialog answered),
+        // so it is confined to this machine's workdir: a harness running on
+        // someone's real machine must not be able to write outside its own
+        // sandbox, however a scenario misbehaves.
+        writeFileSync(this.confine(String(a.path)), String(a.contents))
         return null
       }
       case 'ai_dialog_toggle':
@@ -518,6 +531,20 @@ export class LabBackend {
       kind === 'ask' || kind === 'confirm' ? answer !== null : answer
     this.dialogs.push({ ts: Date.now(), kind, payload: a, answeredWith })
     return answeredWith
+  }
+
+  /** Keeps an app-supplied path inside this machine's workdir. A relative path
+   *  resolves under it; an absolute one outside it is rejected rather than
+   *  quietly redirected, so a scenario finds out. */
+  private confine(candidate: string): string {
+    const resolved = path.resolve(this.dir, candidate)
+    const root = path.resolve(this.dir)
+    if (resolved !== root && !resolved.startsWith(`${root}${path.sep}`)) {
+      throw new Error(
+        `lab: refusing to write outside machine '${this.name}' workdir (${candidate})`
+      )
+    }
+    return resolved
   }
 
   private unhandledCommand(cmd: string): never {
