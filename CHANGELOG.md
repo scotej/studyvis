@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.11.3-rc.5 — 2026-08-19 — Linux release candidate
+## 1.11.3 — 2026-08-22 — StudyVis on Linux
 
 ### Added
 
