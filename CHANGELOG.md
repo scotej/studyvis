@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- **StudyVis no longer opens to a blank window on Arch-based Linux.** The
+  1.11.3 AppImage carried PipeWire's client library but none of the plugins,
+  modules, or configuration that library loads by name when it starts, so on
+  any distribution that is not Debian-derived it looked for them at Ubuntu's
+  paths, found nothing, and took the page down with it a few seconds after
+  launch. The AppImage now carries that payload and points PipeWire at its own
+  copy, and the packaged-artifact check exercises the PipeWire client startup
+  that the previous element check could not reach. Screen sharing and AI
+  capture on Linux still need their physical desktop sign-off.
+
 ## 1.11.3 — 2026-08-22 — StudyVis on Linux
 
 ### Added

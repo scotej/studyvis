@@ -30,7 +30,7 @@ if [[ $# -ne 1 ]]; then
   exit 2
 fi
 
-for command_name in bash cmp env find grep gst-inspect-1.0 head ldd mkdir mktemp node npm readelf realpath sha256sum tr wc; do
+for command_name in bash cmp env find grep gst-inspect-1.0 head ldd mkdir mktemp node npm python3 readelf realpath sha256sum tr wc; do
   command -v "$command_name" >/dev/null 2>&1 || die "missing AppImage check dependency: $command_name"
 done
 
@@ -291,6 +291,51 @@ for element in \
       die "packaged GStreamer element is unavailable: $element"
     }
 done
+
+# Resolving `pipewiresrc` above proves only that the plugin loads: its
+# plugin_init calls pw_init(), which never touches the SPA plugin directory.
+# The directory is first read by pw_loop_new(), and PipeWire's failure mode
+# there is a NULL that neither GStreamer nor pw_context_connect() checks, so a
+# bundle missing its payload passes every element check and then segfaults the
+# web process on the first capture probe (ISSUES.md I89). Exercise the packaged
+# library against the packaged payload directly: pointing the overrides at the
+# bundle is what makes this fail on a Debian-derived builder, whose host
+# happens to provide the compiled-in /usr/lib/x86_64-linux-gnu paths.
+spa_plugins="$root/usr/lib/spa-0.2"
+# The modules are packaged beside libpipewire because client-node declares
+# protocol-native in DT_NEEDED and the loader never searches a consumer's own
+# directory; audit-linux-appimage-elf-closure.sh enforces that placement.
+pipewire_modules="$root/usr/lib"
+pipewire_config="$root/usr/share/pipewire"
+require_file "$spa_plugins/support/libspa-support.so"
+require_file "$spa_plugins/audioconvert/libspa-audioconvert.so"
+require_file "$pipewire_config/client.conf"
+require_file "$pipewire_config/client-rt.conf"
+for module in protocol-native client-node client-device adapter metadata session-manager; do
+  require_file "$pipewire_modules/libpipewire-module-$module.so"
+done
+env LD_LIBRARY_PATH="$packaged_library_path" \
+  SPA_PLUGIN_DIR="$spa_plugins" \
+  PIPEWIRE_MODULE_DIR="$pipewire_modules" \
+  PIPEWIRE_CONFIG_DIR="$pipewire_config" \
+  python3 - "$root/usr/lib/libpipewire-0.3.so.0" <<'PROBE' || die "packaged PipeWire client cannot start from the packaged payload"
+import ctypes
+import sys
+
+library = ctypes.CDLL(sys.argv[1])
+library.pw_init(None, None)
+library.pw_loop_new.restype = ctypes.c_void_p
+library.pw_context_new.restype = ctypes.c_void_p
+library.pw_context_new.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_size_t]
+
+loop = library.pw_loop_new(None)
+if not loop:
+    sys.exit("pw_loop_new() returned NULL: the packaged SPA plugins are missing")
+# Every context.modules entry in client.conf is mandatory; a NULL here means
+# one of the packaged modules did not load.
+if not library.pw_context_new(loop, None, 0):
+    sys.exit("pw_context_new() returned NULL: the packaged PipeWire modules are incomplete")
+PROBE
 
 llama_runtime="$root/usr/lib/StudyVis/binaries/llama-runtime-x86_64-unknown-linux-gnu"
 llama_server="$root/usr/bin/llama-server"
