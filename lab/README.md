@@ -66,7 +66,9 @@ CLAUDE.md stands: never put a real mnemonic into a chat with any AI service.
 | `onboard`    | a new machine reaches a usable home screen with a real identity                          |
 | `pair`       | two machines swap contact cards and converge on presence                                 |
 | `session`    | invite → accept → one session with live audio and video both ways                        |
+| `in-session` | a note, a synchronised pomodoro, a shared screen, hold-to-talk                           |
 | `ai`         | scripted verdicts drive streaks, thresholds, a signed peer alert, audit and session rows |
+| `recover`    | a second machine restores the same keys from the 24 words                                |
 | `dark-relay` | every Nostr relay refused, and the invite still lands over MQTT                          |
 
 Write a new one against `src/scenario.ts`: it hands you a lab, `step`, `check`

@@ -13,11 +13,13 @@ export type OnboardOptions = {
   addFriend?: boolean
 }
 
-/** Welcome → permissions → new identity → display name → friends → tips. */
+/** Welcome → permissions → new identity → display name → friends → tips.
+ *  Returns the 24 words it was shown, so a scenario can test recovery without
+ *  a second path through the same screens. */
 export async function onboard(
   machine: LabMachine,
   options: OnboardOptions
-): Promise<void> {
+): Promise<string[]> {
   const page = machine.page()
 
   await ui.waitForText(page, "Let's set you up")
@@ -33,6 +35,7 @@ export async function onboard(
   await ui.click(page, 'Create a new identity')
 
   await ui.waitForText(page, 'Save these 24 words')
+  const mnemonic = await readMnemonic(machine)
   await ui.click(page, "I've saved these words", { role: 'checkbox' })
   await ui.click(page, 'Continue')
 
@@ -48,6 +51,43 @@ export async function onboard(
     await ui.click(page, 'Get started')
     await ui.waitForText(page, 'Friends')
   }
+  return mnemonic
+}
+
+/** The other branch of the identity step: restore from the 24 words instead of
+ *  minting new ones. Same screens either side of it. */
+export async function recover(
+  machine: LabMachine,
+  mnemonic: string[],
+  displayName: string
+): Promise<void> {
+  const page = machine.page()
+
+  await ui.waitForText(page, "Let's set you up")
+  await ui.click(page, 'Set up StudyVis')
+  await ui.waitForText(page, 'A few permissions')
+  await ui.click(page, 'Grant').catch(() => {})
+  await ui.click(page, 'Continue')
+
+  await ui.waitForText(page, 'Set up your identity')
+  await ui.click(page, 'I have a 24-word backup')
+  await ui.waitForText(page, 'Recover your identity')
+  await ui.fill(page, 'Recovery phrase', mnemonic.join(' '))
+  await ui.click(page, 'Recover')
+
+  // Recovery restores keys, not the friends list, and says so on its own
+  // screen before the flow rejoins the new-identity path.
+  await ui.waitForText(page, 'Identity restored', 30_000)
+  await ui.click(page, 'Continue')
+
+  await ui.waitForText(page, 'What should friends see?', 30_000)
+  await ui.fill(page, 'Display name', displayName)
+  await ui.click(page, 'Continue')
+  await ui.waitForText(page, 'Add your first friend')
+  await ui.click(page, 'Skip for now')
+  await ui.waitForText(page, 'How a session works')
+  await ui.click(page, 'Get started')
+  await ui.waitForText(page, 'Friends')
 }
 
 /** The 24 words currently on screen, in order. Scenarios use this to test

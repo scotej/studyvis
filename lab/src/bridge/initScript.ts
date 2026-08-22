@@ -254,6 +254,14 @@ export function installBridge(config: BridgeConfig): void {
         signalingState: pc.signalingState,
         sendingTracks: pc.getSenders().filter((s) => s.track).length,
         receivingTracks: pc.getReceivers().filter((r) => r.track).length,
+        // Hold-to-talk is a track ENABLED flip, not a DOM change, so it is
+        // invisible to a screen snapshot. These are the same counters the
+        // app's own push-to-talk watchdog reasons about.
+        enabledAudioSenders: pc
+          .getSenders()
+          .filter((s) => s.track?.kind === 'audio' && s.track.enabled).length,
+        audioSenders: pc.getSenders().filter((s) => s.track?.kind === 'audio')
+          .length,
         dataChannels: dataChannelsOf(pc),
       })),
   }

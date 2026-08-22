@@ -174,7 +174,12 @@ export const commands: Record<
   async peers({ lab }, args) {
     const page = pageOf(lab, args)
     const all = await ui.evaluate<
-      { connectionState: string; dataChannels: string[] }[]
+      {
+        connectionState: string
+        dataChannels: string[]
+        audioSenders: number
+        enabledAudioSenders: number
+      }[]
     >(page, 'window.__lab.peers()')
     const live = all.filter((peer) => peer.connectionState !== 'closed')
     const states: Record<string, number> = {}
@@ -188,6 +193,11 @@ export const commands: Record<
         peer.dataChannels.filter((channel) => channel.endsWith(':open'))
       ).length,
       total: all.length,
+      audioSenders: all.reduce((sum, peer) => sum + peer.audioSenders, 0),
+      enabledAudioSenders: all.reduce(
+        (sum, peer) => sum + peer.enabledAudioSenders,
+        0
+      ),
       states,
       live: args.verbose === true ? live : live.slice(0, 8),
     }
