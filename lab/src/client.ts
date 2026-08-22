@@ -60,15 +60,37 @@ export function send(
     socket.on('connect', () => {
       socket.write(`${JSON.stringify({ id: 1, command, args })}\n`)
     })
+    let settled = false
     socket.on('data', (chunk) => {
       buffer += chunk.toString('utf8')
       const index = buffer.indexOf('\n')
       if (index < 0) return
       clearTimeout(timer)
-      const response = JSON.parse(buffer.slice(0, index)) as Response
+      settled = true
+      let response: Response
+      try {
+        response = JSON.parse(buffer.slice(0, index)) as Response
+      } catch {
+        socket.end()
+        reject(
+          new Error(`lab: the daemon sent a reply this client cannot parse`)
+        )
+        return
+      }
       socket.end()
       if (response.ok) resolve(response.result)
       else reject(new Error(response.error))
+    })
+    // A daemon that dies mid-command would otherwise leave the caller hanging
+    // until the timeout with no clue what happened.
+    socket.on('close', () => {
+      if (settled) return
+      clearTimeout(timer)
+      reject(
+        new Error(
+          `lab: the daemon closed the connection before answering '${command}' — check that it is still up`
+        )
+      )
     })
   })
 }

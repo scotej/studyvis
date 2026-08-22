@@ -29,7 +29,11 @@ export type IdentityRecord = {
 type StoredKeys = { edPrivHex: string; xPrivHex: string }
 
 function hexToBytes(hex: string): Uint8Array {
-  if (hex.length % 2 !== 0) throw new Error('odd-length hex')
+  // parseInt would turn a non-hex pair into NaN and then into a zero byte, so
+  // a malformed key would silently become a valid-looking one.
+  if (!/^[0-9a-fA-F]*$/.test(hex) || hex.length % 2 !== 0) {
+    throw new Error('invalid hex')
+  }
   const out = new Uint8Array(hex.length / 2)
   for (let i = 0; i < out.length; i++) {
     out[i] = Number.parseInt(hex.slice(i * 2, i * 2 + 2), 16)

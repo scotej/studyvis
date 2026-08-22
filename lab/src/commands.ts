@@ -10,6 +10,14 @@ export type CommandContext = { lab: Lab }
 export type CommandArgs = Record<string, unknown>
 export type CommandResult = unknown
 
+// The app's transient windows are their own HTML entries; `open-window` needs
+// the same mapping the bridge uses to resolve a label.
+const ENTRY_BY_LABEL: Record<string, string> = {
+  main: '',
+  'ai-dialog': 'ai-dialog.html',
+  'session-overlay': 'session-overlay.html',
+}
+
 function machineOf(lab: Lab, args: CommandArgs): LabMachine {
   const name = String(args.machine ?? '')
   if (!name) throw new Error('lab: this command needs a machine name')
@@ -67,7 +75,6 @@ export const commands: Record<
     const machine = machineOf(lab, args)
     await onboard(machine, {
       displayName: String(args.name ?? machine.name),
-      addFriend: args.addFriend === true,
     })
     return {
       onboarded: machine.name,
@@ -153,7 +160,17 @@ export const commands: Record<
 
   async 'open-window'({ lab }, args) {
     const machine = machineOf(lab, args)
-    await machine.openPage(String(args.label), String(args.url ?? lab.app.url))
+    const label = String(args.label)
+    // The label follows from the entry document, so a caller that names a
+    // window gets that window's document — passing the app root would open a
+    // second main window under the wrong name.
+    const entry = ENTRY_BY_LABEL[label]
+    if (!args.url && !entry) {
+      throw new Error(
+        `lab: no known entry document for window '${label}' — pass --url (known: ${Object.keys(ENTRY_BY_LABEL).join(', ')})`
+      )
+    }
+    await machine.openPage(label, String(args.url ?? `${lab.app.url}${entry}`))
     return { windows: [...machine.pages.keys()] }
   },
 

@@ -153,6 +153,17 @@ export async function startNostrRelay(
   wss.on('connection', (socket) => {
     stats.connections += 1
     stats.openConnections += 1
+    // Registered before the refuse path returns, or a dark-relay run would
+    // report every refused connection as still open.
+    socket.on('close', () => {
+      stats.openConnections -= 1
+      for (const sub of subs) {
+        if (sub.socket === socket) {
+          subs.delete(sub)
+          stats.removedBySocketClose += 1
+        }
+      }
+    })
     if (faults.refuseConnections) {
       socket.close(1013, 'lab: relay marked offline')
       return
@@ -244,16 +255,6 @@ export async function startNostrRelay(
           sub.socket.send(JSON.stringify(['EVENT', sub.subId, event]))
           stats.delivered += 1
           if (eventTopic) topicStat(eventTopic).delivered += 1
-        }
-      }
-    })
-
-    socket.on('close', () => {
-      stats.openConnections -= 1
-      for (const sub of subs) {
-        if (sub.socket === socket) {
-          subs.delete(sub)
-          stats.removedBySocketClose += 1
         }
       }
     })

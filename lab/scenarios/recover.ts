@@ -13,11 +13,16 @@ scenario('recover', async ({ lab, step, check }) => {
   const mnemonic = await onboard(first, { displayName: 'Alice' })
   check('twenty-four words were shown', mnemonic.length === 24)
   const original = first.backend.identity.loadRecord()
+  // Both records must exist before they are compared: every comparison below
+  // uses optional chaining, so two missing records would agree with each other
+  // and report a passing derivation contract that was never exercised.
+  check('the first machine wrote an identity', original !== null)
 
   step('a second, empty machine restores from those words')
   const second = await lab.addMachine({ name: 'second' })
   await recover(second, mnemonic, 'Alice on the new laptop')
   const restored = second.backend.identity.loadRecord()
+  check('the second machine wrote an identity', restored !== null)
 
   step('the same identity came back')
   check(

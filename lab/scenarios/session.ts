@@ -35,21 +35,24 @@ scenario('session', async ({ lab, step, check, ui }) => {
   check('bob is in the session', bobScreen.includes('Study session'))
 
   step('media flows both ways')
-  // Two videos per side: the local preview and the remote peer.
-  await ui.until(
-    async () =>
-      (await videoState(alice)).filter((v) => v.width > 0).length >= 2,
-    { label: 'alice to render two painting videos', timeoutMs: 30_000 }
-  )
-  await ui.until(
-    async () => (await videoState(bob)).filter((v) => v.width > 0).length >= 2,
-    { label: 'bob to render two painting videos', timeoutMs: 30_000 }
-  )
-  const aliceVideos = await videoState(alice)
-  check(
-    'alice paints live frames',
-    aliceVideos.every((video) => video.width > 0 && video.playing)
-  )
+  // Two videos per side: the local preview and the remote peer. The wait polls
+  // exactly what the check asserts, so the two can never disagree — an `every`
+  // over a third video that had not started painting would fail a moment after
+  // a wait on `some` had passed.
+  const painting = async (machine: typeof alice) =>
+    (await videoState(machine)).filter(
+      (video) => video.width > 0 && video.playing
+    )
+  await ui.until(async () => (await painting(alice)).length >= 2, {
+    label: 'alice to play two painting videos',
+    timeoutMs: 30_000,
+  })
+  await ui.until(async () => (await painting(bob)).length >= 2, {
+    label: 'bob to play two painting videos',
+    timeoutMs: 30_000,
+  })
+  const aliceVideos = await painting(alice)
+  check('alice paints live frames', aliceVideos.length >= 2)
   check(
     'alice receives live audio and video tracks',
     aliceVideos.some(

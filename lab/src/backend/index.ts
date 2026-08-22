@@ -482,9 +482,11 @@ export class LabBackend {
         )
         this.windowLabels.add(label)
         this.windows.push({ ts: Date.now(), label, url: options.url })
-        // The creator awaits tauri://created before treating the window as
-        // real; without it sessionOverlayRuntime hangs on its own timeout.
-        queueMicrotask(() => this.emit('tauri://created', { label }, label))
+        // Broadcast, not targeted at the new label: the window that asked for
+        // it is the one waiting, and at this moment the new page does not
+        // exist yet. Targeting the label would drop the event and leave the
+        // creator hanging until its own timeout.
+        queueMicrotask(() => this.emit('tauri://created', { label }))
         return null
       }
       case 'close':
@@ -516,7 +518,15 @@ export class LabBackend {
   }
 
   private dialog(command: string, a: Record<string, unknown>): unknown {
-    const answer = this.dialogAnswers.shift() ?? null
+    // Only the dialogs that actually return something consume a queued answer.
+    // Shifting for a message box would eat the path a scenario had lined up for
+    // the save picker behind it.
+    const consumes =
+      command === 'save' ||
+      command === 'open' ||
+      command === 'ask' ||
+      command === 'confirm'
+    const answer = consumes ? (this.dialogAnswers.shift() ?? null) : null
     const kind =
       command === 'save'
         ? 'save'

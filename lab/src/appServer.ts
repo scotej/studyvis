@@ -83,11 +83,10 @@ async function startStaticServer(): Promise<AppServerHandle> {
     const relative = requested === '/' ? 'index.html' : requested.slice(1)
     const file = path.join(root, relative)
     // Directory traversal would let a page under test read the repo.
-    if (
-      !file.startsWith(root) ||
-      !existsSync(file) ||
-      !statSync(file).isFile()
-    ) {
+    // Anchored to a directory boundary: a bare prefix test would also accept a
+    // sibling whose name merely starts with the root's.
+    const inRoot = file === root || file.startsWith(`${root}${path.sep}`)
+    if (!inRoot || !existsSync(file) || !statSync(file).isFile()) {
       res.writeHead(404).end()
       return
     }
@@ -120,10 +119,16 @@ async function buildIfStale(root: string): Promise<void> {
     cwd: REPO_ROOT,
     stdio: 'ignore',
   })
-  const code: number = await new Promise((resolve) =>
+  // A spawn that fails to start (no npm on PATH) emits 'error' and never
+  // 'exit', so waiting only on 'exit' would hang the lab forever.
+  const outcome = await new Promise<number | Error>((resolve) => {
+    build.on('error', resolve)
     build.on('exit', (value) => resolve(value ?? 1))
-  )
-  if (code !== 0 || !existsSync(index)) {
+  })
+  if (outcome instanceof Error) {
+    throw new Error(`lab: could not run \`npm run build\` — ${outcome.message}`)
+  }
+  if (outcome !== 0 || !existsSync(index)) {
     throw new Error('lab: `npm run build` failed — fix the build, then retry')
   }
 }

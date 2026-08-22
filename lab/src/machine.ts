@@ -8,7 +8,12 @@
 
 import { mkdirSync } from 'node:fs'
 
-import { chromium, type Browser, type Page } from 'playwright-core'
+import {
+  chromium,
+  type Browser,
+  type BrowserContext,
+  type Page,
+} from 'playwright-core'
 
 import { LabBackend } from './backend/index'
 import { installBridge, type BridgeConfig } from './bridge/initScript'
@@ -44,6 +49,17 @@ export type MachineOptions = {
 
 export type PageError = { ts: number; label: string; message: string }
 
+// The app's transient windows are separate HTML entries, and their Tauri label
+// follows from which document loaded — so the bridge resolves its own label the
+// same way rather than being told, which is what lets one browser context host
+// all of a machine's windows.
+const WINDOW_LABEL_BY_PATH: Record<string, string> = {
+  '/': 'main',
+  '/index.html': 'main',
+  '/ai-dialog.html': 'ai-dialog',
+  '/session-overlay.html': 'session-overlay',
+}
+
 export class LabMachine {
   readonly name: string
   readonly backend: LabBackend
@@ -53,6 +69,7 @@ export class LabMachine {
   readonly blockedRequests: string[] = []
 
   private browser!: Browser
+  private context!: BrowserContext
   private readonly options: MachineOptions
 
   private constructor(options: MachineOptions) {
@@ -112,15 +129,11 @@ export class LabMachine {
         : { channel: options.chromeChannel ?? 'chrome' }),
     })
 
-    await this.openPage('main', options.appUrl)
-  }
-
-  /** Opens one of the app's webview windows as a page of this machine. */
-  async openPage(label: string, url: string): Promise<Page> {
-    const existing = this.pages.get(label)
-    if (existing) return existing
-
-    const context = await this.browser.newContext({
+    // ONE context for the whole machine, not one per window. The app's windows
+    // are same-origin webviews that share localStorage — the AI dialog reads
+    // boot-cache values `main` wrote — so a context each would model a machine
+    // that does not exist.
+    this.context = await this.browser.newContext({
       // clipboard-read is how a scenario picks up the friend code the app
       // only ever hands to the clipboard and a QR.
       permissions: [
@@ -132,22 +145,22 @@ export class LabMachine {
       viewport: { width: 1280, height: 800 },
     })
 
-    await context.exposeBinding(
+    await this.context.exposeBinding(
       '__labInvoke',
       async (_source, cmd: string, args: unknown) =>
         this.backend.invoke(cmd, args)
     )
 
     const config: BridgeConfig = {
-      label,
-      websocketRewrites: this.options.websocketRewrites,
-      allowedOrigins: this.options.allowedOrigins,
-      clockSkewMs: this.options.clockSkewMs ?? 0,
+      labelByPath: WINDOW_LABEL_BY_PATH,
+      websocketRewrites: options.websocketRewrites,
+      allowedOrigins: options.allowedOrigins,
+      clockSkewMs: options.clockSkewMs ?? 0,
     }
     // Serialized by hand rather than via `addInitScript(fn, arg)`: the
     // transpiler wraps declarations in its own `__name` helper, which does not
     // exist in the page and throws before a single line of the bridge runs.
-    await context.addInitScript({
+    await this.context.addInitScript({
       content: `globalThis.__name ??= (fn) => fn;\n(${installBridge.toString()})(${JSON.stringify(config)});`,
     })
 
@@ -155,17 +168,27 @@ export class LabMachine {
     // network layer, where an app-level patch cannot reach (fonts, images, a
     // stray fetch). Together they are what lets `lab doctor` assert the run
     // never left the machine.
-    await context.route('**/*', (route) => {
-      const url_ = route.request().url()
-      if (isAllowed(url_, this.options.allowedOrigins)) {
+    await this.context.route('**/*', (route) => {
+      const url = route.request().url()
+      if (isAllowed(url, options.allowedOrigins)) {
         void route.continue()
         return
       }
-      this.blockedRequests.push(url_)
+      this.blockedRequests.push(url)
       void route.abort('blockedbyclient')
     })
 
-    const page = await context.newPage()
+    await this.openPage('main', options.appUrl)
+  }
+
+  /** Opens one of the app's webview windows as a page of this machine. The
+   *  label follows from the entry document, exactly as it does for the real
+   *  windows — see WINDOW_LABEL_BY_PATH. */
+  async openPage(label: string, url: string): Promise<Page> {
+    const existing = this.pages.get(label)
+    if (existing) return existing
+
+    const page = await this.context.newPage()
     page.on('pageerror', (error) => {
       this.pageErrors.push({
         ts: Date.now(),

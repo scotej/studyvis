@@ -4,7 +4,7 @@ Runs the real app as several virtual machines on one box, so a change can be
 tested end to end — pairing, a session, media both ways, the AI pipeline —
 without two laptops and without anything leaving the machine.
 
-```
+```bash
 npm run lab -- up --peers alice,bob     # start the lab with two machines
 npm run lab -- onboard alice Alice      # walk the six onboarding screens
 npm run lab -- snapshot alice           # what is on screen, by role and name
@@ -48,6 +48,12 @@ fresh, so this only applies to the interactive path.
 **Settings are read at boot.** `settings <machine> --set '{...}'` writes the file;
 `reload <machine>` is what makes the app pick it up. Machines start with the
 app's own debug-log setting on, so `logs` carries the discovery trace.
+
+**Windows share one browser context.** `open-window <machine> session-overlay`
+(or `ai-dialog`) opens the app's other entry documents as further pages of the
+same machine, and the bridge resolves each one's Tauri label from its path — so
+`localStorage` boot caches are shared across them, as they are for the real
+app's same-origin webviews.
 
 **`peers` will look alarming.** Trystero keeps twenty pre-generated offers per
 room, so a machine sitting alone already holds dozens of closed peer

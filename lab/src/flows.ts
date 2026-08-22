@@ -9,8 +9,6 @@ import * as ui from './ui'
 
 export type OnboardOptions = {
   displayName: string
-  /** Pair during onboarding instead of skipping the step. */
-  addFriend?: boolean
 }
 
 /** Welcome → permissions → new identity → display name → friends → tips.
@@ -43,14 +41,16 @@ export async function onboard(
   await ui.fill(page, 'Display name', options.displayName)
   await ui.click(page, 'Continue')
 
+  // The in-onboarding pairing step is skipped on purpose: every scenario that
+  // needs two friends pairs them afterwards with `pairViaContactCard`, which is
+  // the same dialog reached from the home screen. An option that stopped here
+  // would leave the caller holding a machine that had not finished onboarding.
   await ui.waitForText(page, 'Add your first friend')
-  if (!options.addFriend) await ui.click(page, 'Skip for now')
+  await ui.click(page, 'Skip for now')
 
-  if (!options.addFriend) {
-    await ui.waitForText(page, 'How a session works')
-    await ui.click(page, 'Get started')
-    await ui.waitForText(page, 'Friends')
-  }
+  await ui.waitForText(page, 'How a session works')
+  await ui.click(page, 'Get started')
+  await ui.waitForText(page, 'Friends')
   return mnemonic
 }
 

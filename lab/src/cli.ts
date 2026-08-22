@@ -220,7 +220,9 @@ async function verify(flags: Flags): Promise<void> {
     child.stdout?.on('data', (chunk: Buffer) => {
       out += chunk.toString('utf8')
     })
-    await new Promise((resolve) => child.on('exit', resolve))
+    // 'close' rather than 'exit': the process can exit with its stdio still
+    // draining, and a scenario's verdict is the last thing written.
+    await new Promise((resolve) => child.on('close', resolve))
     const start = out.indexOf('{')
     try {
       const parsed = JSON.parse(out.slice(start)) as {

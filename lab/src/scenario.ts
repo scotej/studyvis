@@ -59,7 +59,29 @@ async function main(name: string, body: ScenarioBody): Promise<void> {
   const checks: { label: string; ok: boolean }[] = []
   let failure: unknown = null
 
-  const lab = await Lab.up(options)
+  let lab: Lab
+  try {
+    lab = await Lab.up(options)
+  } catch (err) {
+    // Nothing to tear down and nothing to snapshot, but the run still has to
+    // answer in the shape a caller parses.
+    process.stdout.write(
+      `${JSON.stringify(
+        {
+          scenario: name,
+          ok: false,
+          ms: Date.now() - started,
+          steps,
+          checks,
+          error: `lab failed to start: ${err instanceof Error ? err.message : String(err)}`,
+        },
+        null,
+        2
+      )}\n`
+    )
+    process.exit(1)
+  }
+
   const ctx: ScenarioContext = {
     lab,
     step(title) {
@@ -81,23 +103,32 @@ async function main(name: string, body: ScenarioBody): Promise<void> {
     failure = err
   }
 
+  // Collecting diagnostics must never be the reason browsers are left running,
+  // so the teardown is in a finally and a failure to gather is reported rather
+  // than thrown.
   const machines: Record<string, unknown> = {}
-  for (const machine of lab.machines.values()) {
-    machines[machine.name] = {
-      windows: [...machine.pages.keys()],
-      pageErrors: machine.pageErrors,
-      consoleErrors: machine.consoleErrors.slice(-5),
-      unhandledCommands: [...machine.backend.unhandled.keys()],
-      screen: failure
-        ? await ui.snapshot(machine.page()).catch(() => '<unavailable>')
-        : undefined,
-      // On failure the app's own structured log is the difference between
-      // "bob never got the invite" and knowing which leg dropped it.
-      log: failure ? tailLog(machine.backend.logLines(400)) : undefined,
+  let egress: string[] = []
+  try {
+    for (const machine of lab.machines.values()) {
+      machines[machine.name] = {
+        windows: [...machine.pages.keys()],
+        pageErrors: machine.pageErrors,
+        consoleErrors: machine.consoleErrors.slice(-5),
+        unhandledCommands: [...machine.backend.unhandled.keys()],
+        screen: failure
+          ? await ui.snapshot(machine.page()).catch(() => '<unavailable>')
+          : undefined,
+        // On failure the app's own structured log is the difference between
+        // "bob never got the invite" and knowing which leg dropped it.
+        log: failure ? tailLog(machine.backend.logLines(400)) : undefined,
+      }
     }
+    egress = lab.egressAttempts()
+  } catch (err) {
+    failure ??= err
+  } finally {
+    await lab.down().catch(() => {})
   }
-  const egress = lab.egressAttempts()
-  await lab.down()
 
   const ok = failure === null && egress.length === 0
   process.stdout.write(

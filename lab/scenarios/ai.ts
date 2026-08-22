@@ -67,10 +67,10 @@ scenario('ai', async ({ lab, step, check, ui }) => {
   )
 
   step('the peer is told')
-  await ui.until(() => bob.backend.db.auditRows().length > 0, {
-    label: "bob's copy of the audit log",
-    timeoutMs: 30_000,
-  })
+  await ui.until(
+    () => bob.backend.db.auditRows().some((row) => row.kind === 'ai_alert'),
+    { label: "bob's copy of the signed alert", timeoutMs: 30_000 }
+  )
   check(
     'bob received the signed alert',
     bob.backend.db.auditRows().some((row) => row.kind === 'ai_alert')

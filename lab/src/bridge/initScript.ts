@@ -9,8 +9,12 @@
 // anything from Node; all configuration arrives through `config`.
 
 export type BridgeConfig = {
-  /** Window label this page stands in for ('main', 'session-overlay', …). */
-  label: string
+  /** Which window label each entry document stands in for, keyed by pathname.
+   *  Resolved in the page rather than passed as one value because all of a
+   *  machine's windows share a single browser context — which is what makes
+   *  their localStorage shared, as it is for the real app's same-origin
+   *  webviews. Anything unlisted is the main window. */
+  labelByPath: Record<string, string>
   /** Pinned relay/broker hostnames rewritten to the lab's loopback servers.
    *  Keyed by the exact `wss://…` URL the app ships. */
   websocketRewrites: Record<string, string>
@@ -25,6 +29,7 @@ export function installBridge(config: BridgeConfig): void {
   type EventTarget_ = { kind: string; label?: string }
   type Listener = { id: number; event: string; target: EventTarget_ }
 
+  const windowLabel = config.labelByPath[window.location.pathname] ?? 'main'
   const w = window as unknown as Record<string, unknown>
   const callbacks = new Map<number, (data: unknown) => unknown>()
   const listeners: Listener[] = []
@@ -181,41 +186,52 @@ export function installBridge(config: BridgeConfig): void {
       return id
     }
     if (command === 'unlisten') {
-      const eventId = args.eventId as number
-      const index = listeners.findIndex((l) => l.id === eventId)
-      if (index >= 0) listeners.splice(index, 1)
-      callbacks.delete(eventId)
+      dropListener(args.eventId as number)
       return null
     }
     return undefined
   }
 
-  function deliver(event: string, payload: unknown, label?: string): number {
-    if (label !== undefined && label !== config.label) return 0
+  function deliver(event: string, payload: unknown, target?: string): number {
+    if (target !== undefined && target !== windowLabel) return 0
     let delivered = 0
     for (const listener of [...listeners]) {
       if (listener.event !== event) continue
-      const target = listener.target
+      const listenerTarget = listener.target
       if (
-        target.kind !== 'Any' &&
-        target.label !== undefined &&
-        target.label !== config.label
+        listenerTarget.kind !== 'Any' &&
+        listenerTarget.label !== undefined &&
+        listenerTarget.label !== windowLabel
       ) {
         continue
       }
-      runCallback(listener.id, { event, id: listener.id, payload })
+      // One subscriber throwing must not starve the ones registered after it —
+      // the same rule the app's own room fan-out follows.
+      try {
+        runCallback(listener.id, { event, id: listener.id, payload })
+      } catch {
+        // A handler that throws is the page's problem, not the lab's.
+      }
       delivered += 1
     }
     return delivered
   }
 
+  function dropListener(id: number): void {
+    const index = listeners.findIndex((listener) => listener.id === id)
+    if (index >= 0) listeners.splice(index, 1)
+    callbacks.delete(id)
+  }
+
   w.__TAURI_INTERNALS__ = {
     metadata: {
-      currentWindow: { label: config.label },
-      currentWebview: { label: config.label, windowLabel: config.label },
+      currentWindow: { label: windowLabel },
+      currentWebview: { label: windowLabel, windowLabel },
     },
     transformCallback,
-    unregisterCallback: (id: number) => callbacks.delete(id),
+    // Drops the listener too. Deleting only the callback would leave a dead
+    // entry that `deliver` keeps counting and `listeners()` keeps reporting.
+    unregisterCallback: dropListener,
     runCallback,
     callbacks,
     convertFileSrc: (filePath: string, protocol = 'asset') =>
@@ -233,12 +249,12 @@ export function installBridge(config: BridgeConfig): void {
     },
   }
   w.__TAURI_EVENT_PLUGIN_INTERNALS__ = {
-    unregisterListener: (_event: string, id: number) => callbacks.delete(id),
+    unregisterListener: (_event: string, id: number) => dropListener(id),
   }
 
   // --- lab-facing surface -------------------------------------------------
   w.__lab = {
-    label: config.label,
+    label: windowLabel,
     deliver,
     listeners: () =>
       listeners.map((l) => ({ event: l.event, target: l.target })),
