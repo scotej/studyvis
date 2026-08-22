@@ -4,13 +4,14 @@
 
 ### Added
 
-- **StudyVis adds an x86_64 Linux AppImage release candidate.** CachyOS with KDE
+- **StudyVis now ships an x86_64 Linux AppImage.** CachyOS with KDE
   Plasma on Wayland is the reference Linux desktop. The packaged build includes
   a pinned WebRTC-enabled WebKitGTK 2.52.5 + librice 0.4.3 runtime and CPU-only
   llama.cpp engine, stores private credentials through the freedesktop Secret
   Service, and uses the KDE desktop portal + PipeWire for screen sharing and
-  optional AI capture. Linux is not promoted to supported-release status by
-  this implementation alone.
+  optional AI capture. Support is bounded to x86_64 with CPU-only inference
+  on the maintained KDE Wayland path; ARM64, native distro packages, Flatpak,
+  Snap, and GPU-accelerated inference are out of scope.
 - **Every desktop artifact now carries a locked third-party notice inventory.**
   `THIRD-PARTY-NOTICES.txt` and its machine-readable JSON manifest cover the
   npm production tree, all three target-filtered normal Cargo closures, and the
@@ -54,7 +55,7 @@
   of work for anonymous events, and MQTT now pins three brokers that passed the
   same subscribe/publish/receive path used by rendezvous instead of inheriting
   `@trystero-p2p/mqtt`'s unavailable first default.
-- **The Linux candidate now carries its production WebRTC runtime instead of
+- **The Linux build now carries its production WebRTC runtime instead of
   trusting distro WebKitGTK.** Official distro release builds in the maintained
   path compile GTK's `ENABLE_WEB_RTC` peer-connection binding out while leaving
   the media-device API present; no runtime preference can reverse that compile
@@ -144,7 +145,7 @@
   the owner-scoped `RELEASE_PAT`, and immutable releases were configured.
   GitHub hides the bypass list from the workflow's read-only ruleset response,
   so an admin must verify that no broader bypass is configured. The physical
-  candidate matrix remains a separate publication gate.
+  sign-off matrix for the exact AppImage remains a separate publication gate.
 - **Linux install and support boundaries are documented end to end.** The
   install guide covers CachyOS dependencies, FUSE and extraction launch paths,
   Secret Service providers, KDE Wayland portals/PipeWire, automatic-update
