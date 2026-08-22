@@ -13,6 +13,15 @@
   copy, and the packaged-artifact check exercises the PipeWire client startup
   that the previous element check could not reach. Screen sharing and AI
   capture on Linux still need their physical desktop sign-off.
+- **The microphone dot on your own tile no longer stays lit once you stop
+  talking.** On macOS it could keep glowing after the key was back up, while
+  your friends correctly saw you go quiet and could no longer hear you — the
+  app, the microphone and everything it told your friends had already stopped,
+  and only your own screen disagreed. An idle dot used to be hidden by fading
+  it to fully transparent, which leaves it on screen for the system to draw
+  and, after a fast run of holds, could leave it drawn at full strength. It is
+  now taken off the screen outright, so "not talking" cannot be left over from
+  the last fade.
 
 ## 1.11.3 — 2026-08-22 — StudyVis on Linux
 

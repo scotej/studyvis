@@ -31,7 +31,16 @@ export function PttIndicator({
       data-ptt-scope={scope}
       className={cn(
         'inline-flex items-center justify-center rounded-full bg-accent-default p-1.5 text-text-inverse transition-opacity duration-fast',
-        active ? 'opacity-100' : 'opacity-0',
+        // I90 / #265 — `opacity-0` alone leaves an idle badge in the paint
+        // tree as a fully transparent composited layer, so "off" is only ever
+        // as true as the compositor's last frame. The macOS report had the
+        // store, the sender track, the peer broadcast and the committed
+        // `data-ptt-active` attribute all back at false with a dot still lit
+        // on screen — the one layer no record can reach. `invisible` removes
+        // the element from painting outright, which no interrupted opacity
+        // transition can undo. It keeps the box, so the caption row does not
+        // reflow, and `data-*` stays untouched for the #226 render probe.
+        active ? 'opacity-100' : 'invisible opacity-0',
         className
       )}
     >
