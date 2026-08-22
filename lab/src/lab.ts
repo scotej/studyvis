@@ -113,7 +113,14 @@ export class Lab {
       headless: this.options.headless ?? true,
       media: options.media,
       clockSkewMs: options.clockSkewMs,
-      settings: options.settings,
+      settings: {
+        // The app's own debug-log setting, on by default here: it is the
+        // difference between `lab logs` showing five records and showing the
+        // discovery/invite/session trace a failure is diagnosed from. A
+        // scenario that wants shipped-default logging can override it.
+        debug_log_enabled: true,
+        ...options.settings,
+      },
       appState: options.appState,
       chromeChannel: this.options.chromeChannel,
       chromeExecutable: this.options.chromeExecutable,

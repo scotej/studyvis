@@ -60,3 +60,44 @@ export async function readMnemonic(machine: LabMachine): Promise<string[]> {
     .allInnerTexts()
   return items.map((item) => item.trim().split(/\s+/).pop() ?? '')
 }
+
+/** Swaps self-signed contact cards both ways, confirming the safety number on
+ *  each side. This is the shipped default pairing path: a pure local parse and
+ *  insert, with no rendezvous — so a scenario that needs two friends can use it
+ *  without depending on the relay being healthy. */
+export async function pairViaContactCard(
+  a: LabMachine,
+  b: LabMachine
+): Promise<void> {
+  const cardOfA = await copyContactCard(a)
+  await importContactCard(b, cardOfA)
+  const cardOfB = await copyContactCard(b)
+  await importContactCard(a, cardOfB)
+}
+
+async function copyContactCard(machine: LabMachine): Promise<string> {
+  const page = machine.page()
+  await ui.click(page, 'Add friend')
+  await ui.waitForText(page, 'Your code')
+  await ui.click(page, 'Copy your friend code')
+  const card = await ui.clipboard(page)
+  await ui.click(page, 'Cancel')
+  return card
+}
+
+async function importContactCard(
+  machine: LabMachine,
+  card: string
+): Promise<void> {
+  const page = machine.page()
+  await ui.click(page, 'Add friend')
+  await ui.fill(page, "Your friend's code", card)
+  await ui.click(page, 'Add')
+  await ui.waitForText(page, 'Add this friend?')
+  await ui.click(page, 'These digits match on both screens', {
+    role: 'checkbox',
+  })
+  await ui.click(page, 'Add friend', {
+    within: { role: 'dialog', name: 'Add this friend?' },
+  })
+}

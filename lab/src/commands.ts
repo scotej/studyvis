@@ -1,6 +1,7 @@
 // The lab's verb table. One place, so the CLI, the daemon and a scenario file
 // all drive a machine through exactly the same operations.
 
+import { onboard, readMnemonic } from './flows'
 import { Lab, type AddMachineOptions } from './lab'
 import type { LabMachine } from './machine'
 import * as ui from './ui'
@@ -60,6 +61,24 @@ export const commands: Record<
     return { name: machine.name, windows: [...machine.pages.keys()] }
   },
 
+  // Getting a machine to a usable home screen is six screens of clicking that
+  // every interactive session needs before the interesting part starts.
+  async onboard({ lab }, args) {
+    const machine = machineOf(lab, args)
+    await onboard(machine, {
+      displayName: String(args.name ?? machine.name),
+      addFriend: args.addFriend === true,
+    })
+    return {
+      onboarded: machine.name,
+      identity: machine.backend.identity.loadRecord(),
+    }
+  },
+
+  async mnemonic({ lab }, args) {
+    return { words: await readMnemonic(machineOf(lab, args)) }
+  },
+
   async snapshot({ lab }, args) {
     return { snapshot: await ui.snapshot(pageOf(lab, args)) }
   },
@@ -73,6 +92,7 @@ export const commands: Record<
       role: args.role as string | undefined,
       exact: args.exact as boolean | undefined,
       nth: args.nth as number | undefined,
+      within: args.within as { role: string; name?: string } | undefined,
     })
     return { clicked: args.name }
   },
@@ -103,6 +123,19 @@ export const commands: Record<
     return {
       value: await ui.evaluate(pageOf(lab, args), String(args.expression)),
     }
+  },
+
+  // Settings are read at boot, so a file seeded under a running app takes
+  // effect on the next load. Reloading is also how a scenario tests the
+  // restart-shaped paths (interrupted session recovery, boot caches).
+  async reload({ lab }, args) {
+    const page = pageOf(lab, args)
+    await page.reload({ waitUntil: 'domcontentloaded' })
+    return { reloaded: args.machine }
+  },
+
+  async clipboard({ lab }, args) {
+    return { text: await ui.clipboard(pageOf(lab, args)) }
   },
 
   async screenshot({ lab }, args) {

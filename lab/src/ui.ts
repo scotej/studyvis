@@ -15,6 +15,9 @@ export type ClickOptions = {
   exact?: boolean
   nth?: number
   timeoutMs?: number
+  /** Scope the search to a container, so "the Add friend button in THIS dialog"
+   *  is expressible without positional indexes that shift as the UI grows. */
+  within?: { role: string; name?: string }
 }
 
 export async function snapshot(page: Page): Promise<string> {
@@ -26,7 +29,13 @@ export async function text(page: Page): Promise<string> {
 }
 
 function target(page: Page, name: string, options: ClickOptions): Locator {
-  const byRole = page.getByRole(
+  const scope = options.within
+    ? page.getByRole(
+        options.within.role as Parameters<Page['getByRole']>[0],
+        options.within.name ? { name: options.within.name } : {}
+      )
+    : page
+  const byRole = scope.getByRole(
     (options.role ?? 'button') as Parameters<Page['getByRole']>[0],
     { name, exact: options.exact ?? false }
   )
@@ -94,9 +103,14 @@ export async function isVisible(page: Page, needle: string): Promise<boolean> {
     .catch(() => false)
 }
 
-/** Reads a value the page exposes on `window`, for state a screen doesn't show. */
+/** Reads a value the page exposes on `window`, for state a screen doesn't show.
+ *  Async so a scenario can await page APIs (the clipboard, for one). */
 export async function evaluate<T>(page: Page, expression: string): Promise<T> {
-  return page.evaluate(`(() => (${expression}))()`) as Promise<T>
+  return page.evaluate(`(async () => (${expression}))()`) as Promise<T>
+}
+
+export async function clipboard(page: Page): Promise<string> {
+  return page.evaluate(() => navigator.clipboard.readText())
 }
 
 export async function screenshot(page: Page, file: string): Promise<void> {

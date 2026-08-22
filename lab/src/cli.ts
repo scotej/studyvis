@@ -24,6 +24,8 @@ const USAGE = `studyvis lab — run the real app as N virtual machines on this b
   doctor                      prove the transports round-trip and nothing left the box
 
   add-machine <name> [--clock-skew-ms N] [--video FILE] [--audio FILE]
+  onboard <machine> [display-name]    walk the six onboarding screens
+  mnemonic <machine>                  the 24 words currently on screen
   snapshot <machine> [--window W]     accessibility view of the screen
   text <machine>                      visible text
   click <machine> <name> [--role R] [--nth N]
@@ -31,13 +33,15 @@ const USAGE = `studyvis lab — run the real app as N virtual machines on this b
   press <machine> <keys>
   wait-for <machine> <text> [--timeout-ms N]
   eval <machine> <expression>
+  clipboard <machine>                 what the app last copied
   screenshot <machine> <file>
   open-window <machine> <label> [--url URL]
   emit <machine> <event> [--payload JSON]      push a Tauri event, as Rust would
 
   db <machine> friends|sessions|audit [--session-id ID]
   identity <machine>
-  settings <machine> [--set JSON]
+  settings <machine> [--set JSON]     read, or seed for the next load
+  reload <machine>                    reload the window (settings take effect)
   logs <machine> [--limit N]
   calls <machine> [--limit N] [--cmd SUBSTRING]
   notifications <machine>     recorded notifications, dialogs, windows, shortcuts
@@ -227,9 +231,16 @@ async function main(): Promise<void> {
     case 'add-machine':
       args.name = positional[0]
       break
+    case 'onboard':
+      args.machine = positional[0]
+      if (positional[1]) args.name = positional[1]
+      break
     case 'snapshot':
     case 'text':
+    case 'mnemonic':
     case 'identity':
+    case 'clipboard':
+    case 'reload':
     case 'settings':
     case 'logs':
     case 'calls':

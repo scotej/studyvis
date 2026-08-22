@@ -112,7 +112,14 @@ export class LabMachine {
     if (existing) return existing
 
     const context = await this.browser.newContext({
-      permissions: ['camera', 'microphone'],
+      // clipboard-read is how a scenario picks up the friend code the app
+      // only ever hands to the clipboard and a QR.
+      permissions: [
+        'camera',
+        'microphone',
+        'clipboard-read',
+        'clipboard-write',
+      ],
       viewport: { width: 1280, height: 800 },
     })
 
