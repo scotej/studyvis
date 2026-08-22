@@ -9,7 +9,7 @@
 #
 # Each non-empty line is `<kind> <path>`, relative to that kind's staged root:
 #   spa      SPA plugin, relative to `spa-0.2` under the PipeWire libdir
-#            (Debian and Ubuntu ship no libspa-0.2.pc to ask instead)
+#            (libspa-0.2.pc sits in a dev package nothing here requires)
 #   module   context module, relative to `--variable=moduledir libpipewire-0.3`
 #   config   client configuration, relative to the PipeWire data directory
 #   library  extra shared object the payload needs, relative to that libdir

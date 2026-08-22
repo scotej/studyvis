@@ -158,9 +158,10 @@ fi
   die "could not locate PipeWire modules; set STUDYVIS_PIPEWIRE_MODULES_DIR"
 }
 pipewire_module_dir=$(normalize_path STUDYVIS_PIPEWIRE_MODULES_DIR "$pipewire_module_dir" existing)
-# Debian and Ubuntu ship no libspa-0.2.pc, so the SPA plugin directory is
-# derived from the library directory PipeWire itself reports rather than from
-# a pkg-config module that only some distributions provide.
+# libspa-0.2.pc lives in a separate libspa-0.2-dev package that nothing here
+# requires and that reaches the Ubuntu builder only transitively, so the SPA
+# plugin directory is derived from the library directory PipeWire itself
+# reports rather than from a pkg-config module that may not be installed.
 pipewire_spa_dir=$(normalize_path STUDYVIS_SPA_PLUGINS_DIR \
   "${STUDYVIS_SPA_PLUGINS_DIR:-$pipewire_libdir/spa-0.2}" existing)
 pipewire_config_dir=$(normalize_path STUDYVIS_PIPEWIRE_CONFIG_DIR \
