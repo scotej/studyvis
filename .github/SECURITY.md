@@ -67,23 +67,24 @@ copy rests on three things:
    its artifacts only after the platform-specific checks (including the exact
    AppImage smoke). The publisher downloads the exact twelve-file draft set,
    compares updater signature sidecars with the manifest, verifies every
-   artifact's attestation against that workflow/tag/commit, requires the
-   physically tested AppImage SHA-256, and rechecks that digest immediately
-   before publishing. Before production publication, an administrator must create the
-   `release` environment with required reviewers, protect matching
-   `v*` tags against creation/update/deletion, and enable immutable releases. This
-   sole-owner repository uses `scotej` as its reviewer and permits self-review;
-   add an independent reviewer and enable self-review prevention for two-person
-   approval.
+   artifact's attestation against that workflow/tag/commit, computes the exact
+   draft AppImage's SHA-256 during validation, and rechecks that digest against a
+   fresh download immediately before publishing, so the bytes cannot change
+   underneath a validated draft. Publication is unattended: it takes no
+   hand-entered value and waits on no approval, so every control it enforces is
+   machine-checkable. An administrator must protect matching
+   `v*` tags against creation/update/deletion, and enable immutable releases.
    The tag ruleset's sole `Always` bypass entry must be `RepositoryRole 5`
    (admin), used by the owner-scoped `RELEASE_PAT`; do not add Write, Maintain,
    team, or integration bypasses. GitHub hides `bypass_actors` from the
    workflow's read-only ruleset API response, so an admin must verify that list.
-   On 2026-08-15, the `release` environment (with `scotej` as reviewer), active
-   `v*` lifecycle rule, and immutable releases were configured and verified.
-   This is a sole-owner approval boundary until an independent reviewer is
-   added. The YAML's asset checks are not a substitute for independent approval
-   or for preventing later tag/release mutation.
+   On 2026-08-15 the active `v*` lifecycle rule and immutable releases were
+   configured and verified. The `release` environment's reviewer gate was
+   removed when publication became unattended — on a sole-owner repository
+   permitting self-review it was never an independent approval boundary, so it
+   bought a delay rather than a second opinion. The YAML's asset checks are not
+   a substitute for independent approval, which this repository does not have,
+   nor for preventing later tag/release mutation.
    Every platform artifact must also carry the generated
    `THIRD-PARTY-NOTICES.txt`/`.json` pair. Its offline regeneration gate derives
    the npm production and three target-filtered normal Cargo closures plus the

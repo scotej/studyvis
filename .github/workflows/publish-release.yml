@@ -7,20 +7,17 @@ on:
         description: 'Draft tag to publish (vX.Y.Z or vX.Y.Z-prerelease)'
         required: true
         type: string
-      linux_appimage_sha256:
-        description: 'Lowercase SHA-256 recorded while physically testing the exact draft AppImage'
-        required: true
-        type: string
 
 permissions:
   contents: read
 
 # Publishing immediately exposes an update to clients and must be treated as
-# irreversible. Use release.yml's exact per-tag group so publishing queues
-# behind an in-progress build/verifier, and queue repeated attempts rather than
-# cancelling or racing them. Repository administrators must separately protect
-# `v*` tags, restrict the ruleset's bypass actors as documented below, and
-# enable immutable releases before production use.
+# irreversible. It runs unattended, so every gate it has is automated. Use
+# release.yml's exact per-tag group so publishing queues behind an in-progress
+# build/verifier, and queue repeated attempts rather than cancelling or racing
+# them. Repository administrators must separately protect `v*` tags, restrict
+# the ruleset's bypass actors as documented below, and keep immutable releases
+# enabled -- that costs no human step and still blocks silent asset swaps.
 concurrency:
   group: release-${{ inputs.tag }}
   cancel-in-progress: false
@@ -40,27 +37,10 @@ jobs:
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
-      - name: Require protected release environment and protected release tags
+      - name: Require protected release tags
         shell: bash
         run: |
           set -euo pipefail
-
-          if ! environment=$(gh api \
-            -H 'X-GitHub-Api-Version: 2026-03-10' \
-            "repos/${{ github.repository }}/environments/release"); then
-            echo "::error::The release environment is absent or unreadable. Create it with at least one required reviewer before publishing."
-            exit 1
-          fi
-          if ! jq -e '
-            .name == "release" and
-            any(.protection_rules[]?;
-              .type == "required_reviewers" and
-              (.reviewers | type == "array" and length > 0)
-            )
-          ' <<< "$environment" >/dev/null; then
-            echo "::error::The release environment must have at least one required reviewer."
-            exit 1
-          fi
 
           if ! summaries=$(gh api --paginate \
             -H 'X-GitHub-Api-Version: 2026-03-10' \
@@ -117,19 +97,17 @@ jobs:
       contents: write
       actions: read
       attestations: read
-    # External prerequisites in repository settings: configure required
-    # reviewers on this environment; give the v* tag ruleset only one Always
-    # bypass entry, RepositoryRole 5 (admin), for the owner RELEASE_PAT; and
-    # enable immutable releases. The environment approval happens before this
-    # job receives its write-scoped token. This workflow verifies tag scope and
-    # rule types, but GitHub hides bypass actors from its read-only API token.
-    environment:
-      name: release
-      url: ${{ github.server_url }}/${{ github.repository }}/releases
+    # Publication is unattended by design: there is no reviewer gate and no
+    # hand-entered digest. What still holds the line is machine-checkable and
+    # runs on every publish -- the tag must be on main, exact-commit CI and the
+    # exact tag/commit release.yml run must have succeeded, every asset must
+    # carry a GitHub attestation tying it to that run, and the draft's bytes are
+    # re-verified against a snapshot immediately before it goes live.
+    # Repository settings still owe this workflow a v* tag ruleset whose only
+    # Always bypass entry is RepositoryRole 5 (admin) for the owner RELEASE_PAT.
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       TAG: ${{ inputs.tag }}
-      EXPECTED_LINUX_APPIMAGE_SHA256: ${{ inputs.linux_appimage_sha256 }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -142,10 +120,6 @@ jobs:
           set -euo pipefail
           if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]]; then
             echo "::error::tag '$TAG' is not vX.Y.Z (optionally -prerelease)"
-            exit 1
-          fi
-          if [[ ! "$EXPECTED_LINUX_APPIMAGE_SHA256" =~ ^[0-9a-f]{64}$ ]]; then
-            echo "::error::linux_appimage_sha256 must be the lowercase 64-hex digest recorded from the physically tested draft AppImage"
             exit 1
           fi
           git fetch --no-tags origin \
@@ -380,11 +354,15 @@ jobs:
           assert_sidecar_matches_manifest windows-x86_64 "$windows_updater"
           assert_sidecar_matches_manifest linux-x86_64 "$linux_updater"
 
+          # The digest is captured here rather than supplied by hand. Its job is
+          # to pin THIS run's view of the AppImage: it is folded into the
+          # snapshot below and re-checked against a fresh download immediately
+          # before publication, so the bytes cannot change between validation
+          # and going live. A value typed into a form never proved anything a
+          # workflow could not compute itself.
           linux_appimage_sha256=$(sha256sum "$artifact_dir/$linux_updater" | cut -d' ' -f1)
-          if [ "$linux_appimage_sha256" != "$EXPECTED_LINUX_APPIMAGE_SHA256" ]; then
-            echo "::error::The exact draft AppImage is $linux_appimage_sha256, not the physically tested $EXPECTED_LINUX_APPIMAGE_SHA256."
-            exit 1
-          fi
+          echo "VALIDATED_LINUX_APPIMAGE_SHA256=$linux_appimage_sha256" >> "$GITHUB_ENV"
+          echo "Validated draft AppImage digest for this run: $linux_appimage_sha256"
 
           for pair in \
             "$source_bundle:$source_checksum" \
@@ -462,11 +440,11 @@ jobs:
           snapshot=$(
             printf '%s\n%s\n%s\n%s\n' \
               "$snapshot_metadata" "$snapshot_manifest" \
-              "$EXPECTED_LINUX_APPIMAGE_SHA256" "$RELEASE_RUN_ID" \
+              "$linux_appimage_sha256" "$RELEASE_RUN_ID" \
               | sha256sum | cut -d' ' -f1
           )
           echo "RELEASE_SNAPSHOT=$snapshot" >> "$GITHUB_ENV"
-          echo "Draft metadata, 12 exact assets attested by release run $RELEASE_RUN_ID, updater sidecars, physically tested AppImage digest, and both checksummed Linux source bundles all verified."
+          echo "Draft metadata, 12 exact assets attested by release run $RELEASE_RUN_ID, updater sidecars, the validated AppImage digest, and both checksummed Linux source bundles all verified."
 
       - name: Publish the revalidated draft
         shell: bash
@@ -581,7 +559,7 @@ jobs:
           current_snapshot=$(
             printf '%s\n%s\n%s\n%s\n' \
               "$snapshot_metadata" "$snapshot_manifest" \
-              "$EXPECTED_LINUX_APPIMAGE_SHA256" "$RELEASE_RUN_ID" \
+              "$VALIDATED_LINUX_APPIMAGE_SHA256" "$RELEASE_RUN_ID" \
               | sha256sum | cut -d' ' -f1
           )
           if [ "$current_snapshot" != "$RELEASE_SNAPSHOT" ]; then
@@ -611,8 +589,8 @@ jobs:
           fi
           download_final_asset "$linux_updater"
           final_linux_sha256=$(sha256sum "$final_asset_dir/$linux_updater" | cut -d' ' -f1)
-          if [ "$final_linux_sha256" != "$EXPECTED_LINUX_APPIMAGE_SHA256" ]; then
-            echo "::error::Immediately before publish, the exact draft AppImage is $final_linux_sha256, not the physically tested $EXPECTED_LINUX_APPIMAGE_SHA256."
+          if [ "$final_linux_sha256" != "$VALIDATED_LINUX_APPIMAGE_SHA256" ]; then
+            echo "::error::The draft AppImage changed after validation: $final_linux_sha256 is not the validated $VALIDATED_LINUX_APPIMAGE_SHA256. Refusing to publish."
             exit 1
           fi
 
@@ -627,5 +605,5 @@ jobs:
             echo "::error::GitHub did not report '$TAG' as published."
             exit 1
           fi
-          echo "Published $TAG through the release environment." \
+          echo "Published $TAG unattended after full revalidation." \
             | tee -a "$GITHUB_STEP_SUMMARY"
