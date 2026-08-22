@@ -96,6 +96,17 @@ export default defineConfig([
       'no-console': 'error',
     },
   },
+  // lab/ is Node tooling that drives a browser: it needs node globals, and a
+  // handful of its files legitimately author code that runs in the page.
+  {
+    files: ['lab/**/*.ts'],
+    languageOptions: {
+      globals: { ...globals.node, ...globals.browser },
+    },
+    rules: {
+      'no-console': 'off',
+    },
+  },
   ...storybook.configs['flat/recommended'],
   prettier,
 ])
