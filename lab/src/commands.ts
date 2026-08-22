@@ -159,6 +159,32 @@ export const commands: Record<
     return { event: args.event, delivered }
   },
 
+  // Trystero keeps a pool of 20 pre-generated offers PER ROOM, so a machine
+  // sitting alone already holds dozens of peer connections that are closed by
+  // design. Reporting the raw list reads as catastrophic failure; what matters
+  // is how many are live, and of those, how many actually connected.
+  async peers({ lab }, args) {
+    const page = pageOf(lab, args)
+    const all = await ui.evaluate<
+      { connectionState: string; dataChannels: string[] }[]
+    >(page, 'window.__lab.peers()')
+    const live = all.filter((peer) => peer.connectionState !== 'closed')
+    const states: Record<string, number> = {}
+    for (const peer of all) {
+      states[peer.connectionState] = (states[peer.connectionState] ?? 0) + 1
+    }
+    return {
+      connected: all.filter((peer) => peer.connectionState === 'connected')
+        .length,
+      openDataChannels: all.flatMap((peer) =>
+        peer.dataChannels.filter((channel) => channel.endsWith(':open'))
+      ).length,
+      total: all.length,
+      states,
+      live: args.verbose === true ? live : live.slice(0, 8),
+    }
+  },
+
   async db({ lab }, args) {
     const { backend } = machineOf(lab, args)
     switch (String(args.table)) {
@@ -237,6 +263,23 @@ export const commands: Record<
       queued: lab.llama.queue.length,
       requests: lab.llama.requests.length,
     }
+  },
+
+  async frames({ lab }, args) {
+    const limit = Number(args.limit ?? 60)
+    const filter = args.topic ? String(args.topic) : null
+    const frames = lab.relay
+      .frames()
+      .filter((frame) => (filter ? frame.detail.includes(filter) : true))
+    return { frames: frames.slice(-limit) }
+  },
+
+  async subs({ lab }, args) {
+    const topic = args.topic ? String(args.topic) : null
+    const subs = lab.relay
+      .subscriptions()
+      .filter((sub) => (topic ? sub.topics.includes(topic) : true))
+    return { count: subs.length, subs: subs.slice(0, Number(args.limit ?? 20)) }
   },
 
   async fault({ lab }, args) {

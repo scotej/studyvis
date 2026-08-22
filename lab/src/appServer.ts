@@ -1,12 +1,14 @@
 // Serves the app under test.
 //
-// Two modes, and the difference is not cosmetic: `dev` runs the Vite server, so
-// React StrictMode double-invokes effects and every `import.meta.env.DEV` gate
-// is live; `built` serves `dist/`, which is the bytes that ship. Iterate in dev,
-// confirm in built.
+// Two modes, and the difference is not cosmetic. `built` serves `dist/` — the
+// bytes that ship — and is the DEFAULT. `dev` runs the Vite server, where
+// StrictMode double-invokes every effect: rooms are joined and left in a loop,
+// so trystero never holds a subscription long enough to meet a peer and no
+// two machines ever connect. That makes dev mode useful for looking at screens
+// and useless for anything peer-to-peer. Use it knowingly.
 
 import { spawn, type ChildProcess } from 'node:child_process'
-import { createReadStream, existsSync, statSync } from 'node:fs'
+import { createReadStream, existsSync, readdirSync, statSync } from 'node:fs'
 import { createServer } from 'node:http'
 import path from 'node:path'
 
@@ -75,11 +77,7 @@ async function startViteServer(): Promise<AppServerHandle> {
 
 async function startStaticServer(): Promise<AppServerHandle> {
   const root = path.join(REPO_ROOT, 'dist')
-  if (!existsSync(path.join(root, 'index.html'))) {
-    throw new Error(
-      'lab: dist/index.html is missing — run `npm run build` before `--built`'
-    )
-  }
+  await buildIfStale(root)
   const server = createServer((req, res) => {
     const requested = decodeURIComponent((req.url ?? '/').split('?')[0])
     const relative = requested === '/' ? 'index.html' : requested.slice(1)
@@ -108,6 +106,46 @@ async function startStaticServer(): Promise<AppServerHandle> {
         server.close(() => resolve())
       }),
   }
+}
+
+// Running a scenario against yesterday's bundle and believing the result is the
+// one mistake this mode invites, so the bundle is rebuilt whenever anything it
+// is made of is newer than it.
+async function buildIfStale(root: string): Promise<void> {
+  const index = path.join(root, 'index.html')
+  const builtAt = existsSync(index) ? statSync(index).mtimeMs : 0
+  if (builtAt > 0 && newestSourceMs() <= builtAt) return
+  process.stderr.write('lab: building the app bundle…\n')
+  const build = spawn('npm', ['run', 'build'], {
+    cwd: REPO_ROOT,
+    stdio: 'ignore',
+  })
+  const code: number = await new Promise((resolve) =>
+    build.on('exit', (value) => resolve(value ?? 1))
+  )
+  if (code !== 0 || !existsSync(index)) {
+    throw new Error('lab: `npm run build` failed — fix the build, then retry')
+  }
+}
+
+function newestSourceMs(): number {
+  let newest = 0
+  const walk = (dir: string) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name)
+      if (entry.isDirectory()) {
+        walk(full)
+        continue
+      }
+      newest = Math.max(newest, statSync(full).mtimeMs)
+    }
+  }
+  walk(path.join(REPO_ROOT, 'src'))
+  for (const file of ['index.html', 'vite.config.ts', 'package.json']) {
+    const full = path.join(REPO_ROOT, file)
+    if (existsSync(full)) newest = Math.max(newest, statSync(full).mtimeMs)
+  }
+  return newest
 }
 
 async function responds(url: string): Promise<boolean> {

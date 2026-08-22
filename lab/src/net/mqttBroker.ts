@@ -26,6 +26,7 @@ export type MqttBrokerStats = {
   connections: number
   openConnections: number
   published: number
+  topics: Record<string, number>
 }
 
 export type MqttBrokerHandle = {
@@ -89,10 +90,13 @@ export async function startMqttBroker(
     connections: 0,
     openConnections: 0,
     published: 0,
+    topics: {},
   }
 
-  broker.authorizePublish = (_client, _packet, done) => {
+  broker.authorizePublish = (_client, packet, done) => {
     stats.published += 1
+    const topic = String(packet.topic)
+    stats.topics[topic] = (stats.topics[topic] ?? 0) + 1
     done(
       faults.dropMessages ? new Error('lab: broker dropping messages') : null
     )
@@ -116,7 +120,7 @@ export async function startMqttBroker(
     url: `ws://127.0.0.1:${port}`,
     port,
     faults,
-    stats: () => ({ ...stats }),
+    stats: () => ({ ...stats, topics: { ...stats.topics } }),
     close: () =>
       new Promise<void>((resolve) => {
         for (const client of wss.clients) client.terminate()

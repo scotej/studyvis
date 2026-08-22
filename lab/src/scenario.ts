@@ -23,9 +23,35 @@ export function scenario(name: string, body: ScenarioBody): void {
   void main(name, body)
 }
 
+// The app writes one JSON record per line; a failure dump wants the shape, not
+// the volume — warnings and errors always, plus the tail of everything else.
+function tailLog(lines: string[]): string[] {
+  const records = lines
+    .map((line) => {
+      try {
+        return JSON.parse(line) as {
+          lvl: string
+          scope: string
+          msg: string
+          data?: unknown
+        }
+      } catch {
+        return null
+      }
+    })
+    .filter((record): record is NonNullable<typeof record> => record !== null)
+  const notable = records.filter((r) => r.lvl === 'warn' || r.lvl === 'error')
+  const tail = records.slice(-30)
+  const chosen = [...new Set([...notable, ...tail])]
+  return chosen.map(
+    (r) =>
+      `${r.lvl} ${r.scope} ${r.msg} ${JSON.stringify(r.data ?? {}).slice(0, 300)}`
+  )
+}
+
 async function main(name: string, body: ScenarioBody): Promise<void> {
   const headed = process.argv.includes('--headed')
-  const mode = process.argv.includes('--built') ? 'built' : 'dev'
+  const mode = process.argv.includes('--dev') ? 'dev' : 'built'
   const options: LabOptions = { headless: !headed, mode }
 
   const started = Date.now()
@@ -65,6 +91,9 @@ async function main(name: string, body: ScenarioBody): Promise<void> {
       screen: failure
         ? await ui.snapshot(machine.page()).catch(() => '<unavailable>')
         : undefined,
+      // On failure the app's own structured log is the difference between
+      // "bob never got the invite" and knowing which leg dropped it.
+      log: failure ? tailLog(machine.backend.logLines(400)) : undefined,
     }
   }
   const egress = lab.egressAttempts()

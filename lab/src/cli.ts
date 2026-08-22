@@ -17,8 +17,12 @@ const REPO_ROOT = path.resolve(import.meta.dirname, '../..')
 
 const USAGE = `studyvis lab — run the real app as N virtual machines on this box
 
-  up [--peers a,b] [--mode dev|built] [--headed] [--keep-data] [--run-id ID]
-                              start the lab (local relay + broker + llama stub)
+  up [--peers a,b] [--mode built|dev] [--headed] [--keep-data] [--run-id ID]
+                              start the lab (local relay + broker + llama stub).
+                              Defaults to the built bundle and rebuilds it when
+                              src/ is newer. --mode dev serves Vite instead, where
+                              StrictMode's double-invoked effects churn rooms and
+                              nothing peer-to-peer works.
   down                        stop it and remove the machines' disks
   status                      what is running, plus every error counter
   doctor                      prove the transports round-trip and nothing left the box
@@ -38,6 +42,7 @@ const USAGE = `studyvis lab — run the real app as N virtual machines on this b
   open-window <machine> <label> [--url URL]
   emit <machine> <event> [--payload JSON]      push a Tauri event, as Rust would
 
+  peers <machine>                     every RTCPeerConnection and its state
   db <machine> friends|sessions|audit [--session-id ID]
   identity <machine>
   settings <machine> [--set JSON]     read, or seed for the next load
@@ -47,6 +52,8 @@ const USAGE = `studyvis lab — run the real app as N virtual machines on this b
   notifications <machine>     recorded notifications, dialogs, windows, shortcuts
 
   llama status|requests|push <content>
+  frames [--topic T] [--limit N]      recent relay frames (REQ/EVENT/CLOSE)
+  subs [--topic T]                    the relay's live subscription table
   fault relay|broker --faults JSON
 
   run <scenario.ts> [args...]  run a scenario file against a fresh lab
@@ -104,7 +111,7 @@ async function up(flags: Flags): Promise<void> {
   if (existsSync(SOCKET_PATH)) rmSync(SOCKET_PATH)
 
   const options = {
-    mode: (flags.mode as string) ?? 'dev',
+    mode: (flags.mode as string) ?? 'built',
     headless: flags.headed !== true,
     keepData: flags['keep-data'] === true,
     runId: flags['run-id'] as string | undefined,
@@ -239,6 +246,7 @@ async function main(): Promise<void> {
     case 'text':
     case 'mnemonic':
     case 'identity':
+    case 'peers':
     case 'clipboard':
     case 'reload':
     case 'settings':

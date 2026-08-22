@@ -78,7 +78,7 @@ export class Lab {
     mkdirSync(workdir, { recursive: true })
 
     const [app, relay, broker, llama] = await Promise.all([
-      startAppServer(options.mode ?? 'dev'),
+      startAppServer(options.mode ?? 'built'),
       startNostrRelay(),
       startMqttBroker(),
       startLlamaStub(),
@@ -86,17 +86,27 @@ export class Lab {
     return new Lab(runId, workdir, app, relay, broker, llama, options)
   }
 
-  /** Maps every pinned public endpoint onto this run's loopback twin. */
+  /** Maps every pinned public endpoint onto this run's loopback twin.
+   *
+   *  Each endpoint gets a DISTINCT url — one server, many paths. Collapsing the
+   *  six shipped relays onto a single url looks equivalent and is not:
+   *  trystero registers one client per configured url but keys its subscription
+   *  batcher on the SOCKET's url, so six identical urls share one batcher. Its
+   *  REQ/CLOSE bookkeeping then collides, the handshake never settles, and the
+   *  app churns peer connections that close immediately. Distinct paths restore
+   *  the one-batcher-per-relay topology the strategy is written against. */
   websocketRewrites(): Record<string, string> {
     const rewrites: Record<string, string> = {}
-    for (const url of DEFAULT_RELAY_URLS) {
-      rewrites[url] = this.relay.url
-      rewrites[new URL(url).hostname] = this.relay.url
-    }
-    for (const url of DEFAULT_MQTT_BROKER_URLS) {
-      rewrites[url] = this.broker.url
-      rewrites[new URL(url).hostname] = this.broker.url
-    }
+    DEFAULT_RELAY_URLS.forEach((url, index) => {
+      const target = `${this.relay.url}/relay-${index}`
+      rewrites[url] = target
+      rewrites[new URL(url).hostname] = target
+    })
+    DEFAULT_MQTT_BROKER_URLS.forEach((url, index) => {
+      const target = `${this.broker.url}/broker-${index}`
+      rewrites[url] = target
+      rewrites[new URL(url).hostname] = target
+    })
     return rewrites
   }
 

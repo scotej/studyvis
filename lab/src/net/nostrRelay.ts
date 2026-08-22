@@ -52,6 +52,16 @@ export type NostrRelayStats = {
   events: number
   subscriptions: number
   delivered: number
+  removedByReq: number
+  removedByClose: number
+  removedBySocketClose: number
+  /** Per-topic accounting, keyed by the `x` tag trystero rendezvous on. A
+   *  discovery failure is almost always visible here: a topic that was
+   *  published to but never subscribed to, or the reverse. */
+  topics: Record<
+    string,
+    { published: number; subscribed: number; delivered: number }
+  >
 }
 
 export type NostrRelayHandle = {
@@ -59,10 +69,33 @@ export type NostrRelayHandle = {
   port: number
   faults: NostrRelayFaults
   stats: () => NostrRelayStats
+  frames: () => RelayFrame[]
+  /** The subscription table as it stands right now. Frames age out; this is
+   *  what the relay would match an event against this instant, which is the
+   *  question a stalled rendezvous actually poses. */
+  subscriptions: () => {
+    subId: string
+    kinds: number[]
+    since?: number
+    topics: string[]
+  }[]
   close: () => Promise<void>
 }
 
 type Subscription = { socket: WebSocket; subId: string; filter: NostrFilter }
+
+/** Bounded ring of recent frames, so a rendezvous that silently fails can be
+ *  read rather than guessed at. Trystero re-sends a batched REQ under the same
+ *  subscription id whenever a room is added or removed, which is exactly the
+ *  traffic a topic-count alone cannot explain. */
+export type RelayFrame = {
+  ts: number
+  direction: 'in' | 'out'
+  type: string
+  detail: string
+}
+
+const FRAME_RING = 2000
 
 function matches(filter: NostrFilter, event: NostrEvent): boolean {
   if (filter.ids && !filter.ids.includes(event.id)) return false
@@ -93,13 +126,29 @@ export async function startNostrRelay(
   const http = createServer()
   const wss = new WebSocketServer({ server: http })
   const subs = new Set<Subscription>()
+  const frames: RelayFrame[] = []
+  const record = (
+    direction: RelayFrame['direction'],
+    type: string,
+    detail: string
+  ) => {
+    frames.push({ ts: Date.now(), direction, type, detail })
+    if (frames.length > FRAME_RING) frames.shift()
+  }
   const stats: NostrRelayStats = {
     connections: 0,
     openConnections: 0,
     events: 0,
     subscriptions: 0,
     delivered: 0,
+    removedByReq: 0,
+    removedByClose: 0,
+    removedBySocketClose: 0,
+    topics: {},
   }
+
+  const topicStat = (topic: string) =>
+    (stats.topics[topic] ??= { published: 0, subscribed: 0, delivered: 0 })
 
   wss.on('connection', (socket) => {
     stats.connections += 1
@@ -118,6 +167,9 @@ export async function startNostrRelay(
       }
       if (!Array.isArray(frame)) return
       const [type] = frame as [string, ...unknown[]]
+      if (type !== 'REQ' && type !== 'EVENT' && type !== 'CLOSE') {
+        record('in', `?${String(type)}`, String(raw).slice(0, 120))
+      }
 
       if (type === 'REQ') {
         const [, subId, ...filters] = frame as [
@@ -125,18 +177,44 @@ export async function startNostrRelay(
           string,
           ...NostrFilter[],
         ]
+        // A REQ REPLACES whatever that subscription id previously matched.
+        // Accumulating instead leaves stale filters behind and delivers the
+        // same event once per superseded filter — which reads as a duplicate
+        // -delivery bug in the app rather than a bug in the lab.
+        for (const sub of subs) {
+          if (sub.socket === socket && sub.subId === subId) {
+            subs.delete(sub)
+            stats.removedByReq += 1
+          }
+        }
         for (const filter of filters) {
           subs.add({ socket, subId, filter })
           stats.subscriptions += 1
+          for (const topic of filter['#x'] ?? [])
+            topicStat(topic).subscribed += 1
         }
+        record(
+          'in',
+          'REQ',
+          `${subId} ${filters
+            .map(
+              (filter) =>
+                `kinds=${(filter.kinds ?? []).length} since=${filter.since ?? '-'} x=${(filter['#x'] ?? []).length}`
+            )
+            .join(' | ')}`
+        )
         socket.send(JSON.stringify(['EOSE', subId]))
         return
       }
 
       if (type === 'CLOSE') {
         const [, subId] = frame as [string, string]
+        record('in', 'CLOSE', subId)
         for (const sub of subs) {
-          if (sub.socket === socket && sub.subId === subId) subs.delete(sub)
+          if (sub.socket === socket && sub.subId === subId) {
+            subs.delete(sub)
+            stats.removedByClose += 1
+          }
         }
         return
       }
@@ -145,6 +223,13 @@ export async function startNostrRelay(
         const [, event] = frame as [string, NostrEvent]
         if (!event?.id) return
         stats.events += 1
+        const eventTopic = event.tags?.find((tag) => tag[0] === 'x')?.[1]
+        if (eventTopic) topicStat(eventTopic).published += 1
+        record(
+          'in',
+          'EVENT',
+          `kind=${event.kind} created_at=${event.created_at} x=${eventTopic ?? '-'}`
+        )
         if (faults.rejectPublish) {
           socket.send(
             JSON.stringify(['OK', event.id, false, faults.rejectPublish])
@@ -158,13 +243,19 @@ export async function startNostrRelay(
           if (!matches(sub.filter, event)) continue
           sub.socket.send(JSON.stringify(['EVENT', sub.subId, event]))
           stats.delivered += 1
+          if (eventTopic) topicStat(eventTopic).delivered += 1
         }
       }
     })
 
     socket.on('close', () => {
       stats.openConnections -= 1
-      for (const sub of subs) if (sub.socket === socket) subs.delete(sub)
+      for (const sub of subs) {
+        if (sub.socket === socket) {
+          subs.delete(sub)
+          stats.removedBySocketClose += 1
+        }
+      }
     })
   })
 
@@ -173,7 +264,15 @@ export async function startNostrRelay(
     url: `ws://127.0.0.1:${port}`,
     port,
     faults,
-    stats: () => ({ ...stats }),
+    stats: () => ({ ...stats, topics: { ...stats.topics } }),
+    frames: () => [...frames],
+    subscriptions: () =>
+      [...subs].map((sub) => ({
+        subId: sub.subId,
+        kinds: sub.filter.kinds ?? [],
+        since: sub.filter.since,
+        topics: sub.filter['#x'] ?? [],
+      })),
     close: () =>
       new Promise<void>((resolve) => {
         for (const client of wss.clients) client.terminate()

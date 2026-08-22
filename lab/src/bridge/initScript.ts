@@ -81,14 +81,14 @@ export function installBridge(config: BridgeConfig): void {
       return null
     }
     // The shipped broker list carries credentials and a path
-    // (`wss://public:public@host/mqtt`); match on origin and keep the path so
-    // the client still talks to the same endpoint shape.
+    // (`wss://public:public@host/mqtt`), so an exact-string match can miss;
+    // the hostname always identifies which pinned endpoint this is. The mapped
+    // url is used verbatim — it already carries the per-endpoint path that
+    // keeps each one a distinct relay as far as the client is concerned.
     const byOrigin =
       config.websocketRewrites[`${parsed.protocol}//${parsed.host}`] ??
       config.websocketRewrites[parsed.hostname]
-    if (byOrigin) {
-      return `${byOrigin}${parsed.pathname === '/' ? '' : parsed.pathname}`
-    }
+    if (byOrigin) return byOrigin
     if (parsed.hostname === '127.0.0.1' || parsed.hostname === 'localhost') {
       return original
     }
@@ -99,11 +99,42 @@ export function installBridge(config: BridgeConfig): void {
   // Two peers on one machine reach each other on host candidates, so the
   // shipped STUN defaults would only add UDP egress and DNS timeouts. Forcing
   // an empty server list keeps the offline property true end to end.
+  const peerConnections: RTCPeerConnection[] = []
+  const channelsByConnection = new WeakMap<
+    RTCPeerConnection,
+    RTCDataChannel[]
+  >()
+  const createdAt = new WeakMap<RTCPeerConnection, number>()
+  const origin = new WeakMap<RTCPeerConnection, string>()
   const RealPeerConnection = window.RTCPeerConnection
   if (RealPeerConnection) {
     class LabPeerConnection extends RealPeerConnection {
       constructor(configuration?: RTCConfiguration) {
         super({ ...configuration, iceServers: [] })
+        peerConnections.push(this)
+        createdAt.set(this, Date.now())
+        origin.set(
+          this,
+          (new Error().stack ?? '')
+            .split('\n')
+            .slice(1, 4)
+            .map((line) => line.trim())
+            .join(' <- ')
+        )
+        const channels: RTCDataChannel[] = []
+        channelsByConnection.set(this, channels)
+        this.addEventListener('datachannel', (event) => {
+          channels.push((event as RTCDataChannelEvent).channel)
+        })
+      }
+
+      createDataChannel(
+        label: string,
+        options?: RTCDataChannelInit
+      ): RTCDataChannel {
+        const channel = super.createDataChannel(label, options)
+        channelsByConnection.get(this)?.push(channel)
+        return channel
       }
     }
     window.RTCPeerConnection =
@@ -212,5 +243,25 @@ export function installBridge(config: BridgeConfig): void {
     listeners: () =>
       listeners.map((l) => ({ event: l.event, target: l.target })),
     blockedSockets: () => [...blockedSockets],
+    // "Did the two machines actually connect?" is the question behind most
+    // session failures, and nothing on screen answers it.
+    peers: () =>
+      peerConnections.map((pc) => ({
+        age: Date.now() - (createdAt.get(pc) ?? Date.now()),
+        origin: origin.get(pc) ?? '',
+        connectionState: pc.connectionState,
+        iceConnectionState: pc.iceConnectionState,
+        signalingState: pc.signalingState,
+        sendingTracks: pc.getSenders().filter((s) => s.track).length,
+        receivingTracks: pc.getReceivers().filter((r) => r.track).length,
+        dataChannels: dataChannelsOf(pc),
+      })),
+  }
+
+  // A room's data channel is what carries an invite, a hello, chat and the
+  // audit log; its label and readyState say more than the connection state.
+  function dataChannelsOf(pc: RTCPeerConnection): string[] {
+    const created = channelsByConnection.get(pc) ?? []
+    return created.map((channel) => `${channel.label}:${channel.readyState}`)
   }
 }

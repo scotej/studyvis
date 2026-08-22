@@ -101,3 +101,38 @@ async function importContactCard(
     within: { role: 'dialog', name: 'Add this friend?' },
   })
 }
+
+/** Alice invites Bob and Bob accepts, leaving both in one live session. */
+export async function inviteAndAccept(
+  host: LabMachine,
+  guest: LabMachine,
+  guestFriendName: string,
+  hostFriendName: string
+): Promise<void> {
+  await ui.waitForText(host.page(), 'Available', 30_000)
+  await ui.click(host.page(), `Invite ${guestFriendName}`)
+  await ui.waitForText(host.page(), 'Study session', 20_000)
+  await ui.waitForText(guest.page(), 'invites you to study', 30_000)
+  await ui.click(guest.page(), `Accept the invite from ${hostFriendName}`)
+  await ui.waitForText(guest.page(), 'Study session', 20_000)
+}
+
+/** Every <video> the page is currently rendering, with the state a scenario
+ *  cares about: is it actually carrying live tracks and painting frames. */
+export async function videoState(
+  machine: LabMachine
+): Promise<
+  { width: number; height: number; playing: boolean; tracks: string[] }[]
+> {
+  return ui.evaluate(
+    machine.page(),
+    `Array.from(document.querySelectorAll('video')).map((video) => ({
+      width: video.videoWidth,
+      height: video.videoHeight,
+      playing: !video.paused,
+      tracks: video.srcObject
+        ? video.srcObject.getTracks().map((track) => track.kind + ':' + track.readyState)
+        : [],
+    }))`
+  )
+}
