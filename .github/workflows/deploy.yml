@@ -310,7 +310,9 @@ jobs:
             wayland-protocols xdg-dbus-proxy xdg-utils xz-utils \
             gstreamer1.0-alsa gstreamer1.0-plugins-bad \
             gstreamer1.0-plugins-base gstreamer1.0-plugins-good \
-            gstreamer1.0-nice gstreamer1.0-pipewire gstreamer1.0-tools
+            gstreamer1.0-nice gstreamer1.0-pipewire gstreamer1.0-tools \
+            libpipewire-0.3-dev libpipewire-0.3-modules libspa-0.2-modules \
+            pipewire-bin libselinux1 libpcre2-8-0
 
       - uses: actions/setup-node@v7
         if: env.SHIPPABLE == 'true'

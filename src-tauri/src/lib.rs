@@ -24,6 +24,8 @@ pub mod crypto;
 pub mod db;
 #[cfg(target_os = "linux")]
 mod linux_media_permissions;
+#[cfg(target_os = "linux")]
+mod linux_pipewire_runtime;
 #[cfg(target_os = "macos")]
 mod macos_display_capture;
 pub mod window_layout;
@@ -81,6 +83,11 @@ use commands::system::{
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Before any webview exists: the web process inherits this environment and
+    // is what loads GStreamer's PipeWire plugin.
+    #[cfg(target_os = "linux")]
+    linux_pipewire_runtime::install();
+
     let builder = tauri::Builder::default();
 
     // Registered first so a second launch is rejected before any other

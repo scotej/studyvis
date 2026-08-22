@@ -1,0 +1,51 @@
+# Exact PipeWire client payload allowed in the Linux AppImage.
+#
+# linuxdeploy stages libpipewire-0.3.so.0 because libgstpipewire.so declares it
+# in DT_NEEDED, but PipeWire's SPA plugins, its context modules, and its client
+# configuration are all opened at runtime by name. Nothing in a DT_NEEDED walk
+# can see them, so without this manifest the packaged library falls back to the
+# builder's compiled-in /usr/lib/x86_64-linux-gnu paths and finds nothing on any
+# host that is not Debian-derived (ISSUES.md I89).
+#
+# Each non-empty line is `<kind> <path>`, relative to that kind's staged root:
+#   spa      SPA plugin, relative to `spa-0.2` under the PipeWire libdir
+#            (libspa-0.2.pc sits in a dev package nothing here requires)
+#   module   context module, relative to `--variable=moduledir libpipewire-0.3`
+#   config   client configuration, relative to the PipeWire data directory
+#
+# The spa and module sets are not a judgement call: they are exactly the
+# factories named by `context.spa-libs` and the modules named by
+# `context.modules` in the packaged client.conf. Dropping any module makes
+# pw_context_new() fail, and neither GStreamer nor PipeWire null-checks that.
+
+# context.spa-libs: support.* and audio.convert.* are the only factory
+# families the client configuration maps.
+spa support/libspa-support.so
+spa audioconvert/libspa-audioconvert.so
+
+# context.modules: every entry is mandatory. protocol-native is what actually
+# talks to the host PipeWire daemon over the portal-provided socket. These are
+# packaged beside libpipewire rather than in their own directory, because
+# client-node declares protocol-native in DT_NEEDED and the dynamic loader
+# never searches a consumer's own directory — a nested layout resolves only by
+# accident of the order client.conf loads them in, and the ELF closure audit
+# rejects it outright.
+module libpipewire-module-protocol-native.so
+module libpipewire-module-client-node.so
+module libpipewire-module-client-device.so
+module libpipewire-module-adapter.so
+module libpipewire-module-metadata.so
+module libpipewire-module-session-manager.so
+
+# client.conf is the only configuration the packaged client ever loads: the
+# GStreamer element builds its context with NULL properties, so PipeWire falls
+# back to it. The realtime variant is deliberately not listed — upstream
+# dropped client-rt.conf after 1.0.x, so requiring it would pin this manifest
+# to the builder's PipeWire version and break a local build on any host
+# shipping a newer one.
+config client.conf
+
+# No `library` entries are needed: protocol-native's non-libc dependencies
+# (libsystemd, libselinux, and libselinux's own libpcre2) are already in the
+# bundle, and AppRun prepends the packaged libdir to LD_LIBRARY_PATH, so the
+# module resolves them from there on every host.

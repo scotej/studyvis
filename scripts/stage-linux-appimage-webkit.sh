@@ -135,6 +135,38 @@ plugin_manifest="$script_dir/linux-gstreamer-plugins.txt"
   die "curated GStreamer plugin manifest is missing: $plugin_manifest"
 }
 
+# libgstpipewire.so only reaches the AppImage because linuxdeploy follows its
+# DT_NEEDED to libpipewire. PipeWire then opens its SPA plugins, context
+# modules, and client configuration by name at runtime, which no dependency
+# walk can discover, so they are staged from an explicit manifest instead
+# (ISSUES.md I89).
+pipewire_manifest="$script_dir/linux-pipewire-payload.txt"
+[[ -s $pipewire_manifest && ! -L $pipewire_manifest ]] || {
+  die "curated PipeWire payload manifest is missing: $pipewire_manifest"
+}
+pipewire_libdir=${STUDYVIS_PIPEWIRE_LIBDIR:-}
+if [[ -z $pipewire_libdir ]]; then
+  pipewire_libdir=$(pkg-config --variable=libdir libpipewire-0.3 2>/dev/null || true)
+fi
+[[ -n $pipewire_libdir ]] || die "could not locate the PipeWire libdir; set STUDYVIS_PIPEWIRE_LIBDIR"
+pipewire_libdir=$(normalize_path STUDYVIS_PIPEWIRE_LIBDIR "$pipewire_libdir" existing)
+pipewire_module_dir=${STUDYVIS_PIPEWIRE_MODULES_DIR:-}
+if [[ -z $pipewire_module_dir ]]; then
+  pipewire_module_dir=$(pkg-config --variable=moduledir libpipewire-0.3 2>/dev/null || true)
+fi
+[[ -n $pipewire_module_dir ]] || {
+  die "could not locate PipeWire modules; set STUDYVIS_PIPEWIRE_MODULES_DIR"
+}
+pipewire_module_dir=$(normalize_path STUDYVIS_PIPEWIRE_MODULES_DIR "$pipewire_module_dir" existing)
+# libspa-0.2.pc lives in a separate libspa-0.2-dev package that nothing here
+# requires and that reaches the Ubuntu builder only transitively, so the SPA
+# plugin directory is derived from the library directory PipeWire itself
+# reports rather than from a pkg-config module that may not be installed.
+pipewire_spa_dir=$(normalize_path STUDYVIS_SPA_PLUGINS_DIR \
+  "${STUDYVIS_SPA_PLUGINS_DIR:-$pipewire_libdir/spa-0.2}" existing)
+pipewire_config_dir=$(normalize_path STUDYVIS_PIPEWIRE_CONFIG_DIR \
+  "${STUDYVIS_PIPEWIRE_CONFIG_DIR:-/usr/share/pipewire}" existing)
+
 # Compile-time WebKit fallbacks are deliberately /usr/bin. The AppImage patch
 # first resolves the copies beside StudyVis's executable, so stage the exact
 # FHS paths by default instead of trusting PATH lookup.
@@ -195,6 +227,10 @@ stage_directories=(
   "$stage_root/processes/injected-bundle"
   "$stage_root/gstreamer"
   "$stage_root/gstreamer-plugins"
+  "$stage_root/pipewire"
+  "$stage_root/pipewire/spa"
+  "$stage_root/pipewire/modules"
+  "$stage_root/pipewire/config"
   "$stage_root/sandbox"
   "$stage_root/licenses"
   "$stage_root/notices"
@@ -246,6 +282,40 @@ for forbidden in libgstlibav.so libgstx264.so libgstx265.so; do
   }
 done
 
+# Drop a previous run's payload so a shortened manifest cannot leave an
+# unlisted plugin or module behind in the bundle.
+while IFS= read -r -d '' stale; do
+  [[ -f $stale && ! -L $stale ]] || die "unexpected staged PipeWire entry: $stale"
+  rm -f -- "$stale"
+done < <(find "$stage_root/pipewire" -mindepth 1 -type f -print0)
+
+declare -A staged_pipewire=()
+while IFS= read -r payload_line || [[ -n $payload_line ]]; do
+  payload_line=${payload_line%%#*}
+  read -r payload_kind payload_path <<<"$payload_line"
+  [[ -n ${payload_kind:-} ]] || continue
+  [[ -n ${payload_path:-} ]] || die "PipeWire payload entry has no path: $payload_kind"
+  [[ $payload_path =~ ^[A-Za-z0-9_][A-Za-z0-9_.+-]*(/[A-Za-z0-9_][A-Za-z0-9_.+-]*)?$ ]] || {
+    die "invalid PipeWire payload path: $payload_path"
+  }
+  case $payload_kind in
+    spa) payload_source="$pipewire_spa_dir/$payload_path" payload_stage=spa ;;
+    module) payload_source="$pipewire_module_dir/$payload_path" payload_stage=modules ;;
+    config) payload_source="$pipewire_config_dir/$payload_path" payload_stage=config ;;
+    *) die "unknown PipeWire payload kind: $payload_kind" ;;
+  esac
+  [[ -f $payload_source ]] || die "PipeWire payload entry is missing: $payload_source"
+  payload_destination="$stage_root/pipewire/$payload_stage/$payload_path"
+  [[ ! -v staged_pipewire[$payload_kind/$payload_path] ]] || {
+    die "duplicate PipeWire payload entry: $payload_kind $payload_path"
+  }
+  install -D -m 0644 -- "$payload_source" "$payload_destination"
+  staged_pipewire[$payload_kind/$payload_path]=1
+done <"$pipewire_manifest"
+# pw_context_new() treats every context.modules entry as mandatory, so a short
+# payload fails closed at runtime rather than degrading.
+[[ ${#staged_pipewire[@]} -ge 9 ]] || die "curated PipeWire payload is unexpectedly small"
+
 library_destination="$stage_root/libraries"
 for library in "${required_libraries[@]}"; do
   install -m 0755 "$runtime_libdir/$library" "$library_destination/$library"
@@ -295,4 +365,6 @@ echo "Staged $runtime_id from $runtime_dir"
 echo "Staged production WebKit helpers for /usr/bin/$appimage_runtime_dirname"
 echo "Staged GStreamer helpers from $gstreamer_helper_dir"
 echo "Staged ${#staged_plugins[@]} curated GStreamer plugins from $system_gstreamer_plugins"
+echo "Staged ${#staged_pipewire[@]} curated PipeWire payload entries from $pipewire_spa_dir," \
+  "$pipewire_module_dir, $pipewire_config_dir, and $pipewire_libdir"
 echo "Staged AppImage sandbox helpers from $bwrap and $dbus_proxy"
