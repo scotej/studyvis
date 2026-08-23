@@ -672,6 +672,9 @@ export const strings = {
       // tile.
       connecting: 'Connecting…',
       failed: 'Connection failed',
+      // #264 — the peer's transport dropped without them leaving. The tile is
+      // held for a grace window while the connection re-forms.
+      reconnecting: 'Reconnecting…',
     },
     badges: {
       selfWarningAriaLabel: 'Self-warning',

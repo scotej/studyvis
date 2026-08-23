@@ -18,6 +18,9 @@ export const Focused: Story = { args: { state: 'focused' } }
 export const Warning: Story = { args: { state: 'warning' } }
 export const Alerted: Story = { args: { state: 'alerted' } }
 export const Offline: Story = { args: { state: 'offline' } }
+export const Connecting: Story = { args: { state: 'connecting' } }
+export const Reconnecting: Story = { args: { state: 'reconnecting' } }
+export const Failed: Story = { args: { state: 'failed' } }
 
 const ALL_STATES: FocusState[] = [
   'online',
@@ -26,6 +29,9 @@ const ALL_STATES: FocusState[] = [
   'warning',
   'alerted',
   'offline',
+  'connecting',
+  'reconnecting',
+  'failed',
 ]
 
 export const AllStates: Story = {

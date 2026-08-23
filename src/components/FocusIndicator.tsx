@@ -5,6 +5,7 @@ import {
   CircleDot,
   CircleOff,
   Coffee,
+  RefreshCw,
   TriangleAlert,
   Unplug,
   type LucideIcon,
@@ -18,7 +19,7 @@ export type V2FocusState = 'focused' | 'warning' | 'alerted' | 'offline'
 // F4 — WebRTC transport states for peer tiles. Distinct from the focus
 // states above; surfaced when a peer is mid-handshake or its connection
 // failed so a frozen offline tile is no longer ambiguous.
-export type ConnectionFocusState = 'connecting' | 'failed'
+export type ConnectionFocusState = 'connecting' | 'failed' | 'reconnecting'
 export type FocusState = V1FocusState | V2FocusState | ConnectionFocusState
 
 // Each state gets a grayscale-distinct glyph so the status reads without
@@ -27,7 +28,9 @@ export type FocusState = V1FocusState | V2FocusState | ConnectionFocusState
 // (circle), `alerted` (triangle), and `on_break` (cup) are tellable apart by
 // silhouette alone. F4 adds `connecting` (dashed ring) and `failed` (unplug)
 // — both shape-distinct from the rest. Icon precedents:
-// SelfWarningBadge=AlertCircle, BreakCountdownBadge=Coffee.
+// SelfWarningBadge=AlertCircle, BreakCountdownBadge=Coffee. #264 adds
+// `reconnecting` (circling arrows) for a peer whose transport dropped while
+// the session holds their place.
 const STATE_ICONS: Record<FocusState, LucideIcon> = {
   online: Circle,
   on_break: Coffee,
@@ -37,6 +40,7 @@ const STATE_ICONS: Record<FocusState, LucideIcon> = {
   offline: CircleOff,
   connecting: CircleDashed,
   failed: Unplug,
+  reconnecting: RefreshCw,
 }
 
 // F4 reuses existing status tokens rather than minting new ones: `connecting`
@@ -52,6 +56,7 @@ const STATE_COLORS: Record<FocusState, string> = {
   offline: 'text-status-offline',
   connecting: 'text-status-warning',
   failed: 'text-status-alerted',
+  reconnecting: 'text-status-warning',
 }
 
 const STATE_LABELS: Record<FocusState, string> = {
@@ -63,6 +68,7 @@ const STATE_LABELS: Record<FocusState, string> = {
   offline: strings.session.focusStates.offline,
   connecting: strings.session.focusStates.connecting,
   failed: strings.session.focusStates.failed,
+  reconnecting: strings.session.focusStates.reconnecting,
 }
 
 export type FocusIndicatorProps = {

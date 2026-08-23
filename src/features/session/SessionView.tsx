@@ -2169,8 +2169,13 @@ export function SessionView({
               // handshake or after a transient 'disconnected', 'failed' only on
               // a terminally dead connection — so a peer with no tracks yet no
               // longer reads as a frozen offline tile.
-              const peerState: FocusState | undefined =
-                peerStream && peerAlert
+              // #264 takes precedence over both: while the lifecycle holds a
+              // dropped peer's place there is no transport left to report on,
+              // and the tile must say so rather than read as a plain offline
+              // friend who walked away.
+              const peerState: FocusState | undefined = peer.reconnecting
+                ? 'reconnecting'
+                : peerStream && peerAlert
                   ? 'alerted'
                   : connectionFocusState(peerConnState[peer.peerId], peerStream)
               const peerName = peer.displayName ?? peerLabel(peer.peerId)

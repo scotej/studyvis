@@ -220,6 +220,25 @@ export class LabMachine {
     return page
   }
 
+  // #264 — this machine's renderer process ids. Chrome runs WebRTC in the
+  // renderer, so SIGSTOP-ing these freezes the page AND its ICE agent: the
+  // multi-second stall a saturated laptop produces, which is what makes a
+  // peer's connection report `disconnected`. A machine is a whole browser, so
+  // every renderer here belongs to it.
+  async rendererPids(): Promise<number[]> {
+    const session = await this.browser.newBrowserCDPSession()
+    try {
+      const info = (await session.send(
+        'SystemInfo.getProcessInfo' as 'Browser.getVersion'
+      )) as unknown as { processInfo: { type: string; id: number }[] }
+      return info.processInfo
+        .filter((process) => process.type === 'renderer')
+        .map((process) => process.id)
+    } finally {
+      await session.detach().catch(() => {})
+    }
+  }
+
   /** Push a Tauri event into this machine's windows, as Rust would. */
   async emit(event: string, payload: unknown, label?: string): Promise<number> {
     let delivered = 0

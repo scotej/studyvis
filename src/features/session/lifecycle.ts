@@ -18,6 +18,7 @@ import {
 } from '@/lib/db/sessionPresence'
 import { bytesToBase64 } from '@/lib/encoding'
 import { joinTopic, type TopicRoom } from '@/lib/trystero'
+import { transportHealthOf } from '@/lib/webrtc/resilientPeerConnection'
 import { buildIceOptions } from '@/lib/trystero/ice'
 import { userRelayConfig } from '@/lib/trystero/relays'
 import { useAuditStore } from '@/stores/auditStore'
@@ -66,6 +67,15 @@ export const PTT_STATE_ACTION = 'ptt-state'
 export const CAMERA_STATE_ACTION = 'camera-state'
 // 4-user mesh hard cap (host + 3 peers, ARCHITECTURE.md §7).
 export const MAX_REMOTE_PEERS = 3
+
+// #264 — how long a peer whose transport dropped uncleanly keeps its tile,
+// marked "Reconnecting…", before it is treated as gone. The lib/webrtc hold
+// already absorbs a blip without anyone leaving at all; this covers the
+// longer case where trystero does tear the connection down and then
+// re-establishes it (observed in the field within ~15 s). Presence accounting
+// is closed at the drop, not here, so a session ended mid-grace cannot
+// over-count overlap.
+export const PEER_RECONNECT_GRACE_MS = 30_000
 export const SESSION_FULL_MESSAGE = strings.session.full
 // V2-P8 replaces the V2-P3 session-ended splash with the post-session
 // report. The reset now runs when the user dismisses the report (via
@@ -888,6 +898,13 @@ export function wireSessionRoom(
   store: SessionStore = useSessionStore
 ): RoomLifecycle {
   const peers = new Set<string>()
+  // #264 — the live RTCPeerConnection behind each admitted peer, captured at
+  // join so the departure path can read the transport state that preceded
+  // trystero's close (by then connectionState is already 'closed'). Empty for
+  // the in-process room mocks used by tests, which is what keeps their
+  // departures on the immediate path.
+  const transportByPeer = new Map<string, RTCPeerConnection>()
+  const reconnectTimers = new Map<string, ReturnType<typeof setTimeout>>()
   // A guest's onPeerJoin only observes transport. The original host's
   // authority-checked roster below is the only source of reconnect eligibility.
   const reconnectPeerIds = new Set<string>()
@@ -1004,6 +1021,45 @@ export function wireSessionRoom(
     }
     rosterProbeRetryTimers.clear()
     rosterProbeAttempts.clear()
+    for (const [peerId, timeout] of reconnectTimers) {
+      clearTimeout(timeout)
+      store.getState().peerReconnectExpired(peerId)
+    }
+    reconnectTimers.clear()
+    transportByPeer.clear()
+  }
+
+  // trystero publishes a peer into its active map immediately before firing
+  // onPeerJoin, so the connection is always resolvable here.
+  const bindTransport = (peerId: string) => {
+    const connection = room.getPeers()[peerId]
+    if (connection) transportByPeer.set(peerId, connection)
+  }
+
+  const scheduleReconnectGrace = (peerId: string) => {
+    const existing = reconnectTimers.get(peerId)
+    if (existing !== undefined) clearTimeout(existing)
+    reconnectTimers.set(
+      peerId,
+      setTimeout(() => {
+        reconnectTimers.delete(peerId)
+        if (disposed) return
+        store.getState().peerReconnectExpired(peerId)
+        log.info('peer.reconnect_expired', {
+          role: hooks.isHost ? 'host' : 'guest',
+          graceMs: PEER_RECONNECT_GRACE_MS,
+          peerCount: peers.size,
+        })
+      }, PEER_RECONNECT_GRACE_MS)
+    )
+  }
+
+  const clearReconnectGrace = (peerId: string): boolean => {
+    const timeout = reconnectTimers.get(peerId)
+    if (timeout === undefined) return false
+    clearTimeout(timeout)
+    reconnectTimers.delete(peerId)
+    return true
   }
 
   const getFrozenGuestAdmission = (): GuestAdmissionSnapshot | null => {
@@ -1323,6 +1379,8 @@ export function wireSessionRoom(
       return
     }
     peers.add(peerId)
+    bindTransport(peerId)
+    const reconnected = clearReconnectGrace(peerId)
     if (hooks.isHost) {
       hostAdmittedPeerIds.add(peerId)
       reservedReconnectPeerIds.delete(peerId)
@@ -1358,6 +1416,9 @@ export function wireSessionRoom(
     log.info('peer.joined', {
       role: hooks.isHost ? 'host' : 'guest',
       peerCount: peers.size,
+      // #264 — true when this join resumed a tile the grace window was
+      // holding open, rather than admitting a newly arrived participant.
+      reconnected,
     })
   }
 
@@ -1673,7 +1734,26 @@ export function wireSessionRoom(
         })
       }
     }
-    const closedPresence = store.getState().peerLeft(peerId)
+    // #264 — tell a clean departure from a lost link. A remote Leave arrives
+    // over the data channel and a remote quit closes that channel, so both
+    // reach us with the transport still 'connected'; only a link that had
+    // already gone 'disconnected' or 'failed' is worth waiting on. The
+    // connection itself is 'closed' by now (trystero destroys it before
+    // calling back), hence the state captured while it was live.
+    const health = transportHealthOf(transportByPeer.get(peerId))
+    transportByPeer.delete(peerId)
+    const lastConnectionState = health?.lastLiveConnectionState ?? null
+    const degradedForMs =
+      health?.degradedSinceMs != null
+        ? Date.now() - health.degradedSinceMs
+        : null
+    const awaitingReconnect =
+      lastConnectionState === 'disconnected' || lastConnectionState === 'failed'
+    // Presence closes at the drop either way. The grace window holds only the
+    // tile, so ending the session mid-grace cannot inflate measured overlap.
+    const closedPresence = awaitingReconnect
+      ? store.getState().peerTransportLost(peerId)
+      : store.getState().peerLeft(peerId)
     if (closedPresence) {
       void useFriendsStore
         .getState()
@@ -1691,10 +1771,16 @@ export function wireSessionRoom(
           })
         })
     }
+    if (awaitingReconnect) scheduleReconnectGrace(peerId)
     log.info('peer.left', {
       role: hooks.isHost ? 'host' : 'guest',
       peerCount: peers.size,
       presenceClosed: closedPresence !== null,
+      // #264 diagnostics: an empty "Anything from the logs" box on the issue
+      // was the direct consequence of recording nothing about the transport.
+      lastConnectionState,
+      degradedForMs,
+      awaitingReconnect,
     })
     if (lostAdmissionAuthority) {
       authenticatedAuthorityPeerId = hooks.isHost ? room.selfId : null
