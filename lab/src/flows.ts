@@ -180,10 +180,25 @@ export async function declareTopicIfAsked(
 
 /** Every <video> the page is currently rendering, with the state a scenario
  *  cares about: is it actually carrying live tracks and painting frames. */
-export async function videoState(
-  machine: LabMachine
-): Promise<
-  { width: number; height: number; playing: boolean; tracks: string[] }[]
+export async function videoState(machine: LabMachine): Promise<
+  {
+    width: number
+    height: number
+    playing: boolean
+    tracks: string[]
+    // #264 — decoded-frame counter. Sampled twice, this is what separates a
+    // stream that is still LIVE from one frozen on its last frame; the two
+    // look identical to `playing` and `videoWidth`.
+    decodedFrames: number
+    // VideoTile mutes the local preview and every screen tile, so an unmuted
+    // video is a REMOTE camera — the only kind whose frames prove a peer is
+    // still transmitting to this machine.
+    muted: boolean
+    // Track identity, so a test can follow ONE connection's media across a
+    // reconnection instead of being fooled by a fresh stream arriving on a
+    // replaced element with a reset frame counter.
+    trackIds: string[]
+  }[]
 > {
   return ui.evaluate(
     machine.page(),
@@ -193,6 +208,13 @@ export async function videoState(
       playing: !video.paused,
       tracks: video.srcObject
         ? video.srcObject.getTracks().map((track) => track.kind + ':' + track.readyState)
+        : [],
+      decodedFrames: typeof video.getVideoPlaybackQuality === 'function'
+        ? video.getVideoPlaybackQuality().totalVideoFrames
+        : 0,
+      muted: video.muted,
+      trackIds: video.srcObject
+        ? video.srcObject.getTracks().map((track) => track.id)
         : [],
     }))`
   )
