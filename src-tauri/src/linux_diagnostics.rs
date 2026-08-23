@@ -29,6 +29,8 @@
 //!    down but every attempt is in the log.
 
 use tauri::{Manager, Runtime};
+use webkit2gtk::gio::{BusType, DBusCallFlags};
+use webkit2gtk::glib::ToVariant;
 use webkit2gtk::{WebProcessTerminationReason, WebViewExt};
 
 /// Automatic page reloads per process lifetime once the web process dies.
@@ -344,6 +346,94 @@ fn packaged_webkit_probes(
         runtime.join("WebKitWebProcess"),
         usr.join("bin/bwrap"),
     )
+}
+
+// ---------------------------------------------------------------------------
+// Tray-host presence. tray-icon's Linux constructor builds an AppIndicator
+// and returns Ok even when no StatusNotifier host exists on the session bus —
+// the icon simply never renders (the #263 GNOME outcome). Construction
+// success therefore says nothing about reachability, so close-to-tray is
+// gated on this DBus check instead: libappindicator's StatusNotifierItem
+// protocol requires a watcher (org.kde.StatusNotifierWatcher) that reports a
+// registered host before any indicator can appear.
+// ---------------------------------------------------------------------------
+
+/// Whether the session bus reports an owner for
+/// `org.kde.StatusNotifierWatcher`. A missing or unreachable bus counts as
+/// absent: without D-Bus there is no StatusNotifier protocol at all.
+pub fn status_notifier_watcher_owned() -> bool {
+    dbus_name_has_owner("org.kde.StatusNotifierWatcher")
+}
+
+fn dbus_name_has_owner(name: &str) -> bool {
+    let Ok(connection) =
+        webkit2gtk::gio::bus_get_sync(BusType::Session, None::<&webkit2gtk::gio::Cancellable>)
+    else {
+        return false;
+    };
+    connection
+        .call_sync(
+            Some("org.freedesktop.DBus"),
+            "/org/freedesktop/DBus",
+            "org.freedesktop.DBus",
+            "NameHasOwner",
+            Some(&name.to_variant()),
+            Some(webkit2gtk::glib::VariantTy::BOOLEAN),
+            DBusCallFlags::NO_AUTO_START,
+            500,
+            None::<&webkit2gtk::gio::Cancellable>,
+        )
+        .ok()
+        .and_then(|reply| reply.get::<bool>())
+        .unwrap_or(false)
+}
+
+/// True when a StatusNotifier host can actually render an indicator: a
+/// watcher owns its well-known name AND it currently reports a registered
+/// host (GNOME's AppIndicator extension provides both; a half-installed
+/// stack may expose a watcher without ever registering a host).
+pub fn status_notifier_host_ready() -> bool {
+    if !status_notifier_watcher_owned() {
+        return false;
+    }
+    let Ok(connection) =
+        webkit2gtk::gio::bus_get_sync(BusType::Session, None::<&webkit2gtk::gio::Cancellable>)
+    else {
+        return false;
+    };
+    connection
+        .call_sync(
+            Some("org.kde.StatusNotifierWatcher"),
+            "/StatusNotifierWatcher",
+            "org.freedesktop.DBus.Properties",
+            "Get",
+            Some(
+                &(
+                    "org.kde.StatusNotifierWatcher",
+                    "IsStatusNotifierHostRegistered",
+                )
+                    .to_variant(),
+            ),
+            // Properties.Get answers (v); the inner value is validated below
+            // instead of pinning the reply type.
+            None,
+            DBusCallFlags::NO_AUTO_START,
+            500,
+            None::<&webkit2gtk::gio::Cancellable>,
+        )
+        .ok()
+        .and_then(|reply| reply.try_child_value(0))
+        .and_then(|boxed| boxed.get::<bool>())
+        .unwrap_or(false)
+}
+
+/// Boot record for the tray-probe outcome, mirrored to stderr like every
+/// other boot fact. Called from setup_desktop once the tray has been built.
+pub fn record_tray_probe(built: bool, host_ready: bool) {
+    record(
+        "boot.tray_probe",
+        &[("built", flag(built)), ("host_ready", flag(host_ready))],
+    );
 }
 
 // ---------------------------------------------------------------------------

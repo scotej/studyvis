@@ -826,6 +826,36 @@ fn setup_desktop(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>>
         .build(app)
     {
         Ok(_tray) => {
+            // Construction returning Ok does not mean an icon can render:
+            // tray-icon's Linux backend registers an AppIndicator over DBus
+            // and succeeds even with no StatusNotifier host on the session
+            // bus — stock GNOME's outcome (#263). Only mark the tray usable
+            // when a watcher with a registered host can actually show it.
+            #[cfg(target_os = "linux")]
+            {
+                let host_ready = linux_diagnostics::status_notifier_host_ready();
+                linux_diagnostics::record_tray_probe(true, host_ready);
+                if !host_ready {
+                    eprintln!(
+                        "[tray] no StatusNotifier host on the session bus; close-to-tray disabled"
+                    );
+                    commands::native_log::record(
+                        commands::native_log::NativeLevel::Info,
+                        "native",
+                        "tray.host_absent",
+                        &[(
+                            "os",
+                            commands::native_log::NativeValue::Word(std::env::consts::OS),
+                        )],
+                    );
+                }
+                TrayAvailableFlag::set(app.app_handle(), host_ready);
+                if !host_ready {
+                    // No reachable tray → nothing can un-hide the window.
+                    MinimizeToTrayFlag::set(app.app_handle(), false);
+                }
+            }
+            #[cfg(not(target_os = "linux"))]
             TrayAvailableFlag::set(app.app_handle(), true);
         }
         Err(err) => {
