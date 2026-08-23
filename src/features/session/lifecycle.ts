@@ -18,7 +18,10 @@ import {
 } from '@/lib/db/sessionPresence'
 import { bytesToBase64 } from '@/lib/encoding'
 import { joinTopic, type TopicRoom } from '@/lib/trystero'
-import { transportHealthOf } from '@/lib/webrtc/resilientPeerConnection'
+import {
+  closeTransport,
+  transportHealthOf,
+} from '@/lib/webrtc/resilientPeerConnection'
 import { buildIceOptions } from '@/lib/trystero/ice'
 import { userRelayConfig } from '@/lib/trystero/relays'
 import { useAuditStore } from '@/stores/auditStore'
@@ -71,10 +74,13 @@ export const MAX_REMOTE_PEERS = 3
 // #264 — how long a peer whose transport dropped uncleanly keeps its tile,
 // marked "Reconnecting…", before it is treated as gone. The lib/webrtc hold
 // already absorbs a blip without anyone leaving at all; this covers the
-// longer case where trystero does tear the connection down and then
-// re-establishes it (observed in the field within ~15 s). Presence accounting
-// is closed at the drop, not here, so a session ended mid-grace cannot
-// over-count overlap.
+// longer case where trystero does declare the peer closed and then
+// re-establishes it. Re-establishment is only possible because the departure
+// path closes the abandoned connection (see the onPeerLeave handler): while
+// it stays open, trystero reads it as a live connected peer and drops every
+// signaling message for that peerId, so no amount of waiting would help.
+// Presence accounting is closed at the drop, not here, so a session ended
+// mid-grace cannot over-count overlap.
 export const PEER_RECONNECT_GRACE_MS = 30_000
 export const SESSION_FULL_MESSAGE = strings.session.full
 // V2-P8 replaces the V2-P3 session-ended splash with the post-session
@@ -899,10 +905,11 @@ export function wireSessionRoom(
 ): RoomLifecycle {
   const peers = new Set<string>()
   // #264 — the live RTCPeerConnection behind each admitted peer, captured at
-  // join so the departure path can read the transport state that preceded
-  // trystero's close (by then connectionState is already 'closed'). Empty for
-  // the in-process room mocks used by tests, which is what keeps their
-  // departures on the immediate path.
+  // join. The departure path needs it for two things trystero does not give
+  // it: the transport state that preceded the departure, and a handle to
+  // close a connection trystero abandoned open. Empty for the in-process room
+  // mocks used by tests, which is what keeps their departures on the
+  // immediate path.
   const transportByPeer = new Map<string, RTCPeerConnection>()
   const reconnectTimers = new Map<string, ReturnType<typeof setTimeout>>()
   // A guest's onPeerJoin only observes transport. The original host's
@@ -1054,6 +1061,22 @@ export function wireSessionRoom(
     )
   }
 
+  const closeOrphanedTransport = (
+    connection: RTCPeerConnection | undefined
+  ) => {
+    if (!connection || connection.connectionState === 'closed') return
+    try {
+      closeTransport(connection)
+      log.info('transport.closed_orphan', {
+        role: hooks.isHost ? 'host' : 'guest',
+        peerCount: peers.size,
+      })
+    } catch (err) {
+      // The in-process bus used by tests intentionally has only a no-op close.
+      log.warn('transport.close_orphan_failed', { err })
+    }
+  }
+
   const clearReconnectGrace = (peerId: string): boolean => {
     const timeout = reconnectTimers.get(peerId)
     if (timeout === undefined) return false
@@ -1092,7 +1115,9 @@ export function wireSessionRoom(
   const closePeerTransport = (peerId: string) => {
     if (disposed) return
     try {
-      room.getPeers()[peerId]?.close()
+      // Channels first (see closeTransport): an evicted peer learns from a
+      // stream reset instead of waiting out ICE consent.
+      closeTransport(room.getPeers()[peerId])
     } catch {
       // The in-process bus used by tests intentionally has only a no-op close.
     }
@@ -1738,9 +1763,11 @@ export function wireSessionRoom(
     // over the data channel and a remote quit closes that channel, so both
     // reach us with the transport still 'connected'; only a link that had
     // already gone 'disconnected' or 'failed' is worth waiting on. The
-    // connection itself is 'closed' by now (trystero destroys it before
-    // calling back), hence the state captured while it was live.
-    const health = transportHealthOf(transportByPeer.get(peerId))
+    // instantaneous state cannot answer this — trystero declares the peer
+    // gone without closing the connection, which may by now have recovered to
+    // 'connected' — hence the last state captured while it was live.
+    const transport = transportByPeer.get(peerId)
+    const health = transportHealthOf(transport)
     transportByPeer.delete(peerId)
     const lastConnectionState = health?.lastLiveConnectionState ?? null
     const degradedForMs =
@@ -1749,6 +1776,31 @@ export function wireSessionRoom(
         : null
     const awaitingReconnect =
       lastConnectionState === 'disconnected' || lastConnectionState === 'failed'
+    // #264 — trystero abandons the connection OPEN on an unclean close. Its
+    // `SharedPeerManager.clear(…, {destroyPeer: false})` empties `bindings`
+    // BEFORE firing each binding's close handler, so the `detachBinding` that
+    // would have removed our senders early-returns and never runs. The camera
+    // and screen therefore keep transmitting to a peer this app has just told
+    // the user is gone — measured, not inferred: with this close removed, the
+    // far side decodes 31 fresh frames of us in 4 s while our own session sits
+    // empty, which is exactly what #264's reporter described.
+    //
+    // The far side is also stuck: its `state.connectedPeer` still points at
+    // this connection, `getConnectedPeerHealth` reads it as "live" because
+    // its data channel never closed, and `createSignalHandler` returns early
+    // on precisely that, so it drops every offer we send. Nothing we do
+    // locally re-forms the session while this connection stays up. Closing it
+    // — data channels first, so they learn from a stream reset instead of
+    // waiting out ICE consent — is what unblocks the grace window below;
+    // measured, reconnection then lands inside it.
+    //
+    // Never on a clean departure: a peer who leaves the session by choice is
+    // still a friend, and presence and the inbox go on riding that same
+    // connection. The one case this gets wrong is a Leave that arrives while
+    // the link is degraded — then presence and the inbox re-establish, which
+    // the 60 s heartbeat window absorbs invisibly. Staying on camera to
+    // someone the UI says has gone is the worse failure.
+    if (awaitingReconnect) closeOrphanedTransport(transport)
     // Presence closes at the drop either way. The grace window holds only the
     // tile, so ending the session mid-grace cannot inflate measured overlap.
     const closedPresence = awaitingReconnect

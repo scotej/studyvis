@@ -1,4 +1,4 @@
-// #264 — trystero closes a peer 5 s after its RTCPeerConnection reports
+// #264 — trystero declares a peer gone 5 s after its RTCPeerConnection reports
 // `disconnected`, which is shorter than the multi-second process stalls a
 // machine running the on-device model produces. These cover the hold that
 // keeps a recoverable blip invisible while letting every terminal state

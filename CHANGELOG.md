@@ -4,20 +4,27 @@
 
 ### Fixed
 
-- **A brief stall no longer ends the session and takes your friend with it.**
-  A study session could lose a peer out of nowhere after a few minutes and
-  never get them back: the friend vanished from the grid, chat stopped
-  arriving, and only restarting the app fixed it — while on the other side
-  your video sat there frozen on its last frame, so nobody could tell what had
-  happened. Underneath, the peer-to-peer layer gave up on a connection five
+- **A brief stall no longer empties your session while you are still on
+  camera to your friend.** A study session could lose a peer out of nowhere
+  after a few minutes and never get them back: the friend vanished from the
+  grid, chat stopped arriving in both directions, and only restarting the app
+  fixed it. The dangerous part was invisible from the inside — your friend
+  could still see you, live, moving around, and your shared screen with it,
+  because the connection was never actually closed. You were sitting in what
+  looked like an empty session, still being watched.
+
+  Two faults, both fixed. The peer-to-peer layer gave up on a connection five
   seconds after it stopped receiving, which is less time than the app itself
-  freezes for while the on-device model runs on a busy laptop. Brief silence
-  on a link is the state WebRTC expects to recover from, so it is now given
-  twenty seconds to do so before anyone is declared gone, while a genuinely
-  dead connection still fails immediately. If a peer is dropped anyway, their
-  place is held for thirty seconds under a "Reconnecting…" label instead of
-  disappearing, and the diagnostics log now records what the connection was
-  doing when it went.
+  freezes for while the on-device model runs on a busy laptop; brief silence
+  on a link is the state this is supposed to recover from, so it is now given
+  twenty seconds before anyone is declared gone, while a genuinely dead
+  connection still fails immediately. And when a peer _is_ dropped, the
+  connection carrying your camera and screen is now closed rather than left
+  running — which also unblocks reconnecting, since the abandoned connection
+  was itself what stopped the two of you finding each other again. A dropped
+  friend's place is held for thirty seconds under a "Reconnecting…" label
+  instead of disappearing, and the diagnostics log now records what the
+  connection was doing when it went.
 
 - **StudyVis no longer opens to a blank window on Arch-based Linux.** The
   1.11.3 AppImage carried PipeWire's client library but none of the plugins,

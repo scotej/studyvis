@@ -92,12 +92,15 @@ function fakeRoom(options: { wrapped?: boolean } = {}) {
       for (const fn of joinSubs) fn(peerId)
       connections.get(peerId)?.transition('connected', 'connected')
     },
-    // trystero destroys the connection before it calls back, so the close
-    // always precedes the leave notification.
+    // Models trystero faithfully: on BOTH the clean and the unclean path it
+    // detaches the room without closing the RTCPeerConnection
+    // (`SharedPeerManager.clear(…, {destroyPeer: false})`). Leaving it open
+    // here is what lets these tests assert who closes it and when.
     leave(peerId: string) {
-      connections.get(peerId)?.close()
+      const connection = connections.get(peerId)
       connections.delete(peerId)
       for (const fn of leaveSubs) fn(peerId)
+      return connection
     },
   }
 }
@@ -144,7 +147,14 @@ describe('#264 peer reconnect grace', () => {
     harness.join('peer-a')
     helloFrom('peer-a')
     harness.connection('peer-a').transition('disconnected', 'disconnected')
-    harness.leave('peer-a')
+    const abandoned = harness.leave('peer-a')
+
+    // trystero leaves the connection open with our camera and screen still
+    // attached to it (#264). The departure path must close it: it stops the
+    // transmission to a peer the UI now says is gone, and it is the only
+    // thing that lets trystero re-establish — while it reads as live, every
+    // signaling message for this peer is dropped.
+    expect(abandoned?.connectionState).toBe('closed')
 
     const state = useSessionStore.getState()
     // The room membership is gone; only the grid placeholder survives.
@@ -222,8 +232,11 @@ describe('#264 peer reconnect grace', () => {
     helloFrom('peer-a')
     // No degraded transition: the connection was healthy right up to the
     // remote Leave, which is what a deliberate departure looks like.
-    harness.leave('peer-a')
+    const departed = harness.leave('peer-a')
 
+    // The connection stays open — presence and the inbox legitimately still
+    // ride it, and trystero has already removed this room's senders from it.
+    expect(departed?.connectionState).toBe('connected')
     expect(useSessionStore.getState().peers['peer-a']).toBeUndefined()
     expect(vi.getTimerCount()).toBe(0)
 
