@@ -265,46 +265,49 @@ fn webkit_version_components() -> (u64, u64, u64) {
 }
 
 fn record_packaged_payloads() {
-    // Same layout assumption as linux_pipewire_runtime::packaged_prefix:
-    // <prefix>/usr/bin/studyvis inside the mounted AppImage. A source or
+    // The AppImage executes /<mount>/usr/bin/studyvis, so the executable's
+    // grandparent is <mount>/usr itself — the same derivation
+    // linux_pipewire_runtime::packaged_prefix performs. A source or
     // `tauri dev` build has nothing beside the executable and reports absent,
     // which is the true statement there.
-    let prefix = std::env::current_exe()
+    let usr = std::env::current_exe()
         .ok()
-        .and_then(|exe| exe.parent()?.parent().map(|p| p.join("usr")));
+        .as_deref()
+        .and_then(|exe| exe.parent()?.parent().map(|p| p.to_path_buf()));
 
-    let webkit_runtime = prefix.as_ref().map(|p| p.join("studyvis-webkit-runtime"));
+    // Staged names come from src-tauri/tauri.linux.conf.json: the WebKit
+    // processes sit directly in bin/studyvis-webkit-runtime and the bwrap
+    // helper in bin/ — there is no processes/ or sandbox/ subdirectory in the
+    // shipped image. scripts/check-linux-appimage.sh validates the same
+    // locations, so these probes stay honest (unit-pinned below).
+    let webkit = usr.as_deref().map(packaged_webkit_probes);
     record(
         "boot.packaged_webkit_runtime",
         &[
             (
                 "present",
-                flag(webkit_runtime.as_ref().is_some_and(|p| p.is_dir())),
+                flag(webkit.as_ref().is_some_and(|(dir, _, _)| dir.is_dir())),
             ),
             (
                 "web_process",
                 flag(
-                    webkit_runtime
+                    webkit
                         .as_ref()
-                        .is_some_and(|p| p.join("processes/WebProcess").is_file()),
+                        .is_some_and(|(_, web_process, _)| web_process.is_file()),
                 ),
             ),
             (
                 "sandbox_bwrap",
-                flag(
-                    webkit_runtime
-                        .as_ref()
-                        .is_some_and(|p| p.join("sandbox/bwrap").is_file()),
-                ),
+                flag(webkit.as_ref().is_some_and(|(_, _, bwrap)| bwrap.is_file())),
             ),
         ],
     );
 
-    let pipewire = prefix.as_ref().map(|p| {
+    let pipewire = usr.as_ref().map(|u| {
         (
-            p.join("lib/spa-0.2"),
-            p.join("lib/libpipewire-module-protocol-native.so"),
-            p.join("share/pipewire"),
+            u.join("lib/spa-0.2"),
+            u.join("lib/libpipewire-module-protocol-native.so"),
+            u.join("share/pipewire"),
         )
     });
     if let Some((spa, modules_marker, config)) = pipewire {
@@ -326,6 +329,21 @@ fn record_packaged_payloads() {
             ],
         );
     }
+}
+
+// Pure so the packaged-layout contract is unit-testable without a filesystem.
+// Order: (runtime dir, web process, bwrap). Paths mirror
+// src-tauri/tauri.linux.conf.json's bundle files and
+// scripts/check-linux-appimage.sh's validated locations exactly.
+fn packaged_webkit_probes(
+    usr: &std::path::Path,
+) -> (std::path::PathBuf, std::path::PathBuf, std::path::PathBuf) {
+    let runtime = usr.join("bin/studyvis-webkit-runtime");
+    (
+        runtime.clone(),
+        runtime.join("WebKitWebProcess"),
+        usr.join("bin/bwrap"),
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -452,5 +470,23 @@ mod tests {
         // Any real WebKitGTK answers; 0.0.0 would mean the symbols vanished.
         assert!(major > 0, "webkit_get_major_version returned {major}");
         let _ = (minor, micro);
+    }
+
+    #[test]
+    fn packaged_webkit_probes_target_the_staged_appimage_layout() {
+        // Must stay byte-identical to src-tauri/tauri.linux.conf.json's bundle
+        // files and scripts/check-linux-appimage.sh's validated locations: the
+        // WebKit processes sit directly in bin/studyvis-webkit-runtime and
+        // bwrap in bin/. A drift here makes boot.packaged_webkit_runtime lie.
+        let probes = packaged_webkit_probes(std::path::Path::new("/mnt/usr"));
+        assert_eq!(
+            probes.0,
+            std::path::PathBuf::from("/mnt/usr/bin/studyvis-webkit-runtime")
+        );
+        assert_eq!(
+            probes.1,
+            std::path::PathBuf::from("/mnt/usr/bin/studyvis-webkit-runtime/WebKitWebProcess")
+        );
+        assert_eq!(probes.2, std::path::PathBuf::from("/mnt/usr/bin/bwrap"));
     }
 }
