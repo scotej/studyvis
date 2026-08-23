@@ -50,6 +50,12 @@ export type PeerSnapshot = {
   peerId: string
   hasStream: boolean
   ptt: boolean
+  // #264 — the transport dropped without a clean departure and the lifecycle
+  // is holding this tile open for a same-peerId reconnect. The identity
+  // binding and presence interval are already closed (see peerTransportLost),
+  // so every identity-gated consumer treats it as absent; only the grid still
+  // shows it, labelled "Reconnecting…".
+  reconnecting: boolean
   // Populated by the signed-hello handshake (V1-P9). Receivers gate audit-
   // event verification on this binding's presence; absent until hello arrives.
   edPubkeyHex: string | null
@@ -181,6 +187,19 @@ export type SessionState = {
     peerId: string,
     clock?: PeerPresenceClock
   ) => PeerPresenceClose | null
+  // #264 — an unclean transport loss. Closes the authenticated overlap
+  // interval at `clock` exactly as peerLeft does (so a session ended during
+  // the grace window can never over-count), but keeps a name-only stub in
+  // `peers` so the grid can show "Reconnecting…" instead of the friend
+  // vanishing. A same-peerId rejoin rebinds through the normal
+  // peerJoined + signed-hello path and opens a fresh interval.
+  peerTransportLost: (
+    peerId: string,
+    clock?: PeerPresenceClock
+  ) => PeerPresenceClose | null
+  // Drops a stub left by peerTransportLost once its grace window expires.
+  // Never removes a peer that reconnected in the meantime.
+  peerReconnectExpired: (peerId: string) => void
   setPeerStream: (peerId: string, hasStream: boolean) => void
   setPeerPtt: (peerId: string, active: boolean) => void
   setPeerHello: (
@@ -284,6 +303,70 @@ function overlapMs(
   return Math.max(0, Math.floor(Math.min(wallMs, monoMs)))
 }
 
+type SessionSet = Parameters<StateCreator<SessionState>>[0]
+
+// Shared body of peerLeft / peerTransportLost. Both close the departing
+// transport's authenticated overlap interval at `clock`; they differ only in
+// what is left behind in `peers` — nothing, or the #264 name-only
+// "Reconnecting…" stub. The identity binding is dropped either way, so the
+// interval close, every identity-gated consumer, and a later signed hello all
+// behave exactly as they did before the stub existed.
+function departPeer(
+  set: SessionSet,
+  peerId: string,
+  clock: PeerPresenceClock,
+  retainAsReconnecting: boolean
+): PeerPresenceClose | null {
+  let closed: PeerPresenceClose | null = null
+  set((s) => {
+    const departing = s.peers[peerId]
+    if (!departing) return s
+    const peers = { ...s.peers }
+    if (retainAsReconnecting) {
+      peers[peerId] = {
+        ...departing,
+        hasStream: false,
+        ptt: false,
+        reconnecting: true,
+        edPubkeyHex: null,
+      }
+    } else {
+      delete peers[peerId]
+    }
+    const edPubkeyHex = departing.edPubkeyHex
+    if (!edPubkeyHex) return { peers }
+
+    const identityStillPresent = Object.values(peers).some(
+      (peer) => peer.edPubkeyHex === edPubkeyHex
+    )
+    const presence = s.peerPresence[edPubkeyHex]
+    if (
+      identityStillPresent ||
+      !presence ||
+      presence.activeSinceWall === null ||
+      presence.activeSinceMono === null
+    ) {
+      return { peers }
+    }
+
+    const accumulatedMs = presence.accumulatedMs + overlapMs(presence, clock)
+    closed = { edPubkeyHex, endedAt: clock.wallMs }
+    return {
+      peers,
+      peerPresence: {
+        ...s.peerPresence,
+        [edPubkeyHex]: {
+          accumulatedMs,
+          activeSinceWall: null,
+          activeSinceMono: null,
+          lastEndedAt: clock.wallMs,
+        },
+      },
+    }
+  })
+  return closed
+}
+
 const sessionStateCreator: StateCreator<SessionState> = (set, get) => ({
   ...INITIAL,
   begin: (init) =>
@@ -324,60 +407,41 @@ const sessionStateCreator: StateCreator<SessionState> = (set, get) => ({
   setPendingInitialTopic: (topic) => set({ pendingInitialTopic: topic }),
   setDeclaredStudyTopic: (next) => set({ declaredStudyTopic: next }),
   peerJoined: (peerId) =>
-    set((s) => ({
-      hadAnyPeer: true,
-      peers: {
-        ...s.peers,
-        [peerId]: s.peers[peerId] ?? {
-          peerId,
-          hasStream: false,
-          ptt: false,
-          edPubkeyHex: null,
-          displayName: null,
-          joinedAt: null,
-        },
-      },
-    })),
-  peerLeft: (peerId, clock = currentPresenceClock()) => {
-    let closed: PeerPresenceClose | null = null
     set((s) => {
-      const departing = s.peers[peerId]
-      if (!departing) return s
+      const existing = s.peers[peerId]
+      return {
+        hadAnyPeer: true,
+        peers: {
+          ...s.peers,
+          [peerId]: existing
+            ? // #264 — a stub from peerTransportLost resumes here. Its
+              // identity binding stays cleared so the signed hello re-opens a
+              // fresh overlap interval, exactly as a first join would.
+              { ...existing, reconnecting: false }
+            : {
+                peerId,
+                hasStream: false,
+                ptt: false,
+                reconnecting: false,
+                edPubkeyHex: null,
+                displayName: null,
+                joinedAt: null,
+              },
+        },
+      }
+    }),
+  peerLeft: (peerId, clock = currentPresenceClock()) =>
+    departPeer(set, peerId, clock, false),
+  peerTransportLost: (peerId, clock = currentPresenceClock()) =>
+    departPeer(set, peerId, clock, true),
+  peerReconnectExpired: (peerId) =>
+    set((s) => {
+      const stub = s.peers[peerId]
+      if (!stub?.reconnecting) return s
       const peers = { ...s.peers }
       delete peers[peerId]
-      const edPubkeyHex = departing.edPubkeyHex
-      if (!edPubkeyHex) return { peers }
-
-      const identityStillPresent = Object.values(peers).some(
-        (peer) => peer.edPubkeyHex === edPubkeyHex
-      )
-      const presence = s.peerPresence[edPubkeyHex]
-      if (
-        identityStillPresent ||
-        !presence ||
-        presence.activeSinceWall === null ||
-        presence.activeSinceMono === null
-      ) {
-        return { peers }
-      }
-
-      const accumulatedMs = presence.accumulatedMs + overlapMs(presence, clock)
-      closed = { edPubkeyHex, endedAt: clock.wallMs }
-      return {
-        peers,
-        peerPresence: {
-          ...s.peerPresence,
-          [edPubkeyHex]: {
-            accumulatedMs,
-            activeSinceWall: null,
-            activeSinceMono: null,
-            lastEndedAt: clock.wallMs,
-          },
-        },
-      }
-    })
-    return closed
-  },
+      return { peers }
+    }),
   setPeerStream: (peerId, hasStream) =>
     set((s) => {
       const cur = s.peers[peerId]
@@ -398,6 +462,7 @@ const sessionStateCreator: StateCreator<SessionState> = (set, get) => ({
         peerId,
         hasStream: false,
         ptt: false,
+        reconnecting: false,
         edPubkeyHex: null,
         displayName: null,
         joinedAt: null,

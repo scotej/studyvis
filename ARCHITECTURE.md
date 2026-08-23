@@ -341,6 +341,14 @@ All topics are 32-byte SHA-256 hashes serialized as hex.
 
 Connections are **STUN-only by default**: no public TURN server currently ships (`PUBLIC_TURN_SERVERS` in `src/lib/trystero/ice.ts` is empty — the old free public TURN endpoints are dead and a zero-config public TURN no longer exists). The TURN path is fully wired into **every** room that carries WebRTC traffic — pairing, session rooms, the per-send invite room, and the always-on inbox + presence rooms — via `iceOptionsFor`, which maps the user's Network preference (`auto`/`always`/`never`) to ICE config. It applies to the next pairing/session/invite send the instant a server is added; the always-on inbox + presence rooms capture it at join and pick a change up on relaunch (same caveat as relays). Until a server is configured there is **no relay fallback**, so the ~15% of connections behind symmetric/CGNAT/strict-firewall networks that need a relay can fail to establish. Adding a server is gated on a cost/ownership decision: a long-lived credential baked into a distributed binary is extractable (quota/billing abuse), and safe short-lived credentials require a backend we don't operate. Onboarding documents the symptom: "if you regularly connect from a corporate / school network and sessions are choppy, this is why."
 
+### Surviving a transient disconnect (#264)
+
+`@trystero-p2p/core` closes a peer **5 s** after its `RTCPeerConnection` reports `disconnected` (`disconnectedCloseDelayMs` in its `peer.mjs`), and that close destroys the connection **every** room for that friend rides on — `SharedPeerManager` keeps one `RTCPeerConnection` per (appId, peerId), so the session, presence, and inbox rooms all bind to the same transport. Five seconds is shorter than a Wi-Fi roam and far shorter than the multi-second renderer stalls a machine running the on-device model produces; with no TURN, the connection that gets torn down often never re-forms, so a study session died for good.
+
+`disconnected` is the recoverable state in the WebRTC state machine and `failed` is the terminal one, so `src/lib/webrtc/resilientPeerConnection.ts` reports the standard posture: a **post-`connected` `disconnected` is held back for 20 s** before any reader sees it, after which the truth is republished and trystero's own timer runs as before. `failed`, `closed`, and every healthy state pass through untouched and immediately, and a connection that never reached `connected` is never held, so a failing handshake still fails fast. It is installed through trystero's documented `rtcPolyfill` hook in `joinTopic` — for **every** room, because a session-only polyfill would not be the one in effect on a connection the presence room created first. Deliberate departures are unaffected: trystero's `leaveAction` arrives over the data channel and a remote teardown closes that channel, and neither path reads connection state. `p2p.transport` log records (`hold.armed` / `hold.recovered` / `hold.expired`) carry the real states for diagnostics.
+
+`lab/scenarios/reconnect.ts` is the regression: it `SIGSTOP`s a peer's Chrome renderer — where Chrome runs WebRTC — for 15 s. With the hold disabled, the observer logs `peer.left` at `degradedForMs` 5003 and the peer never returns; with it, the session comes through untouched.
+
 ### Relay-carried presence (I74)
 
 Everything trystero does — over any strategy — is *signaling*; application data still rides WebRTC datachannels. So when a STUN-only connection can't traverse the NAT pair between two friends, presence heartbeats never flow in either direction, trystero surfaces **no error for a failed ICE attempt** (it silently re-offers forever), and both friends show each other permanently offline — the exact symptom that motivated this leg, made structural by offline ContactCard pairing (§5.1), which removed the last step that ever proved the P2P path worked.
@@ -1079,6 +1087,14 @@ The `Ctrl+]` AI dialog is a separate Tauri window with:
 Remote membership never controls local session lifetime. A deliberate peer
 departure, transport loss, or every remote peer disappearing moves the survivor
 to active solo mode indefinitely; it does not call the survivor's Leave handler.
+When a departure follows an unclean transport loss (the connection's last live
+state was `disconnected` or `failed` rather than `connected`), the survivor
+keeps a name-only "Reconnecting…" tile for that peer for 30 s — long enough for
+trystero to re-establish, which it does often enough to be worth waiting for.
+The tile is all that is held: the identity binding and the authenticated
+overlap interval close at the drop exactly as a clean departure closes them, so
+ending the session mid-grace cannot over-count overlap, and a same-peerId
+rejoin rebinds through the normal join + signed-hello path.
 The room, camera/microphone, optional AI sampling, elapsed-time accounting,
 Pomodoro, notes, invitation capacity, and explicit Leave control stay live. A
 later reconnect or new invitee joins that same room normally, and a departed

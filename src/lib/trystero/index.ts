@@ -30,12 +30,29 @@ import {
 } from 'trystero'
 
 import { logger } from '@/lib/log'
+import { createResilientPeerConnection } from '@/lib/webrtc/resilientPeerConnection'
 import { DEFAULT_MQTT_BROKER_URLS } from './mqttRelayUrls'
 import { DEFAULT_RELAY_URLS } from './relays'
 
 const log = logger.child('p2p.trystero')
 
 export const APP_ID = 'studyvis'
+
+// #264 — every RTCPeerConnection trystero builds gets the transient-disconnect
+// hold. It is applied here rather than per-caller because @trystero-p2p/core
+// shares ONE connection per friend across every room of an appId
+// (SharedPeerManager): the session room usually binds to the connection the
+// presence room already created, so a session-only polyfill would never be the
+// one in effect. Undefined outside a webview (node-env tests), where trystero
+// falls back to the global constructor it can't find either.
+const resilientPeerConnection =
+  typeof RTCPeerConnection === 'function'
+    ? createResilientPeerConnection(RTCPeerConnection)
+    : undefined
+
+const resilientRtcConfig = resilientPeerConnection
+  ? { rtcPolyfill: resilientPeerConnection }
+  : {}
 
 // Discovery transports trystero can rendezvous over. 'nostr' is the default
 // (curated relay pin in ./relays); 'mqtt' uses the separate curated broker pin
@@ -221,6 +238,7 @@ export const joinTopic: JoinTopicFn = (
           password,
           turnConfig,
           rtcConfig,
+          ...resilientRtcConfig,
           relayConfig: { urls: DEFAULT_MQTT_BROKER_URLS },
         },
         topic,
@@ -234,6 +252,7 @@ export const joinTopic: JoinTopicFn = (
         password,
         turnConfig,
         rtcConfig,
+        ...resilientRtcConfig,
         // Default-merge so the curated relay pin always applies when a caller
         // omits `urls`. A caller passing only `{ redundancy }` (no urls) would
         // otherwise short-circuit the pin and fall back to trystero's
