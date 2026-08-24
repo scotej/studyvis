@@ -202,14 +202,17 @@ pub fn capture_boot_environment() {
         ],
     );
 
-    // GStreamer/PipeWire relocation env the packaged runtime sets (I89). The
-    // values are absolute paths; presence is the diagnostic, not the path.
+    // GStreamer/PipeWire relocation env. GStreamer's own AppRun hook (and
+    // check-linux-appimage.sh's smoke, which mirrors it) exports only the
+    // 1_0-suffixed GST variants; the app itself sets the three PipeWire
+    // variables in linux_pipewire_runtime::install before any webview exists.
+    // The values are absolute paths; presence is the diagnostic, not the path.
     record(
         "boot.media_env",
         &[
             (
-                "gst_plugin_system_path",
-                flag(std::env::var_os("GST_PLUGIN_SYSTEM_PATH").is_some()),
+                "gst_plugin_system_path_1_0",
+                flag(std::env::var_os("GST_PLUGIN_SYSTEM_PATH_1_0").is_some()),
             ),
             (
                 "spa_plugin_dir",
