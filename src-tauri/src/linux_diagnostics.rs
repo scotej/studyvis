@@ -414,16 +414,28 @@ pub fn status_notifier_host_ready() -> bool {
                 )
                     .to_variant(),
             ),
-            // Properties.Get answers (v); the inner value is validated below
-            // instead of pinning the reply type.
+            // Properties.Get answers (v); the boxed bool is unpacked by
+            // parse_host_registered below instead of pinning the reply type.
             None,
             DBusCallFlags::NO_AUTO_START,
             500,
             None::<&webkit2gtk::gio::Cancellable>,
         )
         .ok()
-        .and_then(|reply| reply.try_child_value(0))
-        .and_then(|boxed| boxed.get::<bool>())
+        .map(|reply| parse_host_registered(&reply))
+        .unwrap_or(false)
+}
+
+// Properties.Get replies with `(v)` — the tuple's only child is itself a
+// DVARIANT boxing the property value. `g_variant_get_child_value` does NOT
+// unbox, and glib-rs' `Variant::get::<bool>()` accepts type 'b' only, so the
+// child must be unwrapped via `as_variant()` first or every read fails and
+// this probe would hardwire `false` even on desktops with a working tray.
+fn parse_host_registered(reply: &webkit2gtk::glib::Variant) -> bool {
+    reply
+        .try_child_value(0)
+        .and_then(|boxed| boxed.as_variant())
+        .and_then(|inner| inner.get::<bool>())
         .unwrap_or(false)
 }
 
@@ -578,5 +590,33 @@ mod tests {
             std::path::PathBuf::from("/mnt/usr/bin/studyvis-webkit-runtime/WebKitWebProcess")
         );
         assert_eq!(probes.2, std::path::PathBuf::from("/mnt/usr/bin/bwrap"));
+    }
+
+    #[test]
+    fn host_registered_parses_the_boxed_bool_out_of_a_properties_get_reply() {
+        use webkit2gtk::glib::{ToVariant, Variant};
+        // org.freedesktop.DBus.Properties.Get answers `(v)`: a one-child tuple
+        // holding the property value boxed as a DVARIANT. The child is NOT
+        // auto-unboxed, so the parser must call as_variant() before reading —
+        // reading the tuple child as 'b' directly always fails.
+        let reply = (Variant::from_variant(&true.to_variant()),).to_variant();
+        assert_eq!(reply.type_().as_str(), "(v)");
+        assert!(parse_host_registered(&reply));
+
+        let reply = (Variant::from_variant(&false.to_variant()),).to_variant();
+        assert!(!parse_host_registered(&reply));
+    }
+
+    #[test]
+    fn host_registered_replies_that_are_not_a_boxed_bool_read_as_false() {
+        use webkit2gtk::glib::ToVariant;
+        // A bare bool child (no DVARIANT box) must not panic and must read
+        // false — the box unwrap simply fails.
+        let unboxed = (true.to_variant(),).to_variant();
+        assert!(!parse_host_registered(&unboxed));
+        // An empty tuple (malformed reply) likewise reads false.
+        let empty = ().to_variant();
+        assert_eq!(empty.type_().as_str(), "()");
+        assert!(!parse_host_registered(&empty));
     }
 }

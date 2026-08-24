@@ -782,9 +782,9 @@ fn setup_desktop(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>>
     // succeeding-into-invisible is just as bad combined with close-to-tray:
     // the window hides and nothing can bring it back. So: log loudly and
     // force the close behavior back to real quit by clearing the tray flag.
-    // If the user later enables close-to-tray in Settings while no tray
-    // exists, the setting stores but close keeps quitting — visible behavior
-    // beats an unreachable process.
+    // While no tray exists, `system_minimize_to_tray_set_enabled` refuses
+    // enables at the command layer and the JS toggle reverts, so the UI
+    // never claims a behavior this desktop can't deliver.
     match TrayIconBuilder::with_id("studyvis-main")
         .icon(tray_icon)
         .icon_as_template(true)
