@@ -429,14 +429,22 @@ pub fn status_notifier_host_ready() -> bool {
 // Properties.Get replies with `(v)` — the tuple's only child is itself a
 // DVARIANT boxing the property value. `g_variant_get_child_value` does NOT
 // unbox, and glib-rs' `Variant::get::<bool>()` accepts type 'b' only, so the
-// child must be unwrapped via `as_variant()` first or every read fails and
-// this probe would hardwire `false` even on desktops with a working tray.
+// boxed value must be unwrapped via `as_variant()` first or every read fails
+// and this probe would hardwire `false` even on desktops with a working tray.
+// The unbox is guarded by the child's own type string: `as_variant()` outside
+// its `'v'` contract is unspecified, so it is only ever invoked on a 'v'; any
+// other well-typed child falls through to the plain read below, and anything
+// that is not a bool anywhere in the chain reads as absent (`false`).
 fn parse_host_registered(reply: &webkit2gtk::glib::Variant) -> bool {
-    reply
-        .try_child_value(0)
-        .and_then(|boxed| boxed.as_variant())
-        .and_then(|inner| inner.get::<bool>())
-        .unwrap_or(false)
+    let Some(child) = reply.try_child_value(0) else {
+        return false;
+    };
+    let inner = if child.type_().as_str() == "v" {
+        child.as_variant()
+    } else {
+        Some(child)
+    };
+    inner.and_then(|value| value.get::<bool>()).unwrap_or(false)
 }
 
 /// Boot record for the tray-probe outcome, mirrored to stderr like every
@@ -596,26 +604,35 @@ mod tests {
     fn host_registered_parses_the_boxed_bool_out_of_a_properties_get_reply() {
         use webkit2gtk::glib::{ToVariant, Variant};
         // org.freedesktop.DBus.Properties.Get answers `(v)`: a one-child tuple
-        // holding the property value boxed as a DVARIANT. The child is NOT
-        // auto-unboxed, so the parser must call as_variant() before reading —
-        // reading the tuple child as 'b' directly always fails.
-        let reply = (Variant::from_variant(&true.to_variant()),).to_variant();
+        // holding the property value boxed as a DVARIANT. `tuple_from_iter`
+        // takes children as-is (a 1-tuple's ToVariant would re-box a Variant
+        // child into '(vv)'), so this is the honest wire shape. The child is
+        // NOT auto-unboxed on read, so the parser must call as_variant()
+        // before reading — reading the tuple child as 'b' directly fails.
+        let boxed = Variant::from_variant(&true.to_variant());
+        let reply = Variant::tuple_from_iter([boxed]);
         assert_eq!(reply.type_().as_str(), "(v)");
         assert!(parse_host_registered(&reply));
 
-        let reply = (Variant::from_variant(&false.to_variant()),).to_variant();
+        let boxed = Variant::from_variant(&false.to_variant());
+        let reply = Variant::tuple_from_iter([boxed]);
         assert!(!parse_host_registered(&reply));
     }
 
     #[test]
-    fn host_registered_replies_that_are_not_a_boxed_bool_read_as_false() {
-        use webkit2gtk::glib::ToVariant;
-        // A bare bool child (no DVARIANT box) must not panic and must read
-        // false — the box unwrap simply fails.
-        let unboxed = (true.to_variant(),).to_variant();
-        assert!(!parse_host_registered(&unboxed));
+    fn host_registered_replies_degrade_without_panicking() {
+        use webkit2gtk::glib::{ToVariant, Variant};
+        // A bare bool child ('(b)') skips the unbox guard and reads directly —
+        // same property value without the box, so true stays true.
+        let unboxed = Variant::tuple_from_iter([true.to_variant()]);
+        assert_eq!(unboxed.type_().as_str(), "(b)");
+        assert!(parse_host_registered(&unboxed));
+        // A boxed string ('(vs)') boxes fine but is not a bool: false.
+        let wrong_inner = Variant::tuple_from_iter([Variant::from_variant(&"x".to_variant())]);
+        assert_eq!(wrong_inner.type_().as_str(), "(v)");
+        assert!(!parse_host_registered(&wrong_inner));
         // An empty tuple (malformed reply) likewise reads false.
-        let empty = ().to_variant();
+        let empty = Variant::tuple_from_iter([] as [Variant; 0]);
         assert_eq!(empty.type_().as_str(), "()");
         assert!(!parse_host_registered(&empty));
     }
