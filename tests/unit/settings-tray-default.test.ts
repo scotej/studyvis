@@ -67,6 +67,16 @@ describe('defaultMinimizeToTray (#263)', () => {
     )
   })
 
+  test('the default is platform-derived, not a hardcoded true', () => {
+    // Node-env (no navigator) resolves detectChromePlatform to 'windows', so a
+    // literal `true` in DEFAULT_SETTINGS would satisfy the consistency test
+    // above on every CI host while silently re-stranding Linux users. Pin the
+    // Linux outcome directly: whatever this module evaluates to, the value the
+    // helper assigns to linux must be false and must flow through hydration.
+    expect(defaultMinimizeToTray('linux')).toBe(false)
+    expect(defaultMinimizeToTray('windows')).toBe(true)
+  })
+
   test('UA detection classifies the three platforms', () => {
     expect(
       detectChromePlatformFromUA(
@@ -100,6 +110,12 @@ describe('hydration honors an explicit stored value over the platform default', 
     const { values } = await hydrateValuesFromStore(store, makeMigrator())
     expect(values.minimizeToTrayOnClose).toBe(
       DEFAULT_SETTINGS.minimizeToTrayOnClose
+    )
+    // Same node-env pin as above, through hydration: the fallback must be the
+    // helper's answer for the host this bundle resolved to — false wherever a
+    // tray cannot be assumed, never an unconditional true.
+    expect(values.minimizeToTrayOnClose).toBe(
+      defaultMinimizeToTray(detectChromePlatform())
     )
   })
 })
