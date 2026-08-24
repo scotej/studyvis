@@ -377,14 +377,21 @@ fn dbus_name_has_owner(name: &str) -> bool {
             "/org/freedesktop/DBus",
             "org.freedesktop.DBus",
             "NameHasOwner",
-            Some(&name.to_variant()),
-            Some(webkit2gtk::glib::VariantTy::BOOLEAN),
+            // D-Bus method arguments always travel as a tuple.
+            Some(&webkit2gtk::glib::Variant::tuple_from_iter([
+                name.to_variant()
+            ])),
+            // The reply is '(b)': GDBus wraps every method reply in a tuple,
+            // so pinning BOOLEAN here rejects every answer ("returned type
+            // '(b)', but expected 'b'"). Read the tuple child instead.
+            None,
             DBusCallFlags::NO_AUTO_START,
             500,
             None::<&webkit2gtk::gio::Cancellable>,
         )
         .ok()
-        .and_then(|reply| reply.get::<bool>())
+        .and_then(|reply| reply.try_child_value(0))
+        .and_then(|inner| inner.get::<bool>())
         .unwrap_or(false)
 }
 
