@@ -478,6 +478,10 @@ pub fn install_crash_recovery<R: Runtime>(app: &tauri::AppHandle<R>) {
 
     let Some(window) = app.get_webview_window("main") else {
         eprintln!("[boot:error] no main window; web-process crash recovery not installed");
+        record(
+            "boot.crash_recovery",
+            &[("installed", flag(false)), ("why", word("no_main_window"))],
+        );
         return;
     };
 
@@ -501,6 +505,13 @@ pub fn install_crash_recovery<R: Runtime>(app: &tauri::AppHandle<R>) {
             });
     }) {
         eprintln!("[boot:error] with_webview failed; crash recovery not installed: {error}");
+        record(
+            "boot.crash_recovery",
+            &[
+                ("installed", flag(false)),
+                ("why", word("with_webview_failed")),
+            ],
+        );
     }
 }
 

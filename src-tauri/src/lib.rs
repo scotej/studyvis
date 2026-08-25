@@ -872,6 +872,10 @@ fn setup_desktop(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>>
             // No tray → nothing can un-hide the window, so close must quit
             // even if a stale settings.json says close-to-tray.
             MinimizeToTrayFlag::set(app.app_handle(), false);
+            // Same boot record the Ok path emits, so a diagnostics archive
+            // always carries a tray outcome whichever way setup went.
+            #[cfg(target_os = "linux")]
+            linux_diagnostics::record_tray_probe(false, false);
         }
     }
 
