@@ -128,10 +128,13 @@ impl WindowStyleAppliedFlag {
     }
 }
 
-// #263 — Whether a tray icon actually exists to bring the window back. Set
-// once by setup_desktop: true when TrayIconBuilder::build succeeded, false
-// when creation failed (stock GNOME has no StatusNotifier/AppIndicator host,
-// so this is a real CachyOS outcome, not a hypothetical). When false,
+// #263 — Whether a StatusNotifier host can actually render the tray icon and
+// bring the window back. Set once by setup_desktop: true when the build
+// succeeded AND the session bus reports a watcher with a registered host
+// (`status_notifier_host_ready`). Construction alone proves nothing —
+// tray-icon's Linux constructor returns Ok even on stock GNOME, where no
+// host exists to draw anything, so a successfully built tray is exactly the
+// case that still strands the window. When false,
 // `system_minimize_to_tray_set_enabled` refuses enable requests — hiding the
 // only window with no way back reads to the user as "the app cannot be
 // closed". The stored settings.json value keeps whatever the user chose, so
