@@ -944,3 +944,15 @@ fn show_main_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
         let _ = window.set_focus();
     }
 }
+
+#[cfg(all(test, target_os = "linux"))]
+mod default_minimize_to_tray_tests {
+    // #263 — the Rust boot default must agree with its JS twin
+    // (`defaultMinimizeToTray` in src/stores/settingsStore.ts), whose tests
+    // pin `false` for Linux directly. A literal-true revert here would
+    // re-strand trayless desktops while every JS test stayed green.
+    #[test]
+    fn close_to_tray_defaults_off_on_linux() {
+        assert!(!super::default_minimize_to_tray());
+    }
+}
