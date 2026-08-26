@@ -776,9 +776,10 @@ export const strings = {
       aiPausedForBattery: (percent: number) =>
         `AI paused to save battery (${percent}%). Plug in or charge above 20% to resume.`,
       aiResumed: 'AI resumed.',
-      // A6 — one-shot notice when the duration-based cadence backoff engages
-      // (the model is running slower than measured, so checks are spaced out
-      // to give your machine room to cool).
+      // A6 — one-shot notice when the cadence backoff engages, from either
+      // arm: the model running slower than measured, or (#269) a check that
+      // left the app itself unscheduled for seconds. Checks are spaced out to
+      // give the machine room either way.
       aiSlowedDown:
         'Checks are running slower than usual, so StudyVis is spacing them out to ease the load on your machine.',
       // I82 — the AI loop has gone a sustained stretch without a single
@@ -1449,7 +1450,7 @@ export const strings = {
         title: 'Benchmark this model first?',
         fallbackModelName: 'Your selected model',
         description: (displayName: string, fallbackSec: number) =>
-          `${displayName} can run without a benchmark. Until you measure it, StudyVis uses a ${fallbackSec}-second sampling interval, allows extra time for each result, and skips automatic slowdown tuning.`,
+          `${displayName} can run without a benchmark. Until you measure it, StudyVis uses a ${fallbackSec}-second sampling interval, allows extra time for each result, and has nothing to call a check slow against — it will still space checks out if one freezes the app.`,
         recommendation:
           'Benchmarking is recommended for timing tuned to this computer, but it is not required.',
         keepOffCta: 'Keep AI off',
