@@ -32,6 +32,15 @@ import {
   PTT_FRIENDS_DEFAULT_ACCELERATOR,
   type ShortcutAction,
 } from '@/lib/keybindings'
+import { detectChromePlatform, type ChromePlatform } from '@/lib/windowChrome'
+
+// Close-to-tray ships ON for the platforms where a tray icon is a first-class
+// citizen and OFF for Linux (#263): GNOME without an AppIndicator extension
+// renders no icon at all, so "close" would leave an unreachable process
+// running. An explicit stored value always wins — see hydrateValuesFromStore.
+export function defaultMinimizeToTray(platform: ChromePlatform): boolean {
+  return platform !== 'linux'
+}
 
 export type ThemeMode = 'dark' | 'light' | 'auto'
 export type TurnPreference = 'auto' | 'always' | 'never'
@@ -226,7 +235,12 @@ export const DEFAULT_SETTINGS: SettingsValues = {
   pomodoroSoundEnabled: false,
   friendOnlineNotificationEnabled: false,
   autoUpdateEnabled: true,
-  minimizeToTrayOnClose: true,
+  // Close-to-tray is a macOS/Windows convention (#263). Linux's tray rides
+  // libappindicator and GNOME — CachyOS included — ships no indicator host by
+  // default, so a hidden window is unreachable there: close means quit unless
+  // the user opts in from Settings. Pure helper so tests can drive platforms;
+  // mirrors the Rust boot default in `lib.rs`.
+  minimizeToTrayOnClose: defaultMinimizeToTray(detectChromePlatform()),
   debugLogEnabled: false,
   turnPreference: 'auto',
   aiFeaturesEnabled: false,
@@ -995,13 +1009,20 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     try {
       await activeDeps.runtime.pushMinimizeToTray(enabled)
     } catch (err) {
+      // #263 — the backend refuses close-to-tray when no tray icon exists
+      // (stock GNOME has none): hiding would leave the app unreachable.
+      // Revert the local toggle so the UI keeps telling the truth; the
+      // stored value survives so a fixed environment restores it on boot.
       const message = err instanceof Error ? err.message : String(err)
       log.error('push.failed', {
         setting: 'minimizeToTrayOnClose',
         desired: enabled,
         err,
       })
-      set({ error: message })
+      set((s) => ({
+        values: { ...s.values, minimizeToTrayOnClose: !enabled },
+        error: message,
+      }))
     }
   },
 

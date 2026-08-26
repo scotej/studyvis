@@ -23,6 +23,8 @@ mod commands;
 pub mod crypto;
 pub mod db;
 #[cfg(target_os = "linux")]
+mod linux_diagnostics;
+#[cfg(target_os = "linux")]
 mod linux_media_permissions;
 #[cfg(target_os = "linux")]
 mod linux_pipewire_runtime;
@@ -78,7 +80,7 @@ use commands::system::{
     system_open_screen_capture_settings, system_relaunch_app, system_save_image,
     system_set_global_shortcut, system_window_style_is_custom_applied, system_write_text_file,
     AiFeaturesFlag, MinimizeToTrayFlag, QuitFlag, SessionActiveFlag, ShortcutBindings,
-    WindowStyleAppliedFlag,
+    TrayAvailableFlag, WindowStyleAppliedFlag,
 };
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -333,9 +335,12 @@ pub fn run() {
                 app.manage(QuitFlag::new());
                 app.manage(SessionActiveFlag::new());
                 app.manage(WindowStyleAppliedFlag::new());
-                let initial_minimize_to_tray =
-                    read_minimize_to_tray_from_settings(app.handle()).unwrap_or(true);
+                let initial_minimize_to_tray = read_minimize_to_tray_from_settings(app.handle())
+                    .unwrap_or_else(default_minimize_to_tray);
                 app.manage(MinimizeToTrayFlag::new(initial_minimize_to_tray));
+                // #263 — assumed absent until the tray actually builds below;
+                // the flag gates close-to-tray enables at the command layer.
+                app.manage(TrayAvailableFlag::new(false));
                 let initial_ai_features =
                     read_ai_features_from_settings(app.handle()).unwrap_or(false);
                 app.manage(AiFeaturesFlag::new(initial_ai_features));
@@ -345,6 +350,11 @@ pub fn run() {
                 // #226 — resolve the native log path before anything PTT-shaped
                 // can happen, so no lifecycle record is dropped pre-init.
                 commands::native_log::init(app.handle(), env!("CARGO_PKG_VERSION"));
+                // #263 — the white-window report needs the session/display
+                // facts on record before the webview can die taking its own
+                // diagnostics with it.
+                #[cfg(target_os = "linux")]
+                linux_diagnostics::capture_boot_environment();
                 app.manage(SidecarState::new());
                 app.manage(EngineState::new());
                 app.manage(DownloadState::new());
@@ -474,6 +484,18 @@ fn read_minimize_to_tray_from_settings<R: tauri::Runtime>(
     let bytes = std::fs::read(dir.join(SETTINGS_FILE)).ok()?;
     let value: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
     value.get(KEY_MINIMIZE_TO_TRAY)?.as_bool()
+}
+
+// #263 — Close-to-tray ships ON for macOS/Windows and OFF for Linux. Linux's
+// tray rides libappindicator; GNOME (CachyOS's session included) has no
+// AppIndicator host by default, so a hidden window with no visible tray icon
+// reads as "the app can't be closed". Closing now quits unless the user turns
+// close-to-tray on in Settings. Must stay in lockstep with
+// `defaultMinimizeToTray` in `src/stores/settingsStore.ts` — the JS store
+// hydrates from the same file after boot.
+#[cfg(desktop)]
+fn default_minimize_to_tray() -> bool {
+    !cfg!(target_os = "linux")
 }
 
 // Same one-shot read for the AI-features gate so the global Ctrl+] shortcut
@@ -644,6 +666,11 @@ fn setup_desktop(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>>
     #[cfg(target_os = "linux")]
     linux_media_permissions::install(app.handle());
 
+    // #263 — WebKitGTK gives no default surface for web-process death (the
+    // white-window failure); log it and reload within a small budget.
+    #[cfg(target_os = "linux")]
+    linux_diagnostics::install_crash_recovery(app.handle());
+
     app.handle().plugin(tauri_plugin_autostart::init(
         tauri_plugin_autostart::MacosLauncher::LaunchAgent,
         None::<Vec<&str>>,
@@ -749,7 +776,16 @@ fn setup_desktop(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>>
         .items(&[&open_item, &separator, &quit_item])
         .build()?;
 
-    TrayIconBuilder::with_id("studyvis-main")
+    // #263 — Tray creation can genuinely fail on Linux (no StatusNotifier
+    // host: stock GNOME has no AppIndicator extension). Propagating that
+    // error out of setup() would panic before the window ever paints, and
+    // succeeding-into-invisible is just as bad combined with close-to-tray:
+    // the window hides and nothing can bring it back. So: log loudly and
+    // force the close behavior back to real quit by clearing the tray flag.
+    // While no tray exists, `system_minimize_to_tray_set_enabled` refuses
+    // enables at the command layer and the JS toggle reverts, so the UI
+    // never claims a behavior this desktop can't deliver.
+    match TrayIconBuilder::with_id("studyvis-main")
         .icon(tray_icon)
         .icon_as_template(true)
         .menu(&menu)
@@ -787,7 +823,61 @@ fn setup_desktop(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>>
                 }
             }
         })
-        .build(app)?;
+        .build(app)
+    {
+        Ok(_tray) => {
+            // Construction returning Ok does not mean an icon can render:
+            // tray-icon's Linux backend registers an AppIndicator over DBus
+            // and succeeds even with no StatusNotifier host on the session
+            // bus — stock GNOME's outcome (#263). Only mark the tray usable
+            // when a watcher with a registered host can actually show it.
+            #[cfg(target_os = "linux")]
+            {
+                let host_ready = linux_diagnostics::status_notifier_host_ready();
+                linux_diagnostics::record_tray_probe(true, host_ready);
+                if !host_ready {
+                    eprintln!(
+                        "[tray] no StatusNotifier host on the session bus; close-to-tray disabled"
+                    );
+                    commands::native_log::record(
+                        commands::native_log::NativeLevel::Info,
+                        "native",
+                        "tray.host_absent",
+                        &[(
+                            "os",
+                            commands::native_log::NativeValue::Word(std::env::consts::OS),
+                        )],
+                    );
+                }
+                TrayAvailableFlag::set(app.app_handle(), host_ready);
+                if !host_ready {
+                    // No reachable tray → nothing can un-hide the window.
+                    MinimizeToTrayFlag::set(app.app_handle(), false);
+                }
+            }
+            #[cfg(not(target_os = "linux"))]
+            TrayAvailableFlag::set(app.app_handle(), true);
+        }
+        Err(err) => {
+            eprintln!("[tray] creation failed; close-to-tray disabled: {err}");
+            commands::native_log::record(
+                commands::native_log::NativeLevel::Error,
+                "native",
+                "tray.creation_failed",
+                &[(
+                    "os",
+                    commands::native_log::NativeValue::Word(std::env::consts::OS),
+                )],
+            );
+            // No tray → nothing can un-hide the window, so close must quit
+            // even if a stale settings.json says close-to-tray.
+            MinimizeToTrayFlag::set(app.app_handle(), false);
+            // Same boot record the Ok path emits, so a diagnostics archive
+            // always carries a tray outcome whichever way setup went.
+            #[cfg(target_os = "linux")]
+            linux_diagnostics::record_tray_probe(false, false);
+        }
+    }
 
     // N4 — macOS Cmd+Q. The default app menu's Quit is a muda predefined
     // item wired to native `NSApp.terminate:`; AppKit commits termination
@@ -852,5 +942,17 @@ fn show_main_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
         let _ = window.unminimize();
         let _ = window.show();
         let _ = window.set_focus();
+    }
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod default_minimize_to_tray_tests {
+    // #263 — the Rust boot default must agree with its JS twin
+    // (`defaultMinimizeToTray` in src/stores/settingsStore.ts), whose tests
+    // pin `false` for Linux directly. A literal-true revert here would
+    // re-strand trayless desktops while every JS test stayed green.
+    #[test]
+    fn close_to_tray_defaults_off_on_linux() {
+        assert!(!super::default_minimize_to_tray());
     }
 }

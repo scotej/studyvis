@@ -52,7 +52,9 @@ pub(crate) enum NativeValue {
 }
 
 impl NativeValue {
-    fn render_into(self, out: &mut String) {
+    // pub(crate): `linux_diagnostics` mirrors boot records to stderr through
+    // this renderer so both sinks show byte-identical values.
+    pub(crate) fn render_into(self, out: &mut String) {
         match self {
             NativeValue::Bool(v) => out.push_str(if v { "true" } else { "false" }),
             NativeValue::U64(v) => out.push_str(&v.to_string()),

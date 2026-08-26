@@ -4,6 +4,15 @@
 
 ### Fixed
 
+- **Closing the window on Linux now actually closes it, and a white window
+  can come back on its own.** On GNOME there is no tray icon to click, so
+  closing StudyVis used to leave it running with no way back — and when the
+  page's renderer died, the app stayed white forever with nothing in any log
+  to say why. Close now quits unless a working tray is present (and Linux no
+  longer pretends one exists by default), a tray that cannot render refuses
+  close-to-tray instead of hiding your only window, and a killed web process
+  is logged with its reason and reloaded automatically, twice, before giving
+  up with the whole story in the diagnostics archive.
 - **A brief stall no longer empties your session while you are still on
   camera to your friend.** A study session could lose a peer out of nowhere
   after a few minutes and never get them back: the friend vanished from the
