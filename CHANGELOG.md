@@ -4,6 +4,19 @@
 
 ### Fixed
 
+- **On-device AI no longer freezes the app for seconds at a time.** With
+  focus detection on, a single check could take the whole machine: the window
+  stopped responding, video stuttered, and on a busy laptop nothing in the app
+  got scheduled at all for as long as nine seconds at a stretch — which is
+  what had been pushing peer connections over the edge in the first place. The
+  model engine is now started at a lower scheduling priority, so it hands the
+  machine back the moment the app wants it and only loses time when something
+  else actually needs the CPU. And the rule that spaces checks out now watches
+  for the app freezing rather than only for the model running long: one check
+  that froze the app is enough to stretch the cadence, where it used to take
+  two merely slow ones in a row. The diagnostics log records how long the app
+  was starved, next to the check that starved it.
+
 - **Closing the window on Linux now actually closes it, and a white window
   can come back on its own.** On GNOME there is no tray icon to click, so
   closing StudyVis used to leave it running with no way back — and when the
