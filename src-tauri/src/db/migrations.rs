@@ -570,6 +570,10 @@ mod tests {
                 7,
                 "689ca525dc403affc9fcd191486afe91f4aca876e197e9d9fdf90cd83194177e",
             ),
+            (
+                8,
+                "9adbe0b37d2696c06b2a34fc87a88f9e1b6ca3e77560d0fcf89fdaa41be03c65",
+            ),
         ];
         assert_eq!(
             MIGRATIONS.len(),
