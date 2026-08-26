@@ -8,6 +8,18 @@
 //! There are no down migrations. Write DDL idempotently (`IF NOT EXISTS`) and
 //! add an upgrade test alongside the existing ones below.
 //!
+//! A new migration has to be registered in **four** places, and only the first
+//! is where you were already typing. `npm run check-migrations -- --update`
+//! covers one of the other three; the remaining two fail nowhere but `cargo
+//! test`, which is easy to discover the slow way in CI:
+//!   1. the `(NNN, include_str!)` tuple in `MIGRATIONS` above;
+//!   2. `migrations/MANIFEST.sha256` (the `--update` flag writes it);
+//!   3. `PINNED` in `shipped_migrations_are_immutable` below — a second,
+//!      deliberately independent copy of the hash, so an edited migration
+//!      cannot be laundered by regenerating the manifest;
+//!   4. `db::schema_repair::EXPECTED_SCHEMA`, which mirrors every table and
+//!      column this build queries and rejects any it has not been told about.
+//!
 //! 001's own header calls its two pre-release in-place amendments harmless
 //! because "SQLite tolerates extra columns". That holds for the column the
 //! `friends` amendment removed and not for the two the `sessions` one added:
