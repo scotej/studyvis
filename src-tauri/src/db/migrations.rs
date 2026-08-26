@@ -26,6 +26,7 @@ const MIGRATION_004_AI_ENABLED: &str = include_str!("migrations/004_ai_enabled.s
 const MIGRATION_005_SESSION_IDENTITY: &str = include_str!("migrations/005_session_identity.sql");
 const MIGRATION_006_PEER_PRESENCE_MS: &str = include_str!("migrations/006_peer_presence_ms.sql");
 const MIGRATION_007_TOTAL_DURATION_MS: &str = include_str!("migrations/007_total_duration_ms.sql");
+const MIGRATION_008_SESSION_TIMELINES: &str = include_str!("migrations/008_session_timelines.sql");
 
 const MIGRATIONS: &[(u32, &str)] = &[
     (1, MIGRATION_001_INITIAL),
@@ -35,6 +36,7 @@ const MIGRATIONS: &[(u32, &str)] = &[
     (5, MIGRATION_005_SESSION_IDENTITY),
     (6, MIGRATION_006_PEER_PRESENCE_MS),
     (7, MIGRATION_007_TOTAL_DURATION_MS),
+    (8, MIGRATION_008_SESSION_TIMELINES),
 ];
 
 pub const MAX_KNOWN_VERSION: u32 = MIGRATIONS[MIGRATIONS.len() - 1].0;
@@ -127,7 +129,7 @@ mod tests {
         .unwrap_or(0)
     }
 
-    const LATEST_VERSION: u32 = 7;
+    const LATEST_VERSION: u32 = 8;
 
     #[test]
     fn applies_full_schema_on_empty_db() {
@@ -139,6 +141,7 @@ mod tests {
         assert_table_exists(&conn, "sessions");
         assert_table_exists(&conn, "audit_events");
         assert_table_exists(&conn, "models");
+        assert_table_exists(&conn, "session_timelines");
         assert_eq!(current_version(&conn), LATEST_VERSION);
     }
 
@@ -424,6 +427,68 @@ mod tests {
             .expect("read ai_enabled");
         assert_eq!(ai_enabled, None, "pre-004 rows must read as unknown");
         assert_eq!(confident, Some(24), "003 data must survive the 004 upgrade");
+    }
+
+    // #236 — 008 adds the written-timeline table beside existing history. A
+    // database that predates it keeps every session row and simply has no
+    // narrative yet; the report regenerates one from the raw journal on demand.
+    #[test]
+    fn upgrades_v7_db_to_v8_leaving_existing_sessions_without_a_timeline() {
+        let mut conn = Connection::open_in_memory().expect("open in-memory");
+        {
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS schema_version (version INTEGER PRIMARY KEY)",
+                [],
+            )
+            .expect("schema_version");
+            let tx = conn.transaction().expect("tx");
+            tx.execute_batch(MIGRATION_001_INITIAL).expect("apply 001");
+            tx.execute_batch(MIGRATION_002_V2).expect("apply 002");
+            tx.execute_batch(MIGRATION_003_SAMPLE_COUNTS)
+                .expect("apply 003");
+            tx.execute_batch(MIGRATION_004_AI_ENABLED)
+                .expect("apply 004");
+            tx.execute_batch(MIGRATION_005_SESSION_IDENTITY)
+                .expect("apply 005");
+            tx.execute_batch(MIGRATION_006_PEER_PRESENCE_MS)
+                .expect("apply 006");
+            tx.execute_batch(MIGRATION_007_TOTAL_DURATION_MS)
+                .expect("apply 007");
+            tx.execute(
+                "INSERT INTO schema_version (version) VALUES (1), (2), (3), (4), (5), (6), (7)",
+                [],
+            )
+            .expect("record v7");
+            tx.commit().expect("commit v7");
+        }
+        conn.execute(
+            "INSERT INTO sessions (id, total_minutes, total_duration_ms)
+             VALUES ('s1', 42, 2520000)",
+            [],
+        )
+        .expect("insert v7 session");
+
+        let applied = run_migrations(&mut conn).expect("upgrade run");
+        assert_eq!(applied, LATEST_VERSION);
+        assert_table_exists(&conn, "session_timelines");
+        let minutes: Option<i64> = conn
+            .query_row(
+                "SELECT total_minutes FROM sessions WHERE id = 's1'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("read migrated session");
+        assert_eq!(
+            minutes,
+            Some(42),
+            "v7 session data must survive the upgrade"
+        );
+        let timelines: i64 = conn
+            .query_row("SELECT COUNT(*) FROM session_timelines", [], |row| {
+                row.get(0)
+            })
+            .expect("count timelines");
+        assert_eq!(timelines, 0, "008 backfills nothing");
     }
 
     #[test]

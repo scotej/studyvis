@@ -434,13 +434,19 @@ pub fn synthesize_from_orphaned_audit_events(
     Ok(changed_rows)
 }
 
-// Session deletion removes the audit_events for the same topic in the same
-// transaction: `sessions.id` IS the session topic and `audit_events.session_id`
-// references it (001_initial.sql has no FK, so the cascade is manual here).
+// Session deletion removes the audit_events and the #236 written timeline for
+// the same topic in the same transaction: `sessions.id` IS the session topic
+// and both tables reference it (001_initial.sql has no FK, so the cascade is
+// manual here). The raw observation journal is a file rather than a row; the
+// command layer unlinks it after this transaction commits.
 pub fn delete(conn: &mut Connection, id: &str) -> Result<usize> {
     let tx = conn.transaction()?;
     tx.execute(
         "DELETE FROM audit_events WHERE session_id = ?1",
+        params![id],
+    )?;
+    tx.execute(
+        "DELETE FROM session_timelines WHERE session_id = ?1",
         params![id],
     )?;
     let deleted = tx.execute("DELETE FROM sessions WHERE id = ?1", params![id])?;
@@ -451,6 +457,7 @@ pub fn delete(conn: &mut Connection, id: &str) -> Result<usize> {
 pub fn clear_all(conn: &mut Connection) -> Result<usize> {
     let tx = conn.transaction()?;
     tx.execute("DELETE FROM audit_events", [])?;
+    tx.execute("DELETE FROM session_timelines", [])?;
     let deleted = tx.execute("DELETE FROM sessions", [])?;
     tx.commit()?;
     Ok(deleted)

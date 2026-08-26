@@ -62,9 +62,11 @@ use commands::models::{
     model_download, model_download_cancel, model_head_check, model_install_state, model_paths,
     model_remove, DownloadState, ModelOperationState,
 };
+use commands::session_journal::{session_journal_append, session_journal_read};
 use commands::sessions::{
-    audit_event_insert, audit_events_list_all, audit_events_list_for_session, sessions_clear_all,
-    sessions_delete, sessions_get, sessions_insert, sessions_insert_if_absent, sessions_list,
+    audit_event_insert, audit_events_list_all, audit_events_list_for_session, session_timeline_get,
+    session_timeline_save, sessions_clear_all, sessions_delete, sessions_get, sessions_insert,
+    sessions_insert_if_absent, sessions_list,
 };
 #[cfg(desktop)]
 use commands::sidecar::{
@@ -149,6 +151,10 @@ pub fn run() {
         sessions_get,
         sessions_delete,
         sessions_clear_all,
+        session_timeline_get,
+        session_timeline_save,
+        session_journal_append,
+        session_journal_read,
         audit_event_insert,
         audit_events_list_for_session,
         audit_events_list_all,
