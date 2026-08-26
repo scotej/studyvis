@@ -16,6 +16,9 @@ import {
   preacquireScreenStream,
   SLOW_TICK_FACTOR,
   STALL_NOTICE_AFTER_MS,
+  STARVE_PROBE_INTERVAL_MS,
+  STARVE_THRESHOLD_MS,
+  startStarveProbe,
   MAX_REQUEST_TIMEOUT_MS,
   REQUEST_TIMEOUT_MS,
   REQUEST_TIMEOUT_P95_FACTOR,
@@ -90,7 +93,10 @@ class FakeClock {
         .sort((a, b) => a.fireAt - b.fireAt)[0]
       if (!next) break
       this.timers = this.timers.filter((t) => t.id !== next.id)
-      this.now = next.fireAt
+      // #269 — never rewind. A handler may advance the clock itself (the
+      // backoff runtime's fetch spends its inference duration that way), and
+      // an assignment would put time back before work that already happened.
+      this.now = Math.max(this.now, next.fireAt)
       next.handler()
       // Drain microtasks aggressively — the tick chain is await-heavy
       // (Promise.all capture → fetch → response.json → applyJudgment).
@@ -98,7 +104,45 @@ class FakeClock {
       // the next assertion runs across Node 24 runner platforms.
       await flushMicrotasks(30)
     }
+    this.now = Math.max(this.now, target)
+    await flushMicrotasks(30)
+  }
+
+  // #269 — burn wall time from INSIDE a running handler, firing due timers on
+  // their own deadlines but without awaiting anything. `advance` cannot be
+  // re-entered: its microtask flush is bounded, so a nested call would still
+  // be pending when the outer one finished and computed its target from a now
+  // that had not moved yet.
+  spend(ms: number): void {
+    const target = this.now + ms
+    while (true) {
+      const next = this.timers
+        .filter((t) => t.fireAt <= target)
+        .sort((a, b) => a.fireAt - b.fireAt)[0]
+      if (!next) break
+      this.timers = this.timers.filter((t) => t.id !== next.id)
+      this.now = next.fireAt
+      next.handler()
+    }
     this.now = target
+  }
+
+  // #269 — a main thread that stopped being scheduled. Wall time moves while
+  // no callback runs; every timer that came due inside the jump then arrives
+  // at once, late by however long the freeze lasted. `advance` cannot express
+  // this: it fires each timer exactly at its own deadline, so lateness there
+  // is always zero.
+  async freeze(ms: number): Promise<void> {
+    this.now += ms
+    while (true) {
+      const next = this.timers
+        .filter((t) => t.fireAt <= this.now)
+        .sort((a, b) => a.fireAt - b.fireAt)[0]
+      if (!next) break
+      this.timers = this.timers.filter((t) => t.id !== next.id)
+      next.handler()
+      await flushMicrotasks(30)
+    }
     await flushMicrotasks(30)
   }
 }
@@ -2320,11 +2364,11 @@ describe('startSampleLoop — A6 cadence backoff', () => {
   })
 
   // The default test-model benchmark has p95Sec=3, so the slow threshold is
-  // 3 * SLOW_TICK_FACTOR (2.5) = 7.5 s. We inject the loop's `now` (used to
-  // measure inference duration) separately from the FakeClock that drives
-  // scheduling. The duration is `now()` after the fetch minus `now()` before
-  // it, so the fetch itself bumps a private counter by `perTickDurationMs` —
-  // making each tick's measured inference exactly that. BACKOFF_ENGAGE_AFTER
+  // 3 * SLOW_TICK_FACTOR (2.5) = 7.5 s. The fetch spends its inference
+  // duration on the FakeClock itself rather than on a private counter, so the
+  // loop's `now` and its timers share one timeline: #269's starve probe runs
+  // a 1 Hz timer across exactly this window, and two clocks would have shown
+  // every fabricated duration as a frozen main thread. BACKOFF_ENGAGE_AFTER
   // is 2 consecutive slow ticks; base interval 5 s, BACKOFF_MULTIPLIER 2.
   function buildBackoffRuntime(
     clock: FakeClock,
@@ -2332,7 +2376,6 @@ describe('startSampleLoop — A6 cadence backoff', () => {
     // (0-indexed by completed-tick count) so a test can vary slow/fast ticks.
     perTickDurationMs: number | ((tickIndex: number) => number)
   ): { runtime: SampleLoopRuntime; fetchMock: ReturnType<typeof vi.fn> } {
-    let virtualNow = 0
     let tickIndex = 0
     const fetchMock = vi.fn(async () => {
       const dur =
@@ -2340,12 +2383,11 @@ describe('startSampleLoop — A6 cadence backoff', () => {
           ? perTickDurationMs(tickIndex)
           : perTickDurationMs
       tickIndex += 1
-      virtualNow += dur
+      clock.spend(dur)
       return judgmentResponse('on_task')
     })
-    const base = buildSampleLoopRuntime({ clock, fetch: fetchMock as never })
     return {
-      runtime: { ...base, now: () => virtualNow },
+      runtime: buildSampleLoopRuntime({ clock, fetch: fetchMock as never }),
       fetchMock,
     }
   }
@@ -2426,6 +2468,51 @@ describe('startSampleLoop — A6 cadence backoff', () => {
     expect(handle.__state().backoff.engaged).toBe(true)
     expect(handle.__state().thermalNoticeShown).toBe(true)
     expect(onThermalBackoff).toHaveBeenCalledTimes(1)
+    await handle.stop()
+  })
+
+  test('one tick that froze the app engages backoff and stretches the cadence', async () => {
+    // #269 — the freeze, not the duration, is what engages here: 6 s of
+    // inference is under the 7.5 s slow threshold, and it is the loop's first
+    // tick, so the two-consecutive-slow rule could not have fired either.
+    const clock = new FakeClock()
+    const onThermalBackoff = vi.fn()
+    let release: () => void = () => {}
+    const inFlight = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const fetchMock = vi.fn(async () => {
+      await inFlight
+      return judgmentResponse('on_task')
+    })
+    __setSampleLoopRuntime(
+      buildSampleLoopRuntime({ clock, fetch: fetchMock as never })
+    )
+    const handle = startSampleLoop({
+      getTopic: () => 't',
+      modelId: 'test-model',
+      getFaceTrack: () => makeFakeTrack(),
+      onThermalBackoff,
+    })
+    await flushMicrotasks(10)
+
+    await clock.advance(5_000)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(handle.__state().backoff.engaged).toBe(false)
+
+    // The machine stops scheduling the webview for 6 s mid-inference.
+    await clock.freeze(6_000)
+    release()
+    await flushMicrotasks(30)
+
+    expect(handle.__state().backoff.engaged).toBe(true)
+    expect(onThermalBackoff).toHaveBeenCalledTimes(1)
+
+    // Cadence is stretched from here: 5 s base * 2 = 10 s.
+    await clock.advance(5_000)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    await clock.advance(5_000)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
     await handle.stop()
   })
 
@@ -2547,7 +2634,12 @@ describe('nextBackoffState — A6 pure transition', () => {
     expect(states.at(-1)?.engaged).toBe(true)
   })
 
-  test('disables (rests) when p95 is unknown / non-positive', () => {
+  test('duration stops driving the machine when p95 is unknown', () => {
+    // No baseline means no way to call 9999 s slow, so the tick counts as
+    // normal and the slow streak clears. It does NOT snap the whole machine
+    // back to rest: since #269 a starving tick can engage backoff with no
+    // benchmark at all, and that engagement has to be allowed to recover the
+    // ordinary way rather than be erased by the next tick.
     const s = nextBackoffState(
       {
         engaged: true,
@@ -2558,6 +2650,116 @@ describe('nextBackoffState — A6 pure transition', () => {
       9999,
       0
     )
-    expect(s).toEqual(initialBackoffState())
+    expect(s.consecutiveSlow).toBe(0)
+    expect(s.consecutiveNormal).toBe(1)
+    expect(s.engaged).toBe(true)
+    expect(s.justEngaged).toBe(false)
+  })
+
+  test('a starving tick engages immediately, without waiting for a second', () => {
+    // #269 — the asymmetry is the point. A merely slow tick waits for
+    // BACKOFF_ENGAGE_AFTER; one that froze the app does not, because the
+    // freeze already happened and the tick we would be waiting for is another.
+    const s = nextBackoffState(
+      initialBackoffState(),
+      FAST,
+      P95,
+      STARVE_THRESHOLD_MS
+    )
+    expect(s.engaged).toBe(true)
+    expect(s.justEngaged).toBe(true)
+    expect(BACKOFF_ENGAGE_AFTER).toBeGreaterThan(1)
+  })
+
+  test('lateness below the threshold is jitter, not starvation', () => {
+    const s = nextBackoffState(
+      initialBackoffState(),
+      FAST,
+      P95,
+      STARVE_THRESHOLD_MS - 1
+    )
+    expect(s.engaged).toBe(false)
+    expect(s.consecutiveSlow).toBe(0)
+  })
+
+  test('starvation engages even with no benchmark to compare against', () => {
+    const s = nextBackoffState(initialBackoffState(), 1, 0, STARVE_THRESHOLD_MS)
+    expect(s.engaged).toBe(true)
+  })
+
+  test('a starved run recovers on the ordinary normal-tick streak', () => {
+    let s = nextBackoffState(
+      initialBackoffState(),
+      FAST,
+      P95,
+      STARVE_THRESHOLD_MS
+    )
+    expect(s.engaged).toBe(true)
+    for (let i = 0; i < BACKOFF_RECOVER_AFTER - 1; i += 1) {
+      s = nextBackoffState(s, FAST, P95)
+      expect(s.engaged).toBe(true)
+    }
+    s = nextBackoffState(s, FAST, P95)
+    expect(s.engaged).toBe(false)
+  })
+})
+
+describe('startStarveProbe — #269 main-thread lateness', () => {
+  test('reports zero while timers keep their deadlines', async () => {
+    const clock = new FakeClock()
+    const probe = startStarveProbe({
+      now: () => clock.now,
+      setTimeout: (h, ms) => clock.setTimeout(h, ms),
+      clearTimeout: (h) => clock.clearTimeout(h),
+    })
+    await clock.advance(STARVE_PROBE_INTERVAL_MS * 5)
+    probe.stop()
+    expect(probe.worstMs()).toBe(0)
+  })
+
+  test('keeps the worst gap when the main thread stops being scheduled', async () => {
+    const clock = new FakeClock()
+    const probe = startStarveProbe({
+      now: () => clock.now,
+      setTimeout: (h, ms) => clock.setTimeout(h, ms),
+      clearTimeout: (h) => clock.clearTimeout(h),
+    })
+    await clock.advance(STARVE_PROBE_INTERVAL_MS)
+    await clock.freeze(6_000)
+    // The 1 Hz timer due 1 s in was serviced 6 s in.
+    expect(probe.worstMs()).toBe(6_000 - STARVE_PROBE_INTERVAL_MS)
+    // A later healthy stretch must not erase the worst reading.
+    await clock.advance(STARVE_PROBE_INTERVAL_MS * 3)
+    probe.stop()
+    expect(probe.worstMs()).toBe(6_000 - STARVE_PROBE_INTERVAL_MS)
+  })
+
+  test('counts a freeze still in progress when the probe is stopped', () => {
+    // The freeze ends on the same turn the inference resolves, and which of
+    // the two overdue tasks the event loop runs first is not ours to choose.
+    // Measuring once more on the way out is what keeps that from reading zero.
+    const clock = new FakeClock()
+    const probe = startStarveProbe({
+      now: () => clock.now,
+      setTimeout: (h, ms) => clock.setTimeout(h, ms),
+      clearTimeout: (h) => clock.clearTimeout(h),
+    })
+    clock.now += 9_000
+    probe.stop()
+    expect(probe.worstMs()).toBe(9_000 - STARVE_PROBE_INTERVAL_MS)
+  })
+
+  test('stop is idempotent and leaves no timer behind', async () => {
+    const clock = new FakeClock()
+    const probe = startStarveProbe({
+      now: () => clock.now,
+      setTimeout: (h, ms) => clock.setTimeout(h, ms),
+      clearTimeout: (h) => clock.clearTimeout(h),
+    })
+    probe.stop()
+    probe.stop()
+    expect(clock.timers).toHaveLength(0)
+    await clock.advance(STARVE_PROBE_INTERVAL_MS * 3)
+    expect(clock.timers).toHaveLength(0)
   })
 })
