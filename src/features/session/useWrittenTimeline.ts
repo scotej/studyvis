@@ -26,6 +26,14 @@ import {
 
 const log = logger.child('session.timeline.ui')
 
+// Storybook renders the report shell outside Tauri, where the journal probe
+// would reject and paint a failure banner over a fixture that has no journal at
+// all. Same runtime probe `sampleLoop`'s `enumerateDisplayCount` uses.
+function hasTauriRuntime(): boolean {
+  if (typeof window === 'undefined') return false
+  return '__TAURI_INTERNALS__' in window || '__TAURI__' in window
+}
+
 export type WrittenTimelineStatus =
   // Nothing pending: the report renders the stored write-up, or the
   // nothing-was-recorded copy when there is none.
@@ -114,6 +122,7 @@ export function useWrittenTimeline({
 
     let cancelled = false
     const run = async () => {
+      if (!hasTauriRuntime()) return
       const settings = useSettingsStore.getState().values
       // A session that recorded nothing has nothing to write up, and saying so
       // is different from saying the model failed. Reading the journal first is
@@ -176,6 +185,12 @@ export function useWrittenTimeline({
       // and still persists: the post-session report is usually closed within
       // seconds, and abandoning the pass there would mean it never completes.
       cancelled = true
+      // Release the once-only latch as well. React 19 Strict Mode tears the
+      // first effect down while the journal probe above is still awaiting, so
+      // without this the remount finds the latch already claimed by a run that
+      // returned early — and the write-up never happens in dev at all. The
+      // `inFlight` map still keeps the expensive pass itself to one.
+      if (requested.current === key) requested.current = null
     }
   }, [sessionId, ready, timeline, attempt, declaredTopic])
 

@@ -279,13 +279,27 @@ describe('windowing', () => {
 
   test('widens the window rather than growing the count on a long session', () => {
     const threeHours = 180
-    expect(windowMinutesFor(threeHours)).toBe(3)
+    // 180 checks a minute apart span minutes 0..179 — exactly three per window.
+    expect(windowMinutesFor(179)).toBe(3)
     const observations = Array.from({ length: threeHours }, (_, minute) =>
       observation({ ts: T0 + minute * 60_000 })
     )
     const windows = windowObservations(observations)
     expect(windows.length).toBeLessThanOrEqual(MAX_WINDOWS)
     expect(windows[0]).toMatchObject({ startMin: 0, endMin: 3 })
+  })
+
+  // A span of exactly MAX_WINDOWS minutes touches MAX_WINDOWS + 1 of them, so
+  // width 1 would overrun the cap by a single window.
+  test('never exceeds the window cap at the width boundary', () => {
+    expect(windowMinutesFor(MAX_WINDOWS - 1)).toBe(1)
+    expect(windowMinutesFor(MAX_WINDOWS)).toBe(2)
+    const observations = Array.from({ length: MAX_WINDOWS + 1 }, (_, minute) =>
+      observation({ ts: T0 + minute * 60_000 })
+    )
+    expect(windowObservations(observations).length).toBeLessThanOrEqual(
+      MAX_WINDOWS
+    )
   })
 
   test('a one-minute session still gets a one-minute window', () => {

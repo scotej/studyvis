@@ -140,8 +140,16 @@ export function describeWindow(window: ObservationWindow): string {
   return copy.distracted(window.offTask, total, notes)
 }
 
+// Prompt-side only. The journal keeps the full 300-character reasoning; three
+// of those per window across twelve windows would crowd DEFAULT_CTX_SIZE's 4096
+// tokens against the response budget, and a request that overflows the context
+// degrades that whole chunk to its digest.
+const MAX_PROMPT_NOTE_LENGTH = 140
+
 function renderWindow(window: ObservationWindow): string {
-  const notes = window.notes.map((note) => JSON.stringify(note)).join(' | ')
+  const notes = window.notes
+    .map((note) => JSON.stringify(boundedText(note, MAX_PROMPT_NOTE_LENGTH)))
+    .join(' | ')
   const topic = window.topics.map((t) => JSON.stringify(t)).join(' | ')
   return `- start_min: ${window.startMin}, end_min: ${window.endMin}, on_task: ${window.onTask}, off_task: ${window.offTask}, unreadable: ${window.uncertain}, topic: ${topic || '""'}, notes: ${notes || '(none)'}`
 }
@@ -316,11 +324,14 @@ async function writeChunk(
 }
 
 // Fills the stretches the model left uncovered with their own window digests,
-// so the timeline always spans the whole recorded session.
+// so the timeline always spans the whole recorded session. `uncovered` is what
+// decides the stored `source`: a chunk where the model described one window out
+// of twelve is eleven-twelfths digest, and labelling that as the model's work
+// would be exactly the fabricated all-clear I83 exists to prevent.
 function mergeWithFallback(
   written: ReadonlyArray<TimelineEntry>,
   windows: ReadonlyArray<ObservationWindow>
-): { entries: TimelineEntry[]; covered: boolean } {
+): { entries: TimelineEntry[]; uncovered: number } {
   const uncovered = windows.filter(
     (window) =>
       !written.some(
@@ -331,7 +342,7 @@ function mergeWithFallback(
   const entries = [...written, ...fallbackEntries(uncovered)].sort(
     (a, b) => a.start_min - b.start_min || a.end_min - b.end_min
   )
-  return { entries, covered: uncovered.length === 0 }
+  return { entries, uncovered: uncovered.length }
 }
 
 export class SessionTimelineError extends Error {
@@ -409,7 +420,7 @@ export async function generateSessionTimeline(
     for (const chunk of chunks) {
       const written = await writeChunk(chunk, input, sidecar.port)
       const merged = mergeWithFallback(written, chunk)
-      if (written.length > 0) writtenWindows += chunk.length
+      writtenWindows += chunk.length - merged.uncovered
       entries = entries.concat(merged.entries)
     }
   } catch (err) {

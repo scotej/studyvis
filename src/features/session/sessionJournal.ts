@@ -242,10 +242,14 @@ export type ObservationWindow = {
 
 // Window width for a session of `spanMinutes`, so the timeline never exceeds
 // MAX_WINDOWS entries. One minute is the floor — the requested granularity —
-// and anything longer than an hour widens in whole minutes from there.
+// and anything longer widens in whole minutes from there. The divisor is the
+// number of distinct minutes the span touches, not the span itself: a session
+// spanning exactly 60 minutes occupies minutes 0 through 60, which is 61
+// windows at width 1.
 export function windowMinutesFor(spanMinutes: number): number {
   if (!Number.isFinite(spanMinutes) || spanMinutes <= 0) return 1
-  return Math.max(1, Math.ceil(spanMinutes / MAX_WINDOWS))
+  const minutesTouched = Math.floor(spanMinutes) + 1
+  return Math.max(1, Math.ceil(minutesTouched / MAX_WINDOWS))
 }
 
 // Groups observations into fixed-width windows anchored on the first one.

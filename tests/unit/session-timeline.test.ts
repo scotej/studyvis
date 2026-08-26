@@ -376,6 +376,8 @@ describe('generating a write-up', () => {
     expect(timeline?.entries).toHaveLength(2)
     expect(timeline?.entries[0].summary).toBe('Opened notes')
     expect(timeline?.entries[1].summary).toContain('playing a game')
+    // One of the two windows is a digest, so this is not the model's own work.
+    expect(timeline?.source).toBe('mixed')
   })
 
   test('refuses to run while a session is live', async () => {
