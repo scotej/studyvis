@@ -431,6 +431,7 @@ async fn sidecar_start_marked<R: Runtime>(
         port,
         &compute_device,
     )?;
+    deprioritize_child(&child, &mut log_file, generation);
 
     guard.child = Some(child);
     guard.port = Some(port);
@@ -959,6 +960,92 @@ fn spawn_llama<R: Runtime>(
         .map_err(|e| format!("spawn {}: {e}", binary.display()))
 }
 
+// #269 — llama-server is spawned at the same scheduling priority as the app
+// that spawns it, so a vision inference and the webview compete for the
+// machine as equals. Diagnostics from v1.11.3 show the cost: the 1 Hz
+// push-to-talk watchdog failed to tick for 5.5–9.2 s while a sample inference
+// ran, with `skewMs` at 0 (so not sleep/wake — the app simply was not
+// scheduled). A webview frozen that long processes nothing, WebRTC included.
+//
+// Dropping the child one notch means the engine only loses time when the app
+// actually wants the CPU; on an idle machine it changes nothing, so the
+// benchmark p95 stays comparable — benchmark runs take this same spawn path.
+//
+// The value is llama.cpp's own GGML_SCHED_PRIO_LOW mapping, from the pinned
+// b9095 `common/common.cpp`: nice +5 on POSIX, BELOW_NORMAL_PRIORITY_CLASS on
+// Windows. We apply it from here rather than passing `--prio -1` because at
+// that commit only llama-cli calls `set_process_priority` — llama-server
+// parses the flag into a threadpool config it never builds, so it would be
+// inert. Deliberately NOT macOS `PRIO_DARWIN_BG`: that throttles the
+// process's I/O and timers hard enough to multiply inference duration rather
+// than merely yield the CPU.
+#[cfg(unix)]
+const SIDECAR_NICE: libc::c_int = 5;
+
+// Best-effort by contract: a machine that refuses the change should still get
+// its engine. The outcome goes to the sidecar log so the next diagnostics
+// bundle answers "did the yield actually apply on this box?" rather than
+// leaving it assumed.
+fn deprioritize_child(child: &CommandChild, log: &mut File, generation: u64) {
+    let note = match lower_process_priority(child.pid()) {
+        Ok(()) => "applied".to_string(),
+        Err(e) => format!("failed: {e}"),
+    };
+    with_sidecar_log(|| {
+        let _ = writeln!(log, "[event gen={generation}] yield-priority {note}");
+        let _ = log.flush();
+    });
+}
+
+// Linux caveat: the nice value is a per-thread attribute there, and threads
+// inherit it from the thread that creates them. We set it on the child's main
+// thread while that thread is still parsing arguments and loading a multi-GB
+// model — seconds before ggml builds its worker threads — so the workers that
+// do the competing are born at the lowered value.
+#[cfg(unix)]
+fn lower_process_priority(pid: u32) -> Result<(), String> {
+    // SAFETY: setpriority takes three scalars and writes through no pointer.
+    // The pid names a child whose `CommandChild` the caller still holds, so it
+    // cannot have been reaped and recycled under us.
+    let rc = unsafe { libc::setpriority(libc::PRIO_PROCESS, libc::id_t::from(pid), SIDECAR_NICE) };
+    if rc == 0 {
+        Ok(())
+    } else {
+        Err(std::io::Error::last_os_error().to_string())
+    }
+}
+
+#[cfg(windows)]
+fn lower_process_priority(pid: u32) -> Result<(), String> {
+    use windows_sys::Win32::Foundation::CloseHandle;
+    use windows_sys::Win32::System::Threading::{
+        OpenProcess, SetPriorityClass, BELOW_NORMAL_PRIORITY_CLASS, PROCESS_SET_INFORMATION,
+    };
+
+    // SAFETY: OpenProcess returns a handle or null and writes through no
+    // pointer we own. As the spawning parent we hold the child alive, so the
+    // pid is ours to open.
+    let handle = unsafe { OpenProcess(PROCESS_SET_INFORMATION, 0, pid) };
+    if handle.is_null() {
+        return Err(std::io::Error::last_os_error().to_string());
+    }
+    // SAFETY: `handle` is the live handle just opened, closed exactly once
+    // below on both outcomes.
+    let ok = unsafe { SetPriorityClass(handle, BELOW_NORMAL_PRIORITY_CLASS) };
+    let err = (ok == 0).then(|| std::io::Error::last_os_error().to_string());
+    // SAFETY: same handle, not used again after this call.
+    unsafe { CloseHandle(handle) };
+    match err {
+        Some(e) => Err(e),
+        None => Ok(()),
+    }
+}
+
+#[cfg(not(any(unix, windows)))]
+fn lower_process_priority(_pid: u32) -> Result<(), String> {
+    Err("unsupported platform".to_string())
+}
+
 // Consecutive respawns that each died before MIN_HEALTHY_UPTIME accumulate
 // toward RESTART_BUDGET; a child that ran at least that long is a durable
 // server, so its later death starts the streak over at 1.
@@ -1203,6 +1290,7 @@ async fn watch<R: Runtime>(
             let _ = writeln!(log, "[event gen={generation}] respawned on port {port}");
             let _ = log.flush();
         });
+        deprioritize_child(&new_child, &mut log, generation);
         guard.child = Some(new_child);
         guard.port = Some(port);
         drop(guard);
@@ -1526,5 +1614,32 @@ mod tests {
         // An 8-hour session whose sidecar dies once an hour after clean uptime
         // spends 8 respawns. It must never be called a crash loop.
         assert!(!exceeded_total_restarts(8));
+    }
+
+    // #269 — the one part of the yield that a type check cannot confirm: that
+    // we hand `setpriority` the child's pid in the argument it reads as one.
+    // Getting `who` wrong renices the app instead of the engine, and both
+    // spellings compile. So spawn a real child, move it, and read it back.
+    #[cfg(unix)]
+    #[test]
+    fn lowering_priority_moves_a_live_child_and_not_the_caller() {
+        let before = unsafe { libc::getpriority(libc::PRIO_PROCESS, 0) };
+        let mut child = std::process::Command::new("sleep")
+            .arg("30")
+            .spawn()
+            .expect("spawn a child to renice");
+        let pid = child.id();
+        let applied = lower_process_priority(pid);
+        let observed = unsafe { libc::getpriority(libc::PRIO_PROCESS, libc::id_t::from(pid)) };
+        let _ = child.kill();
+        let _ = child.wait();
+
+        applied.expect("setpriority on an owned child");
+        assert_eq!(observed, SIDECAR_NICE);
+        assert_eq!(
+            unsafe { libc::getpriority(libc::PRIO_PROCESS, 0) },
+            before,
+            "the app's own priority must be untouched"
+        );
     }
 }
