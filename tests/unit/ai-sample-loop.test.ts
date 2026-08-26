@@ -2516,6 +2516,310 @@ describe('startSampleLoop — A6 cadence backoff', () => {
     await handle.stop()
   })
 
+  // #269 — the failure counterparts to the test above. A request that froze
+  // the app for six seconds and THEN failed is the case the issue was opened
+  // on: the freeze already happened, so it has to reach the cadence and the
+  // log even though no verdict ever came back. The probe used to be read only
+  // after a successful parse, so every one of these paths threw the reading
+  // away and retried at the cadence that had just frozen.
+  async function runFrozenFailingTick(
+    finish: () => Promise<Response>,
+    freezeMs = 6_000
+  ): Promise<{
+    clock: FakeClock
+    handle: ReturnType<typeof startSampleLoop>
+    fetchMock: ReturnType<typeof vi.fn>
+    records: LogRecord[]
+    onThermalBackoff: ReturnType<typeof vi.fn>
+  }> {
+    const clock = new FakeClock()
+    const onThermalBackoff = vi.fn()
+    let release: () => void = () => {}
+    const inFlight = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const fetchMock = vi.fn(async () => {
+      await inFlight
+      return finish()
+    })
+    const records: LogRecord[] = []
+    __resetLog()
+    __setLogRecordSink((record) => records.push(record))
+    __setSampleLoopRuntime(
+      buildSampleLoopRuntime({ clock, fetch: fetchMock as never })
+    )
+    const handle = startSampleLoop({
+      getTopic: () => 't',
+      modelId: 'test-model',
+      getFaceTrack: () => makeFakeTrack(),
+      onThermalBackoff,
+    })
+    await flushMicrotasks(10)
+
+    await clock.advance(5_000)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(handle.__state().backoff.engaged).toBe(false)
+
+    // The webview stops being scheduled with the request in flight.
+    await clock.freeze(freezeMs)
+    release()
+    await flushMicrotasks(30)
+    return { clock, handle, fetchMock, records, onThermalBackoff }
+  }
+
+  function expectStarvedRecord(records: LogRecord[], outcome: string): void {
+    const starved = records.filter(
+      (record) =>
+        record.scope === 'ai.sampleloop' && record.msg === 'app.starved'
+    )
+    expect(starved).toHaveLength(1)
+    expect(starved[0]?.data).toMatchObject({
+      outcome,
+      backoffEngaged: true,
+      // A tick that never answered has no round-trip to report, and must not
+      // be able to report a fabricated one either.
+      inferenceMs: null,
+      effectiveIntervalMs: 10_000,
+    })
+    expect(Number(starved[0]?.data?.starvedMs)).toBeGreaterThanOrEqual(
+      STARVE_THRESHOLD_MS
+    )
+  }
+
+  test('a frozen tick answered non-2xx still stretches the cadence', async () => {
+    const { clock, handle, fetchMock, records, onThermalBackoff } =
+      await runFrozenFailingTick(
+        async () => new Response('upstream said no', { status: 500 })
+      )
+
+    expect(handle.__state().backoff.engaged).toBe(true)
+    expect(onThermalBackoff).toHaveBeenCalledTimes(1)
+    expectStarvedRecord(records, 'http_error')
+
+    // The retry lands on the stretched 10 s cadence, not the 5 s one that froze.
+    await clock.advance(5_000)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    await clock.advance(5_000)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    await handle.stop()
+  })
+
+  test('a frozen tick that aborts still stretches the cadence', async () => {
+    const { clock, handle, fetchMock, records, onThermalBackoff } =
+      await runFrozenFailingTick(async () => {
+        throw new DOMException('aborted', 'AbortError')
+      })
+
+    expect(handle.__state().backoff.engaged).toBe(true)
+    expect(onThermalBackoff).toHaveBeenCalledTimes(1)
+    expectStarvedRecord(records, 'timeout')
+
+    await clock.advance(5_000)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    await clock.advance(5_000)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    await handle.stop()
+  })
+
+  test('a frozen tick that throws still stretches the cadence', async () => {
+    const { clock, handle, fetchMock, records, onThermalBackoff } =
+      await runFrozenFailingTick(async () => {
+        throw new Error('socket hung up')
+      })
+
+    expect(handle.__state().backoff.engaged).toBe(true)
+    expect(onThermalBackoff).toHaveBeenCalledTimes(1)
+    expectStarvedRecord(records, 'failed')
+
+    await clock.advance(5_000)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    await clock.advance(5_000)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    await handle.stop()
+  })
+
+  test('a frozen tick whose body is not JSON still stretches the cadence', async () => {
+    // The fourth path #269 has to cover: a 200 whose body fails response.json()
+    // lands in the same generic arm as a rejected fetch, and the reading has to
+    // survive it the same way.
+    const { clock, handle, fetchMock, records, onThermalBackoff } =
+      await runFrozenFailingTick(
+        async () => new Response('<html>not json</html>', { status: 200 })
+      )
+
+    expect(handle.__state().backoff.engaged).toBe(true)
+    expect(onThermalBackoff).toHaveBeenCalledTimes(1)
+    expectStarvedRecord(records, 'failed')
+
+    await clock.advance(5_000)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    await clock.advance(5_000)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    await handle.stop()
+  })
+
+  test('a consumer that throws on the notice does not wedge the loop', async () => {
+    // The settle path calls into consumer code, and one of its call sites is
+    // the tick's `finally`. A throw escaping there would skip the reschedule
+    // that lives below it and stop sampling for the rest of the session, with
+    // only the two-minute stall watchdog to notice.
+    const clock = new FakeClock()
+    const onThermalBackoff = vi.fn(() => {
+      throw new Error('toast layer boom')
+    })
+    let release: () => void = () => {}
+    const inFlight = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const fetchMock = vi.fn(async () => {
+      await inFlight
+      throw new Error('socket hung up')
+    })
+    const records: LogRecord[] = []
+    __resetLog()
+    __setLogRecordSink((record) => records.push(record))
+    __setSampleLoopRuntime(
+      buildSampleLoopRuntime({ clock, fetch: fetchMock as never })
+    )
+    const handle = startSampleLoop({
+      getTopic: () => 't',
+      modelId: 'test-model',
+      getFaceTrack: () => makeFakeTrack(),
+      onThermalBackoff,
+    })
+    await flushMicrotasks(10)
+
+    await clock.advance(5_000)
+    await clock.freeze(6_000)
+    release()
+    await flushMicrotasks(30)
+
+    expect(onThermalBackoff).toHaveBeenCalledTimes(1)
+    expect(
+      records.some(
+        (record) =>
+          record.scope === 'ai.sampleloop' &&
+          record.msg === 'thermal_notice.threw'
+      )
+    ).toBe(true)
+    expect(handle.__state().backoff.engaged).toBe(true)
+    // The tick finished and the chain is still armed at the stretched cadence.
+    expect(handle.__state().inFlight).toBe(false)
+    await clock.advance(10_000)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    await handle.stop()
+  })
+
+  test('teardown discards its probe instead of settling it', async () => {
+    // stop() aborts the in-flight request itself, so settling on the way out
+    // would attribute our own shutdown to a machine freeze: a toast blaming
+    // the model, a bogus app.starved row, and a backoff left engaged for the
+    // next session to start stretched on. The discard is what prevents that,
+    // and nothing else in the suite covers it.
+    const clock = new FakeClock()
+    const onThermalBackoff = vi.fn()
+    let release: () => void = () => {}
+    const inFlight = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const fetchMock = vi.fn(async () => {
+      await inFlight
+      throw new DOMException('aborted', 'AbortError')
+    })
+    const records: LogRecord[] = []
+    __resetLog()
+    __setLogRecordSink((record) => records.push(record))
+    __setSampleLoopRuntime(
+      buildSampleLoopRuntime({ clock, fetch: fetchMock as never })
+    )
+    const handle = startSampleLoop({
+      getTopic: () => 't',
+      modelId: 'test-model',
+      getFaceTrack: () => makeFakeTrack(),
+      onThermalBackoff,
+    })
+    await flushMicrotasks(10)
+
+    await clock.advance(5_000)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    // Six seconds of freeze the probe would otherwise be entitled to report...
+    await clock.freeze(6_000)
+    // ...but the session is ending, and this abort is ours.
+    await handle.stop()
+    release()
+    await flushMicrotasks(30)
+
+    expect(handle.__state().backoff.engaged).toBe(false)
+    expect(onThermalBackoff).not.toHaveBeenCalled()
+    expect(
+      records.filter(
+        (record) =>
+          record.scope === 'ai.sampleloop' && record.msg === 'app.starved'
+      )
+    ).toHaveLength(0)
+  })
+
+  test('the stall record names the cadence the freeze just bought', async () => {
+    // Both records describe the same tick, and `stall.reported` exists to
+    // answer "why did focus detection stop scoring". Settling before the tick
+    // arms the watchdog is what keeps it from naming the 5 s cadence the loop
+    // is abandoning for a retry that lands 10 s out.
+    const { handle, records } = await runFrozenFailingTick(
+      async () => new Response('upstream said no', { status: 500 }),
+      STALL_NOTICE_AFTER_MS + 10_000
+    )
+
+    const stall = records.find(
+      (record) =>
+        record.scope === 'ai.sampleloop' && record.msg === 'stall.reported'
+    )
+    expect(stall?.data).toMatchObject({
+      reason: 'inference_failed',
+      backoffEngaged: true,
+      effectiveIntervalMs: 10_000,
+    })
+    await handle.stop()
+  })
+
+  test('a failure that starved nothing is not credited toward recovery', async () => {
+    // Reading the probe on the failure paths must not quietly turn those
+    // ticks into normal ones: a tick that never answered is no evidence the
+    // machine recovered. Before #269 the question could not arise, because
+    // errored ticks never touched the backoff machine at all.
+    const clock = new FakeClock()
+    let release: () => void = () => {}
+    const inFlight = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const fetchMock = vi.fn(async () => {
+      if (fetchMock.mock.calls.length === 1) await inFlight
+      throw new Error('socket hung up')
+    })
+    __setSampleLoopRuntime(
+      buildSampleLoopRuntime({ clock, fetch: fetchMock as never })
+    )
+    const handle = startSampleLoop({
+      getTopic: () => 't',
+      modelId: 'test-model',
+      getFaceTrack: () => makeFakeTrack(),
+    })
+    await flushMicrotasks(10)
+
+    await clock.advance(5_000)
+    await clock.freeze(6_000)
+    release()
+    await flushMicrotasks(30)
+    expect(handle.__state().backoff.engaged).toBe(true)
+
+    // Enough quiet failures to recover on, at the stretched 10 s cadence.
+    for (let i = 0; i < BACKOFF_RECOVER_AFTER; i += 1) {
+      await clock.advance(10_000)
+    }
+    expect(fetchMock.mock.calls.length).toBe(1 + BACKOFF_RECOVER_AFTER)
+    expect(handle.__state().backoff.engaged).toBe(true)
+    await handle.stop()
+  })
+
   test('does not engage when ticks stay near the measured p95', async () => {
     const clock = new FakeClock()
     const onThermalBackoff = vi.fn()
@@ -2685,6 +2989,20 @@ describe('nextBackoffState — A6 pure transition', () => {
   test('starvation engages even with no benchmark to compare against', () => {
     const s = nextBackoffState(initialBackoffState(), 1, 0, STARVE_THRESHOLD_MS)
     expect(s.engaged).toBe(true)
+  })
+
+  test('a starving tick with no duration to judge still engages', () => {
+    // #269 — the failure paths have no completed round-trip, so they settle
+    // the probe with NaN. That must neither read as slow nor as fast.
+    const s = nextBackoffState(
+      initialBackoffState(),
+      Number.NaN,
+      P95,
+      STARVE_THRESHOLD_MS
+    )
+    expect(s.engaged).toBe(true)
+    expect(s.justEngaged).toBe(true)
+    expect(s.consecutiveNormal).toBe(0)
   })
 
   test('a starved run recovers on the ordinary normal-tick streak', () => {
