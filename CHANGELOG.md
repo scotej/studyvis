@@ -4,18 +4,23 @@
 
 ### Fixed
 
-- **On-device AI no longer freezes the app for seconds at a time.** With
-  focus detection on, a single check could take the whole machine: the window
-  stopped responding, video stuttered, and on a busy laptop nothing in the app
-  got scheduled at all for as long as nine seconds at a stretch — which is
-  what had been pushing peer connections over the edge in the first place. The
-  model engine is now started at a lower scheduling priority, so it hands the
-  machine back the moment the app wants it and only loses time when something
-  else actually needs the CPU. And the rule that spaces checks out now watches
-  for the app freezing rather than only for the model running long: one check
-  that froze the app is enough to stretch the cadence, where it used to take
-  two merely slow ones in a row. The diagnostics log records how long the app
-  was starved, next to the check that starved it.
+- **On-device AI freezes the app far less.** With focus detection on, a
+  single check could take the whole machine: the window stopped responding,
+  video stuttered, and on a busy laptop nothing in the app got scheduled at
+  all for as long as nine seconds at a stretch — which is what had been
+  pushing peer connections over the edge in the first place. The model engine
+  is now started at a lower scheduling priority, so where the system honours
+  that it hands the machine back the moment the app wants it and only loses
+  time when something else actually needs the CPU. And the rule that spaces
+  checks out now watches for the app freezing rather than only for the model
+  running long: one check that froze the app is enough to stretch the cadence,
+  where it used to take two merely slow ones in a row — including a check that
+  froze the app and then failed or timed out, which used to be thrown away and
+  retried straight back into the same freeze. Both halves are damage control
+  rather than a cure: the priority request is best-effort, and spacing checks
+  out can only answer a freeze that has already happened. The diagnostics log
+  records how long the app was starved, next to the check that starved it,
+  whether or not that check ever came back with an answer.
 
 - **Closing the window on Linux now actually closes it, and a white window
   can come back on its own.** On GNOME there is no tray icon to click, so
