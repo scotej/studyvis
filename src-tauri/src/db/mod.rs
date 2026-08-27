@@ -25,6 +25,7 @@ pub mod audit_events;
 pub mod friends;
 pub mod migrations;
 pub mod schema_repair;
+pub mod session_timelines;
 pub mod sessions;
 
 /// The app's single shared connection behind a `Mutex` (not an actual pool),

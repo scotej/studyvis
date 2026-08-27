@@ -1,5 +1,9 @@
 import { auditEventsListForSession } from '@/lib/db/audit'
 import { listFriends, type Friend } from '@/lib/db/friends'
+import {
+  sessionTimelineGet,
+  type SessionTimelineRecord,
+} from '@/lib/db/sessionTimeline'
 import { sessionsGet } from '@/lib/db/sessions'
 import { logger } from '@/lib/log'
 import { strings } from '@/strings'
@@ -19,10 +23,19 @@ export async function loadReportData(
     log.warn('friends.list_failed', { cmd: 'friends_list', err })
     return []
   })
-  const [session, auditEvents, friendRows] = await Promise.all([
+  // #236 — a missing or unreadable write-up is the same as not having one yet:
+  // the report offers to write it from the raw journal instead of failing.
+  const timelinePromise = sessionTimelineGet(sessionId).catch(
+    (err: unknown): SessionTimelineRecord | null => {
+      log.warn('timeline.get_failed', { cmd: 'session_timeline_get', err })
+      return null
+    }
+  )
+  const [session, auditEvents, friendRows, timeline] = await Promise.all([
     sessionsGet(sessionId),
     auditEventsListForSession(sessionId),
     friendRowsPromise,
+    timelinePromise,
   ])
   if (!session) throw new Error(strings.report.notFound)
 
@@ -40,6 +53,7 @@ export async function loadReportData(
   return {
     session,
     auditEvents,
+    timeline,
     nameByEdPubkey,
     // The saved session owns this value. Do not substitute the identity that
     // happens to be active when a historical report is opened.

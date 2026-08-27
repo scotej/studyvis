@@ -32,6 +32,15 @@ import {
   PTT_FRIENDS_DEFAULT_ACCELERATOR,
   type ShortcutAction,
 } from '@/lib/keybindings'
+import { detectChromePlatform, type ChromePlatform } from '@/lib/windowChrome'
+
+// Close-to-tray ships ON for the platforms where a tray icon is a first-class
+// citizen and OFF for Linux (#263): GNOME without an AppIndicator extension
+// renders no icon at all, so "close" would leave an unreachable process
+// running. An explicit stored value always wins — see hydrateValuesFromStore.
+export function defaultMinimizeToTray(platform: ChromePlatform): boolean {
+  return platform !== 'linux'
+}
 
 export type ThemeMode = 'dark' | 'light' | 'auto'
 export type TurnPreference = 'auto' | 'always' | 'never'
@@ -129,6 +138,13 @@ export type SettingsValues = {
   // per-sample by `features/ai/focusStore.ts`; the Settings → AI slider sets
   // it. 0 disables the gate.
   offTaskConfidenceFloor: number
+  // #236 — record what the AI reports seeing during a session to a local file
+  // and write it up afterwards. ON by default: it stores only text the model
+  // already produced about a session the user asked it to watch, never a frame,
+  // never anything off this device — and the post-session account is the whole
+  // point of the feature. Turning it off stops new journal lines; existing
+  // write-ups stay readable until their session is deleted.
+  sessionTimelineEnabled: boolean
   // V2-P9 user override for the AI sample interval (seconds). `null` means
   // "use the V2-P2 benchmark's measured cadence" (the default). When set, the
   // sample loop clamps it to the model's measured floor so the user can only
@@ -201,6 +217,7 @@ export const SETTINGS_KEY_WARNING_THRESHOLD = 'warning_threshold'
 export const SETTINGS_KEY_ALERT_THRESHOLD = 'alert_threshold'
 export const SETTINGS_KEY_CONFIDENCE_FLOOR = 'off_task_confidence_floor'
 export const SETTINGS_KEY_SAMPLE_INTERVAL = 'sample_interval_s'
+export const SETTINGS_KEY_SESSION_TIMELINE = 'session_timeline_enabled'
 export const SETTINGS_KEY_PTT_FRIENDS_ACCELERATOR = 'ptt_friends_accelerator'
 export const SETTINGS_KEY_PTT_AI_ACCELERATOR = 'ptt_ai_accelerator'
 export const SETTINGS_KEY_CAPTURE_DISPLAYS = 'capture_displays'
@@ -226,7 +243,12 @@ export const DEFAULT_SETTINGS: SettingsValues = {
   pomodoroSoundEnabled: false,
   friendOnlineNotificationEnabled: false,
   autoUpdateEnabled: true,
-  minimizeToTrayOnClose: true,
+  // Close-to-tray is a macOS/Windows convention (#263). Linux's tray rides
+  // libappindicator and GNOME — CachyOS included — ships no indicator host by
+  // default, so a hidden window is unreachable there: close means quit unless
+  // the user opts in from Settings. Pure helper so tests can drive platforms;
+  // mirrors the Rust boot default in `lib.rs`.
+  minimizeToTrayOnClose: defaultMinimizeToTray(detectChromePlatform()),
   debugLogEnabled: false,
   turnPreference: 'auto',
   aiFeaturesEnabled: false,
@@ -238,6 +260,7 @@ export const DEFAULT_SETTINGS: SettingsValues = {
   // `@/features/ai` import (same boundary the threshold defaults respect).
   offTaskConfidenceFloor: 0.6,
   sampleIntervalSec: null,
+  sessionTimelineEnabled: true,
   pttFriendsAccelerator: PTT_FRIENDS_DEFAULT_ACCELERATOR,
   pttAiAccelerator: PTT_AI_DEFAULT_ACCELERATOR,
   captureDisplays: 'primary',
@@ -302,6 +325,8 @@ type SettingsState = {
   setOffTaskConfidenceFloor: (floor: number) => Promise<void>
   // `null` clears the override, falling back to the model benchmark cadence.
   setSampleIntervalSec: (seconds: number | null) => Promise<void>
+  // #236 — record per-check observations and write the session up afterwards.
+  setSessionTimelineEnabled: (enabled: boolean) => Promise<void>
   // V3-P3 — set the accelerator for one of the two global shortcuts. The
   // order intentionally inverts `setMinimizeToTrayOnClose` because shortcut
   // semantics are binary: registration must succeed before persistence is
@@ -692,6 +717,7 @@ export async function hydrateValuesFromStore(
     alert: await store.get(SETTINGS_KEY_ALERT_THRESHOLD),
     confidenceFloor: await store.get(SETTINGS_KEY_CONFIDENCE_FLOOR),
     sampleInterval: await store.get(SETTINGS_KEY_SAMPLE_INTERVAL),
+    sessionTimeline: await store.get(SETTINGS_KEY_SESSION_TIMELINE),
     pttFriends: await store.get(SETTINGS_KEY_PTT_FRIENDS_ACCELERATOR),
     pttAi: await store.get(SETTINGS_KEY_PTT_AI_ACCELERATOR),
     captureDisplays: await store.get(SETTINGS_KEY_CAPTURE_DISPLAYS),
@@ -787,6 +813,10 @@ export async function hydrateValuesFromStore(
         DEFAULT_SETTINGS.offTaskConfidenceFloor
       ),
       sampleIntervalSec: readNullableNumber(stored.sampleInterval),
+      sessionTimelineEnabled: readBool(
+        stored.sessionTimeline,
+        DEFAULT_SETTINGS.sessionTimelineEnabled
+      ),
       pttFriendsAccelerator: readAccelerator(
         stored.pttFriends,
         DEFAULT_SETTINGS.pttFriendsAccelerator
@@ -995,13 +1025,20 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     try {
       await activeDeps.runtime.pushMinimizeToTray(enabled)
     } catch (err) {
+      // #263 — the backend refuses close-to-tray when no tray icon exists
+      // (stock GNOME has none): hiding would leave the app unreachable.
+      // Revert the local toggle so the UI keeps telling the truth; the
+      // stored value survives so a fixed environment restores it on boot.
       const message = err instanceof Error ? err.message : String(err)
       log.error('push.failed', {
         setting: 'minimizeToTrayOnClose',
         desired: enabled,
         err,
       })
-      set({ error: message })
+      set((s) => ({
+        values: { ...s.values, minimizeToTrayOnClose: !enabled },
+        error: message,
+      }))
     }
   },
 
@@ -1090,6 +1127,11 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   setSampleIntervalSec: async (seconds) => {
     set((s) => ({ values: { ...s.values, sampleIntervalSec: seconds } }))
     await writeKey(set, SETTINGS_KEY_SAMPLE_INTERVAL, seconds)
+  },
+
+  setSessionTimelineEnabled: async (enabled) => {
+    set((s) => ({ values: { ...s.values, sessionTimelineEnabled: enabled } }))
+    await writeKey(set, SETTINGS_KEY_SESSION_TIMELINE, enabled)
   },
 
   setShortcutAccelerator: async (action, accelerator) => {

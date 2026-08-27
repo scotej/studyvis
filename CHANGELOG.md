@@ -2,8 +2,71 @@
 
 ## Unreleased
 
+### Added
+
+- **Your session report now tells you what actually happened, minute by
+  minute.** Until now the AI's own words survived only when it flagged you:
+  every check where you were working was read once, used to move the score, and
+  thrown away. StudyVis now keeps each check's text in a plain file beside its
+  session — no images, ever, and nothing leaves the machine — and when the
+  session ends the same on-device model reads that file back and writes the
+  session up as a timeline. It appears under "Minute by minute" in the report
+  you get on leaving and in Settings → Sessions, and rides along in "Copy
+  report". The write-up runs after the report has already opened, so nothing
+  waits on it, and the section says plainly when the model could not be reached
+  and the entries are the raw checks instead — with a button to have it written
+  again. Deleting a session deletes its file along with everything else.
+  Recording is on by default whenever AI is on and can be turned off in
+  Settings → AI; existing write-ups stay readable either way.
+
 ### Fixed
 
+- **"Write it up again" on a session report now writes it up once.** Pressing
+  it started the write-up over on its own result, forever: each pass read the
+  whole session back, ran the on-device model over it, started and stopped the
+  engine, and then triggered the next one — for as long as the report stayed
+  open. The button now does exactly one pass, the way it always read.
+
+- **The write-up no longer leaves the AI engine running when it cannot use
+  it.** If the engine was slow to load — a large model on a machine without a
+  GPU is the usual way — the write-up gave up waiting and fell back to the
+  plain per-minute account, which is by design, but left the engine itself
+  running with the model still in memory and nothing left to use it. It now
+  shuts down whatever it started.
+
+- **A dropped update download no longer holds on to what it half-fetched.**
+  A background update check that lost the network, or one interrupted by a
+  session starting, kept the partly downloaded release around for the rest of
+  the run instead of discarding it. The next check already started over from
+  scratch; now the abandoned bytes go with it.
+
+- **On-device AI freezes the app far less.** With focus detection on, a
+  single check could take the whole machine: the window stopped responding,
+  video stuttered, and on a busy laptop nothing in the app got scheduled at
+  all for as long as nine seconds at a stretch — which is what had been
+  pushing peer connections over the edge in the first place. The model engine
+  is now started at a lower scheduling priority, so where the system honours
+  that it hands the machine back the moment the app wants it and only loses
+  time when something else actually needs the CPU. And the rule that spaces
+  checks out now watches for the app freezing rather than only for the model
+  running long: one check that froze the app is enough to stretch the cadence,
+  where it used to take two merely slow ones in a row — including a check that
+  froze the app and then failed or timed out, which used to be thrown away and
+  retried straight back into the same freeze. Both halves are damage control
+  rather than a cure: the priority request is best-effort, and spacing checks
+  out can only answer a freeze that has already happened. The diagnostics log
+  records how long the app was starved, next to the check that starved it,
+  whether or not that check ever came back with an answer.
+
+- **Closing the window on Linux now actually closes it, and a white window
+  can come back on its own.** On GNOME there is no tray icon to click, so
+  closing StudyVis used to leave it running with no way back — and when the
+  page's renderer died, the app stayed white forever with nothing in any log
+  to say why. Close now quits unless a working tray is present (and Linux no
+  longer pretends one exists by default), a tray that cannot render refuses
+  close-to-tray instead of hiding your only window, and a killed web process
+  is logged with its reason and reloaded automatically, twice, before giving
+  up with the whole story in the diagnostics archive.
 - **A brief stall no longer empties your session while you are still on
   camera to your friend.** A study session could lose a peer out of nowhere
   after a few minutes and never get them back: the friend vanished from the

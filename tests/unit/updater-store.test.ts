@@ -164,6 +164,9 @@ describe('checkNow', () => {
     expect(s.errorKind).toBe('download')
     expect(s.pending).toBeNull()
     expect(s.version).toBeNull()
+    // "Nothing staged" has to include the plugin handle the partial bytes
+    // hang off, or every flaky download leaves one behind for the process.
+    expect(update.close).toHaveBeenCalledOnce()
   })
 
   test('a check while an update is already staged is a no-op — staged bytes are not re-fetched', async () => {
@@ -204,6 +207,9 @@ describe('checkNow', () => {
     expect(update.download).not.toHaveBeenCalled()
     expect(useUpdaterStore.getState().status).toBe('idle')
     expect(useUpdaterStore.getState().pending).toBeNull()
+    // Abandoned, not held: the next check re-finds this release, so the Rust
+    // resource behind this handle must not outlive the attempt.
+    expect(update.close).toHaveBeenCalledOnce()
   })
 
   test('an unswappable bundle blocks before any bytes move — issue #77, the .dmg-run app', async () => {
