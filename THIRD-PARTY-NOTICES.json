@@ -16,7 +16,7 @@
   "inputs": [
     {
       "path": "package-lock.json",
-      "sha256": "fcd2bba2315cfa4e8e9712e8e4dbcfddeb15dd2a4a5b2a9a49c3e11f262a8a10"
+      "sha256": "c58b5c911e8a420e7ed63a76fcad955f9b508bed965bbeb3be87f3121ae51d25"
     },
     {
       "path": "package.json",
