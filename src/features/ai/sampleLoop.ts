@@ -1446,7 +1446,9 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
       // duration alone cannot tell a slow engine from one that took the
       // machine away from the app.
       const inferenceStart = runtime.now()
-      activeStarveProbe = startStarveProbe(runtime)
+      // Teardown can land during the capture await above; arming a 1 Hz timer
+      // after it would outlive the loop that owns it.
+      if (!state.stopped) activeStarveProbe = startStarveProbe(runtime)
       const response = await runtime.fetch(
         `http://127.0.0.1:${port}/v1/chat/completions`,
         {
