@@ -94,6 +94,17 @@ only to `127.0.0.1:<sidecar-port>`. No telemetry and no remote upload. The Tauri
 CSP is explicit, and its `connect-src` directive deliberately includes
 `http://127.0.0.1:*` for the randomly bound local llama-server port.
 
+**No frame is stored. The model's words about a frame now are** (#236): each
+resolved check appends one NDJSON line — verdict, the model's reasoning,
+confidence, declared topic, timestamp — to
+`<data_dir>/session-journals/<session-topic>.ndjson`, and the post-session
+write-up reads it back. That is the same class of text the audit log already
+persisted for warnings and alerts, extended to the on-task checks a written
+timeline is mostly made of. It stays local, is never signed or broadcast, is
+gated by Settings → AI → "Write up my sessions", and is unlinked when its
+session is deleted. See `features/session/sessionJournal.ts`,
+`features/session/sessionTimeline.ts`, and `commands/session_journal.rs`.
+
 ## Files
 
 - `captureFace.ts` — camera crop/encode.

@@ -97,6 +97,12 @@ export function AiCategory() {
   const setSampleIntervalSec = useSettingsStore((s) => s.setSampleIntervalSec)
   const debugLogEnabled = useSettingsStore((s) => s.values.debugLogEnabled)
   const setDebugLogEnabled = useSettingsStore((s) => s.setDebugLogEnabled)
+  const sessionTimelineEnabled = useSettingsStore(
+    (s) => s.values.sessionTimelineEnabled
+  )
+  const setSessionTimelineEnabled = useSettingsStore(
+    (s) => s.setSessionTimelineEnabled
+  )
   const captureDisplays = useSettingsStore((s) => s.values.captureDisplays)
   const setCaptureDisplays = useSettingsStore((s) => s.setCaptureDisplays)
   const engineAutoInstall = useSettingsStore((s) => s.values.engineAutoInstall)
@@ -772,6 +778,20 @@ export function AiCategory() {
                   </Label>
                 </div>
               </RadioGroup>
+            }
+          />
+
+          <SettingsRow
+            label={copy.sessionTimeline.label}
+            help={copy.sessionTimeline.help}
+            control={
+              <Switch
+                checked={sessionTimelineEnabled}
+                onCheckedChange={(checked) =>
+                  void setSessionTimelineEnabled(Boolean(checked))
+                }
+                aria-label={copy.sessionTimeline.ariaLabel}
+              />
             }
           />
 

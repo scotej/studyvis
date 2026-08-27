@@ -18,7 +18,7 @@ For each Cargo registry component, `source` is the direct exact-version crates.i
 source-archive URL and `source checksum` is its Cargo.lock SHA-256. These fields
 tell recipients how to obtain and verify the Covered Source named in the index.
 
-Components: 755 total (532 Cargo, 222 npm, 1 external runtime).
+Components: 753 total (532 Cargo, 220 npm, 1 external runtime).
 
 COMPONENT INDEX
 ===============
@@ -4266,23 +4266,11 @@ NPM
   source: https://registry.npmjs.org/@noble/ed25519/-/ed25519-3.1.0.tgz
   license: npm:node_modules/@noble/ed25519/LICENSE (SHA-256 80e49272a4c81b0ded274b540d2b8089bd5f4d7d4fe1f2df309d463d7067c9c4)
 
-- @noble/hashes 2.2.0 — MIT
-  id: npm:node_modules/@noble/hashes@2.2.0
+- @noble/hashes 2.3.0 — MIT
+  id: npm:node_modules/@noble/hashes@2.3.0
   targets: frontend
-  source: https://registry.npmjs.org/@noble/hashes/-/hashes-2.2.0.tgz
+  source: https://registry.npmjs.org/@noble/hashes/-/hashes-2.3.0.tgz
   license: npm:node_modules/@noble/hashes/LICENSE (SHA-256 3239e134eb6e6d64538ca76498c7fcb08a395249dd9d4af9927bf6d0169ee429)
-
-- @noble/hashes 2.3.0 — MIT
-  id: npm:node_modules/@noble/curves/node_modules/@noble/hashes@2.3.0
-  targets: frontend
-  source: https://registry.npmjs.org/@noble/hashes/-/hashes-2.3.0.tgz
-  license: npm:node_modules/@noble/curves/node_modules/@noble/hashes/LICENSE (SHA-256 3239e134eb6e6d64538ca76498c7fcb08a395249dd9d4af9927bf6d0169ee429)
-
-- @noble/hashes 2.3.0 — MIT
-  id: npm:node_modules/@scure/bip39/node_modules/@noble/hashes@2.3.0
-  targets: frontend
-  source: https://registry.npmjs.org/@noble/hashes/-/hashes-2.3.0.tgz
-  license: npm:node_modules/@scure/bip39/node_modules/@noble/hashes/LICENSE (SHA-256 3239e134eb6e6d64538ca76498c7fcb08a395249dd9d4af9927bf6d0169ee429)
 
 - @noble/secp256k1 3.1.0 — MIT
   id: npm:node_modules/@noble/secp256k1@3.1.0
@@ -11051,10 +11039,8 @@ Permission is granted to anyone to use this software for any purpose, including 
 
 SHA-256 3239e134eb6e6d64538ca76498c7fcb08a395249dd9d4af9927bf6d0169ee429
 Applies to:
-- npm:node_modules/@noble/curves/node_modules/@noble/hashes@2.3.0 — npm:node_modules/@noble/curves/node_modules/@noble/hashes/LICENSE
 - npm:node_modules/@noble/curves@2.3.0 — npm:node_modules/@noble/curves/LICENSE
-- npm:node_modules/@noble/hashes@2.2.0 — npm:node_modules/@noble/hashes/LICENSE
-- npm:node_modules/@scure/bip39/node_modules/@noble/hashes@2.3.0 — npm:node_modules/@scure/bip39/node_modules/@noble/hashes/LICENSE
+- npm:node_modules/@noble/hashes@2.3.0 — npm:node_modules/@noble/hashes/LICENSE
 
 --------------------------------------------------------------------------------
 

@@ -11,8 +11,13 @@
 import { type AuditEventKind, isAuditEventKind } from '@/lib/audit-types'
 import type { AuditEventRecord } from '@/lib/db/audit'
 import type { SessionRecord } from '@/lib/db/sessions'
+import {
+  isTimelineSource,
+  type SessionTimelineRecord,
+} from '@/lib/db/sessionTimeline'
 import { strings } from '@/strings'
 import { formatBreakDuration } from './break'
+import { parseTimelineEntries, type TimelineEntry } from './sessionTimeline'
 import {
   aiCoverage,
   deriveBreaksSummary,
@@ -34,6 +39,42 @@ export type ResolvedReportData = {
   // session. Null means a legacy row with unknown owner; it must never be
   // replaced with the currently active identity.
   myEdPubkeyHex: string | null
+  // #236 — the stored written account of the session, when one exists. Optional
+  // because Storybook fixtures and the pre-#236 rows both legitimately have
+  // none; the report then offers to write one from the raw journal.
+  timeline?: SessionTimelineRecord | null
+}
+
+// #236 — shared between the rendered section and the text export so a copied
+// report and the screen can never disagree about what the AI wrote.
+export function writtenTimelineEntries(
+  timeline: SessionTimelineRecord | null | undefined
+): TimelineEntry[] {
+  if (!timeline) return []
+  return parseTimelineEntries(timeline.entries)
+}
+
+export function formatWrittenRange(startMin: number, endMin: number): string {
+  const copy = strings.report.sections.written
+  return endMin - startMin <= 1
+    ? copy.rangeSingle(startMin)
+    : copy.rangeSpan(startMin, endMin)
+}
+
+// The honesty line under the section heading: only a write-up the model
+// actually produced for every window goes unlabelled.
+export function writtenSourceNote(
+  timeline: SessionTimelineRecord | null | undefined
+): string | null {
+  if (!timeline) return null
+  const source = isTimelineSource(timeline.source) ? timeline.source : null
+  if (source === 'mixed') {
+    return strings.report.sections.written.sourceNote.mixed
+  }
+  if (source === 'observations') {
+    return strings.report.sections.written.sourceNote.observations
+  }
+  return null
 }
 
 export function labelFor(
@@ -155,6 +196,26 @@ export function serializeReportToText(data: ResolvedReportData): string {
     for (const t of topicTimeline) lines.push(`- ${t.topic} (${t.label})`)
   }
 
+  // #236 — the written account sits between the declared topic and the raw
+  // audit timeline in both renderings: it reads as the story, and the signed
+  // event list below it is the evidence.
+  lines.push('', `## ${strings.report.sections.written.heading}`)
+  const written = writtenTimelineEntries(data.timeline)
+  if (written.length === 0) {
+    lines.push(strings.report.sections.written.empty)
+  } else {
+    const note = writtenSourceNote(data.timeline)
+    if (note) lines.push(note)
+    if (data.timeline?.truncated) {
+      lines.push(strings.report.sections.written.truncated)
+    }
+    for (const entry of written) {
+      lines.push(
+        `- ${formatWrittenRange(entry.start_min, entry.end_min)} — ${entry.summary}`
+      )
+    }
+  }
+
   lines.push('', `## ${strings.report.sections.timeline.heading}`)
   if (grouped.length === 0) {
     lines.push(strings.report.sections.timeline.empty)
@@ -174,9 +235,9 @@ export function serializeReportToText(data: ResolvedReportData): string {
     }
   }
 
-  // R5 — section order mirrors the on-screen render (Topic → Timeline →
-  // Distractions → Breaks) so a copied/exported summary matches what the
-  // user just saw. The on-screen Distractions section precedes Breaks.
+  // R5 — section order mirrors the on-screen render (Topic → Minute by minute
+  // → Timeline → Distractions → Breaks) so a copied/exported summary matches
+  // what the user just saw. The on-screen Distractions section precedes Breaks.
   lines.push('', `## ${strings.report.sections.distractions.heading}`)
   if (distractions.length === 0) {
     lines.push(

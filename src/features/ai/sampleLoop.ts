@@ -247,6 +247,96 @@ export function schedulerLagIsMaterial(
   )
 }
 
+// #269 — the other half of "who is running behind". `schedulerLagIsMaterial`
+// above measures how late the NEXT tick was scheduled, so it can only see the
+// gaps that happen to straddle a tick boundary; at a backed-off 42 s cadence
+// that misses almost all of them. This probe runs a 1 Hz timer for exactly as
+// long as an inference is in flight and keeps the worst lateness it sees, so a
+// main thread that stopped being scheduled DURING an inference is attributed
+// to the inference that was running.
+//
+// Both halves matter and neither substitutes for the other: a long inference
+// says the engine is behind, a starved main thread says the app is. The
+// v1.11.3 diagnostics in #269 show them together — 25–35 s inferences against
+// an 11.2 s benchmark p95, and a separate 1 Hz watchdog missing 5.5–9.2 s at a
+// time with no clock skew, which is a webview processing nothing at all.
+export const STARVE_PROBE_INTERVAL_MS = 1_000
+// Above ordinary GC / layout jitter and far below the freezes in the report. A
+// main thread three full seconds late to a 1 Hz timer has stopped painting and
+// stopped servicing WebRTC.
+export const STARVE_THRESHOLD_MS = 3_000
+
+export type StarveProbe = {
+  stop: () => void
+  // Worst observed lateness, in ms, over the probe's lifetime.
+  worstMs: () => number
+  // Wall time minus monotonic time across the probe's lifetime — the same
+  // discriminator `pttWatchdog` records as `skewMs`. Material skew means the
+  // machine suspended rather than starved.
+  skewMs: () => number
+}
+
+type StarveProbeRuntime = {
+  now: () => number
+  // Monotonic clock, when the platform has one. Optional so an injected test
+  // runtime with a single clock keeps today's deterministic behavior.
+  monotonicNow?: () => number
+  setTimeout: (handler: () => void, ms: number) => unknown
+  clearTimeout: (handle: unknown) => void
+}
+
+export function startStarveProbe(runtime: StarveProbeRuntime): StarveProbe {
+  // Lateness is measured on the MONOTONIC clock, never on `Date.now()`. A
+  // machine that suspends mid-inference (lid closed, sleep) moves wall time by
+  // minutes while nothing was ever starved, and an NTP step does the same — on
+  // wall time a single such tick would engage backoff on its first occurrence
+  // and file a fabricated `app.starved` record. `pttWatchdog` draws exactly
+  // this distinction from the same pair of clocks, and #269's own diagnosis
+  // leaned on its `skewMs: 0` to rule sleep out.
+  const monotonicNow = runtime.monotonicNow ?? runtime.now
+  let worstMs = 0
+  let skewMs = 0
+  let handle: unknown = null
+  let stopped = false
+  const startedMono = monotonicNow()
+  const startedWall = runtime.now()
+  let dueAt = startedMono + STARVE_PROBE_INTERVAL_MS
+
+  const observe = (): void => {
+    worstMs = Math.max(worstMs, monotonicNow() - dueAt)
+  }
+
+  const tick = (): void => {
+    if (stopped) return
+    observe()
+    dueAt = monotonicNow() + STARVE_PROBE_INTERVAL_MS
+    handle = runtime.setTimeout(tick, STARVE_PROBE_INTERVAL_MS)
+  }
+
+  handle = runtime.setTimeout(tick, STARVE_PROBE_INTERVAL_MS)
+
+  return {
+    stop: () => {
+      if (stopped) return
+      stopped = true
+      // Measure once more on the way out. When the freeze ends, the pending
+      // timer callback and the resolved fetch are both queued and the order
+      // between them is not ours to choose; without this, a 9 s freeze that
+      // released just as the inference resolved could be recorded as zero.
+      observe()
+      skewMs = runtime.now() - startedWall - (monotonicNow() - startedMono)
+      if (handle !== null) runtime.clearTimeout(handle)
+      handle = null
+    },
+    worstMs: () => Math.max(0, Math.round(worstMs)),
+    skewMs: () => Math.round(skewMs),
+  }
+}
+
+// #269 — how the inference a starve reading belongs to ended. Purely a log
+// field: the cadence owes a freeze the same answer however the tick finished.
+type TickOutcome = 'resolved' | 'http_error' | 'timeout' | 'failed'
+
 export type BackoffState = {
   engaged: boolean
   consecutiveSlow: number
@@ -267,27 +357,36 @@ export function initialBackoffState(): BackoffState {
 
 // Pure transition for the backoff state machine. `p95Sec` is the benchmark's
 // measured p95 (the cost the cadence was sized against); `durationSec` is the
-// just-measured inference wall-clock. When p95 is unknown/non-positive the
-// backoff is disabled (we have no baseline to compare against), so the state
-// is returned to rest.
+// just-measured inference wall-clock; `starvedMs` is the worst main-thread
+// lateness the starve probe saw while that inference was in flight. When p95
+// is unknown/non-positive there is no baseline to call a duration slow, so
+// duration stops driving the machine and only starvation can still engage it.
 export function nextBackoffState(
   prev: BackoffState,
   durationSec: number,
-  p95Sec: number
+  p95Sec: number,
+  starvedMs = 0
 ): BackoffState {
-  if (!Number.isFinite(p95Sec) || p95Sec <= 0) {
-    return prev.engaged || prev.consecutiveSlow !== 0
-      ? initialBackoffState()
-      : prev
-  }
+  const hasBaseline = Number.isFinite(p95Sec) && p95Sec > 0
   const isSlow =
-    Number.isFinite(durationSec) && durationSec > p95Sec * SLOW_TICK_FACTOR
-  const consecutiveSlow = isSlow ? prev.consecutiveSlow + 1 : 0
-  const consecutiveNormal = isSlow ? 0 : prev.consecutiveNormal + 1
+    hasBaseline &&
+    Number.isFinite(durationSec) &&
+    durationSec > p95Sec * SLOW_TICK_FACTOR
+  // #269 — a tick that froze the app is a bad tick whether or not a benchmark
+  // exists to call it slow, so this arm deliberately survives an unknown p95.
+  // Duration needs a baseline to mean anything; a missed 1 Hz timer does not.
+  const starved = Number.isFinite(starvedMs) && starvedMs >= STARVE_THRESHOLD_MS
+  const bad = isSlow || starved
+  const consecutiveSlow = bad ? prev.consecutiveSlow + 1 : 0
+  const consecutiveNormal = bad ? 0 : prev.consecutiveNormal + 1
 
   let engaged = prev.engaged
   let justEngaged = false
-  if (!engaged && consecutiveSlow >= BACKOFF_ENGAGE_AFTER) {
+  // #269 — engage on the FIRST starving tick. Waiting for
+  // BACKOFF_ENGAGE_AFTER is right for a merely slow tick, where the cadence
+  // shouldn't chase ordinary variance, and wrong for one that froze the app:
+  // the freeze already happened, and the tick we'd be waiting for is another.
+  if (!engaged && (starved || consecutiveSlow >= BACKOFF_ENGAGE_AFTER)) {
     engaged = true
     justEngaged = true
   } else if (engaged && consecutiveNormal >= BACKOFF_RECOVER_AFTER) {
@@ -298,6 +397,10 @@ export function nextBackoffState(
 
 export type SampleLoopRuntime = {
   now: () => number
+  // #269 — a clock that does not move while the machine is suspended, used by
+  // the starve probe so a sleep/wake cannot be read as a frozen main thread.
+  // Optional: an injected runtime without one falls back to `now`.
+  monotonicNow?: () => number
   setTimeout: (handler: () => void, ms: number) => unknown
   clearTimeout: (handle: unknown) => void
   fetch: typeof fetch
@@ -339,6 +442,8 @@ export type SampleLoopRuntime = {
 
 const defaultRuntime: SampleLoopRuntime = {
   now: () => Date.now(),
+  monotonicNow: () =>
+    typeof performance === 'undefined' ? Date.now() : performance.now(),
   setTimeout: (handler, ms) =>
     typeof window === 'undefined'
       ? globalThis.setTimeout(handler, ms)
@@ -645,6 +750,9 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
   // STALL_CHECK_INTERVAL_MS.
   let stallHandle: unknown | null = null
   let activeAbort: AbortController | null = null
+  // #269 — armed for the inference window only; stopped in the tick's finally
+  // and by teardown, so a thrown or aborted tick can never leave it ticking.
+  let activeStarveProbe: StarveProbe | null = null
   // The one bounded post-inference callback currently holding the tick chain.
   // Its signal makes an elapsed deadline or teardown observable to the
   // callback; resolving the deadline alone cannot cancel its promise.
@@ -667,6 +775,77 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
     const override = useSettingsStore.getState().values.sampleIntervalSec
     const baseMs = effectiveIntervalSec(state.modelFloorSec, override) * 1000
     return state.backoff.engaged ? baseMs * BACKOFF_MULTIPLIER : baseMs
+  }
+
+  // #269 — fold the tick's starve reading into the cadence and the log, then
+  // disarm the probe. Every way out of an in-flight inference calls this
+  // exactly once — answered, non-2xx, malformed JSON, rejected fetch, timeout
+  // abort — before the tick arms the stall watchdog or reschedules, so a
+  // request that froze the app for nine seconds and then failed still
+  // stretches the cadence it retries at, and both records name that cadence.
+  // Consuming nulls the probe, so the net in the tick's `finally` cannot
+  // apply a second transition on top of the one a branch already applied.
+  //
+  // `durationSec` is the inference wall-clock when the round-trip completed
+  // and NaN when it didn't: a tick that never answered has no duration to
+  // call slow and — unlike one that did — is no evidence of health either, so
+  // a failure that starved nothing is passed over rather than credited toward
+  // recovery.
+  function settleStarveProbe(
+    outcome: TickOutcome,
+    durationSec: number
+  ): number {
+    const probe = activeStarveProbe
+    if (probe === null) return 0
+    activeStarveProbe = null
+    probe.stop()
+    const starvedMs = probe.worstMs()
+    const completed = Number.isFinite(durationSec)
+    const starved = starvedMs >= STARVE_THRESHOLD_MS
+    if (completed || starved) {
+      const nextBackoff = nextBackoffState(
+        state.backoff,
+        durationSec,
+        state.modelP95Sec,
+        starvedMs
+      )
+      state.backoff = nextBackoff
+      if (nextBackoff.justEngaged && !state.thermalNoticeShown) {
+        state.thermalNoticeShown = true
+        try {
+          opts.onThermalBackoff?.()
+        } catch (err) {
+          // The notice is a toast; settling is the loop's own bookkeeping.
+          // Since #269 this can run from the tick's `catch` and `finally`,
+          // where a throwing consumer would either surface as an unhandled
+          // rejection or skip the reschedule and end sampling for the
+          // session. The latch is already set, so the notice stays one-shot.
+          log.warn('thermal_notice.threw', { tick: state.ticks, err })
+        }
+      }
+    }
+    if (starved) {
+      // The record #269 was opened without: an app-side freeze named beside
+      // the inference it happened under, rather than inferred by lining a
+      // push-to-talk watchdog gap up against a sample-loop timestamp.
+      log.warn('app.starved', {
+        tick: state.ticks,
+        modelId: state.modelId,
+        outcome,
+        starvedMs,
+        // Wall running ahead of monotonic is the signature of a suspend; the
+        // reading above already excludes it, and recording the pair is what
+        // makes that checkable from a diagnostics bundle (same field as
+        // `ptt.watchdog`'s timeline gap).
+        skewMs: probe.skewMs(),
+        inferenceMs: completed ? Math.round(durationSec * 1000) : null,
+        benchmarkP95Ms: Math.round(state.modelP95Sec * 1000),
+        backoffEngaged: state.backoff.engaged,
+        effectiveIntervalMs: nextDelayMs(),
+        onBattery: state.battery.onBattery,
+      })
+    }
+    return starvedMs
   }
 
   // I82 — a tick ended without a sample for a reason nothing else surfaces.
@@ -1263,7 +1442,13 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
       })
       // A6 — time the inference round-trip (the compute that a throttling SoC
       // slows down) so the cadence backoff can compare it to the benchmark p95.
+      // #269 — and watch the main thread across the same window, because the
+      // duration alone cannot tell a slow engine from one that took the
+      // machine away from the app.
       const inferenceStart = runtime.now()
+      // Teardown can land during the capture await above; arming a 1 Hz timer
+      // after it would outlive the loop that owns it.
+      if (!state.stopped) activeStarveProbe = startStarveProbe(runtime)
       const response = await runtime.fetch(
         `http://127.0.0.1:${port}/v1/chat/completions`,
         {
@@ -1284,6 +1469,7 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
           tick: state.ticks,
           elapsedMs: Math.max(0, runtime.now() - tickStartedAt),
         })
+        settleStarveProbe('http_error', Number.NaN)
         noteBlockedTick('inference_failed')
         return
       }
@@ -1299,14 +1485,12 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
       // A6 — a completed round-trip is a valid duration sample for the backoff
       // machine. Aborted / errored ticks don't reach here, so a single hung
       // request (which already aborts at requestTimeoutMs) never alone trips
-      // backoff; only sustained real overruns do.
+      // backoff on duration; only sustained real overruns do. A tick that left
+      // the app unscheduled for seconds does trip it alone, deliberately — but
+      // that arm belongs to `settleStarveProbe`, which every failing path
+      // reaches too, so a duration is the only thing this line is sole owner of.
       const inferenceSec = (runtime.now() - inferenceStart) / 1000
-      const nextBackoff = nextBackoffState(
-        state.backoff,
-        inferenceSec,
-        state.modelP95Sec
-      )
-      state.backoff = nextBackoff
+      const starvedMs = settleStarveProbe('resolved', inferenceSec)
       if (
         state.modelP95Sec > 0 &&
         inferenceSec > state.modelP95Sec * SLOW_TICK_FACTOR
@@ -1319,16 +1503,13 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
           slowThresholdMs: Math.round(
             state.modelP95Sec * SLOW_TICK_FACTOR * 1000
           ),
-          consecutiveSlow: nextBackoff.consecutiveSlow,
-          backoffEngaged: nextBackoff.engaged,
+          consecutiveSlow: state.backoff.consecutiveSlow,
+          backoffEngaged: state.backoff.engaged,
           effectiveIntervalMs: nextDelayMs(),
           schedulerLagMs,
+          starvedMs,
           onBattery: state.battery.onBattery,
         })
-      }
-      if (nextBackoff.justEngaged && !state.thermalNoticeShown) {
-        state.thermalNoticeShown = true
-        opts.onThermalBackoff?.()
       }
       state.captureErrorReported = false
       // A resolved sample (confident OR uncertain) means the pipeline is alive
@@ -1356,6 +1537,7 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
         backoffEngaged: state.backoff.engaged,
         nextDelayMs: nextDelayMs(),
         schedulerLagMs,
+        starvedMs,
         onBattery: state.battery.onBattery,
       })
     } catch (err) {
@@ -1394,6 +1576,7 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
           onBattery: state.battery.onBattery,
           tick: state.ticks,
         })
+        settleStarveProbe('timeout', Number.NaN)
         noteBlockedTick('inference_timeout')
         return
       }
@@ -1403,11 +1586,16 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
         elapsedMs: Math.max(0, runtime.now() - tickStartedAt),
         err,
       })
+      settleStarveProbe('failed', Number.NaN)
       noteBlockedTick('inference_failed')
     } finally {
       runtime.clearTimeout(timer)
       activeAbort = null
       state.inFlight = false
+      // Every path above settles under its own name; this is the net that
+      // keeps "the probe is never left unread" true of a path added later,
+      // and it still runs before the reschedule below.
+      settleStarveProbe('failed', Number.NaN)
       schedule(nextDelayMs())
     }
   }
@@ -1453,6 +1641,13 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
     if (stallHandle !== null) {
       runtime.clearTimeout(stallHandle)
       stallHandle = null
+    }
+    if (activeStarveProbe) {
+      // Discarded, not settled: the abort below is ours, and a shutdown is no
+      // reason to stretch the cadence a later session starts at. Nulling it
+      // here is what makes the aborted tick's `finally` a no-op.
+      activeStarveProbe.stop()
+      activeStarveProbe = null
     }
     if (activeAbort) {
       try {
@@ -1709,19 +1904,33 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
         })
       } catch (err) {
         // Soft fallback: a cancelled picker or any other capture error on
-        // the extra-display acquires drops us back to single-display for
-        // this session. We do NOT latch captureDenied — the primary stream
-        // is still live and the session continues.
-        if (
-          !(err instanceof CaptureError) ||
-          err.code !== 'screen_capture_denied'
-        ) {
-          log.warn('display.acquire_failed', {
-            acquireTargetCount,
-            latchedDenied: false,
-            err,
-          })
-        }
+        // the extra-display acquires drops us back to whatever the user
+        // already granted for this session. We do NOT latch captureDenied —
+        // the primary stream is still live and the session continues.
+        //
+        // Recorded on every outcome, and keyed on the underlying DOMException
+        // name rather than the mapped code (I94). I83 folded "no transient
+        // activation" — InvalidStateError on WebView2, InvalidAccessError on
+        // WebKit — into `screen_capture_denied` beside a genuinely cancelled
+        // picker, and this branch suppressed that whole code. `boot()` runs
+        // from a useEffect and the one live gesture was already spent on the
+        // primary acquire, so those two names are the expected outcome here
+        // on macOS and Windows — the very thing a diagnostics bundle needs to
+        // see, and the one thing it could not.
+        const cause = err instanceof CaptureError ? err.cause : err
+        const domName = cause instanceof DOMException ? cause.name : null
+        const cancelled =
+          domName === 'NotAllowedError' || domName === 'AbortError'
+        const record = cancelled ? log.info : log.warn
+        record('display.acquire_stopped', {
+          acquireTargetCount,
+          acquiredDisplayCount: state.screenTracks.length,
+          code: err instanceof CaptureError ? err.code : null,
+          domName,
+          cancelled,
+          latchedDenied: false,
+          err,
+        })
         break
       }
     }

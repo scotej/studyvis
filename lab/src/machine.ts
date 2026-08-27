@@ -121,11 +121,16 @@ export class LabMachine {
       args.push(`--use-file-for-fake-audio-capture=${options.media.audioFile}`)
     }
 
+    // LAB_CHROME_EXECUTABLE lets a host without a Chrome channel installed
+    // (e.g. CI runners and dev boxes that only have Playwright's bundled
+    // Chromium) point every launch at a working executable without editing
+    // scenarios. Explicit flags still win over the environment.
+    const envExecutable = process.env.LAB_CHROME_EXECUTABLE
     this.browser = await chromium.launch({
       headless: options.headless,
       args,
-      ...(options.chromeExecutable
-        ? { executablePath: options.chromeExecutable }
+      ...(options.chromeExecutable || envExecutable
+        ? { executablePath: options.chromeExecutable ?? envExecutable }
         : { channel: options.chromeChannel ?? 'chrome' }),
     })
 

@@ -7,6 +7,9 @@
 //! Getting a gate wrong silently drops a whole command group at compile time.
 
 pub mod friends;
+// #236 — the raw observation journal is a plain file beside the database, so
+// it needs no platform backend and stays ungated like `sessions` itself.
+pub mod session_journal;
 pub mod sessions;
 
 #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]

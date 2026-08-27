@@ -77,6 +77,14 @@ libc = "0.2"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 keyring = { version = "3.6", features = ["windows-native"] }
+# #269 — SetPriorityClass on the llama-server child, so the engine yields the
+# machine to the app instead of competing with it at NORMAL. Tauri's shell
+# plugin exposes only the child's pid, so we open it ourselves; already in the
+# resolved graph beneath tauri, so this adds no package.
+windows-sys = { version = "0.61", features = [
+  "Win32_Foundation",
+  "Win32_System_Threading",
+] }
 
 # Linux custody is the freedesktop Secret Service (gnome-keyring, KWallet,
 # KeePassXC — whatever owns org.freedesktop.secrets on the session bus).

@@ -85,7 +85,7 @@ describe('serializeReportToText section order (R5)', () => {
     expect(text).not.toContain(`${strings.report.summaryPrefix}0 min`)
   })
 
-  test('emits Topic → Timeline → Distractions → Breaks, matching the render', () => {
+  test('emits Topic → Minute by minute → Timeline → Distractions → Breaks, matching the render', () => {
     const text = serializeReportToText(
       buildData(baseSession(), [
         evt(ME, 'joined', 0),
@@ -101,14 +101,48 @@ describe('serializeReportToText section order (R5)', () => {
       ])
     )
     const topic = headingIndex(text, H.topic.heading)
+    const written = headingIndex(text, H.written.heading)
     const timeline = headingIndex(text, H.timeline.heading)
     const distractions = headingIndex(text, H.distractions.heading)
     const breaks = headingIndex(text, H.breaks.heading)
 
     expect(topic).toBeGreaterThanOrEqual(0)
-    expect(timeline).toBeGreaterThan(topic)
+    expect(written).toBeGreaterThan(topic)
+    expect(timeline).toBeGreaterThan(written)
     expect(distractions).toBeGreaterThan(timeline)
     expect(breaks).toBeGreaterThan(distractions)
+  })
+
+  // #236 — a copied report must carry the written account, and must carry the
+  // same honesty label the screen shows when the model did not produce it.
+  test('exports the written timeline with its source label', () => {
+    const data = buildData(baseSession(), [evt(ME, 'joined', 0)])
+    const text = serializeReportToText({
+      ...data,
+      timeline: {
+        session_id: data.session.id,
+        generated_at: 1_700_000_400_000,
+        model_id: null,
+        source: 'observations',
+        entries: JSON.stringify([
+          { start_min: 0, end_min: 1, summary: 'Opened the assignment' },
+          { start_min: 3, end_min: 5, summary: 'Scrolled social media' },
+        ]),
+        truncated: 1,
+      },
+    })
+    expect(text).toContain('- 0 min — Opened the assignment')
+    expect(text).toContain('- 3–5 min — Scrolled social media')
+    expect(text).toContain(H.written.sourceNote.observations)
+    expect(text).toContain(H.written.truncated)
+  })
+
+  test('says nothing was recorded when there is no written timeline', () => {
+    const text = serializeReportToText(
+      buildData(baseSession(), [evt(ME, 'joined', 0)])
+    )
+    expect(text).toContain(H.written.empty)
+    expect(text).not.toContain(H.written.sourceNote.observations)
   })
 
   test('section order holds even when both sections are empty', () => {

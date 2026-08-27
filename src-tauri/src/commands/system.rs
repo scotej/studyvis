@@ -128,6 +128,33 @@ impl WindowStyleAppliedFlag {
     }
 }
 
+// #263 — Whether a StatusNotifier host can actually render the tray icon and
+// bring the window back. Set once by setup_desktop: true when the build
+// succeeded AND the session bus reports a watcher with a registered host
+// (`status_notifier_host_ready`). Construction alone proves nothing —
+// tray-icon's Linux constructor returns Ok even on stock GNOME, where no
+// host exists to draw anything, so a successfully built tray is exactly the
+// case that still strands the window. When false,
+// `system_minimize_to_tray_set_enabled` refuses enable requests — hiding the
+// only window with no way back reads to the user as "the app cannot be
+// closed". The stored settings.json value keeps whatever the user chose, so
+// fixing the desktop environment and relaunching restores their preference.
+pub struct TrayAvailableFlag(pub AtomicBool);
+
+impl TrayAvailableFlag {
+    pub fn new(initial: bool) -> Self {
+        Self(AtomicBool::new(initial))
+    }
+
+    pub fn set<R: Runtime>(app: &AppHandle<R>, available: bool) {
+        app.state::<Self>().0.store(available, Ordering::Relaxed);
+    }
+
+    pub fn is_available<R: Runtime>(app: &AppHandle<R>) -> bool {
+        app.state::<Self>().0.load(Ordering::Relaxed)
+    }
+}
+
 #[tauri::command]
 pub fn system_window_style_is_custom_applied<R: Runtime>(app: AppHandle<R>) -> bool {
     WindowStyleAppliedFlag::is_custom(&app)
@@ -804,6 +831,15 @@ pub fn system_minimize_to_tray_set_enabled<R: Runtime>(
     app: AppHandle<R>,
     enabled: bool,
 ) -> Result<(), String> {
+    // #263 — enabling close-to-tray with no tray icon would hide the only
+    // window with no way to bring it back. Refuse; the JS store keeps the
+    // user's chosen value so a fixed desktop environment restores it.
+    if enabled && !TrayAvailableFlag::is_available(&app) {
+        return Err(
+            "tray unavailable: enable a tray/AppIndicator extension before using close-to-tray"
+                .to_string(),
+        );
+    }
     MinimizeToTrayFlag::set(&app, enabled);
     Ok(())
 }

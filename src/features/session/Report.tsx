@@ -17,6 +17,7 @@
 // byte-identical.
 
 import {
+  useCallback,
   useEffect,
   useId,
   useMemo,
@@ -32,6 +33,7 @@ import {
   CopyIcon,
   DownloadIcon,
   GripHorizontalIcon,
+  Loader2Icon,
   RotateCcwIcon,
 } from 'lucide-react'
 import { toast } from 'sonner'
@@ -43,6 +45,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { tokens } from '@/design/tokens'
 import { isAuditEventKind } from '@/lib/audit-types'
 import type { AuditEventRecord } from '@/lib/db/audit'
+import type { SessionTimelineRecord } from '@/lib/db/sessionTimeline'
 import {
   fileDateStamp,
   saveTextFile,
@@ -75,11 +78,18 @@ import {
   describeRow,
   distractionsEmptyMessage,
   formatTopicHeading,
+  formatWrittenRange,
   labelFor,
   noScoreBody,
   serializeReportToText,
+  writtenSourceNote,
+  writtenTimelineEntries,
   type ResolvedReportData,
 } from './reportSerialize'
+import {
+  useWrittenTimeline,
+  type WrittenTimelineStatus,
+} from './useWrittenTimeline'
 
 export type { ResolvedReportData } from './reportSerialize'
 
@@ -189,6 +199,24 @@ export function Report({
     }
   }, [sessionId, __loader, reloadKey])
 
+  // #236 — a fresh write-up replaces the loaded row in place, so the rendered
+  // section and the "Copy report" export always describe the same timeline.
+  const handleWritten = useCallback((record: SessionTimelineRecord) => {
+    setStatus((current) =>
+      current.kind === 'ready'
+        ? { kind: 'ready', data: { ...current.data, timeline: record } }
+        : current
+    )
+  }, [])
+  const { status: writtenStatus, rewrite } = useWrittenTimeline({
+    sessionId,
+    ready: status.kind === 'ready',
+    timeline: status.kind === 'ready' ? (status.data.timeline ?? null) : null,
+    declaredTopic:
+      status.kind === 'ready' ? status.data.session.declared_topic : null,
+    onWritten: handleWritten,
+  })
+
   if (status.kind === 'loading' || status.kind === 'error') {
     // §10 — loading + error sit inside the same shell as the loaded view so
     // the user never sees a full-screen sink. Loading shows a Skeleton; the
@@ -261,6 +289,8 @@ export function Report({
   return (
     <ReportView
       data={status.data}
+      writtenStatus={writtenStatus}
+      onRewriteTimeline={rewrite}
       onClose={onClose}
       closeLabel={closeLabel}
       autoFocusClose={focusCloseOnMount}
@@ -293,6 +323,12 @@ export type ReportViewProps = {
   // Disables the on-mount ScoreGauge sweep so Storybook snapshots stay
   // deterministic. Production callers pass true (or omit).
   animateScore?: boolean
+  // #236 — transient state of the written-timeline pass. Defaults to idle so a
+  // fixture that only supplies `data` renders the stored write-up (or the
+  // nothing-recorded copy) without knowing this exists.
+  writtenStatus?: WrittenTimelineStatus
+  // Omitted where a rewrite cannot be offered (Storybook fixtures).
+  onRewriteTimeline?: () => void
 }
 
 export function ReportView({
@@ -306,6 +342,8 @@ export function ReportView({
   rejoinDeadline,
   showDiagnosticsExport = false,
   animateScore = true,
+  writtenStatus = { kind: 'idle' },
+  onRewriteTimeline,
 }: ReportViewProps) {
   const { session, auditEvents, nameByEdPubkey, myEdPubkeyHex } = data
   const timelineHeadingId = useId()
@@ -614,6 +652,17 @@ export function ReportView({
         </Section>
 
         <Section
+          heading={strings.report.sections.written.heading}
+          help={strings.report.sections.written.help}
+        >
+          <WrittenTimeline
+            timeline={data.timeline ?? null}
+            status={writtenStatus}
+            onRewrite={onRewriteTimeline}
+          />
+        </Section>
+
+        <Section
           heading={strings.report.sections.timeline.heading}
           headingId={timelineHeadingId}
         >
@@ -689,10 +738,12 @@ export function ReportView({
 function Section({
   heading,
   headingId,
+  help,
   children,
 }: {
   heading: string
   headingId?: string
+  help?: string
   children: React.ReactNode
 }) {
   return (
@@ -703,8 +754,105 @@ function Section({
       >
         {heading}
       </h2>
+      {help ? <p className="-mt-1 text-xs text-text-muted">{help}</p> : null}
       {children}
     </section>
+  )
+}
+
+// #236 — the written account of the session. Four renderings, and which one
+// shows is the whole point of the section: a write-up in progress, a write-up
+// that exists (labelled when the model did not produce all of it), a reason it
+// cannot be written right now, or a failure the user can retry.
+function WrittenTimeline({
+  timeline,
+  status,
+  onRewrite,
+}: {
+  timeline: SessionTimelineRecord | null
+  status: WrittenTimelineStatus
+  onRewrite?: () => void
+}) {
+  const copy = strings.report.sections.written
+  const entries = useMemo(() => writtenTimelineEntries(timeline), [timeline])
+
+  if (status.kind === 'generating') {
+    return (
+      <div
+        role="status"
+        aria-busy="true"
+        className="flex items-center gap-2 rounded-md border border-border-subtle bg-bg-surface px-3 py-3 text-sm text-text-secondary"
+      >
+        <Loader2Icon
+          aria-hidden="true"
+          className="size-4 motion-safe:animate-spin"
+        />
+        {copy.loading}
+      </div>
+    )
+  }
+
+  if (entries.length === 0) {
+    if (status.kind === 'failed') {
+      return (
+        <div
+          role="alert"
+          className="flex items-center justify-between gap-4 rounded-md border border-status-alerted/40 bg-status-alerted/10 px-3 py-3 text-sm"
+        >
+          <span className="text-status-alerted">{status.message}</span>
+          {onRewrite ? (
+            <Button variant="ghost" size="sm" onClick={onRewrite}>
+              {strings.common.actions.retry}
+            </Button>
+          ) : null}
+        </div>
+      )
+    }
+    return (
+      <Empty
+        message={status.kind === 'blocked' ? status.message : copy.empty}
+      />
+    )
+  }
+
+  const sourceNote = writtenSourceNote(timeline)
+  return (
+    <div className="flex flex-col gap-2">
+      {timeline?.truncated ? (
+        <p className="text-xs text-text-muted">{copy.truncated}</p>
+      ) : null}
+      {sourceNote ? (
+        <p className="text-xs text-text-muted">{sourceNote}</p>
+      ) : null}
+      <ol className="m-0 flex list-none flex-col gap-2 p-0">
+        {entries.map((entry, i) => (
+          <li
+            key={`${entry.start_min}-${entry.end_min}-${i}`}
+            className="flex items-start gap-3 rounded-md border border-border-subtle bg-bg-surface px-3 py-2 text-sm"
+          >
+            <span
+              aria-label={copy.rangeAriaLabel(entry.start_min, entry.end_min)}
+              className="w-20 shrink-0 text-xs font-medium text-text-muted tabular-nums"
+            >
+              {formatWrittenRange(entry.start_min, entry.end_min)}
+            </span>
+            <span className="text-text-primary">{entry.summary}</span>
+          </li>
+        ))}
+      </ol>
+      {status.kind === 'failed' ? (
+        <p role="alert" className="text-xs text-status-alerted">
+          {status.message}
+        </p>
+      ) : null}
+      {sourceNote && onRewrite ? (
+        <div>
+          <Button variant="ghost" size="sm" onClick={onRewrite}>
+            <RotateCcwIcon /> {copy.rewriteCta}
+          </Button>
+        </div>
+      ) : null}
+    </div>
   )
 }
 

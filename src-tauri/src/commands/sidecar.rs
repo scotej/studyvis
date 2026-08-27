@@ -431,6 +431,7 @@ async fn sidecar_start_marked<R: Runtime>(
         port,
         &compute_device,
     )?;
+    deprioritize_child(&child, &mut log_file, generation);
 
     guard.child = Some(child);
     guard.port = Some(port);
@@ -959,6 +960,177 @@ fn spawn_llama<R: Runtime>(
         .map_err(|e| format!("spawn {}: {e}", binary.display()))
 }
 
+// #269 — llama-server is spawned at the same scheduling priority as the app
+// that spawns it, so a vision inference and the webview compete for the
+// machine as equals. Diagnostics from v1.11.3 show the cost: the 1 Hz
+// push-to-talk watchdog failed to tick for 5.5–9.2 s while a sample inference
+// ran, with `skewMs` at 0 (so not sleep/wake — the app simply was not
+// scheduled). A webview frozen that long processes nothing, WebRTC included.
+//
+// Dropping the child one notch means the engine only loses time when the app
+// actually wants the CPU; on an idle machine it changes nothing, so the
+// benchmark p95 stays comparable — benchmark runs take this same spawn path.
+//
+// The value is llama.cpp's own GGML_SCHED_PRIO_LOW mapping, from the pinned
+// b9095 `common/common.cpp`: nice +5 on POSIX, BELOW_NORMAL_PRIORITY_CLASS on
+// Windows. We apply it from here rather than passing `--prio -1` because at
+// that commit only llama-cli calls `set_process_priority` — llama-server
+// parses the flag into a threadpool config it never builds, so it would be
+// inert. Deliberately NOT macOS `PRIO_DARWIN_BG`: that throttles the
+// process's I/O and timers hard enough to multiply inference duration rather
+// than merely yield the CPU.
+#[cfg(unix)]
+const SIDECAR_NICE: libc::c_int = 5;
+
+// Enough to outlast a burst of thread creation, small enough that a child
+// which somehow never stops spawning cannot hold up the spawn path.
+#[cfg(target_os = "linux")]
+const SIDECAR_NICE_SWEEP_PASSES: u32 = 5;
+
+// Best-effort by contract: a machine that refuses the change should still get
+// its engine. The outcome goes to the sidecar log so the next diagnostics
+// bundle answers "did the yield actually apply on this box?" rather than
+// leaving it assumed — which is why the tolerated refusals get their own note
+// rather than riding on `Ok`. `Ok(true)` means the OS moved every target;
+// `Ok(false)` means it refused one and we carried on (the target already sits
+// outside the nice range we may move it within — RLIMIT_NICE, or an app that
+// was itself renice'd — or it exited before we reached it). Logging that as
+// "applied" would restate the assumption this line exists to replace.
+fn deprioritize_child(child: &CommandChild, log: &mut File, generation: u64) {
+    let note = match lower_process_priority(child.pid()) {
+        Ok(true) => "applied".to_string(),
+        Ok(false) => {
+            "refused by the OS (target already at or below the requested priority, or gone)"
+                .to_string()
+        }
+        Err(e) => format!("failed: {e}"),
+    };
+    with_sidecar_log(|| {
+        let _ = writeln!(log, "[event gen={generation}] yield-priority {note}");
+        let _ = log.flush();
+    });
+}
+
+// PR-277 — `PRIO_PROCESS` does not mean the same thing on both Unixes. On
+// macOS the nice value is the POSIX per-process attribute, so one call moves
+// the whole child. On Linux it is per-*thread*, and threads inherit it from
+// the thread that creates them, so this call moves only the thread whose tid
+// equals the pid. Any thread llama-server already started keeps the value it
+// was born with, and every thread IT later creates inherits that — which is
+// how a ggml worker pool could end up competing with the app at full priority
+// under a main thread we had politely lowered.
+//
+// `who` is therefore a pid on macOS and a tid on Linux; on Linux the sweep
+// below turns the one into the other.
+#[cfg(unix)]
+fn apply_sidecar_nice(who: u32) -> Result<bool, String> {
+    // SAFETY: setpriority takes three scalars and writes through no pointer.
+    // The caller still holds the child's `CommandChild`, so its pid cannot
+    // have been reaped and recycled under us; a tid read from that pid's own
+    // task directory is checked for ESRCH below rather than assumed live.
+    let rc = unsafe { libc::setpriority(libc::PRIO_PROCESS, libc::id_t::from(who), SIDECAR_NICE) };
+    if rc == 0 {
+        return Ok(true);
+    }
+    let err = std::io::Error::last_os_error();
+    match err.raw_os_error() {
+        // Exited between the directory read and here — nothing left to yield.
+        Some(libc::ESRCH) => Ok(false),
+        // EACCES is the target already sitting outside the nice range we are
+        // allowed to move it within (RLIMIT_NICE), which means it is yielding
+        // at least as much as we asked for — but NOT that we changed
+        // anything. EPERM is a uid mismatch, which should be impossible for a
+        // child we spawned. Neither is worth refusing to start the engine
+        // over, and neither may be reported as an applied yield.
+        Some(libc::EPERM) | Some(libc::EACCES) => Ok(false),
+        _ => Err(err.to_string()),
+    }
+}
+
+// Linux only: walk `/proc/<pid>/task` and lower every thread the child already
+// has. Threads created after their creator has been lowered inherit the value,
+// so this only has to catch the ones that existed first — but a thread can be
+// born between the directory read and the next call, so passes repeat until
+// one finds nothing new. Two passes is the normal case (the child is still in
+// the dynamic linker when we get here); the cap only bounds a pathological
+// child that spawns threads faster than we can enumerate them.
+#[cfg(target_os = "linux")]
+fn lower_thread_priorities(pid: u32) -> Result<bool, String> {
+    let mut lowered = std::collections::HashSet::new();
+    let mut applied = true;
+    for _ in 0..SIDECAR_NICE_SWEEP_PASSES {
+        let tasks = match fs::read_dir(format!("/proc/{pid}/task")) {
+            Ok(tasks) => tasks,
+            // The child exited before we got here — the same benign case
+            // `apply_sidecar_nice` maps from ESRCH, and not a failure worth
+            // reporting as one.
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+            Err(e) => return Err(format!("read /proc/{pid}/task: {e}")),
+        };
+        let mut fresh = 0_usize;
+        for entry in tasks.flatten() {
+            let Ok(tid) = entry.file_name().to_string_lossy().parse::<u32>() else {
+                continue;
+            };
+            if !lowered.insert(tid) {
+                continue;
+            }
+            fresh += 1;
+            applied = apply_sidecar_nice(tid)? && applied;
+        }
+        if fresh == 0 {
+            return Ok(applied);
+        }
+    }
+    Ok(applied)
+}
+
+#[cfg(unix)]
+fn lower_process_priority(pid: u32) -> Result<bool, String> {
+    // The main thread first, so anything the child starts from here on is born
+    // lowered even if the sweep below is still walking the directory.
+    let applied = apply_sidecar_nice(pid)?;
+    // Not `applied && …`: a main thread the OS refused to move must not skip
+    // the sweep over the threads it would have accepted.
+    #[cfg(target_os = "linux")]
+    let applied = {
+        let threads = lower_thread_priorities(pid)?;
+        applied && threads
+    };
+    Ok(applied)
+}
+
+#[cfg(windows)]
+fn lower_process_priority(pid: u32) -> Result<bool, String> {
+    use windows_sys::Win32::Foundation::CloseHandle;
+    use windows_sys::Win32::System::Threading::{
+        OpenProcess, SetPriorityClass, BELOW_NORMAL_PRIORITY_CLASS, PROCESS_SET_INFORMATION,
+    };
+
+    // SAFETY: OpenProcess returns a handle or null and writes through no
+    // pointer we own. As the spawning parent we hold the child alive, so the
+    // pid is ours to open.
+    let handle = unsafe { OpenProcess(PROCESS_SET_INFORMATION, 0, pid) };
+    if handle.is_null() {
+        return Err(std::io::Error::last_os_error().to_string());
+    }
+    // SAFETY: `handle` is the live handle just opened, closed exactly once
+    // below on both outcomes.
+    let ok = unsafe { SetPriorityClass(handle, BELOW_NORMAL_PRIORITY_CLASS) };
+    let err = (ok == 0).then(|| std::io::Error::last_os_error().to_string());
+    // SAFETY: same handle, not used again after this call.
+    unsafe { CloseHandle(handle) };
+    match err {
+        Some(e) => Err(e),
+        None => Ok(true),
+    }
+}
+
+#[cfg(not(any(unix, windows)))]
+fn lower_process_priority(_pid: u32) -> Result<bool, String> {
+    Err("unsupported platform".to_string())
+}
+
 // Consecutive respawns that each died before MIN_HEALTHY_UPTIME accumulate
 // toward RESTART_BUDGET; a child that ran at least that long is a durable
 // server, so its later death starts the streak over at 1.
@@ -1203,6 +1375,7 @@ async fn watch<R: Runtime>(
             let _ = writeln!(log, "[event gen={generation}] respawned on port {port}");
             let _ = log.flush();
         });
+        deprioritize_child(&new_child, &mut log, generation);
         guard.child = Some(new_child);
         guard.port = Some(port);
         drop(guard);
@@ -1526,5 +1699,101 @@ mod tests {
         // An 8-hour session whose sidecar dies once an hour after clean uptime
         // spends 8 respawns. It must never be called a crash loop.
         assert!(!exceeded_total_restarts(8));
+    }
+
+    // #269 — the one part of the yield that a type check cannot confirm: that
+    // we hand `setpriority` the child's pid in the argument it reads as one.
+    // Getting `who` wrong renices the app instead of the engine, and both
+    // spellings compile. So spawn a real child, move it, and read it back.
+    #[cfg(unix)]
+    #[test]
+    fn lowering_priority_moves_a_live_child_and_not_the_caller() {
+        let before = unsafe { libc::getpriority(libc::PRIO_PROCESS, 0) };
+        let mut child = std::process::Command::new("sleep")
+            .arg("30")
+            .spawn()
+            .expect("spawn a child to renice");
+        let pid = child.id();
+        let applied = lower_process_priority(pid);
+        let observed = unsafe { libc::getpriority(libc::PRIO_PROCESS, libc::id_t::from(pid)) };
+        let _ = child.kill();
+        let _ = child.wait();
+
+        assert!(
+            applied.expect("setpriority on an owned child"),
+            "the OS refused the yield"
+        );
+        assert_eq!(observed, SIDECAR_NICE);
+        assert_eq!(
+            unsafe { libc::getpriority(libc::PRIO_PROCESS, 0) },
+            before,
+            "the app's own priority must be untouched"
+        );
+    }
+
+    // PR-277 — the test above cannot see the bug this one exists for: `sleep`
+    // is single-threaded, so a main-thread-only renice looks complete. On
+    // Linux the nice value is per-thread, and llama-server is not `sleep`. So
+    // spawn a child that ALREADY has threads before we lower it, and require
+    // every one of them to have moved.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn lowering_priority_reaches_threads_the_child_already_started() {
+        use std::io::BufRead;
+
+        const HELPERS: usize = 4;
+        // One line, no continuations: rustfmt rewrites a backslash-continued
+        // literal into one with the source indentation baked in, which Python
+        // reads as an IndentationError.
+        let script = format!(
+            "import threading,time;[threading.Thread(target=time.sleep,args=(60,),daemon=True).start() for _ in range({HELPERS})];time.sleep(0.2);print('ready',flush=True);time.sleep(60)"
+        );
+        let mut child = std::process::Command::new("python3")
+            .arg("-c")
+            .arg(script)
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .expect("spawn a multi-threaded child to renice");
+        let pid = child.id();
+        // Block until the helper threads are actually running: without this the
+        // assertions below could pass against a child that never made any.
+        let mut ready = String::new();
+        std::io::BufReader::new(child.stdout.take().expect("piped stdout"))
+            .read_line(&mut ready)
+            .expect("read the child's ready line");
+
+        let applied = lower_process_priority(pid);
+        let observed: Vec<(u32, libc::c_int)> = fs::read_dir(format!("/proc/{pid}/task"))
+            .expect("read the child's task directory")
+            .flatten()
+            .filter_map(|entry| entry.file_name().to_string_lossy().parse::<u32>().ok())
+            .map(|tid| {
+                let nice = unsafe { libc::getpriority(libc::PRIO_PROCESS, libc::id_t::from(tid)) };
+                (tid, nice)
+            })
+            .collect();
+        let _ = child.kill();
+        let _ = child.wait();
+
+        assert_eq!(ready.trim(), "ready");
+        // Deliberately NOT asserting the returned `true` here: a helper thread
+        // that exits between the directory read and its `setpriority` is the
+        // ESRCH race `apply_sidecar_nice` tolerates, and it reports as a
+        // refusal. The per-thread nice assertion below is the load-bearing one.
+        applied.expect("lowering an owned child's threads");
+        assert!(
+            observed.len() > HELPERS,
+            "expected the main thread plus {HELPERS} helpers, saw {} — the child \
+             never became multi-threaded, so this test proves nothing",
+            observed.len()
+        );
+        let missed: Vec<_> = observed
+            .iter()
+            .filter(|(_, nice)| *nice != SIDECAR_NICE)
+            .collect();
+        assert!(
+            missed.is_empty(),
+            "these threads kept the app's priority: {missed:?}"
+        );
     }
 }
