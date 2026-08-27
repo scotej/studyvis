@@ -4,9 +4,10 @@
 //! the TS callers are `src/lib/db/sessions.ts` and `src/lib/db/audit.ts`
 //! (camelCase invoke args in, snake_case serde rows out).
 
-use tauri::State;
+use tauri::{AppHandle, Runtime, State};
 
-use crate::db::{audit_events, sessions, DbPool};
+use crate::commands::session_journal;
+use crate::db::{audit_events, session_timelines, sessions, DbPool};
 
 fn lock<'a>(
     state: &'a State<'_, DbPool>,
@@ -123,18 +124,70 @@ pub fn sessions_get(
     sessions::get(&conn, &id).map_err(|e| e.to_string())
 }
 
+// R4 + #236 — the SQL cascade drops the session, its audit events, and its
+// written timeline in one transaction; the raw observation journal is a file,
+// so it is unlinked after that transaction commits. Deleting rows first means a
+// failure can only ever leave an orphaned journal (which the next regeneration
+// or clear-all removes), never a narrative whose evidence is already gone.
 #[tauri::command]
-pub fn sessions_delete(state: State<'_, DbPool>, id: String) -> Result<(), String> {
-    let mut conn = lock(&state)?;
-    sessions::delete(&mut conn, &id).map_err(|e| e.to_string())?;
+pub fn sessions_delete<R: Runtime>(
+    app: AppHandle<R>,
+    state: State<'_, DbPool>,
+    id: String,
+) -> Result<(), String> {
+    {
+        let mut conn = lock(&state)?;
+        sessions::delete(&mut conn, &id).map_err(|e| e.to_string())?;
+    }
+    session_journal::remove_journal(&app, &id);
     Ok(())
 }
 
 #[tauri::command]
-pub fn sessions_clear_all(state: State<'_, DbPool>) -> Result<(), String> {
-    let mut conn = lock(&state)?;
-    sessions::clear_all(&mut conn).map_err(|e| e.to_string())?;
+pub fn sessions_clear_all<R: Runtime>(
+    app: AppHandle<R>,
+    state: State<'_, DbPool>,
+) -> Result<(), String> {
+    {
+        let mut conn = lock(&state)?;
+        sessions::clear_all(&mut conn).map_err(|e| e.to_string())?;
+    }
+    session_journal::clear_journals(&app);
     Ok(())
+}
+
+// #236 — the post-session written timeline. `entries` is the JSON array the
+// frontend validated before persisting; this layer stores it verbatim, the same
+// way audit-event detail is stored.
+#[tauri::command]
+pub fn session_timeline_get(
+    state: State<'_, DbPool>,
+    session_id: String,
+) -> Result<Option<session_timelines::SessionTimelineRow>, String> {
+    let conn = lock(&state)?;
+    session_timelines::get(&conn, &session_id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn session_timeline_save(
+    state: State<'_, DbPool>,
+    session_id: String,
+    generated_at: i64,
+    model_id: Option<String>,
+    source: String,
+    entries: String,
+    truncated: bool,
+) -> Result<(), String> {
+    let conn = lock(&state)?;
+    let row = session_timelines::SessionTimelineRow {
+        session_id,
+        generated_at,
+        model_id,
+        source,
+        entries,
+        truncated: i64::from(truncated),
+    };
+    session_timelines::upsert(&conn, &row).map_err(|e| e.to_string())
 }
 
 #[tauri::command]

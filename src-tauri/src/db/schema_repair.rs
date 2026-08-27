@@ -96,6 +96,17 @@ const EXPECTED_SCHEMA: &[(&str, &[(&str, &str)])] = &[
             ("last_benchmarked_at", "INTEGER"),
         ],
     ),
+    (
+        "session_timelines",
+        &[
+            ("session_id", "TEXT"),
+            ("generated_at", "INTEGER"),
+            ("model_id", "TEXT"),
+            ("source", "TEXT"),
+            ("entries", "TEXT"),
+            ("truncated", "INTEGER"),
+        ],
+    ),
 ];
 
 fn columns_of(conn: &Connection, table: &str) -> Result<HashSet<String>> {
