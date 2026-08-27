@@ -990,10 +990,19 @@ const SIDECAR_NICE_SWEEP_PASSES: u32 = 5;
 // Best-effort by contract: a machine that refuses the change should still get
 // its engine. The outcome goes to the sidecar log so the next diagnostics
 // bundle answers "did the yield actually apply on this box?" rather than
-// leaving it assumed.
+// leaving it assumed — which is why the tolerated refusals get their own note
+// rather than riding on `Ok`. `Ok(true)` means the OS moved every target;
+// `Ok(false)` means it refused one and we carried on (the target already sits
+// outside the nice range we may move it within — RLIMIT_NICE, or an app that
+// was itself renice'd — or it exited before we reached it). Logging that as
+// "applied" would restate the assumption this line exists to replace.
 fn deprioritize_child(child: &CommandChild, log: &mut File, generation: u64) {
     let note = match lower_process_priority(child.pid()) {
-        Ok(()) => "applied".to_string(),
+        Ok(true) => "applied".to_string(),
+        Ok(false) => {
+            "refused by the OS (target already at or below the requested priority, or gone)"
+                .to_string()
+        }
         Err(e) => format!("failed: {e}"),
     };
     with_sidecar_log(|| {
@@ -1014,23 +1023,26 @@ fn deprioritize_child(child: &CommandChild, log: &mut File, generation: u64) {
 // `who` is therefore a pid on macOS and a tid on Linux; on Linux the sweep
 // below turns the one into the other.
 #[cfg(unix)]
-fn apply_sidecar_nice(who: u32) -> Result<(), String> {
+fn apply_sidecar_nice(who: u32) -> Result<bool, String> {
     // SAFETY: setpriority takes three scalars and writes through no pointer.
     // The caller still holds the child's `CommandChild`, so its pid cannot
     // have been reaped and recycled under us; a tid read from that pid's own
     // task directory is checked for ESRCH below rather than assumed live.
     let rc = unsafe { libc::setpriority(libc::PRIO_PROCESS, libc::id_t::from(who), SIDECAR_NICE) };
     if rc == 0 {
-        return Ok(());
+        return Ok(true);
     }
     let err = std::io::Error::last_os_error();
     match err.raw_os_error() {
         // Exited between the directory read and here — nothing left to yield.
-        Some(libc::ESRCH) => Ok(()),
-        // We only ever lower, and lowering needs no privilege; a refusal here
-        // means the thread already sits at a higher nice than we are asking
-        // for, so it is yielding more than we want, not less.
-        Some(libc::EPERM) | Some(libc::EACCES) => Ok(()),
+        Some(libc::ESRCH) => Ok(false),
+        // EACCES is the target already sitting outside the nice range we are
+        // allowed to move it within (RLIMIT_NICE), which means it is yielding
+        // at least as much as we asked for — but NOT that we changed
+        // anything. EPERM is a uid mismatch, which should be impossible for a
+        // child we spawned. Neither is worth refusing to start the engine
+        // over, and neither may be reported as an applied yield.
+        Some(libc::EPERM) | Some(libc::EACCES) => Ok(false),
         _ => Err(err.to_string()),
     }
 }
@@ -1043,11 +1055,18 @@ fn apply_sidecar_nice(who: u32) -> Result<(), String> {
 // the dynamic linker when we get here); the cap only bounds a pathological
 // child that spawns threads faster than we can enumerate them.
 #[cfg(target_os = "linux")]
-fn lower_thread_priorities(pid: u32) -> Result<(), String> {
+fn lower_thread_priorities(pid: u32) -> Result<bool, String> {
     let mut lowered = std::collections::HashSet::new();
+    let mut applied = true;
     for _ in 0..SIDECAR_NICE_SWEEP_PASSES {
-        let tasks = fs::read_dir(format!("/proc/{pid}/task"))
-            .map_err(|e| format!("read /proc/{pid}/task: {e}"))?;
+        let tasks = match fs::read_dir(format!("/proc/{pid}/task")) {
+            Ok(tasks) => tasks,
+            // The child exited before we got here — the same benign case
+            // `apply_sidecar_nice` maps from ESRCH, and not a failure worth
+            // reporting as one.
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+            Err(e) => return Err(format!("read /proc/{pid}/task: {e}")),
+        };
         let mut fresh = 0_usize;
         for entry in tasks.flatten() {
             let Ok(tid) = entry.file_name().to_string_lossy().parse::<u32>() else {
@@ -1057,27 +1076,32 @@ fn lower_thread_priorities(pid: u32) -> Result<(), String> {
                 continue;
             }
             fresh += 1;
-            apply_sidecar_nice(tid)?;
+            applied = apply_sidecar_nice(tid)? && applied;
         }
         if fresh == 0 {
-            return Ok(());
+            return Ok(applied);
         }
     }
-    Ok(())
+    Ok(applied)
 }
 
 #[cfg(unix)]
-fn lower_process_priority(pid: u32) -> Result<(), String> {
+fn lower_process_priority(pid: u32) -> Result<bool, String> {
     // The main thread first, so anything the child starts from here on is born
     // lowered even if the sweep below is still walking the directory.
-    apply_sidecar_nice(pid)?;
+    let applied = apply_sidecar_nice(pid)?;
+    // Not `applied && …`: a main thread the OS refused to move must not skip
+    // the sweep over the threads it would have accepted.
     #[cfg(target_os = "linux")]
-    lower_thread_priorities(pid)?;
-    Ok(())
+    let applied = {
+        let threads = lower_thread_priorities(pid)?;
+        applied && threads
+    };
+    Ok(applied)
 }
 
 #[cfg(windows)]
-fn lower_process_priority(pid: u32) -> Result<(), String> {
+fn lower_process_priority(pid: u32) -> Result<bool, String> {
     use windows_sys::Win32::Foundation::CloseHandle;
     use windows_sys::Win32::System::Threading::{
         OpenProcess, SetPriorityClass, BELOW_NORMAL_PRIORITY_CLASS, PROCESS_SET_INFORMATION,
@@ -1098,12 +1122,12 @@ fn lower_process_priority(pid: u32) -> Result<(), String> {
     unsafe { CloseHandle(handle) };
     match err {
         Some(e) => Err(e),
-        None => Ok(()),
+        None => Ok(true),
     }
 }
 
 #[cfg(not(any(unix, windows)))]
-fn lower_process_priority(_pid: u32) -> Result<(), String> {
+fn lower_process_priority(_pid: u32) -> Result<bool, String> {
     Err("unsupported platform".to_string())
 }
 
@@ -1695,7 +1719,10 @@ mod tests {
         let _ = child.kill();
         let _ = child.wait();
 
-        applied.expect("setpriority on an owned child");
+        assert!(
+            applied.expect("setpriority on an owned child"),
+            "the OS refused the yield"
+        );
         assert_eq!(observed, SIDECAR_NICE);
         assert_eq!(
             unsafe { libc::getpriority(libc::PRIO_PROCESS, 0) },
@@ -1749,6 +1776,10 @@ mod tests {
         let _ = child.wait();
 
         assert_eq!(ready.trim(), "ready");
+        // Deliberately NOT asserting the returned `true` here: a helper thread
+        // that exits between the directory read and its `setpriority` is the
+        // ESRCH race `apply_sidecar_nice` tolerates, and it reports as a
+        // refusal. The per-thread nice assertion below is the load-bearing one.
         applied.expect("lowering an owned child's threads");
         assert!(
             observed.len() > HELPERS,
