@@ -3103,3 +3103,99 @@ describe('startStarveProbe — #269 main-thread lateness', () => {
     expect(clock.timers).toHaveLength(0)
   })
 })
+
+// I94 — "All displays" asks for one stream per monitor from boot(), which runs
+// from a useEffect with no live user gesture; on WebView2 and WKWebView every
+// acquire past the pre-acquired first one is refused for exactly that reason.
+// The refusal maps to `screen_capture_denied` (I83), which this branch used to
+// suppress along with a genuinely cancelled picker — so the outcome a
+// diagnostics bundle most needs from this path left no record at all.
+describe('multi-display acquire diagnostics', () => {
+  function noActivationError(): CaptureError {
+    return new CaptureError(
+      'screen_capture_denied',
+      'no transient activation',
+      {
+        cause: new DOMException('no transient activation', 'InvalidStateError'),
+      }
+    )
+  }
+
+  function cancelledPickerError(): CaptureError {
+    return new CaptureError('screen_capture_denied', 'picker dismissed', {
+      cause: new DOMException('picker dismissed', 'NotAllowedError'),
+    })
+  }
+
+  async function runWithSecondAcquire(
+    error: CaptureError
+  ): Promise<LogRecord[]> {
+    useSettingsStore.setState((s) => ({
+      ...s,
+      values: { ...s.values, captureDisplays: 'all' },
+    }))
+    const clock = new FakeClock()
+    const records: LogRecord[] = []
+    __resetLog()
+    __setLogRecordSink((record) => records.push(record))
+    let acquires = 0
+    __setSampleLoopRuntime(
+      buildSampleLoopRuntime({
+        clock,
+        fetch: vi.fn(async () => judgmentResponse('on_task')) as never,
+        enumerateDisplayCount: async () => 2,
+        acquireScreenStream: async () => {
+          acquires += 1
+          if (acquires === 1) return makeFakeScreenStream()
+          throw error
+        },
+      })
+    )
+    const handle = startSampleLoop({
+      getTopic: () => 't',
+      modelId: 'test-model',
+      getFaceTrack: () => makeFakeTrack(),
+    })
+    await flushMicrotasks(30)
+    // The primary display survives; only the extra one was refused.
+    expect(handle.__state().screenTracks).toHaveLength(1)
+    expect(handle.__state().captureDenied).toBe(false)
+    await handle.stop()
+    return records
+  }
+
+  function acquireStopped(records: LogRecord[]): LogRecord | undefined {
+    return records.find(
+      (record) =>
+        record.scope === 'ai.sampleloop' &&
+        record.msg === 'display.acquire_stopped'
+    )
+  }
+
+  test('a webview that refused the call for want of a gesture is recorded', async () => {
+    const record = acquireStopped(
+      await runWithSecondAcquire(noActivationError())
+    )
+    expect(record).toBeDefined()
+    expect(record?.lvl).toBe('warn')
+    expect(record?.data).toMatchObject({
+      domName: 'InvalidStateError',
+      cancelled: false,
+      acquireTargetCount: 2,
+      acquiredDisplayCount: 1,
+    })
+  })
+
+  test('a picker the user dismissed is told apart from that', async () => {
+    const record = acquireStopped(
+      await runWithSecondAcquire(cancelledPickerError())
+    )
+    expect(record).toBeDefined()
+    expect(record?.data).toMatchObject({
+      domName: 'NotAllowedError',
+      cancelled: true,
+    })
+    // Deliberate, so it does not read as a fault in a bundle.
+    expect(record?.lvl).toBe('info')
+  })
+})
