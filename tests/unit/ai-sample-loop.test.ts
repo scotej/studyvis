@@ -3067,6 +3067,28 @@ describe('startStarveProbe — #269 main-thread lateness', () => {
     expect(probe.worstMs()).toBe(9_000 - STARVE_PROBE_INTERVAL_MS)
   })
 
+  test('a suspend that moves only wall time is not a starve', () => {
+    // The machine slept mid-inference: `Date.now()` jumps by ten minutes while
+    // the scheduler's own clock never moved and nothing was ever starved.
+    // Measured on wall time this would engage backoff on its FIRST occurrence
+    // and file a fabricated `app.starved` row — the reading has to come off
+    // the monotonic clock, with the wall-vs-monotonic skew recorded beside it
+    // the way `ptt.watchdog` records its timeline gap.
+    const clock = new FakeClock()
+    let wall = 1_700_000_000_000
+    const probe = startStarveProbe({
+      now: () => wall,
+      monotonicNow: () => clock.now,
+      setTimeout: (h, ms) => clock.setTimeout(h, ms),
+      clearTimeout: (h) => clock.clearTimeout(h),
+    })
+    wall += 600_000
+    probe.stop()
+
+    expect(probe.worstMs()).toBe(0)
+    expect(probe.skewMs()).toBe(600_000)
+  })
+
   test('stop is idempotent and leaves no timer behind', async () => {
     const clock = new FakeClock()
     const probe = startStarveProbe({

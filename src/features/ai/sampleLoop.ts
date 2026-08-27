@@ -270,28 +270,46 @@ export type StarveProbe = {
   stop: () => void
   // Worst observed lateness, in ms, over the probe's lifetime.
   worstMs: () => number
+  // Wall time minus monotonic time across the probe's lifetime — the same
+  // discriminator `pttWatchdog` records as `skewMs`. Material skew means the
+  // machine suspended rather than starved.
+  skewMs: () => number
 }
 
 type StarveProbeRuntime = {
   now: () => number
+  // Monotonic clock, when the platform has one. Optional so an injected test
+  // runtime with a single clock keeps today's deterministic behavior.
+  monotonicNow?: () => number
   setTimeout: (handler: () => void, ms: number) => unknown
   clearTimeout: (handle: unknown) => void
 }
 
 export function startStarveProbe(runtime: StarveProbeRuntime): StarveProbe {
+  // Lateness is measured on the MONOTONIC clock, never on `Date.now()`. A
+  // machine that suspends mid-inference (lid closed, sleep) moves wall time by
+  // minutes while nothing was ever starved, and an NTP step does the same — on
+  // wall time a single such tick would engage backoff on its first occurrence
+  // and file a fabricated `app.starved` record. `pttWatchdog` draws exactly
+  // this distinction from the same pair of clocks, and #269's own diagnosis
+  // leaned on its `skewMs: 0` to rule sleep out.
+  const monotonicNow = runtime.monotonicNow ?? runtime.now
   let worstMs = 0
+  let skewMs = 0
   let handle: unknown = null
   let stopped = false
-  let dueAt = runtime.now() + STARVE_PROBE_INTERVAL_MS
+  const startedMono = monotonicNow()
+  const startedWall = runtime.now()
+  let dueAt = startedMono + STARVE_PROBE_INTERVAL_MS
 
   const observe = (): void => {
-    worstMs = Math.max(worstMs, runtime.now() - dueAt)
+    worstMs = Math.max(worstMs, monotonicNow() - dueAt)
   }
 
   const tick = (): void => {
     if (stopped) return
     observe()
-    dueAt = runtime.now() + STARVE_PROBE_INTERVAL_MS
+    dueAt = monotonicNow() + STARVE_PROBE_INTERVAL_MS
     handle = runtime.setTimeout(tick, STARVE_PROBE_INTERVAL_MS)
   }
 
@@ -306,10 +324,12 @@ export function startStarveProbe(runtime: StarveProbeRuntime): StarveProbe {
       // between them is not ours to choose; without this, a 9 s freeze that
       // released just as the inference resolved could be recorded as zero.
       observe()
+      skewMs = runtime.now() - startedWall - (monotonicNow() - startedMono)
       if (handle !== null) runtime.clearTimeout(handle)
       handle = null
     },
     worstMs: () => Math.max(0, Math.round(worstMs)),
+    skewMs: () => Math.round(skewMs),
   }
 }
 
@@ -377,6 +397,10 @@ export function nextBackoffState(
 
 export type SampleLoopRuntime = {
   now: () => number
+  // #269 — a clock that does not move while the machine is suspended, used by
+  // the starve probe so a sleep/wake cannot be read as a frozen main thread.
+  // Optional: an injected runtime without one falls back to `now`.
+  monotonicNow?: () => number
   setTimeout: (handler: () => void, ms: number) => unknown
   clearTimeout: (handle: unknown) => void
   fetch: typeof fetch
@@ -418,6 +442,8 @@ export type SampleLoopRuntime = {
 
 const defaultRuntime: SampleLoopRuntime = {
   now: () => Date.now(),
+  monotonicNow: () =>
+    typeof performance === 'undefined' ? Date.now() : performance.now(),
   setTimeout: (handler, ms) =>
     typeof window === 'undefined'
       ? globalThis.setTimeout(handler, ms)
@@ -807,6 +833,11 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
         modelId: state.modelId,
         outcome,
         starvedMs,
+        // Wall running ahead of monotonic is the signature of a suspend; the
+        // reading above already excludes it, and recording the pair is what
+        // makes that checkable from a diagnostics bundle (same field as
+        // `ptt.watchdog`'s timeline gap).
+        skewMs: probe.skewMs(),
         inferenceMs: completed ? Math.round(durationSec * 1000) : null,
         benchmarkP95Ms: Math.round(state.modelP95Sec * 1000),
         backoffEngaged: state.backoff.engaged,
