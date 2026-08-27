@@ -750,6 +750,21 @@ Score floor: 0. Ceiling: 100. Initial: 100. Scores are integer; deductions clamp
 
 The "2 then 4" threshold is the V2 default. User-customizable in settings within `[2, 8]` for the warning trigger and `[3, 12]` for the alert trigger, with the constraint warning-trigger < alert-trigger.
 
+### Session observation journal and written timeline (#236)
+
+The score machine consumes each judgment and discards it, so before #236 the only checks that survived a session were the off-task ones the audit log recorded. A written account of a session is mostly made of the other kind.
+
+Every resolved check therefore also appends one NDJSON line — timestamp, verdict (`on_task` / `mild` / `moderate` / `blatant` / `uncertain`), the model's reasoning, `on_topic_confidence`, and the declared topic at that moment — to `<data_dir>/session-journals/<session-topic>.ndjson` via `session_journal_append`. The write is fire-and-forget from the sample loop's score-event callback, gated on `sessionTimelineEnabled` (Settings → AI, default ON). **No frame is ever written**; the file holds only text the model produced. The Rust side refuses any session id that is not a session topic (it becomes the filename), caps a line at 4 KiB and a journal at 2 MiB, and unlinks the file when its session row is deleted.
+
+After the session ends, the report turns that journal into the timeline stored in `session_timelines` (migration 008), in two stages:
+
+1. **Windowing** (`features/session/sessionJournal.ts`, pure): observations are grouped into consecutive fixed-width windows anchored on the first check — one minute each, widening in whole minutes so a long session never exceeds 60 windows. Each window carries its on-task / off-task / unreadable counts, the topics seen, and up to three distinct reasoning notes ordered by frequency. Windows with no checks are dropped rather than rendered as a gap, because a paused capture (break, camera off, pomodoro rest) records nothing.
+2. **Narration** (`features/session/sessionTimeline.ts`): the windows are sent to the same llama-server sidecar in text-only chunks of at most 12, temperature 0, with a JSON-schema `response_format`. Window text is declared UNTRUSTED DATA in the system prompt for the same reason the chat agent does — it is a record of what was on screen. Returned segments are clamped to the window boundaries they were asked about, sorted, and de-overlapped.
+
+Stage 1 is also the fallback: any window the model does not narrate is filled with its own digest, so a dead sidecar or an unusable response costs polish, not the feature. The stored `source` (`model` / `mixed` / `observations`) records which happened and the report labels anything other than `model`, so it can never imply the AI wrote an account it did not.
+
+The write-up runs from the report, not from session teardown — it happens after the report has already rendered, so PLAN §5's "report generation completes within 5 seconds" is unaffected. Because only success is persisted, a session interrupted mid-write-up (app quit, AI off at the time, model missing) is simply retried the next time its report is opened. Sidecar ownership follows `benchmark.ts`: the write-up starts the sidecar if nothing else is using it and stops it again afterwards, and refuses to run at all while a session is active, since the live sample loop owns the sidecar then.
+
 ## 9. Audit log
 
 Single shared log per session, visible to all peers in real time on a dedicated panel. Each entry:
@@ -779,6 +794,8 @@ What stays **private** (not in audit log) until session end: the running numeric
 What's **broadcast in real time**: session-presence, Pomodoro, topic, approved/denied break, and `ai_alert` events. `ai_warning`, `break_request`, `ai_stalled`, and `ai_resumed` remain local-only. Peers can see "Sam: looking off-task" after an alert, but never Sam's running numeric score or local machine-health events. This honours the user's privacy nuance from the design conversation.
 
 Audit log is also written to local SQLite per session for the post-session report and (V3) stats.
+
+The audit log is not the #236 observation journal, and the two must not be merged. Audit events are signed, some of them are broadcast, and their vocabulary is a cross-version wire contract; the journal is an unsigned local text file of every AI check, written for one purpose (the post-session write-up) and deleted with its session. Putting per-check rows in `audit_events` would flood the shared in-session panel and the report's event timeline with the on-task checks nobody asked to see.
 
 The Stats dashboard's **focus-insights** section (R7) reads the cross-session `ai_warning`/`ai_alert` audit rows via the `audit_events_list_all` command — when-distractions-cluster timing, recurring distraction reasons, and a focused-time trend, all derived from the same `ai_warning`/`ai_alert` reasoning the single-session report already shows. Each session row captures the local Ed25519 key and display name at session start; reports and historical distraction filtering use that immutable provenance rather than whichever identity is active now. Legacy rows keep those fields unknown and never borrow a later identity, while their sessions-table focus percentage can still appear in the trend. The command narrows the read to those two kinds (insights ignore every other kind), so the whole table never crosses IPC. The numeric stats tiles (`statsData`) remain **sessions-table-only** (they never query `audit_events`); the cross-session insight transforms live in the pure `features/stats/statsInsights.ts` seam. Strictly local — nothing here transmits.
 
@@ -894,9 +911,10 @@ studyvis/
 └─ README.md                      # summary + install
 ```
 
-The `commands/` tree above is illustrative; the actual command modules are `identity.rs`, `friends.rs`, `models.rs`, `sessions.rs`, and `system.rs`. Commands added in the maintenance/feature line, by concern:
+The `commands/` tree above is illustrative; the actual command modules are `identity.rs`, `friends.rs`, `models.rs`, `sessions.rs`, `session_journal.rs`, and `system.rs`. Commands added in the maintenance/feature line, by concern:
 
-- **Local data management:** `sessions_delete`, `sessions_clear_all` (each tx-scoped, deleting the session row and its `audit_events` together), `audit_events_list_all` (the cross-session read backing the focus-insights view), and `system_write_text_file` (the report / audit-JSON / stats-CSV save path — no fs-plugin surface added).
+- **Local data management:** `sessions_delete`, `sessions_clear_all` (each tx-scoped, deleting the session row, its `audit_events`, and its `session_timelines` row together, then unlinking that session's observation journal after the transaction commits), `audit_events_list_all` (the cross-session read backing the focus-insights view), and `system_write_text_file` (the report / audit-JSON / stats-CSV save path — no fs-plugin surface added).
+- **Written session timeline (#236):** `session_journal_append` / `session_journal_read` in `commands/session_journal.rs` own the per-session observation file (see §8), and `session_timeline_get` / `session_timeline_save` read and replace the narrative stored in `session_timelines`. The journal commands derive their path from the session topic alone and refuse anything that is not one; neither takes a caller-supplied path.
 - **Friends backup:** `friends_export` / `friends_import` (sealed-box to the user's own X25519 key, SVFB v1 format; import upserts on `ON CONFLICT(ed_pubkey_hex)`).
 - **Lifecycle:** `session_set_active` (drives the Rust `SessionActiveFlag` for the quit-confirm path) and `app_quit` (arms the quit and exits after the in-app confirm).
 - **Diagnostics (#98, #161):** `app_log_append` / `app_log_tail` in `commands/applog.rs` back `src/lib/log.ts`. The frontend renders and redacts each newline-delimited-JSON record; Rust appends it to `<data_dir>/logs/studyvis.log` under a process-wide mutex shared by both webviews. The live app log rolls at 2 MiB and keeps ten rolled generations. The AI engine writes `llama-server.log` under a separate process-wide mutex; each explicit engine start archives a bounded tail of the prior live file into the same ten-generation history, then truncates the live file. Snapshot-and-truncate is intentional: a just-stopped watcher can still own an open Windows handle, where renaming the live file would silently fail. Those files are deliberately called **log generations**, not sessions: benchmarks, crash recovery and deliberate restarts also start the engine, while one long app-log generation may span several study sessions.

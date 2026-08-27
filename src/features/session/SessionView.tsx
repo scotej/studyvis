@@ -132,6 +132,7 @@ import {
   type SessionImage,
   type SessionNote,
 } from './notesStore'
+import { recordSampleObservation } from './sessionJournal'
 import {
   EntireScreenShareRequiredError,
   requestScreenShareStream,
@@ -1323,6 +1324,16 @@ export function SessionView({
         !cameraOnRef.current ||
         usePomodoroStore.getState().phase.startsWith('rest'),
       onScoreEvents: async (events, verdict, context) => {
+        // #236: record every resolved check — on-task ones included — in the
+        // session's local observation journal, which the post-session write-up
+        // narrates. Deliberately before the dispatcher gate below and never
+        // awaited: an alert dispatcher that is missing or a teardown that has
+        // already aborted must not cost the account of what happened.
+        void recordSampleObservation({
+          sessionId: useSessionStore.getState().sessionTopic,
+          verdict,
+          topic: useSessionStore.getState().declaredStudyTopic,
+        })
         // V2-P6: route every sample's emitted events through the alert
         // dispatcher (warnings → local-only badge + ai_warning audit;
         // alerts → ai_alert audit + signed broadcast + tile highlight).

@@ -481,3 +481,163 @@ export const AiRecoveredAfterSlowdown: Story = {
     showDiagnosticsExport: true,
   },
 }
+
+// #236 — the written session timeline. Its four states are the reason the
+// section exists, and three of them exist precisely because the local model is
+// allowed to be slow, absent, or unhelpful.
+function writtenTimeline(
+  entries: Array<{ start_min: number; end_min: number; summary: string }>,
+  overrides: Partial<{
+    source: string
+    model_id: string | null
+    truncated: number
+  }> = {}
+) {
+  return {
+    session_id: 'mock-session',
+    generated_at: ENDED_AT + 20_000,
+    model_id: 'gemma-3-4b',
+    source: 'model',
+    truncated: 0,
+    entries: JSON.stringify(entries),
+    ...overrides,
+  }
+}
+
+const writtenEntries = [
+  {
+    start_min: 0,
+    end_min: 4,
+    summary: 'Opened the problem set and worked through the first two proofs.',
+  },
+  {
+    start_min: 4,
+    end_min: 9,
+    summary:
+      'Kept working on the proofs, checking the lecture notes alongside them.',
+  },
+  {
+    start_min: 9,
+    end_min: 12,
+    summary: 'Switched to a browser and read unrelated news for a few minutes.',
+  },
+  {
+    start_min: 12,
+    end_min: 25,
+    summary:
+      'Returned to the problem set and finished the remaining questions.',
+  },
+]
+
+export const WrittenTimeline: Story = {
+  args: {
+    ...MostlyOnTask.args,
+    data: {
+      ...buildData(
+        baseSession({
+          score: 91,
+          focused_pct: 22 / 25,
+          declared_topic: 'Linear algebra problem set',
+        }),
+        [event(ME, 'joined', 0), event(ME, 'left', 25 * 60_000)]
+      ),
+      timeline: writtenTimeline(writtenEntries),
+    },
+  },
+  play: async ({ canvasElement }) => {
+    await expect(
+      within(canvasElement).getByText(writtenEntries[0].summary)
+    ).toBeVisible()
+  },
+}
+
+// The model could not be reached, so the entries are the raw AI checks grouped
+// by time. The section says so and offers another attempt.
+export const WrittenTimelineFromRawChecks: Story = {
+  args: {
+    ...WrittenTimeline.args,
+    data: {
+      ...buildData(
+        baseSession({ declared_topic: 'Linear algebra problem set' }),
+        [event(ME, 'joined', 0)]
+      ),
+      timeline: writtenTimeline(
+        [
+          {
+            start_min: 0,
+            end_min: 1,
+            summary: 'On task — working through proofs',
+          },
+          {
+            start_min: 1,
+            end_min: 2,
+            summary: '3 of 8 checks off task — reading news',
+          },
+        ],
+        { source: 'observations', model_id: null, truncated: 1 }
+      ),
+    },
+    onRewriteTimeline: () => {
+      // no-op for stories
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(
+      canvas.getByText(strings.report.sections.written.sourceNote.observations)
+    ).toBeVisible()
+    await expect(
+      canvas.getByText(strings.report.sections.written.truncated)
+    ).toBeVisible()
+    await expect(
+      canvas.getByRole('button', {
+        name: strings.report.sections.written.rewriteCta,
+      })
+    ).toBeVisible()
+  },
+}
+
+export const WrittenTimelineInProgress: Story = {
+  args: {
+    ...MostlyOnTask.args,
+    writtenStatus: { kind: 'generating' },
+  },
+  play: async ({ canvasElement }) => {
+    await expect(
+      within(canvasElement).getByText(strings.report.sections.written.loading)
+    ).toBeVisible()
+  },
+}
+
+export const WrittenTimelineUnavailable: Story = {
+  args: {
+    ...MostlyOnTask.args,
+    writtenStatus: {
+      kind: 'blocked',
+      message: strings.report.sections.written.aiOff,
+    },
+  },
+  play: async ({ canvasElement }) => {
+    await expect(
+      within(canvasElement).getByText(strings.report.sections.written.aiOff)
+    ).toBeVisible()
+  },
+}
+
+export const WrittenTimelineFailed: Story = {
+  args: {
+    ...MostlyOnTask.args,
+    writtenStatus: {
+      kind: 'failed',
+      message: strings.report.sections.written.failed,
+    },
+    onRewriteTimeline: () => {
+      // no-op for stories
+    },
+  },
+  play: async ({ canvasElement }) => {
+    await expect(
+      within(canvasElement).getByText(strings.report.sections.written.failed)
+    ).toBeVisible()
+  },
+}

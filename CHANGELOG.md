@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+### Added
+
+- **Your session report now tells you what actually happened, minute by
+  minute.** Until now the AI's own words survived only when it flagged you:
+  every check where you were working was read once, used to move the score, and
+  thrown away. StudyVis now keeps each check's text in a plain file beside its
+  session — no images, ever, and nothing leaves the machine — and when the
+  session ends the same on-device model reads that file back and writes the
+  session up as a timeline. It appears under "Minute by minute" in the report
+  you get on leaving and in Settings → Sessions, and rides along in "Copy
+  report". The write-up runs after the report has already opened, so nothing
+  waits on it, and the section says plainly when the model could not be reached
+  and the entries are the raw checks instead — with a button to have it written
+  again. Deleting a session deletes its file along with everything else.
+  Recording is on by default whenever AI is on and can be turned off in
+  Settings → AI; existing write-ups stay readable either way.
+
 ### Fixed
 
 - **Closing the window on Linux now actually closes it, and a white window

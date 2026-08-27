@@ -936,6 +936,55 @@ export const strings = {
         empty: 'No breaks were taken.',
         count: (n: number) => `${n} ${n === 1 ? 'break' : 'breaks'}`,
       },
+      // #236 — the written account of the session, produced after it ended by
+      // the same local model that watched it. Distinct from `timeline` above,
+      // which lists signed audit events; this one narrates what the AI saw
+      // between them.
+      written: {
+        heading: 'Minute by minute',
+        help: 'Written on this device after the session, from the AI checks it recorded. Times are counted from the start of the session.',
+        loading: 'Writing up this session…',
+        // Nothing was recorded to write up: AI was off, it never produced a
+        // readable check, or the session predates this feature. The copy stays
+        // cause-neutral for the same reason `noScore.body` does.
+        empty:
+          'No AI checks were recorded for this session, so there is nothing to write up.',
+        // The journal exists but the user has since turned AI off, so the
+        // model cannot be asked to narrate it.
+        aiOff:
+          'Turn AI back on in Settings → AI to have this session written up.',
+        sessionActive:
+          'The AI is busy watching your current session. This can be written up once that session ends.',
+        failed: "Couldn't write up this session.",
+        rewriteCta: 'Write it up again',
+        truncated:
+          'This session ran long enough to fill its check log, so the account below covers only the part that was recorded.',
+        // Honest labelling of where the entries came from. A model that could
+        // not be reached still yields a real account — assembled from the raw
+        // checks rather than written — and the report must not imply otherwise.
+        sourceNote: {
+          mixed:
+            'Some stretches below are the raw AI checks; the model did not write those up.',
+          observations:
+            'The model did not write this up. These entries are the raw AI checks, grouped by time.',
+        },
+        rangeSingle: (startMin: number) => `${startMin} min`,
+        rangeSpan: (startMin: number, endMin: number) =>
+          `${startMin}–${endMin} min`,
+        rangeAriaLabel: (startMin: number, endMin: number) =>
+          `Minute ${startMin} to ${endMin}`,
+        // The deterministic per-window digest — both what the model is shown
+        // and what a window it failed to narrate falls back to.
+        digest: {
+          focused: (notes: string) =>
+            notes ? `On task — ${notes}` : 'On task.',
+          distracted: (offTask: number, total: number, notes: string) =>
+            notes
+              ? `${offTask} of ${total} checks off task — ${notes}`
+              : `${offTask} of ${total} checks off task.`,
+          unreadable: 'Checks ran but none could be read.',
+        },
+      },
     },
     studiedFallback: 'Studied',
     studiedWithTopic: (topic: string) => `Studied ${topic}`,
@@ -1495,6 +1544,15 @@ export const strings = {
           primary: 'Primary only',
           all: 'All displays',
         },
+      },
+      // #236 — the per-check journal that feeds the post-session write-up. ON
+      // by default: it records only text the model already produced about a
+      // session the user asked it to watch, it stays on this device, and
+      // without it the report has nothing to narrate.
+      sessionTimeline: {
+        label: 'Write up my sessions',
+        help: 'Records what the AI reports seeing during a session to a local file, then turns it into a minute-by-minute account in the session report. Never leaves this device; no images are saved.',
+        ariaLabel: 'Write up my sessions',
       },
       diagnostics: {
         label: 'Mirror AI diagnostics to console',
