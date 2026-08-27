@@ -1904,19 +1904,33 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
         })
       } catch (err) {
         // Soft fallback: a cancelled picker or any other capture error on
-        // the extra-display acquires drops us back to single-display for
-        // this session. We do NOT latch captureDenied — the primary stream
-        // is still live and the session continues.
-        if (
-          !(err instanceof CaptureError) ||
-          err.code !== 'screen_capture_denied'
-        ) {
-          log.warn('display.acquire_failed', {
-            acquireTargetCount,
-            latchedDenied: false,
-            err,
-          })
-        }
+        // the extra-display acquires drops us back to whatever the user
+        // already granted for this session. We do NOT latch captureDenied —
+        // the primary stream is still live and the session continues.
+        //
+        // Recorded on every outcome, and keyed on the underlying DOMException
+        // name rather than the mapped code (I94). I83 folded "no transient
+        // activation" — InvalidStateError on WebView2, InvalidAccessError on
+        // WebKit — into `screen_capture_denied` beside a genuinely cancelled
+        // picker, and this branch suppressed that whole code. `boot()` runs
+        // from a useEffect and the one live gesture was already spent on the
+        // primary acquire, so those two names are the expected outcome here
+        // on macOS and Windows — the very thing a diagnostics bundle needs to
+        // see, and the one thing it could not.
+        const cause = err instanceof CaptureError ? err.cause : err
+        const domName = cause instanceof DOMException ? cause.name : null
+        const cancelled =
+          domName === 'NotAllowedError' || domName === 'AbortError'
+        const record = cancelled ? log.info : log.warn
+        record('display.acquire_stopped', {
+          acquireTargetCount,
+          acquiredDisplayCount: state.screenTracks.length,
+          code: err instanceof CaptureError ? err.code : null,
+          domName,
+          cancelled,
+          latchedDenied: false,
+          err,
+        })
         break
       }
     }
