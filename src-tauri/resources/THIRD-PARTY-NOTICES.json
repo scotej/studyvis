@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "generatedBy": "scripts/generate-third-party-notices.ts",
   "noticePath": "THIRD-PARTY-NOTICES.txt",
-  "noticeSha256": "58a17e5173ac06a9a106a55b0fa16517dfb36da4b07daad6af87e086e45419af",
+  "noticeSha256": "d92b0b0b3b6f9ac30a565d5e05af88fa463928e7002bb2701783f2eec7ad0abd",
   "scope": {
     "npm": "package-lock.json v3 entries beneath node_modules whose dev flag is not true",
     "cargo": "normal dependency edges reachable from the StudyVis root under each release target; build/dev edges excluded",
@@ -16,11 +16,11 @@
   "inputs": [
     {
       "path": "package-lock.json",
-      "sha256": "c58b5c911e8a420e7ed63a76fcad955f9b508bed965bbeb3be87f3121ae51d25"
+      "sha256": "c7b8331ff2dfdcc7e7513232f6599463a722e19a8992a809d968cb379c583098"
     },
     {
       "path": "package.json",
-      "sha256": "077e2f368408fe880d9fcde8768973c3431fd489e9aaca25a1fa3172d654d91d"
+      "sha256": "096641861dba70422810ab7cbbc25a000b07d6865360dff97febf86ebab01567"
     },
     {
       "path": "scripts/fetch-llama-server.sh",
@@ -56,9 +56,9 @@
     }
   ],
   "counts": {
-    "components": 755,
+    "components": 753,
     "cargo": 532,
-    "npm": 222,
+    "npm": 220,
     "external": 1,
     "distinctLicenseTexts": 396
   },
@@ -12424,55 +12424,19 @@
       ]
     },
     {
-      "id": "npm:node_modules/@noble/hashes@2.2.0",
+      "id": "npm:node_modules/@noble/hashes@2.3.0",
       "ecosystem": "npm",
       "name": "@noble/hashes",
-      "version": "2.2.0",
+      "version": "2.3.0",
       "licenseExpression": "MIT",
-      "source": "https://registry.npmjs.org/@noble/hashes/-/hashes-2.2.0.tgz",
+      "source": "https://registry.npmjs.org/@noble/hashes/-/hashes-2.3.0.tgz",
       "repository": "git+https://github.com/paulmillr/noble-hashes.git",
-      "integrity": "sha512-IYqDGiTXab6FniAgnSdZwgWbomxpy9FtYvLKs7wCUs2a8RkITG+DFGO1DM9cr+E3/RgADRpFjrKVaJ1z6sjtEg==",
+      "integrity": "sha512-oN+QwyX7VSHotibwubG3kpzbwKrfnyR6OOO+3Nk/53ADL7FmgHHz4TgrbaYKvvOw09u6QTx0oiH1cNCIOuN0CQ==",
       "lockPath": "node_modules/@noble/hashes",
       "targets": ["frontend"],
       "licenseFiles": [
         {
           "path": "npm:node_modules/@noble/hashes/LICENSE",
-          "sha256": "3239e134eb6e6d64538ca76498c7fcb08a395249dd9d4af9927bf6d0169ee429"
-        }
-      ]
-    },
-    {
-      "id": "npm:node_modules/@noble/curves/node_modules/@noble/hashes@2.3.0",
-      "ecosystem": "npm",
-      "name": "@noble/hashes",
-      "version": "2.3.0",
-      "licenseExpression": "MIT",
-      "source": "https://registry.npmjs.org/@noble/hashes/-/hashes-2.3.0.tgz",
-      "repository": "git+https://github.com/paulmillr/noble-hashes.git",
-      "integrity": "sha512-oN+QwyX7VSHotibwubG3kpzbwKrfnyR6OOO+3Nk/53ADL7FmgHHz4TgrbaYKvvOw09u6QTx0oiH1cNCIOuN0CQ==",
-      "lockPath": "node_modules/@noble/curves/node_modules/@noble/hashes",
-      "targets": ["frontend"],
-      "licenseFiles": [
-        {
-          "path": "npm:node_modules/@noble/curves/node_modules/@noble/hashes/LICENSE",
-          "sha256": "3239e134eb6e6d64538ca76498c7fcb08a395249dd9d4af9927bf6d0169ee429"
-        }
-      ]
-    },
-    {
-      "id": "npm:node_modules/@scure/bip39/node_modules/@noble/hashes@2.3.0",
-      "ecosystem": "npm",
-      "name": "@noble/hashes",
-      "version": "2.3.0",
-      "licenseExpression": "MIT",
-      "source": "https://registry.npmjs.org/@noble/hashes/-/hashes-2.3.0.tgz",
-      "repository": "git+https://github.com/paulmillr/noble-hashes.git",
-      "integrity": "sha512-oN+QwyX7VSHotibwubG3kpzbwKrfnyR6OOO+3Nk/53ADL7FmgHHz4TgrbaYKvvOw09u6QTx0oiH1cNCIOuN0CQ==",
-      "lockPath": "node_modules/@scure/bip39/node_modules/@noble/hashes",
-      "targets": ["frontend"],
-      "licenseFiles": [
-        {
-          "path": "npm:node_modules/@scure/bip39/node_modules/@noble/hashes/LICENSE",
           "sha256": "3239e134eb6e6d64538ca76498c7fcb08a395249dd9d4af9927bf6d0169ee429"
         }
       ]
