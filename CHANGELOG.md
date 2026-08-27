@@ -21,6 +21,25 @@
 
 ### Fixed
 
+- **"Write it up again" on a session report now writes it up once.** Pressing
+  it started the write-up over on its own result, forever: each pass read the
+  whole session back, ran the on-device model over it, started and stopped the
+  engine, and then triggered the next one — for as long as the report stayed
+  open. The button now does exactly one pass, the way it always read.
+
+- **The write-up no longer leaves the AI engine running when it cannot use
+  it.** If the engine was slow to load — a large model on a machine without a
+  GPU is the usual way — the write-up gave up waiting and fell back to the
+  plain per-minute account, which is by design, but left the engine itself
+  running with the model still in memory and nothing left to use it. It now
+  shuts down whatever it started.
+
+- **A dropped update download no longer holds on to what it half-fetched.**
+  A background update check that lost the network, or one interrupted by a
+  session starting, kept the partly downloaded release around for the rest of
+  the run instead of discarding it. The next check already started over from
+  scratch; now the abandoned bytes go with it.
+
 - **On-device AI freezes the app far less.** With focus detection on, a
   single check could take the whole machine: the window stopped responding,
   video stuttered, and on a busy laptop nothing in the app got scheduled at
