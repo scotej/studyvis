@@ -23,10 +23,12 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  # Do not put this check only inside the environment-bound `publish` job:
-  # merely referencing a missing environment can auto-create it without
-  # protections. This read-only prerequisite detects either an absent or an
-  # auto-created-but-unprotected environment before `publish` can start.
+  # A separate, least-privilege prerequisite: the repository controls this
+  # workflow depends on are settings, not YAML, so they are checked with a
+  # read-only token before the job holding contents: write can start. The
+  # `release` environment this once also asserted is gone — its reviewer gate
+  # was removed when publication became unattended, and on a sole-owner
+  # repository permitting self-review it was never a two-person boundary.
   publication-controls:
     name: Verify publication controls
     runs-on: ubuntu-22.04
@@ -86,7 +88,7 @@ jobs:
           fi
 
           echo "::notice::Manually verify the tag ruleset's sole Always-bypass entry is RepositoryRole 5 (admin), used by the owner-scoped RELEASE_PAT; do not grant Write, Maintain, team, or integration bypass. GitHub hides bypass_actors from this read-only token."
-          echo "Release environment approval plus v* tag scope and lifecycle restrictions are verified."
+          echo "Tag ruleset scope (refs/tags/v*, no exclusions) and its creation, update, and deletion restrictions are verified."
 
   publish:
     name: Revalidate and publish ${{ inputs.tag }}

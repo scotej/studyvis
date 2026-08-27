@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "generatedBy": "scripts/generate-third-party-notices.ts",
   "noticePath": "THIRD-PARTY-NOTICES.txt",
-  "noticeSha256": "d92b0b0b3b6f9ac30a565d5e05af88fa463928e7002bb2701783f2eec7ad0abd",
+  "noticeSha256": "5900dcbfca64f3ab3c60f6d00ea0f6de4f8c4e934ae1de3954a2afbe9cea2953",
   "scope": {
     "npm": "package-lock.json v3 entries beneath node_modules whose dev flag is not true",
     "cargo": "normal dependency edges reachable from the StudyVis root under each release target; build/dev edges excluded",
@@ -16,11 +16,11 @@
   "inputs": [
     {
       "path": "package-lock.json",
-      "sha256": "c7b8331ff2dfdcc7e7513232f6599463a722e19a8992a809d968cb379c583098"
+      "sha256": "77d60d4d3bb700ea3d53ee4b1158f763b59612c1bdf7ab0c76615f60ccbc7db3"
     },
     {
       "path": "package.json",
-      "sha256": "096641861dba70422810ab7cbbc25a000b07d6865360dff97febf86ebab01567"
+      "sha256": "afeb12cfd69de34699509d38572f49d0ead4cae1da358ecb7491c6155375382d"
     },
     {
       "path": "scripts/fetch-llama-server.sh",
@@ -16245,14 +16245,14 @@
       ]
     },
     {
-      "id": "npm:node_modules/zustand@5.0.14",
+      "id": "npm:node_modules/zustand@5.0.15",
       "ecosystem": "npm",
       "name": "zustand",
-      "version": "5.0.14",
+      "version": "5.0.15",
       "licenseExpression": "MIT",
-      "source": "https://registry.npmjs.org/zustand/-/zustand-5.0.14.tgz",
+      "source": "https://registry.npmjs.org/zustand/-/zustand-5.0.15.tgz",
       "repository": "git+https://github.com/pmndrs/zustand.git",
-      "integrity": "sha512-/8tAspM5LMPr28b3fwLYrtdj77ECpfZviaP75CMTnwO8ISyaE4GDIG/9rDDYq/cH9D2Xw2A2RXglLInmVBQB/g==",
+      "integrity": "sha512-MpSEjRiBkA9crSYeOUH32rJC7SVqAbm0Fqcqge/bUi2PPoLcBWKOsG+C8mevmpr8TwXHBVkChbbJiyvkE+i/3A==",
       "lockPath": "node_modules/zustand",
       "targets": ["frontend"],
       "licenseFiles": [

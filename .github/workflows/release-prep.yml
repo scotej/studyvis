@@ -16,6 +16,10 @@ on:
         description: 'Exact version, e.g. 1.2.0 or 1.2.0-rc.1 (only used when bump = custom)'
         type: string
         default: ''
+      auto_publish:
+        description: 'Queue "Publish verified release" for the new tag once the draft build finishes'
+        type: boolean
+        default: true
 
 # Job-scoped (not workflow-level) so the gate job — which runs the
 # third-party toolchain action — never holds a write token; only prep pushes
@@ -29,10 +33,88 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # Everything here is cheap, read-only, and decides whether this release
+  # request can succeed at all. It runs FIRST because the three cheapest ways
+  # to get a release wrong — asking for a version that is already tagged,
+  # asking for one with no release notes, or asking without the PAT that does
+  # the push — used to surface only after `gate` had spent ~20 minutes on
+  # npm ci, lint, test, build, Storybook, Playwright and axe, or (for the
+  # CHANGELOG) after `gate` had passed entirely. Same fail-the-cheap-thing-
+  # first ordering ci.yml uses ahead of its WebKitGTK compile.
+  preflight:
+    name: Release request preflight
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.ver.outputs.new }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+          persist-credentials: false
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+
+      - name: Compute the next version
+        id: ver
+        env:
+          RELEASE_TYPE: ${{ inputs.release_type }}
+          CUSTOM_VERSION: ${{ inputs.custom_version }}
+        run: |
+          set -euo pipefail
+          # Shared with prep's own computation (scripts/next-version.sh) so the
+          # two cannot disagree about which version is being cut.
+          new=$(bash scripts/next-version.sh "$RELEASE_TYPE" "$CUSTOM_VERSION")
+          echo "new=$new" >> "$GITHUB_OUTPUT"
+
+      - name: Assert the version tag is still free
+        env:
+          NEW: ${{ steps.ver.outputs.new }}
+        run: |
+          set -euo pipefail
+          if git ls-remote --exit-code --tags origin "refs/tags/v$NEW" >/dev/null 2>&1; then
+            echo "::error::tag v$NEW already exists on origin. Pick a different version; a released tag is immutable."
+            exit 1
+          fi
+          echo "Tag v$NEW is free."
+
+      # The CHANGELOG heading is the one release input a human must write by
+      # hand, it is the body release.yml puts on the Releases page, and
+      # renaming '## Unreleased' to '## <version> — <date> — <title>' is the
+      # step that is easiest to forget. Checking it here costs seconds.
+      - name: Require a non-empty CHANGELOG section for the new version
+        env:
+          NEW: ${{ steps.ver.outputs.new }}
+        run: |
+          bash scripts/changelog-section.sh "$NEW" \
+            "Write the release notes, merge to main, then re-run Release prep." \
+            > /dev/null
+
+      # Same reasoning as release.yml's signing-key preflight: a missing
+      # secret that only surfaces later reads as a mysterious failure. Without
+      # RELEASE_PAT the `prep` job below runs the whole bump, then dies on
+      # `git push origin main` with a rules violation that looks like a
+      # protection misconfiguration rather than an absent secret. Only
+      # presence is checked; the value never reaches the log.
+      - name: Assert the release PAT is configured
+        env:
+          PAT: ${{ secrets.RELEASE_PAT }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${PAT}" ]]; then
+            echo "::error::RELEASE_PAT is not set. main is protected by a ruleset requiring a PR + 'All pre-merge checks', and GITHUB_TOKEN cannot bypass it on a user-owned repo. Create a fine-grained PAT scoped to this repository with Contents: read and write, add it as the RELEASE_PAT secret, and re-run."
+            exit 1
+          fi
+
   # Quality gate over main before anything is bumped, committed, tagged, or
   # pushed. rustfmt is the only Rust check here — no compilation, so the
   # ubuntu runner needs no llama-server prebuild.
   gate:
+    needs: preflight
     permissions:
       contents: read
       actions: read # the "Require CI success" step queries the runs API
@@ -111,22 +193,6 @@ jobs:
       # gap this closes. Require that CI (which DOES compile/clippy/test every
       # host targets and runs check-a11y) has gone green on the precise main SHA
       # being tagged, so the irreversible bump+tag+push can't outrun it.
-      # Same reasoning as release.yml's signing-key preflight: a missing
-      # secret that only surfaces later reads as a mysterious failure. Without
-      # RELEASE_PAT the `prep` job below runs the whole bump, then dies on
-      # `git push origin main` with a rules violation that looks like a
-      # protection misconfiguration rather than an absent secret. Only
-      # presence is checked; the value never reaches the log.
-      - name: Assert the release PAT is configured
-        env:
-          PAT: ${{ secrets.RELEASE_PAT }}
-        run: |
-          set -euo pipefail
-          if [[ -z "${PAT}" ]]; then
-            echo "::error::RELEASE_PAT is not set. main is protected by a ruleset requiring a PR + 'All pre-merge checks', and GITHUB_TOKEN cannot bypass it on a user-owned repo. Create a fine-grained PAT scoped to this repository with Contents: read and write, add it as the RELEASE_PAT secret, and re-run."
-            exit 1
-          fi
-
       - name: Require CI success on this main commit
         id: ci-check
         env:
@@ -156,11 +222,13 @@ jobs:
       # GITHUB_TOKEN read-only so the job holds only one write credential.
       contents: read
     name: Bump and tag
-    needs: gate
+    needs: [preflight, gate]
     runs-on: ubuntu-latest
     # The three target-filtered `cargo fetch` closures below take minutes, not
     # seconds; 10 was sized for a job that only rewrote five version strings.
     timeout-minutes: 25
+    outputs:
+      version: ${{ steps.ver.outputs.new }}
     steps:
       # RELEASE_PAT, not GITHUB_TOKEN. main is protected by a ruleset that
       # requires a pull request and the "All pre-merge checks" status check,
@@ -208,29 +276,27 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # Same script preflight ran, against the gate-verified commit rather
+      # than whatever main was when the button was pressed. Re-deriving and
+      # comparing is what catches a version bump landing on main in between:
+      # the SHA check above proves prep and gate agree, this proves the
+      # *request* still resolves to the version preflight approved.
       - name: Compute next version
         id: ver
         env:
           RELEASE_TYPE: ${{ inputs.release_type }}
           CUSTOM_VERSION: ${{ inputs.custom_version }}
+          PREFLIGHT_VERSION: ${{ needs.preflight.outputs.version }}
         run: |
           set -euo pipefail
-          current=$(node -p "require('./package.json').version")
-          IFS='.' read -r MA MI PA <<< "$current"
-          case "$RELEASE_TYPE" in
-            major)  NEW="$((MA + 1)).0.0" ;;
-            minor)  NEW="${MA}.$((MI + 1)).0" ;;
-            patch)  NEW="${MA}.${MI}.$((PA + 1))" ;;
-            custom) NEW="$CUSTOM_VERSION" ;;
-            *)      echo "::error::unknown release_type '$RELEASE_TYPE'"; exit 1 ;;
-          esac
-          if [[ ! "$NEW" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]]; then
-            echo "::error::computed version '$NEW' is not X.Y.Z or X.Y.Z-prerelease (custom needs a value)"; exit 1
+          NEW=$(bash scripts/next-version.sh "$RELEASE_TYPE" "$CUSTOM_VERSION")
+          if [ "$NEW" != "$PREFLIGHT_VERSION" ]; then
+            echo "::error::preflight approved v$PREFLIGHT_VERSION but this commit resolves to v$NEW; main's version files moved underneath the request. Re-run Release prep."
+            exit 1
           fi
           if git ls-remote --exit-code --tags origin "refs/tags/v$NEW" >/dev/null 2>&1; then
             echo "::error::tag v$NEW already exists on origin"; exit 1
           fi
-          echo "Bumping $current -> $NEW"
           echo "new=$NEW" >> "$GITHUB_OUTPUT"
 
       # #47 F2 — CLAUDE.md requires a CHANGELOG entry per release and the
@@ -343,13 +409,99 @@ jobs:
         if: always()
         env:
           NEW: ${{ steps.ver.outputs.new }}
+          AUTO_PUBLISH: ${{ inputs.auto_publish }}
         run: |
           {
             echo "### Release prep: v${NEW:-?}"
             echo ""
             echo "- Bumped version to **v${NEW}** and pushed tag \`v${NEW}\` to main"
             echo "- The RELEASE_PAT tag push triggers the **Release** build once"
-            echo ""
-            echo 'After the draft verifies, run **Publish verified release** for `v'"${NEW}"'`:'
-            echo "<https://github.com/${{ github.repository }}/actions/workflows/publish-release.yml>"
+            if [ "$AUTO_PUBLISH" = true ]; then
+              echo "- **Publish verified release** is queued behind that build by the next job; it publishes only if every one of its gates passes"
+            else
+              echo ""
+              echo 'After the draft verifies, run **Publish verified release** for `v'"${NEW}"'`:'
+              echo "<https://github.com/${{ github.repository }}/actions/workflows/publish-release.yml>"
+            fi
           } >> "$GITHUB_STEP_SUMMARY"
+
+  # The tag push above starts the Release build, and that build takes hours
+  # (its Linux leg compiles WebKitGTK from source against the verified tuple,
+  # with no restored build state). Publication was therefore a step someone
+  # had to remember to come back and perform by hand — the last click in a
+  # pathway whose every actual check is already automated.
+  #
+  # publish-release.yml shares release.yml's `release-<tag>` concurrency group
+  # with cancel-in-progress: false, so a dispatch fired now does not race the
+  # build: it queues behind it and starts when the build is done. Queuing it
+  # early is safe because queuing is not approving. Everything that decides
+  # whether the draft goes live still runs inside publish-release.yml, fails
+  # closed, and is unchanged by this — tag on main, exact-commit CI green, the
+  # exact tag/commit release run successful, twelve expected assets, matching
+  # updater sidecars, an attestation binding every asset to that run, and a
+  # byte-identical AppImage re-check immediately before it publishes.
+  #
+  # Separate job on purpose. `prep` above persists RELEASE_PAT on disk and its
+  # header comment keeps that job's own GITHUB_TOKEN read-only so it holds a
+  # single write credential; this job holds actions: write and no release
+  # credential. GITHUB_TOKEN can raise workflow_dispatch — it and
+  # repository_dispatch are the documented exceptions to the rule that
+  # GITHUB_TOKEN-triggered events do not start new workflow runs.
+  chain-publish:
+    name: Queue publication
+    needs: prep
+    if: inputs.auto_publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      actions: write
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      TAG: v${{ needs.prep.outputs.version }}
+    steps:
+      # Order matters: whichever run enters the shared concurrency group first
+      # holds it. Dispatching before the tag push has produced a Release run
+      # would make the build queue behind the publisher, which would then fail
+      # closed for want of a completed build. Wait for the Release run to
+      # exist, and only then queue behind it.
+      - name: Wait for the Release build to claim the tag
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 60); do
+            response=$(gh api \
+              "repos/${{ github.repository }}/actions/workflows/release.yml/runs?per_page=20" \
+              2>/dev/null || printf '{"workflow_runs":[]}')
+            if jq -e --arg tag "$TAG" \
+              'any(.workflow_runs[]; .head_branch == $tag)' \
+              <<< "$response" >/dev/null; then
+              echo "Release build for $TAG exists and holds the release-$TAG group."
+              exit 0
+            fi
+            echo "No Release run for $TAG yet (poll ${attempt}/60)."
+            sleep 10
+          done
+          echo "::error::No Release workflow run appeared for $TAG within 10 minutes. The tag is pushed; investigate the tag-push trigger, then dispatch Publish verified release by hand."
+          exit 1
+
+      - name: Dispatch Publish verified release
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3; do
+            if gh workflow run publish-release.yml \
+              --repo "${{ github.repository }}" \
+              --ref main \
+              --field "tag=$TAG"; then
+              {
+                echo "### Publication queued for $TAG"
+                echo ""
+                echo "It waits on the \`release-$TAG\` concurrency group until the Release build finishes, then applies every gate in **Publish verified release**. A draft that fails any of them is not published."
+                echo "<https://github.com/${{ github.repository }}/actions/workflows/publish-release.yml>"
+              } >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            echo "Dispatch attempt $attempt failed; retrying..."
+            sleep 10
+          done
+          echo "::error::Could not dispatch Publish verified release for $TAG. The tag is pushed and the build is running; publish by hand from the Actions tab once the draft verifies."
+          exit 1
