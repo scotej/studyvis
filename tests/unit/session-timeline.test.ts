@@ -38,6 +38,7 @@ import {
   parseTimelineEntries,
   TIMELINE_SYSTEM_PROMPT,
 } from '@/features/session/sessionTimeline'
+import { createWriteUpLatch } from '@/features/session/useWrittenTimeline'
 import { useSessionStore } from '@/stores/sessionStore'
 import { strings } from '@/strings'
 
@@ -484,5 +485,40 @@ describe('sidecar ownership', () => {
     })
 
     expect(stops).toBe(0)
+  })
+})
+
+describe('the write-up latch', () => {
+  test('a claim is refused while it is still running', () => {
+    const latch = createWriteUpLatch()
+    expect(latch.claim('s:0')).toBe(true)
+    expect(latch.claim('s:0')).toBe(false)
+  })
+
+  test('a released claim can be retaken — the Strict Mode remount', () => {
+    const latch = createWriteUpLatch()
+    expect(latch.claim('s:0')).toBe(true)
+    latch.release('s:0')
+    expect(latch.claim('s:0')).toBe(true)
+  })
+
+  test('a completed write-up is never started again by its own result', () => {
+    // The rewrite loop, replayed: the pass finishes, `onWritten` changes the
+    // `timeline` dependency, the effect re-runs and its cleanup releases the
+    // claim. Without the completion half, this second claim succeeded and the
+    // write-up restarted itself forever.
+    const latch = createWriteUpLatch()
+    expect(latch.claim('s:1')).toBe(true)
+    latch.complete('s:1')
+    latch.release('s:1')
+    expect(latch.claim('s:1')).toBe(false)
+  })
+
+  test('a completed key does not block the next explicit rewrite', () => {
+    const latch = createWriteUpLatch()
+    latch.claim('s:1')
+    latch.complete('s:1')
+    latch.release('s:1')
+    expect(latch.claim('s:2')).toBe(true)
   })
 })

@@ -68,6 +68,47 @@ function runOnce(
   return attempt
 }
 
+// Which write-up attempt this hook has started, and which one has already
+// produced a stored timeline. Two states rather than one because they answer
+// different questions and are released at different times: `requested` is an
+// in-flight latch the effect cleanup gives back (React 19 Strict Mode tears
+// the first effect down mid-probe, and a latch still held by that abandoned
+// run would mean the write-up never happens in dev), while `completed` is
+// permanent for its key.
+//
+// Keeping only `requested` is what made "Write it up again" loop forever: a
+// finished pass calls `onWritten`, the report stores the new record, the
+// `timeline` prop it feeds back is a fresh object, the effect re-runs, its
+// cleanup hands the latch back — and the completion guard did not cover a
+// rewrite, so the pass started over on its own result. Each iteration is a
+// full local-model pass, a sidecar start/stop, and a row upsert.
+export type WriteUpLatch = {
+  // False when this key is already running or already done.
+  claim: (key: string) => boolean
+  // Give back an in-flight claim that never produced anything.
+  release: (key: string) => void
+  // This key's write-up landed; it must never start again.
+  complete: (key: string) => void
+}
+
+export function createWriteUpLatch(): WriteUpLatch {
+  let requested: string | null = null
+  let completed: string | null = null
+  return {
+    claim: (key) => {
+      if (completed === key || requested === key) return false
+      requested = key
+      return true
+    },
+    release: (key) => {
+      if (requested === key) requested = null
+    },
+    complete: (key) => {
+      completed = key
+    },
+  }
+}
+
 function toRecord(
   sessionId: string,
   timeline: SessionTimeline
@@ -106,8 +147,9 @@ export function useWrittenTimeline({
   const [status, setStatus] = useState<WrittenTimelineStatus>({ kind: 'idle' })
   const [attempt, setAttempt] = useState(0)
   // A stored write-up is never replaced on its own — only the explicit rewrite
-  // action asks for a second pass.
-  const requested = useRef<string | null>(null)
+  // action asks for a second pass, and only once per press.
+  const latch = useRef<WriteUpLatch | null>(null)
+  latch.current ??= createWriteUpLatch()
   const onWrittenRef = useRef(onWritten)
   useEffect(() => {
     onWrittenRef.current = onWritten
@@ -117,8 +159,8 @@ export function useWrittenTimeline({
     if (!ready) return
     if (timeline && attempt === 0) return
     const key = `${sessionId}:${attempt}`
-    if (requested.current === key) return
-    requested.current = key
+    const claims = latch.current
+    if (!claims?.claim(key)) return
 
     let cancelled = false
     const run = async () => {
@@ -166,6 +208,10 @@ export function useWrittenTimeline({
           setStatus({ kind: 'idle' })
           return
         }
+        // Before `onWritten`, which feeds a fresh record back through the
+        // `timeline` dependency and re-runs this effect: the key has to read
+        // as done by the time that run reaches its guard.
+        claims.complete(key)
         onWrittenRef.current(toRecord(sessionId, written))
         setStatus({ kind: 'idle' })
       } catch (err) {
@@ -185,12 +231,14 @@ export function useWrittenTimeline({
       // and still persists: the post-session report is usually closed within
       // seconds, and abandoning the pass there would mean it never completes.
       cancelled = true
-      // Release the once-only latch as well. React 19 Strict Mode tears the
-      // first effect down while the journal probe above is still awaiting, so
-      // without this the remount finds the latch already claimed by a run that
-      // returned early — and the write-up never happens in dev at all. The
+      // Give the in-flight claim back. React 19 Strict Mode tears the first
+      // effect down while the journal probe above is still awaiting, so
+      // without this the remount finds the key already claimed by a run that
+      // returned early — and the write-up never happens in dev at all. A key
+      // this run COMPLETED stays completed, which is what stops the released
+      // claim from letting a rewrite restart itself on its own result. The
       // `inFlight` map still keeps the expensive pass itself to one.
-      if (requested.current === key) requested.current = null
+      claims.release(key)
     }
   }, [sessionId, ready, timeline, attempt, declaredTopic])
 
