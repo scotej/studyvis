@@ -13,7 +13,16 @@ import {
   __setAiAgentRuntime,
   type AiAgentRuntime,
 } from '@/features/ai/aiAgent'
-import { useSidecarStore } from '@/features/ai/sidecar'
+import {
+  __setDownloadRuntime,
+  __resetDownloadRuntime,
+  type DownloadRuntime,
+} from '@/features/ai/download'
+import {
+  __resetSidecarRuntime,
+  __setSidecarRuntime,
+  useSidecarStore,
+} from '@/features/ai/sidecar'
 import {
   serializeObservation,
   __resetSessionJournalRuntime,
@@ -116,6 +125,8 @@ beforeEach(() => {
 afterEach(() => {
   __resetAiAgentRuntime()
   __resetSessionJournalRuntime()
+  __resetSidecarRuntime()
+  __resetDownloadRuntime()
   useSidecarStore.setState({ status: 'idle', port: null })
   useSessionStore.setState({ status: 'idle' })
 })
@@ -392,5 +403,86 @@ describe('generating a write-up', () => {
       })
     ).rejects.toMatchObject({ code: 'session_active' })
     expect(invokeMock).not.toHaveBeenCalled()
+  })
+})
+
+describe('sidecar ownership', () => {
+  // The whole point of `startedHere`: an engine this write-up spawned holds a
+  // multi-GB model, and readiness failing does not hand it to anyone else.
+  function stubSidecarRuntime(stop: () => void) {
+    __setSidecarRuntime({
+      start: async () => ({ port: PORT, hardwareIdentity: null }),
+      stop: async () => stop(),
+      status: async () => {
+        throw new Error('unused')
+      },
+      fetchHealth: async () => true,
+      setInterval: () => 1,
+      clearInterval: () => {},
+      getAiFeaturesEnabled: () => true,
+      getEngineAutoInstall: () => false,
+    })
+    __setDownloadRuntime({
+      paths: async () => ({ model_path: '/m.gguf', mmproj_path: '/p.gguf' }),
+    } as unknown as DownloadRuntime)
+  }
+
+  // A runtime whose sidecar_status reports an errored child, so
+  // waitForSidecarReady rejects instead of burning its 90-second deadline.
+  function erroredReadinessRuntime(): AiAgentRuntime {
+    return {
+      now: () => T0,
+      getSidecarStatus: async () => ({
+        running: false,
+        starting: false,
+        port: null,
+        model: null,
+        mmproj: null,
+        ctx_size: null,
+        errored: true,
+        last_error: 'child died loading the projector',
+      }),
+      fetch: (async () => new Response(null, { status: 500 })) as typeof fetch,
+    }
+  }
+
+  test('an engine that never became healthy is stopped, not left resident', async () => {
+    // Idle, so this write-up is the one that brings the engine up.
+    useSidecarStore.setState({ status: 'idle', port: null })
+    let stops = 0
+    stubSidecarRuntime(() => {
+      stops += 1
+    })
+    __setSessionJournalRuntime(journalOf([observation(0), observation(1)]))
+    __setAiAgentRuntime(erroredReadinessRuntime())
+
+    const timeline = await generateSessionTimeline({
+      sessionId: SESSION,
+      modelId: 'gemma',
+      declaredTopic: 'Maths',
+    })
+
+    // The write-up still produces the deterministic account...
+    expect(timeline?.source).toBe('observations')
+    // ...and does not leave the engine it started running behind it.
+    expect(stops).toBe(1)
+  })
+
+  test('an engine somebody else was already running is left alone', async () => {
+    useSidecarStore.setState({ status: 'running', port: PORT })
+    let stops = 0
+    stubSidecarRuntime(() => {
+      stops += 1
+    })
+    __setSessionJournalRuntime(journalOf([observation(0)]))
+    __setAiAgentRuntime(erroredReadinessRuntime())
+
+    await generateSessionTimeline({
+      sessionId: SESSION,
+      modelId: 'gemma',
+      declaredTopic: 'Maths',
+    })
+
+    expect(stops).toBe(0)
   })
 })
