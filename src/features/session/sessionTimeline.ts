@@ -354,6 +354,17 @@ export class SessionTimelineError extends Error {
   }
 }
 
+// Release an engine this write-up started. Never while a session is live: by
+// then the sample loop owns the sidecar, and stopping it would silently end
+// that session's AI.
+async function releaseSidecar(): Promise<void> {
+  if (useSessionStore.getState().status === 'active') return
+  await useSidecarStore
+    .getState()
+    .stop()
+    .catch((err: unknown) => log.warn('sidecar.stop_failed', { err }))
+}
+
 async function ensureSidecar(modelId: string): Promise<{
   port: number
   startedHere: boolean
@@ -379,10 +390,23 @@ async function ensureSidecar(modelId: string): Promise<{
       )
     }
   }
-  const port = await waitForSidecarReady(modelId, getAiAgentRuntime(), {
-    unavailableMessage: strings.report.sections.written.failed,
-  })
-  return { port, startedHere: ownsLifecycle }
+  try {
+    const port = await waitForSidecarReady(modelId, getAiAgentRuntime(), {
+      unavailableMessage: strings.report.sections.written.failed,
+    })
+    return { port, startedHere: ownsLifecycle }
+  } catch (err) {
+    // The engine spawned but never reported healthy — a cold CPU start that
+    // outran SIDECAR_HEALTH_TIMEOUT_MS, or a child that errored out. It is
+    // loading a multi-GB model right now and nobody else asked for it, so it
+    // has to be released HERE: the caller learns ownership from this
+    // function's return value, which a throw never delivers, and its own
+    // `finally` would therefore skip the stop and leave the engine resident
+    // for the rest of the process. Same contract as benchmark.ts, whose
+    // `finally` releases the sidecar on a failed waitForHealthy too.
+    if (ownsLifecycle) await releaseSidecar()
+    throw err
+  }
 }
 
 // Writes up one finished session and stores the result. Returns null when the
@@ -436,15 +460,7 @@ export async function generateSessionTimeline(
     })
     entries = fallbackEntries(windows)
   } finally {
-    if (
-      sidecar?.startedHere &&
-      useSessionStore.getState().status !== 'active'
-    ) {
-      await useSidecarStore
-        .getState()
-        .stop()
-        .catch((err: unknown) => log.warn('sidecar.stop_failed', { err }))
-    }
+    if (sidecar?.startedHere) await releaseSidecar()
   }
 
   const source: SessionTimelineSource =
