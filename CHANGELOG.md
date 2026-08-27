@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.12.0 — 2026-08-27 — Your session, minute by minute
 
 ### Added
 
