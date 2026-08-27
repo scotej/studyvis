@@ -76,6 +76,20 @@ export const defaultUpdaterDeps: UpdaterDeps = {
   installContext: () => invoke('system_install_context'),
 }
 
+// Every `check()` that finds something hands back a plugin `Update`, which is
+// a handle on a Rust-side resource (its `rid`) — and after a download, on the
+// staged bytes too. Exactly one of two things may happen to it: it is kept as
+// `pending` for `install()`, or it is closed. There are three ways to abandon
+// one, so they share this rather than each remembering.
+async function discard(update: Update): Promise<void> {
+  try {
+    await update.close()
+  } catch (err) {
+    // Best-effort cleanup; the handle is going out of scope either way.
+    log.warn('update.close_failed', { err })
+  }
+}
+
 let deps: UpdaterDeps = defaultUpdaterDeps
 
 export function setUpdaterDeps(next: Partial<UpdaterDeps>) {
@@ -177,11 +191,7 @@ export const useUpdaterStore = create<UpdaterState>((set, get) => ({
         dismissed: false,
       })
       // Nothing staged, so free the Rust-side Update resource.
-      try {
-        await update.close()
-      } catch {
-        // Best-effort cleanup.
-      }
+      await discard(update)
       return
     }
 
@@ -192,6 +202,9 @@ export const useUpdaterStore = create<UpdaterState>((set, get) => ({
     // and installer bytes over a live call are the exact bandwidth cost this
     // guard exists to avoid, whoever pressed the button.
     if (deps.isSessionActive()) {
+      // The next check re-finds this release from scratch, so this handle is
+      // abandoned rather than held — release it with the rest of them.
+      await discard(update)
       set({ status: 'idle' })
       return
     }
@@ -230,6 +243,9 @@ export const useUpdaterStore = create<UpdaterState>((set, get) => ({
       // Leave nothing staged: the next check re-downloads from scratch rather
       // than trying to resume a half-written artifact.
       log.error('download.failed', { err })
+      // "Nothing staged" has to include the handle the partial bytes hang
+      // off, not just this store's `pending`.
+      await discard(update)
       set({
         status: 'error',
         pending: null,
