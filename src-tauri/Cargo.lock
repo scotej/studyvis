@@ -4618,6 +4618,7 @@ dependencies = [
  "tauri-plugin-store",
  "tauri-plugin-updater",
  "webkit2gtk",
+ "windows-sys 0.61.2",
  "zip 8.6.0",
 ]
 

@@ -343,6 +343,9 @@ export {
   SCHEDULER_LAG_MIN_MS,
   SCHEDULER_LAG_RATIO,
   schedulerLagIsMaterial,
+  STARVE_PROBE_INTERVAL_MS,
+  STARVE_THRESHOLD_MS,
+  startStarveProbe,
 } from './sampleLoop'
 export type {
   SampleLoopRuntime,
@@ -353,4 +356,5 @@ export type {
   SampleRecoveryInfo,
   ScoreEventsDispatchContext,
   BackoffState,
+  StarveProbe,
 } from './sampleLoop'
