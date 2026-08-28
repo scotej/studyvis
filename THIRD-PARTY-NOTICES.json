@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "generatedBy": "scripts/generate-third-party-notices.ts",
   "noticePath": "THIRD-PARTY-NOTICES.txt",
-  "noticeSha256": "5900dcbfca64f3ab3c60f6d00ea0f6de4f8c4e934ae1de3954a2afbe9cea2953",
+  "noticeSha256": "86de7c235063d44d779d8f487e877cbc1d2df5011843a741fb9d44133916abda",
   "scope": {
     "npm": "package-lock.json v3 entries beneath node_modules whose dev flag is not true",
     "cargo": "normal dependency edges reachable from the StudyVis root under each release target; build/dev edges excluded",
@@ -44,7 +44,7 @@
     },
     {
       "path": "src-tauri/Cargo.lock",
-      "sha256": "4d3fdc8b31441691edf63106224af2d7a08b6e79157f08139629bc712d207e9b"
+      "sha256": "19aecfe1cbae6066f47bc0f0ea6dbb13509dedf876c1e105c161d5b1dd0adf30"
     },
     {
       "path": "src-tauri/Cargo.toml",
@@ -213,13 +213,13 @@
       ]
     },
     {
-      "id": "cargo:anyhow@1.0.102",
+      "id": "cargo:anyhow@1.0.103",
       "ecosystem": "cargo",
       "name": "anyhow",
-      "version": "1.0.102",
+      "version": "1.0.103",
       "licenseExpression": "MIT OR Apache-2.0",
-      "source": "https://crates.io/api/v1/crates/anyhow/1.0.102/download",
-      "checksum": "7f202df86484c868dbad7eaa557ef785d5c66295e41b460ef922eca0723b842c",
+      "source": "https://crates.io/api/v1/crates/anyhow/1.0.103/download",
+      "checksum": "2a4385e2e34eb35d6b3efe798b9eb88096925d87726c0798709bf56d9ed84af3",
       "repository": "https://github.com/dtolnay/anyhow",
       "targets": [
         "aarch64-apple-darwin",
@@ -228,11 +228,11 @@
       ],
       "licenseFiles": [
         {
-          "path": "cargo:anyhow@1.0.102/LICENSE-APACHE",
+          "path": "cargo:anyhow@1.0.103/LICENSE-APACHE",
           "sha256": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a"
         },
         {
-          "path": "cargo:anyhow@1.0.102/LICENSE-MIT",
+          "path": "cargo:anyhow@1.0.103/LICENSE-MIT",
           "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3"
         }
       ]
@@ -2802,22 +2802,22 @@
       ]
     },
     {
-      "id": "cargo:event-listener@5.4.1",
+      "id": "cargo:event-listener@5.4.2",
       "ecosystem": "cargo",
       "name": "event-listener",
-      "version": "5.4.1",
+      "version": "5.4.2",
       "licenseExpression": "Apache-2.0 OR MIT",
-      "source": "https://crates.io/api/v1/crates/event-listener/5.4.1/download",
-      "checksum": "e13b66accf52311f30a0db42147dadea9850cb48cd070028831ae5f5d4b856ab",
+      "source": "https://crates.io/api/v1/crates/event-listener/5.4.2/download",
+      "checksum": "5a23add41df1562121a9393cb065eab5146a1242410f23a644851e90cfd669d2",
       "repository": "https://github.com/smol-rs/event-listener",
       "targets": ["x86_64-unknown-linux-gnu"],
       "licenseFiles": [
         {
-          "path": "cargo:event-listener@5.4.1/LICENSE-APACHE",
+          "path": "cargo:event-listener@5.4.2/LICENSE-APACHE",
           "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
         },
         {
-          "path": "cargo:event-listener@5.4.1/LICENSE-MIT",
+          "path": "cargo:event-listener@5.4.2/LICENSE-MIT",
           "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3"
         }
       ]
