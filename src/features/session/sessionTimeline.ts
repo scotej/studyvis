@@ -464,6 +464,12 @@ export async function generateSessionTimeline(
       err: err instanceof AiAgentError ? err.code : err,
     })
     entries = fallbackEntries(windows)
+    // Today only `ensureSidecar` reaches here, where the tally is still 0 —
+    // `writeChunk` swallows its own failures and returns the digest. Reset it
+    // anyway: `entries` has just been replaced wholesale, so a tally left
+    // standing would credit the model for text no longer in the timeline, and
+    // the two have to move together for `source` below to mean anything.
+    writtenWindows = 0
   } finally {
     if (sidecar?.startedHere) await releaseSidecar()
   }

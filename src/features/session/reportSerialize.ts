@@ -13,11 +13,12 @@ import type { AuditEventRecord } from '@/lib/db/audit'
 import type { SessionRecord } from '@/lib/db/sessions'
 import {
   isTimelineSource,
+  parseTimelineEntries,
   type SessionTimelineRecord,
+  type TimelineEntry,
 } from '@/lib/db/sessionTimeline'
 import { strings } from '@/strings'
 import { formatBreakDuration } from './break'
-import { parseTimelineEntries, type TimelineEntry } from './sessionTimeline'
 import {
   aiCoverage,
   deriveBreaksSummary,
@@ -62,19 +63,21 @@ export function formatWrittenRange(startMin: number, endMin: number): string {
 }
 
 // The honesty line under the section heading: only a write-up the model
-// actually produced for every window goes unlabelled.
+// actually produced for every window goes unlabelled. A `source` this build
+// does not recognise — a row stored by a newer one, then read after a
+// downgrade — is labelled rather than passed off as the model's own work;
+// silence is the one rendering that claims authorship, so it must never be the
+// fallback.
 export function writtenSourceNote(
   timeline: SessionTimelineRecord | null | undefined
 ): string | null {
   if (!timeline) return null
-  const source = isTimelineSource(timeline.source) ? timeline.source : null
-  if (source === 'mixed') {
-    return strings.report.sections.written.sourceNote.mixed
-  }
+  const source = isTimelineSource(timeline.source) ? timeline.source : 'mixed'
+  if (source === 'model') return null
   if (source === 'observations') {
     return strings.report.sections.written.sourceNote.observations
   }
-  return null
+  return strings.report.sections.written.sourceNote.mixed
 }
 
 export function labelFor(
