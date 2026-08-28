@@ -9,6 +9,7 @@ import {
   type PttInvariantId,
   type PttObservation,
 } from '@/features/system/pttInvariants'
+import { PTT_WATCHDOG_STYLE_EVERY } from '@/features/system/pttWatchdog'
 
 // A healthy in-session observation. Every test perturbs exactly one layer, so
 // a predicate that fires on an unrelated field shows up as a second id in the
@@ -145,6 +146,16 @@ describe('PTT invariants', () => {
       },
     },
     {
+      id: 'indicator.opacity_disagrees_with_store',
+      perturb: (atMs) => {
+        const o = healthy({ atMs })
+        // The committed attribute still agrees with the store; only what the
+        // user can SEE disagrees.
+        o.render.opacityLit = true
+        return o
+      },
+    },
+    {
       id: 'broadcast.disagrees_with_store',
       perturb: (atMs) => {
         const o = healthy({ atMs })
@@ -230,7 +241,70 @@ describe('PTT invariants', () => {
         return o
       })
     )
-    expect(fired).toContain('indicator.disagrees_with_store')
+    expect(fired).toContain('indicator.opacity_disagrees_with_store')
+  })
+
+  // I91 — the test above feeds a style reading on every tick, which the real
+  // watchdog never does: it reads computed style on one tick in ten. That gap
+  // is exactly how the opacity check sat in the suite looking covered while
+  // being unreachable in production, so drive it at the real cadence here.
+  test("a stuck badge is caught at the watchdog's real 1-in-10 style cadence", () => {
+    const monitor = createPttInvariantMonitor()
+    const fired = violationIds(
+      settle(
+        monitor,
+        (atMs) => {
+          const o = healthy({ atMs })
+          o.render.selfLit = false
+          // `atMs` is the tick number in ms; only every tenth carries a read.
+          o.render.opacityLit =
+            Math.round(atMs / 1_000) % PTT_WATCHDOG_STYLE_EVERY === 0
+              ? true
+              : null
+          return o
+        },
+        40
+      )
+    )
+    expect(fired).toContain('indicator.opacity_disagrees_with_store')
+  })
+
+  // The other half of `samplesOn`: a tick with no reading must not be able to
+  // clear a streak, but it must not prop one up either. A badge that agrees on
+  // every sample it is actually read on stays silent however long it runs.
+  test('an agreeing badge stays silent across the same cadence', () => {
+    const monitor = createPttInvariantMonitor()
+    const events = settle(
+      monitor,
+      (atMs) => {
+        const o = healthy({ atMs })
+        o.render.opacityLit =
+          Math.round(atMs / 1_000) % PTT_WATCHDOG_STYLE_EVERY === 0
+            ? false
+            : null
+        return o
+      },
+      40
+    )
+    expect(violationIds(events)).toEqual([])
+  })
+
+  // Leaving the session has to clear an open opacity violation rather than
+  // freeze it: `samplesOn` is checked after applicability precisely so an
+  // invariant cannot be stranded open by its input going quiet.
+  test('leaving the session clears an open badge violation', () => {
+    const monitor = createPttInvariantMonitor()
+    const stuck = (atMs: number) => {
+      const o = healthy({ atMs })
+      o.render.opacityLit = true
+      return o
+    }
+    settle(monitor, stuck, 4)
+    expect(monitor.openViolations()).toBeGreaterThan(0)
+    const o = stuck(10_000)
+    o.sessionActive = false
+    monitor.observe(o)
+    expect(monitor.openViolations()).toBe(0)
   })
 
   test('one stuck sender among several is not hidden by the others', () => {
