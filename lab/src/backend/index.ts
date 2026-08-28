@@ -18,12 +18,20 @@ import {
   appendFileSync,
   existsSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
+  rmSync,
+  statSync,
   writeFileSync,
 } from 'node:fs'
 import path from 'node:path'
 
-import { LabDb, type AuditEventRecord, type SessionRecord } from './db'
+import {
+  LabDb,
+  type AuditEventRecord,
+  type SessionRecord,
+  type SessionTimelineRecord,
+} from './db'
 import { LabIdentity, type IdentityRecord } from './identity'
 import { LabStores } from './store'
 
@@ -68,6 +76,16 @@ export type LabBackendOptions = {
    *  downstream of the one call that needs a model. */
   llamaPort?: number
 }
+
+// #236 — the raw AI observation journal. Ceilings copied from
+// src-tauri/src/commands/session_journal.rs; the point of implementing this
+// faithfully rather than stubbing it is that the write-up's own fallbacks are
+// driven by `truncated` and by a refused append.
+const JOURNAL_DIR = 'session-journals'
+const JOURNAL_MAX_LINES_PER_CALL = 64
+const JOURNAL_MAX_LINE_BYTES = 4 * 1024
+const JOURNAL_MAX_BYTES = 2 * 1024 * 1024
+const JOURNAL_MAX_READ_LINES = 20_000
 
 // Mirrors the serde shape of `sidecar_status` (src/features/ai/sidecar.ts).
 const LAB_MODEL_ID = 'lab-stub-model'
@@ -123,6 +141,98 @@ export class LabBackend {
     return lines.slice(-limit)
   }
 
+  // --- session journal (#236) ---------------------------------------------
+  //
+  // Faithful, not stubbed: `session_journal_read` is what the post-session
+  // write-up narrates, and its `truncated` flag plus a refused append are the
+  // inputs to the report's honesty labelling. A stub that always succeeded
+  // would make that whole path untestable while looking green.
+
+  // Session ids are session topics (32-byte SHA-256 as hex) and become
+  // filenames, so anything else is REFUSED rather than sanitized — same choice
+  // as `journal_file_name` in Rust, and the reason a traversal cannot reach
+  // outside the machine's directory.
+  private journalPath(sessionId: string): string {
+    if (
+      sessionId.length === 0 ||
+      sessionId.length > 64 ||
+      !/^[0-9a-fA-F]+$/.test(sessionId)
+    ) {
+      throw new Error('session id is not a session topic')
+    }
+    const dir = path.join(this.dir, JOURNAL_DIR)
+    mkdirSync(dir, { recursive: true })
+    return path.join(dir, `${sessionId.toLowerCase()}.ndjson`)
+  }
+
+  private journalAppend(sessionId: string, lines: string[]): null {
+    if (lines.length === 0) return null
+    if (lines.length > JOURNAL_MAX_LINES_PER_CALL) {
+      throw new Error(
+        `too many journal lines in one call (${lines.length} > ${JOURNAL_MAX_LINES_PER_CALL})`
+      )
+    }
+    const file = this.journalPath(sessionId)
+    let payload = ''
+    for (const line of lines) {
+      // A newline inside a "line" would split one observation into two records
+      // the reader cannot parse.
+      if (line.includes('\n') || line.includes('\r')) {
+        throw new Error('journal line contains a newline')
+      }
+      if (Buffer.byteLength(line) > JOURNAL_MAX_LINE_BYTES) {
+        throw new Error(
+          `journal line too long (${Buffer.byteLength(line)} > ${JOURNAL_MAX_LINE_BYTES})`
+        )
+      }
+      payload += `${line}\n`
+    }
+    // Full: the session keeps running and the report is written from what was
+    // recorded, rather than failing the sample loop's fire-and-forget append
+    // for the rest of the session.
+    const existing = existsSync(file) ? statSync(file).size : 0
+    if (existing >= JOURNAL_MAX_BYTES) return null
+    appendFileSync(file, payload, { mode: 0o600 })
+    return null
+  }
+
+  // Public so a scenario can assert the journal the write-up narrates, the
+  // same way it reads `db.auditRows()`.
+  journalRead(sessionId: string): {
+    lines: string[]
+    truncated: boolean
+  } {
+    const file = this.journalPath(sessionId)
+    if (!existsSync(file)) return { lines: [], truncated: false }
+    const size = statSync(file).size
+    let truncated = size >= JOURNAL_MAX_BYTES
+    const all = readFileSync(file, 'utf8')
+      .split('\n')
+      .filter((line) => line.trim().length > 0)
+    if (all.length > JOURNAL_MAX_READ_LINES) truncated = true
+    return { lines: all.slice(0, JOURNAL_MAX_READ_LINES), truncated }
+  }
+
+  // Best-effort, like their Rust twins: a journal that outlived its session row
+  // would be evidence for a report the user asked us to forget.
+  private removeJournal(sessionId: string): void {
+    try {
+      rmSync(this.journalPath(sessionId), { force: true })
+    } catch {
+      // An id that is not a session topic never had a file.
+    }
+  }
+
+  private clearJournals(): void {
+    const dir = path.join(this.dir, JOURNAL_DIR)
+    if (!existsSync(dir)) return
+    for (const entry of readdirSync(dir)) {
+      if (entry.endsWith('.ndjson')) {
+        rmSync(path.join(dir, entry), { force: true })
+      }
+    }
+  }
+
   async invoke(cmd: string, rawArgs: unknown): Promise<unknown> {
     const args = (rawArgs ?? {}) as Record<string, never>
     // app_log_append is the app's own diagnostics firehose; recording every one
@@ -171,10 +281,40 @@ export class LabBackend {
         return this.db.sessionsList()
       case 'sessions_get':
         return this.db.sessionsGet(String(a.id))
-      case 'sessions_delete':
-        return this.db.sessionsDelete(String(a.id))
+      case 'sessions_delete': {
+        const id = String(a.id)
+        this.db.sessionsDelete(id)
+        // The journal is a file, not a row, so the command layer unlinks it
+        // after the transaction — same order as `sessions_delete` in Rust.
+        this.removeJournal(id)
+        return null
+      }
       case 'sessions_clear_all':
-        return this.db.sessionsClearAll()
+        this.db.sessionsClearAll()
+        this.clearJournals()
+        return null
+
+      // session write-up (#236)
+      case 'session_timeline_get':
+        return this.db.sessionTimelineGet(String(a.sessionId))
+      case 'session_timeline_save': {
+        const row: SessionTimelineRecord = {
+          session_id: String(a.sessionId),
+          generated_at: Number(a.generatedAt),
+          model_id: a.modelId == null ? null : String(a.modelId),
+          source: String(a.source),
+          entries: String(a.entries),
+          truncated: a.truncated ? 1 : 0,
+        }
+        return this.db.sessionTimelineUpsert(row)
+      }
+      case 'session_journal_append':
+        return this.journalAppend(
+          String(a.sessionId),
+          (a.lines as string[]) ?? []
+        )
+      case 'session_journal_read':
+        return this.journalRead(String(a.sessionId))
 
       // audit events
       case 'audit_event_insert':

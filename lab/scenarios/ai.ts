@@ -93,5 +93,27 @@ scenario('ai', async ({ lab, step, check, ui }) => {
   check('a session row was written', session !== undefined)
   check('it recorded that AI was on', session?.ai_enabled === 1)
   check('it counted the samples', (session?.confident_samples ?? 0) > 0)
+
+  // #236 — the raw observation journal is what the post-session write-up
+  // narrates, and it is written by a fire-and-forget append whose failure the
+  // app only whispers about at warn level. Assert the file, not the absence of
+  // a crash: before `session_journal_append` existed here every append failed
+  // and the only symptom was `no unhandled IPC` going red.
+  step('the observation journal is on disk and readable')
+  const journal = alice.backend.journalRead(session?.id ?? '')
+  check('the journal recorded observations', journal.lines.length > 0)
+  check(
+    'every line is one parseable observation',
+    journal.lines.every((line) => {
+      try {
+        const row = JSON.parse(line) as Record<string, unknown>
+        return typeof row.ts === 'number' && typeof row.v === 'string'
+      } catch {
+        return false
+      }
+    })
+  )
+  check('the journal is not reported truncated', journal.truncated === false)
+
   check('no unhandled IPC', alice.backend.unhandled.size === 0)
 })
