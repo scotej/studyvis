@@ -115,5 +115,40 @@ scenario('ai', async ({ lab, step, check, ui }) => {
   )
   check('the journal is not reported truncated', journal.truncated === false)
 
+  // #236 — the post-session write-up. This scenario's own header has always
+  // claimed it covers "the report"; until the journal commands existed here it
+  // could not. The safety property is the one worth asserting: the model is
+  // never credited for entries it did not produce. The lab's stub queue is
+  // exhausted by the sample loop above, so the write-up finds no usable model
+  // output and must fall back to the deterministic digest — and SAY so.
+  step('the report writes the session up, and says who wrote it')
+  await ui.waitForText(alice.page(), 'Minute by minute')
+  await ui.until(
+    () => alice.backend.db.sessionTimelineGet(session?.id ?? '') !== null,
+    { label: 'the stored write-up row', timeoutMs: 60_000 }
+  )
+  const timeline = alice.backend.db.sessionTimelineGet(session?.id ?? '')
+  check('a write-up row was stored', timeline !== null)
+  check(
+    'it is labelled as the raw checks, not the model',
+    timeline?.source === 'observations'
+  )
+  check('no model is credited for it', timeline?.model_id === null)
+  const entries = JSON.parse(timeline?.entries ?? '[]') as Array<
+    Record<string, unknown>
+  >
+  check('it covers at least one stretch of the session', entries.length > 0)
+  check(
+    'every entry is a bounded time range with text',
+    entries.every(
+      (entry) =>
+        typeof entry.start_min === 'number' &&
+        typeof entry.end_min === 'number' &&
+        entry.end_min > entry.start_min &&
+        typeof entry.summary === 'string' &&
+        entry.summary.length > 0
+    )
+  )
+
   check('no unhandled IPC', alice.backend.unhandled.size === 0)
 })
