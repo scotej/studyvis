@@ -11,13 +11,16 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { useModelStore } from '@/features/ai/modelStore'
-import type { SessionTimelineRecord } from '@/lib/db/sessionTimeline'
+import {
+  parseTimelineEntries,
+  type SessionTimelineRecord,
+} from '@/lib/db/sessionTimeline'
 import { logger } from '@/lib/log'
 import { useSessionStore } from '@/stores/sessionStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { strings } from '@/strings'
 
-import { readObservations } from './sessionJournal'
+import { readObservations, type SessionJournalRead } from './sessionJournal'
 import {
   generateSessionTimeline,
   SessionTimelineError,
@@ -25,6 +28,12 @@ import {
 } from './sessionTimeline'
 
 const log = logger.child('session.timeline.ui')
+
+// A stored row only counts as a write-up when it still holds readable entries;
+// one that doesn't is regenerated rather than rendered as "nothing recorded".
+function hasStoredWriteUp(timeline: SessionTimelineRecord | null): boolean {
+  return timeline !== null && parseTimelineEntries(timeline.entries).length > 0
+}
 
 // Storybook renders the report shell outside Tauri, where the journal probe
 // would reject and paint a failure banner over a fixture that has no journal at
@@ -53,7 +62,8 @@ const inFlight = new Map<string, Promise<SessionTimeline | null>>()
 function runOnce(
   sessionId: string,
   modelId: string,
-  declaredTopic: string | null
+  declaredTopic: string | null,
+  journal: SessionJournalRead
 ): Promise<SessionTimeline | null> {
   const existing = inFlight.get(sessionId)
   if (existing) return existing
@@ -61,6 +71,7 @@ function runOnce(
     sessionId,
     modelId,
     declaredTopic,
+    journal,
   }).finally(() => {
     inFlight.delete(sessionId)
   })
@@ -157,7 +168,10 @@ export function useWrittenTimeline({
 
   useEffect(() => {
     if (!ready) return
-    if (timeline && attempt === 0) return
+    // A row whose entries cannot be parsed counts as absent (see
+    // parseTimelineEntries): the report regenerates rather than rendering a
+    // section that claims nothing was recorded.
+    if (hasStoredWriteUp(timeline) && attempt === 0) return
     const key = `${sessionId}:${attempt}`
     const claims = latch.current
     if (!claims?.claim(key)) return
@@ -168,11 +182,11 @@ export function useWrittenTimeline({
       const settings = useSettingsStore.getState().values
       // A session that recorded nothing has nothing to write up, and saying so
       // is different from saying the model failed. Reading the journal first is
-      // what lets the two be told apart.
-      let hasObservations: boolean
+      // what lets the two be told apart; the same read is then handed to the
+      // write-up rather than paying for the file and its parse twice.
+      let journal: SessionJournalRead
       try {
-        const journal = await readObservations(sessionId)
-        hasObservations = journal.observations.length > 0
+        journal = await readObservations(sessionId)
       } catch (err) {
         log.warn('journal.probe_failed', { err })
         if (!cancelled) {
@@ -184,7 +198,7 @@ export function useWrittenTimeline({
         return
       }
       if (cancelled) return
-      if (!hasObservations) {
+      if (journal.observations.length === 0) {
         setStatus({ kind: 'idle' })
         return
       }
@@ -202,7 +216,12 @@ export function useWrittenTimeline({
 
       setStatus({ kind: 'generating' })
       try {
-        const written = await runOnce(sessionId, modelId, declaredTopic)
+        const written = await runOnce(
+          sessionId,
+          modelId,
+          declaredTopic,
+          journal
+        )
         if (cancelled) return
         if (!written) {
           setStatus({ kind: 'idle' })

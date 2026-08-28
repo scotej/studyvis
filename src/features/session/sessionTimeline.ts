@@ -30,24 +30,22 @@ import { DEFAULT_CTX_SIZE, useSidecarStore } from '@/features/ai/sidecar'
 import {
   sessionTimelineSave,
   type SessionTimelineSource,
+  type TimelineEntry,
 } from '@/lib/db/sessionTimeline'
 import { logger } from '@/lib/log'
 import { useSessionStore } from '@/stores/sessionStore'
 import { strings } from '@/strings'
 
 import {
+  boundedText,
+  MAX_WINDOW_NOTES,
   readObservations,
   windowObservations,
   type ObservationWindow,
+  type SessionJournalRead,
 } from './sessionJournal'
 
 const log = logger.child('session.timeline')
-
-export type TimelineEntry = {
-  start_min: number
-  end_min: number
-  summary: string
-}
 
 export type SessionTimeline = {
   entries: TimelineEntry[]
@@ -122,11 +120,11 @@ export type SessionTimelineInput = {
   sessionId: string
   modelId: string
   declaredTopic: string | null
+  // The journal the caller has already read. The report probes it to tell "no
+  // checks were recorded" apart from "the model failed", so re-reading and
+  // re-parsing the same file here would double the work for nothing.
+  journal?: SessionJournalRead
   signal?: AbortSignal
-}
-
-function boundedText(value: string, maxLength: number): string {
-  return value.replace(/\s+/g, ' ').trim().slice(0, maxLength)
 }
 
 // The deterministic account of one window, used both as the model's input and
@@ -150,7 +148,14 @@ function renderWindow(window: ObservationWindow): string {
   const notes = window.notes
     .map((note) => JSON.stringify(boundedText(note, MAX_PROMPT_NOTE_LENGTH)))
     .join(' | ')
-  const topic = window.topics.map((t) => JSON.stringify(t)).join(' | ')
+  // Same cap as the notes, and for the same reason: `topics` is unbounded (one
+  // entry per distinct declared topic in the window), and a user who renames
+  // the topic repeatedly could otherwise push the request past DEFAULT_CTX_SIZE
+  // and lose the whole chunk to its digest.
+  const topic = window.topics
+    .slice(0, MAX_WINDOW_NOTES)
+    .map((t) => JSON.stringify(t))
+    .join(' | ')
   return `- start_min: ${window.startMin}, end_min: ${window.endMin}, on_task: ${window.onTask}, off_task: ${window.offTask}, unreadable: ${window.uncertain}, topic: ${topic || '""'}, notes: ${notes || '(none)'}`
 }
 
@@ -373,8 +378,13 @@ async function ensureSidecar(modelId: string): Promise<{
   // Only a sidecar this write-up brought up from nothing is ours to stop.
   // `starting` means another consumer's start is already in flight and would
   // join ours; stopping that afterwards would take the engine out from under
-  // whoever asked for it.
-  const ownsLifecycle = before === 'idle' || before === 'errored'
+  // whoever asked for it. `stopping` is ours: the sidecar store queues our
+  // start behind the pending stop and then spawns a fresh child for us — the
+  // ordinary post-session path, since leaving a session stops the engine just
+  // as the report opens. Missing it left llama-server resident with the model
+  // in RAM for the rest of the app's life.
+  const ownsLifecycle =
+    before === 'idle' || before === 'errored' || before === 'stopping'
   if (before !== 'running') {
     const paths = await getDownloadRuntime().paths(modelId)
     const started = await useSidecarStore.getState().start({
@@ -422,9 +432,9 @@ export async function generateSessionTimeline(
     )
   }
 
-  let journal
+  let journal: SessionJournalRead
   try {
-    journal = await readObservations(input.sessionId)
+    journal = input.journal ?? (await readObservations(input.sessionId))
   } catch (err) {
     log.warn('journal.read_failed', { err })
     throw new SessionTimelineError(
@@ -459,6 +469,12 @@ export async function generateSessionTimeline(
       err: err instanceof AiAgentError ? err.code : err,
     })
     entries = fallbackEntries(windows)
+    // Today only `ensureSidecar` reaches here, where the tally is still 0 —
+    // `writeChunk` swallows its own failures and returns the digest. Reset it
+    // anyway: `entries` has just been replaced wholesale, so a tally left
+    // standing would credit the model for text no longer in the timeline, and
+    // the two have to move together for `source` below to mean anything.
+    writtenWindows = 0
   } finally {
     if (sidecar?.startedHere) await releaseSidecar()
   }
@@ -490,36 +506,7 @@ export async function generateSessionTimeline(
     entries: entries.length,
     source,
     truncated: journal.truncated,
+    unreadableLines: journal.unreadableLines,
   })
   return timeline
-}
-
-// Reads back what `session_timeline_get` stored. A row this cannot parse is
-// treated as absent so the report can regenerate rather than render nothing.
-export function parseTimelineEntries(raw: string): TimelineEntry[] {
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(raw)
-  } catch {
-    return []
-  }
-  if (!Array.isArray(parsed)) return []
-  const entries: TimelineEntry[] = []
-  for (const item of parsed) {
-    if (!item || typeof item !== 'object' || Array.isArray(item)) continue
-    const raw = item as Record<string, unknown>
-    if (
-      typeof raw.start_min !== 'number' ||
-      typeof raw.end_min !== 'number' ||
-      typeof raw.summary !== 'string'
-    ) {
-      continue
-    }
-    entries.push({
-      start_min: raw.start_min,
-      end_min: raw.end_min,
-      summary: raw.summary,
-    })
-  }
-  return entries
 }
