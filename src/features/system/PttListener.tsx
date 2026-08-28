@@ -170,8 +170,10 @@ export function PttListener() {
     let releasedEvents = 0
     let lastPhysicalAtMs: number | null = null
     // Suppresses the `store.changed` record for a change a native edge has
-    // already fully described, so the per-hold volume does not double.
-    let nativeEdgeAtMs: number | null = null
+    // already fully described, so the per-hold volume does not double. True
+    // only for the duration of the `press()` / `release()` call below, which
+    // is exactly when the store subscriber runs.
+    let inNativeEdgeMutation = false
 
     const observe = (wantStyle: boolean): PttObservation => {
       const store = usePttStore.getState()
@@ -458,27 +460,39 @@ export function PttListener() {
       const duplicatePress = edge === 'pressed' && nativeHeld
       const duplicateRelease = edge === 'released' && !nativeHeld
 
-      // Set BEFORE the mutation: zustand notifies subscribers synchronously
-      // inside `set`, so a marker written afterwards is always too late and the
-      // subscriber would duplicate every edge this record already explains.
-      nativeEdgeAtMs = now
-
-      if (edge === 'pressed') {
-        if (duplicatePress) {
-          log.debug('edge.duplicate_pressed', {
-            edgeSeq: currentEdgeSeq,
-            edgeSource,
-            heldMs:
-              pressStartedAt === null
-                ? undefined
-                : Math.max(0, Math.round(now - pressStartedAt)),
-          })
-        } else {
-          pressStartedAt = now
-          press('native-shortcut')
+      // Held across the mutation and nothing else. zustand notifies subscribers
+      // synchronously inside `set`, so the subscriber observes this as true
+      // precisely when the change is one a native edge is already recording;
+      // a marker written after the call would always be too late, and the
+      // subscriber would duplicate every edge `edge.received` explains.
+      //
+      // I92: this used to be a timestamp the subscriber compared against a
+      // 50 ms window. A #226 archive caught it failing — a `reset` logged
+      // 51 ms into a live 4.2-second hold, on a run whose timeline also shows
+      // five-second gaps under llama inference. The window was least reliable
+      // exactly when an archive matters most. A latch bounded by the call
+      // itself cannot be outrun by a stall of any length.
+      inNativeEdgeMutation = true
+      try {
+        if (edge === 'pressed') {
+          if (duplicatePress) {
+            log.debug('edge.duplicate_pressed', {
+              edgeSeq: currentEdgeSeq,
+              edgeSource,
+              heldMs:
+                pressStartedAt === null
+                  ? undefined
+                  : Math.max(0, Math.round(now - pressStartedAt)),
+            })
+          } else {
+            pressStartedAt = now
+            press('native-shortcut')
+          }
+        } else if (!duplicateRelease) {
+          release('native-shortcut')
         }
-      } else if (!duplicateRelease) {
-        release('native-shortcut')
+      } finally {
+        inNativeEdgeMutation = false
       }
 
       const after = usePttStore.getState()
@@ -708,10 +722,8 @@ export function PttListener() {
       if (cause === null) return
 
       const nowMs = monotonicNow()
-      // A native edge in the same turn already wrote `edge.received`.
-      const explainedByEdge =
-        nativeEdgeAtMs !== null && nowMs - nativeEdgeAtMs < 50
-      if (cause === 'reset' && explainedByEdge) return
+      // A native edge in this very call already wrote `edge.received`.
+      if (cause === 'reset' && inNativeEdgeMutation) return
 
       const fields = {
         cause,

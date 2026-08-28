@@ -131,6 +131,40 @@ describe('pttStore', () => {
     })
   })
 
+  // I92 — PttListener discriminates a native release from a `reset()` with a
+  // latch it holds only across the `press()` / `release()` call, which is
+  // exact ONLY because subscribers run inside the mutation rather than after
+  // it. If zustand ever notified asynchronously the latch would already be
+  // false by the time the subscriber looked, and a phantom `reset` would be
+  // logged mid-hold again — the very thing the latch replaced a 50 ms window
+  // to stop. Pin the contract here rather than discovering it from an archive.
+  describe('subscriber notification is synchronous (the I92 latch contract)', () => {
+    test('press notifies before it returns', () => {
+      let notifiedDuringCall = false
+      let returned = false
+      const unsubscribe = usePttStore.subscribe(() => {
+        notifiedDuringCall = !returned
+      })
+      usePttStore.getState().press()
+      returned = true
+      unsubscribe()
+      expect(notifiedDuringCall).toBe(true)
+    })
+
+    test('release notifies before it returns', () => {
+      usePttStore.getState().press()
+      let notifiedDuringCall = false
+      let returned = false
+      const unsubscribe = usePttStore.subscribe(() => {
+        notifiedDuringCall = !returned
+      })
+      usePttStore.getState().release()
+      returned = true
+      unsubscribe()
+      expect(notifiedDuringCall).toBe(true)
+    })
+  })
+
   describe('S2 max-hold failsafe', () => {
     function fakeScheduler() {
       let nextId = 1
