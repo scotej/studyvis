@@ -123,6 +123,7 @@ export type PttInvariantId =
   | 'track.enabled_while_inactive'
   | 'track.disabled_while_active'
   | 'indicator.disagrees_with_store'
+  | 'indicator.opacity_disagrees_with_store'
   | 'broadcast.disagrees_with_store'
   | 'hold.muted_while_latched'
   | 'hold.store_without_reconciler'
@@ -151,6 +152,13 @@ type Invariant = {
   // A session must be live for anything media- or peer-shaped to mean
   // anything; outside one there are no senders and no tiles.
   requiresSession: boolean
+  // Some inputs are sampled on a cadence rather than every tick. An invariant
+  // that reads one declares it here, and the monitor then neither counts nor
+  // resets the ticks in between: its dwell is measured in samples of its own
+  // signal. Without this a `dwellTicks: 2` invariant reading a 1-in-10 input
+  // can never reach two, because the nine ticks between samples read as
+  // "not violating" and clear the streak.
+  samplesOn?: (o: PttObservation) => boolean
   predicate: (o: PttObservation) => boolean
 }
 
@@ -205,13 +213,33 @@ export const PTT_INVARIANTS: readonly Invariant[] = [
     requiresSession: true,
     predicate: (o) =>
       !o.render.probeError &&
-      ((o.render.selfLit !== null && o.render.selfLit !== o.store.active) ||
-        // The badge is shown by opacity, so what the user SEES can disagree
-        // with the committed attribute. #226 was reported as a visibly lit
-        // indicator; measuring this and never asserting on it would leave the
-        // literal symptom undetected.
-        (o.render.opacityLit !== null &&
-          o.render.opacityLit !== o.store.active)),
+      o.render.selfLit !== null &&
+      o.render.selfLit !== o.store.active,
+  },
+  // The badge is shown by opacity, so what the user SEES can disagree with the
+  // committed attribute above. #226 was reported as a visibly lit indicator,
+  // so measuring this and never asserting on it would leave the literal
+  // symptom undetected.
+  //
+  // I91: this used to be a second clause of `indicator.disagrees_with_store`,
+  // where it could never fire — computed style is read on one tick in ten, and
+  // the nine ticks with a `null` reading cleared the streak before it could
+  // reach `dwellTicks`. It is its own invariant now, dwelling on style samples
+  // via `samplesOn`, so two consecutive disagreeing samples (~10 s apart under
+  // PTT_WATCHDOG_STYLE_EVERY) are what it takes — which is the right shape
+  // anyway, since a stuck-lit badge is a steady state, not a transition.
+  {
+    id: 'indicator.opacity_disagrees_with_store',
+    level: 'error',
+    dwellTicks: 2,
+    minDwellMs: 1_500,
+    requiresPhysicalWatch: false,
+    requiresSession: true,
+    samplesOn: (o) => o.render.opacityLit !== null,
+    predicate: (o) =>
+      !o.render.probeError &&
+      o.render.opacityLit !== null &&
+      o.render.opacityLit !== o.store.active,
   },
   // We told peers one thing and believe another. `msSinceSend` keeps a send
   // that is merely in flight from counting.
@@ -369,6 +397,13 @@ export function createPttInvariantMonitor(options?: {
         const applicable =
           (!invariant.requiresPhysicalWatch || o.physicalWatchExpected) &&
           (!invariant.requiresSession || o.sessionActive)
+        // No reading this tick means no opinion: leave the dwell exactly as it
+        // was rather than counting or clearing it. Deliberately AFTER
+        // `applicable`, so an open violation still clears when the session
+        // ends instead of freezing until the next sample.
+        if (applicable && invariant.samplesOn && !invariant.samplesOn(o)) {
+          continue
+        }
         const violated = applicable && invariant.predicate(o)
 
         if (!violated) {
