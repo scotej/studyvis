@@ -315,10 +315,6 @@ export function __resetBenchmarkRuntime(): void {
   activeRuntime = defaultRuntime
 }
 
-export function getBenchmarkRuntime(): BenchmarkRuntime {
-  return activeRuntime
-}
-
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms))
 }

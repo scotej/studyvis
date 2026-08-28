@@ -42,7 +42,6 @@
 import { useSettingsStore } from '@/stores/settingsStore'
 
 import {
-  BATTERY_PAUSE_PERCENT,
   getBatteryRuntime,
   shouldPauseForBattery,
   type BatteryInfo,
@@ -2149,14 +2148,6 @@ type ChatCompletionResponse = {
     message?: { content?: string }
     finish_reason?: string
   }>
-}
-
-// Re-exported for tests that want to assert specific request shapes. The
-// builder itself now lives in focusRequest.ts (A1) so the benchmark, the
-// eval harness, and this loop share one source of truth.
-export const __internals = {
-  buildChatRequest: buildFocusRequest,
-  BATTERY_PAUSE_PERCENT,
 }
 
 // Convenience for any caller that wants the registry severity list without
