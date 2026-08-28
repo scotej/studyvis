@@ -413,9 +413,13 @@ desktop/session bus.
 
 `src-tauri/tauri.conf.json`
 
-**Evidence.** Both webview windows ship with CSP disabled (defense-in-depth only — no reachable XSS sink today: React auto-escapes, no `innerHTML`/`eval`).
+**Evidence.** Both webview windows shipped with CSP disabled (`"csp": null` since the scaffold) — defense-in-depth only, as there was no reachable XSS sink: React auto-escapes and there is no `innerHTML`/`eval`.
 
-**Status.** **deferred — needs a desktop CSP smoke-test.** A wrong CSP hard-breaks Tauri IPC/asset loading, which no static gate catches; landing a `script-src 'self'` policy safely requires running the built desktop app (not possible headless). Recommended policy: `default-src 'self'; script-src 'self'; object-src 'none'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self' ws: wss: http://127.0.0.1:*`.
+**Status.** **fixed** — landed in the Linux AppImage pipeline work, released in **v1.11.3** and described in that version's notes. `app.security.csp` in `src-tauri/tauri.conf.json` now carries a full policy, and the deferral's own precondition is met: CI's `Linux AppImage startup smoke` launches the exact packaged artifact under Xvfb and requires the first document to reach `runtime.webrtc ready` with a data-channel offer, which is script execution and Tauri IPC exercised under the policy. macOS and Windows have shipped it in every release since.
+
+The shipped policy is the one recommended here, adjusted where Tauri's own protocols require it and tightened elsewhere: `base-uri 'self'`, `frame-ancestors 'none'` and `worker-src`/`font-src` were added; `img-src`/`media-src` also allow `asset:` + `http://asset.localhost` and `connect-src` also allows `ipc:` + `http://ipc.localhost`, without which the asset protocol and IPC do not load; and `style-src` carries `'unsafe-inline'`, which the recommendation did not account for and which inline styles need.
+
+**This entry is no longer only defense-in-depth, and the policy must not be loosened casually.** [I87](#i87--sev1) records why: WebKitGTK 2.52.5's public user-media request wrapper does not expose the requesting `SecurityOrigin`, so the Linux boundary is the allowlisted current top-level URI *together with* this CSP keeping child frames self-only. `frame-ancestors`/`default-src 'self'` are load-bearing there, not decoration. Same note in CLAUDE.md's stack summary.
 
 ### I51 — Sev2
 
