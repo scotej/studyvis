@@ -33,6 +33,14 @@ yanked = "deny"
 # mach, unic-char-property, unic-char-range, unic-common, unic-ucd-ident,
 # unic-ucd-version — all pulled in beneath tauri.
 unmaintained = "workspace"
+# "unsound" is a different animal and does NOT get the same scoping. It marks
+# a soundness hole that can miscompile or crash the shipped binary, and where
+# it sits in the graph has no bearing on whether it can. cargo-deny's default
+# here is "workspace", which — in a Tauri app, where all but a handful of the
+# 629 packages are transitive — would let almost any new unsoundness through
+# silently. Set explicitly so the line below ("everything else fails the
+# build") is actually true, rather than quietly untrue for this one class.
+unsound = "all"
 # Everything else fails the build. The list below is the backlog that
 # existed the day this gate landed, each entry pinned by ID so that a NEW
 # advisory — including one introduced by a dependency bump — still turns the
@@ -45,6 +53,12 @@ ignore = [
   # tooling. Upstream fix is 0.41.0, which has to arrive via tauri.
   { id = "RUSTSEC-2026-0194", reason = "quick-xml DoS; transitive under tauri, no runtime XML from peers. Drop when tauri pulls >=0.41." },
   { id = "RUSTSEC-2026-0195", reason = "quick-xml namespace-allocation DoS; same path and same fix as RUSTSEC-2026-0194." },
+  # glib 0.18.5, Linux only, and only via tauri -> tray-icon ->
+  # libappindicator -> gtk 0.18 -> atk. Unsound out-pointer in
+  # VariantStrIter's Iterator impls; patched in glib 0.20, which this repo
+  # cannot reach on its own — the whole gtk-rs 0.18 stack is pinned beneath
+  # tauri's tray-icon. Surfaced by `unsound = "all"` above; see ISSUES.md I98.
+  { id = "RUSTSEC-2024-0429", reason = "glib VariantStrIter unsoundness; transitive under tauri's GTK tray stack on Linux. Drop when tauri pulls gtk-rs with glib >=0.20." },
 ]
 
 [licenses]

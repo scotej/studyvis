@@ -817,6 +817,19 @@ It was also invisible. The extra-display `catch` suppressed its log line for `sc
 
 **Status.** **fixed** — one `discard()` for all three abandonment paths, so a later exit added here inherits the release rather than having to remember it. Both existing tests already asserted `pending` was null and now also assert the handle behind it was closed.
 
+### I98 — Sev3
+
+`src-tauri/deny.toml`
+
+**Evidence.** Three open Dependabot alerts on `src-tauri/Cargo.lock` that the repo's own `Supply chain` job stayed green on. Chasing the discrepancy turned up two separate causes, one benign and one a real hole in the gate:
+
+- **`nix 0.19.1`** (GHSA-wgrg-5h56-jg27 high, GHSA-76w9-p8mg-j927 / CVE-2021-45707 medium; `getgrouplist` out-of-bounds write, fixed in 0.20.2) is a **false positive against the shipped product**. It is reached only through `battery 0.7.8`, on the BSD targets `battery` uses `nix` for: `cargo tree --locked -i nix@0.19.1 --target <t>` prints nothing for any of `x86_64-unknown-linux-gnu`, `aarch64-apple-darwin` or `x86_64-pc-windows-msvc`, and resolves only under `--target all`. cargo-deny is right to stay quiet — `[graph].targets` scopes it to the three release triples for exactly this reason. Dependabot reads the lockfile with no target filter and cannot draw that distinction.
+- **`glib 0.18.5`** (RUSTSEC-2024-0429, alias GHSA-wrw7-89jp-8q8g) **is** in the Linux artifact, via `tauri 2.11.5 → tray-icon → libappindicator → gtk 0.18.2 → atk → glib`, and it was passing the gate for the wrong reason. The advisory is `informational = "unsound"`: an out-pointer passed as `&p` instead of `&mut p` to a variadic C function, which recent rustc versions optimise away entirely, so `VariantStrIter`'s `Iterator` impls dereference NULL. cargo-deny's `[advisories].unsound` field was never set here, and its default is `workspace` — unsound advisories fail **only** for direct workspace dependencies. In a Tauri graph, where all but a handful of 629 packages are transitive, that silently exempted nearly the whole dependency tree. The file's own stated policy ("everything else fails the build … so a NEW advisory still turns the build red") was therefore untrue for the one advisory class that describes memory unsoundness in shipped code.
+
+**Status.** **fixed** (2026-08-28) — `unsound = "all"` is now set explicitly beside the deliberate `unmaintained = "workspace"`, with a comment on why the two get different scoping: an unmaintained transitive crate is a fact about someone's release cadence, while an unsound one can crash the binary regardless of where it sits. RUSTSEC-2024-0429 is pinned in `ignore` with a reason, in the same style as the quick-xml pair, because glib 0.20 cannot be reached from this repo — the whole gtk-rs 0.18 stack is pinned beneath tauri's tray-icon. Drop the entry when tauri moves its GTK stack; cargo-deny flags a non-matching entry, so it cannot rot there.
+
+`nix` needs nothing. `battery` is a real dependency (V2-P5 battery awareness, ARCHITECTURE §8) and replacing it would be a cross-platform swap, not a security fix. Same recording purpose as [I19](#i19--sev4) on the npm side: the scan result should not have to be re-derived each time the security tab is opened.
+
 ## Archive — retired backlogs
 
 Two documents used to sit beside this ledger and were deleted once their implementation backlog had no open code work left: `BUILD-PROMPTS.md` (the sequenced V0→V3 build plan) and `IMPROVEMENTS.md` (the v1.2.0-era improvement backlog). Git history holds both in full — `git log --diff-filter=D -- BUILD-PROMPTS.md IMPROVEMENTS.md`, then `git show <sha>^:<file>`. Linux's implementation checklist is complete, but its operational release sign-off remains pending. What survives here is the part still cited from code.
