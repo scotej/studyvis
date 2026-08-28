@@ -373,8 +373,13 @@ async function ensureSidecar(modelId: string): Promise<{
   // Only a sidecar this write-up brought up from nothing is ours to stop.
   // `starting` means another consumer's start is already in flight and would
   // join ours; stopping that afterwards would take the engine out from under
-  // whoever asked for it.
-  const ownsLifecycle = before === 'idle' || before === 'errored'
+  // whoever asked for it. `stopping` is ours: the sidecar store queues our
+  // start behind the pending stop and then spawns a fresh child for us — the
+  // ordinary post-session path, since leaving a session stops the engine just
+  // as the report opens. Missing it left llama-server resident with the model
+  // in RAM for the rest of the app's life.
+  const ownsLifecycle =
+    before === 'idle' || before === 'errored' || before === 'stopping'
   if (before !== 'running') {
     const paths = await getDownloadRuntime().paths(modelId)
     const started = await useSidecarStore.getState().start({
