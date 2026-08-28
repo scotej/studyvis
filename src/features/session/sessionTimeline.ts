@@ -36,6 +36,7 @@ import { useSessionStore } from '@/stores/sessionStore'
 import { strings } from '@/strings'
 
 import {
+  MAX_WINDOW_NOTES,
   readObservations,
   windowObservations,
   type ObservationWindow,
@@ -150,7 +151,14 @@ function renderWindow(window: ObservationWindow): string {
   const notes = window.notes
     .map((note) => JSON.stringify(boundedText(note, MAX_PROMPT_NOTE_LENGTH)))
     .join(' | ')
-  const topic = window.topics.map((t) => JSON.stringify(t)).join(' | ')
+  // Same cap as the notes, and for the same reason: `topics` is unbounded (one
+  // entry per distinct declared topic in the window), and a user who renames
+  // the topic repeatedly could otherwise push the request past DEFAULT_CTX_SIZE
+  // and lose the whole chunk to its digest.
+  const topic = window.topics
+    .slice(0, MAX_WINDOW_NOTES)
+    .map((t) => JSON.stringify(t))
+    .join(' | ')
   return `- start_min: ${window.startMin}, end_min: ${window.endMin}, on_task: ${window.onTask}, off_task: ${window.offTask}, unreadable: ${window.uncertain}, topic: ${topic || '""'}, notes: ${notes || '(none)'}`
 }
 
