@@ -75,13 +75,13 @@ CARGO
   override: alloc-stdlib omits the shared Dropbox BSD-3-Clause text from its crates.io archive.
   license: cargo:brotli-decompressor@5.0.0/LICENSE (SHA-256 c0c56f26d9c051cac4d200c34c84e7ae9aaa853e01a982a1df08b09931e518ae)
 
-- anyhow 1.0.102 — MIT OR Apache-2.0
-  id: cargo:anyhow@1.0.102
+- anyhow 1.0.103 — MIT OR Apache-2.0
+  id: cargo:anyhow@1.0.103
   targets: aarch64-apple-darwin, x86_64-pc-windows-msvc, x86_64-unknown-linux-gnu
-  source: https://crates.io/api/v1/crates/anyhow/1.0.102/download
-  source checksum: 7f202df86484c868dbad7eaa557ef785d5c66295e41b460ef922eca0723b842c
-  license: cargo:anyhow@1.0.102/LICENSE-APACHE (SHA-256 62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a)
-  license: cargo:anyhow@1.0.102/LICENSE-MIT (SHA-256 23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3)
+  source: https://crates.io/api/v1/crates/anyhow/1.0.103/download
+  source checksum: 2a4385e2e34eb35d6b3efe798b9eb88096925d87726c0798709bf56d9ed84af3
+  license: cargo:anyhow@1.0.103/LICENSE-APACHE (SHA-256 62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a)
+  license: cargo:anyhow@1.0.103/LICENSE-MIT (SHA-256 23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3)
 
 - async-broadcast 0.7.2 — MIT OR Apache-2.0
   id: cargo:async-broadcast@0.7.2
@@ -962,13 +962,13 @@ CARGO
   license: cargo:errno@0.3.14/LICENSE-APACHE (SHA-256 a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2)
   license: cargo:errno@0.3.14/LICENSE-MIT (SHA-256 8764a597675778ddfd4e25f81b08a05dbcf089ac05662df7613fe67f150e3aa2)
 
-- event-listener 5.4.1 — Apache-2.0 OR MIT
-  id: cargo:event-listener@5.4.1
+- event-listener 5.4.2 — Apache-2.0 OR MIT
+  id: cargo:event-listener@5.4.2
   targets: x86_64-unknown-linux-gnu
-  source: https://crates.io/api/v1/crates/event-listener/5.4.1/download
-  source checksum: e13b66accf52311f30a0db42147dadea9850cb48cd070028831ae5f5d4b856ab
-  license: cargo:event-listener@5.4.1/LICENSE-APACHE (SHA-256 a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2)
-  license: cargo:event-listener@5.4.1/LICENSE-MIT (SHA-256 23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3)
+  source: https://crates.io/api/v1/crates/event-listener/5.4.2/download
+  source checksum: 5a23add41df1562121a9393cb065eab5146a1242410f23a644851e90cfd669d2
+  license: cargo:event-listener@5.4.2/LICENSE-APACHE (SHA-256 a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2)
+  license: cargo:event-listener@5.4.2/LICENSE-MIT (SHA-256 23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3)
 
 - event-listener-strategy 0.5.4 — Apache-2.0 OR MIT
   id: cargo:event-listener-strategy@0.5.4
@@ -9563,7 +9563,7 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 SHA-256 23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3
 Applies to:
 - cargo:adler2@2.0.1 — cargo:adler2@2.0.1/LICENSE-MIT
-- cargo:anyhow@1.0.102 — cargo:anyhow@1.0.102/LICENSE-MIT
+- cargo:anyhow@1.0.103 — cargo:anyhow@1.0.103/LICENSE-MIT
 - cargo:async-channel@2.5.0 — cargo:async-channel@2.5.0/LICENSE-MIT
 - cargo:async-executor@1.14.0 — cargo:async-executor@1.14.0/LICENSE-MIT
 - cargo:async-io@2.6.0 — cargo:async-io@2.6.0/LICENSE-MIT
@@ -9590,7 +9590,7 @@ Applies to:
 - cargo:endi@1.1.1 — cargo:endi@1.1.1/LICENSE-MIT
 - cargo:erased-serde@0.4.10 — cargo:erased-serde@0.4.10/LICENSE-MIT
 - cargo:event-listener-strategy@0.5.4 — cargo:event-listener-strategy@0.5.4/LICENSE-MIT
-- cargo:event-listener@5.4.1 — cargo:event-listener@5.4.1/LICENSE-MIT
+- cargo:event-listener@5.4.2 — cargo:event-listener@5.4.2/LICENSE-MIT
 - cargo:fastrand@2.4.1 — cargo:fastrand@2.4.1/LICENSE-MIT
 - cargo:futures-lite@2.6.1 — cargo:futures-lite@2.6.1/LICENSE-MIT
 - cargo:itoa@1.0.18 — cargo:itoa@1.0.18/LICENSE-MIT
@@ -14364,7 +14364,7 @@ DEALINGS IN THE SOFTWARE.
 
 SHA-256 62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a
 Applies to:
-- cargo:anyhow@1.0.102 — cargo:anyhow@1.0.102/LICENSE-APACHE
+- cargo:anyhow@1.0.103 — cargo:anyhow@1.0.103/LICENSE-APACHE
 - cargo:async-trait@0.1.89 — cargo:async-trait@0.1.89/LICENSE-APACHE
 - cargo:dlv-list@0.5.2 — cargo:dlv-list@0.5.2/LICENSE-APACHE
 - cargo:dtoa@1.0.11 — cargo:dtoa@1.0.11/LICENSE-APACHE
@@ -20746,7 +20746,7 @@ Applies to:
 - cargo:equivalent@1.0.2 — cargo:equivalent@1.0.2/LICENSE-APACHE
 - cargo:errno@0.3.14 — cargo:errno@0.3.14/LICENSE-APACHE
 - cargo:event-listener-strategy@0.5.4 — cargo:event-listener-strategy@0.5.4/LICENSE-APACHE
-- cargo:event-listener@5.4.1 — cargo:event-listener@5.4.1/LICENSE-APACHE
+- cargo:event-listener@5.4.2 — cargo:event-listener@5.4.2/LICENSE-APACHE
 - cargo:fastrand@2.4.1 — cargo:fastrand@2.4.1/LICENSE-APACHE
 - cargo:filetime@0.2.29 — cargo:filetime@0.2.29/LICENSE-APACHE
 - cargo:flate2@1.1.9 — cargo:flate2@1.1.9/LICENSE-APACHE
