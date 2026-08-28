@@ -47,6 +47,16 @@ export type SessionRecord = {
   peer_presence_ms: string | null
 }
 
+// #236 — mirrors SessionTimelineRow in src-tauri/src/db/session_timelines.rs.
+export type SessionTimelineRecord = {
+  session_id: string
+  generated_at: number
+  model_id: string | null
+  source: string
+  entries: string
+  truncated: number
+}
+
 export type AuditEventRecord = {
   session_id: string
   ts: number
@@ -232,10 +242,16 @@ export class LabDb {
     return result.changes === 1
   }
 
+  // `session_timelines` (008) has no foreign key, so its row is deleted by
+  // hand here exactly as `db::sessions::delete` does in Rust. Missing it left
+  // the model's written account of a session the user asked us to forget.
   sessionsDelete(id: string): void {
     this.db.exec('BEGIN')
     try {
       this.db.prepare('DELETE FROM audit_events WHERE session_id = ?').run(id)
+      this.db
+        .prepare('DELETE FROM session_timelines WHERE session_id = ?')
+        .run(id)
       this.db.prepare('DELETE FROM sessions WHERE id = ?').run(id)
       this.db.exec('COMMIT')
     } catch (err) {
@@ -248,12 +264,49 @@ export class LabDb {
     this.db.exec('BEGIN')
     try {
       this.db.exec('DELETE FROM audit_events')
+      this.db.exec('DELETE FROM session_timelines')
       this.db.exec('DELETE FROM sessions')
       this.db.exec('COMMIT')
     } catch (err) {
       this.db.exec('ROLLBACK')
       throw err
     }
+  }
+
+  // --- session timelines (#236) -------------------------------------------
+
+  sessionTimelineGet(sessionId: string): SessionTimelineRecord | null {
+    const row = this.db
+      .prepare(
+        `SELECT session_id, generated_at, model_id, source, entries, truncated
+         FROM session_timelines
+         WHERE session_id = ?`
+      )
+      .get(sessionId)
+    return (row as unknown as SessionTimelineRecord) ?? null
+  }
+
+  // Regeneration replaces the stored narrative rather than accumulating rows.
+  sessionTimelineUpsert(row: SessionTimelineRecord): void {
+    this.db
+      .prepare(
+        `INSERT INTO session_timelines (session_id, generated_at, model_id, source, entries, truncated)
+         VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT(session_id) DO UPDATE SET
+           generated_at = excluded.generated_at,
+           model_id     = excluded.model_id,
+           source       = excluded.source,
+           entries      = excluded.entries,
+           truncated    = excluded.truncated`
+      )
+      .run(
+        row.session_id,
+        row.generated_at,
+        row.model_id,
+        row.source,
+        row.entries,
+        row.truncated
+      )
   }
 
   // --- audit events -------------------------------------------------------

@@ -93,5 +93,62 @@ scenario('ai', async ({ lab, step, check, ui }) => {
   check('a session row was written', session !== undefined)
   check('it recorded that AI was on', session?.ai_enabled === 1)
   check('it counted the samples', (session?.confident_samples ?? 0) > 0)
+
+  // #236 — the raw observation journal is what the post-session write-up
+  // narrates, and it is written by a fire-and-forget append whose failure the
+  // app only whispers about at warn level. Assert the file, not the absence of
+  // a crash: before `session_journal_append` existed here every append failed
+  // and the only symptom was `no unhandled IPC` going red.
+  step('the observation journal is on disk and readable')
+  const journal = alice.backend.journalRead(session?.id ?? '')
+  check('the journal recorded observations', journal.lines.length > 0)
+  check(
+    'every line is one parseable observation',
+    journal.lines.every((line) => {
+      try {
+        const row = JSON.parse(line) as Record<string, unknown>
+        return typeof row.ts === 'number' && typeof row.v === 'string'
+      } catch {
+        return false
+      }
+    })
+  )
+  check('the journal is not reported truncated', journal.truncated === false)
+
+  // #236 — the post-session write-up. This scenario's own header has always
+  // claimed it covers "the report"; until the journal commands existed here it
+  // could not. The safety property is the one worth asserting: the model is
+  // never credited for entries it did not produce. The lab's stub queue is
+  // exhausted by the sample loop above, so the write-up finds no usable model
+  // output and must fall back to the deterministic digest — and SAY so.
+  step('the report writes the session up, and says who wrote it')
+  await ui.waitForText(alice.page(), 'Minute by minute')
+  await ui.until(
+    () => alice.backend.db.sessionTimelineGet(session?.id ?? '') !== null,
+    { label: 'the stored write-up row', timeoutMs: 60_000 }
+  )
+  const timeline = alice.backend.db.sessionTimelineGet(session?.id ?? '')
+  check('a write-up row was stored', timeline !== null)
+  check(
+    'it is labelled as the raw checks, not the model',
+    timeline?.source === 'observations'
+  )
+  check('no model is credited for it', timeline?.model_id === null)
+  const entries = JSON.parse(timeline?.entries ?? '[]') as Array<
+    Record<string, unknown>
+  >
+  check('it covers at least one stretch of the session', entries.length > 0)
+  check(
+    'every entry is a bounded time range with text',
+    entries.every(
+      (entry) =>
+        typeof entry.start_min === 'number' &&
+        typeof entry.end_min === 'number' &&
+        entry.end_min > entry.start_min &&
+        typeof entry.summary === 'string' &&
+        entry.summary.length > 0
+    )
+  )
+
   check('no unhandled IPC', alice.backend.unhandled.size === 0)
 })
