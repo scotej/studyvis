@@ -11,7 +11,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { useModelStore } from '@/features/ai/modelStore'
-import type { SessionTimelineRecord } from '@/lib/db/sessionTimeline'
+import {
+  parseTimelineEntries,
+  type SessionTimelineRecord,
+} from '@/lib/db/sessionTimeline'
 import { logger } from '@/lib/log'
 import { useSessionStore } from '@/stores/sessionStore'
 import { useSettingsStore } from '@/stores/settingsStore'
@@ -25,6 +28,12 @@ import {
 } from './sessionTimeline'
 
 const log = logger.child('session.timeline.ui')
+
+// A stored row only counts as a write-up when it still holds readable entries;
+// one that doesn't is regenerated rather than rendered as "nothing recorded".
+function hasStoredWriteUp(timeline: SessionTimelineRecord | null): boolean {
+  return timeline !== null && parseTimelineEntries(timeline.entries).length > 0
+}
 
 // Storybook renders the report shell outside Tauri, where the journal probe
 // would reject and paint a failure banner over a fixture that has no journal at
@@ -157,7 +166,10 @@ export function useWrittenTimeline({
 
   useEffect(() => {
     if (!ready) return
-    if (timeline && attempt === 0) return
+    // A row whose entries cannot be parsed counts as absent (see
+    // parseTimelineEntries): the report regenerates rather than rendering a
+    // section that claims nothing was recorded.
+    if (hasStoredWriteUp(timeline) && attempt === 0) return
     const key = `${sessionId}:${attempt}`
     const claims = latch.current
     if (!claims?.claim(key)) return

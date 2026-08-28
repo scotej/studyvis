@@ -30,6 +30,7 @@ import { DEFAULT_CTX_SIZE, useSidecarStore } from '@/features/ai/sidecar'
 import {
   sessionTimelineSave,
   type SessionTimelineSource,
+  type TimelineEntry,
 } from '@/lib/db/sessionTimeline'
 import { logger } from '@/lib/log'
 import { useSessionStore } from '@/stores/sessionStore'
@@ -43,12 +44,6 @@ import {
 } from './sessionJournal'
 
 const log = logger.child('session.timeline')
-
-export type TimelineEntry = {
-  start_min: number
-  end_min: number
-  summary: string
-}
 
 export type SessionTimeline = {
   entries: TimelineEntry[]
@@ -511,34 +506,4 @@ export async function generateSessionTimeline(
     truncated: journal.truncated,
   })
   return timeline
-}
-
-// Reads back what `session_timeline_get` stored. A row this cannot parse is
-// treated as absent so the report can regenerate rather than render nothing.
-export function parseTimelineEntries(raw: string): TimelineEntry[] {
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(raw)
-  } catch {
-    return []
-  }
-  if (!Array.isArray(parsed)) return []
-  const entries: TimelineEntry[] = []
-  for (const item of parsed) {
-    if (!item || typeof item !== 'object' || Array.isArray(item)) continue
-    const raw = item as Record<string, unknown>
-    if (
-      typeof raw.start_min !== 'number' ||
-      typeof raw.end_min !== 'number' ||
-      typeof raw.summary !== 'string'
-    ) {
-      continue
-    }
-    entries.push({
-      start_min: raw.start_min,
-      end_min: raw.end_min,
-      summary: raw.summary,
-    })
-  }
-  return entries
 }

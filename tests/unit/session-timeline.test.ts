@@ -35,10 +35,10 @@ import {
   describeWindow,
   generateSessionTimeline,
   normalizeSegments,
-  parseTimelineEntries,
   TIMELINE_SYSTEM_PROMPT,
 } from '@/features/session/sessionTimeline'
 import { createWriteUpLatch } from '@/features/session/useWrittenTimeline'
+import { parseTimelineEntries } from '@/lib/db/sessionTimeline'
 import { useSessionStore } from '@/stores/sessionStore'
 import { strings } from '@/strings'
 

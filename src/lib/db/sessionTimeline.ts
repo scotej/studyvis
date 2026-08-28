@@ -29,6 +29,45 @@ export function isTimelineSource(
   return value === 'model' || value === 'mixed' || value === 'observations'
 }
 
+// One stretch of the written account, as stored inside `entries`.
+export type TimelineEntry = {
+  start_min: number
+  end_min: number
+  summary: string
+}
+
+// Reads back what `session_timeline_get` stored. A row this cannot parse is
+// treated as absent so the report can regenerate rather than render nothing.
+// Pure, and deliberately here rather than beside the generator: the report's
+// serializer needs it, and must not drag the sidecar/model stack along with it.
+export function parseTimelineEntries(raw: string): TimelineEntry[] {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    return []
+  }
+  if (!Array.isArray(parsed)) return []
+  const entries: TimelineEntry[] = []
+  for (const item of parsed) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) continue
+    const row = item as Record<string, unknown>
+    if (
+      typeof row.start_min !== 'number' ||
+      typeof row.end_min !== 'number' ||
+      typeof row.summary !== 'string'
+    ) {
+      continue
+    }
+    entries.push({
+      start_min: row.start_min,
+      end_min: row.end_min,
+      summary: row.summary,
+    })
+  }
+  return entries
+}
+
 export async function sessionTimelineGet(
   sessionId: string
 ): Promise<SessionTimelineRecord | null> {
