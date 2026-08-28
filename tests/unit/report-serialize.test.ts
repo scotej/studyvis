@@ -137,6 +137,27 @@ describe('serializeReportToText section order (R5)', () => {
     expect(text).toContain(H.written.truncated)
   })
 
+  // A row stored by a newer build and read back after a downgrade. Silence is
+  // the one rendering that claims the model wrote the entries, so an
+  // unrecognised source must never fall through to it.
+  test('labels a source this build does not recognise', () => {
+    const data = buildData(baseSession(), [evt(ME, 'joined', 0)])
+    const text = serializeReportToText({
+      ...data,
+      timeline: {
+        session_id: data.session.id,
+        generated_at: 1_700_000_400_000,
+        model_id: 'gemma',
+        source: 'summarised-by-something-newer',
+        entries: JSON.stringify([
+          { start_min: 0, end_min: 1, summary: 'Opened the assignment' },
+        ]),
+        truncated: 0,
+      },
+    })
+    expect(text).toContain(H.written.sourceNote.mixed)
+  })
+
   test('says nothing was recorded when there is no written timeline', () => {
     const text = serializeReportToText(
       buildData(baseSession(), [evt(ME, 'joined', 0)])
