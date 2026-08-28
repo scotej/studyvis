@@ -33,7 +33,6 @@ import {
   CopyIcon,
   DownloadIcon,
   GripHorizontalIcon,
-  Loader2Icon,
   RotateCcwIcon,
 } from 'lucide-react'
 import { toast } from 'sonner'
@@ -777,17 +776,20 @@ function WrittenTimeline({
   const entries = useMemo(() => writtenTimelineEntries(timeline), [timeline])
 
   if (status.kind === 'generating') {
+    // DESIGN-SYSTEM §10: Skeleton shaped like the eventual content is the only
+    // sanctioned loading affordance — no spinner, no visible "loading…" text.
+    // The waiting copy stays for assistive tech, which gets nothing from a
+    // shape.
     return (
       <div
         role="status"
         aria-busy="true"
-        className="flex items-center gap-2 rounded-md border border-border-subtle bg-bg-surface px-3 py-3 text-sm text-text-secondary"
+        aria-label={copy.loading}
+        className="flex flex-col gap-2"
       >
-        <Loader2Icon
-          aria-hidden="true"
-          className="size-4 motion-safe:animate-spin"
-        />
-        {copy.loading}
+        <span className="sr-only">{copy.loading}</span>
+        <Skeleton className="h-10 w-full" />
+        <Skeleton className="h-10 w-full" />
       </div>
     )
   }
@@ -830,11 +832,15 @@ function WrittenTimeline({
             key={`${entry.start_min}-${entry.end_min}-${i}`}
             className="flex items-start gap-3 rounded-md border border-border-subtle bg-bg-surface px-3 py-2 text-sm"
           >
-            <span
-              aria-label={copy.rangeAriaLabel(entry.start_min, entry.end_min)}
-              className="w-20 shrink-0 text-xs font-medium text-text-muted tabular-nums"
-            >
-              {formatWrittenRange(entry.start_min, entry.end_min)}
+            <span className="w-20 shrink-0 text-xs font-medium text-text-muted tabular-nums">
+              {/* aria-label is prohibited on a role-less span and is simply
+                  dropped by assistive tech, so spell the range out instead. */}
+              <span className="sr-only">
+                {copy.rangeAriaLabel(entry.start_min, entry.end_min)}
+              </span>
+              <span aria-hidden="true">
+                {formatWrittenRange(entry.start_min, entry.end_min)}
+              </span>
             </span>
             <span className="text-text-primary">{entry.summary}</span>
           </li>
