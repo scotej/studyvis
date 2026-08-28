@@ -47,16 +47,11 @@ function makeDefaultRuntime(): PomodoroSoundRuntime {
   }
 }
 
-let activeRuntime: PomodoroSoundRuntime = makeDefaultRuntime()
+// Not swappable: `pomodoroNotify` injects its own `deps.playChime`, which is
+// the seam the chime-gating tests drive. A second one here would be a second
+// way to fake the same call, tested through neither.
+const activeRuntime: PomodoroSoundRuntime = makeDefaultRuntime()
 
 export function playPomodoroChime(): void {
   activeRuntime.play()
-}
-
-export function __setPomodoroSoundRuntime(runtime: PomodoroSoundRuntime): void {
-  activeRuntime = runtime
-}
-
-export function __resetPomodoroSoundRuntime(): void {
-  activeRuntime = makeDefaultRuntime()
 }

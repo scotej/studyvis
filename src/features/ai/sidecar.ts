@@ -575,8 +575,3 @@ function stopPolling(): void {
   activeRuntime.clearInterval(handle)
   useSidecarStore.setState({ pollHandle: null, healthy: false })
 }
-
-export const __testInternals = {
-  ensurePollingStarted,
-  stopPolling,
-}

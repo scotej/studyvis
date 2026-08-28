@@ -193,9 +193,6 @@ export const SETTINGS_FILE = 'settings.json'
 // so the inline script in index.html can resolve the theme synchronously
 // before first paint, avoiding a FOUC of the dark canvas under light/auto.
 export const THEME_LOCALSTORAGE_KEY = 'studyvis.theme'
-// Backwards-compat alias for the migration code path. New code should import
-// THEME_LOCALSTORAGE_KEY directly.
-export const LEGACY_THEME_LOCALSTORAGE_KEY = THEME_LOCALSTORAGE_KEY
 export const SETTINGS_KEY_THEME = 'theme'
 export const SETTINGS_KEY_REDUCE_MOTION = 'reduce_motion'
 export const SETTINGS_KEY_INVITE_NOTIFY = 'incoming_invite_notification_enabled'
