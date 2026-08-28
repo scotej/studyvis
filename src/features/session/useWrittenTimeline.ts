@@ -20,7 +20,7 @@ import { useSessionStore } from '@/stores/sessionStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { strings } from '@/strings'
 
-import { readObservations } from './sessionJournal'
+import { readObservations, type SessionJournalRead } from './sessionJournal'
 import {
   generateSessionTimeline,
   SessionTimelineError,
@@ -62,7 +62,8 @@ const inFlight = new Map<string, Promise<SessionTimeline | null>>()
 function runOnce(
   sessionId: string,
   modelId: string,
-  declaredTopic: string | null
+  declaredTopic: string | null,
+  journal: SessionJournalRead
 ): Promise<SessionTimeline | null> {
   const existing = inFlight.get(sessionId)
   if (existing) return existing
@@ -70,6 +71,7 @@ function runOnce(
     sessionId,
     modelId,
     declaredTopic,
+    journal,
   }).finally(() => {
     inFlight.delete(sessionId)
   })
@@ -180,11 +182,11 @@ export function useWrittenTimeline({
       const settings = useSettingsStore.getState().values
       // A session that recorded nothing has nothing to write up, and saying so
       // is different from saying the model failed. Reading the journal first is
-      // what lets the two be told apart.
-      let hasObservations: boolean
+      // what lets the two be told apart; the same read is then handed to the
+      // write-up rather than paying for the file and its parse twice.
+      let journal: SessionJournalRead
       try {
-        const journal = await readObservations(sessionId)
-        hasObservations = journal.observations.length > 0
+        journal = await readObservations(sessionId)
       } catch (err) {
         log.warn('journal.probe_failed', { err })
         if (!cancelled) {
@@ -196,7 +198,7 @@ export function useWrittenTimeline({
         return
       }
       if (cancelled) return
-      if (!hasObservations) {
+      if (journal.observations.length === 0) {
         setStatus({ kind: 'idle' })
         return
       }
@@ -214,7 +216,12 @@ export function useWrittenTimeline({
 
       setStatus({ kind: 'generating' })
       try {
-        const written = await runOnce(sessionId, modelId, declaredTopic)
+        const written = await runOnce(
+          sessionId,
+          modelId,
+          declaredTopic,
+          journal
+        )
         if (cancelled) return
         if (!written) {
           setStatus({ kind: 'idle' })

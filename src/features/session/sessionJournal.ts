@@ -90,13 +90,11 @@ export function __resetSessionJournalRuntime(): void {
   activeRuntime = defaultRuntime
 }
 
-export function getSessionJournalRuntime(): SessionJournalRuntime {
-  return activeRuntime
-}
-
-function clamp(text: string, max: number): string {
-  const collapsed = text.replace(/\s+/g, ' ').trim()
-  return collapsed.length > max ? collapsed.slice(0, max) : collapsed
+// Collapse-then-clamp, shared with the write-up in sessionTimeline.ts: every
+// string that reaches a journal line, a prompt, or a rendered entry goes
+// through exactly this.
+export function boundedText(text: string, max: number): string {
+  return text.replace(/\s+/g, ' ').trim().slice(0, max)
 }
 
 // One JSON object per line. Keys are short because a long session writes
@@ -105,9 +103,9 @@ export function serializeObservation(observation: SessionObservation): string {
   return JSON.stringify({
     ts: Math.round(observation.ts),
     v: observation.verdict,
-    r: clamp(observation.reasoning, MAX_REASONING_LENGTH),
+    r: boundedText(observation.reasoning, MAX_REASONING_LENGTH),
     c: observation.confidence,
-    t: clamp(observation.topic, MAX_TOPIC_LENGTH),
+    t: boundedText(observation.topic, MAX_TOPIC_LENGTH),
   })
 }
 

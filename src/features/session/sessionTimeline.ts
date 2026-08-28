@@ -37,10 +37,12 @@ import { useSessionStore } from '@/stores/sessionStore'
 import { strings } from '@/strings'
 
 import {
+  boundedText,
   MAX_WINDOW_NOTES,
   readObservations,
   windowObservations,
   type ObservationWindow,
+  type SessionJournalRead,
 } from './sessionJournal'
 
 const log = logger.child('session.timeline')
@@ -118,11 +120,11 @@ export type SessionTimelineInput = {
   sessionId: string
   modelId: string
   declaredTopic: string | null
+  // The journal the caller has already read. The report probes it to tell "no
+  // checks were recorded" apart from "the model failed", so re-reading and
+  // re-parsing the same file here would double the work for nothing.
+  journal?: SessionJournalRead
   signal?: AbortSignal
-}
-
-function boundedText(value: string, maxLength: number): string {
-  return value.replace(/\s+/g, ' ').trim().slice(0, maxLength)
 }
 
 // The deterministic account of one window, used both as the model's input and
@@ -430,9 +432,9 @@ export async function generateSessionTimeline(
     )
   }
 
-  let journal
+  let journal: SessionJournalRead
   try {
-    journal = await readObservations(input.sessionId)
+    journal = input.journal ?? (await readObservations(input.sessionId))
   } catch (err) {
     log.warn('journal.read_failed', { err })
     throw new SessionTimelineError(
@@ -504,6 +506,7 @@ export async function generateSessionTimeline(
     entries: entries.length,
     source,
     truncated: journal.truncated,
+    unreadableLines: journal.unreadableLines,
   })
   return timeline
 }
