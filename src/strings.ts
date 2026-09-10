@@ -954,6 +954,11 @@ export const strings = {
         // model cannot be asked to narrate it.
         aiOff:
           'Turn AI back on in Settings → AI to have this session written up.',
+        // I103 — the other half of the same feature. Recording is off, so this
+        // session's checks are on disk but nothing new will be written from
+        // them. Distinct from `aiOff` because the setting to change differs.
+        writeUpsOff:
+          'Turn "Write up my sessions" back on in Settings → AI to have this session written up.',
         sessionActive:
           'The AI is busy watching your current session. This can be written up once that session ends.',
         failed: "Couldn't write up this session.",

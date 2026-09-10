@@ -306,7 +306,10 @@ export class LabBackend {
           entries: String(a.entries),
           truncated: a.truncated ? 1 : 0,
         }
-        return this.db.sessionTimelineUpsert(row)
+        // I100 — the Rust command discards the outcome too: a write-up that
+        // lost the race with a delete is the race going the right way.
+        this.db.sessionTimelineUpsert(row)
+        return undefined
       }
       case 'session_journal_append':
         return this.journalAppend(
