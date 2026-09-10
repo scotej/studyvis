@@ -78,7 +78,7 @@ import { useIdentityStore } from '@/stores/identityStore'
 import { usePomodoroStore } from '@/stores/pomodoroStore'
 import { useSessionStore } from '@/stores/sessionStore'
 import { useSettingsStore } from '@/stores/settingsStore'
-import { usePttStore } from '@/stores/pttStore'
+import { usePttStore, withPttButtonMutation } from '@/stores/pttStore'
 import { strings } from '@/strings'
 
 import { startAiAlertDispatcher, type AiAlertDispatcher } from './aiAlerts'
@@ -1977,7 +1977,7 @@ export function SessionView({
       awaitingReleaseBefore: before.awaitingRelease,
       heldSourcesBefore: before.heldSources,
     })
-    usePttStore.getState().press('session-button')
+    withPttButtonMutation(() => usePttStore.getState().press('session-button'))
   }, [])
   const releaseHoldToTalk = useCallback((trigger: string) => {
     const before = usePttStore.getState()
@@ -1988,7 +1988,9 @@ export function SessionView({
       awaitingReleaseBefore: before.awaitingRelease,
       heldSourcesBefore: before.heldSources,
     })
-    usePttStore.getState().release('session-button')
+    withPttButtonMutation(() =>
+      usePttStore.getState().release('session-button')
+    )
   }, [])
 
   // "Try again" — clear the error and bump the nonce so the acquisition

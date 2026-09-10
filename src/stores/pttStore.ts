@@ -89,7 +89,17 @@ export const usePttStore = create<PttState>((set, get) => ({
     // A repeat from this physical source is always a no-op. A second source
     // joins the existing hold without extending its failsafe deadline.
     if (current.heldSources.includes(source)) return
-    if (current.awaitingRelease) {
+    // I107 — joining is only right while the hold is LIVE. `MAX_HOLD_MS`
+    // deliberately mutes a hold whose release never arrived and leaves it
+    // latched (`awaitingRelease` true, `active` false), and a source that
+    // joined THAT transmitted nothing: on Linux X11, where the native shortcut
+    // and the in-window hold-to-talk button both exist, every later click of
+    // the button joined and left a dead hold with no feedback, because the
+    // button renders from `active`. Only pressing the native key again could
+    // clear it. A press arriving after the failsafe is a fresh, deliberate
+    // hold, so it starts one and the expired sources are dropped: their own
+    // release then no-ops, and releasing this one ends the hold for good.
+    if (current.active) {
       set({ heldSources: [...current.heldSources, source] })
       return
     }
@@ -140,3 +150,29 @@ export const usePttStore = create<PttState>((set, get) => ({
     }))
   },
 }))
+
+// I108 — the in-window hold-to-talk button mutates this store directly, and a
+// last-holder `release()` produces the same transition a `reset()` does;
+// `classifyPttStoreChange` says as much and cannot tell them apart. PttListener
+// already solved this for native edges with a latch held across the call (I92),
+// but that latch is private to the native path, so every button release was
+// recorded as `cause:"reset"` — a teardown that never happened, deterministic
+// rather than stall-dependent, on the platform in release sign-off.
+//
+// This is that latch for the other caller. It lives beside the mutations it
+// brackets so the two ends cannot drift apart, and it is a depth counter rather
+// than a boolean so a nested call cannot clear it early.
+let buttonMutationDepth = 0
+
+export function inPttButtonMutation(): boolean {
+  return buttonMutationDepth > 0
+}
+
+export function withPttButtonMutation<T>(run: () => T): T {
+  buttonMutationDepth += 1
+  try {
+    return run()
+  } finally {
+    buttonMutationDepth -= 1
+  }
+}

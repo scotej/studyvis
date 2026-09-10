@@ -15,7 +15,11 @@ import {
 import { logHealth, logger } from '@/lib/log'
 import type { TopicRoom } from '@/lib/trystero'
 import { detectChromePlatform } from '@/lib/windowChrome'
-import { MAX_HOLD_MS, usePttStore } from '@/stores/pttStore'
+import {
+  inPttButtonMutation,
+  MAX_HOLD_MS,
+  usePttStore,
+} from '@/stores/pttStore'
 import { useSessionStore, type PeerSnapshot } from '@/stores/sessionStore'
 
 import {
@@ -718,7 +722,11 @@ export function PttListener() {
       ) {
         return
       }
-      const cause = classifyPttStoreChange(previous, state)
+      const cause = classifyPttStoreChange(
+        previous,
+        state,
+        inPttButtonMutation()
+      )
       if (cause === null) return
 
       const nowMs = monotonicNow()
