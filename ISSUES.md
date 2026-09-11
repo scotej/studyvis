@@ -1024,6 +1024,32 @@ A 1280x800 window on a 200 % display persists as 2560x1600 physical. Drop that d
 
 **Status.** **fixed** — capped to the monitor it will land on, applied before the existing floor so the OS minimum still wins on a screen too small to hold it. With no reachable position the window is centred on a monitor this pure function cannot identify, so the largest present one bounds it: exact for the single-monitor and removed-external cases, and never shrinking a window that already fits.
 
+### I116 — Sev2
+
+`scripts/linuxdeploy-tools.env` + `scripts/prepare-linuxdeploy-tools.sh`
+
+**Evidence.** Every Linux build began failing at `Prepare the pinned linuxdeploy toolchain`:
+
+```
+error: linuxdeploy-plugin-appimage.AppImage SHA256 mismatch:
+expected a45d3e227bc7f397e9cf6bfa4c9507494efa2293357b6e86690a3de2ca992e79
+got      0441769ab38009504d2678c38cd7e526955388dd30a215b4a20afaa5471652f2
+```
+
+Not a regression from any commit here — it is latent on `main` and was simply not exercised, because the installer job's steps are guarded and a docs-only commit builds nothing. The last real Linux build was 2026-08-28.
+
+`STUDYVIS_APPIMAGE_PLUGIN_URL` points at upstream's `continuous` release, which is the only release they publish and which they rebuild on a schedule. Its assets were replaced on 2026-09-01 with no source change: the repo's last push is 2026-06-07, and `..._COMMIT` (`536b0687`) is still HEAD. The plugin's CI re-ran against an unchanged tree and re-squashed the AppImage, which moves the outer container's bytes on its own. So a hash pinned to that URL goes stale by itself, and will again. The two sibling entries do not share the problem: `linuxdeploy` and `AppRun` come from `tauri-apps/binary-releases` under fixed tags, and tauri-apps does not mirror this plugin.
+
+The trap is the second-order one. The plugin's `ci/build-bundle.sh` fetches appimagetool from *its* rolling `continuous` tag at build time, so a rebuild can silently swap the appimagetool this project bundles and ships source for — which would leave `STUDYVIS_APPIMAGETOOL_COMMIT` describing a binary no longer in the artifact. Pasting in the observed hash would have accepted an unreviewed binary AND quietly falsified the corresponding-source delivery.
+
+Blast radius while broken: `deploy.yml`'s Linux installer, `ci.yml`'s advisory AppImage startup smoke, and — the one that matters — `release.yml`'s Linux leg, so the next release could not be cut.
+
+**Status.** **fixed** — re-pinned to the artifact now served, after establishing that nothing about the SOURCE moved: `..._COMMIT` is still upstream HEAD, the tarball at `..._SOURCE_URL` still hashes to `..._SOURCE_SHA256`, and the bundled appimagetool is still `8c8c91f`, read out of the artifact rather than assumed (split the squashfs off at the end of the ELF headers, `unsquashfs`, and the git version is a plain string in `appimagetool-prefix/usr/bin/appimagetool`). Only the outer container was rebuilt. Every other binary and source pin in the file was re-verified against its URL at the same time, so the next Linux build does not stop four minutes later on a different stale entry.
+
+`STUDYVIS_LINUXDEPLOY_TOOLSET_REVISION` deliberately did not move: every source tuple the file delivers is byte-identical to r3, and relabelling unchanged corresponding source would make the archive say something untrue.
+
+The recurrence is not fixed, because it cannot be from here — upstream publishes no immutable tag for this plugin, their newest fixed release is sixteen months older and would drag the bundled appimagetool back with it, and mirroring the artifact ourselves is a repository-owned decision rather than a build fix. What is fixed is the cost of the next one: the entry now carries the rolling-tag hazard and the three-step re-verification beside it, and the mismatch prints the procedure and says plainly not to paste the observed hash in. The gate refusing an unreviewed binary is the control working; `prepare-linuxdeploy-tools.sh`'s own header already says a mutable URL is acceptable *only* because its bytes are checked first.
+
 ## Archive — retired backlogs
 
 Two documents used to sit beside this ledger and were deleted once their implementation backlog had no open code work left: `BUILD-PROMPTS.md` (the sequenced V0→V3 build plan) and `IMPROVEMENTS.md` (the v1.2.0-era improvement backlog). Git history holds both in full — `git log --diff-filter=D -- BUILD-PROMPTS.md IMPROVEMENTS.md`, then `git show <sha>^:<file>`. Linux's implementation checklist is complete, but its operational release sign-off remains pending. What survives here is the part still cited from code.
