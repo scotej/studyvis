@@ -248,10 +248,7 @@ pub fn sanitize_layout(
 }
 
 fn rects_overlap(a: &Rect, b: &Rect) -> bool {
-    a.x < b.x + b.width
-        && b.x < a.x + a.width
-        && a.y < b.y + b.height
-        && b.y < a.y + a.height
+    a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height
 }
 
 fn largest_monitor(monitors: &[Rect]) -> Option<&Rect> {
