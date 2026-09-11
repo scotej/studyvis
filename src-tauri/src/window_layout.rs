@@ -205,18 +205,59 @@ pub fn sanitize_layout(
     monitors: &[Rect],
     min_scale: f64,
 ) -> AppliedLayout {
-    let (width, height) = clamp_size(window.width, window.height, min_scale);
     let position = if position_is_reachable(window, monitors) {
         Some((window.x, window.y))
     } else {
         None
     };
+    // I115 — a remembered size must still fit a screen that is present NOW.
+    // The size was only ever floored, never capped, and on Windows and Linux it
+    // is replayed in the PHYSICAL pixels it was captured in: a 1280x800 window
+    // on a 200% display persists as 2560x1600, and dropping that display to
+    // 100% — or unplugging the 2x external and booting on the laptop panel —
+    // set 2560x1600 on a 1920x1080 screen. Centring then puts the left edge off
+    // one side and, under the opt-in custom chrome, the window controls off the
+    // other: the very recovery affordance `position_is_reachable` exists to
+    // protect. Capping to the monitor it will land on is the direct fix.
+    //
+    // With no reachable position the window is centred on whichever monitor it
+    // currently sits on, which this pure function cannot know, so the largest
+    // present monitor is used as the upper bound. That is exact for the single
+    // monitor and removed-external cases this defect is about, and never
+    // shrinks a window that already fits somewhere.
+    let bound = match position {
+        Some(_) => monitors
+            .iter()
+            .find(|candidate| rects_overlap(window, candidate))
+            .or_else(|| largest_monitor(monitors)),
+        None => largest_monitor(monitors),
+    };
+    let (capped_width, capped_height) = match bound {
+        Some(m) => (window.width.min(m.width), window.height.min(m.height)),
+        None => (window.width, window.height),
+    };
+    // The floor is applied last: the OS minimum-size constraint wins over a
+    // monitor too small to hold it, and re-clamps anyway.
+    let (width, height) = clamp_size(capped_width, capped_height, min_scale);
     AppliedLayout {
         width,
         height,
         position,
         maximized: layout.maximized,
     }
+}
+
+fn rects_overlap(a: &Rect, b: &Rect) -> bool {
+    a.x < b.x + b.width
+        && b.x < a.x + a.width
+        && a.y < b.y + b.height
+        && b.y < a.y + a.height
+}
+
+fn largest_monitor(monitors: &[Rect]) -> Option<&Rect> {
+    monitors
+        .iter()
+        .max_by(|a, b| (a.width * a.height).total_cmp(&(b.width * b.height)))
 }
 
 #[cfg(desktop)]
@@ -518,6 +559,85 @@ mod tests {
                 maximized: false,
             }
         );
+    }
+
+    // I115 — a size captured at 2x and replayed on a 1x panel used to be set
+    // verbatim, so the window opened wider than the screen and the custom
+    // chrome's window controls landed off it.
+    #[test]
+    fn sanitize_caps_a_size_captured_at_a_higher_scale() {
+        let laptop = MonitorRect {
+            x: 0.0,
+            y: 0.0,
+            width: 1920.0,
+            height: 1080.0,
+            scale: 1.0,
+        };
+        // 1280x800 logical on a 200% display.
+        let layout = SavedLayout {
+            width: 2560.0,
+            height: 1600.0,
+            x: 0.0,
+            y: 0.0,
+            scale: 2.0,
+            maximized: false,
+        };
+        let applied = sanitize_layout(
+            &layout,
+            &layout.physical_rect(),
+            &rects(&[laptop]),
+            layout.scale,
+        );
+        assert!(applied.width <= 1920.0, "wider than the only screen");
+        assert!(applied.height <= 1080.0, "taller than the only screen");
+    }
+
+    #[test]
+    fn sanitize_caps_an_unreachable_oversized_window_too() {
+        let laptop = MonitorRect {
+            x: 0.0,
+            y: 0.0,
+            width: 1920.0,
+            height: 1080.0,
+            scale: 1.0,
+        };
+        let layout = SavedLayout {
+            width: 2560.0,
+            height: 1600.0,
+            x: 9999.0,
+            y: 9999.0,
+            scale: 2.0,
+            maximized: false,
+        };
+        let applied = sanitize_layout(
+            &layout,
+            &layout.physical_rect(),
+            &rects(&[laptop]),
+            layout.scale,
+        );
+        assert_eq!(applied.position, None);
+        assert!(applied.width <= 1920.0);
+        assert!(applied.height <= 1080.0);
+    }
+
+    #[test]
+    fn sanitize_leaves_a_window_that_already_fits_alone() {
+        let layout = SavedLayout {
+            width: 1600.0,
+            height: 900.0,
+            x: 100.0,
+            y: 100.0,
+            scale: 1.0,
+            maximized: false,
+        };
+        let applied = sanitize_layout(
+            &layout,
+            &layout.physical_rect(),
+            &rects(&[primary()]),
+            layout.scale,
+        );
+        assert_eq!((applied.width, applied.height), (1600.0, 900.0));
+        assert_eq!(applied.position, Some((100.0, 100.0)));
     }
 
     #[test]

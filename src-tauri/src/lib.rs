@@ -640,7 +640,7 @@ fn setup_desktop(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>>
         tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
         Emitter,
     };
-    use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
+    use tauri_plugin_global_shortcut::ShortcutState;
 
     // V3-P6 — Apply the saved chrome preference before paint. Idempotent
     // on every other path (default `'system'`, missing file, etc.). The
@@ -706,10 +706,6 @@ fn setup_desktop(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>>
     // V3-P3 `system_set_global_shortcut` command can swap them at runtime.
     // The handler locks the same Mutex on every press/release — Mutex
     // contention is per-keystroke and trivial.
-    let initial_ptt_ai = {
-        let bindings = app.state::<ShortcutBindings>();
-        bindings.ptt_ai()
-    };
     app.handle().plugin(
         tauri_plugin_global_shortcut::Builder::new()
             .with_handler(move |app, shortcut, event| {
@@ -752,15 +748,21 @@ fn setup_desktop(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>>
             })
             .build(),
     )?;
-    // #47 B5 — only the AI shortcut is registered for the app's lifetime
-    // (already gated by AiFeaturesFlag in the handler). The friends-PTT combo
-    // registers on session start and unregisters on session end (see
-    // `apply_ptt_friends_registration`, driven by `session_set_active`), so a
-    // tray-idle StudyVis no longer swallows Cmd+[ system-wide (Back in
-    // Safari/Finder, outdent in editors). When a hand-edited settings.json
-    // collides the two accelerators, this single registration serves both —
-    // the handler's friends branch matches it first, and the session-start
-    // register / session-end unregister both no-op on the shared combo.
+    // #47 B5 — neither PTT combo is grabbed for the app's lifetime any more.
+    // The friends combo registers on session start and unregisters on session
+    // end (`apply_ptt_friends_registration`, driven by `session_set_active`),
+    // so a tray-idle StudyVis no longer swallows Cmd+[ system-wide (Back in
+    // Safari/Finder, outdent in editors).
+    //
+    // I112 — the AI combo now follows the same rule against the AI-features
+    // flag, applied here at boot and again from
+    // `system_ai_features_set_enabled`. It used to be registered
+    // unconditionally and never released, on the grounds that the handler
+    // already checks the flag — but a handler gate cannot un-grab an OS-level
+    // hotkey, so a fresh install that never turned AI on (the default) still
+    // took Cmd+] / Ctrl+] away from every other app. When a hand-edited
+    // settings.json collides the two accelerators they share one registration,
+    // and each side declines to release it while the other still wants it.
     //
     // Register best-effort. An OS-level conflict — another app already holds
     // the combo globally (Windows returns ERROR_HOTKEY_ALREADY_REGISTERED),
@@ -769,10 +771,10 @@ fn setup_desktop(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>>
     // and panic the whole app before the window ever paints, with no recourse.
     // A failed binding just means that shortcut is inert until the user rebinds
     // it in Settings → Shortcuts; the app still boots.
-    let manager = app.global_shortcut();
-    if let Err(err) = manager.register(initial_ptt_ai) {
-        eprintln!("[global-shortcut] couldn't register {initial_ptt_ai:?}: {err} — rebind in Settings → Shortcuts");
-    }
+    commands::system::apply_ptt_ai_registration(
+        app.handle(),
+        AiFeaturesFlag::is_enabled(app.handle()),
+    );
 
     let tray_icon = include_image!("icons/tray/22x22.png");
     let open_item = MenuItemBuilder::with_id("tray-open", "Open StudyVis").build(app)?;

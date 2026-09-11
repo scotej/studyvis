@@ -1367,6 +1367,11 @@ export const strings = {
           custom: 'Custom',
         },
         relaunchCta: 'Relaunch now',
+        // I111 — restarting mid-session skips the leave handler, so the
+        // session would be lost whole. Say that rather than failing quietly.
+        relaunchDuringSession:
+          'Leave your study session first — relaunching now would end it without saving it.',
+        relaunchFailed: "Couldn't relaunch StudyVis.",
       },
       reduceMotion: {
         label: 'Reduce motion',
