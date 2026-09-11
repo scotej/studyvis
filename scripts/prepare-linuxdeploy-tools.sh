@@ -67,6 +67,15 @@ install_verified() {
   actual_sha=$(sha256sum -- "$temporary")
   actual_sha=${actual_sha%% *}
   [[ $actual_sha == "$expected_sha" ]] || {
+    # I116 — this is the gate doing its job, not a flake. At least one of these
+    # URLs is a rolling tag that upstream rebuilds on a schedule, so a mismatch
+    # usually means "the artifact was replaced", not "someone tampered with it"
+    # — but the two are indistinguishable from here, which is the whole point of
+    # refusing. Re-establish provenance before re-pinning; linuxdeploy-tools.env
+    # carries the procedure beside the entry.
+    echo "note: $name comes from an upstream URL that can be republished." >&2
+    echo "      Re-verify its source tuple before re-pinning; see the notes in" >&2
+    echo "      scripts/linuxdeploy-tools.env. Never paste in the hash below." >&2
     die "$name SHA256 mismatch: expected $expected_sha, got $actual_sha"
   }
   install -m "$mode" -- "$temporary" "$destination"
