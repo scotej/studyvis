@@ -7,6 +7,7 @@ import {
   classifyPttStoreChange,
   createPttWatchdog,
   PTT_WATCHDOG_ACTIVE_MS,
+  PTT_WATCHDOG_GAP_MAX_RECORDS,
   PTT_WATCHDOG_HEARTBEAT_MS,
   type PttWatchdogTick,
 } from '@/features/system/pttWatchdog'
@@ -238,6 +239,31 @@ describe('PTT watchdog', () => {
     ).toEqual([])
   })
 
+  // I106 — the gap RECORD is capped for log volume; restarting the dwell is a
+  // correctness rule. Gating the second on the first meant that past the cap a
+  // stalling machine started confirming dwell across windows in which it had
+  // observed nothing, with no `timeline.gap` beside it to say so.
+  test('dwell keeps restarting across gaps after the record cap is spent', () => {
+    const { watchdog, ticks } = build((atMs) => {
+      const o = observation({ atMs })
+      o.render.selfLit = true
+      return o
+    })
+    watchdog.start()
+    for (let i = 0; i <= PTT_WATCHDOG_GAP_MAX_RECORDS + 4; i += 1) {
+      clock.advance(1_500)
+      clock.jump(120_000)
+    }
+    clock.advance(1_000)
+    watchdog.stop()
+
+    const gaps = ticks.map((t) => t.gap).filter(Boolean)
+    expect(gaps).toHaveLength(PTT_WATCHDOG_GAP_MAX_RECORDS)
+    expect(
+      ticks.flatMap((t) => t.events).filter((e) => e.kind === 'violation')
+    ).toEqual([])
+  })
+
   test('an idle app ticks slower than an in-session one', () => {
     const { watchdog, ticks } = build((atMs) =>
       observation({ atMs, sessionActive: false })
@@ -329,6 +355,37 @@ describe('classifyPttStoreChange', () => {
         held(['session-button'], true, true)
       )
     ).toBe('button')
+  })
+
+  // I108 — a last-holder release and a reset() are the same transition, so the
+  // button's own changes are only distinguishable by who is calling.
+  test('a button release is attributed to the button, not to a teardown', () => {
+    expect(
+      classifyPttStoreChange(
+        held(['session-button'], true, true),
+        held([], false, false),
+        true
+      )
+    ).toBe('button')
+  })
+
+  test('without the button latch the same shape still reads as a teardown', () => {
+    expect(
+      classifyPttStoreChange(
+        held(['session-button'], true, true),
+        held([], false, false)
+      )
+    ).toBe('reset')
+  })
+
+  test('the failsafe still wins over the button latch', () => {
+    expect(
+      classifyPttStoreChange(
+        held(['session-button'], true, true),
+        held(['session-button'], false, true),
+        true
+      )
+    ).toBe('failsafe')
   })
 
   test('a plain native press has no cause of its own', () => {

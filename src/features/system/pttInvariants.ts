@@ -508,8 +508,23 @@ export function createPttInvariantMonitor(options?: {
     // the ticks either side are not consecutive observations. The BUDGET is
     // deliberately untouched: a gap is not a new session, and letting one hand
     // back a fresh allowance would defeat the ceiling entirely.
+    //
+    // I105 — which is why this drops the dwell per state rather than clearing
+    // the map. `states.clear()` also deleted `emitCount` and `lastEmitAtMs`,
+    // the two fields the ordinary clear path above says must SURVIVE, so every
+    // recorded gap put every invariant back on backoff rung 0. A stalling
+    // machine — the I92 archive shows five-second gaps under llama inference on
+    // battery — then re-emitted one stuck hold at full rate instead of climbing
+    // the ladder, and spent the whole violation budget inside half an hour.
+    // After `budget-exhausted` the monitor is silent for the rest of the
+    // session, including every `cleared`, so the machine most likely to have a
+    // real fault is the one whose archive stops carrying evidence.
     resetDwell: () => {
-      states.clear()
+      for (const state of states.values()) {
+        state.open = false
+        state.ticks = 0
+        state.firstAtMs = null
+      }
     },
 
     // A session owns its own budget and its own dwell history: a divergence
