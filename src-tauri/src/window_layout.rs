@@ -211,20 +211,14 @@ pub fn sanitize_layout(
         None
     };
     // I115 — a remembered size must still fit a screen that is present NOW.
-    // The size was only ever floored, never capped, and on Windows and Linux it
-    // is replayed in the PHYSICAL pixels it was captured in: a 1280x800 window
-    // on a 200% display persists as 2560x1600, and dropping that display to
-    // 100% — or unplugging the 2x external and booting on the laptop panel —
-    // set 2560x1600 on a 1920x1080 screen. Centring then puts the left edge off
-    // one side and, under the opt-in custom chrome, the window controls off the
-    // other: the very recovery affordance `position_is_reachable` exists to
-    // protect. Capping to the monitor it will land on is the direct fix.
-    //
-    // With no reachable position the window is centred on whichever monitor it
-    // currently sits on, which this pure function cannot know, so the largest
-    // present monitor is used as the upper bound. That is exact for the single
-    // monitor and removed-external cases this defect is about, and never
-    // shrinks a window that already fits somewhere.
+    // Callers hand this a rect already re-expressed in the target monitor's
+    // scale (`target_for_physical_replay`); capping to that monitor is the
+    // second half, for the case where the window was simply saved larger than
+    // any screen now attached. With no reachable position the window is centred
+    // on whichever monitor it currently sits on, which this pure function
+    // cannot know, so the largest present monitor bounds it — exact for the
+    // single-monitor and removed-external cases, and never shrinking a window
+    // that already fits somewhere.
     let bound = match position {
         Some(_) => monitors
             .iter()
@@ -236,8 +230,10 @@ pub fn sanitize_layout(
         Some(m) => (window.width.min(m.width), window.height.min(m.height)),
         None => (window.width, window.height),
     };
-    // The floor is applied last: the OS minimum-size constraint wins over a
-    // monitor too small to hold it, and re-clamps anyway.
+    // The floor is applied last and is expressed in the SAME space as the rect,
+    // which is why `min_scale` must be the target monitor's scale rather than
+    // the captured one: at 2x it is 2048x1280, and applying that to a 1x screen
+    // would undo the cap above and put the window back over the edge.
     let (width, height) = clamp_size(capped_width, capped_height, min_scale);
     AppliedLayout {
         width,
@@ -245,6 +241,60 @@ pub fn sanitize_layout(
         position,
         maximized: layout.maximized,
     }
+}
+
+/// I115 — re-express a saved PHYSICAL rect in the pixels of the monitor it will
+/// land on, and report the scale the conf minimums belong to there.
+///
+/// Only the size moves. Physical desktop coordinates are shared across
+/// monitors, so `x`/`y` already mean what they meant; `width`/`height` were
+/// derived from a logical size at the captured scale and mean nothing without
+/// it. A 1280x800 window remembered on a 200% display is stored as 2560x1600,
+/// and replaying that verbatim after the display drops to 100% — or after the
+/// 2x external is unplugged and the laptop panel is all that is left — asks for
+/// a window wider than the screen, with the custom chrome's window controls off
+/// the edge. That is the recovery affordance `position_is_reachable` exists to
+/// protect, defeated by the other half of the same rect.
+///
+/// With no monitor to land on, the captured scale is returned unchanged, which
+/// reproduces the old behaviour rather than inventing a ratio.
+pub fn target_for_physical_replay(
+    saved: &Rect,
+    captured_scale: f64,
+    monitors: &[MonitorRect],
+) -> (Rect, f64) {
+    let physical: Vec<Rect> = monitors.iter().map(MonitorRect::physical_rect).collect();
+    let index = physical
+        .iter()
+        .position(|m| rects_overlap(saved, m))
+        .or_else(|| {
+            physical
+                .iter()
+                .enumerate()
+                .max_by(|(_, a), (_, b)| (a.width * a.height).total_cmp(&(b.width * b.height)))
+                .map(|(i, _)| i)
+        });
+    let Some(index) = index else {
+        return (*saved, captured_scale);
+    };
+    let target_scale = monitors[index].scale;
+    let usable = captured_scale.is_finite()
+        && captured_scale > 0.0
+        && target_scale.is_finite()
+        && target_scale > 0.0;
+    if !usable {
+        return (*saved, captured_scale);
+    }
+    let ratio = target_scale / captured_scale;
+    (
+        Rect {
+            x: saved.x,
+            y: saved.y,
+            width: saved.width * ratio,
+            height: saved.height * ratio,
+        },
+        target_scale,
+    )
 }
 
 fn rects_overlap(a: &Rect, b: &Rect) -> bool {
@@ -301,12 +351,12 @@ pub fn apply_saved_window_layout<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     #[cfg(not(target_os = "macos"))]
     let applied = {
         let monitor_rects: Vec<Rect> = monitors.iter().map(MonitorRect::physical_rect).collect();
-        sanitize_layout(
-            &layout,
-            &layout.physical_rect(),
-            &monitor_rects,
-            layout.scale,
-        )
+        // I115 — physical pixels are only uniform at a fixed scale, so the
+        // saved size is re-expressed for the monitor this window will land on
+        // before anything is clamped against it.
+        let (window, min_scale) =
+            target_for_physical_replay(&layout.physical_rect(), layout.scale, &monitors);
+        sanitize_layout(&layout, &window, &monitor_rects, min_scale)
     };
 
     // Apply order differs by platform and matters on both:
@@ -579,12 +629,11 @@ mod tests {
             scale: 2.0,
             maximized: false,
         };
-        let applied = sanitize_layout(
-            &layout,
-            &layout.physical_rect(),
-            &rects(&[laptop]),
-            layout.scale,
-        );
+        let (window, min_scale) =
+            target_for_physical_replay(&layout.physical_rect(), layout.scale, &[laptop]);
+        let applied = sanitize_layout(&layout, &window, &rects(&[laptop]), min_scale);
+        // 1280x800 logical, which is what was remembered, now at 1x.
+        assert_eq!((applied.width, applied.height), (1280.0, 800.0));
         assert!(applied.width <= 1920.0, "wider than the only screen");
         assert!(applied.height <= 1080.0, "taller than the only screen");
     }
@@ -606,12 +655,9 @@ mod tests {
             scale: 2.0,
             maximized: false,
         };
-        let applied = sanitize_layout(
-            &layout,
-            &layout.physical_rect(),
-            &rects(&[laptop]),
-            layout.scale,
-        );
+        let (window, min_scale) =
+            target_for_physical_replay(&layout.physical_rect(), layout.scale, &[laptop]);
+        let applied = sanitize_layout(&layout, &window, &rects(&[laptop]), min_scale);
         assert_eq!(applied.position, None);
         assert!(applied.width <= 1920.0);
         assert!(applied.height <= 1080.0);
@@ -627,14 +673,37 @@ mod tests {
             scale: 1.0,
             maximized: false,
         };
-        let applied = sanitize_layout(
-            &layout,
-            &layout.physical_rect(),
-            &rects(&[primary()]),
-            layout.scale,
-        );
+        let (window, min_scale) =
+            target_for_physical_replay(&layout.physical_rect(), layout.scale, &[primary()]);
+        let applied = sanitize_layout(&layout, &window, &rects(&[primary()]), min_scale);
         assert_eq!((applied.width, applied.height), (1600.0, 900.0));
         assert_eq!(applied.position, Some((100.0, 100.0)));
+    }
+
+    #[test]
+    fn replay_leaves_the_size_alone_when_the_scale_has_not_moved() {
+        let saved = Rect {
+            x: 0.0,
+            y: 0.0,
+            width: 1600.0,
+            height: 900.0,
+        };
+        let (window, min_scale) = target_for_physical_replay(&saved, 1.0, &[primary()]);
+        assert_eq!((window.width, window.height), (1600.0, 900.0));
+        assert_eq!(min_scale, 1.0);
+    }
+
+    #[test]
+    fn replay_without_monitors_changes_nothing() {
+        let saved = Rect {
+            x: 10.0,
+            y: 20.0,
+            width: 2560.0,
+            height: 1600.0,
+        };
+        let (window, min_scale) = target_for_physical_replay(&saved, 2.0, &[]);
+        assert_eq!(window, saved);
+        assert_eq!(min_scale, 2.0);
     }
 
     #[test]
