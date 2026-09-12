@@ -301,18 +301,31 @@ jobs:
             libgtk-3-dev libgudev-1.0-dev libharfbuzz-dev libhyphen-dev \
             libicu-dev libjpeg-dev liblcms2-dev libnice-dev libopenjp2-7-dev \
             libpng-dev librsvg2-dev libseccomp-dev libunwind-dev \
+            libasound2-dev libopus-dev libpulse-dev libvpx-dev libsrtp2-dev libusrsctp-dev \
             libsecret-1-dev libsoup-3.0-dev libsqlite3-dev libssl-dev \
             libsysprof-capture-4-dev libsystemd-dev libtasn1-6-dev \
             libwayland-dev libwebkit2gtk-4.1-dev libwebp-dev libwoff-dev \
-            libx11-dev libxcomposite-dev libxdo-dev libxml2-dev \
+            libx11-dev libx11-xcb-dev libudev-dev libxcomposite-dev libxdo-dev libxml2-dev \
             libxml2-utils libxslt1-dev libxt-dev libtool ninja-build \
             patch patchelf perl pkg-config python3 ruby tar unifdef \
-            wayland-protocols xdg-dbus-proxy xdg-utils xz-utils \
+            wayland-protocols xauth xdg-dbus-proxy xdg-utils xz-utils xvfb \
             gstreamer1.0-alsa gstreamer1.0-plugins-bad \
             gstreamer1.0-plugins-base gstreamer1.0-plugins-good \
             gstreamer1.0-nice gstreamer1.0-pipewire gstreamer1.0-tools \
             libpipewire-0.3-dev libpipewire-0.3-modules libspa-0.2-modules \
             pipewire-bin libselinux1 libpcre2-8-0
+
+      # The native media check exercises WebKit's real bubblewrap sandbox.
+      # Match the CI/release runner accommodation; the artifact keeps its sandbox.
+      - name: Allow the packaged WebKit sandbox to create user namespaces
+        if: env.SHIPPABLE == 'true' && runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          knob=/proc/sys/kernel/apparmor_restrict_unprivileged_userns
+          if [ -e "$knob" ]; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
 
       - uses: actions/setup-node@v7
         if: env.SHIPPABLE == 'true'
@@ -469,7 +482,7 @@ jobs:
         uses: actions/cache/restore@v6
         with:
           path: ${{ runner.temp }}/studyvis-tauri-cache-deploy
-          key: studyvis-linuxdeploy-ubuntu-24.04-x86_64-${{ hashFiles('scripts/linuxdeploy-tools.env', 'scripts/linux-appimage-runtime.env', 'scripts/linux-appimage-runtime-sources.tsv', 'scripts/prepare-linuxdeploy-tools.sh', 'scripts/build-linux-appimage-runtime.sh', 'scripts/verify-linux-appimage-runtime.sh') }}
+          key: studyvis-linuxdeploy-ubuntu-24.04-x86_64-${{ hashFiles('scripts/linuxdeploy-tools.env', 'scripts/linux-appimage-runtime.env', 'scripts/linux-appimage-runtime-sources.tsv', 'scripts/prepare-linuxdeploy-tools.sh', 'scripts/linuxdeploy-plugin-appimage.sh', 'scripts/build-linux-appimage-runtime.sh', 'scripts/verify-linux-appimage-runtime.sh') }}
 
       - name: Prepare the pinned linuxdeploy toolchain
         if: env.SHIPPABLE == 'true' && runner.os == 'Linux'
@@ -494,7 +507,7 @@ jobs:
         uses: actions/cache/save@v6
         with:
           path: ${{ runner.temp }}/studyvis-tauri-cache-deploy
-          key: studyvis-linuxdeploy-ubuntu-24.04-x86_64-${{ hashFiles('scripts/linuxdeploy-tools.env', 'scripts/linux-appimage-runtime.env', 'scripts/linux-appimage-runtime-sources.tsv', 'scripts/prepare-linuxdeploy-tools.sh', 'scripts/build-linux-appimage-runtime.sh', 'scripts/verify-linux-appimage-runtime.sh') }}
+          key: studyvis-linuxdeploy-ubuntu-24.04-x86_64-${{ hashFiles('scripts/linuxdeploy-tools.env', 'scripts/linux-appimage-runtime.env', 'scripts/linux-appimage-runtime-sources.tsv', 'scripts/prepare-linuxdeploy-tools.sh', 'scripts/linuxdeploy-plugin-appimage.sh', 'scripts/build-linux-appimage-runtime.sh', 'scripts/verify-linux-appimage-runtime.sh') }}
 
       # Preview builds are throwaway artifacts, so they reuse WebKit object
       # files across runs. The tagged release leg has no equivalent step on

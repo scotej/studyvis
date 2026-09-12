@@ -109,13 +109,18 @@ experimental features still off but WebRTC explicitly on; it also reasserts
 media streams, GStreamer WebRTC, librice, and the bubblewrap sandbox. librice
 keeps ICE/network work in WebKit's sandboxed NetworkProcess.
 
-Runtime revision 5 has this reviewable input identity:
+Runtime revision 6 has this reviewable input identity:
 
 | Input | Version/source | SHA-256 |
 |-|-|-|
 | WebKitGTK | `webkitgtk-2.52.5.tar.xz` from `webkitgtk.org/releases` | `8a531a9abd2215936e8a8a914c077b586c0228b31d652f205286a8ec90f3364b` |
 | librice | GitHub tag archive `v0.4.3` | `4671e1835f9ab0f8d87e8d9e22b6bfb06f928aeae442841ab81881dff61e3f4b` |
-| WebKit AppImage portability delta | `scripts/patches/webkitgtk-2.52.5-appimage-sandbox.patch` | `12a6cf019e883c9f13c84a904e7410247678dca094289124fc6b76fc4a66bb0b` |
+| WebKit AppImage portability delta | `scripts/patches/webkitgtk-2.52.5-appimage-sandbox.patch` | `edc669c77ea7eba40b6454fd95369d4601b6632615b8174abd9df0e304ac54a0` |
+| GStreamer core | `gstreamer-1.26.11.tar.xz` from `gstreamer.freedesktop.org/src` | `2e0bd192d0438ea606a6f76a95c8e16542167656ffec2c2bc3aaf6ee0837fbf6` |
+| GStreamer base | `gst-plugins-base-1.26.11.tar.xz` from `gstreamer.freedesktop.org/src` | `fc50f885d41f5d0407ce0876ec7235d9e7b82d48db2f4bc72c5f244a4ac79263` |
+| GStreamer good | `gst-plugins-good-1.26.11.tar.xz` from `gstreamer.freedesktop.org/src` | `001deb0876d5d743cd3448abf74a27adec3fd850012fcb1b00994861bd6c1145` |
+| GStreamer bad | `gst-plugins-bad-1.26.11.tar.xz` from `gstreamer.freedesktop.org/src` | `110fb82795f0e569b1e27b12ab9699d35c7762e1ff4db95335d6ac8d1442af3d` |
+| Meson | GitHub release archive `1.7.2` | `4d40d63aa748a9c139cc41ab9bffe43edd113c5639d78bde81544ca955aea890` |
 
 `scripts/linux-webkit-runtime.env` is the version/hash authority;
 `scripts/build-linux-webkit-runtime.sh` verifies the downloads, applies that
@@ -131,13 +136,15 @@ compiled native locations. This avoids silently resolving the host's
 it does not disable the sandbox. Reproducibility here means pinned and checked
 source inputs, local delta, build environment, and configuration—not a claim of
 bit-for-bit identical output from arbitrary machines. Production builds use
-Ubuntu 24.04, Rust 1.97.1, and `cargo-c` 0.10.24. Ubuntu 24.04 is the floor
-that WebKit's librice ICE agent forces: it subclasses `GstWebRTCICE`, which
-GStreamer only exposes from 1.22, while WebKit's own configure gate still
-accepts 1.20. Ubuntu 22.04's GStreamer 1.20.3 therefore configured cleanly and
-failed hours later inside the unified build, so the builder now asserts
-`gstreamer-webrtc-1.0 >= 1.22` before compiling anything. That floor also sets
-the artifact's own glibc 2.39 floor. The hosted image and Noble apt
+Ubuntu 24.04, Rust 1.97.1, and `cargo-c` 0.10.24, retaining the artifact's
+glibc 2.39 floor. The private runtime also builds matched GStreamer 1.26.11
+core/base/good/bad libraries and curated plugins using source-pinned Meson
+1.7.2. Noble's 1.24.2 satisfies WebKit's advertised configure minimum but
+misassigns sending pads, creates receiving transceivers too late, and omits
+SDP attributes WebKit needs to attach decoded frames to JavaScript tracks
+(#312). Source-built helpers and all packaged GStreamer libraries/plugins are
+checked against their original build IDs; only the PipeWire and libnice
+plugins use the distro's stable GStreamer 1.x ABI. The hosted image and Noble apt
 indexes are mutable, so this is a bounded build baseline rather than a fully
 pinned or bit-reproducible environment. A stronger future boundary would use a
 snapshot-pinned apt repository or digest-pinned build container and record the
@@ -149,6 +156,15 @@ the tagged release leg has no compiler cache, for the same reason it restores
 no binary prefix. The builder also scales its own parallelism to the smaller of
 the host's CPU count and one job per 2 GB of RAM, which is what WebKit's
 unified translation units actually consume.
+
+The curated media payload includes WebKit's black/silence fallback sources,
+OpenGL upload/conversion/download elements for portal frames, and matching NSS
+soft-token/freebl modules for Noble's SRTP encryption. WebKit requests linear
+BGRA DMA-BUF caps because the packaged PipeWire 1.0.5 plugin cannot negotiate
+newer `DMA_DRM` caps. The AppImage output wrapper removes only the bundled
+Wayland client provider before invoking the unchanged verified output tool:
+host EGL drivers must load their matching client library. Private WebKit and
+the remaining reviewed ABI boundary stay under the normal artifact checks.
 
 Every platform bundle also carries identical generated
 `THIRD-PARTY-NOTICES.txt` and `THIRD-PARTY-NOTICES.json` Tauri resources. The
@@ -181,9 +197,10 @@ identity, including the AppImage-relative subprocess, injected-bundle, and
 sandbox-helper layout, while `WEBKIT-THIRD-PARTY-LICENSES.txt` and
 `WEBKIT-LICENSE-FILES.sha256` preserve a readable and hash-addressed inventory
 of all 59 upstream WebKit license/notice files discovered by the pinned source
-build. The builder's `--source-bundle` mode separately creates a deterministic
-corresponding-source archive containing the exact verified WebKitGTK/librice
-archives, complete patch, pinned env, builder, expected manifest, reconstruction
+build. A separate GStreamer license inventory and Meson license accompany its
+matched source-built media stack. The builder's `--source-bundle` mode separately creates a deterministic
+corresponding-source archive containing the exact verified WebKitGTK/librice,
+GStreamer core/base/good/bad, and Meson archives, complete patch, pinned env, builder, expected manifest, reconstruction
 README, and internal checksums. Tagged Linux builds attach it as
 `StudyVis_X.Y.Z_linux-webkit-sources.tar.gz` with a basename-only `.sha256`
 sidecar after the exact-AppImage smoke; it is kept outside the AppImage to avoid
@@ -221,7 +238,12 @@ packaged-only GStreamer WebRTC/SCTP elements, verifies a gnome-keyring Secret
 Service round-trip, and starts the extracted AppImage under Xvfb. The first
 document must log `runtime.webrtc ready` after constructing a
 local peer-connection data-channel offer; this proves more than a live process
-but less than an exchanged data channel or real media session. Preview
+but does not establish a complete media session. A separate finite probe runs
+the packaged WebKit subprocesses, exchanges data, renders synthetic camera and
+screen video with original stream IDs, and exercises late publication and
+stop/restart. Native codec, SRTP, GPU-memory conversion and transceiver checks
+run with isolated packaged plugin paths. These synthetic checks do not replace
+PLAN §8's physical KDE portal/device matrix. Preview
 deployments additionally build installable macOS arm64, Windows x86_64, and
 Linux x86_64 artifacts from the exact commit. A tagged release fetches the
 pinned sidecar for each target and emits signed updater artifacts. The Linux leg

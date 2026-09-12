@@ -361,3 +361,33 @@ index a75dfcf..68ebb96 100644
  		}, roomOptions);
  		roomRegistration = {
  			roomToken: null,
+diff --git a/node_modules/@trystero-p2p/core/dist/media.mjs b/node_modules/@trystero-p2p/core/dist/media.mjs
+index 2fd4906..e4c2dd2 100644
+--- a/node_modules/@trystero-p2p/core/dist/media.mjs
++++ b/node_modules/@trystero-p2p/core/dist/media.mjs
+@@ -28,7 +28,7 @@ const createMediaIdentityCache = () => {
+ 		getStreamKey: makeKeyGetter(localStreamKeys),
+ 		getTrackKey: makeKeyGetter(localTrackKeys),
+ 		rememberRemoteStream: (key, stream, streamId) => {
+-			remoteStreamsByKey.set(key, stream);
++			if (key !== void 0) remoteStreamsByKey.set(key, stream);
+ 			if (streamId) remoteStreamsById.set(streamId, stream);
+ 		},
+ 		getRemoteStream: (key, streamId) => remoteStreamsByKey.get(key) ?? (streamId ? remoteStreamsById.get(streamId) : void 0),
+@@ -116,7 +116,15 @@ const createMediaManager = ({ iterate, isActive, getSharedMediaPeer }) => {
+ 		},
+ 		receiveRemoteStream: (id, stream) => {
+ 			if (!isActive(id)) return;
+-			const next = pendingStreamMetas[id]?.shift();
++			// #312: native track events can precede metadata, and each camera
++			// track repeats its stream. Match identities, not arrival positions.
++			getSharedMediaPeer(id)?.__trysteroMedia?.rememberRemoteStream(void 0, stream, stream.id);
++			const pending = pendingStreamMetas[id];
++			if (!pending) return;
++			let index = pending.findIndex((meta) => meta.streamId === stream.id);
++			if (index < 0) index = pending.findIndex((meta) => meta.streamId === void 0);
++			if (index < 0) return;
++			const next = pending.splice(index, 1)[0];
+ 			if (!next) return;
+ 			emitStream(id, next.key, stream, next.metadata);
+ 		},

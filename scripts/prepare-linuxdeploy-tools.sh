@@ -88,8 +88,10 @@ install_verified AppRun-x86_64 \
   "$STUDYVIS_APPRUN_URL" "$STUDYVIS_APPRUN_SHA256" 0755
 install_verified linuxdeploy-x86_64.AppImage \
   "$STUDYVIS_LINUXDEPLOY_URL" "$STUDYVIS_LINUXDEPLOY_SHA256" 0755
-install_verified linuxdeploy-plugin-appimage.AppImage \
+install_verified studyvis-appimage-output.AppImage \
   "$STUDYVIS_APPIMAGE_PLUGIN_URL" "$STUDYVIS_APPIMAGE_PLUGIN_SHA256" 0755
+install -m 0755 -- "$script_dir/linuxdeploy-plugin-appimage.sh" \
+  "$cache_dir/linuxdeploy-plugin-appimage.AppImage"
 install_verified linuxdeploy-plugin-gstreamer.sh \
   "$STUDYVIS_GSTREAMER_PLUGIN_URL" "$STUDYVIS_GSTREAMER_PLUGIN_SHA256" 0755
 install_verified linuxdeploy-plugin-gtk.sh \

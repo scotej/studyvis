@@ -1,0 +1,282 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>Packaged WebKit media regression</title>
+<script>
+  // These are real native WebRTC connections. Canvas sources avoid permissions,
+  // cameras, portals, and relay servers while testing the shipped media engine.
+  const report = (message) =>
+    window.webkit.messageHandlers.probe.postMessage(message)
+  const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+  const assert = (condition, message) => {
+    if (!condition) throw new Error(message)
+  }
+  const until = async (predicate, label) => {
+    const deadline = performance.now() + 8000
+    while (!(await predicate())) {
+      assert(performance.now() < deadline, `timed out: ${label}`)
+      await delay(100)
+    }
+  }
+  onerror = (message) => report(`FAIL ${message}`)
+  onunhandledrejection = (event) => report(`FAIL ${event.reason}`)
+
+  onload = async () => {
+    const peers = []
+    const sources = []
+    const timers = []
+    let audioContext
+    try {
+      const makeSource = (width, height) => {
+        const canvas = document.createElement('canvas')
+        canvas.width = width
+        canvas.height = height
+        const context = canvas.getContext('2d')
+        let frame = 0
+        const paint = () => {
+          context.fillStyle = ++frame % 2 ? 'crimson' : 'turquoise'
+          context.fillRect(0, 0, width, height)
+        }
+        paint()
+        timers.push(setInterval(paint, 80))
+        const stream = canvas.captureStream(12)
+        sources.push(stream)
+        return stream
+      }
+      audioContext = new AudioContext()
+      await audioContext.resume()
+      const addMicrophone = (stream, frequency) => {
+        const tone = audioContext.createOscillator()
+        tone.frequency.value = frequency
+        const destination = audioContext.createMediaStreamDestination()
+        tone.connect(destination)
+        tone.start()
+        stream.addTrack(destination.stream.getAudioTracks()[0])
+      }
+      const makeVideo = (stream) => {
+        const video = document.createElement('video')
+        video.autoplay = true
+        video.muted = true
+        video.playsInline = true
+        video.width = 200
+        document.body.append(video)
+        video.srcObject = stream
+        return video
+      }
+      const frames = (video) =>
+        video?.getVideoPlaybackQuality().totalVideoFrames ?? 0
+      const advancing = async (video, width, height, label) => {
+        const before = frames(video)
+        await until(
+          () =>
+            video.videoWidth === width &&
+            video.videoHeight === height &&
+            video.readyState >= 2 &&
+            frames(video) >= before + 3,
+          label
+        )
+        const sample = document.createElement('canvas').getContext('2d')
+        sample.drawImage(video, 0, 0, 1, 1)
+        const pixel = sample.getImageData(0, 0, 1, 1).data
+        assert(pixel[0] + pixel[1] + pixel[2] > 100, `${label}: black pixels`)
+      }
+      const a = new RTCPeerConnection({ bundlePolicy: 'max-bundle' })
+      const b = new RTCPeerConnection({ bundlePolicy: 'max-bundle' })
+      peers.push(a, b)
+      const pending = new Map([
+        [a, []],
+        [b, []],
+      ])
+      for (const [self, other] of [
+        [a, b],
+        [b, a],
+      ]) {
+        self.onicecandidate = (event) => {
+          if (!event.candidate) return
+          if (other.remoteDescription) other.addIceCandidate(event.candidate)
+          else pending.get(other).push(event.candidate)
+        }
+      }
+      const received = new Map([
+        [a, new Map()],
+        [b, new Map()],
+      ])
+      const receivedAudio = new Map([
+        [a, new Map()],
+        [b, new Map()],
+      ])
+      const audioReceived = async (peer, stream, label) => {
+        await until(async () => {
+          const event = receivedAudio.get(peer).get(stream.id)
+          if (!event || event.track.muted || event.track.readyState !== 'live')
+            return false
+          const stats = await event.receiver.getStats()
+          return [...stats.values()].some(
+            (stat) =>
+              stat.type === 'inbound-rtp' &&
+              stats
+                .get(stat.codecId)
+                ?.mimeType.toLowerCase()
+                .startsWith('audio/') &&
+              stat.packetsReceived >= 5 &&
+              stat.bytesReceived > 0
+          )
+        }, label)
+      }
+      for (const peer of peers) {
+        peer.ontrack = (event) => {
+          // Trystero consumes streams[0], so its first stream must retain the
+          // advertised UUID used to associate camera and screen metadata.
+          const stream = event.streams[0]
+          assert(
+            event.streams.length === 1,
+            'one advertised stream gained an extra SSRC-derived stream'
+          )
+          assert(
+            stream && sources.some((source) => source.id === stream.id),
+            `incoming first stream lost its original ID: ${stream?.id}`
+          )
+          if (event.track.kind === 'audio')
+            receivedAudio.get(peer).set(stream.id, event)
+          else received.get(peer).set(stream.id, makeVideo(stream))
+        }
+      }
+      const negotiate = async (offerer, answerer) => {
+        const offer = await offerer.createOffer()
+        await offerer.setLocalDescription(offer)
+        await answerer.setRemoteDescription(offer)
+        for (const candidate of pending.get(answerer).splice(0))
+          await answerer.addIceCandidate(candidate)
+        const answer = await answerer.createAnswer()
+        await answerer.setLocalDescription(answer)
+        await offerer.setRemoteDescription(answer)
+        for (const candidate of pending.get(offerer).splice(0))
+          await offerer.addIceCandidate(candidate)
+      }
+      let dataAcknowledged = false
+      const channel = a.createDataChannel('media-check')
+      channel.onopen = () => channel.send('ping')
+      channel.onmessage = (event) => {
+        dataAcknowledged = event.data === 'pong'
+      }
+      b.ondatachannel = (event) => {
+        event.channel.onmessage = (message) => {
+          if (message.data === 'ping') event.channel.send('pong')
+        }
+      }
+      const cameraA = makeSource(320, 180)
+      addMicrophone(cameraA, 440)
+      await advancing(makeVideo(cameraA), 320, 180, 'local camera')
+      for (const track of [
+        ...cameraA.getVideoTracks(),
+        ...cameraA.getAudioTracks(),
+      ])
+        a.addTrack(track, cameraA)
+      await negotiate(a, b)
+      await until(
+        () => dataAcknowledged && received.get(b).has(cameraA.id),
+        'receive-only track event and data channel'
+      )
+      await advancing(
+        received.get(b).get(cameraA.id),
+        320,
+        180,
+        'receive-only camera'
+      )
+      await audioReceived(b, cameraA, 'receive-only microphone')
+      report(
+        'receive-only camera and microphone received with original stream ID'
+      )
+
+      const cameraB = makeSource(160, 120)
+      addMicrophone(cameraB, 660)
+      for (const track of [
+        ...cameraB.getVideoTracks(),
+        ...cameraB.getAudioTracks(),
+      ])
+        b.addTrack(track, cameraB)
+      await negotiate(b, a)
+      await until(
+        () => received.get(a).has(cameraB.id),
+        'reverse camera track event'
+      )
+      await advancing(
+        received.get(a).get(cameraB.id),
+        160,
+        120,
+        'reverse camera'
+      )
+      await advancing(
+        received.get(b).get(cameraA.id),
+        320,
+        180,
+        'camera after reverse negotiation'
+      )
+      await audioReceived(a, cameraB, 'reverse microphone')
+      report('bidirectional cameras and microphones received')
+
+      const screen = makeSource(640, 360)
+      const screenSender = a.addTrack(screen.getVideoTracks()[0], screen)
+      await negotiate(a, b)
+      await until(() => received.get(b).has(screen.id), 'screen track event')
+      const screenVideo = received.get(b).get(screen.id)
+      await advancing(screenVideo, 640, 360, 'late screen')
+      await advancing(
+        received.get(b).get(cameraA.id),
+        320,
+        180,
+        'camera beside screen'
+      )
+      await screenSender.replaceTrack(null)
+      await delay(800)
+      const stoppedFrames = frames(screenVideo)
+      await delay(500)
+      assert(
+        frames(screenVideo) <= stoppedFrames + 1,
+        'screen kept sending after replaceTrack(null)'
+      )
+      await screenSender.replaceTrack(screen.getVideoTracks()[0])
+      await advancing(screenVideo, 640, 360, 'restored screen')
+
+      a.removeTrack(screenSender)
+      await negotiate(a, b)
+      screen.getTracks().forEach((track) => track.stop())
+      const restartedScreen = makeSource(480, 270)
+      a.addTrack(restartedScreen.getVideoTracks()[0], restartedScreen)
+      await negotiate(a, b)
+      await until(
+        () => received.get(b).has(restartedScreen.id),
+        'restarted screen track event'
+      )
+      await advancing(
+        received.get(b).get(restartedScreen.id),
+        480,
+        270,
+        'restarted screen'
+      )
+      await advancing(
+        received.get(a).get(cameraB.id),
+        160,
+        120,
+        'reverse camera after screen restart'
+      )
+      await advancing(
+        received.get(b).get(cameraA.id),
+        320,
+        180,
+        'camera after screen restart'
+      )
+      report(
+        'PASS local and remote cameras, audio packets and unmuted tracks, receive-only track events, stream IDs, late screen, replaceTrack, and screen restart'
+      )
+    } catch (error) {
+      report(`FAIL ${String(error)} ${error.stack ?? ''}`)
+    } finally {
+      if (audioContext) await audioContext.close()
+      timers.forEach(clearInterval)
+      peers.forEach((peer) => peer.close())
+      sources.forEach((stream) =>
+        stream.getTracks().forEach((track) => track.stop())
+      )
+    }
+  }
+</script>

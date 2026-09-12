@@ -1050,6 +1050,49 @@ Blast radius while broken: `deploy.yml`'s Linux installer, `ci.yml`'s advisory A
 
 The recurrence is not fixed, because it cannot be from here — upstream publishes no immutable tag for this plugin, their newest fixed release is sixteen months older and would drag the bundled appimagetool back with it, and mirroring the artifact ourselves is a repository-owned decision rather than a build fix. What is fixed is the cost of the next one: the entry now carries the rolling-tag hazard and the three-step re-verification beside it, and the mismatch prints the procedure and says plainly not to paste the observed hash in. The gate refusing an unreviewed binary is the control working; `prepare-linuxdeploy-tools.sh`'s own header already says a mutable URL is acceptable *only* because its bytes are checked first.
 
+### I117 — Sev2
+
+`scripts/build-linux-webkit-runtime.sh`, `scripts/stage-linux-appimage-webkit.sh`,
+`scripts/patches/webkitgtk-2.52.5-appimage-sandbox.patch`, and
+`patches/@trystero-p2p+core+0.25.3.patch`
+
+**Evidence.** In [#312](https://github.com/scotej/studyvis/issues/312), the
+reporter confirmed the screenshot was taken on Linux: its local camera was
+live, while the peer camera and local shared screen were blank. The uploaded
+September 12 logs show a WebProcess crash on the first session, then a joined
+peer and a bound screen stream in the next session. Those records establish
+capture and data activity, but contain no evidence of decoded remote frames.
+
+Native reproduction against the released AppImage identified separate failures:
+Noble GStreamer 1.24.2 misassigns sending pads and delays incoming transceiver
+creation, and its incoming caps omit SDP attributes required by WebKit's track
+binding. Matching newer GStreamer restores receive-only and bidirectional video
+and independently negotiated screen streams. WebKit's recycled-sender path also
+drops the outgoing source instead of retaining and linking it after negotiation;
+the expanded regression exercises a camera added after receiving remote media.
+
+The curated payload omitted WebKit's black/silence source factories, GPU frame
+conversion, and NSS's lazily loaded SRTP modules. Separately, the bundled
+PipeWire 1.0.5 plugin rejects WebKit's `DMA_DRM` request: its exact upstream
+format converter fails SPA negotiation, while legacy linear BGRA negotiates and
+round-trips correctly. Host EGL drivers can also fail loading newer Wayland
+symbols when the AppImage shadows their client library with Noble's copy.
+
+At the JavaScript boundary, Trystero consumed one stream announcement per native
+track event. A camera's audio and video could therefore consume the screen's
+metadata, preventing correct delivery even with working native media. Both
+released Trystero versions already include the native stream ID, so matching
+that ID preserves the existing wire contract.
+
+**Status.** **in review** — runtime revision 6 pins matched GStreamer 1.26.11
+sources, restores the required curated payload, fixes portal caps and recycled
+sender ownership, and matches Trystero announcements by stream ID. Exact
+AppImage checks now process native media and exercise peer rendering and
+renegotiation. The output wrapper leaves the Wayland client to the host EGL
+driver before the unchanged verified output tool packages the artifact.
+Source/license/build-ID checks cover the expanded runtime. The rebuilt WebKit
+regression and PLAN §8's physical KDE matrix remain validation requirements.
+
 ## Archive — retired backlogs
 
 Two documents used to sit beside this ledger and were deleted once their implementation backlog had no open code work left: `BUILD-PROMPTS.md` (the sequenced V0→V3 build plan) and `IMPROVEMENTS.md` (the v1.2.0-era improvement backlog). Git history holds both in full — `git log --diff-filter=D -- BUILD-PROMPTS.md IMPROVEMENTS.md`, then `git show <sha>^:<file>`. Linux's implementation checklist is complete, but its operational release sign-off remains pending. What survives here is the part still cited from code.

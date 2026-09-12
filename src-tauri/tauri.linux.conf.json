@@ -17,6 +17,10 @@
           "/usr/lib/libjavascriptcoregtk-4.1.so.0": "target/appimage-webkit/libraries/libjavascriptcoregtk-4.1.so.0",
           "/usr/lib/librice-proto.so.0": "target/appimage-webkit/libraries/librice-proto.so.0",
           "/usr/lib/librice-io.so.0": "target/appimage-webkit/libraries/librice-io.so.0",
+          "/usr/lib/libsoftokn3.so": "target/appimage-webkit/nss/libsoftokn3.so",
+          "/usr/lib/libsoftokn3.chk": "target/appimage-webkit/nss/libsoftokn3.chk",
+          "/usr/lib/libfreeblpriv3.so": "target/appimage-webkit/nss/libfreeblpriv3.so",
+          "/usr/lib/libfreeblpriv3.chk": "target/appimage-webkit/nss/libfreeblpriv3.chk",
           "/usr/bin/studyvis-webkit-runtime/WebKitNetworkProcess": "target/appimage-webkit/processes/WebKitNetworkProcess",
           "/usr/bin/studyvis-webkit-runtime/WebKitWebProcess": "target/appimage-webkit/processes/WebKitWebProcess",
           "/usr/bin/studyvis-webkit-runtime/WebKitGPUProcess": "target/appimage-webkit/processes/WebKitGPUProcess",
@@ -35,6 +39,7 @@
           "/usr/lib/libpipewire-module-session-manager.so": "target/appimage-webkit/pipewire/modules/libpipewire-module-session-manager.so",
           "/usr/share/pipewire/client.conf": "target/appimage-webkit/pipewire/config/client.conf",
           "/usr/share/licenses/studyvis-webkit-runtime/BUILD-MANIFEST.txt": "target/appimage-webkit/licenses/BUILD-MANIFEST.txt",
+          "/usr/share/licenses/studyvis-webkit-runtime/GStreamer-LICENSE-LGPL-2.1": "target/appimage-webkit/licenses/GStreamer-LICENSE-LGPL-2.1",
           "/usr/share/licenses/studyvis-webkit-runtime/COPYING.LIB": "target/appimage-webkit/licenses/COPYING.LIB",
           "/usr/share/licenses/studyvis-webkit-runtime/LICENSE-APPLE": "target/appimage-webkit/licenses/LICENSE-APPLE",
           "/usr/share/licenses/studyvis-webkit-runtime/LICENSE-LGPL-2": "target/appimage-webkit/licenses/LICENSE-LGPL-2",
@@ -49,7 +54,11 @@
           "/usr/share/licenses/studyvis-runtime/LLAMA.CPP-MIT.txt": "target/appimage-webkit/notices/LLAMA.CPP-MIT.txt",
           "/usr/share/licenses/studyvis-runtime/TAURI-BINARY-RELEASES-MIT.txt": "target/appimage-webkit/notices/TAURI-BINARY-RELEASES-MIT.txt",
           "/usr/share/licenses/studyvis-runtime/WRY-MIT.txt": "target/appimage-webkit/notices/WRY-MIT.txt",
-          "/usr/share/licenses/studyvis-runtime/WRY-APACHE-2.0.txt": "target/appimage-webkit/notices/WRY-APACHE-2.0.txt"
+          "/usr/share/licenses/studyvis-runtime/WRY-APACHE-2.0.txt": "target/appimage-webkit/notices/WRY-APACHE-2.0.txt",
+          "/usr/share/licenses/studyvis-webkit-runtime/GSTREAMER-THIRD-PARTY-LICENSES.txt": "target/appimage-webkit/licenses/GSTREAMER-THIRD-PARTY-LICENSES.txt",
+          "/usr/share/licenses/studyvis-webkit-runtime/GSTREAMER-LICENSE-FILES.sha256": "target/appimage-webkit/licenses/GSTREAMER-LICENSE-FILES.sha256",
+          "/usr/share/licenses/studyvis-webkit-runtime/Meson-LICENSE-APACHE-2.0": "target/appimage-webkit/licenses/Meson-LICENSE-APACHE-2.0",
+          "/usr/share/licenses/studyvis-webkit-runtime/GStreamer-PTP-LICENSE-MPL-2.0": "target/appimage-webkit/licenses/GStreamer-PTP-LICENSE-MPL-2.0"
         }
       }
     }
