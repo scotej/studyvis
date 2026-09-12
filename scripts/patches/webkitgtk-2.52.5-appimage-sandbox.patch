@@ -536,7 +536,7 @@ diff --git a/Source/WebCore/platform/mediastream/gstreamer/RealtimeOutgoingMedia
  
  void RealtimeOutgoingMediaSourceGStreamer::start()
  {
-+    g_printerr("StudyVis outgoing start stopped=%d track=%p source=%p\\n", m_isStopped, m_track.get(), m_outgoingSource.get());
++    g_printerr("StudyVis outgoing start stopped=%d track=%p source=%p\n", m_isStopped, m_track.get(), m_outgoingSource.get());
      if (!m_isStopped) {
          GST_DEBUG_OBJECT(m_bin.get(), "Source already started");
          return;
@@ -545,7 +545,27 @@ diff --git a/Source/WebCore/platform/mediastream/gstreamer/RealtimeOutgoingMedia
      GST_DEBUG_OBJECT(m_bin.get(), "Starting outgoing source");
      if (m_track)
          m_track->addObserver(*this);
-@@ -252,17 +253,18 @@
+@@ -134,17 +135,19 @@
+     if (m_transceiver) {
+         auto pad = outgoingSourcePad();
+         if (!gst_pad_is_linked(pad.get())) {
+             GST_DEBUG_OBJECT(m_bin.get(), "Codec preferences haven't changed before startup, ensuring source is linked");
+             codecPreferencesChanged();
+         }
+     }
+ 
++    gst_bin_sync_children_states(GST_BIN_CAST(m_bin.get()));
+     gst_element_sync_state_with_parent(m_bin.get());
++    g_printerr("StudyVis outgoing state bin=%d source=%d input=%d tee=%d\n", GST_STATE(m_bin.get()), m_outgoingSource ? GST_STATE(m_outgoingSource.get()) : -1, GST_STATE(m_inputSelector.get()), GST_STATE(m_tee.get()));
+ 
+     startUpdatingStats();
+ }
+ 
+ void RealtimeOutgoingMediaSourceGStreamer::stop(StoppedCallback&& callback)
+ {
+     if (m_isStopped) {
+         callback();
+@@ -252,17 +255,18 @@
      GST_DEBUG_OBJECT(m_bin.get(), "Initializing from track, muted: %s, enabled: %s", boolForPrinting(m_muted), boolForPrinting(m_enabled));
  }
  
@@ -556,7 +576,7 @@ diff --git a/Source/WebCore/platform/mediastream/gstreamer/RealtimeOutgoingMedia
      auto srcPad = adoptGRef(gst_element_get_static_pad(m_bin.get(), "src"));
 -    gst_pad_link(srcPad.get(), m_webrtcSinkPad.get());
 +    auto result = gst_pad_link(srcPad.get(), m_webrtcSinkPad.get());
-+    g_printerr("StudyVis outgoing link result=%d src-linked=%d sink-linked=%d\\n", result, gst_pad_is_linked(srcPad.get()), gst_pad_is_linked(m_webrtcSinkPad.get()));
++    g_printerr("StudyVis outgoing link result=%d src-linked=%d sink-linked=%d\n", result, gst_pad_is_linked(srcPad.get()), gst_pad_is_linked(m_webrtcSinkPad.get()));
  }
  
  void RealtimeOutgoingMediaSourceGStreamer::setSinkPad(GRefPtr<GstPad>&& pad)
