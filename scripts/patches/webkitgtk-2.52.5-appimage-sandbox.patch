@@ -218,54 +218,6 @@ diff --git a/Source/WebCore/platform/mediastream/gstreamer/DesktopPortal.cpp b/S
 diff --git a/Source/WebCore/Modules/mediastream/gstreamer/GStreamerMediaEndpoint.cpp b/Source/WebCore/Modules/mediastream/gstreamer/GStreamerMediaEndpoint.cpp
 --- a/Source/WebCore/Modules/mediastream/gstreamer/GStreamerMediaEndpoint.cpp
 +++ b/Source/WebCore/Modules/mediastream/gstreamer/GStreamerMediaEndpoint.cpp
-@@ -559,16 +559,23 @@
- Vector<String> getMediaStreamIdsFromSDPMedia(const GstSDPMedia& media)
- {
-     HashSet<String> mediaStreamIdsSet;
-+    HashSet<String> legacyStreamIds;
-+    bool hasMediaLevelMsid = false;
-     for (guint i = 0; i < gst_sdp_media_attributes_len(&media); ++i) {
-         const auto attribute = gst_sdp_media_get_attribute(&media, i);
-         auto key = CStringView::unsafeFromUTF8(attribute->key);
-         if (key == "msid"_s) {
-             auto components = String(byteCast<char8_t>(unsafeSpan(attribute->value))).split(' ');
--            if (components.size() < 2)
-+            if (components.isEmpty())
-                 continue;
--            mediaStreamIdsSet.add(components[0]);
--        }
--        // MSID may also come in ssrc attributes, specially if they're in an SDP answer. They look like:
-+            hasMediaLevelMsid = true;
-+            if (components[0] != "-"_s)
-+                mediaStreamIdsSet.add(components[0]);
-+        }
-+        // Older peers only signal stream IDs in SSRC attributes. Use these
-+        // only when media-level MSID is absent: GStreamer can also advertise
-+        // a synthetic CNAME here, which is not another MediaStream (RFC 8830).
-+        // Legacy attributes look like:
-         // a=ssrc:3612593434 msid:e1019f4a-0983-4863-b923-b75903cced2c webrtctransceiver1
-         if (key == "ssrc"_s) {
-             auto outerComponents = String::fromUTF8(attribute->value).split(' ');
-@@ -576,14 +583,15 @@
-                 auto innerComponents = outer.split(':');
-                 if (innerComponents.size() < 2)
-                     continue;
--                if (innerComponents[0] == "msid"_s)
--                    mediaStreamIdsSet.add(innerComponents[1]);
-+                if (innerComponents[0] == "msid"_s && innerComponents[1] != "-"_s)
-+                    legacyStreamIds.add(innerComponents[1]);
-             }
-         }
-     }
-+    const auto& streamIds = hasMediaLevelMsid ? mediaStreamIdsSet : legacyStreamIds;
-     Vector<String> mediaStreamIds;
--    mediaStreamIds.reserveInitialCapacity(mediaStreamIdsSet.size());
--    for (const auto& msid : mediaStreamIdsSet)
-+    mediaStreamIds.reserveInitialCapacity(streamIds.size());
-+    for (const auto& msid : streamIds)
-         mediaStreamIds.append(msid);
-     return mediaStreamIds;
- }
 @@ -1321,44 +1329,52 @@
      onNegotiationNeeded();
  }
