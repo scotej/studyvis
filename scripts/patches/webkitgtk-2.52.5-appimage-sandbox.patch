@@ -527,14 +527,41 @@ diff --git a/Source/WebCore/Modules/mediastream/gstreamer/GStreamerRtpSenderBack
 diff --git a/Source/WebCore/platform/mediastream/gstreamer/RealtimeOutgoingMediaSourceGStreamer.cpp b/Source/WebCore/platform/mediastream/gstreamer/RealtimeOutgoingMediaSourceGStreamer.cpp
 --- a/Source/WebCore/platform/mediastream/gstreamer/RealtimeOutgoingMediaSourceGStreamer.cpp
 +++ b/Source/WebCore/platform/mediastream/gstreamer/RealtimeOutgoingMediaSourceGStreamer.cpp
-@@ -122,3 +122,4 @@
+@@ -116,16 +116,17 @@
+ {
+     GRefPtr<GstCaps> caps;
+     g_object_get(m_rtpCapsfilter.get(), "caps", &caps.outPtr(), nullptr);
+     return caps;
+ }
+ 
  void RealtimeOutgoingMediaSourceGStreamer::start()
  {
 +    g_printerr("StudyVis outgoing start stopped=%d track=%p source=%p\\n", m_isStopped, m_track.get(), m_outgoingSource.get());
      if (!m_isStopped) {
-@@ -259,3 +259,4 @@
+         GST_DEBUG_OBJECT(m_bin.get(), "Source already started");
+         return;
+     }
+ 
+     GST_DEBUG_OBJECT(m_bin.get(), "Starting outgoing source");
+     if (m_track)
+         m_track->addObserver(*this);
+@@ -252,17 +253,18 @@
+     GST_DEBUG_OBJECT(m_bin.get(), "Initializing from track, muted: %s, enabled: %s", boolForPrinting(m_muted), boolForPrinting(m_enabled));
+ }
+ 
+ void RealtimeOutgoingMediaSourceGStreamer::link()
+ {
+     GST_DEBUG_OBJECT(m_bin.get(), "Linking webrtcbin pad %" GST_PTR_FORMAT, m_webrtcSinkPad.get());
+ 
      auto srcPad = adoptGRef(gst_element_get_static_pad(m_bin.get(), "src"));
 -    gst_pad_link(srcPad.get(), m_webrtcSinkPad.get());
 +    auto result = gst_pad_link(srcPad.get(), m_webrtcSinkPad.get());
 +    g_printerr("StudyVis outgoing link result=%d src-linked=%d sink-linked=%d\\n", result, gst_pad_is_linked(srcPad.get()), gst_pad_is_linked(m_webrtcSinkPad.get()));
  }
+ 
+ void RealtimeOutgoingMediaSourceGStreamer::setSinkPad(GRefPtr<GstPad>&& pad)
+ {
+     GST_DEBUG_OBJECT(m_bin.get(), "Associating with webrtcbin pad %" GST_PTR_FORMAT, pad.get());
+     m_webrtcSinkPad = WTF::move(pad);
+ 
+     if (m_transceiver)
