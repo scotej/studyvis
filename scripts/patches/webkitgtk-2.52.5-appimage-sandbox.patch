@@ -215,6 +215,22 @@ diff --git a/Source/WebCore/platform/mediastream/gstreamer/DesktopPortal.cpp b/S
      return nodeData;
  }
  
+diff --git a/Source/WebCore/platform/mediastream/gstreamer/GStreamerIncomingTrackProcessor.cpp b/Source/WebCore/platform/mediastream/gstreamer/GStreamerIncomingTrackProcessor.cpp
+--- a/Source/WebCore/platform/mediastream/gstreamer/GStreamerIncomingTrackProcessor.cpp
++++ b/Source/WebCore/platform/mediastream/gstreamer/GStreamerIncomingTrackProcessor.cpp
+@@ -82,8 +82,11 @@
+ 
+     g_object_get(m_pad.get(), "transceiver", &m_data.transceiver.outPtr(), nullptr);
+ 
++    // Prefer the SSRC-specific MSID above. During bundled or recycled
++    // transceivers, the media-level a-msid may carry a synthetic CNAME rather
++    // than the MediaStream identity associated with this RTP source.
+     auto msIdAttribute = gstStructureGetString(structure, "a-msid"_s);
+-    if (!msIdAttribute.isEmpty()) {
++    if (m_sdpMsIdAndTrackId.second.isEmpty() && !msIdAttribute.isEmpty()) {
+         if (startsWith(msIdAttribute.span(), " "_s))
+             m_sdpMsIdAndTrackId = { emptyString(), msIdAttribute.span().subspan(1) };
+         else {
 diff --git a/Source/WebCore/Modules/mediastream/gstreamer/GStreamerMediaEndpoint.cpp b/Source/WebCore/Modules/mediastream/gstreamer/GStreamerMediaEndpoint.cpp
 --- a/Source/WebCore/Modules/mediastream/gstreamer/GStreamerMediaEndpoint.cpp
 +++ b/Source/WebCore/Modules/mediastream/gstreamer/GStreamerMediaEndpoint.cpp
