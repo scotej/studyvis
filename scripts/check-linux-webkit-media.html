@@ -147,11 +147,25 @@
       const negotiate = async (offerer, answerer) => {
         const offer = await offerer.createOffer()
         await offerer.setLocalDescription(offer)
+        report(
+          `offer ${offerer === a ? 'a' : 'b'} ` +
+            offer.sdp
+              .split('\\r\\n')
+              .filter((line) => /^(m=|a=mid:|a=msid:)/.test(line))
+              .join('|')
+        )
         await answerer.setRemoteDescription(offer)
         for (const candidate of pending.get(answerer).splice(0))
           await answerer.addIceCandidate(candidate)
         const answer = await answerer.createAnswer()
         await answerer.setLocalDescription(answer)
+        report(
+          `answer ${answerer === a ? 'a' : 'b'} ` +
+            answer.sdp
+              .split('\\r\\n')
+              .filter((line) => /^(m=|a=mid:|a=msid:)/.test(line))
+              .join('|')
+        )
         await offerer.setRemoteDescription(answer)
         for (const candidate of pending.get(offerer).splice(0))
           await offerer.addIceCandidate(candidate)
