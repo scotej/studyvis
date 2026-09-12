@@ -149,7 +149,7 @@
         await offerer.setLocalDescription(offer)
         report(
           `offer ${offerer === a ? 'a' : 'b'} ` +
-            offer.sdp
+            offerer.localDescription.sdp
               .split('\\r\\n')
               .filter((line) => /^(m=|a=mid:|a=msid:)/.test(line))
               .join('|')
@@ -161,7 +161,7 @@
         await answerer.setLocalDescription(answer)
         report(
           `answer ${answerer === a ? 'a' : 'b'} ` +
-            answer.sdp
+            answerer.localDescription.sdp
               .split('\\r\\n')
               .filter((line) => /^(m=|a=mid:|a=msid:)/.test(line))
               .join('|')
