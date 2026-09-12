@@ -307,6 +307,23 @@ diff --git a/Source/WebCore/Modules/mediastream/gstreamer/GStreamerMediaEndpoint
          mediaStreamIds.append(msid);
      return mediaStreamIds;
  }
+@@ -702,14 +702,15 @@
+-        GST_DEBUG_OBJECT(m_pipeline.get(), "Looking-up outgoing source with msid %s in %zu unlinked sources", msid.utf8(), m_unlinkedOutgoingSources.size());
++        GST_WARNING_OBJECT(m_pipeline.get(), "Looking-up outgoing source with msid %s in %zu unlinked sources", msid.utf8(), m_unlinkedOutgoingSources.size());
+         m_unlinkedOutgoingSources.removeFirstMatching([&, msid = String(msid.span())](auto& source) -> bool {
+             if (source->type() != sourceType) {
+                 GST_DEBUG_OBJECT(pipeline(), "Un-matched source type");
+                 return false;
+             }
+             if (const auto& track = source->track()) {
+                 auto sourceMsid = makeString(source->mediaStreamID(), ' ', track->id());
++                GST_WARNING_OBJECT(pipeline(), "Outgoing candidate source msid %s for media msid %s", sourceMsid.utf8().data(), msid.utf8().data());
+                 if (!msid.isEmpty() && sourceMsid != msid) {
+                     GST_DEBUG_OBJECT(pipeline(), "Un-matched outgoing source msid: %s", sourceMsid.utf8().data());
+                     return false;
+                 }
+             }
+ 
 @@ -716,7 +716,7 @@
  
 -            auto allowedCaps = capsFromSDPMedia(media);
@@ -317,6 +334,14 @@ diff --git a/Source/WebCore/Modules/mediastream/gstreamer/GStreamerMediaEndpoint
                  auto rtpCaps = source->rtpCaps();
                  auto sinkPad = requestPad(rtpCaps, source->mediaStreamID());
                  source->setSinkPad(WTF::move(sinkPad));
+@@ -730,5 +730,6 @@
+-            source->link();
++            GST_WARNING_OBJECT(pipeline(), "Linking outgoing source for media msid %s", msid.utf8().data());
++            source->link();
+             callOnMainThreadAndWait([&] {
+                 source->start();
+             });
+             return true;
 @@ -1321,44 +1322,77 @@
      onNegotiationNeeded();
  }
