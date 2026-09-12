@@ -307,23 +307,6 @@ diff --git a/Source/WebCore/Modules/mediastream/gstreamer/GStreamerMediaEndpoint
          mediaStreamIds.append(msid);
      return mediaStreamIds;
  }
-@@ -702,14 +702,15 @@
--        GST_DEBUG_OBJECT(m_pipeline.get(), "Looking-up outgoing source with msid %s in %zu unlinked sources", msid.utf8(), m_unlinkedOutgoingSources.size());
-+        g_printerr("StudyVis outgoing lookup msid=%s unlinked=%zu\n", msid.utf8(), m_unlinkedOutgoingSources.size());
-         m_unlinkedOutgoingSources.removeFirstMatching([&, msid = String(msid.span())](auto& source) -> bool {
-             if (source->type() != sourceType) {
-                 GST_DEBUG_OBJECT(pipeline(), "Un-matched source type");
-                 return false;
-             }
-             if (const auto& track = source->track()) {
-                 auto sourceMsid = makeString(source->mediaStreamID(), ' ', track->id());
-+                g_printerr("StudyVis outgoing candidate source-msid=%s media-msid=%s\n", sourceMsid.utf8().data(), msid.utf8().data());
-                 if (!msid.isEmpty() && sourceMsid != msid) {
-                     GST_DEBUG_OBJECT(pipeline(), "Un-matched outgoing source msid: %s", sourceMsid.utf8().data());
-                     return false;
-                 }
-             }
- 
 @@ -716,7 +716,7 @@
  
 -            auto allowedCaps = capsFromSDPMedia(media);
@@ -334,9 +317,8 @@ diff --git a/Source/WebCore/Modules/mediastream/gstreamer/GStreamerMediaEndpoint
                  auto rtpCaps = source->rtpCaps();
                  auto sinkPad = requestPad(rtpCaps, source->mediaStreamID());
                  source->setSinkPad(WTF::move(sinkPad));
-@@ -730,5 +730,6 @@
+@@ -730,5 +730,5 @@
 -            source->link();
-+            g_printerr("StudyVis linking outgoing source media-msid=%s\n", msid.utf8().data());
 +            source->link();
              callOnMainThreadAndWait([&] {
                  source->start();
@@ -527,56 +509,6 @@ diff --git a/Source/WebCore/Modules/mediastream/gstreamer/GStreamerRtpSenderBack
 diff --git a/Source/WebCore/platform/mediastream/gstreamer/RealtimeOutgoingMediaSourceGStreamer.cpp b/Source/WebCore/platform/mediastream/gstreamer/RealtimeOutgoingMediaSourceGStreamer.cpp
 --- a/Source/WebCore/platform/mediastream/gstreamer/RealtimeOutgoingMediaSourceGStreamer.cpp
 +++ b/Source/WebCore/platform/mediastream/gstreamer/RealtimeOutgoingMediaSourceGStreamer.cpp
-@@ -116,16 +116,17 @@
- {
-     GRefPtr<GstCaps> caps;
-     g_object_get(m_rtpCapsfilter.get(), "caps", &caps.outPtr(), nullptr);
-     return caps;
- }
- 
- void RealtimeOutgoingMediaSourceGStreamer::start()
- {
-+    g_printerr("StudyVis outgoing start stopped=%d track=%p source=%p\n", m_isStopped, m_track.get(), m_outgoingSource.get());
-     if (!m_isStopped) {
-         GST_DEBUG_OBJECT(m_bin.get(), "Source already started");
-         return;
-     }
- 
-     GST_DEBUG_OBJECT(m_bin.get(), "Starting outgoing source");
-     if (m_track)
-         m_track->addObserver(*this);
-@@ -135,16 +136,31 @@
-         auto pad = outgoingSourcePad();
-         if (!gst_pad_is_linked(pad.get())) {
-             GST_DEBUG_OBJECT(m_bin.get(), "Codec preferences haven't changed before startup, ensuring source is linked");
-             codecPreferencesChanged();
-         }
-     }
- 
-     gst_element_sync_state_with_parent(m_bin.get());
-+    g_printerr("StudyVis outgoing state bin=%d source=%d input=%d tee=%d\n", GST_STATE(m_bin.get()), m_outgoingSource ? GST_STATE(m_outgoingSource.get()) : -1, GST_STATE(m_inputSelector.get()), GST_STATE(m_tee.get()));
-+    auto installProbe = [](GstPad* pad, const char* label) {
-+        if (!pad)
-+            return;
-+        gst_pad_add_probe(pad, GST_PAD_PROBE_TYPE_BUFFER, [](GstPad*, GstPadProbeInfo*, gpointer userData) {
-+            g_printerr("StudyVis outgoing first-buffer %s\n", static_cast<const char*>(userData));
-+            return GST_PAD_PROBE_REMOVE;
-+        }, const_cast<char*>(label), nullptr);
-+    };
-+    auto sourcePad = outgoingSourcePad();
-+    installProbe(sourcePad.get(), "source");
-+    auto selectorPad = adoptGRef(gst_element_get_static_pad(m_inputSelector.get(), "src"));
-+    installProbe(selectorPad.get(), "selector");
-+    auto capsPad = adoptGRef(gst_element_get_static_pad(m_rtpCapsfilter.get(), "src"));
-+    installProbe(capsPad.get(), "caps");
- 
-     startUpdatingStats();
- }
- 
- void RealtimeOutgoingMediaSourceGStreamer::stop(StoppedCallback&& callback)
- {
-     if (m_isStopped) {
-         callback();
 @@ -171,38 +187,41 @@
          return;
      }
