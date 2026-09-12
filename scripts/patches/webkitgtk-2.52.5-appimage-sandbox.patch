@@ -317,7 +317,7 @@ diff --git a/Source/WebCore/Modules/mediastream/gstreamer/GStreamerMediaEndpoint
                  auto rtpCaps = source->rtpCaps();
                  auto sinkPad = requestPad(rtpCaps, source->mediaStreamID());
                  source->setSinkPad(WTF::move(sinkPad));
-@@ -1321,44 +1322,76 @@
+@@ -1321,44 +1322,77 @@
      onNegotiationNeeded();
  }
  
@@ -366,6 +366,18 @@ diff --git a/Source/WebCore/Modules/mediastream/gstreamer/GStreamerMediaEndpoint
 +    if (!media)
 +        return;
 +
++    // Seed the recycled transceiver with the replacement identity before
++    // offer generation. Strip the previous m-line identity so GStreamer does
++    // not reuse its mid or advertise its old stream.
++    auto codecPreferences = capsFromSDPMedia(media);
++    auto msid = makeString(mediaStreamId, ' ', track.id());
++    for (unsigned i = 0; i < gst_caps_get_size(codecPreferences.get()); ++i) {
++        auto* structure = gst_caps_get_structure(codecPreferences.get(), i);
++        gst_structure_remove_field(structure, "a-mid");
++        gst_structure_set(structure, "a-msid", G_TYPE_STRING, msid.utf8().data(), nullptr);
++    }
++    g_object_set(transceiver, "codec-preferences", codecPreferences.get(), nullptr);
++
 +    // removeTrack() stops the old source but the sender backend leaves its
 +    // request pad attached to the transceiver. Release that stale pad before
 +    // asking webrtcbin for the replacement, otherwise a recycled m-line can
@@ -403,21 +415,10 @@ diff --git a/Source/WebCore/Modules/mediastream/gstreamer/GStreamerMediaEndpoint
 +        outgoingSource->setRtpHeaderExtensionMapping(m_rtpHeaderExtensions);
 +        configureSource(outgoingSource.get(), nullptr);
 +
-+        // Attach the replacement pad before offer generation. Without an
-+        // associated sink pad, webrtcbin advertises the RTP CNAME as the
-+        // stream identity for a recycled m-line instead of the negotiated MSID.
-+        auto allowedCaps = capsFromSDPMedia(media);
-+        // The previous remote m-line carries its own mid and msid. Keep the
-+        // replacement's stream identity while dropping those stale values.
-+        auto msid = makeString(outgoingSource->mediaStreamID(), ' ', track.id());
-+        for (unsigned i = 0; i < gst_caps_get_size(allowedCaps.get()); ++i) {
-+            auto* structure = gst_caps_get_structure(allowedCaps.get(), i);
-+            gst_structure_remove_field(structure, "a-mid");
-+            gst_structure_set(structure, "a-msid", G_TYPE_STRING, msid.utf8().data(), nullptr);
-+        }
-+        outgoingSource->configure(WTF::move(allowedCaps));
-+        auto rtpCaps = outgoingSource->rtpCaps();
-+        outgoingSource->setSinkPad(requestPad(rtpCaps, outgoingSource->mediaStreamID()));
++        // Use the same deferred negotiation/link/start path as a new sender.
++        // The transceiver codec preferences above carry the replacement MSID;
++        // linkOutgoingSources attaches the sink pad after the offer is made.
++        m_unlinkedOutgoingSources.append(outgoingSource.ptr());
 +    };
 +    switchOn(source, [&](Ref<RealtimeOutgoingAudioSourceGStreamer>& outgoingSource) {
 +        configureRecycledSource(outgoingSource);
