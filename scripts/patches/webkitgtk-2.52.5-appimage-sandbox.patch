@@ -314,6 +314,22 @@ diff --git a/Source/WebCore/Modules/mediastream/gstreamer/GStreamerMediaEndpoint
 +    const auto media = gst_sdp_message_get_media(remoteDescription->sdp, mLineIndex);
 +    if (!media)
 +        return;
++    // removeTrack() stops the old source but the sender backend leaves its
++    // request pad attached to the transceiver. Release that stale pad before
++    // asking webrtcbin for the replacement, otherwise a recycled m-line can
++    // keep the old sender association and silently drop a restarted track.
++    for (auto pad : GstIteratorAdaptor<GstPad>(gst_element_iterate_sink_pads(m_webrtcBin.get()))) {
++        GRefPtr<GstWebRTCRTPTransceiver> padTransceiver;
++        g_object_get(pad, "transceiver", &padTransceiver.outPtr(), nullptr);
++        if (padTransceiver.get() != transceiver)
++            continue;
++        auto srcPad = adoptGRef(gst_pad_get_peer(pad.get()));
++        if (srcPad && gst_pad_is_linked(pad.get()))
++            gst_pad_unlink(srcPad.get(), pad.get());
++        GST_DEBUG_OBJECT(m_pipeline.get(), "Releasing stale sender pad %" GST_PTR_FORMAT, pad.get());
++        gst_element_release_request_pad(m_webrtcBin.get(), pad.get());
++        break;
++    }
 +    auto codecPreferences = capsFromSDPMedia(media);
 +    auto msid = makeString(mediaStreamId, ' ', track.id());
 +    for (unsigned i = 0; i < gst_caps_get_size(codecPreferences.get()); ++i)
