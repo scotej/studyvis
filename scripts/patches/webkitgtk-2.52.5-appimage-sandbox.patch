@@ -317,7 +317,7 @@ diff --git a/Source/WebCore/Modules/mediastream/gstreamer/GStreamerMediaEndpoint
                  auto rtpCaps = source->rtpCaps();
                  auto sinkPad = requestPad(rtpCaps, source->mediaStreamID());
                  source->setSinkPad(WTF::move(sinkPad));
-@@ -1321,44 +1322,73 @@
+@@ -1321,44 +1322,76 @@
      onNegotiationNeeded();
  }
  
@@ -407,11 +407,14 @@ diff --git a/Source/WebCore/Modules/mediastream/gstreamer/GStreamerMediaEndpoint
 +        // associated sink pad, webrtcbin advertises the RTP CNAME as the
 +        // stream identity for a recycled m-line instead of the negotiated MSID.
 +        auto allowedCaps = capsFromSDPMedia(media);
-+        // The previous remote m-line carries its own mid and msid. Reusing
-+        // either identity in the replacement codec caps makes webrtcbin
-+        // reject the next offer or advertise the stale stream.
-+        for (unsigned i = 0; i < gst_caps_get_size(allowedCaps.get()); ++i)
-+            gst_structure_remove_fields(gst_caps_get_structure(allowedCaps.get(), i), "a-mid", "a-msid", nullptr);
++        // The previous remote m-line carries its own mid and msid. Keep the
++        // replacement's stream identity while dropping those stale values.
++        auto msid = makeString(outgoingSource->mediaStreamID(), ' ', track.id());
++        for (unsigned i = 0; i < gst_caps_get_size(allowedCaps.get()); ++i) {
++            auto* structure = gst_caps_get_structure(allowedCaps.get(), i);
++            gst_structure_remove_field(structure, "a-mid");
++            gst_structure_set(structure, "a-msid", G_TYPE_STRING, msid.utf8().data(), nullptr);
++        }
 +        outgoingSource->configure(WTF::move(allowedCaps));
 +        auto rtpCaps = outgoingSource->rtpCaps();
 +        outgoingSource->setSinkPad(requestPad(rtpCaps, outgoingSource->mediaStreamID()));
