@@ -266,7 +266,7 @@ diff --git a/Source/WebCore/Modules/mediastream/gstreamer/GStreamerMediaEndpoint
          mediaStreamIds.append(msid);
      return mediaStreamIds;
  }
-@@ -1321,44 +1329,55 @@
+@@ -1321,44 +1329,71 @@
      onNegotiationNeeded();
  }
  
