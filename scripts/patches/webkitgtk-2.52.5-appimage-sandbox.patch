@@ -398,3 +398,46 @@ diff --git a/Source/WebCore/Modules/mediastream/gstreamer/GStreamerPeerConnectio
  
          // 5. If transceiver.[[Direction]] is "recvonly", set transceiver.[[Direction]] to "sendrecv".
          // 6. If transceiver.[[Direction]] is "inactive", set transceiver.[[Direction]] to "sendonly".
+diff --git a/Source/WebCore/Modules/mediastream/gstreamer/GStreamerRtpSenderBackend.cpp b/Source/WebCore/Modules/mediastream/gstreamer/GStreamerRtpSenderBackend.cpp
+--- a/Source/WebCore/Modules/mediastream/gstreamer/GStreamerRtpSenderBackend.cpp
++++ b/Source/WebCore/Modules/mediastream/gstreamer/GStreamerRtpSenderBackend.cpp
+@@ -89,6 +89,7 @@ void GStreamerRtpSenderBackend::setSource(Source&& source)
+ {
+     ASSERT(!hasSource());
+     GST_DEBUG_OBJECT(m_rtcSender.get(), "Setting source");
++    ++m_sourceGeneration;
+     m_source = WTF::move(source);
+     ASSERT(hasSource());
+ 
+@@ -125,13 +126,16 @@ void GStreamerRtpSenderBackend::startSource()
+ void GStreamerRtpSenderBackend::stopSource()
+ {
+     GST_DEBUG_OBJECT(m_rtcSender.get(), "Stopping source");
++    auto sourceGeneration = m_sourceGeneration;
+     switchOn(m_source, [&](Ref<RealtimeOutgoingAudioSourceGStreamer>& source) {
+-        source->stop([self = RefPtr { this }] {
+-            self->clearSource();
++        source->stop([self = RefPtr { this }, sourceGeneration] {
++            if (self->m_sourceGeneration == sourceGeneration)
++                self->clearSource();
+         });
+     }, [&](Ref<RealtimeOutgoingVideoSourceGStreamer>& source) {
+-        source->stop([self = RefPtr { this }] {
+-            self->clearSource();
++        source->stop([self = RefPtr { this }, sourceGeneration] {
++            if (self->m_sourceGeneration == sourceGeneration)
++                self->clearSource();
+         });
+     }, [&](std::nullptr_t&) {
+     });
+diff --git a/Source/WebCore/Modules/mediastream/gstreamer/GStreamerRtpSenderBackend.h b/Source/WebCore/Modules/mediastream/gstreamer/GStreamerRtpSenderBackend.h
+--- a/Source/WebCore/Modules/mediastream/gstreamer/GStreamerRtpSenderBackend.h
++++ b/Source/WebCore/Modules/mediastream/gstreamer/GStreamerRtpSenderBackend.h
+@@ -100,6 +100,7 @@ private:
+     WeakPtr<GStreamerPeerConnectionBackend> m_peerConnectionBackend;
+     GRefPtr<GstWebRTCRTPSender> m_rtcSender;
+     Source m_source;
++    uint64_t m_sourceGeneration { 0 };
+     GUniquePtr<GstStructure> m_initData;
+     mutable GUniquePtr<GstStructure> m_currentParameters;
+ };
