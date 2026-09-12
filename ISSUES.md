@@ -1084,14 +1084,25 @@ metadata, preventing correct delivery even with working native media. Both
 released Trystero versions already include the native stream ID, so matching
 that ID preserves the existing wire contract.
 
-**Status.** **in review** — runtime revision 6 pins matched GStreamer 1.26.11
-sources, restores the required curated payload, fixes portal caps and recycled
-sender ownership, and matches Trystero announcements by stream ID. Exact
-AppImage checks now process native media and exercise peer rendering and
-renegotiation. The output wrapper leaves the Wayland client to the host EGL
-driver before the unchanged verified output tool packages the artifact.
-Source/license/build-ID checks cover the expanded runtime. The rebuilt WebKit
-regression and PLAN §8's physical KDE matrix remain validation requirements.
+The first rebuilt regression reached the reverse-offer path and failed with
+`Could not reuse transceiver`. Its receive-only transceiver had no codec
+preferences, so the first patch substituted WebKit's unassigned VP8/Opus
+capability caps; GStreamer cannot form an SDP media section from dynamic codecs
+without RTP payload numbers. The recycled sender now derives preferences from
+the negotiated remote m-line, replaces only its MSID, and then uses WebKit's
+normal deferred link/start lifecycle.
+
+**Status.** **in review** — runtime revision 7 pins matched GStreamer 1.28.7 and
+libnice 0.1.24 sources, restores the required curated payload, fixes portal caps
+and recycled sender ownership, and matches Trystero announcements by stream ID.
+The maintained runtime also includes the DTLS fingerprint/certificate, Opus,
+RTP, and TURN fixes absent from 1.26.11 (including CVE-2026-14935,
+CVE-2026-59692, and CVE-2026-18297). Exact AppImage checks process native media
+and exercise peer rendering and renegotiation. The output wrapper leaves the
+Wayland client to the host EGL driver before the unchanged verified output tool
+packages the artifact. Source/license/build-ID checks cover GStreamer and
+libnice; only PipeWire remains distro-provided. The rebuilt WebKit regression
+and PLAN §8's physical KDE matrix remain validation requirements.
 
 ## Archive — retired backlogs
 

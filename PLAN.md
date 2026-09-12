@@ -184,7 +184,7 @@ Promoting it to shipped support requires all of the following:
 2. Its advisory `Linux AppImage startup smoke` job — excluded from the
    `All pre-merge checks` aggregator because it compiles WebKitGTK from
    source, but run and reported on every pull request — builds the pinned WebKitGTK
-   2.52.5 + librice 0.4.3 + GStreamer 1.26.11 runtime, packages that private copy with the
+   2.52.5 + librice 0.4.3 + GStreamer 1.28.7 + libnice 0.1.24 runtime, packages that private copy with the
    media-framework and sandbox helpers, verifies the expected runtime files,
    build manifest, complete upstream license inventory, cross-platform notice
    pair, ELF dependencies, and packaged-only GStreamer WebRTC/SCTP elements,

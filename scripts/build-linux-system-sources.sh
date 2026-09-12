@@ -392,10 +392,10 @@ classify_non_ubuntu() {
       printf 'pinned-llama\tllama.cpp %s / commit %s; exact source + MIT notice in this bundle\n' \
         "$STUDYVIS_LLAMA_TAG" "$STUDYVIS_LLAMA_COMMIT"
       ;;
-    usr/lib/gstreamer-1.0/libgstnice.so|usr/lib/gstreamer-1.0/libgstpipewire.so)
+    usr/lib/gstreamer-1.0/libgstpipewire.so)
       return 1
       ;;
-    usr/lib/libgst*.so*|usr/lib/gstreamer-1.0/libgst*.so|usr/lib/gstreamer1.0/gstreamer-1.0/*)
+    usr/lib/libgst*.so*|usr/lib/libnice.so*|usr/lib/gstreamer-1.0/libgst*.so|usr/lib/gstreamer1.0/gstreamer-1.0/*)
       reference=${rel#usr/lib/}
       reference=${reference#gstreamer1.0/}
       reference="$gstreamer_runtime_libdir/$reference"

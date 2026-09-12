@@ -198,18 +198,19 @@ binding. StudyVis therefore builds that binding into a private AppImage runtime,
 explicitly reasserts media streams, and keeps the rest of WebKit's experimental
 feature set disabled.
 
-The pinned, hash-verified input tuple for runtime revision 6 is:
+The pinned, hash-verified input tuple for runtime revision 7 is:
 
-| Input                              | Pinned source                                                                            | SHA-256                                                            |
-| ---------------------------------- | ---------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
-| WebKitGTK                          | `https://webkitgtk.org/releases/webkitgtk-2.52.5.tar.xz`                                 | `8a531a9abd2215936e8a8a914c077b586c0228b31d652f205286a8ec90f3364b` |
-| librice                            | `https://github.com/ystreet/librice/archive/refs/tags/v0.4.3.tar.gz`                     | `4671e1835f9ab0f8d87e8d9e22b6bfb06f928aeae442841ab81881dff61e3f4b` |
-| AppImage runtime portability patch | `scripts/patches/webkitgtk-2.52.5-appimage-sandbox.patch`                                | `edc669c77ea7eba40b6454fd95369d4601b6632615b8174abd9df0e304ac54a0` |
-| GStreamer core                     | `https://gstreamer.freedesktop.org/src/gstreamer/gstreamer-1.26.11.tar.xz`               | `2e0bd192d0438ea606a6f76a95c8e16542167656ffec2c2bc3aaf6ee0837fbf6` |
-| GStreamer base                     | `https://gstreamer.freedesktop.org/src/gst-plugins-base/gst-plugins-base-1.26.11.tar.xz` | `fc50f885d41f5d0407ce0876ec7235d9e7b82d48db2f4bc72c5f244a4ac79263` |
-| GStreamer good                     | `https://gstreamer.freedesktop.org/src/gst-plugins-good/gst-plugins-good-1.26.11.tar.xz` | `001deb0876d5d743cd3448abf74a27adec3fd850012fcb1b00994861bd6c1145` |
-| GStreamer bad                      | `https://gstreamer.freedesktop.org/src/gst-plugins-bad/gst-plugins-bad-1.26.11.tar.xz`   | `110fb82795f0e569b1e27b12ab9699d35c7762e1ff4db95335d6ac8d1442af3d` |
-| Meson                              | `https://github.com/mesonbuild/meson/releases/download/1.7.2/meson-1.7.2.tar.gz`         | `4d40d63aa748a9c139cc41ab9bffe43edd113c5639d78bde81544ca955aea890` |
+| Input                              | Pinned source                                                                           | SHA-256                                                            |
+| ---------------------------------- | --------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
+| WebKitGTK                          | `https://webkitgtk.org/releases/webkitgtk-2.52.5.tar.xz`                                | `8a531a9abd2215936e8a8a914c077b586c0228b31d652f205286a8ec90f3364b` |
+| librice                            | `https://github.com/ystreet/librice/archive/refs/tags/v0.4.3.tar.gz`                    | `4671e1835f9ab0f8d87e8d9e22b6bfb06f928aeae442841ab81881dff61e3f4b` |
+| AppImage runtime portability patch | `scripts/patches/webkitgtk-2.52.5-appimage-sandbox.patch`                               | `64648124f8f13f8840ec8f6514f531c9898ddf3bbac1115243c8b0c19bf367e2` |
+| GStreamer core                     | `https://gstreamer.freedesktop.org/src/gstreamer/gstreamer-1.28.7.tar.xz`               | `787329b2c5758e228a71d926a6dcf960bceaacca3cadd63874ba665dfcda013e` |
+| GStreamer base                     | `https://gstreamer.freedesktop.org/src/gst-plugins-base/gst-plugins-base-1.28.7.tar.xz` | `ed6e5410f496d171818763af2265e7977154bc7f9b827e98acf8c5bed21dd5a7` |
+| GStreamer good                     | `https://gstreamer.freedesktop.org/src/gst-plugins-good/gst-plugins-good-1.28.7.tar.xz` | `87256969c82cf3bc8574301f3e7044a90de0ac500a5a27d8ba38c4dde894dd8b` |
+| GStreamer bad                      | `https://gstreamer.freedesktop.org/src/gst-plugins-bad/gst-plugins-bad-1.28.7.tar.xz`   | `dc525383c18b2c265bbe6a43d498656cd918aaa130aa4e3abeabcdaa741c3ffe` |
+| libnice                            | `https://libnice.freedesktop.org/releases/libnice-0.1.24.tar.gz`                        | `cfb5e8e778534f2f5b3c6f4958a1eb057c6b95c537c0f100817a537cf5d64fcc` |
+| Meson                              | `https://github.com/mesonbuild/meson/releases/download/1.7.2/meson-1.7.2.tar.gz`        | `4d40d63aa748a9c139cc41ab9bffe43edd113c5639d78bde81544ca955aea890` |
 
 `scripts/linux-webkit-runtime.env` is the exact source URL/version/hash,
 portability-patch hash, `cargo-c` version, runtime revision, and AppImage
@@ -238,10 +239,10 @@ bundled Wayland client by accident.
 This is a pinned, reviewable build recipe, not a claim that independent builds
 are bit-for-bit identical. Production builds use Ubuntu 24.04, Rust 1.97.1,
 `cargo-c` 0.10.24, and the workflow's declared source-build dependency set.
-The private runtime builds GStreamer 1.26.11 core/base/good/bad using pinned
-Meson 1.7.2. Noble's 1.24.2 meets WebKit's configure minimum but has incompatible
-transceiver and incoming-stream behavior (#312). Only the PipeWire and libnice
-plugins remain distro-provided; the remaining GStreamer libraries, plugins,
+The private runtime builds GStreamer 1.28.7 core/base/good/bad and libnice 0.1.24
+using pinned Meson 1.7.2. Noble's 1.24.2 meets WebKit's configure minimum but has
+incompatible transceiver and incoming-stream behavior (#312). Only the PipeWire
+plugin remains distro-provided; the remaining GStreamer libraries, plugins,
 scanner and PTP helper must match the source-built prefix's build IDs.
 The Ubuntu 24.04 build baseline retains the AppImage's glibc 2.39 floor.
 CI/preview cache keys cover the runtime tuple, builder, librice notice generator,

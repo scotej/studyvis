@@ -131,6 +131,9 @@ license_files=(
   BUILD-MANIFEST.txt
   GStreamer-LICENSE-LGPL-2.1
   GStreamer-PTP-LICENSE-MPL-2.0
+  Libnice-LICENSING
+  Libnice-LICENSE-LGPL-2.1
+  Libnice-LICENSE-MPL-1.1
   GSTREAMER-THIRD-PARTY-LICENSES.txt
   GSTREAMER-LICENSE-FILES.sha256
   Meson-LICENSE-APACHE-2.0
@@ -158,6 +161,18 @@ for notice in GSTREAMER-THIRD-PARTY-LICENSES.txt GSTREAMER-LICENSE-FILES.sha256 
   read -r actual_sha _ < <(sha256sum "$license_dir/$notice")
   [[ $actual_sha == "$expected_sha" ]] || die "GStreamer license evidence has the wrong SHA256: $notice"
 done
+for license in Libnice-LICENSING Libnice-LICENSE-LGPL-2.1 Libnice-LICENSE-MPL-1.1; do
+  case $license in
+    Libnice-LICENSING) expected_sha=$STUDYVIS_LIBNICE_LICENSING_SHA256 ;;
+    Libnice-LICENSE-LGPL-2.1) expected_sha=$STUDYVIS_LIBNICE_LGPL_SHA256 ;;
+    Libnice-LICENSE-MPL-1.1) expected_sha=$STUDYVIS_LIBNICE_MPL_SHA256 ;;
+  esac
+  read -r actual_sha _ < <(sha256sum "$license_dir/$license")
+  [[ $actual_sha == "$expected_sha" ]] || die "libnice license evidence has the wrong SHA256: $license"
+done
+[[ $(wc -l <"$license_dir/GSTREAMER-LICENSE-FILES.sha256") -eq 15 ]] || {
+  die "packaged GStreamer/libnice license hash inventory is incomplete"
+}
 if ! cmp -s "$license_dir/BUILD-MANIFEST.txt" \
   <(bash "$script_dir/build-linux-webkit-runtime.sh" --print-manifest); then
   die "packaged runtime manifest does not match the repository tuple and flags"
@@ -294,7 +309,7 @@ gstreamer_runtime_libdir=${gstreamer_runtime_libdir%/pkgconfig}
 while IFS= read -r -d '' payload; do
   name=${payload##*/}
   case $payload in
-    "$plugins/libgstnice.so"|"$plugins/libgstpipewire.so") continue ;;
+    "$plugins/libgstpipewire.so") continue ;;
     "$plugins/"*|"${scanner%/*}/"*) reference="$gstreamer_runtime_libdir/gstreamer-1.0/$name" ;;
     *) reference="$gstreamer_runtime_libdir/$name" ;;
   esac
@@ -305,7 +320,7 @@ while IFS= read -r -d '' payload; do
     die "packaged GStreamer differs from its pinned source build: $name"
   }
 done < <(find "$packaged_libdir" -type f \
-  \( -name 'libgst*.so*' -o -name gst-plugin-scanner -o -name gst-ptp-helper \) -print0)
+  \( -name 'libgst*.so*' -o -name 'libnice.so*' -o -name gst-plugin-scanner -o -name gst-ptp-helper \) -print0)
 
 # A fresh registry plus packaged-only paths proves every element resolves from
 # the artifact. This covers capture, ICE, RTP, baseline A/V codecs, DTLS-SRTP
@@ -347,7 +362,7 @@ env -u DISPLAY -u WAYLAND_DISPLAY \
   GST_REGISTRY="$registry" \
   GST_PLUGIN_SYSTEM_PATH_1_0="$plugins" \
   GST_PLUGIN_PATH_1_0="$plugins" \
-  GST_GL_WINDOW=surfaceless GST_GL_PLATFORM=egl EGL_PLATFORM=surfaceless \
+  GST_GL_WINDOW=surfaceless GST_GL_PLATFORM=egl GST_GL_API=gles2 EGL_PLATFORM=surfaceless \
   timeout 45s python3 "$script_dir/check-linux-gstreamer.py" "$packaged_libdir" "$STUDYVIS_GSTREAMER_VERSION" || {
     die "packaged GStreamer cannot encode and decode WebRTC media"
   }

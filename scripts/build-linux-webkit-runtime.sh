@@ -41,6 +41,12 @@ gstreamer_hashes=(
   "$STUDYVIS_GSTREAMER_CORE_SHA256" "$STUDYVIS_GSTREAMER_BASE_SHA256"
   "$STUDYVIS_GSTREAMER_GOOD_SHA256" "$STUDYVIS_GSTREAMER_BAD_SHA256"
 )
+libnice_version=$STUDYVIS_LIBNICE_VERSION
+libnice_url=$STUDYVIS_LIBNICE_SOURCE_URL
+libnice_sha256=$STUDYVIS_LIBNICE_SHA256
+libnice_licensing_sha256=$STUDYVIS_LIBNICE_LICENSING_SHA256
+libnice_lgpl_sha256=$STUDYVIS_LIBNICE_LGPL_SHA256
+libnice_mpl_sha256=$STUDYVIS_LIBNICE_MPL_SHA256
 meson_version=$STUDYVIS_GSTREAMER_MESON_VERSION
 meson_url=$STUDYVIS_GSTREAMER_MESON_SOURCE_URL
 meson_sha256=$STUDYVIS_GSTREAMER_MESON_SHA256
@@ -63,6 +69,7 @@ require_match() {
 require_match STUDYVIS_WEBKIT_VERSION "$webkit_version" '^[0-9]+\.[0-9]+\.[0-9]+$'
 require_match STUDYVIS_LIBRICE_VERSION "$rice_version" '^[0-9]+\.[0-9]+\.[0-9]+$'
 require_match STUDYVIS_GSTREAMER_VERSION "$gstreamer_version" '^[0-9]+\.[0-9]+\.[0-9]+$'
+require_match STUDYVIS_LIBNICE_VERSION "$libnice_version" '^[0-9]+\.[0-9]+\.[0-9]+$'
 require_match STUDYVIS_GSTREAMER_MESON_VERSION "$meson_version" '^[0-9]+\.[0-9]+\.[0-9]+$'
 require_match STUDYVIS_CARGO_C_VERSION "$cargo_c_version" '^[0-9]+\.[0-9]+\.[0-9]+$'
 require_match STUDYVIS_WEBKIT_RUNTIME_REVISION "$runtime_revision" '^[1-9][0-9]*$'
@@ -80,6 +87,11 @@ for component_index in "${!gstreamer_components[@]}"; do
   require_match "${gstreamer_components[$component_index]} source URL" \
     "${gstreamer_urls[$component_index]}" '^https://[^[:space:]]+$'
 done
+require_match STUDYVIS_LIBNICE_SOURCE_URL "$libnice_url" '^https://[^[:space:]]+$'
+require_match STUDYVIS_LIBNICE_SHA256 "$libnice_sha256" '^[0-9a-f]{64}$'
+require_match STUDYVIS_LIBNICE_LICENSING_SHA256 "$libnice_licensing_sha256" '^[0-9a-f]{64}$'
+require_match STUDYVIS_LIBNICE_LGPL_SHA256 "$libnice_lgpl_sha256" '^[0-9a-f]{64}$'
+require_match STUDYVIS_LIBNICE_MPL_SHA256 "$libnice_mpl_sha256" '^[0-9a-f]{64}$'
 require_match STUDYVIS_GSTREAMER_MESON_SHA256 "$meson_sha256" '^[0-9a-f]{64}$'
 require_match STUDYVIS_GSTREAMER_MESON_SOURCE_URL "$meson_url" '^https://[^[:space:]]+$'
 require_match STUDYVIS_GSTREAMER_PTP_LICENSE_URL "$gstreamer_ptp_license_url" '^https://[^[:space:]]+$'
@@ -186,13 +198,28 @@ gstreamer_bad_options=(
   '-Dgpl=disabled' '-Dwebrtc=enabled' '-Ddtls=enabled'
   '-Dsrtp=enabled' '-Dsctp=enabled' '-Dsctp-internal-usrsctp=disabled'
 )
+libnice_meson_options=(
+  '--prefix=/usr'
+  '--libdir=lib/x86_64-linux-gnu'
+  '--buildtype=release'
+  '--wrap-mode=nofallback'
+  '-Dauto_features=disabled'
+  '-Ddefault_library=shared'
+  '-Dtests=disabled'
+  '-Dexamples=disabled'
+  '-Dgtk_doc=disabled'
+  '-Dintrospection=disabled'
+  '-Dgupnp=disabled'
+  '-Dgstreamer=enabled'
+  '-Dcrypto-library=openssl'
+)
 gstreamer_option_arrays=(
   gstreamer_core_options gstreamer_base_options gstreamer_good_options gstreamer_bad_options
 )
 gstreamer_plugins=(
   coreelements app audioconvert audiorate audioresample audiotestsrc videotestsrc
   opengl gio opus playback typefindfunctions videoconvertscale videorate volume
-  autodetect pulseaudio alsa video4linux2 rtp rtpmanager vpx dtls sctp srtp webrtc
+  autodetect pulseaudio alsa video4linux2 rtp rtpmanager vpx nice dtls sctp srtp webrtc
 )
 gstreamer_packages=(
   gstreamer-1.0 gstreamer-base-1.0 gstreamer-app-1.0
@@ -205,7 +232,7 @@ gstreamer_libraries=(
   libgstapp-1.0.so.0 libgstaudio-1.0.so.0 libgstfft-1.0.so.0 libgstpbutils-1.0.so.0
   libgstriff-1.0.so.0 libgstrtp-1.0.so.0 libgstrtsp-1.0.so.0 libgstsdp-1.0.so.0
   libgsttag-1.0.so.0 libgstvideo-1.0.so.0 libgstallocators-1.0.so.0 libgstgl-1.0.so.0
-  libgstsctp-1.0.so.0 libgstwebrtc-1.0.so.0 libgstwebrtcnice-1.0.so.0
+  libgstsctp-1.0.so.0 libgstwebrtc-1.0.so.0 libgstwebrtcnice-1.0.so.0 libnice.so.10
 )
 
 # Keep every host-independent option in one array. It drives configuration,
@@ -266,7 +293,13 @@ expected_manifest() {
     "gstreamer-license-sha256=$gstreamer_license_sha256" \
     "gstreamer-notice-sha256=$gstreamer_notice_sha256" \
     "gstreamer-license-inventory-sha256=$gstreamer_license_inventory_sha256" \
-    'gstreamer-license-file-count=17' \
+    'gstreamer-license-file-count=15' \
+    "libnice-version=$libnice_version" \
+    "libnice-source-url=$libnice_url" \
+    "libnice-source-sha256=$libnice_sha256" \
+    "libnice-licensing-sha256=$libnice_licensing_sha256" \
+    "libnice-lgpl-sha256=$libnice_lgpl_sha256" \
+    "libnice-mpl-sha256=$libnice_mpl_sha256" \
     "gstreamer-meson-version=$meson_version" \
     "gstreamer-meson-source-url=$meson_url" \
     "gstreamer-meson-source-sha256=$meson_sha256" \
@@ -274,13 +307,13 @@ expected_manifest() {
     "gstreamer-ptp-license-url=$gstreamer_ptp_license_url" \
     "gstreamer-ptp-license-sha256=$gstreamer_ptp_license_sha256" \
     'gstreamer-ptp-compiler-policy=Rust standard library only; no Cargo dependencies; release CI pins Rust 1.97.1' \
-    'gstreamer-install-policy=matched core/base/good/bad shared libraries; curated plugins; system libnice/PipeWire plugins' \
+    'gstreamer-install-policy=matched core/base/good/bad and libnice shared libraries; curated plugins; system PipeWire plugin' \
     'gstreamer-rpath-policy=remove all build-prefix RPATH and RUNPATH entries before packaging' \
     'gstreamer-sctp-policy=dynamic Noble libusrsctp; no bundled static usrsctp' \
     'librice-cargo-closure=union of locked/offline x86_64 normal edges for rice-proto/capi and rice-io/capi' \
     "cargo-c-version=$cargo_c_version" \
     'compiler-policy=GCC >= 12.2 or Clang; release CI pins GCC 12' \
-    'gstreamer-policy=matched source-built 1.26 stable series; early transceiver association and complete remote stream identities' \
+    'gstreamer-policy=matched source-built maintained 1.28 stable series; early transceiver association and complete remote stream identities' \
     'cmake-generator=Ninja' \
     "appimage-runtime-relative-directory=$appimage_runtime_dirname" \
     "appimage-runtime-install-directory=/usr/bin/$appimage_runtime_dirname" \
@@ -292,6 +325,9 @@ expected_manifest() {
   done
   for option in "${gstreamer_meson_options[@]}"; do
     printf 'gstreamer-meson-option=%s\n' "$option"
+  done
+  for option in "${libnice_meson_options[@]}"; do
+    printf 'libnice-meson-option=%s\n' "$option"
   done
   for index in "${!gstreamer_components[@]}"; do
     printf '%s\n' \
@@ -327,6 +363,9 @@ expected_manifest() {
     'license-payload=webkitgtk-appimage-sandbox.patch' \
     'license-payload=GStreamer-LICENSE-LGPL-2.1' \
     'license-payload=GStreamer-PTP-LICENSE-MPL-2.0' \
+    'license-payload=Libnice-LICENSING' \
+    'license-payload=Libnice-LICENSE-LGPL-2.1' \
+    'license-payload=Libnice-LICENSE-MPL-1.1' \
     'license-payload=GSTREAMER-THIRD-PARTY-LICENSES.txt' \
     'license-payload=GSTREAMER-LICENSE-FILES.sha256' \
     'license-payload=Meson-LICENSE-APACHE-2.0' \
@@ -396,6 +435,7 @@ done
 downloads="$work_root/downloads"
 webkit_archive="$downloads/webkitgtk-$webkit_version.tar.xz"
 rice_archive="$downloads/librice-$rice_version.tar.gz"
+libnice_archive="$downloads/libnice-$libnice_version.tar.gz"
 meson_archive="$downloads/meson-$meson_version.tar.gz"
 
 download_verified() {
@@ -429,13 +469,14 @@ download_gstreamer_sources() {
       "$downloads/${gstreamer_components[$index]}-$gstreamer_version.tar.xz" \
       "${gstreamer_hashes[$index]}"
   done
+  download_verified "$libnice_url" "$libnice_archive" "$libnice_sha256"
   download_verified "$meson_url" "$meson_archive" "$meson_sha256"
   download_verified "$gstreamer_ptp_license_url" "$downloads/MPL-2.0.txt" \
     "$gstreamer_ptp_license_sha256"
 }
 
 generate_gstreamer_licenses() {
-  python3 - "$downloads" "$1" "$gstreamer_version" "$meson_version" <<'PY'
+  python3 - "$downloads" "$1" "$gstreamer_version" "$libnice_version" "$meson_version" <<'PY'
 import hashlib
 from pathlib import Path
 import re
@@ -443,7 +484,7 @@ import sys
 import tarfile
 
 downloads, output = map(Path, sys.argv[1:3])
-version, meson_version = sys.argv[3:5]
+version, libnice_version, meson_version = sys.argv[3:6]
 output.mkdir(parents=True, exist_ok=True)
 inventory = []
 notices = [b"StudyVis GStreamer upstream license and author inventory\n"]
@@ -466,6 +507,21 @@ for component in ("gstreamer", "gst-plugins-base", "gst-plugins-good", "gst-plug
             ptp_notice = ptp_source.split(b"\n\n", 1)[0] + b"\n"
             inventory.append(f"{hashlib.sha256(ptp_notice).hexdigest()}  {ptp_path}:license-header\n")
             notices.extend([f"\n===== {ptp_path}:license-header =====\n\n".encode(), ptp_notice])
+with tarfile.open(downloads / f"libnice-{libnice_version}.tar.gz") as archive:
+    for filename in ("AUTHORS", "COPYING", "COPYING.LGPL", "COPYING.MPL"):
+        member_name = f"libnice-{libnice_version}/{filename}"
+        data = archive.extractfile(member_name).read()
+        inventory.append(f"{hashlib.sha256(data).hexdigest()}  {member_name}\n")
+        notices.extend([f"\n===== {member_name} =====\n\n".encode(), data, b"\n"])
+    (output / "Libnice-LICENSING").write_bytes(
+        archive.extractfile(f"libnice-{libnice_version}/COPYING").read()
+    )
+    (output / "Libnice-LICENSE-LGPL-2.1").write_bytes(
+        archive.extractfile(f"libnice-{libnice_version}/COPYING.LGPL").read()
+    )
+    (output / "Libnice-LICENSE-MPL-1.1").write_bytes(
+        archive.extractfile(f"libnice-{libnice_version}/COPYING.MPL").read()
+    )
 ptp_license = (downloads / "MPL-2.0.txt").read_bytes()
 (output / "GStreamer-PTP-LICENSE-MPL-2.0").write_bytes(ptp_license)
 inventory.append(f"{hashlib.sha256(ptp_license).hexdigest()}  MPL-2.0.txt\n")
@@ -482,6 +538,9 @@ PY
   [[ $actual == "$gstreamer_notice_sha256" ]] || die "unexpected GStreamer third-party notices"
   read -r actual _ < <(sha256sum "$1/GSTREAMER-LICENSE-FILES.sha256")
   [[ $actual == "$gstreamer_license_inventory_sha256" ]] || die "unexpected GStreamer license inventory"
+  [[ $(wc -l <"$1/GSTREAMER-LICENSE-FILES.sha256") -eq 15 ]] || {
+    die "unexpected GStreamer/libnice license file count"
+  }
 }
 
 create_source_bundle() (
@@ -498,7 +557,8 @@ create_source_bundle() (
   output=$(normalize_output_path source-bundle-output "$requested_output")
   [[ ! -d $output && ! -L $output ]] || die "refusing source bundle directory or symlink: $output"
   [[ $output != "$webkit_archive" && $output != "$rice_archive" && \
-     $output != "$meson_archive" && $output != "$downloads"/gst*.tar.xz ]] || {
+     $output != "$libnice_archive" && $output != "$meson_archive" && \
+     $output != "$downloads"/gst*.tar.xz ]] || {
     die "source bundle output must not replace a verified source archive: $output"
   }
   parent=${output%/*}
@@ -532,6 +592,7 @@ create_source_bundle() (
     install -m 0644 "$downloads/${gstreamer_components[$index]}-$gstreamer_version.tar.xz" \
       "$bundle_dir/sources/"
   done
+  install -m 0644 "$libnice_archive" "$bundle_dir/sources/"
   install -m 0644 "$meson_archive" "$bundle_dir/sources/"
   install -m 0644 "$downloads/MPL-2.0.txt" "$bundle_dir/sources/"
   generate_gstreamer_licenses "$bundle_dir/licenses"
@@ -552,7 +613,7 @@ create_source_bundle() (
 StudyVis corresponding source bundle for $runtime_id
 
 This archive contains the exact verified WebKitGTK, librice, GStreamer
-core/base/good/bad, and Meson archives, StudyVis's patch, build/notice-generation
+core/base/good/bad, libnice, and Meson archives, StudyVis's patch, build/notice-generation
 scripts, pinned supply-chain environment, the deterministic build manifest,
 and the exact locked librice dependency notice pair shipped in the AppImage.
 To reconstruct the modified WebKitGTK source tree:
@@ -560,12 +621,12 @@ To reconstruct the modified WebKitGTK source tree:
   tar -xf sources/webkitgtk-$webkit_version.tar.xz
   patch -d webkitgtk-$webkit_version -p1 < $patch_relative
 
-The GStreamer archives are unmodified upstream releases. The builder installs
-core, base, good, and bad in that order, with the complete Meson options and
-exact ABI versions recorded in BUILD-MANIFEST.txt. Meson subproject downloads
-are disabled. External dependencies, including libnice, PipeWire, and dynamic
-libusrsctp, remain the Ubuntu 24.04 packages inventoried in the companion
-linux-system-sources archive. The AppImage carries only the curated plugins.
+The GStreamer and libnice archives are unmodified upstream releases. The builder
+installs core, base, good, libnice, and bad in that order, with the complete Meson
+options and exact ABI versions recorded in BUILD-MANIFEST.txt. Meson subproject
+downloads are disabled. External dependencies, including PipeWire and dynamic
+libusrsctp, remain the Ubuntu 24.04 packages inventoried in the companion Linux
+system-sources archive. The AppImage carries only the curated plugins.
 The matching gst-ptp-helper source is in the GStreamer core archive under
 libs/gst/helpers/ptp and uses only the Rust standard library, with no Cargo
 dependencies. Its copyright notice and complete Mozilla Public License 2.0
@@ -607,6 +668,7 @@ required_runtime_files=(
   "$runtime_libdir/libjavascriptcoregtk-4.1.so.0"
   "$runtime_libdir/librice-proto.so.0"
   "$runtime_libdir/librice-io.so.0"
+  "$runtime_libdir/libnice.so.10"
   "$gstreamer_plugin"
   "$runtime_libdir/webkit2gtk-4.1/WebKitNetworkProcess"
   "$runtime_libdir/webkit2gtk-4.1/WebKitWebProcess"
@@ -616,6 +678,7 @@ required_runtime_files=(
   "$runtime_pkgconfig/javascriptcoregtk-4.1.pc"
   "$runtime_pkgconfig/rice-proto.pc"
   "$runtime_pkgconfig/rice-io.pc"
+  "$runtime_pkgconfig/nice.pc"
   "$licenses/COPYING.LIB"
   "$licenses/LICENSE-APPLE"
   "$licenses/LICENSE-LGPL-2"
@@ -627,6 +690,9 @@ required_runtime_files=(
   "$licenses/webkitgtk-appimage-sandbox.patch"
   "$licenses/GStreamer-LICENSE-LGPL-2.1"
   "$licenses/GStreamer-PTP-LICENSE-MPL-2.0"
+  "$licenses/Libnice-LICENSING"
+  "$licenses/Libnice-LICENSE-LGPL-2.1"
+  "$licenses/Libnice-LICENSE-MPL-1.1"
   "$licenses/GSTREAMER-THIRD-PARTY-LICENSES.txt"
   "$licenses/GSTREAMER-LICENSE-FILES.sha256"
   "$licenses/Meson-LICENSE-APACHE-2.0"
@@ -649,7 +715,9 @@ gstreamer_runtime_is_complete() {
   [[ -s $gstreamer_plugin && ! -L $gstreamer_plugin ]] || return 1
   for plugin in "${gstreamer_plugins[@]}"; do
     [[ -f $runtime_libdir/gstreamer-1.0/libgst$plugin.so ]] || return 1
-    grep -aFq "$gstreamer_package_name" "$runtime_libdir/gstreamer-1.0/libgst$plugin.so" || return 1
+    if [[ $plugin != nice ]]; then
+      grep -aFq "$gstreamer_package_name" "$runtime_libdir/gstreamer-1.0/libgst$plugin.so" || return 1
+    fi
   done
   for helper in gst-plugin-scanner gst-ptp-helper; do
     [[ -x $gstreamer_helpers/$helper ]] || return 1
@@ -664,10 +732,11 @@ gstreamer_runtime_is_complete() {
     if grep -Eq '\((RPATH|RUNPATH)\)' <<<"$dynamic"; then
       return 1
     fi
-  done < <(find "$runtime_libdir" -maxdepth 2 -type f \( -name 'libgst*.so*' -o -name 'gst-plugin-scanner' -o -name 'gst-ptp-helper' \) -print0)
+  done < <(find "$runtime_libdir" -maxdepth 2 -type f \( -name 'libgst*.so*' -o -name 'libnice.so*' -o -name 'gst-plugin-scanner' -o -name 'gst-ptp-helper' \) -print0)
   for package in "${gstreamer_packages[@]}"; do
     grep -Fqx "Version: $gstreamer_version" "$runtime_pkgconfig/$package.pc" || return 1
   done
+  grep -Fqx "Version: $libnice_version" "$runtime_pkgconfig/nice.pc" || return 1
 }
 
 runtime_is_complete() {
@@ -688,10 +757,17 @@ runtime_is_complete() {
   [[ $actual_gstreamer_sha256 == "$gstreamer_ptp_license_sha256" ]] || return 1
   read -r actual_gstreamer_sha256 _ < <(sha256sum "$licenses/Meson-LICENSE-APACHE-2.0")
   [[ $actual_gstreamer_sha256 == "$meson_license_sha256" ]] || return 1
+  read -r actual_gstreamer_sha256 _ < <(sha256sum "$licenses/Libnice-LICENSING")
+  [[ $actual_gstreamer_sha256 == "$libnice_licensing_sha256" ]] || return 1
+  read -r actual_gstreamer_sha256 _ < <(sha256sum "$licenses/Libnice-LICENSE-LGPL-2.1")
+  [[ $actual_gstreamer_sha256 == "$libnice_lgpl_sha256" ]] || return 1
+  read -r actual_gstreamer_sha256 _ < <(sha256sum "$licenses/Libnice-LICENSE-MPL-1.1")
+  [[ $actual_gstreamer_sha256 == "$libnice_mpl_sha256" ]] || return 1
   read -r actual_gstreamer_sha256 _ < <(sha256sum "$licenses/GSTREAMER-THIRD-PARTY-LICENSES.txt")
   [[ $actual_gstreamer_sha256 == "$gstreamer_notice_sha256" ]] || return 1
   read -r actual_gstreamer_sha256 _ < <(sha256sum "$licenses/GSTREAMER-LICENSE-FILES.sha256")
   [[ $actual_gstreamer_sha256 == "$gstreamer_license_inventory_sha256" ]] || return 1
+  [[ $(wc -l <"$licenses/GSTREAMER-LICENSE-FILES.sha256") -eq 15 ]] || return 1
   gstreamer_runtime_is_complete || return 1
   [[ $(wc -l <"$licenses/WEBKIT-LICENSE-FILES.sha256") -eq 59 ]] || return 1
   node "$librice_notice_generator" --check "$licenses" \
@@ -706,6 +782,7 @@ runtime_is_complete() {
     "$runtime_libdir/libjavascriptcoregtk-4.1.so.0" \
     "$runtime_libdir/librice-proto.so.0" \
     "$runtime_libdir/librice-io.so.0" \
+    "$runtime_libdir/libnice.so.10" \
     "$runtime_libdir/webkit2gtk-4.1/injected-bundle/libwebkit2gtkinjectedbundle.so"; do
     elf_header=$(readelf -h "$file" 2>/dev/null) || return 1
     grep -Eq 'Machine:[[:space:]]+Advanced Micro Devices X86-64' <<<"$elf_header" || return 1
@@ -755,6 +832,7 @@ rebase_pkgconfig_files() {
   for pc_file in \
     "$runtime_pkgconfig/rice-proto.pc" \
     "$runtime_pkgconfig/rice-io.pc" \
+    "$runtime_pkgconfig/nice.pc" \
     "$runtime_pkgconfig/javascriptcoregtk-4.1.pc" \
     "$runtime_pkgconfig/webkit2gtk-4.1.pc"; do
     rebase_pc_file "$pc_file"
@@ -769,8 +847,13 @@ verify_runtime_pkgconfig() {
   unset PKG_CONFIG_SYSROOT_DIR
   export PKG_CONFIG_PATH="$runtime_pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
   pkg-config --exact-version="$rice_version" rice-proto rice-io
+  pkg-config --exact-version="$libnice_version" nice
   pkg-config --exact-version="$webkit_version" javascriptcoregtk-4.1 webkit2gtk-4.1
   verify_gstreamer_packages || die "pkg-config did not resolve the complete pinned GStreamer runtime"
+  resolved_libdir=$(pkg-config --variable=libdir nice)
+  [[ $resolved_libdir == "$runtime_libdir" ]] || {
+    die "pkg-config resolved libnice outside the pinned runtime: $resolved_libdir"
+  }
   resolved_libdir=$(pkg-config --variable=libdir webkit2gtk-4.1)
   [[ $resolved_libdir == "$runtime_libdir" ]] || {
     die "pkg-config resolved WebKitGTK outside the pinned runtime: $resolved_libdir"
@@ -844,8 +927,12 @@ require_match STUDYVIS_WEBKIT_KEEP_BUILD "$webkit_keep_build" '^[01]$'
 webkit_source="$work_root/webkitgtk-$webkit_version"
 webkit_build="$work_root/webkitgtk-build"
 rice_source="$work_root/librice-$rice_version"
+libnice_source="$work_root/libnice-$libnice_version"
+libnice_build="$work_root/libnice-build"
 meson_source="$work_root/meson-$meson_version"
-for generated_path in "$webkit_source" "$webkit_build" "$rice_source" "$meson_source"; do
+for generated_path in \
+  "$webkit_source" "$webkit_build" "$rice_source" "$libnice_source" \
+  "$libnice_build" "$meson_source"; do
   [[ $generated_path != "$runtime_dir" && $runtime_dir != "$generated_path"/* ]] || {
     die "unsafe overlap between runtime and generated build path: $generated_path"
   }
@@ -891,9 +978,9 @@ if [[ ! -f $rice_extract_marker ]] || \
   expected_rice_extraction >"$rice_extract_marker"
 fi
 
-# #312: WebKit needs the 1.26 negotiation lifecycle and stream identities.
-# Build all four GStreamer components against one prefix so no 1.24 support
-# library can silently satisfy a newer plugin's symbols on the build runner.
+# #312: WebKit needs the 1.28 negotiation lifecycle and stream identities.
+# Build all four GStreamer components and libnice against one prefix so no
+# Ubuntu 1.24/0.1.21 library can satisfy a newer plugin on the build runner.
 rm -rf -- "$meson_source"
 install -d "$meson_source"
 tar --extract --file "$meson_archive" --directory "$meson_source" \
@@ -919,10 +1006,22 @@ for component_index in "${!gstreamer_components[@]}"; do
   for pc_file in "$runtime_pkgconfig"/gstreamer-*.pc; do
     rebase_pc_file "$pc_file"
   done
+  if [[ $component == gst-plugins-good ]]; then
+    rm -rf -- "$libnice_source" "$libnice_build"
+    install -d "$libnice_source"
+    tar --extract --file "$libnice_archive" --directory "$libnice_source" \
+      --strip-components=1 --no-same-owner --no-same-permissions
+    env CC="$cc" CXX="$cxx" python3 "$meson_source/meson.py" \
+      setup "$libnice_build" "$libnice_source" "${libnice_meson_options[@]}"
+    ninja -C "$libnice_build" -j "$webkit_jobs"
+    DESTDIR="$runtime_dir" python3 "$meson_source/meson.py" \
+      install -C "$libnice_build" --no-rebuild --strip
+    rebase_pc_file "$runtime_pkgconfig/nice.pc"
+  fi
 done
 while IFS= read -r -d '' gstreamer_elf; do
   patchelf --remove-rpath "$gstreamer_elf"
-done < <(find "$runtime_libdir" -maxdepth 2 -type f \( -name 'libgst*.so*' -o -name 'gst-plugin-scanner' -o -name 'gst-ptp-helper' \) -print0)
+done < <(find "$runtime_libdir" -maxdepth 2 -type f \( -name 'libgst*.so*' -o -name 'libnice.so*' -o -name 'gst-plugin-scanner' -o -name 'gst-ptp-helper' \) -print0)
 verify_gstreamer_packages || die "the source-built GStreamer ABI is incomplete or resolves outside the runtime"
 gstreamer_runtime_is_complete || die "the source-built GStreamer runtime is incomplete"
 generate_gstreamer_licenses "$licenses"
@@ -1148,7 +1247,8 @@ printf '%s\n' "$runtime_id" >"$marker"
 runtime_is_complete || die "the installed WebKitGTK runtime is incomplete"
 
 if [[ $webkit_keep_build != 1 ]]; then
-  rm -rf -- "$webkit_build" "$webkit_source" "$rice_source" "$meson_source"
+  rm -rf -- "$webkit_build" "$webkit_source" "$rice_source" \
+    "$libnice_source" "$libnice_build" "$meson_source"
   for component in "${gstreamer_components[@]}"; do
     rm -rf -- "$work_root/$component-build" "$work_root/$component-$gstreamer_version"
   done

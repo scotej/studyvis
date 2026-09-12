@@ -109,17 +109,18 @@ experimental features still off but WebRTC explicitly on; it also reasserts
 media streams, GStreamer WebRTC, librice, and the bubblewrap sandbox. librice
 keeps ICE/network work in WebKit's sandboxed NetworkProcess.
 
-Runtime revision 6 has this reviewable input identity:
+Runtime revision 7 has this reviewable input identity:
 
 | Input | Version/source | SHA-256 |
 |-|-|-|
 | WebKitGTK | `webkitgtk-2.52.5.tar.xz` from `webkitgtk.org/releases` | `8a531a9abd2215936e8a8a914c077b586c0228b31d652f205286a8ec90f3364b` |
 | librice | GitHub tag archive `v0.4.3` | `4671e1835f9ab0f8d87e8d9e22b6bfb06f928aeae442841ab81881dff61e3f4b` |
-| WebKit AppImage portability delta | `scripts/patches/webkitgtk-2.52.5-appimage-sandbox.patch` | `edc669c77ea7eba40b6454fd95369d4601b6632615b8174abd9df0e304ac54a0` |
-| GStreamer core | `gstreamer-1.26.11.tar.xz` from `gstreamer.freedesktop.org/src` | `2e0bd192d0438ea606a6f76a95c8e16542167656ffec2c2bc3aaf6ee0837fbf6` |
-| GStreamer base | `gst-plugins-base-1.26.11.tar.xz` from `gstreamer.freedesktop.org/src` | `fc50f885d41f5d0407ce0876ec7235d9e7b82d48db2f4bc72c5f244a4ac79263` |
-| GStreamer good | `gst-plugins-good-1.26.11.tar.xz` from `gstreamer.freedesktop.org/src` | `001deb0876d5d743cd3448abf74a27adec3fd850012fcb1b00994861bd6c1145` |
-| GStreamer bad | `gst-plugins-bad-1.26.11.tar.xz` from `gstreamer.freedesktop.org/src` | `110fb82795f0e569b1e27b12ab9699d35c7762e1ff4db95335d6ac8d1442af3d` |
+| WebKit AppImage portability delta | `scripts/patches/webkitgtk-2.52.5-appimage-sandbox.patch` | `64648124f8f13f8840ec8f6514f531c9898ddf3bbac1115243c8b0c19bf367e2` |
+| GStreamer core | `gstreamer-1.28.7.tar.xz` from `gstreamer.freedesktop.org/src` | `787329b2c5758e228a71d926a6dcf960bceaacca3cadd63874ba665dfcda013e` |
+| GStreamer base | `gst-plugins-base-1.28.7.tar.xz` from `gstreamer.freedesktop.org/src` | `ed6e5410f496d171818763af2265e7977154bc7f9b827e98acf8c5bed21dd5a7` |
+| GStreamer good | `gst-plugins-good-1.28.7.tar.xz` from `gstreamer.freedesktop.org/src` | `87256969c82cf3bc8574301f3e7044a90de0ac500a5a27d8ba38c4dde894dd8b` |
+| GStreamer bad | `gst-plugins-bad-1.28.7.tar.xz` from `gstreamer.freedesktop.org/src` | `dc525383c18b2c265bbe6a43d498656cd918aaa130aa4e3abeabcdaa741c3ffe` |
+| libnice | `libnice-0.1.24.tar.gz` from `libnice.freedesktop.org/releases` | `cfb5e8e778534f2f5b3c6f4958a1eb057c6b95c537c0f100817a537cf5d64fcc` |
 | Meson | GitHub release archive `1.7.2` | `4d40d63aa748a9c139cc41ab9bffe43edd113c5639d78bde81544ca955aea890` |
 
 `scripts/linux-webkit-runtime.env` is the version/hash authority;
@@ -137,14 +138,14 @@ it does not disable the sandbox. Reproducibility here means pinned and checked
 source inputs, local delta, build environment, and configuration—not a claim of
 bit-for-bit identical output from arbitrary machines. Production builds use
 Ubuntu 24.04, Rust 1.97.1, and `cargo-c` 0.10.24, retaining the artifact's
-glibc 2.39 floor. The private runtime also builds matched GStreamer 1.26.11
-core/base/good/bad libraries and curated plugins using source-pinned Meson
+glibc 2.39 floor. The private runtime also builds matched GStreamer 1.28.7
+core/base/good/bad and libnice 0.1.24 libraries and curated plugins using source-pinned Meson
 1.7.2. Noble's 1.24.2 satisfies WebKit's advertised configure minimum but
 misassigns sending pads, creates receiving transceivers too late, and omits
 SDP attributes WebKit needs to attach decoded frames to JavaScript tracks
 (#312). Source-built helpers and all packaged GStreamer libraries/plugins are
-checked against their original build IDs; only the PipeWire and libnice
-plugins use the distro's stable GStreamer 1.x ABI. The hosted image and Noble apt
+checked against their original build IDs; only the PipeWire plugin uses the
+distro's stable GStreamer 1.x ABI. The hosted image and Noble apt
 indexes are mutable, so this is a bounded build baseline rather than a fully
 pinned or bit-reproducible environment. A stronger future boundary would use a
 snapshot-pinned apt repository or digest-pinned build container and record the

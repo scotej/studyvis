@@ -95,6 +95,7 @@ required_libraries=(
   libjavascriptcoregtk-4.1.so.0
   librice-proto.so.0
   librice-io.so.0
+  libnice.so.10
 )
 for library in "${required_libraries[@]}"; do
   [[ -e $runtime_libdir/$library ]] || {
@@ -187,6 +188,9 @@ license_files=(
   BUILD-MANIFEST.txt
   GStreamer-LICENSE-LGPL-2.1
   GStreamer-PTP-LICENSE-MPL-2.0
+  Libnice-LICENSING
+  Libnice-LICENSE-LGPL-2.1
+  Libnice-LICENSE-MPL-1.1
   GSTREAMER-THIRD-PARTY-LICENSES.txt
   GSTREAMER-LICENSE-FILES.sha256
   Meson-LICENSE-APACHE-2.0
@@ -216,6 +220,18 @@ for notice in GSTREAMER-THIRD-PARTY-LICENSES.txt GSTREAMER-LICENSE-FILES.sha256 
   read -r actual_sha _ < <(sha256sum "$license_source/$notice")
   [[ $actual_sha == "$expected_sha" ]] || die "GStreamer license evidence has the wrong SHA256: $notice"
 done
+for license in Libnice-LICENSING Libnice-LICENSE-LGPL-2.1 Libnice-LICENSE-MPL-1.1; do
+  case $license in
+    Libnice-LICENSING) expected_sha=$STUDYVIS_LIBNICE_LICENSING_SHA256 ;;
+    Libnice-LICENSE-LGPL-2.1) expected_sha=$STUDYVIS_LIBNICE_LGPL_SHA256 ;;
+    Libnice-LICENSE-MPL-1.1) expected_sha=$STUDYVIS_LIBNICE_MPL_SHA256 ;;
+  esac
+  read -r actual_sha _ < <(sha256sum "$license_source/$license")
+  [[ $actual_sha == "$expected_sha" ]] || die "libnice license evidence has the wrong SHA256: $license"
+done
+[[ $(wc -l <"$license_source/GSTREAMER-LICENSE-FILES.sha256") -eq 15 ]] || {
+  die "runtime GStreamer/libnice license hash inventory is incomplete"
+}
 read -r staged_patch_sha256 _ < <(sha256sum "$license_source/webkitgtk-appimage-sandbox.patch")
 [[ $staged_patch_sha256 == "$STUDYVIS_WEBKIT_PATCH_SHA256" ]] || {
   die "runtime patch evidence has the wrong SHA256: $staged_patch_sha256"
@@ -281,7 +297,7 @@ while IFS= read -r plugin_group || [[ -n $plugin_group ]]; do
       die "invalid curated GStreamer plugin name: $candidate"
     }
     case $candidate in
-      libgstnice.so|libgstpipewire.so) plugin_source="$system_gstreamer_plugins/$candidate" ;;
+      libgstpipewire.so) plugin_source="$system_gstreamer_plugins/$candidate" ;;
       *) plugin_source="$runtime_libdir/gstreamer-1.0/$candidate" ;;
     esac
     if [[ -f $plugin_source && ! -L $plugin_source ]]; then
