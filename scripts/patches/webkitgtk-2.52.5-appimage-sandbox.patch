@@ -309,7 +309,7 @@ diff --git a/Source/WebCore/Modules/mediastream/gstreamer/GStreamerMediaEndpoint
  }
 @@ -702,14 +702,15 @@
 -        GST_DEBUG_OBJECT(m_pipeline.get(), "Looking-up outgoing source with msid %s in %zu unlinked sources", msid.utf8(), m_unlinkedOutgoingSources.size());
-+        g_printerr("StudyVis outgoing lookup msid=%s unlinked=%zu\\n", msid.utf8().data(), m_unlinkedOutgoingSources.size());
++        g_printerr("StudyVis outgoing lookup msid=%s unlinked=%zu\\n", msid.utf8(), m_unlinkedOutgoingSources.size());
          m_unlinkedOutgoingSources.removeFirstMatching([&, msid = String(msid.span())](auto& source) -> bool {
              if (source->type() != sourceType) {
                  GST_DEBUG_OBJECT(pipeline(), "Un-matched source type");
