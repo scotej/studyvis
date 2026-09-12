@@ -307,7 +307,17 @@ diff --git a/Source/WebCore/Modules/mediastream/gstreamer/GStreamerMediaEndpoint
          mediaStreamIds.append(msid);
      return mediaStreamIds;
  }
-@@ -1321,44 +1329,52 @@
+@@ -716,7 +716,7 @@
+ 
+-            auto allowedCaps = capsFromSDPMedia(media);
+-            source->configure(WTF::move(allowedCaps));
+             if (!source->pad()) {
++                auto allowedCaps = capsFromSDPMedia(media);
++                source->configure(WTF::move(allowedCaps));
+                 auto rtpCaps = source->rtpCaps();
+                 auto sinkPad = requestPad(rtpCaps, source->mediaStreamID());
+                 source->setSinkPad(WTF::move(sinkPad));
+@@ -1321,44 +1322,68 @@
      onNegotiationNeeded();
  }
  
@@ -343,6 +353,18 @@ diff --git a/Source/WebCore/Modules/mediastream/gstreamer/GStreamerMediaEndpoint
 -        source->setSinkPad(WTF::move(sinkPad));
 -    } else {
 +    GST_DEBUG_OBJECT(m_pipeline.get(), "Recycling transceiver %" GST_PTR_FORMAT " for track %s", transceiver, track.id().utf8().data());
++
++    unsigned mLineIndex;
++    g_object_get(transceiver, "mlineindex", &mLineIndex, nullptr);
++
++    GUniqueOutPtr<GstWebRTCSessionDescription> remoteDescription;
++    g_object_get(m_webrtcBin.get(), "remote-description", &remoteDescription.outPtr(), nullptr);
++    if (!remoteDescription)
++        return;
++
++    const auto media = gst_sdp_message_get_media(remoteDescription->sdp, mLineIndex);
++    if (!media)
++        return;
 +
 +    // removeTrack() stops the old source but the sender backend leaves its
 +    // request pad attached to the transceiver. Release that stale pad before
@@ -381,9 +403,13 @@ diff --git a/Source/WebCore/Modules/mediastream/gstreamer/GStreamerMediaEndpoint
 +        outgoingSource->setRtpHeaderExtensionMapping(m_rtpHeaderExtensions);
 +        configureSource(outgoingSource.get(), nullptr);
 +
-+        // Use the same deferred negotiation/link/start path as a new sender.
-+        // The transceiver remains recvonly until the new offer is negotiated.
-+        m_unlinkedOutgoingSources.append(outgoingSource.ptr());
++        // Attach the replacement pad before offer generation. Without an
++        // associated sink pad, webrtcbin advertises the RTP CNAME as the
++        // stream identity for a recycled m-line instead of the negotiated MSID.
++        auto allowedCaps = capsFromSDPMedia(media);
++        outgoingSource->configure(WTF::move(allowedCaps));
++        auto rtpCaps = outgoingSource->rtpCaps();
++        outgoingSource->setSinkPad(requestPad(rtpCaps, outgoingSource->mediaStreamID()));
 +    };
 +    switchOn(source, [&](Ref<RealtimeOutgoingAudioSourceGStreamer>& outgoingSource) {
 +        configureRecycledSource(outgoingSource);
