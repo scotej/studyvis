@@ -545,8 +545,7 @@ diff --git a/Source/WebCore/platform/mediastream/gstreamer/RealtimeOutgoingMedia
      GST_DEBUG_OBJECT(m_bin.get(), "Starting outgoing source");
      if (m_track)
          m_track->addObserver(*this);
-@@ -134,17 +135,33 @@
-     if (m_transceiver) {
+@@ -135,16 +136,31 @@
          auto pad = outgoingSourcePad();
          if (!gst_pad_is_linked(pad.get())) {
              GST_DEBUG_OBJECT(m_bin.get(), "Codec preferences haven't changed before startup, ensuring source is linked");
@@ -554,23 +553,22 @@ diff --git a/Source/WebCore/platform/mediastream/gstreamer/RealtimeOutgoingMedia
          }
      }
  
-+    gst_bin_sync_children_states(GST_BIN_CAST(m_bin.get()));
      gst_element_sync_state_with_parent(m_bin.get());
 +    g_printerr("StudyVis outgoing state bin=%d source=%d input=%d tee=%d\n", GST_STATE(m_bin.get()), m_outgoingSource ? GST_STATE(m_outgoingSource.get()) : -1, GST_STATE(m_inputSelector.get()), GST_STATE(m_tee.get()));
-+    auto installProbe = [](GstElement* element, const char* label) {
-+        if (!element)
-+            return;
-+        auto pad = adoptGRef(gst_element_get_static_pad(element, "src"));
++    auto installProbe = [](GstPad* pad, const char* label) {
 +        if (!pad)
 +            return;
-+        gst_pad_add_probe(pad.get(), GST_PAD_PROBE_TYPE_BUFFER, [](GstPad*, GstPadProbeInfo*, gpointer userData) {
++        gst_pad_add_probe(pad, GST_PAD_PROBE_TYPE_BUFFER, [](GstPad*, GstPadProbeInfo*, gpointer userData) {
 +            g_printerr("StudyVis outgoing first-buffer %s\n", static_cast<const char*>(userData));
 +            return GST_PAD_PROBE_REMOVE;
 +        }, const_cast<char*>(label), nullptr);
 +    };
-+    installProbe(m_outgoingSource.get(), "source");
-+    installProbe(m_inputSelector.get(), "selector");
-+    installProbe(m_rtpCapsfilter.get(), "caps");
++    auto sourcePad = outgoingSourcePad();
++    installProbe(sourcePad.get(), "source");
++    auto selectorPad = adoptGRef(gst_element_get_static_pad(m_inputSelector.get(), "src"));
++    installProbe(selectorPad.get(), "selector");
++    auto capsPad = adoptGRef(gst_element_get_static_pad(m_rtpCapsfilter.get(), "src"));
++    installProbe(capsPad.get(), "caps");
  
      startUpdatingStats();
  }
@@ -579,23 +577,48 @@ diff --git a/Source/WebCore/platform/mediastream/gstreamer/RealtimeOutgoingMedia
  {
      if (m_isStopped) {
          callback();
-@@ -252,17 +269,18 @@
-     GST_DEBUG_OBJECT(m_bin.get(), "Initializing from track, muted: %s, enabled: %s", boolForPrinting(m_muted), boolForPrinting(m_enabled));
+@@ -171,38 +187,41 @@
+         return;
+     }
+ 
+     auto data = createProbeData();
+     data->source = this;
+     data->callback = WTF::move(callback);
+ 
+     auto pad = adoptGRef(gst_element_get_static_pad(m_inputSelector.get(), "src"));
+-    gst_pad_add_probe(pad.get(), GST_PAD_PROBE_TYPE_EVENT_DOWNSTREAM, reinterpret_cast<GstPadProbeCallback>(+[](GstPad*, GstPadProbeInfo* info, gpointer userData) -> GstPadProbeReturn {
++    gst_pad_add_probe(pad.get(), GST_PAD_PROBE_TYPE_EVENT_DOWNSTREAM, reinterpret_cast<GstPadProbeCallback>(+[](GstPad* pad, GstPadProbeInfo* info, gpointer userData) -> GstPadProbeReturn {
+         auto event = GST_PAD_PROBE_INFO_EVENT(info);
+         if (GST_EVENT_TYPE(event) != GST_EVENT_EOS)
+             return GST_PAD_PROBE_OK;
+ 
+         auto data = reinterpret_cast<ProbeData*>(userData);
+         auto self = data->source.get();
++        auto probeId = GST_PAD_PROBE_INFO_ID(info);
+         if (!self) {
+             data->callback();
+-            return GST_PAD_PROBE_REMOVE;
++            gst_pad_remove_probe(pad, probeId);
++            return GST_PAD_PROBE_DROP;
+         }
+ 
+         callOnMainThread([weakSelf = WTF::move(self), callback = WTF::move(data->callback)] {
+             auto self = weakSelf.get();
+             if (!self) {
+                 callback();
+                 return;
+             }
+             self->removeOutgoingSource();
+             callback();
+         });
+-        return GST_PAD_PROBE_REMOVE;
++        gst_pad_remove_probe(pad, probeId);
++        return GST_PAD_PROBE_DROP;
+     }), data, reinterpret_cast<GDestroyNotify>(destroyProbeData));
+ 
+     if (WEBKIT_IS_MEDIA_STREAM_SRC(m_outgoingSource.get()))
+         webkitMediaStreamSrcSignalEndOfStream(WEBKIT_MEDIA_STREAM_SRC_CAST(m_outgoingSource.get()));
+ 
+     if (m_fallbackSource)
+         gst_element_send_event(m_fallbackSource.get(), gst_event_new_eos());
  }
- 
- void RealtimeOutgoingMediaSourceGStreamer::link()
- {
-     GST_DEBUG_OBJECT(m_bin.get(), "Linking webrtcbin pad %" GST_PTR_FORMAT, m_webrtcSinkPad.get());
- 
-     auto srcPad = adoptGRef(gst_element_get_static_pad(m_bin.get(), "src"));
--    gst_pad_link(srcPad.get(), m_webrtcSinkPad.get());
-+    auto result = gst_pad_link(srcPad.get(), m_webrtcSinkPad.get());
-+    g_printerr("StudyVis outgoing link result=%d src-linked=%d sink-linked=%d\n", result, gst_pad_is_linked(srcPad.get()), gst_pad_is_linked(m_webrtcSinkPad.get()));
- }
- 
- void RealtimeOutgoingMediaSourceGStreamer::setSinkPad(GRefPtr<GstPad>&& pad)
- {
-     GST_DEBUG_OBJECT(m_bin.get(), "Associating with webrtcbin pad %" GST_PTR_FORMAT, pad.get());
-     m_webrtcSinkPad = WTF::move(pad);
- 
-     if (m_transceiver)
