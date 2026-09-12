@@ -231,6 +231,34 @@ diff --git a/Source/WebCore/platform/mediastream/gstreamer/GStreamerIncomingTrac
          if (startsWith(msIdAttribute.span(), " "_s))
              m_sdpMsIdAndTrackId = { emptyString(), msIdAttribute.span().subspan(1) };
          else {
+@@ -134,6 +134,12 @@
+ {
+     // Look-up the mediastream ID, using the msid attribute, fall back to pad name if there is no msid.
+     String mediaStreamId;
++    // The src pad's msid falls back to RTP SDES CNAME. Prefer the negotiated
++    // SDP MSID so bundled or recycled receivers retain the MediaStream identity.
++    if (!m_sdpMsIdAndTrackId.first.isEmpty()) {
++        GST_DEBUG_OBJECT(m_bin.get(), "msid set from SDP media msid attribute: '%s'", m_sdpMsIdAndTrackId.first.utf8().data());
++        return m_sdpMsIdAndTrackId.first;
++    }
+     if (gstObjectHasProperty(m_pad.get(), "msid"_s)) {
+         GUniqueOutPtr<char> msidChars;
+         g_object_get(m_pad.get(), "msid", &msidChars.outPtr(), nullptr);
+@@ -147,11 +153,6 @@
+     if (!mediaStreamId.isEmpty())
+         return mediaStreamId;
+ 
+-    if (!m_sdpMsIdAndTrackId.first.isEmpty()) {
+-        GST_DEBUG_OBJECT(m_bin.get(), "msid set from SDP media msid attribute: '%s'", m_sdpMsIdAndTrackId.first.utf8().data());
+-        return m_sdpMsIdAndTrackId.first;
+-    }
+-
+     auto name = GMallocString::unsafeAdoptFromUTF8(gst_pad_get_name(m_pad.get()));
+     mediaStreamId = name.span();
+     GST_DEBUG_OBJECT(m_bin.get(), "msid set from webrtcbin src pad name: %s", name.utf8());
+     return mediaStreamId;
+ }
+
 diff --git a/Source/WebCore/Modules/mediastream/gstreamer/GStreamerMediaEndpoint.cpp b/Source/WebCore/Modules/mediastream/gstreamer/GStreamerMediaEndpoint.cpp
 --- a/Source/WebCore/Modules/mediastream/gstreamer/GStreamerMediaEndpoint.cpp
 +++ b/Source/WebCore/Modules/mediastream/gstreamer/GStreamerMediaEndpoint.cpp
