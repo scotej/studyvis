@@ -545,7 +545,7 @@ diff --git a/Source/WebCore/platform/mediastream/gstreamer/RealtimeOutgoingMedia
      GST_DEBUG_OBJECT(m_bin.get(), "Starting outgoing source");
      if (m_track)
          m_track->addObserver(*this);
-@@ -134,17 +135,19 @@
+@@ -134,17 +135,33 @@
      if (m_transceiver) {
          auto pad = outgoingSourcePad();
          if (!gst_pad_is_linked(pad.get())) {
@@ -557,6 +557,20 @@ diff --git a/Source/WebCore/platform/mediastream/gstreamer/RealtimeOutgoingMedia
 +    gst_bin_sync_children_states(GST_BIN_CAST(m_bin.get()));
      gst_element_sync_state_with_parent(m_bin.get());
 +    g_printerr("StudyVis outgoing state bin=%d source=%d input=%d tee=%d\n", GST_STATE(m_bin.get()), m_outgoingSource ? GST_STATE(m_outgoingSource.get()) : -1, GST_STATE(m_inputSelector.get()), GST_STATE(m_tee.get()));
++    auto installProbe = [](GstElement* element, const char* label) {
++        if (!element)
++            return;
++        auto pad = adoptGRef(gst_element_get_static_pad(element, "src"));
++        if (!pad)
++            return;
++        gst_pad_add_probe(pad.get(), GST_PAD_PROBE_TYPE_BUFFER, [](GstPad*, GstPadProbeInfo*, gpointer userData) {
++            g_printerr("StudyVis outgoing first-buffer %s\n", static_cast<const char*>(userData));
++            return GST_PAD_PROBE_REMOVE;
++        }, const_cast<char*>(label), nullptr);
++    };
++    installProbe(m_outgoingSource.get(), "source");
++    installProbe(m_inputSelector.get(), "selector");
++    installProbe(m_rtpCapsfilter.get(), "caps");
  
      startUpdatingStats();
  }
@@ -565,7 +579,7 @@ diff --git a/Source/WebCore/platform/mediastream/gstreamer/RealtimeOutgoingMedia
  {
      if (m_isStopped) {
          callback();
-@@ -252,17 +255,18 @@
+@@ -252,17 +269,18 @@
      GST_DEBUG_OBJECT(m_bin.get(), "Initializing from track, muted: %s, enabled: %s", boolForPrinting(m_muted), boolForPrinting(m_enabled));
  }
  
