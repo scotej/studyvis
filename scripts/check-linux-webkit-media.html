@@ -66,14 +66,22 @@
         video?.getVideoPlaybackQuality().totalVideoFrames ?? 0
       const advancing = async (video, width, height, label) => {
         const before = frames(video)
-        await until(
-          () =>
-            video.videoWidth === width &&
-            video.videoHeight === height &&
-            video.readyState >= 2 &&
-            frames(video) >= before + 3,
-          label
-        )
+        try {
+          await until(
+            () =>
+              video.videoWidth === width &&
+              video.videoHeight === height &&
+              video.readyState >= 2 &&
+              frames(video) >= before + 3,
+            label
+          )
+        } catch (error) {
+          report(
+            `diagnostic ${label}: ${video.videoWidth}x${video.videoHeight}; ` +
+              `ready=${video.readyState}; frames=${frames(video)}; before=${before}`
+          )
+          throw error
+        }
         const sample = document.createElement('canvas').getContext('2d')
         sample.drawImage(video, 0, 0, 1, 1)
         const pixel = sample.getImageData(0, 0, 1, 1).data
