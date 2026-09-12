@@ -309,7 +309,7 @@ diff --git a/Source/WebCore/Modules/mediastream/gstreamer/GStreamerMediaEndpoint
  }
 @@ -702,14 +702,15 @@
 -        GST_DEBUG_OBJECT(m_pipeline.get(), "Looking-up outgoing source with msid %s in %zu unlinked sources", msid.utf8(), m_unlinkedOutgoingSources.size());
-+        g_printerr("StudyVis outgoing lookup msid=%s unlinked=%zu\\n", msid.utf8(), m_unlinkedOutgoingSources.size());
++        g_printerr("StudyVis outgoing lookup msid=%s unlinked=%zu\n", msid.utf8(), m_unlinkedOutgoingSources.size());
          m_unlinkedOutgoingSources.removeFirstMatching([&, msid = String(msid.span())](auto& source) -> bool {
              if (source->type() != sourceType) {
                  GST_DEBUG_OBJECT(pipeline(), "Un-matched source type");
@@ -317,7 +317,7 @@ diff --git a/Source/WebCore/Modules/mediastream/gstreamer/GStreamerMediaEndpoint
              }
              if (const auto& track = source->track()) {
                  auto sourceMsid = makeString(source->mediaStreamID(), ' ', track->id());
-+                g_printerr("StudyVis outgoing candidate source-msid=%s media-msid=%s\\n", sourceMsid.utf8().data(), msid.utf8().data());
++                g_printerr("StudyVis outgoing candidate source-msid=%s media-msid=%s\n", sourceMsid.utf8().data(), msid.utf8().data());
                  if (!msid.isEmpty() && sourceMsid != msid) {
                      GST_DEBUG_OBJECT(pipeline(), "Un-matched outgoing source msid: %s", sourceMsid.utf8().data());
                      return false;
@@ -336,7 +336,7 @@ diff --git a/Source/WebCore/Modules/mediastream/gstreamer/GStreamerMediaEndpoint
                  source->setSinkPad(WTF::move(sinkPad));
 @@ -730,5 +730,6 @@
 -            source->link();
-+            g_printerr("StudyVis linking outgoing source media-msid=%s\\n", msid.utf8().data());
++            g_printerr("StudyVis linking outgoing source media-msid=%s\n", msid.utf8().data());
 +            source->link();
              callOnMainThreadAndWait([&] {
                  source->start();
@@ -523,3 +523,18 @@ diff --git a/Source/WebCore/Modules/mediastream/gstreamer/GStreamerRtpSenderBack
      GUniquePtr<GstStructure> m_initData;
      mutable GUniquePtr<GstStructure> m_currentParameters;
  };
+
+diff --git a/Source/WebCore/platform/mediastream/gstreamer/RealtimeOutgoingMediaSourceGStreamer.cpp b/Source/WebCore/platform/mediastream/gstreamer/RealtimeOutgoingMediaSourceGStreamer.cpp
+--- a/Source/WebCore/platform/mediastream/gstreamer/RealtimeOutgoingMediaSourceGStreamer.cpp
++++ b/Source/WebCore/platform/mediastream/gstreamer/RealtimeOutgoingMediaSourceGStreamer.cpp
+@@ -122,3 +122,4 @@
+ void RealtimeOutgoingMediaSourceGStreamer::start()
+ {
++    g_printerr("StudyVis outgoing start stopped=%d track=%p source=%p\\n", m_isStopped, m_track.get(), m_outgoingSource.get());
+     if (!m_isStopped) {
+@@ -259,3 +259,4 @@
+     auto srcPad = adoptGRef(gst_element_get_static_pad(m_bin.get(), "src"));
+-    gst_pad_link(srcPad.get(), m_webrtcSinkPad.get());
++    auto result = gst_pad_link(srcPad.get(), m_webrtcSinkPad.get());
++    g_printerr("StudyVis outgoing link result=%d src-linked=%d sink-linked=%d\\n", result, gst_pad_is_linked(srcPad.get()), gst_pad_is_linked(m_webrtcSinkPad.get()));
+ }
