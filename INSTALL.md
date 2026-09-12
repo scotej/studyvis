@@ -124,8 +124,8 @@ The source build additionally needs the compiler toolchain and frontend tools:
 
 ```sh
 sudo pacman -S --needed base-devel bison bubblewrap cmake curl dbus file flex \
-  glib2-devel gperf ninja nodejs-lts-krypton npm openssl patchelf ruby rustup \
-  unifdef webkit2gtk-4.1 xdg-dbus-proxy libayatana-appindicator librsvg xdotool \
+  glib2-devel gperf ninja nodejs-lts-krypton npm openssl patchelf python ruby rustup \
+  unifdef wayland-protocols webkit2gtk-4.1 xdg-dbus-proxy libayatana-appindicator librsvg xdotool \
   gst-libav gst-plugin-pipewire gst-plugins-bad gst-plugins-base \
   gst-plugins-good libnice
 rustup toolchain install 1.97.1 --profile minimal --component rustfmt --component clippy
@@ -137,8 +137,17 @@ npm run tauri dev
 The same portal, PipeWire, and Secret Service runtime requirements above apply.
 Debug builds can install the pinned engine on first AI use; before a
 release-profile build, fetch the real sidecar explicitly with
-`bash scripts/fetch-llama-server.sh --triple x86_64-unknown-linux-gnu`. Build the
-pinned browser runtime once, then package it:
+`bash scripts/fetch-llama-server.sh --triple x86_64-unknown-linux-gnu`.
+
+Build complete AppImages in Ubuntu 24.04 using the workflow's declared
+dependencies, including `libusrsctp-dev`. Native CachyOS/Arch packaging is not
+currently a complete documented path: the private runtime requires standalone
+`usrsctp.h`/`libusrsctp`, and staging requires the NSS `.chk` integrity files
+provided by Noble's packages. Arch's GStreamer and NSS packages do not supply
+all of these inputs. This affects building the complete bundle, not running
+the Ubuntu-built AppImage on CachyOS/Arch.
+
+In that Ubuntu build environment, build the pinned browser runtime and package it:
 
 ```sh
 bash scripts/build-linux-webkit-runtime.sh
@@ -147,10 +156,8 @@ npm run build:linux
 
 `npm run build:linux` produces an unsigned, non-updater local AppImage and sets
 linuxdeploy's `NO_STRIP=1` compatibility mode; Cargo has already optimized the
-executable, while the older strip embedded in linuxdeploy cannot parse the
-DT_RELR sections emitted by current CachyOS/Arch toolchains. Official release
-artifacts use the workflow's pinned Linux build environment and are signed for
-updater integrity.
+executable. Official release artifacts use the workflow's pinned Linux build
+environment and are signed for updater integrity.
 
 ### Cross-platform third-party notices
 
@@ -191,24 +198,30 @@ binding. StudyVis therefore builds that binding into a private AppImage runtime,
 explicitly reasserts media streams, and keeps the rest of WebKit's experimental
 feature set disabled.
 
-The pinned, hash-verified input tuple for runtime revision 5 is:
+The pinned, hash-verified input tuple for runtime revision 6 is:
 
-| Input                              | Pinned source                                                        | SHA-256                                                            |
-| ---------------------------------- | -------------------------------------------------------------------- | ------------------------------------------------------------------ |
-| WebKitGTK                          | `https://webkitgtk.org/releases/webkitgtk-2.52.5.tar.xz`             | `8a531a9abd2215936e8a8a914c077b586c0228b31d652f205286a8ec90f3364b` |
-| librice                            | `https://github.com/ystreet/librice/archive/refs/tags/v0.4.3.tar.gz` | `4671e1835f9ab0f8d87e8d9e22b6bfb06f928aeae442841ab81881dff61e3f4b` |
-| AppImage runtime portability patch | `scripts/patches/webkitgtk-2.52.5-appimage-sandbox.patch`            | `12a6cf019e883c9f13c84a904e7410247678dca094289124fc6b76fc4a66bb0b` |
+| Input                              | Pinned source                                                                            | SHA-256                                                            |
+| ---------------------------------- | ---------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
+| WebKitGTK                          | `https://webkitgtk.org/releases/webkitgtk-2.52.5.tar.xz`                                 | `8a531a9abd2215936e8a8a914c077b586c0228b31d652f205286a8ec90f3364b` |
+| librice                            | `https://github.com/ystreet/librice/archive/refs/tags/v0.4.3.tar.gz`                     | `4671e1835f9ab0f8d87e8d9e22b6bfb06f928aeae442841ab81881dff61e3f4b` |
+| AppImage runtime portability patch | `scripts/patches/webkitgtk-2.52.5-appimage-sandbox.patch`                                | `edc669c77ea7eba40b6454fd95369d4601b6632615b8174abd9df0e304ac54a0` |
+| GStreamer core                     | `https://gstreamer.freedesktop.org/src/gstreamer/gstreamer-1.26.11.tar.xz`               | `2e0bd192d0438ea606a6f76a95c8e16542167656ffec2c2bc3aaf6ee0837fbf6` |
+| GStreamer base                     | `https://gstreamer.freedesktop.org/src/gst-plugins-base/gst-plugins-base-1.26.11.tar.xz` | `fc50f885d41f5d0407ce0876ec7235d9e7b82d48db2f4bc72c5f244a4ac79263` |
+| GStreamer good                     | `https://gstreamer.freedesktop.org/src/gst-plugins-good/gst-plugins-good-1.26.11.tar.xz` | `001deb0876d5d743cd3448abf74a27adec3fd850012fcb1b00994861bd6c1145` |
+| GStreamer bad                      | `https://gstreamer.freedesktop.org/src/gst-plugins-bad/gst-plugins-bad-1.26.11.tar.xz`   | `110fb82795f0e569b1e27b12ab9699d35c7762e1ff4db95335d6ac8d1442af3d` |
+| Meson                              | `https://github.com/mesonbuild/meson/releases/download/1.7.2/meson-1.7.2.tar.gz`         | `4d40d63aa748a9c139cc41ab9bffe43edd113c5639d78bde81544ca955aea890` |
 
 `scripts/linux-webkit-runtime.env` is the exact source URL/version/hash,
 portability-patch hash, `cargo-c` version, runtime revision, and AppImage
 runtime-directory source of truth.
-`scripts/build-linux-webkit-runtime.sh` verifies both downloads before
-extracting them, applies the named patch, asserts the effective CMake cache
+`scripts/build-linux-webkit-runtime.sh` verifies every download before
+extracting it, builds matched GStreamer libraries and curated plugins before
+librice/WebKit, applies the named patch, and asserts the effective CMake cache
 (`ENABLE_WEB_RTC=ON`, `ENABLE_MEDIA_STREAM=ON`, GStreamer WebRTC + librice +
 bubblewrap sandbox on, all experimental features off), and installs the
 runtime's provenance/license material. Run it with `--print-manifest` to review
 the expected manifest without compiling. Despite its historical filename, the
-revision-3 portability patch covers the full AppImage relocation boundary. It
+portability patch covers the full AppImage relocation boundary. It
 resolves `WebKitNetworkProcess`, `WebKitWebProcess`, `WebKitGPUProcess`, and the
 injected bundle from `studyvis-webkit-runtime/` beside the StudyVis executable,
 then uses WebKit's compiled native paths only as fallbacks. The staged locations
@@ -216,15 +229,21 @@ are `/usr/bin/studyvis-webkit-runtime/{WebKitNetworkProcess,WebKitWebProcess,Web
 It likewise prefers the packaged `/usr/bin/{bwrap,xdg-dbus-proxy}` beside the
 StudyVis executable. It does not weaken or disable the Web/GPU/Network process
 sandbox.
+It also retains recycled media senders through renegotiation, preserves
+advertised stream IDs, and requests the linear BGRA portal format understood
+by the bundled PipeWire 1.0.5 plugin. Packaging leaves `libwayland-client.so.0`
+to the host EGL driver so a rolling distro's driver cannot load an older
+bundled Wayland client by accident.
 
 This is a pinned, reviewable build recipe, not a claim that independent builds
 are bit-for-bit identical. Production builds use Ubuntu 24.04, Rust 1.97.1,
 `cargo-c` 0.10.24, and the workflow's declared source-build dependency set.
-Ubuntu 24.04 is the floor its GStreamer sets: WebKit's librice ICE agent
-subclasses `GstWebRTCICE`, which exists only from GStreamer 1.22, so Ubuntu
-22.04's 1.20.3 could not build this runtime. The AppImage therefore needs
-glibc 2.39 or newer on the machine that runs it, which every rolling
-distribution — CachyOS and Arch included — already satisfies.
+The private runtime builds GStreamer 1.26.11 core/base/good/bad using pinned
+Meson 1.7.2. Noble's 1.24.2 meets WebKit's configure minimum but has incompatible
+transceiver and incoming-stream behavior (#312). Only the PipeWire and libnice
+plugins remain distro-provided; the remaining GStreamer libraries, plugins,
+scanner and PTP helper must match the source-built prefix's build IDs.
+The Ubuntu 24.04 build baseline retains the AppImage's glibc 2.39 floor.
 CI/preview cache keys cover the runtime tuple, builder, librice notice generator,
 patch, and toolchain pins, and the verified builder runs after a restore. Tagged
 releases deliberately restore no compiled Rust or WebKit state and cold-build
@@ -246,12 +265,16 @@ manifest from the exact locked/offline normal-dependency union for the
 `rice-proto` and `rice-io` `cargo-c` roots with `capi` enabled. This pair records
 the target, root commands, librice `Cargo.lock` hash, direct source
 URLs/checksums, and normalized license-text hashes, and remains verifiable after
-the extracted source tree is deleted.
+the extracted source tree is deleted. `GSTREAMER-THIRD-PARTY-LICENSES.txt`
+and `GSTREAMER-LICENSE-FILES.sha256` carry GStreamer's separate readable/hash
+inventory, alongside its LGPL text, the PTP helper's MPL 2.0 text, and Meson's
+Apache 2.0 license.
 
 The builder's `--source-bundle <output.tar.gz>` mode produces the deterministic
-corresponding-source archive used by tagged releases. It contains the two exact
-verified upstream archives, the complete portability patch, pinned env file,
-build script, build manifest, a reconstruction README, and internal
+corresponding-source archive used by tagged releases. It contains the seven exact
+verified WebKit/librice/GStreamer/Meson archives, the PTP license, complete
+portability patch, pinned env file, build/notice-generation scripts, build
+manifest, a reconstruction README, and internal
 `SHA256SUMS`. After the tagged workflow's exact-AppImage smoke succeeds, the
 draft receives `StudyVis_X.Y.Z_linux-webkit-sources.tar.gz` and the matching
 `StudyVis_X.Y.Z_linux-webkit-sources.tar.gz.sha256`; release validation requires
@@ -282,7 +305,7 @@ downloads and verifies both Linux source pairs, but these mechanical checks are
 not legal sign-off and do not make the mutable Noble baseline bit-reproducible.
 
 Because the host package manager cannot update this private copy, every
-WebKitGTK or librice security bump must update the tuple, rebase and re-hash the
+WebKitGTK, librice, or GStreamer security bump must update the tuple, rebase and re-hash the
 patch, rebuild the AppImage and source archive, repeat the packaged checks and
 physical matrix, and ship through StudyVis's signed updater. Maintainers are
 also responsible for continuing to satisfy all notice and corresponding-source
