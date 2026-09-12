@@ -266,7 +266,7 @@ diff --git a/Source/WebCore/Modules/mediastream/gstreamer/GStreamerMediaEndpoint
          mediaStreamIds.append(msid);
      return mediaStreamIds;
  }
-@@ -1321,44 +1329,71 @@
+@@ -1321,44 +1329,52 @@
      onNegotiationNeeded();
  }
  
@@ -303,17 +303,6 @@ diff --git a/Source/WebCore/Modules/mediastream/gstreamer/GStreamerMediaEndpoint
 -    } else {
 +    GST_DEBUG_OBJECT(m_pipeline.get(), "Recycling transceiver %" GST_PTR_FORMAT " for track %s", transceiver, track.id().utf8().data());
 +
-+    unsigned mLineIndex;
-+    g_object_get(transceiver, "mlineindex", &mLineIndex, nullptr);
-+
-+    GUniqueOutPtr<GstWebRTCSessionDescription> remoteDescription;
-+    g_object_get(m_webrtcBin.get(), "remote-description", &remoteDescription.outPtr(), nullptr);
-+    if (!remoteDescription)
-+        return;
-+
-+    const auto media = gst_sdp_message_get_media(remoteDescription->sdp, mLineIndex);
-+    if (!media)
-+        return;
 +    // removeTrack() stops the old source but the sender backend leaves its
 +    // request pad attached to the transceiver. Release that stale pad before
 +    // asking webrtcbin for the replacement, otherwise a recycled m-line can
@@ -330,14 +319,6 @@ diff --git a/Source/WebCore/Modules/mediastream/gstreamer/GStreamerMediaEndpoint
 +        gst_element_release_request_pad(m_webrtcBin.get(), pad);
 +        break;
 +    }
-+    auto codecPreferences = capsFromSDPMedia(media);
-+    auto msid = makeString(mediaStreamId, ' ', track.id());
-+    for (unsigned i = 0; i < gst_caps_get_size(codecPreferences.get()); ++i)
-+        gst_structure_remove_field(gst_caps_get_structure(codecPreferences.get(), i), "a-msid");
-+    gst_structure_set(gst_caps_get_structure(codecPreferences.get(), 0), "a-msid", G_TYPE_STRING, msid.utf8().data(), nullptr);
-+    GST_DEBUG_OBJECT(m_pipeline.get(), "Recycled transceiver codec preferences: %" GST_PTR_FORMAT, codecPreferences.get());
-+    g_object_set(transceiver, "codec-preferences", codecPreferences.get(), nullptr);
-+
 +    GStreamerRtpSenderBackend::Source source;
 +    if (track.privateTrack().isAudio())
 +        source = RealtimeOutgoingAudioSourceGStreamer::create(m_ssrcGenerator, mediaStreamId, track);
