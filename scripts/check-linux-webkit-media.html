@@ -131,6 +131,10 @@
             event.streams.length === 1,
             'one advertised stream gained an extra SSRC-derived stream'
           )
+          report(
+            `incoming ${event.track.kind} stream id=${stream?.id ?? '<none>'}; ` +
+              `known=${sources.map((source) => source.id).join(',')}`
+          )
           assert(
             stream && sources.some((source) => source.id === stream.id),
             `incoming first stream lost its original ID: ${stream?.id}`
