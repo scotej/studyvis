@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- Linux sessions can send and receive camera video and screen shares reliably,
+  including screens added after joining and restarted during a session.
+- Camera audio and video no longer consume a screen share's stream announcement
+  when their tracks arrive in a different order.
+- The Linux media runtime now includes current GStreamer and ICE security fixes.
+
 ## 1.12.0 — 2026-08-27 — Your session, minute by minute
 
 ### Added

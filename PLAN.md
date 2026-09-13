@@ -184,7 +184,7 @@ Promoting it to shipped support requires all of the following:
 2. Its advisory `Linux AppImage startup smoke` job — excluded from the
    `All pre-merge checks` aggregator because it compiles WebKitGTK from
    source, but run and reported on every pull request — builds the pinned WebKitGTK
-   2.52.5 + librice 0.4.3 runtime, packages that private copy with the
+   2.52.5 + librice 0.4.3 + GStreamer 1.28.7 + libnice 0.1.24 runtime, packages that private copy with the
    media-framework and sandbox helpers, verifies the expected runtime files,
    build manifest, complete upstream license inventory, cross-platform notice
    pair, ELF dependencies, and packaged-only GStreamer WebRTC/SCTP elements,
@@ -192,8 +192,10 @@ Promoting it to shipped support requires all of the following:
    Service round-trip, and starts the
    extracted AppImage under Xvfb. The app's boot probe must create a local
    `RTCPeerConnection` data-channel offer and log `runtime.webrtc ready`.
-   Neither that local offer nor a process staying alive proves that two peers,
-   physical media devices, or a KDE portal work.
+   A separate finite native probe exchanges data, renders synthetic camera and
+   screen streams, and exercises late publication and stop/restart. Packaged
+   codec, SRTP, GL conversion and transceiver checks complement it. Physical
+   media devices and the KDE portal still require the matrix below.
 3. Preview and tagged-release workflows build the same pinned WebKit runtime,
    fetch the pinned `x86_64-unknown-linux-gnu` llama runtime, and build an
    x86_64 AppImage rather than linking the final artifact to the runner's
