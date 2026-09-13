@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 1.12.1 — 2026-09-13 — Reliable Linux session media
+
 ### Fixed
 
 - Linux sessions can send and receive camera video and screen shares reliably,
