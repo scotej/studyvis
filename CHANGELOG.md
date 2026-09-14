@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Fixed
+
+- Model benchmarks in installed builds no longer fail with "Load failed" while
+  loading the bundled test image.
+
 ## 1.12.1 — 2026-09-13 — Reliable Linux session media
 
 ### Fixed

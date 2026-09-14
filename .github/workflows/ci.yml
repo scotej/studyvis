@@ -82,6 +82,14 @@ jobs:
       - name: Install Playwright (Chromium)
         run: npx playwright install --with-deps chromium
 
+      - name: Production benchmark image loading
+        # The direct playwright-core version can differ from Storybook's playwright.
+        env:
+          PLAYWRIGHT_SKIP_BROWSER_GC: '1'
+        run: |
+          npx playwright-core install --with-deps chromium
+          node --test tests/production/benchmark-images.mjs
+
       - name: Accessibility audit (axe-core over every Storybook story)
         run: npm run check-a11y
 
