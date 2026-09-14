@@ -1104,6 +1104,46 @@ packages the artifact. Source/license/build-ID checks cover GStreamer and
 libnice; only PipeWire remains distro-provided. The rebuilt WebKit regression
 and PLAN §8's physical KDE matrix remain validation requirements.
 
+### I118 — Sev2
+
+`src/features/session/sessionOverlayRuntime.ts`, `src-tauri/src/commands/session_overlay.rs`,
+`src-tauri/src/macos_floating_window.rs`, `src-tauri/capabilities/default.json`
+
+**Evidence.** [#317](https://github.com/scotej/studyvis/issues/317): a macOS
+(Apple Silicon, v1.11.3) host in a 51-minute two-person session could read
+every chat message in the panel but never saw the floating notification card
+while working in another app. The attached diagnostics archive holds no
+`session.overlay` records at all — the runtime logged nothing on any branch, so
+the archive cannot say whether a window was created, prepared or shown. By
+source: the overlay is a `WebviewWindow` created from the main webview with
+`alwaysOnTop` + `visibleOnAllWorkspaces`, which tao maps to
+`NSFloatingWindowLevel` + `canJoinAllSpaces` only. A macOS window may not join
+another app's full-screen Space without `fullScreenAuxiliary` — the exact bit
+`ai_dialog.rs` applies natively for the Ctrl+] dialog (ARCHITECTURE §12) and
+that Tauri's window config cannot express — so the JS-created overlay never
+received it and was absent whenever the reporter's other app was full-screen.
+Two smaller macOS defects sit on the same path: tao's `set_inner_size` is
+`setContentSize:`, which keeps the bottom-left corner fixed, so the #228
+grow-to-fit resize slid the card's top edge up under the menu bar; and every
+failure branch in the runtime was a silent `catch`. Nothing in the overlay
+changed between the reporter's 1.11.3 and HEAD.
+
+**Status.** **in review** — `session_overlay_prepare` (a command hard-wired to the
+overlay label, granted only to `main-commands`) applies
+`canJoinAllSpaces | fullScreenAuxiliary` through the helper now shared with the
+AI dialog (`macos_floating_window.rs`), awaited inside the serialized creation
+step so READY/PRESENT cannot reveal an unprepared window; the runtime
+re-asserts the top-left corner after every resize
+(`core:window:allow-set-position`); and a `session.overlay` log scope records
+creation/preparation/presentation failures, a READY watchdog and each reveal
+(revision and height only, never text). Unit-tested in
+`session-overlay-runtime.test.ts` (prepare ordering, prepare failure still
+reveals, re-anchor after each resize, watchdog); the Rust label is locked to the
+capability file by a test. Verified by source and by CI compile only — neither
+CI nor this Linux host can exercise the macOS behaviour, so the reporter's
+confirmation with the new log scope is the remaining check. The non-full-screen
+macOS path reads correct by source and is unchanged apart from the logging.
+
 ## Archive — retired backlogs
 
 Two documents used to sit beside this ledger and were deleted once their implementation backlog had no open code work left: `BUILD-PROMPTS.md` (the sequenced V0→V3 build plan) and `IMPROVEMENTS.md` (the v1.2.0-era improvement backlog). Git history holds both in full — `git log --diff-filter=D -- BUILD-PROMPTS.md IMPROVEMENTS.md`, then `git show <sha>^:<file>`. Linux's implementation checklist is complete, but its operational release sign-off remains pending. What survives here is the part still cited from code.

@@ -4,26 +4,41 @@ import {
   SESSION_OVERLAY_DISMISS,
   SESSION_OVERLAY_PRESENT,
   SESSION_OVERLAY_READY,
+  SESSION_OVERLAY_READY_TIMEOUT_MS,
   SESSION_OVERLAY_UPDATE,
   SESSION_OVERLAY_WINDOW_LABEL,
+  SESSION_OVERLAY_WINDOW_MARGIN,
   SESSION_OVERLAY_WINDOW_WIDTH,
   type SessionOverlayUpdatePayload,
 } from '@/features/session/sessionOverlay'
+import { SESSION_OVERLAY_PREPARE_COMMAND } from '@/features/session/sessionOverlayRuntime'
 
 type EventHandler = (event: { payload: unknown }) => void
 type LogicalSizeLike = { width: number; height: number }
+type LogicalPositionLike = { x: number; y: number }
 type EmittedEvent = { target: string; event: string; payload: unknown }
 type OverlayMock = {
   closed: boolean
   hideCalls: number
   showCalls: number
   sizes: LogicalSizeLike[]
+  positions: LogicalPositionLike[]
+}
+type MonitorLike = {
+  scaleFactor: number
+  workArea: {
+    position: { toLogical: (scale: number) => LogicalPositionLike }
+    size: { toLogical: (scale: number) => LogicalSizeLike }
+  }
 }
 
 const harness = vi.hoisted(() => ({
   emitted: [] as EmittedEvent[],
   failListenOn: null as string | null,
+  failPrepare: false,
   handlers: new Map<string, EventHandler>(),
+  invoked: [] as string[],
+  monitor: null as MonitorLike | null,
   overlay: null as OverlayMock | null,
   sequence: [] as string[],
   unregistered: [] as string[],
@@ -33,7 +48,24 @@ vi.mock('@/strings', () => ({
   strings: { app: { name: 'StudyVis' } },
 }))
 
+vi.mock('@tauri-apps/api/core', () => ({
+  invoke: async (command: string) => {
+    harness.invoked.push(command)
+    harness.sequence.push(`invoke:${command}`)
+    if (harness.failPrepare) throw new Error('ns_window() returned null')
+  },
+}))
+
 vi.mock('@tauri-apps/api/dpi', () => ({
+  LogicalPosition: class LogicalPosition {
+    x: number
+    y: number
+
+    constructor(x: number, y: number) {
+      this.x = x
+      this.y = y
+    }
+  },
   LogicalSize: class LogicalSize {
     width: number
     height: number
@@ -62,6 +94,7 @@ vi.mock('@tauri-apps/api/webviewWindow', () => {
     hideCalls = 0
     showCalls = 0
     sizes: LogicalSizeLike[] = []
+    positions: LogicalPositionLike[] = []
 
     constructor() {
       harness.sequence.push('construct')
@@ -78,11 +111,18 @@ vi.mock('@tauri-apps/api/webviewWindow', () => {
     }
 
     async show(): Promise<void> {
+      harness.sequence.push('show')
       this.showCalls += 1
     }
 
     async setSize(size: LogicalSizeLike): Promise<void> {
+      harness.sequence.push('setSize')
       this.sizes.push({ width: size.width, height: size.height })
+    }
+
+    async setPosition(position: LogicalPositionLike): Promise<void> {
+      harness.sequence.push('setPosition')
+      this.positions.push({ x: position.x, y: position.y })
     }
 
     async close(): Promise<void> {
@@ -110,7 +150,7 @@ vi.mock('@tauri-apps/api/webviewWindow', () => {
 
 vi.mock('@tauri-apps/api/window', () => ({
   cursorPosition: async () => ({ x: 0, y: 0 }),
-  monitorFromPoint: async () => null,
+  monitorFromPoint: async () => harness.monitor,
   currentMonitor: async () => null,
   primaryMonitor: async () => null,
   getCurrentWindow: () => ({
@@ -140,6 +180,43 @@ async function flushAsyncWork(): Promise<void> {
   for (let step = 0; step < 12; step += 1) await Promise.resolve()
 }
 
+// A 2x display whose work area starts below a 25 pt menu bar, in the physical
+// units Tauri's monitor API reports.
+function retinaMonitor(): MonitorLike {
+  return {
+    scaleFactor: 2,
+    workArea: {
+      position: { toLogical: (scale) => ({ x: 0, y: 50 / scale }) },
+      size: {
+        toLogical: (scale) => ({ width: 2940 / scale, height: 1862 / scale }),
+      },
+    },
+  }
+}
+
+async function revealFirstItem(
+  runtime: Awaited<ReturnType<typeof loadRuntime>>,
+  height = 172
+): Promise<number> {
+  await runtime.pushSessionOverlayItem(item)
+  emitFromOverlay(SESSION_OVERLAY_READY)
+  await flushAsyncWork()
+  const revision = updates()[0]?.revision
+  expect(revision).toBeDefined()
+  emitFromOverlay(SESSION_OVERLAY_PRESENT, { revision, height })
+  await flushAsyncWork()
+  return revision as number
+}
+
+async function overlayLogMessages(): Promise<string[]> {
+  // The runtime is re-imported after resetModules, so read the logger
+  // instance it wrote to rather than a stale top-level import.
+  const { recentRecords } = await import('@/lib/log')
+  return recentRecords()
+    .filter((record) => record.scope === 'session.overlay')
+    .map((record) => record.msg)
+}
+
 function updates(): SessionOverlayUpdatePayload[] {
   return harness.emitted
     .filter((entry: EmittedEvent) => entry.event === SESSION_OVERLAY_UPDATE)
@@ -152,7 +229,10 @@ describe('session overlay runtime lifecycle', () => {
     vi.resetModules()
     harness.emitted = []
     harness.failListenOn = null
+    harness.failPrepare = false
     harness.handlers.clear()
+    harness.invoked = []
+    harness.monitor = null
     harness.overlay = null
     harness.sequence = []
     harness.unregistered = []
@@ -160,12 +240,16 @@ describe('session overlay runtime lifecycle', () => {
       visibilityState: 'hidden',
       hasFocus: () => false,
     })
+    // The logger mirrors warn records to the console; the assertions below
+    // read the ring buffer instead.
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
   })
 
   afterEach(() => {
     vi.clearAllTimers()
     vi.useRealTimers()
     vi.unstubAllGlobals()
+    vi.restoreAllMocks()
   })
 
   test('registers the complete control channel before constructing a window', async () => {
@@ -178,6 +262,7 @@ describe('session overlay runtime lifecycle', () => {
       `listen:${SESSION_OVERLAY_DISMISS}`,
       `listen:${SESSION_OVERLAY_PRESENT}`,
       'construct',
+      `invoke:${SESSION_OVERLAY_PREPARE_COMMAND}`,
     ])
     expect(harness.handlers.has(SESSION_OVERLAY_READY)).toBe(true)
     expect(harness.handlers.has(SESSION_OVERLAY_DISMISS)).toBe(true)
@@ -287,5 +372,99 @@ describe('session overlay runtime lifecycle', () => {
         event: SESSION_OVERLAY_UPDATE,
       }),
     ])
+  })
+
+  // #317 — the native preparation (macOS fullScreenAuxiliary) must land
+  // between construction and the first reveal, exactly once per window.
+  test('prepares the native window between creation and the first reveal', async () => {
+    const runtime = await loadRuntime()
+
+    await revealFirstItem(runtime)
+
+    const prepare = `invoke:${SESSION_OVERLAY_PREPARE_COMMAND}`
+    expect(harness.invoked).toEqual([SESSION_OVERLAY_PREPARE_COMMAND])
+    expect(harness.sequence.indexOf('construct')).toBeLessThan(
+      harness.sequence.indexOf(prepare)
+    )
+    expect(harness.sequence.indexOf(prepare)).toBeLessThan(
+      harness.sequence.indexOf('show')
+    )
+
+    await runtime.pushSessionOverlayItem({ ...item, id: 'note:2' })
+    expect(harness.invoked).toHaveLength(1)
+  })
+
+  test('still reveals the overlay when native preparation fails', async () => {
+    harness.failPrepare = true
+    const runtime = await loadRuntime()
+
+    await revealFirstItem(runtime)
+
+    expect(harness.overlay?.showCalls).toBe(1)
+    expect(await overlayLogMessages()).toEqual([
+      'prepare.failed',
+      'present.shown',
+    ])
+  })
+
+  test('re-asserts the top-left corner after every measured resize', async () => {
+    harness.monitor = retinaMonitor()
+    const runtime = await loadRuntime()
+
+    const revision = await revealFirstItem(runtime)
+
+    const expected = {
+      x: 1470 - SESSION_OVERLAY_WINDOW_WIDTH - SESSION_OVERLAY_WINDOW_MARGIN,
+      y: 25 + SESSION_OVERLAY_WINDOW_MARGIN,
+    }
+    expect(harness.overlay?.positions).toEqual([expected])
+    expect(harness.sequence.slice(-3)).toEqual([
+      'setSize',
+      'setPosition',
+      'show',
+    ])
+
+    // A later measurement for the visible revision (fonts finished loading)
+    // resizes in place and anchors again.
+    emitFromOverlay(SESSION_OVERLAY_PRESENT, { revision, height: 200 })
+    await flushAsyncWork()
+    expect(harness.overlay?.sizes).toEqual([
+      { width: SESSION_OVERLAY_WINDOW_WIDTH, height: 172 },
+      { width: SESSION_OVERLAY_WINDOW_WIDTH, height: 200 },
+    ])
+    expect(harness.overlay?.positions).toEqual([expected, expected])
+    expect(harness.overlay?.showCalls).toBe(1)
+  })
+
+  test('leaves the position alone when no monitor could be resolved', async () => {
+    const runtime = await loadRuntime()
+
+    await revealFirstItem(runtime)
+
+    expect(harness.overlay?.sizes).toHaveLength(1)
+    expect(harness.overlay?.positions).toEqual([])
+    expect(harness.overlay?.showCalls).toBe(1)
+  })
+
+  test('records a renderer that never announces READY', async () => {
+    const runtime = await loadRuntime()
+
+    await runtime.pushSessionOverlayItem(item)
+    await vi.advanceTimersByTimeAsync(SESSION_OVERLAY_READY_TIMEOUT_MS)
+
+    expect(await overlayLogMessages()).toEqual(['ready.timeout'])
+  })
+
+  test('stays quiet when READY arrives inside the watchdog window', async () => {
+    const runtime = await loadRuntime()
+
+    await runtime.pushSessionOverlayItem(item)
+    emitFromOverlay(SESSION_OVERLAY_READY)
+    await flushAsyncWork()
+    await vi.advanceTimersByTimeAsync(SESSION_OVERLAY_READY_TIMEOUT_MS)
+
+    // The layout fallback legitimately reveals the card inside this window;
+    // only the watchdog must stay silent.
+    expect(await overlayLogMessages()).not.toContain('ready.timeout')
   })
 })
