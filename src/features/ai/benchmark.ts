@@ -12,7 +12,8 @@
 // honest enough to choose between "fastest" (~3 s/check) and "heaviest"
 // (~25 s/check), which is the only call the user is making.
 
-import benchmarkImageUrl from './assets/benchmark-desk.png'
+// The CSP allows same-origin fetches, but not Vite's inlined data: URLs.
+import benchmarkImageUrl from './assets/benchmark-desk.png?no-inline'
 import { FACE_FRAME_QUALITY, FACE_FRAME_SIZE } from './captureFace'
 import {
   aiHardwareIdentitiesEqual,
