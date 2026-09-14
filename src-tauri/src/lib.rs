@@ -30,6 +30,8 @@ mod linux_media_permissions;
 mod linux_pipewire_runtime;
 #[cfg(target_os = "macos")]
 mod macos_display_capture;
+#[cfg(target_os = "macos")]
+mod macos_floating_window;
 pub mod window_layout;
 
 use tauri::Manager;
@@ -63,6 +65,8 @@ use commands::models::{
     model_remove, DownloadState, ModelOperationState,
 };
 use commands::session_journal::{session_journal_append, session_journal_read};
+#[cfg(desktop)]
+use commands::session_overlay::session_overlay_prepare;
 use commands::sessions::{
     audit_event_insert, audit_events_list_all, audit_events_list_for_session, session_timeline_get,
     session_timeline_save, sessions_clear_all, sessions_delete, sessions_get, sessions_insert,
@@ -234,6 +238,8 @@ pub fn run() {
         app_log_tail,
         #[cfg(desktop)]
         ai_dialog_toggle,
+        #[cfg(desktop)]
+        session_overlay_prepare,
         #[cfg(desktop)]
         model_paths,
         #[cfg(desktop)]
