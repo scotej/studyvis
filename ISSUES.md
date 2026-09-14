@@ -1128,7 +1128,7 @@ grow-to-fit resize slid the card's top edge up under the menu bar; and every
 failure branch in the runtime was a silent `catch`. Nothing in the overlay
 changed between the reporter's 1.11.3 and HEAD.
 
-**Status.** **fixed** — `session_overlay_prepare` (a command hard-wired to the
+**Status.** **in review** — `session_overlay_prepare` (a command hard-wired to the
 overlay label, granted only to `main-commands`) applies
 `canJoinAllSpaces | fullScreenAuxiliary` through the helper now shared with the
 AI dialog (`macos_floating_window.rs`), awaited inside the serialized creation
