@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "generatedBy": "scripts/generate-third-party-notices.ts",
   "noticePath": "THIRD-PARTY-NOTICES.txt",
-  "noticeSha256": "86de7c235063d44d779d8f487e877cbc1d2df5011843a741fb9d44133916abda",
+  "noticeSha256": "aa8e2eb03ea2656cd008707f3789fb0b0c3321c6755a0979af895b3bd5c01277",
   "scope": {
     "npm": "package-lock.json v3 entries beneath node_modules whose dev flag is not true",
     "cargo": "normal dependency edges reachable from the StudyVis root under each release target; build/dev edges excluded",
@@ -16,11 +16,11 @@
   "inputs": [
     {
       "path": "package-lock.json",
-      "sha256": "c0bb22a558bae49debf59336934975204f11b32d32c1db338af6899f49ede49c"
+      "sha256": "e8258873483e844afb2014e2ab59f72acbab6c6b0da0a5c1bfcb392a6162c5c7"
     },
     {
       "path": "package.json",
-      "sha256": "cef9d1b151130a5789f0c68041ee6c96f1171f740faacf9d8cc347164564b107"
+      "sha256": "42827799a9bbec4bf22442736a924809d637c429d49caf0ceba5844a9f4c827f"
     },
     {
       "path": "scripts/fetch-llama-server.sh",
@@ -13937,14 +13937,14 @@
       ]
     },
     {
-      "id": "npm:node_modules/@types/node@26.2.0",
+      "id": "npm:node_modules/@types/node@26.5.0",
       "ecosystem": "npm",
       "name": "@types/node",
-      "version": "26.2.0",
+      "version": "26.5.0",
       "licenseExpression": "MIT",
-      "source": "https://registry.npmjs.org/@types/node/-/node-26.2.0.tgz",
+      "source": "https://registry.npmjs.org/@types/node/-/node-26.5.0.tgz",
       "repository": "https://github.com/DefinitelyTyped/DefinitelyTyped.git",
-      "integrity": "sha512-5IviulTZeRNp2vAJ514cc/HUlY5nZ9fCbq9DMyC52BrhFZACo3nI0R7qBxhQmo/d27NFe96ur/b7Wwxklda+kg==",
+      "integrity": "sha512-dVSGpriSoCgz8WnDNTuSSuSv1PC/ALXihO4ulRZt7Md8k9mlbdin3lGOcDE8SnWOgf513ByWlXd7BK4azmyg/A==",
       "lockPath": "node_modules/@types/node",
       "targets": ["frontend"],
       "licenseFiles": [
@@ -13973,14 +13973,14 @@
       ]
     },
     {
-      "id": "npm:node_modules/@types/react-dom@19.2.4",
+      "id": "npm:node_modules/@types/react-dom@19.2.7",
       "ecosystem": "npm",
       "name": "@types/react-dom",
-      "version": "19.2.4",
+      "version": "19.2.7",
       "licenseExpression": "MIT",
-      "source": "https://registry.npmjs.org/@types/react-dom/-/react-dom-19.2.4.tgz",
+      "source": "https://registry.npmjs.org/@types/react-dom/-/react-dom-19.2.7.tgz",
       "repository": "https://github.com/DefinitelyTyped/DefinitelyTyped.git",
-      "integrity": "sha512-Bsc+QHgp+P/F02XDzNCY9jnZNCUuLki36KT7VKrTXXLdHf+vHMNZnW1rVu5DNW/rCK+fya3DATySbLM4yhtKUw==",
+      "integrity": "sha512-I8bPpDLcHBv1qiIiXDCy71Rt8eQDKJP0sMSWJphDdAcdqiJ1sGpZamavoEIRZmYzjia9LuEb2HlYdDpmoENpvQ==",
       "lockPath": "node_modules/@types/react-dom",
       "targets": ["frontend"],
       "licenseFiles": [
@@ -15901,14 +15901,14 @@
       ]
     },
     {
-      "id": "npm:node_modules/undici-types@8.3.0",
+      "id": "npm:node_modules/undici-types@8.9.0",
       "ecosystem": "npm",
       "name": "undici-types",
-      "version": "8.3.0",
+      "version": "8.9.0",
       "licenseExpression": "MIT",
-      "source": "https://registry.npmjs.org/undici-types/-/undici-types-8.3.0.tgz",
+      "source": "https://registry.npmjs.org/undici-types/-/undici-types-8.9.0.tgz",
       "repository": "git+https://github.com/nodejs/undici.git",
-      "integrity": "sha512-j375ScV60dom+YkPFIfTLcOiPxkN/buHz5GobjLhixFuANaNs3C9l4GmrWqejgXWJ7BbJcFYpTEUkS1Ge8bpZQ==",
+      "integrity": "sha512-KTDyRTYX8sWmKXAikPHHSyc63CRPETMctyjKFupcC6OBLXT3xsN0e9aF7m+mIXutFWpUXuedtowG7iLOzp0kQg==",
       "lockPath": "node_modules/undici-types",
       "targets": ["frontend"],
       "licenseFiles": [
