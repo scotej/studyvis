@@ -561,7 +561,7 @@ requires an exact diff; artifact checks require the packaged copies and hashes.
 This mechanical inventory aids review and release gating—it is not legal advice
 or legal sign-off.
 
-The Linux candidate also bundles separately licensed WebKitGTK and librice
+The Linux candidate also bundles separately licensed WebKitGTK, librice, and GStreamer
 components. Their notices, the local portability patch, and other staged
 license material ship under
 `usr/share/licenses/studyvis-webkit-runtime/` in the AppImage. That directory's
@@ -571,6 +571,9 @@ inputs, and payload list; `WEBKIT-THIRD-PARTY-LICENSES.txt` and
 `LIBRICE-THIRD-PARTY-NOTICES.txt` and its JSON manifest separately inventory
 the exact locked normal-dependency union selected by the `rice-proto` and
 `rice-io` `cargo-c` builds, including their `capi` features and source hashes.
+`GSTREAMER-THIRD-PARTY-LICENSES.txt` and `GSTREAMER-LICENSE-FILES.sha256`
+cover the matched source-built GStreamer components, with separate LGPL,
+PTP-helper MPL 2.0, and Meson Apache 2.0 license texts.
 Each tagged Linux draft also carries
 `StudyVis_X.Y.Z_linux-webkit-sources.tar.gz` and its `.sha256` sidecar, providing
 the verified upstream archives, complete patch, and build inputs separately

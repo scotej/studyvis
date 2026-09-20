@@ -13,6 +13,11 @@ import { encodePeerPresenceMs } from '@/lib/db/sessionPresence'
 
 const db = new Map<string, Record<string, unknown>>()
 let sessionsGetFailuresRemaining = 0
+// I109 — fires inside the persistence window, between the teardown flush and
+// `markEnded()`, so a test can model the AI sample loop appending an audit row
+// there. The loop really is still running at that point: its handle lives in
+// SessionView's effect and is only released when `markEnded()` unmounts it.
+let onSessionsInsert: (() => void) | null = null
 
 vi.mock('@/lib/db/sessions', () => ({
   sessionsGet: vi.fn(async (id: string) => {
@@ -44,6 +49,7 @@ vi.mock('@/lib/db/sessions', () => ({
   sessionsInsert: vi.fn(
     async (row: { id: string } & Record<string, unknown>) => {
       db.set(row.id, row)
+      onSessionsInsert?.()
     }
   ),
   sessionsInsertIfAbsent: vi.fn(
@@ -73,6 +79,7 @@ import {
   buildLeaveHandler,
   mergeSessionStints,
 } from '@/features/session/lifecycle'
+import { useAuditStore } from '@/stores/auditStore'
 import type { TopicRoom } from '@/lib/trystero'
 import { createSessionStore, useSessionStore } from '@/stores/sessionStore'
 
@@ -124,9 +131,62 @@ describe('re-entry merge across leave cycles', () => {
       skippedSamples: null,
       aiEnabled: 0,
     }
+    onSessionsInsert = null
+    useAuditStore.getState().reset()
     useSessionStore.getState().reset()
     vi.useFakeTimers()
     return () => vi.useRealTimers()
+  })
+
+  // I109 — the teardown flush is followed by four IPC round-trips, and the AI
+  // sample loop runs through all of them: its handle lives in SessionView's
+  // effect and is only released when `markEnded()` unmounts it. A row appended
+  // in that window was a fire-and-forget insert with no second flush, and the
+  // report reads audit_events exactly once — the user watched an alert fire and
+  // the timeline did not have it, while reopening the session later did.
+  test('the audit store is flushed again after the last row-producing step', async () => {
+    const trace: string[] = []
+    const realFlush = useAuditStore.getState().flushPending
+    useAuditStore.setState({
+      flushPending: async () => {
+        trace.push('flush')
+        await realFlush()
+      },
+    })
+    onSessionsInsert = () => {
+      trace.push('sessions-insert')
+      useAuditStore.getState().append({
+        v: 1,
+        session_topic: 'topic-1',
+        ts: T0 + MIN,
+        who: 'a'.repeat(64),
+        kind: 'ai_alert',
+        detail: { reasoning: 'opened a video' },
+        sig: 'late-alert',
+      })
+    }
+    const unsubscribe = useSessionStore.subscribe((state) => {
+      if (state.status === 'ended' && !trace.includes('ended')) {
+        trace.push('ended')
+      }
+    })
+
+    try {
+      await runStint(T0, T0 + 10 * MIN)
+    } finally {
+      unsubscribe()
+      useAuditStore.setState({ flushPending: realFlush })
+    }
+
+    const lastInsert = trace.lastIndexOf('sessions-insert')
+    const ended = trace.indexOf('ended')
+    expect(lastInsert).toBeGreaterThan(-1)
+    expect(ended).toBeGreaterThan(lastInsert)
+    const flushAfterInsert = trace.findIndex(
+      (entry, index) => entry === 'flush' && index > lastInsert
+    )
+    expect(flushAfterInsert).toBeGreaterThan(-1)
+    expect(flushAfterInsert).toBeLessThan(ended)
   })
 
   test('a rejoin stint accumulates minutes instead of rewinding the row', async () => {

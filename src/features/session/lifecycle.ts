@@ -775,6 +775,22 @@ export function buildLeaveHandler(args: {
       // user in the active session UI.
       log.error('log_flush.failed', { phase: 'teardown', err })
     }
+    // I109 — flush again, immediately before the flip. The first flush above
+    // is followed by four IPC round-trips (sessions read, upsert, markStudied,
+    // log flush), and the AI sample loop is still running through all of them:
+    // its handle lives in SessionView's effect and is only released when
+    // `markEnded()` unmounts the view, so nothing here can stop it. An alert or
+    // `ai_stalled` row appended in that window is a fire-and-forget
+    // `audit_event_insert`, and the report reads `audit_events` exactly once —
+    // the user watched the alert fire and the timeline did not have it, while
+    // reopening the same session later did, because by then the insert had
+    // landed. PR #27 closed the window DURING the first flush; this is the one
+    // after it. Cheap when there is nothing pending, which is the normal case.
+    try {
+      await useAuditStore.getState().flushPending()
+    } catch (err) {
+      log.error('audit_flush.failed', { phase: 'pre_end', err })
+    }
     // Flip to 'ended'. The Report view (mounted by Home.tsx when status ===
     // 'ended') queries the just-persisted sessions row + audit_events for
     // this topic. Reset of audit + pomodoro stores is driven by the V2-P5

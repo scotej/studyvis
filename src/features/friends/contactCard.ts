@@ -50,23 +50,43 @@ function allZero(bytes: Uint8Array): boolean {
 // point (so a `fatal` UTF-8 decode on the far side can never fail). Prefers
 // grapheme-cluster boundaries when Intl.Segmenter is available so an emoji ZWJ
 // sequence isn't cut mid-cluster; falls back to code-point iteration otherwise.
+//
+// I110 — the cluster pass alone could return NOTHING. A single grapheme cluster
+// can exceed NAME_CAP on its own: "man, light skin, ZWJ, heart, ZWJ, kiss, ZWJ,
+// man, dark skin" is one cluster of 35 UTF-8 bytes. Breaking on the first
+// cluster that does not fit then produced an empty name, so a user whose name
+// the app had accepted handed out a `studyvis://add` card carrying no name at
+// all and was imported under a placeholder. A cap should shorten a name, never
+// delete it, so an empty cluster pass falls back to code points: a partial
+// emoji sequence reads as its component emoji, which is a worse name than the
+// one that was chosen but is still the name that was chosen.
 function truncateUtf8(name: string, maxBytes: number): Uint8Array {
   const encoder = new TextEncoder()
   const full = encoder.encode(name)
   if (full.length <= maxBytes) return full
-  const units =
-    typeof Intl !== 'undefined' && 'Segmenter' in Intl
-      ? Array.from(new Intl.Segmenter().segment(name), (s) => s.segment)
-      : Array.from(name) // Array.from over a string iterates by code point.
-  let out = ''
-  let used = 0
-  for (const unit of units) {
-    const size = encoder.encode(unit).length
-    if (used + size > maxBytes) break
-    out += unit
-    used += size
+
+  const fit = (units: Iterable<string>): string => {
+    let out = ''
+    let used = 0
+    for (const unit of units) {
+      const size = encoder.encode(unit).length
+      if (used + size > maxBytes) break
+      out += unit
+      used += size
+    }
+    return out
   }
-  return encoder.encode(out)
+
+  const byCluster =
+    typeof Intl !== 'undefined' && 'Segmenter' in Intl
+      ? fit(Array.from(new Intl.Segmenter().segment(name), (s) => s.segment))
+      : ''
+  // Array.from over a string iterates by code point.
+  const kept = byCluster || fit(Array.from(name))
+  // A cut inside a ZWJ sequence can leave a joiner or a variation selector with
+  // nothing after it. `sanitizeDisplayName` keeps U+200D on purpose, so trim
+  // the dangling tail here rather than shipping a name that ends in a joiner.
+  return encoder.encode(kept.replace(/(?:\u200D|\uFE0F)+$/u, ''))
 }
 
 // Build our own signed ContactCard bytes. `sign` is the keyring-bound ed25519

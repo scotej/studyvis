@@ -64,6 +64,7 @@ const APP_COMMANDS: &[&str] = &[
     "app_log_append",
     "app_log_tail",
     "ai_dialog_toggle",
+    "session_overlay_prepare",
     "model_paths",
     "model_install_state",
     "model_remove",
