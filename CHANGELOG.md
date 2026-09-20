@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+## 1.12.2 — 2026-09-14 — Notifications that reach you
+
+### Fixed
+
+- Model benchmarks in installed builds no longer fail with "Load failed" while
+  loading the bundled test image.
+- **Session notifications now reach you on macOS while you're in a full-screen
+  app.** A friend's chat message, an off-task alert or a session notice shows
+  up in the small floating card over whatever you're working in — but on
+  macOS that card was never allowed onto a full-screen app's space, so anyone
+  studying with another app full-screen saw nothing until they came back to
+  StudyVis. The card now joins full-screen spaces the way the Ctrl+] AI dialog
+  already did, keeps its top edge below the menu bar when it grows to fit a
+  longer message, and records what it did in the diagnostics log so a silent
+  notification can be diagnosed from an archive.
+
+## 1.12.1 — 2026-09-13 — Reliable Linux session media
+
 ### Fixed
 
 - Linux sessions can send and receive camera video and screen shares reliably,
