@@ -10,6 +10,8 @@ Round 1 (`audit/sev1-sev2-fixes`, PR #29): every Sev1/Sev2 fixed. Round 2 (`audi
 
 **Improvement wave 3 (post-v1.6.0, `feat/improvements-wave3`).** A 12-subsystem multi-agent survey with per-finding adversarial verification, then a multi-lens review of the branch (the three low-severity findings it confirmed were fixed on-branch). Rows I51+ record the confirmed fixes; each shipped as its own commit with tests where the harness allows. Test-only and doc-only outcomes (rendezvous-derivation vectors, signed-hello gate coverage, inbox replay coverage, and the DESIGN-SYSTEM §4 / ARCHITECTURE §11–§12 / README true-ups) are not ledgered separately.
 
+**v1.12.0-era survey (`audit/v1.12-findings`).** A six-lane read of the code that had never been audited as a whole: the #236 session write-up shipped in v1.12.0, the push-to-talk state machine after two consecutive fixes to it (#286, #287), the AI sample loop and session lifecycle, the TypeScript↔Rust IPC contract and Rust command handlers, and identity/crypto/pairing/P2P. Rows I99+ record what it found. Every entry was verified against the cited lines before it was written, and all seventeen were then fixed on the same branch, each as its own commit with tests where the harness allows. Where a test could only pass by accident it was confirmed to FAIL with its fix reverted; the two behaviours the node-env harness cannot reach (a React effect's gating, and the tray probe) say so in their rows. Four areas came back clean and are recorded here rather than re-hunted: the identity/crypto/pairing/P2P wire (key derivation, nonce use, inbound verification, replay guards and encoding all hold), the IPC contract (argument casing, serde shapes, capability grants and command registration are byte-consistent across `build.rs`, `generate_handler!` and `permissions/window-commands.toml`), the pomodoro controller, and session images. Three hand-maintained lockstep invariants that nothing in CI checks were also verified by hand and are intact: the Linux WebKit cache keys across `ci.yml` and `deploy.yml`, that command-registration triple, and the five release-tracked version files.
+
 Format: one `###` section per finding, ordered by ID. Entries are appended, never renumbered — an ID is a permanent handle cited from code comments, commits and CI config. This file is in `.prettierignore`: it was a five-column table whose cells grew to 5 KB, and Prettier's column alignment padded every row to the widest one (631 KB of the 707 KB was trailing spaces).
 
 ## Findings
@@ -844,6 +846,303 @@ Both are semver-compatible patch bumps, lockfile-only, and `THIRD-PARTY-NOTICES.
 Only **RUSTSEC-2024-0429** (glib) is pinned in `ignore`, with a reason, in the same style as the quick-xml pair: glib 0.20 cannot be reached from this repo because the whole gtk-rs 0.18 stack is pinned beneath tauri's tray-icon. Drop the entry when tauri moves its GTK stack; cargo-deny flags a non-matching entry, so it cannot rot there.
 
 `nix` needs nothing. `battery` is a real dependency (V2-P5 battery awareness, ARCHITECTURE §8) and replacing it would be a cross-platform swap, not a security fix. Same recording purpose as [I19](#i19--sev4) on the npm side: the scan result should not have to be re-derived each time the security tab is opened.
+
+### I99 — Sev2
+
+`src/features/session/useWrittenTimeline.ts` + `src/features/session/Report.tsx`
+
+**Evidence.** `if (hasStoredWriteUp(timeline) && attempt === 0) return` (`useWrittenTimeline.ts:174`) treats any stored row as final, but a rejoin reuses the session topic — `join.ts:81` computes `continuesEndedSession` from `previousSession.sessionTopic === sessionTopic`, and the explicit Rejoin button inside `REJOIN_WINDOW_MS` (`lifecycle.ts:885`) does the same — so stint 2 appends to the same journal file and the same `session_timelines.session_id`. The row written for stint 1 therefore suppresses regeneration forever, while the summary, score and audit timeline beside it merge both stints. `db/session_timelines.rs:48-49` documents the opposite intent verbatim: "a rejoined session ends twice, and the second write-up spans both stints." The upsert supports it; nothing calls it.
+
+There is no UI recovery on the path where it matters most. `Report.tsx:854` gates "Write it up again" on `sourceNote && onRewrite`, and `writtenSourceNote` (`reportSerialize.ts:76`) returns `null` for `source: 'model'` — a fully model-written stint 1 gets no button at all. The guest path has no 20 s bound either: accepting a fresh invite to the same room from the report is the same `continuesEndedSession` branch.
+
+**Status.** **fixed** — a stored write-up whose `generated_at` predates the session's own `ended_at` is stale by construction, so the guard regenerates instead of standing down. An ordinary write-up runs after the session ended and is never stale; a regenerated one is stamped later than the end that made it stale, so this cannot loop, and the completion latch is a second stop either way. `Report` now passes `started_at` and `ended_at` down for this and for [I101](#i101--sev2). Pinned as the pure predicate it is.
+
+### I100 — Sev2
+
+`src-tauri/src/commands/sessions.rs` + `src/features/session/useWrittenTimeline.ts`
+
+**Evidence.** `sessions_delete` removes the rows and unlinks the journal, and its comment is explicit that ordering the two that way means "a failure can only ever leave an orphaned journal … never a narrative whose evidence is already gone." A write-up already in flight breaks that guarantee from the other side. `session_timeline_save` (`commands/sessions.rs:172`) upserts with no existence check, `008_session_timelines.sql` declares no foreign key, and the pass is deliberately detached on unmount (`useWrittenTimeline.ts:249`, "an in-flight write-up keeps running and still persists") holding the parsed journal in memory (`sessionTimeline.ts:437`, `input.journal ?? await readObservations(...)`), so unlinking the file does not stop it.
+
+Open a report, leave while the section reads `generating` — a sidecar start plus up to five 120 s chunk requests, so minutes — then delete that session from Settings → Sessions. Tens of seconds later the detached pass writes the model's account of it back. The row is unreachable from any report (`sessionsGet` returns null and the page renders `strings.report.notFound`) and removable only by clear-all. Same class for `sessions_clear_all`.
+
+**Status.** **fixed** — the upsert is now `INSERT … SELECT … WHERE EXISTS (SELECT 1 FROM sessions WHERE id = ?1)` and returns whether a row was written. The `WHERE` is also what makes it parse: SQLite cannot tell an UPSERT's `ON` from a join's after a bare `INSERT … SELECT` and documents a WHERE clause as the disambiguator. The command discards the outcome deliberately — the user asked for the session to be forgotten and the write-up lost the race, which is the direction that race should go. Mirrored verbatim into the lab's SQLite layer per its fidelity rule, and covered by two Rust cases including a delete landing mid-write-up.
+
+### I101 — Sev2
+
+`src/features/session/sessionJournal.ts` + `src/strings.ts` + `src/features/session/Report.tsx`
+
+**Evidence.** `windowObservations` anchors minute 0 on the first recorded check — `const anchor = sorted[0].ts` (`sessionJournal.ts:262`) — while the section's own help line says "Times are counted from the start of the session" (`strings.ts:946`) and the audit timeline directly beneath it anchors on `sessions.started_at` (`Report.tsx:504`). Two adjacent sections of one report therefore give the same wall-clock instant two different origins, and "Copy report" reproduces both (`reportSerialize.ts:205-222`).
+
+The offset is not hypothetical. The sample loop is paused while the camera is off and during a synced pomodoro rest phase (`SessionView.tsx:1321-1324`), recording is re-read per check so enabling it mid-session starts the clock there (`sessionJournal.ts:197`), and on a CPU-only machine the first *resolved* check is minutes after the session actually started. A session begun with the camera off for twenty minutes labels its first entry "0 min" against an audit row reading 20:00.
+
+**Status.** **fixed** — `windowObservations` takes the session start and anchors on it, plumbed through `SessionTimelineInput`. A missing or impossible value (no row, or clock skew putting the start after the first check) falls back to the old anchor rather than emitting negative minutes. Pinned end to end through `generateSessionTimeline`, control included, and confirmed to fail without the fix.
+
+### I102 — Sev3
+
+`src/features/session/SessionView.tsx` + `src/features/session/sessionJournal.ts`
+
+**Evidence.** `recordSampleObservation` is called with `useSessionStore.getState().sessionTopic` and `...declaredStudyTopic` read at callback time (`SessionView.tsx:1332-1335`), and stamps the entry with `activeRuntime.now()` rather than the sample's own time (`sessionJournal.ts:191-202`). The call sits deliberately ahead of the `context.signal.aborted` gate — "a teardown that has already aborted must not cost the account of what happened" — so it runs for a sample that resolved after the loop stopped, which is the intended behaviour.
+
+`sessionStore` keeps `sessionTopic` through `status: 'ended'` and only replaces it in `begin()`, so the ordinary late sample still files correctly. If a new session has already begun, though — accepting an invite from the report needs one click — the observation lands in the new session's journal carrying a timestamp inside the new session's window, and the write-up narrates the previous session's screen as part of this one. It also drags the I101 anchor backwards for that session.
+
+**Status.** **fixed** — `ScoreEventsDispatchContext` now carries the `atMs` and `topic` the tick was ISSUED with, and `SessionView` captures the session topic once when the loop is constructed rather than reading the live store from inside a callback that deliberately outlives teardown.
+
+### I103 — Sev3
+
+`src/features/session/useWrittenTimeline.ts`
+
+**Evidence.** The generation gate is `if (!settings.aiFeaturesEnabled || !modelId)` (`useWrittenTimeline.ts:212`). `sessionTimelineEnabled` has exactly one non-settings reader in the tree — the recording path at `sessionJournal.ts:197` — so the half of the feature the toggle names second still runs when it is off. Its help text covers both halves ("Records … then turns it into a minute-by-minute account in the session report") and the v1.12.0 CHANGELOG promises only that existing write-ups stay readable.
+
+Reachable whenever a journal exists with no stored row: a write-up that failed because the engine was unreachable leaves exactly that. The user then turns the feature off, later opens that session from Settings → Sessions, and the report starts llama-server, loads a multi-GB model into RAM and runs up to five chunk requests on an explicitly disabled feature.
+
+**Status.** **fixed** — `sessionTimelineEnabled` gates generation as well as recording, with its own blocked message: the setting to change is not the AI toggle, so the copy says which one. Existing write-ups stay readable either way, which is what the release notes promise.
+
+### I104 — Sev3
+
+`src/features/session/sessionTimeline.ts`
+
+**Evidence.** `mergeWithFallback` (`:336-351`) counts a window uncovered unless a written entry fully contains it, then concatenates the written entries with the fallback digests and sorts — without re-applying the overlap trim `normalizeSegments` performs at `:218-229`, whose own comment is "Overlaps read as contradictory time ranges in the report." The model's response schema constrains the integers, not the window boundaries, so a clamped entry need not be boundary-aligned.
+
+A 90-minute session gives `windowMinutesFor` a width of 2, so windows are [0,2), [2,4) and so on. A model entry of [0,3) leaves [2,4) uncovered, and the report renders "0–3 min" immediately above "2–4 min", double-counting minute 2. Unreachable below 60 minutes, where the width is 1 and every clamped entry is boundary-aligned (`MAX_WINDOWS` is 60, so width exceeds 1 only once the span reaches an hour).
+
+**Status.** **fixed** — the trim is extracted as `sortedWithoutOverlap` and run over the merged list as well as the normalized one, so the two producers cannot contradict each other. Pinned with a model entry that straddles a window boundary on a session long enough to widen the windows, and confirmed to fail without the fix.
+
+### I105 — Sev3
+
+`src/features/system/pttInvariants.ts` + `src/features/system/pttWatchdog.ts`
+
+**Evidence.** `resetDwell` is implemented as `states.clear()` (`pttInvariants.ts:511-513`). That deletes the whole `InvariantState`, including `emitCount` and `lastEmitAtMs` — the two fields the ordinary clear path at `:431-435` says must survive: "the backoff ladder is per-invariant-per-session, not per-episode. Resetting them let a flapping predicate re-enter at full rate." `resetDwell`'s own comment two lines above is careful that the *budget* is untouched, which is exactly the outcome the ladder reset then defeats. `pttWatchdog.run` calls it on every recorded `timeline.gap` (`pttWatchdog.ts:174`), so every main-thread stall drops every invariant back to rung 0.
+
+Measured against the real `createPttInvariantMonitor`, one simulated hour of 2 s ticks with a single continuously stuck hold:
+
+| run | violations | budget left |
+| --- | --- | --- |
+| no stalls | 14 | 26 |
+| one `resetDwell` per minute | 40 | 0 |
+
+The stalling profile is the one the I92 archive describes: two `timeline.gap` warnings of over five seconds while llama inference ran on battery. Once `PTT_INVARIANT_BUDGET` is spent the monitor emits `budget-exhausted` once and is silent for the rest of the session, including every `cleared` — so the machine most likely to have a real PTT fault is the one whose archive stops carrying evidence, which is the failure #226 built this module to end.
+
+**Status.** **fixed** — `resetDwell` zeroes `ticks`, `firstAtMs` and `open` per state, exactly as the ordinary clear path does, so `emitCount` and `lastEmitAtMs` survive it. The regression test measures the budget across a simulated hour of one stuck hold rather than asserting an implementation detail: a healthy run leaves most of the budget, and one reset a minute used to exhaust it.
+
+### I106 — Sev3
+
+`src/features/system/pttWatchdog.ts`
+
+**Evidence.** `gap` is constructed only when `overdue && gapCount < PTT_WATCHDOG_GAP_MAX_RECORDS` (`:154`), and `resetDwell()` is gated on `if (gap)` (`:174`). One constant therefore serves two unrelated jobs: capping log volume, and enforcing the correctness rule stated at `:170-173` — "a gap means the ticks either side are not consecutive, so dwell streaks built across it would be fiction." `gapCount` is zeroed only by `resetSession()` on a room change, so past the twentieth gap in a session the guard stops permanently.
+
+From then on the monitor can emit an `error` reading `ticks: 2, dwellMs: 6000` for two samples six seconds apart with the app frozen in between and nothing observed. Worse, the same condition suppressed the `timeline.gap` record, which is the one signal this module's own reading guide requires before a reader may treat a window as unattributable ("Claim NOTHING about that window"). The archive states a conclusion it cannot support, on a stalling machine.
+
+**Status.** **fixed** — the dwell restart is keyed on a tick being overdue, never on whether its `timeline.gap` was recorded. The record cap keeps its own job. Pinned by driving the real watchdog past `PTT_WATCHDOG_GAP_MAX_RECORDS` gaps and asserting both that the records stop and that the violations do not start.
+
+### I107 — Sev3
+
+`src/stores/pttStore.ts`
+
+**Evidence.** `press()`'s second-source branch appends to `heldSources` and returns without setting `active: true` (`:92-95`). That is right while a hold is live, but `MAX_HOLD_MS` deliberately leaves `awaitingRelease` latched with `active: false` (`:98-106`), and in that state a joining source is added to a hold that transmits nothing. `release()` clears the latch only when the last source goes (`:117-121`), so releasing the joiner leaves the original held.
+
+On Linux the on-screen hold-to-talk control renders for every session (`SessionView.tsx:255`, `showLinuxHoldFallback` keys on the platform alone) and the native global shortcut also registers there — `apply_ptt_friends_registration` (`system.rs:443`) carries no platform gate — so X11 has both. A native hold whose release edge is lost (I85's premise) or held past 120 s latches the failsafe state; every subsequent click of the button then joins and leaves a dead hold. Nothing transmits, and because `data-ptt-hold` and `aria-pressed` both read `active` (`SessionView.tsx:2263-2265`) the button renders un-pressed with the label still "Hold to talk", so there is no feedback either. Only pressing the native key again recovers it. Wayland, where the button is the sole source, is unaffected.
+
+**Status.** **fixed** — a press joins an existing hold only while it is LIVE. After the failsafe it starts a fresh hold owned by the new source and drops the expired ones, so their own release no-ops and releasing this one ends the hold for good. Three cases pinned: the revival, the late release from the expired source, and a second source still joining a genuinely live hold.
+
+### I108 — Sev3
+
+`src/features/system/pttWatchdog.ts` + `src/features/system/PttListener.tsx`
+
+**Evidence.** I92 replaced a 50 ms wall-clock discriminator with a latch, and the latch is exact — for native edges. `classifyPttStoreChange`'s `reset` branch matches any last-holder release and returns before the `touchedButton` branch at `:269-272` can be reached (`:256-267`), and `PttListener.tsx:726` suppresses that only when `inNativeEdgeMutation`, which is set true solely inside `handleLocalEdge` (`:475`, cleared `:495`). The session button calls the store directly (`SessionView.tsx:1966`, `:1977`), so nothing suppresses it.
+
+One press and release of the Linux button therefore writes `ptt/store.changed {"cause":"reset"}` every time — a teardown record for a teardown that did not happen. That is I92's symptom made deterministic rather than stall-dependent, on the platform in release sign-off, and the emitted fields carry `previousHeldSourceCount` but not the previous sources, so the record cannot be told apart from a real `reset()`. The `touchedButton` clause is dead code for releases.
+
+**Status.** **fixed** — the latch, since the other option misclassifies a genuine `reset()` that happens to run while the button is held. `withPttButtonMutation` lives beside the mutations it brackets in `pttStore`, is a depth counter rather than a boolean, and `classifyPttStoreChange` takes it as an explicit argument so the function stays pure and testable. The failsafe signature still wins over it.
+
+### I109 — Sev3
+
+`src/features/session/lifecycle.ts` + `src/features/session/SessionView.tsx`
+
+**Evidence.** `buildLeaveHandler` awaits `useAuditStore.flushPending()` (`lifecycle.ts:608`) and then performs four more IPC round-trips before `markEnded()` — `sessionsGet` (`:657`), `sessionsInsert` (`:696`), `sessionsInsertIfAbsent` (`:718`), `markStudiedAt` (`:742`), `flushLog` (`:772`), `markEnded` (`:784`). Nothing stops the AI sample loop in that window: its handle lives in the `SessionView` effect whose cleanup runs `stop()` at `:1465-1469`, released only when `markEnded()` unmounts the view, and `lifecycle.ts` holds no reference to it.
+
+A tick resolving in that window with an off-task verdict crossing the alert threshold reaches `useAuditStore.append` (`auditStore.ts:87-110`), a fire-and-forget `audit_event_insert` with no second flush; the `ai_stalled` watchdog path is the same. `reportLoader.ts:36` then reads `auditEventsListForSession` exactly once. The user watches an alert fire and the report's timeline does not have it, while reopening the same session later from Settings → Sessions does — so the report contradicts itself between viewings. The *during*-flush window was closed by PR #27 (`auditStore.ts:114-119`); this is the after-flush one.
+
+**Status.** **fixed** — re-flushed immediately before `markEnded()`, which is cheap when nothing is pending. Stopping the loop first would mean the leave path reaching into ownership that belongs to `SessionView`'s effect. Pinned as an ordering rather than a microtask race: the incidental awaits after the insert were enough to hide the defect from a timing-based test.
+
+### I110 — Sev3
+
+`src/features/friends/contactCard.ts`
+
+**Evidence.** `truncateUtf8` (`:53-70`) walks grapheme clusters and `break`s on the first that does not fit, so when cluster 1 alone exceeds `NAME_CAP` (32 UTF-8 bytes) it returns zero bytes and `buildContactCard` writes `name_len = 0`. Proven with a failing test against the real module: the emoji sequence "man light skin, ZWJ, heart, ZWJ, kiss, ZWJ, man dark skin" is a single 35-byte cluster and truncates to the empty string, while a 60-character ASCII name truncates to 32 as intended.
+
+The user picks a name the app accepts — `DisplayNameStep` only requires a non-empty trim — and their offline `studyvis://add` card carries no name at all. The import side degrades rather than breaks (`ContactImportDialog.tsx:95` falls back to `copy.fallbackName`, `FriendsListView.tsx:149` to a short pubkey), so the friend is added nameless rather than wrongly named. The session hello is unaffected by construction: its cap is 192 bytes and a 64-UTF-16-unit input cannot exceed that.
+
+**Status.** **fixed** — an empty grapheme pass falls back to code points, so the cap shortens a name instead of deleting it, and a cut inside a ZWJ sequence no longer leaves a dangling joiner or variation selector. Pinned end to end through build and parse with the 35-byte cluster above.
+
+### I111 — Sev2
+
+`src-tauri/src/commands/system.rs` + `src/stores/settingsStore.ts`
+
+**Evidence.** `system_relaunch_app` (`system.rs:1015-1023`) kills the sidecar and calls `app.restart()` without consulting `SessionActiveFlag`, and its JS caller has no guard either (`settingsStore.ts:528-531`). Settings is reachable over a live session by design (`routes/Home.tsx:627` passes `onOpenSettings` into `SessionView`; `:631` mounts the overlay), and Appearance → Window style renders "Relaunch now" as soon as the style changes (`AppearanceCategory.tsx:139-147`).
+
+Pressing it mid-session replaces the process with no confirm. `leaveBeforeQuit` never runs, so per `quitLeave.ts:1-4` the session is "silently lost: no sessions row, no report, no stats credit" — the exact loss `app_quit`, the tray Quit item and the `CloseRequested` handler are all routed around. The sibling caller settles where the guard belongs: `updaterStore.ts:268` refuses to install mid-session with a comment naming this same consequence.
+
+**Status.** **fixed** — the command refuses while a session is active, and `Settings → Appearance` checks too so the user gets the reason rather than a rejected promise nobody handled. Both halves matter: the Rust guard is the boundary, the UI check is the explanation.
+
+### I112 — Sev2
+
+`src-tauri/src/lib.rs` + `src-tauri/src/commands/system.rs`
+
+**Evidence.** `initial_ptt_ai` is registered unconditionally at boot (`lib.rs:772-775`) and is never unregistered — `system_ai_features_set_enabled` (`system.rs:848-862`) only flips the flag and destroys an open dialog, and the three other `manager.register` sites in the tree all belong to the friends combo or the rebind command. The `AiFeaturesFlag` gate lives inside the handler (`lib.rs:746`), where it stops the dialog opening but cannot un-grab an OS-level hotkey. AI is off by default on both sides (`settingsStore.ts:251`; `lib.rs:351` reads `unwrap_or(false)`).
+
+So on a fresh install that never enables AI, `Cmd+]` / `Ctrl+]` stops reaching Safari, Finder or an editor for as long as StudyVis is running, including while it merely sits in the tray. This is the #47 B5 defect: the comment at `lib.rs:754-757` records that fix being applied to the friends combo — "a tray-idle StudyVis no longer swallows Cmd+[ system-wide" — and in the same breath justifies keeping the AI combo lifetime-registered on the handler gate, which is not the layer that does the swallowing.
+
+**Status.** **fixed** — `apply_ptt_ai_registration` mirrors `apply_ptt_friends_registration`, applied at boot and again from `system_ai_features_set_enabled`, and the rebind path releases a combo the feature does not want. The shared-accelerator case is now symmetric in both directions: the friends side no longer assumes an AI registration exists to preserve, and the AI side declines to release a combo a live session is holding.
+
+### I113 — Sev2
+
+`src-tauri/src/db/sessions.rs`
+
+**Evidence.** Crash-recovery adoption derives the recovered peer set from `kind = 'joined'` rows only (`:315-319`) and writes `local_ed_pubkey: None` (`:369`). The `joined` event is emitted exactly once per session (`SessionView.tsx:1196`) and broadcast only to the peers connected at that instant; nothing replays it. Hellos, by contrast, *are* re-sent to every late joiner (`hello.ts:175-185`), which is why the live leave path's `seenPeerEdPubkeys` is symmetric — only recovery uses the asymmetric proxy.
+
+The later joiner is always the guest, since the host waits in the room. A crashed guest therefore holds no `joined` row for anyone but itself, so after the self-filter at `:329-331` `peer_pubkeys` is NULL and the `friends.last_studied_with` loop at `:339-346` never runs — even though the peer's identity is in the same database, under the `left`, `ai_alert` and `pomodoro_*` rows `auditStore.ts:87-106` persists with the real signer. The NULL owner is then permanent, because the upsert pins `local_ed_pubkey = sessions.local_ed_pubkey` (`:233`), which is correct and unit-tested for legacy rows: the session contributes nothing to Settings → Stats focus insights (`statsInsights.ts:170` requires a non-empty owner) and a second crash on the same topic is not reconciled (`:389` requires `local_ed_pubkey IS NOT NULL`).
+
+**Status.** **fixed** — the peer set comes from every distinct signer in the session's audit rows, and ownership is recorded when our own signature is among them. Every row there was verified against the signed-hello binding before it was stored, so no kind is weaker evidence of presence than another. Ownership stays NULL when nothing in the session is ours — an identity restored onto another device's database — because then it genuinely cannot be proven. One existing assertion changed deliberately: it encoded the missing provenance as intended behaviour.
+
+### I114 — Sev3
+
+`src-tauri/src/lib.rs` + `src-tauri/src/commands/system.rs`
+
+**Evidence.** `TrayAvailableFlag` is written only at `lib.rs:349`, `:858` and `:865`, all inside `setup_desktop`, and read at `system.rs:837`. It is therefore a boot-only latch.
+
+On a desktop with no tray host the user hits the #263 refusal — "tray unavailable: enable a tray/AppIndicator extension before using close-to-tray" — installs the extension, watches the StudyVis tray icon appear, and finds close-to-tray still refused for the rest of the process. The refusal text names the prerequisite but never says the app has to be relaunched before the fix takes effect; the code comment anticipates the next launch restoring the stored preference, which is the behaviour, just not what the message says.
+
+**Status.** **fixed** — the probe runs again on the enable attempt. Linux is the only platform whose answer can change while the app runs, since the AppIndicator is registered either way and only becomes visible once a StatusNotifier host is on the bus; elsewhere the flag is false only because tray creation itself failed, which a re-probe cannot undo. The refusal message is now true whenever it appears.
+
+### I115 — Sev3
+
+`src-tauri/src/window_layout.rs`
+
+**Evidence.** On Windows and Linux the saved layout is sanitized against `layout.physical_rect()` with `min_scale = layout.scale` (`:262-271`), and `:302-319` applies that size unconditionally in both branches. `clamp_size` (`:167-172`) is a floor only, and `position_is_reachable` guards the position alone — the centred fallback exists precisely so a window cannot open off-screen — so nothing checks the *size* against the monitors actually present.
+
+A 1280x800 window on a 200 % display persists as 2560x1600 physical. Drop that display to 100 %, or unplug the 2x external and boot on the laptop panel, and the next launch sets 2560x1600 on a 1920x1080 screen with the floor raised to 2048x1280 as well. Centring then puts the left edge at -320, and under the opt-in custom chrome the window-control cluster is off the right edge, which is the recovery affordance the module's reachability rule exists to protect. `rememberWindowLayout` defaults to true (`settingsStore.ts:270`).
+
+**Status.** **fixed** — capped to the monitor it will land on, applied before the existing floor so the OS minimum still wins on a screen too small to hold it. With no reachable position the window is centred on a monitor this pure function cannot identify, so the largest present one bounds it: exact for the single-monitor and removed-external cases, and never shrinking a window that already fits.
+
+### I116 — Sev2
+
+`scripts/linuxdeploy-tools.env` + `scripts/prepare-linuxdeploy-tools.sh`
+
+**Evidence.** Every Linux build began failing at `Prepare the pinned linuxdeploy toolchain`:
+
+```
+error: linuxdeploy-plugin-appimage.AppImage SHA256 mismatch:
+expected a45d3e227bc7f397e9cf6bfa4c9507494efa2293357b6e86690a3de2ca992e79
+got      0441769ab38009504d2678c38cd7e526955388dd30a215b4a20afaa5471652f2
+```
+
+Not a regression from any commit here — it is latent on `main` and was simply not exercised, because the installer job's steps are guarded and a docs-only commit builds nothing. The last real Linux build was 2026-08-28.
+
+`STUDYVIS_APPIMAGE_PLUGIN_URL` points at upstream's `continuous` release, which is the only release they publish and which they rebuild on a schedule. Its assets were replaced on 2026-09-01 with no source change: the repo's last push is 2026-06-07, and `..._COMMIT` (`536b0687`) is still HEAD. The plugin's CI re-ran against an unchanged tree and re-squashed the AppImage, which moves the outer container's bytes on its own. So a hash pinned to that URL goes stale by itself, and will again. The two sibling entries do not share the problem: `linuxdeploy` and `AppRun` come from `tauri-apps/binary-releases` under fixed tags, and tauri-apps does not mirror this plugin.
+
+The trap is the second-order one. The plugin's `ci/build-bundle.sh` fetches appimagetool from *its* rolling `continuous` tag at build time, so a rebuild can silently swap the appimagetool this project bundles and ships source for — which would leave `STUDYVIS_APPIMAGETOOL_COMMIT` describing a binary no longer in the artifact. Pasting in the observed hash would have accepted an unreviewed binary AND quietly falsified the corresponding-source delivery.
+
+Blast radius while broken: `deploy.yml`'s Linux installer, `ci.yml`'s advisory AppImage startup smoke, and — the one that matters — `release.yml`'s Linux leg, so the next release could not be cut.
+
+**Status.** **fixed** — re-pinned to the artifact now served, after establishing that nothing about the SOURCE moved: `..._COMMIT` is still upstream HEAD, the tarball at `..._SOURCE_URL` still hashes to `..._SOURCE_SHA256`, and the bundled appimagetool is still `8c8c91f`, read out of the artifact rather than assumed (split the squashfs off at the end of the ELF headers, `unsquashfs`, and the git version is a plain string in `appimagetool-prefix/usr/bin/appimagetool`). Only the outer container was rebuilt. Every other binary and source pin in the file was re-verified against its URL at the same time, so the next Linux build does not stop four minutes later on a different stale entry.
+
+`STUDYVIS_LINUXDEPLOY_TOOLSET_REVISION` deliberately did not move: every source tuple the file delivers is byte-identical to r3, and relabelling unchanged corresponding source would make the archive say something untrue.
+
+The recurrence is not fixed, because it cannot be from here — upstream publishes no immutable tag for this plugin, their newest fixed release is sixteen months older and would drag the bundled appimagetool back with it, and mirroring the artifact ourselves is a repository-owned decision rather than a build fix. What is fixed is the cost of the next one: the entry now carries the rolling-tag hazard and the three-step re-verification beside it, and the mismatch prints the procedure and says plainly not to paste the observed hash in. The gate refusing an unreviewed binary is the control working; `prepare-linuxdeploy-tools.sh`'s own header already says a mutable URL is acceptable *only* because its bytes are checked first.
+
+### I117 — Sev2
+
+`scripts/build-linux-webkit-runtime.sh`, `scripts/stage-linux-appimage-webkit.sh`,
+`scripts/patches/webkitgtk-2.52.5-appimage-sandbox.patch`, and
+`patches/@trystero-p2p+core+0.25.3.patch`
+
+**Evidence.** In [#312](https://github.com/scotej/studyvis/issues/312), the
+reporter confirmed the screenshot was taken on Linux: its local camera was
+live, while the peer camera and local shared screen were blank. The uploaded
+September 12 logs show a WebProcess crash on the first session, then a joined
+peer and a bound screen stream in the next session. Those records establish
+capture and data activity, but contain no evidence of decoded remote frames.
+
+Native reproduction against the released AppImage identified separate failures:
+Noble GStreamer 1.24.2 misassigns sending pads and delays incoming transceiver
+creation, and its incoming caps omit SDP attributes required by WebKit's track
+binding. Matching newer GStreamer restores receive-only and bidirectional video
+and independently negotiated screen streams. WebKit's recycled-sender path also
+drops the outgoing source instead of retaining and linking it after negotiation;
+the expanded regression exercises a camera added after receiving remote media.
+
+The curated payload omitted WebKit's black/silence source factories, GPU frame
+conversion, and NSS's lazily loaded SRTP modules. Separately, the bundled
+PipeWire 1.0.5 plugin rejects WebKit's `DMA_DRM` request: its exact upstream
+format converter fails SPA negotiation, while legacy linear BGRA negotiates and
+round-trips correctly. Host EGL drivers can also fail loading newer Wayland
+symbols when the AppImage shadows their client library with Noble's copy.
+
+At the JavaScript boundary, Trystero consumed one stream announcement per native
+track event. A camera's audio and video could therefore consume the screen's
+metadata, preventing correct delivery even with working native media. Both
+released Trystero versions already include the native stream ID, so matching
+that ID preserves the existing wire contract.
+
+The first rebuilt regression reached the reverse-offer path and failed with
+`Could not reuse transceiver`. Its receive-only transceiver had no codec
+preferences, so the first patch substituted WebKit's unassigned VP8/Opus
+capability caps; GStreamer cannot form an SDP media section from dynamic codecs
+without RTP payload numbers. The recycled sender now derives preferences from
+the negotiated remote m-line, replaces only its MSID, and then uses WebKit's
+normal deferred link/start lifecycle.
+
+**Status.** **in review** — runtime revision 7 pins matched GStreamer 1.28.7 and
+libnice 0.1.24 sources, restores the required curated payload, fixes portal caps
+and recycled sender ownership, and matches Trystero announcements by stream ID.
+The maintained runtime also includes the DTLS fingerprint/certificate, Opus,
+RTP, and TURN fixes absent from 1.26.11 (including CVE-2026-14935,
+CVE-2026-59692, and CVE-2026-18297). Exact AppImage checks process native media
+and exercise peer rendering and renegotiation. The output wrapper leaves the
+Wayland client to the host EGL driver before the unchanged verified output tool
+packages the artifact. Source/license/build-ID checks cover GStreamer and
+libnice; only PipeWire remains distro-provided. The rebuilt WebKit regression
+and PLAN §8's physical KDE matrix remain validation requirements.
+
+### I118 — Sev2
+
+`src/features/session/sessionOverlayRuntime.ts`, `src-tauri/src/commands/session_overlay.rs`,
+`src-tauri/src/macos_floating_window.rs`, `src-tauri/capabilities/default.json`
+
+**Evidence.** [#317](https://github.com/scotej/studyvis/issues/317): a macOS
+(Apple Silicon, v1.11.3) host in a 51-minute two-person session could read
+every chat message in the panel but never saw the floating notification card
+while working in another app. The attached diagnostics archive holds no
+`session.overlay` records at all — the runtime logged nothing on any branch, so
+the archive cannot say whether a window was created, prepared or shown. By
+source: the overlay is a `WebviewWindow` created from the main webview with
+`alwaysOnTop` + `visibleOnAllWorkspaces`, which tao maps to
+`NSFloatingWindowLevel` + `canJoinAllSpaces` only. A macOS window may not join
+another app's full-screen Space without `fullScreenAuxiliary` — the exact bit
+`ai_dialog.rs` applies natively for the Ctrl+] dialog (ARCHITECTURE §12) and
+that Tauri's window config cannot express — so the JS-created overlay never
+received it and was absent whenever the reporter's other app was full-screen.
+Two smaller macOS defects sit on the same path: tao's `set_inner_size` is
+`setContentSize:`, which keeps the bottom-left corner fixed, so the #228
+grow-to-fit resize slid the card's top edge up under the menu bar; and every
+failure branch in the runtime was a silent `catch`. Nothing in the overlay
+changed between the reporter's 1.11.3 and HEAD.
+
+**Status.** **in review** — `session_overlay_prepare` (a command hard-wired to the
+overlay label, granted only to `main-commands`) applies
+`canJoinAllSpaces | fullScreenAuxiliary` through the helper now shared with the
+AI dialog (`macos_floating_window.rs`), awaited inside the serialized creation
+step so READY/PRESENT cannot reveal an unprepared window; the runtime
+re-asserts the top-left corner after every resize
+(`core:window:allow-set-position`); and a `session.overlay` log scope records
+creation/preparation/presentation failures, a READY watchdog and each reveal
+(revision and height only, never text). Unit-tested in
+`session-overlay-runtime.test.ts` (prepare ordering, prepare failure still
+reveals, re-anchor after each resize, watchdog); the Rust label is locked to the
+capability file by a test. Verified by source and by CI compile only — neither
+CI nor this Linux host can exercise the macOS behaviour, so the reporter's
+confirmation with the new log scope is the remaining check. The non-full-screen
+macOS path reads correct by source and is unchanged apart from the logging.
 
 ## Archive — retired backlogs
 

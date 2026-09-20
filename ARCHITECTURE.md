@@ -109,13 +109,19 @@ experimental features still off but WebRTC explicitly on; it also reasserts
 media streams, GStreamer WebRTC, librice, and the bubblewrap sandbox. librice
 keeps ICE/network work in WebKit's sandboxed NetworkProcess.
 
-Runtime revision 5 has this reviewable input identity:
+Runtime revision 7 has this reviewable input identity:
 
 | Input | Version/source | SHA-256 |
 |-|-|-|
 | WebKitGTK | `webkitgtk-2.52.5.tar.xz` from `webkitgtk.org/releases` | `8a531a9abd2215936e8a8a914c077b586c0228b31d652f205286a8ec90f3364b` |
 | librice | GitHub tag archive `v0.4.3` | `4671e1835f9ab0f8d87e8d9e22b6bfb06f928aeae442841ab81881dff61e3f4b` |
-| WebKit AppImage portability delta | `scripts/patches/webkitgtk-2.52.5-appimage-sandbox.patch` | `12a6cf019e883c9f13c84a904e7410247678dca094289124fc6b76fc4a66bb0b` |
+| WebKit AppImage portability delta | `scripts/patches/webkitgtk-2.52.5-appimage-sandbox.patch` | `a27c9de1c1b8665cad2619ace297cb58ed6f9b345b03a25b5f711cbebc4434f7` |
+| GStreamer core | `gstreamer-1.28.7.tar.xz` from `gstreamer.freedesktop.org/src` | `787329b2c5758e228a71d926a6dcf960bceaacca3cadd63874ba665dfcda013e` |
+| GStreamer base | `gst-plugins-base-1.28.7.tar.xz` from `gstreamer.freedesktop.org/src` | `ed6e5410f496d171818763af2265e7977154bc7f9b827e98acf8c5bed21dd5a7` |
+| GStreamer good | `gst-plugins-good-1.28.7.tar.xz` from `gstreamer.freedesktop.org/src` | `87256969c82cf3bc8574301f3e7044a90de0ac500a5a27d8ba38c4dde894dd8b` |
+| GStreamer bad | `gst-plugins-bad-1.28.7.tar.xz` from `gstreamer.freedesktop.org/src` | `dc525383c18b2c265bbe6a43d498656cd918aaa130aa4e3abeabcdaa741c3ffe` |
+| libnice | `libnice-0.1.24.tar.gz` from `libnice.freedesktop.org/releases` | `cfb5e8e778534f2f5b3c6f4958a1eb057c6b95c537c0f100817a537cf5d64fcc` |
+| Meson | GitHub release archive `1.7.2` | `4d40d63aa748a9c139cc41ab9bffe43edd113c5639d78bde81544ca955aea890` |
 
 `scripts/linux-webkit-runtime.env` is the version/hash authority;
 `scripts/build-linux-webkit-runtime.sh` verifies the downloads, applies that
@@ -131,13 +137,15 @@ compiled native locations. This avoids silently resolving the host's
 it does not disable the sandbox. Reproducibility here means pinned and checked
 source inputs, local delta, build environment, and configuration—not a claim of
 bit-for-bit identical output from arbitrary machines. Production builds use
-Ubuntu 24.04, Rust 1.97.1, and `cargo-c` 0.10.24. Ubuntu 24.04 is the floor
-that WebKit's librice ICE agent forces: it subclasses `GstWebRTCICE`, which
-GStreamer only exposes from 1.22, while WebKit's own configure gate still
-accepts 1.20. Ubuntu 22.04's GStreamer 1.20.3 therefore configured cleanly and
-failed hours later inside the unified build, so the builder now asserts
-`gstreamer-webrtc-1.0 >= 1.22` before compiling anything. That floor also sets
-the artifact's own glibc 2.39 floor. The hosted image and Noble apt
+Ubuntu 24.04, Rust 1.97.1, and `cargo-c` 0.10.24, retaining the artifact's
+glibc 2.39 floor. The private runtime also builds matched GStreamer 1.28.7
+core/base/good/bad and libnice 0.1.24 libraries and curated plugins using source-pinned Meson
+1.7.2. Noble's 1.24.2 satisfies WebKit's advertised configure minimum but
+misassigns sending pads, creates receiving transceivers too late, and omits
+SDP attributes WebKit needs to attach decoded frames to JavaScript tracks
+(#312). Source-built helpers and all packaged GStreamer libraries/plugins are
+checked against their original build IDs; only the PipeWire plugin uses the
+distro's stable GStreamer 1.x ABI. The hosted image and Noble apt
 indexes are mutable, so this is a bounded build baseline rather than a fully
 pinned or bit-reproducible environment. A stronger future boundary would use a
 snapshot-pinned apt repository or digest-pinned build container and record the
@@ -149,6 +157,15 @@ the tagged release leg has no compiler cache, for the same reason it restores
 no binary prefix. The builder also scales its own parallelism to the smaller of
 the host's CPU count and one job per 2 GB of RAM, which is what WebKit's
 unified translation units actually consume.
+
+The curated media payload includes WebKit's black/silence fallback sources,
+OpenGL upload/conversion/download elements for portal frames, and matching NSS
+soft-token/freebl modules for Noble's SRTP encryption. WebKit requests linear
+BGRA DMA-BUF caps because the packaged PipeWire 1.0.5 plugin cannot negotiate
+newer `DMA_DRM` caps. The AppImage output wrapper removes only the bundled
+Wayland client provider before invoking the unchanged verified output tool:
+host EGL drivers must load their matching client library. Private WebKit and
+the remaining reviewed ABI boundary stay under the normal artifact checks.
 
 Every platform bundle also carries identical generated
 `THIRD-PARTY-NOTICES.txt` and `THIRD-PARTY-NOTICES.json` Tauri resources. The
@@ -181,9 +198,10 @@ identity, including the AppImage-relative subprocess, injected-bundle, and
 sandbox-helper layout, while `WEBKIT-THIRD-PARTY-LICENSES.txt` and
 `WEBKIT-LICENSE-FILES.sha256` preserve a readable and hash-addressed inventory
 of all 59 upstream WebKit license/notice files discovered by the pinned source
-build. The builder's `--source-bundle` mode separately creates a deterministic
-corresponding-source archive containing the exact verified WebKitGTK/librice
-archives, complete patch, pinned env, builder, expected manifest, reconstruction
+build. A separate GStreamer license inventory and Meson license accompany its
+matched source-built media stack. The builder's `--source-bundle` mode separately creates a deterministic
+corresponding-source archive containing the exact verified WebKitGTK/librice,
+GStreamer core/base/good/bad, and Meson archives, complete patch, pinned env, builder, expected manifest, reconstruction
 README, and internal checksums. Tagged Linux builds attach it as
 `StudyVis_X.Y.Z_linux-webkit-sources.tar.gz` with a basename-only `.sha256`
 sidecar after the exact-AppImage smoke; it is kept outside the AppImage to avoid
@@ -221,7 +239,12 @@ packaged-only GStreamer WebRTC/SCTP elements, verifies a gnome-keyring Secret
 Service round-trip, and starts the extracted AppImage under Xvfb. The first
 document must log `runtime.webrtc ready` after constructing a
 local peer-connection data-channel offer; this proves more than a live process
-but less than an exchanged data channel or real media session. Preview
+but does not establish a complete media session. A separate finite probe runs
+the packaged WebKit subprocesses, exchanges data, renders synthetic camera and
+screen video with original stream IDs, and exercises late publication and
+stop/restart. Native codec, SRTP, GPU-memory conversion and transceiver checks
+run with isolated packaged plugin paths. These synthetic checks do not replace
+PLAN §8's physical KDE portal/device matrix. Preview
 deployments additionally build installable macOS arm64, Windows x86_64, and
 Linux x86_64 artifacts from the exact commit. A tagged release fetches the
 pinned sidecar for each target and emits signed updater artifacts. The Linux leg
@@ -1015,20 +1038,23 @@ its exact AppImage built from `x86_64-unknown-linux-gnu`.
 
 `build.rs` supplies an `AppManifest` listing every custom command, so app commands are denied until a capability grants their generated `allow-*` permission. `src-tauri/permissions/window-commands.toml` is the reviewed source for those grants and must remain in lockstep with the `invoke_handler` command list.
 
-`src-tauri/capabilities/` holds two ACL files, each scoped to a single window:
+`src-tauri/capabilities/` holds three ACL files, each scoped to a single window:
 
-- `default.json` (`windows: ["main"]`) grants `core:default`, `notification:default`, `store:default`, `dialog:default`, `deep-link:default`, `updater:default`, `main-commands`, plus nine `core:window:*` bindings — `start-dragging` / `minimize` / `toggle-maximize` / `close` for the opt-in custom titlebar, `is-fullscreen` / `set-fullscreen` for the screen-share viewer, and `set-size` / `center` / `unmaximize` for the Settings → Appearance → Window reset.
+- `default.json` (`windows: ["main"]`) grants `core:default`, `notification:default`, `store:default`, `dialog:default`, `deep-link:default`, `updater:default`, `main-commands`, `core:webview:allow-create-webview-window` (the main window constructs the session overlay), plus twelve `core:window:*` bindings — `start-dragging` / `minimize` / `toggle-maximize` / `close` for the opt-in custom titlebar, `is-fullscreen` / `set-fullscreen` for the screen-share viewer, `set-size` / `center` / `unmaximize` for the Settings → Appearance → Window reset, and `hide` / `show` / `set-position` (with `set-size` again) so the main window owns the overlay's geometry: it applies the measured content height before reveal and re-asserts the top-left corner after each resize.
 - `ai-dialog.json` (`windows: ["ai-dialog"]`) grants `core:default`, `core:window:allow-close`, and `ai-dialog-commands`: only `app_log_append` and `sidecar_status`, with no plugin surface. Confining the floating dialog to its narrow command capability keeps every plugin grant and every other app command on the main window — the "scoped to the main window" invariant §12 relies on.
+- `session-overlay.json` (`windows: ["session-overlay"]`) grants only `core:default` and `core:window:allow-close`: the overlay renderer listens for its snapshot, reports its measured height and dismissals back to `main` with `emitTo`, and closes itself. It has no app command and no plugin surface; the one native tweak it needs (`session_overlay_prepare`, below) is a `main-commands` grant invoked by the main window.
 
 Plugins driven only from Rust need no ACL entry: the Tauri 2 ACL gates webview IPC, so `shell` (sidecar spawn, `commands/sidecar.rs`), `global-shortcut`, `autostart`, `opener`, and `single-instance` are registered in `lib.rs` and reached from Rust or through our own `invoke_handler` commands, none of which the ACL mediates. Correspondingly they ship no `@tauri-apps/plugin-*` JS package — package.json's five plugin packages (`deep-link`, `dialog`, `notification`, `store`, `updater`) map 1:1 to the five non-core plugin grants above.
 
-### Always-on-top floating windows (AI text dialog)
+### Always-on-top floating windows (AI text dialog, session overlay)
 The `Ctrl+]` AI dialog is a separate Tauri window with:
 - `transparent: true`
 - `decorations: false`
 - `alwaysOnTop: true`
-- macOS additionally needs `NSWindowCollectionBehavior.canJoinAllSpaces | .fullScreenAuxiliary` to appear over fullscreen apps. Set via the Tauri window-builder's macOS-specific config in V2-P7.
+- macOS additionally needs `NSWindowCollectionBehavior.canJoinAllSpaces | .fullScreenAuxiliary` to appear over fullscreen apps. tao's `visibleOnAllWorkspaces` sets only the first bit and neither Tauri's builder nor its window config can express the second, so `src-tauri/src/macos_floating_window.rs` ORs both in through AppKit after the window is built (V2-P7).
 - macOS also needs `shadow: false` (`NSWindow.hasShadow`). AppKit draws its window rim around the *alpha silhouette* of a borderless transparent window, and that silhouette is the panel plus the faint halo of the panel's own CSS shadow — so the rim renders as a phantom outline floating around the dialog rather than hugging it (I81). Depth comes from the panel's `shadow-lg` on every platform instead. Left enabled on Windows, where the same flag supplies an undecorated window's 1 px border and Windows 11 rounded corners.
+
+The in-session overlay (`sessionOverlayRuntime.ts`, #198) is the same kind of window — transparent, undecorated, floating, all-Spaces, hidden until its content is measured — but it is constructed from the main webview with `WebviewWindow`, so it could not reach that AppKit step and was absent on macOS whenever the user was in a full-screen app (#317, I118). The runtime therefore calls the `session_overlay_prepare` command, hard-wired to the overlay label and granted only to `main-commands`, inside its serialized creation step before READY/PRESENT can reveal the window; on Windows and Linux the command only verifies the window exists. One more macOS difference lives on that path: tao's resize is `setContentSize:`, which keeps the bottom-left corner fixed, so after every measured resize the runtime re-asserts the top-left corner (`core:window:allow-set-position`) to keep the card below the menu bar. The runtime logs under the `session.overlay` scope — creation, preparation and presentation failures, a READY watchdog, and each reveal by revision and height, never the notification text.
 
 ## 13. State diagrams (ASCII)
 

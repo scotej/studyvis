@@ -192,12 +192,20 @@ export async function recordSampleObservation(args: {
   sessionId: string | null
   verdict: SampleVerdict
   topic: string
+  // I102 — when the check was ISSUED. A sample that resolves after the loop
+  // stopped is still recorded on purpose, so stamping it with the clock at
+  // write time dated it to whenever the engine happened to finish.
+  atMs?: number
 }): Promise<void> {
   if (!args.sessionId) return
   if (!useSettingsStore.getState().values.sessionTimelineEnabled) return
+  const ts =
+    typeof args.atMs === 'number' && Number.isFinite(args.atMs) && args.atMs > 0
+      ? args.atMs
+      : activeRuntime.now()
   await appendObservation(
     args.sessionId,
-    observationFromVerdict(args.verdict, args.topic, activeRuntime.now())
+    observationFromVerdict(args.verdict, args.topic, ts)
   )
 }
 
@@ -250,16 +258,34 @@ export function windowMinutesFor(spanMinutes: number): number {
   return Math.max(1, Math.ceil(minutesTouched / MAX_WINDOWS))
 }
 
-// Groups observations into fixed-width windows anchored on the first one.
+// Groups observations into fixed-width windows anchored on the session start.
 // Empty windows are dropped rather than rendered as a gap: a paused capture
 // (break, camera off, pomodoro rest) produces no observations, and inventing
 // "nothing happened" rows for it would read as an accusation.
+//
+// I101 — `startedAtMs` is the session's own start, and the section's help line
+// promises offsets counted from it. Anchoring on the first *recorded* check
+// instead put this section on a different origin from the audit timeline
+// directly beneath it, which reads `sessions.started_at`: a session begun with
+// the camera off, in a pomodoro rest phase, or on a machine whose first model
+// load is slow records nothing for its opening minutes, and every row was then
+// short by that offset. A missing or impossible value (absent row, clock skew
+// that puts the start after the first check) falls back to the old anchor
+// rather than emitting negative minutes.
 export function windowObservations(
-  observations: ReadonlyArray<SessionObservation>
+  observations: ReadonlyArray<SessionObservation>,
+  startedAtMs?: number | null
 ): ObservationWindow[] {
   if (observations.length === 0) return []
   const sorted = [...observations].sort((a, b) => a.ts - b.ts)
-  const anchor = sorted[0].ts
+  const firstTs = sorted[0].ts
+  const anchor =
+    typeof startedAtMs === 'number' &&
+    Number.isFinite(startedAtMs) &&
+    startedAtMs > 0 &&
+    startedAtMs <= firstTs
+      ? startedAtMs
+      : firstTs
   const spanMinutes = (sorted[sorted.length - 1].ts - anchor) / 60_000
   const width = windowMinutesFor(spanMinutes)
 

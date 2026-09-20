@@ -78,7 +78,7 @@ import { useIdentityStore } from '@/stores/identityStore'
 import { usePomodoroStore } from '@/stores/pomodoroStore'
 import { useSessionStore } from '@/stores/sessionStore'
 import { useSettingsStore } from '@/stores/settingsStore'
-import { usePttStore } from '@/stores/pttStore'
+import { usePttStore, withPttButtonMutation } from '@/stores/pttStore'
 import { strings } from '@/strings'
 
 import { startAiAlertDispatcher, type AiAlertDispatcher } from './aiAlerts'
@@ -1299,6 +1299,12 @@ export function SessionView({
     if (!localStream) return
     // Don't relaunch into a denied state — the overlay's retry clears this.
     if (captureDenied) return
+    // I102 — the session this loop belongs to, captured once at construction.
+    // `onScoreEvents` deliberately runs for a sample that resolved after
+    // teardown, so reading the live store from inside it filed that check into
+    // whatever session had begun since — with a timestamp inside the new
+    // session's window, which is what let it blend in.
+    const loopSessionTopic = useSessionStore.getState().sessionTopic
     // A new loop instance has reported nothing yet, so it must not inherit the
     // previous one's stall. `onSamplesResumed` is loop-local and fires only
     // when THAT loop had reported a stall, so without this the chip stays
@@ -1330,9 +1336,10 @@ export function SessionView({
         // awaited: an alert dispatcher that is missing or a teardown that has
         // already aborted must not cost the account of what happened.
         void recordSampleObservation({
-          sessionId: useSessionStore.getState().sessionTopic,
+          sessionId: loopSessionTopic,
           verdict,
-          topic: useSessionStore.getState().declaredStudyTopic,
+          topic: context.topic,
+          atMs: context.atMs,
         })
         // V2-P6: route every sample's emitted events through the alert
         // dispatcher (warnings → local-only badge + ai_warning audit;
@@ -1467,7 +1474,14 @@ export function SessionView({
       handle = null
       void local?.stop()
     }
-  }, [status, aiFeaturesEnabled, activeModelId, localStream, captureDenied])
+  }, [
+    status,
+    aiFeaturesEnabled,
+    activeModelId,
+    localStream,
+    captureDenied,
+    sessionTopic,
+  ])
 
   // V2-P9 gesture fix safety net — a gesture handler (TopicGateModal submit,
   // fired BEFORE this component even mounts, the AiCategory toggle, or
@@ -1963,7 +1977,7 @@ export function SessionView({
       awaitingReleaseBefore: before.awaitingRelease,
       heldSourcesBefore: before.heldSources,
     })
-    usePttStore.getState().press('session-button')
+    withPttButtonMutation(() => usePttStore.getState().press('session-button'))
   }, [])
   const releaseHoldToTalk = useCallback((trigger: string) => {
     const before = usePttStore.getState()
@@ -1974,7 +1988,9 @@ export function SessionView({
       awaitingReleaseBefore: before.awaitingRelease,
       heldSourcesBefore: before.heldSources,
     })
-    usePttStore.getState().release('session-button')
+    withPttButtonMutation(() =>
+      usePttStore.getState().release('session-button')
+    )
   }, [])
 
   // "Try again" — clear the error and bump the nonce so the acquisition

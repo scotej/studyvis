@@ -954,6 +954,11 @@ export const strings = {
         // model cannot be asked to narrate it.
         aiOff:
           'Turn AI back on in Settings → AI to have this session written up.',
+        // I103 — the other half of the same feature. Recording is off, so this
+        // session's checks are on disk but nothing new will be written from
+        // them. Distinct from `aiOff` because the setting to change differs.
+        writeUpsOff:
+          'Turn "Write up my sessions" back on in Settings → AI to have this session written up.',
         sessionActive:
           'The AI is busy watching your current session. This can be written up once that session ends.',
         failed: "Couldn't write up this session.",
@@ -1362,6 +1367,11 @@ export const strings = {
           custom: 'Custom',
         },
         relaunchCta: 'Relaunch now',
+        // I111 — restarting mid-session skips the leave handler, so the
+        // session would be lost whole. Say that rather than failing quietly.
+        relaunchDuringSession:
+          'Leave your study session first — relaunching now would end it without saving it.',
+        relaunchFailed: "Couldn't relaunch StudyVis.",
       },
       reduceMotion: {
         label: 'Reduce motion',

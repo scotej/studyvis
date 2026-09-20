@@ -196,29 +196,361 @@ diff --git a/Source/WebKit/UIProcess/API/glib/WebKitWebContext.cpp b/Source/WebK
      const char* bundleDirectory = g_getenv("WEBKIT_INJECTED_BUNDLE_PATH");
      if (bundleDirectory && g_file_test(bundleDirectory, G_FILE_TEST_IS_DIR))
          return bundleDirectory;
-diff --git a/Source/WebCore/Modules/mediastream/gstreamer/GStreamerIceAgent.cpp b/Source/WebCore/Modules/mediastream/gstreamer/GStreamerIceAgent.cpp
---- a/Source/WebCore/Modules/mediastream/gstreamer/GStreamerIceAgent.cpp
-+++ b/Source/WebCore/Modules/mediastream/gstreamer/GStreamerIceAgent.cpp
-@@ -46,6 +46,22 @@
- #include <wtf/text/StringBuilder.h>
- #include <wtf/text/WTFString.h>
+diff --git a/Source/WebCore/platform/mediastream/gstreamer/DesktopPortal.cpp b/Source/WebCore/platform/mediastream/gstreamer/DesktopPortal.cpp
+--- a/Source/WebCore/platform/mediastream/gstreamer/DesktopPortal.cpp
++++ b/Source/WebCore/platform/mediastream/gstreamer/DesktopPortal.cpp
+@@ -298,11 +298,10 @@
+     nodeData.caps = adoptGRef(gst_caps_new_empty_simple("video/x-raw"));
+     gst_caps_set_features_simple(nodeData.caps.get(), gst_caps_features_new("memory:DMABuf", nullptr));
  
-+// GStreamer 1.24.2 ships gst/webrtc/webrtc_fwd.h without G_BEGIN_DECLS, so a
-+// C++ translation unit declares gst_webrtc_error_quark() with C++ linkage and
-+// emits a mangled reference that libgstwebrtc-1.0's C symbol cannot satisfy.
-+// Upstream added the guard before 1.24.12, but Ubuntu 24.04 - the Linux build
-+// baseline - is frozen at 1.24.2 in every pocket. Resolve the error domain by
-+// its documented name instead of through the symbol: the library derives the
-+// identical quark from the same static string.
-+#if !GST_CHECK_VERSION(1, 24, 12)
-+static GQuark webkitGstWebRTCErrorQuark()
+-#if GST_CHECK_VERSION(1, 24, 0)
+-    auto fourcc = gst_video_dma_drm_fourcc_from_format(GST_VIDEO_FORMAT_BGRA);
+-    auto drmFormat = GMallocString::unsafeAdoptFromUTF8(gst_video_dma_drm_fourcc_to_string(fourcc, 0));
+-    gst_caps_set_simple(nodeData.caps.get(), "format", G_TYPE_STRING, "DMA_DRM", "drm-format", G_TYPE_STRING, drmFormat.utf8(), nullptr);
+-#endif
++    // #312: the packaged PipeWire 1.0.5 plugin predates DMA_DRM caps, even
++    // with newer GStreamer. Its legacy BGRA path negotiates only implicit or
++    // linear DMA-BUF modifiers; DMA_DRM produces an invalid SPA format.
++    gst_caps_set_simple(nodeData.caps.get(), "format", G_TYPE_STRING, "BGRA", nullptr);
+     return nodeData;
+ }
+ 
+diff --git a/Source/WebCore/platform/mediastream/gstreamer/GStreamerIncomingTrackProcessor.cpp b/Source/WebCore/platform/mediastream/gstreamer/GStreamerIncomingTrackProcessor.cpp
+--- a/Source/WebCore/platform/mediastream/gstreamer/GStreamerIncomingTrackProcessor.cpp
++++ b/Source/WebCore/platform/mediastream/gstreamer/GStreamerIncomingTrackProcessor.cpp
+@@ -82,8 +82,11 @@
+ 
+     g_object_get(m_pad.get(), "transceiver", &m_data.transceiver.outPtr(), nullptr);
+ 
++    // Prefer the SSRC-specific MSID above. During bundled or recycled
++    // transceivers, the media-level a-msid may carry a synthetic CNAME rather
++    // than the MediaStream identity associated with this RTP source.
+     auto msIdAttribute = gstStructureGetString(structure, "a-msid"_s);
+-    if (!msIdAttribute.isEmpty()) {
++    if (m_sdpMsIdAndTrackId.second.isEmpty() && !msIdAttribute.isEmpty()) {
+         if (startsWith(msIdAttribute.span(), " "_s))
+             m_sdpMsIdAndTrackId = { emptyString(), msIdAttribute.span().subspan(1) };
+         else {
+@@ -134,6 +134,12 @@
+ {
+     // Look-up the mediastream ID, using the msid attribute, fall back to pad name if there is no msid.
+     String mediaStreamId;
++    // The src pad's msid falls back to RTP SDES CNAME. Prefer the negotiated
++    // SDP MSID so bundled or recycled receivers retain the MediaStream identity.
++    if (!m_sdpMsIdAndTrackId.first.isEmpty()) {
++        GST_DEBUG_OBJECT(m_bin.get(), "msid set from SDP media msid attribute: '%s'", m_sdpMsIdAndTrackId.first.utf8().data());
++        return m_sdpMsIdAndTrackId.first;
++    }
+     if (gstObjectHasProperty(m_pad.get(), "msid"_s)) {
+         GUniqueOutPtr<char> msidChars;
+         g_object_get(m_pad.get(), "msid", &msidChars.outPtr(), nullptr);
+@@ -147,11 +153,6 @@
+     if (!mediaStreamId.isEmpty())
+         return mediaStreamId;
+ 
+-    if (!m_sdpMsIdAndTrackId.first.isEmpty()) {
+-        GST_DEBUG_OBJECT(m_bin.get(), "msid set from SDP media msid attribute: '%s'", m_sdpMsIdAndTrackId.first.utf8().data());
+-        return m_sdpMsIdAndTrackId.first;
+-    }
+-
+     auto name = GMallocString::unsafeAdoptFromUTF8(gst_pad_get_name(m_pad.get()));
+     mediaStreamId = name.span();
+     GST_DEBUG_OBJECT(m_bin.get(), "msid set from webrtcbin src pad name: %s", name.utf8());
+     return mediaStreamId;
+ }
+
+diff --git a/Source/WebCore/Modules/mediastream/gstreamer/GStreamerMediaEndpoint.cpp b/Source/WebCore/Modules/mediastream/gstreamer/GStreamerMediaEndpoint.cpp
+--- a/Source/WebCore/Modules/mediastream/gstreamer/GStreamerMediaEndpoint.cpp
++++ b/Source/WebCore/Modules/mediastream/gstreamer/GStreamerMediaEndpoint.cpp
+@@ -559,16 +559,20 @@
+ Vector<String> getMediaStreamIdsFromSDPMedia(const GstSDPMedia& media)
+ {
+     HashSet<String> mediaStreamIdsSet;
++    HashSet<String> legacyStreamIds;
+     for (guint i = 0; i < gst_sdp_media_attributes_len(&media); ++i) {
+         const auto attribute = gst_sdp_media_get_attribute(&media, i);
+         auto key = CStringView::unsafeFromUTF8(attribute->key);
+         if (key == "msid"_s) {
+             auto components = String(byteCast<char8_t>(unsafeSpan(attribute->value))).split(' ');
+-            if (components.size() < 2)
++            if (components.size() < 2 || components[0] == "-"_s)
+                 continue;
+-            mediaStreamIdsSet.add(components[0]);
+-        }
+-        // MSID may also come in ssrc attributes, specially if they're in an SDP answer. They look like:
++            mediaStreamIdsSet.add(components[0]);
++        }
++        // Older peers only signal stream IDs in SSRC attributes. Use these
++        // only when media-level MSID is absent: GStreamer can also advertise
++        // a synthetic CNAME here, which is not another MediaStream (RFC 8830).
++        // Legacy attributes look like:
+         // a=ssrc:3612593434 msid:e1019f4a-0983-4863-b923-b75903cced2c webrtctransceiver1
+         if (key == "ssrc"_s) {
+             auto outerComponents = String::fromUTF8(attribute->value).split(' ');
+@@ -576,14 +583,15 @@
+                 auto innerComponents = outer.split(':');
+                 if (innerComponents.size() < 2)
+                     continue;
+-                if (innerComponents[0] == "msid"_s)
+-                    mediaStreamIdsSet.add(innerComponents[1]);
++                if (innerComponents[0] == "msid"_s && innerComponents[1] != "-"_s)
++                    legacyStreamIds.add(innerComponents[1]);
+             }
+         }
+     }
++    const auto& streamIds = mediaStreamIdsSet.isEmpty() ? legacyStreamIds : mediaStreamIdsSet;
+     Vector<String> mediaStreamIds;
+-    mediaStreamIds.reserveInitialCapacity(mediaStreamIdsSet.size());
+-    for (const auto& msid : mediaStreamIdsSet)
++    mediaStreamIds.reserveInitialCapacity(streamIds.size());
++    for (const auto& msid : streamIds)
+         mediaStreamIds.append(msid);
+     return mediaStreamIds;
+ }
+@@ -716,7 +716,7 @@
+ 
+-            auto allowedCaps = capsFromSDPMedia(media);
+-            source->configure(WTF::move(allowedCaps));
+             if (!source->pad()) {
++                auto allowedCaps = capsFromSDPMedia(media);
++                source->configure(WTF::move(allowedCaps));
+                 auto rtpCaps = source->rtpCaps();
+                 auto sinkPad = requestPad(rtpCaps, source->mediaStreamID());
+                 source->setSinkPad(WTF::move(sinkPad));
+@@ -730,5 +730,5 @@
+-            source->link();
++            source->link();
+             callOnMainThreadAndWait([&] {
+                 source->start();
+             });
+             return true;
+@@ -1321,44 +1322,77 @@
+     onNegotiationNeeded();
+ }
+ 
+-void GStreamerMediaEndpoint::recycleTransceiverForSenderTrack(GStreamerRtpTransceiverBackend* transceiverBackend, MediaStreamTrack& track, const FixedVector<String>& mediaStreamIds)
+-{
+-    auto mediaStreamId = mediaStreamIds.isEmpty() ? emptyString() : mediaStreamIds[0];
+-
++void GStreamerMediaEndpoint::recycleTransceiverForSenderTrack(GStreamerRtpTransceiverBackend* transceiverBackend, GStreamerRtpSenderBackend& senderBackend, MediaStreamTrack& track, const FixedVector<String>& mediaStreamIds)
 +{
-+    return g_quark_from_static_string("gst-webrtc-error-quark");
-+}
-+#undef GST_WEBRTC_ERROR
-+#define GST_WEBRTC_ERROR webkitGstWebRTCErrorQuark()
-+#endif
++    auto mediaStreamId = mediaStreamIds.isEmpty() ? "-"_s : mediaStreamIds[0];
+     auto transceiver = transceiverBackend->rtcTransceiver();
+-    GST_DEBUG_OBJECT(m_pipeline.get(), "Recycling transceiver %" GST_PTR_FORMAT " for track %s", transceiver,  track.id().utf8().data());
+-
+-    unsigned mLineIndex;
+-    g_object_get(transceiver, "mlineindex", &mLineIndex, nullptr);
+-
+-    GUniqueOutPtr<GstWebRTCSessionDescription> remoteDescription;
+-    g_object_get(m_webrtcBin.get(), "remote-description", &remoteDescription.outPtr(), nullptr);
+-    if (!remoteDescription)
+-        return;
+-
+-    const auto media = gst_sdp_message_get_media(remoteDescription->sdp, mLineIndex);
+-    auto allowedCaps = capsFromSDPMedia(media);
+-
+-    if (track.privateTrack().isAudio()) {
+-        GST_DEBUG_OBJECT(m_pipeline.get(), "Adding outgoing audio source");
+-        auto source = RealtimeOutgoingAudioSourceGStreamer::create(m_ssrcGenerator, mediaStreamId, track);
+-        configureSource(source.get(), nullptr);
+-
+-        source->configure(WTF::move(allowedCaps));
+-        auto rtpCaps = source->rtpCaps();
+-        auto sinkPad = requestPad(rtpCaps, source->mediaStreamID());
+-        source->setSinkPad(WTF::move(sinkPad));
+-    } else {
++    GST_DEBUG_OBJECT(m_pipeline.get(), "Recycling transceiver %" GST_PTR_FORMAT " for track %s", transceiver, track.id().utf8().data());
 +
- using namespace WTF;
- using namespace WebCore;
++    unsigned mLineIndex;
++    g_object_get(transceiver, "mlineindex", &mLineIndex, nullptr);
++
++    GUniqueOutPtr<GstWebRTCSessionDescription> remoteDescription;
++    g_object_get(m_webrtcBin.get(), "remote-description", &remoteDescription.outPtr(), nullptr);
++    if (!remoteDescription)
++        return;
++
++    const auto media = gst_sdp_message_get_media(remoteDescription->sdp, mLineIndex);
++    if (!media)
++        return;
++
++    // Seed the recycled transceiver with the replacement identity before
++    // offer generation. Strip the previous m-line identity so GStreamer does
++    // not reuse its mid or advertise its old stream.
++    auto codecPreferences = capsFromSDPMedia(media);
++    auto msid = makeString(mediaStreamId, ' ', track.id());
++    for (unsigned i = 0; i < gst_caps_get_size(codecPreferences.get()); ++i) {
++        auto* structure = gst_caps_get_structure(codecPreferences.get(), i);
++        gst_structure_remove_field(structure, "a-mid");
++        gst_structure_set(structure, "a-msid", G_TYPE_STRING, msid.utf8().data(), nullptr);
++    }
++    g_object_set(transceiver, "codec-preferences", codecPreferences.get(), nullptr);
++
++    // removeTrack() stops the old source but the sender backend leaves its
++    // request pad attached to the transceiver. Release that stale pad before
++    // asking webrtcbin for the replacement, otherwise a recycled m-line can
++    // keep the old sender association and silently drop a restarted track.
++    for (auto pad : GstIteratorAdaptor<GstPad>(gst_element_iterate_sink_pads(m_webrtcBin.get()))) {
++        GRefPtr<GstWebRTCRTPTransceiver> padTransceiver;
++        g_object_get(pad, "transceiver", &padTransceiver.outPtr(), nullptr);
++        if (padTransceiver.get() != transceiver)
++            continue;
++        auto srcPad = adoptGRef(gst_pad_get_peer(pad));
++        if (srcPad && gst_pad_is_linked(pad))
++            gst_pad_unlink(srcPad.get(), pad);
++        GST_DEBUG_OBJECT(m_pipeline.get(), "Releasing stale sender pad %" GST_PTR_FORMAT, pad);
++        gst_element_release_request_pad(m_webrtcBin.get(), pad);
++        break;
++    }
++    GStreamerRtpSenderBackend::Source source;
++    if (track.privateTrack().isAudio())
++        source = RealtimeOutgoingAudioSourceGStreamer::create(m_ssrcGenerator, mediaStreamId, track);
++    else {
+         ASSERT(track.privateTrack().isVideo());
+-        GST_DEBUG_OBJECT(m_pipeline.get(), "Adding outgoing video source");
+-        auto source = RealtimeOutgoingVideoSourceGStreamer::create(m_ssrcGenerator, mediaStreamId, track);
+-        configureSource(source.get(), nullptr);
+-
+-        source->configure(WTF::move(allowedCaps));
+-        auto rtpCaps = source->rtpCaps();
+-        auto sinkPad = requestPad(rtpCaps, source->mediaStreamID());
+-        source->setSinkPad(WTF::move(sinkPad));
+-    }
++        source = RealtimeOutgoingVideoSourceGStreamer::create(m_ssrcGenerator, mediaStreamId, track);
++    }
++
++    auto configureRecycledSource = [&](auto& outgoingSource) {
++        outgoingSource->setRtpHeaderExtensionMapping(m_rtpHeaderExtensions);
++        configureSource(outgoingSource.get(), nullptr);
++
++        // Use the same deferred negotiation/link/start path as a new sender.
++        // The transceiver codec preferences above carry the replacement MSID;
++        // linkOutgoingSources attaches the sink pad after the offer is made.
++        m_unlinkedOutgoingSources.append(outgoingSource.ptr());
++    };
++    switchOn(source, [&](Ref<RealtimeOutgoingAudioSourceGStreamer>& outgoingSource) {
++        configureRecycledSource(outgoingSource);
++    }, [&](Ref<RealtimeOutgoingVideoSourceGStreamer>& outgoingSource) {
++        configureRecycledSource(outgoingSource);
++    }, [](std::nullptr_t&) {
++        ASSERT_NOT_REACHED();
++    });
++    senderBackend.setSource(WTF::move(source));
+ }
  
+ void GStreamerMediaEndpoint::doCreateOffer(const RTCOfferOptions& options)
+diff --git a/Source/WebCore/Modules/mediastream/gstreamer/GStreamerMediaEndpoint.h b/Source/WebCore/Modules/mediastream/gstreamer/GStreamerMediaEndpoint.h
+--- a/Source/WebCore/Modules/mediastream/gstreamer/GStreamerMediaEndpoint.h
++++ b/Source/WebCore/Modules/mediastream/gstreamer/GStreamerMediaEndpoint.h
+@@ -91,7 +91,7 @@
+     ExceptionOr<RefPtr<GStreamerRtpSenderBackend>> addTrack(MediaStreamTrack&, const FixedVector<String>&);
+     void removeTrack(GStreamerRtpSenderBackend&);
+ 
+-    void recycleTransceiverForSenderTrack(GStreamerRtpTransceiverBackend*, MediaStreamTrack&, const FixedVector<String>&);
++    void recycleTransceiverForSenderTrack(GStreamerRtpTransceiverBackend*, GStreamerRtpSenderBackend&, MediaStreamTrack&, const FixedVector<String>&);
+ 
+     struct Backends {
+         RefPtr<GStreamerRtpSenderBackend> senderBackend;
+diff --git a/Source/WebCore/Modules/mediastream/gstreamer/GStreamerPeerConnectionBackend.cpp b/Source/WebCore/Modules/mediastream/gstreamer/GStreamerPeerConnectionBackend.cpp
+--- a/Source/WebCore/Modules/mediastream/gstreamer/GStreamerPeerConnectionBackend.cpp
++++ b/Source/WebCore/Modules/mediastream/gstreamer/GStreamerPeerConnectionBackend.cpp
+@@ -333,7 +333,7 @@
+         if (!transceiver)
+             return Exception { ExceptionCode::TypeError, "Unable to add track"_s };
+ 
+-        m_endpoint->recycleTransceiverForSenderTrack(reinterpret_cast<GStreamerRtpTransceiverBackend*>(transceiver->backend()), track, mediaStreamIds);
++        m_endpoint->recycleTransceiverForSenderTrack(reinterpret_cast<GStreamerRtpTransceiverBackend*>(transceiver->backend()), backendFromRTPSender(*sender), track, mediaStreamIds);
+ 
+         // 5. If transceiver.[[Direction]] is "recvonly", set transceiver.[[Direction]] to "sendrecv".
+         // 6. If transceiver.[[Direction]] is "inactive", set transceiver.[[Direction]] to "sendonly".
+diff --git a/Source/WebCore/Modules/mediastream/gstreamer/GStreamerRtpSenderBackend.cpp b/Source/WebCore/Modules/mediastream/gstreamer/GStreamerRtpSenderBackend.cpp
+--- a/Source/WebCore/Modules/mediastream/gstreamer/GStreamerRtpSenderBackend.cpp
++++ b/Source/WebCore/Modules/mediastream/gstreamer/GStreamerRtpSenderBackend.cpp
+@@ -89,6 +89,7 @@ void GStreamerRtpSenderBackend::setSource(Source&& source)
+ {
+     ASSERT(!hasSource());
+     GST_DEBUG_OBJECT(m_rtcSender.get(), "Setting source");
++    ++m_sourceGeneration;
+     m_source = WTF::move(source);
+     ASSERT(hasSource());
+ 
+@@ -125,13 +126,16 @@ void GStreamerRtpSenderBackend::startSource()
+ void GStreamerRtpSenderBackend::stopSource()
+ {
+     GST_DEBUG_OBJECT(m_rtcSender.get(), "Stopping source");
++    auto sourceGeneration = m_sourceGeneration;
+     switchOn(m_source, [&](Ref<RealtimeOutgoingAudioSourceGStreamer>& source) {
+-        source->stop([self = RefPtr { this }] {
+-            self->clearSource();
++        source->stop([self = RefPtr { this }, sourceGeneration] {
++            if (self->m_sourceGeneration == sourceGeneration)
++                self->clearSource();
+         });
+     }, [&](Ref<RealtimeOutgoingVideoSourceGStreamer>& source) {
+-        source->stop([self = RefPtr { this }] {
+-            self->clearSource();
++        source->stop([self = RefPtr { this }, sourceGeneration] {
++            if (self->m_sourceGeneration == sourceGeneration)
++                self->clearSource();
+         });
+     }, [&](std::nullptr_t&) {
+     });
+diff --git a/Source/WebCore/Modules/mediastream/gstreamer/GStreamerRtpSenderBackend.h b/Source/WebCore/Modules/mediastream/gstreamer/GStreamerRtpSenderBackend.h
+--- a/Source/WebCore/Modules/mediastream/gstreamer/GStreamerRtpSenderBackend.h
++++ b/Source/WebCore/Modules/mediastream/gstreamer/GStreamerRtpSenderBackend.h
+@@ -100,6 +100,7 @@ private:
+     WeakPtr<GStreamerPeerConnectionBackend> m_peerConnectionBackend;
+     GRefPtr<GstWebRTCRTPSender> m_rtcSender;
+     Source m_source;
++    uint64_t m_sourceGeneration { 0 };
+     GUniquePtr<GstStructure> m_initData;
+     mutable GUniquePtr<GstStructure> m_currentParameters;
+ };
+
+diff --git a/Source/WebCore/platform/mediastream/gstreamer/RealtimeOutgoingMediaSourceGStreamer.cpp b/Source/WebCore/platform/mediastream/gstreamer/RealtimeOutgoingMediaSourceGStreamer.cpp
+--- a/Source/WebCore/platform/mediastream/gstreamer/RealtimeOutgoingMediaSourceGStreamer.cpp
++++ b/Source/WebCore/platform/mediastream/gstreamer/RealtimeOutgoingMediaSourceGStreamer.cpp
+@@ -171,38 +187,41 @@
+         return;
+     }
+ 
+     auto data = createProbeData();
+     data->source = this;
+     data->callback = WTF::move(callback);
+ 
+     auto pad = adoptGRef(gst_element_get_static_pad(m_inputSelector.get(), "src"));
+-    gst_pad_add_probe(pad.get(), GST_PAD_PROBE_TYPE_EVENT_DOWNSTREAM, reinterpret_cast<GstPadProbeCallback>(+[](GstPad*, GstPadProbeInfo* info, gpointer userData) -> GstPadProbeReturn {
++    gst_pad_add_probe(pad.get(), GST_PAD_PROBE_TYPE_EVENT_DOWNSTREAM, reinterpret_cast<GstPadProbeCallback>(+[](GstPad* pad, GstPadProbeInfo* info, gpointer userData) -> GstPadProbeReturn {
+         auto event = GST_PAD_PROBE_INFO_EVENT(info);
+         if (GST_EVENT_TYPE(event) != GST_EVENT_EOS)
+             return GST_PAD_PROBE_OK;
+ 
+         auto data = reinterpret_cast<ProbeData*>(userData);
+         auto self = data->source.get();
++        auto probeId = GST_PAD_PROBE_INFO_ID(info);
+         if (!self) {
+             data->callback();
+-            return GST_PAD_PROBE_REMOVE;
++            gst_pad_remove_probe(pad, probeId);
++            return GST_PAD_PROBE_DROP;
+         }
+ 
+         callOnMainThread([weakSelf = WTF::move(self), callback = WTF::move(data->callback)] {
+             auto self = weakSelf.get();
+             if (!self) {
+                 callback();
+                 return;
+             }
+             self->removeOutgoingSource();
+             callback();
+         });
+-        return GST_PAD_PROBE_REMOVE;
++        gst_pad_remove_probe(pad, probeId);
++        return GST_PAD_PROBE_DROP;
+     }), data, reinterpret_cast<GDestroyNotify>(destroyProbeData));
+ 
+     if (WEBKIT_IS_MEDIA_STREAM_SRC(m_outgoingSource.get()))
+         webkitMediaStreamSrcSignalEndOfStream(WEBKIT_MEDIA_STREAM_SRC_CAST(m_outgoingSource.get()));
+ 
+     if (m_fallbackSource)
+         gst_element_send_event(m_fallbackSource.get(), gst_event_new_eos());
+ }

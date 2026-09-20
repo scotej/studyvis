@@ -182,6 +182,12 @@ for rel in usr/bin/bwrap usr/bin/xdg-dbus-proxy usr/bin/xdg-mime usr/bin/xdg-ope
   add_payload "$appdir/$rel" direct-helper
 done
 
+# The NSS modules are inventoried by the ELF walk below; retain the matching
+# integrity files as exact Ubuntu bytes too (#312).
+for rel in usr/lib/libsoftokn3.chk usr/lib/libfreeblpriv3.chk; do
+  add_payload "$appdir/$rel" nss-integrity
+done
+
 # Independently prove linuxdeploy-plugin-gstreamer received StudyVis's curated
 # stage. Do not let this source generator bless a broader plugin directory just
 # because the earlier exact-AppImage check should already have rejected it.
@@ -377,6 +383,7 @@ find_copyright() {
 classify_non_ubuntu() {
   local rel=$1
   local sha=$2
+  local reference source_build_id packaged_build_id
   case $rel in
     usr/bin/studyvis)
       printf 'project-built\ttagged StudyVis source and Cargo/npm locks\n'
@@ -384,6 +391,25 @@ classify_non_ubuntu() {
     usr/bin/llama-server|usr/lib/StudyVis/binaries/llama-runtime-x86_64-unknown-linux-gnu/*|usr/lib/libggml*.so*|usr/lib/libllama*.so*|usr/lib/libmtmd*.so*)
       printf 'pinned-llama\tllama.cpp %s / commit %s; exact source + MIT notice in this bundle\n' \
         "$STUDYVIS_LLAMA_TAG" "$STUDYVIS_LLAMA_COMMIT"
+      ;;
+    usr/lib/gstreamer-1.0/libgstpipewire.so)
+      return 1
+      ;;
+    usr/lib/libgst*.so*|usr/lib/libnice.so*|usr/lib/gstreamer-1.0/libgst*.so|usr/lib/gstreamer1.0/gstreamer-1.0/*)
+      reference=${rel#usr/lib/}
+      reference=${reference#gstreamer1.0/}
+      reference="$gstreamer_runtime_libdir/$reference"
+      [[ -f $reference ]] || {
+        echo "error: packaged GStreamer has no pinned source build: $rel" >&2
+        return 2
+      }
+      source_build_id=$(elf_build_id "$reference")
+      packaged_build_id=$(elf_build_id "$appdir/$rel")
+      [[ -n $source_build_id && $source_build_id == "$packaged_build_id" ]] || {
+        echo "error: packaged GStreamer differs from its pinned source build: $rel" >&2
+        return 2
+      }
+      printf 'pinned-gstreamer\tcompanion linux-webkit-sources archive; matching GNU build-id\n'
       ;;
     usr/lib/libwebkit2gtk-4.1.so.0|usr/lib/libjavascriptcoregtk-4.1.so.0|usr/lib/librice-proto.so.0|usr/lib/librice-io.so.0|usr/bin/studyvis-webkit-runtime/*|usr/lib/webkit2gtk-4.1/*|usr/lib/x86_64-linux-gnu/webkit2gtk-4.1/*)
       printf 'pinned-webkit\tcompanion linux-webkit-sources archive\n'
@@ -440,6 +466,8 @@ bash "$script_dir/audit-linux-appimage-elf-closure.sh" \
   "$appdir" "$runtime_prefix" "$dynamic_inventory"
 
 mapfile -t ordered_payload < <(printf '%s\n' "${!queued[@]}" | LC_ALL=C sort)
+gstreamer_runtime_libdir=$(bash "$script_dir/build-linux-webkit-runtime.sh" --print-pkg-config-path)
+gstreamer_runtime_libdir=${gstreamer_runtime_libdir%/pkgconfig}
 for rel in "${ordered_payload[@]}"; do
   path="$appdir/$rel"
   payload_sha=$(sha256sum -- "$path")
@@ -452,6 +480,9 @@ for rel in "${ordered_payload[@]}"; do
       "$rel" "$payload_sha" "${build_id:--}" "$class" "$evidence" \
       >>"$classified_inventory"
     continue
+  else
+    classification_status=$?
+    [[ $classification_status -eq 1 ]] || die "pinned runtime source classification failed: $rel"
   fi
   match=$(find_package_match "$path" "$payload_sha" "$build_id") || {
     die "could not map packaged ${payload_class[$rel]} '$rel' to exactly one installed Ubuntu package"
@@ -517,6 +548,9 @@ done
 for build_input in \
   scripts/stage-linux-appimage-webkit.sh \
   scripts/check-linux-appimage.sh \
+  scripts/check-linux-gstreamer.py \
+  scripts/check-linux-webkit-media.c \
+  scripts/check-linux-webkit-media.html \
   scripts/check-third-party-notices-bundle.ts \
   scripts/generate-third-party-notices.ts \
   scripts/generate-librice-third-party-notices.mjs \
@@ -524,6 +558,7 @@ for build_input in \
   scripts/build-linux-system-sources.sh \
   scripts/build-linux-appimage-runtime.sh \
   scripts/prepare-linuxdeploy-tools.sh \
+  scripts/linuxdeploy-plugin-appimage.sh \
   scripts/verify-linux-appimage-runtime.sh \
   scripts/linuxdeploy-tools.env \
   scripts/linux-appimage-runtime.env \
@@ -668,13 +703,16 @@ record_tool_input linuxdeploy-x86_64.AppImage \
   "$STUDYVIS_LINUXDEPLOY_URL" "$STUDYVIS_LINUXDEPLOY_SHA256" \
   linuxdeploy "$STUDYVIS_LINUXDEPLOY_COMMIT" \
   "$STUDYVIS_LINUXDEPLOY_SOURCE_URL" "$STUDYVIS_LINUXDEPLOY_SOURCE_SHA256"
-record_tool_input linuxdeploy-plugin-appimage.AppImage \
+cmp -s "$tool_cache/linuxdeploy-plugin-appimage.AppImage" "$script_dir/linuxdeploy-plugin-appimage.sh" || {
+  die "AppImage host ABI wrapper changed after verification"
+}
+record_tool_input studyvis-appimage-output.AppImage \
   "$STUDYVIS_APPIMAGE_PLUGIN_URL" "$STUDYVIS_APPIMAGE_PLUGIN_SHA256" \
   linuxdeploy-plugin-appimage "$STUDYVIS_APPIMAGE_PLUGIN_COMMIT" \
   "$STUDYVIS_APPIMAGE_PLUGIN_SOURCE_URL" "$STUDYVIS_APPIMAGE_PLUGIN_SOURCE_SHA256"
 # The pinned plugin AppImage embeds appimagetool; keep that second exact source
 # mapping explicit without duplicating the opaque executable in this archive.
-record_tool_input linuxdeploy-plugin-appimage.AppImage \
+record_tool_input studyvis-appimage-output.AppImage \
   "$STUDYVIS_APPIMAGE_PLUGIN_URL" "$STUDYVIS_APPIMAGE_PLUGIN_SHA256" \
   appimagetool "$STUDYVIS_APPIMAGETOOL_COMMIT" \
   "$STUDYVIS_APPIMAGETOOL_SOURCE_URL" "$STUDYVIS_APPIMAGETOOL_SOURCE_SHA256"
