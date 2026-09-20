@@ -635,6 +635,13 @@ export type SampleRecoveryInfo = {
 // consumer an explicit lifetime it can honor before performing later effects.
 export type ScoreEventsDispatchContext = {
   signal: AbortSignal
+  // I102 — when this sample was ISSUED, and the topic it was issued against.
+  // A dispatch deliberately survives teardown (an aborted pass must not cost
+  // the account of what happened), so a consumer reading the live clock or the
+  // live session store instead can attribute a finished check to whatever came
+  // next. Both of these come from the tick that produced the verdict.
+  atMs: number
+  topic: string
 }
 
 export type SampleLoopHandle = {
@@ -953,7 +960,9 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
   // subsequent sample for this small, explicit deadline.
   async function dispatchScoreEventsBounded(
     events: ReadonlyArray<ScoreEvent>,
-    verdict: SampleVerdict
+    verdict: SampleVerdict,
+    issuedAtMs: number,
+    issuedTopic: string
   ): Promise<void> {
     const onScoreEvents = opts.onScoreEvents
     if (!onScoreEvents) return
@@ -963,6 +972,8 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
     const controller = new AbortController()
     const context: ScoreEventsDispatchContext = {
       signal: controller.signal,
+      atMs: issuedAtMs,
+      topic: issuedTopic,
     }
     try {
       await Promise.race([
@@ -1433,9 +1444,10 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
         noteBlockedTick('engine_warming')
         return
       }
+      const issuedTopic = opts.getTopic()
       const body = buildFocusRequest({
         modelId,
-        topic: opts.getTopic(),
+        topic: issuedTopic,
         faceBase64: face,
         screenBase64: screen,
       })
@@ -1518,7 +1530,12 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
       const events = useFocusStore
         .getState()
         .applyJudgment(verdict, runtime.now())
-      await dispatchScoreEventsBounded(events, verdict)
+      await dispatchScoreEventsBounded(
+        events,
+        verdict,
+        captureStartedAt,
+        issuedTopic
+      )
       state.resolvedSamples += 1
       log.debug('sample.resolved', {
         tick: state.ticks,

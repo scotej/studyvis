@@ -269,9 +269,11 @@ pub fn insert_with_focus_metrics_mode(
 // A local same-topic rejoin can also crash after its first stint has a row;
 // recovery reconciles that row by clearing its no-longer-precise duration.
 // Report fields stay NULL — the report already renders NULL score/counts as
-// unknown (D5 contract). The active
-// identity can help exclude itself from peer_pubkeys, but cannot prove it
-// owned a crashed session after an identity restore, so provenance stays NULL.
+// unknown (D5 contract). I113 — provenance is recorded when this device's own
+// signature is among the session's audit rows, which is proof it was there; it
+// stays NULL when nothing in the session is ours (an identity restored from a
+// backup onto another device's database), because then it genuinely cannot be
+// proven.
 //
 // Returns the total number of session rows changed: both newly synthesized
 // orphan rows and existing rows reconciled for a crashed same-topic rejoin.
@@ -311,10 +313,22 @@ pub fn synthesize_from_orphaned_audit_events(
         // not pin report/friend ordering into an arbitrary future date.
         let ended_at = bounded_recovery_timestamp(raw_ended_at, now_ms);
         let started_at = bounded_recovery_timestamp(started_at, now_ms).min(ended_at);
+        // I113 — every distinct signer, not only the senders of a 'joined'
+        // event. `joined` is emitted once per session and broadcast only to the
+        // peers connected at that instant, and nothing replays it; hellos, by
+        // contrast, ARE re-sent to every late joiner. The later joiner is always
+        // the guest, since the host waits in the room, so a crashed guest held
+        // no 'joined' row for anyone but itself: after the self-filter below its
+        // peer set was empty, `peer_pubkeys` came out NULL and the
+        // `last_studied_with` bump never ran — while the partner's identity sat
+        // in this same table under 'left', 'ai_alert' and 'pomodoro_*' rows,
+        // each persisted with the signer the signed-hello binding verified.
+        // Every row here is one this device verified before it stored it, so no
+        // kind is weaker evidence of presence than another.
         let mut peers: Vec<String> = {
             let mut stmt = tx.prepare(
                 "SELECT DISTINCT who FROM audit_events
-                 WHERE session_id = ?1 AND kind = 'joined' AND who IS NOT NULL
+                 WHERE session_id = ?1 AND who IS NOT NULL
                    AND ts BETWEEN ?3 AND ?2",
             )?;
             let rows = stmt.query_map(params![session_id, now_ms, MIN_SAFE_JS_DATE_MS], |row| {
@@ -322,10 +336,16 @@ pub fn synthesize_from_orphaned_audit_events(
             })?;
             rows.collect::<Result<Vec<_>>>()?
         };
-        // Peers = signed-hello-verified senders of 'joined' events, minus
-        // ourselves (each side persists its own row; peer_pubkeys means THE
-        // OTHERS). Use the same normalized list for friend timestamps.
+        // Peers = signed-hello-verified signers, minus ourselves (each side
+        // persists its own row; peer_pubkeys means THE OTHERS). Use the same
+        // normalized list for friend timestamps.
         peers.retain(|p| p.len() == 64 && p.bytes().all(|b| b.is_ascii_hexdigit()));
+        // Ownership is proven by our own signature appearing among those
+        // signers, which is exactly what the self-filter is about to remove.
+        let owner = match local_ed_pubkey_hex {
+            Some(local) if peers.iter().any(|p| p == local) => Some(local.to_string()),
+            _ => None,
+        };
         if let Some(local) = local_ed_pubkey_hex {
             peers.retain(|p| p != local);
         }
@@ -366,7 +386,15 @@ pub fn synthesize_from_orphaned_audit_events(
                 confident_samples: None,
                 skipped_samples: None,
                 ai_enabled: None,
-                local_ed_pubkey: None,
+                // I113 — a row this device signed IS proof it owned the
+                // session, and it is the only thing that makes the recovered
+                // session count: `statsInsights` skips a session with no owner,
+                // and the same-topic rejoin reconciliation below requires one.
+                // The upsert pins this column once set, so leaving it NULL was
+                // permanent. Still NULL when nothing here is ours — an identity
+                // restored from a backup onto another device's database, say —
+                // because then we genuinely cannot prove it.
+                local_ed_pubkey: owner,
                 local_display_name: None,
                 peer_presence_ms: None,
             },
@@ -895,8 +923,9 @@ mod tests {
         let row = get(&conn, "orphan-topic").expect("get").expect("adopted");
         assert_eq!(row.started_at, Some(1_700_000_060_000));
         assert_eq!(
-            row.local_ed_pubkey, None,
-            "the current identity can filter peers but cannot be assigned as the orphan owner"
+            row.local_ed_pubkey.as_deref(),
+            Some(me.as_str()),
+            "I113 — our own signature in this session's rows is proof we were in it"
         );
         assert_eq!(row.ended_at, Some(1_700_002_760_000));
         assert_eq!(row.total_minutes, None);
@@ -914,6 +943,78 @@ mod tests {
         // Idempotent: the adopted row is no longer an orphan.
         let again = synthesize_from_orphaned_audit_events(&mut conn, Some(&me)).expect("re-run");
         assert_eq!(again, 0);
+    }
+
+    // I113 — `joined` is emitted once per session and reaches only the peers
+    // connected at that instant, and nothing replays it. The later joiner is
+    // always the guest, so a crashed guest has no `joined` row for the host —
+    // but the host's identity is right there under every other kind, each one
+    // verified against the signed-hello binding before it was stored.
+    #[test]
+    fn synthesize_recovers_a_guest_whose_partner_never_sent_a_joined_row() {
+        let mut conn = fresh();
+        let me = hex64("aa");
+        let host = hex64("bb");
+        conn.execute(
+            "INSERT INTO friends (ed_pubkey_hex, x_pubkey_hex, display_name, paired_at, last_studied_with)
+             VALUES (?1, ?2, ?3, ?4, NULL)",
+            params![host, hex64("cc"), "Host", 1_600_000_000_000i64],
+        )
+        .expect("friend");
+        // Only OUR joined row exists; the host's arrival predates ours.
+        audit_events::insert(
+            &conn,
+            &orphan_audit_row("guest-topic", 1_700_000_000_000, &me, "joined"),
+        )
+        .expect("our joined");
+        audit_events::insert(
+            &conn,
+            &orphan_audit_row("guest-topic", 1_700_000_300_000, &host, "pomodoro_start"),
+        )
+        .expect("host pomodoro");
+        audit_events::insert(
+            &conn,
+            &orphan_audit_row("guest-topic", 1_700_002_700_000, &host, "left"),
+        )
+        .expect("host left");
+
+        assert_eq!(
+            synthesize_from_orphaned_audit_events(&mut conn, Some(&me)).expect("recover"),
+            1
+        );
+        let row = get(&conn, "guest-topic").expect("get").expect("adopted");
+        assert_eq!(row.peer_pubkeys, Some(format!("[\"{host}\"]")));
+        assert_eq!(row.local_ed_pubkey.as_deref(), Some(me.as_str()));
+
+        let last: Option<i64> = conn
+            .query_row(
+                "SELECT last_studied_with FROM friends WHERE ed_pubkey_hex = ?1",
+                params![host],
+                |r| r.get(0),
+            )
+            .expect("friend row");
+        assert_eq!(last, Some(1_700_002_700_000));
+    }
+
+    // Provenance is proven, never assumed: an identity restored onto another
+    // device's database owns none of these sessions.
+    #[test]
+    fn synthesize_leaves_the_owner_null_when_nothing_in_the_session_is_ours() {
+        let mut conn = fresh();
+        let me = hex64("aa");
+        let stranger = hex64("dd");
+        audit_events::insert(
+            &conn,
+            &orphan_audit_row("theirs", 1_700_000_000_000, &stranger, "joined"),
+        )
+        .expect("insert");
+        assert_eq!(
+            synthesize_from_orphaned_audit_events(&mut conn, Some(&me)).expect("recover"),
+            1
+        );
+        let row = get(&conn, "theirs").expect("get").expect("adopted");
+        assert_eq!(row.local_ed_pubkey, None);
+        assert_eq!(row.peer_pubkeys, Some(format!("[\"{stranger}\"]")));
     }
 
     #[test]

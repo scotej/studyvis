@@ -393,6 +393,36 @@ describe('PTT invariants', () => {
     expect(monitor.budgetLeft()).toBe(left)
   })
 
+  // I105 — a stalling main thread calls resetDwell on every recorded gap. It
+  // must drop the dwell only: wiping the backoff ladder with it let one stuck
+  // hold re-emit at full rate and spend the whole budget inside half an hour,
+  // after which the monitor is silent for the rest of the session.
+  test('resetDwell keeps the backoff ladder, so a stall cannot burn the budget', () => {
+    const stuck = (atMs: number) => {
+      const o = healthy({ atMs })
+      o.render.selfLit = true
+      return o
+    }
+    const run = (resetEvery: number | null) => {
+      const monitor = createPttInvariantMonitor()
+      let violations = 0
+      for (let i = 1; i <= 1_800; i += 1) {
+        if (resetEvery !== null && i % resetEvery === 0) monitor.resetDwell()
+        violations += monitor
+          .observe(stuck(i * 2_000))
+          .filter((e) => e.kind === 'violation').length
+      }
+      return { violations, budgetLeft: monitor.budgetLeft() }
+    }
+    const healthyRun = run(null)
+    const stallingRun = run(30)
+    expect(healthyRun.budgetLeft).toBeGreaterThan(0)
+    expect(stallingRun.budgetLeft).toBeGreaterThan(0)
+    expect(stallingRun.violations).toBeLessThanOrEqual(
+      healthyRun.violations * 2
+    )
+  })
+
   test('every invariant has a case', () => {
     expect(cases.map((c) => c.id).sort()).toEqual(
       PTT_INVARIANTS.map((i) => i.id).sort()

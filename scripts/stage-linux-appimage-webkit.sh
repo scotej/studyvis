@@ -95,6 +95,7 @@ required_libraries=(
   libjavascriptcoregtk-4.1.so.0
   librice-proto.so.0
   librice-io.so.0
+  libnice.so.10
 )
 for library in "${required_libraries[@]}"; do
   [[ -e $runtime_libdir/$library ]] || {
@@ -105,13 +106,9 @@ done
 # linuxdeploy-plugin-gstreamer's AppRun hook expects these helpers below
 # usr/lib/gstreamer1.0/gstreamer-1.0, even though the plugin stages its shared
 # objects below usr/lib/gstreamer-1.0. Tauri maps this stable pair there.
-gstreamer_helper_dir=${STUDYVIS_GSTREAMER_HELPERS_DIR:-}
-if [[ -z $gstreamer_helper_dir ]] && command -v pkg-config >/dev/null 2>&1; then
-  gstreamer_helper_dir=$(pkg-config --variable=pluginscannerdir gstreamer-1.0 2>/dev/null || true)
-fi
-[[ -n $gstreamer_helper_dir ]] || {
-  die "could not locate GStreamer helpers; set STUDYVIS_GSTREAMER_HELPERS_DIR"
-}
+gstreamer_helper_dir=$(PKG_CONFIG_PATH="$runtime_libdir/pkgconfig" \
+  pkg-config --variable=pluginscannerdir gstreamer-1.0)
+[[ $gstreamer_helper_dir == "$runtime_dir/"* ]] || die "GStreamer helpers resolved outside the pinned runtime"
 gstreamer_helper_dir=$(normalize_path STUDYVIS_GSTREAMER_HELPERS_DIR "$gstreamer_helper_dir" existing)
 scanner="$gstreamer_helper_dir/gst-plugin-scanner"
 ptp_helper="$gstreamer_helper_dir/gst-ptp-helper"
@@ -123,13 +120,21 @@ ptp_helper="$gstreamer_helper_dir/gst-ptp-helper"
 # libav/x264/x265 and scores of codecs StudyVis neither needs nor has audited.
 system_gstreamer_plugins=${STUDYVIS_SYSTEM_GSTREAMER_PLUGINS_DIR:-}
 if [[ -z $system_gstreamer_plugins ]]; then
-  system_gstreamer_plugins=$(pkg-config --variable=pluginsdir gstreamer-1.0 2>/dev/null || true)
+  system_gstreamer_plugins=$(env -u PKG_CONFIG_PATH pkg-config --variable=pluginsdir gstreamer-1.0 2>/dev/null || true)
 fi
 [[ -n $system_gstreamer_plugins ]] || {
   die "could not locate system GStreamer plugins; set STUDYVIS_SYSTEM_GSTREAMER_PLUGINS_DIR"
 }
 system_gstreamer_plugins=$(normalize_path STUDYVIS_SYSTEM_GSTREAMER_PLUGINS_DIR \
   "$system_gstreamer_plugins" existing)
+# Noble's SRTP implementation loads softokn/freebl through NSS at runtime;
+# linuxdeploy's DT_NEEDED walk cannot discover those modules (#312).
+nss_libdir=$(normalize_path STUDYVIS_NSS_LIBDIR \
+  "${STUDYVIS_NSS_LIBDIR:-${system_gstreamer_plugins%/*}}" existing)
+nss_payload=(libsoftokn3.so libsoftokn3.chk libfreeblpriv3.so libfreeblpriv3.chk)
+for nss_file in "${nss_payload[@]}"; do
+  [[ -s $nss_libdir/$nss_file ]] || die "NSS media payload is missing: $nss_libdir/$nss_file"
+done
 plugin_manifest="$script_dir/linux-gstreamer-plugins.txt"
 [[ -s $plugin_manifest && ! -L $plugin_manifest ]] || {
   die "curated GStreamer plugin manifest is missing: $plugin_manifest"
@@ -181,6 +186,14 @@ dbus_proxy=$(normalize_path STUDYVIS_DBUS_PROXY_EXECUTABLE \
 
 license_files=(
   BUILD-MANIFEST.txt
+  GStreamer-LICENSE-LGPL-2.1
+  GStreamer-PTP-LICENSE-MPL-2.0
+  Libnice-LICENSING
+  Libnice-LICENSE-LGPL-2.1
+  Libnice-LICENSE-MPL-1.1
+  GSTREAMER-THIRD-PARTY-LICENSES.txt
+  GSTREAMER-LICENSE-FILES.sha256
+  Meson-LICENSE-APACHE-2.0
   COPYING.LIB
   LICENSE-APPLE
   LICENSE-LGPL-2
@@ -198,6 +211,27 @@ for license in "${license_files[@]}"; do
     die "pinned runtime license/provenance material is missing: $license_source/$license"
   }
 done
+for notice in GSTREAMER-THIRD-PARTY-LICENSES.txt GSTREAMER-LICENSE-FILES.sha256 GStreamer-PTP-LICENSE-MPL-2.0; do
+  case $notice in
+    GSTREAMER-THIRD-PARTY-LICENSES.txt) expected_sha=$STUDYVIS_GSTREAMER_NOTICE_SHA256 ;;
+    GSTREAMER-LICENSE-FILES.sha256) expected_sha=$STUDYVIS_GSTREAMER_LICENSE_INVENTORY_SHA256 ;;
+    GStreamer-PTP-LICENSE-MPL-2.0) expected_sha=$STUDYVIS_GSTREAMER_PTP_LICENSE_SHA256 ;;
+  esac
+  read -r actual_sha _ < <(sha256sum "$license_source/$notice")
+  [[ $actual_sha == "$expected_sha" ]] || die "GStreamer license evidence has the wrong SHA256: $notice"
+done
+for license in Libnice-LICENSING Libnice-LICENSE-LGPL-2.1 Libnice-LICENSE-MPL-1.1; do
+  case $license in
+    Libnice-LICENSING) expected_sha=$STUDYVIS_LIBNICE_LICENSING_SHA256 ;;
+    Libnice-LICENSE-LGPL-2.1) expected_sha=$STUDYVIS_LIBNICE_LGPL_SHA256 ;;
+    Libnice-LICENSE-MPL-1.1) expected_sha=$STUDYVIS_LIBNICE_MPL_SHA256 ;;
+  esac
+  read -r actual_sha _ < <(sha256sum "$license_source/$license")
+  [[ $actual_sha == "$expected_sha" ]] || die "libnice license evidence has the wrong SHA256: $license"
+done
+[[ $(wc -l <"$license_source/GSTREAMER-LICENSE-FILES.sha256") -eq 15 ]] || {
+  die "runtime GStreamer/libnice license hash inventory is incomplete"
+}
 read -r staged_patch_sha256 _ < <(sha256sum "$license_source/webkitgtk-appimage-sandbox.patch")
 [[ $staged_patch_sha256 == "$STUDYVIS_WEBKIT_PATCH_SHA256" ]] || {
   die "runtime patch evidence has the wrong SHA256: $staged_patch_sha256"
@@ -227,6 +261,7 @@ stage_directories=(
   "$stage_root/processes/injected-bundle"
   "$stage_root/gstreamer"
   "$stage_root/gstreamer-plugins"
+  "$stage_root/nss"
   "$stage_root/pipewire"
   "$stage_root/pipewire/spa"
   "$stage_root/pipewire/modules"
@@ -243,7 +278,7 @@ done
 # The two linuxdeploy GStreamer inputs are whole-directory copies. Remove old
 # regular files from both guarded generated directories before staging; an
 # unexpected symlink/directory fails rather than being followed or packaged.
-for generated_dir in "$stage_root/gstreamer-plugins" "$stage_root/gstreamer"; do
+for generated_dir in "$stage_root/gstreamer-plugins" "$stage_root/gstreamer" "$stage_root/nss"; do
   while IFS= read -r -d '' stale; do
     [[ -f $stale && ! -L $stale ]] || die "unexpected staged GStreamer entry: $stale"
     rm -f -- "$stale"
@@ -261,7 +296,11 @@ while IFS= read -r plugin_group || [[ -n $plugin_group ]]; do
     [[ $candidate =~ ^libgst[A-Za-z0-9_.+-]+\.so$ ]] || {
       die "invalid curated GStreamer plugin name: $candidate"
     }
-    if [[ -f $system_gstreamer_plugins/$candidate && ! -L $system_gstreamer_plugins/$candidate ]]; then
+    case $candidate in
+      libgstpipewire.so) plugin_source="$system_gstreamer_plugins/$candidate" ;;
+      *) plugin_source="$runtime_libdir/gstreamer-1.0/$candidate" ;;
+    esac
+    if [[ -f $plugin_source && ! -L $plugin_source ]]; then
       selected=$candidate
       break
     fi
@@ -270,7 +309,7 @@ while IFS= read -r plugin_group || [[ -n $plugin_group ]]; do
     die "none of the required GStreamer plugin alternatives exist: $plugin_group"
   }
   if [[ ! -v staged_plugins[$selected] ]]; then
-    install -m 0755 -- "$system_gstreamer_plugins/$selected" \
+    install -m 0755 -- "$plugin_source" \
       "$stage_root/gstreamer-plugins/$selected"
     staged_plugins[$selected]=1
   fi
@@ -280,6 +319,10 @@ for forbidden in libgstlibav.so libgstx264.so libgstx265.so; do
   [[ ! -e $stage_root/gstreamer-plugins/$forbidden ]] || {
     die "forbidden GStreamer codec entered the curated stage: $forbidden"
   }
+done
+
+for nss_file in "${nss_payload[@]}"; do
+  install -m 0644 -- "$nss_libdir/$nss_file" "$stage_root/nss/$nss_file"
 done
 
 # Drop a previous run's payload so a shortened manifest cannot leave an
@@ -364,7 +407,7 @@ done
 echo "Staged $runtime_id from $runtime_dir"
 echo "Staged production WebKit helpers for /usr/bin/$appimage_runtime_dirname"
 echo "Staged GStreamer helpers from $gstreamer_helper_dir"
-echo "Staged ${#staged_plugins[@]} curated GStreamer plugins from $system_gstreamer_plugins"
+echo "Staged ${#staged_plugins[@]} curated GStreamer plugins from the pinned runtime and system PipeWire/libnice"
 echo "Staged ${#staged_pipewire[@]} curated PipeWire payload entries from $pipewire_spa_dir," \
   "$pipewire_module_dir, $pipewire_config_dir, and $pipewire_libdir"
 echo "Staged AppImage sandbox helpers from $bwrap and $dbus_proxy"

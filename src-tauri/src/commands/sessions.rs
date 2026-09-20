@@ -187,7 +187,16 @@ pub fn session_timeline_save(
         entries,
         truncated: i64::from(truncated),
     };
-    session_timelines::upsert(&conn, &row).map_err(|e| e.to_string())
+    // I100 — a write-up runs for minutes and outlives the report that started
+    // it, so the session it describes can be deleted underneath it. The db
+    // layer refuses to write a narrative for a session that is gone and says so
+    // in its return value. Discarding it is the intended outcome, not an error
+    // the caller can act on: the user asked for the session to be forgotten and
+    // the write-up lost the race, which is the direction that race should go.
+    // `native_log` is desktop-gated and this module is not, so the outcome is
+    // deliberately not recorded here.
+    let _stored = session_timelines::upsert(&conn, &row).map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 #[tauri::command]

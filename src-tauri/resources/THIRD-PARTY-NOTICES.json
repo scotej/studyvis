@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "generatedBy": "scripts/generate-third-party-notices.ts",
   "noticePath": "THIRD-PARTY-NOTICES.txt",
-  "noticeSha256": "86de7c235063d44d779d8f487e877cbc1d2df5011843a741fb9d44133916abda",
+  "noticeSha256": "b1baf037b0f647b48bcb448a5ed2b1a6d35ba09f46de61e8743f3441508149d1",
   "scope": {
     "npm": "package-lock.json v3 entries beneath node_modules whose dev flag is not true",
     "cargo": "normal dependency edges reachable from the StudyVis root under each release target; build/dev edges excluded",
@@ -16,11 +16,11 @@
   "inputs": [
     {
       "path": "package-lock.json",
-      "sha256": "57c31e6a3537f8cfe212bf074a246a444cada45e3a1cd4b6b11e36c85d44162b"
+      "sha256": "49f443c2a41a17a50ee9e82dd2eb15615ca438d5816039328b07cd03d284bc2d"
     },
     {
       "path": "package.json",
-      "sha256": "4ad1f28c7159572f4d39bdbb08c768c913ed29a5d3c11c8aec6a4b76bde4b8d3"
+      "sha256": "0f81c7e9513b84cc397da1c96f9b9a1fa9ac7f3778fe30c488e7ba262b5d8027"
     },
     {
       "path": "scripts/fetch-llama-server.sh",
@@ -44,11 +44,11 @@
     },
     {
       "path": "src-tauri/Cargo.lock",
-      "sha256": "19aecfe1cbae6066f47bc0f0ea6dbb13509dedf876c1e105c161d5b1dd0adf30"
+      "sha256": "a9e64e36b2c80acda6b7fcf5332913d7aa7bc05194bf42625126e1d57cedf173"
     },
     {
       "path": "src-tauri/Cargo.toml",
-      "sha256": "d083bd99933cf1a0e75efc2168b1f4ece7303d36d0464edf625eb9223ef0b103"
+      "sha256": "2bec4b58294003081333a06f774a345b45386369a1e25745e56070f329555aeb"
     },
     {
       "path": "src-tauri/vendor/wry/LICENSE-MIT",
@@ -12406,14 +12406,14 @@
       ]
     },
     {
-      "id": "npm:node_modules/@noble/ed25519@3.1.0",
+      "id": "npm:node_modules/@noble/ed25519@3.2.0",
       "ecosystem": "npm",
       "name": "@noble/ed25519",
-      "version": "3.1.0",
+      "version": "3.2.0",
       "licenseExpression": "MIT",
-      "source": "https://registry.npmjs.org/@noble/ed25519/-/ed25519-3.1.0.tgz",
+      "source": "https://registry.npmjs.org/@noble/ed25519/-/ed25519-3.2.0.tgz",
       "repository": "git+https://github.com/paulmillr/noble-ed25519.git",
-      "integrity": "sha512-pfcObRY3CtvwfaG9Mt5XqZdKmAQppl37tHUeuBhDUbiwJBCVY4/A4lbMvb1xKhMDx96AqAqZpMWuBX1HulhX4g==",
+      "integrity": "sha512-criDgRlnUA09hchYrTy/JUWPIEap5rZxQe6wDWzRx51oWWpDRcUpuNzlgPxDJaOK6AsW9c0wKcj3rKRv6t+bPQ==",
       "lockPath": "node_modules/@noble/ed25519",
       "targets": ["frontend"],
       "licenseFiles": [

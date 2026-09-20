@@ -15,6 +15,7 @@ export const SESSION_OVERLAY_WINDOW_MAX_HEIGHT = 360
 export const SESSION_OVERLAY_BODY_MAX_HEIGHT = 224
 export const SESSION_OVERLAY_WINDOW_MARGIN = tokens.space[4]
 export const SESSION_OVERLAY_CREATE_TIMEOUT_MS = 5_000
+export const SESSION_OVERLAY_READY_TIMEOUT_MS = 5_000
 export const SESSION_OVERLAY_LAYOUT_TIMEOUT_MS = 1_500
 
 export type SessionOverlayTone = 'neutral' | 'warning' | 'alerted'
