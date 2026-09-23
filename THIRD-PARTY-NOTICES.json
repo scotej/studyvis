@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "generatedBy": "scripts/generate-third-party-notices.ts",
   "noticePath": "THIRD-PARTY-NOTICES.txt",
-  "noticeSha256": "756130ff86bcc786f43ed0bc56d4a409c9500f60a8d5e4a1151bd97f63bc8049",
+  "noticeSha256": "cc2149ff1bab99709389312fcfa7ea9e8a68d7607f5be631ec1c3e4f85a0a6aa",
   "scope": {
     "npm": "package-lock.json v3 entries beneath node_modules whose dev flag is not true",
     "cargo": "normal dependency edges reachable from the StudyVis root under each release target; build/dev edges excluded",
@@ -16,11 +16,11 @@
   "inputs": [
     {
       "path": "package-lock.json",
-      "sha256": "0f6d4ea846e663f8693178073d7ca0e5e28295ef94f72ab70d6b65f67569a9a5"
+      "sha256": "c7350db33ad1886f918711c1dad0f656fc517612013135b3ac3787bd196a50ff"
     },
     {
       "path": "package.json",
-      "sha256": "cef9d1b151130a5789f0c68041ee6c96f1171f740faacf9d8cc347164564b107"
+      "sha256": "0f81c7e9513b84cc397da1c96f9b9a1fa9ac7f3778fe30c488e7ba262b5d8027"
     },
     {
       "path": "scripts/fetch-llama-server.sh",
@@ -12439,14 +12439,14 @@
       ]
     },
     {
-      "id": "npm:node_modules/@noble/ed25519@3.1.0",
+      "id": "npm:node_modules/@noble/ed25519@3.2.0",
       "ecosystem": "npm",
       "name": "@noble/ed25519",
-      "version": "3.1.0",
+      "version": "3.2.0",
       "licenseExpression": "MIT",
-      "source": "https://registry.npmjs.org/@noble/ed25519/-/ed25519-3.1.0.tgz",
+      "source": "https://registry.npmjs.org/@noble/ed25519/-/ed25519-3.2.0.tgz",
       "repository": "git+https://github.com/paulmillr/noble-ed25519.git",
-      "integrity": "sha512-pfcObRY3CtvwfaG9Mt5XqZdKmAQppl37tHUeuBhDUbiwJBCVY4/A4lbMvb1xKhMDx96AqAqZpMWuBX1HulhX4g==",
+      "integrity": "sha512-criDgRlnUA09hchYrTy/JUWPIEap5rZxQe6wDWzRx51oWWpDRcUpuNzlgPxDJaOK6AsW9c0wKcj3rKRv6t+bPQ==",
       "lockPath": "node_modules/@noble/ed25519",
       "targets": ["frontend"],
       "licenseFiles": [
