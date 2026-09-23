@@ -298,10 +298,29 @@ export function createResilientPeerConnection(
 ): PeerConnectionConstructor {
   return new Proxy(Base, {
     construct(target, args) {
+      const config = args[0] as RTCConfiguration | undefined
+      const turnServerCount = (config?.iceServers ?? []).filter((server) => {
+        const urls = Array.isArray(server.urls) ? server.urls : [server.urls]
+        return urls.some((url) => /^turns?:/i.test(url))
+      }).length
       const connection = Reflect.construct(
         target,
         args
       ) as unknown as RTCPeerConnection
+      // A saved TURN setting is not proof that the peer connection received
+      // it. Record only the effective mode and count; URLs and credentials
+      // must never enter a diagnostics archive. Distinct event names keep a
+      // changed mode visible despite the log's 10-second duplicate throttle.
+      const mode =
+        turnServerCount === 0
+          ? 'stun'
+          : config?.iceTransportPolicy === 'relay'
+            ? 'turn-only'
+            : 'turn-auto'
+      log.info(`peer.created.${mode}`, {
+        iceTransportPolicy: config?.iceTransportPolicy ?? 'all',
+        turnServerCount,
+      })
       installTransientDisconnectHold(connection, holdMs)
       return connection
     },
