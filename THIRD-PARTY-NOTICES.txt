@@ -4787,16 +4787,16 @@ NPM
   source: https://registry.npmjs.org/@types/node/-/node-26.2.0.tgz
   license: npm:node_modules/@types/node/LICENSE (SHA-256 c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383)
 
-- @types/react 19.2.18 — MIT
-  id: npm:node_modules/@types/react@19.2.18
+- @types/react 19.3.0 — MIT
+  id: npm:node_modules/@types/react@19.3.0
   targets: frontend
-  source: https://registry.npmjs.org/@types/react/-/react-19.2.18.tgz
+  source: https://registry.npmjs.org/@types/react/-/react-19.3.0.tgz
   license: npm:node_modules/@types/react/LICENSE (SHA-256 c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383)
 
-- @types/react-dom 19.2.4 — MIT
-  id: npm:node_modules/@types/react-dom@19.2.4
+- @types/react-dom 19.3.0 — MIT
+  id: npm:node_modules/@types/react-dom@19.3.0
   targets: frontend
-  source: https://registry.npmjs.org/@types/react-dom/-/react-dom-19.2.4.tgz
+  source: https://registry.npmjs.org/@types/react-dom/-/react-dom-19.3.0.tgz
   license: npm:node_modules/@types/react-dom/LICENSE (SHA-256 c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383)
 
 - @types/readable-stream 4.0.23 — MIT
@@ -5147,10 +5147,10 @@ NPM
   source: https://registry.npmjs.org/lru-cache/-/lru-cache-10.4.3.tgz
   license: npm:node_modules/mqtt/node_modules/lru-cache/LICENSE (SHA-256 451ec07eeb9c4e1b86de9abdaa426462a8be48f887ec7421cf0bbb9c769555ab)
 
-- lucide-react 1.31.0 — ISC
-  id: npm:node_modules/lucide-react@1.31.0
+- lucide-react 1.46.0 — ISC
+  id: npm:node_modules/lucide-react@1.46.0
   targets: frontend
-  source: https://registry.npmjs.org/lucide-react/-/lucide-react-1.31.0.tgz
+  source: https://registry.npmjs.org/lucide-react/-/lucide-react-1.46.0.tgz
   license: npm:node_modules/lucide-react/LICENSE (SHA-256 b495047bd93a9b06913511076f504daba17d5bbeb3e0650f3bb53a4220329c57)
 
 - minimist 1.2.8 — MIT
@@ -5237,16 +5237,16 @@ NPM
   source: https://registry.npmjs.org/radix-ui/-/radix-ui-1.6.7.tgz
   license: npm:node_modules/radix-ui/LICENSE (SHA-256 0e80a2d229d2fd4fc7e8636142ec5d0ff0bc031f14c15b682e2ac01dfd5b5138)
 
-- react 19.2.8 — MIT
-  id: npm:node_modules/react@19.2.8
+- react 19.3.0 — MIT
+  id: npm:node_modules/react@19.3.0
   targets: frontend
-  source: https://registry.npmjs.org/react/-/react-19.2.8.tgz
+  source: https://registry.npmjs.org/react/-/react-19.3.0.tgz
   license: npm:node_modules/react/LICENSE (SHA-256 da6d3703ed11cbe42bd212c725957c98da23cbff1998c05fa4b3d976d1a58e93)
 
-- react-dom 19.2.8 — MIT
-  id: npm:node_modules/react-dom@19.2.8
+- react-dom 19.3.0 — MIT
+  id: npm:node_modules/react-dom@19.3.0
   targets: frontend
-  source: https://registry.npmjs.org/react-dom/-/react-dom-19.2.8.tgz
+  source: https://registry.npmjs.org/react-dom/-/react-dom-19.3.0.tgz
   license: npm:node_modules/react-dom/LICENSE (SHA-256 da6d3703ed11cbe42bd212c725957c98da23cbff1998c05fa4b3d976d1a58e93)
 
 - react-is 17.0.2 — MIT
@@ -5274,10 +5274,10 @@ NPM
   override: The 2.3.8 package archive declares MIT but omits the text; retain the same author's locked react-remove-scroll MIT notice.
   license: npm:node_modules/react-remove-scroll/LICENSE (SHA-256 30f0cfddf483d1128e3610205020f2041a6c5e837aa999e0aa82e5576187d4a9)
 
-- react-router 8.3.0 — MIT
-  id: npm:node_modules/react-router@8.3.0
+- react-router 8.3.1 — MIT
+  id: npm:node_modules/react-router@8.3.1
   targets: frontend
-  source: https://registry.npmjs.org/react-router/-/react-router-8.3.0.tgz
+  source: https://registry.npmjs.org/react-router/-/react-router-8.3.1.tgz
   license: npm:node_modules/react-router/LICENSE.md (SHA-256 77c9ee6a9c5d5782fb0c50b50d101189116314c14f7df0a1b0d385fc96a7ba49)
 
 - react-style-singleton 2.2.3 — MIT
@@ -5352,10 +5352,10 @@ NPM
   source: https://registry.npmjs.org/safe-buffer/-/safe-buffer-5.2.1.tgz
   license: npm:node_modules/string_decoder/node_modules/safe-buffer/LICENSE (SHA-256 c7cc929b57080f4b9d0c6cf57669f0463fc5b39906344dfc8d3bc43426b30eac)
 
-- scheduler 0.27.0 — MIT
-  id: npm:node_modules/scheduler@0.27.0
+- scheduler 0.28.0 — MIT
+  id: npm:node_modules/scheduler@0.28.0
   targets: frontend
-  source: https://registry.npmjs.org/scheduler/-/scheduler-0.27.0.tgz
+  source: https://registry.npmjs.org/scheduler/-/scheduler-0.28.0.tgz
   license: npm:node_modules/scheduler/LICENSE (SHA-256 da6d3703ed11cbe42bd212c725957c98da23cbff1998c05fa4b3d976d1a58e93)
 
 - set-blocking 2.0.0 — ISC
@@ -5406,10 +5406,10 @@ NPM
   source: https://registry.npmjs.org/strip-ansi/-/strip-ansi-6.0.1.tgz
   license: npm:node_modules/strip-ansi/license (SHA-256 48da2f39e100d4085767e94966b43f4fa95ff6a0698fba57ed460914e35f94a0)
 
-- tailwind-merge 3.6.0 — MIT
-  id: npm:node_modules/tailwind-merge@3.6.0
+- tailwind-merge 3.7.0 — MIT
+  id: npm:node_modules/tailwind-merge@3.7.0
   targets: frontend
-  source: https://registry.npmjs.org/tailwind-merge/-/tailwind-merge-3.6.0.tgz
+  source: https://registry.npmjs.org/tailwind-merge/-/tailwind-merge-3.7.0.tgz
   license: npm:node_modules/tailwind-merge/LICENSE.md (SHA-256 d4c70c7ce38cea8778f0aed3fc0bef0a9dbd27f13bd8b6773cbd6d37941971e5)
 
 - tiny-invariant 1.3.3 — MIT
@@ -16713,7 +16713,7 @@ DEALINGS IN THE SOFTWARE.
 
 SHA-256 77c9ee6a9c5d5782fb0c50b50d101189116314c14f7df0a1b0d385fc96a7ba49
 Applies to:
-- npm:node_modules/react-router@8.3.0 — npm:node_modules/react-router/LICENSE.md
+- npm:node_modules/react-router@8.3.1 — npm:node_modules/react-router/LICENSE.md
 
 --------------------------------------------------------------------------------
 
@@ -23475,7 +23475,7 @@ Applies to:
 
 SHA-256 b495047bd93a9b06913511076f504daba17d5bbeb3e0650f3bb53a4220329c57
 Applies to:
-- npm:node_modules/lucide-react@1.31.0 — npm:node_modules/lucide-react/LICENSE
+- npm:node_modules/lucide-react@1.46.0 — npm:node_modules/lucide-react/LICENSE
 
 --------------------------------------------------------------------------------
 
@@ -24176,8 +24176,8 @@ Applies to:
 - npm:node_modules/@types/d3-time@3.0.4 — npm:node_modules/@types/d3-time/LICENSE
 - npm:node_modules/@types/d3-timer@3.0.2 — npm:node_modules/@types/d3-timer/LICENSE
 - npm:node_modules/@types/node@26.2.0 — npm:node_modules/@types/node/LICENSE
-- npm:node_modules/@types/react-dom@19.2.4 — npm:node_modules/@types/react-dom/LICENSE
-- npm:node_modules/@types/react@19.2.18 — npm:node_modules/@types/react/LICENSE
+- npm:node_modules/@types/react-dom@19.3.0 — npm:node_modules/@types/react-dom/LICENSE
+- npm:node_modules/@types/react@19.3.0 — npm:node_modules/@types/react/LICENSE
 - npm:node_modules/@types/readable-stream@4.0.23 — npm:node_modules/@types/readable-stream/LICENSE
 - npm:node_modules/@types/use-sync-external-store@0.0.6 — npm:node_modules/@types/use-sync-external-store/LICENSE
 - npm:node_modules/@types/ws@8.18.1 — npm:node_modules/@types/ws/LICENSE
@@ -25885,7 +25885,7 @@ Applies to:
 
 SHA-256 d4c70c7ce38cea8778f0aed3fc0bef0a9dbd27f13bd8b6773cbd6d37941971e5
 Applies to:
-- npm:node_modules/tailwind-merge@3.6.0 — npm:node_modules/tailwind-merge/LICENSE.md
+- npm:node_modules/tailwind-merge@3.7.0 — npm:node_modules/tailwind-merge/LICENSE.md
 
 --------------------------------------------------------------------------------
 
@@ -26014,9 +26014,9 @@ DEALINGS IN THE SOFTWARE.
 
 SHA-256 da6d3703ed11cbe42bd212c725957c98da23cbff1998c05fa4b3d976d1a58e93
 Applies to:
-- npm:node_modules/react-dom@19.2.8 — npm:node_modules/react-dom/LICENSE
-- npm:node_modules/react@19.2.8 — npm:node_modules/react/LICENSE
-- npm:node_modules/scheduler@0.27.0 — npm:node_modules/scheduler/LICENSE
+- npm:node_modules/react-dom@19.3.0 — npm:node_modules/react-dom/LICENSE
+- npm:node_modules/react@19.3.0 — npm:node_modules/react/LICENSE
+- npm:node_modules/scheduler@0.28.0 — npm:node_modules/scheduler/LICENSE
 - npm:node_modules/use-sync-external-store@1.6.0 — npm:node_modules/use-sync-external-store/LICENSE
 
 --------------------------------------------------------------------------------
