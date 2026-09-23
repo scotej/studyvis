@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "generatedBy": "scripts/generate-third-party-notices.ts",
   "noticePath": "THIRD-PARTY-NOTICES.txt",
-  "noticeSha256": "59f1db6de314f7b3e46a20d3a6e6ac76d4ebb9de5b7c60f70c1dea8f17cdd314",
+  "noticeSha256": "756130ff86bcc786f43ed0bc56d4a409c9500f60a8d5e4a1151bd97f63bc8049",
   "scope": {
     "npm": "package-lock.json v3 entries beneath node_modules whose dev flag is not true",
     "cargo": "normal dependency edges reachable from the StudyVis root under each release target; build/dev edges excluded",
@@ -44,7 +44,7 @@
     },
     {
       "path": "src-tauri/Cargo.lock",
-      "sha256": "8a8e97264196500895b875aa7d8bd95d901635df245e658392963b463cf80682"
+      "sha256": "9173bf0fe454afcb7cfc987cbf40336ab45e864db974877f3edac4b28448485b"
     },
     {
       "path": "src-tauri/Cargo.toml",
@@ -56,8 +56,8 @@
     }
   ],
   "counts": {
-    "components": 753,
-    "cargo": 532,
+    "components": 754,
+    "cargo": 533,
     "npm": 220,
     "external": 1,
     "distinctLicenseTexts": 396
@@ -2990,13 +2990,13 @@
       ]
     },
     {
-      "id": "cargo:flate2@1.1.9",
+      "id": "cargo:flate2@1.1.10",
       "ecosystem": "cargo",
       "name": "flate2",
-      "version": "1.1.9",
+      "version": "1.1.10",
       "licenseExpression": "MIT OR Apache-2.0",
-      "source": "https://crates.io/api/v1/crates/flate2/1.1.9/download",
-      "checksum": "843fba2746e448b37e26a819579957415c8cef339bf08564fe8b7ddbd959573c",
+      "source": "https://crates.io/api/v1/crates/flate2/1.1.10/download",
+      "checksum": "6e634e2e0ebac1ee034020da1ca582e17ffe4e0f5e985823721e168928136dcb",
       "repository": "https://github.com/rust-lang/flate2-rs",
       "targets": [
         "aarch64-apple-darwin",
@@ -3005,11 +3005,11 @@
       ],
       "licenseFiles": [
         {
-          "path": "cargo:flate2@1.1.9/LICENSE-APACHE",
+          "path": "cargo:flate2@1.1.10/LICENSE-APACHE",
           "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
         },
         {
-          "path": "cargo:flate2@1.1.9/LICENSE-MIT",
+          "path": "cargo:flate2@1.1.10/LICENSE-MIT",
           "sha256": "025436edff4cfcdde17a5811fdea78892d8482efd1abdec5a17872d07a4f2112"
         }
       ]
@@ -5326,6 +5326,39 @@
         },
         {
           "path": "cargo:miniz_oxide@0.8.9/LICENSE-ZLIB.md",
+          "sha256": "0a54e647fe54104658b5e563c04c6f9edf251710e47bce692e0bd990a4ddaa39"
+        }
+      ]
+    },
+    {
+      "id": "cargo:miniz_oxide@0.9.1",
+      "ecosystem": "cargo",
+      "name": "miniz_oxide",
+      "version": "0.9.1",
+      "licenseExpression": "MIT OR Zlib OR Apache-2.0",
+      "source": "https://crates.io/api/v1/crates/miniz_oxide/0.9.1/download",
+      "checksum": "b63fbc4a50860e98e7b2aa7804ded1db5cbc3aff9193adaff57a6931bf7c4b4c",
+      "repository": "https://github.com/Frommi/miniz_oxide/tree/master/miniz_oxide",
+      "targets": [
+        "aarch64-apple-darwin",
+        "x86_64-pc-windows-msvc",
+        "x86_64-unknown-linux-gnu"
+      ],
+      "licenseFiles": [
+        {
+          "path": "cargo:miniz_oxide@0.9.1/LICENSE",
+          "sha256": "4108245a1f2df9d4e94df8abed5b4ba0759bb2f9b40a6b939f1be141077ae50b"
+        },
+        {
+          "path": "cargo:miniz_oxide@0.9.1/LICENSE-APACHE.md",
+          "sha256": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594"
+        },
+        {
+          "path": "cargo:miniz_oxide@0.9.1/LICENSE-MIT.md",
+          "sha256": "799e9ca9d179295ef372f25d3769cdda7d25bb2668add6a6a1e22d1e4c678b8d"
+        },
+        {
+          "path": "cargo:miniz_oxide@0.9.1/LICENSE-ZLIB.md",
           "sha256": "0a54e647fe54104658b5e563c04c6f9edf251710e47bce692e0bd990a4ddaa39"
         }
       ]
