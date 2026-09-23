@@ -2614,14 +2614,14 @@ CARGO
   license: cargo:rustix@1.1.4/LICENSE-Apache-2.0_WITH_LLVM-exception (SHA-256 a6c48161a09acc75a0e25503bab66a731eb5fba5392ed4bb4743e4ba5085327a)
   license: cargo:rustix@1.1.4/LICENSE-MIT (SHA-256 23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3)
 
-- rustls 0.23.40 — Apache-2.0 OR ISC OR MIT
-  id: cargo:rustls@0.23.40
+- rustls 0.23.45 — Apache-2.0 OR ISC OR MIT
+  id: cargo:rustls@0.23.45
   targets: aarch64-apple-darwin, x86_64-pc-windows-msvc, x86_64-unknown-linux-gnu
-  source: https://crates.io/api/v1/crates/rustls/0.23.40/download
-  source checksum: ef86cd5876211988985292b91c96a8f2d298df24e75989a43a3c73f2d4d8168b
-  license: cargo:rustls@0.23.40/LICENSE-APACHE (SHA-256 a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2)
-  license: cargo:rustls@0.23.40/LICENSE-ISC (SHA-256 7cfafc877eccc46c0e346ccbaa5c51bb6b894d2b818e617d970211e232785ad4)
-  license: cargo:rustls@0.23.40/LICENSE-MIT (SHA-256 709e3175b4212f7b13aa93971c9f62ff8c69ec45ad8c6532a7e0c41d7a7d6f8c)
+  source: https://crates.io/api/v1/crates/rustls/0.23.45/download
+  source checksum: 0d41d731c7d2f962d1ccc364cec258de3c0e93b38c2fb3ba97ac74513048d634
+  license: cargo:rustls@0.23.45/LICENSE-APACHE (SHA-256 a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2)
+  license: cargo:rustls@0.23.45/LICENSE-ISC (SHA-256 7cfafc877eccc46c0e346ccbaa5c51bb6b894d2b818e617d970211e232785ad4)
+  license: cargo:rustls@0.23.45/LICENSE-MIT (SHA-256 709e3175b4212f7b13aa93971c9f62ff8c69ec45ad8c6532a7e0c41d7a7d6f8c)
 
 - rustls-native-certs 0.8.4 — Apache-2.0 OR ISC OR MIT
   id: cargo:rustls-native-certs@0.8.4
@@ -2649,12 +2649,12 @@ CARGO
   license: cargo:rustls-platform-verifier@0.7.0/LICENSE-APACHE (SHA-256 c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4)
   license: cargo:rustls-platform-verifier@0.7.0/LICENSE-MIT (SHA-256 1c7cf76689c837a68ed8d704994e52a0f2940c087958f860d17f3186afbdcc0c)
 
-- rustls-webpki 0.103.13 — ISC
-  id: cargo:rustls-webpki@0.103.13
+- rustls-webpki 0.103.15 — ISC
+  id: cargo:rustls-webpki@0.103.15
   targets: aarch64-apple-darwin, x86_64-pc-windows-msvc, x86_64-unknown-linux-gnu
-  source: https://crates.io/api/v1/crates/rustls-webpki/0.103.13/download
-  source checksum: 61c429a8649f110dddef65e2a5ad240f747e85f7758a6bccc7e5777bd33f756e
-  license: cargo:rustls-webpki@0.103.13/LICENSE (SHA-256 5b698ca13897be3afdb7174256fa1574f8c6892b8bea1a66dd6469d3fe27885a)
+  source: https://crates.io/api/v1/crates/rustls-webpki/0.103.15/download
+  source checksum: f3c3cf1d8b1e7d4927e2d154c3fcb02979afb9939629c62cd9048d4f07b60ac2
+  license: cargo:rustls-webpki@0.103.15/LICENSE (SHA-256 5b698ca13897be3afdb7174256fa1574f8c6892b8bea1a66dd6469d3fe27885a)
 
 - ryu 1.0.23 — Apache-2.0 OR BSL-1.0
   id: cargo:ryu@1.0.23
@@ -14028,7 +14028,7 @@ THE SOFTWARE.
 
 SHA-256 5b698ca13897be3afdb7174256fa1574f8c6892b8bea1a66dd6469d3fe27885a
 Applies to:
-- cargo:rustls-webpki@0.103.13 — cargo:rustls-webpki@0.103.13/LICENSE
+- cargo:rustls-webpki@0.103.15 — cargo:rustls-webpki@0.103.15/LICENSE
 
 --------------------------------------------------------------------------------
 
@@ -16242,7 +16242,7 @@ SHA-256 709e3175b4212f7b13aa93971c9f62ff8c69ec45ad8c6532a7e0c41d7a7d6f8c
 Applies to:
 - cargo:hyper-rustls@0.27.9 — cargo:hyper-rustls@0.27.9/LICENSE-MIT
 - cargo:rustls-native-certs@0.8.4 — cargo:rustls-native-certs@0.8.4/LICENSE-MIT
-- cargo:rustls@0.23.40 — cargo:rustls@0.23.40/LICENSE-MIT
+- cargo:rustls@0.23.45 — cargo:rustls@0.23.45/LICENSE-MIT
 
 --------------------------------------------------------------------------------
 
@@ -17384,7 +17384,7 @@ SHA-256 7cfafc877eccc46c0e346ccbaa5c51bb6b894d2b818e617d970211e232785ad4
 Applies to:
 - cargo:hyper-rustls@0.27.9 — cargo:hyper-rustls@0.27.9/LICENSE-ISC
 - cargo:rustls-native-certs@0.8.4 — cargo:rustls-native-certs@0.8.4/LICENSE-ISC
-- cargo:rustls@0.23.40 — cargo:rustls@0.23.40/LICENSE-ISC
+- cargo:rustls@0.23.45 — cargo:rustls@0.23.45/LICENSE-ISC
 
 --------------------------------------------------------------------------------
 
@@ -20814,7 +20814,7 @@ Applies to:
 - cargo:regex@1.12.3 — cargo:regex@1.12.3/LICENSE-APACHE
 - cargo:rustix@1.1.4 — cargo:rustix@1.1.4/LICENSE-APACHE
 - cargo:rustls-native-certs@0.8.4 — cargo:rustls-native-certs@0.8.4/LICENSE-APACHE
-- cargo:rustls@0.23.40 — cargo:rustls@0.23.40/LICENSE-APACHE
+- cargo:rustls@0.23.45 — cargo:rustls@0.23.45/LICENSE-APACHE
 - cargo:scopeguard@1.2.0 — cargo:scopeguard@1.2.0/LICENSE-APACHE
 - cargo:secret-service@4.0.0 — cargo:secret-service@4.0.0/LICENSE-APACHE
 - cargo:security-framework-sys@2.17.0 — cargo:security-framework-sys@2.17.0/LICENSE-APACHE
