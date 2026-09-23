@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "generatedBy": "scripts/generate-third-party-notices.ts",
   "noticePath": "THIRD-PARTY-NOTICES.txt",
-  "noticeSha256": "86de7c235063d44d779d8f487e877cbc1d2df5011843a741fb9d44133916abda",
+  "noticeSha256": "59f1db6de314f7b3e46a20d3a6e6ac76d4ebb9de5b7c60f70c1dea8f17cdd314",
   "scope": {
     "npm": "package-lock.json v3 entries beneath node_modules whose dev flag is not true",
     "cargo": "normal dependency edges reachable from the StudyVis root under each release target; build/dev edges excluded",
@@ -16,7 +16,7 @@
   "inputs": [
     {
       "path": "package-lock.json",
-      "sha256": "9664edefa5205102b7ba0ce8646430db7cc8a4d2a8da7d44ee288b2343f6c762"
+      "sha256": "29723049b3c1ad85e1b3f1aab652cc936d903fe6966409138787b51835505347"
     },
     {
       "path": "package.json",
@@ -44,7 +44,7 @@
     },
     {
       "path": "src-tauri/Cargo.lock",
-      "sha256": "a9e64e36b2c80acda6b7fcf5332913d7aa7bc05194bf42625126e1d57cedf173"
+      "sha256": "8a8e97264196500895b875aa7d8bd95d901635df245e658392963b463cf80682"
     },
     {
       "path": "src-tauri/Cargo.toml",
@@ -7568,13 +7568,13 @@
       ]
     },
     {
-      "id": "cargo:rustls@0.23.40",
+      "id": "cargo:rustls@0.23.45",
       "ecosystem": "cargo",
       "name": "rustls",
-      "version": "0.23.40",
+      "version": "0.23.45",
       "licenseExpression": "Apache-2.0 OR ISC OR MIT",
-      "source": "https://crates.io/api/v1/crates/rustls/0.23.40/download",
-      "checksum": "ef86cd5876211988985292b91c96a8f2d298df24e75989a43a3c73f2d4d8168b",
+      "source": "https://crates.io/api/v1/crates/rustls/0.23.45/download",
+      "checksum": "0d41d731c7d2f962d1ccc364cec258de3c0e93b38c2fb3ba97ac74513048d634",
       "repository": "https://github.com/rustls/rustls",
       "targets": [
         "aarch64-apple-darwin",
@@ -7583,15 +7583,15 @@
       ],
       "licenseFiles": [
         {
-          "path": "cargo:rustls@0.23.40/LICENSE-APACHE",
+          "path": "cargo:rustls@0.23.45/LICENSE-APACHE",
           "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
         },
         {
-          "path": "cargo:rustls@0.23.40/LICENSE-ISC",
+          "path": "cargo:rustls@0.23.45/LICENSE-ISC",
           "sha256": "7cfafc877eccc46c0e346ccbaa5c51bb6b894d2b818e617d970211e232785ad4"
         },
         {
-          "path": "cargo:rustls@0.23.40/LICENSE-MIT",
+          "path": "cargo:rustls@0.23.45/LICENSE-MIT",
           "sha256": "709e3175b4212f7b13aa93971c9f62ff8c69ec45ad8c6532a7e0c41d7a7d6f8c"
         }
       ]
@@ -7676,13 +7676,13 @@
       ]
     },
     {
-      "id": "cargo:rustls-webpki@0.103.13",
+      "id": "cargo:rustls-webpki@0.103.15",
       "ecosystem": "cargo",
       "name": "rustls-webpki",
-      "version": "0.103.13",
+      "version": "0.103.15",
       "licenseExpression": "ISC",
-      "source": "https://crates.io/api/v1/crates/rustls-webpki/0.103.13/download",
-      "checksum": "61c429a8649f110dddef65e2a5ad240f747e85f7758a6bccc7e5777bd33f756e",
+      "source": "https://crates.io/api/v1/crates/rustls-webpki/0.103.15/download",
+      "checksum": "f3c3cf1d8b1e7d4927e2d154c3fcb02979afb9939629c62cd9048d4f07b60ac2",
       "repository": "https://github.com/rustls/webpki",
       "targets": [
         "aarch64-apple-darwin",
@@ -7691,7 +7691,7 @@
       ],
       "licenseFiles": [
         {
-          "path": "cargo:rustls-webpki@0.103.13/LICENSE",
+          "path": "cargo:rustls-webpki@0.103.15/LICENSE",
           "sha256": "5b698ca13897be3afdb7174256fa1574f8c6892b8bea1a66dd6469d3fe27885a"
         }
       ]
