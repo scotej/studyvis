@@ -548,6 +548,7 @@ done
 for build_input in \
   scripts/stage-linux-appimage-webkit.sh \
   scripts/check-linux-appimage.sh \
+  scripts/check-linux-pipewire.c \
   scripts/check-linux-gstreamer.py \
   scripts/check-linux-webkit-media.c \
   scripts/check-linux-webkit-media.html \

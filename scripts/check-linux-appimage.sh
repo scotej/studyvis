@@ -470,7 +470,7 @@ if ! env "${pipewire_env[@]}" python3 "$pipewire_probe" "$pipewire_library"; the
       -ex 'frame 0' \
       -ex 'p map->l_name' \
       -ex 'p map->l_info[6]' \
-      -ex 'p $_siginfo._sifields._sigfault.si_addr' \
+      -ex 'p $_siginfo' \
       -ex 'x/8i $pc-16' \
       -ex 'info registers' \
       -ex 'thread apply all bt' \

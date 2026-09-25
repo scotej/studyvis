@@ -182,6 +182,32 @@ audit_consumer() {
   local label=$1
   local path=$2
   local relationship name interpreter resolution_sha resolution_path
+  local headers type offset virtual physical file_size mem_size rest
+  local segment_start segment_end segment_delta prior
+  local -a load_starts=() load_ends=() load_deltas=()
+
+  # A second PT_LOAD must not remap bytes in an earlier one from a different
+  # file offset. linuxdeploy's old patchelf once did this to a PipeWire module:
+  # readelf still saw DT_SYMTAB on disk, but glibc saw zeros at PT_DYNAMIC.
+  headers=$(readelf -W -l -- "$path") || die "could not inspect ELF program headers: $label"
+  while read -r type offset virtual physical file_size mem_size rest; do
+    [[ $type == LOAD ]] || continue
+    [[ $offset =~ ^0x[[:xdigit:]]+$ && $virtual =~ ^0x[[:xdigit:]]+$ &&
+       $mem_size =~ ^0x[[:xdigit:]]+$ ]] || die "invalid PT_LOAD header in $label"
+    segment_start=$((virtual))
+    segment_end=$((segment_start + mem_size))
+    segment_delta=$((offset - segment_start))
+    for prior in "${!load_starts[@]}"; do
+      if (( segment_start < load_ends[prior] && load_starts[prior] < segment_end &&
+            segment_delta != load_deltas[prior] )); then
+        die "conflicting PT_LOAD mappings in $label"
+      fi
+    done
+    load_starts+=("$segment_start")
+    load_ends+=("$segment_end")
+    load_deltas+=("$segment_delta")
+  done <<<"$headers"
+
   mapfile -t needed < <(
     readelf -d -- "$path" 2>/dev/null \
       | sed -n 's/.*Shared library: \[\([^]]*\)\].*/\1/p' \
