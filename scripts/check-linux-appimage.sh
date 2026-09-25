@@ -30,7 +30,7 @@ if [[ $# -ne 1 ]]; then
   exit 2
 fi
 
-for command_name in bash cc cmp dbus-run-session env find grep gst-inspect-1.0 head ldd mkdir mktemp node npm pkg-config python3 readelf realpath sed sha256sum timeout tr wc xvfb-run; do
+for command_name in bash cat cc cmp dbus-run-session env find grep gst-inspect-1.0 head ldd mkdir mktemp node npm pkg-config python3 readelf realpath sed sha256sum timeout tr wc xvfb-run; do
   command -v "$command_name" >/dev/null 2>&1 || die "missing AppImage check dependency: $command_name"
 done
 
@@ -452,6 +452,8 @@ if ! env "${pipewire_env[@]}" python3 "$pipewire_probe" "$pipewire_library"; the
       -ex "set environment SPA_PLUGIN_DIR $spa_plugins" \
       -ex "set environment PIPEWIRE_MODULE_DIR $pipewire_modules" \
       -ex "set environment PIPEWIRE_CONFIG_DIR $pipewire_config" \
+      -ex 'set environment PIPEWIRE_DEBUG 5' \
+      -ex 'set environment LD_DEBUG libs,files' \
       -ex run -ex 'thread apply all bt' \
       --args python3 "$pipewire_probe" "$pipewire_library" || true
   fi

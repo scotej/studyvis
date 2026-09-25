@@ -323,7 +323,7 @@ jobs:
             bubblewrap ca-certificates clang-14=1:14.0.6-19build4 cmake curl dbus-x11 \
             desktop-file-utils file flex g++-12 gcc-11=11.5.0-1ubuntu1~24.04.1 gcc-12 gdb gettext gnome-keyring \
             gperf libayatana-appindicator3-dev \
-            libcairo2-dev libdbus-1-dev libdrm-dev libegl-dev \
+            libc6-dbg libcairo2-dev libdbus-1-dev libdrm-dev libegl-dev \
             libenchant-2-dev libepoxy-dev libfontconfig-dev libfreetype-dev \
             libfuse2t64 libgbm-dev libgcc-11-dev=11.5.0-1ubuntu1~24.04.1 libgcrypt20-dev libgl-dev libgles-dev libglib2.0-dev \
             libglib2.0-dev-bin libgstreamer-plugins-bad1.0-dev \
