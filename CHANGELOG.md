@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.12.3 — 2026-09-25 — Reliable session invitations
 
 ### Fixed
 
