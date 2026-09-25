@@ -330,7 +330,7 @@ grep -aFq "StudyVis GStreamer $STUDYVIS_GSTREAMER_VERSION (runtime r$STUDYVIS_WE
   die "packaged WebRTC plugin is missing its pinned runtime build marker"
 }
 test_home="$extract/home"
-mkdir -p "$test_home"
+mkdir -p "$test_home/.config"
 for element in \
   videotestsrc audiotestsrc \
   glupload glcolorconvert gldownload \
@@ -389,6 +389,8 @@ for module in protocol-native client-node client-device adapter metadata session
   require_file "$pipewire_modules/libpipewire-module-$module.so"
 done
 env LD_LIBRARY_PATH="$packaged_library_path" \
+  HOME="$test_home" \
+  XDG_CONFIG_HOME="$test_home/.config" \
   SPA_PLUGIN_DIR="$spa_plugins" \
   PIPEWIRE_MODULE_DIR="$pipewire_modules" \
   PIPEWIRE_CONFIG_DIR="$pipewire_config" \
@@ -397,18 +399,38 @@ import ctypes
 import sys
 
 library = ctypes.CDLL(sys.argv[1])
+library.pw_init.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+library.pw_init.restype = None
 library.pw_init(None, None)
+library.pw_loop_new.argtypes = [ctypes.c_void_p]
 library.pw_loop_new.restype = ctypes.c_void_p
 library.pw_context_new.restype = ctypes.c_void_p
 library.pw_context_new.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_size_t]
+library.pw_context_destroy.argtypes = [ctypes.c_void_p]
+library.pw_context_destroy.restype = None
+library.pw_loop_destroy.argtypes = [ctypes.c_void_p]
+library.pw_loop_destroy.restype = None
+library.pw_deinit.argtypes = []
+library.pw_deinit.restype = None
 
-loop = library.pw_loop_new(None)
-if not loop:
-    sys.exit("pw_loop_new() returned NULL: the packaged SPA plugins are missing")
-# Every context.modules entry in client.conf is mandatory; a NULL here means
-# one of the packaged modules did not load.
-if not library.pw_context_new(loop, None, 0):
-    sys.exit("pw_context_new() returned NULL: the packaged PipeWire modules are incomplete")
+try:
+    loop = library.pw_loop_new(None)
+    if not loop:
+        sys.exit("pw_loop_new() returned NULL: the packaged SPA plugins are missing")
+    try:
+        # Every context.modules entry in client.conf is mandatory; a NULL here
+        # means one of the packaged modules did not load.
+        context = library.pw_context_new(loop, None, 0)
+        if not context:
+            sys.exit("pw_context_new() returned NULL: the packaged PipeWire modules are incomplete")
+        print("Packaged PipeWire context created", flush=True)
+        # Unload its modules before Python tears down the ctypes library.
+        library.pw_context_destroy(context)
+    finally:
+        library.pw_loop_destroy(loop)
+finally:
+    library.pw_deinit()
+print("Packaged PipeWire context and loop destroyed", flush=True)
 PROBE
 
 # A data-channel offer does not exercise receiver creation or renegotiation.
