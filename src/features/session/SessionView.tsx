@@ -210,7 +210,7 @@ export type SessionViewProps = {
   // a live session toward the 4-user mesh. Both omitted in tests, which
   // hides the invite affordance entirely.
   presence?: PresenceMap
-  onInviteFriend?: (friend: Friend) => void
+  onInviteFriend?: (friend: Friend) => Promise<boolean>
   // #47 B2 — open the Home-hosted settings overlay (optionally deep-linked
   // to a category) WITHOUT unmounting the session. Shipped error copy sends
   // users to "Settings → AI"; before this, following it meant leaving — and

@@ -574,8 +574,11 @@ export const strings = {
       emptyOnline: 'No friends online right now.',
       listAriaLabel: 'Online friends',
       rowCta: 'Invite',
+      sendingLabel: 'Sending…',
       invitedLabel: 'Invited',
       rowInviteAriaLabel: (name: string) => `Invite ${name} to this session`,
+      sendingAriaLabel: (name: string) => `Sending invite to ${name}`,
+      invitedAriaLabel: (name: string) => `Invited ${name} to this session`,
     },
     // U2 — empty-peer waiting state (DESIGN-SYSTEM §10 empty-state: no
     // spinner, calm copy) shown alongside the self tile while alone.

@@ -164,8 +164,8 @@ export function Home() {
   }, [])
 
   const runHostInvite = useCallback(
-    async (friend: Friend) => {
-      if (!identity || !identity.display_name) return
+    async (friend: Friend): Promise<boolean> => {
+      if (!identity || !identity.display_name) return false
       try {
         const result = await inviteToCurrentSession({
           friend,
@@ -187,6 +187,7 @@ export function Home() {
         } else {
           toast(strings.friends.inviteSentUnconfirmed(name))
         }
+        return true
       } catch (err) {
         const friendPresence = presenceState(
           presenceRef.current,
@@ -205,6 +206,7 @@ export function Home() {
                   ? err.message
                   : strings.friends.inviteSendErrorFallback
         toast.error(message)
+        return false
       }
     },
     [identity, actions.signWithKeyring]
@@ -632,7 +634,7 @@ export function Home() {
         <div inert={sessionSettingsCategory !== null} className="contents">
           <SessionView
             presence={presence}
-            onInviteFriend={(friend) => void runHostInvite(friend)}
+            onInviteFriend={runHostInvite}
             onOpenSettings={openSessionSettings}
           />
         </div>
