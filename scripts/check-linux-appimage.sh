@@ -442,6 +442,18 @@ pipewire_env=(
   "PIPEWIRE_CONFIG_DIR=$pipewire_config"
 )
 if ! env "${pipewire_env[@]}" python3 "$pipewire_probe" "$pipewire_library"; then
+  # Keep the original failure fatal, but compare with a process that does not
+  # load Python's ctypes/libffi before opening the same packaged PipeWire ELF.
+  native_probe="$extract/pipewire-native-probe"
+  if cc -std=c11 -Wall -Wextra -Werror \
+    "$script_dir/check-linux-pipewire.c" -o "$native_probe" -ldl; then
+    echo "Packaged PipeWire Python probe failed; comparing a native probe" >&2
+    if env "${pipewire_env[@]}" timeout 30s "$native_probe" "$pipewire_library"; then
+      echo "Native packaged PipeWire probe passed after Python probe failed" >&2
+    else
+      echo "Native packaged PipeWire probe also failed" >&2
+    fi
+  fi
   if command -v gdb >/dev/null 2>&1; then
     echo "Packaged PipeWire probe failed; rerunning under gdb for a native backtrace" >&2
     env -u LD_LIBRARY_PATH gdb -q -batch -nx \
@@ -454,7 +466,14 @@ if ! env "${pipewire_env[@]}" python3 "$pipewire_probe" "$pipewire_library"; the
       -ex "set environment PIPEWIRE_CONFIG_DIR $pipewire_config" \
       -ex 'set environment PIPEWIRE_DEBUG 5' \
       -ex 'set environment LD_DEBUG libs,files' \
-      -ex run -ex 'thread apply all bt' \
+      -ex run \
+      -ex 'frame 0' \
+      -ex 'p map->l_name' \
+      -ex 'p map->l_info[6]' \
+      -ex 'p $_siginfo._sifields._sigfault.si_addr' \
+      -ex 'x/8i $pc-16' \
+      -ex 'info registers' \
+      -ex 'thread apply all bt' \
       --args python3 "$pipewire_probe" "$pipewire_library" || true
   fi
   die "packaged PipeWire client cannot start from the packaged payload"

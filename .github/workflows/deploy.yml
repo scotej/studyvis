@@ -648,6 +648,7 @@ jobs:
           }
 
       - name: Validate the exact Linux preview AppImage
+        id: linux_preview_check
         if: env.SHIPPABLE == 'true' && runner.os == 'Linux'
         shell: bash
         run: |
@@ -655,6 +656,15 @@ jobs:
           appimage="${GITHUB_WORKSPACE}/src-tauri/target/release/bundle/appimage/StudyVis_${version}_amd64.AppImage"
           test -f "$appimage"
           bash scripts/check-linux-appimage.sh "$appimage"
+
+      - name: Save failed PR AppImage for PipeWire diagnosis
+        if: ${{ failure() && github.event_name == 'pull_request' && env.SHIPPABLE == 'true' && runner.os == 'Linux' && steps.linux_preview_check.outcome == 'failure' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: linux-pipewire-failed-installer-pr${{ github.event.pull_request.number }}-${{ github.run_id }}
+          path: src-tauri/target/release/bundle/appimage/*.AppImage
+          if-no-files-found: error
+          retention-days: 2
 
       - name: Collect the installer
         if: env.SHIPPABLE == 'true'

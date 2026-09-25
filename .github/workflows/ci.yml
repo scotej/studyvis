@@ -618,9 +618,19 @@ jobs:
           echo "APPIMAGE_PATH=$appimage" >> "$GITHUB_ENV"
 
       - name: Assert packaged WebKit, PipeWire, and AI runtimes
+        id: packaged_runtime_check
         shell: bash
         run: |
           bash scripts/check-linux-appimage.sh "$APPIMAGE_PATH"
+
+      - name: Save failed PR AppImage for PipeWire diagnosis
+        if: ${{ failure() && github.event_name == 'pull_request' && steps.packaged_runtime_check.outcome == 'failure' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: linux-pipewire-failed-ci-pr${{ github.event.pull_request.number }}-${{ github.run_id }}
+          path: ${{ env.APPIMAGE_PATH }}
+          if-no-files-found: error
+          retention-days: 2
 
       - name: Launch the packaged AppImage under Xvfb
         shell: bash
