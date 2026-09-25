@@ -556,6 +556,7 @@ for build_input in \
   scripts/generate-librice-third-party-notices.mjs \
   scripts/audit-linux-appimage-elf-closure.sh \
   scripts/build-linux-system-sources.sh \
+  scripts/download-linux-apparmor-source.sh \
   scripts/build-linux-appimage-runtime.sh \
   scripts/prepare-linuxdeploy-tools.sh \
   scripts/linuxdeploy-plugin-appimage.sh \
@@ -756,7 +757,8 @@ ABI in linux-appimage-external-sonames.txt; no other host borrowing is allowed.
 
 PACKAGE-INVENTORY.tsv records the exact binary-to-source version mapping and
 the packaged Debian copyright file. SOURCE-INVENTORY.tsv hashes every file
-downloaded from the matching signed apt source index. The sources directory
+downloaded from matching signed apt source indexes, except the hash-pinned
+historical AppArmor .7 snapshot. The sources directory
 contains every .dsc/source component plus immutable llama/AppRun/linuxdeploy/
 plugin snapshots and the complete StudyVis type2 sources, licenses and link evidence.
 PACKAGING-TOOL-INVENTORY.tsv records verified input URLs/hashes and their pinned
@@ -856,10 +858,21 @@ if [[ $mode == bundle ]]; then
     safe_version=${source_version//\//_}
     download_dir="$source_dir/${safe_source}_${safe_version}"
     mkdir -p "$download_dir"
-    (
+    if ! (
       cd "$download_dir"
       apt-get source --download-only --only-source "$source_package=$source_version" >/dev/null
-    ) || die "could not download exact Ubuntu source $source_package=$source_version"
+    ); then
+      [[ $source_package == apparmor && \
+        $source_version == 4.0.1really4.0.1-0ubuntu0.24.04.7 ]] || {
+        die "could not download exact Ubuntu source $source_package=$source_version"
+      }
+      [[ -z $(find "$download_dir" -mindepth 1 -maxdepth 1 -print -quit) ]] || {
+        die "failed apt source left partial files for $source_package=$source_version"
+      }
+      bash "$script_dir/download-linux-apparmor-source.sh" "$download_dir" || {
+        die "could not download pinned Ubuntu snapshot source $source_package=$source_version"
+      }
+    fi
 
     mapfile -t dsc_files < <(find "$download_dir" -mindepth 1 -maxdepth 1 -type f -name '*.dsc' -print | LC_ALL=C sort)
     [[ ${#dsc_files[@]} -eq 1 ]] || {

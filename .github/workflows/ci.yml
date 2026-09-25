@@ -345,6 +345,16 @@ jobs:
             libpipewire-0.3-dev libpipewire-0.3-modules libspa-0.2-modules \
             pipewire-bin libselinux1 libpcre2-8-0
 
+      - name: Verify pinned historical AppArmor source download
+        shell: bash
+        run: |
+          set -euo pipefail
+          source_dir=$(mktemp -d "$RUNNER_TEMP/studyvis-apparmor-source.XXXXXX")
+          bash scripts/download-linux-apparmor-source.sh "$source_dir"
+          dsc="$source_dir/apparmor_4.0.1really4.0.1-0ubuntu0.24.04.7.dsc"
+          grep -Fxq 'Version: 4.0.1really4.0.1-0ubuntu0.24.04.7' "$dsc"
+          test "$(find "$source_dir" -mindepth 1 -maxdepth 1 -type f | wc -l)" -eq 3
+
       # Ubuntu 24.04 restricts unprivileged user namespaces through AppArmor,
       # which is exactly what WebKit's bubblewrap sandbox needs to start. This
       # is a runner accommodation only: the shipped AppImage relies on the
@@ -675,6 +685,34 @@ jobs:
             exit 1
           fi
           echo "Packaged AppImage stayed alive and attested a first-document WebRTC data-channel offer."
+
+      # Release publication archives source for every Ubuntu-owned ELF in the
+      # exact AppImage. Exercise that same download before a tag is created:
+      # a runner can retain a binary whose source version left current indexes.
+      - name: Enable authenticated Noble source indexes
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo tee /etc/apt/sources.list.d/studyvis-deb-src.list >/dev/null <<'EOF'
+          deb-src https://archive.ubuntu.com/ubuntu noble main restricted universe multiverse
+          deb-src https://archive.ubuntu.com/ubuntu noble-updates main restricted universe multiverse
+          deb-src https://archive.ubuntu.com/ubuntu noble-backports main restricted universe multiverse
+          deb-src https://security.ubuntu.com/ubuntu noble-security main restricted universe multiverse
+          EOF
+          sudo apt-get -o Acquire::Retries=3 update
+
+      - name: Verify exact AppImage system source bundle
+        shell: bash
+        env:
+          GITHUB_TOKEN: ''
+          GH_TOKEN: ''
+        run: |
+          set -euo pipefail
+          bundle="$RUNNER_TEMP/StudyVis_linux-system-sources-preflight.tar.gz"
+          bash scripts/build-linux-system-sources.sh \
+            --appimage "$APPIMAGE_PATH" --output "$bundle"
+          test -s "$bundle"
+          tar -tzf "$bundle" >/dev/null
 
   # ---------------------------------------------------------------------
   # Everything below is new pre-merge surface (#102). Each job is cheap and
