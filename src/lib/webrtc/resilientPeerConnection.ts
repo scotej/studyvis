@@ -298,11 +298,60 @@ export function createResilientPeerConnection(
 ): PeerConnectionConstructor {
   return new Proxy(Base, {
     construct(target, args) {
+      const config = args[0] as RTCConfiguration | undefined
+      const turnServerCount = (config?.iceServers ?? []).filter((server) => {
+        const urls = Array.isArray(server.urls) ? server.urls : [server.urls]
+        return urls.some((url) => /^turns?:/i.test(url))
+      }).length
       const connection = Reflect.construct(
         target,
         args
       ) as unknown as RTCPeerConnection
+      // A saved TURN setting is not proof that the peer connection received
+      // it. Record only the effective mode and count; URLs and credentials
+      // must never enter a diagnostics archive. Distinct event names keep a
+      // changed mode visible despite the log's 10-second duplicate throttle.
+      const mode =
+        turnServerCount === 0
+          ? 'stun'
+          : config?.iceTransportPolicy === 'relay'
+            ? 'turn-only'
+            : 'turn-auto'
+      log.info(`peer.created.${mode}`, {
+        iceTransportPolicy: config?.iceTransportPolicy ?? 'all',
+        turnServerCount,
+      })
       installTransientDisconnectHold(connection, holdMs)
+      // Trystero clears a failed answer peer without destroying it. Let its
+      // state handlers see the failure first, then close the abandoned PC so
+      // repeated failed handshakes cannot exhaust the browser's PC limit.
+      let cleanupQueued = false
+      const closeFailedConnection = () => {
+        if (cleanupQueued) return
+        if (
+          connection.connectionState !== 'failed' &&
+          connection.iceConnectionState !== 'failed'
+        ) {
+          return
+        }
+        cleanupQueued = true
+        queueMicrotask(() => {
+          cleanupQueued = false
+          // Trystero already abandoned the peer when it observed `failed`.
+          // A quick native state change cannot make that peer owned again.
+          if (connection.connectionState === 'closed') return
+          closeTransport(connection)
+          log.warn('peer.failed_closed')
+        })
+      }
+      connection.addEventListener(
+        'connectionstatechange',
+        closeFailedConnection
+      )
+      connection.addEventListener(
+        'iceconnectionstatechange',
+        closeFailedConnection
+      )
       return connection
     },
   })

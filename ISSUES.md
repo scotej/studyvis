@@ -1144,6 +1144,52 @@ CI nor this Linux host can exercise the macOS behaviour, so the reporter's
 confirmation with the new log scope is the remaining check. The non-full-screen
 macOS path reads correct by source and is unchanged apart from the logging.
 
+### I119 — Sev2
+
+`src/lib/webrtc/resilientPeerConnection.ts`, `src/features/friends/invite.ts`,
+`src/features/session/SessionInviteDialog.tsx`, `src/lib/trystero/relayUrls.ts`
+
+**Evidence.** [#325](https://github.com/scotej/studyvis/issues/325) includes
+macOS and Windows diagnostics from a group whose apps showed online but whose
+invites never produced a joined session peer. Both devices repeatedly logged
+that an SDP exchange could not establish a WebRTC connection without TURN.
+Windows later logged over 10,000 coalesced `RTCPeerConnection` constructor
+failures. A reproduction using Trystero 0.25.3's real answer handler created 50
+failed connections and closed none: its failure callback clears the answering
+peer and cancels its expiry timer without destroying the native connection.
+One pinned Nostr relay also rejected publishes because its disk was full, and
+two others failed the live publish/receive check. The in-session picker marked
+a failed send "Invited" and disabled retry until reopened.
+
+**Status.** **in review** — the existing `rtcPolyfill` closes a peer after a
+terminal failure, preserving the transient-disconnect hold; a real-core
+regression covers repeated failures and a same-turn state change. Pending
+invites retry on a recovered direct heartbeat, the picker exposes send progress
+and keeps failed rows retryable, and the failing Nostr pins were replaced with
+three that passed the signed ephemeral-event round-trip. The issue's observed
+network still needs TURN to complete a session: both logs show no configured
+TURN server, and the old public no-account endpoint failed live probes. A
+physical retest with working TURN on both devices is needed to verify the
+original two-device symptom end to end.
+
+### I120 — Sev3
+
+`src/features/system/WindowLayoutListener.tsx`, `src-tauri/capabilities/default.json`
+
+**Evidence.** The same Windows diagnostics contain an unhandled
+`plugin:window|destroy not allowed by ACL` rejection after a close request.
+The main window's layout listener registers Tauri's `onCloseRequested`, whose
+JS helper invokes `destroy()` after the flush callback, but the main-window
+capability grants only `close`. Granting `destroy` would let that helper bypass
+the Rust close handler's tray-hide and mid-session quit-confirmation decisions.
+
+**Status.** **in review** — the layout listener no longer subscribes to the
+close request, so Tauri's JavaScript helper never calls `destroy()` and Rust
+remains the sole owner of the close decision. Move/resize capture remains
+debounced; the removed close flush was fire-and-forget and could not guarantee
+a final write during a real quit. Source-verified against the installed Tauri
+API; requires a Windows packaged-app close and tray check.
+
 ## Archive — retired backlogs
 
 Two documents used to sit beside this ledger and were deleted once their implementation backlog had no open code work left: `BUILD-PROMPTS.md` (the sequenced V0→V3 build plan) and `IMPROVEMENTS.md` (the v1.2.0-era improvement backlog). Git history holds both in full — `git log --diff-filter=D -- BUILD-PROMPTS.md IMPROVEMENTS.md`, then `git show <sha>^:<file>`. Linux's implementation checklist is complete, but its operational release sign-off remains pending. What survives here is the part still cited from code.

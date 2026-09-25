@@ -32,7 +32,7 @@ const log = logger.child('friends.invite')
 // F6 — process-wide retry manager. `inviteFriend` registers a pending retry on
 // a timeout or an unconfirmed transport send, and marks (recipient, session)
 // delivered only after a verified recipient ACK. InboxBoot drives
-// `onPresenceOnline` when a friend's presence flips online, and `cancelAll`
+// `onPresenceOnline` when a direct presence heartbeat arrives, and `cancelAll`
 // when the host's session ends.
 export const inviteRetryManager = createInviteRetryManager({
   // Never the envelope: it carries the session password.
