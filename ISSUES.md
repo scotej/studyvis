@@ -1180,11 +1180,15 @@ original two-device symptom end to end.
 `plugin:window|destroy not allowed by ACL` rejection after a close request.
 The main window's layout listener registers Tauri's `onCloseRequested`, whose
 JS helper invokes `destroy()` after the flush callback, but the main-window
-capability granted `close` and omitted `destroy`.
+capability grants only `close`. Granting `destroy` would let that helper bypass
+the Rust close handler's tray-hide and mid-session quit-confirmation decisions.
 
-**Status.** **in review** — the capability now grants `core:window:allow-destroy`
-to the main window only. Source-verified against the installed Tauri API;
-requires a Windows packaged-app close check.
+**Status.** **in review** — the layout listener no longer subscribes to the
+close request, so Tauri's JavaScript helper never calls `destroy()` and Rust
+remains the sole owner of the close decision. Move/resize capture remains
+debounced; the removed close flush was fire-and-forget and could not guarantee
+a final write during a real quit. Source-verified against the installed Tauri
+API; requires a Windows packaged-app close and tray check.
 
 ## Archive — retired backlogs
 
