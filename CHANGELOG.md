@@ -15,6 +15,8 @@
   returning StudyVis messages.
 - Closing the main window on Windows no longer fails with a window permission
   error when remembering its position is enabled.
+- Linux AppImage media startup no longer crashes while loading the bundled
+  PipeWire module for camera and screen sharing.
 
 Friends whose networks block a direct WebRTC connection still need a working
 TURN server in Settings → Network. The former public no-account TURN service

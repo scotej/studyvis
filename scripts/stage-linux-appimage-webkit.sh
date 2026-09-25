@@ -354,9 +354,9 @@ while IFS= read -r payload_line || [[ -n $payload_line ]]; do
   }
   install -D -m 0644 -- "$payload_source" "$payload_destination"
   if [[ $payload_kind == module ]]; then
-    # linuxdeploy's bundled patchelf 0.8 can add an overlapping PT_LOAD when it
-    # grows Noble's absolute RUNPATH with :$ORIGIN. Shrink the staged copy
-    # first, so linuxdeploy does not grow it when adding its library path.
+    # A finished AppImage had an overlapping PT_LOAD after linuxdeploy grew
+    # Noble's absolute RUNPATH with :$ORIGIN. Shrink the staged copy first,
+    # so linuxdeploy does not need to grow it when adding its library path.
     patchelf --set-rpath '$ORIGIN' "$payload_destination"
     [[ $(patchelf --print-rpath "$payload_destination") == '$ORIGIN' ]] || {
       die "staged PipeWire module has the wrong RUNPATH: $payload_path"

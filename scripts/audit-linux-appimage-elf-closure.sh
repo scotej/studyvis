@@ -187,13 +187,14 @@ audit_consumer() {
   local -a load_starts=() load_ends=() load_deltas=()
 
   # A second PT_LOAD must not remap bytes in an earlier one from a different
-  # file offset. linuxdeploy's old patchelf once did this to a PipeWire module:
-  # readelf still saw DT_SYMTAB on disk, but glibc saw zeros at PT_DYNAMIC.
+  # file offset. A packaged PipeWire module once had this layout: readelf saw
+  # DT_SYMTAB on disk, but glibc saw zeros at PT_DYNAMIC.
   headers=$(readelf -W -l -- "$path") || die "could not inspect ELF program headers: $label"
   while read -r type offset virtual physical file_size mem_size rest; do
     [[ $type == LOAD ]] || continue
     [[ $offset =~ ^0x[[:xdigit:]]+$ && $virtual =~ ^0x[[:xdigit:]]+$ &&
        $mem_size =~ ^0x[[:xdigit:]]+$ ]] || die "invalid PT_LOAD header in $label"
+    (( mem_size > 0 )) || continue
     segment_start=$((virtual))
     segment_end=$((segment_start + mem_size))
     segment_delta=$((offset - segment_start))
