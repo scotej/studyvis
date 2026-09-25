@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+### Fixed
+
+- **An invite that fails to send can be tried again.** The in-session picker
+  now shows when a send is in progress and only marks a friend invited after
+  the send succeeds. A pending invite also retries when that friend's direct
+  connection recovers while the host keeps the session open.
+- **Repeated failed peer handshakes no longer exhaust the browser's connection
+  limit.** Abandoned WebRTC connections are closed after a failed handshake;
+  an active connection still gets its recovery window after a brief outage.
+- Refreshed the default signaling relays after three stopped accepting or
+  returning StudyVis messages.
+- Closing the main window on Windows no longer fails with a window permission
+  error when remembering its position is enabled.
+
+Friends whose networks block a direct WebRTC connection still need a working
+TURN server in Settings → Network. The former public no-account TURN service
+does not respond, so StudyVis cannot supply one as a default.
+
 ## 1.12.2 — 2026-09-14 — Notifications that reach you
 
 ### Fixed
