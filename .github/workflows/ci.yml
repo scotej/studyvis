@@ -321,9 +321,9 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             autoconf automake binutils=2.42-4ubuntu2.10 build-essential bison \
             bubblewrap ca-certificates clang-14=1:14.0.6-19build4 cmake curl dbus-x11 \
-            desktop-file-utils file flex g++-12 gcc-11=11.5.0-1ubuntu1~24.04.1 gcc-12 gdb gettext gnome-keyring \
+            desktop-file-utils file flex g++-12 gcc-11=11.5.0-1ubuntu1~24.04.1 gcc-12 gettext gnome-keyring \
             gperf libayatana-appindicator3-dev \
-            libc6-dbg libcairo2-dev libdbus-1-dev libdrm-dev libegl-dev \
+            libcairo2-dev libdbus-1-dev libdrm-dev libegl-dev \
             libenchant-2-dev libepoxy-dev libfontconfig-dev libfreetype-dev \
             libfuse2t64 libgbm-dev libgcc-11-dev=11.5.0-1ubuntu1~24.04.1 libgcrypt20-dev libgl-dev libgles-dev libglib2.0-dev \
             libglib2.0-dev-bin libgstreamer-plugins-bad1.0-dev \
@@ -618,19 +618,9 @@ jobs:
           echo "APPIMAGE_PATH=$appimage" >> "$GITHUB_ENV"
 
       - name: Assert packaged WebKit, PipeWire, and AI runtimes
-        id: packaged_runtime_check
         shell: bash
         run: |
           bash scripts/check-linux-appimage.sh "$APPIMAGE_PATH"
-
-      - name: Save failed PR AppImage for PipeWire diagnosis
-        if: ${{ failure() && github.event_name == 'pull_request' && steps.packaged_runtime_check.outcome == 'failure' }}
-        uses: actions/upload-artifact@v7
-        with:
-          name: linux-pipewire-failed-ci-pr${{ github.event.pull_request.number }}-${{ github.run_id }}
-          path: ${{ env.APPIMAGE_PATH }}
-          if-no-files-found: error
-          retention-days: 2
 
       - name: Launch the packaged AppImage under Xvfb
         shell: bash

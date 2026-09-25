@@ -30,7 +30,7 @@ if [[ $# -ne 1 ]]; then
   exit 2
 fi
 
-for command_name in bash cat cc cmp dbus-run-session env find grep gst-inspect-1.0 head ldd mkdir mktemp node npm pkg-config python3 readelf realpath sed sha256sum timeout tr wc xvfb-run; do
+for command_name in bash cc cmp dbus-run-session env find grep gst-inspect-1.0 head ldd mkdir mktemp node npm pkg-config python3 readelf realpath sed sha256sum timeout tr wc xvfb-run; do
   command -v "$command_name" >/dev/null 2>&1 || die "missing AppImage check dependency: $command_name"
 done
 
@@ -388,19 +388,20 @@ require_file "$pipewire_config/client.conf"
 for module in protocol-native client-node client-device adapter metadata session-manager; do
   require_file "$pipewire_modules/libpipewire-module-$module.so"
 done
-pipewire_probe="$extract/pipewire-probe.py"
-cat >"$pipewire_probe" <<'PROBE'
+env LD_LIBRARY_PATH="$packaged_library_path" \
+  HOME="$test_home" \
+  XDG_CONFIG_HOME="$test_home/.config" \
+  SPA_PLUGIN_DIR="$spa_plugins" \
+  PIPEWIRE_MODULE_DIR="$pipewire_modules" \
+  PIPEWIRE_CONFIG_DIR="$pipewire_config" \
+  python3 - "$root/usr/lib/libpipewire-0.3.so.0" <<'PROBE' || die "packaged PipeWire client cannot start from the packaged payload"
 import ctypes
-import faulthandler
 import sys
 
-faulthandler.enable()
-print("Packaged PipeWire: loading library", flush=True)
 library = ctypes.CDLL(sys.argv[1])
 library.pw_init.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
 library.pw_init.restype = None
 library.pw_init(None, None)
-print("Packaged PipeWire: initialized", flush=True)
 library.pw_loop_new.argtypes = [ctypes.c_void_p]
 library.pw_loop_new.restype = ctypes.c_void_p
 library.pw_context_new.restype = ctypes.c_void_p
@@ -416,7 +417,6 @@ try:
     loop = library.pw_loop_new(None)
     if not loop:
         sys.exit("pw_loop_new() returned NULL: the packaged SPA plugins are missing")
-    print("Packaged PipeWire: loop created", flush=True)
     try:
         # Every context.modules entry in client.conf is mandatory; a NULL here
         # means one of the packaged modules did not load.
@@ -432,52 +432,6 @@ finally:
     library.pw_deinit()
 print("Packaged PipeWire context and loop destroyed", flush=True)
 PROBE
-pipewire_library="$root/usr/lib/libpipewire-0.3.so.0"
-pipewire_env=(
-  "LD_LIBRARY_PATH=$packaged_library_path"
-  "HOME=$test_home"
-  "XDG_CONFIG_HOME=$test_home/.config"
-  "SPA_PLUGIN_DIR=$spa_plugins"
-  "PIPEWIRE_MODULE_DIR=$pipewire_modules"
-  "PIPEWIRE_CONFIG_DIR=$pipewire_config"
-)
-if ! env "${pipewire_env[@]}" python3 "$pipewire_probe" "$pipewire_library"; then
-  # Keep the original failure fatal, but compare with a process that does not
-  # load Python's ctypes/libffi before opening the same packaged PipeWire ELF.
-  native_probe="$extract/pipewire-native-probe"
-  if cc -std=c11 -Wall -Wextra -Werror \
-    "$script_dir/check-linux-pipewire.c" -o "$native_probe" -ldl; then
-    echo "Packaged PipeWire Python probe failed; comparing a native probe" >&2
-    if env "${pipewire_env[@]}" timeout 30s "$native_probe" "$pipewire_library"; then
-      echo "Native packaged PipeWire probe passed after Python probe failed" >&2
-    else
-      echo "Native packaged PipeWire probe also failed" >&2
-    fi
-  fi
-  if command -v gdb >/dev/null 2>&1; then
-    echo "Packaged PipeWire probe failed; rerunning under gdb for a native backtrace" >&2
-    env -u LD_LIBRARY_PATH gdb -q -batch -nx \
-      -ex 'set disable-randomization off' \
-      -ex "set environment LD_LIBRARY_PATH $packaged_library_path" \
-      -ex "set environment HOME $test_home" \
-      -ex "set environment XDG_CONFIG_HOME $test_home/.config" \
-      -ex "set environment SPA_PLUGIN_DIR $spa_plugins" \
-      -ex "set environment PIPEWIRE_MODULE_DIR $pipewire_modules" \
-      -ex "set environment PIPEWIRE_CONFIG_DIR $pipewire_config" \
-      -ex 'set environment PIPEWIRE_DEBUG 5' \
-      -ex 'set environment LD_DEBUG libs,files' \
-      -ex run \
-      -ex 'frame 0' \
-      -ex 'p map->l_name' \
-      -ex 'p map->l_info[6]' \
-      -ex 'p $_siginfo' \
-      -ex 'x/8i $pc-16' \
-      -ex 'info registers' \
-      -ex 'thread apply all bt' \
-      --args python3 "$pipewire_probe" "$pipewire_library" || true
-  fi
-  die "packaged PipeWire client cannot start from the packaged payload"
-fi
 
 # A data-channel offer does not exercise receiver creation or renegotiation.
 # Compile against the pinned SDK, then run beside the extracted application so
