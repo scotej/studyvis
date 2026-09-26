@@ -35,6 +35,27 @@ function hasStoredWriteUp(timeline: SessionTimelineRecord | null): boolean {
   return timeline !== null && parseTimelineEntries(timeline.entries).length > 0
 }
 
+// I99 — a rejoin ends the same session id a second time, appending to the same
+// journal and pointing at the same `session_timelines` row, so a write-up
+// generated before the session's own end no longer covers all of it. That is
+// what `db/session_timelines.rs` means by "a rejoined session ends twice, and
+// the second write-up spans both stints": the upsert always supported it and
+// nothing asked for it, so the first stint's account stood while the summary,
+// score and audit timeline beside it merged both.
+//
+// Comparing the two stored timestamps is enough, and self-limiting: an ordinary
+// write-up runs after the session ended, so it is never stale, and a
+// regenerated one is stamped later than the end that made it stale. A backward
+// clock step can cost one extra pass and nothing else.
+export function storedWriteUpIsStale(
+  timeline: SessionTimelineRecord | null,
+  sessionEndedAt: number | null
+): boolean {
+  if (timeline === null || sessionEndedAt === null) return false
+  if (!Number.isFinite(sessionEndedAt)) return false
+  return timeline.generated_at < sessionEndedAt
+}
+
 // Storybook renders the report shell outside Tauri, where the journal probe
 // would reject and paint a failure banner over a fixture that has no journal at
 // all. Same runtime probe `sampleLoop`'s `enumerateDisplayCount` uses.
@@ -63,7 +84,8 @@ function runOnce(
   sessionId: string,
   modelId: string,
   declaredTopic: string | null,
-  journal: SessionJournalRead
+  journal: SessionJournalRead,
+  startedAtMs: number | null
 ): Promise<SessionTimeline | null> {
   const existing = inFlight.get(sessionId)
   if (existing) return existing
@@ -72,6 +94,7 @@ function runOnce(
     modelId,
     declaredTopic,
     journal,
+    startedAtMs,
   }).finally(() => {
     inFlight.delete(sessionId)
   })
@@ -141,6 +164,11 @@ export type UseWrittenTimelineArgs = {
   ready: boolean
   timeline: SessionTimelineRecord | null
   declaredTopic: string | null
+  // `sessions.started_at` — the origin the written offsets are counted from
+  // (I101) — and `sessions.ended_at`, which is what makes a stored write-up
+  // recognisably stale after a rejoin (I99).
+  startedAt: number | null
+  endedAt: number | null
   // Called once with a fresh write-up so the report can render and export it.
   onWritten: (record: SessionTimelineRecord) => void
 }
@@ -150,6 +178,8 @@ export function useWrittenTimeline({
   ready,
   timeline,
   declaredTopic,
+  startedAt,
+  endedAt,
   onWritten,
 }: UseWrittenTimelineArgs): {
   status: WrittenTimelineStatus
@@ -171,7 +201,13 @@ export function useWrittenTimeline({
     // A row whose entries cannot be parsed counts as absent (see
     // parseTimelineEntries): the report regenerates rather than rendering a
     // section that claims nothing was recorded.
-    if (hasStoredWriteUp(timeline) && attempt === 0) return
+    if (
+      hasStoredWriteUp(timeline) &&
+      !storedWriteUpIsStale(timeline, endedAt) &&
+      attempt === 0
+    ) {
+      return
+    }
     const key = `${sessionId}:${attempt}`
     const claims = latch.current
     if (!claims?.claim(key)) return
@@ -213,6 +249,16 @@ export function useWrittenTimeline({
         setStatus({ kind: 'blocked', message: copy.aiOff })
         return
       }
+      // I103 — the setting names both halves of the feature ("Records … then
+      // turns it into a minute-by-minute account"), but only the recording half
+      // read it. Opening an older report with a journal and no stored row then
+      // started llama-server and ran the model on an explicitly disabled
+      // feature. Generation only: write-ups already stored stay readable, which
+      // is what the v1.12.0 release notes promise.
+      if (!settings.sessionTimelineEnabled) {
+        setStatus({ kind: 'blocked', message: copy.writeUpsOff })
+        return
+      }
 
       setStatus({ kind: 'generating' })
       try {
@@ -220,7 +266,8 @@ export function useWrittenTimeline({
           sessionId,
           modelId,
           declaredTopic,
-          journal
+          journal,
+          startedAt
         )
         if (cancelled) return
         if (!written) {
@@ -259,7 +306,7 @@ export function useWrittenTimeline({
       // `inFlight` map still keeps the expensive pass itself to one.
       claims.release(key)
     }
-  }, [sessionId, ready, timeline, attempt, declaredTopic])
+  }, [sessionId, ready, timeline, attempt, declaredTopic, startedAt, endedAt])
 
   const rewrite = useCallback(() => setAttempt((n) => n + 1), [])
 

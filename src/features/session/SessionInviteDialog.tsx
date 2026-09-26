@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { UserPlusIcon } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
@@ -34,7 +34,9 @@ export type SessionInviteDialogProps = {
   // Live remote-peer count is at MAX_REMOTE_PEERS: show the full-session
   // notice instead of rows the host cap would reject anyway.
   full: boolean
-  onInvite: (friend: Friend) => void
+  // True means the envelope was sent; an unconfirmed ACK is still a send.
+  // False leaves the row available for another attempt.
+  onInvite: (friend: Friend) => Promise<boolean>
 }
 
 export function SessionInviteDialog({
@@ -50,17 +52,46 @@ export function SessionInviteDialog({
   // reopened dialog starts fresh (an invite may have expired meanwhile).
   // Same adjust-state-on-prop-change pattern as TopicGateModal.
   const [invited, setInvited] = useState<ReadonlySet<string>>(new Set())
+  const [sending, setSending] = useState<ReadonlySet<string>>(new Set())
   const [wasOpen, setWasOpen] = useState(open)
+  const generation = useRef(0)
   if (open !== wasOpen) {
     setWasOpen(open)
-    if (open) setInvited(new Set())
+    if (open) {
+      setInvited(new Set())
+      setSending(new Set())
+    }
   }
+
+  useEffect(
+    () => () => {
+      generation.current += 1
+    },
+    [open]
+  )
 
   const rows = invitableFriends(friends, isOnline, inSessionEdPubkeys)
 
-  const handleInvite = (friend: Friend) => {
-    setInvited((cur) => new Set(cur).add(friend.ed_pubkey_hex))
-    onInvite(friend)
+  const handleInvite = async (friend: Friend) => {
+    const ed = friend.ed_pubkey_hex
+    const startedIn = generation.current
+    setSending((cur) => new Set(cur).add(ed))
+    try {
+      const sent = await onInvite(friend)
+      if (sent && generation.current === startedIn) {
+        setInvited((cur) => new Set(cur).add(ed))
+      }
+    } catch {
+      // The caller reports send errors; keep the row available for a retry.
+    } finally {
+      if (generation.current === startedIn) {
+        setSending((cur) => {
+          const next = new Set(cur)
+          next.delete(ed)
+          return next
+        })
+      }
+    }
   }
 
   return (
@@ -96,6 +127,7 @@ export function SessionInviteDialog({
                 friend.display_name?.trim() ||
                 strings.friends.addDialog.defaultFriendName
               const alreadyInvited = invited.has(friend.ed_pubkey_hex)
+              const isSending = sending.has(friend.ed_pubkey_hex)
               return (
                 <li
                   key={friend.ed_pubkey_hex}
@@ -108,13 +140,21 @@ export function SessionInviteDialog({
                     type="button"
                     variant="secondary"
                     size="sm"
-                    disabled={alreadyInvited}
-                    onClick={() => handleInvite(friend)}
-                    aria-label={strings.session.invite.rowInviteAriaLabel(name)}
+                    disabled={alreadyInvited || isSending}
+                    onClick={() => void handleInvite(friend)}
+                    aria-label={
+                      isSending
+                        ? strings.session.invite.sendingAriaLabel(name)
+                        : alreadyInvited
+                          ? strings.session.invite.invitedAriaLabel(name)
+                          : strings.session.invite.rowInviteAriaLabel(name)
+                    }
                   >
-                    {alreadyInvited
-                      ? strings.session.invite.invitedLabel
-                      : strings.session.invite.rowCta}
+                    {isSending
+                      ? strings.session.invite.sendingLabel
+                      : alreadyInvited
+                        ? strings.session.invite.invitedLabel
+                        : strings.session.invite.rowCta}
                   </Button>
                 </li>
               )

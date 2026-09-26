@@ -142,10 +142,14 @@ export function createPttWatchdog(deps: PttWatchdogDeps): PttWatchdog {
     }
 
     let gap: PttTimelineGap | null = null
+    // I106 — kept separate from `gap`. The record is capped for log volume; the
+    // dwell reset below is a correctness rule, and gating it on the record made
+    // one constant do both jobs — so past the cap the guard silently stopped.
+    let overdue = false
     if (lastTickMonoMs !== null && lastTickWallMs !== null) {
       const monoElapsedMs = Math.round(monoMs - lastTickMonoMs)
       const wallElapsedMs = Math.round(wallMs - lastTickWallMs)
-      const overdue =
+      overdue =
         monoElapsedMs >
         Math.max(
           PTT_WATCHDOG_GAP_MIN_MS,
@@ -171,7 +175,15 @@ export function createPttWatchdog(deps: PttWatchdogDeps): PttWatchdog {
     // built across it would be fiction. Clear the dwell history only — a gap is
     // not a new session, and `reset()` would also hand back the whole violation
     // budget, so a periodically stalling machine would never hit the ceiling.
-    if (gap) monitor.resetDwell()
+    //
+    // I106 — keyed on `overdue`, never on whether the gap was RECORDED.
+    // `gapCount` only resets on a room change, so after the twentieth gap in a
+    // session the record stops being built and this guard stopped with it: the
+    // monitor then reported "ticks: 2, dwellMs: 6000" for two samples six
+    // seconds apart with the app frozen in between, and suppressed the
+    // `timeline.gap` that would have marked the window unattributable in the
+    // same breath.
+    if (overdue) monitor.resetDwell()
 
     const events = monitor.observe(observation)
 
@@ -241,7 +253,12 @@ export type PttStoreShape = {
 // intact. `release()` empties the sources, and `reset()` clears all three.
 export function classifyPttStoreChange(
   previous: PttStoreShape,
-  next: PttStoreShape
+  next: PttStoreShape,
+  // I108 — true only while the in-window hold-to-talk button is mid-mutation.
+  // A last-holder release and a `reset()` are the same transition, so the two
+  // can only be told apart by who is calling; the button's own press and
+  // release are `button` changes whatever shape they take.
+  fromButton = false
 ): PttStoreChangeCause | null {
   if (
     previous.active &&
@@ -251,6 +268,14 @@ export function classifyPttStoreChange(
     next.heldSources.length === previous.heldSources.length
   ) {
     return 'failsafe'
+  }
+
+  if (
+    fromButton &&
+    previous.heldSources.includes('session-button') !==
+      next.heldSources.includes('session-button')
+  ) {
+    return 'button'
   }
 
   if (
