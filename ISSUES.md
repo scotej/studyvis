@@ -1050,6 +1050,146 @@ Blast radius while broken: `deploy.yml`'s Linux installer, `ci.yml`'s advisory A
 
 The recurrence is not fixed, because it cannot be from here — upstream publishes no immutable tag for this plugin, their newest fixed release is sixteen months older and would drag the bundled appimagetool back with it, and mirroring the artifact ourselves is a repository-owned decision rather than a build fix. What is fixed is the cost of the next one: the entry now carries the rolling-tag hazard and the three-step re-verification beside it, and the mismatch prints the procedure and says plainly not to paste the observed hash in. The gate refusing an unreviewed binary is the control working; `prepare-linuxdeploy-tools.sh`'s own header already says a mutable URL is acceptable *only* because its bytes are checked first.
 
+### I117 — Sev2
+
+`scripts/build-linux-webkit-runtime.sh`, `scripts/stage-linux-appimage-webkit.sh`,
+`scripts/patches/webkitgtk-2.52.5-appimage-sandbox.patch`, and
+`patches/@trystero-p2p+core+0.25.3.patch`
+
+**Evidence.** In [#312](https://github.com/scotej/studyvis/issues/312), the
+reporter confirmed the screenshot was taken on Linux: its local camera was
+live, while the peer camera and local shared screen were blank. The uploaded
+September 12 logs show a WebProcess crash on the first session, then a joined
+peer and a bound screen stream in the next session. Those records establish
+capture and data activity, but contain no evidence of decoded remote frames.
+
+Native reproduction against the released AppImage identified separate failures:
+Noble GStreamer 1.24.2 misassigns sending pads and delays incoming transceiver
+creation, and its incoming caps omit SDP attributes required by WebKit's track
+binding. Matching newer GStreamer restores receive-only and bidirectional video
+and independently negotiated screen streams. WebKit's recycled-sender path also
+drops the outgoing source instead of retaining and linking it after negotiation;
+the expanded regression exercises a camera added after receiving remote media.
+
+The curated payload omitted WebKit's black/silence source factories, GPU frame
+conversion, and NSS's lazily loaded SRTP modules. Separately, the bundled
+PipeWire 1.0.5 plugin rejects WebKit's `DMA_DRM` request: its exact upstream
+format converter fails SPA negotiation, while legacy linear BGRA negotiates and
+round-trips correctly. Host EGL drivers can also fail loading newer Wayland
+symbols when the AppImage shadows their client library with Noble's copy.
+
+At the JavaScript boundary, Trystero consumed one stream announcement per native
+track event. A camera's audio and video could therefore consume the screen's
+metadata, preventing correct delivery even with working native media. Both
+released Trystero versions already include the native stream ID, so matching
+that ID preserves the existing wire contract.
+
+The first rebuilt regression reached the reverse-offer path and failed with
+`Could not reuse transceiver`. Its receive-only transceiver had no codec
+preferences, so the first patch substituted WebKit's unassigned VP8/Opus
+capability caps; GStreamer cannot form an SDP media section from dynamic codecs
+without RTP payload numbers. The recycled sender now derives preferences from
+the negotiated remote m-line, replaces only its MSID, and then uses WebKit's
+normal deferred link/start lifecycle.
+
+**Status.** **in review** — runtime revision 7 pins matched GStreamer 1.28.7 and
+libnice 0.1.24 sources, restores the required curated payload, fixes portal caps
+and recycled sender ownership, and matches Trystero announcements by stream ID.
+The maintained runtime also includes the DTLS fingerprint/certificate, Opus,
+RTP, and TURN fixes absent from 1.26.11 (including CVE-2026-14935,
+CVE-2026-59692, and CVE-2026-18297). Exact AppImage checks process native media
+and exercise peer rendering and renegotiation. The output wrapper leaves the
+Wayland client to the host EGL driver before the unchanged verified output tool
+packages the artifact. Source/license/build-ID checks cover GStreamer and
+libnice; only PipeWire remains distro-provided. The rebuilt WebKit regression
+and PLAN §8's physical KDE matrix remain validation requirements.
+
+### I118 — Sev2
+
+`src/features/session/sessionOverlayRuntime.ts`, `src-tauri/src/commands/session_overlay.rs`,
+`src-tauri/src/macos_floating_window.rs`, `src-tauri/capabilities/default.json`
+
+**Evidence.** [#317](https://github.com/scotej/studyvis/issues/317): a macOS
+(Apple Silicon, v1.11.3) host in a 51-minute two-person session could read
+every chat message in the panel but never saw the floating notification card
+while working in another app. The attached diagnostics archive holds no
+`session.overlay` records at all — the runtime logged nothing on any branch, so
+the archive cannot say whether a window was created, prepared or shown. By
+source: the overlay is a `WebviewWindow` created from the main webview with
+`alwaysOnTop` + `visibleOnAllWorkspaces`, which tao maps to
+`NSFloatingWindowLevel` + `canJoinAllSpaces` only. A macOS window may not join
+another app's full-screen Space without `fullScreenAuxiliary` — the exact bit
+`ai_dialog.rs` applies natively for the Ctrl+] dialog (ARCHITECTURE §12) and
+that Tauri's window config cannot express — so the JS-created overlay never
+received it and was absent whenever the reporter's other app was full-screen.
+Two smaller macOS defects sit on the same path: tao's `set_inner_size` is
+`setContentSize:`, which keeps the bottom-left corner fixed, so the #228
+grow-to-fit resize slid the card's top edge up under the menu bar; and every
+failure branch in the runtime was a silent `catch`. Nothing in the overlay
+changed between the reporter's 1.11.3 and HEAD.
+
+**Status.** **in review** — `session_overlay_prepare` (a command hard-wired to the
+overlay label, granted only to `main-commands`) applies
+`canJoinAllSpaces | fullScreenAuxiliary` through the helper now shared with the
+AI dialog (`macos_floating_window.rs`), awaited inside the serialized creation
+step so READY/PRESENT cannot reveal an unprepared window; the runtime
+re-asserts the top-left corner after every resize
+(`core:window:allow-set-position`); and a `session.overlay` log scope records
+creation/preparation/presentation failures, a READY watchdog and each reveal
+(revision and height only, never text). Unit-tested in
+`session-overlay-runtime.test.ts` (prepare ordering, prepare failure still
+reveals, re-anchor after each resize, watchdog); the Rust label is locked to the
+capability file by a test. Verified by source and by CI compile only — neither
+CI nor this Linux host can exercise the macOS behaviour, so the reporter's
+confirmation with the new log scope is the remaining check. The non-full-screen
+macOS path reads correct by source and is unchanged apart from the logging.
+
+### I119 — Sev2
+
+`src/lib/webrtc/resilientPeerConnection.ts`, `src/features/friends/invite.ts`,
+`src/features/session/SessionInviteDialog.tsx`, `src/lib/trystero/relayUrls.ts`
+
+**Evidence.** [#325](https://github.com/scotej/studyvis/issues/325) includes
+macOS and Windows diagnostics from a group whose apps showed online but whose
+invites never produced a joined session peer. Both devices repeatedly logged
+that an SDP exchange could not establish a WebRTC connection without TURN.
+Windows later logged over 10,000 coalesced `RTCPeerConnection` constructor
+failures. A reproduction using Trystero 0.25.3's real answer handler created 50
+failed connections and closed none: its failure callback clears the answering
+peer and cancels its expiry timer without destroying the native connection.
+One pinned Nostr relay also rejected publishes because its disk was full, and
+two others failed the live publish/receive check. The in-session picker marked
+a failed send "Invited" and disabled retry until reopened.
+
+**Status.** **in review** — the existing `rtcPolyfill` closes a peer after a
+terminal failure, preserving the transient-disconnect hold; a real-core
+regression covers repeated failures and a same-turn state change. Pending
+invites retry on a recovered direct heartbeat, the picker exposes send progress
+and keeps failed rows retryable, and the failing Nostr pins were replaced with
+three that passed the signed ephemeral-event round-trip. The issue's observed
+network still needs TURN to complete a session: both logs show no configured
+TURN server, and the old public no-account endpoint failed live probes. A
+physical retest with working TURN on both devices is needed to verify the
+original two-device symptom end to end.
+
+### I120 — Sev3
+
+`src/features/system/WindowLayoutListener.tsx`, `src-tauri/capabilities/default.json`
+
+**Evidence.** The same Windows diagnostics contain an unhandled
+`plugin:window|destroy not allowed by ACL` rejection after a close request.
+The main window's layout listener registers Tauri's `onCloseRequested`, whose
+JS helper invokes `destroy()` after the flush callback, but the main-window
+capability grants only `close`. Granting `destroy` would let that helper bypass
+the Rust close handler's tray-hide and mid-session quit-confirmation decisions.
+
+**Status.** **in review** — the layout listener no longer subscribes to the
+close request, so Tauri's JavaScript helper never calls `destroy()` and Rust
+remains the sole owner of the close decision. Move/resize capture remains
+debounced; the removed close flush was fire-and-forget and could not guarantee
+a final write during a real quit. Source-verified against the installed Tauri
+API; requires a Windows packaged-app close and tray check.
+
 ## Archive — retired backlogs
 
 Two documents used to sit beside this ledger and were deleted once their implementation backlog had no open code work left: `BUILD-PROMPTS.md` (the sequenced V0→V3 build plan) and `IMPROVEMENTS.md` (the v1.2.0-era improvement backlog). Git history holds both in full — `git log --diff-filter=D -- BUILD-PROMPTS.md IMPROVEMENTS.md`, then `git show <sha>^:<file>`. Linux's implementation checklist is complete, but its operational release sign-off remains pending. What survives here is the part still cited from code.

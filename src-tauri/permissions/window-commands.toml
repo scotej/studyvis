@@ -68,6 +68,7 @@ permissions = [
   "allow-app-log-append",
   "allow-app-log-tail",
   "allow-ai-dialog-toggle",
+  "allow-session-overlay-prepare",
   "allow-model-paths",
   "allow-model-install-state",
   "allow-model-remove",

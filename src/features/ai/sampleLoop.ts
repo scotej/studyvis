@@ -194,7 +194,7 @@ export type SampleBlockReason =
   // stuck short of the crash-restart budget that would flip it to errored.
   | 'engine_warming'
   // The inference request hit `requestTimeoutMs` and aborted. The likeliest
-  // cause on a CPU-only build (Windows/Linux run `--n-gpu-layers 0`) is a
+  // cause on a CPU selection (`--n-gpu-layers 0`) is a
   // model too heavy for the machine, so every tick burns the full timeout.
   | 'inference_timeout'
   // The sidecar answered non-2xx, or the tick threw something unexpected.

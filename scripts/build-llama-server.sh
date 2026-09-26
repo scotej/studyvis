@@ -6,7 +6,7 @@
 # pinned llama.cpp commit and backend policy. Use fetch by default (faster,
 # release-pinned bytes); use build when:
 #   - cross-compiling for a triple llama.cpp doesn't publish our chosen prebuild for
-#   - you want a statically linked single-binary output (no companion dylibs)
+#   - you want a static macOS/Windows build (no companion dylibs)
 #   - you need to verify the prebuilt binary's provenance independently
 #
 # Pinned commit: f3c3e0e9a087835639733485b8900b195ba4ca47 (release tag b9095).
@@ -18,8 +18,9 @@
 #   - cmake >= 3.18, ninja, git, a working C/C++ compiler matching the host triple
 #   - For macOS: Apple-Silicon Macs build aarch64 natively; pass --x86 to
 #     cross-build for x86_64-apple-darwin (universal SDK required).
-#   - For Linux: gcc/clang with libstdc++ static archives (`libstdc++-*-pic-dev`
-#     on Debian/Ubuntu).
+#   - For Linux: gcc/clang, Vulkan development headers/loader and glslc.
+#     Linux always uses shared, dynamically loaded backends so hosts without
+#     a Vulkan loader or compatible GPU can still use the CPU backend.
 #   - For Windows: build from a Windows host with MSVC plus the Vulkan SDK.
 #     This mirrors the win-vulkan release archive used by fetch-llama-server.sh.
 #
@@ -43,7 +44,7 @@ Usage: $0 [--triple <rust-target-triple>] [--shared] [--clean]
   --triple <triple>  Build for a specific Rust target triple. Default: host.
   --shared           Build with BUILD_SHARED_LIBS=ON (matches the prebuilt
                      release layout — produces companion .dylib/.so/.dll).
-                     Default: OFF (single static binary).
+                     Default: ON for Linux, OFF elsewhere.
   --clean            Remove the working directory before building.
   -h, --help         Show this help.
 USAGE
@@ -88,6 +89,10 @@ case "$TRIPLE" in
   *) echo "build-llama-server: unsupported triple '$TRIPLE'" >&2; exit 1 ;;
 esac
 
+# GGML_BACKEND_DL requires shared libraries. A static Vulkan dependency would
+# make even CPU execution fail before main() on hosts without libvulkan.so.1.
+[ "$PLATFORM" = "linux" ] && SHARED=1
+
 EXE_SUFFIX=""
 [ "$PLATFORM" = "windows" ] && EXE_SUFFIX=".exe"
 
@@ -130,7 +135,15 @@ case "$PLATFORM" in
       x86_64-apple-darwin)  CMAKE_FLAGS+=("-DCMAKE_OSX_ARCHITECTURES=x86_64") ;;
     esac
     ;;
-  linux) CMAKE_FLAGS+=("-DGGML_BLAS=OFF") ;;
+  linux)
+    CMAKE_FLAGS+=(
+      "-DGGML_BLAS=OFF"
+      "-DGGML_VULKAN=ON"
+      "-DGGML_BACKEND_DL=ON"
+      "-DGGML_NATIVE=OFF"
+      "-DGGML_CPU_ALL_VARIANTS=ON"
+    )
+    ;;
   windows) CMAKE_FLAGS+=("-DGGML_VULKAN=ON") ;;
 esac
 
