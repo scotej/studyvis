@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "generatedBy": "scripts/generate-third-party-notices.ts",
   "noticePath": "THIRD-PARTY-NOTICES.txt",
-  "noticeSha256": "f1dbf33c7473dbe1357676b4320600af3cdfe5a6944ced8f965ba3cc65790eb7",
+  "noticeSha256": "b8e852f57483887483bf4dc5b2b404403e4a90b07b0a036daa2c9e5d5f663122",
   "scope": {
     "npm": "package-lock.json v3 entries beneath node_modules whose dev flag is not true",
     "cargo": "normal dependency edges reachable from the StudyVis root under each release target; build/dev edges excluded",
@@ -16,11 +16,11 @@
   "inputs": [
     {
       "path": "package-lock.json",
-      "sha256": "436fd3e9c97d9605843a612f5a619a1adae3201e2af73e9321f8bd2d443ba243"
+      "sha256": "75d780b03cdf8d9763566fed6e9919aea1c6c3a59c93be11cc0d7757507eae76"
     },
     {
       "path": "package.json",
-      "sha256": "0d7af245eb3f1b358f9b8b6f395fa4c2cfff4e57211a9dc1e36a85fb7eaf2f91"
+      "sha256": "df0ce25d48bfbe0c435afcd94c65b00938a3dc2c5af4674a257bd8ecdc7aaa66"
     },
     {
       "path": "scripts/fetch-llama-server.sh",
@@ -44,7 +44,7 @@
     },
     {
       "path": "src-tauri/Cargo.lock",
-      "sha256": "deba8a86694d0ad1e8a715a609ecaf2e744af03a4056f52a53f8ff3b26286325"
+      "sha256": "1a9fe7cc176549394b8b770228d1aa2d4c157cb7906dcfc9c146de1a20591652"
     },
     {
       "path": "src-tauri/Cargo.toml",
@@ -56,11 +56,11 @@
     }
   ],
   "counts": {
-    "components": 754,
-    "cargo": 533,
+    "components": 757,
+    "cargo": 536,
     "npm": 220,
     "external": 1,
-    "distinctLicenseTexts": 396
+    "distinctLicenseTexts": 397
   },
   "components": [
     {
@@ -1467,6 +1467,27 @@
         },
         {
           "path": "cargo:core-foundation@0.7.0/LICENSE-MIT",
+          "sha256": "62065228e42caebca7e7d7db1204cbb867033de5982ca4009928915e4095f3a3"
+        }
+      ]
+    },
+    {
+      "id": "cargo:core-foundation@0.9.4",
+      "ecosystem": "cargo",
+      "name": "core-foundation",
+      "version": "0.9.4",
+      "licenseExpression": "MIT OR Apache-2.0",
+      "source": "https://crates.io/api/v1/crates/core-foundation/0.9.4/download",
+      "checksum": "91e195e091a93c46f7102ec7818a2aa394e1e1771c3ab4825963fa03e45afb8f",
+      "repository": "https://github.com/servo/core-foundation-rs",
+      "targets": ["aarch64-apple-darwin"],
+      "licenseFiles": [
+        {
+          "path": "cargo:core-foundation@0.9.4/LICENSE-APACHE",
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
+        },
+        {
+          "path": "cargo:core-foundation@0.9.4/LICENSE-MIT",
           "sha256": "62065228e42caebca7e7d7db1204cbb867033de5982ca4009928915e4095f3a3"
         }
       ]
@@ -8996,6 +9017,48 @@
       ]
     },
     {
+      "id": "cargo:system-configuration@0.7.0",
+      "ecosystem": "cargo",
+      "name": "system-configuration",
+      "version": "0.7.0",
+      "licenseExpression": "MIT OR Apache-2.0",
+      "source": "https://crates.io/api/v1/crates/system-configuration/0.7.0/download",
+      "checksum": "a13f3d0daba03132c0aa9767f98351b3488edc2c100cda2d2ec2b04f3d8d3c8b",
+      "repository": "https://github.com/mullvad/system-configuration-rs",
+      "targets": ["aarch64-apple-darwin"],
+      "licenseFiles": [
+        {
+          "path": "cargo:system-configuration@0.7.0/LICENSE-APACHE",
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
+        },
+        {
+          "path": "cargo:system-configuration@0.7.0/LICENSE-MIT",
+          "sha256": "000cbb5bea6f21829c8f0d9e1fe87410bd5ef0453412ffc017845982a3e19824"
+        }
+      ]
+    },
+    {
+      "id": "cargo:system-configuration-sys@0.6.0",
+      "ecosystem": "cargo",
+      "name": "system-configuration-sys",
+      "version": "0.6.0",
+      "licenseExpression": "MIT OR Apache-2.0",
+      "source": "https://crates.io/api/v1/crates/system-configuration-sys/0.6.0/download",
+      "checksum": "8e1d1b10ced5ca923a1fcb8d03e96b8d3268065d724548c0211415ff6ac6bac4",
+      "repository": "https://github.com/mullvad/system-configuration-rs",
+      "targets": ["aarch64-apple-darwin"],
+      "licenseFiles": [
+        {
+          "path": "cargo:system-configuration-sys@0.6.0/LICENSE-APACHE",
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
+        },
+        {
+          "path": "cargo:system-configuration-sys@0.6.0/LICENSE-MIT",
+          "sha256": "000cbb5bea6f21829c8f0d9e1fe87410bd5ef0453412ffc017845982a3e19824"
+        }
+      ]
+    },
+    {
       "id": "cargo:tao@0.35.2",
       "ecosystem": "cargo",
       "name": "tao",
@@ -9411,13 +9474,13 @@
       ]
     },
     {
-      "id": "cargo:tauri-plugin-updater@2.10.1",
+      "id": "cargo:tauri-plugin-updater@2.11.0",
       "ecosystem": "cargo",
       "name": "tauri-plugin-updater",
-      "version": "2.10.1",
+      "version": "2.11.0",
       "licenseExpression": "Apache-2.0 OR MIT",
-      "source": "https://crates.io/api/v1/crates/tauri-plugin-updater/2.10.1/download",
-      "checksum": "806d9dac662c2e4594ff03c647a552f2c9bd544e7d0f683ec58f872f952ce4af",
+      "source": "https://crates.io/api/v1/crates/tauri-plugin-updater/2.11.0/download",
+      "checksum": "b28d8cabdeb0564f03ae261963de4bc3d98321cd3d213e76a81b7d344e5df606",
       "repository": "https://github.com/tauri-apps/plugins-workspace",
       "targets": [
         "aarch64-apple-darwin",
@@ -9426,15 +9489,15 @@
       ],
       "licenseFiles": [
         {
-          "path": "cargo:tauri-plugin-updater@2.10.1/LICENSE.spdx",
+          "path": "cargo:tauri-plugin-updater@2.11.0/LICENSE.spdx",
           "sha256": "9c1db6b7e7eb83e1cb2af973b5df2bdc63651ede0f38506ab98dfa0940487759"
         },
         {
-          "path": "cargo:tauri-plugin-updater@2.10.1/LICENSE_APACHE-2.0",
+          "path": "cargo:tauri-plugin-updater@2.11.0/LICENSE_APACHE-2.0",
           "sha256": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594"
         },
         {
-          "path": "cargo:tauri-plugin-updater@2.10.1/LICENSE_MIT",
+          "path": "cargo:tauri-plugin-updater@2.11.0/LICENSE_MIT",
           "sha256": "9dd42ea92cff2ede5cd477cbfcce051b2d0115c0ac7f368ee88cb545055dff1d"
         }
       ]
@@ -13739,14 +13802,14 @@
       ]
     },
     {
-      "id": "npm:node_modules/@tauri-apps/plugin-updater@2.10.1",
+      "id": "npm:node_modules/@tauri-apps/plugin-updater@2.11.0",
       "ecosystem": "npm",
       "name": "@tauri-apps/plugin-updater",
-      "version": "2.10.1",
+      "version": "2.11.0",
       "licenseExpression": "MIT OR Apache-2.0",
-      "source": "https://registry.npmjs.org/@tauri-apps/plugin-updater/-/plugin-updater-2.10.1.tgz",
+      "source": "https://registry.npmjs.org/@tauri-apps/plugin-updater/-/plugin-updater-2.11.0.tgz",
       "repository": "https://github.com/tauri-apps/plugins-workspace",
-      "integrity": "sha512-NFYMg+tWOZPJdzE/PpFj2qfqwAWwNS3kXrb1tm1gnBJ9mYzZ4WDRrwy8udzWoAnfGCHLuePNLY1WVCNHnh3eRA==",
+      "integrity": "sha512-AE36XkOoSna24G40jZMY15nzAnkXEPL/73tGoseGrtGOHuI/cZwWzHpZFLjKXDPgzYZ435z1gHu28LgrsBwIxQ==",
       "lockPath": "node_modules/@tauri-apps/plugin-updater",
       "targets": ["frontend"],
       "licenseFiles": [
