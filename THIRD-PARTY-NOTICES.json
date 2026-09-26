@@ -24,7 +24,7 @@
     },
     {
       "path": "scripts/fetch-llama-server.sh",
-      "sha256": "02e6622b1fe809cd68a8df9ef249665bf8ac44b971670b3b6ca823095b94775b"
+      "sha256": "ba847479a7bc2eaee68ab9ab5b010d06867b2dd695ed257f71c0e43190c3233f"
     },
     {
       "path": "scripts/generate-third-party-notices.ts",

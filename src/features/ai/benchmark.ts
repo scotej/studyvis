@@ -66,7 +66,8 @@ const BENCHMARK_TOPIC = 'Studying'
 // the canonical Tauri store and said nothing about Auto's actual accelerator
 // order. Persist the native spawn identity below instead. Deliberately NOT
 // __APP_VERSION__: most releases don't affect inference measurements.
-const INFERENCE_ENGINE_FINGERPRINT_BASE = 'b9095-hwidentity2-cachecold2'
+const INFERENCE_ENGINE_FINGERPRINT_BASE =
+  'b9095-linuxvulkan1-hwidentity2-cachecold2'
 
 export function inferenceEngineFingerprintFor(
   identity: AiHardwareIdentity
