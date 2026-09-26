@@ -375,6 +375,16 @@ It does **not** close that connection, and the resulting half-teardown is what #
 
 `lab/scenarios/reconnect.ts` is the regression: it `SIGSTOP`s a peer's Chrome renderer — where Chrome runs WebRTC — for 15 s. With the hold disabled, the observer logs `peer.left` at `degradedForMs` 5003 and the peer never returns; with it, the session comes through untouched.
 
+The pinned Trystero core also closes a shared connection after a terminal
+negotiation error. Clearing only its room bindings leaves the remote attached
+to a still-open transport, which can block fresh offers even though the local
+participant has disappeared. Error/close callbacks act only on the connection
+they registered, and replacing the last shared peer retains its new registry
+entry. A normal room leave still detaches only that room. Native SDP/candidate
+operation failures are recorded as categorical operation/error names and
+connection states; SDP, candidates, device identifiers and error messages are
+not logged.
+
 ### Relay-carried presence (I74)
 
 Everything trystero does — over any strategy — is *signaling*; application data still rides WebRTC datachannels. So when a STUN-only connection can't traverse the NAT pair between two friends, presence heartbeats never flow in either direction, trystero surfaces **no error for a failed ICE attempt** (it silently re-offers forever), and both friends show each other permanently offline — the exact symptom that motivated this leg, made structural by offline ContactCard pairing (§5.1), which removed the last step that ever proved the P2P path worked.
