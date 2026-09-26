@@ -154,6 +154,7 @@ type TurnTestState =
 function TurnServerField() {
   const copy = strings.settings.network.advanced.turn
   const stored = useSettingsStore((s) => s.values.turnServer)
+  const preference = useSettingsStore((s) => s.values.turnPreference)
   const setTurnServer = useSettingsStore((s) => s.setTurnServer)
 
   const [url, setUrl] = useState(() => stored?.url ?? '')
@@ -164,7 +165,7 @@ function TurnServerField() {
   const commit = () => void setTurnServer({ url, username, credential })
 
   const urlInvalid = url.trim().length > 0 && !isValidTurnUrl(url)
-  const active = stored !== null
+  const saved = stored !== null
   const testable =
     isValidTurnUrl(url) &&
     username.trim().length > 0 &&
@@ -278,8 +279,16 @@ function TurnServerField() {
         {/* Below the button with the test results: all status feedback in
             one stable place, so completing the third credential field never
             shifts the button while the pointer is heading for it. */}
-        {active ? (
-          <p className="text-xs text-status-focused">{copy.active}</p>
+        {saved ? (
+          <p
+            className={
+              preference === 'never'
+                ? 'text-xs text-text-secondary'
+                : 'text-xs text-status-focused'
+            }
+          >
+            {preference === 'never' ? copy.disabled : copy.active}
+          </p>
         ) : null}
       </div>
     </div>

@@ -1,7 +1,8 @@
 // F6 — Nostr relays don't buffer for an absent peer, so an invite sent while a
 // friend's app is closed always times out and is never delivered. This manager
 // holds an unconfirmed invite "pending" for a short window and re-attempts
-// delivery the moment that friend's presence flips online. A transport send
+// delivery when a direct presence heartbeat proves WebRTC is working. Relay
+// presence alone cannot deliver an invite. A transport send
 // alone is not delivery: only a signature-verified recipient ACK suppresses
 // retries, so a third party on the derivable inbox topic cannot acknowledge an
 // invite on the recipient's behalf.
@@ -69,8 +70,8 @@ export type InviteRetryManager = {
   // Mark (recipient, session) as delivered so it never retries again. Call
   // only after a signature-verified ACK from the intended recipient.
   markDelivered: (recipientEdPubkeyHex: string, sessionTopic: string) => void
-  // A friend just flipped online. Retry every non-expired pending entry for
-  // them. Awaitable so tests can flush the deliveries deterministically.
+  // A direct presence heartbeat arrived. Retry every non-expired pending entry
+  // for that friend. Awaitable so tests can flush deliveries deterministically.
   onPresenceOnline: (recipientEdPubkeyHex: string) => Promise<void>
   // Drop all pending entries for a recipient (e.g. they came online and we no
   // longer need the safety net — optional) — currently used by cancelAll.

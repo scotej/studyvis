@@ -229,6 +229,58 @@ describe('pttStore', () => {
       })
     })
 
+    // I107 — on Linux X11 the native shortcut and the in-window button both
+    // exist. A native hold whose release edge is lost latches the failsafe, and
+    // a source joining THAT hold transmitted nothing while the button rendered
+    // un-pressed, because both read `active`.
+    test('a press after the failsafe starts a fresh hold instead of joining a dead one', () => {
+      const sched = fakeScheduler()
+      usePttStore.getState().press('native-shortcut')
+      sched.advance(MAX_HOLD_MS)
+      expect(usePttStore.getState()).toMatchObject({
+        active: false,
+        awaitingRelease: true,
+      })
+
+      usePttStore.getState().press('session-button')
+      expect(usePttStore.getState()).toMatchObject({
+        active: true,
+        awaitingRelease: true,
+        heldSources: ['session-button'],
+      })
+
+      // Releasing the button ends the hold for good: the expired native source
+      // can no longer keep it latched.
+      usePttStore.getState().release('session-button')
+      expect(usePttStore.getState()).toMatchObject({
+        active: false,
+        awaitingRelease: false,
+        heldSources: [],
+      })
+    })
+
+    test('a late release from the expired source is a no-op', () => {
+      const sched = fakeScheduler()
+      usePttStore.getState().press('native-shortcut')
+      sched.advance(MAX_HOLD_MS)
+      usePttStore.getState().press('session-button')
+      usePttStore.getState().release('native-shortcut')
+      expect(usePttStore.getState()).toMatchObject({
+        active: true,
+        heldSources: ['session-button'],
+      })
+    })
+
+    test('a second source still joins a hold that is genuinely live', () => {
+      fakeScheduler()
+      usePttStore.getState().press('native-shortcut')
+      usePttStore.getState().press('session-button')
+      expect(usePttStore.getState()).toMatchObject({
+        active: true,
+        heldSources: ['native-shortcut', 'session-button'],
+      })
+    })
+
     test('duplicate presses do not extend the original failsafe deadline', () => {
       const sched = fakeScheduler()
       usePttStore.getState().press()

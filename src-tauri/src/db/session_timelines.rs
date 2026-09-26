@@ -47,10 +47,28 @@ pub fn get(conn: &Connection, session_id: &str) -> Result<Option<SessionTimeline
 
 /// Regeneration replaces the stored narrative rather than accumulating rows:
 /// a rejoined session ends twice, and the second write-up spans both stints.
-pub fn upsert(conn: &Connection, row: &SessionTimelineRow) -> Result<()> {
-    conn.execute(
+///
+/// I100 — the write is conditional on the session still existing. A write-up is
+/// a minutes-long local-model pass that the report deliberately detaches on
+/// unmount, holding the journal it already read in memory, so unlinking that
+/// journal cannot stop it. Without this guard, deleting a session while its
+/// write-up was running let the finished pass insert the narrative back
+/// afterwards: a row for a session the user had asked us to forget, reachable
+/// from no report and removable only by clear-all. `sessions_delete` orders its
+/// own work so a failure can only ever orphan a journal, never a narrative
+/// whose evidence is gone; this is the same invariant seen from the other side.
+///
+/// Returns whether a row was written, so a caller can tell "stored" from
+/// "the session went away underneath it".
+///
+/// The `WHERE` is also what makes this parse: SQLite cannot tell an UPSERT's
+/// `ON` from a join's `ON` after a bare `INSERT … SELECT`, and documents a
+/// WHERE clause as the disambiguator.
+pub fn upsert(conn: &Connection, row: &SessionTimelineRow) -> Result<bool> {
+    let written = conn.execute(
         "INSERT INTO session_timelines (session_id, generated_at, model_id, source, entries, truncated)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+         SELECT ?1, ?2, ?3, ?4, ?5, ?6
+         WHERE EXISTS (SELECT 1 FROM sessions WHERE id = ?1)
          ON CONFLICT(session_id) DO UPDATE SET
            generated_at = excluded.generated_at,
            model_id     = excluded.model_id,
@@ -66,7 +84,7 @@ pub fn upsert(conn: &Connection, row: &SessionTimelineRow) -> Result<()> {
             row.truncated,
         ],
     )?;
-    Ok(())
+    Ok(written > 0)
 }
 
 #[cfg(test)]
@@ -78,6 +96,16 @@ mod tests {
         let mut conn = Connection::open_in_memory().expect("open in-memory");
         migrations::run_migrations(&mut conn).expect("migrations");
         conn
+    }
+
+    /// A timeline belongs to a session, so every round-trip test needs the row
+    /// it hangs off (I100).
+    fn with_session(conn: &Connection, id: &str) {
+        conn.execute(
+            "INSERT INTO sessions (id, started_at, ended_at) VALUES (?1, ?2, ?3)",
+            params![id, 1_700_000_000_000i64, 1_700_000_600_000i64],
+        )
+        .expect("insert session");
     }
 
     fn row(session_id: &str, source: &str, entries: &str) -> SessionTimelineRow {
@@ -100,6 +128,7 @@ mod tests {
     #[test]
     fn upsert_then_get_round_trips() {
         let conn = fresh();
+        with_session(&conn, "s1");
         let written = row(
             "s1",
             "model",
@@ -117,6 +146,7 @@ mod tests {
     #[test]
     fn upsert_replaces_a_previous_narrative_for_the_same_session() {
         let conn = fresh();
+        with_session(&conn, "s1");
         upsert(&conn, &row("s1", "observations", "[]")).expect("first");
         upsert(
             &conn,
@@ -133,5 +163,38 @@ mod tests {
         assert_eq!(count, 1, "regeneration replaces rather than accumulates");
         let read = get(&conn, "s1").expect("get").expect("row");
         assert_eq!(read.source, "model");
+    }
+
+    // I100 — the delete wins. A write-up that finishes after its session was
+    // removed must not put the narrative back.
+    #[test]
+    fn upsert_writes_nothing_for_a_session_that_no_longer_exists() {
+        let conn = fresh();
+        let stored = upsert(&conn, &row("gone", "model", "[]")).expect("upsert");
+        assert!(!stored, "no session row means nothing to narrate");
+        assert!(get(&conn, "gone").expect("get").is_none());
+    }
+
+    #[test]
+    fn upsert_writes_nothing_when_the_session_is_deleted_mid_write_up() {
+        let conn = fresh();
+        with_session(&conn, "s1");
+        assert!(upsert(&conn, &row("s1", "model", "[]")).expect("first"));
+        // The user deletes the session while a second pass is still running.
+        conn.execute("DELETE FROM session_timelines WHERE session_id = 's1'", [])
+            .expect("cascade");
+        conn.execute("DELETE FROM sessions WHERE id = 's1'", [])
+            .expect("delete session");
+        let stored = upsert(
+            &conn,
+            &row(
+                "s1",
+                "model",
+                r#"[{"start_min":0,"end_min":1,"summary":"Read"}]"#,
+            ),
+        )
+        .expect("late pass");
+        assert!(!stored);
+        assert!(get(&conn, "s1").expect("get").is_none());
     }
 }

@@ -49,22 +49,14 @@ export function WindowLayoutListener() {
       timer = setTimeout(() => void capture(), CAPTURE_DEBOUNCE_MS)
     }
 
-    // Flush immediately when the window is asked to close: the debounce
-    // would otherwise drop a move/resize made in the last half second
-    // before quitting. Best-effort — under minimize-to-tray the process
-    // survives and the write always lands; on a real quit it races the
-    // teardown.
-    const flush = () => {
-      clearTimeout(timer)
-      void capture()
-    }
-
     void capture()
     const w = getCurrentWindow()
+    // Do not listen for close requests here. Tauri prevents the native close
+    // whenever JS listens, and its onCloseRequested helper destroys the window
+    // after the callback, bypassing Rust's tray and quit-confirmation policy.
     const unlisteners = Promise.all([
       w.onResized(schedule),
       w.onMoved(schedule),
-      w.onCloseRequested(flush),
     ])
 
     return () => {

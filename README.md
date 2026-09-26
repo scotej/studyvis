@@ -225,9 +225,10 @@ During an AI session:
   deny, the rule layer is the final arbiter (cooldown, cap, quota).
 
 The model runs only on your machine. Camera and screen pixels never
-go to peers. The packaged Linux-candidate x86_64 engine is CPU-only; GPU
-acceleration is not promised by the AppImage build, even if the machine has a
-supported GPU.
+go to peers. The packaged Linux x86_64 engine uses Vulkan for compatible
+NVIDIA, AMD, and Intel GPUs. Auto uses available accelerators; CPU remains
+selectable in Settings → AI. GPU detection requires a working host Vulkan
+loader and driver.
 
 ## Friends-only trust model
 
@@ -408,7 +409,7 @@ where you'd see it surface.
 - **rusqlite** for local persistence (friends, sessions, audit log).
 - **llama-server (llama.cpp build) sidecar** for V2 vision-model
   inference. Bundled per platform, started on demand. The packaged
-  Linux-candidate build deliberately runs CPU-only.
+  Linux build includes Vulkan acceleration and a CPU fallback.
 
 `PLAN.md`, `ARCHITECTURE.md`, and `DESIGN-SYSTEM.md` are the
 canonical specs — each the source of truth for its concern.
@@ -561,7 +562,7 @@ requires an exact diff; artifact checks require the packaged copies and hashes.
 This mechanical inventory aids review and release gating—it is not legal advice
 or legal sign-off.
 
-The Linux candidate also bundles separately licensed WebKitGTK and librice
+The Linux candidate also bundles separately licensed WebKitGTK, librice, and GStreamer
 components. Their notices, the local portability patch, and other staged
 license material ship under
 `usr/share/licenses/studyvis-webkit-runtime/` in the AppImage. That directory's
@@ -571,6 +572,9 @@ inputs, and payload list; `WEBKIT-THIRD-PARTY-LICENSES.txt` and
 `LIBRICE-THIRD-PARTY-NOTICES.txt` and its JSON manifest separately inventory
 the exact locked normal-dependency union selected by the `rice-proto` and
 `rice-io` `cargo-c` builds, including their `capi` features and source hashes.
+`GSTREAMER-THIRD-PARTY-LICENSES.txt` and `GSTREAMER-LICENSE-FILES.sha256`
+cover the matched source-built GStreamer components, with separate LGPL,
+PTP-helper MPL 2.0, and Meson Apache 2.0 license texts.
 Each tagged Linux draft also carries
 `StudyVis_X.Y.Z_linux-webkit-sources.tar.gz` and its `.sha256` sidecar, providing
 the verified upstream archives, complete patch, and build inputs separately

@@ -88,6 +88,30 @@ describe('contactCard build / parse / verify', () => {
     expect(Array.from(parsed.card.name)).toEqual(Array.from('😀'.repeat(8)))
     expect(verifyContactCard(bytes)).toBe(true)
   })
+
+  // I110 — a single grapheme cluster can exceed the cap on its own, and
+  // breaking on the first that does not fit shipped a card with no name.
+  test('a name that is one oversized grapheme cluster still carries a name', async () => {
+    // Man + light skin, ZWJ, heart, VS16, ZWJ, kiss, ZWJ, man + dark skin:
+    // one cluster, 35 UTF-8 bytes, over the 32-byte cap.
+    const oneCluster =
+      '\u{1F468}\u{1F3FB}\u200D\u2764\uFE0F\u200D\u{1F48B}\u200D\u{1F468}\u{1F3FF}'
+    expect(new TextEncoder().encode(oneCluster).length).toBe(35)
+    expect(Array.from(new Intl.Segmenter().segment(oneCluster))).toHaveLength(1)
+
+    const bytes = await card(alice, oneCluster)
+    const parsed = parseContactCard(bytes)
+    expect(parsed.ok).toBe(true)
+    if (!parsed.ok) return
+    expect(parsed.card.name).not.toBe('')
+    expect(parsed.card.name).not.toContain('\uFFFD')
+    // Never left ending on a dangling joiner.
+    expect(/(?:\u200D|\uFE0F)$/u.test(parsed.card.name)).toBe(false)
+    expect(
+      new TextEncoder().encode(parsed.card.name).length
+    ).toBeLessThanOrEqual(NAME_CAP)
+    expect(verifyContactCard(bytes)).toBe(true)
+  })
 })
 
 describe('contactCard tamper detection', () => {
