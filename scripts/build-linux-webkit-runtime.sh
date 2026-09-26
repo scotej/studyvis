@@ -189,7 +189,7 @@ gstreamer_base_options=(
 # shellcheck disable=SC2034
 gstreamer_good_options=(
   '-Dorc=enabled' '-Dautodetect=enabled' '-Dpulse=enabled'
-  '-Dv4l2=enabled' '-Dv4l2-gudev=enabled'
+  '-Dv4l2=enabled' '-Dv4l2-gudev=enabled' '-Djpeg=enabled'
   '-Drtp=enabled' '-Drtpmanager=enabled' '-Dvpx=enabled'
 )
 # shellcheck disable=SC2034
@@ -219,7 +219,8 @@ gstreamer_option_arrays=(
 gstreamer_plugins=(
   coreelements app audioconvert audiorate audioresample audiotestsrc videotestsrc
   opengl gio opus playback typefindfunctions videoconvertscale videorate volume
-  autodetect pulseaudio alsa video4linux2 rtp rtpmanager vpx nice dtls sctp srtp webrtc
+  autodetect pulseaudio alsa video4linux2 jpeg
+  rtp rtpmanager vpx nice dtls sctp srtp webrtc
 )
 gstreamer_packages=(
   gstreamer-1.0 gstreamer-base-1.0 gstreamer-app-1.0

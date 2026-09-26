@@ -15,7 +15,7 @@ import { join, resolve } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 describe.skipIf(process.platform !== 'linux')(
-  'AppImage host Wayland boundary',
+  'AppImage host graphics boundary',
   () => {
     let fixture: string
     let appdir: string
@@ -57,6 +57,24 @@ describe.skipIf(process.platform !== 'linux')(
       )
       expect(readFileSync(join(libdir, 'libwayland-server.so.0'), 'utf8')).toBe(
         'server'
+      )
+    })
+
+    it('keeps the Vulkan backend but removes bundled loaders and their aliases', () => {
+      const libdir = join(appdir, 'usr', 'lib')
+      const runtime = join(libdir, 'StudyVis', 'binaries', 'llama-runtime')
+      mkdirSync(runtime, { recursive: true })
+      writeFileSync(join(runtime, 'libggml-vulkan.so'), 'Vulkan backend')
+      writeFileSync(join(libdir, 'libvulkan.so.1.3.275'), 'builder loader')
+      symlinkSync('libvulkan.so.1.3.275', join(libdir, 'libvulkan.so.1'))
+      writeFileSync(join(runtime, 'libvulkan.so'), 'nested loader')
+
+      expect(run('--appdir', appdir).status).toBe(0)
+      expect(existsSync(join(libdir, 'libvulkan.so.1.3.275'))).toBe(false)
+      expect(() => lstatSync(join(libdir, 'libvulkan.so.1'))).toThrow()
+      expect(existsSync(join(runtime, 'libvulkan.so'))).toBe(false)
+      expect(readFileSync(join(runtime, 'libggml-vulkan.so'), 'utf8')).toBe(
+        'Vulkan backend'
       )
     })
 

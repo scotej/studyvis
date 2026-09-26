@@ -716,11 +716,10 @@ fn with_sidecar_log<T>(write: impl FnOnce() -> T) -> T {
 }
 
 // #211 — compute hardware selection. macOS's pinned engine is Metal-enabled
-// and Windows now ships the cross-vendor Vulkan b9095 archive. `auto` and an
+// and Windows/Linux ship the cross-vendor Vulkan b9095 archives. `auto` and an
 // explicit device therefore offload all catalog-model layers on those release
 // platforms, while CPU explicitly combines --device none with zero GPU layers.
-// The pinned Linux x64 package is CPU-only, so its layer count stays zero. The
-// selection is snapshotted when a sidecar generation starts and is carried
+// The selection is snapshotted when a sidecar generation starts and is carried
 // through crash respawns; editing the settings file behind the running app
 // cannot silently move a live model to different hardware.
 //
@@ -743,9 +742,7 @@ fn llama_spawn_policy<'a>(
     has_projector: bool,
 ) -> LlamaSpawnPolicy<'a> {
     // Keep the projector on precisely the same offload path as the text
-    // model. In particular, Linux `auto` is intentionally CPU-only for the
-    // packaged engine even if a local llama.cpp build happens to have GPU
-    // backends available; an explicit device remains an explicit opt-in.
+    // model, including Linux Auto's Vulkan acceleration.
     let offloads_model = super::compute_device::gpu_layers(compute_device) != "0";
     let projector_offload = has_projector.then_some(offloads_model);
     let projector_device = match compute_device {
@@ -1394,7 +1391,7 @@ mod tests {
     // MTMD path, so both controls are necessary to keep projector placement
     // aligned with the selected compute hardware.
     #[test]
-    fn b9095_auto_policy_matches_the_platform_text_offload_without_forcing_a_device() {
+    fn b9095_auto_offloads_model_and_projector_without_forcing_a_device() {
         let policy = llama_spawn_policy(
             &super::super::compute_device::ComputeDeviceSelection::Auto,
             true,
@@ -1403,15 +1400,9 @@ mod tests {
         assert_eq!(
             policy,
             LlamaSpawnPolicy {
-                gpu_layers: super::super::compute_device::gpu_layers(
-                    &super::super::compute_device::ComputeDeviceSelection::Auto,
-                ),
+                gpu_layers: "99",
                 model_device: None,
-                projector_offload: Some(
-                    super::super::compute_device::gpu_layers(
-                        &super::super::compute_device::ComputeDeviceSelection::Auto,
-                    ) != "0",
-                ),
+                projector_offload: Some(true),
                 projector_device: None,
             }
         );

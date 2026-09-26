@@ -33,12 +33,15 @@
 // after it began requiring 28-bit proof of work for anonymous events.
 // `relay.damus.io` and `relay.froth.zone` remain omitted after repeated
 // connection failures, while offchain.pub requires publishers to be in its web
-// of trust.
+// of trust. `purplerelay.com` was removed after live diagnostics on 2026-09-23
+// showed its publish path rejecting writes with an MDB disk-full error.
+// `relay.mostr.pub` and `relay.mostro.network` failed the round-trip on
+// 2026-09-25; their replacements passed the same live probe that day.
 export const DEFAULT_RELAY_URLS: string[] = [
   'wss://relay.primal.net',
   'wss://strfry.shock.network',
-  'wss://relay.mostr.pub',
   'wss://relay.snort.social',
-  'wss://relay.mostro.network',
-  'wss://purplerelay.com',
+  'wss://nostr.mom',
+  'wss://relay.wellorder.net',
+  'wss://relay.sigit.io',
 ]

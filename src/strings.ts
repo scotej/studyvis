@@ -512,11 +512,12 @@ export const strings = {
       `Invite sent to ${name} — no confirmation from their app yet. If nothing happens, make sure they've added you back.`,
     inviteSendErrorFallback: "Couldn't send the invite.",
     joinErrorFallback: "Couldn't join the session.",
-    // F6 — friend was offline; we couldn't deliver now, but the invite is held
-    // and re-sent automatically the moment they come online (within a few
-    // minutes). Distinct from inviteRelayError below, which blames the network.
+    // F6 — this send found no WebRTC peer. A pending invite is retried when a
+    // direct presence heartbeat proves the peer connection has recovered.
     inviteTimeout:
-      "Your friend looks offline. We'll deliver this the moment they come online — keep your session open.",
+      "Couldn't deliver the invite yet. We'll retry if a direct connection forms while you keep this session open.",
+    inviteLimitedConnection:
+      "Your friend is online, but a direct connection isn't forming. Check TURN preference and Test connection in Network settings on both devices, then fully restart StudyVis.",
     // F1/F6 — the relays themselves were unreachable, so this is the user's own
     // network, not an offline friend. No retry is queued (the relay would be
     // just as unreachable), so the copy points at the network, not the friend.
@@ -573,8 +574,11 @@ export const strings = {
       emptyOnline: 'No friends online right now.',
       listAriaLabel: 'Online friends',
       rowCta: 'Invite',
+      sendingLabel: 'Sending…',
       invitedLabel: 'Invited',
       rowInviteAriaLabel: (name: string) => `Invite ${name} to this session`,
+      sendingAriaLabel: (name: string) => `Sending invite to ${name}`,
+      invitedAriaLabel: (name: string) => `Invited ${name} to this session`,
     },
     // U2 — empty-peer waiting state (DESIGN-SYSTEM §10 empty-state: no
     // spinner, calm copy) shown alongside the self tile while alone.
@@ -1688,7 +1692,7 @@ export const strings = {
         },
         turn: {
           label: 'TURN server',
-          help: 'A TURN relay gets you through strict firewalls and NATs. Self-host coturn, or use a provider. All three fields are required to enable it. Sessions, pairing, and invites use it right away; presence and invite delivery pick it up after a restart.',
+          help: 'A TURN relay can get you through strict firewalls and NATs. Self-host coturn, or use a provider. All three fields are required. Fully quit and reopen StudyVis on both devices after changing TURN settings so invite, presence, and session connections use them.',
           urlLabel: 'TURN URL',
           urlPlaceholder: 'turn:turn.example.com:3478',
           urlAriaLabel: 'TURN server URL',
@@ -1697,7 +1701,9 @@ export const strings = {
           credentialLabel: 'Password',
           credentialAriaLabel: 'TURN password',
           invalidUrl: 'TURN URL must start with turn: or turns:',
-          active: 'TURN server active — the preference above now applies.',
+          active:
+            'TURN server saved. Fully quit and reopen StudyVis on both devices after a change.',
+          disabled: 'TURN server saved but disabled by “Never use TURN” above.',
           // #47 C5 — reachability probe: a throwaway relay-only
           // RTCPeerConnection against the user's own server, so a typo'd
           // credential is distinguishable from a network problem before a
@@ -1707,7 +1713,7 @@ export const strings = {
             testing: `Testing${'…'}`,
             ariaLabel: 'Test the TURN server connection',
             success: (seconds: string) =>
-              `Relay candidate gathered in ${seconds}s — your TURN server works from this network.`,
+              `Relay candidate gathered in ${seconds}s. This device can reach your TURN server; a session with your friend still needs to connect.`,
             timeout:
               'No relay candidate within 10 seconds. Check the URL and that the server is reachable from this network.',
             noRelay:

@@ -80,6 +80,69 @@ function accessorOf(target: object, key: string): (() => unknown) | null {
   return null
 }
 
+type NegotiationOperation =
+  'setLocalDescription' | 'setRemoteDescription' | 'addIceCandidate'
+
+const NEGOTIATION_ERROR_NAMES = new Set([
+  'Error',
+  'TypeError',
+  'SyntaxError',
+  'RangeError',
+  'InvalidStateError',
+  'InvalidAccessError',
+  'InvalidModificationError',
+  'NotSupportedError',
+  'OperationError',
+  'RTCError',
+])
+
+function observeNegotiationFailure<K extends NegotiationOperation>(
+  connection: RTCPeerConnection,
+  operation: K
+): void {
+  const native = connection[operation]
+  if (typeof native !== 'function') return
+
+  const report = (error: unknown) => {
+    try {
+      const name =
+        error && typeof error === 'object' && 'name' in error
+          ? error.name
+          : null
+      // Native messages can contain SDP or ICE addresses. Even names must be
+      // allowlisted before they enter a shareable diagnostics archive.
+      log.warn(`negotiation.${operation}.failed`, {
+        errorName:
+          typeof name === 'string' && NEGOTIATION_ERROR_NAMES.has(name)
+            ? name
+            : 'unknown',
+        connectionState: connection.connectionState,
+        signalingState: connection.signalingState,
+        iceConnectionState: connection.iceConnectionState,
+      })
+    } catch {
+      // Diagnostic accessors must never replace the original failure.
+    }
+  }
+
+  connection[operation] = new Proxy(native, {
+    apply(target, receiver, args) {
+      try {
+        const result = Reflect.apply(target, receiver, args) as
+          Promise<unknown> | undefined
+        if (!result || typeof result.catch !== 'function') return result
+        return result.catch((error: unknown) => {
+          report(error)
+          throw error
+        })
+      } catch (error) {
+        report(error)
+        throw error
+      }
+    },
+  })
+}
+
 // Shadows `connectionState` / `iceConnectionState` on the instance and holds a
 // post-`connected` `disconnected` back for `holdMs`. Exported for unit tests,
 // which install it over a fake connection; production goes through
@@ -298,11 +361,65 @@ export function createResilientPeerConnection(
 ): PeerConnectionConstructor {
   return new Proxy(Base, {
     construct(target, args) {
+      const config = args[0] as RTCConfiguration | undefined
+      const turnServerCount = (config?.iceServers ?? []).filter((server) => {
+        const urls = Array.isArray(server.urls) ? server.urls : [server.urls]
+        return urls.some((url) => /^turns?:/i.test(url))
+      }).length
       const connection = Reflect.construct(
         target,
         args
       ) as unknown as RTCPeerConnection
+      // A saved TURN setting is not proof that the peer connection received
+      // it. Record only the effective mode and count; URLs and credentials
+      // must never enter a diagnostics archive. Distinct event names keep a
+      // changed mode visible despite the log's 10-second duplicate throttle.
+      const mode =
+        turnServerCount === 0
+          ? 'stun'
+          : config?.iceTransportPolicy === 'relay'
+            ? 'turn-only'
+            : 'turn-auto'
+      log.info(`peer.created.${mode}`, {
+        iceTransportPolicy: config?.iceTransportPolicy ?? 'all',
+        turnServerCount,
+      })
+      // Trystero catches these native failures before global error handlers
+      // can see them, including renegotiation failures after media is added.
+      observeNegotiationFailure(connection, 'setLocalDescription')
+      observeNegotiationFailure(connection, 'setRemoteDescription')
+      observeNegotiationFailure(connection, 'addIceCandidate')
       installTransientDisconnectHold(connection, holdMs)
+      // Trystero clears a failed answer peer without destroying it. Let its
+      // state handlers see the failure first, then close the abandoned PC so
+      // repeated failed handshakes cannot exhaust the browser's PC limit.
+      let cleanupQueued = false
+      const closeFailedConnection = () => {
+        if (cleanupQueued) return
+        if (
+          connection.connectionState !== 'failed' &&
+          connection.iceConnectionState !== 'failed'
+        ) {
+          return
+        }
+        cleanupQueued = true
+        queueMicrotask(() => {
+          cleanupQueued = false
+          // Trystero already abandoned the peer when it observed `failed`.
+          // A quick native state change cannot make that peer owned again.
+          if (connection.connectionState === 'closed') return
+          closeTransport(connection)
+          log.warn('peer.failed_closed')
+        })
+      }
+      connection.addEventListener(
+        'connectionstatechange',
+        closeFailedConnection
+      )
+      connection.addEventListener(
+        'iceconnectionstatechange',
+        closeFailedConnection
+      )
       return connection
     },
   })

@@ -210,7 +210,7 @@ export type SessionViewProps = {
   // a live session toward the 4-user mesh. Both omitted in tests, which
   // hides the invite affordance entirely.
   presence?: PresenceMap
-  onInviteFriend?: (friend: Friend) => void
+  onInviteFriend?: (friend: Friend) => Promise<boolean>
   // #47 B2 — open the Home-hosted settings overlay (optionally deep-linked
   // to a category) WITHOUT unmounting the session. Shipped error copy sends
   // users to "Settings → AI"; before this, following it meant leaving — and
@@ -517,6 +517,7 @@ export function SessionView({
     let offJoinStream: (() => void) | null = null
     void (async () => {
       try {
+        log.info('media.acquire_started')
         const stream = await navigator.mediaDevices.getUserMedia(
           mediaConstraints(
             useSettingsStore.getState().values.audioInputDeviceId
@@ -527,6 +528,10 @@ export function SessionView({
           return
         }
         acquiredStream = stream
+        log.info('media.acquired', {
+          audioTracks: stream.getAudioTracks().length,
+          videoTracks: stream.getVideoTracks().length,
+        })
         // Default-muted unless PTT is currently held (PLAN.md §5: "Default-
         // muted; PTT key unmutes only while held."). Read the live PTT state
         // imperatively so a stream re-acquire mid-hold (e.g. clicking
@@ -553,6 +558,7 @@ export function SessionView({
         const handleTrackEnded = () => {
           if (cancelled) return
           if (localStreamRef.current !== stream) return
+          log.warn('media.track_ended')
           setMediaErrorName('NotReadableError')
         }
         const endedTracks = stream.getTracks()
@@ -583,6 +589,7 @@ export function SessionView({
           typeof err === 'object' && err !== null && 'name' in err
             ? String((err as { name: unknown }).name)
             : ''
+        log.warn('media.acquire_failed', { kind: mediaErrorKind(name) })
         setMediaErrorName(name)
       }
     })()

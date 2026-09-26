@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # #312: host EGL drivers load newer Wayland APIs than Noble's bundled client.
-# Apply that host ABI boundary after every dependency-deploying input plugin,
+# Vulkan likewise uses the host loader and vendor ICDs.
+# Apply those host ABI boundaries after every dependency-deploying input plugin,
 # before the unchanged pinned output tool generates the AppImage/signatures.
 set -euo pipefail
 
@@ -41,7 +42,8 @@ for libdir in "$appdir/usr/lib" "$appdir/usr/lib64"; do
   [[ ! -L $libdir ]] || die "refusing a symlinked AppDir library directory: $libdir"
   [[ -e $libdir ]] || continue
   [[ -d $libdir ]] || die "AppDir library path is not a directory: $libdir"
-  find "$libdir" -name 'libwayland-client.so*' \( -type f -o -type l \) -delete
+  find "$libdir" \( -name 'libwayland-client.so*' -o -name 'libvulkan.so*' \) \
+    \( -type f -o -type l \) -delete
 done
 
 exec "$output_tool" --appdir "$appdir"

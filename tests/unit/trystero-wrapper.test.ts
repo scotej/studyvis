@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, test, vi } from 'vitest'
 
+import { __resetLog, recentRecords } from '@/lib/log'
+
 // The integration tests mock `@/lib/trystero` and substitute their own
 // in-process bus, so the real wrapper's fanout/unsubscribe semantics are
 // never exercised there. This file mocks the underlying `trystero` package
@@ -20,6 +22,7 @@ const captured: {
   config: Record<string, unknown> | null
   callbacks: Record<string, unknown> | null
   addStream: Array<[MediaStream, unknown]>
+  mediaResults: Promise<void>[]
   removeStream: Array<[MediaStream, unknown]>
 } = {
   onPeerJoin: null,
@@ -28,6 +31,7 @@ const captured: {
   config: null,
   callbacks: null,
   addStream: [],
+  mediaResults: [],
   removeStream: [],
 }
 
@@ -63,7 +67,7 @@ vi.mock('trystero', () => ({
       }),
       addStream: (stream: MediaStream, options: unknown) => {
         captured.addStream.push([stream, options])
-        return []
+        return captured.mediaResults
       },
       removeStream: (stream: MediaStream, options: unknown) => {
         captured.removeStream.push([stream, options])
@@ -84,6 +88,8 @@ beforeEach(() => {
   captured.config = null
   captured.callbacks = null
   captured.addStream.length = 0
+  captured.mediaResults = []
+  __resetLog()
   captured.removeStream.length = 0
   for (const k of Object.keys(fakeSockets)) delete fakeSockets[k]
 })
@@ -169,6 +175,38 @@ describe('trystero wrapRoom fanout', () => {
 // translation — screenShare.ts is the app's only metadata producer, and
 // SessionView reads that metadata to tell a screen share from a camera.
 describe('trystero wrapRoom media options mapping', () => {
+  test('observes every publication rejection without delaying join subscription', async () => {
+    const room = joinTopic({ topic: 't', password: 'p' })
+    let rejectFirst!: (reason: Error) => void
+    let rejectSecond!: (reason: Error) => void
+    captured.mediaResults = [
+      new Promise<void>((_, reject) => {
+        rejectFirst = reject
+      }),
+      new Promise<void>((_, reject) => {
+        rejectSecond = reject
+      }),
+    ]
+    expect(room.addStream({} as MediaStream)).toBeUndefined()
+    const onJoin = vi.fn()
+    room.onPeerJoin(onJoin)
+    captured.onPeerJoin?.('new-peer')
+    expect(onJoin).toHaveBeenCalledWith('new-peer')
+
+    rejectFirst(new Error('private SDP and device details'))
+    rejectSecond(new Error('second private failure'))
+    await Promise.resolve()
+    const records = recentRecords()
+    expect(records).toContainEqual(
+      expect.objectContaining({
+        scope: 'p2p.trystero',
+        msg: 'media.publish_failed',
+        lvl: 'warn',
+      })
+    )
+    expect(JSON.stringify(records)).not.toContain('private')
+  })
+
   test('addStream maps positional target + metadata onto the options object', () => {
     const room = joinTopic({ topic: 't', password: 'p' })
     const stream = {} as MediaStream

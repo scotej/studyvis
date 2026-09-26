@@ -141,7 +141,7 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master; the toolchain input selects the channel
+      - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # master; the toolchain input selects the channel
         with:
           toolchain: '1.97.1'
 
@@ -211,7 +211,7 @@ jobs:
             libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev \
             libxdo-dev libssl-dev libdbus-1-dev build-essential file
 
-      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master; the toolchain input selects the channel
+      - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # master; the toolchain input selects the channel
         with:
           # With a master pin the ref no longer selects the toolchain; this
           # input does.
@@ -345,6 +345,16 @@ jobs:
             libpipewire-0.3-dev libpipewire-0.3-modules libspa-0.2-modules \
             pipewire-bin libselinux1 libpcre2-8-0
 
+      - name: Verify pinned historical AppArmor source download
+        shell: bash
+        run: |
+          set -euo pipefail
+          source_dir=$(mktemp -d "$RUNNER_TEMP/studyvis-apparmor-source.XXXXXX")
+          bash scripts/download-linux-apparmor-source.sh "$source_dir"
+          dsc="$source_dir/apparmor_4.0.1really4.0.1-0ubuntu0.24.04.7.dsc"
+          grep -Fxq 'Version: 4.0.1really4.0.1-0ubuntu0.24.04.7' "$dsc"
+          test "$(find "$source_dir" -mindepth 1 -maxdepth 1 -type f | wc -l)" -eq 3
+
       # Ubuntu 24.04 restricts unprivileged user namespaces through AppArmor,
       # which is exactly what WebKit's bubblewrap sandbox needs to start. This
       # is a runner accommodation only: the shipped AppImage relies on the
@@ -365,7 +375,7 @@ jobs:
           cache: 'npm'
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master; the toolchain input selects the channel
+        uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # master; the toolchain input selects the channel
         with:
           toolchain: '1.97.1'
 
@@ -676,6 +686,34 @@ jobs:
           fi
           echo "Packaged AppImage stayed alive and attested a first-document WebRTC data-channel offer."
 
+      # Release publication archives source for every Ubuntu-owned ELF in the
+      # exact AppImage. Exercise that same download before a tag is created:
+      # a runner can retain a binary whose source version left current indexes.
+      - name: Enable authenticated Noble source indexes
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo tee /etc/apt/sources.list.d/studyvis-deb-src.list >/dev/null <<'EOF'
+          deb-src https://archive.ubuntu.com/ubuntu noble main restricted universe multiverse
+          deb-src https://archive.ubuntu.com/ubuntu noble-updates main restricted universe multiverse
+          deb-src https://archive.ubuntu.com/ubuntu noble-backports main restricted universe multiverse
+          deb-src https://security.ubuntu.com/ubuntu noble-security main restricted universe multiverse
+          EOF
+          sudo apt-get -o Acquire::Retries=3 update
+
+      - name: Verify exact AppImage system source bundle
+        shell: bash
+        env:
+          GITHUB_TOKEN: ''
+          GH_TOKEN: ''
+        run: |
+          set -euo pipefail
+          bundle="$RUNNER_TEMP/StudyVis_linux-system-sources-preflight.tar.gz"
+          bash scripts/build-linux-system-sources.sh \
+            --appimage "$APPIMAGE_PATH" --output "$bundle"
+          test -s "$bundle"
+          tar -tzf "$bundle" >/dev/null
+
   # ---------------------------------------------------------------------
   # Everything below is new pre-merge surface (#102). Each job is cheap and
   # independent, so they fan out beside the two slow ones above rather than
@@ -736,7 +774,7 @@ jobs:
       # policy; the heuristic audits below it would gate merges on
       # low-confidence guesses, which is how a gate gets ignored.
       - name: zizmor (blocking — pinning policy)
-        uses: zizmorcore/zizmor-action@70fb788f84895a7701f5643d103d587e460b5c99 # v0.6.3
+        uses: zizmorcore/zizmor-action@cc914d7f3750a2d13d75c7f184a1060aa0e9d482 # v0.6.4
         with:
           version: 1.28.0
           config: .github/zizmor.yml
@@ -751,7 +789,7 @@ jobs:
       # triage, not a red X on an unrelated PR.
       - name: zizmor (advisory — full findings to code scanning)
         continue-on-error: true
-        uses: zizmorcore/zizmor-action@70fb788f84895a7701f5643d103d587e460b5c99 # v0.6.3
+        uses: zizmorcore/zizmor-action@cc914d7f3750a2d13d75c7f184a1060aa0e9d482 # v0.6.4
         with:
           version: 1.28.0
           config: .github/zizmor.yml

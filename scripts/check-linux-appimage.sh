@@ -113,6 +113,9 @@ packaged_library_path="$packaged_libdir:$root/usr/lib/x86_64-linux-gnu"
 while IFS= read -r -d '' client; do
   die "host EGL would load a bundled Wayland client: ${client#"$root/"}"
 done < <(find "$root/usr" -name 'libwayland-client.so*' -print0)
+while IFS= read -r -d '' loader; do
+  die "Vulkan must use the host loader: ${loader#"$root/"}"
+done < <(find "$root/usr" -name 'libvulkan.so*' -print0)
 for library in \
   libwebkit2gtk-4.1.so.0 libjavascriptcoregtk-4.1.so.0 \
   librice-proto.so.0 librice-io.so.0; do
@@ -330,11 +333,12 @@ grep -aFq "StudyVis GStreamer $STUDYVIS_GSTREAMER_VERSION (runtime r$STUDYVIS_WE
   die "packaged WebRTC plugin is missing its pinned runtime build marker"
 }
 test_home="$extract/home"
-mkdir -p "$test_home"
+mkdir -p "$test_home/.config"
 for element in \
   videotestsrc audiotestsrc \
   glupload glcolorconvert gldownload \
   pipewiresrc webrtcbin nicesrc nicesink rtpbin \
+  v4l2src jpegenc jpegdec decodebin3 \
   vp8enc vp8dec rtpvp8pay rtpvp8depay \
   opusenc opusdec rtpopuspay rtpopusdepay \
   dtlssrtpenc dtlssrtpdec srtpenc srtpdec sctpenc sctpdec; do
@@ -389,6 +393,8 @@ for module in protocol-native client-node client-device adapter metadata session
   require_file "$pipewire_modules/libpipewire-module-$module.so"
 done
 env LD_LIBRARY_PATH="$packaged_library_path" \
+  HOME="$test_home" \
+  XDG_CONFIG_HOME="$test_home/.config" \
   SPA_PLUGIN_DIR="$spa_plugins" \
   PIPEWIRE_MODULE_DIR="$pipewire_modules" \
   PIPEWIRE_CONFIG_DIR="$pipewire_config" \
@@ -397,18 +403,38 @@ import ctypes
 import sys
 
 library = ctypes.CDLL(sys.argv[1])
+library.pw_init.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+library.pw_init.restype = None
 library.pw_init(None, None)
+library.pw_loop_new.argtypes = [ctypes.c_void_p]
 library.pw_loop_new.restype = ctypes.c_void_p
 library.pw_context_new.restype = ctypes.c_void_p
 library.pw_context_new.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_size_t]
+library.pw_context_destroy.argtypes = [ctypes.c_void_p]
+library.pw_context_destroy.restype = None
+library.pw_loop_destroy.argtypes = [ctypes.c_void_p]
+library.pw_loop_destroy.restype = None
+library.pw_deinit.argtypes = []
+library.pw_deinit.restype = None
 
-loop = library.pw_loop_new(None)
-if not loop:
-    sys.exit("pw_loop_new() returned NULL: the packaged SPA plugins are missing")
-# Every context.modules entry in client.conf is mandatory; a NULL here means
-# one of the packaged modules did not load.
-if not library.pw_context_new(loop, None, 0):
-    sys.exit("pw_context_new() returned NULL: the packaged PipeWire modules are incomplete")
+try:
+    loop = library.pw_loop_new(None)
+    if not loop:
+        sys.exit("pw_loop_new() returned NULL: the packaged SPA plugins are missing")
+    try:
+        # Every context.modules entry in client.conf is mandatory; a NULL here
+        # means one of the packaged modules did not load.
+        context = library.pw_context_new(loop, None, 0)
+        if not context:
+            sys.exit("pw_context_new() returned NULL: the packaged PipeWire modules are incomplete")
+        print("Packaged PipeWire context created", flush=True)
+        # Unload its modules before Python tears down the ctypes library.
+        library.pw_context_destroy(context)
+    finally:
+        library.pw_loop_destroy(loop)
+finally:
+    library.pw_deinit()
+print("Packaged PipeWire context and loop destroyed", flush=True)
 PROBE
 
 # A data-channel offer does not exercise receiver creation or renegotiation.
@@ -437,7 +463,31 @@ env \
 llama_runtime="$root/usr/lib/StudyVis/binaries/llama-runtime-x86_64-unknown-linux-gnu"
 llama_server="$root/usr/bin/llama-server"
 require_executable "$llama_server"
+require_x86_64_elf "$llama_runtime/libggml-vulkan.so"
+require_x86_64_elf "$llama_runtime/libggml-cpu-x64.so"
+# Only the optional backend may require Vulkan. Linking it into a core library
+# would prevent CPU startup on hosts without the loader, even with --device none.
+for library in "$llama_server" "$llama_runtime"/*.so*; do
+  [[ ${library##*/} == libggml-vulkan.so* ]] && continue
+  dependencies=$(readelf -d "$library")
+  if grep -Eq '\(NEEDED\).*\[(libvulkan\.so|libggml-vulkan\.so)' <<<"$dependencies"; then
+    die "CPU fallback links Vulkan directly: ${library#"$root/"}"
+  fi
+done
 env LD_LIBRARY_PATH="$packaged_library_path:$llama_runtime" \
   "$llama_server" --version >/dev/null
+# Use the same backend search directory as the application. Empty ICD discovery
+# exercises CPU-only hosts without requiring a GPU on the packaging runner.
+(
+  cd "$llama_runtime"
+  env LD_LIBRARY_PATH="$packaged_library_path:$llama_runtime" \
+    VK_DRIVER_FILES="$extract/no-vulkan-driver.json" \
+    VK_ICD_FILENAMES="$extract/no-vulkan-driver.json" \
+    timeout 30 "$llama_server" --list-devices >"$extract/llama-devices.txt" 2>"$extract/llama-backends.txt"
+)
+grep -Fq 'loaded CPU backend' "$extract/llama-backends.txt" || {
+  cat "$extract/llama-backends.txt" >&2
+  die "packaged llama runtime cannot load its CPU fallback"
+}
 
 echo "Validated packaged WebKit, sandbox, WebRTC, PipeWire, licenses, and llama runtimes: $appimage"
