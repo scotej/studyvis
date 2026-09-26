@@ -338,6 +338,7 @@ for element in \
   videotestsrc audiotestsrc \
   glupload glcolorconvert gldownload \
   pipewiresrc webrtcbin nicesrc nicesink rtpbin \
+  v4l2src jpegenc jpegdec decodebin3 \
   vp8enc vp8dec rtpvp8pay rtpvp8depay \
   opusenc opusdec rtpopuspay rtpopusdepay \
   dtlssrtpenc dtlssrtpdec srtpenc srtpdec sctpenc sctpdec; do

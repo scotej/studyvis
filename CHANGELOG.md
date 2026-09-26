@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- Linux camera previews no longer stay blank when a webcam uses MJPEG. The
+  AppImage now includes the JPEG decoder needed by camera capture.
+
 ## 1.12.4 — 2026-09-25 — Reliable session invitations
 
 ### Fixed
