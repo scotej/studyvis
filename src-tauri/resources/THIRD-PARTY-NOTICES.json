@@ -16,11 +16,11 @@
   "inputs": [
     {
       "path": "package-lock.json",
-      "sha256": "75d780b03cdf8d9763566fed6e9919aea1c6c3a59c93be11cc0d7757507eae76"
+      "sha256": "52e956013d4e67fbc270376297715cc7ca93e2de7aada74538d0b73dd4cf18df"
     },
     {
       "path": "package.json",
-      "sha256": "df0ce25d48bfbe0c435afcd94c65b00938a3dc2c5af4674a257bd8ecdc7aaa66"
+      "sha256": "e24dffb2193eaa2b17bd10f4ec11efb781a350ad7cc6003591cea40e54c5615d"
     },
     {
       "path": "scripts/fetch-llama-server.sh",
