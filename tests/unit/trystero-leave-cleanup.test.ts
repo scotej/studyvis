@@ -178,8 +178,17 @@ describe('patched Trystero room leave cleanup', () => {
     vi.useFakeTimers()
     try {
       const unsubscribeError = new Error('unsubscribe failed')
+      let signalUnsubscribed: () => void
+      const unsubscribed = new Promise<void>((resolve) => {
+        signalUnsubscribed = resolve
+      })
       const unsubscribe = vi.fn(() => {
+        signalUnsubscribed()
         throw unsubscribeError
+      })
+      let signalSubscribed: () => void
+      const subscribed = new Promise<void>((resolve) => {
+        signalSubscribed = resolve
       })
       let resolveSubscription: (unsubscribe: () => void) => void
       const subscription = new Promise<() => void>((resolve) => {
@@ -187,7 +196,10 @@ describe('patched Trystero room leave cleanup', () => {
       })
       const joinRoom = createStrategy({
         init: () => ({}),
-        subscribe: () => subscription,
+        subscribe: () => {
+          signalSubscribed()
+          return subscription
+        },
         announce: async () => 60_000,
       })
       const room = joinRoom(
@@ -195,19 +207,14 @@ describe('patched Trystero room leave cleanup', () => {
         'same-room'
       )
 
+      await subscribed
       const leave = room.leave()
       await vi.advanceTimersByTimeAsync(99)
       await expect(leave).resolves.toBeUndefined()
       expect(unsubscribe).not.toHaveBeenCalled()
 
       resolveSubscription!(unsubscribe)
-      // The deferred cleanup can only run once the strategy's own topic
-      // promises resolve, and those are WebCrypto digests that settle off the
-      // timer queue. One tick is usually enough and occasionally is not, so
-      // give the event loop a bounded number of real turns instead.
-      for (let i = 0; i < 20 && unsubscribe.mock.calls.length === 0; i += 1) {
-        await vi.advanceTimersByTimeAsync(0)
-      }
+      await unsubscribed
       expect(unsubscribe).toHaveBeenCalledTimes(1)
     } finally {
       vi.useRealTimers()

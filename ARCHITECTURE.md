@@ -109,13 +109,19 @@ experimental features still off but WebRTC explicitly on; it also reasserts
 media streams, GStreamer WebRTC, librice, and the bubblewrap sandbox. librice
 keeps ICE/network work in WebKit's sandboxed NetworkProcess.
 
-Runtime revision 5 has this reviewable input identity:
+Runtime revision 8 has this reviewable input identity:
 
 | Input | Version/source | SHA-256 |
 |-|-|-|
 | WebKitGTK | `webkitgtk-2.52.5.tar.xz` from `webkitgtk.org/releases` | `8a531a9abd2215936e8a8a914c077b586c0228b31d652f205286a8ec90f3364b` |
 | librice | GitHub tag archive `v0.4.3` | `4671e1835f9ab0f8d87e8d9e22b6bfb06f928aeae442841ab81881dff61e3f4b` |
-| WebKit AppImage portability delta | `scripts/patches/webkitgtk-2.52.5-appimage-sandbox.patch` | `12a6cf019e883c9f13c84a904e7410247678dca094289124fc6b76fc4a66bb0b` |
+| WebKit AppImage portability delta | `scripts/patches/webkitgtk-2.52.5-appimage-sandbox.patch` | `ae3cfcd66c3f8deaf4ff60809e53e52f09e0aa916e3db04f296ae9e951aa1250` |
+| GStreamer core | `gstreamer-1.28.7.tar.xz` from `gstreamer.freedesktop.org/src` | `787329b2c5758e228a71d926a6dcf960bceaacca3cadd63874ba665dfcda013e` |
+| GStreamer base | `gst-plugins-base-1.28.7.tar.xz` from `gstreamer.freedesktop.org/src` | `ed6e5410f496d171818763af2265e7977154bc7f9b827e98acf8c5bed21dd5a7` |
+| GStreamer good | `gst-plugins-good-1.28.7.tar.xz` from `gstreamer.freedesktop.org/src` | `87256969c82cf3bc8574301f3e7044a90de0ac500a5a27d8ba38c4dde894dd8b` |
+| GStreamer bad | `gst-plugins-bad-1.28.7.tar.xz` from `gstreamer.freedesktop.org/src` | `dc525383c18b2c265bbe6a43d498656cd918aaa130aa4e3abeabcdaa741c3ffe` |
+| libnice | `libnice-0.1.24.tar.gz` from `libnice.freedesktop.org/releases` | `cfb5e8e778534f2f5b3c6f4958a1eb057c6b95c537c0f100817a537cf5d64fcc` |
+| Meson | GitHub release archive `1.7.2` | `4d40d63aa748a9c139cc41ab9bffe43edd113c5639d78bde81544ca955aea890` |
 
 `scripts/linux-webkit-runtime.env` is the version/hash authority;
 `scripts/build-linux-webkit-runtime.sh` verifies the downloads, applies that
@@ -131,13 +137,15 @@ compiled native locations. This avoids silently resolving the host's
 it does not disable the sandbox. Reproducibility here means pinned and checked
 source inputs, local delta, build environment, and configuration—not a claim of
 bit-for-bit identical output from arbitrary machines. Production builds use
-Ubuntu 24.04, Rust 1.97.1, and `cargo-c` 0.10.24. Ubuntu 24.04 is the floor
-that WebKit's librice ICE agent forces: it subclasses `GstWebRTCICE`, which
-GStreamer only exposes from 1.22, while WebKit's own configure gate still
-accepts 1.20. Ubuntu 22.04's GStreamer 1.20.3 therefore configured cleanly and
-failed hours later inside the unified build, so the builder now asserts
-`gstreamer-webrtc-1.0 >= 1.22` before compiling anything. That floor also sets
-the artifact's own glibc 2.39 floor. The hosted image and Noble apt
+Ubuntu 24.04, Rust 1.97.1, and `cargo-c` 0.10.24, retaining the artifact's
+glibc 2.39 floor. The private runtime also builds matched GStreamer 1.28.7
+core/base/good/bad and libnice 0.1.24 libraries and curated plugins using source-pinned Meson
+1.7.2. Noble's 1.24.2 satisfies WebKit's advertised configure minimum but
+misassigns sending pads, creates receiving transceivers too late, and omits
+SDP attributes WebKit needs to attach decoded frames to JavaScript tracks
+(#312). Source-built helpers and all packaged GStreamer libraries/plugins are
+checked against their original build IDs; only the PipeWire plugin uses the
+distro's stable GStreamer 1.x ABI. The hosted image and Noble apt
 indexes are mutable, so this is a bounded build baseline rather than a fully
 pinned or bit-reproducible environment. A stronger future boundary would use a
 snapshot-pinned apt repository or digest-pinned build container and record the
@@ -149,6 +157,16 @@ the tagged release leg has no compiler cache, for the same reason it restores
 no binary prefix. The builder also scales its own parallelism to the smaller of
 the host's CPU count and one job per 2 GB of RAM, which is what WebKit's
 unified translation units actually consume.
+
+The curated media payload includes JPEG decoding for MJPEG webcams
+through WebKit's `decodebin3` capture path, WebKit's black/silence fallback sources,
+OpenGL upload/conversion/download elements for portal frames, and matching NSS
+soft-token/freebl modules for Noble's SRTP encryption. WebKit requests linear
+BGRA DMA-BUF caps because the packaged PipeWire 1.0.5 plugin cannot negotiate
+newer `DMA_DRM` caps. The AppImage output wrapper removes only the bundled
+Wayland client provider before invoking the unchanged verified output tool:
+host EGL drivers must load their matching client library. Private WebKit and
+the remaining reviewed ABI boundary stay under the normal artifact checks.
 
 Every platform bundle also carries identical generated
 `THIRD-PARTY-NOTICES.txt` and `THIRD-PARTY-NOTICES.json` Tauri resources. The
@@ -181,9 +199,10 @@ identity, including the AppImage-relative subprocess, injected-bundle, and
 sandbox-helper layout, while `WEBKIT-THIRD-PARTY-LICENSES.txt` and
 `WEBKIT-LICENSE-FILES.sha256` preserve a readable and hash-addressed inventory
 of all 59 upstream WebKit license/notice files discovered by the pinned source
-build. The builder's `--source-bundle` mode separately creates a deterministic
-corresponding-source archive containing the exact verified WebKitGTK/librice
-archives, complete patch, pinned env, builder, expected manifest, reconstruction
+build. A separate GStreamer license inventory and Meson license accompany its
+matched source-built media stack. The builder's `--source-bundle` mode separately creates a deterministic
+corresponding-source archive containing the exact verified WebKitGTK/librice,
+GStreamer core/base/good/bad, and Meson archives, complete patch, pinned env, builder, expected manifest, reconstruction
 README, and internal checksums. Tagged Linux builds attach it as
 `StudyVis_X.Y.Z_linux-webkit-sources.tar.gz` with a basename-only `.sha256`
 sidecar after the exact-AppImage smoke; it is kept outside the AppImage to avoid
@@ -221,7 +240,12 @@ packaged-only GStreamer WebRTC/SCTP elements, verifies a gnome-keyring Secret
 Service round-trip, and starts the extracted AppImage under Xvfb. The first
 document must log `runtime.webrtc ready` after constructing a
 local peer-connection data-channel offer; this proves more than a live process
-but less than an exchanged data channel or real media session. Preview
+but does not establish a complete media session. A separate finite probe runs
+the packaged WebKit subprocesses, exchanges data, renders synthetic camera and
+screen video with original stream IDs, and exercises late publication and
+stop/restart. Native codec, SRTP, GPU-memory conversion and transceiver checks
+run with isolated packaged plugin paths. These synthetic checks do not replace
+PLAN §8's physical KDE portal/device matrix. Preview
 deployments additionally build installable macOS arm64, Windows x86_64, and
 Linux x86_64 artifacts from the exact commit. A tagged release fetches the
 pinned sidecar for each target and emits signed updater artifacts. The Linux leg
@@ -350,6 +374,16 @@ It does **not** close that connection, and the resulting half-teardown is what #
 `disconnected` is the recoverable state in the WebRTC state machine and `failed` is the terminal one, so `src/lib/webrtc/resilientPeerConnection.ts` reports the standard posture: a **post-`connected` `disconnected` is held back for 20 s** before any reader sees it, after which the truth is republished and trystero's own timer runs as before. `failed`, `closed`, and every healthy state pass through untouched and immediately, and a connection that never reached `connected` is never held, so a failing handshake still fails fast. It is installed through trystero's documented `rtcPolyfill` hook in `joinTopic` — for **every** room, because a session-only polyfill would not be the one in effect on a connection the presence room created first. Deliberate departures are unaffected: trystero's `leaveAction` arrives over the data channel and a remote teardown closes that channel, and neither path reads connection state. `p2p.transport` log records (`hold.armed` / `hold.recovered` / `hold.expired`) carry the real states for diagnostics.
 
 `lab/scenarios/reconnect.ts` is the regression: it `SIGSTOP`s a peer's Chrome renderer — where Chrome runs WebRTC — for 15 s. With the hold disabled, the observer logs `peer.left` at `degradedForMs` 5003 and the peer never returns; with it, the session comes through untouched.
+
+The pinned Trystero core also closes a shared connection after a terminal
+negotiation error. Clearing only its room bindings leaves the remote attached
+to a still-open transport, which can block fresh offers even though the local
+participant has disappeared. Error/close callbacks act only on the connection
+they registered, and replacing the last shared peer retains its new registry
+entry. A normal room leave still detaches only that room. Native SDP/candidate
+operation failures are recorded as categorical operation/error names and
+connection states; SDP, candidates, device identifiers and error messages are
+not logged.
 
 ### Relay-carried presence (I74)
 
@@ -488,7 +522,7 @@ Multi-friend invites (1:3, 1:4): Sam runs steps 1–7 once per invitee, all usin
 
 Nostr relays don't buffer for an absent peer, so an invite to a closed app can't be delivered later by itself. Two failure modes are now distinguished so the host sees the real cause:
 
-- **Friend offline** (`InviteTimeoutError`): no peer arrived on the inbox topic within the send window. The invite is held and **re-attempted automatically when that friend's presence flips online inside the retry window**, deduped per `(recipient, session)` so a friend can never receive the same invite twice.
+- **Friend may be offline** (`InviteTimeoutError`): no peer arrived on the inbox topic within the send window. The invite is held and **re-attempted on each fresh direct WebRTC presence heartbeat** from that friend inside the retry window; relay-only presence cannot deliver it. An inbox send without a recipient-signed `invite-ack` remains unconfirmed and uses the same retry path. Only one retry is queued per `(recipient, session)`, and the recipient inbox deduplicates repeated deliveries.
 - **Relay down** (`InviteRelayError`): no signaling relay was reachable at all, determined from the live relay-socket check (`relaysUnreachable`), not from trystero's `onJoinError` (which never fires for blocked relays). This is the host's own network, so no retry is queued — re-sending against dead relays would never connect.
 
 After a successful send the host lingers briefly for the recipient-signed **`invite-ack`** (#47 C2, see §7's typed-action list): a verified ACK confirms real delivery, while its absence — an older build, a slow answer, or a friend who never added you back so their inbox silently drops envelopes — renders "sent, unconfirmed" copy with a nudge to make sure they've added you back. Concurrent sends to the same friend are serialized per inbox topic (trystero's core dedupes rooms per topic, so overlapping sends would otherwise share and then destroy one raw room).
@@ -621,7 +655,7 @@ llama-server is bundled as `binaries/llama-server-{platform}` in `tauri.conf.jso
 
 **Engine scheduling priority (#269).** The child is spawned at the app's own priority, so an inference and the webview compete for the machine as equals — which is how a single check came to freeze the app for 5.5–9.2 s at a time. Every spawn site therefore drops the child one notch immediately after `spawn()`: nice **+5** on POSIX, `BELOW_NORMAL_PRIORITY_CLASS` on Windows, llama.cpp's own `GGML_SCHED_PRIO_LOW` mapping at the pinned build. On **Linux** that single call is not enough, because there the nice value is a per-*thread* attribute that threads inherit from whoever creates them: `setpriority(PRIO_PROCESS, pid, …)` moves only the thread whose tid equals the pid, and any thread llama-server already started keeps the app's priority — as would every ggml worker later born under it. So the Linux path walks `/proc/<pid>/task` and lowers each thread, repeating until a pass finds nothing new (threads created after their creator was lowered inherit the value, so only the ones that existed first need catching, and a bounded pass count keeps a thread-spawning child from holding up the spawn). macOS needs none of this — its nice really is the POSIX per-process attribute — and `BELOW_NORMAL_PRIORITY_CLASS` is process-wide by definition. Three further properties are load-bearing. It is applied from Rust rather than by passing `--prio -1`, because at the pinned commit only llama-cli calls `set_process_priority` — llama-server parses the flag into a threadpool config it never builds, so the flag is inert. It is deliberately **not** macOS `PRIO_DARWIN_BG`, which throttles I/O and timers hard enough to lengthen inference rather than merely yield the CPU. And **benchmark runs take the same spawn path**, so a measured p95 stays comparable with live per-tick cost; a new spawn site that skips the drop would make every cadence, slow-tick threshold, and request timeout derived from that p95 too tight. The change is best-effort by contract — a machine that refuses it still gets its engine — so the outcome is written to the sidecar log as `[event gen=N] yield-priority applied|refused by the OS …|failed: <err>`, which is where a diagnostics bundle answers "did the yield apply on this box?". The three states are distinct on purpose: a refusal the code tolerates so the engine still starts (`EACCES`/`RLIMIT_NICE` on a target already outside the range we may move it within, `ESRCH` on one that exited, a partially-applied Linux sweep) is not an applied yield, and logging it as one would restate the assumption the line exists to replace.
 
-**Engine resolution + auto-install (I73).** At spawn time the binary is resolved to an absolute path and launched via `shell().command()` — never `shell().sidecar()`, whose exe-relative join never matched where tauri-build/the bundler actually place the file. Preference order: (1) the bundled binary at `<exe_dir>/llama-server(.exe)` (size-gated, so the dev placeholder `build.rs` writes for debug-profile builds is treated as absent), (2) a managed install at `data_dir/engine/<tag>-<triple>/`. When neither resolves, `sidecar_start` downloads the pinned llama.cpp release asset for the current triple (SHA-256-verified; pins lockstep-tested against `scripts/fetch-llama-server.sh`), unpacks `llama-server` + companion libs, and installs it atomically — gated by the `engine_auto_install` setting (default ON; Settings → AI → AI engine also offers manual Install/Reinstall with progress via `engine:progress` events). The managed install lives in `data_dir`, so it survives app updates; the fallback rescues *spawn* failures (missing/corrupt binary), not runtime crash-loops, which still end at the restart budget. Both sources are the same pinned build, so the fallback never shifts `INFERENCE_ENGINE_FINGERPRINT`.
+**Engine resolution + auto-install (I73).** At spawn time the binary is resolved to an absolute path and launched via `shell().command()` — never `shell().sidecar()`, whose exe-relative join never matched where tauri-build/the bundler actually place the file. Preference order: (1) the bundled binary at `<exe_dir>/llama-server(.exe)` (size-gated, so the dev placeholder `build.rs` writes for debug-profile builds is treated as absent), (2) a managed install at `data_dir/engine/<tag>-r<package-revision>-<triple>/`. When neither resolves, `sidecar_start` downloads the pinned llama.cpp release asset for the current triple (SHA-256-verified; pins lockstep-tested against `scripts/fetch-llama-server.sh`), unpacks `llama-server` + companion libs, and installs it atomically — gated by the `engine_auto_install` setting (default ON; Settings → AI → AI engine also offers manual Install/Reinstall with progress via `engine:progress` events). The managed install lives in `data_dir`, so it survives app updates; the fallback rescues *spawn* failures (missing/corrupt binary), not runtime crash-loops, which still end at the restart budget. Both sources are the same pinned build, so the fallback never shifts `INFERENCE_ENGINE_FINGERPRINT`.
 
 ### Sample loop
 
@@ -1001,9 +1035,13 @@ its exact AppImage built from `x86_64-unknown-linux-gnu`.
   semantics are AppImage-specific: keep the AppImage and containing directory
   writable. Extraction mode retains the original AppImage as the update and
   relaunch target; its temporary tree is never treated as the installation.
-- The packaged llama.cpp runtime is CPU-only by default. Model benchmarking is
-  strongly recommended; users should choose a lighter model when cadence is
-  too slow.
+- The packaged llama.cpp runtime includes a dynamically loaded Vulkan backend
+  for compatible NVIDIA/AMD/Intel GPUs and CPU backends for machines without
+  an accelerator. Auto offloads model and vision-projector work when available;
+  explicit CPU disables both. GPU enumeration uses the host Vulkan loader and
+  ICD drivers, not bundled vendor drivers. Managed package revision 3 prevents
+  old CPU-only engine caches from surviving the switch. Model benchmarking is
+  strongly recommended after hardware changes.
 - Notification recovery attempts to launch KDE or GNOME's settings panel; the
   physical matrix must verify the maintained KDE path. Camera, microphone, and
   screen-capture settings do not have portable Linux deep links, so those
@@ -1015,20 +1053,23 @@ its exact AppImage built from `x86_64-unknown-linux-gnu`.
 
 `build.rs` supplies an `AppManifest` listing every custom command, so app commands are denied until a capability grants their generated `allow-*` permission. `src-tauri/permissions/window-commands.toml` is the reviewed source for those grants and must remain in lockstep with the `invoke_handler` command list.
 
-`src-tauri/capabilities/` holds two ACL files, each scoped to a single window:
+`src-tauri/capabilities/` holds three ACL files, each scoped to a single window:
 
-- `default.json` (`windows: ["main"]`) grants `core:default`, `notification:default`, `store:default`, `dialog:default`, `deep-link:default`, `updater:default`, `main-commands`, plus nine `core:window:*` bindings — `start-dragging` / `minimize` / `toggle-maximize` / `close` for the opt-in custom titlebar, `is-fullscreen` / `set-fullscreen` for the screen-share viewer, and `set-size` / `center` / `unmaximize` for the Settings → Appearance → Window reset.
+- `default.json` (`windows: ["main"]`) grants `core:default`, `notification:default`, `store:default`, `dialog:default`, `deep-link:default`, `updater:default`, `main-commands`, `core:webview:allow-create-webview-window` (the main window constructs the session overlay), plus twelve `core:window:*` bindings — `start-dragging` / `minimize` / `toggle-maximize` / `close` for the opt-in custom titlebar, `is-fullscreen` / `set-fullscreen` for the screen-share viewer, `set-size` / `center` / `unmaximize` for the Settings → Appearance → Window reset, and `hide` / `show` / `set-position` (with `set-size` again) so the main window owns the overlay's geometry: it applies the measured content height before reveal and re-asserts the top-left corner after each resize.
 - `ai-dialog.json` (`windows: ["ai-dialog"]`) grants `core:default`, `core:window:allow-close`, and `ai-dialog-commands`: only `app_log_append` and `sidecar_status`, with no plugin surface. Confining the floating dialog to its narrow command capability keeps every plugin grant and every other app command on the main window — the "scoped to the main window" invariant §12 relies on.
+- `session-overlay.json` (`windows: ["session-overlay"]`) grants only `core:default` and `core:window:allow-close`: the overlay renderer listens for its snapshot, reports its measured height and dismissals back to `main` with `emitTo`, and closes itself. It has no app command and no plugin surface; the one native tweak it needs (`session_overlay_prepare`, below) is a `main-commands` grant invoked by the main window.
 
 Plugins driven only from Rust need no ACL entry: the Tauri 2 ACL gates webview IPC, so `shell` (sidecar spawn, `commands/sidecar.rs`), `global-shortcut`, `autostart`, `opener`, and `single-instance` are registered in `lib.rs` and reached from Rust or through our own `invoke_handler` commands, none of which the ACL mediates. Correspondingly they ship no `@tauri-apps/plugin-*` JS package — package.json's five plugin packages (`deep-link`, `dialog`, `notification`, `store`, `updater`) map 1:1 to the five non-core plugin grants above.
 
-### Always-on-top floating windows (AI text dialog)
+### Always-on-top floating windows (AI text dialog, session overlay)
 The `Ctrl+]` AI dialog is a separate Tauri window with:
 - `transparent: true`
 - `decorations: false`
 - `alwaysOnTop: true`
-- macOS additionally needs `NSWindowCollectionBehavior.canJoinAllSpaces | .fullScreenAuxiliary` to appear over fullscreen apps. Set via the Tauri window-builder's macOS-specific config in V2-P7.
+- macOS additionally needs `NSWindowCollectionBehavior.canJoinAllSpaces | .fullScreenAuxiliary` to appear over fullscreen apps. tao's `visibleOnAllWorkspaces` sets only the first bit and neither Tauri's builder nor its window config can express the second, so `src-tauri/src/macos_floating_window.rs` ORs both in through AppKit after the window is built (V2-P7).
 - macOS also needs `shadow: false` (`NSWindow.hasShadow`). AppKit draws its window rim around the *alpha silhouette* of a borderless transparent window, and that silhouette is the panel plus the faint halo of the panel's own CSS shadow — so the rim renders as a phantom outline floating around the dialog rather than hugging it (I81). Depth comes from the panel's `shadow-lg` on every platform instead. Left enabled on Windows, where the same flag supplies an undecorated window's 1 px border and Windows 11 rounded corners.
+
+The in-session overlay (`sessionOverlayRuntime.ts`, #198) is the same kind of window — transparent, undecorated, floating, all-Spaces, hidden until its content is measured — but it is constructed from the main webview with `WebviewWindow`, so it could not reach that AppKit step and was absent on macOS whenever the user was in a full-screen app (#317, I118). The runtime therefore calls the `session_overlay_prepare` command, hard-wired to the overlay label and granted only to `main-commands`, inside its serialized creation step before READY/PRESENT can reveal the window; on Windows and Linux the command only verifies the window exists. One more macOS difference lives on that path: tao's resize is `setContentSize:`, which keeps the bottom-left corner fixed, so after every measured resize the runtime re-asserts the top-left corner (`core:window:allow-set-position`) to keep the card below the menu bar. The runtime logs under the `session.overlay` scope — creation, preparation and presentation failures, a READY watchdog, and each reveal by revision and height, never the notification text.
 
 ## 13. State diagrams (ASCII)
 
