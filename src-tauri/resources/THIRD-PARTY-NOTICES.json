@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "generatedBy": "scripts/generate-third-party-notices.ts",
   "noticePath": "THIRD-PARTY-NOTICES.txt",
-  "noticeSha256": "b8e852f57483887483bf4dc5b2b404403e4a90b07b0a036daa2c9e5d5f663122",
+  "noticeSha256": "ce4edf3c92c69e9eaf34821d143cf868fda8c69292cb4ef8001869eac95e48f8",
   "scope": {
     "npm": "package-lock.json v3 entries beneath node_modules whose dev flag is not true",
     "cargo": "normal dependency edges reachable from the StudyVis root under each release target; build/dev edges excluded",
@@ -16,11 +16,11 @@
   "inputs": [
     {
       "path": "package-lock.json",
-      "sha256": "75d780b03cdf8d9763566fed6e9919aea1c6c3a59c93be11cc0d7757507eae76"
+      "sha256": "895648639ee4f8c6df0cae1d25c28f7d17ed60bc94b34a4d0fafa816905ea19b"
     },
     {
       "path": "package.json",
-      "sha256": "df0ce25d48bfbe0c435afcd94c65b00938a3dc2c5af4674a257bd8ecdc7aaa66"
+      "sha256": "348fa93f4c7471e9fb7b9c40559b1983b84c937a250dbb4cee4f4d0d41a90c77"
     },
     {
       "path": "scripts/fetch-llama-server.sh",
@@ -44,7 +44,7 @@
     },
     {
       "path": "src-tauri/Cargo.lock",
-      "sha256": "1a9fe7cc176549394b8b770228d1aa2d4c157cb7906dcfc9c146de1a20591652"
+      "sha256": "078cd11dbff5bcd9433df0b1d2fdb266ea94258dce65f7e0d22bb5bee1aece22"
     },
     {
       "path": "src-tauri/Cargo.toml",
@@ -9213,13 +9213,13 @@
       ]
     },
     {
-      "id": "cargo:tauri-plugin-deep-link@2.4.9",
+      "id": "cargo:tauri-plugin-deep-link@2.4.10",
       "ecosystem": "cargo",
       "name": "tauri-plugin-deep-link",
-      "version": "2.4.9",
+      "version": "2.4.10",
       "licenseExpression": "Apache-2.0 OR MIT",
-      "source": "https://crates.io/api/v1/crates/tauri-plugin-deep-link/2.4.9/download",
-      "checksum": "70ee75bc5627f77bfdf40c913255ebc258117b10ebe2b2239a1a1cf40b0b58aa",
+      "source": "https://crates.io/api/v1/crates/tauri-plugin-deep-link/2.4.10/download",
+      "checksum": "92d489b8ecceae1cd09f6e1f7606f2095ac721cc8d54cf2f0e6bb377cc52cff6",
       "repository": "https://github.com/tauri-apps/plugins-workspace",
       "targets": [
         "aarch64-apple-darwin",
@@ -9228,15 +9228,15 @@
       ],
       "licenseFiles": [
         {
-          "path": "cargo:tauri-plugin-deep-link@2.4.9/LICENSE.spdx",
+          "path": "cargo:tauri-plugin-deep-link@2.4.10/LICENSE.spdx",
           "sha256": "9c1db6b7e7eb83e1cb2af973b5df2bdc63651ede0f38506ab98dfa0940487759"
         },
         {
-          "path": "cargo:tauri-plugin-deep-link@2.4.9/LICENSE_APACHE-2.0",
+          "path": "cargo:tauri-plugin-deep-link@2.4.10/LICENSE_APACHE-2.0",
           "sha256": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594"
         },
         {
-          "path": "cargo:tauri-plugin-deep-link@2.4.9/LICENSE_MIT",
+          "path": "cargo:tauri-plugin-deep-link@2.4.10/LICENSE_MIT",
           "sha256": "9dd42ea92cff2ede5cd477cbfcce051b2d0115c0ac7f368ee88cb545055dff1d"
         }
       ]
@@ -9329,13 +9329,13 @@
       ]
     },
     {
-      "id": "cargo:tauri-plugin-notification@2.3.3",
+      "id": "cargo:tauri-plugin-notification@2.4.0",
       "ecosystem": "cargo",
       "name": "tauri-plugin-notification",
-      "version": "2.3.3",
+      "version": "2.4.0",
       "licenseExpression": "Apache-2.0 OR MIT",
-      "source": "https://crates.io/api/v1/crates/tauri-plugin-notification/2.3.3/download",
-      "checksum": "01fc2c5ff41105bd1f7242d8201fdf3efd70749b82fa013a17f2126357d194cc",
+      "source": "https://crates.io/api/v1/crates/tauri-plugin-notification/2.4.0/download",
+      "checksum": "ad2fd40946aef810c4be9fd33a2d1b9b397cb79042b2d21c81a0a8f204354fd1",
       "repository": "https://github.com/tauri-apps/plugins-workspace",
       "targets": [
         "aarch64-apple-darwin",
@@ -9344,27 +9344,27 @@
       ],
       "licenseFiles": [
         {
-          "path": "cargo:tauri-plugin-notification@2.3.3/LICENSE.spdx",
+          "path": "cargo:tauri-plugin-notification@2.4.0/LICENSE.spdx",
           "sha256": "9c1db6b7e7eb83e1cb2af973b5df2bdc63651ede0f38506ab98dfa0940487759"
         },
         {
-          "path": "cargo:tauri-plugin-notification@2.3.3/LICENSE_APACHE-2.0",
+          "path": "cargo:tauri-plugin-notification@2.4.0/LICENSE_APACHE-2.0",
           "sha256": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594"
         },
         {
-          "path": "cargo:tauri-plugin-notification@2.3.3/LICENSE_MIT",
+          "path": "cargo:tauri-plugin-notification@2.4.0/LICENSE_MIT",
           "sha256": "9dd42ea92cff2ede5cd477cbfcce051b2d0115c0ac7f368ee88cb545055dff1d"
         }
       ]
     },
     {
-      "id": "cargo:tauri-plugin-opener@2.5.4",
+      "id": "cargo:tauri-plugin-opener@2.5.5",
       "ecosystem": "cargo",
       "name": "tauri-plugin-opener",
-      "version": "2.5.4",
+      "version": "2.5.5",
       "licenseExpression": "Apache-2.0 OR MIT",
-      "source": "https://crates.io/api/v1/crates/tauri-plugin-opener/2.5.4/download",
-      "checksum": "17e1bea14edce6b793a04e2417e3fd924b9bc4faae83cdee7d714156cceeed29",
+      "source": "https://crates.io/api/v1/crates/tauri-plugin-opener/2.5.5/download",
+      "checksum": "60d60366174b745b4ef5824b8bbc1c457fd08f0ce101ff643c0a49181a9f4e91",
       "repository": "https://github.com/tauri-apps/plugins-workspace",
       "targets": [
         "aarch64-apple-darwin",
@@ -9373,27 +9373,27 @@
       ],
       "licenseFiles": [
         {
-          "path": "cargo:tauri-plugin-opener@2.5.4/LICENSE.spdx",
+          "path": "cargo:tauri-plugin-opener@2.5.5/LICENSE.spdx",
           "sha256": "9c1db6b7e7eb83e1cb2af973b5df2bdc63651ede0f38506ab98dfa0940487759"
         },
         {
-          "path": "cargo:tauri-plugin-opener@2.5.4/LICENSE_APACHE-2.0",
+          "path": "cargo:tauri-plugin-opener@2.5.5/LICENSE_APACHE-2.0",
           "sha256": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594"
         },
         {
-          "path": "cargo:tauri-plugin-opener@2.5.4/LICENSE_MIT",
+          "path": "cargo:tauri-plugin-opener@2.5.5/LICENSE_MIT",
           "sha256": "9dd42ea92cff2ede5cd477cbfcce051b2d0115c0ac7f368ee88cb545055dff1d"
         }
       ]
     },
     {
-      "id": "cargo:tauri-plugin-shell@2.3.5",
+      "id": "cargo:tauri-plugin-shell@2.3.6",
       "ecosystem": "cargo",
       "name": "tauri-plugin-shell",
-      "version": "2.3.5",
+      "version": "2.3.6",
       "licenseExpression": "Apache-2.0 OR MIT",
-      "source": "https://crates.io/api/v1/crates/tauri-plugin-shell/2.3.5/download",
-      "checksum": "8457dbf9e2bab1edd8df22bb2c20857a59a9868e79cb3eac5ed639eec4d0c73b",
+      "source": "https://crates.io/api/v1/crates/tauri-plugin-shell/2.3.6/download",
+      "checksum": "8548af174c5516e4f71f142acea4d02e00316296ea9aafa58798851481003e3c",
       "repository": "https://github.com/tauri-apps/plugins-workspace",
       "targets": [
         "aarch64-apple-darwin",
@@ -9402,15 +9402,15 @@
       ],
       "licenseFiles": [
         {
-          "path": "cargo:tauri-plugin-shell@2.3.5/LICENSE.spdx",
+          "path": "cargo:tauri-plugin-shell@2.3.6/LICENSE.spdx",
           "sha256": "9c1db6b7e7eb83e1cb2af973b5df2bdc63651ede0f38506ab98dfa0940487759"
         },
         {
-          "path": "cargo:tauri-plugin-shell@2.3.5/LICENSE_APACHE-2.0",
+          "path": "cargo:tauri-plugin-shell@2.3.6/LICENSE_APACHE-2.0",
           "sha256": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594"
         },
         {
-          "path": "cargo:tauri-plugin-shell@2.3.5/LICENSE_MIT",
+          "path": "cargo:tauri-plugin-shell@2.3.6/LICENSE_MIT",
           "sha256": "9dd42ea92cff2ede5cd477cbfcce051b2d0115c0ac7f368ee88cb545055dff1d"
         }
       ]
@@ -13730,14 +13730,14 @@
       ]
     },
     {
-      "id": "npm:node_modules/@tauri-apps/plugin-deep-link@2.4.9",
+      "id": "npm:node_modules/@tauri-apps/plugin-deep-link@2.4.10",
       "ecosystem": "npm",
       "name": "@tauri-apps/plugin-deep-link",
-      "version": "2.4.9",
+      "version": "2.4.10",
       "licenseExpression": "MIT OR Apache-2.0",
-      "source": "https://registry.npmjs.org/@tauri-apps/plugin-deep-link/-/plugin-deep-link-2.4.9.tgz",
+      "source": "https://registry.npmjs.org/@tauri-apps/plugin-deep-link/-/plugin-deep-link-2.4.10.tgz",
       "repository": "https://github.com/tauri-apps/plugins-workspace",
-      "integrity": "sha512-u0SKOUHnJ1wqeqXsDFq2+kASCBj9xxbG0g9XZWPy9SOmU4wXtp6b/wiYpm6oH6/5fBTQsLqnLhIvqLBRpgHJlA==",
+      "integrity": "sha512-SuXI47ORUzYuwG6c8dluLDrStTvli5bAZDRa2+VuUEzK/9TEa7FZz7UKXBQriL7+CPFXRHQsz5tSocc47tRXQQ==",
       "lockPath": "node_modules/@tauri-apps/plugin-deep-link",
       "targets": ["frontend"],
       "licenseFiles": [
@@ -13766,14 +13766,14 @@
       ]
     },
     {
-      "id": "npm:node_modules/@tauri-apps/plugin-notification@2.3.3",
+      "id": "npm:node_modules/@tauri-apps/plugin-notification@2.4.0",
       "ecosystem": "npm",
       "name": "@tauri-apps/plugin-notification",
-      "version": "2.3.3",
+      "version": "2.4.0",
       "licenseExpression": "MIT OR Apache-2.0",
-      "source": "https://registry.npmjs.org/@tauri-apps/plugin-notification/-/plugin-notification-2.3.3.tgz",
+      "source": "https://registry.npmjs.org/@tauri-apps/plugin-notification/-/plugin-notification-2.4.0.tgz",
       "repository": "https://github.com/tauri-apps/plugins-workspace",
-      "integrity": "sha512-Zw+ZH18RJb41G4NrfHgIuofJiymusqN+q8fGUIIV7vyCH+5sSn5coqRv/MWB9qETsUs97vmU045q7OyseCV3Qg==",
+      "integrity": "sha512-xlJXMcUoKOjNupzDue5wrEsa1wytf+l/2gCAPhafHyP683Y3N7J/8clUWLZ3vpnwkpT2C1zcLMMQFjjecIG2xg==",
       "lockPath": "node_modules/@tauri-apps/plugin-notification",
       "targets": ["frontend"],
       "licenseFiles": [
