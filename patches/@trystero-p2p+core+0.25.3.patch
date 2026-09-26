@@ -391,3 +391,35 @@ index 2fd4906..e4c2dd2 100644
  			if (!next) return;
  			emitStream(id, next.key, stream, next.metadata);
  		},
+diff --git a/node_modules/@trystero-p2p/core/dist/shared-peer.mjs b/node_modules/@trystero-p2p/core/dist/shared-peer.mjs
+--- a/node_modules/@trystero-p2p/core/dist/shared-peer.mjs
++++ b/node_modules/@trystero-p2p/core/dist/shared-peer.mjs
+@@ -102,7 +102,8 @@
+ 		shared.media.clearRemote();
+ 		shared.pendingDataByToken.clear();
+ 		shared.remoteRoomTokens.clear();
+-		if (keys(map).length === 0) delete this.byApp[appId];
++		// Strategy instances retain this map for their room's lifetime.
++		// Keep its identity when the last peer leaves so reconnects stay visible.
+ 	}
+ 	register(appId, peerId, peer, idleMs) {
+ 		const map = this.getMap(appId);
+@@ -131,10 +132,16 @@
+ 		peer.setHandlers({
+ 			data: (data) => this.dispatchData(shared, data),
+ 			signal: (signal) => this.dispatchSignal(shared, signal),
+-			close: () => this.clear(appId, peerId, { destroyPeer: false }),
++			close: () => {
++				if (this.get(appId, peerId) !== shared) return;
++				this.clear(appId, peerId, { destroyPeer: false });
++			},
+ 			error: (err) => {
++				if (this.get(appId, peerId) !== shared) return;
+ 				console.error(`${libName} peer error:`, err);
+-				this.clear(appId, peerId, { destroyPeer: false });
++				// Negotiation can fail while ICE remains connected. Close the
++				// channel and transport so the remote can discard it and reconnect.
++				this.clear(appId, peerId, { destroyPeer: true });
+ 			},
+ 			track: (track, stream) => this.dispatchTrack(shared, track, stream)
+ 		});

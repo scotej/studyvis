@@ -448,10 +448,18 @@ function wrapRoom(room: Room): TopicRoom {
       }
     },
     // 0.25 moved the media APIs to options objects. addStream returns a
-    // per-peer Promise[] in both versions; the wrapper has always discarded it
-    // (publishLocalStream must not await between its two addStream calls).
+    // per-peer Promise[] in both versions. Observe failures without awaiting:
+    // publishLocalStream must register its join listener in the same turn.
     addStream: (stream, targetPeers, metadata) => {
-      void room.addStream(stream, { target: targetPeers, metadata })
+      for (const pending of room.addStream(stream, {
+        target: targetPeers,
+        metadata,
+      })) {
+        void pending.catch(() => {
+          // Native error text can contain SDP, addresses or device details.
+          log.warn('media.publish_failed')
+        })
+      }
     },
     removeStream: (stream, targetPeers) => {
       room.removeStream(stream, { target: targetPeers })
