@@ -26,6 +26,8 @@ libgstautodetect.so
 libgstpulseaudio.so
 libgstalsa.so
 libgstvideo4linux2.so
+# WebKit's decodebin3 needs JPEG decoding for MJPEG webcams.
+libgstjpeg.so
 libgstrtp.so
 libgstrtpmanager.so
 libgstvpx.so

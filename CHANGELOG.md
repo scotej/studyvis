@@ -2,6 +2,39 @@
 
 ## Unreleased
 
+### Fixed
+
+- Linux camera previews no longer stay blank when a webcam uses MJPEG. The
+  AppImage now includes the JPEG decoder needed by camera capture.
+- Failed camera or screen-share negotiation now closes the abandoned peer
+  connection so a fresh connection can form. A replacement connection stays
+  registered, and delayed errors from an old connection cannot remove it.
+- Session diagnostics now record camera acquisition and stream publication
+  failures, plus WebRTC negotiation failures without private media or network
+  details.
+
+## 1.12.4 — 2026-09-25 — Reliable session invitations
+
+### Fixed
+
+- **An invite that fails to send can be tried again.** The in-session picker
+  now shows when a send is in progress and only marks a friend invited after
+  the send succeeds. A pending invite also retries when that friend's direct
+  connection recovers while the host keeps the session open.
+- **Repeated failed peer handshakes no longer exhaust the browser's connection
+  limit.** Abandoned WebRTC connections are closed after a failed handshake;
+  an active connection still gets its recovery window after a brief outage.
+- Refreshed the default signaling relays after three stopped accepting or
+  returning StudyVis messages.
+- Closing the main window on Windows no longer fails with a window permission
+  error when remembering its position is enabled.
+- Linux AppImage media startup no longer crashes while loading the bundled
+  PipeWire module for camera and screen sharing.
+
+Friends whose networks block a direct WebRTC connection still need a working
+TURN server in Settings → Network. The former public no-account TURN service
+does not respond, so StudyVis cannot supply one as a default.
+
 ## 1.12.2 — 2026-09-14 — Notifications that reach you
 
 ### Fixed

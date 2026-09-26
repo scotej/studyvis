@@ -225,9 +225,10 @@ During an AI session:
   deny, the rule layer is the final arbiter (cooldown, cap, quota).
 
 The model runs only on your machine. Camera and screen pixels never
-go to peers. The packaged Linux-candidate x86_64 engine is CPU-only; GPU
-acceleration is not promised by the AppImage build, even if the machine has a
-supported GPU.
+go to peers. The packaged Linux x86_64 engine uses Vulkan for compatible
+NVIDIA, AMD, and Intel GPUs. Auto uses available accelerators; CPU remains
+selectable in Settings → AI. GPU detection requires a working host Vulkan
+loader and driver.
 
 ## Friends-only trust model
 
@@ -408,7 +409,7 @@ where you'd see it surface.
 - **rusqlite** for local persistence (friends, sessions, audit log).
 - **llama-server (llama.cpp build) sidecar** for V2 vision-model
   inference. Bundled per platform, started on demand. The packaged
-  Linux-candidate build deliberately runs CPU-only.
+  Linux build includes Vulkan acceleration and a CPU fallback.
 
 `PLAN.md`, `ARCHITECTURE.md`, and `DESIGN-SYSTEM.md` are the
 canonical specs — each the source of truth for its concern.

@@ -91,10 +91,20 @@ backend.
    both use the Wayland portal + PipeWire path. StudyVis cannot silently bypass
    or preselect that picker.
 
-The AppImage contains the packaged x86_64 llama.cpp engine. That candidate
-build is CPU-only: it works without a dedicated GPU, but larger vision models can be
-slow. Run the optional benchmark and prefer a lighter model if the measured
-cadence is not usable.
+The AppImage contains the x86_64 llama.cpp engine with Vulkan acceleration
+for compatible NVIDIA, AMD, and Intel GPUs. Auto uses available GPUs; choose
+CPU or a particular detected device in Settings → AI. The host must provide a
+Vulkan 1.2-capable driver and `libvulkan.so.1`; the AppImage does not bundle
+vendor drivers. If no compatible GPU is available, the engine still runs on
+CPU. Run the optional benchmark after changing compute hardware and prefer a
+lighter model if the measured cadence is not usable.
+
+If only CPU appears, verify that `vulkaninfo --summary` lists your GPU, then
+install or repair your distribution's Vulkan loader and vendor driver. On
+Arch/CachyOS, the loader is `vulkan-icd-loader`; AMD and Intel use `vulkan-radeon`
+and `vulkan-intel`, while NVIDIA's userspace driver supplies its Vulkan ICD.
+Driver updates may require a reboot. Reopen Settings → AI after the driver is
+working; device discovery refreshes automatically.
 
 It also contains the pinned WebKitGTK 2.52.5 + librice 0.4.3 runtime required
 for peer connections. A window opening successfully is not proof that this
@@ -198,7 +208,7 @@ binding. StudyVis therefore builds that binding into a private AppImage runtime,
 explicitly reasserts media streams, and keeps the rest of WebKit's experimental
 feature set disabled.
 
-The pinned, hash-verified input tuple for runtime revision 7 is:
+The pinned, hash-verified input tuple for runtime revision 8 is:
 
 | Input                              | Pinned source                                                                           | SHA-256                                                            |
 | ---------------------------------- | --------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
@@ -244,6 +254,8 @@ using pinned Meson 1.7.2. Noble's 1.24.2 meets WebKit's configure minimum but ha
 incompatible transceiver and incoming-stream behavior (#312). Only the PipeWire
 plugin remains distro-provided; the remaining GStreamer libraries, plugins,
 scanner and PTP helper must match the source-built prefix's build IDs.
+The curated plugins include JPEG decoding for MJPEG webcams;
+the packaged media check exercises that automatic decode path at 1080p.
 The Ubuntu 24.04 build baseline retains the AppImage's glibc 2.39 floor.
 CI/preview cache keys cover the runtime tuple, builder, librice notice generator,
 patch, and toolchain pins, and the verified builder runs after a restore. Tagged

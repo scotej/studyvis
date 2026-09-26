@@ -19,6 +19,7 @@ import { pendingInviteKey, usePendingInvitesStore } from './pendingInvitesStore'
 import { inviteRetryManager } from './invite'
 import {
   isOnline,
+  ONLINE_WINDOW_MS,
   startPresence,
   type PresenceMap,
   type PresenceSubscription,
@@ -142,6 +143,7 @@ export function InboxBoot({
   // compared against the previous tick. Kept in a ref so the detector survives
   // re-renders without resubscribing.
   const wasOnlineRef = useRef<Record<string, boolean>>({})
+  const lastDirectHeartbeatRef = useRef<Record<string, number>>({})
   // N3 — friends whose presence has been resolved at least once since this
   // subscription mounted. The FIRST resolution establishes a baseline only —
   // it must not fire a "came online" notification (that's boot's initial
@@ -163,6 +165,7 @@ export function InboxBoot({
     // Reset the per-friend notify state on a genuine (re)subscribe — identity
     // change or remount — so stale state can't leak a phantom transition.
     wasOnlineRef.current = {}
+    lastDirectHeartbeatRef.current = {}
     baselineSeenRef.current = new Set()
     // #47 C6 — the effect no longer keys on the friend set; seed with the
     // current list and let updateFriends churn only what changes.
@@ -186,6 +189,15 @@ export function InboxBoot({
           const online = isOnline(map, ed, at)
           const was = wasOnlineRef.current[ed] ?? false
           wasOnlineRef.current[ed] = online
+          const directHeartbeat = map[ed]?.lastP2pAt
+          if (
+            directHeartbeat !== undefined &&
+            at - directHeartbeat < ONLINE_WINDOW_MS &&
+            lastDirectHeartbeatRef.current[ed] !== directHeartbeat
+          ) {
+            lastDirectHeartbeatRef.current[ed] = directHeartbeat
+            void inviteRetryManager.onPresenceOnline(ed)
+          }
           // N3 — baseline is the first time we resolve a friend ONLINE since
           // we started watching them, NOT the first tick. The presence map
           // starts empty, so a sweep (or another friend's heartbeat) can fire
@@ -198,9 +210,6 @@ export function InboxBoot({
           const hadBaseline = baselineSeenRef.current.has(ed)
           if (online) baselineSeenRef.current.add(ed)
           if (online && !was) {
-            // Fire-and-forget; the manager dedupes and only retries entries
-            // still inside the window.
-            void inviteRetryManager.onPresenceOnline(ed)
             // N3 — an offline→online edge is a real "came online" transition
             // once it can't be boot's initial sweep. The baseline only
             // suppresses inside this friend's own NOTIFY_SETTLE_MS window; past
@@ -260,6 +269,9 @@ export function InboxBoot({
     const keep = new Set(ids)
     for (const ed of Object.keys(wasOnlineRef.current)) {
       if (!keep.has(ed)) delete wasOnlineRef.current[ed]
+    }
+    for (const ed of Object.keys(lastDirectHeartbeatRef.current)) {
+      if (!keep.has(ed)) delete lastDirectHeartbeatRef.current[ed]
     }
     for (const ed of [...baselineSeenRef.current]) {
       if (!keep.has(ed)) baselineSeenRef.current.delete(ed)

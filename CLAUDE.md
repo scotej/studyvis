@@ -97,7 +97,9 @@ Everything above runs in `.github/workflows/ci.yml`, plus checks that only make 
   not wait an hour behind a WebKitGTK compile) and its steps are ordered so the
   cheap ones fail before that compile; `release.yml` repeats the whole thing
   against the exact shipped AppImage. This catches a
-  missing or inert packaged backend. A separate finite native WebKit probe exchanges data and renders synthetic camera/screen streams through renegotiation and stop/restart. These checks do not
+  missing or inert packaged backend. CI also builds the complete Linux
+  system-source bundle from its exact AppImage after startup, so missing Ubuntu
+  source versions fail the pre-tag gate. A separate finite native WebKit probe exchanges data and renders synthetic camera/screen streams through renegotiation and stop/restart. These checks do not
   exercise a physical CachyOS KDE portal/media device, prove in-app identity
   custody, mount through FUSE, or apply an update.
 - **Linux build caching** — **two** jobs compile WebKitGTK: `ci.yml`'s `Linux
@@ -243,7 +245,7 @@ Releasing bumps the version in **five tracked files** (kept in lockstep): `packa
   Workflow YAML cannot create these controls; re-verify them before any
   production publish.
 
-Update `CHANGELOG.md` as part of the release. `package.json#version` flows through `__APP_VERSION__` into Settings → About automatically. Do not publish a draft unless `latest.json` contains `darwin-aarch64`, `windows-x86_64`, and `linux-x86_64`, both Linux source archives and checksum sidecars are present and verify, and the draft verifier is green. PLAN §8's physical CachyOS KDE Wayland matrix is the standard for a complete Linux sign-off and should be run whenever the hardware is free, but it no longer gates publication. That matrix requires an exchanged bidirectional data channel, Linux media send/receive, Linux AI capture, and physical same-draft Linux↔Linux, Linux↔macOS, and Linux↔Windows artifact pairs—not merely CI's local offer probe. It also covers FUSE/extraction launch, Secret Service, N-1 updater/relaunch with preserved data, packaged CPU-only inference, Linux `studyvis://` registration/import, KDE notification-settings launch, custom-chrome drag/window controls, the in-session Wayland hold-to-talk control, and the Settings Talk-to-AI fallback. Record the AppImage SHA-256, artifact/OS versions, direction, and result for every row. The external `release` environment/tag-ruleset/immutable-release blockers above remain independent gates.
+Update `CHANGELOG.md` as part of the release. `package.json#version` flows through `__APP_VERSION__` into Settings → About automatically. Do not publish a draft unless `latest.json` contains `darwin-aarch64`, `windows-x86_64`, and `linux-x86_64`, both Linux source archives and checksum sidecars are present and verify, and the draft verifier is green. PLAN §8's physical CachyOS KDE Wayland matrix is the standard for a complete Linux sign-off and should be run whenever the hardware is free, but it no longer gates publication. That matrix requires an exchanged bidirectional data channel, Linux media send/receive, Linux AI capture, and physical same-draft Linux↔Linux, Linux↔macOS, and Linux↔Windows artifact pairs—not merely CI's local offer probe. It also covers FUSE/extraction launch, Secret Service, N-1 updater/relaunch with preserved data, packaged Vulkan and CPU-fallback inference, Linux `studyvis://` registration/import, KDE notification-settings launch, custom-chrome drag/window controls, the in-session Wayland hold-to-talk control, and the Settings Talk-to-AI fallback. Record the AppImage SHA-256, artifact/OS versions, direction, and result for every row. The external `release` environment/tag-ruleset/immutable-release blockers above remain independent gates.
 
 ## When in doubt
 

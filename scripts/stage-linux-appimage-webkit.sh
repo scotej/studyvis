@@ -25,7 +25,7 @@ appimage_runtime_dirname=$STUDYVIS_WEBKIT_APPIMAGE_RUNTIME_DIRNAME
   die "invalid AppImage WebKit runtime directory name: $appimage_runtime_dirname"
 }
 
-for command_name in bash cmp find install node pkg-config realpath rm sha256sum wc; do
+for command_name in bash cmp find install node patchelf pkg-config realpath rm sha256sum wc; do
   command -v "$command_name" >/dev/null 2>&1 || {
     die "missing AppImage staging dependency: $command_name"
   }
@@ -353,6 +353,15 @@ while IFS= read -r payload_line || [[ -n $payload_line ]]; do
     die "duplicate PipeWire payload entry: $payload_kind $payload_path"
   }
   install -D -m 0644 -- "$payload_source" "$payload_destination"
+  if [[ $payload_kind == module ]]; then
+    # A finished AppImage had an overlapping PT_LOAD after linuxdeploy grew
+    # Noble's absolute RUNPATH with :$ORIGIN. Shrink the staged copy first,
+    # so linuxdeploy does not need to grow it when adding its library path.
+    patchelf --set-rpath '$ORIGIN' "$payload_destination"
+    [[ $(patchelf --print-rpath "$payload_destination") == '$ORIGIN' ]] || {
+      die "staged PipeWire module has the wrong RUNPATH: $payload_path"
+    }
+  fi
   staged_pipewire[$payload_kind/$payload_path]=1
 done <"$pipewire_manifest"
 # pw_context_new() treats every context.modules entry as mandatory, so a short

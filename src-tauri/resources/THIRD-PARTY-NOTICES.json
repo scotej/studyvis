@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "generatedBy": "scripts/generate-third-party-notices.ts",
   "noticePath": "THIRD-PARTY-NOTICES.txt",
-  "noticeSha256": "70aff77feadacb3852e90972f26da2fad3532e67acefb554b898fa1c9cac886a",
+  "noticeSha256": "464a5c56d741a0cbadbedefa549522a2045875b7b11fc35802ab429df76d1e46",
   "scope": {
     "npm": "package-lock.json v3 entries beneath node_modules whose dev flag is not true",
     "cargo": "normal dependency edges reachable from the StudyVis root under each release target; build/dev edges excluded",
@@ -16,15 +16,15 @@
   "inputs": [
     {
       "path": "package-lock.json",
-      "sha256": "41694562bdf3a21d921afcd9031968b9ec4da5661cb17b9e20ffe1dfea7a0c4a"
+      "sha256": "7d712cff10d41fcbc4fb9a863565666760ba0280fc79d38aae84d01171dd8e4a"
     },
     {
       "path": "package.json",
-      "sha256": "7f4f45413d6535fe89fb9851b898613597728ffd240303ab5ebb49f482092dbd"
+      "sha256": "e88615c92d2dcf95bbf347768049f3a4f838620112ea04ca6908032e699f4316"
     },
     {
       "path": "scripts/fetch-llama-server.sh",
-      "sha256": "02e6622b1fe809cd68a8df9ef249665bf8ac44b971670b3b6ca823095b94775b"
+      "sha256": "ba847479a7bc2eaee68ab9ab5b010d06867b2dd695ed257f71c0e43190c3233f"
     },
     {
       "path": "scripts/generate-third-party-notices.ts",
@@ -44,11 +44,11 @@
     },
     {
       "path": "src-tauri/Cargo.lock",
-      "sha256": "9173bf0fe454afcb7cfc987cbf40336ab45e864db974877f3edac4b28448485b"
+      "sha256": "078cd11dbff5bcd9433df0b1d2fdb266ea94258dce65f7e0d22bb5bee1aece22"
     },
     {
       "path": "src-tauri/Cargo.toml",
-      "sha256": "2bec4b58294003081333a06f774a345b45386369a1e25745e56070f329555aeb"
+      "sha256": "67400e43c3989ff1fb277929744a922800b1e85248bab29680979ea734a8ab30"
     },
     {
       "path": "src-tauri/vendor/wry/LICENSE-MIT",
@@ -56,11 +56,11 @@
     }
   ],
   "counts": {
-    "components": 754,
-    "cargo": 533,
+    "components": 757,
+    "cargo": 536,
     "npm": 220,
     "external": 1,
-    "distinctLicenseTexts": 396
+    "distinctLicenseTexts": 397
   },
   "components": [
     {
@@ -1467,6 +1467,27 @@
         },
         {
           "path": "cargo:core-foundation@0.7.0/LICENSE-MIT",
+          "sha256": "62065228e42caebca7e7d7db1204cbb867033de5982ca4009928915e4095f3a3"
+        }
+      ]
+    },
+    {
+      "id": "cargo:core-foundation@0.9.4",
+      "ecosystem": "cargo",
+      "name": "core-foundation",
+      "version": "0.9.4",
+      "licenseExpression": "MIT OR Apache-2.0",
+      "source": "https://crates.io/api/v1/crates/core-foundation/0.9.4/download",
+      "checksum": "91e195e091a93c46f7102ec7818a2aa394e1e1771c3ab4825963fa03e45afb8f",
+      "repository": "https://github.com/servo/core-foundation-rs",
+      "targets": ["aarch64-apple-darwin"],
+      "licenseFiles": [
+        {
+          "path": "cargo:core-foundation@0.9.4/LICENSE-APACHE",
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
+        },
+        {
+          "path": "cargo:core-foundation@0.9.4/LICENSE-MIT",
           "sha256": "62065228e42caebca7e7d7db1204cbb867033de5982ca4009928915e4095f3a3"
         }
       ]
@@ -8996,6 +9017,48 @@
       ]
     },
     {
+      "id": "cargo:system-configuration@0.7.0",
+      "ecosystem": "cargo",
+      "name": "system-configuration",
+      "version": "0.7.0",
+      "licenseExpression": "MIT OR Apache-2.0",
+      "source": "https://crates.io/api/v1/crates/system-configuration/0.7.0/download",
+      "checksum": "a13f3d0daba03132c0aa9767f98351b3488edc2c100cda2d2ec2b04f3d8d3c8b",
+      "repository": "https://github.com/mullvad/system-configuration-rs",
+      "targets": ["aarch64-apple-darwin"],
+      "licenseFiles": [
+        {
+          "path": "cargo:system-configuration@0.7.0/LICENSE-APACHE",
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
+        },
+        {
+          "path": "cargo:system-configuration@0.7.0/LICENSE-MIT",
+          "sha256": "000cbb5bea6f21829c8f0d9e1fe87410bd5ef0453412ffc017845982a3e19824"
+        }
+      ]
+    },
+    {
+      "id": "cargo:system-configuration-sys@0.6.0",
+      "ecosystem": "cargo",
+      "name": "system-configuration-sys",
+      "version": "0.6.0",
+      "licenseExpression": "MIT OR Apache-2.0",
+      "source": "https://crates.io/api/v1/crates/system-configuration-sys/0.6.0/download",
+      "checksum": "8e1d1b10ced5ca923a1fcb8d03e96b8d3268065d724548c0211415ff6ac6bac4",
+      "repository": "https://github.com/mullvad/system-configuration-rs",
+      "targets": ["aarch64-apple-darwin"],
+      "licenseFiles": [
+        {
+          "path": "cargo:system-configuration-sys@0.6.0/LICENSE-APACHE",
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
+        },
+        {
+          "path": "cargo:system-configuration-sys@0.6.0/LICENSE-MIT",
+          "sha256": "000cbb5bea6f21829c8f0d9e1fe87410bd5ef0453412ffc017845982a3e19824"
+        }
+      ]
+    },
+    {
       "id": "cargo:tao@0.35.2",
       "ecosystem": "cargo",
       "name": "tao",
@@ -9150,13 +9213,13 @@
       ]
     },
     {
-      "id": "cargo:tauri-plugin-deep-link@2.4.9",
+      "id": "cargo:tauri-plugin-deep-link@2.4.10",
       "ecosystem": "cargo",
       "name": "tauri-plugin-deep-link",
-      "version": "2.4.9",
+      "version": "2.4.10",
       "licenseExpression": "Apache-2.0 OR MIT",
-      "source": "https://crates.io/api/v1/crates/tauri-plugin-deep-link/2.4.9/download",
-      "checksum": "70ee75bc5627f77bfdf40c913255ebc258117b10ebe2b2239a1a1cf40b0b58aa",
+      "source": "https://crates.io/api/v1/crates/tauri-plugin-deep-link/2.4.10/download",
+      "checksum": "92d489b8ecceae1cd09f6e1f7606f2095ac721cc8d54cf2f0e6bb377cc52cff6",
       "repository": "https://github.com/tauri-apps/plugins-workspace",
       "targets": [
         "aarch64-apple-darwin",
@@ -9165,15 +9228,15 @@
       ],
       "licenseFiles": [
         {
-          "path": "cargo:tauri-plugin-deep-link@2.4.9/LICENSE.spdx",
+          "path": "cargo:tauri-plugin-deep-link@2.4.10/LICENSE.spdx",
           "sha256": "9c1db6b7e7eb83e1cb2af973b5df2bdc63651ede0f38506ab98dfa0940487759"
         },
         {
-          "path": "cargo:tauri-plugin-deep-link@2.4.9/LICENSE_APACHE-2.0",
+          "path": "cargo:tauri-plugin-deep-link@2.4.10/LICENSE_APACHE-2.0",
           "sha256": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594"
         },
         {
-          "path": "cargo:tauri-plugin-deep-link@2.4.9/LICENSE_MIT",
+          "path": "cargo:tauri-plugin-deep-link@2.4.10/LICENSE_MIT",
           "sha256": "9dd42ea92cff2ede5cd477cbfcce051b2d0115c0ac7f368ee88cb545055dff1d"
         }
       ]
@@ -9266,13 +9329,13 @@
       ]
     },
     {
-      "id": "cargo:tauri-plugin-notification@2.3.3",
+      "id": "cargo:tauri-plugin-notification@2.4.0",
       "ecosystem": "cargo",
       "name": "tauri-plugin-notification",
-      "version": "2.3.3",
+      "version": "2.4.0",
       "licenseExpression": "Apache-2.0 OR MIT",
-      "source": "https://crates.io/api/v1/crates/tauri-plugin-notification/2.3.3/download",
-      "checksum": "01fc2c5ff41105bd1f7242d8201fdf3efd70749b82fa013a17f2126357d194cc",
+      "source": "https://crates.io/api/v1/crates/tauri-plugin-notification/2.4.0/download",
+      "checksum": "ad2fd40946aef810c4be9fd33a2d1b9b397cb79042b2d21c81a0a8f204354fd1",
       "repository": "https://github.com/tauri-apps/plugins-workspace",
       "targets": [
         "aarch64-apple-darwin",
@@ -9281,27 +9344,27 @@
       ],
       "licenseFiles": [
         {
-          "path": "cargo:tauri-plugin-notification@2.3.3/LICENSE.spdx",
+          "path": "cargo:tauri-plugin-notification@2.4.0/LICENSE.spdx",
           "sha256": "9c1db6b7e7eb83e1cb2af973b5df2bdc63651ede0f38506ab98dfa0940487759"
         },
         {
-          "path": "cargo:tauri-plugin-notification@2.3.3/LICENSE_APACHE-2.0",
+          "path": "cargo:tauri-plugin-notification@2.4.0/LICENSE_APACHE-2.0",
           "sha256": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594"
         },
         {
-          "path": "cargo:tauri-plugin-notification@2.3.3/LICENSE_MIT",
+          "path": "cargo:tauri-plugin-notification@2.4.0/LICENSE_MIT",
           "sha256": "9dd42ea92cff2ede5cd477cbfcce051b2d0115c0ac7f368ee88cb545055dff1d"
         }
       ]
     },
     {
-      "id": "cargo:tauri-plugin-opener@2.5.4",
+      "id": "cargo:tauri-plugin-opener@2.5.5",
       "ecosystem": "cargo",
       "name": "tauri-plugin-opener",
-      "version": "2.5.4",
+      "version": "2.5.5",
       "licenseExpression": "Apache-2.0 OR MIT",
-      "source": "https://crates.io/api/v1/crates/tauri-plugin-opener/2.5.4/download",
-      "checksum": "17e1bea14edce6b793a04e2417e3fd924b9bc4faae83cdee7d714156cceeed29",
+      "source": "https://crates.io/api/v1/crates/tauri-plugin-opener/2.5.5/download",
+      "checksum": "60d60366174b745b4ef5824b8bbc1c457fd08f0ce101ff643c0a49181a9f4e91",
       "repository": "https://github.com/tauri-apps/plugins-workspace",
       "targets": [
         "aarch64-apple-darwin",
@@ -9310,27 +9373,27 @@
       ],
       "licenseFiles": [
         {
-          "path": "cargo:tauri-plugin-opener@2.5.4/LICENSE.spdx",
+          "path": "cargo:tauri-plugin-opener@2.5.5/LICENSE.spdx",
           "sha256": "9c1db6b7e7eb83e1cb2af973b5df2bdc63651ede0f38506ab98dfa0940487759"
         },
         {
-          "path": "cargo:tauri-plugin-opener@2.5.4/LICENSE_APACHE-2.0",
+          "path": "cargo:tauri-plugin-opener@2.5.5/LICENSE_APACHE-2.0",
           "sha256": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594"
         },
         {
-          "path": "cargo:tauri-plugin-opener@2.5.4/LICENSE_MIT",
+          "path": "cargo:tauri-plugin-opener@2.5.5/LICENSE_MIT",
           "sha256": "9dd42ea92cff2ede5cd477cbfcce051b2d0115c0ac7f368ee88cb545055dff1d"
         }
       ]
     },
     {
-      "id": "cargo:tauri-plugin-shell@2.3.5",
+      "id": "cargo:tauri-plugin-shell@2.3.6",
       "ecosystem": "cargo",
       "name": "tauri-plugin-shell",
-      "version": "2.3.5",
+      "version": "2.3.6",
       "licenseExpression": "Apache-2.0 OR MIT",
-      "source": "https://crates.io/api/v1/crates/tauri-plugin-shell/2.3.5/download",
-      "checksum": "8457dbf9e2bab1edd8df22bb2c20857a59a9868e79cb3eac5ed639eec4d0c73b",
+      "source": "https://crates.io/api/v1/crates/tauri-plugin-shell/2.3.6/download",
+      "checksum": "8548af174c5516e4f71f142acea4d02e00316296ea9aafa58798851481003e3c",
       "repository": "https://github.com/tauri-apps/plugins-workspace",
       "targets": [
         "aarch64-apple-darwin",
@@ -9339,15 +9402,15 @@
       ],
       "licenseFiles": [
         {
-          "path": "cargo:tauri-plugin-shell@2.3.5/LICENSE.spdx",
+          "path": "cargo:tauri-plugin-shell@2.3.6/LICENSE.spdx",
           "sha256": "9c1db6b7e7eb83e1cb2af973b5df2bdc63651ede0f38506ab98dfa0940487759"
         },
         {
-          "path": "cargo:tauri-plugin-shell@2.3.5/LICENSE_APACHE-2.0",
+          "path": "cargo:tauri-plugin-shell@2.3.6/LICENSE_APACHE-2.0",
           "sha256": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594"
         },
         {
-          "path": "cargo:tauri-plugin-shell@2.3.5/LICENSE_MIT",
+          "path": "cargo:tauri-plugin-shell@2.3.6/LICENSE_MIT",
           "sha256": "9dd42ea92cff2ede5cd477cbfcce051b2d0115c0ac7f368ee88cb545055dff1d"
         }
       ]
@@ -9411,13 +9474,13 @@
       ]
     },
     {
-      "id": "cargo:tauri-plugin-updater@2.10.1",
+      "id": "cargo:tauri-plugin-updater@2.11.0",
       "ecosystem": "cargo",
       "name": "tauri-plugin-updater",
-      "version": "2.10.1",
+      "version": "2.11.0",
       "licenseExpression": "Apache-2.0 OR MIT",
-      "source": "https://crates.io/api/v1/crates/tauri-plugin-updater/2.10.1/download",
-      "checksum": "806d9dac662c2e4594ff03c647a552f2c9bd544e7d0f683ec58f872f952ce4af",
+      "source": "https://crates.io/api/v1/crates/tauri-plugin-updater/2.11.0/download",
+      "checksum": "b28d8cabdeb0564f03ae261963de4bc3d98321cd3d213e76a81b7d344e5df606",
       "repository": "https://github.com/tauri-apps/plugins-workspace",
       "targets": [
         "aarch64-apple-darwin",
@@ -9426,15 +9489,15 @@
       ],
       "licenseFiles": [
         {
-          "path": "cargo:tauri-plugin-updater@2.10.1/LICENSE.spdx",
+          "path": "cargo:tauri-plugin-updater@2.11.0/LICENSE.spdx",
           "sha256": "9c1db6b7e7eb83e1cb2af973b5df2bdc63651ede0f38506ab98dfa0940487759"
         },
         {
-          "path": "cargo:tauri-plugin-updater@2.10.1/LICENSE_APACHE-2.0",
+          "path": "cargo:tauri-plugin-updater@2.11.0/LICENSE_APACHE-2.0",
           "sha256": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594"
         },
         {
-          "path": "cargo:tauri-plugin-updater@2.10.1/LICENSE_MIT",
+          "path": "cargo:tauri-plugin-updater@2.11.0/LICENSE_MIT",
           "sha256": "9dd42ea92cff2ede5cd477cbfcce051b2d0115c0ac7f368ee88cb545055dff1d"
         }
       ]
@@ -13667,14 +13730,14 @@
       ]
     },
     {
-      "id": "npm:node_modules/@tauri-apps/plugin-deep-link@2.4.9",
+      "id": "npm:node_modules/@tauri-apps/plugin-deep-link@2.4.10",
       "ecosystem": "npm",
       "name": "@tauri-apps/plugin-deep-link",
-      "version": "2.4.9",
+      "version": "2.4.10",
       "licenseExpression": "MIT OR Apache-2.0",
-      "source": "https://registry.npmjs.org/@tauri-apps/plugin-deep-link/-/plugin-deep-link-2.4.9.tgz",
+      "source": "https://registry.npmjs.org/@tauri-apps/plugin-deep-link/-/plugin-deep-link-2.4.10.tgz",
       "repository": "https://github.com/tauri-apps/plugins-workspace",
-      "integrity": "sha512-u0SKOUHnJ1wqeqXsDFq2+kASCBj9xxbG0g9XZWPy9SOmU4wXtp6b/wiYpm6oH6/5fBTQsLqnLhIvqLBRpgHJlA==",
+      "integrity": "sha512-SuXI47ORUzYuwG6c8dluLDrStTvli5bAZDRa2+VuUEzK/9TEa7FZz7UKXBQriL7+CPFXRHQsz5tSocc47tRXQQ==",
       "lockPath": "node_modules/@tauri-apps/plugin-deep-link",
       "targets": ["frontend"],
       "licenseFiles": [
@@ -13703,14 +13766,14 @@
       ]
     },
     {
-      "id": "npm:node_modules/@tauri-apps/plugin-notification@2.3.3",
+      "id": "npm:node_modules/@tauri-apps/plugin-notification@2.4.0",
       "ecosystem": "npm",
       "name": "@tauri-apps/plugin-notification",
-      "version": "2.3.3",
+      "version": "2.4.0",
       "licenseExpression": "MIT OR Apache-2.0",
-      "source": "https://registry.npmjs.org/@tauri-apps/plugin-notification/-/plugin-notification-2.3.3.tgz",
+      "source": "https://registry.npmjs.org/@tauri-apps/plugin-notification/-/plugin-notification-2.4.0.tgz",
       "repository": "https://github.com/tauri-apps/plugins-workspace",
-      "integrity": "sha512-Zw+ZH18RJb41G4NrfHgIuofJiymusqN+q8fGUIIV7vyCH+5sSn5coqRv/MWB9qETsUs97vmU045q7OyseCV3Qg==",
+      "integrity": "sha512-xlJXMcUoKOjNupzDue5wrEsa1wytf+l/2gCAPhafHyP683Y3N7J/8clUWLZ3vpnwkpT2C1zcLMMQFjjecIG2xg==",
       "lockPath": "node_modules/@tauri-apps/plugin-notification",
       "targets": ["frontend"],
       "licenseFiles": [
@@ -13739,14 +13802,14 @@
       ]
     },
     {
-      "id": "npm:node_modules/@tauri-apps/plugin-updater@2.10.1",
+      "id": "npm:node_modules/@tauri-apps/plugin-updater@2.11.0",
       "ecosystem": "npm",
       "name": "@tauri-apps/plugin-updater",
-      "version": "2.10.1",
+      "version": "2.11.0",
       "licenseExpression": "MIT OR Apache-2.0",
-      "source": "https://registry.npmjs.org/@tauri-apps/plugin-updater/-/plugin-updater-2.10.1.tgz",
+      "source": "https://registry.npmjs.org/@tauri-apps/plugin-updater/-/plugin-updater-2.11.0.tgz",
       "repository": "https://github.com/tauri-apps/plugins-workspace",
-      "integrity": "sha512-NFYMg+tWOZPJdzE/PpFj2qfqwAWwNS3kXrb1tm1gnBJ9mYzZ4WDRrwy8udzWoAnfGCHLuePNLY1WVCNHnh3eRA==",
+      "integrity": "sha512-AE36XkOoSna24G40jZMY15nzAnkXEPL/73tGoseGrtGOHuI/cZwWzHpZFLjKXDPgzYZ435z1gHu28LgrsBwIxQ==",
       "lockPath": "node_modules/@tauri-apps/plugin-updater",
       "targets": ["frontend"],
       "licenseFiles": [
@@ -13988,14 +14051,14 @@
       ]
     },
     {
-      "id": "npm:node_modules/@types/react@19.2.18",
+      "id": "npm:node_modules/@types/react@19.3.0",
       "ecosystem": "npm",
       "name": "@types/react",
-      "version": "19.2.18",
+      "version": "19.3.0",
       "licenseExpression": "MIT",
-      "source": "https://registry.npmjs.org/@types/react/-/react-19.2.18.tgz",
+      "source": "https://registry.npmjs.org/@types/react/-/react-19.3.0.tgz",
       "repository": "https://github.com/DefinitelyTyped/DefinitelyTyped.git",
-      "integrity": "sha512-AnzbBERsrLKtk2XSfTbYRLjQPdy116Sty4q+T+Bp3IC4l6jNBvreVPAHmpq9qhXQM7CXZPjLVmGMw9sy+hxQ3w==",
+      "integrity": "sha512-N0rFCuH9YoxG9/m61l9MfpJKfmLOVU0em7ipIz6TRgSSkvReLB9vL85GB+yr8Bs5leqpvg96JSwF4ZS1s4viQg==",
       "lockPath": "node_modules/@types/react",
       "targets": ["frontend"],
       "licenseFiles": [
@@ -14006,14 +14069,14 @@
       ]
     },
     {
-      "id": "npm:node_modules/@types/react-dom@19.2.4",
+      "id": "npm:node_modules/@types/react-dom@19.3.0",
       "ecosystem": "npm",
       "name": "@types/react-dom",
-      "version": "19.2.4",
+      "version": "19.3.0",
       "licenseExpression": "MIT",
-      "source": "https://registry.npmjs.org/@types/react-dom/-/react-dom-19.2.4.tgz",
+      "source": "https://registry.npmjs.org/@types/react-dom/-/react-dom-19.3.0.tgz",
       "repository": "https://github.com/DefinitelyTyped/DefinitelyTyped.git",
-      "integrity": "sha512-Bsc+QHgp+P/F02XDzNCY9jnZNCUuLki36KT7VKrTXXLdHf+vHMNZnW1rVu5DNW/rCK+fya3DATySbLM4yhtKUw==",
+      "integrity": "sha512-ZI7bU42mZXXKHn/qNLEw2IrbiINU7X5+vfgdixBHkCNpYWXjKgfQ/P+uyGb5CjOLB9UcnTeg3rylQtV2hym44Q==",
       "lockPath": "node_modules/@types/react-dom",
       "targets": ["frontend"],
       "licenseFiles": [
@@ -15068,14 +15131,14 @@
       ]
     },
     {
-      "id": "npm:node_modules/lucide-react@1.31.0",
+      "id": "npm:node_modules/lucide-react@1.46.0",
       "ecosystem": "npm",
       "name": "lucide-react",
-      "version": "1.31.0",
+      "version": "1.46.0",
       "licenseExpression": "ISC",
-      "source": "https://registry.npmjs.org/lucide-react/-/lucide-react-1.31.0.tgz",
+      "source": "https://registry.npmjs.org/lucide-react/-/lucide-react-1.46.0.tgz",
       "repository": "https://github.com/lucide-icons/lucide.git",
-      "integrity": "sha512-G8u2eEtoHUnUa9f8lbvqDhCiORMnYLdUEo06EEG9MQvHQrInKcX3Pa2TH39MM5qyzRcWETxB0+aOwAPI1g1kEg==",
+      "integrity": "sha512-Bv+FZXgZPrxc/NCl1e7JJVQFLdiCxYgxNVhqoV7X0p6I8ADJo8DxBnK1auH0fZz4AmqOJ3jgneL4f1i8LJQRAA==",
       "lockPath": "node_modules/lucide-react",
       "targets": ["frontend"],
       "licenseFiles": [
@@ -15338,14 +15401,14 @@
       ]
     },
     {
-      "id": "npm:node_modules/react@19.2.8",
+      "id": "npm:node_modules/react@19.3.0",
       "ecosystem": "npm",
       "name": "react",
-      "version": "19.2.8",
+      "version": "19.3.0",
       "licenseExpression": "MIT",
-      "source": "https://registry.npmjs.org/react/-/react-19.2.8.tgz",
+      "source": "https://registry.npmjs.org/react/-/react-19.3.0.tgz",
       "repository": "https://github.com/react/react.git",
-      "integrity": "sha512-PWaYA1L/q9u2u7xYQi+Y3L3Yfnie7XyLeaJICV1MGD6LprsBxcAqGjYyr0eY3p+QdsA+x/Irkt4Qif8D63+Sbw==",
+      "integrity": "sha512-E8LUcbtBWt20bbl2YoHfx4ZDBdxVTfOKtCZn9cDSJ4l6/nuoApcpIBcj47t2wZoVX8g2ZHuMHbiShgCR1T5Sog==",
       "lockPath": "node_modules/react",
       "targets": ["frontend"],
       "licenseFiles": [
@@ -15356,14 +15419,14 @@
       ]
     },
     {
-      "id": "npm:node_modules/react-dom@19.2.8",
+      "id": "npm:node_modules/react-dom@19.3.0",
       "ecosystem": "npm",
       "name": "react-dom",
-      "version": "19.2.8",
+      "version": "19.3.0",
       "licenseExpression": "MIT",
-      "source": "https://registry.npmjs.org/react-dom/-/react-dom-19.2.8.tgz",
+      "source": "https://registry.npmjs.org/react-dom/-/react-dom-19.3.0.tgz",
       "repository": "https://github.com/react/react.git",
-      "integrity": "sha512-rVprimfGBG3DR+Tq0IQG2DT5PxKth1WIGDmj5yPmlzr4YBe7uyE+Du4oVqTDXZSHGGGXRtTJEGSSePyQCMBglQ==",
+      "integrity": "sha512-JDk8dgif51OjFoDE70+OT9ICyYr+69HlmihNwp1+Nsfbna3t5sIiCa9ZJktDmQ4/1b/rn26hIAR2uYXDMr5r0Q==",
       "lockPath": "node_modules/react-dom",
       "targets": ["frontend"],
       "licenseFiles": [
@@ -15449,14 +15512,14 @@
       ]
     },
     {
-      "id": "npm:node_modules/react-router@8.3.0",
+      "id": "npm:node_modules/react-router@8.3.1",
       "ecosystem": "npm",
       "name": "react-router",
-      "version": "8.3.0",
+      "version": "8.3.1",
       "licenseExpression": "MIT",
-      "source": "https://registry.npmjs.org/react-router/-/react-router-8.3.0.tgz",
+      "source": "https://registry.npmjs.org/react-router/-/react-router-8.3.1.tgz",
       "repository": "https://github.com/remix-run/react-router",
-      "integrity": "sha512-qyPMvW83jGIct3yiieisxdk9M745anqhpIMKN5m1t6yBMfgVPpt77aHOqs5fUlEJRMCGffg9BaQLH9oPVOL7xQ==",
+      "integrity": "sha512-TEOpiO2g0TJHEOJeRVv4amUFun9v1npCKszvcquNvzETUtJ8udV86ah5eFoHT7g26bsBvT6EiIhqulR8eDF++A==",
       "lockPath": "node_modules/react-router",
       "targets": ["frontend"],
       "licenseFiles": [
@@ -15683,14 +15746,14 @@
       ]
     },
     {
-      "id": "npm:node_modules/scheduler@0.27.0",
+      "id": "npm:node_modules/scheduler@0.28.0",
       "ecosystem": "npm",
       "name": "scheduler",
-      "version": "0.27.0",
+      "version": "0.28.0",
       "licenseExpression": "MIT",
-      "source": "https://registry.npmjs.org/scheduler/-/scheduler-0.27.0.tgz",
-      "repository": "https://github.com/facebook/react.git",
-      "integrity": "sha512-eNv+WrVbKu1f3vbYJT/xtiF5syA5HPIMtf9IgY/nKg0sWqzAUEvqY/xm7OcZc/qafLx/iO9FgOmeSAp4v5ti/Q==",
+      "source": "https://registry.npmjs.org/scheduler/-/scheduler-0.28.0.tgz",
+      "repository": "https://github.com/react/react.git",
+      "integrity": "sha512-juorfCmIkIw8tT+p5BXSm6PJjQF/ycEYmKyzURCIt/RaZIhL+PulbQ9Yu2z1HdOJDdqDTlxA1+xKBmHXJsczAw==",
       "lockPath": "node_modules/scheduler",
       "targets": ["frontend"],
       "licenseFiles": [
@@ -15845,14 +15908,14 @@
       ]
     },
     {
-      "id": "npm:node_modules/tailwind-merge@3.6.0",
+      "id": "npm:node_modules/tailwind-merge@3.7.0",
       "ecosystem": "npm",
       "name": "tailwind-merge",
-      "version": "3.6.0",
+      "version": "3.7.0",
       "licenseExpression": "MIT",
-      "source": "https://registry.npmjs.org/tailwind-merge/-/tailwind-merge-3.6.0.tgz",
+      "source": "https://registry.npmjs.org/tailwind-merge/-/tailwind-merge-3.7.0.tgz",
       "repository": "https://github.com/dcastil/tailwind-merge.git",
-      "integrity": "sha512-uxL7qAVQriqRQPAyK3pj66VqskWqoZ37PW94jwOTwNfq/z9oyu1V+eqrZqtR2+fCiXdYOZe/Modt8GtvqNzu+w==",
+      "integrity": "sha512-XPPUyAc+cvspz3lHTcR/QgPfW2A0lv/xQNIjX3HGhLR+Nq2lHaLq5MtTesHn8GUr3W3DguT2KT5x3NVgRtYwmA==",
       "lockPath": "node_modules/tailwind-merge",
       "targets": ["frontend"],
       "licenseFiles": [

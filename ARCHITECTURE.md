@@ -109,13 +109,13 @@ experimental features still off but WebRTC explicitly on; it also reasserts
 media streams, GStreamer WebRTC, librice, and the bubblewrap sandbox. librice
 keeps ICE/network work in WebKit's sandboxed NetworkProcess.
 
-Runtime revision 7 has this reviewable input identity:
+Runtime revision 8 has this reviewable input identity:
 
 | Input | Version/source | SHA-256 |
 |-|-|-|
 | WebKitGTK | `webkitgtk-2.52.5.tar.xz` from `webkitgtk.org/releases` | `8a531a9abd2215936e8a8a914c077b586c0228b31d652f205286a8ec90f3364b` |
 | librice | GitHub tag archive `v0.4.3` | `4671e1835f9ab0f8d87e8d9e22b6bfb06f928aeae442841ab81881dff61e3f4b` |
-| WebKit AppImage portability delta | `scripts/patches/webkitgtk-2.52.5-appimage-sandbox.patch` | `a27c9de1c1b8665cad2619ace297cb58ed6f9b345b03a25b5f711cbebc4434f7` |
+| WebKit AppImage portability delta | `scripts/patches/webkitgtk-2.52.5-appimage-sandbox.patch` | `ae3cfcd66c3f8deaf4ff60809e53e52f09e0aa916e3db04f296ae9e951aa1250` |
 | GStreamer core | `gstreamer-1.28.7.tar.xz` from `gstreamer.freedesktop.org/src` | `787329b2c5758e228a71d926a6dcf960bceaacca3cadd63874ba665dfcda013e` |
 | GStreamer base | `gst-plugins-base-1.28.7.tar.xz` from `gstreamer.freedesktop.org/src` | `ed6e5410f496d171818763af2265e7977154bc7f9b827e98acf8c5bed21dd5a7` |
 | GStreamer good | `gst-plugins-good-1.28.7.tar.xz` from `gstreamer.freedesktop.org/src` | `87256969c82cf3bc8574301f3e7044a90de0ac500a5a27d8ba38c4dde894dd8b` |
@@ -158,7 +158,8 @@ no binary prefix. The builder also scales its own parallelism to the smaller of
 the host's CPU count and one job per 2 GB of RAM, which is what WebKit's
 unified translation units actually consume.
 
-The curated media payload includes WebKit's black/silence fallback sources,
+The curated media payload includes JPEG decoding for MJPEG webcams
+through WebKit's `decodebin3` capture path, WebKit's black/silence fallback sources,
 OpenGL upload/conversion/download elements for portal frames, and matching NSS
 soft-token/freebl modules for Noble's SRTP encryption. WebKit requests linear
 BGRA DMA-BUF caps because the packaged PipeWire 1.0.5 plugin cannot negotiate
@@ -374,6 +375,16 @@ It does **not** close that connection, and the resulting half-teardown is what #
 
 `lab/scenarios/reconnect.ts` is the regression: it `SIGSTOP`s a peer's Chrome renderer — where Chrome runs WebRTC — for 15 s. With the hold disabled, the observer logs `peer.left` at `degradedForMs` 5003 and the peer never returns; with it, the session comes through untouched.
 
+The pinned Trystero core also closes a shared connection after a terminal
+negotiation error. Clearing only its room bindings leaves the remote attached
+to a still-open transport, which can block fresh offers even though the local
+participant has disappeared. Error/close callbacks act only on the connection
+they registered, and replacing the last shared peer retains its new registry
+entry. A normal room leave still detaches only that room. Native SDP/candidate
+operation failures are recorded as categorical operation/error names and
+connection states; SDP, candidates, device identifiers and error messages are
+not logged.
+
 ### Relay-carried presence (I74)
 
 Everything trystero does — over any strategy — is *signaling*; application data still rides WebRTC datachannels. So when a STUN-only connection can't traverse the NAT pair between two friends, presence heartbeats never flow in either direction, trystero surfaces **no error for a failed ICE attempt** (it silently re-offers forever), and both friends show each other permanently offline — the exact symptom that motivated this leg, made structural by offline ContactCard pairing (§5.1), which removed the last step that ever proved the P2P path worked.
@@ -511,7 +522,7 @@ Multi-friend invites (1:3, 1:4): Sam runs steps 1–7 once per invitee, all usin
 
 Nostr relays don't buffer for an absent peer, so an invite to a closed app can't be delivered later by itself. Two failure modes are now distinguished so the host sees the real cause:
 
-- **Friend offline** (`InviteTimeoutError`): no peer arrived on the inbox topic within the send window. The invite is held and **re-attempted automatically when that friend's presence flips online inside the retry window**, deduped per `(recipient, session)` so a friend can never receive the same invite twice.
+- **Friend may be offline** (`InviteTimeoutError`): no peer arrived on the inbox topic within the send window. The invite is held and **re-attempted on each fresh direct WebRTC presence heartbeat** from that friend inside the retry window; relay-only presence cannot deliver it. An inbox send without a recipient-signed `invite-ack` remains unconfirmed and uses the same retry path. Only one retry is queued per `(recipient, session)`, and the recipient inbox deduplicates repeated deliveries.
 - **Relay down** (`InviteRelayError`): no signaling relay was reachable at all, determined from the live relay-socket check (`relaysUnreachable`), not from trystero's `onJoinError` (which never fires for blocked relays). This is the host's own network, so no retry is queued — re-sending against dead relays would never connect.
 
 After a successful send the host lingers briefly for the recipient-signed **`invite-ack`** (#47 C2, see §7's typed-action list): a verified ACK confirms real delivery, while its absence — an older build, a slow answer, or a friend who never added you back so their inbox silently drops envelopes — renders "sent, unconfirmed" copy with a nudge to make sure they've added you back. Concurrent sends to the same friend are serialized per inbox topic (trystero's core dedupes rooms per topic, so overlapping sends would otherwise share and then destroy one raw room).
@@ -644,7 +655,7 @@ llama-server is bundled as `binaries/llama-server-{platform}` in `tauri.conf.jso
 
 **Engine scheduling priority (#269).** The child is spawned at the app's own priority, so an inference and the webview compete for the machine as equals — which is how a single check came to freeze the app for 5.5–9.2 s at a time. Every spawn site therefore drops the child one notch immediately after `spawn()`: nice **+5** on POSIX, `BELOW_NORMAL_PRIORITY_CLASS` on Windows, llama.cpp's own `GGML_SCHED_PRIO_LOW` mapping at the pinned build. On **Linux** that single call is not enough, because there the nice value is a per-*thread* attribute that threads inherit from whoever creates them: `setpriority(PRIO_PROCESS, pid, …)` moves only the thread whose tid equals the pid, and any thread llama-server already started keeps the app's priority — as would every ggml worker later born under it. So the Linux path walks `/proc/<pid>/task` and lowers each thread, repeating until a pass finds nothing new (threads created after their creator was lowered inherit the value, so only the ones that existed first need catching, and a bounded pass count keeps a thread-spawning child from holding up the spawn). macOS needs none of this — its nice really is the POSIX per-process attribute — and `BELOW_NORMAL_PRIORITY_CLASS` is process-wide by definition. Three further properties are load-bearing. It is applied from Rust rather than by passing `--prio -1`, because at the pinned commit only llama-cli calls `set_process_priority` — llama-server parses the flag into a threadpool config it never builds, so the flag is inert. It is deliberately **not** macOS `PRIO_DARWIN_BG`, which throttles I/O and timers hard enough to lengthen inference rather than merely yield the CPU. And **benchmark runs take the same spawn path**, so a measured p95 stays comparable with live per-tick cost; a new spawn site that skips the drop would make every cadence, slow-tick threshold, and request timeout derived from that p95 too tight. The change is best-effort by contract — a machine that refuses it still gets its engine — so the outcome is written to the sidecar log as `[event gen=N] yield-priority applied|refused by the OS …|failed: <err>`, which is where a diagnostics bundle answers "did the yield apply on this box?". The three states are distinct on purpose: a refusal the code tolerates so the engine still starts (`EACCES`/`RLIMIT_NICE` on a target already outside the range we may move it within, `ESRCH` on one that exited, a partially-applied Linux sweep) is not an applied yield, and logging it as one would restate the assumption the line exists to replace.
 
-**Engine resolution + auto-install (I73).** At spawn time the binary is resolved to an absolute path and launched via `shell().command()` — never `shell().sidecar()`, whose exe-relative join never matched where tauri-build/the bundler actually place the file. Preference order: (1) the bundled binary at `<exe_dir>/llama-server(.exe)` (size-gated, so the dev placeholder `build.rs` writes for debug-profile builds is treated as absent), (2) a managed install at `data_dir/engine/<tag>-<triple>/`. When neither resolves, `sidecar_start` downloads the pinned llama.cpp release asset for the current triple (SHA-256-verified; pins lockstep-tested against `scripts/fetch-llama-server.sh`), unpacks `llama-server` + companion libs, and installs it atomically — gated by the `engine_auto_install` setting (default ON; Settings → AI → AI engine also offers manual Install/Reinstall with progress via `engine:progress` events). The managed install lives in `data_dir`, so it survives app updates; the fallback rescues *spawn* failures (missing/corrupt binary), not runtime crash-loops, which still end at the restart budget. Both sources are the same pinned build, so the fallback never shifts `INFERENCE_ENGINE_FINGERPRINT`.
+**Engine resolution + auto-install (I73).** At spawn time the binary is resolved to an absolute path and launched via `shell().command()` — never `shell().sidecar()`, whose exe-relative join never matched where tauri-build/the bundler actually place the file. Preference order: (1) the bundled binary at `<exe_dir>/llama-server(.exe)` (size-gated, so the dev placeholder `build.rs` writes for debug-profile builds is treated as absent), (2) a managed install at `data_dir/engine/<tag>-r<package-revision>-<triple>/`. When neither resolves, `sidecar_start` downloads the pinned llama.cpp release asset for the current triple (SHA-256-verified; pins lockstep-tested against `scripts/fetch-llama-server.sh`), unpacks `llama-server` + companion libs, and installs it atomically — gated by the `engine_auto_install` setting (default ON; Settings → AI → AI engine also offers manual Install/Reinstall with progress via `engine:progress` events). The managed install lives in `data_dir`, so it survives app updates; the fallback rescues *spawn* failures (missing/corrupt binary), not runtime crash-loops, which still end at the restart budget. Both sources are the same pinned build, so the fallback never shifts `INFERENCE_ENGINE_FINGERPRINT`.
 
 ### Sample loop
 
@@ -1024,9 +1035,13 @@ its exact AppImage built from `x86_64-unknown-linux-gnu`.
   semantics are AppImage-specific: keep the AppImage and containing directory
   writable. Extraction mode retains the original AppImage as the update and
   relaunch target; its temporary tree is never treated as the installation.
-- The packaged llama.cpp runtime is CPU-only by default. Model benchmarking is
-  strongly recommended; users should choose a lighter model when cadence is
-  too slow.
+- The packaged llama.cpp runtime includes a dynamically loaded Vulkan backend
+  for compatible NVIDIA/AMD/Intel GPUs and CPU backends for machines without
+  an accelerator. Auto offloads model and vision-projector work when available;
+  explicit CPU disables both. GPU enumeration uses the host Vulkan loader and
+  ICD drivers, not bundled vendor drivers. Managed package revision 3 prevents
+  old CPU-only engine caches from surviving the switch. Model benchmarking is
+  strongly recommended after hardware changes.
 - Notification recovery attempts to launch KDE or GNOME's settings panel; the
   physical matrix must verify the maintained KDE path. Camera, microphone, and
   screen-capture settings do not have portable Linux deep links, so those

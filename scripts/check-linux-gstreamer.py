@@ -160,6 +160,16 @@ def check_transceiver_reuse():
 
 
 try:
+    # WebKit selects image/jpeg on MJPEG webcams, then autoplugs decoding
+    # through decodebin3. Raw synthetic WebRTC streams miss this path.
+    decode(
+        "MJPEG camera capture",
+        "videotestsrc num-buffers=6 pattern=ball ! "
+        "video/x-raw,format=I420,width=1920,height=1080,framerate=30/1 ! "
+        "jpegenc ! image/jpeg ! decodebin3 ! videoconvert ! "
+        "video/x-raw,format=I420,width=1920,height=1080 ! "
+        "appsink name=decoded sync=false max-buffers=6",
+    )
     decode(
         "VP8/RTP",
         "videotestsrc num-buffers=6 pattern=ball ! "
