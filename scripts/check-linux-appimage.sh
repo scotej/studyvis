@@ -113,6 +113,9 @@ packaged_library_path="$packaged_libdir:$root/usr/lib/x86_64-linux-gnu"
 while IFS= read -r -d '' client; do
   die "host EGL would load a bundled Wayland client: ${client#"$root/"}"
 done < <(find "$root/usr" -name 'libwayland-client.so*' -print0)
+while IFS= read -r -d '' loader; do
+  die "Vulkan must use the host loader: ${loader#"$root/"}"
+done < <(find "$root/usr" -name 'libvulkan.so*' -print0)
 for library in \
   libwebkit2gtk-4.1.so.0 libjavascriptcoregtk-4.1.so.0 \
   librice-proto.so.0 librice-io.so.0; do
@@ -459,7 +462,31 @@ env \
 llama_runtime="$root/usr/lib/StudyVis/binaries/llama-runtime-x86_64-unknown-linux-gnu"
 llama_server="$root/usr/bin/llama-server"
 require_executable "$llama_server"
+require_x86_64_elf "$llama_runtime/libggml-vulkan.so"
+require_x86_64_elf "$llama_runtime/libggml-cpu-x64.so"
+# Only the optional backend may require Vulkan. Linking it into a core library
+# would prevent CPU startup on hosts without the loader, even with --device none.
+for library in "$llama_server" "$llama_runtime"/*.so*; do
+  [[ ${library##*/} == libggml-vulkan.so* ]] && continue
+  dependencies=$(readelf -d "$library")
+  if grep -Eq '\(NEEDED\).*\[(libvulkan\.so|libggml-vulkan\.so)' <<<"$dependencies"; then
+    die "CPU fallback links Vulkan directly: ${library#"$root/"}"
+  fi
+done
 env LD_LIBRARY_PATH="$packaged_library_path:$llama_runtime" \
   "$llama_server" --version >/dev/null
+# Use the same backend search directory as the application. Empty ICD discovery
+# exercises CPU-only hosts without requiring a GPU on the packaging runner.
+(
+  cd "$llama_runtime"
+  env LD_LIBRARY_PATH="$packaged_library_path:$llama_runtime" \
+    VK_DRIVER_FILES="$extract/no-vulkan-driver.json" \
+    VK_ICD_FILENAMES="$extract/no-vulkan-driver.json" \
+    timeout 30 "$llama_server" --list-devices >"$extract/llama-devices.txt" 2>"$extract/llama-backends.txt"
+)
+grep -Fq 'loaded CPU backend' "$extract/llama-backends.txt" || {
+  cat "$extract/llama-backends.txt" >&2
+  die "packaged llama runtime cannot load its CPU fallback"
+}
 
 echo "Validated packaged WebKit, sandbox, WebRTC, PipeWire, licenses, and llama runtimes: $appimage"

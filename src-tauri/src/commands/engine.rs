@@ -32,12 +32,9 @@ use super::sidecar::{SidecarState, TARGET_TRIPLE};
 use crate::db::data_dir;
 
 pub const ENGINE_TAG: &str = "b9095";
-// The upstream tag alone is not enough to identify a compatible managed
-// package: #211 switches Windows from b9095's CPU archive to its Vulkan
-// archive without changing the upstream tag. Keep a package revision in the
-// managed directory name so a damaged future bundle never falls back to an
-// old CPU-only cache and then rejects a persisted Vulkan device selection.
-const ENGINE_PACKAGE_REVISION: &str = "2";
+// Revision 3 replaces the Linux CPU-only archive with Vulkan. A separate
+// directory prevents repair/reinstall from reusing a prior CPU-only cache.
+const ENGINE_PACKAGE_REVISION: &str = "3";
 const RELEASE_BASE: &str = "https://github.com/ggml-org/llama.cpp/releases/download";
 const ENGINE_DIR: &str = "engine";
 
@@ -64,8 +61,8 @@ struct EngineAsset {
 }
 
 // SHA-256s verified against the official b9095 release assets; they match
-// scripts/fetch-llama-server.sh's pins byte-for-byte (test below). Windows
-// deliberately uses the Vulkan package so NVIDIA/AMD/Intel/eGPU devices share
+// scripts/fetch-llama-server.sh's pins byte-for-byte (test below). Windows and Linux
+// deliberately use the Vulkan package so NVIDIA/AMD/Intel/eGPU devices share
 // one backend while CPU remains available through llama.cpp's --device none.
 const ENGINE_ASSETS: &[EngineAsset] = &[
     EngineAsset {
@@ -85,8 +82,8 @@ const ENGINE_ASSETS: &[EngineAsset] = &[
     },
     EngineAsset {
         triple: "x86_64-unknown-linux-gnu",
-        asset: "llama-b9095-bin-ubuntu-x64.tar.gz",
-        sha256: "167e12288da2dc4dcece7327010844edcfb18ee3a76eb45b2e232a04723865e6",
+        asset: "llama-b9095-bin-ubuntu-vulkan-x64.tar.gz",
+        sha256: "3ccb127c298abb2640911aac3e3d9221f197bbf6b7c1e0fedfb4a4dae1ab640b",
     },
 ];
 
@@ -145,7 +142,7 @@ pub enum EngineSource {
 
 // Spawn candidates in preference order: bundled first (the release-tested
 // path), managed second. Both resolve the same pinned tag + package revision,
-// so fallback cannot resurrect a pre-#211 CPU-only Windows engine.
+// so fallback cannot resurrect a CPU-only Windows or Linux engine.
 pub fn resolve_candidates<R: Runtime>(app: &AppHandle<R>) -> Vec<(EngineSource, PathBuf)> {
     let mut candidates = Vec::new();
     if let Some(path) = bundled_binary_path() {
@@ -249,9 +246,7 @@ fn resolved_hardware_identity_for_offload(
 ) -> ResolvedHardwareIdentity {
     let topology = if !offloads_model {
         // CPU is fully selected by --device none / --no-mmproj-offload and
-        // never depends on a GPU probe. This also covers Linux `auto`, whose
-        // packaged b9095 engine deliberately has zero GPU layers even if a
-        // custom build reports accelerators.
+        // never depends on a GPU probe.
         Some(Vec::new())
     } else {
         match selection {
@@ -558,7 +553,7 @@ pub(crate) async fn resolve_hardware_identity<R: Runtime>(
     state: &EngineState,
     selection: &super::compute_device::ComputeDeviceSelection,
 ) -> ResolvedHardwareIdentity {
-    // CPU and packaged Linux-candidate Auto already have a complete, safe identity:
+    // Explicit CPU already has a complete, safe identity:
     // zero model layers means --device none/--no-mmproj-offload, so invoking
     // `--list-devices` would only initialize an unused GPU backend. Do not
     // touch a broken driver merely to describe a known CPU policy.
@@ -1181,11 +1176,7 @@ ggml_vulkan: diagnostic after list
             error: None,
         };
 
-        // Exercise the GPU-offload identity path explicitly so this
-        // normalization test is independent of the host platform. Linux Auto
-        // deliberately selects zero GPU layers; that policy is asserted
-        // separately below.
-        let identity = resolved_hardware_identity_for_offload(&selection, &first, true, true);
+        let identity = resolved_hardware_identity(&selection, &first, true);
         assert_eq!(identity.selection, "auto");
         assert_eq!(
             identity.topology,
@@ -1202,12 +1193,9 @@ ggml_vulkan: diagnostic after list
         );
         assert_eq!(
             identity,
-            resolved_hardware_identity_for_offload(&selection, &changed_free_memory, true, true)
+            resolved_hardware_identity(&selection, &changed_free_memory, true)
         );
-        // Linux Auto keeps text and projector on CPU for the packaged build.
-        // A custom GPU-capable binary may still list devices; identity must
-        // describe the zero-layer policy actually spawned, not that unused
-        // discovery result.
+        // A policy without offload must ignore any discovered accelerators.
         assert_eq!(
             resolved_hardware_identity_for_offload(&selection, &first, true, false).topology,
             Some(Vec::new())
@@ -1262,10 +1250,7 @@ ggml_vulkan: diagnostic after list
         );
 
         let auto = super::super::compute_device::ComputeDeviceSelection::Auto;
-        assert_eq!(
-            selection_requires_device_discovery(&auto),
-            super::super::compute_device::gpu_layers(&auto) != "0"
-        );
+        assert!(selection_requires_device_discovery(&auto));
     }
 
     #[test]
@@ -1344,6 +1329,8 @@ ggml_vulkan: diagnostic after list
             for (path, data) in [
                 ("llama-b9095/llama-server", &b"engine-binary"[..]),
                 ("llama-b9095/libllama.so.0", b"lib"),
+                ("llama-b9095/libggml-vulkan.so", b"vulkan"),
+                ("llama-b9095/libggml-cpu-x64.so", b"cpu"),
                 ("llama-b9095/llama-cli", b"unwanted tool"),
             ] {
                 let mut header = tar::Header::new_gnu();
@@ -1359,6 +1346,8 @@ ggml_vulkan: diagnostic after list
 
         assert!(out.join("llama-server").is_file());
         assert!(out.join("libllama.so.0").is_file());
+        assert_eq!(fs::read(out.join("libggml-vulkan.so")).unwrap(), b"vulkan");
+        assert_eq!(fs::read(out.join("libggml-cpu-x64.so")).unwrap(), b"cpu");
         assert!(!out.join("llama-cli").exists());
         #[cfg(unix)]
         {
@@ -1413,6 +1402,28 @@ ggml_vulkan: diagnostic after list
         assert!(asset_for("x86_64-apple-darwin").is_some());
         assert!(asset_for("x86_64-unknown-linux-gnu").is_some());
         assert!(asset_for("aarch64-unknown-linux-gnu").is_none());
+    }
+
+    #[test]
+    fn cleanup_retires_cpu_only_package_cache() {
+        let root = scratch_dir("package-revision");
+        let old = root.join(format!("b9095-r2-{TARGET_TRIPLE}"));
+        let current = root.join(format!(
+            "{ENGINE_TAG}-r{ENGINE_PACKAGE_REVISION}-{TARGET_TRIPLE}"
+        ));
+        fs::create_dir_all(&old).unwrap();
+        fs::create_dir_all(&current).unwrap();
+        fs::write(old.join(binary_name()), b"cpu-only").unwrap();
+        fs::write(current.join(binary_name()), b"vulkan").unwrap();
+
+        cleanup_stale(&root);
+
+        assert!(
+            !old.exists(),
+            "CPU-only package must not share the current cache"
+        );
+        assert_eq!(fs::read(current.join(binary_name())).unwrap(), b"vulkan");
+        let _ = fs::remove_dir_all(root);
     }
 
     #[test]
