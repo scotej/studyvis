@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "generatedBy": "scripts/generate-third-party-notices.ts",
   "noticePath": "THIRD-PARTY-NOTICES.txt",
-  "noticeSha256": "30d2587b5eb771e39209342a5719da5b2172ff6e729fdd841458f4340020e082",
+  "noticeSha256": "4532c08427e527eac29c863a9c830c4a1ae191a5b21be368ee10bd483140bbdf",
   "scope": {
     "npm": "package-lock.json v3 entries beneath node_modules whose dev flag is not true",
     "cargo": "normal dependency edges reachable from the StudyVis root under each release target; build/dev edges excluded",
@@ -44,7 +44,7 @@
     },
     {
       "path": "src-tauri/Cargo.lock",
-      "sha256": "901f8f484ac9ba811bdcfe3bbe1ff7e0fe32dc03bf658853608f14da4ba7b148"
+      "sha256": "aa94d024431dbe0f754af4fe01ca732e70356e1860d48e1754e52a304a4d3fe0"
     },
     {
       "path": "src-tauri/Cargo.toml",
@@ -9213,13 +9213,13 @@
       ]
     },
     {
-      "id": "cargo:tauri-plugin-deep-link@2.4.9",
+      "id": "cargo:tauri-plugin-deep-link@2.4.10",
       "ecosystem": "cargo",
       "name": "tauri-plugin-deep-link",
-      "version": "2.4.9",
+      "version": "2.4.10",
       "licenseExpression": "Apache-2.0 OR MIT",
-      "source": "https://crates.io/api/v1/crates/tauri-plugin-deep-link/2.4.9/download",
-      "checksum": "70ee75bc5627f77bfdf40c913255ebc258117b10ebe2b2239a1a1cf40b0b58aa",
+      "source": "https://crates.io/api/v1/crates/tauri-plugin-deep-link/2.4.10/download",
+      "checksum": "92d489b8ecceae1cd09f6e1f7606f2095ac721cc8d54cf2f0e6bb377cc52cff6",
       "repository": "https://github.com/tauri-apps/plugins-workspace",
       "targets": [
         "aarch64-apple-darwin",
@@ -9228,15 +9228,15 @@
       ],
       "licenseFiles": [
         {
-          "path": "cargo:tauri-plugin-deep-link@2.4.9/LICENSE.spdx",
+          "path": "cargo:tauri-plugin-deep-link@2.4.10/LICENSE.spdx",
           "sha256": "9c1db6b7e7eb83e1cb2af973b5df2bdc63651ede0f38506ab98dfa0940487759"
         },
         {
-          "path": "cargo:tauri-plugin-deep-link@2.4.9/LICENSE_APACHE-2.0",
+          "path": "cargo:tauri-plugin-deep-link@2.4.10/LICENSE_APACHE-2.0",
           "sha256": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594"
         },
         {
-          "path": "cargo:tauri-plugin-deep-link@2.4.9/LICENSE_MIT",
+          "path": "cargo:tauri-plugin-deep-link@2.4.10/LICENSE_MIT",
           "sha256": "9dd42ea92cff2ede5cd477cbfcce051b2d0115c0ac7f368ee88cb545055dff1d"
         }
       ]

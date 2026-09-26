@@ -3156,14 +3156,14 @@ CARGO
   license: cargo:tauri-plugin-autostart@2.5.1/LICENSE_APACHE-2.0 (SHA-256 0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594)
   license: cargo:tauri-plugin-autostart@2.5.1/LICENSE_MIT (SHA-256 9dd42ea92cff2ede5cd477cbfcce051b2d0115c0ac7f368ee88cb545055dff1d)
 
-- tauri-plugin-deep-link 2.4.9 — Apache-2.0 OR MIT
-  id: cargo:tauri-plugin-deep-link@2.4.9
+- tauri-plugin-deep-link 2.4.10 — Apache-2.0 OR MIT
+  id: cargo:tauri-plugin-deep-link@2.4.10
   targets: aarch64-apple-darwin, x86_64-pc-windows-msvc, x86_64-unknown-linux-gnu
-  source: https://crates.io/api/v1/crates/tauri-plugin-deep-link/2.4.9/download
-  source checksum: 70ee75bc5627f77bfdf40c913255ebc258117b10ebe2b2239a1a1cf40b0b58aa
-  license: cargo:tauri-plugin-deep-link@2.4.9/LICENSE.spdx (SHA-256 9c1db6b7e7eb83e1cb2af973b5df2bdc63651ede0f38506ab98dfa0940487759)
-  license: cargo:tauri-plugin-deep-link@2.4.9/LICENSE_APACHE-2.0 (SHA-256 0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594)
-  license: cargo:tauri-plugin-deep-link@2.4.9/LICENSE_MIT (SHA-256 9dd42ea92cff2ede5cd477cbfcce051b2d0115c0ac7f368ee88cb545055dff1d)
+  source: https://crates.io/api/v1/crates/tauri-plugin-deep-link/2.4.10/download
+  source checksum: 92d489b8ecceae1cd09f6e1f7606f2095ac721cc8d54cf2f0e6bb377cc52cff6
+  license: cargo:tauri-plugin-deep-link@2.4.10/LICENSE.spdx (SHA-256 9c1db6b7e7eb83e1cb2af973b5df2bdc63651ede0f38506ab98dfa0940487759)
+  license: cargo:tauri-plugin-deep-link@2.4.10/LICENSE_APACHE-2.0 (SHA-256 0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594)
+  license: cargo:tauri-plugin-deep-link@2.4.10/LICENSE_MIT (SHA-256 9dd42ea92cff2ede5cd477cbfcce051b2d0115c0ac7f368ee88cb545055dff1d)
 
 - tauri-plugin-dialog 2.7.2 — Apache-2.0 OR MIT
   id: cargo:tauri-plugin-dialog@2.7.2
@@ -7128,7 +7128,7 @@ Applies to:
 - cargo:tauri-codegen@2.6.3 — cargo:tauri-codegen@2.6.3/LICENSE_APACHE-2.0
 - cargo:tauri-macros@2.6.3 — cargo:tauri-macros@2.6.3/LICENSE_APACHE-2.0
 - cargo:tauri-plugin-autostart@2.5.1 — cargo:tauri-plugin-autostart@2.5.1/LICENSE_APACHE-2.0
-- cargo:tauri-plugin-deep-link@2.4.9 — cargo:tauri-plugin-deep-link@2.4.9/LICENSE_APACHE-2.0
+- cargo:tauri-plugin-deep-link@2.4.10 — cargo:tauri-plugin-deep-link@2.4.10/LICENSE_APACHE-2.0
 - cargo:tauri-plugin-dialog@2.7.2 — cargo:tauri-plugin-dialog@2.7.2/LICENSE_APACHE-2.0
 - cargo:tauri-plugin-fs@2.5.1 — cargo:tauri-plugin-fs@2.5.1/LICENSE_APACHE-2.0
 - cargo:tauri-plugin-global-shortcut@2.3.2 — cargo:tauri-plugin-global-shortcut@2.3.2/LICENSE_APACHE-2.0
@@ -19995,7 +19995,7 @@ DEALINGS IN THE SOFTWARE.
 SHA-256 9c1db6b7e7eb83e1cb2af973b5df2bdc63651ede0f38506ab98dfa0940487759
 Applies to:
 - cargo:tauri-plugin-autostart@2.5.1 — cargo:tauri-plugin-autostart@2.5.1/LICENSE.spdx
-- cargo:tauri-plugin-deep-link@2.4.9 — cargo:tauri-plugin-deep-link@2.4.9/LICENSE.spdx
+- cargo:tauri-plugin-deep-link@2.4.10 — cargo:tauri-plugin-deep-link@2.4.10/LICENSE.spdx
 - cargo:tauri-plugin-dialog@2.7.2 — cargo:tauri-plugin-dialog@2.7.2/LICENSE.spdx
 - cargo:tauri-plugin-fs@2.5.1 — cargo:tauri-plugin-fs@2.5.1/LICENSE.spdx
 - cargo:tauri-plugin-global-shortcut@2.3.2 — cargo:tauri-plugin-global-shortcut@2.3.2/LICENSE.spdx
@@ -20106,7 +20106,7 @@ Applies to:
 - cargo:tauri-codegen@2.6.3 — cargo:tauri-codegen@2.6.3/LICENSE_MIT
 - cargo:tauri-macros@2.6.3 — cargo:tauri-macros@2.6.3/LICENSE_MIT
 - cargo:tauri-plugin-autostart@2.5.1 — cargo:tauri-plugin-autostart@2.5.1/LICENSE_MIT
-- cargo:tauri-plugin-deep-link@2.4.9 — cargo:tauri-plugin-deep-link@2.4.9/LICENSE_MIT
+- cargo:tauri-plugin-deep-link@2.4.10 — cargo:tauri-plugin-deep-link@2.4.10/LICENSE_MIT
 - cargo:tauri-plugin-dialog@2.7.2 — cargo:tauri-plugin-dialog@2.7.2/LICENSE_MIT
 - cargo:tauri-plugin-fs@2.5.1 — cargo:tauri-plugin-fs@2.5.1/LICENSE_MIT
 - cargo:tauri-plugin-global-shortcut@2.3.2 — cargo:tauri-plugin-global-shortcut@2.3.2/LICENSE_MIT
