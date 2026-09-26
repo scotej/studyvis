@@ -109,13 +109,13 @@ experimental features still off but WebRTC explicitly on; it also reasserts
 media streams, GStreamer WebRTC, librice, and the bubblewrap sandbox. librice
 keeps ICE/network work in WebKit's sandboxed NetworkProcess.
 
-Runtime revision 7 has this reviewable input identity:
+Runtime revision 8 has this reviewable input identity:
 
 | Input | Version/source | SHA-256 |
 |-|-|-|
 | WebKitGTK | `webkitgtk-2.52.5.tar.xz` from `webkitgtk.org/releases` | `8a531a9abd2215936e8a8a914c077b586c0228b31d652f205286a8ec90f3364b` |
 | librice | GitHub tag archive `v0.4.3` | `4671e1835f9ab0f8d87e8d9e22b6bfb06f928aeae442841ab81881dff61e3f4b` |
-| WebKit AppImage portability delta | `scripts/patches/webkitgtk-2.52.5-appimage-sandbox.patch` | `a27c9de1c1b8665cad2619ace297cb58ed6f9b345b03a25b5f711cbebc4434f7` |
+| WebKit AppImage portability delta | `scripts/patches/webkitgtk-2.52.5-appimage-sandbox.patch` | `ae3cfcd66c3f8deaf4ff60809e53e52f09e0aa916e3db04f296ae9e951aa1250` |
 | GStreamer core | `gstreamer-1.28.7.tar.xz` from `gstreamer.freedesktop.org/src` | `787329b2c5758e228a71d926a6dcf960bceaacca3cadd63874ba665dfcda013e` |
 | GStreamer base | `gst-plugins-base-1.28.7.tar.xz` from `gstreamer.freedesktop.org/src` | `ed6e5410f496d171818763af2265e7977154bc7f9b827e98acf8c5bed21dd5a7` |
 | GStreamer good | `gst-plugins-good-1.28.7.tar.xz` from `gstreamer.freedesktop.org/src` | `87256969c82cf3bc8574301f3e7044a90de0ac500a5a27d8ba38c4dde894dd8b` |
@@ -158,7 +158,8 @@ no binary prefix. The builder also scales its own parallelism to the smaller of
 the host's CPU count and one job per 2 GB of RAM, which is what WebKit's
 unified translation units actually consume.
 
-The curated media payload includes WebKit's black/silence fallback sources,
+The curated media payload includes JPEG decoding for MJPEG webcams
+through WebKit's `decodebin3` capture path, WebKit's black/silence fallback sources,
 OpenGL upload/conversion/download elements for portal frames, and matching NSS
 soft-token/freebl modules for Noble's SRTP encryption. WebKit requests linear
 BGRA DMA-BUF caps because the packaged PipeWire 1.0.5 plugin cannot negotiate

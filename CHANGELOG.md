@@ -4,6 +4,8 @@
 
 ### Fixed
 
+- Linux camera previews no longer stay blank when a webcam uses MJPEG. The
+  AppImage now includes the JPEG decoder needed by camera capture.
 - Failed camera or screen-share negotiation now closes the abandoned peer
   connection so a fresh connection can form. A replacement connection stays
   registered, and delayed errors from an old connection cannot remove it.

@@ -208,7 +208,7 @@ binding. StudyVis therefore builds that binding into a private AppImage runtime,
 explicitly reasserts media streams, and keeps the rest of WebKit's experimental
 feature set disabled.
 
-The pinned, hash-verified input tuple for runtime revision 7 is:
+The pinned, hash-verified input tuple for runtime revision 8 is:
 
 | Input                              | Pinned source                                                                           | SHA-256                                                            |
 | ---------------------------------- | --------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
@@ -254,6 +254,8 @@ using pinned Meson 1.7.2. Noble's 1.24.2 meets WebKit's configure minimum but ha
 incompatible transceiver and incoming-stream behavior (#312). Only the PipeWire
 plugin remains distro-provided; the remaining GStreamer libraries, plugins,
 scanner and PTP helper must match the source-built prefix's build IDs.
+The curated plugins include JPEG decoding for MJPEG webcams;
+the packaged media check exercises that automatic decode path at 1080p.
 The Ubuntu 24.04 build baseline retains the AppImage's glibc 2.39 floor.
 CI/preview cache keys cover the runtime tuple, builder, librice notice generator,
 patch, and toolchain pins, and the verified builder runs after a restore. Tagged
