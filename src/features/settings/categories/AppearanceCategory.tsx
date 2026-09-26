@@ -1,3 +1,4 @@
+import { useCallback } from 'react'
 import { toast } from 'sonner'
 
 import { SettingsRow, SettingsSection } from '@/components/SettingsRow'
@@ -8,6 +9,7 @@ import { Switch } from '@/components/ui/switch'
 import { useTheme } from '@/design/theme-context'
 import { resetWindowToDefault } from '@/features/system'
 import { useAppliedWindowStyle } from '@/lib/appliedWindowStyle'
+import { useSessionStore } from '@/stores/sessionStore'
 import {
   isThemeMode,
   isWindowStyleMode,
@@ -33,6 +35,21 @@ export function AppearanceCategory() {
   const clearWindowLayout = useSettingsStore((s) => s.clearWindowLayout)
   const copy = strings.settings.appearance
   const appliedWindowStyle = useAppliedWindowStyle()
+
+  // I111 — Settings opens over a live session, so this button is reachable
+  // mid-session. `system_relaunch_app` refuses there because a restart skips
+  // the leave handler and loses the session whole; the check is repeated here
+  // so the user gets the reason rather than a generic failure, and the reject
+  // is handled either way instead of surfacing as an unhandled rejection.
+  const handleRelaunch = useCallback(() => {
+    if (useSessionStore.getState().status === 'active') {
+      toast.error(copy.windowStyle.relaunchDuringSession)
+      return
+    }
+    void relaunchApp().catch(() => {
+      toast.error(copy.windowStyle.relaunchFailed)
+    })
+  }, [relaunchApp, copy.windowStyle])
 
   // Compare the saved choice against the frame Rust actually applied at boot.
   // The applied value is process-stable even when this pane remounts after the
@@ -137,11 +154,7 @@ export function AppearanceCategory() {
                 </div>
               </RadioGroup>
               {relaunchPending ? (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => void relaunchApp()}
-                >
+                <Button variant="outline" size="sm" onClick={handleRelaunch}>
                   {copy.windowStyle.relaunchCta}
                 </Button>
               ) : null}

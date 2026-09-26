@@ -287,11 +287,16 @@ export class LabDb {
   }
 
   // Regeneration replaces the stored narrative rather than accumulating rows.
-  sessionTimelineUpsert(row: SessionTimelineRecord): void {
-    this.db
+  // I100 — and only for a session that still exists: a write-up outlives the
+  // report that started it, so a delete landing mid-pass must win. Verbatim
+  // from `db::session_timelines::upsert`, WHERE clause included — SQLite needs
+  // it to tell an UPSERT's `ON` from a join's after `INSERT … SELECT`.
+  sessionTimelineUpsert(row: SessionTimelineRecord): boolean {
+    const result = this.db
       .prepare(
         `INSERT INTO session_timelines (session_id, generated_at, model_id, source, entries, truncated)
-         VALUES (?, ?, ?, ?, ?, ?)
+         SELECT ?, ?, ?, ?, ?, ?
+         WHERE EXISTS (SELECT 1 FROM sessions WHERE id = ?)
          ON CONFLICT(session_id) DO UPDATE SET
            generated_at = excluded.generated_at,
            model_id     = excluded.model_id,
@@ -305,8 +310,10 @@ export class LabDb {
         row.model_id,
         row.source,
         row.entries,
-        row.truncated
+        row.truncated,
+        row.session_id
       )
+    return Number(result.changes) > 0
   }
 
   // --- audit events -------------------------------------------------------

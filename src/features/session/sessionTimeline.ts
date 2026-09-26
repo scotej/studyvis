@@ -120,6 +120,10 @@ export type SessionTimelineInput = {
   sessionId: string
   modelId: string
   declaredTopic: string | null
+  // I101 — `sessions.started_at`, so the written offsets share an origin with
+  // the audit timeline the report renders directly beneath them. Optional: a
+  // caller without the row falls back to the first recorded check.
+  startedAtMs?: number | null
   // The journal the caller has already read. The report probes it to tell "no
   // checks were recorded" apart from "the model failed", so re-reading and
   // re-parsing the same file here would double the work for nothing.
@@ -214,11 +218,26 @@ export function normalizeSegments(
     entries.push({ start_min: startMin, end_min: endMin, summary })
   }
 
-  entries.sort((a, b) => a.start_min - b.start_min || a.end_min - b.end_min)
-  // Overlaps read as contradictory time ranges in the report; trim each entry
-  // to start where the previous one ended and drop what is left of nothing.
+  return sortedWithoutOverlap(entries)
+}
+
+// Overlaps read as contradictory time ranges in the report; trim each entry to
+// start where the previous one ended and drop what is left of nothing.
+//
+// I104 — shared with `mergeWithFallback` rather than owned by normalization.
+// The model's schema constrains its integers, not the window boundaries, so a
+// clamped entry need not be boundary-aligned; the merge then decided coverage
+// by containment and concatenated a fallback digest that could overlap the
+// written entry beside it. Running the merged list back through the same trim
+// is what keeps the two producers from contradicting each other.
+function sortedWithoutOverlap(
+  entries: ReadonlyArray<TimelineEntry>
+): TimelineEntry[] {
+  const sorted = [...entries].sort(
+    (a, b) => a.start_min - b.start_min || a.end_min - b.end_min
+  )
   const ordered: TimelineEntry[] = []
-  for (const entry of entries) {
+  for (const entry of sorted) {
     const previous = ordered[ordered.length - 1]
     if (previous && entry.start_min < previous.end_min) {
       if (entry.end_min <= previous.end_min) continue
@@ -344,9 +363,10 @@ function mergeWithFallback(
           entry.start_min <= window.startMin && entry.end_min >= window.endMin
       )
   )
-  const entries = [...written, ...fallbackEntries(uncovered)].sort(
-    (a, b) => a.start_min - b.start_min || a.end_min - b.end_min
-  )
+  const entries = sortedWithoutOverlap([
+    ...written,
+    ...fallbackEntries(uncovered),
+  ])
   return { entries, uncovered: uncovered.length }
 }
 
@@ -442,7 +462,7 @@ export async function generateSessionTimeline(
       strings.report.sections.written.failed
     )
   }
-  const windows = windowObservations(journal.observations)
+  const windows = windowObservations(journal.observations, input.startedAtMs)
   if (windows.length === 0) return null
 
   const chunks = chunkWindows(windows)
