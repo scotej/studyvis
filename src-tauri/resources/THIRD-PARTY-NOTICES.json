@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "generatedBy": "scripts/generate-third-party-notices.ts",
   "noticePath": "THIRD-PARTY-NOTICES.txt",
-  "noticeSha256": "118b38d80da8be0b4b59ed56c91f6f79b95a6210ab29a7ca0669e23fbf8ae3d8",
+  "noticeSha256": "ce4edf3c92c69e9eaf34821d143cf868fda8c69292cb4ef8001869eac95e48f8",
   "scope": {
     "npm": "package-lock.json v3 entries beneath node_modules whose dev flag is not true",
     "cargo": "normal dependency edges reachable from the StudyVis root under each release target; build/dev edges excluded",
@@ -16,11 +16,11 @@
   "inputs": [
     {
       "path": "package-lock.json",
-      "sha256": "946edcaa34be1a5de6afb8c732e111c57d7927014cc1354538b304256140dcda"
+      "sha256": "895648639ee4f8c6df0cae1d25c28f7d17ed60bc94b34a4d0fafa816905ea19b"
     },
     {
       "path": "package.json",
-      "sha256": "ff10a44d4333fe640d67f0dbf983348e75427f90220d2ca5fd364d7e7b53942a"
+      "sha256": "348fa93f4c7471e9fb7b9c40559b1983b84c937a250dbb4cee4f4d0d41a90c77"
     },
     {
       "path": "scripts/fetch-llama-server.sh",
@@ -44,7 +44,7 @@
     },
     {
       "path": "src-tauri/Cargo.lock",
-      "sha256": "76be9033a111aca7cfa153a1be396637ef42a27b05c37592ffb95c1ea9e41def"
+      "sha256": "078cd11dbff5bcd9433df0b1d2fdb266ea94258dce65f7e0d22bb5bee1aece22"
     },
     {
       "path": "src-tauri/Cargo.toml",
@@ -9329,13 +9329,13 @@
       ]
     },
     {
-      "id": "cargo:tauri-plugin-notification@2.3.3",
+      "id": "cargo:tauri-plugin-notification@2.4.0",
       "ecosystem": "cargo",
       "name": "tauri-plugin-notification",
-      "version": "2.3.3",
+      "version": "2.4.0",
       "licenseExpression": "Apache-2.0 OR MIT",
-      "source": "https://crates.io/api/v1/crates/tauri-plugin-notification/2.3.3/download",
-      "checksum": "01fc2c5ff41105bd1f7242d8201fdf3efd70749b82fa013a17f2126357d194cc",
+      "source": "https://crates.io/api/v1/crates/tauri-plugin-notification/2.4.0/download",
+      "checksum": "ad2fd40946aef810c4be9fd33a2d1b9b397cb79042b2d21c81a0a8f204354fd1",
       "repository": "https://github.com/tauri-apps/plugins-workspace",
       "targets": [
         "aarch64-apple-darwin",
@@ -9344,15 +9344,15 @@
       ],
       "licenseFiles": [
         {
-          "path": "cargo:tauri-plugin-notification@2.3.3/LICENSE.spdx",
+          "path": "cargo:tauri-plugin-notification@2.4.0/LICENSE.spdx",
           "sha256": "9c1db6b7e7eb83e1cb2af973b5df2bdc63651ede0f38506ab98dfa0940487759"
         },
         {
-          "path": "cargo:tauri-plugin-notification@2.3.3/LICENSE_APACHE-2.0",
+          "path": "cargo:tauri-plugin-notification@2.4.0/LICENSE_APACHE-2.0",
           "sha256": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594"
         },
         {
-          "path": "cargo:tauri-plugin-notification@2.3.3/LICENSE_MIT",
+          "path": "cargo:tauri-plugin-notification@2.4.0/LICENSE_MIT",
           "sha256": "9dd42ea92cff2ede5cd477cbfcce051b2d0115c0ac7f368ee88cb545055dff1d"
         }
       ]
@@ -13766,14 +13766,14 @@
       ]
     },
     {
-      "id": "npm:node_modules/@tauri-apps/plugin-notification@2.3.3",
+      "id": "npm:node_modules/@tauri-apps/plugin-notification@2.4.0",
       "ecosystem": "npm",
       "name": "@tauri-apps/plugin-notification",
-      "version": "2.3.3",
+      "version": "2.4.0",
       "licenseExpression": "MIT OR Apache-2.0",
-      "source": "https://registry.npmjs.org/@tauri-apps/plugin-notification/-/plugin-notification-2.3.3.tgz",
+      "source": "https://registry.npmjs.org/@tauri-apps/plugin-notification/-/plugin-notification-2.4.0.tgz",
       "repository": "https://github.com/tauri-apps/plugins-workspace",
-      "integrity": "sha512-Zw+ZH18RJb41G4NrfHgIuofJiymusqN+q8fGUIIV7vyCH+5sSn5coqRv/MWB9qETsUs97vmU045q7OyseCV3Qg==",
+      "integrity": "sha512-xlJXMcUoKOjNupzDue5wrEsa1wytf+l/2gCAPhafHyP683Y3N7J/8clUWLZ3vpnwkpT2C1zcLMMQFjjecIG2xg==",
       "lockPath": "node_modules/@tauri-apps/plugin-notification",
       "targets": ["frontend"],
       "licenseFiles": [
