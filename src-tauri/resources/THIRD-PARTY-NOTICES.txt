@@ -3201,14 +3201,14 @@ CARGO
   license: cargo:tauri-plugin-notification@2.3.3/LICENSE_APACHE-2.0 (SHA-256 0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594)
   license: cargo:tauri-plugin-notification@2.3.3/LICENSE_MIT (SHA-256 9dd42ea92cff2ede5cd477cbfcce051b2d0115c0ac7f368ee88cb545055dff1d)
 
-- tauri-plugin-opener 2.5.4 — Apache-2.0 OR MIT
-  id: cargo:tauri-plugin-opener@2.5.4
+- tauri-plugin-opener 2.5.5 — Apache-2.0 OR MIT
+  id: cargo:tauri-plugin-opener@2.5.5
   targets: aarch64-apple-darwin, x86_64-pc-windows-msvc, x86_64-unknown-linux-gnu
-  source: https://crates.io/api/v1/crates/tauri-plugin-opener/2.5.4/download
-  source checksum: 17e1bea14edce6b793a04e2417e3fd924b9bc4faae83cdee7d714156cceeed29
-  license: cargo:tauri-plugin-opener@2.5.4/LICENSE.spdx (SHA-256 9c1db6b7e7eb83e1cb2af973b5df2bdc63651ede0f38506ab98dfa0940487759)
-  license: cargo:tauri-plugin-opener@2.5.4/LICENSE_APACHE-2.0 (SHA-256 0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594)
-  license: cargo:tauri-plugin-opener@2.5.4/LICENSE_MIT (SHA-256 9dd42ea92cff2ede5cd477cbfcce051b2d0115c0ac7f368ee88cb545055dff1d)
+  source: https://crates.io/api/v1/crates/tauri-plugin-opener/2.5.5/download
+  source checksum: 60d60366174b745b4ef5824b8bbc1c457fd08f0ce101ff643c0a49181a9f4e91
+  license: cargo:tauri-plugin-opener@2.5.5/LICENSE.spdx (SHA-256 9c1db6b7e7eb83e1cb2af973b5df2bdc63651ede0f38506ab98dfa0940487759)
+  license: cargo:tauri-plugin-opener@2.5.5/LICENSE_APACHE-2.0 (SHA-256 0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594)
+  license: cargo:tauri-plugin-opener@2.5.5/LICENSE_MIT (SHA-256 9dd42ea92cff2ede5cd477cbfcce051b2d0115c0ac7f368ee88cb545055dff1d)
 
 - tauri-plugin-shell 2.3.6 — Apache-2.0 OR MIT
   id: cargo:tauri-plugin-shell@2.3.6
@@ -7133,7 +7133,7 @@ Applies to:
 - cargo:tauri-plugin-fs@2.5.1 — cargo:tauri-plugin-fs@2.5.1/LICENSE_APACHE-2.0
 - cargo:tauri-plugin-global-shortcut@2.3.2 — cargo:tauri-plugin-global-shortcut@2.3.2/LICENSE_APACHE-2.0
 - cargo:tauri-plugin-notification@2.3.3 — cargo:tauri-plugin-notification@2.3.3/LICENSE_APACHE-2.0
-- cargo:tauri-plugin-opener@2.5.4 — cargo:tauri-plugin-opener@2.5.4/LICENSE_APACHE-2.0
+- cargo:tauri-plugin-opener@2.5.5 — cargo:tauri-plugin-opener@2.5.5/LICENSE_APACHE-2.0
 - cargo:tauri-plugin-shell@2.3.6 — cargo:tauri-plugin-shell@2.3.6/LICENSE_APACHE-2.0
 - cargo:tauri-plugin-single-instance@2.4.3 — cargo:tauri-plugin-single-instance@2.4.3/LICENSE_APACHE-2.0
 - cargo:tauri-plugin-store@2.4.4 — cargo:tauri-plugin-store@2.4.4/LICENSE_APACHE-2.0
@@ -20000,7 +20000,7 @@ Applies to:
 - cargo:tauri-plugin-fs@2.5.1 — cargo:tauri-plugin-fs@2.5.1/LICENSE.spdx
 - cargo:tauri-plugin-global-shortcut@2.3.2 — cargo:tauri-plugin-global-shortcut@2.3.2/LICENSE.spdx
 - cargo:tauri-plugin-notification@2.3.3 — cargo:tauri-plugin-notification@2.3.3/LICENSE.spdx
-- cargo:tauri-plugin-opener@2.5.4 — cargo:tauri-plugin-opener@2.5.4/LICENSE.spdx
+- cargo:tauri-plugin-opener@2.5.5 — cargo:tauri-plugin-opener@2.5.5/LICENSE.spdx
 - cargo:tauri-plugin-shell@2.3.6 — cargo:tauri-plugin-shell@2.3.6/LICENSE.spdx
 - cargo:tauri-plugin-single-instance@2.4.3 — cargo:tauri-plugin-single-instance@2.4.3/LICENSE.spdx
 - cargo:tauri-plugin-store@2.4.4 — cargo:tauri-plugin-store@2.4.4/LICENSE.spdx
@@ -20111,7 +20111,7 @@ Applies to:
 - cargo:tauri-plugin-fs@2.5.1 — cargo:tauri-plugin-fs@2.5.1/LICENSE_MIT
 - cargo:tauri-plugin-global-shortcut@2.3.2 — cargo:tauri-plugin-global-shortcut@2.3.2/LICENSE_MIT
 - cargo:tauri-plugin-notification@2.3.3 — cargo:tauri-plugin-notification@2.3.3/LICENSE_MIT
-- cargo:tauri-plugin-opener@2.5.4 — cargo:tauri-plugin-opener@2.5.4/LICENSE_MIT
+- cargo:tauri-plugin-opener@2.5.5 — cargo:tauri-plugin-opener@2.5.5/LICENSE_MIT
 - cargo:tauri-plugin-shell@2.3.6 — cargo:tauri-plugin-shell@2.3.6/LICENSE_MIT
 - cargo:tauri-plugin-store@2.4.4 — cargo:tauri-plugin-store@2.4.4/LICENSE_MIT
 - cargo:tauri-plugin-updater@2.11.0 — cargo:tauri-plugin-updater@2.11.0/LICENSE_MIT
