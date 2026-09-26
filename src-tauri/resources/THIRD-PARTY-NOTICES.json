@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "generatedBy": "scripts/generate-third-party-notices.ts",
   "noticePath": "THIRD-PARTY-NOTICES.txt",
-  "noticeSha256": "4dd4721d4b53fc450172df6573840a31e9b4796391f449e4a791df9dea777322",
+  "noticeSha256": "118b38d80da8be0b4b59ed56c91f6f79b95a6210ab29a7ca0669e23fbf8ae3d8",
   "scope": {
     "npm": "package-lock.json v3 entries beneath node_modules whose dev flag is not true",
     "cargo": "normal dependency edges reachable from the StudyVis root under each release target; build/dev edges excluded",
@@ -16,11 +16,11 @@
   "inputs": [
     {
       "path": "package-lock.json",
-      "sha256": "56c1eafe0f732f5ba1d8f63908ddb55634e78456db8d77f98088ee3170851a64"
+      "sha256": "946edcaa34be1a5de6afb8c732e111c57d7927014cc1354538b304256140dcda"
     },
     {
       "path": "package.json",
-      "sha256": "e60af8af29dac00af0ee7fd199ecabbef9a161bb57b12482a2695b5b32351de1"
+      "sha256": "ff10a44d4333fe640d67f0dbf983348e75427f90220d2ca5fd364d7e7b53942a"
     },
     {
       "path": "scripts/fetch-llama-server.sh",
@@ -13730,14 +13730,14 @@
       ]
     },
     {
-      "id": "npm:node_modules/@tauri-apps/plugin-deep-link@2.4.9",
+      "id": "npm:node_modules/@tauri-apps/plugin-deep-link@2.4.10",
       "ecosystem": "npm",
       "name": "@tauri-apps/plugin-deep-link",
-      "version": "2.4.9",
+      "version": "2.4.10",
       "licenseExpression": "MIT OR Apache-2.0",
-      "source": "https://registry.npmjs.org/@tauri-apps/plugin-deep-link/-/plugin-deep-link-2.4.9.tgz",
+      "source": "https://registry.npmjs.org/@tauri-apps/plugin-deep-link/-/plugin-deep-link-2.4.10.tgz",
       "repository": "https://github.com/tauri-apps/plugins-workspace",
-      "integrity": "sha512-u0SKOUHnJ1wqeqXsDFq2+kASCBj9xxbG0g9XZWPy9SOmU4wXtp6b/wiYpm6oH6/5fBTQsLqnLhIvqLBRpgHJlA==",
+      "integrity": "sha512-SuXI47ORUzYuwG6c8dluLDrStTvli5bAZDRa2+VuUEzK/9TEa7FZz7UKXBQriL7+CPFXRHQsz5tSocc47tRXQQ==",
       "lockPath": "node_modules/@tauri-apps/plugin-deep-link",
       "targets": ["frontend"],
       "licenseFiles": [
