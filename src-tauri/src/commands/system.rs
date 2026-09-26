@@ -334,7 +334,19 @@ pub fn system_set_global_shortcut<R: Runtime>(
                 let _ = manager.unregister(new_shortcut);
             }
         }
-        "ptt-ai" => bindings.store_ptt_ai(new_shortcut),
+        "ptt-ai" => {
+            bindings.store_ptt_ai(new_shortcut);
+            // I112 — same shape as the friends arm above: the register
+            // validated that the OS accepts the combo, but the AI combo is only
+            // held while AI features are on. Release it otherwise, and never
+            // when the friends action is holding the same combo for a live
+            // session.
+            if !AiFeaturesFlag::is_enabled(&app)
+                && !(new_shortcut == other_shortcut && SessionActiveFlag::is_active(&app))
+            {
+                let _ = manager.unregister(new_shortcut);
+            }
+        }
         _ => unreachable!("action validated above"),
     }
     Ok(())
@@ -457,7 +469,11 @@ fn apply_ptt_friends_registration<R: Runtime>(app: &AppHandle<R>, active: bool) 
         } else {
             ("register", true, None)
         }
-    } else if friends == ai {
+    } else if friends == ai && AiFeaturesFlag::is_enabled(app) {
+        // I112 — the AI combo is no longer registered for the app's lifetime,
+        // so "the other owner still needs it" has to be checked rather than
+        // assumed. With AI off there is no AI registration to preserve, and
+        // skipping here would strand the combo grabbed after the session ends.
         ("unregister", true, Some("shared-combo"))
     } else if !manager.is_registered(friends) {
         ("unregister", true, Some("not-registered"))
@@ -488,6 +504,69 @@ fn apply_ptt_friends_registration<R: Runtime>(app: &AppHandle<R>, active: bool) 
                 },
             ),
             ("sessionActive", native_log::NativeValue::Bool(active)),
+        ],
+    );
+}
+
+// I112 — the AI dialog's combo, registered only while AI features are on.
+//
+// It used to be registered for the whole process at boot and never released.
+// The `AiFeaturesFlag` gate lives in the shortcut HANDLER, which stops the
+// dialog opening but cannot un-grab an OS-level hotkey — so a fresh install
+// that never turns AI on (the default) still swallowed Cmd+] / Ctrl+] from
+// Safari, Finder and editors for as long as StudyVis was running, including
+// while it merely sat in the tray. That is #47 B5, which was fixed for the
+// friends combo and whose reasoning was never carried across to this one.
+//
+// Mirrors `apply_ptt_friends_registration`, including the shared-accelerator
+// case: a hand-edited settings.json can point both actions at one combo, which
+// has a single OS registration, so neither side may release it while the other
+// still wants it.
+pub fn apply_ptt_ai_registration<R: Runtime>(app: &AppHandle<R>, enabled: bool) {
+    let bindings = app.state::<ShortcutBindings>();
+    let ai = bindings.ptt_ai();
+    let friends = bindings.ptt_friends();
+    let manager = app.global_shortcut();
+    let (op, ok, skipped) = if enabled {
+        if manager.is_registered(ai) {
+            ("register", true, Some("already-registered"))
+        } else if let Err(err) = manager.register(ai) {
+            eprintln!("[global-shortcut] couldn't register the AI dialog shortcut: {err}");
+            ("register", false, None)
+        } else {
+            ("register", true, None)
+        }
+    } else if ai == friends && SessionActiveFlag::is_active(app) {
+        ("unregister", true, Some("shared-combo"))
+    } else if !manager.is_registered(ai) {
+        ("unregister", true, Some("not-registered"))
+    } else if let Err(err) = manager.unregister(ai) {
+        eprintln!("[global-shortcut] couldn't release the AI dialog shortcut: {err}");
+        ("unregister", false, None)
+    } else {
+        ("unregister", true, None)
+    };
+
+    native_log::record(
+        if ok {
+            native_log::NativeLevel::Info
+        } else {
+            native_log::NativeLevel::Error
+        },
+        "ptt.native",
+        "shortcut.state",
+        &[
+            ("op", native_log::NativeValue::Word(op)),
+            ("target", native_log::NativeValue::Word("ptt-ai")),
+            ("ok", native_log::NativeValue::Bool(ok)),
+            (
+                "skipped",
+                match skipped {
+                    Some(reason) => native_log::NativeValue::Word(reason),
+                    None => native_log::NativeValue::Null,
+                },
+            ),
+            ("aiFeaturesEnabled", native_log::NativeValue::Bool(enabled)),
         ],
     );
 }
@@ -826,6 +905,25 @@ pub fn app_quit<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
     Ok(())
 }
 
+// I114 — re-run the boot-time tray probe and latch a newly available tray.
+// Linux is the only platform whose answer can change while the app runs: the
+// AppIndicator is registered either way and only becomes visible once a
+// StatusNotifier host is on the session bus. Elsewhere the flag is false only
+// because tray creation itself failed, which this cannot undo.
+#[cfg(target_os = "linux")]
+fn refresh_tray_available<R: Runtime>(app: &AppHandle<R>) -> bool {
+    let ready = crate::linux_diagnostics::status_notifier_host_ready();
+    if ready {
+        TrayAvailableFlag::set(app, true);
+    }
+    ready
+}
+
+#[cfg(not(target_os = "linux"))]
+fn refresh_tray_available<R: Runtime>(_app: &AppHandle<R>) -> bool {
+    false
+}
+
 #[tauri::command]
 pub fn system_minimize_to_tray_set_enabled<R: Runtime>(
     app: AppHandle<R>,
@@ -834,7 +932,14 @@ pub fn system_minimize_to_tray_set_enabled<R: Runtime>(
     // #263 — enabling close-to-tray with no tray icon would hide the only
     // window with no way to bring it back. Refuse; the JS store keeps the
     // user's chosen value so a fixed desktop environment restores it.
-    if enabled && !TrayAvailableFlag::is_available(&app) {
+    //
+    // I114 — but ask again first. The flag is written once, inside
+    // `setup_desktop`, so a user who read that message, installed an
+    // AppIndicator extension and watched the StatusNotifier icon appear was
+    // still refused for the rest of the process, with nothing saying a relaunch
+    // was needed. The tray icon itself was registered at boot and is waiting
+    // for a host, so a host that has since arrived makes it genuinely usable.
+    if enabled && !TrayAvailableFlag::is_available(&app) && !refresh_tray_available(&app) {
         return Err(
             "tray unavailable: enable a tray/AppIndicator extension before using close-to-tray"
                 .to_string(),
@@ -850,6 +955,9 @@ pub fn system_ai_features_set_enabled<R: Runtime>(
     enabled: bool,
 ) -> Result<(), String> {
     AiFeaturesFlag::set(&app, enabled);
+    // I112 — "zero AI surface" has to include the OS-level grab, not just the
+    // handler gate: the combo is held only while the feature is on.
+    apply_ptt_ai_registration(&app, enabled);
     // "AI off → zero AI surface": tear down an already-open floating Ctrl+]
     // dialog. The shortcut to close it is itself gated on the flag, so without
     // this the window would be orphaned (only Esc/blur could dismiss it).
@@ -1013,6 +1121,16 @@ fn no_battery_fallback() -> BatteryInfo {
 // kept for `#[tauri::command]` ergonomics and the value never resolves.
 #[tauri::command]
 pub fn system_relaunch_app<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
+    // I111 — every other way out of the app consults this flag; this one did
+    // not, and it is reachable mid-session: Settings opens over a live session
+    // by design, and changing Window style renders "Relaunch now" right there.
+    // `app.restart()` bypasses `leaveBeforeQuit` and the CloseRequested confirm
+    // entirely, so the leave handler never runs and the session is lost whole —
+    // no sessions row, no report, no stats credit. The updater already refuses
+    // to install mid-session for exactly this reason; so does this.
+    if SessionActiveFlag::is_active(&app) {
+        return Err("a study session is running".to_string());
+    }
     // `app.restart()` on the main thread goes straight to
     // `cleanup_before_exit()` + `process::restart()` and SKIPS RunEvent::Exit,
     // where the sidecar's only kill lives — so a live llama-server would be

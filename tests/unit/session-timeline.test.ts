@@ -38,7 +38,10 @@ import {
   normalizeSegments,
   TIMELINE_SYSTEM_PROMPT,
 } from '@/features/session/sessionTimeline'
-import { createWriteUpLatch } from '@/features/session/useWrittenTimeline'
+import {
+  createWriteUpLatch,
+  storedWriteUpIsStale,
+} from '@/features/session/useWrittenTimeline'
 import { parseTimelineEntries } from '@/lib/db/sessionTimeline'
 import { useSessionStore } from '@/stores/sessionStore'
 import { strings } from '@/strings'
@@ -622,5 +625,114 @@ describe('the write-up latch', () => {
     latch.complete('s:1')
     latch.release('s:1')
     expect(latch.claim('s:2')).toBe(true)
+  })
+})
+
+// I101 — the section's help line promises offsets counted from the start of the
+// session, and the audit timeline directly beneath it anchors on
+// `sessions.started_at`. Anchoring on the first recorded check instead put the
+// two on different origins whenever the opening minutes recorded nothing.
+describe('anchoring the written offsets', () => {
+  test('counts from the session start, not the first recorded check', async () => {
+    __setSessionJournalRuntime(journalOf([observation(20), observation(21)]))
+    __setAiAgentRuntime(
+      agentRuntime(() => new Response('upstream exploded', { status: 500 }))
+    )
+    const timeline = await generateSessionTimeline({
+      sessionId: SESSION,
+      modelId: 'gemma',
+      declaredTopic: 'Maths',
+      startedAtMs: T0,
+    })
+    expect(timeline?.entries[0]?.start_min).toBe(20)
+  })
+
+  test('falls back to the first check when the start is absent or impossible', async () => {
+    __setSessionJournalRuntime(journalOf([observation(20), observation(21)]))
+    __setAiAgentRuntime(
+      agentRuntime(() => new Response('upstream exploded', { status: 500 }))
+    )
+    const withoutStart = await generateSessionTimeline({
+      sessionId: SESSION,
+      modelId: 'gemma',
+      declaredTopic: 'Maths',
+    })
+    expect(withoutStart?.entries[0]?.start_min).toBe(0)
+
+    __setSessionJournalRuntime(journalOf([observation(20), observation(21)]))
+    __setAiAgentRuntime(
+      agentRuntime(() => new Response('upstream exploded', { status: 500 }))
+    )
+    // A start AFTER the first check is a clock-skewed row, not an origin.
+    const skewed = await generateSessionTimeline({
+      sessionId: SESSION,
+      modelId: 'gemma',
+      declaredTopic: 'Maths',
+      startedAtMs: T0 + 30 * 60_000,
+    })
+    expect(skewed?.entries[0]?.start_min).toBe(0)
+  })
+})
+
+// I104 — the model's schema constrains its integers, not the window
+// boundaries, so a written entry can straddle a window the merge then fills
+// with a digest. Two rows claiming the same minute read as a contradiction.
+describe('merging model output with the digest fallback', () => {
+  test('never renders two entries that overlap', async () => {
+    // A span over an hour widens the windows past one minute, which is what
+    // lets a written entry end somewhere other than a window boundary.
+    __setSessionJournalRuntime(
+      journalOf([observation(0), observation(2), observation(60)])
+    )
+    __setAiAgentRuntime(
+      agentRuntime(() =>
+        chatResponse(
+          JSON.stringify({
+            segments: [
+              { start_min: 0, end_min: 3, summary: 'Worked on integrals' },
+            ],
+          })
+        )
+      )
+    )
+    const timeline = await generateSessionTimeline({
+      sessionId: SESSION,
+      modelId: 'gemma',
+      declaredTopic: 'Maths',
+    })
+    const entries = timeline?.entries ?? []
+    expect(entries.length).toBeGreaterThan(1)
+    for (let i = 1; i < entries.length; i += 1) {
+      expect(entries[i].start_min).toBeGreaterThanOrEqual(
+        entries[i - 1].end_min
+      )
+    }
+  })
+})
+
+// I99 — a rejoin ends the same session id twice, so a row generated before the
+// session's own end covers only the first stint.
+describe('recognising a stale stored write-up', () => {
+  const row = (generatedAt: number) => ({
+    session_id: SESSION,
+    generated_at: generatedAt,
+    model_id: 'gemma',
+    source: 'model',
+    entries: '[]',
+    truncated: 0,
+  })
+
+  test('a write-up generated before the session ended is stale', () => {
+    expect(storedWriteUpIsStale(row(T0), T0 + 1)).toBe(true)
+  })
+
+  test('an ordinary write-up runs after the end and is not stale', () => {
+    expect(storedWriteUpIsStale(row(T0 + 1), T0)).toBe(false)
+  })
+
+  test('no row and no end are both "nothing to redo"', () => {
+    expect(storedWriteUpIsStale(null, T0)).toBe(false)
+    expect(storedWriteUpIsStale(row(T0), null)).toBe(false)
+    expect(storedWriteUpIsStale(row(T0), Number.NaN)).toBe(false)
   })
 })

@@ -6,7 +6,9 @@
 
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 
+import { __resetLog, recentRecords } from '@/lib/log'
 import {
+  createResilientPeerConnection,
   installTransientDisconnectHold,
   transportHealthOf,
 } from '@/lib/webrtc/resilientPeerConnection'
@@ -211,5 +213,41 @@ describe('#264 transient-disconnect hold', () => {
     const bare = new FakeConnection() as unknown as RTCPeerConnection
     expect(transportHealthOf(bare)).toBeNull()
     expect(transportHealthOf(null)).toBeNull()
+  })
+
+  test('records effective TURN mode without exposing server secrets', () => {
+    __resetLog()
+    const Wrapped = createResilientPeerConnection(
+      FakeConnection as unknown as typeof RTCPeerConnection
+    )
+    new Wrapped({ iceServers: [{ urls: 'stun:stun.example.test' }] })
+    new Wrapped({
+      iceServers: [
+        { urls: 'stun:stun.example.test' },
+        {
+          urls: 'turns:private.example.test:443',
+          username: 'private-user',
+          credential: 'private-password',
+        },
+      ],
+      iceTransportPolicy: 'relay',
+    })
+
+    const records = recentRecords().filter(
+      (record) => record.scope === 'p2p.transport'
+    )
+    expect(records.map((record) => record.msg)).toEqual([
+      'peer.created.stun',
+      'peer.created.turn-only',
+    ])
+    const created = records[1]
+    expect(created?.data).toEqual({
+      iceTransportPolicy: 'relay',
+      turnServerCount: 1,
+    })
+    expect(JSON.stringify(created)).not.toMatch(
+      /private-(example|user|password)/
+    )
+    __resetLog()
   })
 })

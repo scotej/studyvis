@@ -1,5 +1,64 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- Failed camera or screen-share negotiation now closes the abandoned peer
+  connection so a fresh connection can form. A replacement connection stays
+  registered, and delayed errors from an old connection cannot remove it.
+- Session diagnostics now record camera acquisition and stream publication
+  failures, plus WebRTC negotiation failures without private media or network
+  details.
+
+## 1.12.4 — 2026-09-25 — Reliable session invitations
+
+### Fixed
+
+- **An invite that fails to send can be tried again.** The in-session picker
+  now shows when a send is in progress and only marks a friend invited after
+  the send succeeds. A pending invite also retries when that friend's direct
+  connection recovers while the host keeps the session open.
+- **Repeated failed peer handshakes no longer exhaust the browser's connection
+  limit.** Abandoned WebRTC connections are closed after a failed handshake;
+  an active connection still gets its recovery window after a brief outage.
+- Refreshed the default signaling relays after three stopped accepting or
+  returning StudyVis messages.
+- Closing the main window on Windows no longer fails with a window permission
+  error when remembering its position is enabled.
+- Linux AppImage media startup no longer crashes while loading the bundled
+  PipeWire module for camera and screen sharing.
+
+Friends whose networks block a direct WebRTC connection still need a working
+TURN server in Settings → Network. The former public no-account TURN service
+does not respond, so StudyVis cannot supply one as a default.
+
+## 1.12.2 — 2026-09-14 — Notifications that reach you
+
+### Fixed
+
+- Model benchmarks in installed builds no longer fail with "Load failed" while
+  loading the bundled test image.
+- **Session notifications now reach you on macOS while you're in a full-screen
+  app.** A friend's chat message, an off-task alert or a session notice shows
+  up in the small floating card over whatever you're working in — but on
+  macOS that card was never allowed onto a full-screen app's space, so anyone
+  studying with another app full-screen saw nothing until they came back to
+  StudyVis. The card now joins full-screen spaces the way the Ctrl+] AI dialog
+  already did, keeps its top edge below the menu bar when it grows to fit a
+  longer message, and records what it did in the diagnostics log so a silent
+  notification can be diagnosed from an archive.
+
+## 1.12.1 — 2026-09-13 — Reliable Linux session media
+
+### Fixed
+
+- Linux sessions can send and receive camera video and screen shares reliably,
+  including screens added after joining and restarted during a session.
+- Camera audio and video no longer consume a screen share's stream announcement
+  when their tracks arrive in a different order.
+- The Linux media runtime now includes current GStreamer and ICE security fixes.
+
 ## 1.12.0 — 2026-08-27 — Your session, minute by minute
 
 ### Added

@@ -78,8 +78,8 @@ pub fn toggle_ai_dialog<R: Runtime>(app: &AppHandle<R>) -> Result<(), tauri::Err
     // canJoinAllSpaces+transient+stationary via the builder; we OR in
     // FullScreenAuxiliary on top.
     #[cfg(target_os = "macos")]
-    {
-        apply_macos_collection_behavior(&window);
+    if let Err(err) = crate::macos_floating_window::apply_collection_behavior(&window) {
+        eprintln!("[ai-dialog] {err} — collection behavior unchanged");
     }
 
     // Silence unused-mut on non-macOS builds where the second branch is gone.
@@ -97,31 +97,4 @@ pub fn toggle_ai_dialog<R: Runtime>(app: &AppHandle<R>) -> Result<(), tauri::Err
 #[tauri::command]
 pub fn ai_dialog_toggle(app: AppHandle) -> Result<(), String> {
     toggle_ai_dialog(&app).map_err(|error| format!("toggle AI dialog: {error}"))
-}
-
-#[cfg(target_os = "macos")]
-fn apply_macos_collection_behavior<R: Runtime>(window: &tauri::WebviewWindow<R>) {
-    use objc2::rc::Retained;
-    use objc2_app_kit::{NSWindow, NSWindowCollectionBehavior};
-
-    let raw = match window.ns_window() {
-        Ok(ptr) if !ptr.is_null() => ptr,
-        _ => {
-            eprintln!("[ai-dialog] ns_window() returned null — collection behavior unchanged");
-            return;
-        }
-    };
-    unsafe {
-        // ns_window() returns an autoreleased pointer (per
-        // tauri::WebviewWindow::ns_window docs / source). Wrap it back
-        // into a Retained so the AppKit method dispatch sees a proper
-        // NSWindow reference; the Retained drops at end of scope which
-        // matches the autoreleased ownership.
-        let ns_window: Retained<NSWindow> =
-            Retained::retain(raw as *mut NSWindow).expect("ns_window pointer to be non-null");
-        let mut behavior = ns_window.collectionBehavior();
-        behavior |= NSWindowCollectionBehavior::CanJoinAllSpaces;
-        behavior |= NSWindowCollectionBehavior::FullScreenAuxiliary;
-        ns_window.setCollectionBehavior(behavior);
-    }
 }

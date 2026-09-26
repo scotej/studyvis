@@ -30,7 +30,7 @@ if [[ $# -ne 1 ]]; then
   exit 2
 fi
 
-for command_name in bash cmp env find grep gst-inspect-1.0 head ldd mkdir mktemp node npm python3 readelf realpath sha256sum tr wc; do
+for command_name in bash cc cmp dbus-run-session env find grep gst-inspect-1.0 head ldd mkdir mktemp node npm pkg-config python3 readelf realpath sed sha256sum timeout tr wc xvfb-run; do
   command -v "$command_name" >/dev/null 2>&1 || die "missing AppImage check dependency: $command_name"
 done
 
@@ -110,6 +110,12 @@ apprun_build_id=$(
 
 packaged_libdir="$root/usr/lib"
 packaged_library_path="$packaged_libdir:$root/usr/lib/x86_64-linux-gnu"
+while IFS= read -r -d '' client; do
+  die "host EGL would load a bundled Wayland client: ${client#"$root/"}"
+done < <(find "$root/usr" -name 'libwayland-client.so*' -print0)
+while IFS= read -r -d '' loader; do
+  die "Vulkan must use the host loader: ${loader#"$root/"}"
+done < <(find "$root/usr" -name 'libvulkan.so*' -print0)
 for library in \
   libwebkit2gtk-4.1.so.0 libjavascriptcoregtk-4.1.so.0 \
   librice-proto.so.0 librice-io.so.0; do
@@ -126,6 +132,14 @@ done
 license_dir="$root/usr/share/licenses/studyvis-webkit-runtime"
 license_files=(
   BUILD-MANIFEST.txt
+  GStreamer-LICENSE-LGPL-2.1
+  GStreamer-PTP-LICENSE-MPL-2.0
+  Libnice-LICENSING
+  Libnice-LICENSE-LGPL-2.1
+  Libnice-LICENSE-MPL-1.1
+  GSTREAMER-THIRD-PARTY-LICENSES.txt
+  GSTREAMER-LICENSE-FILES.sha256
+  Meson-LICENSE-APACHE-2.0
   COPYING.LIB
   LICENSE-APPLE
   LICENSE-LGPL-2
@@ -141,6 +155,27 @@ license_files=(
 for license in "${license_files[@]}"; do
   require_nonempty_file "$license_dir/$license"
 done
+for notice in GSTREAMER-THIRD-PARTY-LICENSES.txt GSTREAMER-LICENSE-FILES.sha256 GStreamer-PTP-LICENSE-MPL-2.0; do
+  case $notice in
+    GSTREAMER-THIRD-PARTY-LICENSES.txt) expected_sha=$STUDYVIS_GSTREAMER_NOTICE_SHA256 ;;
+    GSTREAMER-LICENSE-FILES.sha256) expected_sha=$STUDYVIS_GSTREAMER_LICENSE_INVENTORY_SHA256 ;;
+    GStreamer-PTP-LICENSE-MPL-2.0) expected_sha=$STUDYVIS_GSTREAMER_PTP_LICENSE_SHA256 ;;
+  esac
+  read -r actual_sha _ < <(sha256sum "$license_dir/$notice")
+  [[ $actual_sha == "$expected_sha" ]] || die "GStreamer license evidence has the wrong SHA256: $notice"
+done
+for license in Libnice-LICENSING Libnice-LICENSE-LGPL-2.1 Libnice-LICENSE-MPL-1.1; do
+  case $license in
+    Libnice-LICENSING) expected_sha=$STUDYVIS_LIBNICE_LICENSING_SHA256 ;;
+    Libnice-LICENSE-LGPL-2.1) expected_sha=$STUDYVIS_LIBNICE_LGPL_SHA256 ;;
+    Libnice-LICENSE-MPL-1.1) expected_sha=$STUDYVIS_LIBNICE_MPL_SHA256 ;;
+  esac
+  read -r actual_sha _ < <(sha256sum "$license_dir/$license")
+  [[ $actual_sha == "$expected_sha" ]] || die "libnice license evidence has the wrong SHA256: $license"
+done
+[[ $(wc -l <"$license_dir/GSTREAMER-LICENSE-FILES.sha256") -eq 15 ]] || {
+  die "packaged GStreamer/libnice license hash inventory is incomplete"
+}
 if ! cmp -s "$license_dir/BUILD-MANIFEST.txt" \
   <(bash "$script_dir/build-linux-webkit-runtime.sh" --print-manifest); then
   die "packaged runtime manifest does not match the repository tuple and flags"
@@ -269,13 +304,39 @@ for forbidden in libgstlibav.so libgstx264.so libgstx265.so; do
   [[ ! -e $plugins/$forbidden ]] || die "forbidden GStreamer codec was packaged: $forbidden"
 done
 
+# linuxdeploy resolves support libraries separately from staged plugins. Prove
+# they all came from the same source build even when Noble provides the same
+# sonames. Its stripping/RPATH edits preserve each original GNU build-id.
+gstreamer_runtime_libdir=$(bash "$script_dir/build-linux-webkit-runtime.sh" --print-pkg-config-path)
+gstreamer_runtime_libdir=${gstreamer_runtime_libdir%/pkgconfig}
+while IFS= read -r -d '' payload; do
+  name=${payload##*/}
+  case $payload in
+    "$plugins/libgstpipewire.so") continue ;;
+    "$plugins/"*|"${scanner%/*}/"*) reference="$gstreamer_runtime_libdir/gstreamer-1.0/$name" ;;
+    *) reference="$gstreamer_runtime_libdir/$name" ;;
+  esac
+  require_file "$reference"
+  payload_id=$(readelf -n "$payload" | sed -n 's/.*Build ID: //p')
+  reference_id=$(readelf -n "$reference" | sed -n 's/.*Build ID: //p')
+  [[ -n $payload_id && $payload_id == "$reference_id" ]] || {
+    die "packaged GStreamer differs from its pinned source build: $name"
+  }
+done < <(find "$packaged_libdir" -type f \
+  \( -name 'libgst*.so*' -o -name 'libnice.so*' -o -name gst-plugin-scanner -o -name gst-ptp-helper \) -print0)
+
 # A fresh registry plus packaged-only paths proves every element resolves from
 # the artifact. This covers capture, ICE, RTP, baseline A/V codecs, DTLS-SRTP
 # encryption, and the SCTP data channel used by Trystero.
 registry="$extract/gstreamer-registry.bin"
+grep -aFq "StudyVis GStreamer $STUDYVIS_GSTREAMER_VERSION (runtime r$STUDYVIS_WEBKIT_RUNTIME_REVISION)" "$plugins/libgstwebrtc.so" || {
+  die "packaged WebRTC plugin is missing its pinned runtime build marker"
+}
 test_home="$extract/home"
-mkdir -p "$test_home"
+mkdir -p "$test_home/.config"
 for element in \
+  videotestsrc audiotestsrc \
+  glupload glcolorconvert gldownload \
   pipewiresrc webrtcbin nicesrc nicesink rtpbin \
   vp8enc vp8dec rtpvp8pay rtpvp8depay \
   opusenc opusdec rtpopuspay rtpopusdepay \
@@ -291,6 +352,23 @@ for element in \
       die "packaged GStreamer element is unavailable: $element"
     }
 done
+
+# #312: factories alone missed media failures. Exercise real codecs, SRTP,
+# GPU-memory conversion and transceiver reuse without a camera or display.
+for nss_file in libsoftokn3.so libsoftokn3.chk libfreeblpriv3.so libfreeblpriv3.chk; do
+  require_nonempty_file "$packaged_libdir/$nss_file"
+done
+env -u DISPLAY -u WAYLAND_DISPLAY \
+  HOME="$test_home" \
+  LD_LIBRARY_PATH="$packaged_library_path" \
+  GST_PLUGIN_SCANNER_1_0="$scanner" \
+  GST_REGISTRY="$registry" \
+  GST_PLUGIN_SYSTEM_PATH_1_0="$plugins" \
+  GST_PLUGIN_PATH_1_0="$plugins" \
+  GST_GL_WINDOW=surfaceless GST_GL_PLATFORM=egl GST_GL_API=gles2 EGL_PLATFORM=surfaceless \
+  timeout 45s python3 "$script_dir/check-linux-gstreamer.py" "$packaged_libdir" "$STUDYVIS_GSTREAMER_VERSION" || {
+    die "packaged GStreamer cannot encode and decode WebRTC media"
+  }
 
 # Resolving `pipewiresrc` above proves only that the plugin loads: its
 # plugin_init calls pw_init(), which never touches the SPA plugin directory.
@@ -314,6 +392,8 @@ for module in protocol-native client-node client-device adapter metadata session
   require_file "$pipewire_modules/libpipewire-module-$module.so"
 done
 env LD_LIBRARY_PATH="$packaged_library_path" \
+  HOME="$test_home" \
+  XDG_CONFIG_HOME="$test_home/.config" \
   SPA_PLUGIN_DIR="$spa_plugins" \
   PIPEWIRE_MODULE_DIR="$pipewire_modules" \
   PIPEWIRE_CONFIG_DIR="$pipewire_config" \
@@ -322,24 +402,91 @@ import ctypes
 import sys
 
 library = ctypes.CDLL(sys.argv[1])
+library.pw_init.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+library.pw_init.restype = None
 library.pw_init(None, None)
+library.pw_loop_new.argtypes = [ctypes.c_void_p]
 library.pw_loop_new.restype = ctypes.c_void_p
 library.pw_context_new.restype = ctypes.c_void_p
 library.pw_context_new.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_size_t]
+library.pw_context_destroy.argtypes = [ctypes.c_void_p]
+library.pw_context_destroy.restype = None
+library.pw_loop_destroy.argtypes = [ctypes.c_void_p]
+library.pw_loop_destroy.restype = None
+library.pw_deinit.argtypes = []
+library.pw_deinit.restype = None
 
-loop = library.pw_loop_new(None)
-if not loop:
-    sys.exit("pw_loop_new() returned NULL: the packaged SPA plugins are missing")
-# Every context.modules entry in client.conf is mandatory; a NULL here means
-# one of the packaged modules did not load.
-if not library.pw_context_new(loop, None, 0):
-    sys.exit("pw_context_new() returned NULL: the packaged PipeWire modules are incomplete")
+try:
+    loop = library.pw_loop_new(None)
+    if not loop:
+        sys.exit("pw_loop_new() returned NULL: the packaged SPA plugins are missing")
+    try:
+        # Every context.modules entry in client.conf is mandatory; a NULL here
+        # means one of the packaged modules did not load.
+        context = library.pw_context_new(loop, None, 0)
+        if not context:
+            sys.exit("pw_context_new() returned NULL: the packaged PipeWire modules are incomplete")
+        print("Packaged PipeWire context created", flush=True)
+        # Unload its modules before Python tears down the ctypes library.
+        library.pw_context_destroy(context)
+    finally:
+        library.pw_loop_destroy(loop)
+finally:
+    library.pw_deinit()
+print("Packaged PipeWire context and loop destroyed", flush=True)
 PROBE
+
+# A data-channel offer does not exercise receiver creation or renegotiation.
+# Compile against the pinned SDK, then run beside the extracted application so
+# WebKit resolves its real packaged subprocesses and media libraries (#312).
+media_probe="$root/usr/bin/studyvis-webkit-media-check"
+# shellcheck disable=SC2046
+cc -Wall -Wextra -Werror "$script_dir/check-linux-webkit-media.c" \
+  -o "$media_probe" $(pkg-config --cflags --libs webkit2gtk-4.1)
+env \
+  HOME="$test_home" \
+  LD_LIBRARY_PATH="$packaged_library_path" \
+  GST_PLUGIN_SCANNER_1_0="$scanner" \
+  GST_REGISTRY="$registry" \
+  GST_PLUGIN_SYSTEM_PATH_1_0="$plugins" \
+  GST_PLUGIN_PATH_1_0="$plugins" \
+  SPA_PLUGIN_DIR="$root/usr/lib/spa-0.2" \
+  PIPEWIRE_MODULE_DIR="$packaged_libdir" \
+  PIPEWIRE_CONFIG_DIR="$root/usr/share/pipewire" \
+  GDK_BACKEND=x11 LIBGL_ALWAYS_SOFTWARE=1 \
+  timeout 75s xvfb-run -a dbus-run-session -- \
+    "$media_probe" "$script_dir/check-linux-webkit-media.html" || {
+      die "packaged WebKit cannot render and renegotiate peer media"
+    }
 
 llama_runtime="$root/usr/lib/StudyVis/binaries/llama-runtime-x86_64-unknown-linux-gnu"
 llama_server="$root/usr/bin/llama-server"
 require_executable "$llama_server"
+require_x86_64_elf "$llama_runtime/libggml-vulkan.so"
+require_x86_64_elf "$llama_runtime/libggml-cpu-x64.so"
+# Only the optional backend may require Vulkan. Linking it into a core library
+# would prevent CPU startup on hosts without the loader, even with --device none.
+for library in "$llama_server" "$llama_runtime"/*.so*; do
+  [[ ${library##*/} == libggml-vulkan.so* ]] && continue
+  dependencies=$(readelf -d "$library")
+  if grep -Eq '\(NEEDED\).*\[(libvulkan\.so|libggml-vulkan\.so)' <<<"$dependencies"; then
+    die "CPU fallback links Vulkan directly: ${library#"$root/"}"
+  fi
+done
 env LD_LIBRARY_PATH="$packaged_library_path:$llama_runtime" \
   "$llama_server" --version >/dev/null
+# Use the same backend search directory as the application. Empty ICD discovery
+# exercises CPU-only hosts without requiring a GPU on the packaging runner.
+(
+  cd "$llama_runtime"
+  env LD_LIBRARY_PATH="$packaged_library_path:$llama_runtime" \
+    VK_DRIVER_FILES="$extract/no-vulkan-driver.json" \
+    VK_ICD_FILENAMES="$extract/no-vulkan-driver.json" \
+    timeout 30 "$llama_server" --list-devices >"$extract/llama-devices.txt" 2>"$extract/llama-backends.txt"
+)
+grep -Fq 'loaded CPU backend' "$extract/llama-backends.txt" || {
+  cat "$extract/llama-backends.txt" >&2
+  die "packaged llama runtime cannot load its CPU fallback"
+}
 
 echo "Validated packaged WebKit, sandbox, WebRTC, PipeWire, licenses, and llama runtimes: $appimage"

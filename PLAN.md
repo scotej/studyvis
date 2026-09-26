@@ -155,13 +155,13 @@ These are decisions, not omissions. Adding any of these would change the product
 
 Explicit so we don't pretend.
 
-- **Linux integration is desktop-service and bundled-runtime dependent.** On KDE Wayland, outbound screen share and AI capture require `xdg-desktop-portal-kde` + PipeWire, and private-key storage requires a provider owning `org.freedesktop.secrets`. The candidate is x86_64 AppImage only, the AppImage must be writable for automatic update, and its packaged AI engine is CPU-only. It also carries StudyVis's WebKitGTK/librice copy because the distro build has the `ENABLE_WEB_RTC` peer-connection binding compiled out while retaining the media-device API. Distro security updates therefore do not patch the candidate: StudyVis owns advisory monitoring, license/source obligations, runtime rebuilds, and updater delivery. These are candidate prerequisites and limits, not a development-only implementation status; they become supported-release claims only after the exact-AppImage physical matrix passes.
+- **Linux integration is desktop-service and bundled-runtime dependent.** On KDE Wayland, outbound screen share and AI capture require `xdg-desktop-portal-kde` + PipeWire, and private-key storage requires a provider owning `org.freedesktop.secrets`. The candidate is x86_64 AppImage only, the AppImage must be writable for automatic update, and GPU acceleration requires a compatible host Vulkan driver (CPU fallback remains available). It also carries StudyVis's WebKitGTK/librice copy because the distro build has the `ENABLE_WEB_RTC` peer-connection binding compiled out while retaining the media-device API. Distro security updates therefore do not patch the candidate: StudyVis owns advisory monitoring, license/source obligations, runtime rebuilds, and updater delivery. These are candidate prerequisites and limits, not a development-only implementation status; they become supported-release claims only after the exact-AppImage physical matrix passes.
 - **Prompt injection** on small local LLMs is real. Friend-group threat model mostly absorbs this — Gemma 3 4B and Qwen2.5-VL-3B handle naive injections, but a determined friend can fool them. Mitigations: structured observation prompts where possible, system-prompt manipulation patterns enumerated, no real consequence to faking your own score.
 - **Self-reported scores.** A peer can disable AI features locally and still appear in sessions; their score will simply read "AI off" to the others. No technical defense; rely on social trust.
 - **BIP39 backup is the user's responsibility.** Lose the 24 words and the laptop, you're a new identity to your friends.
 - **TURN relay required for ~15% of network setups.** No public TURN ships (the old free public endpoints are dead), so StudyVis is STUN-only by default and those sessions can fail to connect until the user adds their own TURN server (Settings → Network). Documented in onboarding and ARCHITECTURE §4.
 - **No cross-device identity.** One install = one identity. Multi-device is V3+ via BIP39 restore.
-- **Inference cadence is hardware-dependent.** A user with a slow CPU running a 7B model might only get one inference every 15–30s, not every 5s. The packaged Linux-candidate engine is CPU-only, so this limitation is especially visible there. The optional benchmark shows realistic, measured numbers and tunes cadence for that model on the current device. A model without a current benchmark instead uses the generic 5s interval and conservative 300s request timeout, with no p95 slowdown baseline; the pre-enable warning makes that trade-off explicit.
+- **Inference cadence is hardware-dependent.** A user with a slow CPU running a 7B model might only get one inference every 15–30s, not every 5s. The optional benchmark shows realistic, measured numbers and tunes cadence for that model on the current device. A model without a current benchmark instead uses the generic 5s interval and conservative 300s request timeout, with no p95 slowdown baseline; the pre-enable warning makes that trade-off explicit.
 - **Always-on daemon means battery cost.** Negligible in practice (idle Nostr WebSocket), but not zero.
 
 ## 8. Open questions (deferred, not blocking V1)
@@ -184,7 +184,7 @@ Promoting it to shipped support requires all of the following:
 2. Its advisory `Linux AppImage startup smoke` job — excluded from the
    `All pre-merge checks` aggregator because it compiles WebKitGTK from
    source, but run and reported on every pull request — builds the pinned WebKitGTK
-   2.52.5 + librice 0.4.3 runtime, packages that private copy with the
+   2.52.5 + librice 0.4.3 + GStreamer 1.28.7 + libnice 0.1.24 runtime, packages that private copy with the
    media-framework and sandbox helpers, verifies the expected runtime files,
    build manifest, complete upstream license inventory, cross-platform notice
    pair, ELF dependencies, and packaged-only GStreamer WebRTC/SCTP elements,
@@ -192,8 +192,10 @@ Promoting it to shipped support requires all of the following:
    Service round-trip, and starts the
    extracted AppImage under Xvfb. The app's boot probe must create a local
    `RTCPeerConnection` data-channel offer and log `runtime.webrtc ready`.
-   Neither that local offer nor a process staying alive proves that two peers,
-   physical media devices, or a KDE portal work.
+   A separate finite native probe exchanges data, renders synthetic camera and
+   screen streams, and exercises late publication and stop/restart. Packaged
+   codec, SRTP, GL conversion and transceiver checks complement it. Physical
+   media devices and the KDE portal still require the matrix below.
 3. Preview and tagged-release workflows build the same pinned WebKit runtime,
    fetch the pinned `x86_64-unknown-linux-gnu` llama runtime, and build an
    x86_64 AppImage rather than linking the final artifact to the runner's
@@ -265,8 +267,9 @@ Promoting it to shipped support requires all of the following:
    - **Session lifecycle:** pair, invite, join, leave/rejoin, and finish a live
      two-machine session without losing the peer/data-channel/media state
      established by the table above.
-   - **Packaged AI:** run the bundled CPU-only engine benchmark and complete at
-     least one real GGUF inference.
+   - **Packaged AI:** verify Vulkan GPU enumeration and model/projector offload
+     on compatible hardware, run the benchmark and a real GGUF inference, and
+     repeat inference with explicit CPU and with no Vulkan driver available.
 6. Publication goes through `Publish verified release`, never the release-page
    button. It queues behind the tag build and rechecks that the tag is on
    `main`, exact-commit CI passed, and the latest `release.yml` run whose
@@ -299,7 +302,7 @@ Promoting it to shipped support requires all of the following:
    gate after a green build.
 
 The remaining Linux breadth is deliberately bounded: ARM64, native
-`.pkg.tar.zst`/AUR, `.deb`, `.rpm`, Flatpak, Snap, GPU-enabled packaged AI,
+`.pkg.tar.zst`/AUR, `.deb`, `.rpm`, Flatpak, Snap,
 and desktop environments outside the maintained KDE Wayland validation path
 are not promised by the candidate support scope.
 

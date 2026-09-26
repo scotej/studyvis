@@ -17,7 +17,7 @@
 //   fall through to Onboarding — its create path would overwrite still-valid
 //   keychain keys (D1).
 
-import { Fragment, useCallback, useEffect, useState } from 'react'
+import { Fragment, useCallback, useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router'
 import { Settings2Icon } from 'lucide-react'
 import { toast } from 'sonner'
@@ -40,6 +40,7 @@ import {
   PairDeepLinkBoot,
   PendingInvites,
   pendingInviteKey,
+  presenceState,
   usePendingInvitesStore,
   type ContactImportSource,
   type PresenceMap,
@@ -115,6 +116,7 @@ export function Home() {
   const [importSource, setImportSource] =
     useState<ContactImportSource>('remote')
   const [presence, setPresence] = useState<PresenceMap>({})
+  const presenceRef = useRef(presence)
   const [view, setView] = useState<View>('main')
   // I74 — category the main-view Settings opens on. Normally undefined (the
   // Settings default); the friends-list limited-connection hint deep-links to
@@ -134,6 +136,10 @@ export function Home() {
   const [pendingStart, setPendingStart] = useState<
     { kind: 'host'; friend: Friend } | { kind: 'guest'; invite: ValidInvite }
   >()
+
+  useEffect(() => {
+    presenceRef.current = presence
+  }, [presence])
 
   useEffect(() => {
     if (status === 'ready' && friendsStatus === 'idle') {
@@ -158,8 +164,8 @@ export function Home() {
   }, [])
 
   const runHostInvite = useCallback(
-    async (friend: Friend) => {
-      if (!identity || !identity.display_name) return
+    async (friend: Friend): Promise<boolean> => {
+      if (!identity || !identity.display_name) return false
       try {
         const result = await inviteToCurrentSession({
           friend,
@@ -181,21 +187,26 @@ export function Home() {
         } else {
           toast(strings.friends.inviteSentUnconfirmed(name))
         }
+        return true
       } catch (err) {
-        // F6 — InviteTimeoutError (friend offline; retry queued) and
-        // InviteRelayError (relays unreachable; the user's own network) get
-        // distinct honest copy, separate from the generic fallback.
+        const friendPresence = presenceState(
+          presenceRef.current,
+          friend.ed_pubkey_hex
+        )
         const message =
           err instanceof InviteRelayError
             ? strings.friends.inviteRelayError
             : err instanceof InviteTimeoutError
-              ? strings.friends.inviteTimeout
+              ? friendPresence.state === 'online' && friendPresence.limited
+                ? strings.friends.inviteLimitedConnection
+                : strings.friends.inviteTimeout
               : err instanceof InviteWhileGuestError
                 ? strings.friends.inviteWhileGuest
                 : err instanceof Error
                   ? err.message
                   : strings.friends.inviteSendErrorFallback
         toast.error(message)
+        return false
       }
     },
     [identity, actions.signWithKeyring]
@@ -623,7 +634,7 @@ export function Home() {
         <div inert={sessionSettingsCategory !== null} className="contents">
           <SessionView
             presence={presence}
-            onInviteFriend={(friend) => void runHostInvite(friend)}
+            onInviteFriend={runHostInvite}
             onOpenSettings={openSessionSettings}
           />
         </div>
