@@ -18,6 +18,10 @@ pub mod identity;
 #[cfg(desktop)]
 pub mod ai_dialog;
 
+// #317 — native preparation for the JS-created in-session overlay window.
+#[cfg(desktop)]
+pub mod session_overlay;
+
 #[cfg(desktop)]
 pub mod applog;
 

@@ -12,7 +12,8 @@
 // honest enough to choose between "fastest" (~3 s/check) and "heaviest"
 // (~25 s/check), which is the only call the user is making.
 
-import benchmarkImageUrl from './assets/benchmark-desk.png'
+// The CSP allows same-origin fetches, but not Vite's inlined data: URLs.
+import benchmarkImageUrl from './assets/benchmark-desk.png?no-inline'
 import { FACE_FRAME_QUALITY, FACE_FRAME_SIZE } from './captureFace'
 import {
   aiHardwareIdentitiesEqual,
@@ -65,7 +66,8 @@ const BENCHMARK_TOPIC = 'Studying'
 // the canonical Tauri store and said nothing about Auto's actual accelerator
 // order. Persist the native spawn identity below instead. Deliberately NOT
 // __APP_VERSION__: most releases don't affect inference measurements.
-const INFERENCE_ENGINE_FINGERPRINT_BASE = 'b9095-hwidentity2-cachecold2'
+const INFERENCE_ENGINE_FINGERPRINT_BASE =
+  'b9095-linuxvulkan1-hwidentity2-cachecold2'
 
 export function inferenceEngineFingerprintFor(
   identity: AiHardwareIdentity

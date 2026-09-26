@@ -18,7 +18,7 @@ For each Cargo registry component, `source` is the direct exact-version crates.i
 source-archive URL and `source checksum` is its Cargo.lock SHA-256. These fields
 tell recipients how to obtain and verify the Covered Source named in the index.
 
-Components: 753 total (532 Cargo, 220 npm, 1 external runtime).
+Components: 757 total (536 Cargo, 220 npm, 1 external runtime).
 
 COMPONENT INDEX
 ===============
@@ -508,6 +508,14 @@ CARGO
   source checksum: 57d24c7a13c43e870e37c1556b74555437870a04514f7685f5b354e090567171
   license: cargo:core-foundation@0.7.0/LICENSE-APACHE (SHA-256 a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2)
   license: cargo:core-foundation@0.7.0/LICENSE-MIT (SHA-256 62065228e42caebca7e7d7db1204cbb867033de5982ca4009928915e4095f3a3)
+
+- core-foundation 0.9.4 — MIT OR Apache-2.0
+  id: cargo:core-foundation@0.9.4
+  targets: aarch64-apple-darwin
+  source: https://crates.io/api/v1/crates/core-foundation/0.9.4/download
+  source checksum: 91e195e091a93c46f7102ec7818a2aa394e1e1771c3ab4825963fa03e45afb8f
+  license: cargo:core-foundation@0.9.4/LICENSE-APACHE (SHA-256 a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2)
+  license: cargo:core-foundation@0.9.4/LICENSE-MIT (SHA-256 62065228e42caebca7e7d7db1204cbb867033de5982ca4009928915e4095f3a3)
 
 - core-foundation-sys 0.7.0 — MIT / Apache-2.0
   id: cargo:core-foundation-sys@0.7.0
@@ -1026,13 +1034,13 @@ CARGO
   license: cargo:filetime@0.2.29/LICENSE-APACHE (SHA-256 a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2)
   license: cargo:filetime@0.2.29/LICENSE-MIT (SHA-256 378f5840b258e2779c39418f3f2d7b2ba96f1c7917dd6be0713f88305dbda397)
 
-- flate2 1.1.9 — MIT OR Apache-2.0
-  id: cargo:flate2@1.1.9
+- flate2 1.1.10 — MIT OR Apache-2.0
+  id: cargo:flate2@1.1.10
   targets: aarch64-apple-darwin, x86_64-pc-windows-msvc, x86_64-unknown-linux-gnu
-  source: https://crates.io/api/v1/crates/flate2/1.1.9/download
-  source checksum: 843fba2746e448b37e26a819579957415c8cef339bf08564fe8b7ddbd959573c
-  license: cargo:flate2@1.1.9/LICENSE-APACHE (SHA-256 a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2)
-  license: cargo:flate2@1.1.9/LICENSE-MIT (SHA-256 025436edff4cfcdde17a5811fdea78892d8482efd1abdec5a17872d07a4f2112)
+  source: https://crates.io/api/v1/crates/flate2/1.1.10/download
+  source checksum: 6e634e2e0ebac1ee034020da1ca582e17ffe4e0f5e985823721e168928136dcb
+  license: cargo:flate2@1.1.10/LICENSE-APACHE (SHA-256 a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2)
+  license: cargo:flate2@1.1.10/LICENSE-MIT (SHA-256 025436edff4cfcdde17a5811fdea78892d8482efd1abdec5a17872d07a4f2112)
 
 - fnv 1.0.7 — Apache-2.0 / MIT
   id: cargo:fnv@1.0.7
@@ -1833,6 +1841,16 @@ CARGO
   license: cargo:miniz_oxide@0.8.9/LICENSE-MIT.md (SHA-256 799e9ca9d179295ef372f25d3769cdda7d25bb2668add6a6a1e22d1e4c678b8d)
   license: cargo:miniz_oxide@0.8.9/LICENSE-ZLIB.md (SHA-256 0a54e647fe54104658b5e563c04c6f9edf251710e47bce692e0bd990a4ddaa39)
 
+- miniz_oxide 0.9.1 — MIT OR Zlib OR Apache-2.0
+  id: cargo:miniz_oxide@0.9.1
+  targets: aarch64-apple-darwin, x86_64-pc-windows-msvc, x86_64-unknown-linux-gnu
+  source: https://crates.io/api/v1/crates/miniz_oxide/0.9.1/download
+  source checksum: b63fbc4a50860e98e7b2aa7804ded1db5cbc3aff9193adaff57a6931bf7c4b4c
+  license: cargo:miniz_oxide@0.9.1/LICENSE (SHA-256 4108245a1f2df9d4e94df8abed5b4ba0759bb2f9b40a6b939f1be141077ae50b)
+  license: cargo:miniz_oxide@0.9.1/LICENSE-APACHE.md (SHA-256 0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594)
+  license: cargo:miniz_oxide@0.9.1/LICENSE-MIT.md (SHA-256 799e9ca9d179295ef372f25d3769cdda7d25bb2668add6a6a1e22d1e4c678b8d)
+  license: cargo:miniz_oxide@0.9.1/LICENSE-ZLIB.md (SHA-256 0a54e647fe54104658b5e563c04c6f9edf251710e47bce692e0bd990a4ddaa39)
+
 - mio 1.2.0 — MIT
   id: cargo:mio@1.2.0
   targets: aarch64-apple-darwin, x86_64-pc-windows-msvc, x86_64-unknown-linux-gnu
@@ -2604,14 +2622,14 @@ CARGO
   license: cargo:rustix@1.1.4/LICENSE-Apache-2.0_WITH_LLVM-exception (SHA-256 a6c48161a09acc75a0e25503bab66a731eb5fba5392ed4bb4743e4ba5085327a)
   license: cargo:rustix@1.1.4/LICENSE-MIT (SHA-256 23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3)
 
-- rustls 0.23.40 — Apache-2.0 OR ISC OR MIT
-  id: cargo:rustls@0.23.40
+- rustls 0.23.45 — Apache-2.0 OR ISC OR MIT
+  id: cargo:rustls@0.23.45
   targets: aarch64-apple-darwin, x86_64-pc-windows-msvc, x86_64-unknown-linux-gnu
-  source: https://crates.io/api/v1/crates/rustls/0.23.40/download
-  source checksum: ef86cd5876211988985292b91c96a8f2d298df24e75989a43a3c73f2d4d8168b
-  license: cargo:rustls@0.23.40/LICENSE-APACHE (SHA-256 a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2)
-  license: cargo:rustls@0.23.40/LICENSE-ISC (SHA-256 7cfafc877eccc46c0e346ccbaa5c51bb6b894d2b818e617d970211e232785ad4)
-  license: cargo:rustls@0.23.40/LICENSE-MIT (SHA-256 709e3175b4212f7b13aa93971c9f62ff8c69ec45ad8c6532a7e0c41d7a7d6f8c)
+  source: https://crates.io/api/v1/crates/rustls/0.23.45/download
+  source checksum: 0d41d731c7d2f962d1ccc364cec258de3c0e93b38c2fb3ba97ac74513048d634
+  license: cargo:rustls@0.23.45/LICENSE-APACHE (SHA-256 a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2)
+  license: cargo:rustls@0.23.45/LICENSE-ISC (SHA-256 7cfafc877eccc46c0e346ccbaa5c51bb6b894d2b818e617d970211e232785ad4)
+  license: cargo:rustls@0.23.45/LICENSE-MIT (SHA-256 709e3175b4212f7b13aa93971c9f62ff8c69ec45ad8c6532a7e0c41d7a7d6f8c)
 
 - rustls-native-certs 0.8.4 — Apache-2.0 OR ISC OR MIT
   id: cargo:rustls-native-certs@0.8.4
@@ -2639,12 +2657,12 @@ CARGO
   license: cargo:rustls-platform-verifier@0.7.0/LICENSE-APACHE (SHA-256 c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4)
   license: cargo:rustls-platform-verifier@0.7.0/LICENSE-MIT (SHA-256 1c7cf76689c837a68ed8d704994e52a0f2940c087958f860d17f3186afbdcc0c)
 
-- rustls-webpki 0.103.13 — ISC
-  id: cargo:rustls-webpki@0.103.13
+- rustls-webpki 0.103.15 — ISC
+  id: cargo:rustls-webpki@0.103.15
   targets: aarch64-apple-darwin, x86_64-pc-windows-msvc, x86_64-unknown-linux-gnu
-  source: https://crates.io/api/v1/crates/rustls-webpki/0.103.13/download
-  source checksum: 61c429a8649f110dddef65e2a5ad240f747e85f7758a6bccc7e5777bd33f756e
-  license: cargo:rustls-webpki@0.103.13/LICENSE (SHA-256 5b698ca13897be3afdb7174256fa1574f8c6892b8bea1a66dd6469d3fe27885a)
+  source: https://crates.io/api/v1/crates/rustls-webpki/0.103.15/download
+  source checksum: f3c3cf1d8b1e7d4927e2d154c3fcb02979afb9939629c62cd9048d4f07b60ac2
+  license: cargo:rustls-webpki@0.103.15/LICENSE (SHA-256 5b698ca13897be3afdb7174256fa1574f8c6892b8bea1a66dd6469d3fe27885a)
 
 - ryu 1.0.23 — Apache-2.0 OR BSL-1.0
   id: cargo:ryu@1.0.23
@@ -3073,6 +3091,22 @@ CARGO
   source checksum: 728a70f3dbaf5bab7f0c4b1ac8d7ae5ea60a4b5549c8a5914361c99147a709d2
   license: cargo:synstructure@0.13.2/LICENSE (SHA-256 219920e865eee70b7dcfc948a86b099e7f4fe2de01bcca2ca9a20c0a033f2b59)
 
+- system-configuration 0.7.0 — MIT OR Apache-2.0
+  id: cargo:system-configuration@0.7.0
+  targets: aarch64-apple-darwin
+  source: https://crates.io/api/v1/crates/system-configuration/0.7.0/download
+  source checksum: a13f3d0daba03132c0aa9767f98351b3488edc2c100cda2d2ec2b04f3d8d3c8b
+  license: cargo:system-configuration@0.7.0/LICENSE-APACHE (SHA-256 a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2)
+  license: cargo:system-configuration@0.7.0/LICENSE-MIT (SHA-256 000cbb5bea6f21829c8f0d9e1fe87410bd5ef0453412ffc017845982a3e19824)
+
+- system-configuration-sys 0.6.0 — MIT OR Apache-2.0
+  id: cargo:system-configuration-sys@0.6.0
+  targets: aarch64-apple-darwin
+  source: https://crates.io/api/v1/crates/system-configuration-sys/0.6.0/download
+  source checksum: 8e1d1b10ced5ca923a1fcb8d03e96b8d3268065d724548c0211415ff6ac6bac4
+  license: cargo:system-configuration-sys@0.6.0/LICENSE-APACHE (SHA-256 a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2)
+  license: cargo:system-configuration-sys@0.6.0/LICENSE-MIT (SHA-256 000cbb5bea6f21829c8f0d9e1fe87410bd5ef0453412ffc017845982a3e19824)
+
 - tao 0.35.2 — Apache-2.0
   id: cargo:tao@0.35.2
   targets: aarch64-apple-darwin, x86_64-pc-windows-msvc, x86_64-unknown-linux-gnu
@@ -3122,14 +3156,14 @@ CARGO
   license: cargo:tauri-plugin-autostart@2.5.1/LICENSE_APACHE-2.0 (SHA-256 0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594)
   license: cargo:tauri-plugin-autostart@2.5.1/LICENSE_MIT (SHA-256 9dd42ea92cff2ede5cd477cbfcce051b2d0115c0ac7f368ee88cb545055dff1d)
 
-- tauri-plugin-deep-link 2.4.9 — Apache-2.0 OR MIT
-  id: cargo:tauri-plugin-deep-link@2.4.9
+- tauri-plugin-deep-link 2.4.10 — Apache-2.0 OR MIT
+  id: cargo:tauri-plugin-deep-link@2.4.10
   targets: aarch64-apple-darwin, x86_64-pc-windows-msvc, x86_64-unknown-linux-gnu
-  source: https://crates.io/api/v1/crates/tauri-plugin-deep-link/2.4.9/download
-  source checksum: 70ee75bc5627f77bfdf40c913255ebc258117b10ebe2b2239a1a1cf40b0b58aa
-  license: cargo:tauri-plugin-deep-link@2.4.9/LICENSE.spdx (SHA-256 9c1db6b7e7eb83e1cb2af973b5df2bdc63651ede0f38506ab98dfa0940487759)
-  license: cargo:tauri-plugin-deep-link@2.4.9/LICENSE_APACHE-2.0 (SHA-256 0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594)
-  license: cargo:tauri-plugin-deep-link@2.4.9/LICENSE_MIT (SHA-256 9dd42ea92cff2ede5cd477cbfcce051b2d0115c0ac7f368ee88cb545055dff1d)
+  source: https://crates.io/api/v1/crates/tauri-plugin-deep-link/2.4.10/download
+  source checksum: 92d489b8ecceae1cd09f6e1f7606f2095ac721cc8d54cf2f0e6bb377cc52cff6
+  license: cargo:tauri-plugin-deep-link@2.4.10/LICENSE.spdx (SHA-256 9c1db6b7e7eb83e1cb2af973b5df2bdc63651ede0f38506ab98dfa0940487759)
+  license: cargo:tauri-plugin-deep-link@2.4.10/LICENSE_APACHE-2.0 (SHA-256 0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594)
+  license: cargo:tauri-plugin-deep-link@2.4.10/LICENSE_MIT (SHA-256 9dd42ea92cff2ede5cd477cbfcce051b2d0115c0ac7f368ee88cb545055dff1d)
 
 - tauri-plugin-dialog 2.7.2 — Apache-2.0 OR MIT
   id: cargo:tauri-plugin-dialog@2.7.2
@@ -3167,23 +3201,23 @@ CARGO
   license: cargo:tauri-plugin-notification@2.3.3/LICENSE_APACHE-2.0 (SHA-256 0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594)
   license: cargo:tauri-plugin-notification@2.3.3/LICENSE_MIT (SHA-256 9dd42ea92cff2ede5cd477cbfcce051b2d0115c0ac7f368ee88cb545055dff1d)
 
-- tauri-plugin-opener 2.5.4 — Apache-2.0 OR MIT
-  id: cargo:tauri-plugin-opener@2.5.4
+- tauri-plugin-opener 2.5.5 — Apache-2.0 OR MIT
+  id: cargo:tauri-plugin-opener@2.5.5
   targets: aarch64-apple-darwin, x86_64-pc-windows-msvc, x86_64-unknown-linux-gnu
-  source: https://crates.io/api/v1/crates/tauri-plugin-opener/2.5.4/download
-  source checksum: 17e1bea14edce6b793a04e2417e3fd924b9bc4faae83cdee7d714156cceeed29
-  license: cargo:tauri-plugin-opener@2.5.4/LICENSE.spdx (SHA-256 9c1db6b7e7eb83e1cb2af973b5df2bdc63651ede0f38506ab98dfa0940487759)
-  license: cargo:tauri-plugin-opener@2.5.4/LICENSE_APACHE-2.0 (SHA-256 0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594)
-  license: cargo:tauri-plugin-opener@2.5.4/LICENSE_MIT (SHA-256 9dd42ea92cff2ede5cd477cbfcce051b2d0115c0ac7f368ee88cb545055dff1d)
+  source: https://crates.io/api/v1/crates/tauri-plugin-opener/2.5.5/download
+  source checksum: 60d60366174b745b4ef5824b8bbc1c457fd08f0ce101ff643c0a49181a9f4e91
+  license: cargo:tauri-plugin-opener@2.5.5/LICENSE.spdx (SHA-256 9c1db6b7e7eb83e1cb2af973b5df2bdc63651ede0f38506ab98dfa0940487759)
+  license: cargo:tauri-plugin-opener@2.5.5/LICENSE_APACHE-2.0 (SHA-256 0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594)
+  license: cargo:tauri-plugin-opener@2.5.5/LICENSE_MIT (SHA-256 9dd42ea92cff2ede5cd477cbfcce051b2d0115c0ac7f368ee88cb545055dff1d)
 
-- tauri-plugin-shell 2.3.5 — Apache-2.0 OR MIT
-  id: cargo:tauri-plugin-shell@2.3.5
+- tauri-plugin-shell 2.3.6 — Apache-2.0 OR MIT
+  id: cargo:tauri-plugin-shell@2.3.6
   targets: aarch64-apple-darwin, x86_64-pc-windows-msvc, x86_64-unknown-linux-gnu
-  source: https://crates.io/api/v1/crates/tauri-plugin-shell/2.3.5/download
-  source checksum: 8457dbf9e2bab1edd8df22bb2c20857a59a9868e79cb3eac5ed639eec4d0c73b
-  license: cargo:tauri-plugin-shell@2.3.5/LICENSE.spdx (SHA-256 9c1db6b7e7eb83e1cb2af973b5df2bdc63651ede0f38506ab98dfa0940487759)
-  license: cargo:tauri-plugin-shell@2.3.5/LICENSE_APACHE-2.0 (SHA-256 0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594)
-  license: cargo:tauri-plugin-shell@2.3.5/LICENSE_MIT (SHA-256 9dd42ea92cff2ede5cd477cbfcce051b2d0115c0ac7f368ee88cb545055dff1d)
+  source: https://crates.io/api/v1/crates/tauri-plugin-shell/2.3.6/download
+  source checksum: 8548af174c5516e4f71f142acea4d02e00316296ea9aafa58798851481003e3c
+  license: cargo:tauri-plugin-shell@2.3.6/LICENSE.spdx (SHA-256 9c1db6b7e7eb83e1cb2af973b5df2bdc63651ede0f38506ab98dfa0940487759)
+  license: cargo:tauri-plugin-shell@2.3.6/LICENSE_APACHE-2.0 (SHA-256 0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594)
+  license: cargo:tauri-plugin-shell@2.3.6/LICENSE_MIT (SHA-256 9dd42ea92cff2ede5cd477cbfcce051b2d0115c0ac7f368ee88cb545055dff1d)
 
 - tauri-plugin-single-instance 2.4.3 — Apache-2.0 OR MIT
   id: cargo:tauri-plugin-single-instance@2.4.3
@@ -3203,14 +3237,14 @@ CARGO
   license: cargo:tauri-plugin-store@2.4.4/LICENSE_APACHE-2.0 (SHA-256 0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594)
   license: cargo:tauri-plugin-store@2.4.4/LICENSE_MIT (SHA-256 9dd42ea92cff2ede5cd477cbfcce051b2d0115c0ac7f368ee88cb545055dff1d)
 
-- tauri-plugin-updater 2.10.1 — Apache-2.0 OR MIT
-  id: cargo:tauri-plugin-updater@2.10.1
+- tauri-plugin-updater 2.11.0 — Apache-2.0 OR MIT
+  id: cargo:tauri-plugin-updater@2.11.0
   targets: aarch64-apple-darwin, x86_64-pc-windows-msvc, x86_64-unknown-linux-gnu
-  source: https://crates.io/api/v1/crates/tauri-plugin-updater/2.10.1/download
-  source checksum: 806d9dac662c2e4594ff03c647a552f2c9bd544e7d0f683ec58f872f952ce4af
-  license: cargo:tauri-plugin-updater@2.10.1/LICENSE.spdx (SHA-256 9c1db6b7e7eb83e1cb2af973b5df2bdc63651ede0f38506ab98dfa0940487759)
-  license: cargo:tauri-plugin-updater@2.10.1/LICENSE_APACHE-2.0 (SHA-256 0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594)
-  license: cargo:tauri-plugin-updater@2.10.1/LICENSE_MIT (SHA-256 9dd42ea92cff2ede5cd477cbfcce051b2d0115c0ac7f368ee88cb545055dff1d)
+  source: https://crates.io/api/v1/crates/tauri-plugin-updater/2.11.0/download
+  source checksum: b28d8cabdeb0564f03ae261963de4bc3d98321cd3d213e76a81b7d344e5df606
+  license: cargo:tauri-plugin-updater@2.11.0/LICENSE.spdx (SHA-256 9c1db6b7e7eb83e1cb2af973b5df2bdc63651ede0f38506ab98dfa0940487759)
+  license: cargo:tauri-plugin-updater@2.11.0/LICENSE_APACHE-2.0 (SHA-256 0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594)
+  license: cargo:tauri-plugin-updater@2.11.0/LICENSE_MIT (SHA-256 9dd42ea92cff2ede5cd477cbfcce051b2d0115c0ac7f368ee88cb545055dff1d)
 
 - tauri-runtime 2.11.3 — Apache-2.0 OR MIT
   id: cargo:tauri-runtime@2.11.3
@@ -4260,10 +4294,10 @@ NPM
   source: https://registry.npmjs.org/@noble/curves/-/curves-2.3.0.tgz
   license: npm:node_modules/@noble/curves/LICENSE (SHA-256 3239e134eb6e6d64538ca76498c7fcb08a395249dd9d4af9927bf6d0169ee429)
 
-- @noble/ed25519 3.1.0 — MIT
-  id: npm:node_modules/@noble/ed25519@3.1.0
+- @noble/ed25519 3.2.0 — MIT
+  id: npm:node_modules/@noble/ed25519@3.2.0
   targets: frontend
-  source: https://registry.npmjs.org/@noble/ed25519/-/ed25519-3.1.0.tgz
+  source: https://registry.npmjs.org/@noble/ed25519/-/ed25519-3.2.0.tgz
   license: npm:node_modules/@noble/ed25519/LICENSE (SHA-256 80e49272a4c81b0ded274b540d2b8089bd5f4d7d4fe1f2df309d463d7067c9c4)
 
 - @noble/hashes 2.3.0 — MIT
@@ -4693,10 +4727,10 @@ NPM
   source: https://registry.npmjs.org/@tauri-apps/plugin-store/-/plugin-store-2.4.4.tgz
   license: npm:node_modules/@tauri-apps/plugin-store/LICENSE.spdx (SHA-256 9c1db6b7e7eb83e1cb2af973b5df2bdc63651ede0f38506ab98dfa0940487759)
 
-- @tauri-apps/plugin-updater 2.10.1 — MIT OR Apache-2.0
-  id: npm:node_modules/@tauri-apps/plugin-updater@2.10.1
+- @tauri-apps/plugin-updater 2.11.0 — MIT OR Apache-2.0
+  id: npm:node_modules/@tauri-apps/plugin-updater@2.11.0
   targets: frontend
-  source: https://registry.npmjs.org/@tauri-apps/plugin-updater/-/plugin-updater-2.10.1.tgz
+  source: https://registry.npmjs.org/@tauri-apps/plugin-updater/-/plugin-updater-2.11.0.tgz
   license: npm:node_modules/@tauri-apps/plugin-updater/LICENSE.spdx (SHA-256 9c1db6b7e7eb83e1cb2af973b5df2bdc63651ede0f38506ab98dfa0940487759)
 
 - @trystero-p2p/core 0.25.3 — MIT
@@ -4777,16 +4811,16 @@ NPM
   source: https://registry.npmjs.org/@types/node/-/node-26.2.0.tgz
   license: npm:node_modules/@types/node/LICENSE (SHA-256 c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383)
 
-- @types/react 19.2.18 — MIT
-  id: npm:node_modules/@types/react@19.2.18
+- @types/react 19.3.0 — MIT
+  id: npm:node_modules/@types/react@19.3.0
   targets: frontend
-  source: https://registry.npmjs.org/@types/react/-/react-19.2.18.tgz
+  source: https://registry.npmjs.org/@types/react/-/react-19.3.0.tgz
   license: npm:node_modules/@types/react/LICENSE (SHA-256 c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383)
 
-- @types/react-dom 19.2.4 — MIT
-  id: npm:node_modules/@types/react-dom@19.2.4
+- @types/react-dom 19.3.0 — MIT
+  id: npm:node_modules/@types/react-dom@19.3.0
   targets: frontend
-  source: https://registry.npmjs.org/@types/react-dom/-/react-dom-19.2.4.tgz
+  source: https://registry.npmjs.org/@types/react-dom/-/react-dom-19.3.0.tgz
   license: npm:node_modules/@types/react-dom/LICENSE (SHA-256 c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383)
 
 - @types/readable-stream 4.0.23 — MIT
@@ -5137,10 +5171,10 @@ NPM
   source: https://registry.npmjs.org/lru-cache/-/lru-cache-10.4.3.tgz
   license: npm:node_modules/mqtt/node_modules/lru-cache/LICENSE (SHA-256 451ec07eeb9c4e1b86de9abdaa426462a8be48f887ec7421cf0bbb9c769555ab)
 
-- lucide-react 1.31.0 — ISC
-  id: npm:node_modules/lucide-react@1.31.0
+- lucide-react 1.46.0 — ISC
+  id: npm:node_modules/lucide-react@1.46.0
   targets: frontend
-  source: https://registry.npmjs.org/lucide-react/-/lucide-react-1.31.0.tgz
+  source: https://registry.npmjs.org/lucide-react/-/lucide-react-1.46.0.tgz
   license: npm:node_modules/lucide-react/LICENSE (SHA-256 b495047bd93a9b06913511076f504daba17d5bbeb3e0650f3bb53a4220329c57)
 
 - minimist 1.2.8 — MIT
@@ -5227,16 +5261,16 @@ NPM
   source: https://registry.npmjs.org/radix-ui/-/radix-ui-1.6.7.tgz
   license: npm:node_modules/radix-ui/LICENSE (SHA-256 0e80a2d229d2fd4fc7e8636142ec5d0ff0bc031f14c15b682e2ac01dfd5b5138)
 
-- react 19.2.8 — MIT
-  id: npm:node_modules/react@19.2.8
+- react 19.3.0 — MIT
+  id: npm:node_modules/react@19.3.0
   targets: frontend
-  source: https://registry.npmjs.org/react/-/react-19.2.8.tgz
+  source: https://registry.npmjs.org/react/-/react-19.3.0.tgz
   license: npm:node_modules/react/LICENSE (SHA-256 da6d3703ed11cbe42bd212c725957c98da23cbff1998c05fa4b3d976d1a58e93)
 
-- react-dom 19.2.8 — MIT
-  id: npm:node_modules/react-dom@19.2.8
+- react-dom 19.3.0 — MIT
+  id: npm:node_modules/react-dom@19.3.0
   targets: frontend
-  source: https://registry.npmjs.org/react-dom/-/react-dom-19.2.8.tgz
+  source: https://registry.npmjs.org/react-dom/-/react-dom-19.3.0.tgz
   license: npm:node_modules/react-dom/LICENSE (SHA-256 da6d3703ed11cbe42bd212c725957c98da23cbff1998c05fa4b3d976d1a58e93)
 
 - react-is 17.0.2 — MIT
@@ -5264,10 +5298,10 @@ NPM
   override: The 2.3.8 package archive declares MIT but omits the text; retain the same author's locked react-remove-scroll MIT notice.
   license: npm:node_modules/react-remove-scroll/LICENSE (SHA-256 30f0cfddf483d1128e3610205020f2041a6c5e837aa999e0aa82e5576187d4a9)
 
-- react-router 8.3.0 — MIT
-  id: npm:node_modules/react-router@8.3.0
+- react-router 8.3.1 — MIT
+  id: npm:node_modules/react-router@8.3.1
   targets: frontend
-  source: https://registry.npmjs.org/react-router/-/react-router-8.3.0.tgz
+  source: https://registry.npmjs.org/react-router/-/react-router-8.3.1.tgz
   license: npm:node_modules/react-router/LICENSE.md (SHA-256 77c9ee6a9c5d5782fb0c50b50d101189116314c14f7df0a1b0d385fc96a7ba49)
 
 - react-style-singleton 2.2.3 — MIT
@@ -5342,10 +5376,10 @@ NPM
   source: https://registry.npmjs.org/safe-buffer/-/safe-buffer-5.2.1.tgz
   license: npm:node_modules/string_decoder/node_modules/safe-buffer/LICENSE (SHA-256 c7cc929b57080f4b9d0c6cf57669f0463fc5b39906344dfc8d3bc43426b30eac)
 
-- scheduler 0.27.0 — MIT
-  id: npm:node_modules/scheduler@0.27.0
+- scheduler 0.28.0 — MIT
+  id: npm:node_modules/scheduler@0.28.0
   targets: frontend
-  source: https://registry.npmjs.org/scheduler/-/scheduler-0.27.0.tgz
+  source: https://registry.npmjs.org/scheduler/-/scheduler-0.28.0.tgz
   license: npm:node_modules/scheduler/LICENSE (SHA-256 da6d3703ed11cbe42bd212c725957c98da23cbff1998c05fa4b3d976d1a58e93)
 
 - set-blocking 2.0.0 — ISC
@@ -5396,10 +5430,10 @@ NPM
   source: https://registry.npmjs.org/strip-ansi/-/strip-ansi-6.0.1.tgz
   license: npm:node_modules/strip-ansi/license (SHA-256 48da2f39e100d4085767e94966b43f4fa95ff6a0698fba57ed460914e35f94a0)
 
-- tailwind-merge 3.6.0 — MIT
-  id: npm:node_modules/tailwind-merge@3.6.0
+- tailwind-merge 3.7.0 — MIT
+  id: npm:node_modules/tailwind-merge@3.7.0
   targets: frontend
-  source: https://registry.npmjs.org/tailwind-merge/-/tailwind-merge-3.6.0.tgz
+  source: https://registry.npmjs.org/tailwind-merge/-/tailwind-merge-3.7.0.tgz
   license: npm:node_modules/tailwind-merge/LICENSE.md (SHA-256 d4c70c7ce38cea8778f0aed3fc0bef0a9dbd27f13bd8b6773cbd6d37941971e5)
 
 - tiny-invariant 1.3.3 — MIT
@@ -5554,6 +5588,41 @@ EXTERNAL
 
 LICENSE TEXTS AND NOTICES
 =========================
+
+SHA-256 000cbb5bea6f21829c8f0d9e1fe87410bd5ef0453412ffc017845982a3e19824
+Applies to:
+- cargo:system-configuration-sys@0.6.0 — cargo:system-configuration-sys@0.6.0/LICENSE-MIT
+- cargo:system-configuration@0.7.0 — cargo:system-configuration@0.7.0/LICENSE-MIT
+
+--------------------------------------------------------------------------------
+
+Copyright (c) 2024 Mullvad VPN AB
+
+Permission is hereby granted, free of charge, to any
+person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the
+Software without restriction, including without
+limitation the rights to use, copy, modify, merge,
+publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software
+is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice
+shall be included in all copies or substantial portions
+of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
+ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
+SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
+IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
+
+================================================================================
 
 SHA-256 005fc765ddc5115da796cca915baa9557abae13ff35e0a47c47affc56f6c414d
 Applies to:
@@ -6308,7 +6377,7 @@ limitations under the License.
 
 SHA-256 025436edff4cfcdde17a5811fdea78892d8482efd1abdec5a17872d07a4f2112
 Applies to:
-- cargo:flate2@1.1.9 — cargo:flate2@1.1.9/LICENSE-MIT
+- cargo:flate2@1.1.10 — cargo:flate2@1.1.10/LICENSE-MIT
 
 --------------------------------------------------------------------------------
 
@@ -6612,6 +6681,7 @@ the following restrictions:
 SHA-256 0a54e647fe54104658b5e563c04c6f9edf251710e47bce692e0bd990a4ddaa39
 Applies to:
 - cargo:miniz_oxide@0.8.9 — cargo:miniz_oxide@0.8.9/LICENSE-ZLIB.md
+- cargo:miniz_oxide@0.9.1 — cargo:miniz_oxide@0.9.1/LICENSE-ZLIB.md
 
 --------------------------------------------------------------------------------
 
@@ -7050,6 +7120,7 @@ Applies to:
 - cargo:fdeflate@0.3.7 — cargo:fdeflate@0.3.7/LICENSE-APACHE
 - cargo:image@0.25.10 — cargo:image@0.25.10/LICENSE-APACHE
 - cargo:miniz_oxide@0.8.9 — cargo:miniz_oxide@0.8.9/LICENSE-APACHE.md
+- cargo:miniz_oxide@0.9.1 — cargo:miniz_oxide@0.9.1/LICENSE-APACHE.md
 - cargo:num-conv@0.2.1 — cargo:num-conv@0.2.1/LICENSE-Apache
 - cargo:pin-project-lite@0.2.17 — cargo:pin-project-lite@0.2.17/LICENSE-APACHE
 - cargo:raw-window-handle@0.6.2 — cargo:raw-window-handle@0.6.2/LICENSE-APACHE.md
@@ -7057,16 +7128,16 @@ Applies to:
 - cargo:tauri-codegen@2.6.3 — cargo:tauri-codegen@2.6.3/LICENSE_APACHE-2.0
 - cargo:tauri-macros@2.6.3 — cargo:tauri-macros@2.6.3/LICENSE_APACHE-2.0
 - cargo:tauri-plugin-autostart@2.5.1 — cargo:tauri-plugin-autostart@2.5.1/LICENSE_APACHE-2.0
-- cargo:tauri-plugin-deep-link@2.4.9 — cargo:tauri-plugin-deep-link@2.4.9/LICENSE_APACHE-2.0
+- cargo:tauri-plugin-deep-link@2.4.10 — cargo:tauri-plugin-deep-link@2.4.10/LICENSE_APACHE-2.0
 - cargo:tauri-plugin-dialog@2.7.2 — cargo:tauri-plugin-dialog@2.7.2/LICENSE_APACHE-2.0
 - cargo:tauri-plugin-fs@2.5.1 — cargo:tauri-plugin-fs@2.5.1/LICENSE_APACHE-2.0
 - cargo:tauri-plugin-global-shortcut@2.3.2 — cargo:tauri-plugin-global-shortcut@2.3.2/LICENSE_APACHE-2.0
 - cargo:tauri-plugin-notification@2.3.3 — cargo:tauri-plugin-notification@2.3.3/LICENSE_APACHE-2.0
-- cargo:tauri-plugin-opener@2.5.4 — cargo:tauri-plugin-opener@2.5.4/LICENSE_APACHE-2.0
-- cargo:tauri-plugin-shell@2.3.5 — cargo:tauri-plugin-shell@2.3.5/LICENSE_APACHE-2.0
+- cargo:tauri-plugin-opener@2.5.5 — cargo:tauri-plugin-opener@2.5.5/LICENSE_APACHE-2.0
+- cargo:tauri-plugin-shell@2.3.6 — cargo:tauri-plugin-shell@2.3.6/LICENSE_APACHE-2.0
 - cargo:tauri-plugin-single-instance@2.4.3 — cargo:tauri-plugin-single-instance@2.4.3/LICENSE_APACHE-2.0
 - cargo:tauri-plugin-store@2.4.4 — cargo:tauri-plugin-store@2.4.4/LICENSE_APACHE-2.0
-- cargo:tauri-plugin-updater@2.10.1 — cargo:tauri-plugin-updater@2.10.1/LICENSE_APACHE-2.0
+- cargo:tauri-plugin-updater@2.11.0 — cargo:tauri-plugin-updater@2.11.0/LICENSE_APACHE-2.0
 - cargo:tauri-runtime-wry@2.11.4 — cargo:tauri-runtime-wry@2.11.4/LICENSE_APACHE-2.0
 - cargo:tauri-runtime@2.11.3 — cargo:tauri-runtime@2.11.3/LICENSE_APACHE-2.0
 - cargo:tauri-utils@2.9.3 — cargo:tauri-utils@2.9.3/LICENSE_APACHE-2.0
@@ -12464,6 +12535,7 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 SHA-256 4108245a1f2df9d4e94df8abed5b4ba0759bb2f9b40a6b939f1be141077ae50b
 Applies to:
 - cargo:miniz_oxide@0.8.9 — cargo:miniz_oxide@0.8.9/LICENSE
+- cargo:miniz_oxide@0.9.1 — cargo:miniz_oxide@0.9.1/LICENSE
 
 --------------------------------------------------------------------------------
 
@@ -14015,7 +14087,7 @@ THE SOFTWARE.
 
 SHA-256 5b698ca13897be3afdb7174256fa1574f8c6892b8bea1a66dd6469d3fe27885a
 Applies to:
-- cargo:rustls-webpki@0.103.13 — cargo:rustls-webpki@0.103.13/LICENSE
+- cargo:rustls-webpki@0.103.15 — cargo:rustls-webpki@0.103.15/LICENSE
 
 --------------------------------------------------------------------------------
 
@@ -14273,6 +14345,7 @@ Applies to:
 - cargo:core-foundation-sys@0.8.7 — cargo:core-foundation-sys@0.8.7/LICENSE-MIT
 - cargo:core-foundation@0.10.1 — cargo:core-foundation@0.10.1/LICENSE-MIT
 - cargo:core-foundation@0.7.0 — cargo:core-foundation@0.7.0/LICENSE-MIT
+- cargo:core-foundation@0.9.4 — cargo:core-foundation@0.9.4/LICENSE-MIT
 - cargo:core-graphics-types@0.2.0 — cargo:core-graphics-types@0.2.0/LICENSE-MIT
 - cargo:core-graphics@0.25.0 — cargo:core-graphics@0.25.0/LICENSE-MIT
 - cargo:string_cache@0.9.0 — cargo:string_cache@0.9.0/LICENSE-MIT
@@ -16229,7 +16302,7 @@ SHA-256 709e3175b4212f7b13aa93971c9f62ff8c69ec45ad8c6532a7e0c41d7a7d6f8c
 Applies to:
 - cargo:hyper-rustls@0.27.9 — cargo:hyper-rustls@0.27.9/LICENSE-MIT
 - cargo:rustls-native-certs@0.8.4 — cargo:rustls-native-certs@0.8.4/LICENSE-MIT
-- cargo:rustls@0.23.40 — cargo:rustls@0.23.40/LICENSE-MIT
+- cargo:rustls@0.23.45 — cargo:rustls@0.23.45/LICENSE-MIT
 
 --------------------------------------------------------------------------------
 
@@ -16700,7 +16773,7 @@ DEALINGS IN THE SOFTWARE.
 
 SHA-256 77c9ee6a9c5d5782fb0c50b50d101189116314c14f7df0a1b0d385fc96a7ba49
 Applies to:
-- npm:node_modules/react-router@8.3.0 — npm:node_modules/react-router/LICENSE.md
+- npm:node_modules/react-router@8.3.1 — npm:node_modules/react-router/LICENSE.md
 
 --------------------------------------------------------------------------------
 
@@ -17183,6 +17256,7 @@ limitations under the License.
 SHA-256 799e9ca9d179295ef372f25d3769cdda7d25bb2668add6a6a1e22d1e4c678b8d
 Applies to:
 - cargo:miniz_oxide@0.8.9 — cargo:miniz_oxide@0.8.9/LICENSE-MIT.md
+- cargo:miniz_oxide@0.9.1 — cargo:miniz_oxide@0.9.1/LICENSE-MIT.md
 
 --------------------------------------------------------------------------------
 
@@ -17370,7 +17444,7 @@ SHA-256 7cfafc877eccc46c0e346ccbaa5c51bb6b894d2b818e617d970211e232785ad4
 Applies to:
 - cargo:hyper-rustls@0.27.9 — cargo:hyper-rustls@0.27.9/LICENSE-ISC
 - cargo:rustls-native-certs@0.8.4 — cargo:rustls-native-certs@0.8.4/LICENSE-ISC
-- cargo:rustls@0.23.40 — cargo:rustls@0.23.40/LICENSE-ISC
+- cargo:rustls@0.23.45 — cargo:rustls@0.23.45/LICENSE-ISC
 
 --------------------------------------------------------------------------------
 
@@ -17433,7 +17507,7 @@ For more information, please refer to <http://unlicense.org/>
 
 SHA-256 80e49272a4c81b0ded274b540d2b8089bd5f4d7d4fe1f2df309d463d7067c9c4
 Applies to:
-- npm:node_modules/@noble/ed25519@3.1.0 — npm:node_modules/@noble/ed25519/LICENSE
+- npm:node_modules/@noble/ed25519@3.2.0 — npm:node_modules/@noble/ed25519/LICENSE
 - npm:node_modules/@noble/secp256k1@3.1.0 — npm:node_modules/@noble/secp256k1/LICENSE
 
 --------------------------------------------------------------------------------
@@ -19921,21 +19995,21 @@ DEALINGS IN THE SOFTWARE.
 SHA-256 9c1db6b7e7eb83e1cb2af973b5df2bdc63651ede0f38506ab98dfa0940487759
 Applies to:
 - cargo:tauri-plugin-autostart@2.5.1 — cargo:tauri-plugin-autostart@2.5.1/LICENSE.spdx
-- cargo:tauri-plugin-deep-link@2.4.9 — cargo:tauri-plugin-deep-link@2.4.9/LICENSE.spdx
+- cargo:tauri-plugin-deep-link@2.4.10 — cargo:tauri-plugin-deep-link@2.4.10/LICENSE.spdx
 - cargo:tauri-plugin-dialog@2.7.2 — cargo:tauri-plugin-dialog@2.7.2/LICENSE.spdx
 - cargo:tauri-plugin-fs@2.5.1 — cargo:tauri-plugin-fs@2.5.1/LICENSE.spdx
 - cargo:tauri-plugin-global-shortcut@2.3.2 — cargo:tauri-plugin-global-shortcut@2.3.2/LICENSE.spdx
 - cargo:tauri-plugin-notification@2.3.3 — cargo:tauri-plugin-notification@2.3.3/LICENSE.spdx
-- cargo:tauri-plugin-opener@2.5.4 — cargo:tauri-plugin-opener@2.5.4/LICENSE.spdx
-- cargo:tauri-plugin-shell@2.3.5 — cargo:tauri-plugin-shell@2.3.5/LICENSE.spdx
+- cargo:tauri-plugin-opener@2.5.5 — cargo:tauri-plugin-opener@2.5.5/LICENSE.spdx
+- cargo:tauri-plugin-shell@2.3.6 — cargo:tauri-plugin-shell@2.3.6/LICENSE.spdx
 - cargo:tauri-plugin-single-instance@2.4.3 — cargo:tauri-plugin-single-instance@2.4.3/LICENSE.spdx
 - cargo:tauri-plugin-store@2.4.4 — cargo:tauri-plugin-store@2.4.4/LICENSE.spdx
-- cargo:tauri-plugin-updater@2.10.1 — cargo:tauri-plugin-updater@2.10.1/LICENSE.spdx
+- cargo:tauri-plugin-updater@2.11.0 — cargo:tauri-plugin-updater@2.11.0/LICENSE.spdx
 - npm:node_modules/@tauri-apps/plugin-deep-link@2.4.9 — npm:node_modules/@tauri-apps/plugin-deep-link/LICENSE.spdx
 - npm:node_modules/@tauri-apps/plugin-dialog@2.7.2 — npm:node_modules/@tauri-apps/plugin-dialog/LICENSE.spdx
 - npm:node_modules/@tauri-apps/plugin-notification@2.3.3 — npm:node_modules/@tauri-apps/plugin-notification/LICENSE.spdx
 - npm:node_modules/@tauri-apps/plugin-store@2.4.4 — npm:node_modules/@tauri-apps/plugin-store/LICENSE.spdx
-- npm:node_modules/@tauri-apps/plugin-updater@2.10.1 — npm:node_modules/@tauri-apps/plugin-updater/LICENSE.spdx
+- npm:node_modules/@tauri-apps/plugin-updater@2.11.0 — npm:node_modules/@tauri-apps/plugin-updater/LICENSE.spdx
 
 --------------------------------------------------------------------------------
 
@@ -20032,15 +20106,15 @@ Applies to:
 - cargo:tauri-codegen@2.6.3 — cargo:tauri-codegen@2.6.3/LICENSE_MIT
 - cargo:tauri-macros@2.6.3 — cargo:tauri-macros@2.6.3/LICENSE_MIT
 - cargo:tauri-plugin-autostart@2.5.1 — cargo:tauri-plugin-autostart@2.5.1/LICENSE_MIT
-- cargo:tauri-plugin-deep-link@2.4.9 — cargo:tauri-plugin-deep-link@2.4.9/LICENSE_MIT
+- cargo:tauri-plugin-deep-link@2.4.10 — cargo:tauri-plugin-deep-link@2.4.10/LICENSE_MIT
 - cargo:tauri-plugin-dialog@2.7.2 — cargo:tauri-plugin-dialog@2.7.2/LICENSE_MIT
 - cargo:tauri-plugin-fs@2.5.1 — cargo:tauri-plugin-fs@2.5.1/LICENSE_MIT
 - cargo:tauri-plugin-global-shortcut@2.3.2 — cargo:tauri-plugin-global-shortcut@2.3.2/LICENSE_MIT
 - cargo:tauri-plugin-notification@2.3.3 — cargo:tauri-plugin-notification@2.3.3/LICENSE_MIT
-- cargo:tauri-plugin-opener@2.5.4 — cargo:tauri-plugin-opener@2.5.4/LICENSE_MIT
-- cargo:tauri-plugin-shell@2.3.5 — cargo:tauri-plugin-shell@2.3.5/LICENSE_MIT
+- cargo:tauri-plugin-opener@2.5.5 — cargo:tauri-plugin-opener@2.5.5/LICENSE_MIT
+- cargo:tauri-plugin-shell@2.3.6 — cargo:tauri-plugin-shell@2.3.6/LICENSE_MIT
 - cargo:tauri-plugin-store@2.4.4 — cargo:tauri-plugin-store@2.4.4/LICENSE_MIT
-- cargo:tauri-plugin-updater@2.10.1 — cargo:tauri-plugin-updater@2.10.1/LICENSE_MIT
+- cargo:tauri-plugin-updater@2.11.0 — cargo:tauri-plugin-updater@2.11.0/LICENSE_MIT
 - cargo:tauri-runtime-wry@2.11.4 — cargo:tauri-runtime-wry@2.11.4/LICENSE_MIT
 - cargo:tauri-runtime@2.11.3 — cargo:tauri-runtime@2.11.3/LICENSE_MIT
 - cargo:tauri-utils@2.9.3 — cargo:tauri-utils@2.9.3/LICENSE_MIT
@@ -20736,6 +20810,7 @@ Applies to:
 - cargo:core-foundation-sys@0.8.7 — cargo:core-foundation-sys@0.8.7/LICENSE-APACHE
 - cargo:core-foundation@0.10.1 — cargo:core-foundation@0.10.1/LICENSE-APACHE
 - cargo:core-foundation@0.7.0 — cargo:core-foundation@0.7.0/LICENSE-APACHE
+- cargo:core-foundation@0.9.4 — cargo:core-foundation@0.9.4/LICENSE-APACHE
 - cargo:core-graphics-types@0.2.0 — cargo:core-graphics-types@0.2.0/LICENSE-APACHE
 - cargo:core-graphics@0.25.0 — cargo:core-graphics@0.25.0/LICENSE-APACHE
 - cargo:crossbeam-channel@0.5.15 — cargo:crossbeam-channel@0.5.15/LICENSE-APACHE
@@ -20749,7 +20824,7 @@ Applies to:
 - cargo:event-listener@5.4.2 — cargo:event-listener@5.4.2/LICENSE-APACHE
 - cargo:fastrand@2.4.1 — cargo:fastrand@2.4.1/LICENSE-APACHE
 - cargo:filetime@0.2.29 — cargo:filetime@0.2.29/LICENSE-APACHE
-- cargo:flate2@1.1.9 — cargo:flate2@1.1.9/LICENSE-APACHE
+- cargo:flate2@1.1.10 — cargo:flate2@1.1.10/LICENSE-APACHE
 - cargo:fnv@1.0.7 — cargo:fnv@1.0.7/LICENSE-APACHE
 - cargo:form_urlencoded@1.2.2 — cargo:form_urlencoded@1.2.2/LICENSE-APACHE
 - cargo:futures-lite@2.6.1 — cargo:futures-lite@2.6.1/LICENSE-APACHE
@@ -20800,7 +20875,7 @@ Applies to:
 - cargo:regex@1.12.3 — cargo:regex@1.12.3/LICENSE-APACHE
 - cargo:rustix@1.1.4 — cargo:rustix@1.1.4/LICENSE-APACHE
 - cargo:rustls-native-certs@0.8.4 — cargo:rustls-native-certs@0.8.4/LICENSE-APACHE
-- cargo:rustls@0.23.40 — cargo:rustls@0.23.40/LICENSE-APACHE
+- cargo:rustls@0.23.45 — cargo:rustls@0.23.45/LICENSE-APACHE
 - cargo:scopeguard@1.2.0 — cargo:scopeguard@1.2.0/LICENSE-APACHE
 - cargo:secret-service@4.0.0 — cargo:secret-service@4.0.0/LICENSE-APACHE
 - cargo:security-framework-sys@2.17.0 — cargo:security-framework-sys@2.17.0/LICENSE-APACHE
@@ -20815,6 +20890,8 @@ Applies to:
 - cargo:stable_deref_trait@1.2.1 — cargo:stable_deref_trait@1.2.1/LICENSE-APACHE
 - cargo:string_cache@0.9.0 — cargo:string_cache@0.9.0/LICENSE-APACHE
 - cargo:syn@1.0.109 — cargo:syn@1.0.109/LICENSE-APACHE
+- cargo:system-configuration-sys@0.6.0 — cargo:system-configuration-sys@0.6.0/LICENSE-APACHE
+- cargo:system-configuration@0.7.0 — cargo:system-configuration@0.7.0/LICENSE-APACHE
 - cargo:tar@0.4.46 — cargo:tar@0.4.46/LICENSE-APACHE
 - cargo:tempfile@3.27.0 — cargo:tempfile@3.27.0/LICENSE-APACHE
 - cargo:tendril@0.5.0 — cargo:tendril@0.5.0/LICENSE-APACHE
@@ -23461,7 +23538,7 @@ Applies to:
 
 SHA-256 b495047bd93a9b06913511076f504daba17d5bbeb3e0650f3bb53a4220329c57
 Applies to:
-- npm:node_modules/lucide-react@1.31.0 — npm:node_modules/lucide-react/LICENSE
+- npm:node_modules/lucide-react@1.46.0 — npm:node_modules/lucide-react/LICENSE
 
 --------------------------------------------------------------------------------
 
@@ -24162,8 +24239,8 @@ Applies to:
 - npm:node_modules/@types/d3-time@3.0.4 — npm:node_modules/@types/d3-time/LICENSE
 - npm:node_modules/@types/d3-timer@3.0.2 — npm:node_modules/@types/d3-timer/LICENSE
 - npm:node_modules/@types/node@26.2.0 — npm:node_modules/@types/node/LICENSE
-- npm:node_modules/@types/react-dom@19.2.4 — npm:node_modules/@types/react-dom/LICENSE
-- npm:node_modules/@types/react@19.2.18 — npm:node_modules/@types/react/LICENSE
+- npm:node_modules/@types/react-dom@19.3.0 — npm:node_modules/@types/react-dom/LICENSE
+- npm:node_modules/@types/react@19.3.0 — npm:node_modules/@types/react/LICENSE
 - npm:node_modules/@types/readable-stream@4.0.23 — npm:node_modules/@types/readable-stream/LICENSE
 - npm:node_modules/@types/use-sync-external-store@0.0.6 — npm:node_modules/@types/use-sync-external-store/LICENSE
 - npm:node_modules/@types/ws@8.18.1 — npm:node_modules/@types/ws/LICENSE
@@ -25871,7 +25948,7 @@ Applies to:
 
 SHA-256 d4c70c7ce38cea8778f0aed3fc0bef0a9dbd27f13bd8b6773cbd6d37941971e5
 Applies to:
-- npm:node_modules/tailwind-merge@3.6.0 — npm:node_modules/tailwind-merge/LICENSE.md
+- npm:node_modules/tailwind-merge@3.7.0 — npm:node_modules/tailwind-merge/LICENSE.md
 
 --------------------------------------------------------------------------------
 
@@ -26000,9 +26077,9 @@ DEALINGS IN THE SOFTWARE.
 
 SHA-256 da6d3703ed11cbe42bd212c725957c98da23cbff1998c05fa4b3d976d1a58e93
 Applies to:
-- npm:node_modules/react-dom@19.2.8 — npm:node_modules/react-dom/LICENSE
-- npm:node_modules/react@19.2.8 — npm:node_modules/react/LICENSE
-- npm:node_modules/scheduler@0.27.0 — npm:node_modules/scheduler/LICENSE
+- npm:node_modules/react-dom@19.3.0 — npm:node_modules/react-dom/LICENSE
+- npm:node_modules/react@19.3.0 — npm:node_modules/react/LICENSE
+- npm:node_modules/scheduler@0.28.0 — npm:node_modules/scheduler/LICENSE
 - npm:node_modules/use-sync-external-store@1.6.0 — npm:node_modules/use-sync-external-store/LICENSE
 
 --------------------------------------------------------------------------------

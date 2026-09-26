@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
+import { expect, userEvent, waitFor, within } from 'storybook/test'
 
 import { SessionInviteDialog } from '@/features/session'
 import type { Friend } from '@/lib/db/friends'
@@ -29,7 +30,7 @@ const meta = {
   args: {
     open: true,
     onOpenChange: () => {},
-    onInvite: () => {},
+    onInvite: async (): Promise<boolean> => true,
     friends: FRIENDS,
     // Devin is offline; everyone else is online.
     isOnline: (ed: string) => !ed.startsWith('d'),
@@ -64,5 +65,40 @@ export const NoFriendsOnline: Story = {
 export const SessionFull: Story = {
   args: {
     full: true,
+  },
+}
+
+let finishInvite: ((sent: boolean) => void) | null = null
+
+export const FailedSendCanRetry: Story = {
+  args: {
+    onInvite: () =>
+      new Promise<boolean>((resolve) => {
+        finishInvite = resolve
+      }),
+  },
+  play: async () => {
+    const button = within(document.body).getByRole('button', {
+      name: 'Invite Alex to this session',
+    })
+    await waitFor(() => {
+      if (getComputedStyle(button).pointerEvents === 'none') {
+        throw new Error('Invite dialog is still opening')
+      }
+    })
+    await userEvent.click(button)
+    expect(button).toBeDisabled()
+    expect(button).toHaveTextContent('Sending…')
+
+    finishInvite?.(false)
+    await waitFor(() => expect(button).toBeEnabled())
+    expect(button).toHaveTextContent('Invite')
+
+    await userEvent.click(button)
+    expect(button).toBeDisabled()
+    expect(button).toHaveTextContent('Sending…')
+    finishInvite?.(true)
+    await waitFor(() => expect(button).toHaveTextContent('Invited'))
+    expect(button).toBeDisabled()
   },
 }

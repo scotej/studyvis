@@ -7,6 +7,13 @@ libgstapp.so
 libgstaudioconvert.so
 libgstaudiorate.so
 libgstaudioresample.so
+# #312: WebKit uses these for black/silent outgoing fallback tracks, including
+# receive-side sendrecv transceivers. They are runtime dependencies, despite
+# their names; a data-channel-only offer never loads either factory.
+libgstaudiotestsrc.so
+libgstvideotestsrc.so
+# Portal frames use GPU memory; WebKit uploads, converts and downloads them.
+libgstopengl.so
 libgstgio.so
 libgstopus.so
 libgstplayback.so
@@ -19,6 +26,8 @@ libgstautodetect.so
 libgstpulseaudio.so
 libgstalsa.so
 libgstvideo4linux2.so
+# WebKit's decodebin3 needs JPEG decoding for MJPEG webcams.
+libgstjpeg.so
 libgstrtp.so
 libgstrtpmanager.so
 libgstvpx.so

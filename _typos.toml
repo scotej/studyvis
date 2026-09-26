@@ -55,6 +55,8 @@ extend-ignore-re = [
   "\\bPNGs?\\b",
   # musl's generated configuration filename in the pinned runtime builder.
   "\\bconfig\\.mak\\b",
+  # Exact Nostr relay URL; the hostname is the service's proper name.
+  "wss://relay\\.sigit\\.io",
 ]
 
 [default.extend-identifiers]

@@ -213,6 +213,8 @@ export function Report({
     timeline: status.kind === 'ready' ? (status.data.timeline ?? null) : null,
     declaredTopic:
       status.kind === 'ready' ? status.data.session.declared_topic : null,
+    startedAt: status.kind === 'ready' ? status.data.session.started_at : null,
+    endedAt: status.kind === 'ready' ? status.data.session.ended_at : null,
     onWritten: handleWritten,
   })
 

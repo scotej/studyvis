@@ -42,22 +42,8 @@ pub(crate) fn read_selection<R: Runtime>(app: &AppHandle<R>) -> ComputeDeviceSel
 
 pub(crate) fn gpu_layers(selection: &ComputeDeviceSelection) -> &'static str {
     match selection {
-        ComputeDeviceSelection::Cpu => return "0",
-        // An explicit device only reaches this point after llama.cpp reports
-        // an accelerator. Honour that choice even on dev platforms whose
-        // packaged default engine is CPU-only; custom GPU-enabled Linux builds
-        // must not silently keep all model layers on the CPU.
-        ComputeDeviceSelection::Device(_) => return "99",
-        ComputeDeviceSelection::Auto => {}
-    }
-
-    #[cfg(any(target_os = "macos", target_os = "windows"))]
-    {
-        "99"
-    }
-    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-    {
-        "0"
+        ComputeDeviceSelection::Cpu => "0",
+        ComputeDeviceSelection::Auto | ComputeDeviceSelection::Device(_) => "99",
     }
 }
 
@@ -105,6 +91,13 @@ mod tests {
         let cpu = ComputeDeviceSelection::Cpu;
         assert_eq!(gpu_layers(&cpu), "0");
         assert_eq!(device_arg(&cpu), Some("none"));
+    }
+
+    #[test]
+    fn auto_enables_offload_without_forcing_a_device() {
+        let auto = ComputeDeviceSelection::Auto;
+        assert_eq!(gpu_layers(&auto), "99");
+        assert_eq!(device_arg(&auto), None);
     }
 
     #[test]

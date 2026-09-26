@@ -21,7 +21,7 @@
 # also bump INFERENCE_ENGINE_FINGERPRINT in src/features/ai/benchmark.ts —
 # it flags persisted benchmarks as stale in the model picker.
 #
-# Windows deliberately ships llama.cpp's Vulkan build rather than the CPU-only
+# Linux and Windows deliberately ship llama.cpp's Vulkan build rather than the CPU-only
 # archive. Vulkan gives one cross-vendor path for NVIDIA, AMD, Intel and eGPUs;
 # the app can still force CPU execution with llama-server's --device none plus
 # --n-gpu-layers 0. macOS keeps the upstream Metal-enabled archive.
@@ -48,7 +48,7 @@ asset_name_for() {
     aarch64-apple-darwin)     echo "llama-${LLAMA_RELEASE_TAG}-bin-macos-arm64.tar.gz" ;;
     x86_64-apple-darwin)      echo "llama-${LLAMA_RELEASE_TAG}-bin-macos-x64.tar.gz" ;;
     x86_64-pc-windows-msvc)   echo "llama-${LLAMA_RELEASE_TAG}-bin-win-vulkan-x64.zip" ;;
-    x86_64-unknown-linux-gnu) echo "llama-${LLAMA_RELEASE_TAG}-bin-ubuntu-x64.tar.gz" ;;
+    x86_64-unknown-linux-gnu) echo "llama-${LLAMA_RELEASE_TAG}-bin-ubuntu-vulkan-x64.tar.gz" ;;
     *) return 1 ;;
   esac
 }
@@ -57,7 +57,7 @@ asset_sha256_for() {
     aarch64-apple-darwin)     echo "90fea82a8e712274adcdc90ceb6c993d959c1c49bbbb77b97584986c9e366bdd" ;;
     x86_64-apple-darwin)      echo "a9e6c3967d2d0d96b5a72a4b5610b14945d8b8448e510a4b3d012a3c7284566f" ;;
     x86_64-pc-windows-msvc)   echo "297209d9f17ac0c25cd146c8e0b11bdb77fc672512aba84045e20ab0d51c96a9" ;;
-    x86_64-unknown-linux-gnu) echo "167e12288da2dc4dcece7327010844edcfb18ee3a76eb45b2e232a04723865e6" ;;
+    x86_64-unknown-linux-gnu) echo "3ccb127c298abb2640911aac3e3d9221f197bbf6b7c1e0fedfb4a4dae1ab640b" ;;
     *) return 1 ;;
   esac
 }
@@ -140,7 +140,10 @@ fetch_one() (
   target_bin="${BINARIES_DIR}/llama-server-${triple}${exe_suffix}"
   target_runtime="${BINARIES_DIR}/llama-runtime-${triple}"
 
-  if [ -x "$target_bin" ] && [ -d "$target_runtime" ] && [ "$FORCE" != "1" ]; then
+  # The release tag alone cannot distinguish the former Linux CPU archive.
+  manifest="${target_runtime}/.llama-asset-sha256"
+  if [ -x "$target_bin" ] && [ -f "$manifest" ] && \
+    [ "$(cat "$manifest")" = "$sha" ] && [ "$FORCE" != "1" ]; then
     echo "fetch-llama-server: $triple already populated at ${target_bin#${REPO_ROOT}/} (use --force to refetch)"
     exit 0
   fi
@@ -213,7 +216,16 @@ fetch_one() (
   esac
   shopt -u nullglob
 
-  count="$(find "$target_runtime" -type f | wc -l | tr -d ' ')"
+  if [ "$triple" = "x86_64-unknown-linux-gnu" ]; then
+    for backend in libggml-vulkan.so libggml-cpu-x64.so; do
+      [ -s "$target_runtime/$backend" ] || {
+        echo "fetch-llama-server: missing Linux backend: $backend" >&2
+        exit 1
+      }
+    done
+  fi
+  printf '%s\n' "$sha" >"$manifest"
+  count="$(find "$target_runtime" -type f ! -name '.llama-asset-sha256' | wc -l | tr -d ' ')"
   echo "fetch-llama-server: $triple → $(basename "$target_bin") + $count companion libs"
 )
 
