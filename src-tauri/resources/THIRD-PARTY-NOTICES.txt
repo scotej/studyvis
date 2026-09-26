@@ -4805,10 +4805,10 @@ NPM
   source: https://registry.npmjs.org/@types/d3-timer/-/d3-timer-3.0.2.tgz
   license: npm:node_modules/@types/d3-timer/LICENSE (SHA-256 c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383)
 
-- @types/node 26.2.0 — MIT
-  id: npm:node_modules/@types/node@26.2.0
+- @types/node 26.5.1 — MIT
+  id: npm:node_modules/@types/node@26.5.1
   targets: frontend
-  source: https://registry.npmjs.org/@types/node/-/node-26.2.0.tgz
+  source: https://registry.npmjs.org/@types/node/-/node-26.5.1.tgz
   license: npm:node_modules/@types/node/LICENSE (SHA-256 c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383)
 
 - @types/react 19.3.0 — MIT
@@ -5460,10 +5460,10 @@ NPM
   source: https://registry.npmjs.org/typedarray/-/typedarray-0.0.6.tgz
   license: npm:node_modules/typedarray/LICENSE (SHA-256 26181ebee1063f3dc6766a3b6d05999a0da058f172eadf2ca5d15105ffd9735a)
 
-- undici-types 8.3.0 — MIT
-  id: npm:node_modules/undici-types@8.3.0
+- undici-types 8.9.0 — MIT
+  id: npm:node_modules/undici-types@8.9.0
   targets: frontend
-  source: https://registry.npmjs.org/undici-types/-/undici-types-8.3.0.tgz
+  source: https://registry.npmjs.org/undici-types/-/undici-types-8.9.0.tgz
   license: npm:node_modules/undici-types/LICENSE (SHA-256 a6db8096b2707bc0102d256917d4d33f298ba36d8c3f25de067a2b5bb379db27)
 
 - use-callback-ref 1.3.3 — MIT
@@ -21526,7 +21526,7 @@ Applies to:
 
 SHA-256 a6db8096b2707bc0102d256917d4d33f298ba36d8c3f25de067a2b5bb379db27
 Applies to:
-- npm:node_modules/undici-types@8.3.0 — npm:node_modules/undici-types/LICENSE
+- npm:node_modules/undici-types@8.9.0 — npm:node_modules/undici-types/LICENSE
 
 --------------------------------------------------------------------------------
 
@@ -24238,7 +24238,7 @@ Applies to:
 - npm:node_modules/@types/d3-shape@3.1.8 — npm:node_modules/@types/d3-shape/LICENSE
 - npm:node_modules/@types/d3-time@3.0.4 — npm:node_modules/@types/d3-time/LICENSE
 - npm:node_modules/@types/d3-timer@3.0.2 — npm:node_modules/@types/d3-timer/LICENSE
-- npm:node_modules/@types/node@26.2.0 — npm:node_modules/@types/node/LICENSE
+- npm:node_modules/@types/node@26.5.1 — npm:node_modules/@types/node/LICENSE
 - npm:node_modules/@types/react-dom@19.3.0 — npm:node_modules/@types/react-dom/LICENSE
 - npm:node_modules/@types/react@19.3.0 — npm:node_modules/@types/react/LICENSE
 - npm:node_modules/@types/readable-stream@4.0.23 — npm:node_modules/@types/readable-stream/LICENSE

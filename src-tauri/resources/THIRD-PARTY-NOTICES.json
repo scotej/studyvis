@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "generatedBy": "scripts/generate-third-party-notices.ts",
   "noticePath": "THIRD-PARTY-NOTICES.txt",
-  "noticeSha256": "ce4edf3c92c69e9eaf34821d143cf868fda8c69292cb4ef8001869eac95e48f8",
+  "noticeSha256": "464a5c56d741a0cbadbedefa549522a2045875b7b11fc35802ab429df76d1e46",
   "scope": {
     "npm": "package-lock.json v3 entries beneath node_modules whose dev flag is not true",
     "cargo": "normal dependency edges reachable from the StudyVis root under each release target; build/dev edges excluded",
@@ -16,11 +16,11 @@
   "inputs": [
     {
       "path": "package-lock.json",
-      "sha256": "895648639ee4f8c6df0cae1d25c28f7d17ed60bc94b34a4d0fafa816905ea19b"
+      "sha256": "7d712cff10d41fcbc4fb9a863565666760ba0280fc79d38aae84d01171dd8e4a"
     },
     {
       "path": "package.json",
-      "sha256": "348fa93f4c7471e9fb7b9c40559b1983b84c937a250dbb4cee4f4d0d41a90c77"
+      "sha256": "e88615c92d2dcf95bbf347768049f3a4f838620112ea04ca6908032e699f4316"
     },
     {
       "path": "scripts/fetch-llama-server.sh",
@@ -14033,14 +14033,14 @@
       ]
     },
     {
-      "id": "npm:node_modules/@types/node@26.2.0",
+      "id": "npm:node_modules/@types/node@26.5.1",
       "ecosystem": "npm",
       "name": "@types/node",
-      "version": "26.2.0",
+      "version": "26.5.1",
       "licenseExpression": "MIT",
-      "source": "https://registry.npmjs.org/@types/node/-/node-26.2.0.tgz",
+      "source": "https://registry.npmjs.org/@types/node/-/node-26.5.1.tgz",
       "repository": "https://github.com/DefinitelyTyped/DefinitelyTyped.git",
-      "integrity": "sha512-5IviulTZeRNp2vAJ514cc/HUlY5nZ9fCbq9DMyC52BrhFZACo3nI0R7qBxhQmo/d27NFe96ur/b7Wwxklda+kg==",
+      "integrity": "sha512-CzNm2FezW4VR/LjG6yUdiEgLE/rAQ9Slj5gCu/C2VrdcW7I0ahNZ8DRbHT7zOZ6r3ONgd/bsQIeSaoDGrd1C6g==",
       "lockPath": "node_modules/@types/node",
       "targets": ["frontend"],
       "licenseFiles": [
@@ -15997,14 +15997,14 @@
       ]
     },
     {
-      "id": "npm:node_modules/undici-types@8.3.0",
+      "id": "npm:node_modules/undici-types@8.9.0",
       "ecosystem": "npm",
       "name": "undici-types",
-      "version": "8.3.0",
+      "version": "8.9.0",
       "licenseExpression": "MIT",
-      "source": "https://registry.npmjs.org/undici-types/-/undici-types-8.3.0.tgz",
+      "source": "https://registry.npmjs.org/undici-types/-/undici-types-8.9.0.tgz",
       "repository": "git+https://github.com/nodejs/undici.git",
-      "integrity": "sha512-j375ScV60dom+YkPFIfTLcOiPxkN/buHz5GobjLhixFuANaNs3C9l4GmrWqejgXWJ7BbJcFYpTEUkS1Ge8bpZQ==",
+      "integrity": "sha512-KTDyRTYX8sWmKXAikPHHSyc63CRPETMctyjKFupcC6OBLXT3xsN0e9aF7m+mIXutFWpUXuedtowG7iLOzp0kQg==",
       "lockPath": "node_modules/undici-types",
       "targets": ["frontend"],
       "licenseFiles": [
