@@ -256,8 +256,9 @@ unless `latest.json` contains `darwin-aarch64`, `windows-x86_64`, and
 `linux-x86_64` and both Linux source archives and checksum sidecars are present
 and verify; aggregate failure stamps it `INCOMPLETE, DO NOT PUBLISH`.
 Headless build and startup success does not prove a desktop media or in-app
-key-custody path: publishing also requires the PLAN §8 exact-AppImage physical
-CachyOS KDE Wayland data-channel/media/cross-platform-peer matrix.
+key-custody path. The PLAN §8 exact-AppImage physical CachyOS KDE Wayland
+data-channel/media/cross-platform-peer matrix is the standard for full Linux
+sign-off, but it does not gate publication.
 `publish-release.yml` is designed as the publication boundary: it queues behind
 the tag build, revalidates the tag's `main` ancestry and exact-commit CI, and
 requires the latest `release.yml` run for that exact tag (`head_branch`) and tag
@@ -268,12 +269,11 @@ metadata and notes, requires the exact twelve expected files, downloads them by
 their draft asset API URLs, compares every updater signature sidecar byte for
 byte with `latest.json`, and verifies GitHub build provenance tying every
 binary, sidecar, source asset, and the final manifest to `release.yml` at that
-exact tag/commit on hosted runners. The required dispatch input is the lowercase
-SHA-256 recorded by the PLAN §8 physical AppImage pass; the publisher checks it
-during validation and re-downloads/re-hashes that AppImage immediately before
-changing the draft to published. Publication is unattended: the workflow derives
-the AppImage digest itself and waits on no approval, so every gate it enforces is
-machine-checkable. Repository settings must still add two controls that workflow
+exact tag/commit on hosted runners. The dispatch takes the tag alone; the
+publisher computes the AppImage SHA-256 during validation and re-downloads and
+re-hashes that AppImage immediately before changing the draft to published.
+Publication is unattended and waits on no approval, so every gate it enforces
+is machine-checkable. Repository settings must still add two controls that workflow
 YAML cannot establish: protect matching `v*` tags against
 creation/update/deletion, and enable immutable releases. The tag ruleset's sole
 `Always` bypass entry must be `RepositoryRole 5` (admin), used by the
@@ -288,7 +288,7 @@ physical AppImage matrix is the standard for a full Linux sign-off but no longer
 gates publication.
 
 ### AI inference (V2+)
-- **llama-server** (binary from llama.cpp build) — Tauri sidecar. The release matrix bundles `aarch64-apple-darwin`, `x86_64-pc-windows-msvc`, and `x86_64-unknown-linux-gnu`; Intel macOS remains fetchable for local development. `scripts/fetch-llama-server.sh` pins and SHA-256-verifies all four upstream archives. The Linux archive is the upstream Ubuntu x64 CPU build: the candidate's `auto` policy uses zero GPU layers. A custom GPU-capable engine can expose an explicit device, but GPU acceleration is not a property promised by the AppImage.
+- **llama-server** (binary from llama.cpp build) — Tauri sidecar. The release matrix bundles `aarch64-apple-darwin`, `x86_64-pc-windows-msvc`, and `x86_64-unknown-linux-gnu`; Intel macOS remains fetchable for local development. `scripts/fetch-llama-server.sh` pins and SHA-256-verifies all four upstream archives. The Linux archive is the upstream Ubuntu x64 Vulkan build: `auto` uses available GPUs, a selected device requests that GPU, and CPU remains available when no compatible host Vulkan driver exists or the user selects CPU.
 - App spawns sidecar on demand, communicates via OpenAI-compatible HTTP on `127.0.0.1:<random-port>`. Exact request shape (image content block field names, multipart vs. base64) verified against the pinned llama-server build at V2-P1 time; the sample-loop pseudocode in §8 is illustrative.
 - Vision models loaded with paired `--mmproj` projector files.
 

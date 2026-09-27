@@ -282,7 +282,8 @@ where you'd see it surface.
   the mandatory release-candidate sign-off path. ARM64 Linux, AUR/pacman,
   Flatpak, Snap, `.deb`, and `.rpm` packages are not release targets. Screen capture
   depends on the desktop portal + PipeWire, key custody depends on a
-  Secret Service provider, and the bundled AI engine uses the CPU.
+  Secret Service provider, and GPU acceleration needs a compatible host Vulkan
+  driver (with CPU fallback).
   Automatic update also requires the AppImage to live on a writable
   filesystem. The FUSE-free extraction fallback still targets that original
   file and does not remove the write requirement. Because StudyVis bundles its

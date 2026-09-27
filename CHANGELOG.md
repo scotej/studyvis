@@ -1,9 +1,13 @@
 # Changelog
 
-## Unreleased
+## 1.12.5 — 2026-09-27 — Linux camera and AI improvements
 
 ### Fixed
 
+- **On-device AI can use a compatible GPU on Linux.** The AppImage now includes
+  the Vulkan engine. Auto selects an available GPU, while Settings → AI still
+  lets you choose a specific device or CPU; machines without a working Vulkan
+  driver continue to use CPU.
 - Linux camera previews no longer stay blank when a webcam uses MJPEG. The
   AppImage now includes the JPEG decoder needed by camera capture.
 - Failed camera or screen-share negotiation now closes the abandoned peer
