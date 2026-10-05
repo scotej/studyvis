@@ -434,7 +434,16 @@ diff --git a/node_modules/@trystero-p2p/core/dist/peer.mjs b/node_modules/@tryst
  	const clearDisconnectedCloseTimer = () => disconnectedCloseTimer = resetTimer(disconnectedCloseTimer);
  	const emitClose = () => {
  		if (didEmitClose) return;
-@@ -154,7 +155,11 @@
+@@ -64,6 +65,8 @@ var peer_default = (initiator, { trickleIce, rtcConfig, rtcPolyfill, turnConfig,
+ 	const getRemoteMediaSectionCount = () => (pc.remoteDescription?.sdp?.match(/^m=/gm) ?? []).length;
+ 	const canApplyRemoteCandidate = (candidate) => {
+ 		if (!pc.remoteDescription) return false;
++		// #349: retain provisional or future MID candidates until matching SDP arrives.
++		if (typeof candidate.sdpMid === "string" && ![...(pc.remoteDescription.sdp ?? "").matchAll(/^a=mid:([^\s]+)/gm)].some((match) => match[1] === candidate.sdpMid)) return false;
+ 		const remoteMLineCount = getRemoteMediaSectionCount();
+ 		if (typeof candidate.sdpMLineIndex === "number" && remoteMLineCount > 0 && candidate.sdpMLineIndex >= remoteMLineCount) return false;
+ 		const remoteUfrag = getRemoteUfrag();
+@@ -154,7 +157,11 @@
  			await pc.setLocalDescription(restartIce ? await pc.createOffer({ iceRestart: true }) : void 0);
  			return await emitLocalDescriptionSignal();
  		} catch (err) {
@@ -447,7 +456,7 @@ diff --git a/node_modules/@trystero-p2p/core/dist/peer.mjs b/node_modules/@tryst
  		} finally {
  			makingOffer = false;
  		}
-@@ -207,9 +212,14 @@
+@@ -207,9 +214,14 @@
  		}
  	};
  	pc.onremovestream = (e) => handlers.stream?.(e.stream);
