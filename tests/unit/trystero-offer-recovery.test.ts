@@ -27,11 +27,16 @@ const NATIVE_ERROR = new DOMException(
   'synthetic native SDP failure',
   'OperationError'
 )
+const NATIVE_CONSTRUCTOR_ERROR = new DOMException(
+  'synthetic native resource exhaustion',
+  'UnknownError'
+)
 
 // Only the native operation boundary is injected. The installed PeerHandle,
 // OfferPool and signal handler own rejection, destruction and all retries.
 class NativeConnection extends EventTarget {
   static failuresRemaining = 0
+  static constructorFailuresRemaining = 0
   static created: NativeConnection[] = []
   connectionState = 'new'
   iceConnectionState = 'new'
@@ -52,6 +57,10 @@ class NativeConnection extends EventTarget {
 
   constructor() {
     super()
+    if (NativeConnection.constructorFailuresRemaining > 0) {
+      NativeConnection.constructorFailuresRemaining -= 1
+      throw NATIVE_CONSTRUCTOR_ERROR
+    }
     this.rejectInitialDescription = NativeConnection.failuresRemaining > 0
     NativeConnection.failuresRemaining = Math.max(
       0,
@@ -99,6 +108,7 @@ async function encryptOffer(peer: ReturnType<typeof createPeer>) {
 function harness(failures: number, cipher = encryptOffer) {
   NativeConnection.created = []
   NativeConnection.failuresRemaining = failures
+  NativeConnection.constructorFailuresRemaining = 0
   const peers: ReturnType<typeof createPeer>[] = []
   const pool = new OfferPool(() => {
     const peer = createPeer(true, { rtcPolyfill: NativeConnection })
@@ -144,6 +154,8 @@ function harness(failures: number, cipher = encryptOffer) {
           {
             offerInitPromise: Promise<unknown> | null
             offerPeer: ReturnType<typeof createPeer> | null
+            offerId: string | null
+            offerSdp: string | null
             offerExpiryTimer: unknown
             offerRelays: unknown[]
             offerAnswered: boolean
@@ -261,6 +273,45 @@ describe('#350 pooled offer failure recovery', () => {
       expect(records).toHaveLength(1)
       expect(records[0].offer).toBe(OFFER.sdp)
       expect(NativeConnection.created[0]?.closeCalls).toBe(1)
+    } finally {
+      h.close()
+    }
+  })
+
+  test('a failed recycle allocation clears its owner and the next announcement recovers', async () => {
+    const h = harness(0)
+    try {
+      h.pool.warmup()
+      // Exhaust warm slots so recovery must allocate a new native connection.
+      await h.pool.checkout(20, false, encryptOffer)
+      await h.announce()
+      const retired = h.state().offerPeer!
+      NativeConnection.constructorFailuresRemaining = 1
+
+      expect(() => resetOfferState(h.state(), h.pool)).not.toThrow()
+      expect(retired.isDead).toBe(true)
+      expect((retired.connection as NativeConnection).closeCalls).toBe(1)
+      expect(h.state().offerPeer).toBeNull()
+      expect(h.state().offerId).toBeNull()
+      expect(h.state().offerSdp).toBeNull()
+      expect(h.state().offerInitPromise).toBeNull()
+      expect(h.state().offerExpiryTimer).toBeNull()
+      expect(h.state().offerRelays).toEqual([])
+      expect(NativeConnection.constructorFailuresRemaining).toBe(0)
+
+      await h.announce()
+      const replacement = h.state().offerPeer!
+      expect(replacement).not.toBe(retired)
+      expect(replacement.isDead).toBe(false)
+      expect(h.state().offerExpiryTimer).not.toBeNull()
+      expect(NativeConnection.created).toHaveLength(22)
+      expect(h.sent).toHaveLength(2)
+      expect(h.ctx.onJoinError).not.toHaveBeenCalled()
+      await h.answer()
+      expect(replacement.connection.remoteDescription).toEqual({
+        type: 'answer',
+        sdp: 'legacy-answer',
+      })
     } finally {
       h.close()
     }
