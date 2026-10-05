@@ -1337,7 +1337,24 @@ the stopped source before replacement, and excludes retired SSRC/MSID from
 codec intersection only when replacement identity is explicit. EOS-gated
 decoder rebinding retains incoming track clients and discards callbacks from
 retired decoder generations. Exact-package decoder/client controls verify the
-fresh-SSRC policy; the new C++ path still requires a rebuilt WebKit probe.
+fresh-SSRC policy. The exact `b473044` rebuild compiles both native patches and
+passes package identity/license/provenance checks. Its opposite-order probe now
+passes removal and same-track restart, then fails rendering a fresh capture:
+the new sender emits RTP and its receiver receives packets, but the fresh screen
+element has no frames. The retained trace shows that the second removal ends an
+older retained SRC pad; the restarted decoder on a newer pad never reaches EOS
+and rejects its next binding. The correction ends all receive pads owned by the
+inactive transceiver. A private GStreamer overlay on exact `b473044` WebKit
+passes the complete balanced collision/screen sequence through fresh capture,
+with original cameras and microphone PCM continuing. Its fresh raster is
+400×224: the native VP8 path pads the previous odd height of 225 to 226, so the
+fixture retains exact dimension assertions with an even source height. The
+complete probe then exposes an unstarted bundle-only microphone: its accepted
+local offer has port zero. Sources now start for such offers only when the exact
+receiving MID is accepted in both committed BUNDLE groups. Parsed native SDP
+admission controls pass 132 assertions, and EOS policy controls pass another
+132. Execution of the revised C++ and the complete exact-package probe remain
+pending.
 The strengthened matched-order Chromium fixture passes same-track restart and
 fresh capture with different stream/track IDs and dimensions, while both
 original cameras and microphone tones continue. A constant-SSRC native control

@@ -115,12 +115,12 @@ Runtime revision 9 has this reviewable input identity:
 |-|-|-|
 | WebKitGTK | `webkitgtk-2.52.5.tar.xz` from `webkitgtk.org/releases` | `8a531a9abd2215936e8a8a914c077b586c0228b31d652f205286a8ec90f3364b` |
 | librice | GitHub tag archive `v0.4.3` | `4671e1835f9ab0f8d87e8d9e22b6bfb06f928aeae442841ab81881dff61e3f4b` |
-| WebKit AppImage portability delta | `scripts/patches/webkitgtk-2.52.5-appimage-sandbox.patch` | `ee3bf0f386caf61885dd6fdf32600ed673cf7213adb47c2c0d931e82b53eef9b` |
+| WebKit AppImage portability delta | `scripts/patches/webkitgtk-2.52.5-appimage-sandbox.patch` | `9896d26754ca0a9d1643bc7b2f229246318540a1efbfd06380563af8919cd885` |
 | GStreamer core | `gstreamer-1.28.7.tar.xz` from `gstreamer.freedesktop.org/src` | `787329b2c5758e228a71d926a6dcf960bceaacca3cadd63874ba665dfcda013e` |
 | GStreamer base | `gst-plugins-base-1.28.7.tar.xz` from `gstreamer.freedesktop.org/src` | `ed6e5410f496d171818763af2265e7977154bc7f9b827e98acf8c5bed21dd5a7` |
 | GStreamer good | `gst-plugins-good-1.28.7.tar.xz` from `gstreamer.freedesktop.org/src` | `87256969c82cf3bc8574301f3e7044a90de0ac500a5a27d8ba38c4dde894dd8b` |
 | GStreamer bad | `gst-plugins-bad-1.28.7.tar.xz` from `gstreamer.freedesktop.org/src` | `dc525383c18b2c265bbe6a43d498656cd918aaa130aa4e3abeabcdaa741c3ffe` |
-| GStreamer rollback delta | `scripts/patches/gst-plugins-bad-1.28.7-webrtc-rollback.patch` | `dcca3b202f7e7ac8f94bc34725993fdc49e3b3c896ae4d2c1dcf71aed3cf7e6d` |
+| GStreamer rollback delta | `scripts/patches/gst-plugins-bad-1.28.7-webrtc-rollback.patch` | `335f742e0446ec6afa0b589b559fb62730e368000302dfe3fe428112c25ade6b` |
 | libnice | `libnice-0.1.24.tar.gz` from `libnice.freedesktop.org/releases` | `cfb5e8e778534f2f5b3c6f4958a1eb057c6b95c537c0f100817a537cf5d64fcc` |
 | Meson | GitHub release archive `1.7.2` | `4d40d63aa748a9c139cc41ab9bffe43edd113c5639d78bde81544ca955aea890` |
 
@@ -146,7 +146,10 @@ direction to GStreamer before stopping its source and renegotiating (#349).
 Recycled senders retain their committed input pad and use the replacement
 stream/track identity. An incoming source can bind a fresh decoder only after
 the old decoder reaches EOS; generation guards discard retired callbacks while
-its track clients remain live. GStreamer preserves an accepted SCTP m-line
+its track clients remain live. Inactive transceivers end every receive pad they
+own, including decoders created by previous restarts. A zero-port bundle-only
+local offer starts its source only when the receiving MID is accepted in both
+committed BUNDLE groups. GStreamer preserves an accepted SCTP m-line
 before a remote data channel arrives and omits RTX source mappings until the
 source SSRC is known. The peer core queues candidates with an unmatched remote
 MID until a matching description arrives, retaining native error reporting for
