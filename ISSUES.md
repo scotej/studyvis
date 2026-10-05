@@ -1302,9 +1302,16 @@ The packaged probe uses the installed patched core and requires decoded camera
 frames and remote microphone PCM after a forced offer collision. Its WebAudio
 helper uses the pinned, packaged interleave plugin. Patch hashes, manifest,
 license payloads and corresponding-source reconstruction include both native
-patches. Chromium probe and source-application controls pass; the full bundled
-engine rebuild, exact-AppImage probe, and affected physical desktop/peer matrix
-remain pending. This does not yet prove #349 resolved.
+patches. Chromium probe and source-application controls pass. The full bundled
+engine rebuild and exact-package identity/license/provenance checks pass, but
+the native peer-core probe still fails: deployment receives no camera frames
+after rollback, while another scheduling path reports a duplicate video MID.
+The retained exact runtime confirms that an accepted remote answer can leave
+the original sender without a pad. Differing media publication order also
+produces incompatible numeric payload mappings for the same codecs. CI retains
+the failed AppImage, installed runtime and isolated synthetic trace for one day.
+These remaining native defects and the affected physical desktop/peer matrix
+are unresolved. This does not yet prove #349 resolved.
 
 ### I126 — Sev2
 
