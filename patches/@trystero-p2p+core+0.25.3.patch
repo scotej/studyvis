@@ -423,3 +423,100 @@ diff --git a/node_modules/@trystero-p2p/core/dist/shared-peer.mjs b/node_modules
  			},
  			track: (track, stream) => this.dispatchTrack(shared, track, stream)
  		});
+diff --git a/node_modules/@trystero-p2p/core/dist/peer.mjs b/node_modules/@trystero-p2p/core/dist/peer.mjs
+--- a/node_modules/@trystero-p2p/core/dist/peer.mjs
++++ b/node_modules/@trystero-p2p/core/dist/peer.mjs
+@@ -24,6 +24,7 @@
+ 	let dataChannel = null;
+ 	let disconnectedCloseTimer = null;
+ 	let didEmitClose = false;
++	let rejectInitialOffer = null;
+ 	const clearDisconnectedCloseTimer = () => disconnectedCloseTimer = resetTimer(disconnectedCloseTimer);
+ 	const emitClose = () => {
+ 		if (didEmitClose) return;
+@@ -154,7 +155,11 @@
+ 			await pc.setLocalDescription(restartIce ? await pc.createOffer({ iceRestart: true }) : void 0);
+ 			return await emitLocalDescriptionSignal();
+ 		} catch (err) {
+-			handlers.error?.(toError(err, "failed to create local offer"));
++			const error = toError(err, "failed to create local offer");
++			// #350 — pooled peers can fail before an error handler is installed.
++			// Reject checkout too, so the failed offer is destroyed and retried.
++			rejectInitialOffer?.(error);
++			handlers.error?.(error);
+ 		} finally {
+ 			makingOffer = false;
+ 		}
+@@ -207,9 +212,14 @@
+ 		}
+ 	};
+ 	pc.onremovestream = (e) => handlers.stream?.(e.stream);
+-	const offerPromise = initiator ? new Promise((res) => appendSignalHandler((signal) => {
+-		if (signal.type === offerType) res(signal);
+-	})) : Promise.resolve();
++	const offerPromise = initiator ? new Promise((res, reject) => {
++		rejectInitialOffer = reject;
++		appendSignalHandler((signal) => {
++			if (signal.type === offerType) res(signal);
++		});
++	}) : Promise.resolve();
++	// Warm offers may fail before checkout attaches its rejection handler.
++	offerPromise.catch(() => {});
+ 	if (initiator) queueMicrotask(() => {
+ 		if (!makingOffer && pc.signalingState === "stable" && !pc.localDescription && pc.connectionState !== "closed") pc.onnegotiationneeded?.(new Event("negotiationneeded"));
+ 	});
+diff --git a/node_modules/@trystero-p2p/core/dist/signal-handler.mjs b/node_modules/@trystero-p2p/core/dist/signal-handler.mjs
+--- a/node_modules/@trystero-p2p/core/dist/signal-handler.mjs
++++ b/node_modules/@trystero-p2p/core/dist/signal-handler.mjs
+@@ -164,7 +164,7 @@
+ 		offerId: state.offerId
+ 	});
+ 	if (state.offerInitPromise) return state.offerInitPromise;
+-	state.offerInitPromise = (async () => {
++	const offerInitPromise = (async () => {
+ 		const firstOffer = (await ctx.offerPool.checkout(1, false, ctx.encryptOffer))[0];
+ 		if (!firstOffer) throw mkErr("failed to allocate offer peer");
+ 		const { peer, offer } = firstOffer;
+@@ -199,8 +199,19 @@
+ 			offer,
+ 			offerId: state.offerId
+ 		};
+-	})().finally(() => state.offerInitPromise = null);
+-	return state.offerInitPromise;
++	})().catch((err) => {
++		// #350 — a failed checkout must release announcement placeholders too.
++		// No offer expiry exists yet; keeping them would suppress every retry.
++		if (ctx.peerStates[peerId] === state && state.offerInitPromise === offerInitPromise) {
++			resetOfferState(state, ctx.offerPool);
++			ctx.checkDeactivate();
++		}
++		throw err;
++	}).finally(() => {
++		if (state.offerInitPromise === offerInitPromise) state.offerInitPromise = null;
++	});
++	state.offerInitPromise = offerInitPromise;
++	return offerInitPromise;
+ };
+ const handleAnnouncement = async (ctx, relayId, peerId, shared, signalPeer) => {
+ 	if (shared) {
+@@ -213,7 +224,19 @@
+ 		return;
+ 	}
+ 	if (state.offerRelays[relayId] !== offerRelayPlaceholder) return;
+-	const [peerTopic, offerInfo] = await all([sha1(topicPath(ctx.rootTopicPlaintext, peerId)), ensureOffer(ctx, state, peerId, relayId)]);
++	let peerTopic, offerInfo;
++	try {
++		[peerTopic, offerInfo] = await all([sha1(topicPath(ctx.rootTopicPlaintext, peerId)), ensureOffer(ctx, state, peerId, relayId)]);
++	} catch {
++		// Signaling subscriptions do not consume rejected handler promises.
++		if (!ctx.isLeaving()) ctx.onJoinError?.({
++			error: "failed to create local offer",
++			appId: ctx.appId,
++			peerId,
++			roomId: ctx.roomId
++		});
++		return;
++	}
+ 	if (ctx.isLeaving()) return;
+ 	if (state.connectedPeer || state.answeringPeer || state.offerAnswered || state.offerRelays[relayId] !== offerRelayPlaceholder) {
+ 		clearOfferRelayIfPlaceholder(state, relayId);
