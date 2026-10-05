@@ -535,7 +535,7 @@ diff --git a/Source/WebCore/Modules/mediastream/gstreamer/GStreamerMediaEndpoint
 +                for (unsigned capsIndex = 0; capsIndex < gst_caps_get_size(allowedCaps.get()); capsIndex++) {
 +                    auto structure = gst_caps_get_structure(allowedCaps.get(), capsIndex);
 +                    // Transport and remote SSRC identity must not enter future local offers.
-+                    gst_structure_remove_fields(structure, "a-fingerprint", "a-ssrc-group", "a-rtcp-fb", nullptr);
++                    gst_structure_remove_fields(structure, "a-fingerprint", "a-ssrc-group", "a-rtcp-fb", "a-candidate", "a-end-of-candidates", nullptr);
 +                    if (negotiatedDescription) {
 +                        gst_structure_remove_field(structure, "a-msid");
 +                        gst_structure_set(structure, "a-msid", G_TYPE_STRING, msid.utf8().data(), nullptr);
@@ -747,7 +747,7 @@ diff --git a/Source/WebCore/Modules/mediastream/gstreamer/GStreamerMediaEndpoint
 +    auto msid = makeString(mediaStreamId, ' ', track.id());
 +    for (unsigned i = 0; i < gst_caps_get_size(codecPreferences.get()); ++i) {
 +        auto* structure = gst_caps_get_structure(codecPreferences.get(), i);
-+        gst_structure_remove_fields(structure, "a-mid", "a-fingerprint", "a-ssrc-group", "a-rtcp-fb", nullptr);
++        gst_structure_remove_fields(structure, "a-mid", "a-fingerprint", "a-ssrc-group", "a-rtcp-fb", "a-candidate", "a-end-of-candidates", nullptr);
 +        gst_structure_set(structure, "a-msid", G_TYPE_STRING, msid.utf8().data(), nullptr);
 +    }
 +    g_object_set(transceiver, "codec-preferences", codecPreferences.get(), nullptr);
