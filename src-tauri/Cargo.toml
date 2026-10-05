@@ -1,6 +1,6 @@
 [package]
 name = "studyvis"
-version = "1.12.5"
+version = "1.12.6"
 description = "Peer-to-peer study app for friends"
 authors = ["StudyVis"]
 license = ""
