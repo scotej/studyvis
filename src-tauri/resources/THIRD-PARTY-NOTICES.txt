@@ -18,7 +18,7 @@ For each Cargo registry component, `source` is the direct exact-version crates.i
 source-archive URL and `source checksum` is its Cargo.lock SHA-256. These fields
 tell recipients how to obtain and verify the Covered Source named in the index.
 
-Components: 757 total (536 Cargo, 220 npm, 1 external runtime).
+Components: 759 total (536 Cargo, 222 npm, 1 external runtime).
 
 COMPONENT INDEX
 ===============
@@ -3123,13 +3123,13 @@ CARGO
   license: cargo:tar@0.4.46/LICENSE-APACHE (SHA-256 a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2)
   license: cargo:tar@0.4.46/LICENSE-MIT (SHA-256 8ca6b96cea9e67c6c5c63f452c31bd396db8bd2406231fdea5d48ef462b48077)
 
-- tauri 2.11.5 — Apache-2.0 OR MIT
-  id: cargo:tauri@2.11.5
+- tauri 2.11.6 — Apache-2.0 OR MIT
+  id: cargo:tauri@2.11.6
   targets: aarch64-apple-darwin, x86_64-pc-windows-msvc, x86_64-unknown-linux-gnu
-  source: https://crates.io/api/v1/crates/tauri/2.11.5/download
-  source checksum: 667b20e2726d572dea2de7370da16e188eb06008faf9a92fab7cdc46791190b5
-  license: cargo:tauri@2.11.5/LICENSE_APACHE-2.0 (SHA-256 0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594)
-  license: cargo:tauri@2.11.5/LICENSE_MIT (SHA-256 9dd42ea92cff2ede5cd477cbfcce051b2d0115c0ac7f368ee88cb545055dff1d)
+  source: https://crates.io/api/v1/crates/tauri/2.11.6/download
+  source checksum: 6fa5bacdb9bbad5954af3d1bd6cf6ae9192cab1b2e270f4a07f904610b9e85f4
+  license: cargo:tauri@2.11.6/LICENSE_APACHE-2.0 (SHA-256 0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594)
+  license: cargo:tauri@2.11.6/LICENSE_MIT (SHA-256 9dd42ea92cff2ede5cd477cbfcce051b2d0115c0ac7f368ee88cb545055dff1d)
 
 - tauri-codegen 2.6.3 — Apache-2.0 OR MIT
   id: cargo:tauri-codegen@2.6.3
@@ -3219,23 +3219,23 @@ CARGO
   license: cargo:tauri-plugin-shell@2.3.6/LICENSE_APACHE-2.0 (SHA-256 0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594)
   license: cargo:tauri-plugin-shell@2.3.6/LICENSE_MIT (SHA-256 9dd42ea92cff2ede5cd477cbfcce051b2d0115c0ac7f368ee88cb545055dff1d)
 
-- tauri-plugin-single-instance 2.4.3 — Apache-2.0 OR MIT
-  id: cargo:tauri-plugin-single-instance@2.4.3
+- tauri-plugin-single-instance 2.4.5 — Apache-2.0 OR MIT
+  id: cargo:tauri-plugin-single-instance@2.4.5
   targets: aarch64-apple-darwin, x86_64-pc-windows-msvc, x86_64-unknown-linux-gnu
-  source: https://crates.io/api/v1/crates/tauri-plugin-single-instance/2.4.3/download
-  source checksum: b3214becf9ef5783c0ae99a3bb25adf5353a7a16ebf53e74b909e29205735c6c
-  license: cargo:tauri-plugin-single-instance@2.4.3/LICENSE.spdx (SHA-256 9c1db6b7e7eb83e1cb2af973b5df2bdc63651ede0f38506ab98dfa0940487759)
-  license: cargo:tauri-plugin-single-instance@2.4.3/LICENSE_APACHE-2.0 (SHA-256 0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594)
-  license: cargo:tauri-plugin-single-instance@2.4.3/LICENSE_MIT (SHA-256 af76c60594af325c4efdcbcd27f5d34ff441c11f09b46b627b378d04d5aa1f1d)
+  source: https://crates.io/api/v1/crates/tauri-plugin-single-instance/2.4.5/download
+  source checksum: db817fe9295e19b7d8357e900af31edb93703dd9fb6de524b007b47b6afc63b0
+  license: cargo:tauri-plugin-single-instance@2.4.5/LICENSE.spdx (SHA-256 9c1db6b7e7eb83e1cb2af973b5df2bdc63651ede0f38506ab98dfa0940487759)
+  license: cargo:tauri-plugin-single-instance@2.4.5/LICENSE_APACHE-2.0 (SHA-256 0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594)
+  license: cargo:tauri-plugin-single-instance@2.4.5/LICENSE_MIT (SHA-256 af76c60594af325c4efdcbcd27f5d34ff441c11f09b46b627b378d04d5aa1f1d)
 
-- tauri-plugin-store 2.4.4 — Apache-2.0 OR MIT
-  id: cargo:tauri-plugin-store@2.4.4
+- tauri-plugin-store 2.4.5 — Apache-2.0 OR MIT
+  id: cargo:tauri-plugin-store@2.4.5
   targets: aarch64-apple-darwin, x86_64-pc-windows-msvc, x86_64-unknown-linux-gnu
-  source: https://crates.io/api/v1/crates/tauri-plugin-store/2.4.4/download
-  source checksum: 6708afbe549f176b712066e71648ba8fafba20789453718260c7ca356733cb0c
-  license: cargo:tauri-plugin-store@2.4.4/LICENSE.spdx (SHA-256 9c1db6b7e7eb83e1cb2af973b5df2bdc63651ede0f38506ab98dfa0940487759)
-  license: cargo:tauri-plugin-store@2.4.4/LICENSE_APACHE-2.0 (SHA-256 0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594)
-  license: cargo:tauri-plugin-store@2.4.4/LICENSE_MIT (SHA-256 9dd42ea92cff2ede5cd477cbfcce051b2d0115c0ac7f368ee88cb545055dff1d)
+  source: https://crates.io/api/v1/crates/tauri-plugin-store/2.4.5/download
+  source checksum: f2c7c771d3ce796b48c6e52b2fac38087d479a3c58e0424d3850cc21db6b4a69
+  license: cargo:tauri-plugin-store@2.4.5/LICENSE.spdx (SHA-256 9c1db6b7e7eb83e1cb2af973b5df2bdc63651ede0f38506ab98dfa0940487759)
+  license: cargo:tauri-plugin-store@2.4.5/LICENSE_APACHE-2.0 (SHA-256 0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594)
+  license: cargo:tauri-plugin-store@2.4.5/LICENSE_MIT (SHA-256 9dd42ea92cff2ede5cd477cbfcce051b2d0115c0ac7f368ee88cb545055dff1d)
 
 - tauri-plugin-updater 2.11.0 — Apache-2.0 OR MIT
   id: cargo:tauri-plugin-updater@2.11.0
@@ -4288,10 +4288,10 @@ NPM
   source: https://registry.npmjs.org/@noble/ciphers/-/ciphers-2.3.0.tgz
   license: npm:node_modules/@noble/ciphers/LICENSE (SHA-256 24d0608c3320a3e27ac35e1b36ee222b096e372ccd981351f4db7ff4c2b0bfd0)
 
-- @noble/curves 2.3.0 — MIT
-  id: npm:node_modules/@noble/curves@2.3.0
+- @noble/curves 2.4.0 — MIT
+  id: npm:node_modules/@noble/curves@2.4.0
   targets: frontend
-  source: https://registry.npmjs.org/@noble/curves/-/curves-2.3.0.tgz
+  source: https://registry.npmjs.org/@noble/curves/-/curves-2.4.0.tgz
   license: npm:node_modules/@noble/curves/LICENSE (SHA-256 3239e134eb6e6d64538ca76498c7fcb08a395249dd9d4af9927bf6d0169ee429)
 
 - @noble/ed25519 3.2.0 — MIT
@@ -4305,6 +4305,12 @@ NPM
   targets: frontend
   source: https://registry.npmjs.org/@noble/hashes/-/hashes-2.3.0.tgz
   license: npm:node_modules/@noble/hashes/LICENSE (SHA-256 3239e134eb6e6d64538ca76498c7fcb08a395249dd9d4af9927bf6d0169ee429)
+
+- @noble/hashes 2.4.0 — MIT
+  id: npm:node_modules/@noble/curves/node_modules/@noble/hashes@2.4.0
+  targets: frontend
+  source: https://registry.npmjs.org/@noble/hashes/-/hashes-2.4.0.tgz
+  license: npm:node_modules/@noble/curves/node_modules/@noble/hashes/LICENSE (SHA-256 3239e134eb6e6d64538ca76498c7fcb08a395249dd9d4af9927bf6d0169ee429)
 
 - @noble/secp256k1 3.1.0 — MIT
   id: npm:node_modules/@noble/secp256k1@3.1.0
@@ -4678,6 +4684,12 @@ NPM
   source: https://registry.npmjs.org/@reduxjs/toolkit/-/toolkit-2.12.0.tgz
   license: npm:node_modules/@reduxjs/toolkit/LICENSE (SHA-256 49784961ec6c4941437b7a2c54d8977d0528076a9e7c73dd40f7d0942b8f106d)
 
+- @remix-run/route-pattern 0.22.1 — MIT
+  id: npm:node_modules/@remix-run/route-pattern@0.22.1
+  targets: frontend
+  source: https://registry.npmjs.org/@remix-run/route-pattern/-/route-pattern-0.22.1.tgz
+  license: npm:node_modules/@remix-run/route-pattern/LICENSE (SHA-256 d6baf87f30d13d2d7770c18c858e7a31fa7ceede4bc9469a50f03dbafe455cb4)
+
 - @scure/bip39 2.3.0 — MIT
   id: npm:node_modules/@scure/bip39@2.3.0
   targets: frontend
@@ -4721,10 +4733,10 @@ NPM
   source: https://registry.npmjs.org/@tauri-apps/plugin-notification/-/plugin-notification-2.4.0.tgz
   license: npm:node_modules/@tauri-apps/plugin-notification/LICENSE.spdx (SHA-256 9c1db6b7e7eb83e1cb2af973b5df2bdc63651ede0f38506ab98dfa0940487759)
 
-- @tauri-apps/plugin-store 2.4.4 — MIT OR Apache-2.0
-  id: npm:node_modules/@tauri-apps/plugin-store@2.4.4
+- @tauri-apps/plugin-store 2.4.5 — MIT OR Apache-2.0
+  id: npm:node_modules/@tauri-apps/plugin-store@2.4.5
   targets: frontend
-  source: https://registry.npmjs.org/@tauri-apps/plugin-store/-/plugin-store-2.4.4.tgz
+  source: https://registry.npmjs.org/@tauri-apps/plugin-store/-/plugin-store-2.4.5.tgz
   license: npm:node_modules/@tauri-apps/plugin-store/LICENSE.spdx (SHA-256 9c1db6b7e7eb83e1cb2af973b5df2bdc63651ede0f38506ab98dfa0940487759)
 
 - @tauri-apps/plugin-updater 2.11.0 — MIT OR Apache-2.0
@@ -5135,10 +5147,10 @@ NPM
   source: https://registry.npmjs.org/internmap/-/internmap-2.0.3.tgz
   license: npm:node_modules/internmap/LICENSE (SHA-256 9ea8903938dab5f12c4572d60725069bec2d1b0dc3bcc210b09bae946a5ebb1f)
 
-- ip-address 10.4.0 — MIT
-  id: npm:node_modules/ip-address@10.4.0
+- ip-address 10.7.2 — MIT
+  id: npm:node_modules/ip-address@10.7.2
   targets: frontend
-  source: https://registry.npmjs.org/ip-address/-/ip-address-10.4.0.tgz
+  source: https://registry.npmjs.org/ip-address/-/ip-address-10.7.2.tgz
   license: npm:node_modules/ip-address/LICENSE (SHA-256 f8d791359a50cbcac82c29cb7b0b1b889b28be76fdd35b8ee33f0f7c8704702a)
 
 - is-fullwidth-code-point 3.0.0 — MIT
@@ -5171,10 +5183,10 @@ NPM
   source: https://registry.npmjs.org/lru-cache/-/lru-cache-10.4.3.tgz
   license: npm:node_modules/mqtt/node_modules/lru-cache/LICENSE (SHA-256 451ec07eeb9c4e1b86de9abdaa426462a8be48f887ec7421cf0bbb9c769555ab)
 
-- lucide-react 1.46.0 — ISC
-  id: npm:node_modules/lucide-react@1.46.0
+- lucide-react 1.48.0 — ISC
+  id: npm:node_modules/lucide-react@1.48.0
   targets: frontend
-  source: https://registry.npmjs.org/lucide-react/-/lucide-react-1.46.0.tgz
+  source: https://registry.npmjs.org/lucide-react/-/lucide-react-1.48.0.tgz
   license: npm:node_modules/lucide-react/LICENSE (SHA-256 b495047bd93a9b06913511076f504daba17d5bbeb3e0650f3bb53a4220329c57)
 
 - minimist 1.2.8 — MIT
@@ -5298,10 +5310,10 @@ NPM
   override: The 2.3.8 package archive declares MIT but omits the text; retain the same author's locked react-remove-scroll MIT notice.
   license: npm:node_modules/react-remove-scroll/LICENSE (SHA-256 30f0cfddf483d1128e3610205020f2041a6c5e837aa999e0aa82e5576187d4a9)
 
-- react-router 8.3.1 — MIT
-  id: npm:node_modules/react-router@8.3.1
+- react-router 8.4.0 — MIT
+  id: npm:node_modules/react-router@8.4.0
   targets: frontend
-  source: https://registry.npmjs.org/react-router/-/react-router-8.3.1.tgz
+  source: https://registry.npmjs.org/react-router/-/react-router-8.4.0.tgz
   license: npm:node_modules/react-router/LICENSE.md (SHA-256 77c9ee6a9c5d5782fb0c50b50d101189116314c14f7df0a1b0d385fc96a7ba49)
 
 - react-style-singleton 2.2.3 — MIT
@@ -7135,14 +7147,14 @@ Applies to:
 - cargo:tauri-plugin-notification@2.4.0 — cargo:tauri-plugin-notification@2.4.0/LICENSE_APACHE-2.0
 - cargo:tauri-plugin-opener@2.5.5 — cargo:tauri-plugin-opener@2.5.5/LICENSE_APACHE-2.0
 - cargo:tauri-plugin-shell@2.3.6 — cargo:tauri-plugin-shell@2.3.6/LICENSE_APACHE-2.0
-- cargo:tauri-plugin-single-instance@2.4.3 — cargo:tauri-plugin-single-instance@2.4.3/LICENSE_APACHE-2.0
-- cargo:tauri-plugin-store@2.4.4 — cargo:tauri-plugin-store@2.4.4/LICENSE_APACHE-2.0
+- cargo:tauri-plugin-single-instance@2.4.5 — cargo:tauri-plugin-single-instance@2.4.5/LICENSE_APACHE-2.0
+- cargo:tauri-plugin-store@2.4.5 — cargo:tauri-plugin-store@2.4.5/LICENSE_APACHE-2.0
 - cargo:tauri-plugin-updater@2.11.0 — cargo:tauri-plugin-updater@2.11.0/LICENSE_APACHE-2.0
 - cargo:tauri-runtime-wry@2.11.4 — cargo:tauri-runtime-wry@2.11.4/LICENSE_APACHE-2.0
 - cargo:tauri-runtime@2.11.3 — cargo:tauri-runtime@2.11.3/LICENSE_APACHE-2.0
 - cargo:tauri-utils@2.9.3 — cargo:tauri-utils@2.9.3/LICENSE_APACHE-2.0
 - cargo:tauri-winrt-notification@0.7.2 — cargo:tauri-winrt-notification@0.7.2/LICENSE_APACHE-2.0
-- cargo:tauri@2.11.5 — cargo:tauri@2.11.5/LICENSE_APACHE-2.0
+- cargo:tauri@2.11.6 — cargo:tauri@2.11.6/LICENSE_APACHE-2.0
 - cargo:time-core@0.1.8 — cargo:time-core@0.1.8/LICENSE-Apache
 - cargo:time-macros@0.2.27 — cargo:time-macros@0.2.27/LICENSE-Apache
 - cargo:time@0.3.47 — cargo:time@0.3.47/LICENSE-Apache
@@ -11110,7 +11122,8 @@ Permission is granted to anyone to use this software for any purpose, including 
 
 SHA-256 3239e134eb6e6d64538ca76498c7fcb08a395249dd9d4af9927bf6d0169ee429
 Applies to:
-- npm:node_modules/@noble/curves@2.3.0 — npm:node_modules/@noble/curves/LICENSE
+- npm:node_modules/@noble/curves/node_modules/@noble/hashes@2.4.0 — npm:node_modules/@noble/curves/node_modules/@noble/hashes/LICENSE
+- npm:node_modules/@noble/curves@2.4.0 — npm:node_modules/@noble/curves/LICENSE
 - npm:node_modules/@noble/hashes@2.3.0 — npm:node_modules/@noble/hashes/LICENSE
 
 --------------------------------------------------------------------------------
@@ -16773,7 +16786,7 @@ DEALINGS IN THE SOFTWARE.
 
 SHA-256 77c9ee6a9c5d5782fb0c50b50d101189116314c14f7df0a1b0d385fc96a7ba49
 Applies to:
-- npm:node_modules/react-router@8.3.1 — npm:node_modules/react-router/LICENSE.md
+- npm:node_modules/react-router@8.4.0 — npm:node_modules/react-router/LICENSE.md
 
 --------------------------------------------------------------------------------
 
@@ -20002,13 +20015,13 @@ Applies to:
 - cargo:tauri-plugin-notification@2.4.0 — cargo:tauri-plugin-notification@2.4.0/LICENSE.spdx
 - cargo:tauri-plugin-opener@2.5.5 — cargo:tauri-plugin-opener@2.5.5/LICENSE.spdx
 - cargo:tauri-plugin-shell@2.3.6 — cargo:tauri-plugin-shell@2.3.6/LICENSE.spdx
-- cargo:tauri-plugin-single-instance@2.4.3 — cargo:tauri-plugin-single-instance@2.4.3/LICENSE.spdx
-- cargo:tauri-plugin-store@2.4.4 — cargo:tauri-plugin-store@2.4.4/LICENSE.spdx
+- cargo:tauri-plugin-single-instance@2.4.5 — cargo:tauri-plugin-single-instance@2.4.5/LICENSE.spdx
+- cargo:tauri-plugin-store@2.4.5 — cargo:tauri-plugin-store@2.4.5/LICENSE.spdx
 - cargo:tauri-plugin-updater@2.11.0 — cargo:tauri-plugin-updater@2.11.0/LICENSE.spdx
 - npm:node_modules/@tauri-apps/plugin-deep-link@2.4.10 — npm:node_modules/@tauri-apps/plugin-deep-link/LICENSE.spdx
 - npm:node_modules/@tauri-apps/plugin-dialog@2.7.2 — npm:node_modules/@tauri-apps/plugin-dialog/LICENSE.spdx
 - npm:node_modules/@tauri-apps/plugin-notification@2.4.0 — npm:node_modules/@tauri-apps/plugin-notification/LICENSE.spdx
-- npm:node_modules/@tauri-apps/plugin-store@2.4.4 — npm:node_modules/@tauri-apps/plugin-store/LICENSE.spdx
+- npm:node_modules/@tauri-apps/plugin-store@2.4.5 — npm:node_modules/@tauri-apps/plugin-store/LICENSE.spdx
 - npm:node_modules/@tauri-apps/plugin-updater@2.11.0 — npm:node_modules/@tauri-apps/plugin-updater/LICENSE.spdx
 
 --------------------------------------------------------------------------------
@@ -20113,13 +20126,13 @@ Applies to:
 - cargo:tauri-plugin-notification@2.4.0 — cargo:tauri-plugin-notification@2.4.0/LICENSE_MIT
 - cargo:tauri-plugin-opener@2.5.5 — cargo:tauri-plugin-opener@2.5.5/LICENSE_MIT
 - cargo:tauri-plugin-shell@2.3.6 — cargo:tauri-plugin-shell@2.3.6/LICENSE_MIT
-- cargo:tauri-plugin-store@2.4.4 — cargo:tauri-plugin-store@2.4.4/LICENSE_MIT
+- cargo:tauri-plugin-store@2.4.5 — cargo:tauri-plugin-store@2.4.5/LICENSE_MIT
 - cargo:tauri-plugin-updater@2.11.0 — cargo:tauri-plugin-updater@2.11.0/LICENSE_MIT
 - cargo:tauri-runtime-wry@2.11.4 — cargo:tauri-runtime-wry@2.11.4/LICENSE_MIT
 - cargo:tauri-runtime@2.11.3 — cargo:tauri-runtime@2.11.3/LICENSE_MIT
 - cargo:tauri-utils@2.9.3 — cargo:tauri-utils@2.9.3/LICENSE_MIT
 - cargo:tauri-winrt-notification@0.7.2 — cargo:tauri-winrt-notification@0.7.2/LICENSE_MIT
-- cargo:tauri@2.11.5 — cargo:tauri@2.11.5/LICENSE_MIT
+- cargo:tauri@2.11.6 — cargo:tauri@2.11.6/LICENSE_MIT
 - npm:node_modules/@tauri-apps/api@2.11.1 — npm:node_modules/@tauri-apps/api/LICENSE_MIT
 
 --------------------------------------------------------------------------------
@@ -22601,7 +22614,7 @@ DEALINGS IN THE SOFTWARE.
 
 SHA-256 af76c60594af325c4efdcbcd27f5d34ff441c11f09b46b627b378d04d5aa1f1d
 Applies to:
-- cargo:tauri-plugin-single-instance@2.4.3 — cargo:tauri-plugin-single-instance@2.4.3/LICENSE_MIT
+- cargo:tauri-plugin-single-instance@2.4.5 — cargo:tauri-plugin-single-instance@2.4.5/LICENSE_MIT
 
 --------------------------------------------------------------------------------
 
@@ -23538,7 +23551,7 @@ Applies to:
 
 SHA-256 b495047bd93a9b06913511076f504daba17d5bbeb3e0650f3bb53a4220329c57
 Applies to:
-- npm:node_modules/lucide-react@1.46.0 — npm:node_modules/lucide-react/LICENSE
+- npm:node_modules/lucide-react@1.48.0 — npm:node_modules/lucide-react/LICENSE
 
 --------------------------------------------------------------------------------
 
@@ -26011,6 +26024,36 @@ DEALINGS IN THE SOFTWARE.
 
 ================================================================================
 
+SHA-256 d6baf87f30d13d2d7770c18c858e7a31fa7ceede4bc9469a50f03dbafe455cb4
+Applies to:
+- npm:node_modules/@remix-run/route-pattern@0.22.1 — npm:node_modules/@remix-run/route-pattern/LICENSE
+
+--------------------------------------------------------------------------------
+
+MIT License
+
+Copyright (c) 2025 Shopify Inc.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+================================================================================
+
 SHA-256 d848c165548bd3f33419b71c3c3bb7cacec620d93383483393410688cba68431
 Applies to:
 - cargo:notify-rust@4.17.0 — cargo:notify-rust@4.17.0/LICENSE-MIT
@@ -28346,7 +28389,7 @@ DEALINGS IN THE SOFTWARE.
 
 SHA-256 f8d791359a50cbcac82c29cb7b0b1b889b28be76fdd35b8ee33f0f7c8704702a
 Applies to:
-- npm:node_modules/ip-address@10.4.0 — npm:node_modules/ip-address/LICENSE
+- npm:node_modules/ip-address@10.7.2 — npm:node_modules/ip-address/LICENSE
 
 --------------------------------------------------------------------------------
 
