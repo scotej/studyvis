@@ -1290,89 +1290,83 @@ that either caused the reported loss.
 
 **Evidence.** GitHub #349's released v1.12.5 AppImage connects a data channel
 but rejects the installed peer core's empty-SDP rollback when both peers publish
-camera/microphone media together. The existing serialized native probe passes
-without exercising that collision. Accepting rollback alone leaves provisional
-GStreamer transceiver MIDs/generated SDP and prematurely configured outgoing
-sources, producing invalid subsequent negotiation.
+camera/microphone media together. The old serialized native probe misses that
+collision. Accepting rollback alone leaves provisional transceiver MIDs,
+generated SDP, payload numbers and outgoing sources configured prematurely.
 
-**Status.** **candidate on branch** — runtime revision 9 accepts rollback,
-restores stable transceiver associations and generated SDP, and defers
-provisional outgoing sources until an accepted answer. Sources use the committed
-sender pad and accepted codecs; removed pending tracks cannot later start.
-The packaged probe uses the installed patched core and requires decoded camera
-frames and remote microphone PCM after a forced offer collision. Its WebAudio
-helper uses the pinned, packaged interleave plugin. Patch hashes, manifest,
-license payloads and corresponding-source reconstruction include both native
-patches. The first revision-9 candidate rebuild and exact-package
-identity/license/provenance checks pass, but its native peer-core probe fails:
-no camera frames after rollback or a duplicate video MID, depending on media
-order. The retained exact runtime confirms missing accepted-answer sender pads,
-provisional payload numbers rejecting matching codecs, and unconfigured sources
-running into `NOT_LINKED` before their packetizers exist. The follow-up ensures
-committed sender/receiver pads, normalizes only unlinked provisional payloads,
-preserves own stream identity across codec narrowing, and keeps queued sources
-stopped until their exact negotiated pad is linked. Native-to-Chromium
-controls also isolate incorrect answer extension IDs and orphan RTCP feedback
-that invalidate later offers. Answers retain supported offered IDs and compatible
-extension direction/configuration. New sources reserve accepted IDs; committed
-per-MID mappings stay stable. Remote fingerprints, SSRC groups and raw feedback
-are excluded from local codec preferences while structured codec feedback stays.
-The final private GStreamer passes 914 focused assertions, including negative
-controls and distinct per-media maps. A bounded old-WebKit/source-lock prototype
-passes decoded bidirectional camera/microphone, codec narrowing, withdrawal and
-legacy serialized screen/restart cases. It does not include the final WebKit or
-new same-peer late-screen/restart fixture. The same-order Chromium fixture
-passes those added cases; deterministic opposite order also exposes a Chromium
-RTP-extension reassignment limit. The subsequent exact AppImage rebuild and
-package identity/license/provenance checks pass, and its opposite-order native probe decodes both cameras,
-microphone tones and late screen frames. It then fails screen removal: the
-sender track is null, but GStreamer still advertises a sending direction.
-WebKit's generic removal changes only private direction state; the focused
-GStreamer backend fix forwards the owning transceiver's desired direction
-before stopping its source and renegotiating. CI retains the failed AppImage,
-installed runtime and isolated synthetic trace for one day. A public native
-direction-setter control passes removal, then isolates duplicate input/FEC graph
-creation on restart. The correction retains the committed sender pad, clears
-the stopped source before replacement, and excludes retired SSRC/MSID from
-codec intersection only when replacement identity is explicit. EOS-gated
-decoder rebinding retains incoming track clients and discards callbacks from
-retired decoder generations. Exact-package decoder/client controls verify the
-fresh-SSRC policy. The exact `b473044` rebuild compiles both native patches and
-passes package identity/license/provenance checks. Its opposite-order probe now
-passes removal and same-track restart, then fails rendering a fresh capture:
-the new sender emits RTP and its receiver receives packets, but the fresh screen
-element has no frames. The retained trace shows that the second removal ends an
-older retained SRC pad; the restarted decoder on a newer pad never reaches EOS
-and rejects its next binding. The correction ends all receive pads owned by the
-inactive transceiver. A private GStreamer overlay on exact `b473044` WebKit
-passes the complete balanced collision/screen sequence through fresh capture,
-with original cameras and microphone PCM continuing. Its fresh raster is
-400×224: the native VP8 path pads the previous odd height of 225 to 226, so the
-fixture retains exact dimension assertions with an even source height. The
-complete probe then exposes an unstarted bundle-only microphone: its accepted
-local offer has port zero. Sources now start for such offers only when the exact
-receiving MID is accepted in both committed BUNDLE groups. Parsed native SDP
-admission controls pass 132 assertions, and EOS policy controls pass another
-132. Execution of the revised C++ and the complete exact-package probe remain
-pending.
-The strengthened matched-order Chromium fixture passes same-track restart and
-fresh capture with different stream/track IDs and dimensions, while both
-original cameras and microphone tones continue. A constant-SSRC native control
-exposes a separate receiver-resume limitation outside this proven fresh-stream
-path.
+**Status.** **candidate on branch** — runtime revision 9 restores stable
+transceiver ownership and generated SDP after rollback. Sources start only when
+their committed sender pads and accepted codecs exist; removed pending tracks
+stay stopped. Answers retain supported offered RTP extension IDs and compatible
+configuration, and later sources preserve committed per-MID mappings. Local
+codec preferences exclude remote transport/SSRC identity and raw feedback while
+retaining the sender's own identity and structured codec feedback.
+Track removal forwards the owning transceiver's desired direction to GStreamer.
+Recycled senders retain their input/FEC pad; explicit replacement identity
+retires old SSRC/MSID constraints. Inactive transceivers end all owned receive
+pads. EOS-gated decoder rebinding retains incoming track clients and rejects
+callbacks from retired generations. Bundle-only sources require the receiving
+MID in both committed BUNDLE groups. Accepted SCTP m-lines survive re-offers
+before remote DCEP, and RTX maps require a known SSRC. The peer core queues
+candidates with MIDs absent from the winning remote SDP while preserving native
+errors for eligible candidates.
 
-Cross-engine controls also reproduce answer-first SCTP m-line loss on both the
-released and retained candidate runtimes. GStreamer now preserves an accepted
-SCTP m-line before remote DCEP arrives, respects rejected and bundle-only media,
-and avoids generating RTX SSRC groups for an unknown source. The core retains
-null-ufrag candidates with unmatched remote MIDs until matching SDP arrives;
-installed-module tests preserve eligible native error delivery. An immutable
-candidate GTK-initiator/Chromium control passes bidirectional decoded video,
-440/660 Hz PCM, stable original senders and data exchange after activating an
-HTML audio sink matching the app's playback. The reverse-role prototype decodes
-video but still fails native PCM/ICE checks. The final rebuilt WebKit/AppImage
-complete stop/restart probe and affected physical desktop/peer matrix remain
-unresolved. This does not yet prove #349 resolved.
+Exact AppImage rebuilds pass native compile and package
+identity/license/provenance checks. Retained negative controls isolate each
+follow-up rather than treating packet arrival as decoded media. The exact
+`b473044` build passes camera/microphone publication, screen removal and
+same-track restart but fails fresh capture: the prior restart exposes another
+owned SRC pad whose decoder never receives EOS. Ending every owned pad corrects
+that path. Exact `779f787` then passes the complete balanced collision/screen
+sequence through a fresh 400×224 capture and legacy bundled microphones, but a
+later serialized restart advertises an RTP CNAME as its stream ID. Committed
+pad synchronization now prefers standard media-level MSID. A fresh unmapped
+SSRC is associated through a received caps MID only when one active transceiver
+accepts its payload on the same committed transport; bundle-only media must
+also resolve both BUNDLE masters to that transport.
+
+The final private identity/caps overlay on exact `779f787` WebKit passes the
+complete native probe in 17.70 s without preloads. It passes 33 extracted
+ownership/MSID controls and 119 real committed-pad assertions; the original
+plugin fails the conflicting-CNAME negative control. Earlier combined native
+pad/codec/extension/RTX controls pass 914 assertions. The permanent probe uses
+the actual installed core, default balanced policy and forced opposite-order
+camera/microphone offers. It retains strict video, PCM, silence/restoration,
+late-screen, removal, same-track and fresh-stream assertions while both cameras
+and tones continue. The even raster retains exact dimensions without VP8's
+odd-height padding. Its separate VP9-preference case adds video before audio
+and rejects bundled payload/codec collisions; the pinned public codec-preference
+API's audio-first allocator limitation is outside the app's API usage.
+
+Cross-engine controls expose a separate candidate-admission problem in the
+reverse role: new media candidates can reach Rice before their accepted
+credentials are installed. Native admission now requires the captured MID and
+full credential generation to match committed SDP and successful backend
+setters on the actual transport. Unbundled answers generate distinct per-media
+credentials. Native local candidates are cached and restored to later SDP only
+for live libnice sockets or the pinned Rice stream's retained sockets; other
+opaque backends keep their original behavior. A restored candidate attribute
+then exposes a codec intersection failure: the retained pad has a TCP candidate
+while its preferences have UDP. Both WebKit producer filters now exclude
+candidate metadata while preserving actual SDP. Captured-cap execution proves
+the narrow correction and keeps codec, payload, clock, extension and explicit
+MSID conflict negatives intact; rebuilt C++ execution is a separate gate.
+
+The final private GStreamer on exact `779f787` libraries passes 914 native
+pad/codec/extension/RTX assertions. Corresponding actual-source helper builds
+pass 37 candidate-admission contracts and 29 local-cache contracts. Both clean GTK/Chromium roles pass all nine strict
+checks per peer: advancing decoded cameras, 440/660 Hz PCM, original sender
+reuse and post-media data, with app-equivalent HTML audio activation and no
+preload, candidate replay or signaling barrier. The existing complete native
+media sequence also passes a diagnostic WebKit caps-converter exclusion; that
+preload verifies causality rather than executing the rebuilt producer C++.
+The combined tuple requires its complete exact-AppImage native gate and the
+physical CachyOS KDE Wayland / Linux-to-macOS/Windows matrix before sign-off.
+The optional native `max-compat` declined-BUNDLE control exposes a separate
+local-credential/gather transition limit; it remains private and does not
+weaken the app's permanent balanced probe. Constant-SSRC receiver resume and
+synthetic `track.enabled` re-enable limits also remain outside the demonstrated
+correction. This does not yet prove #349 resolved.
 
 ### I126 — Sev2
 

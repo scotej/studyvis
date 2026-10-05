@@ -214,12 +214,12 @@ The pinned, hash-verified input tuple for runtime revision 9 is:
 | ---------------------------------- | --------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
 | WebKitGTK                          | `https://webkitgtk.org/releases/webkitgtk-2.52.5.tar.xz`                                | `8a531a9abd2215936e8a8a914c077b586c0228b31d652f205286a8ec90f3364b` |
 | librice                            | `https://github.com/ystreet/librice/archive/refs/tags/v0.4.3.tar.gz`                    | `4671e1835f9ab0f8d87e8d9e22b6bfb06f928aeae442841ab81881dff61e3f4b` |
-| AppImage runtime portability patch | `scripts/patches/webkitgtk-2.52.5-appimage-sandbox.patch`                               | `9896d26754ca0a9d1643bc7b2f229246318540a1efbfd06380563af8919cd885` |
+| AppImage runtime portability patch | `scripts/patches/webkitgtk-2.52.5-appimage-sandbox.patch`                               | `f25f62bbc8e6a889fa4c0c13281cdbad1ee16635a91116972a9e60d0b18238d5` |
 | GStreamer core                     | `https://gstreamer.freedesktop.org/src/gstreamer/gstreamer-1.28.7.tar.xz`               | `787329b2c5758e228a71d926a6dcf960bceaacca3cadd63874ba665dfcda013e` |
 | GStreamer base                     | `https://gstreamer.freedesktop.org/src/gst-plugins-base/gst-plugins-base-1.28.7.tar.xz` | `ed6e5410f496d171818763af2265e7977154bc7f9b827e98acf8c5bed21dd5a7` |
 | GStreamer good                     | `https://gstreamer.freedesktop.org/src/gst-plugins-good/gst-plugins-good-1.28.7.tar.xz` | `87256969c82cf3bc8574301f3e7044a90de0ac500a5a27d8ba38c4dde894dd8b` |
 | GStreamer bad                      | `https://gstreamer.freedesktop.org/src/gst-plugins-bad/gst-plugins-bad-1.28.7.tar.xz`   | `dc525383c18b2c265bbe6a43d498656cd918aaa130aa4e3abeabcdaa741c3ffe` |
-| GStreamer rollback delta           | `scripts/patches/gst-plugins-bad-1.28.7-webrtc-rollback.patch`                          | `335f742e0446ec6afa0b589b559fb62730e368000302dfe3fe428112c25ade6b` |
+| GStreamer rollback delta           | `scripts/patches/gst-plugins-bad-1.28.7-webrtc-rollback.patch`                          | `e3105c73dc2ff3479ecd79320068d112e7370901c48a297288f02cbefcb03799` |
 | libnice                            | `https://libnice.freedesktop.org/releases/libnice-0.1.24.tar.gz`                        | `cfb5e8e778534f2f5b3c6f4958a1eb057c6b95c537c0f100817a537cf5d64fcc` |
 | Meson                              | `https://github.com/mesonbuild/meson/releases/download/1.7.2/meson-1.7.2.tar.gz`        | `4d40d63aa748a9c139cc41ab9bffe43edd113c5639d78bde81544ca955aea890` |
 
@@ -253,9 +253,16 @@ replacement stream/track identity. Incoming track clients remain live when an
 EOS-ended decoder is replaced, with retired callbacks discarded. Inactive
 transceivers end all receive pads they own, including restarted decoders.
 Zero-port bundle-only offers start a source only after the matching receiving
-MID is accepted in both committed BUNDLE groups. Accepted SCTP
+MID is accepted in both committed BUNDLE groups. Committed pads retain the
+standard media stream ID. Previously unmapped incoming sources use a caps MID
+only when a unique active transceiver accepts the payload on the same committed
+transport. Accepted SCTP
 m-lines survive re-offers before remote channels arrive, and RTX source maps
-require a known SSRC. The pinned interleave plugin
+require a known SSRC. Unbundled answers use distinct ICE credentials per media
+section. Native remote candidates wait for their committed media and installed
+credentials; verified or pinned-Rice-owned local sockets retain their candidates
+in later SDP. Candidate addresses stay out of codec preferences.
+The pinned interleave plugin
 supplies WebAudio's decoded remote-audio channel processing. It retains recycled media
 senders through renegotiation, preserves
 advertised stream IDs, and requests the linear BGRA portal format understood

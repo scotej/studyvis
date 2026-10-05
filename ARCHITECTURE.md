@@ -115,12 +115,12 @@ Runtime revision 9 has this reviewable input identity:
 |-|-|-|
 | WebKitGTK | `webkitgtk-2.52.5.tar.xz` from `webkitgtk.org/releases` | `8a531a9abd2215936e8a8a914c077b586c0228b31d652f205286a8ec90f3364b` |
 | librice | GitHub tag archive `v0.4.3` | `4671e1835f9ab0f8d87e8d9e22b6bfb06f928aeae442841ab81881dff61e3f4b` |
-| WebKit AppImage portability delta | `scripts/patches/webkitgtk-2.52.5-appimage-sandbox.patch` | `9896d26754ca0a9d1643bc7b2f229246318540a1efbfd06380563af8919cd885` |
+| WebKit AppImage portability delta | `scripts/patches/webkitgtk-2.52.5-appimage-sandbox.patch` | `f25f62bbc8e6a889fa4c0c13281cdbad1ee16635a91116972a9e60d0b18238d5` |
 | GStreamer core | `gstreamer-1.28.7.tar.xz` from `gstreamer.freedesktop.org/src` | `787329b2c5758e228a71d926a6dcf960bceaacca3cadd63874ba665dfcda013e` |
 | GStreamer base | `gst-plugins-base-1.28.7.tar.xz` from `gstreamer.freedesktop.org/src` | `ed6e5410f496d171818763af2265e7977154bc7f9b827e98acf8c5bed21dd5a7` |
 | GStreamer good | `gst-plugins-good-1.28.7.tar.xz` from `gstreamer.freedesktop.org/src` | `87256969c82cf3bc8574301f3e7044a90de0ac500a5a27d8ba38c4dde894dd8b` |
 | GStreamer bad | `gst-plugins-bad-1.28.7.tar.xz` from `gstreamer.freedesktop.org/src` | `dc525383c18b2c265bbe6a43d498656cd918aaa130aa4e3abeabcdaa741c3ffe` |
-| GStreamer rollback delta | `scripts/patches/gst-plugins-bad-1.28.7-webrtc-rollback.patch` | `335f742e0446ec6afa0b589b559fb62730e368000302dfe3fe428112c25ade6b` |
+| GStreamer rollback delta | `scripts/patches/gst-plugins-bad-1.28.7-webrtc-rollback.patch` | `e3105c73dc2ff3479ecd79320068d112e7370901c48a297288f02cbefcb03799` |
 | libnice | `libnice-0.1.24.tar.gz` from `libnice.freedesktop.org/releases` | `cfb5e8e778534f2f5b3c6f4958a1eb057c6b95c537c0f100817a537cf5d64fcc` |
 | Meson | GitHub release archive `1.7.2` | `4d40d63aa748a9c139cc41ab9bffe43edd113c5639d78bde81544ca955aea890` |
 
@@ -149,11 +149,20 @@ the old decoder reaches EOS; generation guards discard retired callbacks while
 its track clients remain live. Inactive transceivers end every receive pad they
 own, including decoders created by previous restarts. A zero-port bundle-only
 local offer starts its source only when the receiving MID is accepted in both
-committed BUNDLE groups. GStreamer preserves an accepted SCTP m-line
+committed BUNDLE groups. Committed pads prefer the standard media stream ID
+over a provisional RTP CNAME. A previously unmapped SSRC can use its received
+caps MID only when exactly one active transceiver accepts that payload on the
+same committed transport; bundle-only media must also resolve both BUNDLE
+masters to that transport. GStreamer preserves an accepted SCTP m-line
 before a remote data channel arrives and omits RTX source mappings until the
 source SSRC is known. The peer core queues candidates with an unmatched remote
 MID until a matching description arrives, retaining native error reporting for
-eligible candidates.
+eligible candidates. Unbundled answers use distinct per-media ICE credentials.
+Native remote candidates wait for the matching committed MID and full ICE
+credentials to be installed on their actual transport. Local candidates return
+in later SDP only for sockets verified by libnice or retained by the pinned
+Rice stream; unknown getter-less backends keep their original behavior.
+Candidate attributes remain in SDP and are excluded from local codec caps.
 The pinned plugin surface includes interleave/deinterleave for WebAudio's decoded
 remote-audio processing. Reproducibility here means pinned and checked
 source inputs, local delta, build environment, and configuration—not a claim of
