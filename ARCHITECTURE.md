@@ -672,6 +672,15 @@ llama-server is bundled as `binaries/llama-server-{platform}` in `tauri.conf.jso
 
 **Engine resolution + auto-install (I73).** At spawn time the binary is resolved to an absolute path and launched via `shell().command()` — never `shell().sidecar()`, whose exe-relative join never matched where tauri-build/the bundler actually place the file. Preference order: (1) the bundled binary at `<exe_dir>/llama-server(.exe)` (size-gated, so the dev placeholder `build.rs` writes for debug-profile builds is treated as absent), (2) a managed install at `data_dir/engine/<tag>-r<package-revision>-<triple>/`. When neither resolves, `sidecar_start` downloads the pinned llama.cpp release asset for the current triple (SHA-256-verified; pins lockstep-tested against `scripts/fetch-llama-server.sh`), unpacks `llama-server` + companion libs, and installs it atomically — gated by the `engine_auto_install` setting (default ON; Settings → AI → AI engine also offers manual Install/Reinstall with progress via `engine:progress` events). The managed install lives in `data_dir`, so it survives app updates; the fallback rescues *spawn* failures (missing/corrupt binary), not runtime crash-loops, which still end at the restart budget. Both sources are the same pinned build, so the fallback never shifts `INFERENCE_ENGINE_FINGERPRINT`.
 
+**Historical prompt memory (#350).** Every sidecar spawn uses `--cache-ram 0`
+to disable the pinned engine's otherwise 8 GiB RAM archive of historical prompt
+states. Current-slot KV reuse and request-level `cache_prompt` behavior remain
+unchanged, including the benchmark's cold-prefill requests. Revisiting an older
+prompt may require more prefill work. The benchmark engine fingerprint changes
+with this spawn policy so previous timings are treated as stale. The field
+archive shows retained states, but contains no host memory-pressure evidence;
+this resource mitigation does not establish the reported capture stall's cause.
+
 ### Sample loop
 
 ```
