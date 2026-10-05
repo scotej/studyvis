@@ -115,12 +115,12 @@ Runtime revision 9 has this reviewable input identity:
 |-|-|-|
 | WebKitGTK | `webkitgtk-2.52.5.tar.xz` from `webkitgtk.org/releases` | `8a531a9abd2215936e8a8a914c077b586c0228b31d652f205286a8ec90f3364b` |
 | librice | GitHub tag archive `v0.4.3` | `4671e1835f9ab0f8d87e8d9e22b6bfb06f928aeae442841ab81881dff61e3f4b` |
-| WebKit AppImage portability delta | `scripts/patches/webkitgtk-2.52.5-appimage-sandbox.patch` | `dae8af008906d0689b3287d8803e5ca23c5be77487ca14124c68c04792837ec2` |
+| WebKit AppImage portability delta | `scripts/patches/webkitgtk-2.52.5-appimage-sandbox.patch` | `aff85dde0fcc738fd3a4618afdee852e6f183a9f8c49f904db96f8a4e441ce65` |
 | GStreamer core | `gstreamer-1.28.7.tar.xz` from `gstreamer.freedesktop.org/src` | `787329b2c5758e228a71d926a6dcf960bceaacca3cadd63874ba665dfcda013e` |
 | GStreamer base | `gst-plugins-base-1.28.7.tar.xz` from `gstreamer.freedesktop.org/src` | `ed6e5410f496d171818763af2265e7977154bc7f9b827e98acf8c5bed21dd5a7` |
 | GStreamer good | `gst-plugins-good-1.28.7.tar.xz` from `gstreamer.freedesktop.org/src` | `87256969c82cf3bc8574301f3e7044a90de0ac500a5a27d8ba38c4dde894dd8b` |
 | GStreamer bad | `gst-plugins-bad-1.28.7.tar.xz` from `gstreamer.freedesktop.org/src` | `dc525383c18b2c265bbe6a43d498656cd918aaa130aa4e3abeabcdaa741c3ffe` |
-| GStreamer rollback delta | `scripts/patches/gst-plugins-bad-1.28.7-webrtc-rollback.patch` | `d0ad4d4252bcf5f4cd3de7415488a971cb0c46a8fb0b259eb23d2260b3bc54f9` |
+| GStreamer rollback delta | `scripts/patches/gst-plugins-bad-1.28.7-webrtc-rollback.patch` | `0a465f3b83e3421d6e228898d8ae15052c0b2d35fe8611abbb1224ed6dbb0685` |
 | libnice | `libnice-0.1.24.tar.gz` from `libnice.freedesktop.org/releases` | `cfb5e8e778534f2f5b3c6f4958a1eb057c6b95c537c0f100817a537cf5d64fcc` |
 | Meson | GitHub release archive `1.7.2` | `4d40d63aa748a9c139cc41ab9bffe43edd113c5639d78bde81544ca955aea890` |
 
@@ -136,8 +136,12 @@ from `studyvis-webkit-runtime/` beside the AppImage executable, and packaged
 compiled native locations. This avoids silently resolving the host's
 `PKGLIBEXEC`/`PKGLIBDIR` while retaining native-package/development fallbacks;
 it does not disable the sandbox. Runtime revision 9 also accepts empty-SDP
-rollback, defers outgoing media until a local offer is answered, and restores
-GStreamer's stable transceiver MIDs/generated SDP after collided offers (#349).
+rollback, restores stable transceiver ownership after collided offers, and
+starts queued sources only after their exact committed pad is configured.
+Answers retain supported offered RTP extension IDs; future sources reserve
+accepted IDs while committed per-MID mappings remain stable. Remote transport
+and SSRC identity and raw payload-specific feedback stay out of local codec
+preferences (#349).
 The pinned plugin surface includes interleave/deinterleave for WebAudio's decoded
 remote-audio processing. Reproducibility here means pinned and checked
 source inputs, local delta, build environment, and configuration—not a claim of

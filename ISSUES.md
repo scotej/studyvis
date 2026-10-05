@@ -1310,14 +1310,22 @@ provisional payload numbers rejecting matching codecs, and unconfigured sources
 running into `NOT_LINKED` before their packetizers exist. The follow-up ensures
 committed sender/receiver pads, normalizes only unlinked provisional payloads,
 preserves own stream identity across codec narrowing, and keeps queued sources
-stopped until their exact negotiated pad is linked. Its 381 focused native
-assertions pass; unchanged-runtime controls fail. The same-order Chromium probe
-passes decoded camera/microphone, codec narrowing, withdrawal and existing
-serialized cases. The deterministic opposite-order fixture also exposes a
-Chromium RTP-extension reassignment limit, separate from the native changes.
-CI retains the failed AppImage, installed runtime and isolated synthetic trace
-for one day. The final rebuilt WebKit/AppImage probe and affected physical
-desktop/peer matrix remain unresolved. This does not yet prove #349 resolved.
+stopped until their exact negotiated pad is linked. Native-to-Chromium
+controls also isolate incorrect answer extension IDs and orphan RTCP feedback
+that invalidate later offers. Answers retain supported offered IDs and compatible
+extension direction/configuration. New sources reserve accepted IDs; committed
+per-MID mappings stay stable. Remote fingerprints, SSRC groups and raw feedback
+are excluded from local codec preferences while structured codec feedback stays.
+The final private GStreamer passes 812 focused assertions, including negative
+controls and distinct per-media maps. A bounded old-WebKit/source-lock prototype
+passes decoded bidirectional camera/microphone, codec narrowing, withdrawal and
+legacy serialized screen/restart cases. It does not include the final WebKit or
+new same-peer late-screen/restart fixture. The same-order Chromium fixture
+passes those added cases; deterministic opposite order also exposes a Chromium
+RTP-extension reassignment limit. CI retains the failed AppImage, installed
+runtime and isolated synthetic trace for one day. The final rebuilt
+WebKit/AppImage probe and affected physical desktop/peer matrix remain
+unresolved. This does not yet prove #349 resolved.
 
 ### I126 — Sev2
 
