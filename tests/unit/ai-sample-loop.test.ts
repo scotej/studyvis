@@ -2516,6 +2516,143 @@ describe('startSampleLoop — A6 cadence backoff', () => {
     await handle.stop()
   })
 
+  test.each([false, true])(
+    '#350 capture starvation stretches the cadence even when capture fails (%s)',
+    async (captureFails) => {
+      const clock = new FakeClock()
+      const onThermalBackoff = vi.fn()
+      const records: LogRecord[] = []
+      __resetLog()
+      __setLogRecordSink((record) => records.push(record))
+      let release: () => void = () => {}
+      const pendingCapture = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      const captureFace = vi.fn(async () => {
+        await pendingCapture
+        if (captureFails) {
+          throw new CaptureError('frame_extraction_failed', 'no frame')
+        }
+        return 'face-base64'
+      })
+      const fetchMock = vi.fn(async () => judgmentResponse('on_task'))
+      __setSampleLoopRuntime(
+        buildSampleLoopRuntime({
+          clock,
+          captureFace,
+          fetch: fetchMock as never,
+        })
+      )
+      const handle = startSampleLoop({
+        getTopic: () => 't',
+        modelId: 'test-model',
+        getFaceTrack: () => makeFakeTrack(),
+        onThermalBackoff,
+      })
+      await flushMicrotasks()
+      await clock.advance(5_000)
+      expect(captureFace).toHaveBeenCalledTimes(1)
+      expect(fetchMock).not.toHaveBeenCalled()
+
+      await clock.freeze(20_000)
+      release()
+      await flushMicrotasks()
+
+      expect(handle.__state().backoff.engaged).toBe(true)
+      expect(onThermalBackoff).toHaveBeenCalledTimes(1)
+      expect(fetchMock).toHaveBeenCalledTimes(captureFails ? 0 : 1)
+      const starved = records.filter(
+        (record) =>
+          record.scope === 'ai.sampleloop' && record.msg === 'app.starved'
+      )
+      expect(starved).toHaveLength(1)
+      expect(starved[0]?.data).toMatchObject({
+        outcome: captureFails ? 'capture_failed' : 'resolved',
+        starvedMs: 19_000,
+        inferenceMs: captureFails ? null : 0,
+        backoffEngaged: true,
+        effectiveIntervalMs: 10_000,
+      })
+      await clock.advance(5_000)
+      expect(captureFace).toHaveBeenCalledTimes(1)
+      await clock.advance(5_000)
+      expect(captureFace).toHaveBeenCalledTimes(2)
+      await handle.stop()
+    }
+  )
+
+  test('#350 a slow capture with a responsive main thread keeps the normal cadence', async () => {
+    const clock = new FakeClock()
+    let release: () => void = () => {}
+    const pendingCapture = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const fetchMock = vi.fn(async () => judgmentResponse('on_task'))
+    __setSampleLoopRuntime(
+      buildSampleLoopRuntime({
+        clock,
+        captureFace: async () => {
+          await pendingCapture
+          return 'face-base64'
+        },
+        fetch: fetchMock as never,
+      })
+    )
+    const handle = startSampleLoop({
+      getTopic: () => 't',
+      modelId: 'test-model',
+      getFaceTrack: () => makeFakeTrack(),
+    })
+    await flushMicrotasks()
+    await clock.advance(5_000)
+    await clock.advance(20_000)
+    release()
+    await flushMicrotasks()
+
+    expect(handle.__state().backoff.engaged).toBe(false)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    await clock.advance(5_000)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    await handle.stop()
+  })
+
+  test('#350 ending during capture discards the probe and sends no inference', async () => {
+    const clock = new FakeClock()
+    const onThermalBackoff = vi.fn()
+    let release: () => void = () => {}
+    const pendingCapture = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const fetchMock = vi.fn(async () => judgmentResponse('on_task'))
+    __setSampleLoopRuntime(
+      buildSampleLoopRuntime({
+        clock,
+        captureFace: async () => {
+          await pendingCapture
+          return 'face-base64'
+        },
+        fetch: fetchMock as never,
+      })
+    )
+    const handle = startSampleLoop({
+      getTopic: () => 't',
+      modelId: 'test-model',
+      getFaceTrack: () => makeFakeTrack(),
+      onThermalBackoff,
+    })
+    await flushMicrotasks()
+    await clock.advance(5_000)
+    await clock.freeze(20_000)
+    await handle.stop()
+    release()
+    await flushMicrotasks()
+
+    expect(handle.__state().backoff.engaged).toBe(false)
+    expect(onThermalBackoff).not.toHaveBeenCalled()
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect(clock.timers).toHaveLength(0)
+  })
+
   // #269 — the failure counterparts to the test above. A request that froze
   // the app for six seconds and THEN failed is the case the issue was opened
   // on: the freeze already happened, so it has to reach the cadence and the

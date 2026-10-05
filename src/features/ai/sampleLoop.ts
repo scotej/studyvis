@@ -249,10 +249,9 @@ export function schedulerLagIsMaterial(
 // #269 — the other half of "who is running behind". `schedulerLagIsMaterial`
 // above measures how late the NEXT tick was scheduled, so it can only see the
 // gaps that happen to straddle a tick boundary; at a backed-off 42 s cadence
-// that misses almost all of them. This probe runs a 1 Hz timer for exactly as
-// long as an inference is in flight and keeps the worst lateness it sees, so a
-// main thread that stopped being scheduled DURING an inference is attributed
-// to the inference that was running.
+// that misses almost all of them. This probe runs a 1 Hz timer across capture and
+// inference and keeps the worst lateness it sees. #350 froze during capture,
+// before an inference-only probe could observe the stall that lost the peer.
 //
 // Both halves matter and neither substitutes for the other: a long inference
 // says the engine is behind, a starved main thread says the app is. The
@@ -332,9 +331,15 @@ export function startStarveProbe(runtime: StarveProbeRuntime): StarveProbe {
   }
 }
 
-// #269 — how the inference a starve reading belongs to ended. Purely a log
+// #269 / #350 — how the sample a starve reading belongs to ended. Purely a log
 // field: the cadence owes a freeze the same answer however the tick finished.
-type TickOutcome = 'resolved' | 'http_error' | 'timeout' | 'failed'
+type TickOutcome =
+  | 'resolved'
+  | 'capture_failed'
+  | 'engine_warming'
+  | 'http_error'
+  | 'timeout'
+  | 'failed'
 
 export type BackoffState = {
   engaged: boolean
@@ -357,7 +362,7 @@ export function initialBackoffState(): BackoffState {
 // Pure transition for the backoff state machine. `p95Sec` is the benchmark's
 // measured p95 (the cost the cadence was sized against); `durationSec` is the
 // just-measured inference wall-clock; `starvedMs` is the worst main-thread
-// lateness the starve probe saw while that inference was in flight. When p95
+// lateness the starve probe saw during capture and inference. When p95
 // is unknown/non-positive there is no baseline to call a duration slow, so
 // duration stops driving the machine and only starvation can still engage it.
 export function nextBackoffState(
@@ -784,7 +789,7 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
   }
 
   // #269 — fold the tick's starve reading into the cadence and the log, then
-  // disarm the probe. Every way out of an in-flight inference calls this
+  // disarm the probe. Every way out of an in-flight sample calls this
   // exactly once — answered, non-2xx, malformed JSON, rejected fetch, timeout
   // abort — before the tick arms the stall watchdog or reschedules, so a
   // request that froze the app for nine seconds and then failed still
@@ -1422,12 +1427,14 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
     }, tickTimeoutMs)
 
     try {
+      activeStarveProbe = startStarveProbe(runtime)
       const captureStartedAt = runtime.now()
       const [face, screen] = await Promise.all([
         runtime.captureFace(track),
         snapshotScreens(),
       ])
       const captureMs = Math.max(0, runtime.now() - captureStartedAt)
+      if (state.stopped) return
       // A5 — the Rust watcher may have respawned the sidecar on a fresh
       // ephemeral port during the capture window. Re-read the port right
       // before the POST; if it moved or went away, bail and reschedule this
@@ -1441,6 +1448,7 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
         port == null ||
         port !== gatedPort
       ) {
+        settleStarveProbe('engine_warming', Number.NaN)
         noteBlockedTick('engine_warming')
         return
       }
@@ -1453,13 +1461,9 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
       })
       // A6 — time the inference round-trip (the compute that a throttling SoC
       // slows down) so the cadence backoff can compare it to the benchmark p95.
-      // #269 — and watch the main thread across the same window, because the
-      // duration alone cannot tell a slow engine from one that took the
-      // machine away from the app.
+      // The starvation probe spans capture too; inference duration keeps its
+      // own start so a slow screenshot never inflates the model timing.
       const inferenceStart = runtime.now()
-      // Teardown can land during the capture await above; arming a 1 Hz timer
-      // after it would outlive the loop that owns it.
-      if (!state.stopped) activeStarveProbe = startStarveProbe(runtime)
       const response = await runtime.fetch(
         `http://127.0.0.1:${port}/v1/chat/completions`,
         {
@@ -1558,6 +1562,7 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
       })
     } catch (err) {
       if (err instanceof CaptureError) {
+        settleStarveProbe('capture_failed', Number.NaN)
         if (err.code === 'screen_capture_denied') {
           // Latch and bail — V2-P9's ScreenCapturePermissionOverlay handles
           // the re-grant; the loop only resumes after a fresh start().
