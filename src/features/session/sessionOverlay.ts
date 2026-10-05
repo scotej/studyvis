@@ -25,13 +25,14 @@ export type SessionOverlayItem = {
   title: string
   body: string
   tone: SessionOverlayTone
+  category?: 'chat'
   createdAt: number
   expiresAt: number
 }
 
 export type SessionOverlayItemInput = Pick<
   SessionOverlayItem,
-  'id' | 'title' | 'body' | 'tone'
+  'id' | 'title' | 'body' | 'tone' | 'category'
 > & {
   ttlMs?: number
 }
@@ -83,10 +84,16 @@ export class SessionOverlayQueue {
       title: input.title,
       body: input.body,
       tone: input.tone,
+      category: input.category,
       createdAt: now,
       expiresAt: now + ttlMs,
     }
-    const existing = this.items.findIndex((entry) => entry.id === item.id)
+    // #351 — keep only the latest chat card without displacing queued alerts.
+    const existing = this.items.findIndex(
+      (entry) =>
+        entry.id === item.id ||
+        (item.category === 'chat' && entry.category === 'chat')
+    )
     if (existing >= 0) {
       this.items[existing] = item
     } else {
