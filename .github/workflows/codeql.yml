@@ -19,7 +19,6 @@ on:
   push:
     branches: [main]
   pull_request:
-    branches: [main]
   schedule:
     # Queries improve independently of this repo's commit rate — a codebase
     # that has not changed in a month can still pick up a new finding. Weekly,

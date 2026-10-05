@@ -49,7 +49,6 @@ on:
   push:
     branches: [main]
   pull_request:
-    branches: [main]
   workflow_dispatch:
 
 # Deliberately the same shape as ci.yml, including the activity types left at
