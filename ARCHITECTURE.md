@@ -385,6 +385,16 @@ operation failures are recorded as categorical operation/error names and
 connection states; SDP, candidates, device identifiers and error messages are
 not logged.
 
+Unused pooled offers are retired instead of being renewed by rollback: expired
+warm offers are closed on checkout, and returned offers are closed and replaced
+while the pool is active. Fresh connections retain a data-channel SDP section;
+rolling back an unanswered data-only offer can remove it even on Chromium.
+Connected/shared peers and claimed leases are unaffected. If initial native
+offer creation fails before handlers are installed, its promise rejects so
+checkout can destroy/retry the connection. Exhausted initialization clears only
+its own pending relay placeholders and reports through `onJoinError`, allowing
+the next announcement to try again (#350).
+
 ### Relay-carried presence (I74)
 
 Everything trystero does — over any strategy — is *signaling*; application data still rides WebRTC datachannels. So when a STUN-only connection can't traverse the NAT pair between two friends, presence heartbeats never flow in either direction, trystero surfaces **no error for a failed ICE attempt** (it silently re-offers forever), and both friends show each other permanently offline — the exact symptom that motivated this leg, made structural by offline ContactCard pairing (§5.1), which removed the last step that ever proved the P2P path worked.

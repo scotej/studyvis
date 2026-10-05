@@ -1238,6 +1238,44 @@ and zero clock skew cannot establish the original cause. The reported stall
 and two-device recovery remain under investigation; these mitigations and
 diagnostics alone do not prove #350 resolved.
 
+### I123 — Sev2
+
+`patches/@trystero-p2p+core+0.25.3.patch`
+
+**Evidence.** A rejecting native `setLocalDescription` can fail before a pooled
+peer receives its error handler. The core consumes the error but never settles
+`offerPromise`; `OfferPool.checkout` and `ensureOffer` remain pending with no
+offer expiry, so relay placeholders suppress subsequent announcements. Tests
+execute the installed patched peer, pool, and signal-handler modules; reverting
+the change reproduces the hang.
+
+**Status.** **fixed on branch** — reject initial offer creation so checkout
+closes/retries failed peers. Exhausted initialization releases its own
+placeholders; late cleanup cannot clear a replacement promise or peer state.
+Signaling-handler rejections are consumed and reported through `onJoinError`.
+This is a reproduced recovery defect found while investigating #350; the
+reporter's original cause remains unproven.
+
+### I124 — Sev2
+
+`patches/@trystero-p2p+core+0.25.3.patch`
+
+**Evidence.** Real Chromium tests using the installed core reproduce unused
+offer renewal losing every data-channel SDP section and ICE credential after
+rollback. Both aged warm checkout and young returned-offer recycling can take
+that path, leaving later signaling attempts unable to establish a channel.
+The strategy's separate age check also reintroduces renewal if the clock crosses
+the TTL after pool selection.
+
+**Status.** **fixed on branch** — retire expired warm peers and replace returned
+unused peers with fresh connections. The pool owns age rotation; encryption no
+longer restarts an unused offer. Claimed leases and connected/shared peers stay
+owned by their existing path. Real-browser controls produce empty offers;
+patched aged/recycled cases establish connections and exchange data. Actual
+module regressions cover both paths and the TTL boundary. These defects are
+relevant to #350's recovery attempts, but the attached archives do not establish
+that either caused the reported loss.
+
 ## Archive — retired backlogs
 
 Two documents used to sit beside this ledger and were deleted once their implementation backlog had no open code work left: `BUILD-PROMPTS.md` (the sequenced V0→V3 build plan) and `IMPROVEMENTS.md` (the v1.2.0-era improvement backlog). Git history holds both in full — `git log --diff-filter=D -- BUILD-PROMPTS.md IMPROVEMENTS.md`, then `git show <sha>^:<file>`. Linux's implementation checklist is complete, but its operational release sign-off remains pending. What survives here is the part still cited from code.
