@@ -845,6 +845,26 @@ diff --git a/Source/WebCore/Modules/mediastream/gstreamer/GStreamerPeerConnectio
  
          // 5. If transceiver.[[Direction]] is "recvonly", set transceiver.[[Direction]] to "sendrecv".
          // 6. If transceiver.[[Direction]] is "inactive", set transceiver.[[Direction]] to "sendonly".
+@@ -436,6 +436,19 @@
+ void GStreamerPeerConnectionBackend::removeTrack(RTCRtpSender& sender)
+ {
+     ALWAYS_LOG(LOGIDENTIFIER, "Removing "_s, sender.trackKind(), " track with ID "_s, sender.trackId());
++    // I125: removeTrack's private direction change does not reach the native backend.
++    // Preserve the owning transceiver and disable its desired sending direction
++    // before stopping the source and scheduling renegotiation.
++    for (auto& transceiver : protectedPeerConnection()->currentTransceivers()) {
++        if (&transceiver->sender() != &sender)
++            continue;
++        auto direction = transceiver->direction();
++        if (direction == RTCRtpTransceiverDirection::Sendrecv)
++            transceiver->setDirection(RTCRtpTransceiverDirection::Recvonly);
++        else if (direction == RTCRtpTransceiverDirection::Sendonly)
++            transceiver->setDirection(RTCRtpTransceiverDirection::Inactive);
++        break;
++    }
+     m_endpoint->removeTrack(backendFromRTPSender(sender));
+ }
+ 
 diff --git a/Source/WebCore/Modules/mediastream/gstreamer/GStreamerRtpSenderBackend.cpp b/Source/WebCore/Modules/mediastream/gstreamer/GStreamerRtpSenderBackend.cpp
 --- a/Source/WebCore/Modules/mediastream/gstreamer/GStreamerRtpSenderBackend.cpp
 +++ b/Source/WebCore/Modules/mediastream/gstreamer/GStreamerRtpSenderBackend.cpp
