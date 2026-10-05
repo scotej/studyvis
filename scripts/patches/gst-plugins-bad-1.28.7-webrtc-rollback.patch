@@ -33,7 +33,241 @@ diff --git a/ext/webrtc/gstwebrtcbin.c b/ext/webrtc/gstwebrtcbin.c
  }
  
  static GstCaps *
-@@ -4719,6 +4744,8 @@
+@@ -3485,6 +3510,233 @@
+   return edata.extmap;
+ }
+ 
++typedef struct
++{
++  const gchar *uri;
++  const gchar *attributes;
++  GstWebRTCRTPTransceiverDirection direction;
++} AnswerExtmap;
++
++static gboolean
++_answer_extmap_value (const GValue * value,
++    GstWebRTCRTPTransceiverDirection media_direction, AnswerExtmap * map)
++{
++  const gchar *direction = "";
++
++  map->attributes = "";
++  map->direction = media_direction;
++  if (G_VALUE_HOLDS_STRING (value)) {
++    map->uri = g_value_get_string (value);
++  } else if (GST_VALUE_HOLDS_ARRAY (value)
++      && gst_value_array_get_size (value) == 3) {
++    guint i;
++    for (i = 0; i < 3; i++)
++      if (!G_VALUE_HOLDS_STRING (gst_value_array_get_value (value, i)))
++        return FALSE;
++    direction = g_value_get_string (gst_value_array_get_value (value, 0));
++    map->uri = g_value_get_string (gst_value_array_get_value (value, 1));
++    map->attributes = g_value_get_string (gst_value_array_get_value (value, 2));
++  } else {
++    return FALSE;
++  }
++
++  if (direction && *direction) {
++    if (!g_strcmp0 (direction, "sendrecv"))
++      map->direction = GST_WEBRTC_RTP_TRANSCEIVER_DIRECTION_SENDRECV;
++    else if (!g_strcmp0 (direction, "sendonly"))
++      map->direction = GST_WEBRTC_RTP_TRANSCEIVER_DIRECTION_SENDONLY;
++    else if (!g_strcmp0 (direction, "recvonly"))
++      map->direction = GST_WEBRTC_RTP_TRANSCEIVER_DIRECTION_RECVONLY;
++    else if (!g_strcmp0 (direction, "inactive"))
++      map->direction = GST_WEBRTC_RTP_TRANSCEIVER_DIRECTION_INACTIVE;
++    else
++      return FALSE;
++  }
++  return map->uri && *map->uri;
++}
++
++static gchar *
++_canonical_extmap_attributes (const GValue * value)
++{
++  AnswerExtmap map;
++  GstRTPHeaderExtension *extension;
++  GstCaps *caps;
++  gchar *attributes = NULL;
++
++  if (!_answer_extmap_value (value,
++          GST_WEBRTC_RTP_TRANSCEIVER_DIRECTION_SENDRECV, &map))
++    return NULL;
++  extension = gst_rtp_header_extension_create_from_uri (map.uri);
++  if (!extension)
++    return NULL;
++  gst_rtp_header_extension_set_id (extension, 1);
++  caps = gst_caps_new_empty_simple ("application/x-rtp");
++  gst_structure_set_value (gst_caps_get_structure (caps, 0), "extmap-1", value);
++  if (gst_rtp_header_extension_set_attributes_from_caps (extension, caps)
++      && gst_rtp_header_extension_set_caps_from_attributes (extension, caps)
++      && _answer_extmap_value (gst_structure_get_value (
++              gst_caps_get_structure (caps, 0), "extmap-1"),
++          GST_WEBRTC_RTP_TRANSCEIVER_DIRECTION_SENDRECV, &map))
++    attributes = g_strdup (map.attributes);
++  gst_caps_unref (caps);
++  gst_object_unref (extension);
++  return attributes;
++}
++
++static gboolean
++_extmap_configuration_matches (const GValue * left, const GValue * right)
++{
++  AnswerExtmap left_map, right_map;
++  gchar *left_attributes, *right_attributes;
++  gboolean ret;
++
++  if (!_answer_extmap_value (left,
++          GST_WEBRTC_RTP_TRANSCEIVER_DIRECTION_SENDRECV, &left_map)
++      || !_answer_extmap_value (right,
++          GST_WEBRTC_RTP_TRANSCEIVER_DIRECTION_SENDRECV, &right_map))
++    return FALSE;
++  if (!g_strcmp0 (left_map.attributes, right_map.attributes))
++    return TRUE;
++  /* Let the extension implementation compare semantic defaults (e.g. the
++   * audio-level default vad=on), without accepting a different configuration. */
++  left_attributes = _canonical_extmap_attributes (left);
++  right_attributes = _canonical_extmap_attributes (right);
++  ret = left_attributes && right_attributes
++      && !g_strcmp0 (left_attributes, right_attributes);
++  g_free (left_attributes);
++  g_free (right_attributes);
++  return ret;
++}
++
++static GstCaps *
++_extmap_caps_from_sdp (const GstSDPMessage * sdp, const GstSDPMedia * media)
++{
++  GstCaps *caps = gst_caps_new_empty_simple ("application/x-rtp");
++
++  gst_sdp_message_attributes_to_caps (sdp, caps);
++  gst_sdp_media_attributes_to_caps (media, caps);
++  return caps;
++}
++
++static gboolean
++_negotiate_answer_extmap (GstWebRTCBin * webrtc,
++    GstWebRTCRTPTransceiver * trans, const GstSDPMedia * offer_media,
++    const GstCaps * current_caps, GstCaps ** answer_caps, GError ** error)
++{
++  GstCaps *local_caps = gst_caps_copy (current_caps);
++  GstCaps *offer_caps = _extmap_caps_from_sdp (
++      webrtc->pending_remote_description->sdp, offer_media);
++  GstCaps *stable_caps = NULL;
++  GstStructure *local = _gather_extmap (local_caps, error);
++  GstStructure *offer = NULL, *stable = NULL, *discard = NULL;
++  GstWebRTCRTPTransceiverDirection offer_direction =
++      _get_direction_from_media (offer_media);
++  GstWebRTCRTPTransceiverDirection media_direction =
++      _intersect_answer_directions (offer_direction, trans->direction);
++  gboolean ret = FALSE;
++  guint i;
++
++  if (!local)
++    goto out;
++  offer = _gather_extmap (offer_caps, error);
++  if (!offer)
++    goto out;
++  if (webrtc->current_local_description && trans->mid
++      && trans->mline < gst_sdp_message_medias_len (
++          webrtc->current_local_description->sdp)) {
++    const GstSDPMedia *media = gst_sdp_message_get_media (
++        webrtc->current_local_description->sdp, trans->mline);
++    if (!g_strcmp0 (trans->mid, gst_sdp_media_get_attribute_val (media, "mid"))) {
++      stable_caps = _extmap_caps_from_sdp (
++          webrtc->current_local_description->sdp, media);
++      stable = _gather_extmap (stable_caps, error);
++      if (!stable)
++        goto out;
++    }
++  }
++
++  /* StudyVis #349: provisional local extension IDs are not capabilities.
++   * Answer supported URIs/configurations at the offered IDs (RFC 8285),
++   * without allowing a committed mapping to change on a later offer. */
++  *answer_caps = gst_caps_make_writable (*answer_caps);
++  discard = _gather_extmap (*answer_caps, error);
++  if (!discard)
++    goto out;
++  for (i = 0; i < gst_structure_n_fields (offer); i++) {
++    const gchar *field = gst_structure_nth_field_name (offer, i);
++    const GValue *value = gst_structure_get_value (offer, field);
++    AnswerExtmap offered;
++    guint j;
++
++    if (!_answer_extmap_value (value, offer_direction, &offered))
++      continue;
++    for (j = 0; stable && j < gst_structure_n_fields (stable); j++) {
++      const gchar *stable_field = gst_structure_nth_field_name (stable, j);
++      AnswerExtmap committed;
++      if (_answer_extmap_value (gst_structure_get_value (stable, stable_field),
++              GST_WEBRTC_RTP_TRANSCEIVER_DIRECTION_SENDRECV, &committed)
++          && !g_strcmp0 (offered.uri, committed.uri)
++          && g_strcmp0 (field, stable_field)) {
++        g_set_error (error, GST_WEBRTC_ERROR, GST_WEBRTC_ERROR_SDP_SYNTAX_ERROR,
++            "RTP extension %s changed its committed ID on MID %s", offered.uri,
++            trans->mid);
++        goto out;
++      }
++    }
++    for (j = 0; j < gst_structure_n_fields (local); j++) {
++      const gchar *local_field = gst_structure_nth_field_name (local, j);
++      AnswerExtmap supported;
++      GstWebRTCRTPTransceiverDirection direction;
++      GValue array = G_VALUE_INIT, string = G_VALUE_INIT;
++
++      if (!_answer_extmap_value (gst_structure_get_value (local, local_field),
++              trans->direction, &supported)
++          || g_strcmp0 (offered.uri, supported.uri))
++        continue;
++      if (!_extmap_configuration_matches (value,
++              gst_structure_get_value (local, local_field)))
++        continue;
++      direction = _intersect_answer_directions (offered.direction,
++          supported.direction);
++      direction = _intersect_answer_directions (
++          _reverse_direction (media_direction), direction);
++      if (direction == GST_WEBRTC_RTP_TRANSCEIVER_DIRECTION_NONE)
++        continue;
++      if (direction == media_direction
++          && (!offered.attributes || !*offered.attributes)) {
++        gst_structure_set (gst_caps_get_structure (*answer_caps, 0), field,
++            G_TYPE_STRING, offered.uri, NULL);
++      } else {
++        g_value_init (&array, GST_TYPE_ARRAY);
++        g_value_init (&string, G_TYPE_STRING);
++        g_value_set_string (&string, direction == media_direction ? "" :
++            gst_webrtc_rtp_transceiver_direction_to_string (direction));
++        gst_value_array_append_value (&array, &string);
++        g_value_set_string (&string, offered.uri);
++        gst_value_array_append_value (&array, &string);
++        g_value_set_string (&string, offered.attributes);
++        gst_value_array_append_value (&array, &string);
++        gst_structure_set_value (gst_caps_get_structure (*answer_caps, 0), field,
++            &array);
++        g_value_unset (&array);
++        g_value_unset (&string);
++      }
++      break;
++    }
++  }
++  ret = TRUE;
++
++out:
++  gst_caps_unref (local_caps);
++  gst_caps_unref (offer_caps);
++  gst_clear_caps (&stable_caps);
++  gst_clear_structure (&local);
++  gst_clear_structure (&offer);
++  gst_clear_structure (&stable);
++  gst_clear_structure (&discard);
++  return ret;
++}
++
+ struct hdrext_id
+ {
+   const char *rtphdrext_uri;
+@@ -4719,6 +4971,8 @@
        }
        GstCaps *current_caps =
            _find_codec_preferences (webrtc, rtp_trans, i, error);
@@ -42,10 +276,17 @@ diff --git a/ext/webrtc/gstwebrtcbin.c b/ext/webrtc/gstwebrtcbin.c
        if (*error) {
          gst_caps_unref (offer_caps);
          goto rejected;
-@@ -4747,6 +4774,26 @@
+@@ -4747,6 +5001,33 @@
            gst_caps_unref (answer_caps);
            gst_caps_unref (offer_caps);
            goto rejected;
++        }
++        if (!_negotiate_answer_extmap (webrtc, rtp_trans, offer_media,
++                current_caps, &answer_caps, error)) {
++          gst_caps_unref (current_caps);
++          gst_caps_unref (answer_caps);
++          gst_caps_unref (offer_caps);
++          goto rejected;
 +        }
 +        if (rtp_trans->direction == GST_WEBRTC_RTP_TRANSCEIVER_DIRECTION_SENDONLY
 +            || rtp_trans->direction == GST_WEBRTC_RTP_TRANSCEIVER_DIRECTION_SENDRECV) {
@@ -69,7 +310,7 @@ diff --git a/ext/webrtc/gstwebrtcbin.c b/ext/webrtc/gstwebrtcbin.c
          }
          gst_caps_unref (current_caps);
        } else {
-@@ -5967,8 +6014,6 @@
+@@ -5967,8 +6248,6 @@
    }
  
    if (new_dir != prev_dir) {
@@ -78,7 +319,7 @@ diff --git a/ext/webrtc/gstwebrtcbin.c b/ext/webrtc/gstwebrtcbin.c
      GST_DEBUG_OBJECT (webrtc, "transceiver %" GST_PTR_FORMAT
          " direction change from %s to %s", rtp_trans,
          gst_webrtc_rtp_transceiver_direction_to_string (prev_dir),
-@@ -5995,87 +6040,90 @@
+@@ -5995,87 +6274,90 @@
  
        /* XXX: send eos event up the sink pad as well? */
      }
@@ -246,7 +487,7 @@ diff --git a/ext/webrtc/gstwebrtcbin.c b/ext/webrtc/gstwebrtcbin.c
  
    if (!bundled || bundle_idx == media_idx) {
      if (stream->rtxsend || stream->rtxreceive) {
-@@ -6538,8 +6586,78 @@
+@@ -6538,8 +6820,78 @@
       * Restore the value of connection's [[ sctpTransport]] internal slot
       * to its value at the last stable signaling state.
       */
@@ -327,7 +568,7 @@ diff --git a/ext/webrtc/gstwebrtcbin.c b/ext/webrtc/gstwebrtcbin.c
      return TRUE;
    }
  
-@@ -6643,6 +6761,8 @@
+@@ -6643,6 +6995,8 @@
             */
            GstCaps *trans_caps =
                _find_codec_preferences (webrtc, trans, i, error);

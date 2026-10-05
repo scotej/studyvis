@@ -153,12 +153,15 @@
       let acknowledged = false
       let collide = false
       const heldOffers = []
+      const mediaAnswers = []
       for (const [index, handle] of handles.entries()) {
         const other = handles[1 - index]
         handle.setHandlers({
           connect: () => connected++,
           error: (error) => errors.push(error),
           signal: (signal) => {
+            if (signal.type === 'answer' && signal.sdp.includes('a=rtpmap'))
+              mediaAnswers.push({ index, signal })
             if (
               collide &&
               signal.type === 'offer' &&
@@ -233,6 +236,63 @@
           }),
         'original Trystero senders associated after rollback'
       )
+      const extensionMaps = (sdp) =>
+        new Map(
+          sdp
+            .split(/(?=^m=)/m)
+            .slice(1)
+            .map((media) => [
+              media.match(/^a=mid:(.+)$/m)?.[1].trim(),
+              new Map(
+                [...media.matchAll(/^a=extmap:(\d+)(?:\/\w+)? (\S+)/gm)].map(
+                  ([, identifier, uri]) => [uri, Number(identifier)]
+                )
+              ),
+            ])
+        )
+      await peerUntil(() => mediaAnswers.length > 0, 'Trystero media answer')
+      const answer = mediaAnswers[0]
+      const offered = extensionMaps(
+        heldOffers.find(([recipient]) => recipient === handles[answer.index])[1]
+          .sdp
+      )
+      const accepted = extensionMaps(answer.signal.sdp)
+      for (const [mid, extensions] of accepted)
+        for (const [uri, identifier] of extensions)
+          assert(
+            offered.get(mid)?.get(uri) === identifier,
+            `Trystero answer changed offered extension ID for ${uri}`
+          )
+      const assertCommittedExtensions = () => {
+        for (const handle of handles) {
+          const current = extensionMaps(handle.connection.localDescription.sdp)
+          for (const [mid, extensions] of accepted)
+            for (const [uri, identifier] of extensions)
+              if (current.get(mid)?.has(uri))
+                assert(
+                  current.get(mid).get(uri) === identifier,
+                  `later Trystero offer changed committed extension ID for ${uri}`
+                )
+          const global = new Map()
+          const uriIdentifiers = new Map(
+            [...accepted.values()].flatMap((map) => [...map])
+          )
+          for (const extensions of current.values())
+            for (const [uri, identifier] of extensions) {
+              assert(
+                !global.has(identifier) || global.get(identifier) === uri,
+                'later Trystero offer reused an extension ID for another URI'
+              )
+              assert(
+                !uriIdentifiers.has(uri) ||
+                  uriIdentifiers.get(uri) === identifier,
+                'later Trystero offer assigned another ID to a committed URI'
+              )
+              global.set(identifier, uri)
+              uriIdentifiers.set(uri, identifier)
+            }
+        }
+      }
       await peerUntil(
         () =>
           videos[0].has(simultaneous[1].id) &&
@@ -291,10 +351,85 @@
           () => probe.hasTone(index === 0 ? 660 : 440),
           'restored Trystero microphone input'
         )
+      const lateScreen = makeSource(320, 180)
+      const screenTrack = lateScreen.getVideoTracks()[0]
+      handles[1].addStream(lateScreen)
+      await peerUntil(
+        () => videos[0].has(lateScreen.id),
+        'late Trystero screen'
+      )
+      await advancing(
+        videos[0].get(lateScreen.id),
+        320,
+        180,
+        'late Trystero screen'
+      )
+      const screenTransceiver = handles[1].connection
+        .getTransceivers()
+        .find((entry) => entry.sender.track === screenTrack)
+      assert(screenTransceiver, 'late screen lost its original sender')
+      assertCommittedExtensions()
+      handles[1].removeStream(lateScreen)
+      await peerUntil(
+        () =>
+          screenTransceiver.sender.track === null &&
+          ['recvonly', 'inactive'].includes(
+            screenTransceiver.currentDirection
+          ) &&
+          handles.every(
+            (handle) => handle.connection.signalingState === 'stable'
+          ),
+        'Trystero screen removal committed'
+      )
+      await delay(800)
+      const stoppedScreenFrames = frames(videos[0].get(lateScreen.id))
+      await delay(500)
+      assert(
+        frames(videos[0].get(lateScreen.id)) <= stoppedScreenFrames + 1,
+        'removed Trystero screen kept decoding frames'
+      )
+      handles[1].addStream(lateScreen)
+      await peerUntil(
+        () =>
+          handles[1].connection
+            .getTransceivers()
+            .some(
+              (entry) =>
+                entry.sender.track === screenTrack &&
+                entry.mid !== null &&
+                ['sendonly', 'sendrecv'].includes(entry.currentDirection)
+            ),
+        'Trystero screen restart sender committed'
+      )
+      await advancing(
+        videos[0].get(lateScreen.id),
+        320,
+        180,
+        'restarted Trystero screen'
+      )
+      assertCommittedExtensions()
+      for (const [index, width, height] of [
+        [0, 160, 120],
+        [1, 320, 180],
+      ]) {
+        await advancing(
+          videos[index].get(simultaneous[1 - index].id),
+          width,
+          height,
+          'original Trystero camera after screen restart'
+        )
+        await peerUntil(
+          () => audioProbes[index].hasTone(index === 0 ? 660 : 440),
+          'original Trystero microphone after screen restart'
+        )
+      }
+      report(
+        'balanced Trystero late screen and restart preserved committed extension IDs, both cameras, and decoded microphone tones'
+      )
       audioProbes.forEach((probe) => probe.disconnect())
       assert(errors.length === 0, 'Trystero negotiation reported an error')
       handles.forEach((handle) => handle.destroy())
-      for (const stream of simultaneous)
+      for (const stream of [...simultaneous, lateScreen])
         stream.getTracks().forEach((track) => track.stop())
       report(
         'simultaneous Trystero cameras and decoded microphone tones survived rollback, input silence, and restoration'
