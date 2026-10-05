@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.12.6 — 2026-10-05 — Session recovery and Linux media fixes
 
 ### Fixed
 
