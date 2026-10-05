@@ -397,7 +397,50 @@ diff --git a/ext/webrtc/gstwebrtcbin.c b/ext/webrtc/gstwebrtcbin.c
  
          enc_name = gst_structure_get_string (s, "encoding-name");
  
-@@ -5967,8 +6291,6 @@
+@@ -5844,6 +6168,42 @@
+   }
+ }
+ 
++static gchar *
++_get_committed_msid_from_media (const GstSDPMedia * media)
++{
++  guint i;
++
++  /* Media-level MSID is the stream identity. Legacy SSRC attributes may
++   * still contain a CNAME from an offer made before its sender pad existed. */
++  for (i = 0; i < gst_sdp_media_attributes_len (media); i++) {
++    const GstSDPAttribute *attr = gst_sdp_media_get_attribute (media, i);
++    gchar **parts;
++    const gchar *stream_id = NULL;
++    guint tokens = 0, j;
++
++    if (g_strcmp0 (attr->key, "msid") != 0 || !attr->value)
++      continue;
++
++    parts = g_strsplit_set (attr->value, " \t", -1);
++    for (j = 0; parts[j]; j++) {
++      if (!parts[j][0])
++        continue;
++      if (!tokens)
++        stream_id = parts[j];
++      tokens++;
++    }
++    if (tokens == 1 || tokens == 2) {
++      gchar *msid = g_strcmp0 (stream_id, "-") == 0 ? NULL :
++          g_strdup (stream_id);
++      g_strfreev (parts);
++      return msid;
++    }
++    g_strfreev (parts);
++  }
++
++  return _get_msid_from_media (media);
++}
++
+ static void
+ _update_transceiver_from_sdp_media (GstWebRTCBin * webrtc,
+     const GstSDPMessage * sdp, guint media_idx,
+@@ -5967,8 +6327,6 @@
    }
  
    if (new_dir != prev_dir) {
@@ -406,7 +449,7 @@ diff --git a/ext/webrtc/gstwebrtcbin.c b/ext/webrtc/gstwebrtcbin.c
      GST_DEBUG_OBJECT (webrtc, "transceiver %" GST_PTR_FORMAT
          " direction change from %s to %s", rtp_trans,
          gst_webrtc_rtp_transceiver_direction_to_string (prev_dir),
-@@ -5976,10 +6298,31 @@
+@@ -5976,10 +6334,31 @@
  
      if (new_dir == GST_WEBRTC_RTP_TRANSCEIVER_DIRECTION_INACTIVE) {
        if (!webrtc->priv->reuse_source_pads) {
@@ -442,7 +485,7 @@ diff --git a/ext/webrtc/gstwebrtcbin.c b/ext/webrtc/gstwebrtcbin.c
            GstPad *target = gst_ghost_pad_get_target (GST_GHOST_PAD (pad));
            if (target) {
              GstPad *peer = gst_pad_get_peer (target);
-@@ -5989,93 +6332,96 @@
+@@ -5989,93 +6368,96 @@
              }
              gst_object_unref (target);
            }
@@ -484,7 +527,7 @@ diff --git a/ext/webrtc/gstwebrtcbin.c b/ext/webrtc/gstwebrtcbin.c
 +      new_dir == GST_WEBRTC_RTP_TRANSCEIVER_DIRECTION_SENDRECV) {
 +    GstWebRTCBinPad *pad =
 +        _find_pad_for_transceiver (webrtc, GST_PAD_SINK, rtp_trans);
-+    local_msid = _get_msid_from_media (local_media);
++    local_msid = _get_committed_msid_from_media (local_media);
 +
 +    if (pad) {
 +      GST_DEBUG_OBJECT (webrtc, "found existing send pad %" GST_PTR_FORMAT
@@ -547,7 +590,7 @@ diff --git a/ext/webrtc/gstwebrtcbin.c b/ext/webrtc/gstwebrtcbin.c
 +    guint rtp_session_id = bundled ? bundle_idx : media_idx;
 +    GstWebRTCBinPad *pad =
 +        _find_pad_for_transceiver (webrtc, GST_PAD_SRC, rtp_trans);
-+    char *remote_msid = _get_msid_from_media (remote_media);
++    char *remote_msid = _get_committed_msid_from_media (remote_media);
 +
 +    if (pad) {
 +      GST_DEBUG_OBJECT (webrtc, "found existing receive pad %" GST_PTR_FORMAT
@@ -617,7 +660,7 @@ diff --git a/ext/webrtc/gstwebrtcbin.c b/ext/webrtc/gstwebrtcbin.c
  
    if (!bundled || bundle_idx == media_idx) {
      if (stream->rtxsend || stream->rtxreceive) {
-@@ -6538,8 +6884,78 @@
+@@ -6538,8 +6920,78 @@
       * Restore the value of connection's [[ sctpTransport]] internal slot
       * to its value at the last stable signaling state.
       */
@@ -698,7 +741,7 @@ diff --git a/ext/webrtc/gstwebrtcbin.c b/ext/webrtc/gstwebrtcbin.c
      return TRUE;
    }
  
-@@ -6643,6 +7059,8 @@
+@@ -6643,6 +7095,8 @@
             */
            GstCaps *trans_caps =
                _find_codec_preferences (webrtc, trans, i, error);
@@ -707,3 +750,131 @@ diff --git a/ext/webrtc/gstwebrtcbin.c b/ext/webrtc/gstwebrtcbin.c
            if (error && *error)
              goto out;
  
+@@ -7713,6 +8167,107 @@
+ 
+ /* === rtpbin signal implementations === */
+ 
++static gboolean
++_media_uses_payload (const GstSDPMedia * media, guint pt)
++{
++  guint format;
++
++  for (format = 0; format < gst_sdp_media_formats_len (media); format++) {
++    const gchar *value = gst_sdp_media_get_format (media, format);
++    gchar *end;
++    guint64 payload = g_ascii_strtoull (value, &end, 10);
++    if (end != value && !*end && payload == pt)
++      return TRUE;
++  }
++  return FALSE;
++}
++
++static gboolean
++_description_bundles_mid (GstWebRTCBin * webrtc, GstSDPMessage * sdp,
++    TransportStream * stream, const gchar * mid)
++{
++  GStrv mids = NULL;
++  gboolean included = FALSE;
++  guint bundle_idx;
++
++  if (_parse_bundle (sdp, &mids, NULL) && mids &&
++      g_strv_contains ((const gchar * const *) mids, mid) &&
++      _get_bundle_index (sdp, mids, &bundle_idx))
++    included = _find_transport_for_session (webrtc, bundle_idx) == stream;
++  g_strfreev (mids);
++  return included;
++}
++
++static GstWebRTCRTPTransceiver *
++_find_committed_rtp_caps_owner (GstWebRTCBin * webrtc,
++    TransportStream * stream, GstPad * pad, guint pt)
++{
++  GstWebRTCRTPTransceiver *owner = NULL;
++  GstCaps *caps = gst_pad_get_current_caps (pad);
++  const gchar *mid;
++  guint matches = 0, i;
++
++  if (!caps || gst_caps_is_empty (caps) || gst_caps_is_any (caps) ||
++      !webrtc->current_local_description || !webrtc->current_remote_description)
++    goto out;
++  mid = gst_structure_get_string (gst_caps_get_structure (caps, 0), "a-mid");
++  if (!mid)
++    goto out;
++
++  for (i = 0; i < webrtc->priv->transceivers->len; i++) {
++    GstWebRTCRTPTransceiver *trans =
++        g_ptr_array_index (webrtc->priv->transceivers, i);
++    const GstSDPMedia *local, *remote;
++
++    if (trans->stopped || WEBRTC_TRANSCEIVER (trans)->stream != stream ||
++        (trans->current_direction != GST_WEBRTC_RTP_TRANSCEIVER_DIRECTION_RECVONLY
++            && trans->current_direction !=
++            GST_WEBRTC_RTP_TRANSCEIVER_DIRECTION_SENDRECV) ||
++        trans->mline >= gst_sdp_message_medias_len
++        (webrtc->current_local_description->sdp) ||
++        trans->mline >= gst_sdp_message_medias_len
++        (webrtc->current_remote_description->sdp))
++      continue;
++    local = gst_sdp_message_get_media (webrtc->current_local_description->sdp,
++        trans->mline);
++    remote = gst_sdp_message_get_media (webrtc->current_remote_description->sdp,
++        trans->mline);
++    if (g_strcmp0 (trans->mid, gst_sdp_media_get_attribute_val (local, "mid")) ||
++        g_strcmp0 (trans->mid, gst_sdp_media_get_attribute_val (remote, "mid")) ||
++        !_media_uses_payload (local, pt) || !_media_uses_payload (remote, pt))
++      continue;
++    if (!gst_sdp_media_get_port (local) || !gst_sdp_media_get_port (remote)) {
++      const GstSDPMedia *offer, *answer;
++      if (webrtc->current_local_description->type == GST_WEBRTC_SDP_TYPE_OFFER &&
++          webrtc->current_remote_description->type == GST_WEBRTC_SDP_TYPE_ANSWER) {
++        offer = local;
++        answer = remote;
++      } else if (webrtc->current_remote_description->type == GST_WEBRTC_SDP_TYPE_OFFER &&
++          webrtc->current_local_description->type == GST_WEBRTC_SDP_TYPE_ANSWER) {
++        offer = remote;
++        answer = local;
++      } else
++        continue;
++      if (gst_sdp_media_get_port (offer) ||
++          !_media_has_attribute_key (offer, "bundle-only") ||
++          !gst_sdp_media_get_port (answer) ||
++          !_description_bundles_mid (webrtc,
++              webrtc->current_local_description->sdp, stream, trans->mid) ||
++          !_description_bundles_mid (webrtc,
++              webrtc->current_remote_description->sdp, stream, trans->mid))
++        continue;
++    }
++    matches++;
++    if (!g_strcmp0 (trans->mid, mid))
++      owner = trans;
++  }
++  if (matches != 1)
++    owner = NULL;
++out:
++  gst_clear_caps (&caps);
++  return owner;
++}
++
+ static void
+ on_rtpbin_pad_added (GstElement * rtpbin, GstPad * new_pad,
+     GstWebRTCBin * webrtc)
+@@ -7746,6 +8301,19 @@
+     mid_entry =
+         find_mid_ssrc_for_ssrc (webrtc,
+         GST_WEBRTC_RTP_TRANSCEIVER_DIRECTION_RECVONLY, session_id, ssrc);
++
++    /* A deferred sender has no SSRC in its first offer. Only an unambiguous
++     * accepted RTP caps MID can associate that new SSRC with its BUNDLE owner. */
++    if (!mid_entry || (!mid_entry->mid && mid_entry->media_idx == G_MAXUINT)) {
++      rtp_trans = _find_committed_rtp_caps_owner (webrtc, stream, new_pad, pt);
++      if (rtp_trans) {
++        mid_entry = find_or_add_ssrc_map_item (webrtc,
++            GST_WEBRTC_RTP_TRANSCEIVER_DIRECTION_RECVONLY, session_id, ssrc,
++            rtp_trans->mline);
++        mid_entry->media_idx = rtp_trans->mline;
++        mid_entry->mid = g_strdup (rtp_trans->mid);
++      }
++    }
+ 
+     if (mid_entry) {
+       if (mid_entry->mid) {

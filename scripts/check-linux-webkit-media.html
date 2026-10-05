@@ -838,7 +838,13 @@
             narrowVideos[index] = makeVideo(event.streams[0])
           else narrowAudio[index] = event.track
         }
-        for (const track of narrowStreams[index].getTracks())
+        // The pinned setCodecPreferences API starts its own dynamic payload
+        // allocation at 96. Add video first so this focused VP9 case does not
+        // reuse an audio payload for a different bundled codec.
+        for (const track of [
+          ...narrowStreams[index].getVideoTracks(),
+          ...narrowStreams[index].getAudioTracks(),
+        ])
           peer.addTrack(track, narrowStreams[index])
       }
       narrowOfferer
@@ -846,6 +852,21 @@
         .find((transceiver) => transceiver.sender.track.kind === 'video')
         .setCodecPreferences(codecs)
       const narrowOffer = await narrowOfferer.createOffer()
+      const bundledPayloadCodecs = new Map()
+      let mediaKind
+      for (const line of narrowOffer.sdp.split(/\r?\n/)) {
+        const media = /^m=(\w+)/.exec(line)
+        if (media) mediaKind = media[1]
+        const codec = /^a=rtpmap:(\d+) (\S+)/.exec(line)
+        if (!codec) continue
+        const identity = `${mediaKind}/${codec[2].toLowerCase()}`
+        assert(
+          !bundledPayloadCodecs.has(codec[1]) ||
+            bundledPayloadCodecs.get(codec[1]) === identity,
+          'VP9-only offer reused a bundled payload for a different codec'
+        )
+        bundledPayloadCodecs.set(codec[1], identity)
+      }
       assert(
         !/a=rtpmap:\d+ VP8\//i.test(narrowOffer.sdp),
         'VP9-only offer still advertises the default VP8 codec'
