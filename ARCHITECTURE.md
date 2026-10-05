@@ -672,6 +672,7 @@ loop:
         pause AI; show on-battery-paused notice   # battery, not thermal
         sleep(60s); continue
 
+    start_main_thread_starvation_probe()          # #269/#350 — capture too
     face_frame  = capture_camera_frame()
     screen_grab = capture_primary_display()
     t0 = now()
@@ -693,10 +694,11 @@ loop:
       max_tokens: 200,
     }
     inference_sec = now() - t0
-    # #269 — a 1 Hz probe armed for exactly the request window above; every
-    # exit from it (answer, non-2xx, bad JSON, rejection, timeout abort)
-    # reads the probe before rescheduling.
-    starved_ms = worst_main_thread_lateness_during(request)
+    # #269/#350 — a 1 Hz probe spans capture and inference; every exit
+    # (capture failure, engine warming, answer, non-2xx, bad JSON, rejection,
+    # timeout abort) reads the probe before rescheduling. Inference duration
+    # still measures only the POST. Stopping discards the probe.
+    starved_ms = worst_main_thread_lateness_during(capture_and_request)
     update_cadence_backoff(inference_sec, benchmark_p95, starved_ms)  # A6/#269
     judgment = parse_json(response)
     # A2 — a malformed/empty response is an UNCERTAIN skip (not a fabricated

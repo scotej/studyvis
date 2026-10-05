@@ -7,6 +7,8 @@
 - A new session chat message or image replaces the older floating chat
   notification immediately and renews its expiry, so a burst of messages
   does not leave an outdated card on screen.
+- AI checks now reduce their sampling rate after a capture stalls the app,
+  as they already do for an inference stall.
 
 ## 1.12.5 — 2026-09-27 — Linux camera and AI improvements
 

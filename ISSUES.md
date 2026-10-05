@@ -1205,6 +1205,25 @@ receives a fresh expiry. Other alerts retain their order. Queue and runtime
 tests cover immediate replacement, renewed expiry, and stale layout/dismiss
 events; the regressions fail with the change reverted.
 
+### I122 — Sev2
+
+`src/features/ai/sampleLoop.ts`
+
+**Evidence.** GitHub #350's Windows archive records a 20,990 ms capture
+overlapping 7,680 ms and 12,124 ms main-thread gaps and the peers' ICE failure.
+The sample nevertheless reports only 228 ms starvation and no cadence
+backoff: its overload probe starts after capture. The session remains live
+until both clients explicitly leave with reason `user`; the archives do not
+show a forced session end.
+
+**Status.** **mitigated on branch** — the starvation probe spans capture and
+inference, including failed captures and engine-warming exits. Inference
+duration still measures the POST separately. Regression tests cover frozen
+successful/failed capture, a responsive slow capture, and stopping during
+capture. The frozen-capture cases fail with the fix reverted. The initial
+native capture stall and the original two-device recovery remain under
+investigation; this mitigation alone does not prove #350 resolved.
+
 ## Archive — retired backlogs
 
 Two documents used to sit beside this ledger and were deleted once their implementation backlog had no open code work left: `BUILD-PROMPTS.md` (the sequenced V0→V3 build plan) and `IMPROVEMENTS.md` (the v1.2.0-era improvement backlog). Git history holds both in full — `git log --diff-filter=D -- BUILD-PROMPTS.md IMPROVEMENTS.md`, then `git show <sha>^:<file>`. Linux's implementation checklist is complete, but its operational release sign-off remains pending. What survives here is the part still cited from code.
