@@ -1235,6 +1235,8 @@ Browser probes did not reproduce the reported 21 s stall: a 21 s JavaScript
 busy loop preserved ICE/session peers, while whole-renderer suspension caused
 ICE failure followed by automatic rejoin after resumption. Elapsed capture
 and zero clock skew cannot establish the original cause. The reported stall
+occurred while both computers stayed active on the same networks, according to
+the reporter; sleep, lock, and network changes were not observed. The stall
 and two-device recovery remain under investigation; these mitigations and
 diagnostics alone do not prove #350 resolved.
 
@@ -1270,7 +1272,9 @@ the TTL after pool selection.
 
 **Status.** **fixed on branch** — retire expired warm peers and replace returned
 unused peers with fresh connections. The pool owns age rotation; encryption no
-longer restarts an unused offer. Claimed leases and connected/shared peers stay
+longer restarts an unused offer. Replacement-allocation failure leaves an empty
+slot so owner cleanup can finish and the next checkout can retry. Claimed leases
+and connected/shared peers stay
 owned by their existing path. Real-browser controls produce empty offers;
 patched aged/recycled cases establish connections and exchange data. Actual
 module regressions cover both paths and the TTL boundary. These defects are
