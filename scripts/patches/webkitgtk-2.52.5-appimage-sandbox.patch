@@ -1012,7 +1012,7 @@ diff --git a/Source/WebCore/platform/mediastream/gstreamer/RealtimeOutgoingMedia
 diff --git a/Source/WebCore/platform/mediastream/gstreamer/RealtimeIncomingSourceGStreamer.cpp b/Source/WebCore/platform/mediastream/gstreamer/RealtimeIncomingSourceGStreamer.cpp
 --- a/Source/WebCore/platform/mediastream/gstreamer/RealtimeIncomingSourceGStreamer.cpp
 +++ b/Source/WebCore/platform/mediastream/gstreamer/RealtimeIncomingSourceGStreamer.cpp
-@@ -44,35 +44,67 @@
+@@ -44,35 +44,91 @@
  
  bool RealtimeIncomingSourceGStreamer::setBin(GRefPtr<GstElement>&& bin)
  {
@@ -1070,6 +1070,24 @@ diff --git a/Source/WebCore/platform/mediastream/gstreamer/RealtimeIncomingSourc
 +    auto destroyContext = +[](gpointer data, GClosure*) { delete static_cast<CallbackContext*>(data); };
 +    m_prerollHandoffHandlerId = g_signal_connect_data(m_sink.get(), "preroll-handoff", handoffCallback, new CallbackContext { ThreadSafeWeakPtr { *this }, binState }, destroyContext, G_CONNECT_DEFAULT);
 +    m_handoffHandlerId = g_signal_connect_data(m_sink.get(), "handoff", handoffCallback, new CallbackContext { ThreadSafeWeakPtr { *this }, binState }, destroyContext, G_CONNECT_DEFAULT);
++
++    // I125: retire this binding at its own input EOS. The decoder queue may
++    // delay sink EOS until after a replacement track is ready to bind.
++    auto binSinkPad = adoptGRef(gst_element_get_static_pad(m_bin.get(), "sink"));
++    m_binSinkPadProbeId = gst_pad_add_probe(binSinkPad.get(), GST_PAD_PROBE_TYPE_EVENT_DOWNSTREAM, reinterpret_cast<GstPadProbeCallback>(+[](GstPad*, GstPadProbeInfo* info, gpointer userData) -> GstPadProbeReturn {
++        auto& context = *static_cast<CallbackContext*>(userData);
++        auto self = context.source.get();
++        if (!self)
++            return GST_PAD_PROBE_REMOVE;
++        auto currentBinState = self->m_binState.load();
++        if ((currentBinState & ~uint64_t { 1 }) != context.binState)
++            return GST_PAD_PROBE_DROP;
++        if (GST_EVENT_TYPE(GST_PAD_PROBE_INFO_EVENT(info)) == GST_EVENT_EOS) {
++            self->m_binState.compareExchangeStrong(context.binState, context.binState | 1);
++            return GST_PAD_PROBE_OK;
++        }
++        return currentBinState == context.binState ? GST_PAD_PROBE_OK : GST_PAD_PROBE_DROP;
++    }), new CallbackContext { ThreadSafeWeakPtr { *this }, binState }, +[](gpointer data) { delete static_cast<CallbackContext*>(data); });
  
      auto sinkPad = adoptGRef(gst_element_get_static_pad(m_sink.get(), "sink"));
 -    m_sinkPadProbeId = gst_pad_add_probe(sinkPad.get(), static_cast<GstPadProbeType>(GST_PAD_PROBE_TYPE_EVENT_DOWNSTREAM | GST_PAD_PROBE_TYPE_QUERY_DOWNSTREAM), reinterpret_cast<GstPadProbeCallback>(+[](GstPad*, GstPadProbeInfo* info, gpointer userData) -> GstPadProbeReturn {
@@ -1079,8 +1097,14 @@ diff --git a/Source/WebCore/platform/mediastream/gstreamer/RealtimeIncomingSourc
 +        auto self = context.source.get();
 +        if (!self)
 +            return GST_PAD_PROBE_REMOVE;
-+        if (self->m_binState.load() != context.binState)
-+            return GST_PAD_PROBE_DROP;
++        auto currentBinState = self->m_binState.load();
++        if (currentBinState != context.binState) {
++            bool isSameBindingEOS = (info->type & GST_PAD_PROBE_TYPE_EVENT_DOWNSTREAM)
++                && GST_EVENT_TYPE(GST_PAD_PROBE_INFO_EVENT(info)) == GST_EVENT_EOS
++                && (currentBinState & ~uint64_t { 1 }) == context.binState;
++            if (!isSameBindingEOS)
++                return GST_PAD_PROBE_DROP;
++        }
          if (info->type & GST_PAD_PROBE_TYPE_EVENT_DOWNSTREAM) {
              GRefPtr event = GST_PAD_PROBE_INFO_EVENT(info);
 -            return self->handleDownstreamEvent(WTF::move(event));
@@ -1089,7 +1113,7 @@ diff --git a/Source/WebCore/platform/mediastream/gstreamer/RealtimeIncomingSourc
          }
  
          auto query = GST_PAD_PROBE_INFO_QUERY(info);
-@@ -81,7 +113,9 @@
+@@ -81,7 +137,9 @@
              gst_pad_peer_query(srcSrcPad.get(), query);
          });
          return GST_PAD_PROBE_OK;
@@ -1100,11 +1124,14 @@ diff --git a/Source/WebCore/platform/mediastream/gstreamer/RealtimeIncomingSourc
      return true;
  }
  
-@@ -90,11 +124,14 @@
+@@ -90,11 +148,17 @@
      if (!m_bin)
          return;
  
 +    m_binState.store((m_binState.load() & ~uint64_t { 1 }) + 2);
++
++    auto binSinkPad = adoptGRef(gst_element_get_static_pad(m_bin.get(), "sink"));
++    gst_pad_remove_probe(binSinkPad.get(), m_binSinkPadProbeId);
 +
      g_object_set(m_sink.get(), "signal-handoffs", FALSE, nullptr);
  
@@ -1116,7 +1143,7 @@ diff --git a/Source/WebCore/platform/mediastream/gstreamer/RealtimeIncomingSourc
  
      m_sink = nullptr;
      m_bin = nullptr;
-@@ -159,12 +196,17 @@
+@@ -159,12 +223,17 @@
      return gst_pad_peer_query(pad.get(), query);
  }
  
@@ -1137,7 +1164,7 @@ diff --git a/Source/WebCore/platform/mediastream/gstreamer/RealtimeIncomingSourc
      case GST_EVENT_STREAM_START:
      case GST_EVENT_CAPS:
      case GST_EVENT_SEGMENT:
-@@ -172,9 +214,9 @@
+@@ -172,9 +241,9 @@
          return GST_PAD_PROBE_OK;
      case GST_EVENT_LATENCY: {
          GstClockTime minLatency, maxLatency;
@@ -1149,7 +1176,7 @@ diff --git a/Source/WebCore/platform/mediastream/gstreamer/RealtimeIncomingSourc
                  g_object_set(appsrc, "min-latency", minLatency, "max-latency", maxLatency, nullptr);
              });
          }
-@@ -197,7 +239,7 @@
+@@ -197,7 +266,7 @@
  
      forEachClient([&](auto* appsrc) {
          auto pad = adoptGRef(gst_element_get_static_pad(appsrc, "src"));
@@ -1179,7 +1206,7 @@ diff --git a/Source/WebCore/platform/mediastream/gstreamer/RealtimeIncomingSourc
  
  protected:
      RealtimeIncomingSourceGStreamer(const CaptureDevice&);
-@@ -56,6 +58,10 @@
+@@ -56,6 +58,11 @@
  
      GRefPtr<GstElement> m_bin;
      GRefPtr<GstElement> m_sink;
@@ -1187,6 +1214,7 @@ diff --git a/Source/WebCore/platform/mediastream/gstreamer/RealtimeIncomingSourc
 +    Atomic<uint64_t> m_binState { 0 };
 +    unsigned long m_prerollHandoffHandlerId { 0 };
 +    unsigned long m_handoffHandlerId { 0 };
++    unsigned long m_binSinkPadProbeId { 0 };
      unsigned long m_sinkPadProbeId;
      Lock m_clientLock;
      HashMap<int, GRefPtr<GstElement>> m_clients WTF_GUARDED_BY_LOCK(m_clientLock);

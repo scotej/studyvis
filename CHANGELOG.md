@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.12.6 — 2026-10-05 — Session recovery and Linux media fixes
+## 1.12.7 — 2026-10-05 — Session recovery and Linux media fixes
 
 ### Fixed
 
