@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.12.6 — 2026-10-05 — Session recovery and Linux media fixes
 
 ### Fixed
 
@@ -12,6 +12,8 @@
 - AI checks now reduce their sampling rate when the app becomes unresponsive
   during frame capture, as they already do during inference.
 - AI checks no longer retain large copies of historical prompts in memory.
+- Linux camera and microphone publication recovers when peers start media
+  together, and screen sharing preserves media through stop and restart.
 
 ## 1.12.5 — 2026-09-27 — Linux camera and AI improvements
 

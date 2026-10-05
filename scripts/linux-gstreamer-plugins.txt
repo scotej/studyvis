@@ -22,6 +22,8 @@ libgstvideoconvert.so|libgstvideoconvertscale.so
 libgstvideorate.so
 libgstvideoscale.so|libgstvideoconvertscale.so
 libgstvolume.so
+# #349: WebAudio pulls decoded remote channels through deinterleave.
+libgstinterleave.so
 libgstautodetect.so
 libgstpulseaudio.so
 libgstalsa.so

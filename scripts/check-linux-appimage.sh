@@ -30,7 +30,7 @@ if [[ $# -ne 1 ]]; then
   exit 2
 fi
 
-for command_name in bash cc cmp dbus-run-session env find grep gst-inspect-1.0 head ldd mkdir mktemp node npm pkg-config python3 readelf realpath sed sha256sum timeout tr wc xvfb-run; do
+for command_name in bash cc cmp dbus-run-session env find grep gst-inspect-1.0 head ldd mkdir mktemp node npm pkg-config python3 readelf realpath sed sha256sum tee timeout tr wc xvfb-run; do
   command -v "$command_name" >/dev/null 2>&1 || die "missing AppImage check dependency: $command_name"
 done
 
@@ -149,6 +149,7 @@ license_files=(
   librice-LICENSE-APACHE
   librice-LICENSE-MIT
   webkitgtk-appimage-sandbox.patch
+  gst-plugins-bad-webrtc-rollback.patch
   WEBKIT-LICENSE-FILES.sha256
   WEBKIT-THIRD-PARTY-LICENSES.txt
 )
@@ -183,6 +184,10 @@ fi
 read -r packaged_patch_sha256 _ < <(sha256sum "$license_dir/webkitgtk-appimage-sandbox.patch")
 [[ $packaged_patch_sha256 == "$STUDYVIS_WEBKIT_PATCH_SHA256" ]] || {
   die "packaged WebKitGTK patch has the wrong SHA256: $packaged_patch_sha256"
+}
+read -r gstreamer_patch_sha256 _ < <(sha256sum "$license_dir/gst-plugins-bad-webrtc-rollback.patch")
+[[ $gstreamer_patch_sha256 == "$STUDYVIS_GSTREAMER_BAD_PATCH_SHA256" ]] || {
+  die "packaged GStreamer rollback patch has the wrong SHA256: $gstreamer_patch_sha256"
 }
 [[ $(wc -l <"$license_dir/WEBKIT-LICENSE-FILES.sha256") -eq 59 ]] || {
   die "packaged WebKit license hash inventory is incomplete"
@@ -335,7 +340,7 @@ grep -aFq "StudyVis GStreamer $STUDYVIS_GSTREAMER_VERSION (runtime r$STUDYVIS_WE
 test_home="$extract/home"
 mkdir -p "$test_home/.config"
 for element in \
-  videotestsrc audiotestsrc \
+  videotestsrc audiotestsrc interleave deinterleave \
   glupload glcolorconvert gldownload \
   pipewiresrc webrtcbin nicesrc nicesink rtpbin \
   v4l2src jpegenc jpegdec decodebin3 \
@@ -444,7 +449,18 @@ media_probe="$root/usr/bin/studyvis-webkit-media-check"
 # shellcheck disable=SC2046
 cc -Wall -Wextra -Werror "$script_dir/check-linux-webkit-media.c" \
   -o "$media_probe" $(pkg-config --cflags --libs webkit2gtk-4.1)
+media_probe_html="$extract/check-linux-webkit-media.html"
+node "$script_dir/build-linux-webkit-media-probe.mjs" "$media_probe_html"
+media_probe_log="$scratch_parent/studyvis-webkit-media.log"
+media_probe_debug=()
+if [[ ${STUDYVIS_WEBKIT_MEDIA_DIAGNOSTICS:-0} == 1 ]]; then
+  media_probe_debug+=(
+    GST_DEBUG='webrtc*:6,webkitwebrtc*:6,rtp*:5,dtls*:5'
+    GST_DEBUG_NO_COLOR=1
+  )
+fi
 env \
+  "${media_probe_debug[@]}" \
   HOME="$test_home" \
   LD_LIBRARY_PATH="$packaged_library_path" \
   GST_PLUGIN_SCANNER_1_0="$scanner" \
@@ -456,7 +472,7 @@ env \
   PIPEWIRE_CONFIG_DIR="$root/usr/share/pipewire" \
   GDK_BACKEND=x11 LIBGL_ALWAYS_SOFTWARE=1 \
   timeout 75s xvfb-run -a dbus-run-session -- \
-    "$media_probe" "$script_dir/check-linux-webkit-media.html" || {
+    "$media_probe" "$media_probe_html" 2>&1 | tee "$media_probe_log" || {
       die "packaged WebKit cannot render and renegotiate peer media"
     }
 

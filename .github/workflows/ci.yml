@@ -627,9 +627,25 @@ jobs:
           echo "APPIMAGE_PATH=$appimage" >> "$GITHUB_ENV"
 
       - name: Assert packaged WebKit, PipeWire, and AI runtimes
+        id: packaged-runtimes
         shell: bash
+        env:
+          STUDYVIS_WEBKIT_MEDIA_DIAGNOSTICS: '1'
         run: |
           bash scripts/check-linux-appimage.sh "$APPIMAGE_PATH"
+
+      - name: Retain failed native media diagnostics
+        if: ${{ failure() && steps.packaged-runtimes.outcome == 'failure' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: StudyVis-Linux-native-diagnostics-${{ github.run_id }}
+          path: |
+            ${{ env.APPIMAGE_PATH }}
+            ${{ steps.webkit-runtime.outputs.runtime-dir }}
+            ${{ runner.temp }}/studyvis-webkit-media.log
+          retention-days: 1
+          include-hidden-files: true
+          if-no-files-found: error
 
       - name: Launch the packaged AppImage under Xvfb
         shell: bash

@@ -24,6 +24,7 @@
     const peers = []
     const sources = []
     const timers = []
+    const audioProbes = []
     let audioContext
     try {
       const makeSource = (width, height) => {
@@ -44,13 +45,62 @@
       }
       audioContext = new AudioContext()
       await audioContext.resume()
+      const microphoneGains = new Map()
       const addMicrophone = (stream, frequency) => {
         const tone = audioContext.createOscillator()
         tone.frequency.value = frequency
+        const gain = audioContext.createGain()
         const destination = audioContext.createMediaStreamDestination()
-        tone.connect(destination)
+        tone.connect(gain)
+        gain.connect(destination)
+        microphoneGains.set(stream.id, gain)
         tone.start()
         stream.addTrack(destination.stream.getAudioTracks()[0])
+      }
+      const makeAudioProbe = (track) => {
+        const source = audioContext.createMediaStreamSource(
+          new MediaStream([track])
+        )
+        const analyser = audioContext.createAnalyser()
+        analyser.fftSize = 4096
+        const gain = audioContext.createGain()
+        gain.gain.value = 0
+        source.connect(analyser)
+        analyser.connect(gain)
+        gain.connect(audioContext.destination)
+        const samples = new Float32Array(analyser.fftSize)
+        const spectrum = new Float32Array(analyser.frequencyBinCount)
+        const sample = () => {
+          analyser.getFloatTimeDomainData(samples)
+          analyser.getFloatFrequencyData(spectrum)
+          let power = 0
+          for (const value of samples) power += value * value
+          let peak = 1
+          for (let bin = 2; bin < spectrum.length; bin++)
+            if (spectrum[bin] > spectrum[peak]) peak = bin
+          return {
+            rms: Math.sqrt(power / samples.length),
+            frequency: (peak * audioContext.sampleRate) / analyser.fftSize,
+          }
+        }
+        const probe = {
+          sample,
+          hasTone: (frequency) => {
+            const value = sample()
+            return (
+              value.rms > 0.02 &&
+              Math.abs(value.frequency - frequency) <
+                (2 * audioContext.sampleRate) / analyser.fftSize
+            )
+          },
+          disconnect: () => {
+            source.disconnect()
+            analyser.disconnect()
+            gain.disconnect()
+          },
+        }
+        audioProbes.push(probe)
+        return probe
       }
       const makeVideo = (stream) => {
         const video = document.createElement('video')
@@ -87,6 +137,380 @@
         const pixel = sample.getImageData(0, 0, 1, 1).data
         assert(pixel[0] + pixel[1] + pixel[2] > 100, `${label}: black pixels`)
       }
+      const handles = [
+        StudyVisPeerProbe(true, {
+          rtcConfig: { iceServers: [] },
+        }),
+        StudyVisPeerProbe(false, {
+          rtcConfig: { iceServers: [] },
+        }),
+      ]
+      peers.push(...handles.map((handle) => handle.connection))
+      const errors = []
+      const videos = [new Map(), new Map()]
+      const audioTracks = [new Map(), new Map()]
+      let connected = 0
+      let acknowledged = false
+      let collide = false
+      const heldOffers = []
+      const mediaAnswers = []
+      for (const [index, handle] of handles.entries()) {
+        const other = handles[1 - index]
+        handle.setHandlers({
+          connect: () => connected++,
+          error: (error) => errors.push(error),
+          signal: (signal) => {
+            if (signal.type === 'answer' && signal.sdp.includes('a=rtpmap'))
+              mediaAnswers.push({ index, signal })
+            if (
+              collide &&
+              signal.type === 'offer' &&
+              signal.sdp.includes('a=rtpmap')
+            ) {
+              heldOffers.push([other, signal])
+              if (heldOffers.length < 2) return
+              collide = false
+              for (const [recipient, offer] of heldOffers)
+                Promise.resolve().then(() => recipient.signal(offer))
+            } else Promise.resolve().then(() => other.signal(signal))
+          },
+          data: (data) => {
+            if (data === 'ping') handle.sendData('pong')
+            else if (data === 'pong') acknowledged = true
+          },
+          track: (track, stream) => {
+            assert(
+              sources.some((source) => source.id === stream.id),
+              'Trystero received an unknown stream ID'
+            )
+            if (track.kind === 'audio') audioTracks[index].set(stream.id, track)
+            else videos[index].set(stream.id, makeVideo(stream))
+          },
+        })
+      }
+      const peerUntil = async (predicate, label) =>
+        until(() => {
+          if (errors.length) throw errors[0]
+          return predicate()
+        }, label)
+      await peerUntil(() => connected === 2, 'Trystero data channels')
+      handles[0].sendData('ping')
+      await peerUntil(() => acknowledged, 'Trystero data round-trip')
+      report(
+        'default-balanced Trystero data channels exchanged a ping and pong'
+      )
+      const simultaneous = [makeSource(320, 180), makeSource(160, 120)]
+      addMicrophone(simultaneous[0], 440)
+      addMicrophone(simultaneous[1], 660)
+      // Keep opposite publication orders deterministic: their dynamic payload
+      // allocations must not prevent reuse of the original local senders.
+      for (const [index, stream] of simultaneous.entries()) {
+        const tracks = [...stream.getVideoTracks(), ...stream.getAudioTracks()]
+        if (index === 1) tracks.reverse()
+        stream.getTracks = () => [...tracks]
+      }
+      collide = true
+      handles[0].addStream(simultaneous[0])
+      handles[1].addStream(simultaneous[1])
+      await peerUntil(
+        () => heldOffers.length === 2,
+        'simultaneous Trystero media offers'
+      )
+      await peerUntil(
+        () =>
+          peers.slice(0, 2).every((peer, index) => {
+            const transceivers = peer.getTransceivers()
+            return (
+              transceivers.length === 2 &&
+              simultaneous[index]
+                .getTracks()
+                .every((track) =>
+                  transceivers.some(
+                    (transceiver) =>
+                      transceiver.sender.track === track &&
+                      transceiver.mid !== null &&
+                      transceiver.currentDirection === 'sendrecv'
+                  )
+                )
+            )
+          }),
+        'original Trystero senders associated after rollback'
+      )
+      const extensionMaps = (sdp) =>
+        new Map(
+          sdp
+            .split(/(?=^m=)/m)
+            .slice(1)
+            .map((media) => [
+              media.match(/^a=mid:(.+)$/m)?.[1].trim(),
+              new Map(
+                [...media.matchAll(/^a=extmap:(\d+)(?:\/\w+)? (\S+)/gm)].map(
+                  ([, identifier, uri]) => [uri, Number(identifier)]
+                )
+              ),
+            ])
+        )
+      await peerUntil(() => mediaAnswers.length > 0, 'Trystero media answer')
+      const answer = mediaAnswers[0]
+      const offered = extensionMaps(
+        heldOffers.find(([recipient]) => recipient === handles[answer.index])[1]
+          .sdp
+      )
+      const accepted = extensionMaps(answer.signal.sdp)
+      for (const [mid, extensions] of accepted)
+        for (const [uri, identifier] of extensions)
+          assert(
+            offered.get(mid)?.get(uri) === identifier,
+            `Trystero answer changed offered extension ID for ${uri}`
+          )
+      const assertCommittedExtensions = () => {
+        for (const handle of handles) {
+          const current = extensionMaps(handle.connection.localDescription.sdp)
+          for (const [mid, extensions] of accepted)
+            for (const [uri, identifier] of extensions)
+              if (current.get(mid)?.has(uri))
+                assert(
+                  current.get(mid).get(uri) === identifier,
+                  `later Trystero offer changed committed extension ID for ${uri}`
+                )
+          const global = new Map()
+          const uriIdentifiers = new Map(
+            [...accepted.values()].flatMap((map) => [...map])
+          )
+          for (const extensions of current.values())
+            for (const [uri, identifier] of extensions) {
+              assert(
+                !global.has(identifier) || global.get(identifier) === uri,
+                'later Trystero offer reused an extension ID for another URI'
+              )
+              assert(
+                !uriIdentifiers.has(uri) ||
+                  uriIdentifiers.get(uri) === identifier,
+                'later Trystero offer assigned another ID to a committed URI'
+              )
+              global.set(identifier, uri)
+              uriIdentifiers.set(uri, identifier)
+            }
+        }
+      }
+      await peerUntil(
+        () =>
+          videos[0].has(simultaneous[1].id) &&
+          videos[1].has(simultaneous[0].id),
+        'simultaneous Trystero camera streams'
+      )
+      for (const [index, width, height] of [
+        [0, 160, 120],
+        [1, 320, 180],
+      ]) {
+        const stream = simultaneous[1 - index]
+        await advancing(
+          videos[index].get(stream.id),
+          width,
+          height,
+          'Trystero camera after rollback'
+        )
+        await peerUntil(async () => {
+          const track = audioTracks[index].get(stream.id)
+          if (!track || track.readyState !== 'live') return false
+          const receiver = handles[index].connection
+            .getReceivers()
+            .find((entry) => entry.track === track)
+          if (!receiver) return false
+          const stats = await handles[index].connection.getStats()
+          return [...stats.values()].some(
+            (stat) =>
+              stat.type === 'inbound-rtp' &&
+              stats
+                .get(stat.codecId)
+                ?.mimeType.toLowerCase()
+                .startsWith('audio/') &&
+              stat.packetsReceived >= 5 &&
+              stat.bytesReceived > 0
+          )
+        }, 'Trystero microphone after rollback')
+        // Chromium can retain muted=true after rollback despite decoding audio.
+        // Verify this exact remote receiver's PCM and its opposite peer's tone.
+        const probe = makeAudioProbe(audioTracks[index].get(stream.id))
+        await peerUntil(
+          () => probe.hasTone(index === 0 ? 660 : 440),
+          'decoded Trystero microphone after rollback'
+        )
+      }
+      // Silence the synthetic inputs without changing sender-track lifecycle.
+      for (const stream of simultaneous)
+        microphoneGains.get(stream.id).gain.value = 0
+      await peerUntil(
+        () => audioProbes.every((probe) => probe.sample().rms < 0.005),
+        'silent Trystero microphone inputs decode silence'
+      )
+      for (const stream of simultaneous)
+        microphoneGains.get(stream.id).gain.value = 1
+      for (const [index, probe] of audioProbes.entries())
+        await peerUntil(
+          () => probe.hasTone(index === 0 ? 660 : 440),
+          'restored Trystero microphone input'
+        )
+      const lateScreen = makeSource(320, 180)
+      const screenTrack = lateScreen.getVideoTracks()[0]
+      handles[1].addStream(lateScreen)
+      await peerUntil(
+        () => videos[0].has(lateScreen.id),
+        'late Trystero screen'
+      )
+      await advancing(
+        videos[0].get(lateScreen.id),
+        320,
+        180,
+        'late Trystero screen'
+      )
+      const screenTransceiver = handles[1].connection
+        .getTransceivers()
+        .find((entry) => entry.sender.track === screenTrack)
+      assert(screenTransceiver, 'late screen lost its original sender')
+      assertCommittedExtensions()
+      handles[1].removeStream(lateScreen)
+      await peerUntil(
+        () =>
+          screenTransceiver.sender.track === null &&
+          ['recvonly', 'inactive'].includes(
+            screenTransceiver.currentDirection
+          ) &&
+          handles.every(
+            (handle) => handle.connection.signalingState === 'stable'
+          ),
+        'Trystero screen removal committed'
+      )
+      await delay(800)
+      const stoppedScreenFrames = frames(videos[0].get(lateScreen.id))
+      await delay(500)
+      assert(
+        frames(videos[0].get(lateScreen.id)) <= stoppedScreenFrames + 1,
+        'removed Trystero screen kept decoding frames'
+      )
+      handles[1].addStream(lateScreen)
+      await peerUntil(
+        () =>
+          handles[1].connection
+            .getTransceivers()
+            .some(
+              (entry) =>
+                entry.sender.track === screenTrack &&
+                entry.mid !== null &&
+                ['sendonly', 'sendrecv'].includes(entry.currentDirection)
+            ),
+        'Trystero screen restart sender committed'
+      )
+      await advancing(
+        videos[0].get(lateScreen.id),
+        320,
+        180,
+        'restarted Trystero screen'
+      )
+      assertCommittedExtensions()
+      for (const [index, width, height] of [
+        [0, 160, 120],
+        [1, 320, 180],
+      ]) {
+        await advancing(
+          videos[index].get(simultaneous[1 - index].id),
+          width,
+          height,
+          'original Trystero camera after screen restart'
+        )
+        await peerUntil(
+          () => audioProbes[index].hasTone(index === 0 ? 660 : 440),
+          'original Trystero microphone after screen restart'
+        )
+      }
+      const restartedScreenTransceiver = handles[1].connection
+        .getTransceivers()
+        .find((entry) => entry.sender.track === screenTrack)
+      assert(restartedScreenTransceiver, 'restarted screen lost its sender')
+      handles[1].removeStream(lateScreen)
+      lateScreen.getTracks().forEach((track) => track.stop())
+      await peerUntil(
+        () =>
+          restartedScreenTransceiver.sender.track === null &&
+          ['recvonly', 'inactive'].includes(
+            restartedScreenTransceiver.currentDirection
+          ) &&
+          handles.every(
+            (handle) => handle.connection.signalingState === 'stable'
+          ),
+        'Trystero screen stopped before fresh capture'
+      )
+      await delay(800)
+      const retiredScreenFrames = frames(videos[0].get(lateScreen.id))
+      await delay(500)
+      assert(
+        frames(videos[0].get(lateScreen.id)) <= retiredScreenFrames + 1,
+        'retired Trystero screen kept decoding frames'
+      )
+      const freshScreen = makeSource(400, 224)
+      const freshScreenTrack = freshScreen.getVideoTracks()[0]
+      assert(
+        freshScreen.id !== lateScreen.id &&
+          freshScreenTrack.id !== screenTrack.id,
+        'fresh capture reused the retired screen identity'
+      )
+      handles[1].addStream(freshScreen)
+      await peerUntil(
+        () => videos[0].has(freshScreen.id),
+        'fresh Trystero screen stream ID'
+      )
+      await peerUntil(
+        () =>
+          handles[1].connection
+            .getTransceivers()
+            .some(
+              (entry) =>
+                entry.sender.track === freshScreenTrack &&
+                entry.mid !== null &&
+                ['sendonly', 'sendrecv'].includes(entry.currentDirection)
+            ),
+        'fresh Trystero screen sender committed'
+      )
+      assert(
+        handles[1].connection.localDescription.sdp.includes(
+          `a=msid:${freshScreen.id} ${freshScreenTrack.id}`
+        ),
+        'fresh screen offer lost its replacement stream and track identity'
+      )
+      await advancing(
+        videos[0].get(freshScreen.id),
+        400,
+        224,
+        'fresh Trystero screen after capture restart'
+      )
+      assertCommittedExtensions()
+      for (const [index, width, height] of [
+        [0, 160, 120],
+        [1, 320, 180],
+      ]) {
+        await advancing(
+          videos[index].get(simultaneous[1 - index].id),
+          width,
+          height,
+          'original Trystero camera after fresh screen capture'
+        )
+        await peerUntil(
+          () => audioProbes[index].hasTone(index === 0 ? 660 : 440),
+          'original Trystero microphone after fresh screen capture'
+        )
+      }
+      report(
+        'balanced Trystero late screen, same-track restart, and fresh capture preserved committed extension IDs, both cameras, and decoded microphone tones'
+      )
+      audioProbes.forEach((probe) => probe.disconnect())
+      assert(errors.length === 0, 'Trystero negotiation reported an error')
+      handles.forEach((handle) => handle.destroy())
+      for (const stream of [...simultaneous, lateScreen, freshScreen])
+        stream.getTracks().forEach((track) => track.stop())
+      report(
+        'simultaneous Trystero cameras and decoded microphone tones survived rollback, input silence, and restoration'
+      )
+
       const a = new RTCPeerConnection({ bundlePolicy: 'max-bundle' })
       const b = new RTCPeerConnection({ bundlePolicy: 'max-bundle' })
       peers.push(a, b)
@@ -117,7 +541,7 @@
           const event = receivedAudio.get(peer).get(stream.id)
           if (!event || event.track.muted || event.track.readyState !== 'live')
             return false
-          const stats = await event.receiver.getStats()
+          const stats = await peer.getStats()
           return [...stats.values()].some(
             (stat) =>
               stat.type === 'inbound-rtp' &&
@@ -291,10 +715,288 @@
         180,
         'camera after screen restart'
       )
+      // Keep answer narrowing on a separate first-publication pair: the existing
+      // serialized baseline also exercises recycling an already running sender.
+      const codecOfferer = new RTCPeerConnection({
+        iceServers: [],
+        bundlePolicy: 'max-bundle',
+      })
+      const codecAnswerer = new RTCPeerConnection({
+        iceServers: [],
+        bundlePolicy: 'max-bundle',
+      })
+      peers.push(codecOfferer, codecAnswerer)
+      const codecPending = new Map([
+        [codecOfferer, []],
+        [codecAnswerer, []],
+      ])
+      for (const [self, other] of [
+        [codecOfferer, codecAnswerer],
+        [codecAnswerer, codecOfferer],
+      ]) {
+        self.onicecandidate = (event) => {
+          if (!event.candidate) return
+          if (other.remoteDescription) other.addIceCandidate(event.candidate)
+          else codecPending.get(other).push(event.candidate)
+        }
+      }
+      const codecCamera = makeSource(120, 90)
+      const withdrawn = makeSource(80, 60)
+      let codecVideo
+      let withdrawnVideo
+      codecAnswerer.ontrack = (event) => {
+        const stream = event.streams[0]
+        if (stream?.id === withdrawn.id) withdrawnVideo = makeVideo(stream)
+        else {
+          assert(
+            stream?.id === codecCamera.id,
+            'answer-selected codec lost the original stream ID'
+          )
+          codecVideo = makeVideo(stream)
+        }
+      }
+      codecOfferer.addTrack(codecCamera.getVideoTracks()[0], codecCamera)
+      const withdrawnSender = codecOfferer.addTrack(
+        withdrawn.getVideoTracks()[0],
+        withdrawn
+      )
+      const codecOffer = await codecOfferer.createOffer()
+      await codecOfferer.setLocalDescription(codecOffer)
+      codecOfferer.removeTrack(withdrawnSender)
+      await codecAnswerer.setRemoteDescription(codecOffer)
+      for (const candidate of codecPending.get(codecAnswerer).splice(0))
+        await codecAnswerer.addIceCandidate(candidate)
+      const codecs = RTCRtpReceiver.getCapabilities('video').codecs.filter(
+        (codec) => codec.mimeType.toLowerCase() === 'video/vp9'
+      )
+      assert(codecs.length > 0, 'packaged VP9 receiver capability missing')
+      assert(
+        !/^\d+ VP9\//i.test(codecOffer.sdp.split('a=rtpmap:')[1]),
+        'answer narrowing must differ from the first offered codec'
+      )
+      codecAnswerer.getTransceivers()[0].setCodecPreferences(codecs)
+      const codecAnswer = await codecAnswerer.createAnswer()
+      await codecAnswerer.setLocalDescription(codecAnswer)
+      await codecOfferer.setRemoteDescription(codecAnswer)
+      for (const candidate of codecPending.get(codecOfferer).splice(0))
+        await codecOfferer.addIceCandidate(candidate)
+      await until(() => codecVideo, 'answer-selected codec track event')
+      await advancing(codecVideo, 120, 90, 'answer-selected video codec')
+      const receivedStats = await codecAnswerer.getStats()
+      assert(
+        [...receivedStats.values()].some(
+          (stat) =>
+            stat.type === 'inbound-rtp' &&
+            stat.packetsReceived > 0 &&
+            receivedStats.get(stat.codecId)?.mimeType.toLowerCase() ===
+              'video/vp9'
+        ),
+        'first camera did not use the codec accepted by the remote answer'
+      )
+      await delay(500)
+      assert(
+        frames(withdrawnVideo) === 0,
+        'removed sender started when its pending offer was answered'
+      )
       report(
-        'PASS local and remote cameras, audio packets and unmuted tracks, receive-only track events, stream IDs, late screen, replaceTrack, and screen restart'
+        'first publication followed VP9 answer; removed pending sender stayed stopped'
+      )
+      const narrowOfferer = new RTCPeerConnection({
+        bundlePolicy: 'max-bundle',
+      })
+      const broadAnswerer = new RTCPeerConnection({
+        bundlePolicy: 'max-bundle',
+      })
+      peers.push(narrowOfferer, broadAnswerer)
+      const narrowPending = new Map([
+        [narrowOfferer, []],
+        [broadAnswerer, []],
+      ])
+      for (const [self, other] of [
+        [narrowOfferer, broadAnswerer],
+        [broadAnswerer, narrowOfferer],
+      ]) {
+        self.onicecandidate = (event) => {
+          if (!event.candidate) return
+          if (other.remoteDescription) other.addIceCandidate(event.candidate)
+          else narrowPending.get(other).push(event.candidate)
+        }
+      }
+      const narrowStreams = [makeSource(120, 90), makeSource(160, 120)]
+      addMicrophone(narrowStreams[0], 880)
+      addMicrophone(narrowStreams[1], 990)
+      const narrowVideos = [null, null]
+      const narrowAudio = [null, null]
+      for (const [index, peer] of [narrowOfferer, broadAnswerer].entries()) {
+        peer.ontrack = (event) => {
+          assert(
+            event.streams.length === 1 &&
+              event.streams[0].id === narrowStreams[1 - index].id,
+            'VP9-only offer lost the remote sender stream ID'
+          )
+          if (event.track.kind === 'video')
+            narrowVideos[index] = makeVideo(event.streams[0])
+          else narrowAudio[index] = event.track
+        }
+        // The pinned setCodecPreferences API starts its own dynamic payload
+        // allocation at 96. Add video first so this focused VP9 case does not
+        // reuse an audio payload for a different bundled codec.
+        for (const track of [
+          ...narrowStreams[index].getVideoTracks(),
+          ...narrowStreams[index].getAudioTracks(),
+        ])
+          peer.addTrack(track, narrowStreams[index])
+      }
+      narrowOfferer
+        .getTransceivers()
+        .find((transceiver) => transceiver.sender.track.kind === 'video')
+        .setCodecPreferences(codecs)
+      const narrowOffer = await narrowOfferer.createOffer()
+      const bundledPayloadCodecs = new Map()
+      let mediaKind
+      for (const line of narrowOffer.sdp.split(/\r?\n/)) {
+        const media = /^m=(\w+)/.exec(line)
+        if (media) mediaKind = media[1]
+        const codec = /^a=rtpmap:(\d+) (\S+)/.exec(line)
+        if (!codec) continue
+        const identity = `${mediaKind}/${codec[2].toLowerCase()}`
+        assert(
+          !bundledPayloadCodecs.has(codec[1]) ||
+            bundledPayloadCodecs.get(codec[1]) === identity,
+          'VP9-only offer reused a bundled payload for a different codec'
+        )
+        bundledPayloadCodecs.set(codec[1], identity)
+      }
+      assert(
+        !/a=rtpmap:\d+ VP8\//i.test(narrowOffer.sdp),
+        'VP9-only offer still advertises the default VP8 codec'
+      )
+      await narrowOfferer.setLocalDescription(narrowOffer)
+      await broadAnswerer.setRemoteDescription(narrowOffer)
+      for (const candidate of narrowPending.get(broadAnswerer).splice(0))
+        await broadAnswerer.addIceCandidate(candidate)
+      const broadAnswer = await broadAnswerer.createAnswer()
+      assert(
+        broadAnswer.sdp.includes(`a=msid:${narrowStreams[1].id} `),
+        'answer lost its own stream identity when VP8 was rejected'
+      )
+      await broadAnswerer.setLocalDescription(broadAnswer)
+      await narrowOfferer.setRemoteDescription(broadAnswer)
+      for (const candidate of narrowPending.get(narrowOfferer).splice(0))
+        await narrowOfferer.addIceCandidate(candidate)
+      await until(
+        () => narrowVideos.every(Boolean) && narrowAudio.every(Boolean),
+        'bidirectional VP9-only offer track events'
+      )
+      for (const [index, width, height, frequency] of [
+        [0, 160, 120, 990],
+        [1, 120, 90, 880],
+      ]) {
+        await advancing(
+          narrowVideos[index],
+          width,
+          height,
+          'bidirectional VP9-only offer camera'
+        )
+        assert(
+          [narrowOfferer, broadAnswerer][index]
+            .getReceivers()
+            .some((receiver) => receiver.track === narrowAudio[index]),
+          'VP9-only offer audio track is not the current remote receiver'
+        )
+        const probe = makeAudioProbe(narrowAudio[index])
+        await until(
+          () => probe.hasTone(frequency),
+          'bidirectional VP9-only offer decoded microphone'
+        )
+        probe.disconnect()
+        const stats = await [narrowOfferer, broadAnswerer][index].getStats()
+        assert(
+          [...stats.values()].some(
+            (stat) =>
+              stat.type === 'inbound-rtp' &&
+              stat.packetsReceived > 0 &&
+              stats.get(stat.codecId)?.mimeType.toLowerCase() === 'video/vp9'
+          ),
+          'bidirectional VP9-only offer did not decode the accepted codec'
+        )
+      }
+      report(
+        'VP9-only offer preserved both sender stream IDs, decoded cameras, and microphone tones'
+      )
+      report(
+        'PASS simultaneous Trystero publication and rollback, removed pending sender, answer-selected video codec, serialized local and remote cameras, audio packets and unmuted tracks, receive-only track events, stream IDs, late screen, replaceTrack, and screen restart'
       )
     } catch (error) {
+      const description = (value) =>
+        value && {
+          type: value.type,
+          media: value.sdp
+            .split(/\r?\n/)
+            .filter((line) =>
+              /^(m=|a=(mid:|msid:|send|recv|inactive|rtpmap:|fmtp:|group:|setup:|bundle-only|rtcp-mux))/.test(
+                line
+              )
+            ),
+        }
+      for (const [index, peer] of peers.entries()) {
+        try {
+          const stats = await Promise.race([
+            peer.getStats(),
+            delay(1000).then(() => null),
+          ])
+          report(
+            `diagnostic peer ${index}: ${JSON.stringify({
+              signalingState: peer.signalingState,
+              connectionState: peer.connectionState,
+              iceConnectionState: peer.iceConnectionState,
+              iceGatheringState: peer.iceGatheringState,
+              currentLocalDescription: description(
+                peer.currentLocalDescription
+              ),
+              pendingLocalDescription: description(
+                peer.pendingLocalDescription
+              ),
+              currentRemoteDescription: description(
+                peer.currentRemoteDescription
+              ),
+              pendingRemoteDescription: description(
+                peer.pendingRemoteDescription
+              ),
+              transceivers: peer.getTransceivers().map((transceiver) => ({
+                mid: transceiver.mid,
+                direction: transceiver.direction,
+                currentDirection: transceiver.currentDirection,
+                sender: transceiver.sender.track && {
+                  id: transceiver.sender.track.id,
+                  kind: transceiver.sender.track.kind,
+                  enabled: transceiver.sender.track.enabled,
+                  readyState: transceiver.sender.track.readyState,
+                },
+                receiver: transceiver.receiver.track && {
+                  id: transceiver.receiver.track.id,
+                  kind: transceiver.receiver.track.kind,
+                  muted: transceiver.receiver.track.muted,
+                  readyState: transceiver.receiver.track.readyState,
+                },
+              })),
+              stats:
+                stats &&
+                [...stats.values()].filter((stat) =>
+                  [
+                    'inbound-rtp',
+                    'outbound-rtp',
+                    'transport',
+                    'candidate-pair',
+                    'codec',
+                  ].includes(stat.type)
+                ),
+            })}`
+          )
+        } catch (diagnosticError) {
+          report(`diagnostic peer ${index}: ${String(diagnosticError)}`)
+        }
+      }
       report(`FAIL ${String(error)} ${error.stack ?? ''}`)
     } finally {
       if (audioContext) await audioContext.close()

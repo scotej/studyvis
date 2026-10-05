@@ -208,26 +208,27 @@ binding. StudyVis therefore builds that binding into a private AppImage runtime,
 explicitly reasserts media streams, and keeps the rest of WebKit's experimental
 feature set disabled.
 
-The pinned, hash-verified input tuple for runtime revision 8 is:
+The pinned, hash-verified input tuple for runtime revision 9 is:
 
 | Input                              | Pinned source                                                                           | SHA-256                                                            |
 | ---------------------------------- | --------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
 | WebKitGTK                          | `https://webkitgtk.org/releases/webkitgtk-2.52.5.tar.xz`                                | `8a531a9abd2215936e8a8a914c077b586c0228b31d652f205286a8ec90f3364b` |
 | librice                            | `https://github.com/ystreet/librice/archive/refs/tags/v0.4.3.tar.gz`                    | `4671e1835f9ab0f8d87e8d9e22b6bfb06f928aeae442841ab81881dff61e3f4b` |
-| AppImage runtime portability patch | `scripts/patches/webkitgtk-2.52.5-appimage-sandbox.patch`                               | `ae3cfcd66c3f8deaf4ff60809e53e52f09e0aa916e3db04f296ae9e951aa1250` |
+| AppImage runtime portability patch | `scripts/patches/webkitgtk-2.52.5-appimage-sandbox.patch`                               | `f25f62bbc8e6a889fa4c0c13281cdbad1ee16635a91116972a9e60d0b18238d5` |
 | GStreamer core                     | `https://gstreamer.freedesktop.org/src/gstreamer/gstreamer-1.28.7.tar.xz`               | `787329b2c5758e228a71d926a6dcf960bceaacca3cadd63874ba665dfcda013e` |
 | GStreamer base                     | `https://gstreamer.freedesktop.org/src/gst-plugins-base/gst-plugins-base-1.28.7.tar.xz` | `ed6e5410f496d171818763af2265e7977154bc7f9b827e98acf8c5bed21dd5a7` |
 | GStreamer good                     | `https://gstreamer.freedesktop.org/src/gst-plugins-good/gst-plugins-good-1.28.7.tar.xz` | `87256969c82cf3bc8574301f3e7044a90de0ac500a5a27d8ba38c4dde894dd8b` |
 | GStreamer bad                      | `https://gstreamer.freedesktop.org/src/gst-plugins-bad/gst-plugins-bad-1.28.7.tar.xz`   | `dc525383c18b2c265bbe6a43d498656cd918aaa130aa4e3abeabcdaa741c3ffe` |
+| GStreamer rollback delta           | `scripts/patches/gst-plugins-bad-1.28.7-webrtc-rollback.patch`                          | `e3105c73dc2ff3479ecd79320068d112e7370901c48a297288f02cbefcb03799` |
 | libnice                            | `https://libnice.freedesktop.org/releases/libnice-0.1.24.tar.gz`                        | `cfb5e8e778534f2f5b3c6f4958a1eb057c6b95c537c0f100817a537cf5d64fcc` |
 | Meson                              | `https://github.com/mesonbuild/meson/releases/download/1.7.2/meson-1.7.2.tar.gz`        | `4d40d63aa748a9c139cc41ab9bffe43edd113c5639d78bde81544ca955aea890` |
 
 `scripts/linux-webkit-runtime.env` is the exact source URL/version/hash,
-portability-patch hash, `cargo-c` version, runtime revision, and AppImage
+WebKit/GStreamer patch hashes, `cargo-c` version, runtime revision, and AppImage
 runtime-directory source of truth.
 `scripts/build-linux-webkit-runtime.sh` verifies every download before
 extracting it, builds matched GStreamer libraries and curated plugins before
-librice/WebKit, applies the named patch, and asserts the effective CMake cache
+librice/WebKit, applies both named patches, and asserts the effective CMake cache
 (`ENABLE_WEB_RTC=ON`, `ENABLE_MEDIA_STREAM=ON`, GStreamer WebRTC + librice +
 bubblewrap sandbox on, all experimental features off), and installs the
 runtime's provenance/license material. Run it with `--print-manifest` to review
@@ -240,7 +241,30 @@ are `/usr/bin/studyvis-webkit-runtime/{WebKitNetworkProcess,WebKitWebProcess,Web
 It likewise prefers the packaged `/usr/bin/{bwrap,xdg-dbus-proxy}` beside the
 StudyVis executable. It does not weaken or disable the Web/GPU/Network process
 sandbox.
-It also retains recycled media senders through renegotiation, preserves
+It also accepts empty-SDP rollback and restores stable transceiver ownership
+after collided offers. Queued sources start only after their exact committed
+pad is configured. Answers retain supported offered RTP extension IDs,
+future sources reserve accepted IDs, and committed per-MID mappings remain
+stable. Remote transport/SSRC identity and raw payload-specific feedback stay
+out of local codec preferences. Track removal forwards the owning transceiver's
+desired direction to GStreamer before stopping its source and
+renegotiating (#349). Recycled senders retain their committed input pad and
+replacement stream/track identity. Incoming track clients remain live when an
+EOS-ended decoder is replaced, with retired callbacks discarded. Inactive
+transceivers end all receive pads they own, including restarted decoders.
+Zero-port bundle-only offers start a source only after the matching receiving
+MID is accepted in both committed BUNDLE groups. Committed pads retain the
+standard media stream ID. Previously unmapped incoming sources use a caps MID
+only when a unique active transceiver accepts the payload on the same committed
+transport. Accepted SCTP
+m-lines survive re-offers before remote channels arrive, and RTX source maps
+require a known SSRC. Unbundled answers use distinct ICE credentials per media
+section. Native remote candidates wait for their committed media and installed
+credentials; verified or pinned-Rice-owned local sockets retain their candidates
+in later SDP. Candidate addresses stay out of codec preferences.
+The pinned interleave plugin
+supplies WebAudio's decoded remote-audio channel processing. It retains recycled media
+senders through renegotiation, preserves
 advertised stream IDs, and requests the linear BGRA portal format understood
 by the bundled PipeWire 1.0.5 plugin. Packaging leaves `libwayland-client.so.0`
 to the host EGL driver so a rolling distro's driver cannot load an older
@@ -266,7 +290,7 @@ build environment. Stronger future closure would require a snapshot-pinned apt
 repository or digest-pinned build container plus a complete build-host dpkg
 inventory. The AppImage carries
 the resulting libraries, subprocesses, GStreamer helpers/plugins, sandbox
-helpers, upstream license texts, librice licenses, and the applied patch. Under
+helpers, upstream license texts, librice licenses, and the applied patches. Under
 `usr/share/licenses/studyvis-webkit-runtime/`, `BUILD-MANIFEST.txt` records the
 exact URLs/hashes, patch, `cargo-c`, compiler policy, effective CMake/Rice and
 pkg-config inputs, AppImage-relative process/helper layout, runtime identity,
@@ -284,9 +308,9 @@ inventory, alongside its LGPL text, the PTP helper's MPL 2.0 text, and Meson's
 Apache 2.0 license.
 
 The builder's `--source-bundle <output.tar.gz>` mode produces the deterministic
-corresponding-source archive used by tagged releases. It contains the seven exact
+corresponding-source archive used by tagged releases. It contains the eight exact
 verified WebKit/librice/GStreamer/Meson archives, the PTP license, complete
-portability patch, pinned env file, build/notice-generation scripts, build
+WebKit/GStreamer patches, pinned env file, build/notice-generation scripts, build
 manifest, a reconstruction README, and internal
 `SHA256SUMS`. After the tagged workflow's exact-AppImage smoke succeeds, the
 draft receives `StudyVis_X.Y.Z_linux-webkit-sources.tar.gz` and the matching

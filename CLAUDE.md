@@ -99,7 +99,7 @@ Everything above runs in `.github/workflows/ci.yml`, plus checks that only make 
   against the exact shipped AppImage. This catches a
   missing or inert packaged backend. CI also builds the complete Linux
   system-source bundle from its exact AppImage after startup, so missing Ubuntu
-  source versions fail the pre-tag gate. A separate finite native WebKit probe exchanges data and renders synthetic camera/screen streams through renegotiation and stop/restart. These checks do not
+  source versions fail the pre-tag gate. A separate finite native WebKit probe bundles the installed patched peer core, forces simultaneous camera/microphone offers, and requires decoded video and remote microphone PCM after rollback. It also retains serialized camera/screen/audio renegotiation and stop/restart checks. These checks do not
   exercise a physical CachyOS KDE portal/media device, prove in-app identity
   custody, mount through FUSE, or apply an update.
 - **Linux build caching** — **two** jobs compile WebKitGTK: `ci.yml`'s `Linux

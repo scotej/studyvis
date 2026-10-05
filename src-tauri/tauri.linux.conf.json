@@ -53,6 +53,7 @@
           "/usr/share/licenses/studyvis-webkit-runtime/librice-LICENSE-APACHE": "target/appimage-webkit/licenses/librice-LICENSE-APACHE",
           "/usr/share/licenses/studyvis-webkit-runtime/librice-LICENSE-MIT": "target/appimage-webkit/licenses/librice-LICENSE-MIT",
           "/usr/share/licenses/studyvis-webkit-runtime/webkitgtk-appimage-sandbox.patch": "target/appimage-webkit/licenses/webkitgtk-appimage-sandbox.patch",
+          "/usr/share/licenses/studyvis-webkit-runtime/gst-plugins-bad-webrtc-rollback.patch": "target/appimage-webkit/licenses/gst-plugins-bad-webrtc-rollback.patch",
           "/usr/share/licenses/studyvis-webkit-runtime/WEBKIT-LICENSE-FILES.sha256": "target/appimage-webkit/licenses/WEBKIT-LICENSE-FILES.sha256",
           "/usr/share/licenses/studyvis-webkit-runtime/WEBKIT-THIRD-PARTY-LICENSES.txt": "target/appimage-webkit/licenses/WEBKIT-THIRD-PARTY-LICENSES.txt",
           "/usr/share/licenses/studyvis-runtime/LLAMA.CPP-MIT.txt": "target/appimage-webkit/notices/LLAMA.CPP-MIT.txt",
