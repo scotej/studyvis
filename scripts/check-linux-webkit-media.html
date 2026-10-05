@@ -447,7 +447,7 @@
         frames(videos[0].get(lateScreen.id)) <= retiredScreenFrames + 1,
         'retired Trystero screen kept decoding frames'
       )
-      const freshScreen = makeSource(400, 225)
+      const freshScreen = makeSource(400, 224)
       const freshScreenTrack = freshScreen.getVideoTracks()[0]
       assert(
         freshScreen.id !== lateScreen.id &&
@@ -480,7 +480,7 @@
       await advancing(
         videos[0].get(freshScreen.id),
         400,
-        225,
+        224,
         'fresh Trystero screen after capture restart'
       )
       assertCommittedExtensions()

@@ -406,7 +406,50 @@ diff --git a/ext/webrtc/gstwebrtcbin.c b/ext/webrtc/gstwebrtcbin.c
      GST_DEBUG_OBJECT (webrtc, "transceiver %" GST_PTR_FORMAT
          " direction change from %s to %s", rtp_trans,
          gst_webrtc_rtp_transceiver_direction_to_string (prev_dir),
-@@ -5995,87 +6317,90 @@
+@@ -5976,10 +6298,31 @@
+ 
+     if (new_dir == GST_WEBRTC_RTP_TRANSCEIVER_DIRECTION_INACTIVE) {
+       if (!webrtc->priv->reuse_source_pads) {
+-        /* pad reuse is disallowed, so send EOS on this pad */
+-        GstWebRTCBinPad *pad =
+-            _find_pad_for_mline (webrtc, GST_PAD_SRC, media_idx);
+-        if (pad) {
++        GPtrArray *pads = g_ptr_array_new_with_free_func (gst_object_unref);
++        guint pad_index;
++
++        /* A resumed receiver may expose another SRC pad for its new SSRC.
++         * End every pad owned by this inactive transceiver, including the
++         * current decoder, rather than only the first retained pad. */
++        GST_OBJECT_LOCK (webrtc);
++        GList *pad_lists[] = { GST_ELEMENT (webrtc)->pads,
++          webrtc->priv->pending_pads
++        };
++        for (guint list_index = 0; list_index < G_N_ELEMENTS (pad_lists);
++            list_index++) {
++          for (GList *item = pad_lists[list_index]; item; item = item->next) {
++            if (GST_IS_WEBRTC_BIN_PAD (item->data)) {
++              GstWebRTCBinPad *pad = GST_WEBRTC_BIN_PAD (item->data);
++              if (GST_PAD_DIRECTION (pad) == GST_PAD_SRC
++                  && pad->trans == rtp_trans)
++                g_ptr_array_add (pads, gst_object_ref (pad));
++            }
++          }
++        }
++        GST_OBJECT_UNLOCK (webrtc);
++
++        for (pad_index = 0; pad_index < pads->len; pad_index++) {
++          GstPad *pad = g_ptr_array_index (pads, pad_index);
+           GstPad *target = gst_ghost_pad_get_target (GST_GHOST_PAD (pad));
+           if (target) {
+             GstPad *peer = gst_pad_get_peer (target);
+@@ -5989,93 +6332,96 @@
+             }
+             gst_object_unref (target);
+           }
+-          gst_object_unref (pad);
+         }
++        g_ptr_array_unref (pads);
+       }
  
        /* XXX: send eos event up the sink pad as well? */
      }
@@ -574,7 +617,7 @@ diff --git a/ext/webrtc/gstwebrtcbin.c b/ext/webrtc/gstwebrtcbin.c
  
    if (!bundled || bundle_idx == media_idx) {
      if (stream->rtxsend || stream->rtxreceive) {
-@@ -6538,8 +6863,78 @@
+@@ -6538,8 +6884,78 @@
       * Restore the value of connection's [[ sctpTransport]] internal slot
       * to its value at the last stable signaling state.
       */
@@ -655,7 +698,7 @@ diff --git a/ext/webrtc/gstwebrtcbin.c b/ext/webrtc/gstwebrtcbin.c
      return TRUE;
    }
  
-@@ -6643,6 +7038,8 @@
+@@ -6643,6 +7059,8 @@
             */
            GstCaps *trans_caps =
                _find_codec_preferences (webrtc, trans, i, error);

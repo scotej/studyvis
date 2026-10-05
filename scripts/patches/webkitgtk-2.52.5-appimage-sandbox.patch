@@ -305,7 +305,7 @@ diff --git a/Source/WebCore/Modules/mediastream/gstreamer/GStreamerMediaEndpoint
          mediaStreamIds.append(msid);
      return mediaStreamIds;
  }
-@@ -674,8 +679,120 @@
+@@ -674,8 +679,139 @@
      return states;
  }
  
@@ -422,20 +422,39 @@ diff --git a/Source/WebCore/Modules/mediastream/gstreamer/GStreamerMediaEndpoint
 +        m_committedRtpHeaderExtensionMids.add(mediaMapping.key);
 +}
 +
++static bool sdpMessageBundlesMID(const GstSDPMessage* message, const char* mid)
++{
++    if (!mid)
++        return false;
++    for (unsigned i = 0; i < gst_sdp_message_attributes_len(message); ++i) {
++        const auto attribute = gst_sdp_message_get_attribute(message, i);
++        if (StringView::fromLatin1(attribute->key) != "group"_s)
++            continue;
++        auto group = String::fromUTF8(attribute->value).split(' ');
++        if (group.isEmpty() || group[0] != "BUNDLE"_s)
++            continue;
++        for (unsigned j = 1; j < group.size(); ++j) {
++            if (group[j] == StringView::fromLatin1(mid))
++                return true;
++        }
++    }
++    return false;
++}
++
 +void GStreamerMediaEndpoint::linkOutgoingSources(const GstSDPMessage* sdpMessage, const GstSDPMessage* negotiatedDescription)
 +{
 +    updateRtpHeaderExtensionMapping(negotiatedDescription ? negotiatedDescription : sdpMessage);
      unsigned totalMedias = gst_sdp_message_medias_len(sdpMessage);
  #ifndef GST_DISABLE_GST_DEBUG
      GST_DEBUG_OBJECT(m_pipeline.get(), "Linking outgoing sources for %u m-lines", totalMedias);
-@@ -697,28 +814,82 @@
+@@ -697,28 +833,90 @@
              continue;
          }
  
 +        auto localDirection = getDirectionFromSDPMedia(media);
          auto msid = CStringView::unsafeFromUTF8(gst_sdp_media_get_attribute_val(media, "msid"));
 -
-+        if (!gst_sdp_media_get_port(media) || msid.isEmpty()
++        if (msid.isEmpty()
 +            || (localDirection != GST_WEBRTC_RTP_TRANSCEIVER_DIRECTION_SENDONLY && localDirection != GST_WEBRTC_RTP_TRANSCEIVER_DIRECTION_SENDRECV))
 +            continue;
 +
@@ -448,6 +467,14 @@ diff --git a/Source/WebCore/Modules/mediastream/gstreamer/GStreamerMediaEndpoint
 +                continue;
 +            auto direction = getDirectionFromSDPMedia(negotiatedMedia);
 +            if (!gst_sdp_media_get_port(negotiatedMedia) || direction == GST_WEBRTC_RTP_TRANSCEIVER_DIRECTION_SENDONLY || direction == GST_WEBRTC_RTP_TRANSCEIVER_DIRECTION_INACTIVE)
++                continue;
++        }
++        if (!gst_sdp_media_get_port(media)) {
++            auto mid = gst_sdp_media_get_attribute_val(media, "mid");
++            // A zero-port bundle-only local OFFER is active only when its
++            // exact MID was accepted in the committed remote answer's BUNDLE.
++            if (!negotiatedDescription || !sdpMediaHasAttributeKey(media, "bundle-only"_s)
++                || !sdpMessageBundlesMID(sdpMessage, mid) || !sdpMessageBundlesMID(negotiatedDescription, mid))
 +                continue;
 +        }
          GST_DEBUG_OBJECT(m_pipeline.get(), "Looking-up outgoing source with msid %s in %zu unlinked sources", msid.utf8(), m_unlinkedOutgoingSources.size());
@@ -523,7 +550,7 @@ diff --git a/Source/WebCore/Modules/mediastream/gstreamer/GStreamerMediaEndpoint
              }
  
              auto& sinkPad = source->pad();
-@@ -728,6 +899,7 @@
+@@ -728,6 +926,7 @@
              }
  
              source->link();
@@ -531,7 +558,7 @@ diff --git a/Source/WebCore/Modules/mediastream/gstreamer/GStreamerMediaEndpoint
              callOnMainThreadAndWait([&] {
                  source->start();
              });
-@@ -826,21 +998,23 @@
+@@ -826,21 +1025,23 @@
              peerConnectionBackend->setLocalDescriptionFailed(Exception { ExceptionCode::OperationError, "Invalid SDP"_s });
              return;
          }
@@ -559,7 +586,7 @@ diff --git a/Source/WebCore/Modules/mediastream/gstreamer/GStreamerMediaEndpoint
  
          auto descriptions = descriptionsFromWebRTCBin(m_webrtcBin.get(), GatherSignalingState::Yes);
  
-@@ -959,11 +1133,9 @@
+@@ -959,11 +1160,9 @@
                  return;
              }
          }
@@ -574,7 +601,7 @@ diff --git a/Source/WebCore/Modules/mediastream/gstreamer/GStreamerMediaEndpoint
          if (protectedThis->isStopped())
              return;
          auto peerConnectionBackend = this->peerConnectionBackend();
-@@ -980,6 +1152,13 @@
+@@ -980,6 +1179,13 @@
                  g_object_set(ice.get(), "ice-lite", TRUE, nullptr);
              }
          });
@@ -582,13 +609,13 @@ diff --git a/Source/WebCore/Modules/mediastream/gstreamer/GStreamerMediaEndpoint
 +        if (isAnswer) {
 +            GUniqueOutPtr<GstWebRTCSessionDescription> localDescription;
 +            g_object_get(m_webrtcBin.get(), "current-local-description", &localDescription.outPtr(), nullptr);
-+            if (localDescription)
++            if (localDescription && localDescription->type == GST_WEBRTC_SDP_TYPE_OFFER)
 +                linkOutgoingSources(localDescription->sdp, &message);
 +        }
  
          GST_DEBUG_OBJECT(m_pipeline.get(), "Acking remote description");
          auto descriptions = descriptionsFromWebRTCBin(m_webrtcBin.get(), GatherSignalingState::Yes);
-@@ -1057,32 +1236,38 @@
+@@ -1057,32 +1263,38 @@
      auto sdpType = RTCSdpType::Offer;
  
      if (description) {
@@ -647,7 +674,7 @@ diff --git a/Source/WebCore/Modules/mediastream/gstreamer/GStreamerMediaEndpoint
          failureCallback(nullptr);
          return;
      }
-@@ -1180,6 +1365,9 @@
+@@ -1180,6 +1392,9 @@
      source.setInitialParameters(WTF::move(parameters));
  
      auto sourceBin = source.bin();
@@ -657,7 +684,7 @@ diff --git a/Source/WebCore/Modules/mediastream/gstreamer/GStreamerMediaEndpoint
      gst_bin_add(GST_BIN_CAST(m_pipeline.get()), sourceBin.get());
  
  #ifndef GST_DISABLE_GST_DEBUG
-@@ -1317,16 +1505,26 @@
+@@ -1317,16 +1532,26 @@
  void GStreamerMediaEndpoint::removeTrack(GStreamerRtpSenderBackend& sender)
  {
      GST_DEBUG_OBJECT(m_pipeline.get(), "Removing track");
@@ -689,7 +716,7 @@ diff --git a/Source/WebCore/Modules/mediastream/gstreamer/GStreamerMediaEndpoint
  
      unsigned mLineIndex;
      g_object_get(transceiver, "mlineindex", &mLineIndex, nullptr);
-@@ -1337,28 +1535,70 @@
+@@ -1337,28 +1562,70 @@
          return;
  
      const auto media = gst_sdp_message_get_media(remoteDescription->sdp, mLineIndex);
@@ -781,7 +808,7 @@ diff --git a/Source/WebCore/Modules/mediastream/gstreamer/GStreamerMediaEndpoint
  }
  
  void GStreamerMediaEndpoint::doCreateOffer(const RTCOfferOptions& options)
-@@ -1699,7 +1939,9 @@
+@@ -1699,7 +1966,9 @@
          // https://datatracker.ietf.org/doc/html/rfc8285#section-4.2
          // The 4-bit ID is the local identifier of this element in the range 1-14 inclusive. In the
          // signaling section, this is referred to as the valid range.
@@ -792,7 +819,7 @@ diff --git a/Source/WebCore/Modules/mediastream/gstreamer/GStreamerMediaEndpoint
          if (identifier > 14) {
              ASSERT_NOT_REACHED_WITH_MESSAGE("Attempting to use too many RTP header extensions");
              gst_printerrln("Attempting to use too many RTP header extensions, bailing out.");
-@@ -1707,6 +1949,7 @@
+@@ -1707,6 +1976,7 @@
          }
  
          m_rtpHeaderExtensions.add(extension.uri, identifier);
