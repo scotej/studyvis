@@ -203,6 +203,7 @@ license_files=(
   librice-LICENSE-APACHE
   librice-LICENSE-MIT
   webkitgtk-appimage-sandbox.patch
+  gst-plugins-bad-webrtc-rollback.patch
   WEBKIT-LICENSE-FILES.sha256
   WEBKIT-THIRD-PARTY-LICENSES.txt
 )
@@ -235,6 +236,10 @@ done
 read -r staged_patch_sha256 _ < <(sha256sum "$license_source/webkitgtk-appimage-sandbox.patch")
 [[ $staged_patch_sha256 == "$STUDYVIS_WEBKIT_PATCH_SHA256" ]] || {
   die "runtime patch evidence has the wrong SHA256: $staged_patch_sha256"
+}
+read -r gstreamer_patch_sha256 _ < <(sha256sum "$license_source/gst-plugins-bad-webrtc-rollback.patch")
+[[ $gstreamer_patch_sha256 == "$STUDYVIS_GSTREAMER_BAD_PATCH_SHA256" ]] || {
+  die "runtime GStreamer rollback patch has the wrong SHA256: $gstreamer_patch_sha256"
 }
 [[ $(wc -l <"$license_source/WEBKIT-LICENSE-FILES.sha256") -eq 59 ]] || {
   die "runtime WebKit license hash inventory is incomplete"

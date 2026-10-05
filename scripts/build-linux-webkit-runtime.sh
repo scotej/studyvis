@@ -32,6 +32,7 @@ rice_lock_sha256=$STUDYVIS_LIBRICE_CARGO_LOCK_SHA256
 rice_notice_sha256=$STUDYVIS_LIBRICE_NOTICE_SHA256
 rice_notice_manifest_sha256=$STUDYVIS_LIBRICE_NOTICE_MANIFEST_SHA256
 gstreamer_version=$STUDYVIS_GSTREAMER_VERSION
+gstreamer_patch_sha256=$STUDYVIS_GSTREAMER_BAD_PATCH_SHA256
 gstreamer_components=(gstreamer gst-plugins-base gst-plugins-good gst-plugins-bad)
 gstreamer_urls=(
   "$STUDYVIS_GSTREAMER_CORE_SOURCE_URL" "$STUDYVIS_GSTREAMER_BASE_SOURCE_URL"
@@ -77,6 +78,7 @@ require_match STUDYVIS_WEBKIT_APPIMAGE_RUNTIME_DIRNAME "$appimage_runtime_dirnam
   '^studyvis-webkit-runtime$'
 require_match STUDYVIS_WEBKIT_SHA256 "$webkit_sha256" '^[0-9a-f]{64}$'
 require_match STUDYVIS_WEBKIT_PATCH_SHA256 "$webkit_patch_sha256" '^[0-9a-f]{64}$'
+require_match STUDYVIS_GSTREAMER_BAD_PATCH_SHA256 "$gstreamer_patch_sha256" '^[0-9a-f]{64}$'
 require_match STUDYVIS_LIBRICE_SHA256 "$rice_sha256" '^[0-9a-f]{64}$'
 require_match STUDYVIS_LIBRICE_CARGO_LOCK_SHA256 "$rice_lock_sha256" '^[0-9a-f]{64}$'
 require_match STUDYVIS_LIBRICE_NOTICE_SHA256 "$rice_notice_sha256" '^[0-9a-f]{64}$'
@@ -139,6 +141,8 @@ require_managed_output_path STUDYVIS_WEBKIT_BUILD_DIR "$work_root"
 
 patch_file="$script_dir/patches/webkitgtk-${webkit_version}-appimage-sandbox.patch"
 patch_relative=${patch_file#"$repo_root/"}
+gstreamer_patch_file="$script_dir/patches/gst-plugins-bad-${gstreamer_version}-webrtc-rollback.patch"
+gstreamer_patch_relative=${gstreamer_patch_file#"$repo_root/"}
 runtime_lib_relative=usr/lib/x86_64-linux-gnu
 runtime_libdir="$runtime_dir/$runtime_lib_relative"
 runtime_pkgconfig="$runtime_libdir/pkgconfig"
@@ -188,7 +192,7 @@ gstreamer_base_options=(
 )
 # shellcheck disable=SC2034
 gstreamer_good_options=(
-  '-Dorc=enabled' '-Dautodetect=enabled' '-Dpulse=enabled'
+  '-Dorc=enabled' '-Dautodetect=enabled' '-Dpulse=enabled' '-Dinterleave=enabled'
   '-Dv4l2=enabled' '-Dv4l2-gudev=enabled' '-Djpeg=enabled'
   '-Drtp=enabled' '-Drtpmanager=enabled' '-Dvpx=enabled'
 )
@@ -219,7 +223,7 @@ gstreamer_option_arrays=(
 gstreamer_plugins=(
   coreelements app audioconvert audiorate audioresample audiotestsrc videotestsrc
   opengl gio opus playback typefindfunctions videoconvertscale videorate volume
-  autodetect pulseaudio alsa video4linux2 jpeg
+  autodetect pulseaudio alsa video4linux2 jpeg interleave
   rtp rtpmanager vpx nice dtls sctp srtp webrtc
 )
 gstreamer_packages=(
@@ -291,6 +295,8 @@ expected_manifest() {
     "librice-notice-sha256=$rice_notice_sha256" \
     "librice-notice-manifest-sha256=$rice_notice_manifest_sha256" \
     "gstreamer-version=$gstreamer_version" \
+    "gst-plugins-bad-patch-path=$gstreamer_patch_relative" \
+    "gst-plugins-bad-patch-sha256=$gstreamer_patch_sha256" \
     "gstreamer-license-sha256=$gstreamer_license_sha256" \
     "gstreamer-notice-sha256=$gstreamer_notice_sha256" \
     "gstreamer-license-inventory-sha256=$gstreamer_license_inventory_sha256" \
@@ -362,6 +368,7 @@ expected_manifest() {
     'license-payload=LIBRICE-THIRD-PARTY-NOTICES.txt' \
     'license-payload=LIBRICE-THIRD-PARTY-NOTICES.json' \
     'license-payload=webkitgtk-appimage-sandbox.patch' \
+    'license-payload=gst-plugins-bad-webrtc-rollback.patch' \
     'license-payload=GStreamer-LICENSE-LGPL-2.1' \
     'license-payload=GStreamer-PTP-LICENSE-MPL-2.0' \
     'license-payload=Libnice-LICENSING' \
@@ -422,6 +429,14 @@ read -r actual_patch_sha256 _ < <(sha256sum "$patch_file")
 }
 [[ $(grep -Fc "\"$appimage_runtime_dirname\"" "$patch_file") -eq 2 ]] || {
   die "patch does not contain both exact AppImage runtime directory locators"
+}
+
+[[ -f $gstreamer_patch_file && ! -L $gstreamer_patch_file ]] || {
+  die "missing regular GStreamer patch file: $gstreamer_patch_file"
+}
+read -r actual_patch_sha256 _ < <(sha256sum "$gstreamer_patch_file")
+[[ $actual_patch_sha256 == "$gstreamer_patch_sha256" ]] || {
+  die "GStreamer patch SHA256 mismatch (expected $gstreamer_patch_sha256, got $actual_patch_sha256)"
 }
 
 if [[ $mode == print-manifest ]]; then
@@ -587,6 +602,7 @@ create_source_bundle() (
   install -m 0755 "$librice_notice_generator" \
     "$bundle_dir/scripts/generate-librice-third-party-notices.mjs"
   install -m 0644 "$patch_file" "$bundle_dir/$patch_relative"
+  install -m 0644 "$gstreamer_patch_file" "$bundle_dir/$gstreamer_patch_relative"
   install -m 0644 "$webkit_archive" "$bundle_dir/sources/webkitgtk-$webkit_version.tar.xz"
   install -m 0644 "$rice_archive" "$bundle_dir/sources/librice-$rice_version.tar.gz"
   for index in "${!gstreamer_components[@]}"; do
@@ -614,7 +630,7 @@ create_source_bundle() (
 StudyVis corresponding source bundle for $runtime_id
 
 This archive contains the exact verified WebKitGTK, librice, GStreamer
-core/base/good/bad, libnice, and Meson archives, StudyVis's patch, build/notice-generation
+core/base/good/bad, libnice, and Meson archives, StudyVis's patches, build/notice-generation
 scripts, pinned supply-chain environment, the deterministic build manifest,
 and the exact locked librice dependency notice pair shipped in the AppImage.
 To reconstruct the modified WebKitGTK source tree:
@@ -622,7 +638,13 @@ To reconstruct the modified WebKitGTK source tree:
   tar -xf sources/webkitgtk-$webkit_version.tar.xz
   patch -d webkitgtk-$webkit_version -p1 < $patch_relative
 
-The GStreamer and libnice archives are unmodified upstream releases. The builder
+To reconstruct the modified GStreamer WebRTC source tree:
+
+  tar -xf sources/gst-plugins-bad-$gstreamer_version.tar.xz
+  patch -d gst-plugins-bad-$gstreamer_version -p1 < $gstreamer_patch_relative
+
+The archives are verified unmodified upstream releases; the two patches carry
+StudyVis's modifications. The builder
 installs core, base, good, libnice, and bad in that order, with the complete Meson
 options and exact ABI versions recorded in BUILD-MANIFEST.txt. Meson subproject
 downloads are disabled. External dependencies, including PipeWire and dynamic
@@ -689,6 +711,7 @@ required_runtime_files=(
   "$librice_notice"
   "$librice_notice_manifest"
   "$licenses/webkitgtk-appimage-sandbox.patch"
+  "$licenses/gst-plugins-bad-webrtc-rollback.patch"
   "$licenses/GStreamer-LICENSE-LGPL-2.1"
   "$licenses/GStreamer-PTP-LICENSE-MPL-2.0"
   "$licenses/Libnice-LICENSING"
@@ -752,6 +775,10 @@ runtime_is_complete() {
     sha256sum "$licenses/webkitgtk-appimage-sandbox.patch"
   )
   [[ $actual_runtime_patch_sha256 == "$webkit_patch_sha256" ]] || return 1
+  read -r actual_gstreamer_sha256 _ < <(
+    sha256sum "$licenses/gst-plugins-bad-webrtc-rollback.patch"
+  )
+  [[ $actual_gstreamer_sha256 == "$gstreamer_patch_sha256" ]] || return 1
   read -r actual_gstreamer_sha256 _ < <(sha256sum "$licenses/GStreamer-LICENSE-LGPL-2.1")
   [[ $actual_gstreamer_sha256 == "$gstreamer_license_sha256" ]] || return 1
   read -r actual_gstreamer_sha256 _ < <(sha256sum "$licenses/GStreamer-PTP-LICENSE-MPL-2.0")
@@ -997,6 +1024,9 @@ for component_index in "${!gstreamer_components[@]}"; do
   install -d "$gstreamer_source"
   tar --extract --file "$downloads/$component-$gstreamer_version.tar.xz" \
     --directory "$gstreamer_source" --strip-components=1 --no-same-owner --no-same-permissions
+  if [[ $component == gst-plugins-bad ]]; then
+    patch --batch --forward --fuzz=0 --directory="$gstreamer_source" --strip=1 <"$gstreamer_patch_file"
+  fi
   declare -n component_options="${gstreamer_option_arrays[$component_index]}"
   env CC="$cc" CXX="$cxx" python3 "$meson_source/meson.py" \
     setup "$gstreamer_build" "$gstreamer_source" \
@@ -1201,6 +1231,7 @@ install -m 0644 \
 install -m 0644 "$rice_source/LICENSE-APACHE" "$licenses/librice-LICENSE-APACHE"
 install -m 0644 "$rice_source/LICENSE-MIT" "$licenses/librice-LICENSE-MIT"
 install -m 0644 "$patch_file" "$licenses/webkitgtk-appimage-sandbox.patch"
+install -m 0644 "$gstreamer_patch_file" "$licenses/gst-plugins-bad-webrtc-rollback.patch"
 
 # WebKit installs resources containing several vendored components in addition
 # to its main LGPL/BSD surface. Preserve every upstream COPYING/LICENSE/NOTICE

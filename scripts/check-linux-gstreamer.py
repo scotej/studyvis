@@ -185,6 +185,14 @@ try:
         "appsink name=decoded sync=false max-buffers=12",
     )
     decode(
+        "WebAudio channel splitting/joining",
+        "audiotestsrc num-buffers=12 wave=sine ! "
+        "audio/x-raw,rate=48000,channels=2 ! deinterleave name=split "
+        "interleave name=joined ! appsink name=decoded sync=false max-buffers=12 "
+        "split.src_0 ! queue ! joined.sink_0 "
+        "split.src_1 ! queue ! joined.sink_1",
+    )
+    decode(
         "SRTP encryption",
         "videotestsrc num-buffers=6 ! "
         "video/x-raw,width=320,height=180,framerate=10/1 ! videoconvert ! "

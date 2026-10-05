@@ -1,0 +1,84 @@
+diff --git a/ext/webrtc/gstwebrtcbin.c b/ext/webrtc/gstwebrtcbin.c
+--- a/ext/webrtc/gstwebrtcbin.c
++++ b/ext/webrtc/gstwebrtcbin.c
+@@ -6538,8 +6538,78 @@
+      * Restore the value of connection's [[ sctpTransport]] internal slot
+      * to its value at the last stable signaling state.
+      */
+-    GST_FIXME_OBJECT (webrtc,
+-        "Rolling back transceiver associations is not implemented");
++    guint index;
++    GstWebRTCSessionDescription *stable = webrtc->current_local_description;
++
++    /* StudyVis #349: a collided media offer must not retain provisional MIDs
++     * or become the template for the answer to the winning remote offer. */
++    for (index = 0; index < webrtc->priv->transceivers->len; index++) {
++      GstWebRTCRTPTransceiver *trans =
++          g_ptr_array_index (webrtc->priv->transceivers, index);
++      WebRTCTransceiver *wtrans = WEBRTC_TRANSCEIVER (trans);
++      gboolean associated = FALSE;
++      guint media_index;
++
++      if (stable && trans->mid) {
++        for (media_index = 0;
++            media_index < gst_sdp_message_medias_len (stable->sdp);
++            media_index++) {
++          const GstSDPMedia *media =
++              gst_sdp_message_get_media (stable->sdp, media_index);
++          const gchar *mid = gst_sdp_media_get_attribute_val (media, "mid");
++          if (g_strcmp0 (mid, trans->mid) == 0) {
++            trans->mline = media_index;
++            associated = TRUE;
++            break;
++          }
++        }
++      }
++      if (associated)
++        continue;
++      g_clear_pointer (&trans->mid, g_free);
++      g_clear_pointer (&wtrans->pending_mid, g_free);
++      GST_OBJECT_LOCK (trans);
++      if (trans->codec_preferences) {
++        guint caps_index;
++        trans->codec_preferences =
++            gst_caps_make_writable (trans->codec_preferences);
++        for (caps_index = 0;
++            caps_index < gst_caps_get_size (trans->codec_preferences);
++            caps_index++)
++          gst_structure_remove_field (gst_caps_get_structure (
++                  trans->codec_preferences, caps_index), "a-mid");
++      }
++      GST_OBJECT_UNLOCK (trans);
++      {
++        GstWebRTCBinPad *pad =
++            _find_pad_for_transceiver (webrtc, GST_PAD_SINK, trans);
++        if (pad) {
++          guint caps_index;
++          if (pad->received_caps) {
++            pad->received_caps = gst_caps_make_writable (pad->received_caps);
++            for (caps_index = 0;
++                caps_index < gst_caps_get_size (pad->received_caps);
++                caps_index++)
++              gst_structure_remove_field (gst_caps_get_structure (
++                      pad->received_caps, caps_index), "a-mid");
++          }
++          gst_object_unref (pad);
++        }
++      }
++      if (!wtrans->mline_locked)
++        trans->mline = G_MAXUINT;
++      g_object_notify (G_OBJECT (trans), "mid");
++    }
++    g_clear_pointer (&webrtc->priv->last_generated_offer,
++        gst_webrtc_session_description_free);
++    g_clear_pointer (&webrtc->priv->last_generated_answer,
++        gst_webrtc_session_description_free);
++    if (stable && stable->type == GST_WEBRTC_SDP_TYPE_OFFER)
++      webrtc->priv->last_generated_offer =
++          gst_webrtc_session_description_copy (stable);
++    else if (stable && stable->type == GST_WEBRTC_SDP_TYPE_ANSWER)
++      webrtc->priv->last_generated_answer =
++          gst_webrtc_session_description_copy (stable);
+     return TRUE;
+   }
+ 
