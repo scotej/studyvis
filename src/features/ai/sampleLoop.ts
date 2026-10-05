@@ -250,8 +250,8 @@ export function schedulerLagIsMaterial(
 // above measures how late the NEXT tick was scheduled, so it can only see the
 // gaps that happen to straddle a tick boundary; at a backed-off 42 s cadence
 // that misses almost all of them. This probe runs a 1 Hz timer across capture and
-// inference and keeps the worst lateness it sees. #350 froze during capture,
-// before an inference-only probe could observe the stall that lost the peer.
+// inference and keeps the worst lateness it sees. #350 recorded long timer
+// gaps while capture was pending, before an inference-only probe could see them.
 //
 // Both halves matter and neither substitutes for the other: a long inference
 // says the engine is behind, a starved main thread says the app is. The

@@ -1220,9 +1220,16 @@ show a forced session end.
 inference, including failed captures and engine-warming exits. Inference
 duration still measures the POST separately. Regression tests cover frozen
 successful/failed capture, a responsive slow capture, and stopping during
-capture. The frozen-capture cases fail with the fix reverted. The initial
-native capture stall and the original two-device recovery remain under
-investigation; this mitigation alone does not prove #350 resolved.
+capture. The frozen-capture cases fail with the fix reverted.
+
+Slow capture operations now persist numeric stage timings for extraction,
+encoding, compositing, and disposal without frame content or device identifiers.
+Browser probes did not reproduce the reported 21 s stall: a 21 s JavaScript
+busy loop preserved native ICE/media, while whole-renderer suspension caused
+ICE failure followed by automatic rejoin after resumption. Elapsed capture
+and zero clock skew cannot establish the original cause. The reported stall
+and two-device recovery remain under investigation; these mitigations and
+diagnostics alone do not prove #350 resolved.
 
 ## Archive — retired backlogs
 
