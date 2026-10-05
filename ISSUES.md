@@ -1046,6 +1046,13 @@ Blast radius while broken: `deploy.yml`'s Linux installer, `ci.yml`'s advisory A
 
 **Status.** **fixed** — re-pinned to the artifact now served, after establishing that nothing about the SOURCE moved: `..._COMMIT` is still upstream HEAD, the tarball at `..._SOURCE_URL` still hashes to `..._SOURCE_SHA256`, and the bundled appimagetool is still `8c8c91f`, read out of the artifact rather than assumed (split the squashfs off at the end of the ELF headers, `unsquashfs`, and the git version is a plain string in `appimagetool-prefix/usr/bin/appimagetool`). Only the outer container was rebuilt. Every other binary and source pin in the file was re-verified against its URL at the same time, so the next Linux build does not stop four minutes later on a different stale entry.
 
+The same gate caught a recurrence on 2026-10-05: upstream replaced the asset
+on 2026-10-01, changing `0441769a…` to `49d6a171…`. The plugin remains at
+`536b0687`; its source archive and the pinned appimagetool source archive retain
+their hashes. Static extraction confirms the bundled appimagetool still reports
+`8c8c91f`. The pin was refreshed after that review; runtime/source revisions
+and cache-key expressions remain unchanged.
+
 `STUDYVIS_LINUXDEPLOY_TOOLSET_REVISION` deliberately did not move: every source tuple the file delivers is byte-identical to r3, and relabelling unchanged corresponding source would make the archive say something untrue.
 
 The recurrence is not fixed, because it cannot be from here — upstream publishes no immutable tag for this plugin, their newest fixed release is sixteen months older and would drag the bundled appimagetool back with it, and mirroring the artifact ourselves is a repository-owned decision rather than a build fix. What is fixed is the cost of the next one: the entry now carries the rolling-tag hazard and the three-step re-verification beside it, and the mismatch prints the procedure and says plainly not to paste the observed hash in. The gate refusing an unreviewed binary is the control working; `prepare-linuxdeploy-tools.sh`'s own header already says a mutable URL is acceptable *only* because its bytes are checked first.
