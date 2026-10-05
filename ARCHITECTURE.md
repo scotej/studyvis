@@ -115,7 +115,7 @@ Runtime revision 9 has this reviewable input identity:
 |-|-|-|
 | WebKitGTK | `webkitgtk-2.52.5.tar.xz` from `webkitgtk.org/releases` | `8a531a9abd2215936e8a8a914c077b586c0228b31d652f205286a8ec90f3364b` |
 | librice | GitHub tag archive `v0.4.3` | `4671e1835f9ab0f8d87e8d9e22b6bfb06f928aeae442841ab81881dff61e3f4b` |
-| WebKit AppImage portability delta | `scripts/patches/webkitgtk-2.52.5-appimage-sandbox.patch` | `aff85dde0fcc738fd3a4618afdee852e6f183a9f8c49f904db96f8a4e441ce65` |
+| WebKit AppImage portability delta | `scripts/patches/webkitgtk-2.52.5-appimage-sandbox.patch` | `b78b2d6555e2db31fdd467f3ff31c21ba195f5a5ee2995e32742dbb9c78a0d55` |
 | GStreamer core | `gstreamer-1.28.7.tar.xz` from `gstreamer.freedesktop.org/src` | `787329b2c5758e228a71d926a6dcf960bceaacca3cadd63874ba665dfcda013e` |
 | GStreamer base | `gst-plugins-base-1.28.7.tar.xz` from `gstreamer.freedesktop.org/src` | `ed6e5410f496d171818763af2265e7977154bc7f9b827e98acf8c5bed21dd5a7` |
 | GStreamer good | `gst-plugins-good-1.28.7.tar.xz` from `gstreamer.freedesktop.org/src` | `87256969c82cf3bc8574301f3e7044a90de0ac500a5a27d8ba38c4dde894dd8b` |
@@ -141,7 +141,8 @@ starts queued sources only after their exact committed pad is configured.
 Answers retain supported offered RTP extension IDs; future sources reserve
 accepted IDs while committed per-MID mappings remain stable. Remote transport
 and SSRC identity and raw payload-specific feedback stay out of local codec
-preferences (#349).
+preferences. Track removal forwards the owning transceiver's desired
+direction to GStreamer before stopping its source and renegotiating (#349).
 The pinned plugin surface includes interleave/deinterleave for WebAudio's decoded
 remote-audio processing. Reproducibility here means pinned and checked
 source inputs, local delta, build environment, and configuration—not a claim of

@@ -214,7 +214,7 @@ The pinned, hash-verified input tuple for runtime revision 9 is:
 | ---------------------------------- | --------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
 | WebKitGTK                          | `https://webkitgtk.org/releases/webkitgtk-2.52.5.tar.xz`                                | `8a531a9abd2215936e8a8a914c077b586c0228b31d652f205286a8ec90f3364b` |
 | librice                            | `https://github.com/ystreet/librice/archive/refs/tags/v0.4.3.tar.gz`                    | `4671e1835f9ab0f8d87e8d9e22b6bfb06f928aeae442841ab81881dff61e3f4b` |
-| AppImage runtime portability patch | `scripts/patches/webkitgtk-2.52.5-appimage-sandbox.patch`                               | `aff85dde0fcc738fd3a4618afdee852e6f183a9f8c49f904db96f8a4e441ce65` |
+| AppImage runtime portability patch | `scripts/patches/webkitgtk-2.52.5-appimage-sandbox.patch`                               | `b78b2d6555e2db31fdd467f3ff31c21ba195f5a5ee2995e32742dbb9c78a0d55` |
 | GStreamer core                     | `https://gstreamer.freedesktop.org/src/gstreamer/gstreamer-1.28.7.tar.xz`               | `787329b2c5758e228a71d926a6dcf960bceaacca3cadd63874ba665dfcda013e` |
 | GStreamer base                     | `https://gstreamer.freedesktop.org/src/gst-plugins-base/gst-plugins-base-1.28.7.tar.xz` | `ed6e5410f496d171818763af2265e7977154bc7f9b827e98acf8c5bed21dd5a7` |
 | GStreamer good                     | `https://gstreamer.freedesktop.org/src/gst-plugins-good/gst-plugins-good-1.28.7.tar.xz` | `87256969c82cf3bc8574301f3e7044a90de0ac500a5a27d8ba38c4dde894dd8b` |
@@ -246,7 +246,9 @@ after collided offers. Queued sources start only after their exact committed
 pad is configured. Answers retain supported offered RTP extension IDs,
 future sources reserve accepted IDs, and committed per-MID mappings remain
 stable. Remote transport/SSRC identity and raw payload-specific feedback stay
-out of local codec preferences (#349). The pinned interleave plugin
+out of local codec preferences. Track removal forwards the owning transceiver's
+desired direction to GStreamer before stopping its source and
+renegotiating (#349). The pinned interleave plugin
 supplies WebAudio's decoded remote-audio channel processing. It retains recycled media
 senders through renegotiation, preserves
 advertised stream IDs, and requests the linear BGRA portal format understood

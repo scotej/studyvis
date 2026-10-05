@@ -1322,10 +1322,16 @@ passes decoded bidirectional camera/microphone, codec narrowing, withdrawal and
 legacy serialized screen/restart cases. It does not include the final WebKit or
 new same-peer late-screen/restart fixture. The same-order Chromium fixture
 passes those added cases; deterministic opposite order also exposes a Chromium
-RTP-extension reassignment limit. CI retains the failed AppImage, installed
-runtime and isolated synthetic trace for one day. The final rebuilt
-WebKit/AppImage probe and affected physical desktop/peer matrix remain
-unresolved. This does not yet prove #349 resolved.
+RTP-extension reassignment limit. The subsequent exact AppImage rebuild and
+package identity/license/provenance checks pass, and its opposite-order native probe decodes both cameras,
+microphone tones and late screen frames. It then fails screen removal: the
+sender track is null, but GStreamer still advertises a sending direction.
+WebKit's generic removal changes only private direction state; the focused
+GStreamer backend fix forwards the owning transceiver's desired direction
+before stopping its source and renegotiating. CI retains the failed AppImage,
+installed runtime and isolated synthetic trace for one day. The final rebuilt
+WebKit/AppImage stop/restart probe and affected physical desktop/peer matrix
+remain unresolved. This does not yet prove #349 resolved.
 
 ### I126 — Sev2
 
