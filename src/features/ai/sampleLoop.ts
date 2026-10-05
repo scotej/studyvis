@@ -269,8 +269,8 @@ export type StarveProbe = {
   // Worst observed lateness, in ms, over the probe's lifetime.
   worstMs: () => number
   // Wall time minus monotonic time across the probe's lifetime — the same
-  // discriminator `pttWatchdog` records as `skewMs`. Material skew means the
-  // machine suspended rather than starved.
+  // reading `pttWatchdog` records as `skewMs`. Material divergence excludes
+  // the lateness reading; zero skew cannot establish why scheduling paused.
   skewMs: () => number
 }
 
@@ -284,13 +284,10 @@ type StarveProbeRuntime = {
 }
 
 export function startStarveProbe(runtime: StarveProbeRuntime): StarveProbe {
-  // Lateness is measured on the MONOTONIC clock, never on `Date.now()`. A
-  // machine that suspends mid-inference (lid closed, sleep) moves wall time by
-  // minutes while nothing was ever starved, and an NTP step does the same — on
-  // wall time a single such tick would engage backoff on its first occurrence
-  // and file a fabricated `app.starved` record. `pttWatchdog` draws exactly
-  // this distinction from the same pair of clocks, and #269's own diagnosis
-  // leaned on its `skewMs: 0` to rule sleep out.
+  // #269 / #350 — monotonic time avoids treating a wall-clock adjustment as
+  // timer lateness. Material wall/monotonic divergence excludes the reading,
+  // including suspend cases where monotonic time pauses. Windows QPC includes
+  // sleep, so zero skew cannot rule out machine or process suspension.
   const monotonicNow = runtime.monotonicNow ?? runtime.now
   let worstMs = 0
   let skewMs = 0
@@ -401,8 +398,8 @@ export function nextBackoffState(
 
 export type SampleLoopRuntime = {
   now: () => number
-  // #269 — a clock that does not move while the machine is suspended, used by
-  // the starve probe so a sleep/wake cannot be read as a frozen main thread.
+  // #269 / #350 — monotonic timing for lateness and wall-clock divergence.
+  // Whether it advances during machine suspension depends on the platform.
   // Optional: an injected runtime without one falls back to `now`.
   monotonicNow?: () => number
   setTimeout: (handler: () => void, ms: number) => unknown
@@ -844,7 +841,7 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
         modelId: state.modelId,
         outcome,
         starvedMs,
-        // Wall running ahead of monotonic is the signature of a suspend; the
+        // Material wall/monotonic divergence invalidates the reading; the
         // reading above already excludes it, and recording the pair is what
         // makes that checkable from a diagnostics bundle (same field as
         // `ptt.watchdog`'s timeline gap).

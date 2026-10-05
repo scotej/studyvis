@@ -1232,7 +1232,7 @@ capture. The frozen-capture cases fail with the fix reverted.
 Slow capture operations now persist numeric stage timings for extraction,
 encoding, compositing, and disposal without frame content or device identifiers.
 Browser probes did not reproduce the reported 21 s stall: a 21 s JavaScript
-busy loop preserved native ICE/media, while whole-renderer suspension caused
+busy loop preserved ICE/session peers, while whole-renderer suspension caused
 ICE failure followed by automatic rejoin after resumption. Elapsed capture
 and zero clock skew cannot establish the original cause. The reported stall
 and two-device recovery remain under investigation; these mitigations and
@@ -1252,7 +1252,8 @@ the change reproduces the hang.
 **Status.** **fixed on branch** — reject initial offer creation so checkout
 closes/retries failed peers. Exhausted initialization releases its own
 placeholders; late cleanup cannot clear a replacement promise or peer state.
-Signaling-handler rejections are consumed and reported through `onJoinError`.
+Announcement-initialization rejections are consumed and reported through
+`onJoinError`.
 This is a reproduced recovery defect found while investigating #350; the
 reporter's original cause remains unproven.
 
