@@ -289,7 +289,7 @@ inventory, alongside its LGPL text, the PTP helper's MPL 2.0 text, and Meson's
 Apache 2.0 license.
 
 The builder's `--source-bundle <output.tar.gz>` mode produces the deterministic
-corresponding-source archive used by tagged releases. It contains the seven exact
+corresponding-source archive used by tagged releases. It contains the eight exact
 verified WebKit/librice/GStreamer/Meson archives, the PTP license, complete
 WebKit/GStreamer patches, pinned env file, build/notice-generation scripts, build
 manifest, a reconstruction README, and internal

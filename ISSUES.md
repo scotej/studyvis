@@ -1281,6 +1281,31 @@ module regressions cover both paths and the TTL boundary. These defects are
 relevant to #350's recovery attempts, but the attached archives do not establish
 that either caused the reported loss.
 
+### I125 — Sev2
+
+`scripts/patches/webkitgtk-2.52.5-appimage-sandbox.patch`,
+`scripts/patches/gst-plugins-bad-1.28.7-webrtc-rollback.patch`,
+`scripts/check-linux-webkit-media.html`
+
+**Evidence.** GitHub #349's released v1.12.5 AppImage connects a data channel
+but rejects the installed peer core's empty-SDP rollback when both peers publish
+camera/microphone media together. The existing serialized native probe passes
+without exercising that collision. Accepting rollback alone leaves provisional
+GStreamer transceiver MIDs/generated SDP and prematurely configured outgoing
+sources, producing invalid subsequent negotiation.
+
+**Status.** **candidate on branch** — runtime revision 9 accepts rollback,
+restores stable transceiver associations and generated SDP, and defers
+provisional outgoing sources until an accepted answer. Sources use the committed
+sender pad and accepted codecs; removed pending tracks cannot later start.
+The packaged probe uses the installed patched core and requires decoded camera
+frames and remote microphone PCM after a forced offer collision. Its WebAudio
+helper uses the pinned, packaged interleave plugin. Patch hashes, manifest,
+license payloads and corresponding-source reconstruction include both native
+patches. Chromium probe and source-application controls pass; the full bundled
+engine rebuild, exact-AppImage probe, and affected physical desktop/peer matrix
+remain pending. This does not yet prove #349 resolved.
+
 ## Archive — retired backlogs
 
 Two documents used to sit beside this ledger and were deleted once their implementation backlog had no open code work left: `BUILD-PROMPTS.md` (the sequenced V0→V3 build plan) and `IMPROVEMENTS.md` (the v1.2.0-era improvement backlog). Git history holds both in full — `git log --diff-filter=D -- BUILD-PROMPTS.md IMPROVEMENTS.md`, then `git show <sha>^:<file>`. Linux's implementation checklist is complete, but its operational release sign-off remains pending. What survives here is the part still cited from code.

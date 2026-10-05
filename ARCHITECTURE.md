@@ -207,7 +207,7 @@ of all 59 upstream WebKit license/notice files discovered by the pinned source
 build. A separate GStreamer license inventory and Meson license accompany its
 matched source-built media stack. The builder's `--source-bundle` mode separately creates a deterministic
 corresponding-source archive containing the exact verified WebKitGTK/librice,
-GStreamer core/base/good/bad, and Meson archives, complete WebKit/GStreamer patches, pinned env, builder, expected manifest, reconstruction
+GStreamer core/base/good/bad, libnice, and Meson archives, complete WebKit/GStreamer patches, pinned env, builder, expected manifest, reconstruction
 README, and internal checksums. Tagged Linux builds attach it as
 `StudyVis_X.Y.Z_linux-webkit-sources.tar.gz` with a basename-only `.sha256`
 sidecar after the exact-AppImage smoke; it is kept outside the AppImage to avoid
