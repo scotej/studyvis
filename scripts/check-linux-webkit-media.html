@@ -45,11 +45,15 @@
       }
       audioContext = new AudioContext()
       await audioContext.resume()
+      const microphoneGains = new Map()
       const addMicrophone = (stream, frequency) => {
         const tone = audioContext.createOscillator()
         tone.frequency.value = frequency
+        const gain = audioContext.createGain()
         const destination = audioContext.createMediaStreamDestination()
-        tone.connect(destination)
+        tone.connect(gain)
+        gain.connect(destination)
+        microphoneGains.set(stream.id, gain)
         tone.start()
         stream.addTrack(destination.stream.getAudioTracks()[0])
       }
@@ -246,22 +250,19 @@
           'decoded Trystero microphone after rollback'
         )
       }
+      // Silence the synthetic inputs without changing sender-track lifecycle.
       for (const stream of simultaneous)
-        stream.getAudioTracks().forEach((track) => {
-          track.enabled = false
-        })
+        microphoneGains.get(stream.id).gain.value = 0
       await peerUntil(
         () => audioProbes.every((probe) => probe.sample().rms < 0.005),
-        'disabled Trystero microphones are silent'
+        'silent Trystero microphone inputs decode silence'
       )
       for (const stream of simultaneous)
-        stream.getAudioTracks().forEach((track) => {
-          track.enabled = true
-        })
+        microphoneGains.get(stream.id).gain.value = 1
       for (const [index, probe] of audioProbes.entries())
         await peerUntil(
           () => probe.hasTone(index === 0 ? 660 : 440),
-          're-enabled Trystero microphone'
+          'restored Trystero microphone input'
         )
       audioProbes.forEach((probe) => probe.disconnect())
       assert(errors.length === 0, 'Trystero negotiation reported an error')
@@ -269,7 +270,7 @@
       for (const stream of simultaneous)
         stream.getTracks().forEach((track) => track.stop())
       report(
-        'simultaneous Trystero cameras and decoded microphone tones survived rollback, mute, and re-enable'
+        'simultaneous Trystero cameras and decoded microphone tones survived rollback, input silence, and restoration'
       )
 
       const a = new RTCPeerConnection({ bundlePolicy: 'max-bundle' })
