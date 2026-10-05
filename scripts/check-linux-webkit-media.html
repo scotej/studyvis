@@ -567,6 +567,75 @@
         'PASS simultaneous Trystero publication and rollback, removed pending sender, answer-selected video codec, serialized local and remote cameras, audio packets and unmuted tracks, receive-only track events, stream IDs, late screen, replaceTrack, and screen restart'
       )
     } catch (error) {
+      const description = (value) =>
+        value && {
+          type: value.type,
+          media: value.sdp
+            .split(/\r?\n/)
+            .filter((line) =>
+              /^(m=|a=(mid:|msid:|send|recv|inactive|rtpmap:|fmtp:|group:|setup:|bundle-only|rtcp-mux))/.test(
+                line
+              )
+            ),
+        }
+      for (const [index, peer] of peers.entries()) {
+        try {
+          const stats = await Promise.race([
+            peer.getStats(),
+            delay(1000).then(() => null),
+          ])
+          report(
+            `diagnostic peer ${index}: ${JSON.stringify({
+              signalingState: peer.signalingState,
+              connectionState: peer.connectionState,
+              iceConnectionState: peer.iceConnectionState,
+              iceGatheringState: peer.iceGatheringState,
+              currentLocalDescription: description(
+                peer.currentLocalDescription
+              ),
+              pendingLocalDescription: description(
+                peer.pendingLocalDescription
+              ),
+              currentRemoteDescription: description(
+                peer.currentRemoteDescription
+              ),
+              pendingRemoteDescription: description(
+                peer.pendingRemoteDescription
+              ),
+              transceivers: peer.getTransceivers().map((transceiver) => ({
+                mid: transceiver.mid,
+                direction: transceiver.direction,
+                currentDirection: transceiver.currentDirection,
+                sender: transceiver.sender.track && {
+                  id: transceiver.sender.track.id,
+                  kind: transceiver.sender.track.kind,
+                  enabled: transceiver.sender.track.enabled,
+                  readyState: transceiver.sender.track.readyState,
+                },
+                receiver: transceiver.receiver.track && {
+                  id: transceiver.receiver.track.id,
+                  kind: transceiver.receiver.track.kind,
+                  muted: transceiver.receiver.track.muted,
+                  readyState: transceiver.receiver.track.readyState,
+                },
+              })),
+              stats:
+                stats &&
+                [...stats.values()].filter((stat) =>
+                  [
+                    'inbound-rtp',
+                    'outbound-rtp',
+                    'transport',
+                    'candidate-pair',
+                    'codec',
+                  ].includes(stat.type)
+                ),
+            })}`
+          )
+        } catch (diagnosticError) {
+          report(`diagnostic peer ${index}: ${String(diagnosticError)}`)
+        }
+      }
       report(`FAIL ${String(error)} ${error.stack ?? ''}`)
     } finally {
       if (audioContext) await audioContext.close()
