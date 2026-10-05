@@ -214,7 +214,7 @@ The pinned, hash-verified input tuple for runtime revision 9 is:
 | ---------------------------------- | --------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
 | WebKitGTK                          | `https://webkitgtk.org/releases/webkitgtk-2.52.5.tar.xz`                                | `8a531a9abd2215936e8a8a914c077b586c0228b31d652f205286a8ec90f3364b` |
 | librice                            | `https://github.com/ystreet/librice/archive/refs/tags/v0.4.3.tar.gz`                    | `4671e1835f9ab0f8d87e8d9e22b6bfb06f928aeae442841ab81881dff61e3f4b` |
-| AppImage runtime portability patch | `scripts/patches/webkitgtk-2.52.5-appimage-sandbox.patch`                               | `f25f62bbc8e6a889fa4c0c13281cdbad1ee16635a91116972a9e60d0b18238d5` |
+| AppImage runtime portability patch | `scripts/patches/webkitgtk-2.52.5-appimage-sandbox.patch`                               | `a4773c3a942440b6c00eb3bad4f81f0d0bcd86010275eb54bab6f9e965db8145` |
 | GStreamer core                     | `https://gstreamer.freedesktop.org/src/gstreamer/gstreamer-1.28.7.tar.xz`               | `787329b2c5758e228a71d926a6dcf960bceaacca3cadd63874ba665dfcda013e` |
 | GStreamer base                     | `https://gstreamer.freedesktop.org/src/gst-plugins-base/gst-plugins-base-1.28.7.tar.xz` | `ed6e5410f496d171818763af2265e7977154bc7f9b827e98acf8c5bed21dd5a7` |
 | GStreamer good                     | `https://gstreamer.freedesktop.org/src/gst-plugins-good/gst-plugins-good-1.28.7.tar.xz` | `87256969c82cf3bc8574301f3e7044a90de0ac500a5a27d8ba38c4dde894dd8b` |
@@ -249,8 +249,9 @@ stable. Remote transport/SSRC identity and raw payload-specific feedback stay
 out of local codec preferences. Track removal forwards the owning transceiver's
 desired direction to GStreamer before stopping its source and
 renegotiating (#349). Recycled senders retain their committed input pad and
-replacement stream/track identity. Incoming track clients remain live when an
-EOS-ended decoder is replaced, with retired callbacks discarded. Inactive
+replacement stream/track identity. Incoming track clients remain live when a
+decoder whose own input has received EOS is replaced, with retired callbacks
+discarded before its terminal queue drains. Inactive
 transceivers end all receive pads they own, including restarted decoders.
 Zero-port bundle-only offers start a source only after the matching receiving
 MID is accepted in both committed BUNDLE groups. Committed pads retain the

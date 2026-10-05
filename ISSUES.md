@@ -1362,6 +1362,19 @@ media sequence also passes a diagnostic WebKit caps-converter exclusion; that
 preload verifies causality rather than executing the rebuilt producer C++.
 The combined tuple requires its complete exact-AppImage native gate and the
 physical CachyOS KDE Wayland / Linux-to-macOS/Windows matrix before sign-off.
+The exact v1.12.6 commit `3e6741a` passes that native media gate in Deploy but
+fails CI at the legacy fresh-screen restart: new 480×270 RTP arrives while the
+receiver retains the old 640×360 decoder. Three logging-only runs on the captured
+runtime pass and show input-to-terminal EOS delays of 118–193 ms. A single
+controlled 500 ms delay before the old receiver's terminal EOS callback
+reproduces the failure: genuine EOS enters its own decoder, a fresh binding is
+rejected, then the old retirement callback runs. The incoming source now marks
+its captured generation ended at its own input EOS, before terminal queue drain.
+Only same-generation terminal EOS remains eligible; clients stay live, retired
+samples/events are discarded, and active decoder replacement remains rejected.
+This narrow C++ correction still requires a rebuilt exact-AppImage gate and the
+controlled old-negative/new-positive comparison. The immutable, unpublished
+v1.12.6 tag is retained; the release notes move forward to v1.12.7.
 The optional native `max-compat` declined-BUNDLE control exposes a separate
 local-credential/gather transition limit; it remains private and does not
 weaken the app's permanent balanced probe. Constant-SSRC receiver resume and
