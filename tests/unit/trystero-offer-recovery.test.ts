@@ -6,7 +6,7 @@ const { default: createPeer } = await import(
     import.meta.url
   ).href
 )
-const { OfferPool, offerTtl } = await import(
+const { OfferPool } = await import(
   new URL(
     '../../node_modules/@trystero-p2p/core/dist/offer-pool.mjs',
     import.meta.url
@@ -91,7 +91,7 @@ class NativeConnection extends EventTarget {
 }
 
 async function encryptOffer(peer: ReturnType<typeof createPeer>) {
-  const offer = await peer.getOffer(Date.now() - peer.created > offerTtl)
+  const offer = await peer.getOffer()
   if (!offer || offer.type !== 'offer') throw new Error('failed to get offer')
   return offer.sdp
 }
@@ -266,18 +266,23 @@ describe('#350 pooled offer failure recovery', () => {
     }
   })
 
-  test('a failed ICE restart of an aged warm offer settles checkout and retries', async () => {
-    const h = harness(0)
+  test('an ICE restart rejection still settles checkout and retries', async () => {
+    let restartFirst = true
+    const h = harness(0, async (peer) => {
+      await peer.getOffer()
+      if (restartFirst) {
+        restartFirst = false
+        ;(peer.connection as NativeConnection).rejectNextDescription = true
+        const restarted = await peer.getOffer(true)
+        if (!restarted) throw new Error('failed restart')
+      }
+      return encryptOffer(peer)
+    })
     try {
-      h.pool.warmup()
-      const aged = h.peers[0]!
-      await aged.getOffer()
-      aged.created = Date.now() - offerTtl - 1
-      ;(aged.connection as NativeConnection).rejectNextDescription = true
       await h.announce()
-      expect(NativeConnection.created).toHaveLength(21)
+      expect(NativeConnection.created).toHaveLength(2)
       expect(NativeConnection.created[0]?.closeCalls).toBe(1)
-      expect(h.state().offerPeer).toBe(h.peers[20])
+      expect(h.state().offerPeer).toBe(h.peers[1])
       expect(h.sent).toHaveLength(1)
       expect(h.ctx.onJoinError).not.toHaveBeenCalled()
     } finally {
