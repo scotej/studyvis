@@ -423,13 +423,89 @@
           'original Trystero microphone after screen restart'
         )
       }
+      const restartedScreenTransceiver = handles[1].connection
+        .getTransceivers()
+        .find((entry) => entry.sender.track === screenTrack)
+      assert(restartedScreenTransceiver, 'restarted screen lost its sender')
+      handles[1].removeStream(lateScreen)
+      lateScreen.getTracks().forEach((track) => track.stop())
+      await peerUntil(
+        () =>
+          restartedScreenTransceiver.sender.track === null &&
+          ['recvonly', 'inactive'].includes(
+            restartedScreenTransceiver.currentDirection
+          ) &&
+          handles.every(
+            (handle) => handle.connection.signalingState === 'stable'
+          ),
+        'Trystero screen stopped before fresh capture'
+      )
+      await delay(800)
+      const retiredScreenFrames = frames(videos[0].get(lateScreen.id))
+      await delay(500)
+      assert(
+        frames(videos[0].get(lateScreen.id)) <= retiredScreenFrames + 1,
+        'retired Trystero screen kept decoding frames'
+      )
+      const freshScreen = makeSource(400, 225)
+      const freshScreenTrack = freshScreen.getVideoTracks()[0]
+      assert(
+        freshScreen.id !== lateScreen.id &&
+          freshScreenTrack.id !== screenTrack.id,
+        'fresh capture reused the retired screen identity'
+      )
+      handles[1].addStream(freshScreen)
+      await peerUntil(
+        () => videos[0].has(freshScreen.id),
+        'fresh Trystero screen stream ID'
+      )
+      await peerUntil(
+        () =>
+          handles[1].connection
+            .getTransceivers()
+            .some(
+              (entry) =>
+                entry.sender.track === freshScreenTrack &&
+                entry.mid !== null &&
+                ['sendonly', 'sendrecv'].includes(entry.currentDirection)
+            ),
+        'fresh Trystero screen sender committed'
+      )
+      assert(
+        handles[1].connection.localDescription.sdp.includes(
+          `a=msid:${freshScreen.id} ${freshScreenTrack.id}`
+        ),
+        'fresh screen offer lost its replacement stream and track identity'
+      )
+      await advancing(
+        videos[0].get(freshScreen.id),
+        400,
+        225,
+        'fresh Trystero screen after capture restart'
+      )
+      assertCommittedExtensions()
+      for (const [index, width, height] of [
+        [0, 160, 120],
+        [1, 320, 180],
+      ]) {
+        await advancing(
+          videos[index].get(simultaneous[1 - index].id),
+          width,
+          height,
+          'original Trystero camera after fresh screen capture'
+        )
+        await peerUntil(
+          () => audioProbes[index].hasTone(index === 0 ? 660 : 440),
+          'original Trystero microphone after fresh screen capture'
+        )
+      }
       report(
-        'balanced Trystero late screen and restart preserved committed extension IDs, both cameras, and decoded microphone tones'
+        'balanced Trystero late screen, same-track restart, and fresh capture preserved committed extension IDs, both cameras, and decoded microphone tones'
       )
       audioProbes.forEach((probe) => probe.disconnect())
       assert(errors.length === 0, 'Trystero negotiation reported an error')
       handles.forEach((handle) => handle.destroy())
-      for (const stream of [...simultaneous, lateScreen])
+      for (const stream of [...simultaneous, lateScreen, freshScreen])
         stream.getTracks().forEach((track) => track.stop())
       report(
         'simultaneous Trystero cameras and decoded microphone tones survived rollback, input silence, and restoration'

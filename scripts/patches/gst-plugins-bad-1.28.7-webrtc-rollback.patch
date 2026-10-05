@@ -1,7 +1,33 @@
 diff --git a/ext/webrtc/gstwebrtcbin.c b/ext/webrtc/gstwebrtcbin.c
 --- a/ext/webrtc/gstwebrtcbin.c
 +++ b/ext/webrtc/gstwebrtcbin.c
-@@ -2207,6 +2207,31 @@
+@@ -2130,6 +2130,25 @@
+ 
+     if (pad->received_caps) {
+       caps = gst_caps_ref (pad->received_caps);
++      if (GST_PAD_DIRECTION (pad) == GST_PAD_SINK && codec_preferences) {
++        guint i;
++        gboolean has_sender_identity = FALSE;
++        for (i = 0; i < gst_caps_get_size (codec_preferences); i++) {
++          if (gst_structure_has_field (gst_caps_get_structure (codec_preferences,
++                      i), "a-msid")) {
++            has_sender_identity = TRUE;
++            break;
++          }
++        }
++        if (has_sender_identity) {
++          /* The retained pad describes the previous RTP source. Codec
++           * intersection must retain the replacement sender's identity. */
++          caps = gst_caps_make_writable (caps);
++          for (i = 0; i < gst_caps_get_size (caps); i++)
++            gst_structure_remove_fields (gst_caps_get_structure (caps, i),
++                "ssrc", "a-msid", NULL);
++        }
++      }
+     } else {
+       static GstStaticCaps static_filter =
+           GST_STATIC_CAPS ("application/x-rtp, "
+@@ -2207,6 +2226,31 @@
      GST_DEBUG_OBJECT (trans, "Could not find caps for mline %u", media_idx);
  
    return ret;
@@ -33,7 +59,7 @@ diff --git a/ext/webrtc/gstwebrtcbin.c b/ext/webrtc/gstwebrtcbin.c
  }
  
  static GstCaps *
-@@ -3485,6 +3510,233 @@
+@@ -3485,6 +3529,233 @@
    return edata.extmap;
  }
  
@@ -267,7 +293,59 @@ diff --git a/ext/webrtc/gstwebrtcbin.c b/ext/webrtc/gstwebrtcbin.c
  struct hdrext_id
  {
    const char *rtphdrext_uri;
-@@ -4719,6 +4971,8 @@
+@@ -3938,9 +4209,31 @@
+       && webrtc->bundle_policy == GST_WEBRTC_BUNDLE_POLICY_MAX_BUNDLE
+       && gst_sdp_message_medias_len (msg) != bundle_idx;
+   guint last_data_index = G_MAXUINT;
+-
+-  /* add data channel support */
+-  if (webrtc->priv->data_channels->len == 0)
++  guint stable_data_index = webrtc->current_local_description ?
++      _message_get_datachannel_index (webrtc->current_local_description->sdp) :
++      G_MAXUINT;
++  gboolean stable_data_accepted = FALSE;
++
++  if (webrtc->priv->sctp_transport && stable_data_index != G_MAXUINT &&
++      webrtc->current_remote_description &&
++      stable_data_index < gst_sdp_message_medias_len (
++          webrtc->current_remote_description->sdp) &&
++      _message_media_is_datachannel (webrtc->current_remote_description->sdp,
++          stable_data_index)) {
++    const GstSDPMedia *local = gst_sdp_message_get_media (
++        webrtc->current_local_description->sdp, stable_data_index);
++    const GstSDPMedia *remote = gst_sdp_message_get_media (
++        webrtc->current_remote_description->sdp, stable_data_index);
++    stable_data_accepted =
++        (gst_sdp_media_get_port (local) != 0 ||
++        _media_has_attribute_key (local, "bundle-only")) &&
++        (gst_sdp_media_get_port (remote) != 0 ||
++        _media_has_attribute_key (remote, "bundle-only"));
++  }
++
++  /* A committed SCTP m-line exists before a remote DCEP channel arrives.
++   * Preserve it when re-offering, even while the local channel list is empty. */
++  if (webrtc->priv->data_channels->len == 0 && !stable_data_accepted)
+     return FALSE;
+ 
+   if (last_offer) {
+@@ -4488,10 +4781,12 @@
+           gst_sdp_media_add_attribute (media, "fmtp", str);
+           g_free (str);
+ 
+-          str = g_strdup_printf ("%u", target_ssrc);
+-          gst_structure_set (trans->local_rtx_ssrc_map, str, G_TYPE_UINT,
+-              g_random_int (), NULL);
+-          g_free (str);
++          if (target_ssrc != G_MAXUINT) {
++            str = g_strdup_printf ("%u", target_ssrc);
++            gst_structure_set (trans->local_rtx_ssrc_map, str, G_TYPE_UINT,
++                g_random_int (), NULL);
++            g_free (str);
++          }
+         }
+       }
+     }
+@@ -4719,6 +5014,8 @@
        }
        GstCaps *current_caps =
            _find_codec_preferences (webrtc, rtp_trans, i, error);
@@ -276,11 +354,10 @@ diff --git a/ext/webrtc/gstwebrtcbin.c b/ext/webrtc/gstwebrtcbin.c
        if (*error) {
          gst_caps_unref (offer_caps);
          goto rejected;
-@@ -4747,6 +5001,33 @@
-           gst_caps_unref (answer_caps);
+@@ -4748,6 +5045,33 @@
            gst_caps_unref (offer_caps);
            goto rejected;
-+        }
+         }
 +        if (!_negotiate_answer_extmap (webrtc, rtp_trans, offer_media,
 +                current_caps, &answer_caps, error)) {
 +          gst_caps_unref (current_caps);
@@ -307,10 +384,20 @@ diff --git a/ext/webrtc/gstwebrtcbin.c b/ext/webrtc/gstwebrtcbin.c
 +            gst_structure_set (gst_caps_get_structure (answer_caps, 0),
 +                "a-msid", G_TYPE_STRING, msid, NULL);
 +          }
-         }
++        }
          gst_caps_unref (current_caps);
        } else {
-@@ -5967,8 +6248,6 @@
+         answer_caps = gst_caps_ref (offer_caps);
+@@ -4794,7 +5118,7 @@
+         gchar *tmp = NULL;
+         gint target_pt = -1;
+         gint original_target_pt = -1;
+-        guint target_ssrc = 0;
++        guint target_ssrc = G_MAXUINT;
+ 
+         enc_name = gst_structure_get_string (s, "encoding-name");
+ 
+@@ -5967,8 +6291,6 @@
    }
  
    if (new_dir != prev_dir) {
@@ -319,7 +406,7 @@ diff --git a/ext/webrtc/gstwebrtcbin.c b/ext/webrtc/gstwebrtcbin.c
      GST_DEBUG_OBJECT (webrtc, "transceiver %" GST_PTR_FORMAT
          " direction change from %s to %s", rtp_trans,
          gst_webrtc_rtp_transceiver_direction_to_string (prev_dir),
-@@ -5995,87 +6274,90 @@
+@@ -5995,87 +6317,90 @@
  
        /* XXX: send eos event up the sink pad as well? */
      }
@@ -487,7 +574,7 @@ diff --git a/ext/webrtc/gstwebrtcbin.c b/ext/webrtc/gstwebrtcbin.c
  
    if (!bundled || bundle_idx == media_idx) {
      if (stream->rtxsend || stream->rtxreceive) {
-@@ -6538,8 +6820,78 @@
+@@ -6538,8 +6863,78 @@
       * Restore the value of connection's [[ sctpTransport]] internal slot
       * to its value at the last stable signaling state.
       */
@@ -568,7 +655,7 @@ diff --git a/ext/webrtc/gstwebrtcbin.c b/ext/webrtc/gstwebrtcbin.c
      return TRUE;
    }
  
-@@ -6643,6 +6995,8 @@
+@@ -6643,6 +7038,8 @@
             */
            GstCaps *trans_caps =
                _find_codec_preferences (webrtc, trans, i, error);

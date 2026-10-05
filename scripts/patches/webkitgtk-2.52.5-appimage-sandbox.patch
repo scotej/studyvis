@@ -689,7 +689,7 @@ diff --git a/Source/WebCore/Modules/mediastream/gstreamer/GStreamerMediaEndpoint
  
      unsigned mLineIndex;
      g_object_get(transceiver, "mlineindex", &mLineIndex, nullptr);
-@@ -1337,28 +1535,62 @@
+@@ -1337,28 +1535,70 @@
          return;
  
      const auto media = gst_sdp_message_get_media(remoteDescription->sdp, mLineIndex);
@@ -708,6 +708,11 @@ diff --git a/Source/WebCore/Modules/mediastream/gstreamer/GStreamerMediaEndpoint
 +    if (!media)
 +        return;
 +
++    // removeTrack marks the source stopped before its EOS callback clears it.
++    // Finish that clear before assigning a replacement to the same sender.
++    if (senderBackend.hasSource())
++        senderBackend.stopSource();
++
 +    // Seed the recycled transceiver with the replacement identity before
 +    // offer generation. Strip the previous m-line identity so GStreamer does
 +    // not reuse its mid or advertise its old stream.
@@ -720,20 +725,23 @@ diff --git a/Source/WebCore/Modules/mediastream/gstreamer/GStreamerMediaEndpoint
 +    }
 +    g_object_set(transceiver, "codec-preferences", codecPreferences.get(), nullptr);
 +
-+    // removeTrack() stops the old source but the sender backend leaves its
-+    // request pad attached to the transceiver. Release that stale pad before
-+    // asking webrtcbin for the replacement, otherwise a recycled m-line can
-+    // keep the old sender association and silently drop a restarted track.
++    // The committed pad owns an existing input/FEC graph. Releasing it would
++    // request a second graph for the same transceiver on the next answer.
 +    for (auto pad : GstIteratorAdaptor<GstPad>(gst_element_iterate_sink_pads(m_webrtcBin.get()))) {
 +        GRefPtr<GstWebRTCRTPTransceiver> padTransceiver;
 +        g_object_get(pad, "transceiver", &padTransceiver.outPtr(), nullptr);
 +        if (padTransceiver.get() != transceiver)
 +            continue;
 +        auto srcPad = adoptGRef(gst_pad_get_peer(pad));
-+        if (srcPad && gst_pad_is_linked(pad))
++        if (srcPad && gst_pad_is_linked(pad)) {
++            auto retiredBin = adoptGRef(gst_pad_get_parent_element(srcPad.get()));
 +            gst_pad_unlink(srcPad.get(), pad);
-+        GST_DEBUG_OBJECT(m_pipeline.get(), "Releasing stale sender pad %" GST_PTR_FORMAT, pad);
-+        gst_element_release_request_pad(m_webrtcBin.get(), pad);
++            if (retiredBin) {
++                gst_element_set_state(retiredBin.get(), GST_STATE_NULL);
++                gst_bin_remove(GST_BIN_CAST(m_pipeline.get()), retiredBin.get());
++            }
++        }
++        GST_DEBUG_OBJECT(m_pipeline.get(), "Retaining committed sender pad %" GST_PTR_FORMAT, pad);
 +        break;
 +    }
 +    GStreamerRtpSenderBackend::Source source;
@@ -773,7 +781,7 @@ diff --git a/Source/WebCore/Modules/mediastream/gstreamer/GStreamerMediaEndpoint
  }
  
  void GStreamerMediaEndpoint::doCreateOffer(const RTCOfferOptions& options)
-@@ -1699,7 +1931,9 @@
+@@ -1699,7 +1939,9 @@
          // https://datatracker.ietf.org/doc/html/rfc8285#section-4.2
          // The 4-bit ID is the local identifier of this element in the range 1-14 inclusive. In the
          // signaling section, this is referred to as the valid range.
@@ -784,7 +792,7 @@ diff --git a/Source/WebCore/Modules/mediastream/gstreamer/GStreamerMediaEndpoint
          if (identifier > 14) {
              ASSERT_NOT_REACHED_WITH_MESSAGE("Attempting to use too many RTP header extensions");
              gst_printerrln("Attempting to use too many RTP header extensions, bailing out.");
-@@ -1707,6 +1941,7 @@
+@@ -1707,6 +1949,7 @@
          }
  
          m_rtpHeaderExtensions.add(extension.uri, identifier);
@@ -974,3 +982,184 @@ diff --git a/Source/WebCore/platform/mediastream/gstreamer/RealtimeOutgoingMedia
  
  protected:
      enum Type {
+diff --git a/Source/WebCore/platform/mediastream/gstreamer/RealtimeIncomingSourceGStreamer.cpp b/Source/WebCore/platform/mediastream/gstreamer/RealtimeIncomingSourceGStreamer.cpp
+--- a/Source/WebCore/platform/mediastream/gstreamer/RealtimeIncomingSourceGStreamer.cpp
++++ b/Source/WebCore/platform/mediastream/gstreamer/RealtimeIncomingSourceGStreamer.cpp
+@@ -44,35 +44,67 @@
+ 
+ bool RealtimeIncomingSourceGStreamer::setBin(GRefPtr<GstElement>&& bin)
+ {
+-    ASSERT(!m_bin);
+-    if (m_bin) [[unlikely]] {
++    ASSERT(isMainThread());
++    ASSERT(!m_bin || (m_binState.load() & 1));
++    if (m_bin && !(m_binState.load() & 1)) [[unlikely]] {
+         GST_ERROR_OBJECT(m_bin.get(), "Calling setBin twice on the same incoming source instance is not allowed");
+         return false;
+     }
++
++    bool isRebinding = !!m_bin;
++    if (isRebinding) {
++        auto retiredBin = m_bin;
++        tearDown();
++        auto sinkPad = adoptGRef(gst_element_get_static_pad(retiredBin.get(), "sink"));
++        auto peer = adoptGRef(gst_pad_get_peer(sinkPad.get()));
++        if (peer)
++            gst_pad_unlink(peer.get(), sinkPad.get());
++        gst_element_set_state(retiredBin.get(), GST_STATE_NULL);
++        auto parent = adoptGRef(gst_object_get_parent(GST_OBJECT(retiredBin.get())));
++        if (parent && GST_IS_BIN(parent.get()))
++            gst_bin_remove(GST_BIN_CAST(parent.get()), retiredBin.get());
++    }
++
++    struct CallbackContext {
++        ThreadSafeWeakPtr<RealtimeIncomingSourceGStreamer> source;
++        uint64_t binState;
++    };
++    auto binState = (m_binState.load() & ~uint64_t { 1 }) + 2;
++    m_binState.store(binState);
+ 
+     m_bin = WTF::move(bin);
+     m_sink = adoptGRef(gst_bin_get_by_name(GST_BIN_CAST(m_bin.get()), "sink"));
+     g_object_set(m_sink.get(), "signal-handoffs", TRUE, nullptr);
+ 
+     auto handoffCallback = G_CALLBACK(+[](GstElement*, GstBuffer* buffer, GstPad* pad, gpointer userData) {
+-        auto source = reinterpret_cast<RealtimeIncomingSourceGStreamer*>(userData);
++        auto& context = *static_cast<CallbackContext*>(userData);
+         auto caps = adoptGRef(gst_pad_get_current_caps(pad));
+         auto sample = adoptGRef(gst_sample_new(buffer, caps.get(), nullptr, nullptr));
+         // dispatchSample might trigger RealtimeMediaSource::notifySettingsDidChangeObservers()
+         // which expects to run in the main thread.
+-        callOnMainThread([source, sample = WTF::move(sample)]() mutable {
++        callOnMainThread([weakSource = context.source, binState = context.binState, sample = WTF::move(sample)]() mutable {
++            auto source = weakSource.get();
++            if (!source || source->m_binState.load() != binState)
++                return;
+             source->dispatchSample(WTF::move(sample));
+         });
+     });
+-    g_signal_connect(m_sink.get(), "preroll-handoff", handoffCallback, this);
+-    g_signal_connect(m_sink.get(), "handoff", handoffCallback, this);
++    auto destroyContext = +[](gpointer data, GClosure*) { delete static_cast<CallbackContext*>(data); };
++    m_prerollHandoffHandlerId = g_signal_connect_data(m_sink.get(), "preroll-handoff", handoffCallback, new CallbackContext { ThreadSafeWeakPtr { *this }, binState }, destroyContext, G_CONNECT_DEFAULT);
++    m_handoffHandlerId = g_signal_connect_data(m_sink.get(), "handoff", handoffCallback, new CallbackContext { ThreadSafeWeakPtr { *this }, binState }, destroyContext, G_CONNECT_DEFAULT);
+ 
+     auto sinkPad = adoptGRef(gst_element_get_static_pad(m_sink.get(), "sink"));
+-    m_sinkPadProbeId = gst_pad_add_probe(sinkPad.get(), static_cast<GstPadProbeType>(GST_PAD_PROBE_TYPE_EVENT_DOWNSTREAM | GST_PAD_PROBE_TYPE_QUERY_DOWNSTREAM), reinterpret_cast<GstPadProbeCallback>(+[](GstPad*, GstPadProbeInfo* info, gpointer userData) -> GstPadProbeReturn {
+-        auto self = reinterpret_cast<RealtimeIncomingSourceGStreamer*>(userData);
++    m_sinkPadProbeId = gst_pad_add_probe(sinkPad.get(), static_cast<GstPadProbeType>(GST_PAD_PROBE_TYPE_EVENT_DOWNSTREAM | GST_PAD_PROBE_TYPE_QUERY_DOWNSTREAM), reinterpret_cast<GstPadProbeCallback>(+[](GstPad* pad, GstPadProbeInfo* info, gpointer userData) -> GstPadProbeReturn {
++        auto& context = *static_cast<CallbackContext*>(userData);
++        auto self = context.source.get();
++        if (!self)
++            return GST_PAD_PROBE_REMOVE;
++        if (self->m_binState.load() != context.binState)
++            return GST_PAD_PROBE_DROP;
+         if (info->type & GST_PAD_PROBE_TYPE_EVENT_DOWNSTREAM) {
+             GRefPtr event = GST_PAD_PROBE_INFO_EVENT(info);
+-            return self->handleDownstreamEvent(WTF::move(event));
++            auto sink = adoptGRef(gst_pad_get_parent_element(pad));
++            return self->handleDownstreamEvent(sink.get(), WTF::move(event), context.binState);
+         }
+ 
+         auto query = GST_PAD_PROBE_INFO_QUERY(info);
+@@ -81,7 +113,9 @@
+             gst_pad_peer_query(srcSrcPad.get(), query);
+         });
+         return GST_PAD_PROBE_OK;
+-    }), this, nullptr);
++    }), new CallbackContext { ThreadSafeWeakPtr { *this }, binState }, +[](gpointer data) { delete static_cast<CallbackContext*>(data); });
++    if (isRebinding)
++        gst_element_sync_state_with_parent(m_bin.get());
+     return true;
+ }
+ 
+@@ -90,11 +124,14 @@
+     if (!m_bin)
+         return;
+ 
++    m_binState.store((m_binState.load() & ~uint64_t { 1 }) + 2);
++
+     g_object_set(m_sink.get(), "signal-handoffs", FALSE, nullptr);
+ 
+     auto sinkPad = adoptGRef(gst_element_get_static_pad(m_sink.get(), "sink"));
+     gst_pad_remove_probe(sinkPad.get(), m_sinkPadProbeId);
+-    g_signal_handlers_disconnect_by_data(m_sink.get(), this);
++    g_signal_handler_disconnect(m_sink.get(), m_prerollHandoffHandlerId);
++    g_signal_handler_disconnect(m_sink.get(), m_handoffHandlerId);
+ 
+     m_sink = nullptr;
+     m_bin = nullptr;
+@@ -159,12 +196,17 @@
+     return gst_pad_peer_query(pad.get(), query);
+ }
+ 
+-GstPadProbeReturn RealtimeIncomingSourceGStreamer::handleDownstreamEvent(GRefPtr<GstEvent>&& event)
+-{
+-    if (!m_sink) [[unlikely]]
++GstPadProbeReturn RealtimeIncomingSourceGStreamer::handleDownstreamEvent(GstElement* sink, GRefPtr<GstEvent>&& event, uint64_t binState)
++{
++    if (!sink) [[unlikely]]
+         return GST_PAD_PROBE_REMOVE;
+ 
+     switch (GST_EVENT_TYPE(event.get())) {
++    case GST_EVENT_EOS:
++        // An inactive receiver may resume with a new SSRC and decoder bin.
++        // Its existing track clients must remain live across that binding.
++        m_binState.compareExchangeStrong(binState, binState | 1);
++        return GST_PAD_PROBE_OK;
+     case GST_EVENT_STREAM_START:
+     case GST_EVENT_CAPS:
+     case GST_EVENT_SEGMENT:
+@@ -172,9 +214,9 @@
+         return GST_PAD_PROBE_OK;
+     case GST_EVENT_LATENCY: {
+         GstClockTime minLatency, maxLatency;
+-        if (gst_base_sink_query_latency(GST_BASE_SINK(m_sink.get()), nullptr, nullptr, &minLatency, &maxLatency)) {
++        if (gst_base_sink_query_latency(GST_BASE_SINK(sink), nullptr, nullptr, &minLatency, &maxLatency)) {
+             forEachClient([&](auto* appsrc) {
+-                GST_DEBUG_OBJECT(m_sink.get(), "Setting client latency to min %" GST_TIME_FORMAT " max %" GST_TIME_FORMAT, GST_TIME_ARGS(minLatency), GST_TIME_ARGS(maxLatency));
++                GST_DEBUG_OBJECT(sink, "Setting client latency to min %" GST_TIME_FORMAT " max %" GST_TIME_FORMAT, GST_TIME_ARGS(minLatency), GST_TIME_ARGS(maxLatency));
+                 g_object_set(appsrc, "min-latency", minLatency, "max-latency", maxLatency, nullptr);
+             });
+         }
+@@ -197,7 +239,7 @@
+ 
+     forEachClient([&](auto* appsrc) {
+         auto pad = adoptGRef(gst_element_get_static_pad(appsrc, "src"));
+-        GST_DEBUG_OBJECT(m_sink.get(), "Forwarding event %" GST_PTR_FORMAT " to client %" GST_PTR_FORMAT, event.get(), appsrc);
++        GST_DEBUG_OBJECT(sink, "Forwarding event %" GST_PTR_FORMAT " to client %" GST_PTR_FORMAT, event.get(), appsrc);
+         gst_pad_push_event(pad.get(), event.ref());
+     });
+ 
+diff --git a/Source/WebCore/platform/mediastream/gstreamer/RealtimeIncomingSourceGStreamer.h b/Source/WebCore/platform/mediastream/gstreamer/RealtimeIncomingSourceGStreamer.h
+--- a/Source/WebCore/platform/mediastream/gstreamer/RealtimeIncomingSourceGStreamer.h
++++ b/Source/WebCore/platform/mediastream/gstreamer/RealtimeIncomingSourceGStreamer.h
+@@ -23,6 +23,8 @@
+ 
+ #include "GRefPtrGStreamer.h"
+ #include "RealtimeMediaSource.h"
++#include <wtf/Atomics.h>
++#include <wtf/ThreadSafeWeakPtr.h>
+ 
+ namespace WebCore {
+ 
+@@ -41,7 +43,7 @@
+ 
+     void handleUpstreamEvent(GRefPtr<GstEvent>&&);
+     bool handleUpstreamQuery(GstQuery*);
+-    GstPadProbeReturn handleDownstreamEvent(GRefPtr<GstEvent>&&);
++    GstPadProbeReturn handleDownstreamEvent(GstElement*, GRefPtr<GstEvent>&&, uint64_t binState);
+ 
+ protected:
+     RealtimeIncomingSourceGStreamer(const CaptureDevice&);
+@@ -56,6 +58,10 @@
+ 
+     GRefPtr<GstElement> m_bin;
+     GRefPtr<GstElement> m_sink;
++    // The low bit marks EOS; the other bits identify this decoder binding.
++    Atomic<uint64_t> m_binState { 0 };
++    unsigned long m_prerollHandoffHandlerId { 0 };
++    unsigned long m_handoffHandlerId { 0 };
+     unsigned long m_sinkPadProbeId;
+     Lock m_clientLock;
+     HashMap<int, GRefPtr<GstElement>> m_clients WTF_GUARDED_BY_LOCK(m_clientLock);
