@@ -1285,7 +1285,8 @@ that either caused the reported loss.
 
 `scripts/patches/webkitgtk-2.52.5-appimage-sandbox.patch`,
 `scripts/patches/gst-plugins-bad-1.28.7-webrtc-rollback.patch`,
-`scripts/check-linux-webkit-media.html`
+`scripts/check-linux-webkit-media.html`,
+`patches/@trystero-p2p+core+0.25.3.patch`
 
 **Evidence.** GitHub #349's released v1.12.5 AppImage connects a data channel
 but rejects the installed peer core's empty-SDP rollback when both peers publish
@@ -1316,7 +1317,7 @@ that invalidate later offers. Answers retain supported offered IDs and compatibl
 extension direction/configuration. New sources reserve accepted IDs; committed
 per-MID mappings stay stable. Remote fingerprints, SSRC groups and raw feedback
 are excluded from local codec preferences while structured codec feedback stays.
-The final private GStreamer passes 812 focused assertions, including negative
+The final private GStreamer passes 914 focused assertions, including negative
 controls and distinct per-media maps. A bounded old-WebKit/source-lock prototype
 passes decoded bidirectional camera/microphone, codec narrowing, withdrawal and
 legacy serialized screen/restart cases. It does not include the final WebKit or
@@ -1329,9 +1330,32 @@ sender track is null, but GStreamer still advertises a sending direction.
 WebKit's generic removal changes only private direction state; the focused
 GStreamer backend fix forwards the owning transceiver's desired direction
 before stopping its source and renegotiating. CI retains the failed AppImage,
-installed runtime and isolated synthetic trace for one day. The final rebuilt
-WebKit/AppImage stop/restart probe and affected physical desktop/peer matrix
-remain unresolved. This does not yet prove #349 resolved.
+installed runtime and isolated synthetic trace for one day. A public native
+direction-setter control passes removal, then isolates duplicate input/FEC graph
+creation on restart. The correction retains the committed sender pad, clears
+the stopped source before replacement, and excludes retired SSRC/MSID from
+codec intersection only when replacement identity is explicit. EOS-gated
+decoder rebinding retains incoming track clients and discards callbacks from
+retired decoder generations. Exact-package decoder/client controls verify the
+fresh-SSRC policy; the new C++ path still requires a rebuilt WebKit probe.
+The strengthened matched-order Chromium fixture passes same-track restart and
+fresh capture with different stream/track IDs and dimensions, while both
+original cameras and microphone tones continue. A constant-SSRC native control
+exposes a separate receiver-resume limitation outside this proven fresh-stream
+path.
+
+Cross-engine controls also reproduce answer-first SCTP m-line loss on both the
+released and retained candidate runtimes. GStreamer now preserves an accepted
+SCTP m-line before remote DCEP arrives, respects rejected and bundle-only media,
+and avoids generating RTX SSRC groups for an unknown source. The core retains
+null-ufrag candidates with unmatched remote MIDs until matching SDP arrives;
+installed-module tests preserve eligible native error delivery. An immutable
+candidate GTK-initiator/Chromium control passes bidirectional decoded video,
+440/660 Hz PCM, stable original senders and data exchange after activating an
+HTML audio sink matching the app's playback. The reverse-role prototype decodes
+video but still fails native PCM/ICE checks. The final rebuilt WebKit/AppImage
+complete stop/restart probe and affected physical desktop/peer matrix remain
+unresolved. This does not yet prove #349 resolved.
 
 ### I126 — Sev2
 
