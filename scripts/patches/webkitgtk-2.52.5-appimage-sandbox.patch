@@ -310,14 +310,21 @@ diff --git a/Source/WebCore/Modules/mediastream/gstreamer/GStreamerMediaEndpoint
  }
  
 -void GStreamerMediaEndpoint::linkOutgoingSources(GstSDPMessage* sdpMessage)
-+void GStreamerMediaEndpoint::linkOutgoingSources(GstSDPMessage* sdpMessage, const GstSDPMessage* negotiatedDescription)
++void GStreamerMediaEndpoint::linkOutgoingSources(const GstSDPMessage* sdpMessage, const GstSDPMessage* negotiatedDescription)
  {
      unsigned totalMedias = gst_sdp_message_medias_len(sdpMessage);
  #ifndef GST_DISABLE_GST_DEBUG
-@@ -697,6 +702,17 @@
+@@ -697,28 +702,81 @@
              continue;
          }
  
++        auto localDirection = getDirectionFromSDPMedia(media);
+         auto msid = CStringView::unsafeFromUTF8(gst_sdp_media_get_attribute_val(media, "msid"));
+-
++        if (!gst_sdp_media_get_port(media) || msid.isEmpty()
++            || (localDirection != GST_WEBRTC_RTP_TRANSCEIVER_DIRECTION_SENDONLY && localDirection != GST_WEBRTC_RTP_TRANSCEIVER_DIRECTION_SENDRECV))
++            continue;
++
 +        auto negotiatedMedia = media;
 +        if (negotiatedDescription) {
 +            if (i >= gst_sdp_message_medias_len(negotiatedDescription))
@@ -329,39 +336,58 @@ diff --git a/Source/WebCore/Modules/mediastream/gstreamer/GStreamerMediaEndpoint
 +            if (!gst_sdp_media_get_port(negotiatedMedia) || direction == GST_WEBRTC_RTP_TRANSCEIVER_DIRECTION_SENDONLY || direction == GST_WEBRTC_RTP_TRANSCEIVER_DIRECTION_INACTIVE)
 +                continue;
 +        }
-         auto msid = CStringView::unsafeFromUTF8(gst_sdp_media_get_attribute_val(media, "msid"));
- 
          GST_DEBUG_OBJECT(m_pipeline.get(), "Looking-up outgoing source with msid %s in %zu unlinked sources", msid.utf8(), m_unlinkedOutgoingSources.size());
-@@ -713,12 +729,51 @@
-                 }
+         m_unlinkedOutgoingSources.removeFirstMatching([&, msid = String(msid.span())](auto& source) -> bool {
+             if (source->type() != sourceType) {
+                 GST_DEBUG_OBJECT(pipeline(), "Un-matched source type");
+                 return false;
              }
- 
--            auto allowedCaps = capsFromSDPMedia(media);
--            source->configure(WTF::move(allowedCaps));
-             if (!source->pad()) {
+-            if (const auto& track = source->track()) {
+-                auto sourceMsid = makeString(source->mediaStreamID(), ' ', track->id());
+-                if (!msid.isEmpty() && sourceMsid != msid) {
+-                    GST_DEBUG_OBJECT(pipeline(), "Un-matched outgoing source msid: %s", sourceMsid.utf8().data());
++            String sourceMsid;
++            if (const auto& track = source->track())
++                sourceMsid = makeString(source->mediaStreamID(), ' ', track->id());
++            else {
++                auto caps = source->allowedCaps();
++                if (gst_caps_get_size(caps.get()))
++                    sourceMsid = String::fromUTF8(gst_structure_get_string(gst_caps_get_structure(caps.get(), 0), "a-msid"));
++            }
++            if (sourceMsid != msid) {
++                GST_DEBUG_OBJECT(pipeline(), "Un-matched outgoing source msid: %s", sourceMsid.utf8().data());
++                return false;
++            }
++
++            if (!source->pad()) {
 +                GRefPtr<GstPad> committedPad;
 +                GRefPtr<GstWebRTCRTPTransceiver> committedTransceiver;
-+                if (negotiatedDescription) {
-+                    // webrtcbin creates the committed sender pad while applying the
-+                    // answer. Reuse its exact MID instead of creating another sender.
-+                    for (auto pad : GstIteratorAdaptor<GstPad>(gst_element_iterate_sink_pads(m_webrtcBin.get()))) {
-+                        if (gst_pad_is_linked(pad))
-+                            continue;
-+                        GRefPtr<GstWebRTCRTPTransceiver> transceiver;
-+                        g_object_get(pad, "transceiver", &transceiver.outPtr(), nullptr);
-+                        GUniqueOutPtr<char> mid;
-+                        g_object_get(transceiver.get(), "mid", &mid.outPtr(), nullptr);
-+                        if (g_strcmp0(mid.get(), gst_sdp_media_get_attribute_val(media, "mid")))
-+                            continue;
-+                        committedPad = pad;
-+                        committedTransceiver = WTF::move(transceiver);
-+                        break;
-+                    }
-+                    if (!committedPad) {
-+                        GST_WARNING_OBJECT(m_webrtcBin.get(), "No committed sender pad for outgoing source");
-+                        return false;
-+                    }
++                // Both descriptions are committed. Reuse only the sender pad
++                // owned by this MID; a generic request may select another sender.
++                for (auto pad : GstIteratorAdaptor<GstPad>(gst_element_iterate_sink_pads(m_webrtcBin.get()))) {
++                    if (gst_pad_is_linked(pad))
++                        continue;
++                    GRefPtr<GstWebRTCRTPTransceiver> transceiver;
++                    g_object_get(pad, "transceiver", &transceiver.outPtr(), nullptr);
++                    if (!transceiver)
++                        continue;
++                    GUniqueOutPtr<char> mid;
++                    g_object_get(transceiver.get(), "mid", &mid.outPtr(), nullptr);
++                    if (g_strcmp0(mid.get(), gst_sdp_media_get_attribute_val(media, "mid")))
++                        continue;
++                    committedPad = pad;
++                    committedTransceiver = WTF::move(transceiver);
++                    break;
 +                }
++                if (!committedPad) {
++                    GST_WARNING_OBJECT(m_webrtcBin.get(), "No committed sender pad for outgoing source");
+                     return false;
+                 }
+-            }
+-
+-            auto allowedCaps = capsFromSDPMedia(media);
+-            source->configure(WTF::move(allowedCaps));
+-            if (!source->pad()) {
 +
 +                // Match our own MSID, but only encode codecs accepted by the remote answer.
 +                auto allowedCaps = capsFromSDPMedia(negotiatedMedia);
@@ -377,31 +403,48 @@ diff --git a/Source/WebCore/Modules/mediastream/gstreamer/GStreamerMediaEndpoint
                  auto rtpCaps = source->rtpCaps();
 -                auto sinkPad = requestPad(rtpCaps, source->mediaStreamID());
 -                source->setSinkPad(WTF::move(sinkPad));
-+                if (committedPad) {
-+                    g_object_set(committedTransceiver.get(), "codec-preferences", rtpCaps.get(), nullptr);
-+                    source->setSinkPad(WTF::move(committedPad));
-+                } else {
-+                    auto sinkPad = requestPad(rtpCaps, source->mediaStreamID());
-+                    source->setSinkPad(WTF::move(sinkPad));
-+                }
-+
++                g_object_set(committedTransceiver.get(), "codec-preferences", rtpCaps.get(), nullptr);
++                source->setSinkPad(WTF::move(committedPad));
              }
  
              auto& sinkPad = source->pad();
-@@ -827,8 +882,10 @@
+@@ -728,6 +786,7 @@
+             }
+ 
+             source->link();
++            gst_element_set_locked_state(source->bin().get(), FALSE);
+             callOnMainThreadAndWait([&] {
+                 source->start();
+             });
+@@ -826,21 +885,23 @@
+             peerConnectionBackend->setLocalDescriptionFailed(Exception { ExceptionCode::OperationError, "Invalid SDP"_s });
              return;
          }
- 
+-
 -        // Make sure each outgoing media source is configured using the proposed codec and linked to webrtcbin.
 -        linkOutgoingSources(sdpMessage.get());
-+        // An offer is provisional: linking it replaces the sender codec preferences
-+        // and starts packetizers which rollback cannot restore. Link once answered.
-+        if (initialDescription->type() != RTCSdpType::Offer)
-+            linkOutgoingSources(sdpMessage.get());
      }
  
      if (!m_unlinkedOutgoingSources.isEmpty())
-@@ -959,11 +1016,9 @@
+         GST_WARNING_OBJECT(m_pipeline.get(), "Unlinked outgoing sources lingering");
+     gst_element_set_state(m_pipeline.get(), GST_STATE_PLAYING);
+ 
+-    setDescription(initialDescription.get(), DescriptionType::Local, [protectedThis = Ref(*this), this, initialSDP = WTF::move(initialSDP), remoteDescriptionSdp = WTF::move(remoteDescriptionSdp), remoteDescriptionSdpType = WTF::move(remoteDescriptionSdpType)](const GstSDPMessage& message) {
++    setDescription(initialDescription.get(), DescriptionType::Local, [protectedThis = Ref(*this), this, initialSDP = WTF::move(initialSDP), remoteDescriptionSdp = WTF::move(remoteDescriptionSdp), remoteDescriptionSdpType = WTF::move(remoteDescriptionSdpType), isAnswer = initialDescription->type() == RTCSdpType::Answer](const GstSDPMessage& message) {
+         if (protectedThis->isStopped())
+             return;
+         auto peerConnectionBackend = protectedThis->peerConnectionBackend();
+         if (!peerConnectionBackend)
+             return;
++
++        // A provisional offer must not configure packetizers or attach sources.
++        // Both answer paths link only after native transceiver ownership commits.
++        if (isAnswer)
++            linkOutgoingSources(&message);
+ 
+         auto descriptions = descriptionsFromWebRTCBin(m_webrtcBin.get(), GatherSignalingState::Yes);
+ 
+@@ -959,11 +1020,9 @@
                  return;
              }
          }
@@ -416,7 +459,7 @@ diff --git a/Source/WebCore/Modules/mediastream/gstreamer/GStreamerMediaEndpoint
          if (protectedThis->isStopped())
              return;
          auto peerConnectionBackend = this->peerConnectionBackend();
-@@ -980,6 +1035,13 @@
+@@ -980,6 +1039,13 @@
                  g_object_set(ice.get(), "ice-lite", TRUE, nullptr);
              }
          });
@@ -430,7 +473,7 @@ diff --git a/Source/WebCore/Modules/mediastream/gstreamer/GStreamerMediaEndpoint
  
          GST_DEBUG_OBJECT(m_pipeline.get(), "Acking remote description");
          auto descriptions = descriptionsFromWebRTCBin(m_webrtcBin.get(), GatherSignalingState::Yes);
-@@ -1057,32 +1119,38 @@
+@@ -1057,32 +1123,38 @@
      auto sdpType = RTCSdpType::Offer;
  
      if (description) {
@@ -489,7 +532,17 @@ diff --git a/Source/WebCore/Modules/mediastream/gstreamer/GStreamerMediaEndpoint
          failureCallback(nullptr);
          return;
      }
-@@ -1317,16 +1385,26 @@
+@@ -1180,6 +1252,9 @@
+     source.setInitialParameters(WTF::move(parameters));
+ 
+     auto sourceBin = source.bin();
++    // An unconfigured source must not push into an unlinked graph while the
++    // parent negotiates. NOT_LINKED would pause its task before answer commit.
++    gst_element_set_locked_state(sourceBin.get(), TRUE);
+     gst_bin_add(GST_BIN_CAST(m_pipeline.get()), sourceBin.get());
+ 
+ #ifndef GST_DISABLE_GST_DEBUG
+@@ -1317,16 +1392,26 @@
  void GStreamerMediaEndpoint::removeTrack(GStreamerRtpSenderBackend& sender)
  {
      GST_DEBUG_OBJECT(m_pipeline.get(), "Removing track");
@@ -521,7 +574,7 @@ diff --git a/Source/WebCore/Modules/mediastream/gstreamer/GStreamerMediaEndpoint
  
      unsigned mLineIndex;
      g_object_get(transceiver, "mlineindex", &mLineIndex, nullptr);
-@@ -1337,28 +1415,62 @@
+@@ -1337,28 +1422,62 @@
          return;
  
      const auto media = gst_sdp_message_get_media(remoteDescription->sdp, mLineIndex);
@@ -591,7 +644,7 @@ diff --git a/Source/WebCore/Modules/mediastream/gstreamer/GStreamerMediaEndpoint
 +
 +        // Use the same deferred negotiation/link/start path as a new sender.
 +        // The transceiver codec preferences above carry the replacement MSID;
-+        // linkOutgoingSources attaches the sink pad after the offer is made.
++        // linkOutgoingSources attaches the sink pad after the answer commits.
 +        m_unlinkedOutgoingSources.append(outgoingSource.ptr());
 +    };
 +    switchOn(source, [&](Ref<RealtimeOutgoingAudioSourceGStreamer>& outgoingSource) {
@@ -622,7 +675,7 @@ diff --git a/Source/WebCore/Modules/mediastream/gstreamer/GStreamerMediaEndpoint
  #endif
  
 -    void linkOutgoingSources(GstSDPMessage*);
-+    void linkOutgoingSources(GstSDPMessage*, const GstSDPMessage* negotiatedDescription = nullptr);
++    void linkOutgoingSources(const GstSDPMessage*, const GstSDPMessage* negotiatedDescription = nullptr);
  
      String trackIdFromSDPMedia(const GstSDPMedia&);
  

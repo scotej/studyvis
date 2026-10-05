@@ -199,12 +199,39 @@
       const simultaneous = [makeSource(320, 180), makeSource(160, 120)]
       addMicrophone(simultaneous[0], 440)
       addMicrophone(simultaneous[1], 660)
+      // Keep opposite publication orders deterministic: their dynamic payload
+      // allocations must not prevent reuse of the original local senders.
+      for (const [index, stream] of simultaneous.entries()) {
+        const tracks = [...stream.getVideoTracks(), ...stream.getAudioTracks()]
+        if (index === 1) tracks.reverse()
+        stream.getTracks = () => [...tracks]
+      }
       collide = true
       handles[0].addStream(simultaneous[0])
       handles[1].addStream(simultaneous[1])
       await peerUntil(
         () => heldOffers.length === 2,
         'simultaneous Trystero media offers'
+      )
+      await peerUntil(
+        () =>
+          peers.slice(0, 2).every((peer, index) => {
+            const transceivers = peer.getTransceivers()
+            return (
+              transceivers.length === 2 &&
+              simultaneous[index]
+                .getTracks()
+                .every((track) =>
+                  transceivers.some(
+                    (transceiver) =>
+                      transceiver.sender.track === track &&
+                      transceiver.mid !== null &&
+                      transceiver.currentDirection === 'sendrecv'
+                  )
+                )
+            )
+          }),
+        'original Trystero senders associated after rollback'
       )
       await peerUntil(
         () =>
@@ -562,6 +589,108 @@
       )
       report(
         'first publication followed VP9 answer; removed pending sender stayed stopped'
+      )
+      const narrowOfferer = new RTCPeerConnection({
+        bundlePolicy: 'max-bundle',
+      })
+      const broadAnswerer = new RTCPeerConnection({
+        bundlePolicy: 'max-bundle',
+      })
+      peers.push(narrowOfferer, broadAnswerer)
+      const narrowPending = new Map([
+        [narrowOfferer, []],
+        [broadAnswerer, []],
+      ])
+      for (const [self, other] of [
+        [narrowOfferer, broadAnswerer],
+        [broadAnswerer, narrowOfferer],
+      ]) {
+        self.onicecandidate = (event) => {
+          if (!event.candidate) return
+          if (other.remoteDescription) other.addIceCandidate(event.candidate)
+          else narrowPending.get(other).push(event.candidate)
+        }
+      }
+      const narrowStreams = [makeSource(120, 90), makeSource(160, 120)]
+      addMicrophone(narrowStreams[0], 880)
+      addMicrophone(narrowStreams[1], 990)
+      const narrowVideos = [null, null]
+      const narrowAudio = [null, null]
+      for (const [index, peer] of [narrowOfferer, broadAnswerer].entries()) {
+        peer.ontrack = (event) => {
+          assert(
+            event.streams.length === 1 &&
+              event.streams[0].id === narrowStreams[1 - index].id,
+            'VP9-only offer lost the remote sender stream ID'
+          )
+          if (event.track.kind === 'video')
+            narrowVideos[index] = makeVideo(event.streams[0])
+          else narrowAudio[index] = event.track
+        }
+        for (const track of narrowStreams[index].getTracks())
+          peer.addTrack(track, narrowStreams[index])
+      }
+      narrowOfferer
+        .getTransceivers()
+        .find((transceiver) => transceiver.sender.track.kind === 'video')
+        .setCodecPreferences(codecs)
+      const narrowOffer = await narrowOfferer.createOffer()
+      assert(
+        !/a=rtpmap:\d+ VP8\//i.test(narrowOffer.sdp),
+        'VP9-only offer still advertises the default VP8 codec'
+      )
+      await narrowOfferer.setLocalDescription(narrowOffer)
+      await broadAnswerer.setRemoteDescription(narrowOffer)
+      for (const candidate of narrowPending.get(broadAnswerer).splice(0))
+        await broadAnswerer.addIceCandidate(candidate)
+      const broadAnswer = await broadAnswerer.createAnswer()
+      assert(
+        broadAnswer.sdp.includes(`a=msid:${narrowStreams[1].id} `),
+        'answer lost its own stream identity when VP8 was rejected'
+      )
+      await broadAnswerer.setLocalDescription(broadAnswer)
+      await narrowOfferer.setRemoteDescription(broadAnswer)
+      for (const candidate of narrowPending.get(narrowOfferer).splice(0))
+        await narrowOfferer.addIceCandidate(candidate)
+      await until(
+        () => narrowVideos.every(Boolean) && narrowAudio.every(Boolean),
+        'bidirectional VP9-only offer track events'
+      )
+      for (const [index, width, height, frequency] of [
+        [0, 160, 120, 990],
+        [1, 120, 90, 880],
+      ]) {
+        await advancing(
+          narrowVideos[index],
+          width,
+          height,
+          'bidirectional VP9-only offer camera'
+        )
+        assert(
+          [narrowOfferer, broadAnswerer][index]
+            .getReceivers()
+            .some((receiver) => receiver.track === narrowAudio[index]),
+          'VP9-only offer audio track is not the current remote receiver'
+        )
+        const probe = makeAudioProbe(narrowAudio[index])
+        await until(
+          () => probe.hasTone(frequency),
+          'bidirectional VP9-only offer decoded microphone'
+        )
+        probe.disconnect()
+        const stats = await [narrowOfferer, broadAnswerer][index].getStats()
+        assert(
+          [...stats.values()].some(
+            (stat) =>
+              stat.type === 'inbound-rtp' &&
+              stat.packetsReceived > 0 &&
+              stats.get(stat.codecId)?.mimeType.toLowerCase() === 'video/vp9'
+          ),
+          'bidirectional VP9-only offer did not decode the accepted codec'
+        )
+      }
+      report(
+        'VP9-only offer preserved both sender stream IDs, decoded cameras, and microphone tones'
       )
       report(
         'PASS simultaneous Trystero publication and rollback, removed pending sender, answer-selected video codec, serialized local and remote cameras, audio packets and unmuted tracks, receive-only track events, stream IDs, late screen, replaceTrack, and screen restart'

@@ -1,7 +1,252 @@
 diff --git a/ext/webrtc/gstwebrtcbin.c b/ext/webrtc/gstwebrtcbin.c
 --- a/ext/webrtc/gstwebrtcbin.c
 +++ b/ext/webrtc/gstwebrtcbin.c
-@@ -6538,8 +6538,78 @@
+@@ -2207,6 +2207,31 @@
+     GST_DEBUG_OBJECT (trans, "Could not find caps for mline %u", media_idx);
+ 
+   return ret;
++}
++
++static GstCaps *
++_codec_capabilities_for_unlinked_sender (GstWebRTCBin * webrtc,
++    GstWebRTCRTPTransceiver * trans, GstCaps * caps)
++{
++  GstWebRTCBinPad *pad;
++  guint i;
++
++  if (!caps || trans->kind == GST_WEBRTC_KIND_UNKNOWN
++      || WEBRTC_TRANSCEIVER (trans)->mline_locked)
++    return caps;
++  pad = _find_pad_for_transceiver (webrtc, GST_PAD_SINK, trans);
++  if (pad) {
++    gst_object_unref (pad);
++    return caps;
++  }
++
++  /* StudyVis #349: an unlinked sender's provisional payload allocation is
++   * not a codec capability. Keep the offered payload while intersecting
++   * encoding, clock rate, channel and format constraints. */
++  caps = gst_caps_make_writable (caps);
++  for (i = 0; i < gst_caps_get_size (caps); i++)
++    gst_structure_remove_field (gst_caps_get_structure (caps, i), "payload");
++  return caps;
+ }
+ 
+ static GstCaps *
+@@ -4719,6 +4744,8 @@
+       }
+       GstCaps *current_caps =
+           _find_codec_preferences (webrtc, rtp_trans, i, error);
++      current_caps = _codec_capabilities_for_unlinked_sender (webrtc,
++          rtp_trans, current_caps);
+       if (*error) {
+         gst_caps_unref (offer_caps);
+         goto rejected;
+@@ -4747,6 +4774,26 @@
+           gst_caps_unref (answer_caps);
+           gst_caps_unref (offer_caps);
+           goto rejected;
++        }
++        if (rtp_trans->direction == GST_WEBRTC_RTP_TRANSCEIVER_DIRECTION_SENDONLY
++            || rtp_trans->direction == GST_WEBRTC_RTP_TRANSCEIVER_DIRECTION_SENDRECV) {
++          const gchar *msid = NULL;
++          guint caps_index;
++
++          /* The local stream identity belongs to the sender, not to its first
++           * preferred codec, which the offered codec intersection may remove. */
++          for (caps_index = 0; caps_index < gst_caps_get_size (current_caps);
++              caps_index++) {
++            msid = gst_structure_get_string (gst_caps_get_structure (
++                    current_caps, caps_index), "a-msid");
++            if (msid)
++              break;
++          }
++          if (msid) {
++            answer_caps = gst_caps_make_writable (answer_caps);
++            gst_structure_set (gst_caps_get_structure (answer_caps, 0),
++                "a-msid", G_TYPE_STRING, msid, NULL);
++          }
+         }
+         gst_caps_unref (current_caps);
+       } else {
+@@ -5967,8 +6014,6 @@
+   }
+ 
+   if (new_dir != prev_dir) {
+-    guint rtp_session_id = bundled ? bundle_idx : media_idx;
+-
+     GST_DEBUG_OBJECT (webrtc, "transceiver %" GST_PTR_FORMAT
+         " direction change from %s to %s", rtp_trans,
+         gst_webrtc_rtp_transceiver_direction_to_string (prev_dir),
+@@ -5995,87 +6040,90 @@
+ 
+       /* XXX: send eos event up the sink pad as well? */
+     }
+-
+-    if (new_dir == GST_WEBRTC_RTP_TRANSCEIVER_DIRECTION_SENDONLY ||
+-        new_dir == GST_WEBRTC_RTP_TRANSCEIVER_DIRECTION_SENDRECV) {
+-      GstWebRTCBinPad *pad =
+-          _find_pad_for_transceiver (webrtc, GST_PAD_SINK, rtp_trans);
+-      local_msid = _get_msid_from_media (local_media);
+-
+-      if (pad) {
+-        GST_DEBUG_OBJECT (webrtc, "found existing send pad %" GST_PTR_FORMAT
+-            " for transceiver %" GST_PTR_FORMAT " with msid \'%s\'", pad, trans,
+-            pad->msid);
+-        if (g_strcmp0 (pad->msid, local_msid) != 0) {
+-          GST_DEBUG_OBJECT (webrtc, "send pad %" GST_PTR_FORMAT
+-              " transceiver %" GST_PTR_FORMAT " changing msid from \'%s\'"
+-              " to \'%s\'", pad, trans, pad->msid, local_msid);
+-          g_clear_pointer (&pad->msid, g_free);
+-          pad->msid = local_msid;
+-          g_object_notify (G_OBJECT (pad), "msid");
+-          local_msid = NULL;
+-        } else {
+-          g_clear_pointer (&local_msid, g_free);
+-        }
+-        gst_object_unref (pad);
++  }
++
++  /* ANSWER association may already have set current_direction. Pad ownership
++   * and MSIDs must still be synchronized for the committed descriptions. */
++  if (new_dir == GST_WEBRTC_RTP_TRANSCEIVER_DIRECTION_SENDONLY ||
++      new_dir == GST_WEBRTC_RTP_TRANSCEIVER_DIRECTION_SENDRECV) {
++    GstWebRTCBinPad *pad =
++        _find_pad_for_transceiver (webrtc, GST_PAD_SINK, rtp_trans);
++    local_msid = _get_msid_from_media (local_media);
++
++    if (pad) {
++      GST_DEBUG_OBJECT (webrtc, "found existing send pad %" GST_PTR_FORMAT
++          " for transceiver %" GST_PTR_FORMAT " with msid \'%s\'", pad, trans,
++          pad->msid);
++      if (g_strcmp0 (pad->msid, local_msid) != 0) {
++        GST_DEBUG_OBJECT (webrtc, "send pad %" GST_PTR_FORMAT
++            " transceiver %" GST_PTR_FORMAT " changing msid from \'%s\'"
++            " to \'%s\'", pad, trans, pad->msid, local_msid);
++        g_clear_pointer (&pad->msid, g_free);
++        pad->msid = local_msid;
++        g_object_notify (G_OBJECT (pad), "msid");
++        local_msid = NULL;
+       } else {
+-        GST_DEBUG_OBJECT (webrtc,
+-            "creating new send pad for transceiver %" GST_PTR_FORMAT, trans);
+-        pad = _create_pad_for_sdp_media (webrtc, GST_PAD_SINK, rtp_trans,
+-            G_MAXUINT, local_msid);
+-        local_msid = NULL;
+-        _connect_input_stream (webrtc, pad);
+-        _add_pad (webrtc, pad);
++        g_clear_pointer (&local_msid, g_free);
+       }
+-    }
+-    if (new_dir == GST_WEBRTC_RTP_TRANSCEIVER_DIRECTION_RECVONLY ||
+-        new_dir == GST_WEBRTC_RTP_TRANSCEIVER_DIRECTION_SENDRECV) {
+-      GstWebRTCBinPad *pad =
+-          _find_pad_for_transceiver (webrtc, GST_PAD_SRC, rtp_trans);
+-      char *remote_msid = _get_msid_from_media (remote_media);
+-
+-      if (pad) {
+-        GST_DEBUG_OBJECT (webrtc, "found existing receive pad %" GST_PTR_FORMAT
+-            " for transceiver %" GST_PTR_FORMAT " with msid \'%s\'", pad, trans,
+-            pad->msid);
+-        if (g_strcmp0 (pad->msid, remote_msid) != 0) {
+-          GST_DEBUG_OBJECT (webrtc, "receive pad %" GST_PTR_FORMAT
+-              " transceiver %" GST_PTR_FORMAT " changing msid from \'%s\'"
+-              " to \'%s\'", pad, trans, pad->msid, remote_msid);
+-          g_clear_pointer (&pad->msid, g_free);
+-          pad->msid = remote_msid;
+-          remote_msid = NULL;
+-          g_object_notify (G_OBJECT (pad), "msid");
+-        } else {
+-          g_clear_pointer (&remote_msid, g_free);
+-        }
+-        gst_object_unref (pad);
++      gst_object_unref (pad);
++    } else {
++      GST_DEBUG_OBJECT (webrtc,
++          "creating new send pad for transceiver %" GST_PTR_FORMAT, trans);
++      pad = _create_pad_for_sdp_media (webrtc, GST_PAD_SINK, rtp_trans,
++          G_MAXUINT, local_msid);
++      local_msid = NULL;
++      _connect_input_stream (webrtc, pad);
++      _add_pad (webrtc, pad);
++    }
++  }
++  if (new_dir == GST_WEBRTC_RTP_TRANSCEIVER_DIRECTION_RECVONLY ||
++      new_dir == GST_WEBRTC_RTP_TRANSCEIVER_DIRECTION_SENDRECV) {
++    guint rtp_session_id = bundled ? bundle_idx : media_idx;
++    GstWebRTCBinPad *pad =
++        _find_pad_for_transceiver (webrtc, GST_PAD_SRC, rtp_trans);
++    char *remote_msid = _get_msid_from_media (remote_media);
++
++    if (pad) {
++      GST_DEBUG_OBJECT (webrtc, "found existing receive pad %" GST_PTR_FORMAT
++          " for transceiver %" GST_PTR_FORMAT " with msid \'%s\'", pad, trans,
++          pad->msid);
++      if (g_strcmp0 (pad->msid, remote_msid) != 0) {
++        GST_DEBUG_OBJECT (webrtc, "receive pad %" GST_PTR_FORMAT
++            " transceiver %" GST_PTR_FORMAT " changing msid from \'%s\'"
++            " to \'%s\'", pad, trans, pad->msid, remote_msid);
++        g_clear_pointer (&pad->msid, g_free);
++        pad->msid = remote_msid;
++        remote_msid = NULL;
++        g_object_notify (G_OBJECT (pad), "msid");
+       } else {
+-        GST_DEBUG_OBJECT (webrtc,
+-            "creating new receive pad for transceiver %" GST_PTR_FORMAT, trans);
+-        pad = _create_pad_for_sdp_media (webrtc, GST_PAD_SRC, rtp_trans,
+-            G_MAXUINT, remote_msid);
+-        remote_msid = NULL;
+-
+-        if (!trans->stream) {
+-          TransportStream *item;
+-
+-          item =
+-              _get_or_create_transport_stream (webrtc, rtp_session_id, FALSE);
+-          webrtc_transceiver_set_transport (trans, item);
+-        }
+-
+-        _connect_output_stream (webrtc, trans->stream, rtp_session_id);
+-        /* delay adding the pad until rtpbin creates the recv output pad
+-         * to ghost to so queries/events travel through the pipeline correctly
+-         * as soon as the pad is added */
+-        _add_pad_to_list (webrtc, pad);
++        g_clear_pointer (&remote_msid, g_free);
+       }
+-    }
+-
+-    rtp_trans->mline = media_idx;
+-    rtp_trans->current_direction = new_dir;
+-  }
++      gst_object_unref (pad);
++    } else {
++      GST_DEBUG_OBJECT (webrtc,
++          "creating new receive pad for transceiver %" GST_PTR_FORMAT, trans);
++      pad = _create_pad_for_sdp_media (webrtc, GST_PAD_SRC, rtp_trans,
++          G_MAXUINT, remote_msid);
++      remote_msid = NULL;
++
++      if (!trans->stream) {
++        TransportStream *item;
++
++        item =
++            _get_or_create_transport_stream (webrtc, rtp_session_id, FALSE);
++        webrtc_transceiver_set_transport (trans, item);
++      }
++
++      _connect_output_stream (webrtc, trans->stream, rtp_session_id);
++      /* delay adding the pad until rtpbin creates the recv output pad
++       * to ghost to so queries/events travel through the pipeline correctly
++       * as soon as the pad is added */
++      _add_pad_to_list (webrtc, pad);
++    }
++  }
++
++  rtp_trans->mline = media_idx;
++  rtp_trans->current_direction = new_dir;
+ 
+   if (!bundled || bundle_idx == media_idx) {
+     if (stream->rtxsend || stream->rtxreceive) {
+@@ -6538,8 +6586,78 @@
       * Restore the value of connection's [[ sctpTransport]] internal slot
       * to its value at the last stable signaling state.
       */
@@ -81,4 +326,13 @@ diff --git a/ext/webrtc/gstwebrtcbin.c b/ext/webrtc/gstwebrtcbin.c
 +          gst_webrtc_session_description_copy (stable);
      return TRUE;
    }
+ 
+@@ -6643,6 +6761,8 @@
+            */
+           GstCaps *trans_caps =
+               _find_codec_preferences (webrtc, trans, i, error);
++          trans_caps = _codec_capabilities_for_unlinked_sender (webrtc,
++              trans, trans_caps);
+           if (error && *error)
+             goto out;
  
