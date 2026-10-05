@@ -1281,6 +1281,27 @@ module regressions cover both paths and the TTL boundary. These defects are
 relevant to #350's recovery attempts, but the attached archives do not establish
 that either caused the reported loss.
 
+### I126 — Sev2
+
+`src-tauri/src/commands/sidecar.rs`, `src/features/ai/benchmark.ts`
+
+**Evidence.** GitHub #350's retained engine log shows eight historical prompt
+states occupying 1,878.597 MiB before the stalled capture, with no observed
+historical-state loads. The previous inference had completed and all slots were
+idle. StudyVis inherits the pinned engine's 8 GiB RAM archive default. An exact
+b9095 public text-model CPU A/B over 25 requests retains 303.064 MiB of archived
+states by default, with RSS growth of about 306 MiB, versus no archive and about
+3 MiB growth with `--cache-ram 0`.
+
+**Status.** **fixed on branch** — the common initial/fallback/restart spawn
+disables historical RAM archives while preserving active-slot KV reuse and
+request-level `cache_prompt`, including cold benchmark requests. The benchmark
+fingerprint invalidates timings measured under the old policy. All 25 A/B output
+hashes match and current-prompt reuse remains intact; a historical-prompt revisit
+requires more prefill (about 2.35 s versus 0.24 s in this small-model control).
+The field archive has no host RAM/paging measurements, so the resource fix does
+not establish the original stall's cause or prove #350 resolved.
+
 ## Archive — retired backlogs
 
 Two documents used to sit beside this ledger and were deleted once their implementation backlog had no open code work left: `BUILD-PROMPTS.md` (the sequenced V0→V3 build plan) and `IMPROVEMENTS.md` (the v1.2.0-era improvement backlog). Git history holds both in full — `git log --diff-filter=D -- BUILD-PROMPTS.md IMPROVEMENTS.md`, then `git show <sha>^:<file>`. Linux's implementation checklist is complete, but its operational release sign-off remains pending. What survives here is the part still cited from code.
