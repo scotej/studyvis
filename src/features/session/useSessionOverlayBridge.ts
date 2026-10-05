@@ -105,6 +105,7 @@ export function useSessionOverlayBridge(): void {
       )
       void pushSessionOverlayItem({
         id: `note:${note.id}`,
+        category: 'chat',
         title: strings.session.notes.heading,
         body: `${name}: ${note.text}`,
         tone: 'neutral',
@@ -127,6 +128,7 @@ export function useSessionOverlayBridge(): void {
       )
       void pushSessionOverlayItem({
         id: `image:${image.id}`,
+        category: 'chat',
         title: strings.session.images.viewerTitle(name),
         body: image.filename,
         tone: 'neutral',

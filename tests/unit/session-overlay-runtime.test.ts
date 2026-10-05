@@ -5,6 +5,7 @@ import {
   SESSION_OVERLAY_PRESENT,
   SESSION_OVERLAY_READY,
   SESSION_OVERLAY_READY_TIMEOUT_MS,
+  SESSION_OVERLAY_TTL_MS,
   SESSION_OVERLAY_UPDATE,
   SESSION_OVERLAY_WINDOW_LABEL,
   SESSION_OVERLAY_WINDOW_MARGIN,
@@ -322,6 +323,68 @@ describe('session overlay runtime lifecycle', () => {
       { width: SESSION_OVERLAY_WINDOW_WIDTH, height: 188 },
     ])
     expect(overlay?.showCalls).toBe(2)
+  })
+
+  test('presents the latest chat immediately and expires from its arrival', async () => {
+    const runtime = await loadRuntime()
+    const firstMessage = { ...item, category: 'chat' as const }
+    await runtime.pushSessionOverlayItem(firstMessage)
+    emitFromOverlay(SESSION_OVERLAY_READY)
+    await flushAsyncWork()
+    const firstUpdate = updates()[0]
+    emitFromOverlay(SESSION_OVERLAY_PRESENT, {
+      revision: firstUpdate?.revision,
+      height: 172,
+    })
+    await flushAsyncWork()
+    const overlay = harness.overlay
+    const firstExpiry = firstUpdate?.snapshot.item?.expiresAt
+
+    await vi.advanceTimersByTimeAsync(SESSION_OVERLAY_TTL_MS - 1_000)
+    const latestMessage = {
+      ...firstMessage,
+      id: 'note:2',
+      body: 'The newest message.',
+    }
+    await runtime.pushSessionOverlayItem(latestMessage)
+    const latestUpdate = updates()[1]
+    expect(latestUpdate).toMatchObject({
+      snapshot: {
+        item: { id: latestMessage.id, body: latestMessage.body },
+        queued: 0,
+      },
+    })
+    expect(latestUpdate?.snapshot.item?.expiresAt).toBe(
+      (firstExpiry ?? 0) + SESSION_OVERLAY_TTL_MS - 1_000
+    )
+
+    // Events still in flight from the old card must not affect its replacement.
+    emitFromOverlay(SESSION_OVERLAY_PRESENT, {
+      revision: firstUpdate?.revision,
+      height: 240,
+    })
+    emitFromOverlay(SESSION_OVERLAY_DISMISS, { id: firstMessage.id })
+    await flushAsyncWork()
+    expect(overlay?.sizes).toHaveLength(1)
+    expect(overlay?.closed).toBe(false)
+    emitFromOverlay(SESSION_OVERLAY_PRESENT, {
+      revision: latestUpdate?.revision,
+      height: 188,
+    })
+    await flushAsyncWork()
+    expect(overlay?.sizes.at(-1)).toEqual({
+      width: SESSION_OVERLAY_WINDOW_WIDTH,
+      height: 188,
+    })
+    expect(overlay?.showCalls).toBe(2)
+
+    await vi.advanceTimersByTimeAsync(1_000)
+    expect(overlay?.closed).toBe(false)
+    await vi.advanceTimersByTimeAsync(SESSION_OVERLAY_TTL_MS - 1_001)
+    expect(overlay?.closed).toBe(false)
+    await vi.advanceTimersByTimeAsync(1)
+    expect(overlay?.closed).toBe(true)
+    expect(updates()).toHaveLength(2)
   })
 
   test('does not create a dead window when the control channel cannot bind', async () => {
