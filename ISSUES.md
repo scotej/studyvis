@@ -1190,6 +1190,21 @@ debounced; the removed close flush was fire-and-forget and could not guarantee
 a final write during a real quit. Source-verified against the installed Tauri
 API; requires a Windows packaged-app close and tray check.
 
+### I121 — Sev3
+
+`src/features/session/sessionOverlay.ts`, `src/features/session/useSessionOverlayBridge.ts`
+
+**Evidence.** GitHub #351 reports that successive messages leave an older
+floating chat notification visible. Each incoming note or image previously
+added another item to the FIFO queue, waiting behind the older card until its
+original expiry.
+
+**Status.** **fixed on branch** — incoming notes and images share a chat
+category. A newer chat replaces the previous chat in its queue position and
+receives a fresh expiry. Other alerts retain their order. Queue and runtime
+tests cover immediate replacement, renewed expiry, and stale layout/dismiss
+events; the regressions fail with the change reverted.
+
 ## Archive — retired backlogs
 
 Two documents used to sit beside this ledger and were deleted once their implementation backlog had no open code work left: `BUILD-PROMPTS.md` (the sequenced V0→V3 build plan) and `IMPROVEMENTS.md` (the v1.2.0-era improvement backlog). Git history holds both in full — `git log --diff-filter=D -- BUILD-PROMPTS.md IMPROVEMENTS.md`, then `git show <sha>^:<file>`. Linux's implementation checklist is complete, but its operational release sign-off remains pending. What survives here is the part still cited from code.

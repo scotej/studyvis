@@ -1071,6 +1071,12 @@ The `Ctrl+]` AI dialog is a separate Tauri window with:
 
 The in-session overlay (`sessionOverlayRuntime.ts`, #198) is the same kind of window — transparent, undecorated, floating, all-Spaces, hidden until its content is measured — but it is constructed from the main webview with `WebviewWindow`, so it could not reach that AppKit step and was absent on macOS whenever the user was in a full-screen app (#317, I118). The runtime therefore calls the `session_overlay_prepare` command, hard-wired to the overlay label and granted only to `main-commands`, inside its serialized creation step before READY/PRESENT can reveal the window; on Windows and Linux the command only verifies the window exists. One more macOS difference lives on that path: tao's resize is `setContentSize:`, which keeps the bottom-left corner fixed, so after every measured resize the runtime re-asserts the top-left corner (`core:window:allow-set-position`) to keep the card below the menu bar. The runtime logs under the `session.overlay` scope — creation, preparation and presentation failures, a READY watchdog, and each reveal by revision and height, never the notification text.
 
+Incoming chat notes and images share one overlay slot (#351, I121): a newer
+chat replaces the older chat in place and renews its expiry. Other alerts
+keep their queue order. The replacement receives a new presentation revision,
+so measurements and dismissals still in flight from the previous card cannot
+resize or remove it.
+
 ## 13. State diagrams (ASCII)
 
 ### App lifecycle
