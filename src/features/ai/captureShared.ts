@@ -10,6 +10,73 @@
 // HTMLCanvasElement; both paths are equivalent in output, but OffscreenCanvas
 // avoids reflow when the surrounding component is mid-render.
 
+import { logger } from '@/lib/log'
+
+const log = logger.child('ai.capture')
+const SLOW_CAPTURE_MS = 1000
+
+type CaptureTimings = {
+  backend?: 'video' | 'bitmap' | 'offscreen' | 'canvas'
+  sourceWidth?: number
+  sourceHeight?: number
+  targetWidth?: number
+  targetHeight?: number
+  frameCount?: number
+  attachMs?: number
+  playMs?: number
+  metadataMs?: number
+  frameWaitMs?: number
+  drawMs?: number
+  blobCallMs?: number
+  blobSettleMs?: number
+  arrayBufferMs?: number
+  base64Ms?: number
+  pauseMs?: number
+  detachMs?: number
+  closeMs?: number
+}
+
+type CaptureStage = Exclude<
+  keyof CaptureTimings,
+  | 'backend'
+  | 'sourceWidth'
+  | 'sourceHeight'
+  | 'targetWidth'
+  | 'targetHeight'
+  | 'frameCount'
+>
+
+function measureStage<T>(
+  timings: CaptureTimings,
+  stage: CaptureStage,
+  operation: () => T
+): T {
+  const startedAt = performance.now()
+  try {
+    return operation()
+  } finally {
+    timings[stage] = Math.max(0, Math.round(performance.now() - startedAt))
+  }
+}
+
+function logSlowCapture(
+  operation: 'extract' | 'encode' | 'composite' | 'dispose',
+  startedAt: number,
+  outcome: 'ready' | 'failed',
+  timings: CaptureTimings
+): void {
+  const elapsedMs = performance.now() - startedAt
+  if (elapsedMs < SLOW_CAPTURE_MS) return
+  // #350 — persist each slow operation separately; warning throttling would
+  // otherwise fold consecutive face/screen traces and hide the second stall.
+  log.debug('operation.slow', {
+    operation,
+    outcome,
+    elapsedMs: Math.max(0, Math.round(elapsedMs)),
+    ...timings,
+  })
+}
+
 export type CaptureFrame = {
   bitmap: ImageBitmap | HTMLVideoElement
   // Source dimensions in CSS pixels. For face / screen frames these come
@@ -126,53 +193,73 @@ async function defaultExtractFrame(
     )
   }
 
-  const stream = new MediaStream([track])
-  const video = document.createElement('video')
-  video.muted = true
-  video.playsInline = true
-  video.autoplay = true
-  video.srcObject = stream
-
-  const cleanup = () => {
-    try {
-      video.pause()
-    } catch {
-      // already paused; ignore
-    }
-    video.srcObject = null
-  }
-
+  const startedAt = performance.now()
+  const timings: CaptureTimings = { backend: 'video' }
+  let outcome: 'ready' | 'failed' = 'failed'
   try {
-    await waitForVideoReady(video)
-    // Settings on a screen-share track expose width/height directly; for a
-    // <video> element they appear on videoWidth/videoHeight after metadata
-    // arrives.
-    const sourceWidth = video.videoWidth || track.getSettings().width || 0
-    const sourceHeight = video.videoHeight || track.getSettings().height || 0
-    if (sourceWidth === 0 || sourceHeight === 0) {
+    const stream = new MediaStream([track])
+    const video = document.createElement('video')
+    video.muted = true
+    video.playsInline = true
+    video.autoplay = true
+    measureStage(timings, 'attachMs', () => {
+      video.srcObject = stream
+    })
+
+    const cleanup = () => {
+      try {
+        measureStage(timings, 'pauseMs', () => video.pause())
+      } catch {
+        // already paused; ignore
+      }
+      measureStage(timings, 'detachMs', () => {
+        video.srcObject = null
+      })
+    }
+
+    try {
+      await waitForVideoReady(video, timings)
+      // Settings on a screen-share track expose width/height directly; for a
+      // <video> element they appear on videoWidth/videoHeight after metadata
+      // arrives.
+      const sourceWidth = video.videoWidth || track.getSettings().width || 0
+      const sourceHeight = video.videoHeight || track.getSettings().height || 0
+      timings.sourceWidth = sourceWidth
+      timings.sourceHeight = sourceHeight
+      if (sourceWidth === 0 || sourceHeight === 0) {
+        throw new CaptureError(
+          'frame_extraction_failed',
+          `video frame had zero dimensions (${sourceWidth}×${sourceHeight})`
+        )
+      }
+      outcome = 'ready'
+      return {
+        bitmap: video,
+        sourceWidth,
+        sourceHeight,
+      }
+    } catch (err) {
+      cleanup()
+      if (err instanceof CaptureError) throw err
       throw new CaptureError(
         'frame_extraction_failed',
-        `video frame had zero dimensions (${sourceWidth}×${sourceHeight})`
+        err instanceof Error ? err.message : String(err),
+        { cause: err }
       )
     }
-    return {
-      bitmap: video,
-      sourceWidth,
-      sourceHeight,
-    }
-  } catch (err) {
-    cleanup()
-    if (err instanceof CaptureError) throw err
-    throw new CaptureError(
-      'frame_extraction_failed',
-      err instanceof Error ? err.message : String(err),
-      { cause: err }
-    )
+  } finally {
+    logSlowCapture('extract', startedAt, outcome, timings)
   }
 }
 
-function waitForVideoReady(video: HTMLVideoElement): Promise<void> {
+function waitForVideoReady(
+  video: HTMLVideoElement,
+  timings: CaptureTimings
+): Promise<void> {
   return new Promise((resolve, reject) => {
+    const startedAt = performance.now()
+    let playReturnedAt = startedAt
+    let metadataAt: number | null = null
     const timer = setTimeout(() => {
       cleanupListeners()
       reject(
@@ -184,6 +271,14 @@ function waitForVideoReady(video: HTMLVideoElement): Promise<void> {
     }, VIDEO_FRAME_READY_TIMEOUT_MS)
 
     const cleanupListeners = () => {
+      const finishedAt = performance.now()
+      timings.metadataMs = Math.max(
+        0,
+        Math.round((metadataAt ?? finishedAt) - playReturnedAt)
+      )
+      if (metadataAt !== null) {
+        timings.frameWaitMs = Math.max(0, Math.round(finishedAt - metadataAt))
+      }
       clearTimeout(timer)
       video.removeEventListener('loadedmetadata', onMetadata)
       video.removeEventListener('error', onError)
@@ -198,6 +293,7 @@ function waitForVideoReady(video: HTMLVideoElement): Promise<void> {
     }
 
     const onMetadata = () => {
+      metadataAt = performance.now()
       // We have dimensions; now wait for at least one frame to be paint-
       // ready. requestVideoFrameCallback is the precise primitive (Safari
       // 15.4+ / Chromium); fall back to a microtask + 50 ms timer for the
@@ -225,24 +321,42 @@ function waitForVideoReady(video: HTMLVideoElement): Promise<void> {
     // Kick the decoder. play() returns a Promise on modern engines; we
     // intentionally swallow rejection — autoplay restrictions don't apply
     // because srcObject + muted is allowed everywhere we ship.
-    void video.play().catch(() => {})
+    void measureStage(timings, 'playMs', () => video.play()).catch(() => {})
+    playReturnedAt = performance.now()
   })
 }
 
 function defaultDisposeFrame(frame: CaptureFrame): void {
-  if (frame.bitmap instanceof HTMLVideoElement) {
-    try {
-      frame.bitmap.pause()
-    } catch {
-      // ignore
+  const startedAt = performance.now()
+  const timings: CaptureTimings = {
+    sourceWidth: frame.sourceWidth,
+    sourceHeight: frame.sourceHeight,
+  }
+  let outcome: 'ready' | 'failed' = 'failed'
+  try {
+    if (frame.bitmap instanceof HTMLVideoElement) {
+      timings.backend = 'video'
+      const video = frame.bitmap
+      try {
+        measureStage(timings, 'pauseMs', () => video.pause())
+      } catch {
+        // ignore
+      }
+      measureStage(timings, 'detachMs', () => {
+        video.srcObject = null
+      })
+    } else {
+      timings.backend = 'bitmap'
+      const bitmap = frame.bitmap
+      try {
+        measureStage(timings, 'closeMs', () => bitmap.close())
+      } catch {
+        // best-effort; some engines may not implement close()
+      }
     }
-    frame.bitmap.srcObject = null
-  } else {
-    try {
-      frame.bitmap.close()
-    } catch {
-      // best-effort; some engines may not implement close()
-    }
+    outcome = 'ready'
+  } finally {
+    logSlowCapture('dispose', startedAt, outcome, timings)
   }
 }
 
@@ -262,14 +376,29 @@ async function defaultEncodeJpegBase64(
     sw: frame.sourceWidth,
     sh: frame.sourceHeight,
   }
-  const blob = await drawAndEncode(
-    frame,
-    crop,
+  const startedAt = performance.now()
+  const timings: CaptureTimings = {
+    sourceWidth: frame.sourceWidth,
+    sourceHeight: frame.sourceHeight,
     targetWidth,
     targetHeight,
-    quality
-  )
-  return await blobToBase64(blob)
+  }
+  let outcome: 'ready' | 'failed' = 'failed'
+  try {
+    const blob = await drawAndEncode(
+      frame,
+      crop,
+      targetWidth,
+      targetHeight,
+      quality,
+      timings
+    )
+    const result = await blobToBase64(blob, timings)
+    outcome = 'ready'
+    return result
+  } finally {
+    logSlowCapture('encode', startedAt, outcome, timings)
+  }
 }
 
 async function defaultEncodeCompositeJpegBase64(
@@ -285,22 +414,54 @@ async function defaultEncodeCompositeJpegBase64(
   if (placements.length === 0) {
     throw new CaptureError('encode_failed', 'composite has no placements')
   }
-  const blob = await drawCompositeAndEncode(
-    placements,
-    outputWidth,
-    outputHeight,
-    quality
-  )
-  return await blobToBase64(blob)
+  const startedAt = performance.now()
+  const timings: CaptureTimings = {
+    targetWidth: outputWidth,
+    targetHeight: outputHeight,
+    frameCount: placements.length,
+  }
+  let outcome: 'ready' | 'failed' = 'failed'
+  try {
+    const blob = await drawCompositeAndEncode(
+      placements,
+      outputWidth,
+      outputHeight,
+      quality,
+      timings
+    )
+    const result = await blobToBase64(blob, timings)
+    outcome = 'ready'
+    return result
+  } finally {
+    logSlowCapture('composite', startedAt, outcome, timings)
+  }
+}
+
+async function encodeBlob(
+  timings: CaptureTimings,
+  createBlob: () => Promise<Blob>
+): Promise<Blob> {
+  const pending = measureStage(timings, 'blobCallMs', createBlob)
+  const startedAt = performance.now()
+  try {
+    return await pending
+  } finally {
+    timings.blobSettleMs = Math.max(
+      0,
+      Math.round(performance.now() - startedAt)
+    )
+  }
 }
 
 async function drawCompositeAndEncode(
   placements: ReadonlyArray<CompositePlacementInput>,
   outputWidth: number,
   outputHeight: number,
-  quality: number
+  quality: number,
+  timings: CaptureTimings
 ): Promise<Blob> {
   const useOffscreen = typeof OffscreenCanvas !== 'undefined'
+  timings.backend = useOffscreen ? 'offscreen' : 'canvas'
   if (useOffscreen) {
     const canvas = new OffscreenCanvas(outputWidth, outputHeight)
     const ctx = canvas.getContext('2d')
@@ -310,6 +471,33 @@ async function drawCompositeAndEncode(
         'OffscreenCanvas 2d context unavailable'
       )
     }
+    measureStage(timings, 'drawMs', () => {
+      for (const p of placements) {
+        ctx.drawImage(
+          p.frame.bitmap,
+          0,
+          0,
+          p.frame.sourceWidth,
+          p.frame.sourceHeight,
+          p.x,
+          p.y,
+          p.width,
+          p.height
+        )
+      }
+    })
+    return await encodeBlob(timings, () =>
+      canvas.convertToBlob({ type: 'image/jpeg', quality })
+    )
+  }
+  const canvas = document.createElement('canvas')
+  canvas.width = outputWidth
+  canvas.height = outputHeight
+  const ctx = canvas.getContext('2d')
+  if (!ctx) {
+    throw new CaptureError('encode_failed', 'canvas 2d context unavailable')
+  }
+  measureStage(timings, 'drawMs', () => {
     for (const p of placements) {
       ctx.drawImage(
         p.frame.bitmap,
@@ -323,41 +511,24 @@ async function drawCompositeAndEncode(
         p.height
       )
     }
-    return await canvas.convertToBlob({ type: 'image/jpeg', quality })
-  }
-  const canvas = document.createElement('canvas')
-  canvas.width = outputWidth
-  canvas.height = outputHeight
-  const ctx = canvas.getContext('2d')
-  if (!ctx) {
-    throw new CaptureError('encode_failed', 'canvas 2d context unavailable')
-  }
-  for (const p of placements) {
-    ctx.drawImage(
-      p.frame.bitmap,
-      0,
-      0,
-      p.frame.sourceWidth,
-      p.frame.sourceHeight,
-      p.x,
-      p.y,
-      p.width,
-      p.height
-    )
-  }
-  return await new Promise<Blob>((resolve, reject) => {
-    canvas.toBlob(
-      (blob) => {
-        if (blob) resolve(blob)
-        else
-          reject(
-            new CaptureError('encode_failed', 'canvas.toBlob returned null')
-          )
-      },
-      'image/jpeg',
-      quality
-    )
   })
+  return await encodeBlob(
+    timings,
+    () =>
+      new Promise<Blob>((resolve, reject) => {
+        canvas.toBlob(
+          (blob) => {
+            if (blob) resolve(blob)
+            else
+              reject(
+                new CaptureError('encode_failed', 'canvas.toBlob returned null')
+              )
+          },
+          'image/jpeg',
+          quality
+        )
+      })
+  )
 }
 
 async function drawAndEncode(
@@ -365,9 +536,11 @@ async function drawAndEncode(
   crop: SourceCrop,
   targetWidth: number,
   targetHeight: number,
-  quality: number
+  quality: number,
+  timings: CaptureTimings
 ): Promise<Blob> {
   const useOffscreen = typeof OffscreenCanvas !== 'undefined'
+  timings.backend = useOffscreen ? 'offscreen' : 'canvas'
   if (useOffscreen) {
     const canvas = new OffscreenCanvas(targetWidth, targetHeight)
     const ctx = canvas.getContext('2d')
@@ -381,6 +554,31 @@ async function drawAndEncode(
     // draw it into the target rect. The 5-arg form silently stretches the
     // whole source, which squashed the camera's 16:9 frame into the face's
     // 384×384 square.
+    measureStage(timings, 'drawMs', () =>
+      ctx.drawImage(
+        frame.bitmap,
+        crop.sx,
+        crop.sy,
+        crop.sw,
+        crop.sh,
+        0,
+        0,
+        targetWidth,
+        targetHeight
+      )
+    )
+    return await encodeBlob(timings, () =>
+      canvas.convertToBlob({ type: 'image/jpeg', quality })
+    )
+  }
+  const canvas = document.createElement('canvas')
+  canvas.width = targetWidth
+  canvas.height = targetHeight
+  const ctx = canvas.getContext('2d')
+  if (!ctx) {
+    throw new CaptureError('encode_failed', 'canvas 2d context unavailable')
+  }
+  measureStage(timings, 'drawMs', () =>
     ctx.drawImage(
       frame.bitmap,
       crop.sx,
@@ -392,53 +590,52 @@ async function drawAndEncode(
       targetWidth,
       targetHeight
     )
-    return await canvas.convertToBlob({ type: 'image/jpeg', quality })
-  }
-  const canvas = document.createElement('canvas')
-  canvas.width = targetWidth
-  canvas.height = targetHeight
-  const ctx = canvas.getContext('2d')
-  if (!ctx) {
-    throw new CaptureError('encode_failed', 'canvas 2d context unavailable')
-  }
-  ctx.drawImage(
-    frame.bitmap,
-    crop.sx,
-    crop.sy,
-    crop.sw,
-    crop.sh,
-    0,
-    0,
-    targetWidth,
-    targetHeight
   )
-  return await new Promise<Blob>((resolve, reject) => {
-    canvas.toBlob(
-      (blob) => {
-        if (blob) resolve(blob)
-        else
-          reject(
-            new CaptureError('encode_failed', 'canvas.toBlob returned null')
-          )
-      },
-      'image/jpeg',
-      quality
-    )
-  })
+  return await encodeBlob(
+    timings,
+    () =>
+      new Promise<Blob>((resolve, reject) => {
+        canvas.toBlob(
+          (blob) => {
+            if (blob) resolve(blob)
+            else
+              reject(
+                new CaptureError('encode_failed', 'canvas.toBlob returned null')
+              )
+          },
+          'image/jpeg',
+          quality
+        )
+      })
+  )
 }
 
-async function blobToBase64(blob: Blob): Promise<string> {
-  const buf = await blob.arrayBuffer()
-  const bytes = new Uint8Array(buf)
-  // 8 KB chunks keep the call stack short — String.fromCharCode(...array)
-  // blows the stack past ~125k args on V8 / JSC.
-  const CHUNK = 8192
-  let binary = ''
-  for (let i = 0; i < bytes.length; i += CHUNK) {
-    const slice = bytes.subarray(i, i + CHUNK)
-    binary += String.fromCharCode(...slice)
+async function blobToBase64(
+  blob: Blob,
+  timings: CaptureTimings
+): Promise<string> {
+  const startedAt = performance.now()
+  let buf: ArrayBuffer
+  try {
+    buf = await blob.arrayBuffer()
+  } finally {
+    timings.arrayBufferMs = Math.max(
+      0,
+      Math.round(performance.now() - startedAt)
+    )
   }
-  return btoa(binary)
+  return measureStage(timings, 'base64Ms', () => {
+    const bytes = new Uint8Array(buf)
+    // 8 KB chunks keep the call stack short — String.fromCharCode(...array)
+    // blows the stack past ~125k args on V8 / JSC.
+    const CHUNK = 8192
+    let binary = ''
+    for (let i = 0; i < bytes.length; i += CHUNK) {
+      const slice = bytes.subarray(i, i + CHUNK)
+      binary += String.fromCharCode(...slice)
+    }
+    return btoa(binary)
+  })
 }
 
 const defaultRuntime: CaptureRuntime = {

@@ -423,3 +423,193 @@ diff --git a/node_modules/@trystero-p2p/core/dist/shared-peer.mjs b/node_modules
  			},
  			track: (track, stream) => this.dispatchTrack(shared, track, stream)
  		});
+diff --git a/node_modules/@trystero-p2p/core/dist/peer.mjs b/node_modules/@trystero-p2p/core/dist/peer.mjs
+--- a/node_modules/@trystero-p2p/core/dist/peer.mjs
++++ b/node_modules/@trystero-p2p/core/dist/peer.mjs
+@@ -24,6 +24,7 @@
+ 	let dataChannel = null;
+ 	let disconnectedCloseTimer = null;
+ 	let didEmitClose = false;
++	let rejectInitialOffer = null;
+ 	const clearDisconnectedCloseTimer = () => disconnectedCloseTimer = resetTimer(disconnectedCloseTimer);
+ 	const emitClose = () => {
+ 		if (didEmitClose) return;
+@@ -154,7 +155,11 @@
+ 			await pc.setLocalDescription(restartIce ? await pc.createOffer({ iceRestart: true }) : void 0);
+ 			return await emitLocalDescriptionSignal();
+ 		} catch (err) {
+-			handlers.error?.(toError(err, "failed to create local offer"));
++			const error = toError(err, "failed to create local offer");
++			// #350 — pooled peers can fail before an error handler is installed.
++			// Reject checkout too, so the failed offer is destroyed and retried.
++			rejectInitialOffer?.(error);
++			handlers.error?.(error);
+ 		} finally {
+ 			makingOffer = false;
+ 		}
+@@ -207,9 +212,14 @@
+ 		}
+ 	};
+ 	pc.onremovestream = (e) => handlers.stream?.(e.stream);
+-	const offerPromise = initiator ? new Promise((res) => appendSignalHandler((signal) => {
+-		if (signal.type === offerType) res(signal);
+-	})) : Promise.resolve();
++	const offerPromise = initiator ? new Promise((res, reject) => {
++		rejectInitialOffer = reject;
++		appendSignalHandler((signal) => {
++			if (signal.type === offerType) res(signal);
++		});
++	}) : Promise.resolve();
++	// Warm offers may fail before checkout attaches its rejection handler.
++	offerPromise.catch(() => {});
+ 	if (initiator) queueMicrotask(() => {
+ 		if (!makingOffer && pc.signalingState === "stable" && !pc.localDescription && pc.connectionState !== "closed") pc.onnegotiationneeded?.(new Event("negotiationneeded"));
+ 	});
+diff --git a/node_modules/@trystero-p2p/core/dist/signal-handler.mjs b/node_modules/@trystero-p2p/core/dist/signal-handler.mjs
+--- a/node_modules/@trystero-p2p/core/dist/signal-handler.mjs
++++ b/node_modules/@trystero-p2p/core/dist/signal-handler.mjs
+@@ -164,7 +164,7 @@
+ 		offerId: state.offerId
+ 	});
+ 	if (state.offerInitPromise) return state.offerInitPromise;
+-	state.offerInitPromise = (async () => {
++	const offerInitPromise = (async () => {
+ 		const firstOffer = (await ctx.offerPool.checkout(1, false, ctx.encryptOffer))[0];
+ 		if (!firstOffer) throw mkErr("failed to allocate offer peer");
+ 		const { peer, offer } = firstOffer;
+@@ -199,8 +199,19 @@
+ 			offer,
+ 			offerId: state.offerId
+ 		};
+-	})().finally(() => state.offerInitPromise = null);
+-	return state.offerInitPromise;
++	})().catch((err) => {
++		// #350 — a failed checkout must release announcement placeholders too.
++		// No offer expiry exists yet; keeping them would suppress every retry.
++		if (ctx.peerStates[peerId] === state && state.offerInitPromise === offerInitPromise) {
++			resetOfferState(state, ctx.offerPool);
++			ctx.checkDeactivate();
++		}
++		throw err;
++	}).finally(() => {
++		if (state.offerInitPromise === offerInitPromise) state.offerInitPromise = null;
++	});
++	state.offerInitPromise = offerInitPromise;
++	return offerInitPromise;
+ };
+ const handleAnnouncement = async (ctx, relayId, peerId, shared, signalPeer) => {
+ 	if (shared) {
+@@ -213,7 +224,19 @@
+ 		return;
+ 	}
+ 	if (state.offerRelays[relayId] !== offerRelayPlaceholder) return;
+-	const [peerTopic, offerInfo] = await all([sha1(topicPath(ctx.rootTopicPlaintext, peerId)), ensureOffer(ctx, state, peerId, relayId)]);
++	let peerTopic, offerInfo;
++	try {
++		[peerTopic, offerInfo] = await all([sha1(topicPath(ctx.rootTopicPlaintext, peerId)), ensureOffer(ctx, state, peerId, relayId)]);
++	} catch {
++		// Signaling subscriptions do not consume rejected handler promises.
++		if (!ctx.isLeaving()) ctx.onJoinError?.({
++			error: "failed to create local offer",
++			appId: ctx.appId,
++			peerId,
++			roomId: ctx.roomId
++		});
++		return;
++	}
+ 	if (ctx.isLeaving()) return;
+ 	if (state.connectedPeer || state.answeringPeer || state.offerAnswered || state.offerRelays[relayId] !== offerRelayPlaceholder) {
+ 		clearOfferRelayIfPlaceholder(state, relayId);
+diff --git a/node_modules/@trystero-p2p/core/dist/offer-pool.mjs b/node_modules/@trystero-p2p/core/dist/offer-pool.mjs
+--- a/node_modules/@trystero-p2p/core/dist/offer-pool.mjs
++++ b/node_modules/@trystero-p2p/core/dist/offer-pool.mjs
+@@ -8,7 +8,6 @@
+ 	pool = [];
+ 	pooled = /* @__PURE__ */ new Set();
+ 	leased = /* @__PURE__ */ new Map();
+-	recycling = /* @__PURE__ */ new Set();
+ 	cleanupTimer = null;
+ 	active = false;
+ 	constructor(makeOffer) {
+@@ -43,6 +42,13 @@
+ 			const peer = this.pool.shift();
+ 			if (!peer) break;
+ 			this.pooled.delete(peer);
++			// #350 — restarting an unused offer can drop its SCTP section.
++			// Retire expired warm peers and let checkout allocate fresh ones.
++			if (peer.isDead) continue;
++			if (Date.now() - peer.created > offerTtl) {
++				peer.destroy();
++				continue;
++			}
+ 			peers.push(peer);
+ 		}
+ 		return peers;
+@@ -55,7 +61,7 @@
+ 		}
+ 	}
+ 	recycle(peer) {
+-		if (peer.isDead || this.recycling.has(peer)) return;
++		if (peer.isDead) return;
+ 		if (peer.connection.remoteDescription) {
+ 			peer.destroy();
+ 			return;
+@@ -64,19 +70,20 @@
+ 			peer.destroy();
+ 			return;
+ 		}
+-		this.recycling.add(peer);
+ 		peer.setHandlers({
+ 			connect: noOp,
+ 			close: noOp,
+ 			error: noOp
+ 		});
+-		peer.getOffer(true).then((offer) => {
+-			if (!offer || offer.type !== "offer" || peer.isDead || !this.active) {
+-				peer.destroy();
+-				return;
+-			}
+-			this.push(peer);
+-		}).catch(() => peer.destroy()).finally(() => this.recycling.delete(peer));
++		// #350 — even a young unused offer loses its data channel on rollback.
++		// Keep the pool slot, but replace the native connection instead.
++		peer.destroy();
++		try {
++			this.push(this.makeOffer());
++		} catch {
++			// Native allocation may fail; keep the owner reset unblocked.
++			// Checkout fills missing slots and reports its own failures.
++		}
+ 	}
+ 	reclaimLeased(peer) {
+ 		const timer = this.leased.get(peer);
+@@ -139,8 +146,6 @@
+ 			peer.destroy();
+ 		});
+ 		this.leased.clear();
+-		this.recycling.forEach((peer) => peer.destroy());
+-		this.recycling.clear();
+ 	}
+ };
+ //#endregion
+diff --git a/node_modules/@trystero-p2p/core/dist/strategy.mjs b/node_modules/@trystero-p2p/core/dist/strategy.mjs
+--- a/node_modules/@trystero-p2p/core/dist/strategy.mjs
++++ b/node_modules/@trystero-p2p/core/dist/strategy.mjs
+@@ -1,6 +1,6 @@
+ import { all, entries, keys, libName, mkErr, noOp, resetTimer, selfId, toErrorMessage, topicPath, values, watchOnline } from "./utils.mjs";
+ import { decrypt, deriveRoomNamespace, encrypt, genKey, sha1 } from "./crypto.mjs";
+-import { OfferPool, offerTtl } from "./offer-pool.mjs";
++import { OfferPool } from "./offer-pool.mjs";
+ import { createPasswordHandshake } from "./handshake.mjs";
+ import peer_default from "./peer.mjs";
+ import room_default from "./room.mjs";
+@@ -96,7 +96,8 @@
+ 		offerPool ||= new OfferPool(makeOffer);
+ 		const pool = offerPool;
+ 		const encryptOffer = async (peer) => {
+-			const plainOffer = await peer.getOffer(Date.now() - peer.created > offerTtl);
++			// #350 — the pool owns unused-peer expiry; do not restart it after checkout.
++			const plainOffer = await peer.getOffer();
+ 			if (!plainOffer || plainOffer.type !== "offer") throw mkErr("failed to get offer for peer");
+ 			return (await toCipher(plainOffer)).sdp;
+ 		};

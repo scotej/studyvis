@@ -67,7 +67,7 @@ const BENCHMARK_TOPIC = 'Studying'
 // order. Persist the native spawn identity below instead. Deliberately NOT
 // __APP_VERSION__: most releases don't affect inference measurements.
 const INFERENCE_ENGINE_FINGERPRINT_BASE =
-  'b9095-linuxvulkan1-hwidentity2-cachecold2'
+  'b9095-linuxvulkan1-hwidentity2-ramcache0-cachecold2'
 
 export function inferenceEngineFingerprintFor(
   identity: AiHardwareIdentity

@@ -385,6 +385,16 @@ operation failures are recorded as categorical operation/error names and
 connection states; SDP, candidates, device identifiers and error messages are
 not logged.
 
+Unused pooled offers are retired instead of being renewed by rollback: expired
+warm offers are closed on checkout, and returned offers are closed and replaced
+while the pool is active. Fresh connections retain a data-channel SDP section;
+rolling back an unanswered data-only offer can remove it even on Chromium.
+Connected/shared peers and claimed leases are unaffected. If initial native
+offer creation fails before handlers are installed, its promise rejects so
+checkout can destroy/retry the connection. Exhausted initialization clears only
+its own pending relay placeholders and reports through `onJoinError`, allowing
+the next announcement to try again (#350).
+
 ### Relay-carried presence (I74)
 
 Everything trystero does — over any strategy — is *signaling*; application data still rides WebRTC datachannels. So when a STUN-only connection can't traverse the NAT pair between two friends, presence heartbeats never flow in either direction, trystero surfaces **no error for a failed ICE attempt** (it silently re-offers forever), and both friends show each other permanently offline — the exact symptom that motivated this leg, made structural by offline ContactCard pairing (§5.1), which removed the last step that ever proved the P2P path worked.
@@ -657,6 +667,15 @@ llama-server is bundled as `binaries/llama-server-{platform}` in `tauri.conf.jso
 
 **Engine resolution + auto-install (I73).** At spawn time the binary is resolved to an absolute path and launched via `shell().command()` — never `shell().sidecar()`, whose exe-relative join never matched where tauri-build/the bundler actually place the file. Preference order: (1) the bundled binary at `<exe_dir>/llama-server(.exe)` (size-gated, so the dev placeholder `build.rs` writes for debug-profile builds is treated as absent), (2) a managed install at `data_dir/engine/<tag>-r<package-revision>-<triple>/`. When neither resolves, `sidecar_start` downloads the pinned llama.cpp release asset for the current triple (SHA-256-verified; pins lockstep-tested against `scripts/fetch-llama-server.sh`), unpacks `llama-server` + companion libs, and installs it atomically — gated by the `engine_auto_install` setting (default ON; Settings → AI → AI engine also offers manual Install/Reinstall with progress via `engine:progress` events). The managed install lives in `data_dir`, so it survives app updates; the fallback rescues *spawn* failures (missing/corrupt binary), not runtime crash-loops, which still end at the restart budget. Both sources are the same pinned build, so the fallback never shifts `INFERENCE_ENGINE_FINGERPRINT`.
 
+**Historical prompt memory (#350).** Every sidecar spawn uses `--cache-ram 0`
+to disable the pinned engine's otherwise 8 GiB RAM archive of historical prompt
+states. Current-slot KV reuse and request-level `cache_prompt` behavior remain
+unchanged, including the benchmark's cold-prefill requests. Revisiting an older
+prompt may require more prefill work. The benchmark engine fingerprint changes
+with this spawn policy so previous timings are treated as stale. The field
+archive shows retained states, but contains no host memory-pressure evidence;
+this resource mitigation does not establish the reported capture stall's cause.
+
 ### Sample loop
 
 ```
@@ -672,6 +691,7 @@ loop:
         pause AI; show on-battery-paused notice   # battery, not thermal
         sleep(60s); continue
 
+    start_main_thread_starvation_probe()          # #269/#350 — capture too
     face_frame  = capture_camera_frame()
     screen_grab = capture_primary_display()
     t0 = now()
@@ -693,10 +713,11 @@ loop:
       max_tokens: 200,
     }
     inference_sec = now() - t0
-    # #269 — a 1 Hz probe armed for exactly the request window above; every
-    # exit from it (answer, non-2xx, bad JSON, rejection, timeout abort)
-    # reads the probe before rescheduling.
-    starved_ms = worst_main_thread_lateness_during(request)
+    # #269/#350 — a 1 Hz probe spans capture and inference; every exit
+    # (capture failure, engine warming, answer, non-2xx, bad JSON, rejection,
+    # timeout abort) reads the probe before rescheduling. Inference duration
+    # still measures only the POST. Stopping discards the probe.
+    starved_ms = worst_main_thread_lateness_during(capture_and_request)
     update_cadence_backoff(inference_sec, benchmark_p95, starved_ms)  # A6/#269
     judgment = parse_json(response)
     # A2 — a malformed/empty response is an UNCERTAIN skip (not a fabricated
@@ -720,11 +741,14 @@ late rejection is consumed.
 
 **Cadence backoff (A6 + #269, local, no telemetry).** ARCHITECTURE originally promised a "thermal-aware notice" but only paused on battery <20% — which never fires on AC, exactly where a fanless laptop throttles under continuous vision inference. There is no portable OS thermal API and no telemetry, so instead the loop watches inference durations: after **2** consecutive ticks whose measured inference exceeds `benchmark_p95 × 2.5`, it engages — doubling the effective sample interval — and recovers after **3** consecutive normal ticks. It fires a single in-voice "checks are running slower than usual" notice once per session (one-shot, on the engaging tick). The battery pause above is unchanged. When no benchmark p95 exists this **duration** arm is disabled (no baseline to compare against), so an unbenchmarked model is never called slow and never reaches the notice that way.
 
-Duration is only half of "who is running behind", and it is the half that needs a baseline. #269 added the other half: a 1 s probe armed for exactly the inference window keeps the worst lateness the *app's own* main thread shows while a check is in flight — measured on the **monotonic** clock, never on `Date.now()`, so a machine that suspends mid-inference (or an NTP step) cannot be read as a freeze; the probe carries the wall-minus-monotonic `skewMs` alongside the reading, the same discriminator `ptt.watchdog`'s timeline gap records, so a webview that stopped being scheduled **during** an inference is attributed to the inference that starved it (`scheduler.lagged` can only see the gaps that straddle a tick boundary, which at a backed-off cadence is almost none of them). A tick whose probe reads **≥ 3 s** engages backoff on its **first** occurrence — deliberately asymmetric with the two-in-a-row duration rule, because the freeze has already happened and the second tick the rule would wait for is another one — and it does so whether or not a benchmark p95 exists, since a missed 1 Hz timer means what it means with nothing to compare against. Recovery is unchanged: **3** consecutive ticks that are neither slow nor starving.
+Duration is only half of "who is running behind", and it is the half that needs a baseline. The 1 s probe now spans capture and inference (#269 + #350), retaining the worst lateness on the monotonic clock. It carries wall-minus-monotonic `skewMs` and excludes readings with material clock divergence. This guards against wall-clock changes and some suspend cases; zero skew cannot rule out process suspension or Windows sleep, because Windows [QPC includes sleep time](https://learn.microsoft.com/en-us/windows/win32/sysinfo/acquiring-high-resolution-time-stamps). The reading establishes that the main thread was late while the sample was pending, not what caused it. A tick whose probe reads **≥ 3 s** engages backoff on its **first** occurrence, whether or not a benchmark p95 exists. Recovery still requires **3** consecutive ticks that are neither slow nor starving.
 
-Every terminal path out of an in-flight inference reads that probe under its own name — `resolved`, `http_error`, `timeout`, `failed` — before the tick arms the stall watchdog or reschedules, so a request that froze the app and then failed cannot retry at the cadence that froze it, and the stall record cannot name a cadence the retry will not use. A net in the tick's `finally` keeps that invariant true of any path added later. A failed tick still never counts toward *recovery*: with no completed round-trip there is no duration to judge, and a tick that never answered is no evidence the machine is healthy, so a failure that starved nothing is passed over rather than credited. Loop teardown discards its probe instead of settling it, so stopping the loop (whose own abort would otherwise look like a timeout) can never engage backoff.
+Every terminal path reads that probe before rescheduling: capture failure, engine warming after capture, inference resolution, HTTP error, timeout, and rejection. Failed or incomplete ticks cannot count toward recovery because they provide no completed inference duration. The tick's `finally` protects settlement on future exits; stopping the loop discards its probe so teardown cannot engage backoff.
 
-**Overload diagnostics (#187 + #269, local-only).** The structured app log separates the ways a machine can fall behind without recording any topic or capture content. `ai.sampleloop.scheduler.lagged` records a WebView timer that fired at least one second and half a cadence late (main-thread/whole-machine pressure *between* ticks); `ai.sampleloop.inference.slow` records a completed inference above the current benchmark p95 × 2.5 threshold (sidecar compute pressure); `ai.sampleloop.app.starved` records ≥ 3 s of main-thread lateness measured *during* an inference — the app frozen by the check itself — carrying `starvedMs`, its `skewMs` (wall minus monotonic — material skew would mean a suspend, which the reading already excludes), the benchmark p95, and the backoff/cadence that reading produced. Its `outcome` field names how that tick ended (`resolved`, `http_error`, `timeout`, `failed`), because a check that freezes the app and then fails is exactly the one the cadence has to react to; `inferenceMs` is null on the three failing outcomes, which have no round-trip to report. Stall and recovery records include the model id, effective interval, request bound, benchmark p95, backoff/battery state, resolved-sample count, and unavailable duration. Per-tick `sample.resolved` debug rows retain capture/inference/total timings and the tick's starve reading for reconstruction, while the log throttle bounds repeated warning rows.
+**Overload diagnostics (#187 + #269 + #350, local-only).** The structured app log separates timer lateness, inference duration, and capture-stage elapsed time without recording topics or capture content. `ai.sampleloop.scheduler.lagged` records material lateness between ticks; `ai.sampleloop.inference.slow` records a completed inference above benchmark p95 × 2.5; `ai.sampleloop.app.starved` records ≥ 3 s of lateness during capture or inference, with clock skew and resulting cadence/backoff. Its `outcome` is `resolved`, `capture_failed`, `engine_warming`, `http_error`, `timeout`, or `failed`; `inferenceMs` is null except on resolution. Existing stall/recovery and per-tick `sample.resolved` rows retain model, cadence, availability, and capture/inference/total timings.
+
+`ai.capture.operation.slow` debug rows persist individual extraction, encoding, compositing, or disposal operations lasting at least 1 s. Fields contain only categorical backend/outcome, dimensions/counts, and numeric stage timings: stream attachment, synchronous play, metadata/frame wait, drawing, synchronous blob call, blob settlement, array-buffer/base64 conversion, pause/detach, and bitmap closure. Debug rows avoid warning throttling so consecutive slow face/screen operations survive separately. These elapsed times locate a slow stage but cannot independently distinguish native work from process suspension. No frame bytes, device identifiers, track labels, or native error text are included.
+
 
 ### Vision model + mmproj pairing
 

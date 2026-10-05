@@ -1212,6 +1212,96 @@ receives a fresh expiry. Other alerts retain their order. Queue and runtime
 tests cover immediate replacement, renewed expiry, and stale layout/dismiss
 events; the regressions fail with the change reverted.
 
+### I122 — Sev2
+
+`src/features/ai/sampleLoop.ts`
+
+**Evidence.** GitHub #350's Windows archive records a 20,990 ms capture
+overlapping 7,680 ms and 12,124 ms main-thread gaps and the peers' ICE failure.
+The sample nevertheless reports only 228 ms starvation and no cadence
+backoff: its overload probe starts after capture. The session remains live
+until both clients explicitly leave with reason `user`; the archives do not
+show a forced session end.
+
+**Status.** **mitigated on branch** — the starvation probe spans capture and
+inference, including failed captures and engine-warming exits. Inference
+duration still measures the POST separately. Regression tests cover frozen
+successful/failed capture, a responsive slow capture, and stopping during
+capture. The frozen-capture cases fail with the fix reverted.
+
+Slow capture operations now persist numeric stage timings for extraction,
+encoding, compositing, and disposal without frame content or device identifiers.
+Browser probes did not reproduce the reported 21 s stall: a 21 s JavaScript
+busy loop preserved ICE/session peers, while whole-renderer suspension caused
+ICE failure followed by automatic rejoin after resumption. Elapsed capture
+and zero clock skew cannot establish the original cause. The reported stall
+occurred while both computers stayed active on the same networks, according to
+the reporter; sleep, lock, and network changes were not observed. The stall
+and two-device recovery remain under investigation; these mitigations and
+diagnostics alone do not prove #350 resolved.
+
+### I123 — Sev2
+
+`patches/@trystero-p2p+core+0.25.3.patch`
+
+**Evidence.** A rejecting native `setLocalDescription` can fail before a pooled
+peer receives its error handler. The core consumes the error but never settles
+`offerPromise`; `OfferPool.checkout` and `ensureOffer` remain pending with no
+offer expiry, so relay placeholders suppress subsequent announcements. Tests
+execute the installed patched peer, pool, and signal-handler modules; reverting
+the change reproduces the hang.
+
+**Status.** **fixed on branch** — reject initial offer creation so checkout
+closes/retries failed peers. Exhausted initialization releases its own
+placeholders; late cleanup cannot clear a replacement promise or peer state.
+Announcement-initialization rejections are consumed and reported through
+`onJoinError`.
+This is a reproduced recovery defect found while investigating #350; the
+reporter's original cause remains unproven.
+
+### I124 — Sev2
+
+`patches/@trystero-p2p+core+0.25.3.patch`
+
+**Evidence.** Real Chromium tests using the installed core reproduce unused
+offer renewal losing every data-channel SDP section and ICE credential after
+rollback. Both aged warm checkout and young returned-offer recycling can take
+that path, leaving later signaling attempts unable to establish a channel.
+The strategy's separate age check also reintroduces renewal if the clock crosses
+the TTL after pool selection.
+
+**Status.** **fixed on branch** — retire expired warm peers and replace returned
+unused peers with fresh connections. The pool owns age rotation; encryption no
+longer restarts an unused offer. Replacement-allocation failure leaves an empty
+slot so owner cleanup can finish and the next checkout can retry. Claimed leases
+and connected/shared peers stay
+owned by their existing path. Real-browser controls produce empty offers;
+patched aged/recycled cases establish connections and exchange data. Actual
+module regressions cover both paths and the TTL boundary. These defects are
+relevant to #350's recovery attempts, but the attached archives do not establish
+that either caused the reported loss.
+
+### I126 — Sev2
+
+`src-tauri/src/commands/sidecar.rs`, `src/features/ai/benchmark.ts`
+
+**Evidence.** GitHub #350's retained engine log shows eight historical prompt
+states occupying 1,878.597 MiB before the stalled capture, with no observed
+historical-state loads. The previous inference had completed and all slots were
+idle. StudyVis inherits the pinned engine's 8 GiB RAM archive default. An exact
+b9095 public text-model CPU A/B over 25 requests retains 303.064 MiB of archived
+states by default, with RSS growth of about 306 MiB, versus no archive and about
+3 MiB growth with `--cache-ram 0`.
+
+**Status.** **fixed on branch** — the common initial/fallback/restart spawn
+disables historical RAM archives while preserving active-slot KV reuse and
+request-level `cache_prompt`, including cold benchmark requests. The benchmark
+fingerprint invalidates timings measured under the old policy. All 25 A/B output
+hashes match and current-prompt reuse remains intact; a historical-prompt revisit
+requires more prefill (about 2.35 s versus 0.24 s in this small-model control).
+The field archive has no host RAM/paging measurements, so the resource fix does
+not establish the original stall's cause or prove #350 resolved.
+
 ## Archive — retired backlogs
 
 Two documents used to sit beside this ledger and were deleted once their implementation backlog had no open code work left: `BUILD-PROMPTS.md` (the sequenced V0→V3 build plan) and `IMPROVEMENTS.md` (the v1.2.0-era improvement backlog). Git history holds both in full — `git log --diff-filter=D -- BUILD-PROMPTS.md IMPROVEMENTS.md`, then `git show <sha>^:<file>`. Linux's implementation checklist is complete, but its operational release sign-off remains pending. What survives here is the part still cited from code.

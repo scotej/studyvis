@@ -872,6 +872,10 @@ fn spawn_llama<R: Runtime>(
         &port.to_string(),
         "--ctx-size",
         &ctx_size.to_string(),
+        // #350 — keep current-slot KV reuse without retaining historical
+        // prompt snapshots in RAM.
+        "--cache-ram",
+        "0",
         "--n-gpu-layers",
         policy.gpu_layers,
         "--model",

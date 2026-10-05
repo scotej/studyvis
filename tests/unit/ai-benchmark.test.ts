@@ -272,6 +272,23 @@ describe('benchmark fingerprint staleness', () => {
     expect(isBenchmarkStale(result)).toBe(false)
   })
 
+  test('invalidates timings measured with the historical RAM cache policy', () => {
+    const result = summariseBenchmark({
+      samplesSec: [3, 5, 8],
+      completedAtSec: 1_700_000_000,
+      hardwareIdentity: TEST_HARDWARE_IDENTITY,
+    })
+
+    expect(
+      isBenchmarkStale({
+        ...result,
+        engineFingerprint:
+          'b9095-linuxvulkan1-hwidentity2-cachecold2-device-Vulkan0-Vulkan0=NVIDIA%20RTX%204080',
+      })
+    ).toBe(true)
+    expect(isBenchmarkStale(result)).toBe(false)
+  })
+
   test('a record without a resolved native identity is stale', () => {
     const result = summariseBenchmark({
       samplesSec: [3],

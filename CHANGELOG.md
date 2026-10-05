@@ -7,6 +7,11 @@
 - A new session chat message or image replaces the older floating chat
   notification immediately and renews its expiry, so a burst of messages
   does not leave an outdated card on screen.
+- Failed or stale unused connection offers no longer leave later peer
+  connection attempts waiting indefinitely or without a data channel.
+- AI checks now reduce their sampling rate when the app becomes unresponsive
+  during frame capture, as they already do during inference.
+- AI checks no longer retain large copies of historical prompts in memory.
 
 ## 1.12.5 — 2026-09-27 — Linux camera and AI improvements
 
