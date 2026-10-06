@@ -387,6 +387,65 @@ describe('session overlay runtime lifecycle', () => {
     expect(updates()).toHaveLength(2)
   })
 
+  test('shows a queued alert before refreshed chat can outlive it', async () => {
+    const runtime = await loadRuntime()
+    const firstMessage = { ...item, category: 'chat' as const }
+    await runtime.pushSessionOverlayItem(firstMessage)
+    emitFromOverlay(SESSION_OVERLAY_READY)
+    await flushAsyncWork()
+    const firstUpdate = updates()[0]
+    emitFromOverlay(SESSION_OVERLAY_PRESENT, {
+      revision: firstUpdate?.revision,
+      height: 172,
+    })
+    await flushAsyncWork()
+    const overlay = harness.overlay
+
+    await vi.advanceTimersByTimeAsync(5_000)
+    const alert = { ...item, id: 'alert', tone: 'alerted' as const }
+    await runtime.pushSessionOverlayItem(alert)
+    await vi.advanceTimersByTimeAsync(5_000)
+    const latestMessage = { ...firstMessage, id: 'note:2' }
+    await runtime.pushSessionOverlayItem(latestMessage)
+    const alertUpdate = updates()[1]
+    expect(alertUpdate).toMatchObject({
+      snapshot: { item: { id: alert.id }, queued: 1 },
+    })
+    emitFromOverlay(SESSION_OVERLAY_PRESENT, {
+      revision: alertUpdate?.revision,
+      height: 188,
+    })
+    await flushAsyncWork()
+
+    emitFromOverlay(SESSION_OVERLAY_PRESENT, {
+      revision: firstUpdate?.revision,
+      height: 240,
+    })
+    emitFromOverlay(SESSION_OVERLAY_DISMISS, { id: firstMessage.id })
+    await flushAsyncWork()
+    expect(overlay?.showCalls).toBe(2)
+    expect(overlay?.sizes.at(-1)?.height).toBe(188)
+
+    await vi.advanceTimersByTimeAsync(10_000)
+    const latestUpdate = updates()[2]
+    expect(latestUpdate).toMatchObject({
+      snapshot: { item: { id: latestMessage.id }, queued: 0 },
+    })
+    expect(latestUpdate?.snapshot.item?.expiresAt).toBe(
+      (firstUpdate?.snapshot.item?.createdAt ?? 0) + 25_000
+    )
+    emitFromOverlay(SESSION_OVERLAY_PRESENT, {
+      revision: latestUpdate?.revision,
+      height: 172,
+    })
+    await flushAsyncWork()
+    expect(overlay?.showCalls).toBe(3)
+    await vi.advanceTimersByTimeAsync(4_999)
+    expect(overlay?.closed).toBe(false)
+    await vi.advanceTimersByTimeAsync(1)
+    expect(overlay?.closed).toBe(true)
+  })
+
   test('does not create a dead window when the control channel cannot bind', async () => {
     harness.failListenOn = SESSION_OVERLAY_DISMISS
     const runtime = await loadRuntime()

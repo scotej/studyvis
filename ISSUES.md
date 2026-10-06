@@ -1402,6 +1402,22 @@ requires more prefill (about 2.35 s versus 0.24 s in this small-model control).
 The field archive has no host RAM/paging measurements, so the resource fix does
 not establish the original stall's cause or prove #350 resolved.
 
+### I127 — Sev3
+
+`src/features/session/sessionOverlay.ts`, `src/features/session/sessionOverlayRuntime.ts`
+
+**Evidence.** Renewing the visible chat also renews the queue's next expiry
+timer, while queued alerts keep their original expiry. A chat at 0 s, an alert
+at 5 s, and another chat at 10 s leave the chat visible until 25 s; the alert
+expires at 20 s without appearing. v1.12.5 presents that alert at 15 s.
+
+**Status.** **fixed on branch** — a renewed visible chat yields to queued
+alerts while retaining its own fresh expiry. Queued chat updates stay in place
+and preserve alert order. Queue tests cover multiple alerts, full capacity,
+subsequent chat replacement, stale dismissal and expired alerts. A clock-driven
+runtime regression verifies alert presentation, timer handoff and the latest
+chat's eventual presentation/expiry; the two regressions fail without the fix.
+
 ## Archive — retired backlogs
 
 Two documents used to sit beside this ledger and were deleted once their implementation backlog had no open code work left: `BUILD-PROMPTS.md` (the sequenced V0→V3 build plan) and `IMPROVEMENTS.md` (the v1.2.0-era improvement backlog). Git history holds both in full — `git log --diff-filter=D -- BUILD-PROMPTS.md IMPROVEMENTS.md`, then `git show <sha>^:<file>`. Linux's implementation checklist is complete, but its operational release sign-off remains pending. What survives here is the part still cited from code.

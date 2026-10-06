@@ -87,6 +87,55 @@ describe('session overlay queue', () => {
     expect(queue.snapshot(10)).toMatchObject({ item: { id: 'long' } })
     expect(queue.snapshot(1_001)).toEqual({ item: null, queued: 0 })
   })
+
+  test('lets queued alerts precede a renewed visible chat', () => {
+    const queue = new SessionOverlayQueue(3)
+    const chat = {
+      ...item('note:first'),
+      category: 'chat' as const,
+      ttlMs: 15_000,
+    }
+    queue.enqueue(chat, 0)
+    queue.enqueue({ ...item('warning'), tone: 'warning', ttlMs: 15_000 }, 5_000)
+    queue.enqueue({ ...item('error'), tone: 'alerted', ttlMs: 15_000 }, 7_000)
+    queue.enqueue({ ...chat, id: 'note:second' }, 10_000)
+
+    expect(queue.snapshot(10_000)).toMatchObject({
+      item: { id: 'warning', expiresAt: 20_000 },
+      queued: 2,
+    })
+    queue.enqueue({ ...chat, id: 'image:latest' }, 12_000)
+    expect(queue.dismiss('note:first', 13_000)).toMatchObject({
+      item: { id: 'warning' },
+      queued: 2,
+    })
+    expect(queue.dismiss('warning', 14_000)).toMatchObject({
+      item: { id: 'error' },
+      queued: 1,
+    })
+    expect(queue.dismiss('error', 15_000)).toMatchObject({
+      item: { id: 'image:latest', createdAt: 12_000, expiresAt: 27_000 },
+      queued: 0,
+    })
+  })
+
+  test('keeps a renewed chat visible when queued alerts have expired', () => {
+    const queue = new SessionOverlayQueue()
+    const chat = {
+      ...item('note:first'),
+      category: 'chat' as const,
+      ttlMs: 15_000,
+    }
+    queue.enqueue(chat, 0)
+    queue.enqueue(item('expired-alert'), 5_000)
+
+    expect(
+      queue.enqueue({ ...chat, body: 'Updated chat' }, 10_000)
+    ).toMatchObject({
+      item: { id: chat.id, body: 'Updated chat', expiresAt: 25_000 },
+      queued: 0,
+    })
+  })
 })
 
 describe('toast mirroring', () => {

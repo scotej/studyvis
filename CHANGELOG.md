@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.12.8 — 2026-10-06 — Session notification reliability
+
+### Fixed
+
+- Queued session alerts now appear when a new chat refreshes the visible
+  notification, instead of expiring unseen behind it.
+
 ## 1.12.7 — 2026-10-05 — Session recovery and Linux media fixes
 
 ### Fixed

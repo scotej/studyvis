@@ -96,6 +96,11 @@ export class SessionOverlayQueue {
     )
     if (existing >= 0) {
       this.items[existing] = item
+      // I127 — renewing the head chat must not outlast queued alerts' expiry.
+      if (existing === 0 && item.category === 'chat' && this.items.length > 1) {
+        this.items.shift()
+        this.items.push(item)
+      }
     } else {
       this.items.push(item)
     }
