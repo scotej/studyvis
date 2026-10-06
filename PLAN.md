@@ -312,6 +312,12 @@ The remaining deferred item below is not a Linux release blocker:
   - **This is *not* a prerequisite for auto-update, and a previous revision of this document was wrong to bundle them.** Tauri's updater has its own integrity chain: release artifacts are signed with a minisign keypair (`npx tauri signer generate`) and verified in-app against `plugins.updater.pubkey` before anything is unpacked. That is independent of OS code signing, so auto-update shipped in v1.5.0 (X6) on ad-hoc-signed builds. The private key lives outside the repo; CI reads it from `TAURI_SIGNING_PRIVATE_KEY`.
   - **Known caveat while unsigned (macOS).** An ad-hoc signature has no stable identity, so the app's code hash changes with every build. macOS keys camera / microphone / screen-recording grants to that hash, which means an auto-update can silently drop TCC permissions and re-prompt on the next session. This is no worse than the manual reinstall it replaces, and a Developer ID would fix it properly.
 
+The manual Windows-only v1.12.8.1 packaging revision reuses the exact v1.12.8
+macOS/Linux artifacts and their signatures/source archives. It retains internal
+app version 1.12.8, is built and checked separately, and is published outside the
+automatic update channel. New Windows installations include the AI engine's
+Microsoft runtime DLLs; future complete releases retain that packaging fix.
+
 ## 9. Document map
 
 - `PLAN.md` (this file) — vision, scope, principles, footprint disclosure.

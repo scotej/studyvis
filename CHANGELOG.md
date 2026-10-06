@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.12.8.1 — 2026-10-06 — Windows runtime packaging revision
+
+### Fixed
+
+- The Windows installer includes the Microsoft Visual C++ runtime required
+  by the bundled AI engine, including `VCRUNTIME140_1.dll`, so new installations
+  can start the engine without installing that runtime separately.
+
+This is a manual Windows interim release. The app's internal version remains
+1.12.8. macOS and Linux downloads are the unchanged v1.12.8 files, including
+their signatures and Linux source archives. This release stays outside the
+automatic update channel; Windows users download and run its installer manually.
+
 ## 1.12.8 — 2026-10-06 — Session notification reliability
 
 ### Fixed

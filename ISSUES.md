@@ -1418,6 +1418,26 @@ subsequent chat replacement, stale dismissal and expired alerts. A clock-driven
 runtime regression verifies alert presentation, timer handoff and the latest
 chat's eventual presentation/expiry; the two regressions fail without the fix.
 
+### I128 — Sev1
+
+`scripts/stage-windows-vc-runtime.ps1`, `src-tauri/tauri.windows.conf.json`,
+`scripts/check-windows-runtime.ts`, `scripts/check-windows-runtime.ps1`
+
+**Evidence.** The published v1.12.8 Windows NSIS installer contains the pinned
+b9095 engine and all 22 upstream companion DLLs, but its PE imports require
+`MSVCP140.dll`, `VCRUNTIME140.dll`, and `VCRUNTIME140_1.dll`, none of which is
+bundled or installed. A clean Windows installation cannot start llama-server.
+The existing error hint checks only the first two files; installer checks cover
+notices without exercising the engine.
+
+**Status.** **fixed on branch** — stage verified official Microsoft x64
+redistributable files, preserve their license/provenance, and install copies
+beside the engine so older system runtimes cannot take precedence. Required
+Windows CI validates the dependency closure and engine/CPU-backend startup.
+Preview, full release, and manual interim builds repeat those checks against
+the exact extracted NSIS payload. Regression tests reject missing/wrong-arch
+DLLs, incomplete provenance, changed hashes, and broken resource mappings.
+
 ## Archive — retired backlogs
 
 Two documents used to sit beside this ledger and were deleted once their implementation backlog had no open code work left: `BUILD-PROMPTS.md` (the sequenced V0→V3 build plan) and `IMPROVEMENTS.md` (the v1.2.0-era improvement backlog). Git history holds both in full — `git log --diff-filter=D -- BUILD-PROMPTS.md IMPROVEMENTS.md`, then `git show <sha>^:<file>`. Linux's implementation checklist is complete, but its operational release sign-off remains pending. What survives here is the part still cited from code.

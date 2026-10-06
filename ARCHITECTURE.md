@@ -91,6 +91,20 @@ exact artifact identity, not a minimum-version range.
 
 **Windows packaging.** NSIS (`-setup.exe`), per-user install, `installMode: "passive"`. MSI was dropped at X6: applying an MSI update requires msiexec elevation every time, which is a UAC prompt per release.
 
+The Windows platform configuration bundles `msvcp140.dll`, `vcruntime140.dll`,
+and `vcruntime140_1.dll` beside `llama-server.exe`, as well as in its runtime
+resource directory. The adjacent copies take precedence over older system
+copies. They come from the official Visual Studio 2022 x64 redistributable
+directory; staging validates Microsoft signatures, PE architecture, and hashes,
+and ships the original license document and a provenance manifest. Required
+Windows CI checks the staged engine; release and preview checks validate the
+exact extracted NSIS installer and exercise engine startup and CPU fallback.
+
+The manual v1.12.8.1 packaging revision keeps the app version at 1.12.8 and
+reuses the exact v1.12.8 macOS/Linux assets. It is published with
+`make_latest=false`. Advertising a newer global updater version with unchanged
+macOS/Linux binaries would repeatedly offer those clients the same update.
+
 **Linux packaging.** The next release candidate targets
 `x86_64-unknown-linux-gnu`, bundled as an AppImage. It has no native package
 manager integration and no root requirement. FUSE 2 is the normal mount path;

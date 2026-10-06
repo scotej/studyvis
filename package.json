@@ -33,6 +33,7 @@
     "generate-notices": "tsx scripts/generate-third-party-notices.ts --write",
     "check-notices": "tsx scripts/generate-third-party-notices.ts --check",
     "check-notice-bundle": "tsx scripts/check-third-party-notices-bundle.ts",
+    "check-windows-runtime": "tsx scripts/check-windows-runtime.ts",
     "postinstall": "patch-package"
   },
   "dependencies": {

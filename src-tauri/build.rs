@@ -1,5 +1,5 @@
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 // Custom commands are denied to every webview unless a capability explicitly
 // grants their generated `allow-*` permission. Keep this exhaustive with the
@@ -114,7 +114,7 @@ fn ensure_debug_sidecar_placeholder() {
     } else {
         ""
     };
-    let path = PathBuf::from(manifest_dir)
+    let path = PathBuf::from(&manifest_dir)
         .join("binaries")
         .join(format!("llama-server-{target}{ext}"));
     if std::env::var("PROFILE").as_deref() != Ok("debug") {
@@ -128,6 +128,30 @@ fn ensure_debug_sidecar_placeholder() {
                     "{} is a dev placeholder, not a real llama-server; run scripts/fetch-llama-server.sh before a release-profile build",
                     path.display()
                 );
+            }
+        }
+        if target == "x86_64-pc-windows-msvc" {
+            let runtime_dir =
+                PathBuf::from(&manifest_dir).join("binaries/llama-runtime-x86_64-pc-windows-msvc");
+            let root_runtime_dir = PathBuf::from(&manifest_dir)
+                .join("binaries/windows-vc-runtime-x86_64-pc-windows-msvc");
+            for name in ["msvcp140.dll", "vcruntime140.dll", "vcruntime140_1.dll"] {
+                let path = runtime_dir.join(name);
+                let root_path = root_runtime_dir.join(name);
+                for candidate in [&path, &root_path] {
+                    if !is_x64_pe_dll(candidate) {
+                        panic!(
+                            "{} is missing or is not an AMD64 DLL; run scripts/stage-windows-vc-runtime.ps1 before a release-profile build",
+                            candidate.display()
+                        );
+                    }
+                }
+                if fs::read(&path).ok() != fs::read(&root_path).ok() {
+                    panic!(
+                        "{} has inconsistent root and nested copies; run scripts/stage-windows-vc-runtime.ps1 before a release-profile build",
+                        name
+                    );
+                }
             }
         }
         return;
@@ -149,6 +173,24 @@ fn ensure_debug_sidecar_placeholder() {
             b"studyvis placeholder: real companion libraries come from scripts/fetch-llama-server.sh or the in-app engine auto-install (I73)\n",
         );
     }
+    // The Windows app-local resource mappings must also exist in fresh debug
+    // checkouts; release workflows replace these with verified Microsoft DLLs.
+    if target == "x86_64-pc-windows-msvc" {
+        let root_runtime_dir =
+            PathBuf::from(&manifest_dir).join("binaries/windows-vc-runtime-x86_64-pc-windows-msvc");
+        let _ = fs::create_dir_all(&root_runtime_dir);
+        for directory in [&runtime_dir, &root_runtime_dir] {
+            for name in ["msvcp140.dll", "vcruntime140.dll", "vcruntime140_1.dll"] {
+                let path = directory.join(name);
+                if !path.exists() {
+                    let _ = fs::write(
+                        path,
+                        b"studyvis debug placeholder: run scripts/stage-windows-vc-runtime.ps1 before bundling\n",
+                    );
+                }
+            }
+        }
+    }
     if path.exists() {
         return;
     }
@@ -157,4 +199,29 @@ fn ensure_debug_sidecar_placeholder() {
         &path,
         b"studyvis placeholder: the real llama-server comes from scripts/fetch-llama-server.sh or the in-app engine auto-install (I73)\n",
     );
+}
+
+fn is_x64_pe_dll(path: &Path) -> bool {
+    let Ok(bytes) = fs::read(path) else {
+        return false;
+    };
+    let Some(dos_header) = bytes.get(..64) else {
+        return false;
+    };
+    if !dos_header.starts_with(b"MZ") {
+        return false;
+    }
+    let pe_offset = u32::from_le_bytes(dos_header[60..64].try_into().unwrap()) as usize;
+    let Some(header) = bytes.get(pe_offset..pe_offset.saturating_add(26)) else {
+        return false;
+    };
+    let optional_size = u16::from_le_bytes([header[20], header[21]]) as usize;
+    header.starts_with(b"PE\0\0")
+        && header[4..6] == [0x64, 0x86]
+        && header[23] & 0x20 != 0
+        && header[24..26] == [0x0b, 0x02]
+        && optional_size >= 112
+        && bytes
+            .get(pe_offset.saturating_add(24)..pe_offset.saturating_add(24 + optional_size))
+            .is_some()
 }
