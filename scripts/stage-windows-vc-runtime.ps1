@@ -64,8 +64,11 @@ foreach ($name in $required) {
     } else {
         '<none>'
     }
+    # Windows may select the Microsoft catalog signer over the embedded one.
+    $microsoftSigner = $signerName -in @('Microsoft Corporation', 'Microsoft Windows Software Compatibility Publisher') -and
+        $signerSubject -match '(?:^|,\s*)O=Microsoft Corporation(?:,|$)'
     if ($signature.Status -ne 'Valid' -or $null -eq $signature.SignerCertificate -or
-        $signerName -ne 'Microsoft Corporation') {
+        -not $microsoftSigner) {
         throw "$source does not have a valid Microsoft Corporation Authenticode signature: status=$($signature.Status); message=$($signature.StatusMessage); signer=$signerName; subject=$signerSubject."
     }
     $info = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($source)
