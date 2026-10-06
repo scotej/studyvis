@@ -164,7 +164,7 @@ jobs:
           # the passive install mode the updater config asks for, so the
           # update applies with a progress bar and no interaction.
           - label: Windows
-            platform: windows-latest
+            platform: windows-2022
             timeout: 90
             rust-targets: ''
             args: --bundles nsis

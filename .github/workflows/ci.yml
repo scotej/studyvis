@@ -125,7 +125,8 @@ jobs:
 
   windows-runtime:
     name: Windows engine runtime
-    runs-on: windows-latest
+    # Keep the staged DLL source and its redistribution license on VS 2022.
+    runs-on: windows-2022
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7

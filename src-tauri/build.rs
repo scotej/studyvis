@@ -132,13 +132,24 @@ fn ensure_debug_sidecar_placeholder() {
         }
         if target == "x86_64-pc-windows-msvc" {
             let runtime_dir =
-                PathBuf::from(manifest_dir).join("binaries/llama-runtime-x86_64-pc-windows-msvc");
+                PathBuf::from(&manifest_dir).join("binaries/llama-runtime-x86_64-pc-windows-msvc");
+            let root_runtime_dir = PathBuf::from(&manifest_dir)
+                .join("binaries/windows-vc-runtime-x86_64-pc-windows-msvc");
             for name in ["msvcp140.dll", "vcruntime140.dll", "vcruntime140_1.dll"] {
                 let path = runtime_dir.join(name);
-                if !is_x64_pe_dll(&path) {
+                let root_path = root_runtime_dir.join(name);
+                for candidate in [&path, &root_path] {
+                    if !is_x64_pe_dll(candidate) {
+                        panic!(
+                            "{} is missing or is not an AMD64 DLL; run scripts/stage-windows-vc-runtime.ps1 before a release-profile build",
+                            candidate.display()
+                        );
+                    }
+                }
+                if fs::read(&path).ok() != fs::read(&root_path).ok() {
                     panic!(
-                        "{} is missing or is not an AMD64 DLL; run scripts/stage-windows-vc-runtime.ps1 before a release-profile build",
-                        path.display()
+                        "{} has inconsistent root and nested copies; run scripts/stage-windows-vc-runtime.ps1 before a release-profile build",
+                        name
                     );
                 }
             }
@@ -165,13 +176,18 @@ fn ensure_debug_sidecar_placeholder() {
     // The Windows app-local resource mappings must also exist in fresh debug
     // checkouts; release workflows replace these with verified Microsoft DLLs.
     if target == "x86_64-pc-windows-msvc" {
-        for name in ["msvcp140.dll", "vcruntime140.dll", "vcruntime140_1.dll"] {
-            let path = runtime_dir.join(name);
-            if !path.exists() {
-                let _ = fs::write(
-                    path,
-                    b"studyvis debug placeholder: run scripts/stage-windows-vc-runtime.ps1 before bundling\n",
-                );
+        let root_runtime_dir =
+            PathBuf::from(&manifest_dir).join("binaries/windows-vc-runtime-x86_64-pc-windows-msvc");
+        let _ = fs::create_dir_all(&root_runtime_dir);
+        for directory in [&runtime_dir, &root_runtime_dir] {
+            for name in ["msvcp140.dll", "vcruntime140.dll", "vcruntime140_1.dll"] {
+                let path = directory.join(name);
+                if !path.exists() {
+                    let _ = fs::write(
+                        path,
+                        b"studyvis debug placeholder: run scripts/stage-windows-vc-runtime.ps1 before bundling\n",
+                    );
+                }
             }
         }
     }

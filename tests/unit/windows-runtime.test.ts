@@ -7,7 +7,7 @@ import {
   writeFileSync,
 } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { basename, join, relative, resolve, sep } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import {
   readPeImports,
@@ -101,11 +101,25 @@ describe('Windows bundle configuration', () => {
   }
 
   it.each(WINDOWS_VC_DLLS)(
-    'keeps %s beside the installed executable',
+    'uses a separate source to keep %s beside the installed executable',
     (name) => {
+      const rootResources = Object.entries(config.bundle.resources).filter(
+        ([, target]) => target === name
+      )
+      expect(rootResources).toHaveLength(1)
+      const source = rootResources[0][0]
+      expect(source).toBe(
+        `binaries/windows-vc-runtime-x86_64-pc-windows-msvc/${name}`
+      )
+      expect(basename(source)).toBe(name)
+      // NSIS deduplicates physical source paths, even with different targets.
+      // A source inside the runtime directory would lose one packaged copy.
       expect(
-        config.bundle.resources[`${WINDOWS_RUNTIME_DIRECTORY}/${name}`]
-      ).toBe(name)
+        relative(
+          resolve('src-tauri', WINDOWS_RUNTIME_DIRECTORY),
+          resolve('src-tauri', source)
+        ).split(sep)[0]
+      ).toBe('..')
     }
   )
 

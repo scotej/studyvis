@@ -79,8 +79,9 @@ try {
         Copy-Item -LiteralPath (Join-Path $prebuildRoot 'llama-server-x86_64-pc-windows-msvc.exe') -Destination (Join-Path $prebuildStage 'llama-server.exe')
         $prebuildRuntime = Join-Path $prebuildRoot 'llama-runtime-x86_64-pc-windows-msvc'
         Copy-Item -LiteralPath $prebuildRuntime -Destination $prebuildBinaries -Recurse
+        $prebuildRootRuntime = Join-Path $prebuildRoot 'windows-vc-runtime-x86_64-pc-windows-msvc'
         foreach ($name in @('msvcp140.dll', 'vcruntime140.dll', 'vcruntime140_1.dll')) {
-            Copy-Item -LiteralPath (Join-Path $prebuildRuntime $name) -Destination $prebuildStage
+            Copy-Item -LiteralPath (Join-Path $prebuildRootRuntime $name) -Destination $prebuildStage
         }
         $validationArguments += @($prebuildStage, '--engine-only')
     }

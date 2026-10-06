@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param(
-    [string] $RuntimeDirectory = (Join-Path $PSScriptRoot '../src-tauri/binaries/llama-runtime-x86_64-pc-windows-msvc')
+    [string] $RuntimeDirectory = (Join-Path $PSScriptRoot '../src-tauri/binaries/llama-runtime-x86_64-pc-windows-msvc'),
+    [string] $RootRuntimeDirectory = (Join-Path $PSScriptRoot '../src-tauri/binaries/windows-vc-runtime-x86_64-pc-windows-msvc')
 )
 
 Set-StrictMode -Version Latest
@@ -12,6 +13,7 @@ if (-not $IsWindows) {
 if (-not (Test-Path -LiteralPath $RuntimeDirectory -PathType Container)) {
     throw 'Fetch the Windows llama-server prebuild before staging its Visual C++ runtime.'
 }
+New-Item -ItemType Directory -Path $RootRuntimeDirectory -Force | Out-Null
 
 $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/Installer/vswhere.exe'
 if (-not (Test-Path -LiteralPath $vswhere -PathType Leaf)) {
@@ -61,10 +63,14 @@ foreach ($name in $required) {
         throw "$source is not a Visual C++ v14 runtime."
     }
     $hash = (Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash.ToLowerInvariant()
-    $destination = Join-Path $RuntimeDirectory $name
-    Copy-Item -LiteralPath $source -Destination $destination -Force
-    if ((Get-FileHash -LiteralPath $destination -Algorithm SHA256).Hash.ToLowerInvariant() -ne $hash) {
-        throw "Staged runtime hash mismatch: $name."
+    # NSIS deduplicates resource sources, so root and nested targets need
+    # distinct physical source files even though their contents are identical.
+    foreach ($directory in @($RuntimeDirectory, $RootRuntimeDirectory)) {
+        $destination = Join-Path $directory $name
+        Copy-Item -LiteralPath $source -Destination $destination -Force
+        if ((Get-FileHash -LiteralPath $destination -Algorithm SHA256).Hash.ToLowerInvariant() -ne $hash) {
+            throw "Staged runtime hash mismatch: $destination."
+        }
     }
     $files += [ordered] @{
         name = $name

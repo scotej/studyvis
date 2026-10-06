@@ -223,7 +223,7 @@ jobs:
           - label: Windows
             arch: x64
             environment: preview-windows
-            platform: windows-latest
+            platform: windows-2022
             timeout: 90
             rust-targets: ''
             args: --bundles nsis
