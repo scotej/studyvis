@@ -54,9 +54,19 @@ foreach ($name in $required) {
         throw "$source is not an AMD64 PE binary."
     }
     $signature = Get-AuthenticodeSignature -LiteralPath $source
+    $signerName = if ($null -ne $signature.SignerCertificate) {
+        $signature.SignerCertificate.GetNameInfo([System.Security.Cryptography.X509Certificates.X509NameType]::SimpleName, $false)
+    } else {
+        '<none>'
+    }
+    $signerSubject = if ($null -ne $signature.SignerCertificate) {
+        $signature.SignerCertificate.Subject
+    } else {
+        '<none>'
+    }
     if ($signature.Status -ne 'Valid' -or $null -eq $signature.SignerCertificate -or
-        $signature.SignerCertificate.GetNameInfo([System.Security.Cryptography.X509Certificates.X509NameType]::SimpleName, $false) -ne 'Microsoft Corporation') {
-        throw "$source does not have a valid Microsoft Corporation Authenticode signature."
+        $signerName -ne 'Microsoft Corporation') {
+        throw "$source does not have a valid Microsoft Corporation Authenticode signature: status=$($signature.Status); message=$($signature.StatusMessage); signer=$signerName; subject=$signerSubject."
     }
     $info = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($source)
     if ($info.FileMajorPart -ne 14) {
