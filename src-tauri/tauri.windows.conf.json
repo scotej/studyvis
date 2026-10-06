@@ -1,0 +1,13 @@
+{
+  "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
+  "bundle": {
+    "resources": {
+      "binaries/llama-runtime-x86_64-pc-windows-msvc": "binaries/llama-runtime-x86_64-pc-windows-msvc",
+      "binaries/llama-runtime-x86_64-pc-windows-msvc/msvcp140.dll": "msvcp140.dll",
+      "binaries/llama-runtime-x86_64-pc-windows-msvc/vcruntime140.dll": "vcruntime140.dll",
+      "binaries/llama-runtime-x86_64-pc-windows-msvc/vcruntime140_1.dll": "vcruntime140_1.dll",
+      "resources/THIRD-PARTY-NOTICES.txt": "resources/THIRD-PARTY-NOTICES.txt",
+      "resources/THIRD-PARTY-NOTICES.json": "resources/THIRD-PARTY-NOTICES.json"
+    }
+  }
+}

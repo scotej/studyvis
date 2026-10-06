@@ -817,26 +817,42 @@ fn spawn_with_fallback<R: Runtime>(
             Err(e) => last_err = e,
         }
     }
-    Err(append_windows_dll_hint(last_err))
+    Err(append_windows_dll_hint(app, last_err))
 }
 
-// llama-server.exe links msvcp140/vcruntime140 (the VC++ redistributable,
-// not shipped in the llama.cpp zip and not an OS component). When a spawn
-// fails on a machine without it, name the actual fix instead of leaving a
-// bare CreateProcess error.
+#[cfg(any(target_os = "windows", test))]
+fn windows_vc_runtime_available(candidate_dirs: &[Vec<PathBuf>], system32: &Path) -> bool {
+    let names = ["msvcp140.dll", "vcruntime140.dll", "vcruntime140_1.dll"];
+    let complete = |dirs: &[PathBuf]| {
+        names.iter().all(|name| {
+            system32.join(name).is_file() || dirs.iter().any(|dir| dir.join(name).is_file())
+        })
+    };
+    complete(&[]) || candidate_dirs.iter().any(|dirs| complete(dirs))
+}
+
 #[cfg(target_os = "windows")]
-fn append_windows_dll_hint(err: String) -> String {
-    // I83 — probe BOTH halves of the redistributable. llama-server.exe links
-    // the C++ standard library (msvcp140.dll) as well as the C runtime
-    // (vcruntime140.dll), and a machine can carry one without the other: some
-    // installers ship vcruntime140 alone, and a repair/uninstall can leave a
-    // partial set. Checking only vcruntime140 meant the actionable hint stayed
-    // silent on exactly the boxes that needed it most.
+fn append_windows_dll_hint<R: Runtime>(app: &AppHandle<R>, err: String) -> String {
+    // I83 — use each engine's actual loader directories. App-local copies
+    // need no global redistributable; separate candidates cannot share DLLs.
+    let candidate_dirs = super::engine::resolve_candidates(app)
+        .into_iter()
+        .map(|(source, binary)| {
+            let mut dirs = Vec::new();
+            if let Some(parent) = binary.parent() {
+                dirs.push(parent.to_path_buf());
+            }
+            if let super::engine::EngineSource::Bundled = source {
+                if let Some(runtime) = resolve_runtime_dir(app).ok().flatten() {
+                    dirs.push(runtime);
+                }
+            }
+            dirs
+        })
+        .collect::<Vec<_>>();
     let sysroot = std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".to_string());
     let system32 = Path::new(&sysroot).join("System32");
-    let both_present =
-        system32.join("vcruntime140.dll").exists() && system32.join("msvcp140.dll").exists();
-    if both_present {
+    if windows_vc_runtime_available(&candidate_dirs, &system32) {
         err
     } else {
         format!(
@@ -846,7 +862,7 @@ fn append_windows_dll_hint(err: String) -> String {
 }
 
 #[cfg(not(target_os = "windows"))]
-fn append_windows_dll_hint(err: String) -> String {
+fn append_windows_dll_hint<R: Runtime>(_app: &AppHandle<R>, err: String) -> String {
     err
 }
 
@@ -1257,9 +1273,12 @@ async fn watch<R: Runtime>(
         if exceeded_total_restarts(total_restarts) {
             guard.errored = true;
             guard.hardware_identity = None;
-            guard.last_error = Some(append_windows_dll_hint(format!(
-                "the AI engine restarted {total_restarts} times this session and kept dying"
-            )));
+            guard.last_error = Some(append_windows_dll_hint(
+                &app,
+                format!(
+                    "the AI engine restarted {total_restarts} times this session and kept dying"
+                ),
+            ));
             guard.port = None;
             with_sidecar_log(|| {
                 let _ = writeln!(
@@ -1283,7 +1302,7 @@ async fn watch<R: Runtime>(
             guard.last_error = last_exit
                 .clone()
                 .or_else(|| Some(format!("restart budget exceeded ({RESTART_BUDGET})")))
-                .map(append_windows_dll_hint);
+                .map(|err| append_windows_dll_hint(&app, err));
             guard.port = None;
             with_sidecar_log(|| {
                 let _ = writeln!(
@@ -1598,6 +1617,84 @@ mod tests {
             "studyvis-sidecar-test-{name}-{}",
             std::process::id()
         ))
+    }
+
+    fn write_windows_dlls(directory: &Path, names: &[&str]) {
+        fs::create_dir_all(directory).unwrap();
+        for name in names {
+            fs::write(directory.join(name), b"runtime fixture").unwrap();
+        }
+    }
+
+    #[test]
+    fn windows_runtime_hint_accepts_complete_app_local_dlls_without_system32() {
+        let root = scratch_log("windows-app-local");
+        let bundled = root.join("app");
+        write_windows_dlls(
+            &bundled,
+            &["msvcp140.dll", "vcruntime140.dll", "vcruntime140_1.dll"],
+        );
+        assert!(windows_vc_runtime_available(
+            &[vec![bundled]],
+            &root.join("System32"),
+        ));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn windows_runtime_hint_requires_vcruntime140_1() {
+        let root = scratch_log("windows-missing-1");
+        let system32 = root.join("System32");
+        write_windows_dlls(&system32, &["msvcp140.dll", "vcruntime140.dll"]);
+        assert!(!windows_vc_runtime_available(&[], &system32));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn windows_runtime_hint_uses_all_loader_directories_of_one_candidate() {
+        let root = scratch_log("windows-split-loader-dirs");
+        let bundled = root.join("app");
+        let runtime = bundled.join("binaries/llama-runtime-x86_64-pc-windows-msvc");
+        let system32 = root.join("System32");
+        write_windows_dlls(&bundled, &["msvcp140.dll"]);
+        write_windows_dlls(&runtime, &["vcruntime140_1.dll"]);
+        write_windows_dlls(&system32, &["vcruntime140.dll"]);
+        assert!(windows_vc_runtime_available(
+            &[vec![bundled, runtime]],
+            &system32,
+        ));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn windows_runtime_hint_does_not_combine_unrelated_engine_candidates() {
+        let root = scratch_log("windows-separate-candidates");
+        let bundled = root.join("app");
+        let managed = root.join("data/engine/b9095-r3-x86_64-pc-windows-msvc");
+        write_windows_dlls(&bundled, &["msvcp140.dll"]);
+        write_windows_dlls(&managed, &["vcruntime140.dll", "vcruntime140_1.dll"]);
+        assert!(!windows_vc_runtime_available(
+            &[vec![bundled], vec![managed]],
+            &root.join("System32"),
+        ));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn windows_runtime_hint_for_managed_engine_ignores_unrelated_app_directory() {
+        let root = scratch_log("windows-managed-loader-dirs");
+        let app = root.join("app");
+        let managed = root.join("data/engine/b9095-r3-x86_64-pc-windows-msvc");
+        write_windows_dlls(
+            &app,
+            &["msvcp140.dll", "vcruntime140.dll", "vcruntime140_1.dll"],
+        );
+        write_windows_dlls(&managed, &["msvcp140.dll", "vcruntime140.dll"]);
+        assert!(!windows_vc_runtime_available(
+            &[vec![managed]],
+            &root.join("System32"),
+        ));
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

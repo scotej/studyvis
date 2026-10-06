@@ -1,0 +1,211 @@
+name: Windows interim build
+
+# Manual packaging revision: produce a validated installer for the owner to
+# review and publish. This workflow never creates a tag or a GitHub Release.
+# The installed app remains 1.12.8; the manual release may name the unchanged
+# installer bytes StudyVis_1.12.8.1_x64-setup.exe after attestation verification.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-interim-build
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    name: Require exact main and successful CI
+    runs-on: ubuntu-latest
+    timeout-minutes: 130
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+
+      - name: Require the main workflow and checkout to share one commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_REF" != refs/heads/main ||
+                "$GITHUB_WORKFLOW_SHA" != "$GITHUB_SHA" ]]; then
+            echo "::error::Dispatch Windows interim build on main using the workflow at that same commit."
+            exit 1
+          fi
+          git fetch --no-tags origin \
+            +refs/heads/main:refs/remotes/origin/main
+          if [[ "$(git rev-parse HEAD)" != "$GITHUB_SHA" ||
+                "$(git rev-parse refs/remotes/origin/main)" != "$GITHUB_SHA" ]]; then
+            echo "::error::The requested commit is no longer the exact main tip; dispatch the current main commit."
+            exit 1
+          fi
+          bash scripts/check-version-lockstep.sh 1.12.8
+
+      - name: Wait for exact main-push CI success
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          bash scripts/require-ci-success.sh "$GITHUB_SHA" \
+            'Fix main, wait for its checks, and dispatch the current commit.'
+
+      - name: Require the updater signing key
+        shell: bash
+        env:
+          KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$KEY" ]]; then
+            echo "::error::TAURI_SIGNING_PRIVATE_KEY is required for a verifiable Windows installer."
+            exit 1
+          fi
+
+  windows:
+    name: Build and attest the Windows installer
+    needs: preflight
+    runs-on: windows-latest
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: 'npm'
+
+      - name: Install the pinned Rust toolchain
+        uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master; the toolchain input selects the channel
+        with:
+          toolchain: '1.97.1'
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Fetch the pinned Windows llama.cpp runtime
+        shell: bash
+        run: bash scripts/fetch-llama-server.sh --triple x86_64-pc-windows-msvc
+
+      - name: Stage the verified Microsoft Visual C++ runtime
+        shell: pwsh
+        run: ./scripts/stage-windows-vc-runtime.ps1
+
+      - name: Build the signed Windows installer
+        uses: tauri-apps/tauri-action@1deb371b0cd8bd54025b384f1cd735e725c4060f # v1.0.0
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          args: --bundles nsis
+          uploadUpdaterJson: false
+
+      - name: Verify the exact installer and preserve the build evidence
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Set-StrictMode -Version Latest
+          $installers = @(Get-ChildItem 'src-tauri/target/release/bundle' -Recurse -File -Filter '*-setup.exe')
+          if ($installers.Count -ne 1 -or $installers[0].Name -ne 'StudyVis_1.12.8_x64-setup.exe') {
+            throw "Expected exactly one fresh StudyVis 1.12.8 NSIS installer, found $($installers.Count)"
+          }
+          $installer = $installers[0]
+          $signature = Get-Item -LiteralPath "$($installer.FullName).sig"
+          if ($signature.Length -eq 0) {
+            throw 'The updater signature is empty'
+          }
+          $evidence = Join-Path $env:RUNNER_TEMP 'studyvis-windows-interim'
+          New-Item -ItemType Directory -Path $evidence | Out-Null
+          $unpack = Join-Path $env:RUNNER_TEMP "studyvis-nsis-$([guid]::NewGuid())"
+          New-Item -ItemType Directory -Path $unpack | Out-Null
+          Start-Transcript -Path (Join-Path $evidence 'runtime-verification.txt') | Out-Null
+          try {
+            & 7z x '-y' "-o$unpack" $installer.FullName
+            if ($LASTEXITCODE -ne 0) {
+              throw "7-Zip failed to extract the exact NSIS installer (exit $LASTEXITCODE)"
+            }
+            npm run check-notice-bundle -- $unpack
+            if ($LASTEXITCODE -ne 0) {
+              throw "Bundled notice verification failed (exit $LASTEXITCODE)"
+            }
+            ./scripts/check-windows-runtime.ps1 -ArtifactRoot $unpack
+            $runtime = Join-Path $unpack 'binaries/llama-runtime-x86_64-pc-windows-msvc'
+            foreach ($name in @('VC-RUNTIME-MANIFEST.json', 'VC-RUNTIME-NOTICE.txt', 'VC-RUNTIME-LICENSE.docx')) {
+              Copy-Item -LiteralPath (Join-Path $runtime $name) -Destination $evidence
+            }
+          } finally {
+            Stop-Transcript | Out-Null
+            Remove-Item -LiteralPath $unpack -Recurse -Force
+          }
+          Copy-Item -LiteralPath $installer.FullName, $signature.FullName -Destination $evidence
+          $files = @($installer, $signature) | ForEach-Object {
+            $path = Join-Path $evidence $_.Name
+            [ordered]@{
+              name = $_.Name
+              sha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $path).Hash.ToLowerInvariant()
+              size = (Get-Item -LiteralPath $path).Length
+            }
+          }
+          $metadata = [ordered]@{
+            schemaVersion = 1
+            appVersion = '1.12.8'
+            packagingRevision = '1.12.8.1'
+            repository = $env:GITHUB_REPOSITORY
+            sourceRef = $env:GITHUB_REF
+            sourceSha = $env:GITHUB_SHA
+            workflow = $env:GITHUB_WORKFLOW_REF
+            runId = $env:GITHUB_RUN_ID
+            runAttempt = $env:GITHUB_RUN_ATTEMPT
+            files = $files
+          }
+          $metadata | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $evidence 'build-metadata.json') -Encoding utf8
+          $files | ForEach-Object { "$($_.sha256)  $($_.name)" } |
+            Set-Content -LiteralPath (Join-Path $evidence 'SHA256SUMS') -Encoding utf8
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value 'Windows installer validated: bundled notices, complete PE dependency closure, packaged engine startup, and CPU fallback. Publication is manual.'
+
+      # Dispatch runs on main. The certificate accurately names that source
+      # ref and commit; manual publication must independently bind its new
+      # packaging tag to this same SHA and verify this run's attestations.
+      - name: Attest the newly built installer and updater signature
+        id: provenance
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: |
+            ${{ runner.temp }}/studyvis-windows-interim/*-setup.exe
+            ${{ runner.temp }}/studyvis-windows-interim/*-setup.exe.sig
+
+      - name: Include the attestation bundle in the build evidence
+        shell: pwsh
+        env:
+          ATTESTATION_BUNDLE: ${{ steps.provenance.outputs.bundle-path }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if (-not $env:ATTESTATION_BUNDLE -or -not (Test-Path -LiteralPath $env:ATTESTATION_BUNDLE -PathType Leaf)) {
+            throw 'The installer attestation bundle is missing'
+          }
+          Copy-Item -LiteralPath $env:ATTESTATION_BUNDLE -Destination (Join-Path $env:RUNNER_TEMP 'studyvis-windows-interim/attestation.json')
+
+      - name: Upload the validated installer, signature, and provenance
+        uses: actions/upload-artifact@v7
+        with:
+          name: StudyVis-Windows-1.12.8.1-manual
+          path: ${{ runner.temp }}/studyvis-windows-interim/
+          if-no-files-found: error
+          retention-days: 30

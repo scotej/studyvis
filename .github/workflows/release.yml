@@ -4,6 +4,7 @@ on:
   push:
     tags:
       - 'v*.*.*'
+      - '!v[0-9]+.[0-9]+.[0-9]+.[0-9]+'
   # Retained for an intentional re-run on an existing tag.
   workflow_dispatch:
 
@@ -328,6 +329,11 @@ jobs:
             bash scripts/fetch-llama-server.sh --triple "$t"
           done
 
+      - name: Stage the Microsoft x64 runtime
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/stage-windows-vc-runtime.ps1
+
       - name: Prepare the pinned linuxdeploy toolchain
         if: runner.os == 'Linux'
         shell: bash
@@ -396,7 +402,7 @@ jobs:
           tar --extract --gzip --file "$archive" --directory "$unpack"
           npm run check-notice-bundle -- "$unpack"
 
-      - name: Verify notices in the exact Windows release installer
+      - name: Verify notices and runtime in the exact Windows release installer
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
@@ -416,6 +422,7 @@ jobs:
             if ($LASTEXITCODE -ne 0) {
               throw "Bundled third-party notice verification failed (exit $LASTEXITCODE)"
             }
+            ./scripts/check-windows-runtime.ps1 -ArtifactRoot $unpack
           } finally {
             Remove-Item -Recurse -Force $unpack -ErrorAction SilentlyContinue
           }

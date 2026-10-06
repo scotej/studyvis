@@ -22,6 +22,11 @@ distro package.
 
 ## Windows 10 / 11
 
+The manual [v1.12.8.1 Windows packaging revision](https://github.com/scotej/studyvis/releases/tag/v1.12.8.1)
+includes the Visual C++ runtime needed by the AI engine. Download its
+`StudyVis_1.12.8.1_x64-setup.exe` and install it using the steps below. Its app
+version remains 1.12.8, and it is not offered through automatic updates.
+
 1. From the [Releases page](https://github.com/scotej/studyvis/releases), download `StudyVis_<version>_x64-setup.exe`.
 2. Double-click the installer. **SmartScreen** intercepts: _"Windows protected your PC"_. Click **More info**, then **Run anyway**.
 3. Step through the installer (defaults are fine). StudyVis lands in your Start menu and Programs list.
@@ -196,6 +201,13 @@ hash fails generation. After extracting an artifact, run
 pair, byte-compare it with the committed files, and verify the manifest's notice
 hash. These gates produce a reviewable inventory; they are not legal advice or
 legal sign-off.
+
+Windows also ships the Microsoft Visual C++ runtime's original license document,
+attribution, and file/version/hash provenance under its llama runtime resources.
+`scripts/stage-windows-vc-runtime.ps1` obtains the unmodified x64 files from
+Visual Studio 2022's redistributable directory. After extracting the Windows
+installer, `scripts/check-windows-runtime.ps1 -ArtifactRoot <artifact-root>`
+checks its DLL dependencies and runs the packaged engine and CPU backend.
 
 ### Pinned Linux WebKit runtime
 

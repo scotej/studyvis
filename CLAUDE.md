@@ -247,6 +247,22 @@ Releasing bumps the version in **five tracked files** (kept in lockstep): `packa
 
 Update `CHANGELOG.md` as part of the release. `package.json#version` flows through `__APP_VERSION__` into Settings → About automatically. Do not publish a draft unless `latest.json` contains `darwin-aarch64`, `windows-x86_64`, and `linux-x86_64`, both Linux source archives and checksum sidecars are present and verify, and the draft verifier is green. PLAN §8's physical CachyOS KDE Wayland matrix is the standard for a complete Linux sign-off and should be run whenever the hardware is free, but it no longer gates publication. That matrix requires an exchanged bidirectional data channel, Linux media send/receive, Linux AI capture, and physical same-draft Linux↔Linux, Linux↔macOS, and Linux↔Windows artifact pairs—not merely CI's local offer probe. It also covers FUSE/extraction launch, Secret Service, N-1 updater/relaunch with preserved data, packaged Vulkan and CPU-fallback inference, Linux `studyvis://` registration/import, KDE notification-settings launch, custom-chrome drag/window controls, the in-session Wayland hold-to-talk control, and the Settings Talk-to-AI fallback. Record the AppImage SHA-256, artifact/OS versions, direction, and result for every row. The external `release` environment/tag-ruleset/immutable-release blockers above remain independent gates.
 
+### Manual Windows packaging revision
+
+The user-authorized v1.12.8.1 interim release is an exception to the full-release
+workflow above. Its four-part number identifies a packaging revision; all five
+app version files stay at 1.12.8. Dispatch `windows-interim-build.yml` on the exact
+main commit after CI passes. It builds, verifies, and attests Windows only and
+uploads reviewable artifacts; it creates no tag or release. Manually assemble
+the new Windows installer/signature with the exact nine non-Windows v1.12.8
+assets, preserving their names, signatures, and Linux source/checksum pairs.
+Verify new files against the selected interim build's main-ref/commit provenance
+and reused files against the original v1.12.8 tag/commit/release run. Publish
+with `make_latest=false` and verify the stable latest release stays v1.12.8.
+The full release workflow excludes four-part numeric tags. Keep the interim
+manifest's version at valid SemVer 1.12.8; never advertise unchanged macOS/Linux
+binaries under a newer global updater version.
+
 ## When in doubt
 
 - Ask the user if the task is genuinely ambiguous.

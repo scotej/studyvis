@@ -123,6 +123,35 @@ jobs:
       - name: Version lockstep across the five tracked files
         run: bash scripts/check-version-lockstep.sh "$(node -p "require('./package.json').version")"
 
+  windows-runtime:
+    name: Windows engine runtime
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Fetch the pinned Windows engine
+        shell: bash
+        run: bash scripts/fetch-llama-server.sh --triple x86_64-pc-windows-msvc
+
+      - name: Stage the Microsoft x64 runtime
+        shell: pwsh
+        run: ./scripts/stage-windows-vc-runtime.ps1
+
+      - name: Verify the complete Windows engine runtime
+        shell: pwsh
+        run: ./scripts/check-windows-runtime.ps1 -ArtifactRoot src-tauri/binaries -StagedPrebuild
+
   third-party-notices:
     name: Third-party notice closure
     runs-on: ubuntu-latest
@@ -953,7 +982,15 @@ jobs:
     # AppImage before a draft can be published, and PLAN §8's physical matrix
     # remains mandatory.
     needs:
-      [frontend, third-party-notices, rust, workflows, supply-chain, hygiene]
+      [
+        frontend,
+        windows-runtime,
+        third-party-notices,
+        rust,
+        workflows,
+        supply-chain,
+        hygiene,
+      ]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:

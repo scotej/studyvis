@@ -464,6 +464,11 @@ jobs:
           LLAMA_TRIPLE: ${{ matrix.llama-triple }}
         run: bash scripts/fetch-llama-server.sh --triple "$LLAMA_TRIPLE"
 
+      - name: Stage the Microsoft x64 runtime
+        if: env.SHIPPABLE == 'true' && runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/stage-windows-vc-runtime.ps1
+
       # Ordered ahead of the WebKitGTK compile on purpose, matching ci.yml: it
       # downloads hash-pinned tools and builds the AppImage type-2 runtime, so
       # a bad pin or a runtime build break should surface in minutes instead of
@@ -622,7 +627,7 @@ jobs:
           attached=true
           npm run check-notice-bundle -- "$mountpoint"
 
-      - name: Verify notices in the exact Windows preview installer
+      - name: Verify notices and runtime in the exact Windows preview installer
         if: env.SHIPPABLE == 'true' && runner.os == 'Windows'
         shell: pwsh
         run: |
@@ -642,6 +647,7 @@ jobs:
             if ($LASTEXITCODE -ne 0) {
               throw "Bundled third-party notice verification failed (exit $LASTEXITCODE)"
             }
+            ./scripts/check-windows-runtime.ps1 -ArtifactRoot $unpack
           } finally {
             Remove-Item -Recurse -Force $unpack -ErrorAction SilentlyContinue
           }
