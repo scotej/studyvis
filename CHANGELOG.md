@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.12.8 — 2026-10-06 — Session notification reliability
 
 ### Fixed
 
