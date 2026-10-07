@@ -1,6 +1,7 @@
 import { toast } from 'sonner'
 
 import { snapshotFocusForReport } from '@/features/ai/focusStore'
+import { finishMirrorReport } from '@/features/mirror/reportHandoff'
 import { sessionTopic as deriveSessionTopic } from '@/lib/crypto/topics'
 import {
   sessionsGet,
@@ -797,6 +798,7 @@ export function buildLeaveHandler(args: {
     // reset effect in SessionView the next time a session begins (handles
     // the invite-while-on-report path); the V2-P3 1.5 s auto-reset has
     // been retired alongside the SessionEndedSplash.
+    await finishMirrorReport(args.topic)
     sessionStore.getState().markEnded()
     setLogContext({ sess: undefined })
   }

@@ -41,6 +41,16 @@ rusqlite = { version = "0.40", features = ["bundled"] }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream"] }
 sha2 = "0.11"
 futures-util = "0.3"
+axum = { version = "0.8.9", default-features = false, features = ["http1", "json", "tokio", "ws"] }
+hyper-util = { version = "0.1", features = ["server-auto", "tokio", "service"] }
+tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "sync", "time"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
+rcgen = { version = "0.14.10", default-features = false, features = ["ring", "pem", "x509-parser"] }
+x509-parser = { version = "0.18", default-features = false }
+getrandom = "0.4"
+if-addrs = "0.15"
+time = "0.3"
+subtle = "2.6"
 # I73 engine auto-install — unpack the pinned llama.cpp release archives
 # (mac/linux .tar.gz, windows .zip). All three compile everywhere so the
 # extraction code and its tests run on all three CI legs.
@@ -83,6 +93,7 @@ keyring = { version = "3.6", features = ["windows-native"] }
 # resolved graph beneath tauri, so this adds no package.
 windows-sys = { version = "0.61", features = [
   "Win32_Foundation",
+  "Win32_Security_Authorization",
   "Win32_System_Threading",
 ] }
 

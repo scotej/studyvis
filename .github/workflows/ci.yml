@@ -193,7 +193,7 @@ jobs:
   rust:
     name: Rust (${{ matrix.label }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 30
+    timeout-minutes: 45
     strategy:
       # PR-17 — compile every host in the release matrix on every push/PR. Building
       # only aarch64-apple-darwin left every #[cfg(target_os = "windows")] path
@@ -275,6 +275,39 @@ jobs:
       - name: cargo test
         working-directory: src-tauri
         run: cargo test --locked
+
+      - uses: actions/setup-node@v7
+        if: runner.os == 'Linux'
+        with:
+          node-version: '24'
+          cache: 'npm'
+
+      - name: Build browser companion
+        if: runner.os == 'Linux'
+        run: |
+          npm ci
+          npm run build
+          cargo build --locked --manifest-path src-tauri/Cargo.toml --example mirror_fixture
+
+      - name: Browser companion acceptance (Chromium, Firefox, WebKit)
+        if: runner.os == 'Linux'
+        env:
+          PLAYWRIGHT_SKIP_BROWSER_GC: '1'
+        run: |
+          npx playwright-core install --with-deps chromium firefox webkit
+          node --import tsx --test tests/production/mirror-browser.mjs
+
+      - name: Upload browser companion evidence
+        if: ${{ failure() && runner.os == 'Linux' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: mirror-browser-evidence
+          path: |
+            lab/.work
+            !lab/.work/**/mirror-certificate/**
+          include-hidden-files: true
+          if-no-files-found: ignore
+          retention-days: 7
 
       # The gate above allows every clippy group except correctness, so
       # `suspicious`, `complexity`, and `perf` findings — the ones that catch

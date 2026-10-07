@@ -5,6 +5,7 @@ import {
 } from '@tauri-apps/plugin-notification'
 
 import { strings } from '@/strings'
+import { notifyCurrentMirror } from '@/features/mirror/reportHandoff'
 
 type InviteNotificationDeps = {
   isPermissionGranted: typeof isPermissionGranted
@@ -28,6 +29,10 @@ export async function notifyIncomingInvite(
   deps: InviteNotificationDeps = defaultDeps
 ): Promise<void> {
   if (!args.enabled) return
+  notifyCurrentMirror({
+    title: strings.notifications.invite.title,
+    body: args.body,
+  })
 
   try {
     let granted = await deps.isPermissionGranted()

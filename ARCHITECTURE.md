@@ -41,7 +41,7 @@
    └────────────────────────────┘                       └────────────────────────────┘
 ```
 
-Each machine is fully self-contained. AI inference runs only on the user's own machine and judges only that user. Judgments are broadcast to peers; raw camera/screen pixels never leave the device.
+Each desktop is fully self-contained. AI inference runs only on the user's own desktop and judges only that user. With opt-in LAN mirroring (#365), the user's paired browser supplies camera/screen capture to that desktop over encrypted WebRTC. AI pixels are never sent to a third-party inference service. Judgments are broadcast to peers; ordinary session video and explicit screen sharing retain their existing peer contracts.
 
 ## 2. Tech stack
 
@@ -679,10 +679,72 @@ Several signals ride trystero `makeAction`s on their own channels rather than th
 - **`camera-state`** `{ off: boolean }` — on the **session room** (S3). Broadcast on every local camera toggle, and re-sent to a peer on its `onPeerJoin` so a late joiner learns the current state. A disabled video track sends black, not a clean "off" signal, so this drives the explicit camera-off tile. An older peer simply never receives it and keeps rendering the (black) frame; no protocol break.
 - **`screen-share`** `{ sharing: boolean, stream_id: string | null }` — on the **session room** (#96). Sent on `onPeerJoin`, on every local start/stop, and targeted at a peer immediately before its copy of the screen stream is added. It does three jobs at once. It **announces capability**: a screen stream is only ever added for a peer that has sent one of these, because a pre-1.9 build binds any incoming stream to that friend's face tile and trystero has no stream-removed event with which to clear it. It **identifies the stream**: `stream_id` is the sender's `MediaStream.id`, which the receiver matches against `onPeerStream` — content-addressed, unlike the `{ kind: 'screen' }` metadata also tagged onto `addStream`, which trystero pairs to incoming streams FIFO and which therefore serves only as the fallback when media outruns the announce. And it **retires the tile**: `sharing: false` is the sole signal that a share has stopped. The stream itself is `getDisplayMedia({ video: { frameRate: { max: 15 } }, audio: false })` — screens are read rather than watched, so the frame rate is what gives (resolution is what makes text legible), and a full 4-mesh where everyone shares is eight concurrent video streams. On Windows the request prefers a `monitor` surface; because the Screen Capture API cannot constrain the picker to monitor surfaces, StudyVis verifies the returned track and stops any window, browser, or unknown surface before publication, asking the user to try again and choose **Entire Screen**. macOS retains its existing native picker and request behavior. No audio: it would echo against the live mic, and no audit-log kind is emitted for a share, because `AuditEventKind` is a cross-version wire contract and an unknown kind renders as a blank row on an older peer.
 - **`ptt-state`** and **`session-full`** — on the **session room** (V1-era): the not-transmitting indicator on peer tiles, and the host-enforced 4-user cap eviction notice.
-- **`session-note`** `{ v, session_topic, from_ed_pubkey, text, ts, sig }` — on the **session room** (#47 B6). Quiet in-session text notes ("brb 5", a link) so a short message doesn't break the silence or force a messenger switch. Signed over canonical bytes like audit events and verified against the signed-hello peer binding; replay-guarded by `session_topic`; text hard-capped at 500 chars; deliberately **never persisted** (stays clear of the PLAN §6 recording non-goal). Older builds never register the action and are unaffected.
-- **`session-image`** — binary JPEG / PNG / WebP / GIF data on the **session room** (#185), capped at 5 MiB. Trystero performs the data-channel chunking; its action metadata carries a signed manifest `{ v, session_topic, from_ed_pubkey, filename, mime_type, byte_length, width, height, sha256, ts, sig }`. Receivers authenticate the sender against the signed-hello binding, reject cross-session payloads, enforce the size/type/dimension limits, recompute SHA-256 over the received bytes, then verify the manifest signature before rendering. The pinned `@trystero-p2p/core` is patched at install time because its public action API has no receive-limit hook: payloads above 5 MiB, metadata above 16 KiB, and over-budget pending/unknown-action queues are rejected while chunks arrive, before full action reassembly, and the offending peer is disconnected. This core boundary applies to every action, so future action payloads must also stay under 5 MiB. Images remain memory-only and their object URLs are revoked at session reset; clicking an inline thumbnail opens the zoomable viewer, whose download action writes only to a path explicitly chosen in the native save dialog. Older builds never register the action and are unaffected.
+- **`session-note`** `{ v, session_topic, from_ed_pubkey, text, ts, sig }` — on the **session room** (#47 B6). Quiet in-session text notes ("brb 5", a link) so a short message doesn't break the silence or force a messenger switch. Signed over canonical bytes like audit events and verified against the signed-hello peer binding; replay-guarded by `session_topic`; text hard-capped at 500 chars; memory-only on the desktop. An explicitly paired LAN companion caches a bounded text snapshot for read-only offline recovery (§7, LAN browser mirroring); no session media is recorded. Older builds never register the action and are unaffected.
+- **`session-image`** — binary JPEG / PNG / WebP / GIF data on the **session room** (#185), capped at 5 MiB. Trystero performs the data-channel chunking; its action metadata carries a signed manifest `{ v, session_topic, from_ed_pubkey, filename, mime_type, byte_length, width, height, sha256, ts, sig }`. Receivers authenticate the sender against the signed-hello binding, reject cross-session payloads, enforce the size/type/dimension limits, recompute SHA-256 over the received bytes, then verify the manifest signature before rendering. The pinned `@trystero-p2p/core` is patched at install time because its public action API has no receive-limit hook: payloads above 5 MiB, metadata above 16 KiB, and over-budget pending/unknown-action queues are rejected while chunks arrive, before full action reassembly, and the offending peer is disconnected. This core boundary applies to every action, so future action payloads must also stay under 5 MiB. Images remain memory-only and their object URLs are revoked at session reset; clicking an inline thumbnail opens the zoomable viewer, whose download action writes only through an explicit native save dialog or browser download action. Older builds never register the action and are unaffected.
 - **`invite-ack`** — on the **inbox topic** (#47 C2, recipient-signed). A delivery confirmation the sender lingers ~5 s for after an invite send; no verified ACK within the window renders honest "sent, unconfirmed" copy instead of a false "Invite sent". Wire-compatible with v1.2.x: older recipients simply never answer. This is UX legibility only — the §14 inbox-eavesdropper acceptance stands.
 - **presence goodbye** `{ leaving: true }` — on the **presence channel** (F7), an alternate shape of the existing `heartbeat` action. Sent best-effort just before `room.leave()` so subscribers flip the leaver offline immediately instead of waiting out the 60 s `ONLINE_WINDOW_MS`. It deliberately omits `ts`: an older receiver hits the `typeof ts !== 'number'` guard, drops it, and ages the peer out via the window exactly as before (the I2 receiver-clock model is untouched); a new receiver checks `leaving === true` first and marks the pubkey offline at once. Since I74 the heartbeat/goodbye pair also rides the relay-presence leg (§4) as sealed ephemeral Nostr events; a goodbye there keeps `lastSeenAt` for the "seen … ago" row copy.
+
+### LAN browser mirroring (#365)
+
+During a live session the main desktop window can start a Rust-owned HTTPS/WSS
+listener. It binds only while enabled, accepts private IPv4/loopback sources,
+checks the exact IP/port Host and same-origin API requests, and serves the
+dedicated `mirror.html` build. It exposes no Tauri IPC, keychain, model-path,
+filesystem or arbitrary signing command to the browser. Semantic session
+controls pass a bounded allowlist before reaching the existing session handlers.
+The desktop remains the sole identity, P2P, SQLite and llama-server owner; peer
+wire formats and identity derivation are unchanged.
+
+Each enable creates an eight-character cryptographic pairing password and a
+12-hour lease. Global and per-IP authentication budgets protect the short secret.
+Pairing produces a random HttpOnly, Secure, SameSite=Strict cookie; one controller
+can reconnect with that lease. Stop, local session end and process exit revoke
+the lease and close listeners and media. A stable per-host port and certificate
+allow the browser's origin and offline shell to survive host restarts. The public
+CA certificate is available from a separate HTTP download listener; its SHA-256
+fingerprint is displayed on the desktop for comparison before trusting it. The
+CA has critical private-IP name constraints, and private certificate keys stay
+in a private host directory. OS trust-store enforcement of root constraints is
+platform-dependent; this is a user-installed local trust relationship.
+
+The host is the sole WebRTC offerer. Three reserved transceivers receive browser
+camera, microphone and screen; separate outgoing transceivers forward current
+peer media to the browser without consuming those slots. LAN ICE uses no public
+STUN or TURN. The browser requests capture directly from user gestures, defaults
+the microphone to muted, and releases capture on disconnect. Enabling the
+companion releases desktop capture and mutes local peer playback while pairing
+and throughout browser operation.
+Browser screen capture for AI is distinct from explicitly sharing it with peers.
+The sample loop receives a clone of the browser screen and pauses when capture
+is missing; it never falls back to a host display. The mirrored session owns
+the local AI engine separately, so text AI remains available without camera or
+screen capture. Reconnect keeps the desktop
+session alive and asks the browser user to enable media again.
+
+The browser reuses the shipped session components for video, chat/direct
+messages, images, audit, timer, AI dialogue and invitations. Snapshots and image
+strings are bounded, fragmented and deduplicated per connection. A generated
+service worker caches only the companion's static build assets, never `/api/`
+or credentials. Browser storage keeps a bounded last text view and the received
+session report; image bytes remain memory-only. An explicit browser disconnect
+clears the cached view. Host loss shows a disabled cached view rather than a
+network error. Before ordinary session teardown closes the listener, the desktop
+sends its saved report with a three-second total handoff grace. The pure report
+presenter and browser downloads work offline. Live views use an opaque activation
+ID; saved reports retain the original journal identifiers and signatures so raw
+audit exports remain authentic, and include names only for report participants.
+Reports exceeding the browser cache budget remain downloadable in the current
+tab and show a notice that reload cannot restore them.
+
+Capabilities are detected rather than inferred from an OS label. Desktop
+Chromium/Edge, Firefox and Safari/WebKit support camera/microphone and screen
+capture over trusted HTTPS. iPadOS supports camera/microphone and controls but
+does not expose browser screen capture, so screen-based AI checks stay paused
+while text AI remains available.
+OS notifications require browser permission; iPadOS additionally requires a
+Home Screen web app. There is no external push service, so suspended/closed
+browser delivery is not promised. Certificate installation and physical media
+permissions remain platform checks beyond headless browser acceptance.
 
 ## 8. AI inference pipeline (V2+)
 
