@@ -94,11 +94,12 @@ export function createMirrorPeer(options: MirrorPeerOptions): MirrorPeer {
   }
 
   const renderStreams = () => {
-    const streams: Record<string, MediaStream> = {}
-    for (const [key, id] of Object.entries(descriptors)) {
-      const stream = received.get(id)
-      if (stream) streams[key] = stream
-    }
+    const streams = Object.fromEntries(
+      Object.entries(descriptors).flatMap(([key, id]) => {
+        const stream = received.get(id)
+        return stream ? [[key, stream] as const] : []
+      })
+    )
     options.onStreams?.(streams)
   }
 

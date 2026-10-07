@@ -45,6 +45,9 @@ extend-ignore-re = [
   "YWJjMTIz",
   # Lock-ordering notation in sidecar.rs ("an AB-BA deadlock").
   "AB-BA",
+  # Windows certificate ACLs use BA for the built-in Administrators SID.
+  '\(A;OICI;FA;;;BA\)',
+  '\["OW", "SY", "BA"\]',
   # "mis-" as a hyphenated English prefix: mis-decoding, mis-associated,
   # mis-decode. A bare "mis" is still corrected.
   "\\bmis-[a-z]+",

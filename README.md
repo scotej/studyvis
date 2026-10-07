@@ -186,8 +186,12 @@ and [WebKit's Home Screen notification requirements](https://webkit.org/blog/138
 
 ## Where your data lives
 
-Everything that identifies you or remembers your sessions stays in
-the OS user-data directory:
+The desktop stores your identity and session history in the OS user-data
+directory. A paired browser also keeps a bounded text view and saved report in
+its own local storage so they remain available offline; explicit disconnect
+clears that browser cache.
+
+Desktop data locations:
 
 - **macOS** — `~/Library/Application Support/studyvis/`
 - **Windows** — `%APPDATA%\studyvis\` (i.e. `~/AppData/Roaming/studyvis/`)

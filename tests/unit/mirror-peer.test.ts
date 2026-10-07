@@ -267,6 +267,38 @@ describe('LAN peer media ownership', () => {
     browser.close()
   })
 
+  test('prototype-like descriptor keys remain own data properties without inheriting stream fields', () => {
+    const onStreams = vi.fn()
+    const browser = createMirrorPeer({
+      role: 'browser',
+      send: vi.fn(),
+      onStreams,
+      onFailure: vi.fn(),
+    })
+    const stream = new TestStream([
+      track('video', 'bob-camera'),
+    ]) as unknown as MediaStream
+    TestConnection.instances[0].ontrack?.({
+      streams: [stream],
+    } as unknown as RTCTrackEvent)
+    browser.receive({
+      type: 'streams',
+      streams: JSON.parse(
+        `{"__proto__":"${stream.id}","constructor":"${stream.id}"}`
+      ) as Record<string, string>,
+    })
+    const rendered = onStreams.mock.lastCall?.[0] as Record<string, MediaStream>
+    expect(Object.getPrototypeOf(rendered)).toBe(Object.prototype)
+    expect(Object.keys(rendered)).toEqual(['__proto__', 'constructor'])
+    expect(Object.hasOwn(rendered, '__proto__')).toBe(true)
+    expect(Object.hasOwn(rendered, 'constructor')).toBe(true)
+    expect(rendered['__proto__']).toBe(stream)
+    expect(rendered['constructor']).toBe(stream)
+    expect('id' in rendered).toBe(false)
+    expect('getTracks' in rendered).toBe(false)
+    browser.close()
+  })
+
   test('descriptor-first arrival and screen removal never leave a stale displayed stream', () => {
     const onStreams = vi.fn()
     const browser = createMirrorPeer({
