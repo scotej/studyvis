@@ -59,12 +59,18 @@ const image: SessionImage = {
 function StoryStateBoundary({ children }: { children: ReactNode }) {
   useEffect(() => {
     const previousPeers = useSessionStore.getState().peers
+    const previousStatus = useSessionStore.getState().status
+    const previousSessionTopic = useSessionStore.getState().sessionTopic
     const previousModelId = useModelStore.getState().activeModelId
     const previousAiEnabled =
       useSettingsStore.getState().values.aiFeaturesEnabled
     const previousAiRuntime = getAiAgentRuntime()
 
-    useSessionStore.setState({ peers: {} })
+    useSessionStore.setState({
+      peers: {},
+      status: 'idle',
+      sessionTopic: null,
+    })
     useModelStore.setState({ activeModelId: null })
     useSettingsStore.setState((state) => ({
       values: { ...state.values, aiFeaturesEnabled: false },
@@ -72,7 +78,11 @@ function StoryStateBoundary({ children }: { children: ReactNode }) {
     __resetAiAgentRuntime()
 
     return () => {
-      useSessionStore.setState({ peers: previousPeers })
+      useSessionStore.setState({
+        peers: previousPeers,
+        status: previousStatus,
+        sessionTopic: previousSessionTopic,
+      })
       useModelStore.setState({ activeModelId: previousModelId })
       useSettingsStore.setState((state) => ({
         values: { ...state.values, aiFeaturesEnabled: previousAiEnabled },
@@ -188,6 +198,10 @@ const STORY_PEERS = {
 
 export const AiConversation: Story = {
   play: async ({ canvasElement }) => {
+    useSessionStore.setState({
+      status: 'active',
+      sessionTopic: 'story-ai-conversation',
+    })
     useSettingsStore.setState((state) => ({
       values: { ...state.values, aiFeaturesEnabled: true },
     }))

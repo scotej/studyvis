@@ -1522,6 +1522,42 @@ describe('startSampleLoop — sidecar lifecycle', () => {
     expect(stopSpy).toHaveBeenCalled()
   })
 
+  test('stopping mirrored capture aborts inference and releases media while preserving text AI', async () => {
+    const clock = new FakeClock()
+    const stream = makeFakeScreenStream()
+    const releaseScreen = vi.fn()
+    stream.getVideoTracks()[0].stop = releaseScreen
+    let signal: AbortSignal | null | undefined
+    const fetchMock = vi.fn<typeof fetch>((_input, init) => {
+      signal = init?.signal
+      return new Promise<Response>(() => {})
+    })
+    const stopSidecar = vi.fn(async () => {})
+    __setSampleLoopRuntime(
+      buildSampleLoopRuntime({
+        clock,
+        fetch: fetchMock,
+        acquireScreenStream: async () => stream,
+        stopSidecar,
+      })
+    )
+    const handle = startSampleLoop({
+      getTopic: () => 't',
+      modelId: 'test-model',
+      getFaceTrack: () => makeFakeTrack(),
+      stopSidecarOnStop: false,
+    })
+    await flushMicrotasks()
+    await clock.advance(5000)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    await handle.stop()
+    expect(signal?.aborted).toBe(true)
+    expect(releaseScreen).toHaveBeenCalledTimes(1)
+    expect(stopSidecar).not.toHaveBeenCalled()
+    expect(useSidecarStore.getState().status).toBe('running')
+    expect(clock.timers).toHaveLength(0)
+  })
+
   test('handles a sidecar stop rejection while boot is still pending', async () => {
     const clock = new FakeClock()
     const stopError = new Error('stop failed')

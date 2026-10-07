@@ -48,6 +48,9 @@ pub mod native_log;
 pub mod models;
 
 #[cfg(desktop)]
+pub mod mirror;
+
+#[cfg(desktop)]
 pub mod sidecar;
 
 #[cfg(desktop)]

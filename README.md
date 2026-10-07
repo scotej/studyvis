@@ -144,6 +144,46 @@ Once you're past onboarding you land on your friends list. Click an
 online friend, click **Invite**, they accept, and you're in a session
 together.
 
+## Use a browser on another device
+
+During a session, open **Use a browser** in the session footer and choose
+**Start browser companion**. StudyVis displays a local HTTPS address, QR code, pairing
+password, and certificate fingerprint. Keep the desktop awake and connect the
+browser device to the same private IPv4 network.
+
+1. Open the certificate download address on the browser device. Compare its
+   SHA-256 fingerprint with the one displayed by StudyVis, then install and
+   trust the certificate on that device. On iPadOS, installing the profile is
+   followed by **Settings → General → About → Certificate Trust Settings →
+   Enable full trust**. Desktop browsers use the device or browser certificate
+   store. Merely dismissing a certificate warning does not reliably enable
+   camera access or offline caching.
+2. Open the HTTPS address or scan its QR code and enter the displayed password.
+   Choose **Enable camera and microphone** when ready. The microphone stays
+   muted until you hold **Talk**. Enabling the companion releases desktop
+   capture; capture stays paused until you enable it in the paired browser.
+3. Use the session controls, chat, direct messages, shared images, timer and AI
+   dialogue as usual. Capture a screen for AI in the browser's session settings;
+   sharing that screen with friends is a separate, explicit control. Choose an
+   entire display in the browser picker when you want the full screen.
+
+The desktop keeps your identity, peer connections, saved reports and AI engine.
+Configure the model on the desktop before starting. A disconnect pauses browser
+capture and AI rather than switching to the desktop camera or display. The
+browser keeps a bounded read-only last view and the saved report for offline
+reload; reconnecting requires enabling media again. **Stop browser companion** on the
+desktop restores its session controls and invalidates the old password. An
+explicit browser disconnect clears its cached view.
+
+iPadOS browsers support camera and microphone but do not currently expose screen
+capture; screen-based AI checks stay paused there while AI chat still works.
+Add the site to the Home
+Screen to request iPadOS notification permission. Notifications depend on an
+open, connected browser; there is no cloud push service for closed or suspended
+devices. Keep-awake and audio-output controls appear where the browser supports
+them. See [Apple's certificate trust instructions](https://support.apple.com/en-ie/102390)
+and [WebKit's Home Screen notification requirements](https://webkit.org/blog/13878/web-push-for-web-apps-on-ios-and-ipados/).
+
 ## Where your data lives
 
 Everything that identifies you or remembers your sessions stays in

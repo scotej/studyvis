@@ -23,6 +23,28 @@
   ],
   "cargoFallbacks": [
     {
+      "reason": "The asn1-rs-impl archive omits its workspace-root dual-license texts; retain the same author's locked asn1-rs license files.",
+      "components": [
+        {
+          "name": "asn1-rs-impl",
+          "version": "0.2.0",
+          "declaredLicense": "MIT/Apache-2.0"
+        }
+      ],
+      "licenseFiles": [
+        {
+          "cargoPackage": "asn1-rs@0.7.2",
+          "path": "LICENSE-MIT",
+          "expectedSha256": "a5c61b93b6ee1d104af9920cf020ff3c7efe818e31fe562c72261847a728f513"
+        },
+        {
+          "cargoPackage": "asn1-rs@0.7.2",
+          "path": "LICENSE-APACHE",
+          "expectedSha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
+        }
+      ]
+    },
+    {
       "reason": "These crates.io archives omit their workspace-root license file; each declaration permits the MIT alternative selected here.",
       "selectedLicense": "MIT",
       "components": [

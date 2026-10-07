@@ -1,5 +1,26 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Use a browser on another device on your local network during a session.
+  Mirroring keeps identity, peer connections and AI on the desktop while the
+  paired browser supplies camera, microphone and, where supported, screen
+  capture. Session chat, direct messages, images, timer, AI dialogue and saved
+  reports use the same StudyVis components.
+- QR pairing, certificate fingerprint guidance, host takeover, reconnect and
+  offline reload, browser downloads and an optional keep-awake control.
+  iPadOS supports camera, microphone and session controls; its browsers do not
+  support screen capture or closed-app LAN notifications.
+
+### Fixed
+
+- Delayed message and image sends cannot populate a different session after
+  the original session ends.
+- Ending capture cancels the focus-check deadline even if a stalled AI request
+  does not respond to cancellation.
+
 ## 1.12.8.1 — 2026-10-06 — Windows runtime packaging revision
 
 ### Fixed

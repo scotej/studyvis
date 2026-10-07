@@ -1438,6 +1438,34 @@ Preview, full release, and manual interim builds repeat those checks against
 the exact extracted NSIS payload. Regression tests reject missing/wrong-arch
 DLLs, incomplete provenance, changed hashes, and broken resource mappings.
 
+### I129 — Sev3
+
+`src/features/session/SessionView.tsx`
+
+**Evidence.** Session note/image send callbacks await peer transport or image
+validation, then update the currently mounted store. Ending the original session
+and starting another during that await can insert the old message or image into
+the new session's chat history.
+
+**Status.** **fixed on branch** — capture the originating session topic and check
+it again after asynchronous work before touching history. Browser permission and
+file requests likewise bind their originating connection and session; stale
+capture results release their tracks instead of crossing into a new pairing.
+
+### I130 — Sev3
+
+`src/features/ai/sampleLoop.ts`
+
+**Evidence.** The focus request's deadline was cleared only in the request's
+`finally`. A hung fetch that ignores abort retains its timer after sample-loop
+teardown. The regression surfaced when mirroring kept the sidecar running for
+text AI after visual capture stopped.
+
+**Status.** **fixed on branch** — sample-loop teardown explicitly clears the
+owned inference deadline. A clock-driven test holds the inference unresolved,
+stops capture, and verifies released media and zero remaining timers while the
+text AI engine stays available.
+
 ## Archive — retired backlogs
 
 Two documents used to sit beside this ledger and were deleted once their implementation backlog had no open code work left: `BUILD-PROMPTS.md` (the sequenced V0→V3 build plan) and `IMPROVEMENTS.md` (the v1.2.0-era improvement backlog). Git history holds both in full — `git log --diff-filter=D -- BUILD-PROMPTS.md IMPROVEMENTS.md`, then `git show <sha>^:<file>`. Linux's implementation checklist is complete, but its operational release sign-off remains pending. What survives here is the part still cited from code.

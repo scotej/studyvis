@@ -62,6 +62,10 @@ export type RecordedWindow = {
 
 export type LabCall = { ts: number; cmd: string; args: unknown }
 
+export type LabMirrorDriver = {
+  invoke: (cmd: string, args: Record<string, unknown>) => Promise<unknown>
+}
+
 export type LabBackendOptions = {
   name: string
   dir: string
@@ -113,6 +117,7 @@ export class LabBackend {
   private sessionActive = false
   private notificationPermission: 'granted' | 'denied' | 'default' = 'granted'
   private windowLabels = new Set(['main'])
+  private mirrorDriver: LabMirrorDriver | null = null
 
   constructor(options: LabBackendOptions) {
     this.name = options.name
@@ -133,6 +138,10 @@ export class LabBackend {
 
   queueDialogAnswer(answer: string): void {
     this.dialogAnswers.push(answer)
+  }
+
+  attachMirrorDriver(driver: LabMirrorDriver): void {
+    this.mirrorDriver = driver
   }
 
   logLines(limit = 500): string[] {
@@ -239,6 +248,11 @@ export class LabBackend {
     // in `calls` would bury the calls a scenario actually asserts on.
     if (cmd !== 'app_log_append') {
       this.calls.push({ ts: Date.now(), cmd, args })
+    }
+    // Mirroring tests use the production Rust listener rather than a Node
+    // imitation of its TLS, authentication, or websocket behavior.
+    if (cmd.startsWith('mirror_') && this.mirrorDriver) {
+      return this.mirrorDriver.invoke(cmd, args)
     }
     if (cmd.startsWith('plugin:')) return this.plugin(cmd, args)
     return this.command(cmd, args)

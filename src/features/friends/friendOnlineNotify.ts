@@ -14,6 +14,7 @@ import {
 } from '@tauri-apps/plugin-notification'
 
 import { strings } from '@/strings'
+import { notifyCurrentMirror } from '@/features/mirror/reportHandoff'
 
 // How long after we start watching a friend before their FIRST online
 // resolution counts as a genuine arrival rather than boot-sweep noise. This is
@@ -75,6 +76,10 @@ export async function notifyFriendOnline(
 ): Promise<void> {
   if (!args.enabled) return
   const name = args.displayName?.trim() || strings.friends.inbox.senderFallback
+  notifyCurrentMirror({
+    title: strings.notifications.friendOnline.title,
+    body: strings.notifications.friendOnline.body(name),
+  })
   try {
     let granted = await isPermissionGranted()
     if (!granted) {
