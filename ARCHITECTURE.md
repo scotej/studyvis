@@ -290,9 +290,11 @@ the packaged WebKit subprocesses, exchanges data, renders synthetic camera and
 screen video with original stream IDs, and exercises late publication and
 stop/restart. Native codec, SRTP, GPU-memory conversion and transceiver checks
 run with isolated packaged plugin paths. These synthetic checks do not replace
-PLAN §8's physical KDE portal/device matrix. Preview
-deployments additionally build installable macOS arm64, Windows x86_64, and
-Linux x86_64 artifacts from the exact commit. A tagged release fetches the
+PLAN §8's physical KDE portal/device matrix. Manually requested preview
+deployments build installable macOS arm64, Windows x86_64, and Linux x86_64
+artifacts from the selected ref's exact commit. PR updates and main pushes do
+not start the preview matrix; CI keeps its independent Linux artifact audit.
+A tagged release fetches the
 pinned sidecar for each target and emits signed updater artifacts. The Linux leg
 repeats the native inspection on the exact AppImage it produced/uploaded and
 extraction-launches it for 20 seconds with build-time library paths removed,

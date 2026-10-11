@@ -530,22 +530,27 @@ CachyOS KDE matrix in PLAN §8. CodeQL runs alongside as a non-required workflow
 the Security tab. Storybook publishes to GitHub Pages from
 `main` and is attached to each PR as an artifact.
 
-Every pull request also gets a deployment, and no pull request waits
-for one. `deploy.yml` builds each commit that reaches a PR or `main`
-into a real installable preview bundle for macOS, Windows, and the Linux
-release candidate that you can smoke-test — `StudyVis-macOS-arm64-pr<n>` and
-`StudyVis-Windows-x64-pr<n>`, plus the x86_64 Linux AppImage artifact,
-attached to the run for seven days. Each platform records its own GitHub
-Deployment (`preview-macos`, `preview-windows`, `preview-linux`), so one
-broken platform is visible without hiding the others.
+Installer previews are requested explicitly through **Actions → Deploy → Run
+workflow**, selecting the branch or tag to test, or from the CLI:
 
-Its **Deployed** check is an _indicator only_ — a full build takes
-30–60 minutes per platform, so merging waits on the two branch-protection
-checks above, never on this one. Red means a platform stopped building and is
-worth acting on; it still will not block the merge. A commit touching
-only docs or workflow files builds nothing and is recorded as a
-documentation deployment. These bundles carry no updater manifest and
-are never consumable as an update.
+```sh
+gh workflow run deploy.yml --ref feat/my-change
+gh run list --workflow deploy.yml --branch feat/my-change
+```
+
+`deploy.yml` builds that ref's exact commit into macOS, Windows, and Linux
+preview bundles. Download `StudyVis-macOS-arm64-<run-id>`,
+`StudyVis-Windows-x64-<run-id>`, and `StudyVis-Linux-x64-<run-id>` from the
+run's **Artifacts** section within seven days. Each platform records its own
+GitHub Deployment (`preview-macos`, `preview-windows`, `preview-linux`).
+Its **Deployed** check remains an indicator; merging waits on the two
+branch-protection checks above. These bundles have no updater manifest.
+
+PR updates and `main` pushes do not automatically build these previews.
+CI still runs its independent Linux AppImage audit, including on the release
+version bump. **Release prep** pushes the new version tag, which starts one
+production installer matrix in `release.yml`; the clean tagged runtime build,
+exact-artifact checks, and verified publication remain required.
 
 **Read before changing code.** `CLAUDE.md` (repo root) is the
 working agreement — house rules, doc map, quality gates — for human
