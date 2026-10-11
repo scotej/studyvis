@@ -1520,7 +1520,7 @@ but its validated hex filenames stay in lab-owned directories and its
 synchronous operations cross no privilege boundary. The harness is not shipped.
 
 **Status.** **triaged** (2026-10-11) — independently reviewed and dismissed
-#53 and #268–#270 as false positives. #276 and #277 are **accepted, won't fix**:
+alerts #53 and #268–#270 as false positives. #276 and #277 are **accepted, won't fix**:
 a local actor already able to mutate the harness directory can disrupt a lab
 run; this does not expose the installed app. Production crypto and cookie
 semantics remain unchanged, and scans still cover these files.
@@ -1534,8 +1534,8 @@ the fixed repository name or a Git-validated commit hash. The flagged token
 permissions are job-scoped and required by their uploads, attestations,
 publication or dispatch operations. Third-party actions are immutable hash
 pins; GitHub-owned action major tags are explicitly allowed by the canonical
-pinning policy. The Rust helper pin and explicit toolchain input are coherent;
-changing its comment to upstream's unrelated `v1` tag would misstate the pin.
+pinning policy. The Rust helper now pins upstream's `v1` commit with safer input
+handling, retaining the explicit `1.97.1` toolchain and existing targets/components.
 Scorecard's badge, fuzzing, licensing and independent-approval findings describe
 deliberate friends-only, private, sole-owner policies rather than an exploit.
 
