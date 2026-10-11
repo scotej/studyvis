@@ -69,7 +69,10 @@ export function StudyHeatmap({ heatmap }: StudyHeatmapProps) {
             {/* The grid is wider than the settings pane on a narrow window;
                 scroll it rather than shrinking squares below a clickable,
                 legible size. */}
-            <div className="overflow-x-auto">
+            <div
+              tabIndex={0}
+              className="overflow-x-auto rounded-sm focus-visible:ring-3 focus-visible:ring-accent-ring"
+            >
               <div
                 role="img"
                 aria-label={copy.ariaLabel(daysStudied, daysInWindow)}
