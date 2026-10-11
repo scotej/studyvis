@@ -3,6 +3,7 @@ export type MirrorConfig = {
   password: string
   fingerprint: string
   certificateUrl: string
+  certificateUrls?: string[]
   expiresAt: number
   generation: string
 }

@@ -93,24 +93,6 @@ export function MirrorHostPanel({
           ) : null}
           <p className="text-sm text-text-secondary">{copy.certificate}</p>
           <div className="flex flex-col gap-2">
-            <Label htmlFor="mirror-certificate-url">
-              {copy.certificateDownload}
-            </Label>
-            <div className="flex gap-2">
-              <Input
-                id="mirror-certificate-url"
-                readOnly
-                value={config.certificateUrl}
-              />
-              <Button
-                variant="secondary"
-                onClick={() => void copyLink(config.certificateUrl, true)}
-              >
-                {copy.copy}
-              </Button>
-            </div>
-          </div>
-          <div className="flex flex-col gap-2">
             <Label htmlFor="mirror-fingerprint">{copy.fingerprint}</Label>
             <Input
               id="mirror-fingerprint"
@@ -128,17 +110,45 @@ export function MirrorHostPanel({
               className="font-mono"
             />
           </div>
-          {config.urls.map((url, index) => (
-            <div key={url} className="flex flex-col gap-2">
-              <Label htmlFor={`mirror-url-${index}`}>{copy.link}</Label>
-              <div className="flex gap-2">
-                <Input id={`mirror-url-${index}`} readOnly value={url} />
-                <Button variant="secondary" onClick={() => void copyLink(url)}>
-                  {copy.copy}
-                </Button>
+          {config.urls.map((url, index) => {
+            const certificateUrl =
+              config.certificateUrls?.[index] ??
+              (index === 0 ? config.certificateUrl : undefined)
+            return (
+              <div key={url} className="flex flex-col gap-2">
+                <Label htmlFor={`mirror-url-${index}`}>{copy.link}</Label>
+                <div className="flex gap-2">
+                  <Input id={`mirror-url-${index}`} readOnly value={url} />
+                  <Button
+                    variant="secondary"
+                    onClick={() => void copyLink(url)}
+                  >
+                    {copy.copy}
+                  </Button>
+                </div>
+                {certificateUrl ? (
+                  <>
+                    <Label htmlFor={`mirror-certificate-url-${index}`}>
+                      {copy.certificateDownload}
+                    </Label>
+                    <div className="flex gap-2">
+                      <Input
+                        id={`mirror-certificate-url-${index}`}
+                        readOnly
+                        value={certificateUrl}
+                      />
+                      <Button
+                        variant="secondary"
+                        onClick={() => void copyLink(certificateUrl, true)}
+                      >
+                        {copy.copy}
+                      </Button>
+                    </div>
+                  </>
+                ) : null}
               </div>
-            </div>
-          ))}
+            )
+          })}
           {config.urls[0] ? (
             <div className="self-center">
               <PairQrCode value={config.urls[0]} label={copy.link} />

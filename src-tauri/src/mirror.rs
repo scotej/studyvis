@@ -64,6 +64,7 @@ pub struct MirrorConfig {
     pub password: String,
     pub fingerprint: String,
     pub certificate_url: String,
+    pub certificate_urls: Vec<String>,
     pub expires_at: u64,
     pub generation: String,
 }
@@ -271,6 +272,11 @@ impl MirrorServer {
                 "http://{}:{bootstrap_port}/certificate.crt",
                 options.addresses[0]
             ),
+            certificate_urls: options
+                .addresses
+                .iter()
+                .map(|ip| format!("http://{ip}:{bootstrap_port}/certificate.crt"))
+                .collect(),
             expires_at: SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .map_err(|_| "the system clock is invalid")?
@@ -1391,7 +1397,7 @@ mod tests {
                 .await
                 .unwrap();
             assert_eq!(restarted.config().urls, next.urls);
-            assert_eq!(restarted.config().certificate_url, next.certificate_url);
+            assert_eq!(restarted.config().certificate_urls, next.certificate_urls);
             restarted.shutdown().await;
             config = next;
         }
@@ -1430,6 +1436,53 @@ mod tests {
         let failed = MirrorServer::start(options(&directory, Duration::from_secs(60))).await;
         assert_eq!(failed.err().unwrap(), "couldn't read the browser ports");
         assert!(path.is_dir());
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[tokio::test]
+    async fn certificate_download_urls_follow_every_advertised_interface() {
+        let directory = test_directory();
+        let mut settings = options(&directory, Duration::from_secs(60));
+        settings.addresses = vec![Ipv4Addr::new(10, 255, 255, 254), Ipv4Addr::LOCALHOST];
+        let server = MirrorServer::start(settings).await.unwrap();
+        let config = server.config();
+        assert_eq!(config.urls.len(), config.certificate_urls.len());
+        assert_eq!(config.certificate_url, config.certificate_urls[0]);
+        for (url, certificate) in config.urls.iter().zip(&config.certificate_urls) {
+            assert_eq!(
+                reqwest::Url::parse(url).unwrap().host_str(),
+                reqwest::Url::parse(certificate).unwrap().host_str()
+            );
+        }
+        let reachable = config
+            .urls
+            .iter()
+            .position(|url| url.contains("127.0.0.1"))
+            .unwrap();
+        assert_ne!(reachable, 0);
+        let root = fs::read(directory.join("root.crt")).unwrap();
+        let client = reqwest::Client::builder()
+            .no_proxy()
+            .add_root_certificate(reqwest::Certificate::from_der(&root).unwrap())
+            .build()
+            .unwrap();
+        assert_eq!(
+            client
+                .get(&config.urls[reachable])
+                .send()
+                .await
+                .unwrap()
+                .status(),
+            200
+        );
+        let certificate = client
+            .get(&config.certificate_urls[reachable])
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(certificate.status(), 200);
+        assert_eq!(certificate.bytes().await.unwrap().as_ref(), root);
+        server.shutdown().await;
         fs::remove_dir_all(directory).unwrap();
     }
 
