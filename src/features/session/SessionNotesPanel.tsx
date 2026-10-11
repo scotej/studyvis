@@ -742,9 +742,15 @@ export function SessionNotesPanel({
         <h2 id={headingId} className="sr-only">
           {copy.heading}
         </h2>
+        {/* Own only the tabs so their adjacent close buttons remain ordinary
+            buttons outside the tablist in the accessibility tree. */}
         <div
           role="tablist"
           aria-label={copy.conversations}
+          aria-owns={openTabs.map(tabId).join(' ')}
+          className="absolute"
+        />
+        <div
           onKeyDown={handleTabKeyDown}
           className="flex min-w-0 flex-1 gap-1 overflow-x-auto overscroll-x-contain"
         >
@@ -795,7 +801,7 @@ export function SessionNotesPanel({
           })}
         </div>
 
-        <DropdownMenu>
+        <DropdownMenu modal={false}>
           <DropdownMenuTrigger asChild>
             <Button
               type="button"
@@ -850,53 +856,50 @@ export function SessionNotesPanel({
               {noteCopy.empty}
             </p>
           ) : (
-            <ul
-              role="log"
-              aria-live="polite"
-              aria-relevant="additions"
-              className="flex flex-col gap-1 px-4 py-2"
-            >
-              {groupEntries.map((entry) => (
-                <li key={entry.id} className="text-sm leading-snug">
-                  <span
-                    className={
-                      entry.mine
-                        ? 'font-medium text-text-secondary'
-                        : 'font-medium text-accent-default'
-                    }
-                  >
-                    {resolveName(entry)}
-                  </span>{' '}
-                  {'text' in entry ? (
-                    <span className="whitespace-pre-wrap break-words text-text-primary">
-                      {entry.text}
-                    </span>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => onOpenImage(entry)}
-                      className="mt-1 block w-full overflow-hidden rounded-md border border-border-subtle bg-bg-sunk text-left outline-none focus-visible:ring-3 focus-visible:ring-accent-ring"
-                      aria-label={imageCopy.openImage(resolveName(entry))}
+            <div role="log" aria-live="polite" aria-relevant="additions">
+              <ul className="flex flex-col gap-1 px-4 py-2">
+                {groupEntries.map((entry) => (
+                  <li key={entry.id} className="text-sm leading-snug">
+                    <span
+                      className={
+                        entry.mine
+                          ? 'font-medium text-text-secondary'
+                          : 'font-medium text-accent-default'
+                      }
                     >
-                      {reduceMotion && entry.frameCount > 1 ? (
-                        <span className="flex min-h-24 items-center justify-center px-3 text-center text-xs text-text-secondary">
+                      {resolveName(entry)}
+                    </span>{' '}
+                    {'text' in entry ? (
+                      <span className="whitespace-pre-wrap break-words text-text-primary">
+                        {entry.text}
+                      </span>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => onOpenImage(entry)}
+                        className="mt-1 block w-full overflow-hidden rounded-md border border-border-subtle bg-bg-sunk text-left outline-none focus-visible:ring-3 focus-visible:ring-accent-ring"
+                        aria-label={imageCopy.openImage(resolveName(entry))}
+                      >
+                        {reduceMotion && entry.frameCount > 1 ? (
+                          <span className="flex min-h-24 items-center justify-center px-3 text-center text-xs text-text-secondary">
+                            {entry.filename}
+                          </span>
+                        ) : (
+                          <img
+                            src={entry.objectUrl}
+                            alt={imageCopy.imageAlt(resolveName(entry))}
+                            className="max-h-40 w-full object-contain"
+                          />
+                        )}
+                        <span className="block truncate border-t border-border-subtle px-2 py-1 text-xs text-text-secondary">
                           {entry.filename}
                         </span>
-                      ) : (
-                        <img
-                          src={entry.objectUrl}
-                          alt={imageCopy.imageAlt(resolveName(entry))}
-                          className="max-h-40 w-full object-contain"
-                        />
-                      )}
-                      <span className="block truncate border-t border-border-subtle px-2 py-1 text-xs text-text-secondary">
-                        {entry.filename}
-                      </span>
-                    </button>
-                  )}
-                </li>
-              ))}
-            </ul>
+                      </button>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </div>
           )
         ) : activeTab === 'ai' ? (
           !aiAvailable ? (
@@ -906,35 +909,37 @@ export function SessionNotesPanel({
           ) : aiMessages.length === 0 ? (
             <p className="px-4 py-4 text-sm text-text-muted">{copy.aiEmpty}</p>
           ) : (
-            <ul role="log" aria-live="polite" className="space-y-2 px-3 py-3">
-              {aiMessages.map((message) => (
-                <li
-                  key={message.id}
-                  className={
-                    message.role === 'user'
-                      ? 'ml-8 rounded-lg bg-bg-sunk px-3 py-2 text-sm text-text-primary'
-                      : message.failed
-                        ? 'mr-8 rounded-lg border border-danger-border bg-danger-surface px-3 py-2 text-sm text-text-primary'
-                        : 'mr-8 rounded-lg border border-border-default bg-bg-raised px-3 py-2 text-sm text-text-primary'
-                  }
-                >
-                  <span className="mb-1 block text-xs font-medium text-text-secondary">
-                    {message.role === 'user' ? copy.you : copy.ai}
-                  </span>
-                  <span className="whitespace-pre-wrap break-words">
-                    {message.content}
-                  </span>
-                </li>
-              ))}
-              {aiSending && (
-                <li className="mr-8 rounded-lg border border-border-default bg-bg-raised px-3 py-2 text-sm text-text-muted">
-                  <span className="mb-1 block text-xs font-medium text-text-secondary">
-                    {copy.ai}
-                  </span>
-                  {copy.thinking}
-                </li>
-              )}
-            </ul>
+            <div role="log" aria-live="polite">
+              <ul className="space-y-2 px-3 py-3">
+                {aiMessages.map((message) => (
+                  <li
+                    key={message.id}
+                    className={
+                      message.role === 'user'
+                        ? 'ml-8 rounded-lg bg-bg-sunk px-3 py-2 text-sm text-text-primary'
+                        : message.failed
+                          ? 'mr-8 rounded-lg border border-danger-border bg-danger-surface px-3 py-2 text-sm text-text-primary'
+                          : 'mr-8 rounded-lg border border-border-default bg-bg-raised px-3 py-2 text-sm text-text-primary'
+                    }
+                  >
+                    <span className="mb-1 block text-xs font-medium text-text-secondary">
+                      {message.role === 'user' ? copy.you : copy.ai}
+                    </span>
+                    <span className="whitespace-pre-wrap break-words">
+                      {message.content}
+                    </span>
+                  </li>
+                ))}
+                {aiSending && (
+                  <li className="mr-8 rounded-lg border border-border-default bg-bg-raised px-3 py-2 text-sm text-text-muted">
+                    <span className="mb-1 block text-xs font-medium text-text-secondary">
+                      {copy.ai}
+                    </span>
+                    {copy.thinking}
+                  </li>
+                )}
+              </ul>
+            </div>
           )
         ) : !activePeer ? (
           <p className="px-4 py-4 text-sm text-text-muted">
@@ -943,28 +948,30 @@ export function SessionNotesPanel({
         ) : activeDirectMessages.length === 0 ? (
           <p className="px-4 py-4 text-sm text-text-muted">{copy.dmEmpty}</p>
         ) : (
-          <ul role="log" aria-live="polite" className="space-y-2 px-3 py-3">
-            {activeDirectMessages.map((message) => (
-              <li
-                key={message.id}
-                className={
-                  message.mine
-                    ? 'ml-8 rounded-lg bg-bg-sunk px-3 py-2 text-sm text-text-primary'
-                    : 'mr-8 rounded-lg border border-border-default bg-bg-raised px-3 py-2 text-sm text-text-primary'
-                }
-              >
-                <span className="mb-1 block text-xs font-medium text-text-secondary">
-                  {message.mine
-                    ? copy.you
-                    : (activePeer.displayName ??
-                      activePeer.edPubkeyHex.slice(0, 8))}
-                </span>
-                <span className="whitespace-pre-wrap break-words">
-                  {message.text}
-                </span>
-              </li>
-            ))}
-          </ul>
+          <div role="log" aria-live="polite">
+            <ul className="space-y-2 px-3 py-3">
+              {activeDirectMessages.map((message) => (
+                <li
+                  key={message.id}
+                  className={
+                    message.mine
+                      ? 'ml-8 rounded-lg bg-bg-sunk px-3 py-2 text-sm text-text-primary'
+                      : 'mr-8 rounded-lg border border-border-default bg-bg-raised px-3 py-2 text-sm text-text-primary'
+                  }
+                >
+                  <span className="mb-1 block text-xs font-medium text-text-secondary">
+                    {message.mine
+                      ? copy.you
+                      : (activePeer.displayName ??
+                        activePeer.edPubkeyHex.slice(0, 8))}
+                  </span>
+                  <span className="whitespace-pre-wrap break-words">
+                    {message.text}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </div>
         )}
       </div>
 
