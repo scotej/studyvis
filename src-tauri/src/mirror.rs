@@ -413,6 +413,7 @@ async fn serve(
     shared: Arc<Shared>,
 ) {
     let permits = Arc::new(Semaphore::new(MAX_CONNECTIONS));
+    let mut retry_delay = Duration::from_millis(25);
     let mut shutdown = shared.shutdown.subscribe();
     if *shutdown.borrow() || !shared.active() {
         return;
@@ -422,10 +423,19 @@ async fn serve(
             _ = shutdown.changed() => break,
             accepted = listener.accept() => accepted,
         };
-        let Ok((stream, remote)) = accepted else {
-            shared.stop();
-            break;
+        let (stream, remote) = match accepted {
+            Ok(accepted) => accepted,
+            Err(_) => {
+                // PR-368: accept can fail temporarily under descriptor/memory pressure.
+                tokio::select! {
+                    _ = shutdown.changed() => break,
+                    _ = tokio::time::sleep(retry_delay) => {},
+                }
+                retry_delay = (retry_delay * 2).min(Duration::from_secs(1));
+                continue;
+            }
         };
+        retry_delay = Duration::from_millis(25);
         if !private_source(remote.ip()) || !shared.active() {
             continue;
         }
@@ -1483,6 +1493,127 @@ mod tests {
         assert_eq!(certificate.status(), 200);
         assert_eq!(certificate.bytes().await.unwrap().as_ref(), root);
         server.shutdown().await;
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test(flavor = "current_thread")]
+    async fn temporary_accept_errors_recover_and_do_not_delay_shutdown() {
+        const CHILD: &str = "STUDYVIS_MIRROR_ACCEPT_ERROR_TEST";
+        if std::env::var_os(CHILD).is_none() {
+            // Descriptor limits are process-wide; keep unrelated parallel tests isolated.
+            let child = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "mirror::tests::temporary_accept_errors_recover_and_do_not_delay_shutdown",
+                    "--nocapture",
+                ])
+                .env(CHILD, "1")
+                .output()
+                .unwrap();
+            assert!(
+                child.status.success(),
+                "{}\n{}",
+                String::from_utf8_lossy(&child.stdout),
+                String::from_utf8_lossy(&child.stderr)
+            );
+            assert!(String::from_utf8_lossy(&child.stdout).contains("1 passed"));
+            return;
+        }
+
+        struct DescriptorPressure {
+            original: libc::rlimit,
+            files: Vec<fs::File>,
+        }
+        impl DescriptorPressure {
+            fn start() -> Self {
+                let mut original = libc::rlimit {
+                    rlim_cur: 0,
+                    rlim_max: 0,
+                };
+                assert_eq!(
+                    unsafe { libc::getrlimit(libc::RLIMIT_NOFILE, &mut original) },
+                    0
+                );
+                let reduced = libc::rlimit {
+                    rlim_cur: original.rlim_cur.min(64),
+                    rlim_max: original.rlim_max,
+                };
+                assert_eq!(unsafe { libc::setrlimit(libc::RLIMIT_NOFILE, &reduced) }, 0);
+                let mut files = Vec::new();
+                while let Ok(file) = fs::File::open("/dev/null") {
+                    files.push(file);
+                }
+                Self { original, files }
+            }
+        }
+        impl Drop for DescriptorPressure {
+            fn drop(&mut self) {
+                self.files.clear();
+                assert_eq!(
+                    unsafe { libc::setrlimit(libc::RLIMIT_NOFILE, &self.original) },
+                    0
+                );
+            }
+        }
+
+        let directory = test_directory();
+        let server = MirrorServer::start(options(&directory, Duration::from_secs(60)))
+            .await
+            .unwrap();
+        let config = server.config().clone();
+        let address = reqwest::Url::parse(&config.urls[0])
+            .unwrap()
+            .socket_addrs(|| None)
+            .unwrap()[0];
+        let certificate_address = reqwest::Url::parse(&config.certificate_url)
+            .unwrap()
+            .socket_addrs(|| None)
+            .unwrap()[0];
+        let pending_https = std::net::TcpStream::connect(address).unwrap();
+        let pending_certificate = std::net::TcpStream::connect(certificate_address).unwrap();
+        let pressure = DescriptorPressure::start();
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert_eq!(
+            server.sender("absent").err().unwrap(),
+            "browser controller is unavailable"
+        );
+        drop(pressure);
+        drop(pending_https);
+        drop(pending_certificate);
+        let root = fs::read(directory.join("root.crt")).unwrap();
+        let client = reqwest::Client::builder()
+            .no_proxy()
+            .timeout(Duration::from_secs(3))
+            .add_root_certificate(reqwest::Certificate::from_der(&root).unwrap())
+            .build()
+            .unwrap();
+        assert_eq!(
+            client.get(&config.urls[0]).send().await.unwrap().status(),
+            200
+        );
+        assert_eq!(
+            client
+                .get(&config.certificate_url)
+                .send()
+                .await
+                .unwrap()
+                .bytes()
+                .await
+                .unwrap()
+                .as_ref(),
+            root
+        );
+
+        let pending = std::net::TcpStream::connect(address).unwrap();
+        let pressure = DescriptorPressure::start();
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        tokio::time::timeout(Duration::from_millis(250), server.shutdown())
+            .await
+            .unwrap();
+        drop(pressure);
+        drop(pending);
+        assert!(tokio::net::TcpStream::connect(address).await.is_err());
         fs::remove_dir_all(directory).unwrap();
     }
 
