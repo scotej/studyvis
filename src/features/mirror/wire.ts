@@ -27,7 +27,8 @@ export type MirrorMessage =
   | { type: 'snapshot'; snapshot: unknown }
   | { type: 'report'; report: unknown }
   | { type: 'report_saved' }
-  | { type: 'control'; control: unknown }
+  | { type: 'control'; control: unknown; requestId?: string }
+  | { type: 'control_result'; requestId: string; ok: boolean }
   | ({ type: 'notification' } & MirrorNotification)
   | { type: 'ready' }
   | { type: 'reconnect' }
@@ -71,7 +72,12 @@ export function isMirrorMessage(value: unknown): value is MirrorMessage {
     case 'report':
       return v.report !== undefined
     case 'control':
-      return v.control !== undefined
+      return (
+        v.control !== undefined &&
+        (v.requestId === undefined || isControlRequestId(v.requestId))
+      )
+    case 'control_result':
+      return isControlRequestId(v.requestId) && typeof v.ok === 'boolean'
     case 'notification':
       return (
         typeof v.title === 'string' &&
@@ -90,6 +96,10 @@ export function isMirrorMessage(value: unknown): value is MirrorMessage {
     default:
       return false
   }
+}
+
+function isControlRequestId(value: unknown): value is string {
+  return typeof value === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(value)
 }
 
 const CHUNK_SIZE = 24_000

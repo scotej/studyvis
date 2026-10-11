@@ -11,7 +11,9 @@ import {
 
 export function useSessionMirror(
   sessionId: string | null,
-  onControl: (control: MirrorControl) => void
+  onControl: (
+    control: MirrorControl
+  ) => boolean | void | Promise<boolean | void>
 ) {
   const [config, setConfig] = useState<MirrorConfig | null>(null)
   const [starting, setStarting] = useState(false)
@@ -51,7 +53,9 @@ export function useSessionMirror(
     const host = createMirrorHost({
       onControl: (raw) => {
         const control = parseMirrorControl(raw)
-        if (hostRef.current === host && control) controlRef.current(control)
+        if (hostRef.current === host && control)
+          return controlRef.current(control)
+        return false
       },
       onCapture: (kind, stream) => {
         if (hostRef.current !== host) return

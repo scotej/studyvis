@@ -70,6 +70,7 @@ const configuration = {
   password: 'ABCDEFGH',
   fingerprint: 'fingerprint',
   certificateUrl: 'http://127.0.0.1:12346/certificate.crt',
+  certificateUrls: ['http://127.0.0.1:12346/certificate.crt'],
   expiresAt: 123456,
   generation: 'one',
 }
@@ -221,6 +222,80 @@ afterEach(async () => {
 })
 
 describe('desktop mirror lifecycle', () => {
+  test.each([true, false, undefined, 'throw'] as const)(
+    'controls acknowledge only a successful host result (%s)',
+    async (result) => {
+      let complete!: () => void
+      const onControl = vi.fn(async () => {
+        await new Promise<void>((resolve) => {
+          complete = resolve
+        })
+        if (result === 'throw') throw new Error('Invite failed')
+        return result
+      })
+      const host = createMirrorHost({
+        onControl,
+        onConnected: vi.fn(),
+        onCapture: vi.fn(),
+      })
+      cleanup.push(host.stop)
+      await host.start('session-1')
+      doubles.events.get('mirror:client')!({
+        payload: { clientId: 'one', connected: true },
+      })
+      await hostIncoming('one', {
+        type: 'control',
+        requestId: 'invite-1',
+        control: { type: 'invite' },
+      })
+      const sentResults = () => {
+        const codec = new MirrorCodec()
+        return doubles.invoke.mock.calls
+          .filter(([command]) => command === 'mirror_send')
+          .map(([, args]) => codec.receive(args.data as string))
+          .filter((message) => message?.type === 'control_result')
+      }
+      expect(sentResults()).toEqual([])
+      complete()
+      await vi.advanceTimersByTimeAsync(100)
+      expect(sentResults()).toEqual([
+        { type: 'control_result', requestId: 'invite-1', ok: result === true },
+      ])
+    }
+  )
+  test('a delayed control result cannot acknowledge a replacement browser', async () => {
+    let complete!: (ok: boolean) => void
+    const host = createMirrorHost({
+      onControl: () =>
+        new Promise<boolean>((resolve) => {
+          complete = resolve
+        }),
+      onConnected: vi.fn(),
+      onCapture: vi.fn(),
+    })
+    cleanup.push(host.stop)
+    await host.start('session-1')
+    doubles.events.get('mirror:client')!({
+      payload: { clientId: 'one', connected: true },
+    })
+    await hostIncoming('one', {
+      type: 'control',
+      requestId: 'invite-1',
+      control: { type: 'invite' },
+    })
+    doubles.events.get('mirror:client')!({
+      payload: { clientId: 'two', connected: true },
+    })
+    complete(true)
+    await vi.advanceTimersByTimeAsync(100)
+    const codec = new MirrorCodec()
+    const messages = doubles.invoke.mock.calls
+      .filter(([command]) => command === 'mirror_send')
+      .map(([, args]) => codec.receive(args.data as string))
+    expect(messages.some((message) => message?.type === 'control_result')).toBe(
+      false
+    )
+  })
   test('a late cancelled start only stops its own request after a newer start succeeds', async () => {
     let completeFirst!: (value: unknown) => void
     let starts = 0
@@ -423,6 +498,91 @@ describe('desktop mirror lifecycle', () => {
 })
 
 describe('browser recovery and local custody', () => {
+  test('invitation requests wait for their correlated host result and allow retry after failure', async () => {
+    const connection = createBrowserConnection()
+    cleanup.push(connection.disconnect)
+    const socket = TestSocket.instances[0]
+    expect(await connection.requestControl({ type: 'invite' })).toBe(false)
+    await activate(socket)
+    let settled = false
+    const first = connection.requestControl({ type: 'invite' }).then((ok) => {
+      settled = true
+      return ok
+    })
+    await vi.advanceTimersByTimeAsync(100)
+    const request = sent(socket).find((message) => message?.type === 'control')!
+    expect(request.type).toBe('control')
+    if (request.type !== 'control') throw new Error('Missing control')
+    expect(settled).toBe(false)
+    await incoming(socket, {
+      type: 'control_result',
+      requestId: 'unknown',
+      ok: true,
+    })
+    expect(settled).toBe(false)
+    await incoming(socket, {
+      type: 'control_result',
+      requestId: request.requestId!,
+      ok: false,
+    })
+    expect(await first).toBe(false)
+    const second = connection.requestControl({ type: 'invite' })
+    await vi.advanceTimersByTimeAsync(100)
+    const requests = sent(socket).filter(
+      (message) => message?.type === 'control'
+    )
+    const retry = requests[1]
+    if (retry?.type !== 'control') throw new Error('Missing retry')
+    expect(retry.requestId).not.toBe(request.requestId)
+    await incoming(socket, {
+      type: 'control_result',
+      requestId: retry.requestId!,
+      ok: true,
+    })
+    expect(await second).toBe(true)
+  })
+  test.each(['timeout', 'disconnect', 'socket close', 'new session', 'report'])(
+    'pending invitation fails on %s and stale acknowledgments are ignored',
+    async (reason) => {
+      const connection = createBrowserConnection()
+      cleanup.push(connection.disconnect)
+      const socket = TestSocket.instances[0]
+      await activate(socket)
+      const pending = connection.requestControl({ type: 'invite' })
+      await vi.advanceTimersByTimeAsync(100)
+      const request = sent(socket).find(
+        (message) => message?.type === 'control'
+      )!
+      if (request.type !== 'control') throw new Error('Missing control')
+      if (reason === 'timeout') await vi.advanceTimersByTimeAsync(30_000)
+      else if (reason === 'disconnect') connection.disconnect()
+      else if (reason === 'socket close') socket.close()
+      else if (reason === 'new session')
+        await incoming(socket, {
+          type: 'snapshot',
+          snapshot: { ...snapshot(), sessionId: 'session-2' },
+        })
+      else await incoming(socket, { type: 'report', report })
+      expect(await pending).toBe(false)
+      await incoming(socket, {
+        type: 'control_result',
+        requestId: request.requestId!,
+        ok: true,
+      })
+      expect(await pending).toBe(false)
+    }
+  )
+  test('pending invitation requests are bounded even if the host never responds', async () => {
+    const connection = createBrowserConnection()
+    cleanup.push(connection.disconnect)
+    await activate(TestSocket.instances[0])
+    const pending = Array.from({ length: 32 }, () =>
+      connection.requestControl({ type: 'invite' })
+    )
+    expect(await connection.requestControl({ type: 'invite' })).toBe(false)
+    connection.disconnect()
+    expect(await Promise.all(pending)).toEqual(Array(32).fill(false))
+  })
   test('a replaced tab releases capture and stays read-only until an explicit new pairing', async () => {
     vi.stubGlobal(
       'fetch',

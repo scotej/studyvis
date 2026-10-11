@@ -370,7 +370,9 @@ export function SessionView({
     aiSending: false,
     directSending: false,
   })
-  const mirrorControlRef = useRef<(control: MirrorControl) => void>(() => {})
+  const mirrorControlRef = useRef<
+    (control: MirrorControl) => boolean | void | Promise<boolean | void>
+  >(() => false)
   const mirrorChatControlsRef = useRef<MirrorChatControls | null>(null)
   const mirrorAiReadyRef = useRef<Promise<boolean> | null>(null)
   const mirror = useSessionMirror(sessionTopic, (control) =>
@@ -2506,12 +2508,12 @@ export function SessionView({
   useEffect(() => {
     mirrorControlRef.current = (control) => {
       if (useSessionStore.getState().room !== room || status !== 'active')
-        return
+        return false
       if (
         leaveRequestedRef.current &&
         (control.type !== 'ptt' || control.active)
       )
-        return
+        return false
       setMirrorControlError(null)
       let ownsAiRequest = false
       const requestController = mirrorAbortRef.current
@@ -2563,14 +2565,14 @@ export function SessionView({
             handleLeave()
             return
           case 'invite': {
-            if (!isHost) return
+            if (!isHost) return false
             const friend = friends.find(
               (candidate) =>
                 candidate.ed_pubkey_hex.toLowerCase() === control.edPubkeyHex
             )
-            if (friend && onInviteFriend && !(await onInviteFriend(friend)))
+            if (!friend || !onInviteFriend || !(await onInviteFriend(friend)))
               throw new Error(strings.mirror.inviteFailed)
-            return
+            return true
           }
           case 'ai_enabled':
             if (control.enabled) {
@@ -2712,13 +2714,13 @@ export function SessionView({
           }
         }
       }
-      void run()
+      return run()
         .catch((error: unknown) => {
           if (
             mirrorAbortRef.current !== requestController ||
             requestController?.signal.aborted
           )
-            return
+            return false
           if (!ownsAiRequest) {
             setMirrorControlError(
               control.type === 'image'
@@ -2729,7 +2731,7 @@ export function SessionView({
                     ? strings.mirror.inviteFailed
                     : strings.mirror.controlFailed
             )
-            return
+            return false
           }
           setMirrorAiAction({
             pending: false,
@@ -2740,6 +2742,7 @@ export function SessionView({
                 : strings.session.chat.aiFailed,
             tone: 'denied',
           })
+          return false
         })
         .finally(() => {
           if (ownsAiRequest && mirrorAbortRef.current === requestController) {

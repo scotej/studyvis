@@ -18,6 +18,7 @@ export type BrowserConnection = {
   subscribe: (listener: (state: BrowserConnectionState) => void) => () => void
   pair: (password: string) => Promise<void>
   sendControl: (control: unknown) => void
+  requestControl: (control: unknown) => Promise<boolean>
   setCapture: (kind: CaptureKind, stream: MediaStream | null) => void
   disconnect: () => void
 }
@@ -63,6 +64,24 @@ export function createBrowserConnection(): BrowserConnection {
   let connectionRun = 0
   let completedSessionId =
     restoredReport?.mirrorSessionId ?? restoredReport?.session.id ?? null
+  const pendingControls = new Map<
+    string,
+    {
+      resolve: (ok: boolean) => void
+      timeout: ReturnType<typeof setTimeout>
+    }
+  >()
+  const finishControl = (requestId: string, ok: boolean) => {
+    const pending = pendingControls.get(requestId)
+    if (!pending) return
+    pendingControls.delete(requestId)
+    clearTimeout(pending.timeout)
+    pending.resolve(ok)
+  }
+  const cancelControls = () => {
+    for (const requestId of pendingControls.keys())
+      finishControl(requestId, false)
+  }
 
   const update = (patch: Partial<BrowserConnectionState>) => {
     state = { ...state, ...patch }
@@ -160,6 +179,10 @@ export function createBrowserConnection(): BrowserConnection {
           const snapshot = readMirrorSnapshot(message.snapshot)
           if (!snapshot) throw new Error('Incompatible mirror snapshot')
           if (snapshot.sessionId === completedSessionId) return
+          if (
+            snapshot.sessionId !== readMirrorSnapshot(state.snapshot)?.sessionId
+          )
+            cancelControls()
           completedSessionId = null
           update({
             snapshot,
@@ -180,6 +203,7 @@ export function createBrowserConnection(): BrowserConnection {
           const report = readMirrorReport(message.report)
           if (report) {
             completedSessionId = report.mirrorSessionId ?? report.session.id
+            cancelControls()
             clearMedia()
             let reportCached = false
             try {
@@ -201,6 +225,8 @@ export function createBrowserConnection(): BrowserConnection {
             })
             send({ type: 'report_saved' })
           }
+        } else if (message.type === 'control_result') {
+          finishControl(message.requestId, message.ok)
         } else if (message.type === 'notification') {
           if (
             'Notification' in window &&
@@ -237,6 +263,7 @@ export function createBrowserConnection(): BrowserConnection {
       if (heartbeat) clearInterval(heartbeat)
       heartbeat = null
       socket = null
+      cancelControls()
       clearMedia()
       if (event?.code === 4001) {
         stopped = true
@@ -287,6 +314,7 @@ export function createBrowserConnection(): BrowserConnection {
         throw new Error('Pairing failed')
       }
       stopped = false
+      cancelControls()
       connectionRun++
       socket?.close()
       if (heartbeat) clearInterval(heartbeat)
@@ -296,6 +324,24 @@ export function createBrowserConnection(): BrowserConnection {
     },
     sendControl(control) {
       if (state.status === 'connected') send({ type: 'control', control })
+    },
+    requestControl(control) {
+      if (
+        state.status !== 'connected' ||
+        !socket ||
+        socket.readyState !== WebSocket.OPEN ||
+        pendingControls.size >= 32
+      )
+        return Promise.resolve(false)
+      const requestId = crypto.randomUUID()
+      return new Promise((resolve) => {
+        const timeout = setTimeout(
+          () => finishControl(requestId, false),
+          30_000
+        )
+        pendingControls.set(requestId, { resolve, timeout })
+        send({ type: 'control', control, requestId })
+      })
     },
     setCapture(kind, stream) {
       if (state.status !== 'connected') {
@@ -321,6 +367,7 @@ export function createBrowserConnection(): BrowserConnection {
     },
     disconnect() {
       stopped = true
+      cancelControls()
       completedSessionId = null
       connectionRun++
       if (reconnectTimer) clearTimeout(reconnectTimer)

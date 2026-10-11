@@ -147,6 +147,7 @@ function connection(
     subscribe: () => () => {},
     pair: fn(async () => {}),
     sendControl: fn(),
+    requestControl: fn(async () => true),
     setCapture: fn(),
     disconnect: fn(),
   }
@@ -228,6 +229,34 @@ export const ActionFailed: Story = {
     )
     await expect(args.connection.sendControl).toHaveBeenCalledWith({
       type: 'dismiss_error',
+    })
+  },
+}
+export const InvitationFailed: Story = {
+  args: {
+    connection: { ...connection(), requestControl: fn(async () => false) },
+  },
+  play: async ({ args, canvasElement }) => {
+    const canvas = within(canvasElement)
+    await userEvent.click(
+      canvas.getByRole('button', { name: strings.session.invite.cta })
+    )
+    const dialog = within(canvasElement.ownerDocument.body).getByRole(
+      'dialog',
+      { name: strings.session.invite.dialogTitle }
+    )
+    const modal = within(dialog)
+    const invite = modal.getByRole('button', {
+      name: strings.session.invite.rowInviteAriaLabel('Devin'),
+    })
+    await userEvent.click(invite)
+    await expect(modal.getByRole('alert')).toHaveTextContent(
+      strings.mirror.inviteFailed
+    )
+    await expect(invite).toBeEnabled()
+    await expect(args.connection.requestControl).toHaveBeenCalledWith({
+      type: 'invite',
+      edPubkeyHex: 'd'.repeat(64),
     })
   },
 }

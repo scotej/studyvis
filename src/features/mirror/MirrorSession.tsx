@@ -101,6 +101,8 @@ export function MirrorSession({ connection }: MirrorSessionProps) {
   const [aiText, setAiText] = useState('')
   const [topicDraft, setTopicDraft] = useState('')
   const [inviteOpen, setInviteOpen] = useState(false)
+  const [inviteError, setInviteError] = useState<string | null>(null)
+  const inviteGenerationRef = useRef(0)
   const [expandedScreen, setExpandedScreen] = useState<string | null>(null)
   const [imageId, setImageId] = useState<string | null>(null)
   const [images, setImages] = useState<SessionImage[]>([])
@@ -256,6 +258,7 @@ export function MirrorSession({ connection }: MirrorSessionProps) {
       setAiText('')
       setTopicDraft('')
       setInviteOpen(false)
+      setInviteError(null)
       setExpandedScreen(null)
       setImageId(null)
     })
@@ -828,7 +831,11 @@ export function MirrorSession({ connection }: MirrorSessionProps) {
               size="sm"
               variant="ghost"
               disabled={!connected}
-              onClick={() => setInviteOpen(true)}
+              onClick={() => {
+                inviteGenerationRef.current += 1
+                setInviteError(null)
+                setInviteOpen(true)
+              }}
             >
               {strings.session.invite.cta}
             </Button>
@@ -869,7 +876,12 @@ export function MirrorSession({ connection }: MirrorSessionProps) {
       />
       <SessionInviteDialog
         open={inviteOpen}
-        onOpenChange={setInviteOpen}
+        onOpenChange={(open) => {
+          inviteGenerationRef.current += 1
+          setInviteOpen(open)
+          setInviteError(null)
+        }}
+        error={inviteError}
         friends={snapshot.friends}
         isOnline={(key) => online.has(key)}
         inSessionEdPubkeys={
@@ -881,8 +893,21 @@ export function MirrorSession({ connection }: MirrorSessionProps) {
         }
         full={snapshot.sessionFull}
         onInvite={async (friend) => {
-          control({ type: 'invite', edPubkeyHex: friend.ed_pubkey_hex })
-          return true
+          const epoch = mediaScopeRef.current
+          const generation = inviteGenerationRef.current
+          const sessionId = snapshot.sessionId
+          setInviteError(null)
+          const sent = await connection.requestControl({
+            type: 'invite',
+            edPubkeyHex: friend.ed_pubkey_hex,
+          })
+          if (
+            !currentSession(epoch, sessionId) ||
+            generation !== inviteGenerationRef.current
+          )
+            return false
+          if (!sent) setInviteError(copy.inviteFailed)
+          return sent
         }}
       />
       <Dialog open={aiOpen} onOpenChange={setAiOpen}>

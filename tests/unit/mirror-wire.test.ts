@@ -21,6 +21,36 @@ function decode(codec: MirrorCodec, frames: string[]) {
 }
 
 describe('the mirror connection framing', () => {
+  test('control acknowledgments require bounded IDs and boolean outcomes', () => {
+    expect(
+      isMirrorMessage({ type: 'control', control: { type: 'invite' } })
+    ).toBe(true)
+    expect(
+      isMirrorMessage({ type: 'control', control: {}, requestId: 'request-1' })
+    ).toBe(true)
+    expect(
+      isMirrorMessage({
+        type: 'control_result',
+        requestId: 'request-1',
+        ok: true,
+      })
+    ).toBe(true)
+    for (const requestId of ['', 'x'.repeat(129), 'with spaces', 1, null]) {
+      expect(isMirrorMessage({ type: 'control', control: {}, requestId })).toBe(
+        false
+      )
+      expect(
+        isMirrorMessage({ type: 'control_result', requestId, ok: true })
+      ).toBe(false)
+    }
+    expect(
+      isMirrorMessage({
+        type: 'control_result',
+        requestId: 'request-1',
+        ok: 'true',
+      })
+    ).toBe(false)
+  })
   test('large shared images survive fragmentation and are transferred once', async () => {
     const sender = new MirrorCodec()
     const receiver = new MirrorCodec()

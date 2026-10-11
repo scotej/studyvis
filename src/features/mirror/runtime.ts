@@ -11,7 +11,7 @@ import {
 } from './wire'
 
 export type MirrorHostOptions = {
-  onControl: (control: unknown) => void | Promise<void>
+  onControl: (control: unknown) => boolean | void | Promise<boolean | void>
   onCapture: (kind: CaptureKind, stream: MediaStream | null) => void
   onConnected: (connected: boolean) => void
 }
@@ -164,13 +164,36 @@ export function createMirrorHost(options: MirrorHostOptions): MirrorHost {
                   case 'signal':
                     client.peer.receive(message.signal)
                     break
-                  case 'control':
-                    void Promise.resolve(
-                      options.onControl(message.control)
-                    ).catch(() => {
-                      // Controls are validated and report errors through host UI.
-                    })
+                  case 'control': {
+                    const controller = client
+                    void Promise.resolve()
+                      .then(() => {
+                        if (
+                          client !== controller ||
+                          run !== generation ||
+                          !active ||
+                          finishing
+                        )
+                          return false
+                        return options.onControl(message.control)
+                      })
+                      .catch(() => false)
+                      .then((result) => {
+                        if (
+                          message.requestId &&
+                          client === controller &&
+                          run === generation &&
+                          active &&
+                          !finishing
+                        )
+                          return send({
+                            type: 'control_result',
+                            requestId: message.requestId,
+                            ok: result === true,
+                          })
+                      })
                     break
+                  }
                   case 'ready':
                     client.peer.setStreams(streams)
                     pendingSnapshot = true
