@@ -2789,6 +2789,8 @@ export function SessionView({
     return () => window.clearInterval(timer)
   }, [startedAt, startedAtMono, mirror.config])
 
+  const publishMirrorSnapshot = mirror.publish
+  const setMirrorStreams = mirror.setStreams
   useEffect(() => {
     if (!mirror.config || !sessionTopic || !identity || startedAt === null) {
       mirrorPublishRevisionRef.current += 1
@@ -2887,7 +2889,7 @@ export function SessionView({
           useSessionStore.getState().room !== room
         )
           return
-        mirror.publish({
+        publishMirrorSnapshot({
           version: 1,
           sessionId: mirrorSessionId,
           status: status === 'active' ? 'active' : 'ended',
@@ -2943,7 +2945,7 @@ export function SessionView({
       streams[`${key}:camera`] = stream
     for (const [key, stream] of Object.entries(peerScreenStreams))
       streams[`${key}:screen`] = stream
-    mirror.setStreams(streams)
+    setMirrorStreams(streams)
   }, [
     sessionTopic,
     status,
@@ -2984,10 +2986,10 @@ export function SessionView({
     onInviteFriend,
     friends,
     presence,
-    mirror.publish,
-    mirror.setStreams,
+    publishMirrorSnapshot,
+    setMirrorStreams,
     mirrorElapsedMs,
-    mirror,
+    mirror.config,
   ])
 
   if (!room) return null
