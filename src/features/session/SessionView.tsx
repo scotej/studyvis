@@ -353,6 +353,8 @@ export function SessionView({
     null
   )
   const [audioSwapping, setAudioSwapping] = useState(false)
+  const audioSwapAbortRef = useRef<AbortController | null>(null)
+  const audioSenderOperationsRef = useRef(new Set<Promise<void>>())
   // #47 A2 — mid-session invite picker (host only; see the footer button).
   const [inviteOpen, setInviteOpen] = useState(false)
   const [mirrorOpen, setMirrorOpen] = useState(false)
@@ -378,6 +380,19 @@ export function SessionView({
   useLayoutEffect(() => {
     mirrorTakeoverRef.current = mirror.takeover
   }, [mirror.takeover])
+  useLayoutEffect(() => {
+    // A retired room's senders cannot be reused by the next room. Keep the
+    // same room's operations across takeover changes, but isolate new rooms.
+    audioSenderOperationsRef.current = new Set()
+  }, [room])
+  useLayoutEffect(
+    () => () => {
+      audioSwapAbortRef.current?.abort()
+      audioSwapAbortRef.current = null
+      setAudioSwapping(false)
+    },
+    [room, status, sessionTopic, mirror.takeover, mediaRetryNonce]
+  )
   const mirrorChatBridge = useMemo(
     () => ({
       publish: setMirrorChat,
@@ -615,13 +630,39 @@ export function SessionView({
         track.enabled = cameraOnRef.current
       for (const track of stream?.getAudioTracks() ?? [])
         track.enabled = usePttStore.getState().active
-      const offJoin = stream ? publishLocalStream(room, stream) : null
+      let offJoin: (() => void) | null = null
       localStreamRef.current = stream
       let cancelled = false
+      if (stream) {
+        void (async () => {
+          // PR-368 — an unfinished native replacement can overwrite a sender
+          // reused by addTrack; acquisition itself must never delay takeover.
+          await Promise.all([...audioSenderOperationsRef.current])
+          if (
+            cancelled ||
+            !mirrorTakeoverRef.current ||
+            localStreamRef.current !== stream ||
+            useSessionStore.getState().room !== room ||
+            useSessionStore.getState().status !== 'active'
+          )
+            return
+          if (
+            stream.getTracks().some((track) => track.readyState === 'ended')
+          ) {
+            setMediaErrorName('NotReadableError')
+            return
+          }
+          offJoin = publishLocalStream(room, stream)
+        })()
+      }
       queueMicrotask(() => {
         if (cancelled) return
         setLocalStream(stream)
-        setMediaErrorName(null)
+        setMediaErrorName(
+          stream?.getTracks().some((track) => track.readyState === 'ended')
+            ? 'NotReadableError'
+            : null
+        )
       })
       return () => {
         cancelled = true
@@ -696,6 +737,25 @@ export function SessionView({
             t.removeEventListener('ended', handleTrackEnded)
           }
         }
+        await Promise.all([...audioSenderOperationsRef.current])
+        if (
+          cancelled ||
+          mirrorTakeoverRef.current ||
+          useSessionStore.getState().room !== room ||
+          useSessionStore.getState().status !== 'active'
+        ) {
+          stopTracks(stream)
+          return
+        }
+        if (stream.getTracks().some((track) => track.readyState === 'ended')) {
+          stopTracks(stream)
+          setMediaErrorName('NotReadableError')
+          return
+        }
+        for (const track of stream.getAudioTracks())
+          track.enabled = usePttStore.getState().active
+        for (const track of stream.getVideoTracks())
+          track.enabled = cameraOnRef.current
         offJoinStream = publishLocalStream(room, stream)
         setLocalStream(stream)
         localStreamRef.current = stream
@@ -1993,7 +2053,26 @@ export function SessionView({
   const handleSwapAudioDevice = useCallback(
     async (nextDeviceId: string) => {
       const stream = localStreamRef.current
-      if (!stream || audioSwapping || mirror.takeover) return
+      if (
+        !stream ||
+        audioSwapAbortRef.current ||
+        audioSwapping ||
+        mirrorTakeoverRef.current ||
+        useSessionStore.getState().room !== room ||
+        useSessionStore.getState().status !== 'active'
+      )
+        return
+      const controller = new AbortController()
+      const senderOperations = audioSenderOperationsRef.current
+      audioSwapAbortRef.current = controller
+      const isCurrent = () =>
+        audioSwapAbortRef.current === controller &&
+        !controller.signal.aborted &&
+        !mirrorTakeoverRef.current &&
+        !leaveRequestedRef.current &&
+        localStreamRef.current === stream &&
+        useSessionStore.getState().room === room &&
+        useSessionStore.getState().status === 'active'
       setAudioSwapping(true)
       try {
         const newTrack = await swapAudioInput(
@@ -2003,9 +2082,24 @@ export function SessionView({
               navigator.mediaDevices.getUserMedia(constraints),
             room,
             localStream: stream,
+            signal: controller.signal,
+            isCurrent,
+            onReplaceTrack: (operation) => {
+              senderOperations.add(operation)
+              void operation.then(
+                () => senderOperations.delete(operation),
+                () => senderOperations.delete(operation)
+              )
+            },
           },
           () => usePttStore.getState().active
         )
+        if (!newTrack) return
+        if (!isCurrent()) {
+          newTrack.enabled = false
+          newTrack.stop()
+          return
+        }
         // #47 A3 — re-attach the I42 device-loss recovery to the swapped-in
         // track: the acquire effect's 'ended' listeners only cover tracks
         // present at acquisition, so without this the exact churn the swap
@@ -2022,16 +2116,20 @@ export function SessionView({
         // id surfaced at acquisition deliberately does not).
         void useSettingsStore.getState().setAudioInputDeviceId(nextDeviceId)
       } catch (err) {
+        if (!isCurrent()) return
         const message =
           err instanceof Error
             ? err.message
             : strings.session.errors.switchMicFailedFallback
         toast.error(message)
       } finally {
-        setAudioSwapping(false)
+        if (audioSwapAbortRef.current === controller) {
+          audioSwapAbortRef.current = null
+          setAudioSwapping(false)
+        }
       }
     },
-    [audioSwapping, room, mirror.takeover]
+    [audioSwapping, room]
   )
 
   const handleToggleCamera = useCallback(() => {

@@ -34,6 +34,9 @@ export type SwapAudioInputDeps = {
   getUserMedia: (constraints: MediaStreamConstraints) => Promise<MediaStream>
   room: TopicRoom | null
   localStream: MediaStream
+  signal?: AbortSignal
+  isCurrent?: () => boolean
+  onReplaceTrack?: (operation: Promise<void>) => void
 }
 
 // Pulls the list of audio inputs through enumerateDevices. The OS strips
@@ -115,11 +118,17 @@ export async function swapAudioInput(
   // not-transmitting. Mirrors the acquire path's read-after-await rule
   // (SessionView media effect).
   pttActive: () => boolean
-): Promise<MediaStreamTrack> {
+): Promise<MediaStreamTrack | null> {
+  const isCurrent = () => !deps.signal?.aborted && deps.isCurrent?.() !== false
+  if (!isCurrent()) return null
   const constraints: MediaStreamConstraints = {
     audio: nextDeviceId ? { deviceId: { exact: nextDeviceId } } : true,
   }
   const fresh = await deps.getUserMedia(constraints)
+  if (!isCurrent()) {
+    stopAllTracks(fresh)
+    return null
+  }
   const newTrack = fresh.getAudioTracks()[0]
   if (!newTrack) {
     stopAllTracks(fresh)
@@ -138,44 +147,85 @@ export async function swapAudioInput(
       }
     }
   }
-  // Inherit the session's current mute-state: muted-by-default with PTT
-  // toggling enabled. The fresh track starts enabled, so we mirror.
-  newTrack.enabled = pttActive()
+  const completedSenders: {
+    connection: RTCPeerConnection
+    sender: RTCRtpSender
+  }[] = []
+  const cancel = () => {
+    // PR-368 — takeover can happen while a sender replacement is awaiting.
+    // Stop immediately; the pending WebRTC operation cannot be cancelled.
+    newTrack.enabled = false
+    newTrack.stop()
+    for (const { connection, sender } of completedSenders) {
+      if (sender.track !== newTrack) continue
+      try {
+        connection.removeTrack(sender)
+      } catch (err) {
+        log.error('remove_stale_track.failed', { err })
+      }
+    }
+  }
+  deps.signal?.addEventListener('abort', cancel, { once: true })
+  try {
+    // PTT updates the local stream until commit; keep the replacement muted
+    // while it is outside that stream, including pending sender operations.
+    newTrack.enabled = false
+    const oldTrack = deps.localStream.getAudioTracks()[0] ?? null
 
-  const oldTrack = deps.localStream.getAudioTracks()[0] ?? null
-
-  if (deps.room) {
-    for (const conn of Object.values(deps.room.getPeers())) {
-      for (const sender of conn.getSenders()) {
-        if (sender.track && sender.track.kind === 'audio') {
-          try {
-            await sender.replaceTrack(newTrack)
-          } catch (err) {
-            log.error('replace_track.failed', { err })
+    if (deps.room) {
+      for (const conn of Object.values(deps.room.getPeers())) {
+        for (const sender of conn.getSenders()) {
+          if (!isCurrent()) {
+            cancel()
+            return null
+          }
+          if (sender.track && sender.track.kind === 'audio') {
+            const operation = (async () => {
+              try {
+                await sender.replaceTrack(newTrack)
+              } catch (err) {
+                if (isCurrent()) log.error('replace_track.failed', { err })
+              }
+              completedSenders.push({ connection: conn, sender })
+              if (!isCurrent()) {
+                // Native replaceTrack can finish after ownership changed.
+                // Retire only this stopped track before the next capture is
+                // published, so addTrack cannot reuse a sender still changing.
+                cancel()
+              }
+            })()
+            deps.onReplaceTrack?.(operation)
+            await operation
           }
         }
       }
     }
-  }
 
-  if (oldTrack) {
-    try {
-      deps.localStream.removeTrack(oldTrack)
-    } catch {
-      // older Safari throws on remove; ignore
+    if (!isCurrent()) {
+      cancel()
+      return null
     }
-    try {
-      oldTrack.stop()
-    } catch {
-      // ignore
+
+    if (oldTrack) {
+      try {
+        deps.localStream.removeTrack(oldTrack)
+      } catch {
+        // older Safari throws on remove; ignore
+      }
+      try {
+        oldTrack.stop()
+      } catch {
+        // ignore
+      }
     }
+    deps.localStream.addTrack(newTrack)
+    // Final re-read after every await: a PTT transition that landed during
+    // replaceTrack was applied to the old (now stopped) track.
+    newTrack.enabled = pttActive()
+    return newTrack
+  } finally {
+    deps.signal?.removeEventListener('abort', cancel)
   }
-  deps.localStream.addTrack(newTrack)
-  // Final re-read after every await: a PTT transition that landed during
-  // replaceTrack was applied to the old (now stopped) track; this closes the
-  // window to microseconds, and the next PTT transition heals any residue.
-  newTrack.enabled = pttActive()
-  return newTrack
 }
 
 function stopAllTracks(stream: MediaStream): void {

@@ -393,6 +393,116 @@ async function assertHostCaptureReleased(host) {
   )
 }
 
+async function beginPendingDesktopMicrophoneSwap(host) {
+  const page = host.page()
+  await page.waitForFunction(() =>
+    [...document.querySelectorAll('video')].some(
+      (video) => video.muted && video.srcObject?.getAudioTracks().length
+    )
+  )
+  await page.evaluate(() => {
+    const originalAcquire = navigator.mediaDevices.getUserMedia.bind(
+      navigator.mediaDevices
+    )
+    const originalEnumerate = navigator.mediaDevices.enumerateDevices.bind(
+      navigator.mediaDevices
+    )
+    const pending = {
+      originalAcquire,
+      originalEnumerate,
+      originalStream: [...document.querySelectorAll('video')].find(
+        (video) => video.muted && video.srcObject?.getAudioTracks().length
+      ).srcObject,
+      resolve: null,
+      fresh: null,
+    }
+    window.__mirrorPendingMicrophone = pending
+    navigator.mediaDevices.enumerateDevices = async () => [
+      ...(await originalEnumerate()),
+      {
+        kind: 'audioinput',
+        deviceId: 'delayed-test-microphone',
+        label: 'Delayed test microphone',
+      },
+    ]
+    navigator.mediaDevices.getUserMedia = (constraints) =>
+      constraints.audio?.deviceId?.exact === 'delayed-test-microphone'
+        ? new Promise((resolve) => {
+            pending.resolve = resolve
+          })
+        : originalAcquire(constraints)
+    navigator.mediaDevices.dispatchEvent(new Event('devicechange'))
+  })
+  await page.getByRole('button', { name: /^Microphone, currently/ }).click()
+  await page
+    .getByRole('menuitemradio', {
+      name: 'Delayed test microphone',
+      exact: true,
+    })
+    .click()
+  await page.waitForFunction(() => !!window.__mirrorPendingMicrophone.resolve)
+}
+
+async function assertPendingDesktopMicrophoneCancelled(host, page) {
+  const talk = page.getByRole('button', {
+    name: strings.session.holdToTalkAriaLabel,
+    exact: true,
+  })
+  await talk.hover()
+  await page.mouse.down()
+  try {
+    await host.page().waitForFunction(() =>
+      document
+        .querySelector(
+          '[data-testid="video-tile"]:has([data-ptt-scope="self"]) video'
+        )
+        ?.srcObject?.getAudioTracks()
+        .some((track) => track.enabled)
+    )
+    await host.page().evaluate(async () => {
+      const pending = window.__mirrorPendingMicrophone
+      pending.fresh = await pending.originalAcquire({ audio: true })
+      pending.resolve(pending.fresh)
+      navigator.mediaDevices.getUserMedia = pending.originalAcquire
+      navigator.mediaDevices.enumerateDevices = pending.originalEnumerate
+    })
+    await host
+      .page()
+      .waitForFunction(() =>
+        window.__mirrorPendingMicrophone.fresh
+          .getTracks()
+          .every((track) => track.readyState === 'ended')
+      )
+    const state = await host.page().evaluate(() => {
+      const pending = window.__mirrorPendingMicrophone
+      const track = pending.fresh.getAudioTracks()[0]
+      return {
+        attached: pending.originalStream.getAudioTracks().includes(track),
+        published: window.__mirrorTestCapture.peers.some((peer) =>
+          peer.getSenders().some((sender) => sender.track === track)
+        ),
+      }
+    })
+    assert.deepEqual(state, { attached: false, published: false })
+  } finally {
+    await page.mouse.up()
+  }
+  await host.page().waitForFunction(() => {
+    const browserTrack = document
+      .querySelector(
+        '[data-testid="video-tile"]:has([data-ptt-scope="self"]) video'
+      )
+      ?.srcObject?.getAudioTracks()[0]
+    return (
+      browserTrack?.readyState === 'live' &&
+      !browserTrack.enabled &&
+      window.__mirrorTestCapture.peers.some((peer) =>
+        peer.getSenders().some((sender) => sender.track === browserTrack)
+      )
+    )
+  })
+}
+
 async function assertNoNativeCaptureOverlay(host) {
   assert.equal(
     await host
@@ -595,7 +705,7 @@ test(
           })
       })
       const requestScreen = async (index) => {
-        await ui.click(page, strings.session.screenShare.toggleAriaLabel)
+        await ui.click(page, 'Share screen')
         await page.waitForFunction(
           (index) => window.__desktopScreenRequests.length > index,
           index
@@ -673,7 +783,7 @@ test(
         ),
         true
       )
-      await ui.click(page, strings.session.screenShare.stopCta)
+      await ui.click(page, 'Share screen')
       await assertRetired(3)
 
       await requestScreen(4)
@@ -755,6 +865,7 @@ for (const [name, engine] of Object.entries({ chromium, firefox, webkit })) {
           await pairViaContactCard(friend, invited)
         }
         await inviteAndAccept(host, friend, 'Bob', 'Alice', 'Mirrored reading')
+        if (name === 'chromium') await beginPendingDesktopMicrophoneSwap(host)
         await ui.click(host.page(), strings.mirror.open)
         await ui.click(host.page(), strings.mirror.start)
         await assertHostCaptureReleased(host)
@@ -888,6 +999,8 @@ for (const [name, engine] of Object.entries({ chromium, firefox, webkit })) {
             timeoutMs: 45_000,
           }
         )
+        if (name === 'chromium')
+          await assertPendingDesktopMicrophoneCancelled(host, page)
 
         await ui.fill(page, 'Note to your session', `From ${name} browser`)
         await ui.click(page, 'Send the note')
