@@ -195,24 +195,22 @@ impl MirrorServer {
         }
         let certificates = load_certificates(&options.certificate_dir, &options.addresses)?;
         let ports_path = options.certificate_dir.join("ports.json");
-        let saved_ports = if ports_path.exists() {
-            Some(
-                serde_json::from_slice::<SavedPorts>(
-                    &fs::read(&ports_path).map_err(|_| "couldn't read the browser ports")?,
-                )
-                .map_err(|_| "the saved browser ports are unreadable")?,
-            )
-        } else {
-            None
+        let saved_ports = match fs::read(&ports_path) {
+            Ok(bytes) => serde_json::from_slice::<SavedPorts>(&bytes)
+                .ok()
+                .filter(|p| p.https != 0 && p.certificate != 0 && p.https != p.certificate),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+            Err(error)
+                if error.kind() == std::io::ErrorKind::PermissionDenied && !ports_path.is_dir() =>
+            {
+                None
+            }
+            Err(_) => return Err("couldn't read the browser ports".into()),
         };
-        if saved_ports
-            .as_ref()
-            .is_some_and(|p| p.https == 0 || p.certificate == 0 || p.https == p.certificate)
-        {
-            return Err("the saved browser ports are invalid".into());
-        }
-        let listener = bind_listener(saved_ports.as_ref().map_or(0, |p| p.https)).await?;
-        let bootstrap = bind_listener(saved_ports.as_ref().map_or(0, |p| p.certificate)).await?;
+        let (listener, bootstrap) = tokio::try_join!(
+            bind_listener(saved_ports.as_ref().map_or(0, |p| p.https)),
+            bind_listener(saved_ports.as_ref().map_or(0, |p| p.certificate)),
+        )?;
         let port = listener
             .local_addr()
             .map_err(|_| "couldn't read the local port")?
@@ -221,14 +219,14 @@ impl MirrorServer {
             .local_addr()
             .map_err(|_| "couldn't read the certificate port")?
             .port();
-        if saved_ports.is_none() {
-            write_private_new(
+        let ports = SavedPorts {
+            https: port,
+            certificate: bootstrap_port,
+        };
+        if saved_ports.as_ref() != Some(&ports) {
+            write_private_replace(
                 &ports_path,
-                &serde_json::to_vec(&SavedPorts {
-                    https: port,
-                    certificate: bootstrap_port,
-                })
-                .map_err(|_| "couldn't prepare browser ports")?,
+                &serde_json::to_vec(&ports).map_err(|_| "couldn't prepare browser ports")?,
             )?;
         }
         let hosts: HashSet<_> = options
@@ -392,7 +390,9 @@ async fn bind_listener(port: u16) -> Result<TcpListener, String> {
                 tokio::time::sleep(Duration::from_millis(25)).await;
             }
             Err(error) if error.kind() == std::io::ErrorKind::AddrInUse => {
-                return Err("the browser access port is already in use".into())
+                return TcpListener::bind((Ipv4Addr::UNSPECIFIED, 0))
+                    .await
+                    .map_err(|_| "couldn't listen on the local network".into())
             }
             Err(_) => return Err("couldn't listen on the local network".into()),
         }
@@ -862,7 +862,7 @@ struct Certificates {
     key: Vec<u8>,
 }
 
-#[derive(Deserialize, Serialize)]
+#[derive(Deserialize, Serialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 struct SavedPorts {
     https: u16,
@@ -1332,6 +1332,104 @@ mod tests {
             401
         );
         renewed.shutdown().await;
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[tokio::test]
+    async fn recovers_occupied_ports_and_persists_the_new_origin_without_rotating_trust() {
+        let directory = test_directory();
+        let initial = MirrorServer::start(options(&directory, Duration::from_secs(60)))
+            .await
+            .unwrap();
+        let mut config = initial.config().clone();
+        initial.shutdown().await;
+        for certificate_conflict in [false, true] {
+            let previous_https = reqwest::Url::parse(&config.urls[0])
+                .unwrap()
+                .port()
+                .unwrap();
+            let previous_certificate = reqwest::Url::parse(&config.certificate_url)
+                .unwrap()
+                .port()
+                .unwrap();
+            let blocked_port = if certificate_conflict {
+                previous_certificate
+            } else {
+                previous_https
+            };
+            let occupied = TcpListener::bind((Ipv4Addr::UNSPECIFIED, blocked_port))
+                .await
+                .unwrap();
+            let recovered = MirrorServer::start(options(&directory, Duration::from_secs(60)))
+                .await
+                .unwrap();
+            let next = recovered.config().clone();
+            assert_eq!(next.fingerprint, config.fingerprint);
+            if certificate_conflict {
+                assert_eq!(next.urls, config.urls);
+                assert_ne!(next.certificate_url, config.certificate_url);
+            } else {
+                assert_ne!(next.urls, config.urls);
+                assert_eq!(next.certificate_url, config.certificate_url);
+            }
+            let saved: SavedPorts =
+                serde_json::from_slice(&fs::read(directory.join("ports.json")).unwrap()).unwrap();
+            assert_eq!(
+                saved.https,
+                reqwest::Url::parse(&next.urls[0]).unwrap().port().unwrap()
+            );
+            assert_eq!(
+                saved.certificate,
+                reqwest::Url::parse(&next.certificate_url)
+                    .unwrap()
+                    .port()
+                    .unwrap()
+            );
+            recovered.shutdown().await;
+            drop(occupied);
+            let restarted = MirrorServer::start(options(&directory, Duration::from_secs(60)))
+                .await
+                .unwrap();
+            assert_eq!(restarted.config().urls, next.urls);
+            assert_eq!(restarted.config().certificate_url, next.certificate_url);
+            restarted.shutdown().await;
+            config = next;
+        }
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[tokio::test]
+    async fn repairs_corrupt_port_metadata_but_surfaces_storage_read_errors() {
+        let directory = test_directory();
+        let initial = MirrorServer::start(options(&directory, Duration::from_secs(60)))
+            .await
+            .unwrap();
+        let fingerprint = initial.config().fingerprint.clone();
+        initial.shutdown().await;
+        let path = directory.join("ports.json");
+        for corrupt in [
+            "{",
+            r#"{"https":0,"certificate":1234}"#,
+            r#"{"https":1234,"certificate":0}"#,
+            r#"{"https":1234,"certificate":1234}"#,
+            r#"{"https":65536,"certificate":1234}"#,
+        ] {
+            fs::write(&path, corrupt).unwrap();
+            let recovered = MirrorServer::start(options(&directory, Duration::from_secs(60)))
+                .await
+                .unwrap();
+            assert_eq!(recovered.config().fingerprint, fingerprint);
+            let saved: SavedPorts = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+            assert_ne!(saved.https, 0);
+            assert_ne!(saved.certificate, 0);
+            assert_ne!(saved.https, saved.certificate);
+            recovered.shutdown().await;
+        }
+        fs::remove_file(&path).unwrap();
+        fs::create_dir(&path).unwrap();
+        let failed = MirrorServer::start(options(&directory, Duration::from_secs(60))).await;
+        assert_eq!(failed.err().unwrap(), "couldn't read the browser ports");
+        assert!(path.is_dir());
         fs::remove_dir_all(directory).unwrap();
     }
 
