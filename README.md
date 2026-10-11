@@ -153,7 +153,8 @@ During a session, open **Use a browser** in the session footer and choose
 password, and certificate fingerprint. Keep the desktop awake and connect the
 browser device to the same private IPv4 network.
 
-1. Open the certificate download address on the browser device. Compare its
+1. Choose a companion address reachable from the browser device, and open the
+   certificate download address shown with that address. Compare its
    SHA-256 fingerprint with the one displayed by StudyVis, then install and
    trust the certificate on that device. On iPadOS, installing the profile is
    followed by **Settings → General → About → Certificate Trust Settings →
@@ -176,6 +177,10 @@ browser keeps a bounded read-only last view and the saved report for offline
 reload; reconnecting requires enabling media again. **Stop browser companion** on the
 desktop restores its session controls and invalidates the old password. An
 explicit browser disconnect clears its cached view.
+If another app takes a saved companion port, StudyVis displays a new link;
+open that link again. The trusted certificate stays the same. After a desktop
+update, reload the companion to use its new version; open tabs keep their live
+session until you choose to reload.
 
 iPadOS browsers support camera and microphone but do not currently expose screen
 capture; screen-based AI checks stay paused there while AI chat still works.

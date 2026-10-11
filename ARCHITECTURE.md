@@ -699,9 +699,14 @@ Each enable creates an eight-character cryptographic pairing password and a
 12-hour lease. Global and per-IP authentication budgets protect the short secret.
 Pairing produces a random HttpOnly, Secure, SameSite=Strict cookie; one controller
 can reconnect with that lease. Stop, local session end and process exit revoke
-the lease and close listeners and media. A stable per-host port and certificate
-allow the browser's origin and offline shell to survive host restarts. The public
-CA certificate is available from a separate HTTP download listener; its SHA-256
+the lease and close listeners and media. Saved per-host ports and a stable certificate
+allow the browser's origin and offline shell to survive host restarts when those
+ports remain available. Corrupt port metadata or a persistent port conflict
+recovers with an available port and saves the new pair; an HTTPS port change
+requires opening the newly displayed companion link, while CA trust stays intact.
+Temporary accept failures retry with bounded backoff without revoking the lease.
+The public CA certificate is available from a separate HTTP download listener
+at each advertised interface address, paired with its HTTPS link; its SHA-256
 fingerprint is displayed on the desktop for comparison before trusting it. The
 CA has critical private-IP name constraints, and private certificate keys stay
 in a private host directory. OS trust-store enforcement of root constraints is
@@ -714,7 +719,11 @@ STUN or TURN. The browser requests capture directly from user gestures, defaults
 the microphone to muted, and releases capture on disconnect. Enabling the
 companion releases desktop capture and mutes local peer playback while pairing
 and throughout browser operation.
+Pending desktop microphone swaps are cancelled across capture ownership changes;
+fresh tracks stay muted until committed to the current desktop stream.
 Browser screen capture for AI is distinct from explicitly sharing it with peers.
+Losing the browser screen, disconnecting or ending takeover clears sharing consent;
+an AI-only capture after reconnect requires a new explicit share action.
 The sample loop receives a clone of the browser screen and pauses when capture
 is missing; it never falls back to a host display. The mirrored session owns
 the local AI engine separately, so text AI remains available without camera or
@@ -725,7 +734,14 @@ The browser reuses the shipped session components for video, chat/direct
 messages, images, audit, timer, AI dialogue and invitations. Snapshots and image
 strings are bounded, fragmented and deduplicated per connection. A generated
 service worker caches only the companion's static build assets, never `/api/`
-or credentials. Browser storage keeps a bounded last text view and the received
+or credentials. A fully cached new build activates without reloading live tabs;
+the next navigation uses its current shell. Older immutable assets remain cached
+while open tabs need them, including tabs from before build reporting was added.
+One complete preceding build also remains cached for navigations already in flight
+when the new worker activates.
+Invitation controls use bounded request IDs and host results; a failed, timed-out
+or disconnected request leaves the dialog retryable instead of showing success.
+Browser storage keeps a bounded last text view and the received
 session report; image bytes remain memory-only. An explicit browser disconnect
 clears the cached view. Host loss shows a disabled cached view rather than a
 network error. Before ordinary session teardown closes the listener, the desktop

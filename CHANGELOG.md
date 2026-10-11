@@ -24,6 +24,19 @@
   even if the companion stops before the screen picker completes.
 - The browser companion restores peer video and microphone audio after a stream
   is briefly removed and added again.
+- Reconnecting or stopping browser screen capture clears sharing consent, so
+  selecting a screen for AI afterward does not share it with friends.
+- Starting the companion cancels pending desktop microphone changes and keeps
+  their tracks muted until the current desktop capture owns them.
+- Browser invitations show success only after the desktop sends them; failed
+  sends display an error in the dialog and remain available for retry.
+- The browser's **Stop sharing** button uses its visible label for accessibility.
+- Companion startup repairs invalid saved ports and recovers from port conflicts
+  without replacing the trusted certificate. Certificate links are available
+  for every displayed network address.
+- Temporary listener resource errors no longer end browser access.
+- Updated companion builds appear on the next reload while existing tabs keep
+  their active session and the cached assets they still need.
 
 ## 1.12.8.1 — 2026-10-06 — Windows runtime packaging revision
 
