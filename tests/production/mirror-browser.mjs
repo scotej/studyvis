@@ -553,7 +553,7 @@ async function assertAiOnlyScreenAfterShareLoss(host, friend, page) {
   )
   await page.waitForTimeout(1000)
   assert.equal(await friend.page().getByText("Alice's screen").count(), 0)
-  await ui.click(page, 'Share screen')
+  await ui.click(page, strings.session.screenShare.toggleAriaLabel)
   await ui.waitForText(friend.page(), "Alice's screen", 30_000)
 }
 
@@ -759,7 +759,7 @@ test(
           })
       })
       const requestScreen = async (index) => {
-        await ui.click(page, 'Share screen')
+        await ui.click(page, strings.session.screenShare.toggleAriaLabel)
         await page.waitForFunction(
           (index) => window.__desktopScreenRequests.length > index,
           index
@@ -837,7 +837,7 @@ test(
         ),
         true
       )
-      await ui.click(page, 'Share screen')
+      await ui.click(page, strings.session.screenShare.stopCta)
       await assertRetired(3)
 
       await requestScreen(4)
@@ -1222,9 +1222,9 @@ for (const [name, engine] of Object.entries({ chromium, firefox, webkit })) {
           await ui.click(page, strings.settings.openAriaLabel)
           await ui.click(page, strings.mirror.screenCapture)
           await closeControls(page)
-          await ui.click(page, 'Share screen')
+          await ui.click(page, strings.session.screenShare.toggleAriaLabel)
           await ui.waitForText(friend.page(), "Alice's screen", 30_000)
-          await ui.click(page, 'Share screen')
+          await ui.click(page, strings.session.screenShare.stopCta)
           await ui.until(
             async () =>
               (await friend.page().getByText("Alice's screen").count()) === 0,

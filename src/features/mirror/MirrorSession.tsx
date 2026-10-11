@@ -768,7 +768,11 @@ export function MirrorSession({ connection }: MirrorSessionProps) {
           <Button
             size="sm"
             variant="ghost"
-            aria-label={strings.session.screenShare.toggleAriaLabel}
+            aria-label={
+              snapshot.screenSharing
+                ? undefined
+                : strings.session.screenShare.toggleAriaLabel
+            }
             aria-pressed={snapshot.screenSharing}
             disabled={
               screenBusy ||

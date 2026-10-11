@@ -260,6 +260,18 @@ export const InvitationFailed: Story = {
     })
   },
 }
+export const ScreenSharing: Story = {
+  args: {
+    connection: connection({ snapshot: { ...snapshot, screenSharing: true } }),
+  },
+  play: async ({ canvasElement }) => {
+    await expect(
+      within(canvasElement).getByRole('button', {
+        name: strings.session.screenShare.stopCta,
+      })
+    ).toBeVisible()
+  },
+}
 export const InvalidSavedSnapshot: Story = {
   args: {
     connection: connection({
