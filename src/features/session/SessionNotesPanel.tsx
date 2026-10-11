@@ -186,7 +186,9 @@ export function SessionNotesPanel({
     undefined
   )
 
-  activeTabRef.current = activeTab
+  useLayoutEffect(() => {
+    activeTabRef.current = activeTab
+  }, [activeTab])
 
   const myEdPubkeyHex = identity?.ed_pubkey_hex ?? null
   const peerList = useMemo(
@@ -561,11 +563,14 @@ export function SessionNotesPanel({
   }
 
   const chatControlsRef = useRef<MirrorChatControls | null>(null)
-  chatControlsRef.current = {
-    sendDirectMessage: (recipient, text) =>
-      submitDirectMessage(text, recipient, true),
-    sendAi: (text) => submitAi(text),
-  }
+  useLayoutEffect(() => {
+    // Browser controls must only use handlers from a committed desktop render.
+    chatControlsRef.current = {
+      sendDirectMessage: (recipient, text) =>
+        submitDirectMessage(text, recipient, true),
+      sendAi: (text) => submitAi(text),
+    }
+  })
   useEffect(() => {
     if (!bridge) return
     return bridge.register({
