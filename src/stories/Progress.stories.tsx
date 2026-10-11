@@ -1,11 +1,19 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
+import { expect, within } from 'storybook/test'
 
 import { Progress } from '@/components/ui/progress'
+import { strings } from '@/strings'
 
 const meta = {
   title: 'UI/Progress',
   component: Progress,
   parameters: { layout: 'centered' },
+  args: { 'aria-label': strings.updater.settings.downloadingLabel },
+  play: async ({ args, canvasElement }) => {
+    await expect(
+      within(canvasElement).getByRole('progressbar')
+    ).toHaveAttribute('aria-valuenow', String(args.value))
+  },
   decorators: [
     (Story) => (
       <div className="w-72">

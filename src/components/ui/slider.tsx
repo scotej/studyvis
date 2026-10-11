@@ -53,6 +53,12 @@ function Slider({
         <SliderPrimitive.Thumb
           data-slot="slider-thumb"
           key={index}
+          {...(props['aria-label'] !== undefined && {
+            'aria-label': props['aria-label'],
+          })}
+          {...(props['aria-labelledby'] !== undefined && {
+            'aria-labelledby': props['aria-labelledby'],
+          })}
           className="block size-4 shrink-0 rounded-full border border-accent-default bg-text-primary shadow-sm ring-accent-ring transition-[color,box-shadow] hover:ring-3 focus-visible:ring-3 focus-visible:outline-hidden disabled:pointer-events-none disabled:opacity-50"
         />
       ))}
