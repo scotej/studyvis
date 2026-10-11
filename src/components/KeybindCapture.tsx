@@ -123,10 +123,7 @@ export function KeybindCapture({
         <div
           data-state={armed ? 'armed' : 'idle'}
           aria-hidden={armed ? 'true' : undefined}
-          className={cn(
-            'flex items-center gap-1 transition-opacity ease-out-token',
-            armed && 'opacity-40'
-          )}
+          className="flex items-center gap-1 transition-opacity ease-out-token"
         >
           {labels.map((label, i) => (
             <Kbd key={`${label}-${i}`}>{label}</Kbd>

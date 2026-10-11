@@ -11,8 +11,8 @@ export type SettingsRowProps = {
   // would be cramped.
   stack?: boolean
   className?: string
-  // Renders the row at low contrast and disables pointer events on the
-  // control slot. Used for low-contrast informational rows such as the
+  // Disables pointer events on the control slot while keeping explanatory
+  // text readable. Used for informational rows such as the
   // Settings → Identity "Recovery phrase" note.
   disabled?: boolean
 }
@@ -48,7 +48,6 @@ export function SettingsRow({
         stack
           ? 'flex-col gap-3'
           : 'flex-row items-center justify-between gap-6',
-        disabled && 'opacity-60',
         className
       )}
     >
