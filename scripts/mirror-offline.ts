@@ -42,21 +42,73 @@ export function mirrorOfflinePlugin(): Plugin {
       const cacheName = `studyvis-mirror-${digest.digest('hex').slice(0, 16)}`
       const source = `const CACHE = ${JSON.stringify(cacheName)}
 const ASSETS = ${JSON.stringify([...files])}
+const builds = new Map()
+async function pruneCaches() {
+  const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true })
+  const liveIds = new Set(windows.map(client => client.id))
+  for (const id of builds.keys()) if (!liveIds.has(id)) builds.delete(id)
+  let unknown = false
+  for (const client of windows) {
+    if (builds.has(client.id)) continue
+    unknown = true
+    client.postMessage({ type: 'studyvis-mirror-build-request' })
+  }
+  // Older frontends do not answer. Keep their assets until those tabs close;
+  // querying again also recovers the map after the worker process restarts.
+  if (unknown) return
+  const retained = new Set([CACHE, ...builds.values()])
+  const keys = await caches.keys()
+  const preceding = keys.slice(0, keys.indexOf(CACHE))
+  // A navigation can have received the previous HTML before its new client is
+  // visible to matchAll(). Keep one complete predecessor as a bounded reserve.
+  // A cache opened by a failed install must not displace that predecessor.
+  for (const key of [...preceding].reverse()) {
+    if (!key.startsWith('studyvis-mirror-')) continue
+    if (await (await caches.open(key)).match('/mirror.html')) {
+      retained.add(key)
+      break
+    }
+  }
+  // CacheStorage.keys() is creation-ordered. A later cache can belong to an
+  // update that is still installing; the active worker must never delete it.
+  await Promise.all(preceding.filter(key => key.startsWith('studyvis-mirror-') &&
+    !retained.has(key)).map(key => caches.delete(key)))
+}
 self.addEventListener('install', event => {
-  event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(ASSETS)))
+  event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(ASSETS))
+    .then(() => self.skipWaiting()))
 })
 self.addEventListener('activate', event => {
-  event.waitUntil(caches.keys().then(keys => Promise.all(keys
-    .filter(key => key.startsWith('studyvis-mirror-') && key !== CACHE)
-    .map(key => caches.delete(key)))).then(() => self.clients.claim()))
+  // Changing the controller does not reload a page or interrupt its media.
+  event.waitUntil(self.clients.claim().then(pruneCaches))
+})
+self.addEventListener('message', event => {
+  if (event.data?.type !== 'studyvis-mirror-build' || !event.source?.id ||
+      typeof event.data.cache !== 'string' ||
+      !/^studyvis-mirror-[a-f0-9]{16}$/.test(event.data.cache)) return
+  builds.set(event.source.id, event.data.cache)
+  event.waitUntil(pruneCaches())
 })
 self.addEventListener('fetch', event => {
   const url = new URL(event.request.url)
   if (event.request.method !== 'GET' || url.origin !== self.location.origin ||
-      url.pathname.startsWith('/api/') || !ASSETS.includes(url.pathname)) return
+      url.pathname.startsWith('/api/') ||
+      (!ASSETS.includes(url.pathname) && !url.pathname.startsWith('/assets/'))) return
+  const navigation = url.pathname === '/' || url.pathname === '/mirror.html'
+  if (navigation) event.waitUntil(pruneCaches())
   event.respondWith(caches.open(CACHE).then(async cache => {
     const cached = await cache.match(url.pathname)
-    return cached || fetch(event.request)
+    if (cached) return cached
+    // Only immutable assets may come from an older build. Never serve an old
+    // HTML shell (or API response) to a new navigation.
+    if (!navigation && url.pathname.startsWith('/assets/')) {
+      for (const key of await caches.keys()) {
+        if (!key.startsWith('studyvis-mirror-') || key === CACHE) continue
+        const previous = await (await caches.open(key)).match(url.pathname)
+        if (previous) return previous
+      }
+    }
+    return fetch(event.request)
   }))
 })
 self.addEventListener('notificationclick', event => {
@@ -67,7 +119,22 @@ self.addEventListener('notificationclick', event => {
   }))
 })
 `
-      writeFileSync(path.join(options.dir ?? 'dist', 'mirror-sw.js'), source)
+      const directory = options.dir ?? 'dist'
+      const html = bundle['mirror.html']
+      if (html?.type === 'asset') {
+        const original =
+          typeof html.source === 'string'
+            ? html.source
+            : Buffer.from(html.source).toString('utf8')
+        writeFileSync(
+          path.join(directory, 'mirror.html'),
+          original.replace(
+            '<head>',
+            `<head>\n    <meta name="studyvis-mirror-build" content="${cacheName}">`
+          )
+        )
+      }
+      writeFileSync(path.join(directory, 'mirror-sw.js'), source)
     },
   }
 }

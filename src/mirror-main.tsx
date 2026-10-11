@@ -9,6 +9,7 @@ import { ApplyReduceMotion } from '@/design/reduce-motion'
 import { ThemeProvider } from '@/design/theme'
 import { createBrowserConnection } from '@/features/mirror/browserConnection'
 import { MirrorSession } from '@/features/mirror/MirrorSession'
+import { registerMirrorOffline } from '@/features/mirror/offline'
 import { useSettingsStore } from '@/stores/settingsStore'
 
 // The browser has no native settings store; follow this device's appearance.
@@ -28,12 +29,4 @@ createRoot(document.getElementById('root')!).render(
   </ThemeProvider>
 )
 
-if (
-  import.meta.env.PROD &&
-  window.isSecureContext &&
-  'serviceWorker' in navigator
-) {
-  void navigator.serviceWorker.register('/mirror-sw.js').catch(() => {
-    // Trusted HTTPS is required for offline caching; the live UI still works.
-  })
-}
+if (import.meta.env.PROD) registerMirrorOffline()
