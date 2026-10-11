@@ -29,7 +29,10 @@ export function createMirrorPeer(options: MirrorPeerOptions): MirrorPeer {
   >()
   const reusable: RTCRtpTransceiver[] = []
   let requestedStreams: Record<string, MediaStream> | null = null
-  const received = new Map<string, MediaStream>()
+  const received = new Map<
+    string,
+    { stream: MediaStream; detach: () => void }
+  >()
   let descriptors: Record<string, string> = {}
   let captureFlags = { camera: false, screen: false }
   let closed = false
@@ -96,7 +99,7 @@ export function createMirrorPeer(options: MirrorPeerOptions): MirrorPeer {
   const renderStreams = () => {
     const streams = Object.fromEntries(
       Object.entries(descriptors).flatMap(([key, id]) => {
-        const stream = received.get(id)
+        const stream = received.get(id)?.stream
         return stream ? [[key, stream] as const] : []
       })
     )
@@ -147,8 +150,20 @@ export function createMirrorPeer(options: MirrorPeerOptions): MirrorPeer {
       renderCaptures()
     } else {
       for (const stream of event.streams) {
-        received.set(stream.id, stream)
-        stream.addEventListener('removetrack', renderStreams)
+        const previous = received.get(stream.id)
+        if (previous?.stream === stream) continue
+        previous?.detach()
+        const detach = () => stream.removeEventListener('removetrack', onRemove)
+        const onRemove = () => {
+          if (received.get(stream.id)?.stream !== stream) return
+          if (stream.getTracks().length === 0) {
+            received.delete(stream.id)
+            detach()
+          }
+          renderStreams()
+        }
+        received.set(stream.id, { stream, detach })
+        stream.addEventListener('removetrack', onRemove)
       }
       renderStreams()
     }
@@ -179,9 +194,8 @@ export function createMirrorPeer(options: MirrorPeerOptions): MirrorPeer {
       if (closed) return
       if (signal.type === 'streams' && options.role === 'browser') {
         descriptors = signal.streams
-        const active = new Set(Object.values(descriptors))
-        for (const id of received.keys())
-          if (!active.has(id)) received.delete(id)
+        // A withdrawn descriptor may return before SDP removes the stream,
+        // in which case its existing receiver emits no second track event.
         renderStreams()
       } else if (signal.type === 'capture' && options.role === 'host') {
         captureFlags = { camera: signal.camera, screen: signal.screen }
@@ -276,6 +290,7 @@ export function createMirrorPeer(options: MirrorPeerOptions): MirrorPeer {
       pc.onconnectionstatechange = null
       pc.onnegotiationneeded = null
       pc.close()
+      for (const entry of received.values()) entry.detach()
       received.clear()
       options.onStreams?.({})
       options.onCapture?.('camera', null)

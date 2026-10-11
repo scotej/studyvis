@@ -561,6 +561,150 @@ async function assertCaptureFreeAi(lab, page) {
 }
 
 const only = process.env.MIRROR_BROWSER
+test(
+  'desktop screen picks: takeover, restored ownership, overlapping requests, and session end',
+  { timeout: 120_000, skip: !!only && only !== 'chromium' },
+  async () => {
+    const lab = await Lab.up({ chromeExecutable })
+    let driver
+    try {
+      const host = await lab.addMachine({ name: 'screen-picker-host' })
+      const friend = await lab.addMachine({ name: 'screen-picker-friend' })
+      const page = host.page()
+      await page.evaluate(observeCapture)
+      driver = new MirrorFixtureDriver({
+        certificateDir: path.join(lab.workdir, 'mirror-certificate'),
+        assetsDir: path.join(root, 'dist'),
+        executable: fixtureExecutable,
+        emit: (event, payload) => {
+          void host.emit(event, payload)
+        },
+      })
+      host.backend.attachMirrorDriver(driver)
+      await Promise.all([
+        onboard(host, { displayName: 'Alice' }),
+        onboard(friend, { displayName: 'Bob' }),
+      ])
+      await pairViaContactCard(host, friend)
+      await inviteAndAccept(host, friend, 'Bob', 'Alice')
+      await page.evaluate(() => {
+        window.__desktopScreenRequests = []
+        navigator.mediaDevices.getDisplayMedia = () =>
+          new Promise((resolve, reject) => {
+            window.__desktopScreenRequests.push({ resolve, reject })
+          })
+      })
+      const requestScreen = async (index) => {
+        await ui.click(page, strings.session.screenShare.toggleAriaLabel)
+        await page.waitForFunction(
+          (index) => window.__desktopScreenRequests.length > index,
+          index
+        )
+      }
+      const resolveScreen = (index) =>
+        page.evaluate((index) => {
+          const canvas = document.createElement('canvas')
+          canvas.width = 320
+          canvas.height = 180
+          canvas.getContext('2d').fillRect(0, 0, 320, 180)
+          const request = window.__desktopScreenRequests[index]
+          request.stream = canvas.captureStream(5)
+          request.resolve(request.stream)
+        }, index)
+      const assertRetired = async (index) => {
+        await page.waitForFunction(
+          (index) =>
+            window.__desktopScreenRequests[index].stream
+              .getTracks()
+              .every((track) => track.readyState === 'ended'),
+          index,
+          { timeout: 5000 }
+        )
+        const state = await page.evaluate((index) => {
+          const stream = window.__desktopScreenRequests[index].stream
+          const tracks = new Set(stream.getTracks())
+          return {
+            attached: [...document.querySelectorAll('video')].some(
+              (video) => video.srcObject === stream
+            ),
+            published: window.__mirrorTestCapture.peers.some((peer) =>
+              peer.getSenders().some((sender) => tracks.has(sender.track))
+            ),
+          }
+        }, index)
+        assert.deepEqual(state, { attached: false, published: false })
+      }
+      const startCompanion = async () => {
+        await ui.click(page, strings.mirror.open)
+        await ui.click(page, strings.mirror.start)
+        await ui.waitForText(page, strings.mirror.takeover)
+      }
+      const stopCompanion = async () => {
+        await ui.click(page, strings.mirror.stop)
+        await page.getByRole('button', { name: strings.mirror.start }).waitFor()
+        await page.keyboard.press('Escape')
+        await page.getByRole('dialog').waitFor({ state: 'hidden' })
+      }
+
+      await requestScreen(0)
+      await startCompanion()
+      await resolveScreen(0)
+      await assertRetired(0)
+      assert.equal(await friend.page().getByText("Alice's screen").count(), 0)
+      await stopCompanion()
+
+      await requestScreen(1)
+      await startCompanion()
+      await stopCompanion()
+      await resolveScreen(1)
+      await assertRetired(1)
+
+      await requestScreen(2)
+      await requestScreen(3)
+      await resolveScreen(3)
+      await ui.waitForText(friend.page(), "Alice's screen", 30_000)
+      await resolveScreen(2)
+      await assertRetired(2)
+      assert.equal(
+        await page.evaluate(() =>
+          window.__desktopScreenRequests[3].stream
+            .getTracks()
+            .every((track) => track.readyState === 'live')
+        ),
+        true
+      )
+      await ui.click(page, strings.session.screenShare.stopCta)
+      await assertRetired(3)
+
+      await requestScreen(4)
+      await startCompanion()
+      await page.evaluate(() =>
+        window.__desktopScreenRequests[4].reject(
+          new DOMException('Retired picker', 'NotReadableError')
+        )
+      )
+      await page.waitForTimeout(100)
+      assert.equal(
+        await page.getByText(strings.session.screenShare.failedToast).count(),
+        0
+      )
+      await stopCompanion()
+
+      await requestScreen(5)
+      await ui.click(page, strings.session.leaveCta)
+      await page
+        .getByRole('main', { name: strings.report.ariaLabel })
+        .waitFor({ timeout: 30_000 })
+      await resolveScreen(5)
+      await assertRetired(5)
+      assert.deepEqual(lab.egressAttempts(), [])
+    } finally {
+      await driver?.close()
+      await lab.down()
+    }
+  }
+)
+
 for (const [name, engine] of Object.entries({ chromium, firefox, webkit })) {
   test(
     `${name}: production companion, real Rust LAN host, peer media, and offline recovery`,

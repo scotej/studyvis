@@ -471,6 +471,14 @@ export function SessionView({
   const [expandedScreen, setExpandedScreen] = useState<string | null>(null)
   const screenStreamRef = useRef<MediaStream | null>(null)
   const screenShareRef = useRef<ScreenShareController | null>(null)
+  const screenRequestGenerationRef = useRef(0)
+  useLayoutEffect(() => {
+    // PR-368 — a picker can outlive a room or a temporary browser takeover.
+    screenRequestGenerationRef.current += 1
+    return () => {
+      screenRequestGenerationRef.current += 1
+    }
+  }, [room, mirror.takeover])
   const cameraSendRef = useRef<
     ((payload: CameraPayload) => Promise<void>) | null
   >(null)
@@ -2033,6 +2041,7 @@ export function SessionView({
   // #96 — stop sharing. Reached from the footer toggle, from the OS-level "Stop
   // sharing" control (the track's 'ended' event), and from session teardown.
   const stopScreenShare = useCallback(() => {
+    screenRequestGenerationRef.current += 1
     const stream = screenStreamRef.current
     screenStreamRef.current = null
     setScreenStream(null)
@@ -2085,14 +2094,19 @@ export function SessionView({
       toast(strings.session.screenShare.stoppedToast)
       return
     }
+    const controller = screenShareRef.current
+    if (!controller) return
+    const generation = ++screenRequestGenerationRef.current
+    const isCurrentRequest = () =>
+      generation === screenRequestGenerationRef.current &&
+      !mirrorTakeoverRef.current &&
+      screenShareRef.current === controller
     // getDisplayMedia has to run inside the live user activation of this click
     // on both WebView2 and WKWebView (the V2-P9 gesture constraint), so it is
     // called here with nothing awaited in front of it.
     void requestScreenShareStream()
       .then((stream) => {
-        const controller = screenShareRef.current
-        if (!controller) {
-          // The session ended while the OS picker was open.
+        if (!isCurrentRequest()) {
           stopTracks(stream)
           return
         }
@@ -2111,6 +2125,7 @@ export function SessionView({
         toast.success(strings.session.screenShare.startedToast)
       })
       .catch((err: unknown) => {
+        if (!isCurrentRequest()) return
         if (err instanceof EntireScreenShareRequiredError) {
           toast.error(
             err.displaySurface === undefined

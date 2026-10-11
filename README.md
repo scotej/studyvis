@@ -2,14 +2,16 @@
 
 A peer-to-peer desktop study app for close friends. Body-doubling
 accountability with on-device AI focus detection. Local-first, no
-servers we run, nothing about you leaves your machine.
+servers we run, no telemetry.
 
 You start a session, your friends join over video, and you keep each
 other on task by being seen working. Turn on the optional AI and the
-app watches your camera and screen on the same machine — nothing
-streams anywhere — and gently nudges you when you drift off-topic.
-After the session, each of you sees a quiet report of how the time
-went.
+app checks your camera and screen locally and gently nudges you when
+you drift off-topic. With the optional browser companion, a paired
+device sends its camera and selected screen over your local network
+to the desktop. AI inference stays on the desktop; capture is never
+uploaded to an AI service. After the session, each of you sees a quiet
+report of how the time went.
 
 This is the 1.x release line. The current release runs on macOS and Windows;
 the next release candidate adds x86_64 Linux AppImage support. CachyOS with

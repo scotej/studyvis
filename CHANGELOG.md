@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.12.9 — 2026-10-11 — Browser companion
 
 ### Added
 
@@ -20,6 +20,10 @@
   the original session ends.
 - Ending capture cancels the focus-check deadline even if a stalled AI request
   does not respond to cancellation.
+- Starting the browser companion cancels pending desktop screen selections,
+  even if the companion stops before the screen picker completes.
+- The browser companion restores peer video and microphone audio after a stream
+  is briefly removed and added again.
 
 ## 1.12.8.1 — 2026-10-06 — Windows runtime packaging revision
 

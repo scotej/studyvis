@@ -4,10 +4,11 @@ import { createMirrorPeer } from '@/features/mirror/peer'
 import type { SignalMessage } from '@/features/mirror/wire'
 
 let streamId = 0
-class TestStream {
+class TestStream extends EventTarget {
   readonly id = `stream-${++streamId}`
   private readonly tracks: MediaStreamTrack[]
   constructor(tracks: MediaStreamTrack[] = []) {
+    super()
     this.tracks = tracks
   }
   getTracks() {
@@ -19,7 +20,20 @@ class TestStream {
   getAudioTracks() {
     return this.tracks.filter((track) => track.kind === 'audio')
   }
-  addEventListener = vi.fn()
+  removeTrack(track: MediaStreamTrack) {
+    const index = this.tracks.indexOf(track)
+    if (index < 0) return
+    this.tracks.splice(index, 1)
+    this.dispatchEvent(new Event('removetrack'))
+  }
+  override addEventListener = vi.fn(
+    (...args: Parameters<EventTarget['addEventListener']>) =>
+      super.addEventListener(...args)
+  )
+  override removeEventListener = vi.fn(
+    (...args: Parameters<EventTarget['removeEventListener']>) =>
+      super.removeEventListener(...args)
+  )
 }
 
 function track(kind: 'video' | 'audio', id: string): MediaStreamTrack {
@@ -265,6 +279,80 @@ describe('LAN peer media ownership', () => {
     browser.receive({ type: 'streams', streams: {} })
     expect(onStreams).toHaveBeenLastCalledWith({})
     browser.close()
+  })
+
+  test('a stream removed and restored before renegotiation returns without a second track event', () => {
+    const onStreams = vi.fn()
+    const browser = createMirrorPeer({
+      role: 'browser',
+      send: vi.fn(),
+      onStreams,
+      onFailure: vi.fn(),
+    })
+    const stream = new TestStream([
+      track('video', 'bob-camera'),
+    ]) as unknown as MediaStream
+    TestConnection.instances[0].ontrack?.({
+      streams: [stream],
+    } as unknown as RTCTrackEvent)
+    browser.receive({ type: 'streams', streams: { bob: stream.id } })
+    expect(onStreams).toHaveBeenLastCalledWith({ bob: stream })
+    browser.receive({ type: 'streams', streams: {} })
+    expect(onStreams).toHaveBeenLastCalledWith({})
+    browser.receive({ type: 'streams', streams: { bob: stream.id } })
+    expect(onStreams).toHaveBeenLastCalledWith({ bob: stream })
+    browser.close()
+  })
+
+  test('a withdrawn stream remains recoverable until WebRTC removes its last track', () => {
+    const onStreams = vi.fn()
+    const browser = createMirrorPeer({
+      role: 'browser',
+      send: vi.fn(),
+      onStreams,
+      onFailure: vi.fn(),
+    })
+    const video = track('video', 'bob-camera')
+    const audio = track('audio', 'bob-mic')
+    const stream = new TestStream([video, audio])
+    TestConnection.instances[0].ontrack?.({
+      streams: [stream],
+    } as unknown as RTCTrackEvent)
+    browser.receive({ type: 'streams', streams: { bob: stream.id } })
+    browser.receive({ type: 'streams', streams: {} })
+    stream.removeTrack(video)
+    expect(onStreams).toHaveBeenLastCalledWith({})
+    browser.receive({ type: 'streams', streams: { bob: stream.id } })
+    expect(onStreams).toHaveBeenLastCalledWith({ bob: stream })
+    browser.receive({ type: 'streams', streams: {} })
+    stream.removeTrack(audio)
+    expect(stream.removeEventListener).toHaveBeenCalledOnce()
+    browser.receive({ type: 'streams', streams: { bob: stream.id } })
+    expect(onStreams).toHaveBeenLastCalledWith({})
+    browser.close()
+  })
+
+  test('repeated track events keep one stream listener and peer close detaches it', () => {
+    const onStreams = vi.fn()
+    const browser = createMirrorPeer({
+      role: 'browser',
+      send: vi.fn(),
+      onStreams,
+      onFailure: vi.fn(),
+    })
+    const video = track('video', 'bob-camera')
+    const stream = new TestStream([video])
+    const connection = TestConnection.instances[0]
+    const event = { streams: [stream] } as unknown as RTCTrackEvent
+    connection.ontrack?.(event)
+    connection.ontrack?.(event)
+    browser.receive({ type: 'streams', streams: { bob: stream.id } })
+    expect(stream.addEventListener).toHaveBeenCalledOnce()
+    browser.close()
+    expect(stream.removeEventListener).toHaveBeenCalledOnce()
+    const renders = onStreams.mock.calls.length
+    stream.removeTrack(video)
+    expect(onStreams).toHaveBeenCalledTimes(renders)
   })
 
   test('prototype-like descriptor keys remain own data properties without inheriting stream fields', () => {
