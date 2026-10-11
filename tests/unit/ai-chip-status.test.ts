@@ -7,7 +7,10 @@
 
 import { describe, expect, test } from 'vitest'
 
-import { deriveAiChipStatus } from '@/features/session/aiChip'
+import {
+  deriveAiChipStatus,
+  deriveMirrorAiChipStatus,
+} from '@/features/session/aiChip'
 
 const running = {
   aiFeaturesEnabled: true,
@@ -78,5 +81,48 @@ describe('deriveAiChipStatus', () => {
     expect(deriveAiChipStatus({ ...running, runtimeStatus: 'error' })).toBe(
       'error'
     )
+  })
+})
+
+describe('mirrored AI availability', () => {
+  const mirrored = { ...running, hasScreen: false, cameraOn: true }
+  test('pauses visual checks while keeping configured text AI available', () => {
+    expect(deriveMirrorAiChipStatus(mirrored)).toBe('paused')
+    expect(deriveMirrorAiChipStatus({ ...mirrored, hasScreen: true })).toBe(
+      'active'
+    )
+    expect(
+      deriveMirrorAiChipStatus({
+        ...mirrored,
+        hasScreen: true,
+        hasLocalStream: false,
+      })
+    ).toBe('paused')
+    expect(
+      deriveMirrorAiChipStatus({
+        ...mirrored,
+        hasScreen: true,
+        cameraOn: false,
+      })
+    ).toBe('paused')
+  })
+  test('missing capture never hides a broken engine or missing model', () => {
+    expect(
+      deriveMirrorAiChipStatus({
+        ...mirrored,
+        hasLocalStream: false,
+        runtimeStatus: 'error',
+      })
+    ).toBe('error')
+    expect(deriveMirrorAiChipStatus({ ...mirrored, activeModelId: null })).toBe(
+      'unconfigured'
+    )
+    expect(
+      deriveMirrorAiChipStatus({
+        ...mirrored,
+        aiFeaturesEnabled: false,
+        runtimeStatus: 'error',
+      })
+    ).toBe('off')
   })
 })

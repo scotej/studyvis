@@ -48,10 +48,10 @@ unsound = "all"
 # advisory surfaces as "remove me" rather than rotting here silently.
 ignore = [
   # quick-xml 0.37.5 / 0.39.3, both beneath tauri (plist + bundler paths).
-  # Denial-of-service reachable only by parsing hostile XML; StudyVis parses
-  # no attacker-supplied XML at runtime — the exposure is build-time
-  # tooling. Upstream fix is 0.41.0, which has to arrive via tauri.
-  { id = "RUSTSEC-2026-0194", reason = "quick-xml DoS; transitive under tauri, no runtime XML from peers. Drop when tauri pulls >=0.41." },
+  # Hostile-XML parsing is absent: Windows notifications use escaping only,
+  # macOS restart reads the trusted app bundle's Info.plist, and bundling also
+  # parses local XML. Upstream fix is 0.41.0, which has to arrive via tauri.
+  { id = "RUSTSEC-2026-0194", reason = "quick-xml DoS; notification escaping/trusted app-bundle XML, no peer XML parsing. Drop when tauri pulls >=0.41." },
   { id = "RUSTSEC-2026-0195", reason = "quick-xml namespace-allocation DoS; same path and same fix as RUSTSEC-2026-0194." },
   # glib 0.18.5, Linux only, and only via tauri -> tray-icon ->
   # libappindicator -> gtk 0.18 -> atk. Unsound out-pointer in

@@ -1,62 +1,24 @@
 name: Deploy
 
-# AN INDICATOR, NOT A GATE. Nothing waits for this workflow.
+# Manual installer previews, requested from Actions or with
+# `gh workflow run deploy.yml --ref <branch>`. Build the selected ref's exact
+# commit into macOS, Windows, and Linux artifacts for testing before release.
+# Each platform records its own preview Deployment and retains its artifact
+# for seven days. `Deployed` is an indicator, never a required merge check.
 #
-# Read this before adding `Deployed` to branch protection: it is not meant to
-# be there. CI now gates a real Linux AppImage build/startup smoke, but this
-# workflow additionally spends ~30-60 minutes each on the macOS and Windows
-# preview installers. Merging waits on `All pre-merge checks` (ci.yml) and
-# `PR title` (pr-title.yml); those two remain the only required checks. This
-# workflow runs alongside them and reports: green means the commit produced
-# installable previews for macOS, Windows, and the Linux release candidate; red
-# means a release-matrix platform stopped packaging. It remains an indicator,
-# not an additional required check.
+# PR updates, merges, and release-version bumps must not automatically rebuild
+# the preview matrix before release.yml builds the production installers.
+# Required CI and its independent Linux packaged-runtime audit still run.
+# Tagged releases retain their clean runtime build and exact-artifact checks.
 #
-# So a red `Deployed` is information, not a blocker. Look at it before you
-# merge if the change is shippable; act on it when it is red; never sit and
-# wait for it. If it turns out to catch things often enough to be worth the
-# wall-clock, promoting it to required is a one-line ruleset edit — that is a
-# deliberate future decision, not the current setup.
-#
-# What it actually does: every commit that reaches a pull request or main is
-# built into a real, installable StudyVis bundle for each release-matrix
-# platform from that exact SHA, published as the run's artifacts, and recorded
-# as a GitHub Deployment — one per platform, to `preview-macos`,
-# `preview-windows`, and `preview-linux`, because the artifacts succeed and
-# fail independently.
-#
-# This replaces .github/workflows/pr-build.yml ("PR installers"), which ran
-# the same build behind a `build-installers` label. The reasoning for that
-# label was sound and is kept — a full Tauri build is expensive and most PRs
-# here are docs or CI — but it is now encoded as the `scope` job below rather
-# than left to whoever remembers to apply a label. A change that touches no
-# shippable file is deployed as a docs-only change; everything else builds.
-# What is gone is having to opt IN: a shippable change now always gets its
-# bundle, whether or not anyone thought to ask for one.
-#
-# Why this matters more here than on a typical project: CI compiles, lints,
-# builds, and launches a packaged Linux AppImage, but the things this
-# app gets wrong most often — a camera stream that never reaches a late joiner,
-# a sidecar that dies at session start — need two real builds talking to each
-# other. Before this workflow, the first installable build of any change
-# appeared AFTER release-prep had already pushed the version tag.
-#
-# These bundles are NOT releases. `createUpdaterArtifacts` is switched off
-# below, so no `latest.json` is produced and nothing here can be mistaken
-# for — or consumed by — the update channel (X6).
+# These previews have createUpdaterArtifacts disabled: no latest.json is
+# produced, and they can never reach the update channel (X6).
 
 on:
-  push:
-    branches: [main]
-  pull_request:
   workflow_dispatch:
 
-# Deliberately the same shape as ci.yml, including the activity types left at
-# their defaults. #102 is the reason: an event that re-fires on an UNCHANGED
-# commit (`edited`, `ready_for_review`) combines with cancel-in-progress to
-# leave a `cancelled` required check beside a successful one on the same SHA,
-# and the PR then sits at BLOCKED with everything green. Only opened /
-# synchronize / reopened, all of which mean a new head commit to deploy.
+# A repeated manual preview on the same ref supersedes the earlier request.
+# Production builds use release.yml's separate non-cancelling per-tag group.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -334,7 +296,7 @@ jobs:
 
       - name: Install Rust toolchain
         if: env.SHIPPABLE == 'true'
-        uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master; the toolchain input selects the channel
+        uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # v1
         with:
           toolchain: '1.97.1'
           targets: ${{ matrix.rust-targets }}

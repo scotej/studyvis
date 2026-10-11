@@ -37,6 +37,7 @@ export type SessionInviteDialogProps = {
   // True means the envelope was sent; an unconfirmed ACK is still a send.
   // False leaves the row available for another attempt.
   onInvite: (friend: Friend) => Promise<boolean>
+  error?: string | null
 }
 
 export function SessionInviteDialog({
@@ -47,6 +48,7 @@ export function SessionInviteDialog({
   inSessionEdPubkeys,
   full,
   onInvite,
+  error,
 }: SessionInviteDialogProps) {
   // Per-open invited set so a row flips to "Invited" after the click but a
   // reopened dialog starts fresh (an invite may have expired meanwhile).
@@ -111,6 +113,11 @@ export function SessionInviteDialog({
             {strings.session.invite.dialogDescription}
           </DialogDescription>
         </DialogHeader>
+        {error ? (
+          <p role="alert" className="text-sm text-text-primary">
+            {error}
+          </p>
+        ) : null}
         {full ? (
           <p className="text-sm text-text-secondary">{strings.session.full}</p>
         ) : rows.length === 0 ? (

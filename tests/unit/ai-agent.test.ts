@@ -78,6 +78,56 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
+describe('handleUserText cancellation', () => {
+  const input = {
+    text: 'Switch to geometry',
+    declaredTopic: 'Calculus',
+    modelId: 'local-model',
+    recentAuditKinds: ['joined'],
+  }
+
+  test('an already canceled mirror action never queries the engine', async () => {
+    const controller = new AbortController()
+    controller.abort()
+    const getSidecarStatus = vi.fn(async () => sidecarStatus())
+    await expect(
+      handleUserText(
+        { ...input, signal: controller.signal },
+        buildRuntime({ getSidecarStatus })
+      )
+    ).rejects.toMatchObject({ name: 'AbortError' })
+    expect(getSidecarStatus).not.toHaveBeenCalled()
+  })
+
+  test('session or model replacement cancels readiness even if the native query ignores abort', async () => {
+    const controller = new AbortController()
+    const getSidecarStatus = vi.fn(() => new Promise<SidecarStatus>(() => {}))
+    const request = handleUserText(
+      { ...input, signal: controller.signal },
+      buildRuntime({ getSidecarStatus })
+    )
+    controller.abort()
+    await expect(request).rejects.toMatchObject({ name: 'AbortError' })
+  })
+
+  test('session or model replacement aborts generation even if fetch ignores abort', async () => {
+    const controller = new AbortController()
+    let requestSignal: AbortSignal | null | undefined
+    const fetchMock = vi.fn<typeof fetch>((_input, init) => {
+      requestSignal = init?.signal
+      return new Promise<Response>(() => {})
+    })
+    const request = handleUserText(
+      { ...input, signal: controller.signal },
+      buildRuntime({ fetch: fetchMock })
+    )
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+    controller.abort()
+    await expect(request).rejects.toMatchObject({ name: 'AbortError' })
+    expect(requestSignal?.aborted).toBe(true)
+  })
+})
+
 describe('parseAgentReply', () => {
   test('parses topic_change with payload + reply', () => {
     const reply = parseAgentReply(

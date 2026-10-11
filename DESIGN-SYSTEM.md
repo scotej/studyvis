@@ -540,6 +540,15 @@ V3 includes screen-reader semantics, reduced-motion mode, and an axe-core CI gat
 
 ## 12. Layout grids
 
+The LAN companion (#365) reuses the session's video, chat, audit, timer and report
+components. Its session rail stacks below video on tablet widths instead of
+requiring the desktop window minimum. Pairing and reconnect states retain the
+same theme tokens, labels and keyboard focus rules. Hold-to-talk is reachable
+by pointer, touch and keyboard; audio playback and capture permission requests
+remain explicit user gestures. Missing browser capabilities receive text
+guidance, and disconnected controls are disabled while the last view stays
+visible. Keep-awake is opt-in and never replaces the disconnected status.
+
 - **Window minimum**: 1024 × 640.
 - **Window default on first launch**: 1280 × 800.
 - **Content max width** (onboarding): 1200 (`sizes.contentMaxWidth`).

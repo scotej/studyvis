@@ -25,6 +25,91 @@ import type { AuditEventKind } from '@/lib/audit-types'
 const ELLIPSIS = '…'
 
 export const strings = {
+  mirror: {
+    title: 'Browser companion',
+    open: 'Use a browser',
+    intro:
+      'Use this session from another device on the same network. This desktop keeps your identity, friends, history, and AI engine.',
+    start: 'Start browser companion',
+    stop: 'Stop browser companion',
+    starting: 'Starting browser companion',
+    expired:
+      'This companion link has expired. Start it again for a new pairing password.',
+    restart: 'Restart browser companion',
+    stopFailed: "Couldn't stop the browser companion. Try again.",
+    connected: 'Browser connected',
+    waiting: 'Waiting for your browser',
+    resumed: 'Controls stay here while the desktop reconnects.',
+    takeover:
+      'Desktop capture is paused. Choose your camera, microphone, and screen in the browser. Stop the companion to use this desktop again.',
+    disconnected:
+      'Desktop disconnected. Your session continues on the desktop. Controls will return when it reconnects.',
+    pairing: 'Connect to your desktop',
+    password: 'Pairing password',
+    pair: 'Connect',
+    pairingHelp: 'Enter the password shown in StudyVis on your desktop.',
+    certificate:
+      'Trust the local certificate on the device where you will use the browser before opening the companion link. Compare its fingerprint with the desktop.',
+    certificateDownload: 'Download local certificate',
+    certificateCopied: 'Certificate link copied.',
+    savedReport:
+      'Your report is available here while the desktop is disconnected.',
+    reportNotCached:
+      "Download this report to keep it. This browser couldn't save an offline copy, so reloading will lose this view.",
+    fingerprint: 'Certificate fingerprint',
+    link: 'Companion link',
+    copy: 'Copy link',
+    copied: 'Companion link copied.',
+    copyFailed: "Couldn't copy the link.",
+    failed: "Couldn't start the browser companion.",
+    pairFailed: "Couldn't connect. Check the password and local certificate.",
+    pairRateLimited: 'Too many pairing attempts. Wait a minute and try again.',
+    pairInUse:
+      'Another browser is using this companion. Stop and restart the companion on the desktop to switch browsers.',
+    sessionMoved:
+      'This session is open in another tab. Use that tab, or connect again here to take control.',
+    controlFailed: "Couldn't complete that action. Try again.",
+    messageSendFailed: "Couldn't send your message. Try again.",
+    imageSendFailed: "Couldn't send that image. Try again.",
+    inviteFailed: "Couldn't send the invitation. Try again.",
+    dismissError: 'Dismiss',
+    enableMedia: 'Enable camera and microphone',
+    retryMedia: 'Try camera and microphone again',
+    enableAudio: 'Enable session audio',
+    mediaHelp:
+      'Choose this device’s camera and microphone. Your microphone stays muted until you hold Talk.',
+    screenHelp:
+      'Choose a screen for local AI checks. Sharing with friends is a separate control.',
+    screenCapture: 'Choose screen for AI',
+    screenUnavailable:
+      'This browser cannot capture a screen. Camera, microphone, chat, text AI, timers, and incoming screens remain available. AI focus checks stay paused.',
+    screenFailed: "Couldn't capture the screen. Try again and choose a screen.",
+    screenStop: 'Stop screen capture',
+    controls: 'Session controls',
+    aiAction: 'Talk to AI',
+    aiDisabled: 'Enable AI on the desktop and select a model to use it here.',
+    aiEnable: 'Enable AI checks',
+    aiToggleHelp:
+      'AI runs on the desktop and checks only the camera and screen you choose here.',
+    notifications: 'Enable browser notifications',
+    notificationsUnavailable:
+      'Browser notifications are unavailable here. On iPad, add the companion to your Home Screen and open it there. Session events still appear in the app.',
+    notificationsDenied:
+      'Notifications are blocked in this browser. Allow them in its site settings.',
+    keepAwake: 'Keep screen awake',
+    awakeUnavailable: 'This browser cannot keep the screen awake.',
+    topic: 'Study topic',
+    updateTopic: 'Update topic',
+    ended:
+      'This study session has ended. Return to StudyVis on your desktop for your report.',
+    disconnect: 'Disconnect this browser',
+    invalidSnapshot:
+      'The desktop sent an incompatible session. Update StudyVis and reconnect.',
+    offlineImages: 'Images will return when the desktop reconnects.',
+    secondsRemaining: (seconds: number) =>
+      `Pairing expires in ${seconds} seconds.`,
+    elapsed: (minutes: number) => `${minutes} min`,
+  },
   app: {
     name: 'StudyVis',
     homeSrHeading: 'StudyVis',
@@ -2182,6 +2267,23 @@ export const strings = {
   },
 
   notifications: {
+    aiReply: {
+      title: 'StudyVis AI',
+      body: (text: string) => text.slice(0, 500),
+    },
+    sessionMessage: {
+      title: 'StudyVis',
+      body: (name: string, text: string) => `${name}: ${text}`,
+    },
+    directMessage: {
+      title: 'StudyVis',
+      body: (name: string, text: string) =>
+        `${name} sent you a message: ${text}`,
+    },
+    image: {
+      title: 'StudyVis',
+      body: (name: string) => `${name} shared an image.`,
+    },
     invite: {
       title: 'StudyVis',
       // Body comes from friends.inbox.inviteBody — sender-dependent.

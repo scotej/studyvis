@@ -2,14 +2,16 @@
 
 A peer-to-peer desktop study app for close friends. Body-doubling
 accountability with on-device AI focus detection. Local-first, no
-servers we run, nothing about you leaves your machine.
+servers we run, no telemetry.
 
 You start a session, your friends join over video, and you keep each
 other on task by being seen working. Turn on the optional AI and the
-app watches your camera and screen on the same machine — nothing
-streams anywhere — and gently nudges you when you drift off-topic.
-After the session, each of you sees a quiet report of how the time
-went.
+app checks your camera and screen locally and gently nudges you when
+you drift off-topic. With the optional browser companion, a paired
+device sends its camera and selected screen over your local network
+to the desktop. AI inference stays on the desktop; capture is never
+uploaded to an AI service. After the session, each of you sees a quiet
+report of how the time went.
 
 This is the 1.x release line. The current release runs on macOS and Windows;
 the next release candidate adds x86_64 Linux AppImage support. CachyOS with
@@ -144,10 +146,59 @@ Once you're past onboarding you land on your friends list. Click an
 online friend, click **Invite**, they accept, and you're in a session
 together.
 
+## Use a browser on another device
+
+During a session, open **Use a browser** in the session footer and choose
+**Start browser companion**. StudyVis displays a local HTTPS address, QR code, pairing
+password, and certificate fingerprint. Keep the desktop awake and connect the
+browser device to the same private IPv4 network.
+
+1. Choose a companion address reachable from the browser device, and open the
+   certificate download address shown with that address. Compare its
+   SHA-256 fingerprint with the one displayed by StudyVis, then install and
+   trust the certificate on that device. On iPadOS, installing the profile is
+   followed by **Settings → General → About → Certificate Trust Settings →
+   Enable full trust**. Desktop browsers use the device or browser certificate
+   store. Merely dismissing a certificate warning does not reliably enable
+   camera access or offline caching.
+2. Open the HTTPS address or scan its QR code and enter the displayed password.
+   Choose **Enable camera and microphone** when ready. The microphone stays
+   muted until you hold **Talk**. Enabling the companion releases desktop
+   capture; capture stays paused until you enable it in the paired browser.
+3. Use the session controls, chat, direct messages, shared images, timer and AI
+   dialogue as usual. Capture a screen for AI in the browser's session settings;
+   sharing that screen with friends is a separate, explicit control. Choose an
+   entire display in the browser picker when you want the full screen.
+
+The desktop keeps your identity, peer connections, saved reports and AI engine.
+Configure the model on the desktop before starting. A disconnect pauses browser
+capture and AI rather than switching to the desktop camera or display. The
+browser keeps a bounded read-only last view and the saved report for offline
+reload; reconnecting requires enabling media again. **Stop browser companion** on the
+desktop restores its session controls and invalidates the old password. An
+explicit browser disconnect clears its cached view.
+If another app takes a saved companion port, StudyVis displays a new link;
+open that link again. The trusted certificate stays the same. After a desktop
+update, reload the companion to use its new version; open tabs keep their live
+session until you choose to reload.
+
+iPadOS browsers support camera and microphone but do not currently expose screen
+capture; screen-based AI checks stay paused there while AI chat still works.
+Add the site to the Home
+Screen to request iPadOS notification permission. Notifications depend on an
+open, connected browser; there is no cloud push service for closed or suspended
+devices. Keep-awake and audio-output controls appear where the browser supports
+them. See [Apple's certificate trust instructions](https://support.apple.com/en-ie/102390)
+and [WebKit's Home Screen notification requirements](https://webkit.org/blog/13878/web-push-for-web-apps-on-ios-and-ipados/).
+
 ## Where your data lives
 
-Everything that identifies you or remembers your sessions stays in
-the OS user-data directory:
+The desktop stores your identity and session history in the OS user-data
+directory. A paired browser also keeps a bounded text view and saved report in
+its own local storage so they remain available offline; explicit disconnect
+clears that browser cache.
+
+Desktop data locations:
 
 - **macOS** — `~/Library/Application Support/studyvis/`
 - **Windows** — `%APPDATA%\studyvis\` (i.e. `~/AppData/Roaming/studyvis/`)
@@ -479,22 +530,27 @@ CachyOS KDE matrix in PLAN §8. CodeQL runs alongside as a non-required workflow
 the Security tab. Storybook publishes to GitHub Pages from
 `main` and is attached to each PR as an artifact.
 
-Every pull request also gets a deployment, and no pull request waits
-for one. `deploy.yml` builds each commit that reaches a PR or `main`
-into a real installable preview bundle for macOS, Windows, and the Linux
-release candidate that you can smoke-test — `StudyVis-macOS-arm64-pr<n>` and
-`StudyVis-Windows-x64-pr<n>`, plus the x86_64 Linux AppImage artifact,
-attached to the run for seven days. Each platform records its own GitHub
-Deployment (`preview-macos`, `preview-windows`, `preview-linux`), so one
-broken platform is visible without hiding the others.
+Installer previews are requested explicitly through **Actions → Deploy → Run
+workflow**, selecting the branch or tag to test, or from the CLI:
 
-Its **Deployed** check is an _indicator only_ — a full build takes
-30–60 minutes per platform, so merging waits on the two branch-protection
-checks above, never on this one. Red means a platform stopped building and is
-worth acting on; it still will not block the merge. A commit touching
-only docs or workflow files builds nothing and is recorded as a
-documentation deployment. These bundles carry no updater manifest and
-are never consumable as an update.
+```sh
+gh workflow run deploy.yml --ref feat/my-change
+gh run list --workflow deploy.yml --branch feat/my-change
+```
+
+`deploy.yml` builds that ref's exact commit into macOS, Windows, and Linux
+preview bundles. Download `StudyVis-macOS-arm64-<run-id>`,
+`StudyVis-Windows-x64-<run-id>`, and `StudyVis-Linux-x64-<run-id>` from the
+run's **Artifacts** section within seven days. Each platform records its own
+GitHub Deployment (`preview-macos`, `preview-windows`, `preview-linux`).
+Its **Deployed** check remains an indicator; merging waits on the two
+branch-protection checks above. These bundles have no updater manifest.
+
+PR updates and `main` pushes do not automatically build these previews.
+CI still runs its independent Linux AppImage audit, including on the release
+version bump. **Release prep** pushes the new version tag, which starts one
+production installer matrix in `release.yml`; the clean tagged runtime build,
+exact-artifact checks, and verified publication remain required.
 
 **Read before changing code.** `CLAUDE.md` (repo root) is the
 working agreement — house rules, doc map, quality gates — for human

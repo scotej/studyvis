@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
-import { userEvent, waitFor, within } from 'storybook/test'
+import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
 import { AudioDevicePicker } from '@/components/AudioDevicePicker'
 
@@ -52,10 +52,31 @@ export const Swapping: Story = {
 export const OpenWithSelectedDevice: Story = {
   args: {
     currentDeviceId: 'mic-2',
+    onSelect: fn(),
   },
-  play: async ({ canvasElement }) => {
+  play: async ({ args, canvasElement }) => {
     const canvas = within(canvasElement)
-    await userEvent.click(await canvas.findByRole('button'))
+    const body = within(document.body)
+    const trigger = await canvas.findByRole('button')
+    trigger.focus()
+    await userEvent.keyboard('{ArrowDown}')
+    await body.findByRole('menu')
+    await userEvent.keyboard('{Escape}')
+    await waitFor(() => expect(trigger).toHaveFocus())
+
+    await userEvent.keyboard('{ArrowDown}')
+    const firstDevice = await body.findByRole('menuitemradio', {
+      name: 'Built-in Microphone',
+    })
+    await waitFor(() => expect(firstDevice).toHaveFocus())
+    await userEvent.keyboard('{ArrowDown}')
+    await userEvent.keyboard('{ArrowUp}')
+    await waitFor(() => expect(firstDevice).toHaveFocus())
+    await userEvent.keyboard('{Enter}')
+    await expect(args.onSelect).toHaveBeenLastCalledWith('mic-1')
+    await waitFor(() => expect(trigger).toHaveFocus())
+
+    await userEvent.keyboard('{ArrowDown}')
     await waitFor(() => {
       const checked = document.querySelector(
         '[role="menuitemradio"][aria-checked="true"]'

@@ -1,5 +1,48 @@
 # Changelog
 
+## 1.12.9 — 2026-10-11 — Browser companion
+
+### Added
+
+- Use a browser on another device on your local network during a session.
+  Mirroring keeps identity, peer connections and AI on the desktop while the
+  paired browser supplies camera, microphone and, where supported, screen
+  capture. Session chat, direct messages, images, timer, AI dialogue and saved
+  reports use the same StudyVis components.
+- QR pairing, certificate fingerprint guidance, host takeover, reconnect and
+  offline reload, browser downloads and an optional keep-awake control.
+  iPadOS supports camera, microphone and session controls; its browsers do not
+  support screen capture or closed-app LAN notifications.
+
+### Fixed
+
+- Screen readers receive correctly grouped conversation tabs, chat and session
+  logs, volume labels and download progress.
+- Reports and study activity can be scrolled with the keyboard; shortcut and
+  unavailable-settings text stays readable, and tutorial headings follow the
+  page hierarchy.
+- Delayed message and image sends cannot populate a different session after
+  the original session ends.
+- Ending capture cancels the focus-check deadline even if a stalled AI request
+  does not respond to cancellation.
+- Starting the browser companion cancels pending desktop screen selections,
+  even if the companion stops before the screen picker completes.
+- The browser companion restores peer video and microphone audio after a stream
+  is briefly removed and added again.
+- Reconnecting or stopping browser screen capture clears sharing consent, so
+  selecting a screen for AI afterward does not share it with friends.
+- Starting the companion cancels pending desktop microphone changes and keeps
+  their tracks muted until the current desktop capture owns them.
+- Browser invitations show success only after the desktop sends them; failed
+  sends display an error in the dialog and remain available for retry.
+- The browser's **Stop sharing** button uses its visible label for accessibility.
+- Companion startup repairs invalid saved ports and recovers from port conflicts
+  without replacing the trusted certificate. Certificate links are available
+  for every displayed network address.
+- Temporary listener resource errors no longer end browser access.
+- Updated companion builds appear on the next reload while existing tabs keep
+  their active session and the cached assets they still need.
+
 ## 1.12.8.1 — 2026-10-06 — Windows runtime packaging revision
 
 ### Fixed

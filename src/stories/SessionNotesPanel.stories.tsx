@@ -1,6 +1,6 @@
 import { useEffect, type ReactNode } from 'react'
 import type { Decorator, Meta, StoryObj } from '@storybook/react-vite'
-import { expect, fn, userEvent, within } from 'storybook/test'
+import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
 import {
   __resetAiAgentRuntime,
@@ -59,12 +59,18 @@ const image: SessionImage = {
 function StoryStateBoundary({ children }: { children: ReactNode }) {
   useEffect(() => {
     const previousPeers = useSessionStore.getState().peers
+    const previousStatus = useSessionStore.getState().status
+    const previousSessionTopic = useSessionStore.getState().sessionTopic
     const previousModelId = useModelStore.getState().activeModelId
     const previousAiEnabled =
       useSettingsStore.getState().values.aiFeaturesEnabled
     const previousAiRuntime = getAiAgentRuntime()
 
-    useSessionStore.setState({ peers: {} })
+    useSessionStore.setState({
+      peers: {},
+      status: 'idle',
+      sessionTopic: null,
+    })
     useModelStore.setState({ activeModelId: null })
     useSettingsStore.setState((state) => ({
       values: { ...state.values, aiFeaturesEnabled: false },
@@ -72,7 +78,11 @@ function StoryStateBoundary({ children }: { children: ReactNode }) {
     __resetAiAgentRuntime()
 
     return () => {
-      useSessionStore.setState({ peers: previousPeers })
+      useSessionStore.setState({
+        peers: previousPeers,
+        status: previousStatus,
+        sessionTopic: previousSessionTopic,
+      })
       useModelStore.setState({ activeModelId: previousModelId })
       useSettingsStore.setState((state) => ({
         values: { ...state.values, aiFeaturesEnabled: previousAiEnabled },
@@ -188,6 +198,10 @@ const STORY_PEERS = {
 
 export const AiConversation: Story = {
   play: async ({ canvasElement }) => {
+    useSessionStore.setState({
+      status: 'active',
+      sessionTopic: 'story-ai-conversation',
+    })
     useSettingsStore.setState((state) => ({
       values: { ...state.values, aiFeaturesEnabled: true },
     }))
@@ -259,6 +273,33 @@ export const DirectMessageSelection: Story = {
       within(document.body).getByRole('menuitem', { name: /Alice/ })
     )
     await expect(canvas.getByText('No direct messages yet.')).toBeVisible()
+    await expect(
+      await canvas.findByRole('tab', { name: 'Alice' })
+    ).toHaveAttribute('aria-selected', 'true')
+
+    const group = canvas.getByRole('tab', { name: 'Group' })
+    const alice = canvas.getByRole('tab', { name: 'Alice' })
+    alice.focus()
+    await userEvent.keyboard('{Home}')
+    await waitFor(() => expect(group).toHaveFocus())
+    await userEvent.keyboard('{End}')
+    await waitFor(() => expect(alice).toHaveFocus())
+    await userEvent.keyboard('{ArrowRight}')
+    await waitFor(() => expect(group).toHaveFocus())
+    await userEvent.keyboard('{ArrowLeft}')
+    await waitFor(() => expect(alice).toHaveFocus())
+    await userEvent.click(canvas.getByRole('button', { name: 'Close Alice' }))
+    await waitFor(() => expect(group).toHaveFocus())
+
+    const add = canvas.getByRole('button', { name: 'Add conversation' })
+    await userEvent.click(add)
+    await within(document.body).findByRole('menu')
+    await userEvent.keyboard('{Escape}')
+    await waitFor(() => expect(add).toHaveFocus())
+    await userEvent.click(add)
+    await userEvent.click(
+      within(document.body).getByRole('menuitem', { name: /Alice/ })
+    )
     await expect(
       await canvas.findByRole('tab', { name: 'Alice' })
     ).toHaveAttribute('aria-selected', 'true')

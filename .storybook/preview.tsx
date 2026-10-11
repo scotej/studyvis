@@ -102,11 +102,11 @@ const preview: Preview = {
     },
     // V3-P7 — `@storybook/addon-a11y` axe-core integration. `test: 'error'`
     // turns any violation into a `test-storybook` failure in CI; the panel
-    // in the dev Storybook UI shows them while developing. Element scope
-    // ('#storybook-root') keeps Storybook's own chrome out of the audit.
+    // in the dev Storybook UI shows them while developing. The preview iframe
+    // body includes portaled dialogs and menus; manager chrome lives outside it.
     a11y: {
       test: 'error',
-      element: '#storybook-root',
+      context: { include: ['body'] },
     },
   },
   decorators: [withTheme],

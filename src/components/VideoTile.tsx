@@ -25,6 +25,7 @@ export type VideoTileProps = {
   state?: FocusState
   ptt?: boolean
   isLocal?: boolean
+  mutePlayback?: boolean
   // V2-P6 — when the tile is in `alerted` state, the off-task user's
   // reasoning text is shown inline above the name caption. Visible to all
   // peers (the carryover spec: "the off-task user's tile shows the
@@ -58,6 +59,7 @@ export function VideoTile({
   state,
   ptt = false,
   isLocal = false,
+  mutePlayback = false,
   alertReasoning,
   cameraOff = false,
   sinkId,
@@ -133,7 +135,7 @@ export function VideoTile({
         // A screen tile never carries audio (the share is requested video-only)
         // and muting it defensively keeps a peer who publishes one anyway from
         // echoing against the live mic.
-        muted={isLocal || isScreen}
+        muted={isLocal || isScreen || mutePlayback}
         className={cn(
           'h-full w-full',
           // Cropping a screen loses whatever the person is pointing at; letter-

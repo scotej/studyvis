@@ -84,7 +84,7 @@ export function AudioDevicePicker({
   const label = active?.label ?? strings.session.audio.systemDefault
 
   return (
-    <DropdownMenu>
+    <DropdownMenu modal={false}>
       <DropdownMenuTrigger asChild>
         <Button
           variant="ghost"

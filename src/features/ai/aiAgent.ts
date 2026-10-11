@@ -166,6 +166,7 @@ export type HandleUserTextInput = {
   // Last few audit-event kinds, newest-first. Trimmed to a fixed window
   // so the user-message context payload stays small.
   recentAuditKinds: ReadonlyArray<string>
+  signal?: AbortSignal
 }
 
 export type SidecarReadinessOptions = {
@@ -198,14 +199,17 @@ export async function handleUserText(
   if (trimmed.length === 0) {
     throw new AiAgentError('empty_text', 'message is empty')
   }
+  if (input.signal?.aborted) throw abortReason(input.signal)
   // Rust marks the child as running as soon as it spawns, while llama-server
   // returns 503 from /health until model/projector loading finishes. Keep that
   // startup window separate from the user's 60-second generation budget. The
   // resolver returns the port that actually became healthy; Rust may replace
   // the initial port while automatically recovering a crashed child.
   const port = await waitForSidecarReady(input.modelId, runtime, {
+    signal: input.signal,
     unavailableMessage: strings.ai.agent.sidecarOff,
   })
+  if (input.signal?.aborted) throw abortReason(input.signal)
 
   const userContent = buildUserContext({
     text: trimmed.slice(0, MAX_USER_TEXT_LEN),
@@ -226,7 +230,16 @@ export async function handleUserText(
 
   const controller = new AbortController()
   let timedOut = false
+  let abortedExternally = false
+  const abortFromInput = () => {
+    if (timedOut) return
+    abortedExternally = true
+    controller.abort(input.signal?.reason)
+  }
+  input.signal?.addEventListener('abort', abortFromInput, { once: true })
+  if (input.signal?.aborted) abortFromInput()
   const timer = setTimeout(() => {
+    if (abortedExternally) return
     timedOut = true
     controller.abort()
   }, AGENT_REQUEST_TIMEOUT_MS)
@@ -256,6 +269,7 @@ export async function handleUserText(
       controller.signal
     )) as ChatCompletionResponse
   } catch (err) {
+    if (abortedExternally) throw abortReason(input.signal)
     if (err instanceof AiAgentError) throw err
     if (timedOut) {
       log.warn('request.timeout', {
@@ -273,6 +287,7 @@ export async function handleUserText(
     )
   } finally {
     clearTimeout(timer)
+    input.signal?.removeEventListener('abort', abortFromInput)
   }
 
   const content = json?.choices?.[0]?.message?.content ?? ''

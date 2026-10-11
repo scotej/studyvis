@@ -37,6 +37,11 @@ import { useAuditStore } from '@/stores/auditStore'
 import { useSessionStore } from '@/stores/sessionStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { strings } from '@/strings'
+import type {
+  MirrorChatControls,
+  MirrorChatSnapshot,
+} from '@/features/mirror/sessionBridge'
+import type { PeerSnapshot } from '@/stores/sessionStore'
 
 import {
   buildDirectMessagePayload,
@@ -102,6 +107,24 @@ export type SessionNotesPanelProps = {
   onSend: (text: string) => void
   onSendImage: (file: File) => void
   onOpenImage: (image: SessionImage) => void
+  mirror?: {
+    sessionId: string
+    peers: Record<string, PeerSnapshot>
+    aiAvailable: boolean
+    chat: MirrorChatSnapshot
+    controls: MirrorChatControls
+    disabled?: boolean
+  }
+  bridge?: {
+    publish: (snapshot: MirrorChatSnapshot) => void
+    register: (controls: MirrorChatControls) => () => void
+    prepareAi?: () => Promise<boolean>
+    notify?: (notification: {
+      title: string
+      body: string
+      onlyWhenHidden?: boolean
+    }) => void
+  }
 }
 
 export function SessionNotesPanel({
@@ -111,6 +134,8 @@ export function SessionNotesPanel({
   onSend,
   onSendImage,
   onOpenImage,
+  mirror,
+  bridge,
 }: SessionNotesPanelProps) {
   const headingId = useId()
   const noteCopy = strings.session.notes
@@ -118,8 +143,10 @@ export function SessionNotesPanel({
   const reduceMotion = useReduceMotion()
   const { identity } = useIdentity()
   const room = useSessionStore((state) => state.room)
-  const sessionTopic = useSessionStore((state) => state.sessionTopic)
-  const peers = useSessionStore((state) => state.peers)
+  const storedSessionTopic = useSessionStore((state) => state.sessionTopic)
+  const storedPeers = useSessionStore((state) => state.peers)
+  const sessionTopic = mirror?.sessionId ?? storedSessionTopic
+  const peers = mirror?.peers ?? storedPeers
   const declaredStudyTopic = useSessionStore(
     (state) => state.declaredStudyTopic
   )
@@ -132,13 +159,19 @@ export function SessionNotesPanel({
   const [activeTab, setActiveTab] = useState<ChatTab>('group')
   const [openTabs, setOpenTabs] = useState<ChatTab[]>(['group'])
   const [draft, setDraft] = useState('')
-  const [panelHeight, setPanelHeight] = useState(DEFAULT_PANEL_HEIGHT)
-  const [directMessages, setDirectMessages] = useState<
+  const [panelHeight, setPanelHeight] = useState(
+    mirror ? 220 : DEFAULT_PANEL_HEIGHT
+  )
+  const [localDirectMessages, setDirectMessages] = useState<
     Record<string, DirectMessage[]>
   >({})
-  const [aiMessages, setAiMessages] = useState<AiDisplayMessage[]>([])
-  const [aiSending, setAiSending] = useState(false)
-  const [directSending, setDirectSending] = useState(false)
+  const [localAiMessages, setAiMessages] = useState<AiDisplayMessage[]>([])
+  const [localAiSending, setAiSending] = useState(false)
+  const [localDirectSending, setDirectSending] = useState(false)
+  const directMessages = mirror?.chat.directMessages ?? localDirectMessages
+  const aiMessages = mirror?.chat.aiMessages ?? localAiMessages
+  const aiSending = mirror?.chat.aiSending ?? localAiSending
+  const directSending = mirror?.chat.directSending ?? localDirectSending
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const stopResizeRef = useRef<(() => void) | null>(null)
@@ -153,7 +186,9 @@ export function SessionNotesPanel({
     undefined
   )
 
-  activeTabRef.current = activeTab
+  useLayoutEffect(() => {
+    activeTabRef.current = activeTab
+  }, [activeTab])
 
   const myEdPubkeyHex = identity?.ed_pubkey_hex ?? null
   const peerList = useMemo(
@@ -177,7 +212,8 @@ export function SessionNotesPanel({
   // A one-to-one session already has a private voice channel. DMs become
   // useful only when at least three people are present, matching issue #186.
   const showDirectMessageOptions = peerList.length >= 2
-  const aiAvailable = aiFeaturesEnabled && activeModelId != null
+  const aiAvailable =
+    mirror?.aiAvailable ?? (aiFeaturesEnabled && activeModelId != null)
 
   const groupEntries = useMemo(
     () => [...notes, ...images].sort((a, b) => a.ts - b.ts),
@@ -228,7 +264,7 @@ export function SessionNotesPanel({
   }, [sessionTopic])
 
   useEffect(() => {
-    if (!room || !sessionTopic || !myEdPubkeyHex) return
+    if (mirror || !room || !sessionTopic || !myEdPubkeyHex) return
     let stopped = false
     const action = room.makeAction<DirectMessagePayload>(DIRECT_MESSAGE_ACTION)
     directActionRef.current = action
@@ -263,6 +299,15 @@ export function SessionNotesPanel({
           },
         ].slice(-MAX_DIRECT_THREAD_MESSAGES),
       }))
+      bridge?.notify?.({
+        title: strings.notifications.directMessage.title,
+        body: strings.notifications.directMessage.body(
+          useSessionStore.getState().peers[peerId]?.displayName ??
+            strings.session.peerFallback(peerId),
+          verified.text
+        ),
+        onlyWhenHidden: true,
+      })
       setOpenTabs((current) => {
         const tab = `dm:${peerKey}` as const
         return current.includes(tab) ? current : [...current, tab]
@@ -272,7 +317,7 @@ export function SessionNotesPanel({
       stopped = true
       directActionRef.current = undefined
     }
-  }, [myEdPubkeyHex, room, sessionTopic])
+  }, [myEdPubkeyHex, room, sessionTopic, mirror, bridge])
 
   // Close stale DM tabs when a peer leaves; messages remain in memory only
   // until the session view unmounts, so a reconnect can restore the thread.
@@ -337,14 +382,26 @@ export function SessionNotesPanel({
     setDraft('')
   }
 
-  const submitDirectMessage = async () => {
-    const text = draft.trim()
+  const submitDirectMessage = async (
+    providedText = draft,
+    providedRecipient = activePeerEd,
+    propagateFailure = false
+  ) => {
+    const text = providedText.trim()
+    if (mirror && providedRecipient && text) {
+      setDraft('')
+      await mirror.controls.sendDirectMessage(providedRecipient, text)
+      return
+    }
+    const recipient = providedRecipient
+      ? peerByEd.get(providedRecipient)
+      : undefined
     if (
       !text ||
       directSendingRef.current ||
       !showDirectMessageOptions ||
-      !activePeerEd ||
-      !activePeer ||
+      !providedRecipient ||
+      !recipient ||
       !sessionTopic ||
       !myEdPubkeyHex ||
       !directActionRef.current
@@ -353,8 +410,8 @@ export function SessionNotesPanel({
     }
     const requestTab = activeTab
     const requestSessionTopic = sessionTopic
-    const recipientEdPubkeyHex = activePeerEd
-    const recipientPeerId = activePeer.peerId
+    const recipientEdPubkeyHex = providedRecipient
+    const recipientPeerId = recipient.peerId
     const action = directActionRef.current
     const generation = ++directSendGenerationRef.current
     directSendingRef.current = true
@@ -366,6 +423,8 @@ export function SessionNotesPanel({
       const session = useSessionStore.getState()
       return (
         session.sessionTopic === requestSessionTopic &&
+        session.room === room &&
+        session.status === 'active' &&
         directMessagesAllowedNow() &&
         session.peers[recipientPeerId]?.edPubkeyHex === recipientEdPubkeyHex
       )
@@ -400,6 +459,7 @@ export function SessionNotesPanel({
       if (activeTabRef.current === requestTab) {
         setDraft((current) => (current.length === 0 ? text : current))
       }
+      if (propagateFailure) throw new Error(copy.directMessageSendFailed)
     } finally {
       if (directSendGenerationRef.current === generation) {
         directSendingRef.current = false
@@ -408,9 +468,14 @@ export function SessionNotesPanel({
     }
   }
 
-  const submitAi = async () => {
-    const text = draft.trim()
-    if (!text || !activeModelId || aiSendingRef.current) return
+  const submitAi = async (providedText = draft) => {
+    const text = providedText.trim()
+    if (mirror && text) {
+      setDraft('')
+      await mirror.controls.sendAi(text)
+      return
+    }
+    if (!text || !aiAvailable || !activeModelId || aiSendingRef.current) return
     const generation = ++aiRequestGenerationRef.current
     const requestSessionTopic = sessionTopic
     const controller = new AbortController()
@@ -434,9 +499,16 @@ export function SessionNotesPanel({
     const requestIsCurrent = () =>
       !controller.signal.aborted &&
       aiRequestGenerationRef.current === generation &&
-      useSessionStore.getState().sessionTopic === requestSessionTopic
+      useSessionStore.getState().sessionTopic === requestSessionTopic &&
+      useSessionStore.getState().room === room &&
+      useSessionStore.getState().status === 'active' &&
+      useSettingsStore.getState().values.aiFeaturesEnabled &&
+      useModelStore.getState().activeModelId === activeModelId
 
     try {
+      if (bridge?.prepareAi && !(await bridge.prepareAi()))
+        throw new AiAgentError('sidecar_unavailable', copy.aiUnavailable)
+      if (!requestIsCurrent()) return
       const replyText = await handleSessionChatText({
         text,
         declaredTopic: declaredStudyTopic,
@@ -459,6 +531,11 @@ export function SessionNotesPanel({
           },
         ].slice(-MAX_AI_THREAD_MESSAGES)
       )
+      bridge?.notify?.({
+        title: strings.notifications.aiReply.title,
+        body: strings.notifications.aiReply.body(replyText),
+        onlyWhenHidden: true,
+      })
     } catch (error) {
       if (!requestIsCurrent()) return
       setAiMessages((current) =>
@@ -484,6 +561,51 @@ export function SessionNotesPanel({
       }
     }
   }
+
+  const chatControlsRef = useRef<MirrorChatControls | null>(null)
+  useLayoutEffect(() => {
+    // Browser controls must only use handlers from a committed desktop render.
+    chatControlsRef.current = {
+      sendDirectMessage: (recipient, text) =>
+        submitDirectMessage(text, recipient, true),
+      sendAi: (text) => submitAi(text),
+    }
+  })
+  useEffect(() => {
+    if (!bridge) return
+    return bridge.register({
+      sendDirectMessage: (recipient, text) =>
+        chatControlsRef.current?.sendDirectMessage(recipient, text) ??
+        Promise.resolve(),
+      sendAi: (text) =>
+        chatControlsRef.current?.sendAi(text) ?? Promise.resolve(),
+    })
+  }, [bridge])
+  useEffect(() => {
+    bridge?.publish({
+      directMessages: localDirectMessages,
+      aiMessages: localAiMessages,
+      aiSending: localAiSending,
+      directSending: localDirectSending,
+    })
+  }, [
+    bridge,
+    localDirectMessages,
+    localAiMessages,
+    localAiSending,
+    localDirectSending,
+  ])
+
+  useEffect(() => {
+    if (!mirror) return
+    setOpenTabs((current) => {
+      const incoming = Object.keys(mirror.chat.directMessages)
+        .filter((key) => peerByEd.has(key) && showDirectMessageOptions)
+        .map((key) => `dm:${key}` as const)
+      const next = [...new Set([...current, ...incoming])]
+      return next.length === current.length ? current : next
+    })
+  }, [mirror, peerByEd, showDirectMessageOptions])
 
   const submit = () => {
     if (activeTab === 'group') submitGroup()
@@ -575,6 +697,7 @@ export function SessionNotesPanel({
           ? copy.sendDirectAriaLabel(activePeerLabel)
           : copy.sendDirectFallbackAriaLabel
   const inputDisabled =
+    Boolean(mirror?.disabled) ||
     (activeTab === 'ai' && !aiAvailable) ||
     (activeTab.startsWith('dm:') && (!showDirectMessageOptions || !activePeer))
   const sendDisabled =
@@ -619,9 +742,15 @@ export function SessionNotesPanel({
         <h2 id={headingId} className="sr-only">
           {copy.heading}
         </h2>
+        {/* Own only the tabs so their adjacent close buttons remain ordinary
+            buttons outside the tablist in the accessibility tree. */}
         <div
           role="tablist"
           aria-label={copy.conversations}
+          aria-owns={openTabs.map(tabId).join(' ')}
+          className="absolute"
+        />
+        <div
           onKeyDown={handleTabKeyDown}
           className="flex min-w-0 flex-1 gap-1 overflow-x-auto overscroll-x-contain"
         >
@@ -672,7 +801,7 @@ export function SessionNotesPanel({
           })}
         </div>
 
-        <DropdownMenu>
+        <DropdownMenu modal={false}>
           <DropdownMenuTrigger asChild>
             <Button
               type="button"
@@ -727,53 +856,50 @@ export function SessionNotesPanel({
               {noteCopy.empty}
             </p>
           ) : (
-            <ul
-              role="log"
-              aria-live="polite"
-              aria-relevant="additions"
-              className="flex flex-col gap-1 px-4 py-2"
-            >
-              {groupEntries.map((entry) => (
-                <li key={entry.id} className="text-sm leading-snug">
-                  <span
-                    className={
-                      entry.mine
-                        ? 'font-medium text-text-secondary'
-                        : 'font-medium text-accent-default'
-                    }
-                  >
-                    {resolveName(entry)}
-                  </span>{' '}
-                  {'text' in entry ? (
-                    <span className="whitespace-pre-wrap break-words text-text-primary">
-                      {entry.text}
-                    </span>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => onOpenImage(entry)}
-                      className="mt-1 block w-full overflow-hidden rounded-md border border-border-subtle bg-bg-sunk text-left outline-none focus-visible:ring-3 focus-visible:ring-accent-ring"
-                      aria-label={imageCopy.openImage(resolveName(entry))}
+            <div role="log" aria-live="polite" aria-relevant="additions">
+              <ul className="flex flex-col gap-1 px-4 py-2">
+                {groupEntries.map((entry) => (
+                  <li key={entry.id} className="text-sm leading-snug">
+                    <span
+                      className={
+                        entry.mine
+                          ? 'font-medium text-text-secondary'
+                          : 'font-medium text-accent-default'
+                      }
                     >
-                      {reduceMotion && entry.frameCount > 1 ? (
-                        <span className="flex min-h-24 items-center justify-center px-3 text-center text-xs text-text-secondary">
+                      {resolveName(entry)}
+                    </span>{' '}
+                    {'text' in entry ? (
+                      <span className="whitespace-pre-wrap break-words text-text-primary">
+                        {entry.text}
+                      </span>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => onOpenImage(entry)}
+                        className="mt-1 block w-full overflow-hidden rounded-md border border-border-subtle bg-bg-sunk text-left outline-none focus-visible:ring-3 focus-visible:ring-accent-ring"
+                        aria-label={imageCopy.openImage(resolveName(entry))}
+                      >
+                        {reduceMotion && entry.frameCount > 1 ? (
+                          <span className="flex min-h-24 items-center justify-center px-3 text-center text-xs text-text-secondary">
+                            {entry.filename}
+                          </span>
+                        ) : (
+                          <img
+                            src={entry.objectUrl}
+                            alt={imageCopy.imageAlt(resolveName(entry))}
+                            className="max-h-40 w-full object-contain"
+                          />
+                        )}
+                        <span className="block truncate border-t border-border-subtle px-2 py-1 text-xs text-text-secondary">
                           {entry.filename}
                         </span>
-                      ) : (
-                        <img
-                          src={entry.objectUrl}
-                          alt={imageCopy.imageAlt(resolveName(entry))}
-                          className="max-h-40 w-full object-contain"
-                        />
-                      )}
-                      <span className="block truncate border-t border-border-subtle px-2 py-1 text-xs text-text-secondary">
-                        {entry.filename}
-                      </span>
-                    </button>
-                  )}
-                </li>
-              ))}
-            </ul>
+                      </button>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </div>
           )
         ) : activeTab === 'ai' ? (
           !aiAvailable ? (
@@ -783,35 +909,37 @@ export function SessionNotesPanel({
           ) : aiMessages.length === 0 ? (
             <p className="px-4 py-4 text-sm text-text-muted">{copy.aiEmpty}</p>
           ) : (
-            <ul role="log" aria-live="polite" className="space-y-2 px-3 py-3">
-              {aiMessages.map((message) => (
-                <li
-                  key={message.id}
-                  className={
-                    message.role === 'user'
-                      ? 'ml-8 rounded-lg bg-bg-sunk px-3 py-2 text-sm text-text-primary'
-                      : message.failed
-                        ? 'mr-8 rounded-lg border border-danger-border bg-danger-surface px-3 py-2 text-sm text-text-primary'
-                        : 'mr-8 rounded-lg border border-border-default bg-bg-raised px-3 py-2 text-sm text-text-primary'
-                  }
-                >
-                  <span className="mb-1 block text-xs font-medium text-text-secondary">
-                    {message.role === 'user' ? copy.you : copy.ai}
-                  </span>
-                  <span className="whitespace-pre-wrap break-words">
-                    {message.content}
-                  </span>
-                </li>
-              ))}
-              {aiSending && (
-                <li className="mr-8 rounded-lg border border-border-default bg-bg-raised px-3 py-2 text-sm text-text-muted">
-                  <span className="mb-1 block text-xs font-medium text-text-secondary">
-                    {copy.ai}
-                  </span>
-                  {copy.thinking}
-                </li>
-              )}
-            </ul>
+            <div role="log" aria-live="polite">
+              <ul className="space-y-2 px-3 py-3">
+                {aiMessages.map((message) => (
+                  <li
+                    key={message.id}
+                    className={
+                      message.role === 'user'
+                        ? 'ml-8 rounded-lg bg-bg-sunk px-3 py-2 text-sm text-text-primary'
+                        : message.failed
+                          ? 'mr-8 rounded-lg border border-danger-border bg-danger-surface px-3 py-2 text-sm text-text-primary'
+                          : 'mr-8 rounded-lg border border-border-default bg-bg-raised px-3 py-2 text-sm text-text-primary'
+                    }
+                  >
+                    <span className="mb-1 block text-xs font-medium text-text-secondary">
+                      {message.role === 'user' ? copy.you : copy.ai}
+                    </span>
+                    <span className="whitespace-pre-wrap break-words">
+                      {message.content}
+                    </span>
+                  </li>
+                ))}
+                {aiSending && (
+                  <li className="mr-8 rounded-lg border border-border-default bg-bg-raised px-3 py-2 text-sm text-text-muted">
+                    <span className="mb-1 block text-xs font-medium text-text-secondary">
+                      {copy.ai}
+                    </span>
+                    {copy.thinking}
+                  </li>
+                )}
+              </ul>
+            </div>
           )
         ) : !activePeer ? (
           <p className="px-4 py-4 text-sm text-text-muted">
@@ -820,28 +948,30 @@ export function SessionNotesPanel({
         ) : activeDirectMessages.length === 0 ? (
           <p className="px-4 py-4 text-sm text-text-muted">{copy.dmEmpty}</p>
         ) : (
-          <ul role="log" aria-live="polite" className="space-y-2 px-3 py-3">
-            {activeDirectMessages.map((message) => (
-              <li
-                key={message.id}
-                className={
-                  message.mine
-                    ? 'ml-8 rounded-lg bg-bg-sunk px-3 py-2 text-sm text-text-primary'
-                    : 'mr-8 rounded-lg border border-border-default bg-bg-raised px-3 py-2 text-sm text-text-primary'
-                }
-              >
-                <span className="mb-1 block text-xs font-medium text-text-secondary">
-                  {message.mine
-                    ? copy.you
-                    : (activePeer.displayName ??
-                      activePeer.edPubkeyHex.slice(0, 8))}
-                </span>
-                <span className="whitespace-pre-wrap break-words">
-                  {message.text}
-                </span>
-              </li>
-            ))}
-          </ul>
+          <div role="log" aria-live="polite">
+            <ul className="space-y-2 px-3 py-3">
+              {activeDirectMessages.map((message) => (
+                <li
+                  key={message.id}
+                  className={
+                    message.mine
+                      ? 'ml-8 rounded-lg bg-bg-sunk px-3 py-2 text-sm text-text-primary'
+                      : 'mr-8 rounded-lg border border-border-default bg-bg-raised px-3 py-2 text-sm text-text-primary'
+                  }
+                >
+                  <span className="mb-1 block text-xs font-medium text-text-secondary">
+                    {message.mine
+                      ? copy.you
+                      : (activePeer.displayName ??
+                        activePeer.edPubkeyHex.slice(0, 8))}
+                  </span>
+                  <span className="whitespace-pre-wrap break-words">
+                    {message.text}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </div>
         )}
       </div>
 

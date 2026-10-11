@@ -168,6 +168,19 @@ Format: one `###` section per finding, ordered by ID. Entries are appended, neve
 
 **Status.** **triaged — no runtime exposure** (2026-06-13). Every one is a **devDependency**; none reaches the installed desktop app — `npm audit --omit=dev` is clean (0) and no advisory package appears in `dependencies`. Bump `concurrently` and the `@storybook/*` chain when convenient; do **not** rush a major Storybook upgrade for a dev-only advisory. Recorded so the scan result isn't re-investigated each time. (Exact counts shift with the lockfile; the load-bearing fact is the clean prod audit.)
 
+**Rechecked 2026-10-11.** Compatible development-tool patches, including
+`concurrently`/`shell-quote`, remove all critical findings and fix eight open
+Dependabot alerts in PR #368. The full npm audit falls from 38 to 29 findings
+(4 high, 25 moderate); the production audit remains zero. The remaining direct
+advisories concern `braces` and `sprintf-js`, which have no patched release,
+and `uuid`, whose fix requires a major toolchain dependency update. Its observed
+test/report callers use default v1/v4 without buffer arguments. These are
+accepted development-only risks; preserve that scope and revisit when upstream
+patches or compatible toolchain updates become available.
+Dependabot's retained `sprintf-js` and `uuid` alerts are dismissed as tolerable
+risk with those reasons; alerts fixed only by this PR remain open on `main`
+until the patched lockfile lands there.
+
 ### I20 — Sev1
 
 `src-tauri/src/db/mod.rs`
@@ -847,6 +860,17 @@ Only **RUSTSEC-2024-0429** (glib) is pinned in `ignore`, with a reason, in the s
 
 `nix` needs nothing. `battery` is a real dependency (V2-P5 battery awareness, ARCHITECTURE §8) and replacing it would be a cross-platform swap, not a security fix. Same recording purpose as [I19](#i19--sev4) on the npm side: the scan result should not have to be re-derived each time the security tab is opened.
 
+**Rechecked 2026-10-11.** The three release-target graphs still exclude the
+affected `nix`; `glib` remains a real Linux advisory under the existing pinned
+exception. The `quick-xml` exceptions also remain, but their exposure is not
+solely build-time: Windows notifications use XML escaping without the vulnerable
+parser, and macOS restart reads the trusted app bundle's `Info.plist`. Bundling
+also parses local XML. No peer-supplied XML reaches those parsers. Keep
+`unsound = "all"` and the exact advisory exceptions so new findings still fail.
+Dependabot's `nix` alerts are dismissed as unused by the release targets;
+its `glib` alert is dismissed as tolerable risk with the actual unsoundness
+recorded, not as a false positive.
+
 ### I99 — Sev2
 
 `src/features/session/useWrittenTimeline.ts` + `src/features/session/Report.tsx`
@@ -1437,6 +1461,136 @@ Windows CI validates the dependency closure and engine/CPU-backend startup.
 Preview, full release, and manual interim builds repeat those checks against
 the exact extracted NSIS payload. Regression tests reject missing/wrong-arch
 DLLs, incomplete provenance, changed hashes, and broken resource mappings.
+
+### I129 — Sev3
+
+`src/features/session/SessionView.tsx`
+
+**Evidence.** Session note/image send callbacks await peer transport or image
+validation, then update the currently mounted store. Ending the original session
+and starting another during that await can insert the old message or image into
+the new session's chat history.
+
+**Status.** **fixed on branch** — capture the originating session topic and check
+it again after asynchronous work before touching history. Browser permission and
+file requests likewise bind their originating connection and session; stale
+capture results release their tracks instead of crossing into a new pairing.
+
+### I130 — Sev3
+
+`src/features/ai/sampleLoop.ts`
+
+**Evidence.** The focus request's deadline was cleared only in the request's
+`finally`. A hung fetch that ignores abort retains its timer after sample-loop
+teardown. The regression surfaced when mirroring kept the sidecar running for
+text AI after visual capture stopped.
+
+**Status.** **fixed on branch** — sample-loop teardown explicitly clears the
+owned inference deadline. A clock-driven test holds the inference unresolved,
+stops capture, and verifies released media and zero remaining timers while the
+text AI engine stays available.
+
+### I131 — Sev4
+
+`src-tauri/src/mirror.rs` — CodeQL alerts #376 and #377
+
+**Evidence.** CodeQL traces private certificate material from
+`load_certificates` through the aggregate server result into two test GET URLs.
+Both URLs are constructed solely from an IPv4 address and listener port. The
+first uses HTTPS; the second downloads the public CA certificate from the
+intentional HTTP bootstrap. Neither request sends a body, credentials or private
+keys. The leaf private key goes only to rustls; the CA signing key stays local.
+
+**Status.** **false positives dismissed** (2026-10-11) — independently reviewed
+the complete source-to-sink paths and recorded the rationale on both GitHub
+alerts. Keep the real TLS/certificate download tests and security scanning;
+the desktop fingerprint comparison remains required before trusting the CA.
+
+### I132 — Sev4
+
+`src-tauri/src/commands/identity.rs`, vendored Wry cookie readers,
+`lab/src/backend/index.ts` — CodeQL alerts #53, #268–#270, #276 and #277
+
+**Evidence.** The nonce buffer is filled by `OsRng` before encryption; the
+constant-nonce alert omits that in-place overwrite. Wry's cookie readers copy
+the existing engine cookie's Secure flag into a returned representation, rather
+than issuing a session cookie. Forcing the flag would misrepresent engine state.
+The lab journal's existence checks can race external filesystem mutations,
+but its validated hex filenames stay in lab-owned directories and its
+synchronous operations cross no privilege boundary. The harness is not shipped.
+
+**Status.** **triaged** (2026-10-11) — independently reviewed and dismissed
+alerts #53 and #268–#270 as false positives. #276 and #277 are **accepted, won't fix**:
+a local actor already able to mutate the harness directory can disrupt a lab
+run; this does not expose the installed app. Production crypto and cookie
+semantics remain unchanged, and scans still cover these files.
+
+### I133 — Sev4
+
+`.github/workflows/`, `.github/SECURITY.md` — zizmor and OpenSSF Scorecard
+
+**Evidence.** The template-injection paths use literal platform matrices,
+the fixed repository name or a Git-validated commit hash. The flagged token
+permissions are job-scoped and required by their uploads, attestations,
+publication or dispatch operations. Third-party actions are immutable hash
+pins; GitHub-owned action major tags are explicitly allowed by the canonical
+pinning policy. The Rust helper now pins upstream's `v1` commit with safer input
+handling, retaining the explicit `1.97.1` toolchain and existing targets/components.
+Scorecard's badge, fuzzing, licensing and independent-approval findings describe
+deliberate friends-only, private, sole-owner policies rather than an exploit.
+
+**Status.** **triaged** (2026-10-11) — retain scanning and record per-alert
+false-positive or accepted, won't-fix reasons after checking each source and
+operation. The tagged installer build now disables npm cache restore/save, and
+the private-reporting policy gains its direct reporting link. Findings fixed
+only by this PR stay open on `main` until merge and a real scanner refresh.
+The refreshed dependency scan's retained risks are covered by I19 and I98;
+the real Linux `glib` advisory remains an accepted risk, not a false positive.
+
+### I134 — Sev3
+
+`.storybook/preview.tsx`, `.storybook/test-runner.ts`, canvas-stream stories
+
+**Evidence.** The installed accessibility addon rejects the removed `element`
+parameter. The test runner checks reported violations but ignores addon errors
+and missing results, so a configuration exception could produce a passing test
+without running axe.
+Canvas fixtures also stopped tracks inside a state updater ignored after
+unmount, accumulating live captures across story transitions.
+
+**Status.** **fixed on branch** — use the supported `context.include` scope
+over the preview iframe body, including portaled menus and dialogs.
+The runner requires a successful axe report for the matching story, with actual
+result arrays and zero violations; addon errors and missing audits fail the
+gate. Keep the existing timeout, rule configuration and every story covered.
+Fixture cleanup stops the effect's owned stream directly, independently of
+React state updates.
+Verified all 370 stories with actual axe reports; injected addon errors and
+an unnamed button fail the gate. A native capture sequence retires all 26
+previous tracks, leaving zero live tracks after navigation.
+
+### I135 — Sev3
+
+Session/log components, scroll and input primitives, settings and onboarding
+
+**Evidence.** Once I134 enabled actual axe audits, covered stories exposed
+invalid live-log/list and conversation-tab ownership, a nested complementary
+session-log landmark, keyboard-inaccessible
+scroll regions, unnamed slider thumbs, ignored progress values, modal-menu
+background focus, skipped tutorial headings and opacity-reduced text contrast.
+Some primitive demos also lacked labels or the list/document context required
+by their components.
+
+**Status.** **fixed on branch** — preserve semantic lists inside named log
+sections and live regions,
+own only conversation tabs in the tablist, give scroll viewports keyboard
+access and token focus rings, forward slider names and progress values, and
+keep small action menus nonmodal. Heading and text fixes preserve the existing
+tokens and layout. Demo fixtures supply their actual labels/context; no rules,
+timeouts, story variants or zero-violation assertions are removed.
+The native accessibility tree owns only the conversation tabs and exposes
+their close buttons separately. Active keyboard/menu checks and all 370
+body-scoped story audits pass.
 
 ## Archive — retired backlogs
 

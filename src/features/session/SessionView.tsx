@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { emitTo, listen } from '@tauri-apps/api/event'
 import {
@@ -10,6 +17,7 @@ import {
   UserPlusIcon,
   VideoIcon,
   VideoOffIcon,
+  LaptopIcon,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { useShallow } from 'zustand/react/shallow'
@@ -26,6 +34,12 @@ import { ScreenShareViewer } from '@/components/ScreenShareViewer'
 import { SelfWarningBadge } from '@/components/SelfWarningBadge'
 import { SessionTimer } from '@/components/SessionTimer'
 import { Button } from '@/components/ui/button'
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import { Kbd } from '@/components/ui/kbd'
 import { VideoGrid } from '@/components/VideoGrid'
 import { VideoTile } from '@/components/VideoTile'
@@ -80,9 +94,26 @@ import { useSessionStore } from '@/stores/sessionStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { usePttStore, withPttButtonMutation } from '@/stores/pttStore'
 import { strings } from '@/strings'
+import { MirrorHostPanel } from '@/features/mirror/MirrorHostPanel'
+import { useSessionMirror } from '@/features/mirror/useSessionMirror'
+import { startMirrorAiRuntime } from '@/features/mirror/aiRuntime'
+import { notifyCurrentMirror } from '@/features/mirror/reportHandoff'
+import { detectPhaseTransition } from './pomodoroNotify'
+import {
+  base64ToBytes,
+  activeMirrorChat,
+  blobToBase64,
+  type MirrorChatControls,
+  type MirrorChatSnapshot,
+  type MirrorControl,
+  type MirrorImage,
+  type MirrorSessionSnapshot,
+} from '@/features/mirror/sessionBridge'
+import { AiAgentError, handleUserText } from '@/features/ai/aiAgent'
+import { getAiEnableReadiness } from '@/features/ai/benchmarkGate'
 
 import { startAiAlertDispatcher, type AiAlertDispatcher } from './aiAlerts'
-import { deriveAiChipStatus } from './aiChip'
+import { deriveAiChipStatus, deriveMirrorAiChipStatus } from './aiChip'
 
 import {
   cancelActiveBreakTimer,
@@ -322,8 +353,108 @@ export function SessionView({
     null
   )
   const [audioSwapping, setAudioSwapping] = useState(false)
+  const audioSwapAbortRef = useRef<AbortController | null>(null)
+  const audioSenderOperationsRef = useRef(new Set<Promise<void>>())
   // #47 A2 — mid-session invite picker (host only; see the footer button).
   const [inviteOpen, setInviteOpen] = useState(false)
+  const [mirrorOpen, setMirrorOpen] = useState(false)
+  const [mirrorSharing, setMirrorSharing] = useState(false)
+  const [mirrorAiAction, setMirrorAiAction] =
+    useState<MirrorSessionSnapshot['aiAction']>(null)
+  const [mirrorControlError, setMirrorControlError] = useState<string | null>(
+    null
+  )
+  const [mirrorChat, setMirrorChat] = useState<MirrorChatSnapshot>({
+    directMessages: {},
+    aiMessages: [],
+    aiSending: false,
+    directSending: false,
+  })
+  const mirrorControlRef = useRef<
+    (control: MirrorControl) => boolean | void | Promise<boolean | void>
+  >(() => false)
+  const mirrorChatControlsRef = useRef<MirrorChatControls | null>(null)
+  const mirrorAiReadyRef = useRef<Promise<boolean> | null>(null)
+  const mirror = useSessionMirror(sessionTopic, (control) =>
+    mirrorControlRef.current(control)
+  )
+  const mirrorTakeoverRef = useRef(mirror.takeover)
+  useLayoutEffect(() => {
+    mirrorTakeoverRef.current = mirror.takeover
+  }, [mirror.takeover])
+  useLayoutEffect(() => {
+    // A retired room's senders cannot be reused by the next room. Keep the
+    // same room's operations across takeover changes, but isolate new rooms.
+    audioSenderOperationsRef.current = new Set()
+  }, [room])
+  useLayoutEffect(
+    () => () => {
+      audioSwapAbortRef.current?.abort()
+      audioSwapAbortRef.current = null
+      setAudioSwapping(false)
+    },
+    [room, status, sessionTopic, mirror.takeover, mediaRetryNonce]
+  )
+  const previousMirrorCaptureRef = useRef({
+    takeover: mirror.takeover,
+    screen: mirror.screen,
+    connected: mirror.connected,
+  })
+  useLayoutEffect(() => {
+    const previous = previousMirrorCaptureRef.current
+    previousMirrorCaptureRef.current = {
+      takeover: mirror.takeover,
+      screen: mirror.screen,
+      connected: mirror.connected,
+    }
+    if (
+      previous.takeover &&
+      (!mirror.takeover ||
+        (previous.screen && !mirror.screen) ||
+        (previous.connected && !mirror.connected))
+    ) {
+      // PR-368 — a later AI-only selection must not inherit an earlier share.
+      // The initial control may arrive before its first stream, so only a
+      // previously captured source disappearing clears consent.
+      setMirrorSharing(false)
+    }
+  }, [mirror.takeover, mirror.screen, mirror.connected])
+  const mirrorChatBridge = useMemo(
+    () => ({
+      publish: setMirrorChat,
+      prepareAi: () => mirrorAiReadyRef.current ?? Promise.resolve(true),
+      notify: notifyCurrentMirror,
+      register: (controls: MirrorChatControls) => {
+        mirrorChatControlsRef.current = controls
+        return () => {
+          if (mirrorChatControlsRef.current === controls)
+            mirrorChatControlsRef.current = null
+        }
+      },
+    }),
+    []
+  )
+  const notifyMirror = mirror.notify
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- an action error belongs to one companion lease and must not reappear after restart or a new session
+    setMirrorControlError(null)
+  }, [sessionTopic, mirror.config?.generation])
+  useEffect(
+    () =>
+      usePomodoroStore.subscribe((next, previous) => {
+        if (!useSettingsStore.getState().values.pomodoroNotificationEnabled)
+          return
+        const transition = detectPhaseTransition(previous.phase, next.phase)
+        if (!transition) return
+        const copy = strings.notifications.pomodoro
+        notifyMirror(
+          transition === 'to-rest'
+            ? { title: copy.breakTitle, body: copy.breakBody }
+            : { title: copy.workTitle, body: copy.workBody }
+        )
+      }),
+    [notifyMirror]
+  )
   const [openSessionImageId, setOpenSessionImageId] = useState<string | null>(
     null
   )
@@ -381,6 +512,14 @@ export function SessionView({
   const [expandedScreen, setExpandedScreen] = useState<string | null>(null)
   const screenStreamRef = useRef<MediaStream | null>(null)
   const screenShareRef = useRef<ScreenShareController | null>(null)
+  const screenRequestGenerationRef = useRef(0)
+  useLayoutEffect(() => {
+    // PR-368 — a picker can outlive a room or a temporary browser takeover.
+    screenRequestGenerationRef.current += 1
+    return () => {
+      screenRequestGenerationRef.current += 1
+    }
+  }, [room, mirror.takeover])
   const cameraSendRef = useRef<
     ((payload: CameraPayload) => Promise<void>) | null
   >(null)
@@ -511,6 +650,60 @@ export function SessionView({
   // opens) reached nobody. See the contract on that function.
   useEffect(() => {
     if (!room) return
+    if (mirror.takeover) {
+      const stream = mirror.camera
+      for (const track of stream?.getVideoTracks() ?? [])
+        track.enabled = cameraOnRef.current
+      for (const track of stream?.getAudioTracks() ?? [])
+        track.enabled = usePttStore.getState().active
+      let offJoin: (() => void) | null = null
+      localStreamRef.current = stream
+      let cancelled = false
+      if (stream) {
+        void (async () => {
+          // PR-368 — an unfinished native replacement can overwrite a sender
+          // reused by addTrack; acquisition itself must never delay takeover.
+          await Promise.all([...audioSenderOperationsRef.current])
+          if (
+            cancelled ||
+            !mirrorTakeoverRef.current ||
+            localStreamRef.current !== stream ||
+            useSessionStore.getState().room !== room ||
+            useSessionStore.getState().status !== 'active'
+          )
+            return
+          if (
+            stream.getTracks().some((track) => track.readyState === 'ended')
+          ) {
+            setMediaErrorName('NotReadableError')
+            return
+          }
+          offJoin = publishLocalStream(room, stream)
+        })()
+      }
+      queueMicrotask(() => {
+        if (cancelled) return
+        setLocalStream(stream)
+        setMediaErrorName(
+          stream?.getTracks().some((track) => track.readyState === 'ended')
+            ? 'NotReadableError'
+            : null
+        )
+      })
+      return () => {
+        cancelled = true
+        offJoin?.()
+        if (stream) {
+          try {
+            room.removeStream(stream)
+          } catch {
+            /* already removed */
+          }
+        }
+        localStreamRef.current = null
+        setLocalStream(null)
+      }
+    }
     let cancelled = false
     let acquiredStream: MediaStream | null = null
     let detachTrackEnded: (() => void) | null = null
@@ -570,6 +763,25 @@ export function SessionView({
             t.removeEventListener('ended', handleTrackEnded)
           }
         }
+        await Promise.all([...audioSenderOperationsRef.current])
+        if (
+          cancelled ||
+          mirrorTakeoverRef.current ||
+          useSessionStore.getState().room !== room ||
+          useSessionStore.getState().status !== 'active'
+        ) {
+          stopTracks(stream)
+          return
+        }
+        if (stream.getTracks().some((track) => track.readyState === 'ended')) {
+          stopTracks(stream)
+          setMediaErrorName('NotReadableError')
+          return
+        }
+        for (const track of stream.getAudioTracks())
+          track.enabled = usePttStore.getState().active
+        for (const track of stream.getVideoTracks())
+          track.enabled = cameraOnRef.current
         offJoinStream = publishLocalStream(room, stream)
         setLocalStream(stream)
         localStreamRef.current = stream
@@ -612,7 +824,7 @@ export function SessionView({
       localStreamRef.current = null
       setLocalStream(null)
     }
-  }, [room, mediaRetryNonce])
+  }, [room, mediaRetryNonce, mirror.takeover, mirror.camera])
 
   // S2 — on a genuine session teardown (local leave, forced eviction, unmount)
   // drop PTT so a held key at the moment the room closes can't latch `active`
@@ -1060,6 +1272,7 @@ export function SessionView({
     // session payloads, never persist.
     const noteAction = room.makeAction<NotePayload>(NOTE_ACTION)
     noteAction.receive((data, peerId) => {
+      if (stopped || useSessionStore.getState().room !== room) return
       const expectedEd =
         useSessionStore.getState().peers[peerId]?.edPubkeyHex ?? null
       const verified = verifyIncomingNote(data, expectedEd, sessionTopic)
@@ -1070,6 +1283,16 @@ export function SessionView({
         text: verified.text,
         ts: verified.ts,
       })
+      if (verified.from_ed_pubkey !== myEdPubkeyHex) {
+        const name =
+          useSessionStore.getState().peers[peerId]?.displayName ??
+          peerLabel(peerId)
+        notifyCurrentMirror({
+          title: strings.notifications.sessionMessage.title,
+          body: strings.notifications.sessionMessage.body(name, verified.text),
+          onlyWhenHidden: true,
+        })
+      }
     })
     const imageAction = room.makeAction<Uint8Array>(IMAGE_ACTION)
     imageAction.receive((data, peerId, metadata) => {
@@ -1083,18 +1306,32 @@ export function SessionView({
       )
       if (!verified) return
       void appendVerifiedIncomingImage(verified, {
-        isStopped: () => stopped,
-        append: (image) => useNotesStore.getState().appendImage(image),
+        isStopped: () => stopped || useSessionStore.getState().room !== room,
+        append: (image) => {
+          useNotesStore.getState().appendImage(image)
+          if (image.fromEdPubkeyHex !== myEdPubkeyHex) {
+            const name =
+              useSessionStore.getState().peers[peerId]?.displayName ??
+              peerLabel(peerId)
+            notifyCurrentMirror({
+              title: strings.notifications.image.title,
+              body: strings.notifications.image.body(name),
+              onlyWhenHidden: true,
+            })
+          }
+        },
       })
     })
 
     sendNoteRef.current = async (text: string) => {
+      // I129 — signing must not publish into a later session after teardown.
       const payload = await buildNotePayload({
         sessionTopic,
         myEdPubkeyHex,
         text,
         sign,
       })
+      if (stopped || useSessionStore.getState().room !== room) return
       if (payload.text.length === 0) return
       // Append local first so the sender sees their note even if the
       // broadcast fails (matches emitAudit's ordering).
@@ -1113,9 +1350,11 @@ export function SessionView({
           textLength: payload.text.length,
           err,
         })
+        throw err
       }
     }
     sendImageRef.current = async (file: File) => {
+      // I129 — image inspection and signing outlive gestures, so guard each await.
       validateOutgoingImage(file)
       if (!isImageMimeType(file.type)) {
         throw new SessionImageError('unsupported_type')
@@ -1123,6 +1362,7 @@ export function SessionView({
       const blob = file.slice(0, file.size, file.type)
       const bytes = new Uint8Array(await blob.arrayBuffer())
       const dimensions = await readImageDimensions(blob)
+      if (stopped || useSessionStore.getState().room !== room) return
       const payload = await buildImagePayload({
         sessionTopic,
         myEdPubkeyHex,
@@ -1133,11 +1373,13 @@ export function SessionView({
         height: dimensions.height,
         sign,
       })
+      if (stopped || useSessionStore.getState().room !== room) return
       await imageAction.send(
         payload.bytes,
         undefined,
         payload.metadata as ImageMetadata
       )
+      if (stopped || useSessionStore.getState().room !== room) return
       const localBlob = new Blob([payload.bytes.slice()], {
         type: payload.metadata.mime_type,
       })
@@ -1295,6 +1537,45 @@ export function SessionView({
     )
   }, [status, startedAt, aiFeaturesEnabled, modelStatus, activeModelId])
 
+  useEffect(() => {
+    if (
+      status !== 'active' ||
+      !mirror.takeover ||
+      !aiFeaturesEnabled ||
+      !activeModelId
+    )
+      return
+    const engine = startMirrorAiRuntime({
+      modelId: activeModelId,
+      onStartFail: (reason, detail) => {
+        setAiRuntimeStatus('error')
+        if (reason === 'model_files_missing') {
+          toast.error(
+            strings.session.errors.modelFilesMissing,
+            aiSettingsToastAction()
+          )
+        } else if (detail === ERR_ENGINE_NOT_INSTALLED) {
+          toast.error(
+            strings.session.errors.engineNotInstalled,
+            aiSettingsToastAction()
+          )
+        } else {
+          toast.error(
+            detail
+              ? strings.session.errors.aiFailedToStartDetail(detail)
+              : strings.session.errors.aiFailedToStart
+          )
+        }
+      },
+    })
+    mirrorAiReadyRef.current = engine.ready
+    return () => {
+      if (mirrorAiReadyRef.current === engine.ready)
+        mirrorAiReadyRef.current = null
+      void engine.stop()
+    }
+  }, [status, sessionTopic, mirror.takeover, aiFeaturesEnabled, activeModelId])
+
   // V2-P5 AI sample loop: starts when AI features are on, an active model
   // exists, the session is running, and the local camera track is up.
   // Stops on any of those flipping. Topic defaults to "Studying" — V2-P9
@@ -1304,8 +1585,9 @@ export function SessionView({
     if (!aiFeaturesEnabled) return
     if (!activeModelId) return
     if (!localStream) return
+    if (mirror.takeover && !mirror.screen) return
     // Don't relaunch into a denied state — the overlay's retry clears this.
-    if (captureDenied) return
+    if (captureDenied && !mirror.takeover) return
     // I102 — the session this loop belongs to, captured once at construction.
     // `onScoreEvents` deliberately runs for a sample that resolved after
     // teardown, so reading the live store from inside it filed that check into
@@ -1320,9 +1602,16 @@ export function SessionView({
     aiStalledRef.current = false
     // eslint-disable-next-line react-hooks/set-state-in-effect -- resets the AI-runtime latch for a freshly constructed loop; idempotent on re-run
     setAiRuntimeStatus('active')
+    let cancelled = false
     let handle: SampleLoopHandle | null = startSampleLoop({
       getTopic: () => useSessionStore.getState().declaredStudyTopic,
       modelId: activeModelId,
+      stopSidecarOnStop: !mirror.takeover,
+      acquireScreenStream:
+        mirror.takeover && mirror.screen
+          ? async () => mirror.screen!.clone()
+          : undefined,
+      countDisplays: mirror.takeover ? async () => 1 : undefined,
       getFaceTrack: () => localStreamRef.current?.getVideoTracks()[0] ?? null,
       // S3 — pause the loop while the camera is off so it never analyzes a
       // black frame; resume is seamless (no skipped ticks, loop state intact).
@@ -1334,6 +1623,7 @@ export function SessionView({
       // shared timer in rest to dodge scoring is friends-only-accepted
       // (PLAN §4 principle 5 — you can already disable your own AI).
       isPaused: () =>
+        leaveRequestedRef.current ||
         !cameraOnRef.current ||
         usePomodoroStore.getState().phase.startsWith('rest'),
       onScoreEvents: async (events, verdict, context) => {
@@ -1368,6 +1658,7 @@ export function SessionView({
         }
       },
       onStartFail: (reason, detail) => {
+        if (cancelled || mirror.takeover || mirrorTakeoverRef.current) return
         if (reason === 'no_active_model') {
           // #47 B2 — the copy names "Settings → AI"; the action takes the
           // user there without leaving the session.
@@ -1393,6 +1684,13 @@ export function SessionView({
         }
       },
       onCaptureDenied: () => {
+        if (cancelled || mirror.takeover !== mirrorTakeoverRef.current) return
+        if (mirror.takeover) {
+          setAiRuntimeStatus((current) =>
+            current === 'error' ? current : 'paused'
+          )
+          return
+        }
         // Latched dead: surface the actionable overlay (retry re-grants +
         // resumes) rather than a dead-end toast.
         setCaptureDenied(true)
@@ -1400,6 +1698,14 @@ export function SessionView({
         setAiRuntimeStatus('error')
       },
       onCaptureError: (err, fatal) => {
+        if (cancelled || mirror.takeover !== mirrorTakeoverRef.current) return
+        if (mirror.takeover) {
+          if (fatal)
+            setAiRuntimeStatus((current) =>
+              current === 'error' ? current : 'paused'
+            )
+          return
+        }
         toast.error(strings.session.errors.aiCaptureError(err.message))
         // A transient tick-time capture error (fatal === false) leaves the
         // loop running — it may recover on the next tick, so the chip
@@ -1477,6 +1783,7 @@ export function SessionView({
       },
     })
     return () => {
+      cancelled = true
       const local = handle
       handle = null
       void local?.stop()
@@ -1488,6 +1795,8 @@ export function SessionView({
     localStream,
     captureDenied,
     sessionTopic,
+    mirror.takeover,
+    mirror.screen,
   ])
 
   // V2-P9 gesture fix safety net — a gesture handler (TopicGateModal submit,
@@ -1770,7 +2079,26 @@ export function SessionView({
   const handleSwapAudioDevice = useCallback(
     async (nextDeviceId: string) => {
       const stream = localStreamRef.current
-      if (!stream || audioSwapping) return
+      if (
+        !stream ||
+        audioSwapAbortRef.current ||
+        audioSwapping ||
+        mirrorTakeoverRef.current ||
+        useSessionStore.getState().room !== room ||
+        useSessionStore.getState().status !== 'active'
+      )
+        return
+      const controller = new AbortController()
+      const senderOperations = audioSenderOperationsRef.current
+      audioSwapAbortRef.current = controller
+      const isCurrent = () =>
+        audioSwapAbortRef.current === controller &&
+        !controller.signal.aborted &&
+        !mirrorTakeoverRef.current &&
+        !leaveRequestedRef.current &&
+        localStreamRef.current === stream &&
+        useSessionStore.getState().room === room &&
+        useSessionStore.getState().status === 'active'
       setAudioSwapping(true)
       try {
         const newTrack = await swapAudioInput(
@@ -1780,9 +2108,24 @@ export function SessionView({
               navigator.mediaDevices.getUserMedia(constraints),
             room,
             localStream: stream,
+            signal: controller.signal,
+            isCurrent,
+            onReplaceTrack: (operation) => {
+              senderOperations.add(operation)
+              void operation.then(
+                () => senderOperations.delete(operation),
+                () => senderOperations.delete(operation)
+              )
+            },
           },
           () => usePttStore.getState().active
         )
+        if (!newTrack) return
+        if (!isCurrent()) {
+          newTrack.enabled = false
+          newTrack.stop()
+          return
+        }
         // #47 A3 — re-attach the I42 device-loss recovery to the swapped-in
         // track: the acquire effect's 'ended' listeners only cover tracks
         // present at acquisition, so without this the exact churn the swap
@@ -1799,13 +2142,17 @@ export function SessionView({
         // id surfaced at acquisition deliberately does not).
         void useSettingsStore.getState().setAudioInputDeviceId(nextDeviceId)
       } catch (err) {
+        if (!isCurrent()) return
         const message =
           err instanceof Error
             ? err.message
             : strings.session.errors.switchMicFailedFallback
         toast.error(message)
       } finally {
-        setAudioSwapping(false)
+        if (audioSwapAbortRef.current === controller) {
+          audioSwapAbortRef.current = null
+          setAudioSwapping(false)
+        }
       }
     },
     [audioSwapping, room]
@@ -1818,6 +2165,7 @@ export function SessionView({
   // #96 — stop sharing. Reached from the footer toggle, from the OS-level "Stop
   // sharing" control (the track's 'ended' event), and from session teardown.
   const stopScreenShare = useCallback(() => {
+    screenRequestGenerationRef.current += 1
     const stream = screenStreamRef.current
     screenStreamRef.current = null
     setScreenStream(null)
@@ -1826,20 +2174,63 @@ export function SessionView({
     if (stream) stopTracks(stream)
   }, [])
 
+  useEffect(() => {
+    if (!mirror.takeover) return
+    let cancelled = false
+    let stream: MediaStream | null = null
+    queueMicrotask(() => {
+      if (cancelled) return
+      stopScreenShare()
+      const source = mirror.screen
+      if (!mirrorSharing || !source) return
+      stream = source.clone()
+      screenStreamRef.current = stream
+      setScreenStream(stream)
+      screenShareRef.current?.publish(stream)
+    })
+    return () => {
+      cancelled = true
+      if (stream && screenStreamRef.current === stream) stopScreenShare()
+    }
+  }, [mirror.takeover, mirror.screen, mirrorSharing, stopScreenShare])
+
+  useEffect(() => {
+    if (!mirror.takeover) return
+    discardPendingScreenStream()
+    let cancelled = false
+    queueMicrotask(() => {
+      if (cancelled) return
+      setCaptureDenied(false)
+      setCaptureOverlayOpen(false)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [mirror.takeover])
+
   const handleToggleScreenShare = useCallback(() => {
+    if (mirror.takeover) {
+      setMirrorSharing((current) => !current)
+      return
+    }
     if (screenStreamRef.current) {
       stopScreenShare()
       toast(strings.session.screenShare.stoppedToast)
       return
     }
+    const controller = screenShareRef.current
+    if (!controller) return
+    const generation = ++screenRequestGenerationRef.current
+    const isCurrentRequest = () =>
+      generation === screenRequestGenerationRef.current &&
+      !mirrorTakeoverRef.current &&
+      screenShareRef.current === controller
     // getDisplayMedia has to run inside the live user activation of this click
     // on both WebView2 and WKWebView (the V2-P9 gesture constraint), so it is
     // called here with nothing awaited in front of it.
     void requestScreenShareStream()
       .then((stream) => {
-        const controller = screenShareRef.current
-        if (!controller) {
-          // The session ended while the OS picker was open.
+        if (!isCurrentRequest()) {
           stopTracks(stream)
           return
         }
@@ -1858,6 +2249,7 @@ export function SessionView({
         toast.success(strings.session.screenShare.startedToast)
       })
       .catch((err: unknown) => {
+        if (!isCurrentRequest()) return
         if (err instanceof EntireScreenShareRequiredError) {
           toast.error(
             err.displaySurface === undefined
@@ -1893,7 +2285,7 @@ export function SessionView({
             : undefined
         )
       })
-  }, [stopScreenShare])
+  }, [stopScreenShare, mirror.takeover])
 
   const handleSelectOutputDevice = useCallback((deviceId: string) => {
     setActiveOutputDeviceId(deviceId)
@@ -1925,7 +2317,9 @@ export function SessionView({
   // names resolve exactly like the audit panel's (self label for mine,
   // cumulative seenPeerNames for peers so a departed peer keeps their name).
   const handleSendNote = useCallback((text: string) => {
-    void sendNoteRef.current?.(text)
+    void sendNoteRef
+      .current?.(text)
+      .catch(() => toast.error(strings.mirror.messageSendFailed))
   }, [])
   const handleSendImage = useCallback((file: File) => {
     void sendImageRef.current?.(file).catch((error: unknown) => {
@@ -2010,12 +2404,13 @@ export function SessionView({
   // spend it on a screen pre-acquire too, under the same AI-is-actually-running
   // condition the loop effect uses.
   const handleMediaRetry = useCallback(() => {
+    if (mirror.takeover) return
     if (aiFeaturesEnabled && activeModelId && !captureDenied) {
       void preacquireScreenStream()
     }
     setMediaErrorName(null)
     setMediaRetryNonce((n) => n + 1)
-  }, [aiFeaturesEnabled, activeModelId, captureDenied])
+  }, [aiFeaturesEnabled, activeModelId, captureDenied, mirror.takeover])
 
   // Only offered for the permission-denied case. Jumps to the OS camera
   // privacy pane via the same Rust opener the onboarding step uses. macOS is
@@ -2043,11 +2438,12 @@ export function SessionView({
   // boot()'s existing onCaptureDenied/onCaptureError handling takes it from
   // there — no need to duplicate that branching here.
   const handleCaptureRetry = useCallback(() => {
+    if (mirror.takeover) return
     void preacquireScreenStream()
     useFocusStore.getState().reset()
     setCaptureDenied(false)
     setAiRuntimeStatus('active')
-  }, [])
+  }, [mirror.takeover])
 
   const auditEntries = useMemo(
     () => mapAuditEntries(auditEvents, identity, peers, seenPeerNames),
@@ -2082,13 +2478,519 @@ export function SessionView({
   // I83 — the decision moved to `deriveAiChipStatus` (pure, unit-tested) to add
   // the 'unconfigured' case: AI on with no model used to read "AI off", which is
   // the one reading that sends a user to the wrong setting.
-  const aiChipStatus: AiStatus = deriveAiChipStatus({
+  const aiChipInputs = {
     aiFeaturesEnabled,
     activeModelId,
     modelStatus,
     hasLocalStream: Boolean(localStream),
     runtimeStatus: aiRuntimeStatus,
-  })
+  }
+  const aiChipStatus: AiStatus = mirror.takeover
+    ? deriveMirrorAiChipStatus({
+        ...aiChipInputs,
+        hasScreen: mirror.screen !== null,
+        cameraOn,
+      })
+    : deriveAiChipStatus(aiChipInputs)
+
+  const mirrorAbortRef = useRef<AbortController | null>(null)
+  const mirrorAiPendingRef = useRef(false)
+  useEffect(() => {
+    const controller = new AbortController()
+    mirrorAbortRef.current = controller
+    mirrorAiPendingRef.current = false
+    return () => {
+      controller.abort()
+      if (mirrorAbortRef.current === controller) mirrorAbortRef.current = null
+    }
+  }, [room, activeModelId, aiFeaturesEnabled, mirror.takeover])
+
+  useEffect(() => {
+    mirrorControlRef.current = (control) => {
+      if (useSessionStore.getState().room !== room || status !== 'active')
+        return false
+      if (
+        leaveRequestedRef.current &&
+        (control.type !== 'ptt' || control.active)
+      )
+        return false
+      setMirrorControlError(null)
+      let ownsAiRequest = false
+      const requestController = mirrorAbortRef.current
+      const run = async () => {
+        switch (control.type) {
+          case 'ptt':
+            if (control.active)
+              usePttStore.getState().press('browser-companion')
+            else usePttStore.getState().release('browser-companion')
+            return
+          case 'camera':
+            setCameraOn(control.on)
+            return
+          case 'screen_sharing':
+            setMirrorSharing(control.sharing)
+            return
+          case 'note':
+            await sendNoteRef.current?.(control.text)
+            return
+          case 'direct_message':
+            await mirrorChatControlsRef.current?.sendDirectMessage(
+              control.recipient,
+              control.text
+            )
+            return
+          case 'ai_message':
+            await mirrorChatControlsRef.current?.sendAi(control.text)
+            return
+          case 'image': {
+            const bytes = base64ToBytes(control.data)
+            if (bytes.byteLength > 5 * 1024 * 1024) return
+            await sendImageRef.current?.(
+              new File([bytes], control.filename, { type: control.mimeType })
+            )
+            return
+          }
+          case 'pomodoro_start':
+            pomodoroStartRef.current?.(control.args)
+            return
+          case 'pomodoro_stop':
+            pomodoroStopRef.current?.()
+            return
+          case 'dismiss_warning':
+            clearSelfWarning()
+            return
+          case 'dismiss_error':
+            return
+          case 'leave':
+            handleLeave()
+            return
+          case 'invite': {
+            if (!isHost) return false
+            const friend = friends.find(
+              (candidate) =>
+                candidate.ed_pubkey_hex.toLowerCase() === control.edPubkeyHex
+            )
+            if (!friend || !onInviteFriend || !(await onInviteFriend(friend)))
+              throw new Error(strings.mirror.inviteFailed)
+            return true
+          }
+          case 'ai_enabled':
+            if (control.enabled) {
+              const modelState = useModelStore.getState()
+              const readiness = getAiEnableReadiness(modelState)
+              if (
+                readiness !== 'ready' &&
+                !(readiness === 'unbenchmarked' && control.consent)
+              )
+                return
+            }
+            await useSettingsStore
+              .getState()
+              .setAiFeaturesEnabled(control.enabled)
+            return
+          case 'topic': {
+            const previous = useSessionStore.getState().declaredStudyTopic
+            if (previous === control.topic) return
+            useSessionStore.getState().setDeclaredStudyTopic(control.topic)
+            await emitAuditRef.current?.('topic_change', {
+              previous_topic: previous,
+              new_topic: control.topic,
+            })
+            return
+          }
+          case 'break':
+          case 'ai_action': {
+            const signal = mirrorAbortRef.current?.signal
+            if (!signal || signal.aborted || mirrorAiPendingRef.current) return
+            const model = useModelStore.getState().activeModelId
+            if (control.type === 'ai_action' && (!model || !aiFeaturesEnabled))
+              return
+            mirrorAiPendingRef.current = true
+            ownsAiRequest = true
+            setMirrorAiAction({ pending: true, text: '', tone: 'neutral' })
+            if (control.type === 'ai_action') {
+              const ready = mirrorAiReadyRef.current
+              if (!ready || !(await ready))
+                throw new AiAgentError(
+                  'sidecar_unavailable',
+                  strings.session.chat.aiUnavailable
+                )
+              if (signal.aborted) return
+            }
+            const reply =
+              control.type === 'ai_action'
+                ? await handleUserText({
+                    text: control.text,
+                    declaredTopic:
+                      useSessionStore.getState().declaredStudyTopic,
+                    modelId: model!,
+                    recentAuditKinds: useAuditStore
+                      .getState()
+                      .events.slice(-8)
+                      .map((event) => event.kind),
+                    signal,
+                  })
+                : null
+            if (signal.aborted) return
+            if (reply?.intent === 'topic_change') {
+              const previous = useSessionStore.getState().declaredStudyTopic
+              useSessionStore
+                .getState()
+                .setDeclaredStudyTopic(reply.payload.new_topic)
+              await emitAuditRef.current?.(
+                'topic_change',
+                {
+                  previous_topic: previous,
+                  new_topic: reply.payload.new_topic,
+                },
+                { signal }
+              )
+            }
+            if (control.type === 'break' || reply?.intent === 'break_request') {
+              const append = appendLocalAuditRef.current
+              const emit = emitAuditRef.current
+              if (!append || !emit) return
+              const verdict = await requestBreak(
+                {
+                  requestedDurationSec:
+                    control.type === 'break'
+                      ? control.durationSec
+                      : reply!.intent === 'break_request'
+                        ? reply!.payload.duration_sec
+                        : 300,
+                  aiRecommendation:
+                    reply?.intent === 'break_request'
+                      ? reply.payload.recommendation
+                      : 'approve',
+                  aiReasoning:
+                    reply?.intent === 'break_request'
+                      ? reply.payload.reasoning
+                      : '',
+                  now: Date.now(),
+                },
+                {
+                  appendLocalAudit: append,
+                  emitAudit: emit,
+                  startApprovedBreak: (args) =>
+                    useBreakStore.getState().startApprovedBreak(args),
+                  endBreak: (at) => useBreakStore.getState().endBreak(at),
+                  setTimeout: (handler, ms) => window.setTimeout(handler, ms),
+                  clearTimeout: (handle) =>
+                    window.clearTimeout(handle as number),
+                  snapshot: snapshotBreakState,
+                  now: Date.now,
+                  signal,
+                }
+              )
+              if (!signal.aborted) {
+                setMirrorAiAction({
+                  pending: false,
+                  text: verdict.reason,
+                  tone: verdict.verdict === 'approved' ? 'approved' : 'denied',
+                })
+                if (control.type === 'ai_action')
+                  notifyCurrentMirror({
+                    title: strings.notifications.aiReply.title,
+                    body: strings.notifications.aiReply.body(verdict.reason),
+                    onlyWhenHidden: true,
+                  })
+              }
+              return
+            }
+            if (!signal.aborted) {
+              setMirrorAiAction({
+                pending: false,
+                text: reply?.reply_text ?? '',
+                tone: 'neutral',
+              })
+              if (reply?.reply_text)
+                notifyCurrentMirror({
+                  title: strings.notifications.aiReply.title,
+                  body: strings.notifications.aiReply.body(reply.reply_text),
+                  onlyWhenHidden: true,
+                })
+            }
+            return
+          }
+        }
+      }
+      return run()
+        .catch((error: unknown) => {
+          if (
+            mirrorAbortRef.current !== requestController ||
+            requestController?.signal.aborted
+          )
+            return false
+          if (!ownsAiRequest) {
+            setMirrorControlError(
+              control.type === 'image'
+                ? strings.mirror.imageSendFailed
+                : control.type === 'note' || control.type === 'direct_message'
+                  ? strings.mirror.messageSendFailed
+                  : control.type === 'invite'
+                    ? strings.mirror.inviteFailed
+                    : strings.mirror.controlFailed
+            )
+            return false
+          }
+          setMirrorAiAction({
+            pending: false,
+            text:
+              error instanceof AiAgentError &&
+              error.code === 'sidecar_unavailable'
+                ? strings.session.chat.aiUnavailable
+                : strings.session.chat.aiFailed,
+            tone: 'denied',
+          })
+          return false
+        })
+        .finally(() => {
+          if (ownsAiRequest && mirrorAbortRef.current === requestController) {
+            mirrorAiPendingRef.current = false
+            if (!requestController?.signal.aborted)
+              setMirrorAiAction((current) =>
+                current?.pending ? { ...current, pending: false } : current
+              )
+          }
+        })
+    }
+  }, [
+    aiFeaturesEnabled,
+    clearSelfWarning,
+    friends,
+    handleLeave,
+    isHost,
+    onInviteFriend,
+    room,
+    status,
+  ])
+
+  const mirrorImageCacheRef = useRef(new Map<string, Promise<MirrorImage>>())
+  const mirrorPublishRevisionRef = useRef(0)
+  const [mirrorElapsedMs, setMirrorElapsedMs] = useState(0)
+  useEffect(() => {
+    if (!mirror.config) return
+    const update = () => {
+      setMirrorElapsedMs(
+        startedAt === null
+          ? 0
+          : Math.max(
+              0,
+              Math.min(
+                Date.now() - startedAt,
+                startedAtMono === null
+                  ? Infinity
+                  : performance.now() - startedAtMono
+              )
+            )
+      )
+    }
+    const timer = window.setInterval(update, 1000)
+    return () => window.clearInterval(timer)
+  }, [startedAt, startedAtMono, mirror.config])
+
+  const publishMirrorSnapshot = mirror.publish
+  const setMirrorStreams = mirror.setStreams
+  useEffect(() => {
+    if (!mirror.config || !sessionTopic || !identity || startedAt === null) {
+      mirrorPublishRevisionRef.current += 1
+      return
+    }
+    const revision = ++mirrorPublishRevisionRef.current
+    const mirrorSessionId = mirror.config.generation
+    const cache = mirrorImageCacheRef.current
+    const ids = new Set(sessionImages.map((image) => image.id))
+    for (const key of cache.keys()) if (!ids.has(key)) cache.delete(key)
+    const images = sessionImages.map((image) => {
+      let pending = cache.get(image.id)
+      if (!pending) {
+        pending = blobToBase64(image.blob).then((data) => ({
+          id: image.id,
+          fromEdPubkeyHex: image.fromEdPubkeyHex,
+          mine: image.mine,
+          filename: image.filename,
+          mimeType: image.mimeType,
+          width: image.width,
+          height: image.height,
+          frameCount: image.frameCount,
+          ts: image.ts,
+          data,
+        }))
+        cache.set(image.id, pending)
+      }
+      return pending
+    })
+    const snapshotPeers = Object.values(peers)
+    const tiles: MirrorSessionSnapshot['tiles'] = [
+      {
+        key: 'self:camera',
+        peerId: null,
+        name: identity.display_name || strings.session.selfFallback,
+        local: true,
+        variant: 'camera',
+        state: selfTileState,
+        ptt: pttActive,
+        cameraOff: !cameraOn,
+        alertReasoning: selfAlertReasoning,
+      },
+    ]
+    if (screenStream)
+      tiles.push({
+        key: 'self:screen',
+        peerId: null,
+        name: strings.session.screenShare.selfTileName,
+        local: true,
+        variant: 'screen',
+        ptt: false,
+        cameraOff: false,
+      })
+    for (const peer of snapshotPeers) {
+      const stream = remoteStreams[peer.peerId]
+      const alert = peer.edPubkeyHex
+        ? alertedPeers[peer.edPubkeyHex]
+        : undefined
+      tiles.push({
+        key: `${peer.peerId}:camera`,
+        peerId: peer.peerId,
+        name: peer.displayName ?? peerLabel(peer.peerId),
+        local: false,
+        variant: 'camera',
+        ptt: peerPtt[peer.peerId] ?? false,
+        cameraOff: peerCameraOff[peer.peerId] ?? false,
+        state: peer.reconnecting
+          ? 'reconnecting'
+          : stream && alert
+            ? 'alerted'
+            : connectionFocusState(peerConnState[peer.peerId], stream),
+        alertReasoning: alert?.reasoning,
+      })
+      if (peerScreenStreams[peer.peerId])
+        tiles.push({
+          key: `${peer.peerId}:screen`,
+          peerId: peer.peerId,
+          name: strings.session.screenShare.peerTileName(
+            peer.displayName ?? peerLabel(peer.peerId)
+          ),
+          local: false,
+          variant: 'screen',
+          ptt: false,
+          cameraOff: false,
+        })
+    }
+    const broadcasterName = pomodoroSnapshot.iAmBroadcaster
+      ? strings.session.broadcasterSelf
+      : (snapshotPeers.find(
+          (peer) => peer.edPubkeyHex === pomodoroSnapshot.broadcasterEdPubkey
+        )?.displayName ?? null)
+    void Promise.all(images)
+      .then((imageSnapshots) => {
+        if (
+          revision !== mirrorPublishRevisionRef.current ||
+          useSessionStore.getState().room !== room
+        )
+          return
+        publishMirrorSnapshot({
+          version: 1,
+          sessionId: mirrorSessionId,
+          status: status === 'active' ? 'active' : 'ended',
+          self: {
+            edPubkeyHex: identity.ed_pubkey_hex,
+            displayName: identity.display_name,
+          },
+          startedAt,
+          elapsedMs: mirrorElapsedMs,
+          declaredTopic: useSessionStore.getState().declaredStudyTopic,
+          aiEnabled: aiFeaturesEnabled,
+          aiAvailable: aiFeaturesEnabled && activeModelId !== null,
+          aiEnableNeedsConsent:
+            getAiEnableReadiness(useModelStore.getState()) === 'unbenchmarked',
+          aiStatus: aiChipStatus,
+          aiAction: mirrorAiAction,
+          controlError: mirrorControlError,
+          peers,
+          names: seenPeerNames,
+          tiles,
+          hadAnyPeer,
+          cameraOn,
+          pttActive,
+          screenSharing: mirror.takeover
+            ? mirrorSharing
+            : screenStream !== null,
+          audit: auditEntries,
+          notes: [...sessionNotes],
+          images: imageSnapshots,
+          chat: activeMirrorChat(mirrorChat, peers),
+          pomodoro: {
+            phase: pomodoroSnapshot.phase,
+            preset: pomodoroSnapshot.preset,
+            endsAt: pomodoroSnapshot.endsAt,
+            iAmBroadcaster: pomodoroSnapshot.iAmBroadcaster,
+            broadcasterName,
+          },
+          warning: selfWarning ? { reasoning: selfWarning.reasoning } : null,
+          breakEndsAt: onBreak ? breakEndsAt : null,
+          canInvite: isHost && onInviteFriend !== undefined,
+          sessionFull: snapshotPeers.length >= MAX_REMOTE_PEERS,
+          friends,
+          onlineFriends: friends
+            .filter(
+              (friend) => presence && isOnline(presence, friend.ed_pubkey_hex)
+            )
+            .map((friend) => friend.ed_pubkey_hex),
+        })
+      })
+      .catch(() => log.warn('mirror.snapshot_image_failed'))
+    const streams: Record<string, MediaStream> = {}
+    for (const [key, stream] of Object.entries(remoteStreams))
+      streams[`${key}:camera`] = stream
+    for (const [key, stream] of Object.entries(peerScreenStreams))
+      streams[`${key}:screen`] = stream
+    setMirrorStreams(streams)
+  }, [
+    sessionTopic,
+    status,
+    room,
+    identity,
+    startedAt,
+    peers,
+    seenPeerNames,
+    selfTileState,
+    pttActive,
+    cameraOn,
+    selfAlertReasoning,
+    screenStream,
+    remoteStreams,
+    peerScreenStreams,
+    alertedPeers,
+    peerPtt,
+    peerCameraOff,
+    peerConnState,
+    aiFeaturesEnabled,
+    activeModelId,
+    aiChipStatus,
+    mirror.takeover,
+    mirror.screen,
+    mirrorSharing,
+    mirrorAiAction,
+    mirrorControlError,
+    auditEntries,
+    sessionNotes,
+    sessionImages,
+    mirrorChat,
+    pomodoroSnapshot,
+    selfWarning,
+    onBreak,
+    breakEndsAt,
+    hadAnyPeer,
+    isHost,
+    onInviteFriend,
+    friends,
+    presence,
+    publishMirrorSnapshot,
+    setMirrorStreams,
+    mirrorElapsedMs,
+    mirror.config,
+  ])
 
   if (!room) return null
 
@@ -2220,6 +3122,7 @@ export function SessionView({
                   key={peer.peerId}
                   name={peerName}
                   stream={peerStream}
+                  mutePlayback={mirror.takeover}
                   ptt={peerPtt[peer.peerId] ?? false}
                   cameraOff={peerCameraOff[peer.peerId] ?? false}
                   state={peerState}
@@ -2266,6 +3169,7 @@ export function SessionView({
             onSend={handleSendNote}
             onSendImage={handleSendImage}
             onOpenImage={(image) => setOpenSessionImageId(image.id)}
+            bridge={mirrorChatBridge}
           />
         </div>
       </div>
@@ -2419,6 +3323,16 @@ export function SessionView({
           />
         </span>
         <span className="flex items-center gap-2">
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={() => setMirrorOpen(true)}
+            aria-haspopup="dialog"
+            aria-label={strings.mirror.open}
+          >
+            <LaptopIcon />
+          </Button>
           {canInvite ? (
             <Button
               type="button"
@@ -2442,6 +3356,24 @@ export function SessionView({
           </Button>
         </span>
       </footer>
+      <Dialog open={mirrorOpen} onOpenChange={setMirrorOpen}>
+        <DialogContent
+          className="max-h-[90vh] overflow-y-auto"
+          aria-describedby={undefined}
+        >
+          <DialogHeader>
+            <DialogTitle>{strings.mirror.title}</DialogTitle>
+          </DialogHeader>
+          <MirrorHostPanel
+            config={mirror.config}
+            starting={mirror.starting}
+            connected={mirror.connected}
+            takeover={mirror.takeover}
+            onStart={mirror.start}
+            onStop={mirror.stop}
+          />
+        </DialogContent>
+      </Dialog>
       {selfWarning && !onBreak ? (
         <SelfWarningBadge
           reasoning={selfWarning.reasoning}
@@ -2450,7 +3382,7 @@ export function SessionView({
       ) : null}
       {onBreak ? <BreakCountdownBadge endsAt={breakEndsAt} /> : null}
       <ScreenCapturePermissionOverlay
-        open={captureOverlayOpen}
+        open={captureOverlayOpen && !mirror.takeover}
         onOpenChange={setCaptureOverlayOpen}
         onRetry={handleCaptureRetry}
       />

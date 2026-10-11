@@ -32,7 +32,7 @@ Surfaced explicitly because the design implies a footprint the user should conse
 1. **Local-first.** Personal data — keypairs, friends list, session reports, AI logs — lives only on the user's device. Never synced, never backed up to anyone's cloud.
 2. **No backend we operate.** All discovery uses public infrastructure (Nostr relays, with public MQTT brokers raced as the shipped second transport). NAT traversal is STUN-only out of the box — no public TURN ships (none reliable remains), and a user who needs a relay supplies their own TURN server. We never run servers we'd have to keep alive or pay for as the user base grows.
 3. **Polished, not MVP.** Even V1 ships with full onboarding, a settings panel, autostart, and per-OS installers. We don't ship beta-feeling things even when they're functional. (Installers are unsigned for V1's friends-only audience — see §5; signing returns in a later phase if a Developer ID and code-signing cert become available.)
-4. **AI augments, doesn't surveil.** AI inference happens on-device. Camera + screen pixels are never transmitted. Only end-of-session score and real-time event flags ("on task" / "warning" / "alerted") are shared with peers.
+4. **AI augments, doesn't surveil.** AI inference happens on-device. With explicitly enabled mirroring, a paired browser on the user's LAN sends its camera and selected screen to the user's desktop for local inference. AI capture is never uploaded to an AI service. Only end-of-session score and real-time event flags ("on task" / "warning" / "alerted") are shared with peers; ordinary session video and explicit screen sharing remain separate.
 5. **Friends-only trust model.** No defenses against actively malicious peers. We don't try to prevent a user from disabling their own AI or fudging their own score — they can already do that, and these are their friends.
 6. **Reversible decisions over locked-in choices.** Trystero strategy, vision model, scoring weights — all swappable. If Nostr relays vanish in five years, we change one import.
 
@@ -143,7 +143,7 @@ Refinements that make the product feel native rather than functional. Not a sing
 
 These are decisions, not omissions. Adding any of these would change the product.
 
-- **Mobile clients.** This is a focused-work app for laptops and desktops. Phones are the distraction we're studying away from.
+- **Standalone mobile clients.** This is a focused-work app for laptops and desktops. The opt-in LAN browser companion (#365) can run on a tablet, including iPadOS, while the desktop retains identity, peer connections, storage, and AI. It does not create a mobile identity, cloud sync, or a service we operate.
 - **Public rooms / stranger matching.** Friends-only is the trust model. Focusmate-style stranger pairing is a different product.
 - **Recording sessions.** Privacy violation, server cost, and adds nothing the audit log doesn't.
 - **Cloud sync.** Personal data stays local. Period. Users who want cross-device identity should restore from the BIP39 mnemonic.
@@ -154,6 +154,8 @@ These are decisions, not omissions. Adding any of these would change the product
 ## 7. Known limitations
 
 Explicit so we don't pretend.
+
+- **Browser mirroring requires trusted HTTPS and an awake desktop on the same private IPv4 LAN.** The desktop supplies a local certificate and short pairing password. Browsers require an explicit camera/microphone gesture and fresh screen-selection permission; screen capture cannot resume silently after a disconnect. iPadOS browsers do not expose `getDisplayMedia`, so tablet camera, microphone, text AI and session controls work while screen-based focus checks remain paused. Notifications are capability-dependent: iPadOS requires a Home Screen web app for OS notification permission, and a LAN-only app cannot deliver background Web Push while the host or browser is unavailable. A cached browser shell remains usable as a read-only view during a host outage.
 
 - **Linux integration is desktop-service and bundled-runtime dependent.** On KDE Wayland, outbound screen share and AI capture require `xdg-desktop-portal-kde` + PipeWire, and private-key storage requires a provider owning `org.freedesktop.secrets`. The candidate is x86_64 AppImage only, the AppImage must be writable for automatic update, and GPU acceleration requires a compatible host Vulkan driver (CPU fallback remains available). It also carries StudyVis's WebKitGTK/librice copy because the distro build has the `ENABLE_WEB_RTC` peer-connection binding compiled out while retaining the media-device API. Distro security updates therefore do not patch the candidate: StudyVis owns advisory monitoring, license/source obligations, runtime rebuilds, and updater delivery. These are candidate prerequisites and limits, not a development-only implementation status; they become supported-release claims only after the exact-AppImage physical matrix passes.
 - **Prompt injection** on small local LLMs is real. Friend-group threat model mostly absorbs this — Gemma 3 4B and Qwen2.5-VL-3B handle naive injections, but a determined friend can fool them. Mitigations: structured observation prompts where possible, system-prompt manipulation patterns enumerated, no real consequence to faking your own score.

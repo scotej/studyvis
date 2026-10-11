@@ -40,6 +40,24 @@ export async function saveTextFile(
   options: { defaultPath: string; filters?: DialogFilter[] },
   deps: SaveTextFileDeps = defaultDeps
 ): Promise<SaveTextFileResult> {
+  if (
+    deps === defaultDeps &&
+    typeof window !== 'undefined' &&
+    !('__TAURI_INTERNALS__' in window) &&
+    !('__TAURI__' in window)
+  ) {
+    const url = URL.createObjectURL(
+      new Blob([contents], { type: 'text/plain;charset=utf-8' })
+    )
+    const anchor = document.createElement('a')
+    anchor.href = url
+    anchor.download = options.defaultPath
+    document.body.append(anchor)
+    anchor.click()
+    anchor.remove()
+    setTimeout(() => URL.revokeObjectURL(url), 1000)
+    return { kind: 'saved', path: options.defaultPath }
+  }
   const path = await deps.pickPath({
     defaultPath: options.defaultPath,
     filters: options.filters,

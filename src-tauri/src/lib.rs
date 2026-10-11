@@ -32,6 +32,8 @@ mod linux_pipewire_runtime;
 mod macos_display_capture;
 #[cfg(target_os = "macos")]
 mod macos_floating_window;
+#[cfg(desktop)]
+pub mod mirror;
 pub mod window_layout;
 
 use tauri::Manager;
@@ -54,6 +56,8 @@ use commands::identity::{
     identity_box_decrypt, identity_box_encrypt, identity_exists, identity_keys_present,
     identity_load_record, identity_save_keys, identity_save_record, identity_sign,
 };
+#[cfg(desktop)]
+use commands::mirror::{mirror_send, mirror_start, mirror_stop, MirrorState};
 #[cfg(all(
     desktop,
     any(target_os = "macos", target_os = "windows", target_os = "linux")
@@ -241,6 +245,12 @@ pub fn run() {
         #[cfg(desktop)]
         session_overlay_prepare,
         #[cfg(desktop)]
+        mirror_start,
+        #[cfg(desktop)]
+        mirror_stop,
+        #[cfg(desktop)]
+        mirror_send,
+        #[cfg(desktop)]
         model_paths,
         #[cfg(desktop)]
         model_install_state,
@@ -368,6 +378,7 @@ pub fn run() {
                 #[cfg(target_os = "linux")]
                 linux_diagnostics::capture_boot_environment();
                 app.manage(SidecarState::new());
+                app.manage(MirrorState::default());
                 app.manage(EngineState::new());
                 app.manage(DownloadState::new());
                 app.manage(ModelOperationState::new());
@@ -398,6 +409,7 @@ pub fn run() {
         #[cfg(desktop)]
         tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit => {
             SidecarState::kill_blocking(app_handle);
+            MirrorState::stop_for_app(app_handle);
         }
         _ => {}
     });

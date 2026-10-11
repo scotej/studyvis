@@ -18,7 +18,7 @@ For each Cargo registry component, `source` is the direct exact-version crates.i
 source-archive URL and `source checksum` is its Cargo.lock SHA-256. These fields
 tell recipients how to obtain and verify the Covered Source named in the index.
 
-Components: 759 total (536 Cargo, 222 npm, 1 external runtime).
+Components: 783 total (560 Cargo, 222 npm, 1 external runtime).
 
 COMPONENT INDEX
 ===============
@@ -82,6 +82,31 @@ CARGO
   source checksum: 2a4385e2e34eb35d6b3efe798b9eb88096925d87726c0798709bf56d9ed84af3
   license: cargo:anyhow@1.0.103/LICENSE-APACHE (SHA-256 62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a)
   license: cargo:anyhow@1.0.103/LICENSE-MIT (SHA-256 23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3)
+
+- asn1-rs 0.7.2 — MIT OR Apache-2.0
+  id: cargo:asn1-rs@0.7.2
+  targets: aarch64-apple-darwin, x86_64-pc-windows-msvc, x86_64-unknown-linux-gnu
+  source: https://crates.io/api/v1/crates/asn1-rs/0.7.2/download
+  source checksum: b7f43a50ac4fdca5df8e885c21b835997f0a1cdee65494a6847694a98652d9d8
+  license: cargo:asn1-rs@0.7.2/LICENSE-APACHE (SHA-256 a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2)
+  license: cargo:asn1-rs@0.7.2/LICENSE-MIT (SHA-256 a5c61b93b6ee1d104af9920cf020ff3c7efe818e31fe562c72261847a728f513)
+
+- asn1-rs-derive 0.6.0 — MIT OR Apache-2.0
+  id: cargo:asn1-rs-derive@0.6.0
+  targets: aarch64-apple-darwin, x86_64-pc-windows-msvc, x86_64-unknown-linux-gnu
+  source: https://crates.io/api/v1/crates/asn1-rs-derive/0.6.0/download
+  source checksum: 3109e49b1e4909e9db6515a30c633684d68cdeaa252f215214cb4fa1a5bfee2c
+  license: cargo:asn1-rs-derive@0.6.0/LICENSE-APACHE (SHA-256 a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2)
+  license: cargo:asn1-rs-derive@0.6.0/LICENSE-MIT (SHA-256 a5c61b93b6ee1d104af9920cf020ff3c7efe818e31fe562c72261847a728f513)
+
+- asn1-rs-impl 0.2.0 — MIT/Apache-2.0
+  id: cargo:asn1-rs-impl@0.2.0
+  targets: aarch64-apple-darwin, x86_64-pc-windows-msvc, x86_64-unknown-linux-gnu
+  source: https://crates.io/api/v1/crates/asn1-rs-impl/0.2.0/download
+  source checksum: 7b18050c2cd6fe86c3a76584ef5e0baf286d038cda203eb6223df2cc413565f7
+  override: The asn1-rs-impl archive omits its workspace-root dual-license texts; retain the same author's locked asn1-rs license files.
+  license: cargo:asn1-rs@0.7.2/LICENSE-APACHE (SHA-256 a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2)
+  license: cargo:asn1-rs@0.7.2/LICENSE-MIT (SHA-256 a5c61b93b6ee1d104af9920cf020ff3c7efe818e31fe562c72261847a728f513)
 
 - async-broadcast 0.7.2 — MIT OR Apache-2.0
   id: cargo:async-broadcast@0.7.2
@@ -194,6 +219,20 @@ CARGO
   source checksum: 1f012b8cc0c850f34117ec8252a44418f2e34a2cf501de89e29b241ae5f79471
   license: cargo:auto-launch@0.5.0/LICENSE (SHA-256 e3dee6d5b240791312cd89333a5cc62e6f65be66bff8ab6903dc9a67bbe84263)
 
+- axum 0.8.9 — MIT
+  id: cargo:axum@0.8.9
+  targets: aarch64-apple-darwin, x86_64-pc-windows-msvc, x86_64-unknown-linux-gnu
+  source: https://crates.io/api/v1/crates/axum/0.8.9/download
+  source checksum: 31b698c5f9a010f6573133b09e0de5408834d0c82f8d7475a89fc1867a71cd90
+  license: cargo:axum@0.8.9/LICENSE (SHA-256 6a13bc24a100a6812f053879ec51b126b103af7cda6dbf48c4188722da44da9f)
+
+- axum-core 0.5.6 — MIT
+  id: cargo:axum-core@0.5.6
+  targets: aarch64-apple-darwin, x86_64-pc-windows-msvc, x86_64-unknown-linux-gnu
+  source: https://crates.io/api/v1/crates/axum-core/0.5.6/download
+  source checksum: 08c78f31d7b1291f7ee735c1c6780ccde7785daae9a9206026862dab7d8792d1
+  license: cargo:axum-core@0.5.6/LICENSE (SHA-256 e5c343775a0e56c07182dd9b1667d31853cfcb6953f567ee1f5a7bf7978bf285)
+
 - base64 0.21.7 — MIT OR Apache-2.0
   id: cargo:base64@0.21.7
   targets: aarch64-apple-darwin
@@ -241,6 +280,14 @@ CARGO
   source checksum: 5e764a1d40d510daf35e07be9eb06e75770908c27d411ee6c92109c9840eaaf7
   license: cargo:bit-vec@0.8.0/LICENSE-APACHE (SHA-256 8173d5c29b4f956d532781d2b86e4e30f83e6b7878dce18c919451d6ba707c90)
   license: cargo:bit-vec@0.8.0/LICENSE-MIT (SHA-256 f51ac2c59a222f7476ce507ca879960e2b64ea64bb2786eefdbeb7b0b538d1b7)
+
+- bit-vec 0.9.1 — Apache-2.0 OR MIT
+  id: cargo:bit-vec@0.9.1
+  targets: aarch64-apple-darwin, x86_64-pc-windows-msvc, x86_64-unknown-linux-gnu
+  source: https://crates.io/api/v1/crates/bit-vec/0.9.1/download
+  source checksum: b71798fca2c1fe1086445a7258a4bc81e6e49dcd24c8d0dd9a1e57395b603f51
+  license: cargo:bit-vec@0.9.1/LICENSE-APACHE (SHA-256 8173d5c29b4f956d532781d2b86e4e30f83e6b7878dce18c919451d6ba707c90)
+  license: cargo:bit-vec@0.9.1/LICENSE-MIT (SHA-256 f51ac2c59a222f7476ce507ca879960e2b64ea64bb2786eefdbeb7b0b538d1b7)
 
 - bitflags 1.3.2 — MIT/Apache-2.0
   id: cargo:bitflags@1.3.2
@@ -703,6 +750,13 @@ CARGO
   source checksum: ac3984ec7bd6cfa798e62b4a642426a5be0e68f9401cfc2a01e3fa9ea2fcdb8d
   license: cargo:darling_macro@0.23.0/LICENSE (SHA-256 8ea93490d74a5a1b1af3ff71d786271b3f1e5f0bea79ac16e02ec533cef040d6)
 
+- data-encoding 2.11.1 — MIT
+  id: cargo:data-encoding@2.11.1
+  targets: aarch64-apple-darwin, x86_64-pc-windows-msvc, x86_64-unknown-linux-gnu
+  source: https://crates.io/api/v1/crates/data-encoding/2.11.1/download
+  source checksum: 4583a4551df46e2792f82ceeac45e850d2e2d5debba0b91f102385cda5b11f06
+  license: cargo:data-encoding@2.11.1/LICENSE (SHA-256 b68ad1a3367b825447089e1f8d6829b97f47a89eb78d2f4ebaef4672f5606186)
+
 - dbus 0.9.11 — Apache-2.0/MIT
   id: cargo:dbus@0.9.11
   targets: x86_64-unknown-linux-gnu
@@ -718,6 +772,14 @@ CARGO
   source checksum: 708b509edf7889e53d7efb0ffadd994cc6c2345ccb62f55cfd6b0682165e4fa6
   license: cargo:dbus-secret-service@4.1.0/LICENSE-APACHE (SHA-256 a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2)
   license: cargo:dbus-secret-service@4.1.0/LICENSE-MIT (SHA-256 0d13fdf5615ccc7e7123b58b5c88b0d2bbabe345cd70b94e094ee44034db5be6)
+
+- der-parser 10.0.0 — MIT OR Apache-2.0
+  id: cargo:der-parser@10.0.0
+  targets: aarch64-apple-darwin, x86_64-pc-windows-msvc, x86_64-unknown-linux-gnu
+  source: https://crates.io/api/v1/crates/der-parser/10.0.0/download
+  source checksum: 07da5016415d5a3c4dd39b11ed26f915f52fc4e0dc197d87908bc916e51bc1a6
+  license: cargo:der-parser@10.0.0/LICENSE-APACHE (SHA-256 a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2)
+  license: cargo:der-parser@10.0.0/LICENSE-MIT (SHA-256 a5c61b93b6ee1d104af9920cf020ff3c7efe818e31fe562c72261847a728f513)
 
 - deranged 0.5.8 — MIT OR Apache-2.0
   id: cargo:deranged@0.5.8
@@ -1337,6 +1399,13 @@ CARGO
   license: cargo:gtk3-macros@0.18.2/COPYRIGHT (SHA-256 dae402989de65164815b7e2b6bc2b9576285434c3785934c8b6ece0fa055960d)
   license: cargo:gtk3-macros@0.18.2/LICENSE (SHA-256 f9c4c77baa3828004ee54b8a4f2db2e88ed44a6237a493965bf551fac0fcb62d)
 
+- h2 0.4.20 — MIT
+  id: cargo:h2@0.4.20
+  targets: aarch64-apple-darwin, x86_64-pc-windows-msvc, x86_64-unknown-linux-gnu
+  source: https://crates.io/api/v1/crates/h2/0.4.20/download
+  source checksum: 7d29020232d6aa3fb1daca64c1127cf662cf97f254ae16c18c05b8ab635fc118
+  license: cargo:h2@0.4.20/LICENSE (SHA-256 b21623012e6c453d944b0342c515b631cfcbf30704c2621b291526b69c10724d)
+
 - hashbrown 0.12.3 — MIT OR Apache-2.0
   id: cargo:hashbrown@0.12.3
   targets: aarch64-apple-darwin, x86_64-pc-windows-msvc, x86_64-unknown-linux-gnu
@@ -1446,6 +1515,14 @@ CARGO
   source checksum: 6dbf3de79e51f3d586ab4cb9d5c3e2c14aa28ed23d180cf89b4df0454a69cc87
   license: cargo:httparse@1.10.1/LICENSE-APACHE (SHA-256 a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2)
   license: cargo:httparse@1.10.1/LICENSE-MIT (SHA-256 1626f2c950cee975b5809748e288468141d09aa420314c7c9b35e6e62b772b2d)
+
+- httpdate 1.0.3 — MIT OR Apache-2.0
+  id: cargo:httpdate@1.0.3
+  targets: aarch64-apple-darwin, x86_64-pc-windows-msvc, x86_64-unknown-linux-gnu
+  source: https://crates.io/api/v1/crates/httpdate/1.0.3/download
+  source checksum: df3b46402a9d5adb4c86a0cf463f42e19994e3ee891101b1841f30a545cb49a9
+  license: cargo:httpdate@1.0.3/LICENSE-APACHE (SHA-256 4d10fe5f3aa176b05b229a248866bad70b834c173f1252a814ff4748d8a13837)
+  license: cargo:httpdate@1.0.3/LICENSE-MIT (SHA-256 934887691e05d69d7c86ad3f2c360980fa30c15b035e351f3c9865e99da4debc)
 
 - hybrid-array 0.4.13 — MIT OR Apache-2.0
   id: cargo:hybrid-array@0.4.13
@@ -1565,6 +1642,14 @@ CARGO
   license: cargo:idna_adapter@1.2.2/LICENSE-APACHE (SHA-256 a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2)
   license: cargo:idna_adapter@1.2.2/LICENSE-MIT (SHA-256 8b43ce8accd61e9d370b5ca9e9c4f953279b5c239926c62315b40e24df51b726)
 
+- if-addrs 0.15.0 — MIT OR BSD-3-Clause
+  id: cargo:if-addrs@0.15.0
+  targets: aarch64-apple-darwin, x86_64-pc-windows-msvc, x86_64-unknown-linux-gnu
+  source: https://crates.io/api/v1/crates/if-addrs/0.15.0/download
+  source checksum: c0a05c691e1fae256cf7013d99dad472dc52d5543322761f83ec8d47eab40d2b
+  license: cargo:if-addrs@0.15.0/LICENSE-BSD (SHA-256 588713c78138d7d6985b87275724f7047949a71a007b16b352d7745499976f7f)
+  license: cargo:if-addrs@0.15.0/LICENSE-MIT (SHA-256 3990ddb78a5a2cfd64a5ffe5cebc3306f3298f6880c644afdf15043ef7d702d9)
+
 - image 0.25.10 — MIT OR Apache-2.0
   id: cargo:image@0.25.10
   targets: aarch64-apple-darwin, x86_64-pc-windows-msvc, x86_64-unknown-linux-gnu
@@ -1679,6 +1764,14 @@ CARGO
   source checksum: eebcc3aff044e5944a8fbaf69eb277d11986064cba30c468730e8b9909fb551c
   license: cargo:keyring@3.6.3/LICENSE-APACHE (SHA-256 78ebc2ea2a1cec9cbec2e1a6fc15e73474fe22bdad7575518e7f4628651d49c4)
   license: cargo:keyring@3.6.3/LICENSE-MIT (SHA-256 157cc607717b1b372a69f6b4526f6ad18c1279af9f3267835cca2943f37bc07d)
+
+- lazy_static 1.5.1 — MIT OR Apache-2.0
+  id: cargo:lazy_static@1.5.1
+  targets: aarch64-apple-darwin, x86_64-pc-windows-msvc, x86_64-unknown-linux-gnu
+  source: https://crates.io/api/v1/crates/lazy_static/1.5.1/download
+  source checksum: 20870f649af7073d53e38067b2a84312175d56ea15217e1b15bc83506ec50afb
+  license: cargo:lazy_static@1.5.1/LICENSE-APACHE (SHA-256 a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2)
+  license: cargo:lazy_static@1.5.1/LICENSE-MIT (SHA-256 23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3)
 
 - lazycell 1.3.0 — MIT/Apache-2.0
   id: cargo:lazycell@1.3.0
@@ -1800,6 +1893,14 @@ CARGO
   license: cargo:markup5ever@0.38.0/LICENSE-APACHE (SHA-256 a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2)
   license: cargo:markup5ever@0.38.0/LICENSE-MIT (SHA-256 86dd7f026f916daf7511e39951ad8ea8cf55a8db67ae64060dacf829761c18f3)
 
+- matchit 0.8.4 — MIT AND BSD-3-Clause
+  id: cargo:matchit@0.8.4
+  targets: aarch64-apple-darwin, x86_64-pc-windows-msvc, x86_64-unknown-linux-gnu
+  source: https://crates.io/api/v1/crates/matchit/0.8.4/download
+  source checksum: 47e1ffaa40ddd1f3ed91f717a33c8c0ee23fff369e3aa8772b9605cc1d22f4c3
+  license: cargo:matchit@0.8.4/LICENSE (SHA-256 de701d0618d694feb1af90f02181a1763d9b0bdeb70a3a592781e529077dba65)
+  license: cargo:matchit@0.8.4/LICENSE.httprouter (SHA-256 162ce11ad71338d0a0c6ebaf5c48af72c6ae237b468859d3656fe2d9ed3f3a85)
+
 - memchr 2.8.0 — Unlicense OR MIT
   id: cargo:memchr@2.8.0
   targets: aarch64-apple-darwin, x86_64-pc-windows-msvc, x86_64-unknown-linux-gnu
@@ -1823,6 +1924,15 @@ CARGO
   source checksum: 6877bb514081ee2a7ff5ef9de3281f14a4dd4bceac4c09388074a6b5df8a139a
   license: cargo:mime@0.3.17/LICENSE-APACHE (SHA-256 a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2)
   license: cargo:mime@0.3.17/LICENSE-MIT (SHA-256 8b87502eddb2d7fa23d54ed2caf5681ab5fbbdc8eb553e8ade710240842f9097)
+
+- minimal-lexical 0.2.1 — MIT/Apache-2.0
+  id: cargo:minimal-lexical@0.2.1
+  targets: aarch64-apple-darwin, x86_64-pc-windows-msvc, x86_64-unknown-linux-gnu
+  source: https://crates.io/api/v1/crates/minimal-lexical/0.2.1/download
+  source checksum: 68354c5c6bd36d73ff3feceb05efa59b6acb7626617f4962be322a825e61f79a
+  license: cargo:minimal-lexical@0.2.1/LICENSE-APACHE (SHA-256 8173d5c29b4f956d532781d2b86e4e30f83e6b7878dce18c919451d6ba707c90)
+  license: cargo:minimal-lexical@0.2.1/LICENSE-MIT (SHA-256 23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3)
+  license: cargo:minimal-lexical@0.2.1/LICENSE.md (SHA-256 dbe1fff0fb1314b6af94f161511406275cf01c5a32441fbf24528a57a051d599)
 
 - minisign-verify 0.2.5 — MIT
   id: cargo:minisign-verify@0.2.5
@@ -1889,6 +1999,13 @@ CARGO
   source checksum: 71e2746dc3a24dd78b3cfcb7be93368c6de9963d30f43a6a73998a9cf4b17b46
   license: cargo:nix@0.29.0/LICENSE (SHA-256 66e3ee1fa7f909ad3c612d556f2a0cdabcd809ad6e66f3b0605015ac64841b70)
 
+- nom 7.1.3 — MIT
+  id: cargo:nom@7.1.3
+  targets: aarch64-apple-darwin, x86_64-pc-windows-msvc, x86_64-unknown-linux-gnu
+  source: https://crates.io/api/v1/crates/nom/7.1.3/download
+  source checksum: d273983c5a657a70a3e8f2a01329822f3b8c8172b73826411a55751e404a0a4a
+  license: cargo:nom@7.1.3/LICENSE (SHA-256 4dbda04344456f09a7a588140455413a9ac59b6b26a1ef7cdf9c800c012d87f0)
+
 - notify-rust 4.17.0 — MIT/Apache-2.0
   id: cargo:notify-rust@4.17.0
   targets: aarch64-apple-darwin, x86_64-pc-windows-msvc, x86_64-unknown-linux-gnu
@@ -1907,7 +2024,7 @@ CARGO
 
 - num-bigint 0.4.8 — MIT OR Apache-2.0
   id: cargo:num-bigint@0.4.8
-  targets: x86_64-unknown-linux-gnu
+  targets: aarch64-apple-darwin, x86_64-pc-windows-msvc, x86_64-unknown-linux-gnu
   source: https://crates.io/api/v1/crates/num-bigint/0.4.8/download
   source checksum: c89e69e7e0f03bea5ef08013795c25018e101932225a656383bd384495ecc367
   license: cargo:num-bigint@0.4.8/LICENSE-APACHE (SHA-256 a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2)
@@ -1931,7 +2048,7 @@ CARGO
 
 - num-integer 0.1.46 — MIT OR Apache-2.0
   id: cargo:num-integer@0.1.46
-  targets: x86_64-unknown-linux-gnu
+  targets: aarch64-apple-darwin, x86_64-pc-windows-msvc, x86_64-unknown-linux-gnu
   source: https://crates.io/api/v1/crates/num-integer/0.1.46/download
   source checksum: 7969661fd2958a5cb096e56c8e1ad0444ac2bbcd0061bd28660485a44879858f
   license: cargo:num-integer@0.1.46/LICENSE-APACHE (SHA-256 a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2)
@@ -2089,6 +2206,14 @@ CARGO
   override: These crates.io archives omit their workspace-root license file; each declaration permits the MIT alternative selected here.
   license: cargo:serde@1.0.229/LICENSE-MIT (SHA-256 23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3)
 
+- oid-registry 0.8.1 — MIT OR Apache-2.0
+  id: cargo:oid-registry@0.8.1
+  targets: aarch64-apple-darwin, x86_64-pc-windows-msvc, x86_64-unknown-linux-gnu
+  source: https://crates.io/api/v1/crates/oid-registry/0.8.1/download
+  source checksum: 12f40cff3dde1b6087cc5d5f5d4d65712f34016a03ed60e9c08dcc392736b5b7
+  license: cargo:oid-registry@0.8.1/LICENSE-APACHE (SHA-256 a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2)
+  license: cargo:oid-registry@0.8.1/LICENSE-MIT (SHA-256 a5c61b93b6ee1d104af9920cf020ff3c7efe818e31fe562c72261847a728f513)
+
 - once_cell 1.21.4 — MIT OR Apache-2.0
   id: cargo:once_cell@1.21.4
   targets: aarch64-apple-darwin, x86_64-pc-windows-msvc, x86_64-unknown-linux-gnu
@@ -2204,6 +2329,13 @@ CARGO
   source checksum: df94ce210e5bc13cb6651479fa48d14f601d9858cfe0467f43ae157023b938d3
   license: cargo:pathdiff@0.2.3/LICENSE-APACHE (SHA-256 dd7818e575815db1fc6ba5ae894cd1674dfbff78562407b1f9f44da0fb857fe4)
   license: cargo:pathdiff@0.2.3/LICENSE-MIT (SHA-256 23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3)
+
+- pem 4.0.0 — MIT
+  id: cargo:pem@4.0.0
+  targets: aarch64-apple-darwin, x86_64-pc-windows-msvc, x86_64-unknown-linux-gnu
+  source: https://crates.io/api/v1/crates/pem/4.0.0/download
+  source checksum: d354a98a3d1251555de99e8fdd8afda05573c31b82f59063a7b0a29b5527f120
+  license: cargo:pem@4.0.0/LICENSE.md (SHA-256 b7c76ff4466a3aeb6a7d903e81b651335e97d64ecb857e2ee9812a36c6fd1acf)
 
 - percent-encoding 2.3.2 — MIT OR Apache-2.0
   id: cargo:percent-encoding@2.3.2
@@ -2518,6 +2650,13 @@ CARGO
   license: cargo:raw-window-handle@0.6.2/LICENSE-MIT.md (SHA-256 9c5a80639a57c1c945570e7ebbca0706305849ce3c098021325cca9db2f7acc4)
   license: cargo:raw-window-handle@0.6.2/LICENSE-ZLIB.md (SHA-256 ae895c8576e682f310fb70d93d9f99b1dd82872094c54a8f6cdfe2ca5c2d6ecb)
 
+- rcgen 0.14.10 — MIT OR Apache-2.0
+  id: cargo:rcgen@0.14.10
+  targets: aarch64-apple-darwin, x86_64-pc-windows-msvc, x86_64-unknown-linux-gnu
+  source: https://crates.io/api/v1/crates/rcgen/0.14.10/download
+  source checksum: 8774e05a7d0de114588e6a28fe7e71694b82614ed569d86d8b389dfbc98b8ad8
+  license: cargo:rcgen@0.14.10/LICENSE (SHA-256 debe6fed7ac143217c7f533759c54b14f18cd01d5fe195c51d83c2ae2d136cb4)
+
 - ref-cast 1.0.25 — MIT OR Apache-2.0
   id: cargo:ref-cast@1.0.25
   targets: aarch64-apple-darwin, x86_64-pc-windows-msvc, x86_64-unknown-linux-gnu
@@ -2611,6 +2750,14 @@ CARGO
   source checksum: 94300abf3f1ae2e2b8ffb7b58043de3d399c73fa6f4b73826402a5c457614dbe
   license: cargo:rustc-hash@2.1.2/LICENSE-APACHE (SHA-256 62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a)
   license: cargo:rustc-hash@2.1.2/LICENSE-MIT (SHA-256 23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3)
+
+- rusticata-macros 4.1.0 — MIT/Apache-2.0
+  id: cargo:rusticata-macros@4.1.0
+  targets: aarch64-apple-darwin, x86_64-pc-windows-msvc, x86_64-unknown-linux-gnu
+  source: https://crates.io/api/v1/crates/rusticata-macros/4.1.0/download
+  source checksum: faf0c4a6ece9950b9abdb62b1cfcf2a68b3b67a10ba445b3bb85be2a293d0632
+  license: cargo:rusticata-macros@4.1.0/LICENSE-APACHE (SHA-256 a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2)
+  license: cargo:rusticata-macros@4.1.0/LICENSE-MIT (SHA-256 a5c61b93b6ee1d104af9920cf020ff3c7efe818e31fe562c72261847a728f513)
 
 - rustix 1.1.4 — Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT
   id: cargo:rustix@1.1.4
@@ -2805,6 +2952,14 @@ CARGO
   license: cargo:serde_json@1.0.151/LICENSE-APACHE (SHA-256 62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a)
   license: cargo:serde_json@1.0.151/LICENSE-MIT (SHA-256 23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3)
 
+- serde_path_to_error 0.1.20 — MIT OR Apache-2.0
+  id: cargo:serde_path_to_error@0.1.20
+  targets: aarch64-apple-darwin, x86_64-pc-windows-msvc, x86_64-unknown-linux-gnu
+  source: https://crates.io/api/v1/crates/serde_path_to_error/0.1.20/download
+  source checksum: 10a9ff822e371bb5403e391ecd83e182e0e77ba7f6fe0160b795797109d1b457
+  license: cargo:serde_path_to_error@0.1.20/LICENSE-APACHE (SHA-256 62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a)
+  license: cargo:serde_path_to_error@0.1.20/LICENSE-MIT (SHA-256 23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3)
+
 - serde_repr 0.1.20 — MIT OR Apache-2.0
   id: cargo:serde_repr@0.1.20
   targets: aarch64-apple-darwin, x86_64-pc-windows-msvc, x86_64-unknown-linux-gnu
@@ -2887,7 +3042,7 @@ CARGO
 
 - sha1 0.10.7 — MIT OR Apache-2.0
   id: cargo:sha1@0.10.7
-  targets: x86_64-unknown-linux-gnu
+  targets: aarch64-apple-darwin, x86_64-pc-windows-msvc, x86_64-unknown-linux-gnu
   source: https://crates.io/api/v1/crates/sha1/0.10.7/download
   source checksum: a978451301f4db1d02937a4ab3ccce137717b81826e79b7d49ffe3244a13c3b8
   license: cargo:sha1@0.10.7/LICENSE-APACHE (SHA-256 a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5)
@@ -3405,6 +3560,13 @@ CARGO
   license: cargo:tokio-rustls@0.26.4/LICENSE-APACHE (SHA-256 cc117d90b498b32b11a886f279b359da16a73c3b01efbb2f5cc004b20262334e)
   license: cargo:tokio-rustls@0.26.4/LICENSE-MIT (SHA-256 e20fa2b8e0a2565f24a792b94b4bf4b6c2b9d36f781d8a9516e218a036e6677a)
 
+- tokio-tungstenite 0.29.0 — MIT
+  id: cargo:tokio-tungstenite@0.29.0
+  targets: aarch64-apple-darwin, x86_64-pc-windows-msvc, x86_64-unknown-linux-gnu
+  source: https://crates.io/api/v1/crates/tokio-tungstenite/0.29.0/download
+  source checksum: 8f72a05e828585856dacd553fba484c242c46e391fb0e58917c942ee9202915c
+  license: cargo:tokio-tungstenite@0.29.0/LICENSE (SHA-256 fdd55e2b2da854b0fbdc1e607df7c2ba1e1ebf91ecb77c515511ebeef972bc8f)
+
 - tokio-util 0.7.18 — MIT
   id: cargo:tokio-util@0.7.18
   targets: aarch64-apple-darwin, x86_64-pc-windows-msvc, x86_64-unknown-linux-gnu
@@ -3540,6 +3702,14 @@ CARGO
   source: https://crates.io/api/v1/crates/try-lock/0.2.5/download
   source checksum: e421abadd41a4225275504ea4d6566923418b7f05506fbc9c0fe86ba7396114b
   license: cargo:try-lock@0.2.5/LICENSE (SHA-256 8b62775bacdfa5ae8390519b7cdf7ab7d6c53f008981f1b9abd6135ef745b67e)
+
+- tungstenite 0.29.0 — MIT OR Apache-2.0
+  id: cargo:tungstenite@0.29.0
+  targets: aarch64-apple-darwin, x86_64-pc-windows-msvc, x86_64-unknown-linux-gnu
+  source: https://crates.io/api/v1/crates/tungstenite/0.29.0/download
+  source checksum: 6c01152af293afb9c7c2a57e4b559c5620b421f6d133261c60dd2d0cdb38e6b8
+  license: cargo:tungstenite@0.29.0/LICENSE-APACHE (SHA-256 a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2)
+  license: cargo:tungstenite@0.29.0/LICENSE-MIT (SHA-256 7fea0ee51a4ca5d5cea7464135fd55e8b09caf3a61da3d451ac8a22af95c033f)
 
 - typed-path 0.12.3 — MIT OR Apache-2.0
   id: cargo:typed-path@0.12.3
@@ -4020,6 +4190,14 @@ CARGO
   license: cargo:x11rb-protocol@0.13.2/LICENSE-APACHE (SHA-256 cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30)
   license: cargo:x11rb-protocol@0.13.2/LICENSE-MIT (SHA-256 a72561f47c1f665535930f606739d9098a6186802d5e2e8ec491faf00f4add5b)
 
+- x509-parser 0.18.1 — MIT OR Apache-2.0
+  id: cargo:x509-parser@0.18.1
+  targets: aarch64-apple-darwin, x86_64-pc-windows-msvc, x86_64-unknown-linux-gnu
+  source: https://crates.io/api/v1/crates/x509-parser/0.18.1/download
+  source checksum: d43b0f71ce057da06bc0851b23ee24f3f86190b07203dd8f567d0b706a185202
+  license: cargo:x509-parser@0.18.1/LICENSE-APACHE (SHA-256 a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2)
+  license: cargo:x509-parser@0.18.1/LICENSE-MIT (SHA-256 a5c61b93b6ee1d104af9920cf020ff3c7efe818e31fe562c72261847a728f513)
+
 - xattr 1.6.1 — MIT OR Apache-2.0
   id: cargo:xattr@1.6.1
   targets: aarch64-apple-darwin, x86_64-unknown-linux-gnu
@@ -4043,6 +4221,14 @@ CARGO
   license: cargo:xkeysym@0.2.1/LICENSE-APACHE (SHA-256 d4aca2f5936fa638b062f0585df37eec086ca8620d437b2d6be2c95f01199d1a)
   license: cargo:xkeysym@0.2.1/LICENSE-MIT (SHA-256 875e64a5df9f892ebd29c71ad0b58a765b5789d7e9142aa70ec07fae74a67686)
   license: cargo:xkeysym@0.2.1/LICENSE-ZLIB (SHA-256 319736510aa7dbd6f49546f6ee57c787dbe2c7dfa0507dfbd543375f86a4416d)
+
+- yasna 0.6.0 — MIT OR Apache-2.0
+  id: cargo:yasna@0.6.0
+  targets: aarch64-apple-darwin, x86_64-pc-windows-msvc, x86_64-unknown-linux-gnu
+  source: https://crates.io/api/v1/crates/yasna/0.6.0/download
+  source checksum: b5f6765e852b9b4dc8e2a76843e4d64d1cea8e79bcde0b6901aea8e7c7f08282
+  license: cargo:yasna@0.6.0/LICENSE-APACHE (SHA-256 a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2)
+  license: cargo:yasna@0.6.0/LICENSE-MIT (SHA-256 2a7df90e60fd5512b8bca35d3ce90e068f21c52d962855053fd1d9e2e7ca0f16)
 
 - yoke 0.8.2 — Unicode-3.0
   id: cargo:yoke@0.8.2
@@ -8327,6 +8513,44 @@ THE SOFTWARE.
 
 ================================================================================
 
+SHA-256 162ce11ad71338d0a0c6ebaf5c48af72c6ae237b468859d3656fe2d9ed3f3a85
+Applies to:
+- cargo:matchit@0.8.4 — cargo:matchit@0.8.4/LICENSE.httprouter
+
+--------------------------------------------------------------------------------
+
+BSD 3-Clause License
+
+Copyright (c) 2013, Julien Schmidt
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+1. Redistributions of source code must retain the above copyright notice, this
+   list of conditions and the following disclaimer.
+
+2. Redistributions in binary form must reproduce the above copyright notice,
+   this list of conditions and the following disclaimer in the documentation
+   and/or other materials provided with the distribution.
+
+3. Neither the name of the copyright holder nor the names of its
+   contributors may be used to endorse or promote products derived from
+   this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+================================================================================
+
 SHA-256 1662fae9b5314d11cf51284e2dcd1f006a354f7343f08712a730fcff9a359801
 Applies to:
 - npm:node_modules/ms@2.1.3 — npm:node_modules/ms/license.md
@@ -9677,9 +9901,11 @@ Applies to:
 - cargo:fastrand@2.4.1 — cargo:fastrand@2.4.1/LICENSE-MIT
 - cargo:futures-lite@2.6.1 — cargo:futures-lite@2.6.1/LICENSE-MIT
 - cargo:itoa@1.0.18 — cargo:itoa@1.0.18/LICENSE-MIT
+- cargo:lazy_static@1.5.1 — cargo:lazy_static@1.5.1/LICENSE-MIT
 - cargo:libappindicator-sys@0.9.0 — cargo:serde@1.0.229/LICENSE-MIT
 - cargo:linux-raw-sys@0.12.1 — cargo:linux-raw-sys@0.12.1/LICENSE-MIT
 - cargo:mac-notification-sys@0.6.12 — cargo:serde@1.0.229/LICENSE-MIT
+- cargo:minimal-lexical@0.2.1 — cargo:minimal-lexical@0.2.1/LICENSE-MIT
 - cargo:objc2-app-kit@0.3.2 — cargo:serde@1.0.229/LICENSE-MIT
 - cargo:objc2-cloud-kit@0.3.2 — cargo:serde@1.0.229/LICENSE-MIT
 - cargo:objc2-core-data@0.3.2 — cargo:serde@1.0.229/LICENSE-MIT
@@ -9719,6 +9945,7 @@ Applies to:
 - cargo:serde_derive@1.0.229 — cargo:serde_derive@1.0.229/LICENSE-MIT
 - cargo:serde_derive_internals@0.29.1 — cargo:serde_derive_internals@0.29.1/LICENSE-MIT
 - cargo:serde_json@1.0.151 — cargo:serde_json@1.0.151/LICENSE-MIT
+- cargo:serde_path_to_error@0.1.20 — cargo:serde_path_to_error@0.1.20/LICENSE-MIT
 - cargo:serde_repr@0.1.20 — cargo:serde_repr@0.1.20/LICENSE-MIT
 - cargo:servo_arc@0.4.3 — cargo:servo_arc@0.4.3/LICENSE-MIT
 - cargo:sigchld@0.2.4 — cargo:serde@1.0.229/LICENSE-MIT
@@ -10577,6 +10804,22 @@ INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS
 OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
 TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF
 THIS SOFTWARE.
+
+================================================================================
+
+SHA-256 2a7df90e60fd5512b8bca35d3ce90e068f21c52d962855053fd1d9e2e7ca0f16
+Applies to:
+- cargo:yasna@0.6.0 — cargo:yasna@0.6.0/LICENSE-MIT
+
+--------------------------------------------------------------------------------
+
+Copyright (c) 2016 Masaki Hara
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 ================================================================================
 
@@ -11608,6 +11851,23 @@ CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
 OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
+
+================================================================================
+
+SHA-256 3990ddb78a5a2cfd64a5ffe5cebc3306f3298f6880c644afdf15043ef7d702d9
+Applies to:
+- cargo:if-addrs@0.15.0 — cargo:if-addrs@0.15.0/LICENSE-MIT
+
+--------------------------------------------------------------------------------
+
+Copyright 2018 MaidSafe.net limited.
+Copyright 2020 messense
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 ================================================================================
 
@@ -13465,6 +13725,245 @@ DEALINGS IN THE SOFTWARE.
 
 ================================================================================
 
+SHA-256 4d10fe5f3aa176b05b229a248866bad70b834c173f1252a814ff4748d8a13837
+Applies to:
+- cargo:httpdate@1.0.3 — cargo:httpdate@1.0.3/LICENSE-APACHE
+
+--------------------------------------------------------------------------------
+
+Apache License
+Version 2.0, January 2004
+http://www.apache.org/licenses/
+
+TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
+
+1. Definitions.
+
+"License" shall mean the terms and conditions for use, reproduction,
+and distribution as defined by Sections 1 through 9 of this document.
+
+"Licensor" shall mean the copyright owner or entity authorized by
+the copyright owner that is granting the License.
+
+"Legal Entity" shall mean the union of the acting entity and all
+other entities that control, are controlled by, or are under common
+control with that entity. For the purposes of this definition,
+"control" means (i) the power, direct or indirect, to cause the
+direction or management of such entity, whether by contract or
+otherwise, or (ii) ownership of fifty percent (50%) or more of the
+outstanding shares, or (iii) beneficial ownership of such entity.
+
+"You" (or "Your") shall mean an individual or Legal Entity
+exercising permissions granted by this License.
+
+"Source" form shall mean the preferred form for making modifications,
+including but not limited to software source code, documentation
+source, and configuration files.
+
+"Object" form shall mean any form resulting from mechanical
+transformation or translation of a Source form, including but
+not limited to compiled object code, generated documentation,
+and conversions to other media types.
+
+"Work" shall mean the work of authorship, whether in Source or
+Object form, made available under the License, as indicated by a
+copyright notice that is included in or attached to the work
+(an example is provided in the Appendix below).
+
+"Derivative Works" shall mean any work, whether in Source or Object
+form, that is based on (or derived from) the Work and for which the
+editorial revisions, annotations, elaborations, or other modifications
+represent, as a whole, an original work of authorship. For the purposes
+of this License, Derivative Works shall not include works that remain
+separable from, or merely link (or bind by name) to the interfaces of,
+the Work and Derivative Works thereof.
+
+"Contribution" shall mean any work of authorship, including
+the original version of the Work and any modifications or additions
+to that Work or Derivative Works thereof, that is intentionally
+submitted to Licensor for inclusion in the Work by the copyright owner
+or by an individual or Legal Entity authorized to submit on behalf of
+the copyright owner. For the purposes of this definition, "submitted"
+means any form of electronic, verbal, or written communication sent
+to the Licensor or its representatives, including but not limited to
+communication on electronic mailing lists, source code control systems,
+and issue tracking systems that are managed by, or on behalf of, the
+Licensor for the purpose of discussing and improving the Work, but
+excluding communication that is conspicuously marked or otherwise
+designated in writing by the copyright owner as "Not a Contribution."
+
+"Contributor" shall mean Licensor and any individual or Legal Entity
+on behalf of whom a Contribution has been received by Licensor and
+subsequently incorporated within the Work.
+
+2. Grant of Copyright License. Subject to the terms and conditions of
+this License, each Contributor hereby grants to You a perpetual,
+worldwide, non-exclusive, no-charge, royalty-free, irrevocable
+copyright license to reproduce, prepare Derivative Works of,
+publicly display, publicly perform, sublicense, and distribute the
+Work and such Derivative Works in Source or Object form.
+
+3. Grant of Patent License. Subject to the terms and conditions of
+this License, each Contributor hereby grants to You a perpetual,
+worldwide, non-exclusive, no-charge, royalty-free, irrevocable
+(except as stated in this section) patent license to make, have made,
+use, offer to sell, sell, import, and otherwise transfer the Work,
+where such license applies only to those patent claims licensable
+by such Contributor that are necessarily infringed by their
+Contribution(s) alone or by combination of their Contribution(s)
+with the Work to which such Contribution(s) was submitted. If You
+institute patent litigation against any entity (including a
+cross-claim or counterclaim in a lawsuit) alleging that the Work
+or a Contribution incorporated within the Work constitutes direct
+or contributory patent infringement, then any patent licenses
+granted to You under this License for that Work shall terminate
+as of the date such litigation is filed.
+
+4. Redistribution. You may reproduce and distribute copies of the
+Work or Derivative Works thereof in any medium, with or without
+modifications, and in Source or Object form, provided that You
+meet the following conditions:
+
+(a) You must give any other recipients of the Work or
+Derivative Works a copy of this License; and
+
+(b) You must cause any modified files to carry prominent notices
+stating that You changed the files; and
+
+(c) You must retain, in the Source form of any Derivative Works
+that You distribute, all copyright, patent, trademark, and
+attribution notices from the Source form of the Work,
+excluding those notices that do not pertain to any part of
+the Derivative Works; and
+
+(d) If the Work includes a "NOTICE" text file as part of its
+distribution, then any Derivative Works that You distribute must
+include a readable copy of the attribution notices contained
+within such NOTICE file, excluding those notices that do not
+pertain to any part of the Derivative Works, in at least one
+of the following places: within a NOTICE text file distributed
+as part of the Derivative Works; within the Source form or
+documentation, if provided along with the Derivative Works; or,
+within a display generated by the Derivative Works, if and
+wherever such third-party notices normally appear. The contents
+of the NOTICE file are for informational purposes only and
+do not modify the License. You may add Your own attribution
+notices within Derivative Works that You distribute, alongside
+or as an addendum to the NOTICE text from the Work, provided
+that such additional attribution notices cannot be construed
+as modifying the License.
+
+You may add Your own copyright statement to Your modifications and
+may provide additional or different license terms and conditions
+for use, reproduction, or distribution of Your modifications, or
+for any such Derivative Works as a whole, provided Your use,
+reproduction, and distribution of the Work otherwise complies with
+the conditions stated in this License.
+
+5. Submission of Contributions. Unless You explicitly state otherwise,
+any Contribution intentionally submitted for inclusion in the Work
+by You to the Licensor shall be under the terms and conditions of
+this License, without any additional terms or conditions.
+Notwithstanding the above, nothing herein shall supersede or modify
+the terms of any separate license agreement you may have executed
+with Licensor regarding such Contributions.
+
+6. Trademarks. This License does not grant permission to use the trade
+names, trademarks, service marks, or product names of the Licensor,
+except as required for reasonable and customary use in describing the
+origin of the Work and reproducing the content of the NOTICE file.
+
+7. Disclaimer of Warranty. Unless required by applicable law or
+agreed to in writing, Licensor provides the Work (and each
+Contributor provides its Contributions) on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+implied, including, without limitation, any warranties or conditions
+of TITLE, NON-INFRINGEMENT, MERCHANTABILITY, or FITNESS FOR A
+PARTICULAR PURPOSE. You are solely responsible for determining the
+appropriateness of using or redistributing the Work and assume any
+risks associated with Your exercise of permissions under this License.
+
+8. Limitation of Liability. In no event and under no legal theory,
+whether in tort (including negligence), contract, or otherwise,
+unless required by applicable law (such as deliberate and grossly
+negligent acts) or agreed to in writing, shall any Contributor be
+liable to You for damages, including any direct, indirect, special,
+incidental, or consequential damages of any character arising as a
+result of this License or out of the use or inability to use the
+Work (including but not limited to damages for loss of goodwill,
+work stoppage, computer failure or malfunction, or any and all
+other commercial damages or losses), even if such Contributor
+has been advised of the possibility of such damages.
+
+9. Accepting Warranty or Additional Liability. While redistributing
+the Work or Derivative Works thereof, You may choose to offer,
+and charge a fee for, acceptance of support, warranty, indemnity,
+or other liability obligations and/or rights consistent with this
+License. However, in accepting such obligations, You may act only
+on Your own behalf and on Your sole responsibility, not on behalf
+of any other Contributor, and only if You agree to indemnify,
+defend, and hold each Contributor harmless for any liability
+incurred by, or claims asserted against, such Contributor by reason
+of your accepting any such warranty or additional liability.
+
+END OF TERMS AND CONDITIONS
+
+APPENDIX: How to apply the Apache License to your work.
+
+To apply the Apache License to your work, attach the following
+boilerplate notice, with the fields enclosed by brackets "[]"
+replaced with your own identifying information. (Don't include
+the brackets!)  The text should be enclosed in the appropriate
+comment syntax for the file format. We also recommend that a
+file or class name and description of purpose be included on the
+same "printed page" as the copyright notice for easier
+identification within third-party archives.
+
+Copyright [yyyy] [name of copyright owner]
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+
+================================================================================
+
+SHA-256 4dbda04344456f09a7a588140455413a9ac59b6b26a1ef7cdf9c800c012d87f0
+Applies to:
+- cargo:nom@7.1.3 — cargo:nom@7.1.3/LICENSE
+
+--------------------------------------------------------------------------------
+
+Copyright (c) 2014-2019 Geoffroy Couprie
+
+Permission is hereby granted, free of charge, to any person obtaining
+a copy of this software and associated documentation files (the
+"Software"), to deal in the Software without restriction, including
+without limitation the rights to use, copy, modify, merge, publish,
+distribute, sublicense, and/or sell copies of the Software, and to
+permit persons to whom the Software is furnished to do so, subject to
+the following conditions:
+
+The above copyright notice and this permission notice shall be
+included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE
+LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
+WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+================================================================================
+
 SHA-256 4f4f28866154c8d758241a64296e8790d45d7d912ff7b029930778c06d8f2a72
 Applies to:
 - npm:node_modules/socks@2.8.9 — npm:node_modules/socks/LICENSE
@@ -14016,6 +14515,27 @@ SOFTWARE.
 
 ================================================================================
 
+SHA-256 588713c78138d7d6985b87275724f7047949a71a007b16b352d7745499976f7f
+Applies to:
+- cargo:if-addrs@0.15.0 — cargo:if-addrs@0.15.0/LICENSE-BSD
+
+--------------------------------------------------------------------------------
+
+Copyright 2018 MaidSafe.net limited.
+Copyright 2020 messense
+
+Redistribution and use in source and binary forms, with or without modification, are permitted provided that the following conditions are met:
+
+1. Redistributions of source code must retain the above copyright notice, this list of conditions and the following disclaimer.
+
+2. Redistributions in binary form must reproduce the above copyright notice, this list of conditions and the following disclaimer in the documentation and/or other materials provided with the distribution.
+
+3. Neither the name of the copyright holder nor the names of its contributors may be used to endorse or promote products derived from this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+================================================================================
+
 SHA-256 5989359645911c04a140c49d89496b13feca980bbf36d2250a12d3b9d06250d6
 Applies to:
 - npm:node_modules/tslib@2.8.1 — npm:node_modules/tslib/LICENSE.txt
@@ -14473,6 +14993,7 @@ Applies to:
 - cargo:serde_derive@1.0.229 — cargo:serde_derive@1.0.229/LICENSE-APACHE
 - cargo:serde_derive_internals@0.29.1 — cargo:serde_derive_internals@0.29.1/LICENSE-APACHE
 - cargo:serde_json@1.0.151 — cargo:serde_json@1.0.151/LICENSE-APACHE
+- cargo:serde_path_to_error@0.1.20 — cargo:serde_path_to_error@0.1.20/LICENSE-APACHE
 - cargo:serde_repr@0.1.20 — cargo:serde_repr@0.1.20/LICENSE-APACHE
 - cargo:serde_urlencoded@0.7.1 — cargo:serde_urlencoded@0.7.1/LICENSE-APACHE
 - cargo:syn@2.0.117 — cargo:syn@2.0.117/LICENSE-APACHE
@@ -15675,6 +16196,40 @@ INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM
 LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR
 OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
 PERFORMANCE OF THIS SOFTWARE.
+
+================================================================================
+
+SHA-256 6a13bc24a100a6812f053879ec51b126b103af7cda6dbf48c4188722da44da9f
+Applies to:
+- cargo:axum@0.8.9 — cargo:axum@0.8.9/LICENSE
+
+--------------------------------------------------------------------------------
+
+Copyright (c) 2019 axum Contributors
+
+Permission is hereby granted, free of charge, to any
+person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the
+Software without restriction, including without
+limitation the rights to use, copy, modify, merge,
+publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software
+is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice
+shall be included in all copies or substantial portions
+of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
+ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
+SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
+IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
 
 ================================================================================
 
@@ -17518,6 +18073,35 @@ For more information, please refer to <http://unlicense.org/>
 
 ================================================================================
 
+SHA-256 7fea0ee51a4ca5d5cea7464135fd55e8b09caf3a61da3d451ac8a22af95c033f
+Applies to:
+- cargo:tungstenite@0.29.0 — cargo:tungstenite@0.29.0/LICENSE-MIT
+
+--------------------------------------------------------------------------------
+
+Copyright (c) 2017 Alexey Galakhov
+Copyright (c) 2016 Jason Housley
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+
+================================================================================
+
 SHA-256 80e49272a4c81b0ded274b540d2b8089bd5f4d7d4fe1f2df309d463d7067c9c4
 Applies to:
 - npm:node_modules/@noble/ed25519@3.2.0 — npm:node_modules/@noble/ed25519/LICENSE
@@ -17553,7 +18137,9 @@ SHA-256 8173d5c29b4f956d532781d2b86e4e30f83e6b7878dce18c919451d6ba707c90
 Applies to:
 - cargo:bit-set@0.8.0 — cargo:bit-set@0.8.0/LICENSE-APACHE
 - cargo:bit-vec@0.8.0 — cargo:bit-vec@0.8.0/LICENSE-APACHE
+- cargo:bit-vec@0.9.1 — cargo:bit-vec@0.9.1/LICENSE-APACHE
 - cargo:hashlink@0.12.1 — cargo:hashlink@0.12.1/LICENSE-APACHE
+- cargo:minimal-lexical@0.2.1 — cargo:minimal-lexical@0.2.1/LICENSE-APACHE
 
 --------------------------------------------------------------------------------
 
@@ -19719,6 +20305,34 @@ licensed under the Apache License, Version 2.0 <LICENSE-APACHE> or
 
 ================================================================================
 
+SHA-256 934887691e05d69d7c86ad3f2c360980fa30c15b035e351f3c9865e99da4debc
+Applies to:
+- cargo:httpdate@1.0.3 — cargo:httpdate@1.0.3/LICENSE-MIT
+
+--------------------------------------------------------------------------------
+
+Copyright (c) 2016 Pyfisch
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+
+================================================================================
+
 SHA-256 9377db95383c8befacf05c6e465d969d756edf178487ca1344fdf3ba147c596f
 Applies to:
 - npm:node_modules/bl@6.1.6 — npm:node_modules/bl/LICENSE.md
@@ -20795,8 +21409,51 @@ Apache License
 
 ================================================================================
 
+SHA-256 a5c61b93b6ee1d104af9920cf020ff3c7efe818e31fe562c72261847a728f513
+Applies to:
+- cargo:asn1-rs-derive@0.6.0 — cargo:asn1-rs-derive@0.6.0/LICENSE-MIT
+- cargo:asn1-rs-impl@0.2.0 — cargo:asn1-rs@0.7.2/LICENSE-MIT
+- cargo:asn1-rs@0.7.2 — cargo:asn1-rs@0.7.2/LICENSE-MIT
+- cargo:der-parser@10.0.0 — cargo:der-parser@10.0.0/LICENSE-MIT
+- cargo:oid-registry@0.8.1 — cargo:oid-registry@0.8.1/LICENSE-MIT
+- cargo:rusticata-macros@4.1.0 — cargo:rusticata-macros@4.1.0/LICENSE-MIT
+- cargo:x509-parser@0.18.1 — cargo:x509-parser@0.18.1/LICENSE-MIT
+
+--------------------------------------------------------------------------------
+
+Copyright (c) 2017 Pierre Chifflier
+
+Permission is hereby granted, free of charge, to any
+person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the
+Software without restriction, including without
+limitation the rights to use, copy, modify, merge,
+publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software
+is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice
+shall be included in all copies or substantial portions
+of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
+ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
+SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
+IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
+
+================================================================================
+
 SHA-256 a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2
 Applies to:
+- cargo:asn1-rs-derive@0.6.0 — cargo:asn1-rs-derive@0.6.0/LICENSE-APACHE
+- cargo:asn1-rs-impl@0.2.0 — cargo:asn1-rs@0.7.2/LICENSE-APACHE
+- cargo:asn1-rs@0.7.2 — cargo:asn1-rs@0.7.2/LICENSE-APACHE
 - cargo:async-channel@2.5.0 — cargo:async-channel@2.5.0/LICENSE-APACHE
 - cargo:async-executor@1.14.0 — cargo:async-executor@1.14.0/LICENSE-APACHE
 - cargo:async-io@2.6.0 — cargo:async-io@2.6.0/LICENSE-APACHE
@@ -20830,6 +21487,7 @@ Applies to:
 - cargo:crossbeam-utils@0.8.21 — cargo:crossbeam-utils@0.8.21/LICENSE-APACHE
 - cargo:curve25519-dalek-derive@0.1.1 — cargo:curve25519-dalek-derive@0.1.1/LICENSE-APACHE
 - cargo:dbus-secret-service@4.1.0 — cargo:dbus-secret-service@4.1.0/LICENSE-APACHE
+- cargo:der-parser@10.0.0 — cargo:der-parser@10.0.0/LICENSE-APACHE
 - cargo:displaydoc@0.2.5 — cargo:displaydoc@0.2.5/LICENSE-APACHE
 - cargo:equivalent@1.0.2 — cargo:equivalent@1.0.2/LICENSE-APACHE
 - cargo:errno@0.3.14 — cargo:errno@0.3.14/LICENSE-APACHE
@@ -20857,6 +21515,7 @@ Applies to:
 - cargo:indexmap@1.9.3 — cargo:indexmap@1.9.3/LICENSE-APACHE
 - cargo:indexmap@2.14.0 — cargo:indexmap@2.14.0/LICENSE-APACHE
 - cargo:keyboard-types@0.7.0 — cargo:keyboard-types@0.7.0/LICENSE-APACHE
+- cargo:lazy_static@1.5.1 — cargo:lazy_static@1.5.1/LICENSE-APACHE
 - cargo:lazycell@1.3.0 — cargo:lazycell@1.3.0/LICENSE-APACHE
 - cargo:libappindicator@0.9.0 — cargo:libappindicator@0.9.0/LICENSE-APACHE
 - cargo:linux-raw-sys@0.12.1 — cargo:linux-raw-sys@0.12.1/LICENSE-APACHE
@@ -20872,6 +21531,7 @@ Applies to:
 - cargo:num-rational@0.4.2 — cargo:num-rational@0.4.2/LICENSE-APACHE
 - cargo:num-traits@0.2.19 — cargo:num-traits@0.2.19/LICENSE-APACHE
 - cargo:num@0.4.3 — cargo:num@0.4.3/LICENSE-APACHE
+- cargo:oid-registry@0.8.1 — cargo:oid-registry@0.8.1/LICENSE-APACHE
 - cargo:once_cell@1.21.4 — cargo:once_cell@1.21.4/LICENSE-APACHE
 - cargo:openssl-probe@0.2.1 — cargo:openssl-probe@0.2.1/LICENSE-APACHE
 - cargo:ordered-stream@0.2.0 — cargo:ordered-stream@0.2.0/LICENSE-APACHE
@@ -20886,6 +21546,7 @@ Applies to:
 - cargo:regex-automata@0.4.14 — cargo:regex-automata@0.4.14/LICENSE-APACHE
 - cargo:regex-syntax@0.8.10 — cargo:regex-syntax@0.8.10/LICENSE-APACHE
 - cargo:regex@1.12.3 — cargo:regex@1.12.3/LICENSE-APACHE
+- cargo:rusticata-macros@4.1.0 — cargo:rusticata-macros@4.1.0/LICENSE-APACHE
 - cargo:rustix@1.1.4 — cargo:rustix@1.1.4/LICENSE-APACHE
 - cargo:rustls-native-certs@0.8.4 — cargo:rustls-native-certs@0.8.4/LICENSE-APACHE
 - cargo:rustls@0.23.45 — cargo:rustls@0.23.45/LICENSE-APACHE
@@ -20910,12 +21571,15 @@ Applies to:
 - cargo:tendril@0.5.0 — cargo:tendril@0.5.0/LICENSE-APACHE
 - cargo:toml_datetime@0.6.3 — cargo:toml_datetime@0.6.3/LICENSE-APACHE
 - cargo:tray-icon@0.24.2 — cargo:tray-icon@0.24.2/LICENSE-APACHE
+- cargo:tungstenite@0.29.0 — cargo:tungstenite@0.29.0/LICENSE-APACHE
 - cargo:unicode-segmentation@1.13.2 — cargo:unicode-segmentation@1.13.2/LICENSE-APACHE
 - cargo:url@2.5.8 — cargo:url@2.5.8/LICENSE-APACHE
 - cargo:uuid@1.23.1 — cargo:uuid@1.23.1/LICENSE-APACHE
 - cargo:web_atoms@0.2.4 — cargo:web_atoms@0.2.4/LICENSE-APACHE
 - cargo:window-vibrancy@0.6.0 — cargo:window-vibrancy@0.6.0/LICENSE-APACHE
+- cargo:x509-parser@0.18.1 — cargo:x509-parser@0.18.1/LICENSE-APACHE
 - cargo:xattr@1.6.1 — cargo:xattr@1.6.1/LICENSE-APACHE
+- cargo:yasna@0.6.0 — cargo:yasna@0.6.0/LICENSE-APACHE
 
 --------------------------------------------------------------------------------
 
@@ -23244,6 +23908,40 @@ limitations under the License.
 
 ================================================================================
 
+SHA-256 b21623012e6c453d944b0342c515b631cfcbf30704c2621b291526b69c10724d
+Applies to:
+- cargo:h2@0.4.20 — cargo:h2@0.4.20/LICENSE
+
+--------------------------------------------------------------------------------
+
+Copyright (c) 2017 h2 authors
+
+Permission is hereby granted, free of charge, to any
+person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the
+Software without restriction, including without
+limitation the rights to use, copy, modify, merge,
+publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software
+is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice
+shall be included in all copies or substantial portions
+of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
+ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
+SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
+IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
+
+================================================================================
+
 SHA-256 b29f8b01452350c20dd1af16ef83b598fea3053578ccc1c7a0ef40e57be2620f
 Applies to:
 - cargo:libloading@0.7.4 — cargo:libloading@0.7.4/LICENSE
@@ -23666,6 +24364,37 @@ SOFTWARE.
 
 ================================================================================
 
+SHA-256 b68ad1a3367b825447089e1f8d6829b97f47a89eb78d2f4ebaef4672f5606186
+Applies to:
+- cargo:data-encoding@2.11.1 — cargo:data-encoding@2.11.1/LICENSE
+
+--------------------------------------------------------------------------------
+
+The MIT License (MIT)
+
+Copyright (c) 2015-2020 Julien Cretin
+Copyright (c) 2017-2020 Google Inc.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+================================================================================
+
 SHA-256 b6f6f01b03ee7e93c0ae96d62ed39527e98a120fb951afc9de456a741ef3f204
 Applies to:
 - cargo:crypto_secretbox@0.1.1 — cargo:crypto_secretbox@0.1.1/LICENSE-MIT
@@ -23697,6 +24426,36 @@ CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
 OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
 IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
+
+================================================================================
+
+SHA-256 b7c76ff4466a3aeb6a7d903e81b651335e97d64ecb857e2ee9812a36c6fd1acf
+Applies to:
+- cargo:pem@4.0.0 — cargo:pem@4.0.0/LICENSE.md
+
+--------------------------------------------------------------------------------
+
+The MIT License (MIT)
+
+Copyright (c) 2016 Jonathan Creekmore
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
 
 ================================================================================
 
@@ -26274,6 +27033,52 @@ SOFTWARE.
 
 ================================================================================
 
+SHA-256 dbe1fff0fb1314b6af94f161511406275cf01c5a32441fbf24528a57a051d599
+Applies to:
+- cargo:minimal-lexical@0.2.1 — cargo:minimal-lexical@0.2.1/LICENSE.md
+
+--------------------------------------------------------------------------------
+
+Minimal-lexical is dual licensed under the Apache 2.0 license as well as the MIT
+license. See the LICENCE-MIT and the LICENCE-APACHE files for the licenses.
+
+---
+
+`src/bellerophon.rs` is loosely based off the Golang implementation,
+found [here](https://github.com/golang/go/blob/b10849fbb97a2244c086991b4623ae9f32c212d0/src/strconv/extfloat.go).
+That code (used if the `compact` feature is enabled) is subject to a
+[3-clause BSD license](https://github.com/golang/go/blob/b10849fbb97a2244c086991b4623ae9f32c212d0/LICENSE):
+
+Copyright (c) 2009 The Go Authors. All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are
+met:
+
+   * Redistributions of source code must retain the above copyright
+notice, this list of conditions and the following disclaimer.
+   * Redistributions in binary form must reproduce the above
+copyright notice, this list of conditions and the following disclaimer
+in the documentation and/or other materials provided with the
+distribution.
+   * Neither the name of Google Inc. nor the names of its
+contributors may be used to endorse or promote products derived from
+this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+"AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+================================================================================
+
 SHA-256 dc91f8200e4b2a1f9261035d4c18c33c246911a6c0f7b543d75347e61b249cff
 Applies to:
 - cargo:http@1.4.0 — cargo:http@1.4.0/LICENSE-MIT
@@ -26543,6 +27348,259 @@ distributed under the License is distributed on an "AS IS" BASIS,
 WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
+
+================================================================================
+
+SHA-256 de701d0618d694feb1af90f02181a1763d9b0bdeb70a3a592781e529077dba65
+Applies to:
+- cargo:matchit@0.8.4 — cargo:matchit@0.8.4/LICENSE
+
+--------------------------------------------------------------------------------
+
+MIT License
+
+Copyright (c) 2022 Ibraheem Ahmed
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+================================================================================
+
+SHA-256 debe6fed7ac143217c7f533759c54b14f18cd01d5fe195c51d83c2ae2d136cb4
+Applies to:
+- cargo:rcgen@0.14.10 — cargo:rcgen@0.14.10/LICENSE
+
+--------------------------------------------------------------------------------
+
+Copyright (c) 2019-2026 est31 <MTest31@outlook.com> and contributors
+
+Licensed under MIT or Apache License 2.0,
+at your option.
+
+The full list of contributors can be obtained by looking
+at the VCS log (originally, this crate was git versioned,
+there you can do "git shortlog -sn" for this task).
+
+MIT License
+-----------
+
+The MIT License (MIT)
+
+Copyright (c) 2019-2026 est31 <MTest31@outlook.com> and contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+
+
+Apache License, version 2.0
+---------------------------
+                                 Apache License
+                           Version 2.0, January 2004
+                        http://www.apache.org/licenses/
+
+   TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
+
+   1. Definitions.
+
+      "License" shall mean the terms and conditions for use, reproduction,
+      and distribution as defined by Sections 1 through 9 of this document.
+
+      "Licensor" shall mean the copyright owner or entity authorized by
+      the copyright owner that is granting the License.
+
+      "Legal Entity" shall mean the union of the acting entity and all
+      other entities that control, are controlled by, or are under common
+      control with that entity. For the purposes of this definition,
+      "control" means (i) the power, direct or indirect, to cause the
+      direction or management of such entity, whether by contract or
+      otherwise, or (ii) ownership of fifty percent (50%) or more of the
+      outstanding shares, or (iii) beneficial ownership of such entity.
+
+      "You" (or "Your") shall mean an individual or Legal Entity
+      exercising permissions granted by this License.
+
+      "Source" form shall mean the preferred form for making modifications,
+      including but not limited to software source code, documentation
+      source, and configuration files.
+
+      "Object" form shall mean any form resulting from mechanical
+      transformation or translation of a Source form, including but
+      not limited to compiled object code, generated documentation,
+      and conversions to other media types.
+
+      "Work" shall mean the work of authorship, whether in Source or
+      Object form, made available under the License, as indicated by a
+      copyright notice that is included in or attached to the work
+      (an example is provided in the Appendix below).
+
+      "Derivative Works" shall mean any work, whether in Source or Object
+      form, that is based on (or derived from) the Work and for which the
+      editorial revisions, annotations, elaborations, or other modifications
+      represent, as a whole, an original work of authorship. For the purposes
+      of this License, Derivative Works shall not include works that remain
+      separable from, or merely link (or bind by name) to the interfaces of,
+      the Work and Derivative Works thereof.
+
+      "Contribution" shall mean any work of authorship, including
+      the original version of the Work and any modifications or additions
+      to that Work or Derivative Works thereof, that is intentionally
+      submitted to Licensor for inclusion in the Work by the copyright owner
+      or by an individual or Legal Entity authorized to submit on behalf of
+      the copyright owner. For the purposes of this definition, "submitted"
+      means any form of electronic, verbal, or written communication sent
+      to the Licensor or its representatives, including but not limited to
+      communication on electronic mailing lists, source code control systems,
+      and issue tracking systems that are managed by, or on behalf of, the
+      Licensor for the purpose of discussing and improving the Work, but
+      excluding communication that is conspicuously marked or otherwise
+      designated in writing by the copyright owner as "Not a Contribution."
+
+      "Contributor" shall mean Licensor and any individual or Legal Entity
+      on behalf of whom a Contribution has been received by Licensor and
+      subsequently incorporated within the Work.
+
+   2. Grant of Copyright License. Subject to the terms and conditions of
+      this License, each Contributor hereby grants to You a perpetual,
+      worldwide, non-exclusive, no-charge, royalty-free, irrevocable
+      copyright license to reproduce, prepare Derivative Works of,
+      publicly display, publicly perform, sublicense, and distribute the
+      Work and such Derivative Works in Source or Object form.
+
+   3. Grant of Patent License. Subject to the terms and conditions of
+      this License, each Contributor hereby grants to You a perpetual,
+      worldwide, non-exclusive, no-charge, royalty-free, irrevocable
+      (except as stated in this section) patent license to make, have made,
+      use, offer to sell, sell, import, and otherwise transfer the Work,
+      where such license applies only to those patent claims licensable
+      by such Contributor that are necessarily infringed by their
+      Contribution(s) alone or by combination of their Contribution(s)
+      with the Work to which such Contribution(s) was submitted. If You
+      institute patent litigation against any entity (including a
+      cross-claim or counterclaim in a lawsuit) alleging that the Work
+      or a Contribution incorporated within the Work constitutes direct
+      or contributory patent infringement, then any patent licenses
+      granted to You under this License for that Work shall terminate
+      as of the date such litigation is filed.
+
+   4. Redistribution. You may reproduce and distribute copies of the
+      Work or Derivative Works thereof in any medium, with or without
+      modifications, and in Source or Object form, provided that You
+      meet the following conditions:
+
+      (a) You must give any other recipients of the Work or
+          Derivative Works a copy of this License; and
+
+      (b) You must cause any modified files to carry prominent notices
+          stating that You changed the files; and
+
+      (c) You must retain, in the Source form of any Derivative Works
+          that You distribute, all copyright, patent, trademark, and
+          attribution notices from the Source form of the Work,
+          excluding those notices that do not pertain to any part of
+          the Derivative Works; and
+
+      (d) If the Work includes a "NOTICE" text file as part of its
+          distribution, then any Derivative Works that You distribute must
+          include a readable copy of the attribution notices contained
+          within such NOTICE file, excluding those notices that do not
+          pertain to any part of the Derivative Works, in at least one
+          of the following places: within a NOTICE text file distributed
+          as part of the Derivative Works; within the Source form or
+          documentation, if provided along with the Derivative Works; or,
+          within a display generated by the Derivative Works, if and
+          wherever such third-party notices normally appear. The contents
+          of the NOTICE file are for informational purposes only and
+          do not modify the License. You may add Your own attribution
+          notices within Derivative Works that You distribute, alongside
+          or as an addendum to the NOTICE text from the Work, provided
+          that such additional attribution notices cannot be construed
+          as modifying the License.
+
+      You may add Your own copyright statement to Your modifications and
+      may provide additional or different license terms and conditions
+      for use, reproduction, or distribution of Your modifications, or
+      for any such Derivative Works as a whole, provided Your use,
+      reproduction, and distribution of the Work otherwise complies with
+      the conditions stated in this License.
+
+   5. Submission of Contributions. Unless You explicitly state otherwise,
+      any Contribution intentionally submitted for inclusion in the Work
+      by You to the Licensor shall be under the terms and conditions of
+      this License, without any additional terms or conditions.
+      Notwithstanding the above, nothing herein shall supersede or modify
+      the terms of any separate license agreement you may have executed
+      with Licensor regarding such Contributions.
+
+   6. Trademarks. This License does not grant permission to use the trade
+      names, trademarks, service marks, or product names of the Licensor,
+      except as required for reasonable and customary use in describing the
+      origin of the Work and reproducing the content of the NOTICE file.
+
+   7. Disclaimer of Warranty. Unless required by applicable law or
+      agreed to in writing, Licensor provides the Work (and each
+      Contributor provides its Contributions) on an "AS IS" BASIS,
+      WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+      implied, including, without limitation, any warranties or conditions
+      of TITLE, NON-INFRINGEMENT, MERCHANTABILITY, or FITNESS FOR A
+      PARTICULAR PURPOSE. You are solely responsible for determining the
+      appropriateness of using or redistributing the Work and assume any
+      risks associated with Your exercise of permissions under this License.
+
+   8. Limitation of Liability. In no event and under no legal theory,
+      whether in tort (including negligence), contract, or otherwise,
+      unless required by applicable law (such as deliberate and grossly
+      negligent acts) or agreed to in writing, shall any Contributor be
+      liable to You for damages, including any direct, indirect, special,
+      incidental, or consequential damages of any character arising as a
+      result of this License or out of the use or inability to use the
+      Work (including but not limited to damages for loss of goodwill,
+      work stoppage, computer failure or malfunction, or any and all
+      other commercial damages or losses), even if such Contributor
+      has been advised of the possibility of such damages.
+
+   9. Accepting Warranty or Additional Liability. While redistributing
+      the Work or Derivative Works thereof, You may choose to offer,
+      and charge a fee for, acceptance of support, warranty, indemnity,
+      or other liability obligations and/or rights consistent with this
+      License. However, in accepting such obligations, You may act only
+      on Your own behalf and on Your sole responsibility, not on behalf
+      of any other Contributor, and only if You agree to indemnify,
+      defend, and hold each Contributor harmless for any liability
+      incurred by, or claims asserted against, such Contributor by reason
+      of your accepting any such warranty or additional liability.
+
+   END OF TERMS AND CONDITIONS
 
 ================================================================================
 
@@ -27037,6 +28095,42 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+================================================================================
+
+SHA-256 e5c343775a0e56c07182dd9b1667d31853cfcb6953f567ee1f5a7bf7978bf285
+Applies to:
+- cargo:axum-core@0.5.6 — cargo:axum-core@0.5.6/LICENSE
+
+--------------------------------------------------------------------------------
+
+MIT License
+
+Copyright (c) 2019–2025 axum Contributors
+
+Permission is hereby granted, free of charge, to any
+person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the
+Software without restriction, including without
+limitation the rights to use, copy, modify, merge,
+publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software
+is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice
+shall be included in all copies or substantial portions
+of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
+ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
+SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
+IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
 
 ================================================================================
 
@@ -28109,6 +29203,7 @@ SHA-256 f51ac2c59a222f7476ce507ca879960e2b64ea64bb2786eefdbeb7b0b538d1b7
 Applies to:
 - cargo:bit-set@0.8.0 — cargo:bit-set@0.8.0/LICENSE-MIT
 - cargo:bit-vec@0.8.0 — cargo:bit-vec@0.8.0/LICENSE-MIT
+- cargo:bit-vec@0.9.1 — cargo:bit-vec@0.9.1/LICENSE-MIT
 
 --------------------------------------------------------------------------------
 
@@ -28921,6 +30016,35 @@ Permission is hereby granted, free of charge, to any person obtaining a copy of 
 The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+================================================================================
+
+SHA-256 fdd55e2b2da854b0fbdc1e607df7c2ba1e1ebf91ecb77c515511ebeef972bc8f
+Applies to:
+- cargo:tokio-tungstenite@0.29.0 — cargo:tokio-tungstenite@0.29.0/LICENSE
+
+--------------------------------------------------------------------------------
+
+Copyright (c) 2017 Daniel Abramov
+Copyright (c) 2017 Alexey Galakhov
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
 
 ================================================================================
 

@@ -214,6 +214,25 @@ describe('packaged Windows runtime', () => {
     )
   })
 
+  it('accepts the Windows IP Helper library in regular and delayed app imports', () => {
+    writeFileSync(
+      join(root, 'studyvis.exe'),
+      peImage(['IPHLPAPI.dll', 'MSVCP140.dll'], ['iphlpapi.dll'])
+    )
+    const report = validateWindowsRuntime(root)
+    expect(report.images['studyvis.exe']).toEqual([
+      'iphlpapi.dll',
+      'msvcp140.dll',
+    ])
+  })
+
+  it('requires packaging a DLL that only resembles the Windows IP Helper name', () => {
+    writeFileSync(join(root, 'studyvis.exe'), peImage(['iphlpapi-extra.dll']))
+    expect(() => validateWindowsRuntime(root)).toThrow(
+      'missing packaged dependency iphlpapi-extra.dll'
+    )
+  })
+
   it('requires the actual app executable unless prebuild validation is explicit', () => {
     rmSync(join(root, 'studyvis.exe'))
     expect(() => validateWindowsRuntime(root)).toThrow('studyvis.exe')

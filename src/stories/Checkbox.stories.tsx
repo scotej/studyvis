@@ -1,11 +1,13 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
 
 import { Checkbox } from '@/components/ui/checkbox'
+import { strings } from '@/strings'
 
 const meta = {
   title: 'UI/Checkbox',
   component: Checkbox,
   parameters: { layout: 'centered' },
+  args: { 'aria-label': strings.identity.backup.acknowledge },
 } satisfies Meta<typeof Checkbox>
 
 export default meta

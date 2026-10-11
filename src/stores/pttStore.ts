@@ -33,7 +33,8 @@ import { create } from 'zustand'
 
 export const MAX_HOLD_MS = 120_000
 
-export type PttSource = 'native-shortcut' | 'session-button'
+export type PttSource =
+  'native-shortcut' | 'session-button' | 'browser-companion'
 
 type Scheduler = {
   setTimeout: (handler: () => void, ms: number) => number

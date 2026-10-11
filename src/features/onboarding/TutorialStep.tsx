@@ -114,7 +114,7 @@ function TutorialCard({
         <Icon className="size-5" aria-hidden />
       </div>
       <div className="flex flex-col gap-1">
-        <h3 className="text-base font-medium text-text-primary">{title}</h3>
+        <h2 className="text-base font-medium text-text-primary">{title}</h2>
         <p className="text-sm leading-snug text-text-secondary">{body}</p>
       </div>
     </li>

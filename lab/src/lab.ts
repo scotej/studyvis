@@ -87,13 +87,40 @@ export class Lab {
     if (!options.keepData) rmSync(workdir, { recursive: true, force: true })
     mkdirSync(workdir, { recursive: true })
 
-    const [app, relay, broker, llama] = await Promise.all([
+    const started = await Promise.allSettled([
       startAppServer(options.mode ?? 'built'),
       startNostrRelay(),
       startMqttBroker(),
       startLlamaStub(),
-    ])
-    return new Lab(runId, workdir, app, relay, broker, llama, options)
+    ] as const)
+    const failure = started.find((result) => result.status === 'rejected')
+    if (failure) {
+      // A failed frontend build must not leave the other loopback servers alive.
+      await Promise.allSettled(
+        started.map((result) =>
+          result.status === 'fulfilled' ? result.value.close() : undefined
+        )
+      )
+      throw failure.reason
+    }
+    const [app, relay, broker, llama] = started
+    if (
+      app.status !== 'fulfilled' ||
+      relay.status !== 'fulfilled' ||
+      broker.status !== 'fulfilled' ||
+      llama.status !== 'fulfilled'
+    ) {
+      throw new Error('lab: startup did not complete')
+    }
+    return new Lab(
+      runId,
+      workdir,
+      app.value,
+      relay.value,
+      broker.value,
+      llama.value,
+      options
+    )
   }
 
   /** Maps every pinned public endpoint onto this run's loopback twin.

@@ -50,3 +50,15 @@ export function deriveAiChipStatus({
   if (!hasLocalStream) return 'off'
   return runtimeStatus
 }
+
+export function deriveMirrorAiChipStatus(
+  inputs: AiChipInputs & { hasScreen: boolean; cameraOn: boolean }
+): AiStatus {
+  // The mirrored session owns its text engine even without a camera. Retain
+  // engine/configuration errors before pausing healthy visual checks.
+  const status = deriveAiChipStatus({ ...inputs, hasLocalStream: true })
+  return status === 'active' &&
+    (!inputs.hasLocalStream || !inputs.hasScreen || !inputs.cameraOn)
+    ? 'paused'
+    : status
+}

@@ -20,16 +20,39 @@ const meta = {
 export default meta
 type Story = StoryObj<typeof meta>
 
-export const Joined: Story = {}
+export const Joined: Story = {
+  render: (args) => (
+    <ul className="m-0 list-none p-0">
+      <AuditLogRow {...args} />
+    </ul>
+  ),
+}
 
-export const Left: Story = { args: { description: 'left', ts: NOW - 32_000 } }
+export const Left: Story = {
+  args: { description: 'left', ts: NOW - 32_000 },
+  render: (args) => (
+    <ul className="m-0 list-none p-0">
+      <AuditLogRow {...args} />
+    </ul>
+  ),
+}
 
 export const TookABreak: Story = {
   args: { description: 'took a break', ts: NOW - 4 * 60_000 },
+  render: (args) => (
+    <ul className="m-0 list-none p-0">
+      <AuditLogRow {...args} />
+    </ul>
+  ),
 }
 
 export const StartedPomodoro: Story = {
   args: { description: 'started a Pomodoro', ts: NOW - 1_000 },
+  render: (args) => (
+    <ul className="m-0 list-none p-0">
+      <AuditLogRow {...args} />
+    </ul>
+  ),
 }
 
 export const Stack: Story = {

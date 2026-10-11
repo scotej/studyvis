@@ -5,6 +5,7 @@ import { Kbd } from '@/components/ui/kbd'
 import { Label } from '@/components/ui/label'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { Switch } from '@/components/ui/switch'
+import { strings } from '@/strings'
 
 const meta = {
   title: 'Components/SettingsRow',
@@ -21,12 +22,22 @@ export const SwitchRow: Story = {
         <SettingsRow
           label="Incoming invite notifications"
           help="OS-level prompt when a friend invites you to study."
-          control={<Switch defaultChecked />}
+          control={
+            <Switch
+              defaultChecked
+              aria-label={strings.settings.notifications.invites.ariaLabel}
+            />
+          }
         />
         <SettingsRow
           label="Minimize to tray on close"
           help="Closing the window keeps StudyVis running in the tray."
-          control={<Switch defaultChecked />}
+          control={
+            <Switch
+              defaultChecked
+              aria-label={strings.settings.notifications.tray.ariaLabel}
+            />
+          }
         />
       </SettingsSection>
     </div>

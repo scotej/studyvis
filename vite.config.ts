@@ -4,13 +4,14 @@ import path from 'node:path'
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
+import { mirrorOfflinePlugin } from './scripts/mirror-offline.ts'
 
 const pkg = JSON.parse(
   readFileSync(path.join(import.meta.dirname, 'package.json'), 'utf-8')
 ) as { version: string }
 
 export default defineConfig({
-  plugins: [react(), tailwindcss()],
+  plugins: [react(), tailwindcss(), mirrorOfflinePlugin()],
   clearScreen: false,
   define: {
     __APP_VERSION__: JSON.stringify(pkg.version),
@@ -34,6 +35,7 @@ export default defineConfig({
     rollupOptions: {
       input: {
         main: path.resolve(import.meta.dirname, 'index.html'),
+        mirror: path.resolve(import.meta.dirname, 'mirror.html'),
         ai_dialog: path.resolve(import.meta.dirname, 'ai-dialog.html'),
         session_overlay: path.resolve(
           import.meta.dirname,

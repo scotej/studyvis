@@ -537,6 +537,9 @@ export type SampleLoopStartReason =
   'no_active_model' | 'model_files_missing' | 'sidecar_start_failed'
 
 export type SampleLoopOptions = {
+  // The paired LAN companion supplies capture without opening host devices.
+  acquireScreenStream?: () => Promise<MediaStream>
+  countDisplays?: () => Promise<number>
   // Declared study topic. Read per-tick via callback so a mid-session
   // topic_change via the V2-P7 Ctrl+] dialog takes effect on the NEXT
   // inference without restarting the loop. V2-P9 will wire the same
@@ -560,6 +563,9 @@ export type SampleLoopOptions = {
   // fires with 'no_active_model' so the consumer can render a "pick a
   // model in Settings → AI" empty state (V2-P2 carry-forward).
   modelId: string | null
+  // The mirrored session keeps its engine available for text AI while
+  // browser capture is missing. That owner performs the final sidecar stop.
+  stopSidecarOnStop?: boolean
   // Optional callbacks for terminal/notable conditions. UI wiring lives in
   // SessionView (V2-P5) and Settings → AI (V2-P9). All callbacks fire at
   // most once per loop lifetime unless documented otherwise.
@@ -714,7 +720,15 @@ type InternalState = {
 }
 
 export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
-  const runtime = activeRuntime
+  const runtime = {
+    ...activeRuntime,
+    ...(opts.acquireScreenStream
+      ? { acquireScreenStream: opts.acquireScreenStream }
+      : {}),
+    ...(opts.countDisplays
+      ? { enumerateDisplayCount: opts.countDisplays }
+      : {}),
+  }
   // I83 — an explicit override wins verbatim (the unit tests drive short
   // timeouts through it); otherwise the bound is derived per tick from the
   // model's measured p95 via `effectiveRequestTimeoutMs`.
@@ -758,6 +772,8 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
   // STALL_CHECK_INTERVAL_MS.
   let stallHandle: unknown | null = null
   let activeAbort: AbortController | null = null
+  // I130 — fetch may ignore abort, so teardown owns its deadline too.
+  let activeInferenceTimer: unknown | null = null
   // #269 — armed for the inference window only; stopped in the tick's finally
   // and by teardown, so a thrown or aborted tick can never leave it ticking.
   let activeStarveProbe: StarveProbe | null = null
@@ -1422,6 +1438,7 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
     const timer = runtime.setTimeout(() => {
       activeAbort?.abort()
     }, tickTimeoutMs)
+    activeInferenceTimer = timer
 
     try {
       activeStarveProbe = startStarveProbe(runtime)
@@ -1608,6 +1625,7 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
       noteBlockedTick('inference_failed')
     } finally {
       runtime.clearTimeout(timer)
+      if (activeInferenceTimer === timer) activeInferenceTimer = null
       activeAbort = null
       state.inFlight = false
       // Every path above settles under its own name; this is the net that
@@ -1648,6 +1666,10 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
       backoffEngaged: state.backoff.engaged,
     })
     state.stopped = true
+    if (activeInferenceTimer !== null) {
+      runtime.clearTimeout(activeInferenceTimer)
+      activeInferenceTimer = null
+    }
     if (tickHandle !== null) {
       runtime.clearTimeout(tickHandle)
       tickHandle = null
@@ -2113,6 +2135,15 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
       return
     }
     teardownInternal()
+    if (opts.stopSidecarOnStop === false) {
+      await bootPromise
+      log.debug('stop.completed', {
+        alreadyStopped: false,
+        sidecarOwnedExternally: true,
+        elapsedMs: Math.max(0, runtime.now() - stopStartedAt),
+      })
+      return
+    }
     // Claim the singleton stop before waiting for this loop's boot work. A
     // replacement React effect can start immediately after cleanup returns;
     // entering the sidecar store's stop path now makes that new caller wait

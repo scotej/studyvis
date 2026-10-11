@@ -49,6 +49,8 @@ const OS_DLLS = new Set([
   'crypt32.dll',
   'dwmapi.dll',
   'gdi32.dll',
+  // if-addrs uses Windows' GetAdaptersAddresses from this system library.
+  'iphlpapi.dll',
   'kernel32.dll',
   'kernelbase.dll',
   'ntdll.dll',

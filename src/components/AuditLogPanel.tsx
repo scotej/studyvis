@@ -35,10 +35,10 @@ const TICK_INTERVAL_MS = 60_000
 // ARCHITECTURE.md §9 (the audit log is a live region). Fixed 320 wide
 // (`tokens.sizes.auditPanelWidth`); auto-scrolls to the newest row only
 // when the user is already at the bottom — preserving scroll position on
-// read-back. V3-P7 hardens the SR semantics: `role="log"` on the live list
+// read-back. V3-P7 hardens the SR semantics: `role="log"` around the live list
 // (implies aria-live="polite") + aria-relevant="additions" so new rows
-// announce without interrupting; the surrounding `<aside>` carries the
-// landmark label.
+// announce without interrupting; the surrounding named `<section>` provides
+// an audit region within the session.
 export function AuditLogPanel({ events, now, className }: AuditLogPanelProps) {
   const headingId = useId()
   const scrollRef = useRef<HTMLDivElement | null>(null)
@@ -75,7 +75,7 @@ export function AuditLogPanel({ events, now, className }: AuditLogPanelProps) {
   const effectiveNow = now ?? nowState
 
   return (
-    <aside
+    <section
       aria-labelledby={headingId}
       className={cn(
         'flex h-full flex-col border-l border-border-subtle bg-bg-surface',
@@ -107,27 +107,28 @@ export function AuditLogPanel({ events, now, className }: AuditLogPanelProps) {
             {strings.session.audit.empty}
           </p>
         ) : (
-          <ul
+          <div
             role="log"
             aria-live="polite"
             aria-relevant="additions"
             aria-labelledby={headingId}
-            className="m-0 list-none p-0"
           >
-            {events.map((e) => (
-              <AuditLogRow
-                key={e.seq}
-                name={e.name}
-                description={e.description}
-                ts={e.ts}
-                now={effectiveNow}
-                hoverDetail={e.hoverDetail}
-                iconKind={e.iconKind}
-              />
-            ))}
-          </ul>
+            <ul className="m-0 list-none p-0">
+              {events.map((e) => (
+                <AuditLogRow
+                  key={e.seq}
+                  name={e.name}
+                  description={e.description}
+                  ts={e.ts}
+                  now={effectiveNow}
+                  hoverDetail={e.hoverDetail}
+                  iconKind={e.iconKind}
+                />
+              ))}
+            </ul>
+          </div>
         )}
       </div>
-    </aside>
+    </section>
   )
 }

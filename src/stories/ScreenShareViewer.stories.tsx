@@ -37,13 +37,13 @@ function useScreenStream(label: string): MediaStream | null {
       captureStream?: (frameRate?: number) => MediaStream
     }
     const c = canvas as CanvasWithCapture
-    if (typeof c.captureStream === 'function') setStream(c.captureStream(15))
+    const captured =
+      typeof c.captureStream === 'function' ? c.captureStream(15) : null
+    setStream(captured)
     return () => {
       if (rafRef.current !== null) cancelAnimationFrame(rafRef.current)
-      setStream((cur) => {
-        cur?.getTracks().forEach((t) => t.stop())
-        return null
-      })
+      captured?.getTracks().forEach((track) => track.stop())
+      setStream(null)
     }
   }, [label])
 

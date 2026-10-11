@@ -142,7 +142,11 @@ function DemoPane({ active }: { active: CategoryId }) {
       <SettingsRow
         label="Reduce motion"
         help="Replaces transitions with fades."
-        control={<Switch />}
+        control={
+          <Switch
+            aria-label={strings.settings.appearance.reduceMotion.ariaLabel}
+          />
+        }
       />
     </SettingsSection>
   )
