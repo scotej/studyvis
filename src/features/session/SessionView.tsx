@@ -393,6 +393,30 @@ export function SessionView({
     },
     [room, status, sessionTopic, mirror.takeover, mediaRetryNonce]
   )
+  const previousMirrorCaptureRef = useRef({
+    takeover: mirror.takeover,
+    screen: mirror.screen,
+    connected: mirror.connected,
+  })
+  useLayoutEffect(() => {
+    const previous = previousMirrorCaptureRef.current
+    previousMirrorCaptureRef.current = {
+      takeover: mirror.takeover,
+      screen: mirror.screen,
+      connected: mirror.connected,
+    }
+    if (
+      previous.takeover &&
+      (!mirror.takeover ||
+        (previous.screen && !mirror.screen) ||
+        (previous.connected && !mirror.connected))
+    ) {
+      // PR-368 — a later AI-only selection must not inherit an earlier share.
+      // The initial control may arrive before its first stream, so only a
+      // previously captured source disappearing clears consent.
+      setMirrorSharing(false)
+    }
+  }, [mirror.takeover, mirror.screen, mirror.connected])
   const mirrorChatBridge = useMemo(
     () => ({
       publish: setMirrorChat,

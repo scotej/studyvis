@@ -503,6 +503,60 @@ async function assertPendingDesktopMicrophoneCancelled(host, page) {
   })
 }
 
+async function assertAiOnlyScreenAfterShareLoss(host, friend, page) {
+  await page.reload()
+  await ui.until(
+    async () => (await friend.page().getByText("Alice's screen").count()) === 0,
+    { label: 'reload retires the previously shared browser screen' }
+  )
+  await ui.until(
+    () =>
+      page
+        .getByRole('textbox', {
+          name: strings.session.notes.inputAriaLabel,
+          exact: true,
+        })
+        .isEnabled(),
+    { label: 'screen privacy reconnect restores authenticated controls' }
+  )
+  await ui.click(page, strings.settings.openAriaLabel)
+  await ui.click(page, strings.mirror.screenCapture)
+  await closeControls(page)
+  await page.waitForFunction(() => {
+    const snapshot = JSON.parse(
+      localStorage.getItem('studyvis.mirror.snapshot.v1')
+    )
+    return snapshot?.screenSharing === false
+  })
+  await ui.until(
+    () =>
+      host.page().evaluate(async () => {
+        for (const peer of window.__mirrorTestCapture.peers) {
+          if (peer.connectionState !== 'connected') continue
+          const slots = peer.getTransceivers()
+          if (
+            slots.length < 3 ||
+            !slots.slice(0, 3).every((slot) => slot.direction === 'recvonly')
+          )
+            continue
+          const stats = await slots[2].receiver.getStats()
+          if (
+            [...stats.values()].some(
+              (stat) => stat.type === 'inbound-rtp' && stat.framesDecoded > 0
+            )
+          )
+            return true
+        }
+        return false
+      }),
+    { label: 'AI-only browser screen reaches desktop capture transport' }
+  )
+  await page.waitForTimeout(1000)
+  assert.equal(await friend.page().getByText("Alice's screen").count(), 0)
+  await ui.click(page, 'Share screen')
+  await ui.waitForText(friend.page(), "Alice's screen", 30_000)
+}
+
 async function assertNoNativeCaptureOverlay(host) {
   assert.equal(
     await host
@@ -1180,6 +1234,7 @@ for (const [name, engine] of Object.entries({ chromium, firefox, webkit })) {
           )
           await ui.click(page, 'Share screen')
           await ui.waitForText(friend.page(), "Alice's screen", 30_000)
+          await assertAiOnlyScreenAfterShareLoss(host, friend, page)
         }
 
         if (name === 'chromium') {

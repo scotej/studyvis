@@ -62,7 +62,10 @@ export function useSessionMirror(
         if (hostRef.current !== host) return
         setConnected(next)
         if (next) setTakeover(true)
-        else controlRef.current({ type: 'ptt', active: false })
+        else {
+          controlRef.current({ type: 'ptt', active: false })
+          controlRef.current({ type: 'screen_sharing', sharing: false })
+        }
       },
     })
     hostRef.current = host
