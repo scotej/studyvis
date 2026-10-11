@@ -16,6 +16,11 @@
 
 ### Fixed
 
+- Screen readers receive correctly grouped conversation tabs, chat and session
+  logs, volume labels and download progress.
+- Reports and study activity can be scrolled with the keyboard; shortcut and
+  unavailable-settings text stays readable, and tutorial headings follow the
+  page hierarchy.
 - Delayed message and image sends cannot populate a different session after
   the original session ends.
 - Ending capture cancels the focus-check deadline even if a stalled AI request

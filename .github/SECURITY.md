@@ -1,26 +1,27 @@
 # Security
 
-StudyVis is a friends-only desktop app. There is no server, no account
+StudyVis is a friends-only desktop app. There is no central server, no account
 system, and no telemetry — everything runs on the machines of the handful
 of people who installed it. That shapes what "a vulnerability" means here,
 so read this before filing one.
 
 ## What the threat model actually is
 
-The full version lives in `ARCHITECTURE.md` §12. The short form:
+The full version lives in `ARCHITECTURE.md` §14. The short form:
 
 - **Peers are friends, not strangers.** There are no public rooms. You
   connect to someone only after exchanging a pair link out of band. A
   malicious peer is someone you already decided to study with.
 - **All data is local.** Sessions, stats, and the audit log live in a
-  SQLite database on your own disk. Private keys live in the OS keychain
+  SQLite database on your own disk. Identity private keys live in the OS keychain
   (macOS Keychain, Windows Credential Manager, or the freedesktop Secret
   Service on Linux). Linux requires a provider owning
   `org.freedesktop.secrets`; StudyVis does not fall back to plaintext when
   that service is unavailable. There is no account, no server-side history,
   and no telemetry — none of it is uploaded.
 - **Network traffic does leave the machine, but StudyVis does not upload user
-  or session content.** Peer discovery rides third-party Nostr/MQTT relays,
+  or session content to third-party application services.** Peer discovery rides
+  third-party Nostr/MQTT relays,
   and since I74 presence
   does too: every 30 s the app publishes a tiny ephemeral Nostr event
   (kind 20001) to the pinned relays. The payload is XSalsa20-Poly1305
@@ -33,8 +34,14 @@ The full version lives in `ARCHITECTURE.md` §12. The short form:
   downloads a newer installer. Installing an AI engine/model contacts GitHub
   or Hugging Face. These requests do not upload StudyVis identity, friend, or
   session data.
-- **AI inference is on-device.** The llama-server sidecar runs locally;
-  screenshots and camera frames never leave the machine.
+- **AI inference is on-device.** The llama-server sidecar runs on the user's
+  desktop. With opt-in LAN mirroring, a paired browser sends its camera and
+  selected screen to that desktop over encrypted WebRTC; AI capture is never
+  uploaded to an inference service.
+- **LAN certificate bootstrap is public.** The companion's HTTP download
+  serves only the public CA certificate. Compare its fingerprint with the
+  desktop before trusting it. Pairing and session controls use HTTPS/WSS;
+  private certificate keys stay on the desktop.
 - **Two entries in `ISSUES.md` are accepted deviations, not open bugs** —
   `I9` (any peer can drive the shared Pomodoro) and `I18` (the sidecar
   model path is not sandboxed). Both are in-scope only for an attacker who
@@ -138,7 +145,7 @@ taken seriously regardless of how theoretical they look.
 
 ## Reporting
 
-Use **GitHub's private vulnerability reporting** on this repository
+Use [**GitHub's private vulnerability reporting**](https://github.com/scotej/studyvis/security/advisories/new) on this repository
 (Security → Report a vulnerability). That keeps the report out of public
 issues until there is a fix.
 
