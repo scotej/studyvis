@@ -95,6 +95,7 @@ const report = {
 }
 const storage = new Map<string, string>()
 const cleanup: (() => void | Promise<void>)[] = []
+const incomingCodecs = new WeakMap<TestSocket, MirrorCodec>()
 
 function snapshot(): MirrorSessionSnapshot {
   return {
@@ -155,15 +156,17 @@ function snapshot(): MirrorSessionSnapshot {
   }
 }
 
-async function frames(message: MirrorMessage) {
+async function frames(message: MirrorMessage, codec = new MirrorCodec()) {
   const result: string[] = []
-  await new MirrorCodec().send(message, async (frame) => {
+  await codec.send(message, async (frame) => {
     result.push(frame)
   })
   return result
 }
 async function incoming(socket: TestSocket, message: MirrorMessage) {
-  for (const data of await frames(message)) socket.onmessage?.({ data })
+  const codec = incomingCodecs.get(socket) ?? new MirrorCodec()
+  incomingCodecs.set(socket, codec)
+  for (const data of await frames(message, codec)) socket.onmessage?.({ data })
   await vi.advanceTimersByTimeAsync(100)
 }
 async function activate(socket: TestSocket) {
@@ -541,6 +544,43 @@ describe('browser recovery and local custody', () => {
     })
     expect(await second).toBe(true)
   })
+  test.each(['fresh', 'restored'])(
+    'same-session snapshots preserve an in-flight invitation from a %s connection',
+    async (source) => {
+      if (source === 'restored')
+        storage.set('studyvis.mirror.snapshot.v1', JSON.stringify(snapshot()))
+      const connection = createBrowserConnection()
+      cleanup.push(connection.disconnect)
+      const socket = TestSocket.instances[0]
+      await activate(socket)
+      let settled = false
+      const pending = connection
+        .requestControl({ type: 'invite' })
+        .then((ok) => {
+          settled = true
+          return ok
+        })
+      await vi.advanceTimersByTimeAsync(100)
+      const request = sent(socket).find(
+        (message) => message?.type === 'control'
+      )!
+      if (request.type !== 'control') throw new Error('Missing control')
+      await incoming(socket, {
+        type: 'snapshot',
+        snapshot: { ...snapshot(), elapsedMs: 2000 },
+      })
+      expect(socket.readyState).toBe(TestSocket.OPEN)
+      expect(connection.getState().status).toBe('connected')
+      expect(connection.getState().snapshot).toMatchObject({ elapsedMs: 2000 })
+      expect(settled).toBe(false)
+      await incoming(socket, {
+        type: 'control_result',
+        requestId: request.requestId!,
+        ok: true,
+      })
+      expect(await pending).toBe(true)
+    }
+  )
   test.each(['timeout', 'disconnect', 'socket close', 'new session', 'report'])(
     'pending invitation fails on %s and stale acknowledgments are ignored',
     async (reason) => {
@@ -557,12 +597,17 @@ describe('browser recovery and local custody', () => {
       if (reason === 'timeout') await vi.advanceTimersByTimeAsync(30_000)
       else if (reason === 'disconnect') connection.disconnect()
       else if (reason === 'socket close') socket.close()
-      else if (reason === 'new session')
+      else if (reason === 'new session') {
         await incoming(socket, {
           type: 'snapshot',
           snapshot: { ...snapshot(), sessionId: 'session-2' },
         })
-      else await incoming(socket, { type: 'report', report })
+        expect(socket.readyState).toBe(TestSocket.OPEN)
+        expect(connection.getState().status).toBe('connected')
+        expect(connection.getState().snapshot).toMatchObject({
+          sessionId: 'session-2',
+        })
+      } else await incoming(socket, { type: 'report', report })
       expect(await pending).toBe(false)
       await incoming(socket, {
         type: 'control_result',

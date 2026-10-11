@@ -62,6 +62,7 @@ export function createBrowserConnection(): BrowserConnection {
   let retries = 0
   let stopped = false
   let connectionRun = 0
+  let currentSessionId = readMirrorSnapshot(restored)?.sessionId ?? null
   let completedSessionId =
     restoredReport?.mirrorSessionId ?? restoredReport?.session.id ?? null
   const pendingControls = new Map<
@@ -179,10 +180,8 @@ export function createBrowserConnection(): BrowserConnection {
           const snapshot = readMirrorSnapshot(message.snapshot)
           if (!snapshot) throw new Error('Incompatible mirror snapshot')
           if (snapshot.sessionId === completedSessionId) return
-          if (
-            snapshot.sessionId !== readMirrorSnapshot(state.snapshot)?.sessionId
-          )
-            cancelControls()
+          if (snapshot.sessionId !== currentSessionId) cancelControls()
+          currentSessionId = snapshot.sessionId
           completedSessionId = null
           update({
             snapshot,
@@ -202,6 +201,7 @@ export function createBrowserConnection(): BrowserConnection {
         } else if (message.type === 'report') {
           const report = readMirrorReport(message.report)
           if (report) {
+            currentSessionId = null
             completedSessionId = report.mirrorSessionId ?? report.session.id
             cancelControls()
             clearMedia()
@@ -368,6 +368,7 @@ export function createBrowserConnection(): BrowserConnection {
     disconnect() {
       stopped = true
       cancelControls()
+      currentSessionId = null
       completedSessionId = null
       connectionRun++
       if (reconnectTimer) clearTimeout(reconnectTimer)
