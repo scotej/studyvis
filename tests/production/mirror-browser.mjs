@@ -407,9 +407,12 @@ async function beginPendingDesktopMicrophoneSwap(host) {
     const originalEnumerate = navigator.mediaDevices.enumerateDevices.bind(
       navigator.mediaDevices
     )
+    const originalGetSenders = RTCPeerConnection.prototype.getSenders
     const pending = {
       originalAcquire,
       originalEnumerate,
+      originalGetSenders,
+      senders: new Set(),
       originalStream: [...document.querySelectorAll('video')].find(
         (video) => video.muted && video.srcObject?.getAudioTracks().length
       ).srcObject,
@@ -417,6 +420,13 @@ async function beginPendingDesktopMicrophoneSwap(host) {
       fresh: null,
     }
     window.__mirrorPendingMicrophone = pending
+    // Trystero captures its constructor before the late global capture probe.
+    // The lab bridge visits every actual connection through this prototype.
+    RTCPeerConnection.prototype.getSenders = function () {
+      const senders = originalGetSenders.call(this)
+      for (const sender of senders) pending.senders.add(sender)
+      return senders
+    }
     navigator.mediaDevices.enumerateDevices = async () => [
       ...(await originalEnumerate()),
       {
@@ -448,59 +458,70 @@ async function assertPendingDesktopMicrophoneCancelled(host, page) {
     name: strings.session.holdToTalkAriaLabel,
     exact: true,
   })
-  await talk.hover()
-  await page.mouse.down()
   try {
-    await host.page().waitForFunction(() =>
-      document
+    await talk.hover()
+    await page.mouse.down()
+    try {
+      await host.page().waitForFunction(() =>
+        document
+          .querySelector(
+            '[data-testid="video-tile"]:has([data-ptt-scope="self"]) video'
+          )
+          ?.srcObject?.getAudioTracks()
+          .some((track) => track.enabled)
+      )
+      await host.page().evaluate(async () => {
+        const pending = window.__mirrorPendingMicrophone
+        pending.fresh = await pending.originalAcquire({ audio: true })
+        pending.resolve(pending.fresh)
+        navigator.mediaDevices.getUserMedia = pending.originalAcquire
+        navigator.mediaDevices.enumerateDevices = pending.originalEnumerate
+      })
+      await host
+        .page()
+        .waitForFunction(() =>
+          window.__mirrorPendingMicrophone.fresh
+            .getTracks()
+            .every((track) => track.readyState === 'ended')
+        )
+      const state = await host.page().evaluate(() => {
+        const pending = window.__mirrorPendingMicrophone
+        const track = pending.fresh.getAudioTracks()[0]
+        window.__lab.peers()
+        return {
+          attached: pending.originalStream.getAudioTracks().includes(track),
+          published: [...pending.senders].some(
+            (sender) => sender.track === track
+          ),
+        }
+      })
+      assert.deepEqual(state, { attached: false, published: false })
+    } finally {
+      await page.mouse.up()
+    }
+    await host.page().waitForFunction(() => {
+      const browserTrack = document
         .querySelector(
           '[data-testid="video-tile"]:has([data-ptt-scope="self"]) video'
         )
-        ?.srcObject?.getAudioTracks()
-        .some((track) => track.enabled)
-    )
-    await host.page().evaluate(async () => {
+        ?.srcObject?.getAudioTracks()[0]
+      window.__lab.peers()
+      return (
+        browserTrack?.readyState === 'live' &&
+        !browserTrack.enabled &&
+        [...window.__mirrorPendingMicrophone.senders].some(
+          (sender) => sender.track === browserTrack
+        )
+      )
+    })
+  } finally {
+    await host.page().evaluate(() => {
       const pending = window.__mirrorPendingMicrophone
-      pending.fresh = await pending.originalAcquire({ audio: true })
-      pending.resolve(pending.fresh)
+      RTCPeerConnection.prototype.getSenders = pending.originalGetSenders
       navigator.mediaDevices.getUserMedia = pending.originalAcquire
       navigator.mediaDevices.enumerateDevices = pending.originalEnumerate
     })
-    await host
-      .page()
-      .waitForFunction(() =>
-        window.__mirrorPendingMicrophone.fresh
-          .getTracks()
-          .every((track) => track.readyState === 'ended')
-      )
-    const state = await host.page().evaluate(() => {
-      const pending = window.__mirrorPendingMicrophone
-      const track = pending.fresh.getAudioTracks()[0]
-      return {
-        attached: pending.originalStream.getAudioTracks().includes(track),
-        published: window.__mirrorTestCapture.peers.some((peer) =>
-          peer.getSenders().some((sender) => sender.track === track)
-        ),
-      }
-    })
-    assert.deepEqual(state, { attached: false, published: false })
-  } finally {
-    await page.mouse.up()
   }
-  await host.page().waitForFunction(() => {
-    const browserTrack = document
-      .querySelector(
-        '[data-testid="video-tile"]:has([data-ptt-scope="self"]) video'
-      )
-      ?.srcObject?.getAudioTracks()[0]
-    return (
-      browserTrack?.readyState === 'live' &&
-      !browserTrack.enabled &&
-      window.__mirrorTestCapture.peers.some((peer) =>
-        peer.getSenders().some((sender) => sender.track === browserTrack)
-      )
-    )
-  })
 }
 
 async function assertAiOnlyScreenAfterShareLoss(host, friend, page) {
