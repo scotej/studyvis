@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import type { Meta, StoryObj } from '@storybook/react-vite'
 
 import { TitleBar } from '@/components/TitleBar'
@@ -73,37 +74,42 @@ export const WindowsMaximized: Story = {
   ),
 }
 
-// Side-by-side comparison so a reviewer can spot drift between all three
-// platforms in one screenshot. Useful when validating that the wordmark
-// vertical centre and chrome band height stay aligned across the macOS overlay
-// inset and the Windows/Linux control clusters.
+// Compare the variants in one window. Each document has one banner, matching
+// the app; the individual stories above also cover every platform separately.
 export const AllPlatforms: Story = {
-  render: () => (
-    <div className="flex flex-col gap-6 p-6">
-      <div className="overflow-hidden rounded-md border border-border-default">
-        <Frame>
-          <TitleBar platform="mac" onControl={() => undefined} />
-        </Frame>
+  render: () => {
+    const [variant, setVariant] = useState('mac')
+    return (
+      <div className="flex flex-col gap-6 p-6">
+        <label className="flex items-center gap-3 text-sm text-text-primary">
+          Platform
+          <select
+            value={variant}
+            onChange={(event) => setVariant(event.target.value)}
+            className="rounded-md border border-border-default bg-bg-surface p-2"
+          >
+            <option value="mac">macOS</option>
+            <option value="windows">Windows</option>
+            <option value="linux">Linux</option>
+            <option value="windows-maximized">Windows maximized</option>
+          </select>
+        </label>
+        <div className="overflow-hidden rounded-md border border-border-default">
+          <Frame>
+            <TitleBar
+              platform={
+                variant === 'mac'
+                  ? 'mac'
+                  : variant === 'linux'
+                    ? 'linux'
+                    : 'windows'
+              }
+              forceMaximized={variant === 'windows-maximized'}
+              onControl={() => undefined}
+            />
+          </Frame>
+        </div>
       </div>
-      <div className="overflow-hidden rounded-md border border-border-default">
-        <Frame>
-          <TitleBar platform="windows" onControl={() => undefined} />
-        </Frame>
-      </div>
-      <div className="overflow-hidden rounded-md border border-border-default">
-        <Frame>
-          <TitleBar platform="linux" onControl={() => undefined} />
-        </Frame>
-      </div>
-      <div className="overflow-hidden rounded-md border border-border-default">
-        <Frame>
-          <TitleBar
-            platform="windows"
-            forceMaximized
-            onControl={() => undefined}
-          />
-        </Frame>
-      </div>
-    </div>
-  ),
+    )
+  },
 }

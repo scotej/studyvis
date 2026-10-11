@@ -1,12 +1,16 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
 
 import { Input } from '@/components/ui/input'
+import { strings } from '@/strings'
 
 const meta = {
   title: 'UI/Input',
   component: Input,
   parameters: { layout: 'centered' },
-  args: { placeholder: 'placeholder' },
+  args: {
+    placeholder: 'placeholder',
+    'aria-label': strings.settings.identity.displayName.ariaLabel,
+  },
   decorators: [
     (Story) => (
       <div className="w-72">
@@ -29,10 +33,24 @@ export const Focused: Story = {
 export const AllStates: Story = {
   render: () => (
     <div className="flex w-72 flex-col gap-3">
-      <Input placeholder="default" />
-      <Input defaultValue="filled" />
-      <Input disabled placeholder="disabled" />
-      <Input aria-invalid placeholder="error" />
+      <Input
+        placeholder="default"
+        aria-label={strings.settings.identity.displayName.ariaLabel}
+      />
+      <Input
+        defaultValue="filled"
+        aria-label={strings.settings.identity.displayName.ariaLabel}
+      />
+      <Input
+        disabled
+        placeholder="disabled"
+        aria-label={strings.settings.identity.displayName.ariaLabel}
+      />
+      <Input
+        aria-invalid
+        placeholder="error"
+        aria-label={strings.settings.identity.displayName.ariaLabel}
+      />
     </div>
   ),
 }
