@@ -266,12 +266,14 @@ export const DirectMessageSelection: Story = {
   play: async ({ canvasElement }) => {
     useSessionStore.setState({ peers: STORY_PEERS })
     const canvas = within(canvasElement)
-    await userEvent.click(
-      canvas.getByRole('button', { name: 'Add conversation' })
-    )
-    await userEvent.click(
-      within(document.body).getByRole('menuitem', { name: /Alice/ })
-    )
+    const body = within(document.body)
+    const add = canvas.getByRole('button', { name: 'Add conversation' })
+    await userEvent.click(add)
+    await userEvent.click(await body.findByRole('menuitem', { name: /Alice/ }))
+    await waitFor(() => {
+      expect(body.queryByRole('menu')).toBeNull()
+      expect(add).toHaveFocus()
+    })
     await expect(canvas.getByText('No direct messages yet.')).toBeVisible()
     await expect(
       await canvas.findByRole('tab', { name: 'Alice' })
@@ -289,17 +291,22 @@ export const DirectMessageSelection: Story = {
     await userEvent.keyboard('{ArrowLeft}')
     await waitFor(() => expect(alice).toHaveFocus())
     await userEvent.click(canvas.getByRole('button', { name: 'Close Alice' }))
-    await waitFor(() => expect(group).toHaveFocus())
+    await waitFor(() => {
+      expect(canvas.queryByRole('tab', { name: 'Alice' })).toBeNull()
+      expect(group).toHaveAttribute('aria-selected', 'true')
+      expect(group).toHaveFocus()
+    })
 
-    const add = canvas.getByRole('button', { name: 'Add conversation' })
     await userEvent.click(add)
-    await within(document.body).findByRole('menu')
+    await body.findByRole('menu')
     await userEvent.keyboard('{Escape}')
-    await waitFor(() => expect(add).toHaveFocus())
+    await waitFor(() => {
+      expect(body.queryByRole('menu')).toBeNull()
+      expect(add).toHaveFocus()
+    })
     await userEvent.click(add)
-    await userEvent.click(
-      within(document.body).getByRole('menuitem', { name: /Alice/ })
-    )
+    const menu = await body.findByRole('menu')
+    await userEvent.click(within(menu).getByRole('menuitem', { name: /Alice/ }))
     await expect(
       await canvas.findByRole('tab', { name: 'Alice' })
     ).toHaveAttribute('aria-selected', 'true')
