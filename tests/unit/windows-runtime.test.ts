@@ -147,7 +147,9 @@ describe('Windows bundle configuration', () => {
     expect(runtimeCheck).toContain(
       "Invoke-PackagedApp (Join-Path $appRoot 'studyvis.exe') $appRoot"
     )
-    expect(runtimeCheck).toContain('Test-PackagedAppRunStart $smokeData')
+    expect(runtimeCheck).toContain(
+      'Test-PackagedAppRunStart $runtimeLog $startedAt $appProcess.Id'
+    )
   })
 })
 

@@ -7,6 +7,10 @@ on:
         description: 'Draft tag to publish (vX.Y.Z or vX.Y.Z-prerelease)'
         required: true
         type: string
+      recovery_run:
+        description: 'Optional successful main release.yml run repairing only the known v2.0.0 Windows verifier'
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -110,6 +114,8 @@ jobs:
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       TAG: ${{ inputs.tag }}
+      RECOVERY_RUN_ID: ${{ inputs.recovery_run }}
+      GH_REPO: ${{ github.repository }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -179,9 +185,13 @@ jobs:
           ' <<< "$release_run")
           release_run_id=$(jq -r 'if . == null then "" else (.id | tostring) end' \
             <<< "$release_run")
-          if [ "$release_state" != "completed:success" ] || \
+          if [ -n "$RECOVERY_RUN_ID" ]; then
+            export RELEASE_SHA="$tag_sha"
+            bash scripts/check-v2-release-recovery.sh "$RECOVERY_RUN_ID"
+            RECOVERY_SHA=$(gh api "repos/$GH_REPO/actions/runs/$RECOVERY_RUN_ID" --jq .head_sha)
+          elif [ "$release_state" != "completed:success" ] || \
              [[ ! "$release_run_id" =~ ^[1-9][0-9]*$ ]]; then
-            echo "::error::The latest Release workflow for exact tag $TAG at $tag_sha did not complete successfully (got '$release_state'). Its exact Linux AppImage smoke must pass before publishing."
+            echo "::error::The latest exact-tag Release workflow must succeed, or the narrowly scoped v2.0.0 verifier recovery must pass."
             exit 1
           fi
           export RELEASE_RUN_ID="$release_run_id"
@@ -392,15 +402,24 @@ jobs:
           # otherwise fail closed on signer, source, runner, or digest mismatch.
           verify_release_attestation() {
             local name=$1
-            local verification_json run_prefix
-            run_prefix="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${RELEASE_RUN_ID}/attempts/"
+            local verification_json run_prefix signer_sha source_ref selected_run
+            signer_sha=$RELEASE_SHA
+            source_ref="refs/tags/$TAG"
+            selected_run=$RELEASE_RUN_ID
+            if [ -n "$RECOVERY_RUN_ID" ] && \
+               [[ "$name" == "$windows_updater" || "$name" == "${windows_updater}.sig" || "$name" == latest.json ]]; then
+              signer_sha=$RECOVERY_SHA
+              source_ref=refs/heads/main
+              selected_run=$RECOVERY_RUN_ID
+            fi
+            run_prefix="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${selected_run}/attempts/"
             for attempt in 1 2 3 4 5; do
               if verification_json=$(gh attestation verify "$artifact_dir/$name" \
                 --repo "${{ github.repository }}" \
                 --signer-workflow "${{ github.repository }}/.github/workflows/release.yml" \
-                --signer-digest "$RELEASE_SHA" \
-                --source-ref "refs/tags/$TAG" \
-                --source-digest "$RELEASE_SHA" \
+                --signer-digest "$signer_sha" \
+                --source-ref "$source_ref" \
+                --source-digest "$signer_sha" \
                 --deny-self-hosted-runners \
                 --format json); then
                 if jq -e --arg prefix "$run_prefix" '
@@ -426,6 +445,9 @@ jobs:
           for name in "${artifact_names[@]}"; do
             verify_release_attestation "$name"
           done
+
+          windows_sha256=$(sha256sum "$artifact_dir/$windows_updater" | cut -d' ' -f1)
+          echo "VALIDATED_WINDOWS_SHA256=$windows_sha256" >> "$GITHUB_ENV"
 
           snapshot_metadata=$(jq -cS '
             {
@@ -489,11 +511,16 @@ jobs:
           ' <<< "$release_run")
           release_run_id=$(jq -r 'if . == null then "" else (.id | tostring) end' \
             <<< "$release_run")
-          if [ "$release_state" != "completed:success" ] || \
+          if [ -n "$RECOVERY_RUN_ID" ]; then
+            bash scripts/check-v2-release-recovery.sh "$RECOVERY_RUN_ID"
+            current_recovery_sha=$(gh api "repos/$GH_REPO/actions/runs/$RECOVERY_RUN_ID" --jq .head_sha)
+            [[ "$current_recovery_sha" == "$RECOVERY_SHA" ]]
+          elif [ "$release_state" != "completed:success" ] || \
              [ "$release_run_id" != "$RELEASE_RUN_ID" ]; then
-            echo "::error::Selected Release workflow run $RELEASE_RUN_ID for exact tag $TAG at $current_sha is no longer the latest successful run (latest ID '$release_run_id', state '$release_state')."
+            echo "::error::Selected Release workflow is no longer the latest successful exact-tag run."
             exit 1
           fi
+          [[ "$release_run_id" == "$RELEASE_RUN_ID" ]]
 
           metadata=$(gh release view "$TAG" \
             --json tagName,name,isDraft,isPrerelease,targetCommitish,body,assets)
@@ -595,6 +622,11 @@ jobs:
             echo "::error::The draft AppImage changed after validation: $final_linux_sha256 is not the validated $VALIDATED_LINUX_APPIMAGE_SHA256. Refusing to publish."
             exit 1
           fi
+
+          windows_updater=$(jq -er --argjson asset_names "$asset_names" '$asset_names[.platforms["windows-x86_64"].url]' "$manifest")
+          download_final_asset "$windows_updater"
+          final_windows_sha256=$(sha256sum "$final_asset_dir/$windows_updater" | cut -d' ' -f1)
+          [[ "$final_windows_sha256" == "$VALIDATED_WINDOWS_SHA256" ]]
 
           if [ "$expected_prerelease" = true ]; then
             gh release edit "$TAG" --draft=false
