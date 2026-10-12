@@ -4,7 +4,16 @@
 // retract the handler it registered itself. The installed artifact is imported
 // directly: this asserts the shipped patch, not a re-implementation of it.
 
-import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
+import { setTimeout as realDelay } from 'node:timers/promises'
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  test,
+  vi,
+  type MockInstance,
+} from 'vitest'
 
 const { joinRoom } = (await import(
   new URL(
@@ -112,6 +121,8 @@ class FakePeerConnection {
 
 let originalWebSocket: unknown
 let roomCounter = 0
+const nativeDigest = crypto.subtle.digest.bind(crypto.subtle)
+let digest: MockInstance<typeof crypto.subtle.digest>
 
 // Every test gets its own relay URL, appId and roomId: the nostr module keeps
 // `batchers` and the relay registry in module scope for the whole process.
@@ -139,14 +150,11 @@ function socketFor(url: string): FakeSocket {
   return socket
 }
 
-// Topic hashing and event signing go through WebCrypto, which settles off the
-// timer queue, so alternate real event-loop turns with the faked ones until the
-// subscribe / detached-unsubscribe chains and the batcher's flush have all run.
-async function settle(): Promise<void> {
-  for (let i = 0; i < 8; i += 1) {
-    await new Promise((resolve) => setImmediate(resolve))
-    await vi.advanceTimersByTimeAsync(1)
-  }
+// joinRoom starts its topic hashes synchronously. Await their native promises
+// before opening the relay so every pending room is ready to subscribe; a fixed
+// number of event-loop turns cannot guarantee WebCrypto has finished on CI.
+async function waitForHashes(): Promise<void> {
+  await Promise.all(digest.mock.results.map((result) => result.value))
 }
 
 // `leave()` waits out a bounded leave-signal race and a 99 ms peer-teardown
@@ -155,7 +163,6 @@ async function leaveRoom(room: { leave: () => Promise<void> }): Promise<void> {
   const left = room.leave()
   await vi.advanceTimersByTimeAsync(2_000)
   await left
-  await settle()
 }
 
 beforeEach(() => {
@@ -163,11 +170,13 @@ beforeEach(() => {
     toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'],
   })
   FakeSocket.live = []
+  digest = vi.spyOn(crypto.subtle, 'digest').mockImplementation(nativeDigest)
   originalWebSocket = (globalThis as { WebSocket?: unknown }).WebSocket
   ;(globalThis as { WebSocket?: unknown }).WebSocket = FakeSocket
 })
 
 afterEach(() => {
+  digest.mockRestore()
   vi.useRealTimers()
   ;(globalThis as { WebSocket?: unknown }).WebSocket = originalWebSocket
 })
@@ -180,18 +189,18 @@ describe('patched Trystero nostr subscription ownership', () => {
     // The relay is still connecting, so the leaving room's subscribe — and
     // therefore its unsubscribe — cannot resolve yet.
     const leaving = joinRoom(config, roomId)
-    await settle()
+    await waitForHashes()
     await leaveRoom(leaving)
 
     const replacement = joinRoom(config, roomId)
-    await settle()
+    await waitForHashes()
 
     // Both rooms now resolve against the same relay: the old room subscribes,
     // the replacement overwrites the topic handlers, then the old room's
     // detached cleanup runs.
     const socket = socketFor(url)
     socket.open()
-    await settle()
+    await vi.waitFor(() => expect(subscribedTopics(socket)).toHaveLength(2))
 
     const topics = subscribedTopics(socket)
     expect(topics).toHaveLength(2)
@@ -204,8 +213,9 @@ describe('patched Trystero nostr subscription ownership', () => {
     const reconnected = socketFor(url)
     expect(reconnected).not.toBe(socket)
     reconnected.open()
-    await settle()
-    expect(subscribedTopics(reconnected)).toEqual(topics)
+    await vi.waitFor(() =>
+      expect(subscribedTopics(reconnected)).toEqual(topics)
+    )
 
     await leaveRoom(replacement)
   })
@@ -215,38 +225,43 @@ describe('patched Trystero nostr subscription ownership', () => {
     const config = configFor(url, appId)
 
     let current = joinRoom(config, roomId)
-    await settle()
+    await waitForHashes()
     for (let i = 0; i < 3; i += 1) {
       await leaveRoom(current)
       current = joinRoom(config, roomId)
-      await settle()
+      await waitForHashes()
     }
 
     const socket = socketFor(url)
     socket.open()
-    await settle()
-
-    expect(subscribedTopics(socket)).toHaveLength(2)
+    await vi.waitFor(() => expect(subscribedTopics(socket)).toHaveLength(2))
     expect(socket.framesOfType('CLOSE')).toHaveLength(0)
 
     await leaveRoom(current)
   })
 
-  test('an ordinary leave still retracts its own subscriptions', async () => {
-    const { url, appId, roomId } = scope()
-    const config = configFor(url, appId)
+  test.each([0, 50])(
+    'an ordinary leave still retracts its own subscriptions (WebCrypto delay: %i ms)',
+    async (digestDelay) => {
+      digest.mockImplementation(async (...args) => {
+        if (digestDelay) await realDelay(digestDelay)
+        return nativeDigest(...args)
+      })
+      const { url, appId, roomId } = scope()
+      const config = configFor(url, appId)
 
-    const room = joinRoom(config, roomId)
-    await settle()
-    const socket = socketFor(url)
-    socket.open()
-    await settle()
+      const room = joinRoom(config, roomId)
+      await waitForHashes()
+      const socket = socketFor(url)
+      socket.open()
+      await vi.waitFor(() => expect(subscribedTopics(socket)).toHaveLength(2))
 
-    expect(subscribedTopics(socket)).toHaveLength(2)
+      await leaveRoom(room)
 
-    await leaveRoom(room)
-
-    // Last subscriber gone: the batcher closes every subscription it opened.
-    expect(socket.framesOfType('CLOSE').length).toBeGreaterThan(0)
-  })
+      // Last subscriber gone: the batcher closes every subscription it opened.
+      await vi.waitFor(() =>
+        expect(socket.framesOfType('CLOSE').length).toBeGreaterThan(0)
+      )
+    }
+  )
 })
