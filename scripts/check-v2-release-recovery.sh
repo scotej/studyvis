@@ -33,7 +33,8 @@ jq -e '
   any(.[]; .name == "Linux (x86_64 AppImage)" and any(.steps[]; .name == "Launch the exact Linux release AppImage under Xvfb" and .conclusion == "success"))
 ' <<< "$jobs" >/dev/null
 windows_job=$(jq -r '.[] | select(.name == "Windows") | .id' <<< "$jobs")
-log=$(gh api "repos/$GH_REPO/actions/jobs/$windows_job/logs")
+# Keep ANSI bytes opaque: inspect the captured log, never print it to a terminal.
+log=$(gh api --allow-escape-sequences "repos/$GH_REPO/actions/jobs/$windows_job/logs")
 grep -Fq 'Packaged StudyVis did not write its main renderer run.start record within 60 seconds' <<< "$log"
 echo "Original v2.0.0 preflight/macOS/Linux passed; only the known Windows verifier and dependent manifest failed."
 if [[ $# == 1 ]]; then
