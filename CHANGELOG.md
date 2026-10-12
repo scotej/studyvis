@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.12.9 — 2026-10-11 — Browser companion
+## 2.0.0 — 2026-10-12 — Browser companion
 
 ### Added
 
