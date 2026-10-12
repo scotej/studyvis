@@ -5,6 +5,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+$script:expectedAppVersion = (Get-Content -Raw -LiteralPath 'package.json' | ConvertFrom-Json).version
 Set-StrictMode -Version Latest
 if (-not $IsWindows) {
     throw 'Windows runtime startup verification requires Windows PowerShell 7'
@@ -68,25 +69,25 @@ function Invoke-PackagedEngine {
 }
 
 function Test-PackagedAppRunStart {
-    param([string]$DataRoot)
+    param([string]$LogPath, [DateTimeOffset]$StartedAt, [int]$AppPid)
 
-    if (-not (Test-Path -LiteralPath $DataRoot)) {
-        return $false
-    }
-    foreach ($log in Get-ChildItem -LiteralPath $DataRoot -File -Filter 'studyvis.log' -Recurse -ErrorAction SilentlyContinue) {
-        foreach ($line in Get-Content -LiteralPath $log.FullName -ErrorAction SilentlyContinue) {
-            try {
-                $record = ConvertFrom-Json -InputObject $line -ErrorAction Stop
-                if ($record.win -eq 'main' -and $record.msg -eq 'run.start') {
-                    return $true
-                }
-            } catch {
-                # The renderer can append while the smoke test reads the file.
-                # Ignore a partial final line and retry on the next poll.
-            }
+    if (-not (Test-Path -LiteralPath $LogPath)) { return $false }
+    $nativeReady = $false
+    $rendererReady = $false
+    foreach ($line in Get-Content -LiteralPath $LogPath -ErrorAction SilentlyContinue) {
+        try {
+            $record = ConvertFrom-Json -InputObject $line -ErrorAction Stop
+            if (-not $record.run -or $record.msg -ne 'run.start' -or [DateTimeOffset]::Parse($record.ts) -lt $StartedAt) { continue }
+            if ($record.win -eq 'native' -and $record.data.pid -eq $AppPid) { $nativeReady = $true }
+            if ($record.win -eq 'main' -and $record.data.app -eq $script:expectedAppVersion) { $rendererReady = $true }
+        } catch {
+            # Ignore an incomplete final line while the app appends.
         }
     }
-    return $false
+    if ($nativeReady -and $rendererReady) {
+        Write-Host "Fresh run.start records found at $LogPath for native PID $AppPid and main renderer version $script:expectedAppVersion"
+    }
+    return $nativeReady -and $rendererReady
 }
 
 function Invoke-PackagedApp {
@@ -95,22 +96,30 @@ function Invoke-PackagedApp {
         [string]$WorkingDirectory
     )
 
-    $smokeRoot = Join-Path ([System.IO.Path]::GetTempPath()) "studyvis-app-smoke-$([guid]::NewGuid())"
-    $smokeData = Join-Path $smokeRoot 'roaming'
-    New-Item -ItemType Directory -Path $smokeData -Force | Out-Null
+    # Tauri/dirs uses SHGetKnownFolderPath, not the APPDATA environment variable.
+    # Use the same known folder and refuse existing data or another app process:
+    # this smoke runs on a disposable hosted runner, never a user's profile.
+    $roaming = [Environment]::GetFolderPath([Environment+SpecialFolder]::ApplicationData)
+    if (-not $roaming) { throw 'Windows roaming known folder is unavailable' }
+    $smokeData = Join-Path $roaming 'studyvis'
+    $runtimeLog = Join-Path $smokeData 'logs/studyvis.log'
+    if ((Test-Path -LiteralPath $smokeData) -or (Get-Process -Name 'studyvis' -ErrorAction SilentlyContinue)) {
+        throw 'App smoke requires a fresh hosted-runner profile with no StudyVis data or process'
+    }
+    Write-Host "App smoke: known-folder data path $smokeData; inherited APPDATA $env:APPDATA"
 
     $start = [System.Diagnostics.ProcessStartInfo]::new()
     $start.FileName = $Binary
     $start.WorkingDirectory = $WorkingDirectory
     $start.UseShellExecute = $false
     $start.CreateNoWindow = $false
-    $start.Environment['APPDATA'] = $smokeData
     $start.Environment['PATH'] = "$WorkingDirectory;$env:SystemRoot\System32;$env:SystemRoot"
 
     $appProcess = [System.Diagnostics.Process]::new()
     $appProcess.StartInfo = $start
     $started = $false
     try {
+        $startedAt = [DateTimeOffset]::FromUnixTimeMilliseconds([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds())
         if (-not $appProcess.Start()) {
             throw 'Failed to start the packaged StudyVis application'
         }
@@ -124,7 +133,7 @@ function Invoke-PackagedApp {
                 throw "Packaged StudyVis exited before startup completed (exit $($appProcess.ExitCode))"
             }
             if (-not $rendererReady) {
-                $rendererReady = Test-PackagedAppRunStart $smokeData
+                $rendererReady = Test-PackagedAppRunStart $runtimeLog $startedAt $appProcess.Id
             }
             if ($appProcess.MainWindowHandle -ne [IntPtr]::Zero -and $appProcess.MainWindowTitle -eq 'StudyVis') {
                 $windowReady = $true
@@ -148,7 +157,7 @@ function Invoke-PackagedApp {
         if ($appProcess.HasExited) {
             throw "Packaged StudyVis exited immediately after startup (exit $($appProcess.ExitCode))"
         }
-        Write-Host 'Packaged StudyVis main window and renderer startup passed'
+        Write-Host "Packaged StudyVis main window and fresh native/renderer startup passed (PID $($appProcess.Id), log $runtimeLog)"
     }
     finally {
         if ($started -and -not $appProcess.HasExited) {
@@ -159,7 +168,7 @@ function Invoke-PackagedApp {
             }
         }
         $appProcess.Dispose()
-        Remove-Item -LiteralPath $smokeRoot -Recurse -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $smokeData -Recurse -Force -ErrorAction SilentlyContinue
     }
 }
 
