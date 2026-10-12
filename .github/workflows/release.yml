@@ -644,19 +644,22 @@ jobs:
             'StudyVis_2.0.0_x64-setup.exe' = @{ id = 632798496; digest = 'sha256:c0e741380563c5f4aab0e6f1c7451e346fc2423787182f02ac7d52111bc3140e' }
             'StudyVis_2.0.0_x64-setup.exe.sig' = @{ id = 632798570; digest = 'sha256:de333d9bc1f4c263e3edae6b20dff15225f77ec388e2a0f1195aea0972c968b6' }
           }
-          New-Item -ItemType Directory -Path assets | Out-Null
+          $assetDirectory = Join-Path $env:RUNNER_TEMP "studyvis-recovery-assets-$([guid]::NewGuid())"
+          New-Item -ItemType Directory -Path $assetDirectory | Out-Null
+          "WINDOWS_RECOVERY_ASSETS=$assetDirectory" >> $env:GITHUB_ENV
           foreach ($name in @('StudyVis_2.0.0_x64-setup.exe', 'StudyVis_2.0.0_x64-setup.exe.sig')) {
             $asset = @($metadata.assets | Where-Object name -eq $name)
             if ($asset.Count -ne 1 -or $asset[0].id -ne $expected[$name].id -or $asset[0].digest -ne $expected[$name].digest) { throw "Existing asset changed: $name" }
             # gh's native stdout redirection preserves binary bytes in PowerShell 7.4+.
-            gh api -H 'Accept: application/octet-stream' $asset[0].url > "assets/$name"
+            $destination = Join-Path $assetDirectory $name
+            gh api -H 'Accept: application/octet-stream' $asset[0].url > $destination
             if ($LASTEXITCODE -ne 0) { throw "Download failed: $name" }
-            $digest = 'sha256:' + (Get-FileHash "assets/$name" -Algorithm SHA256).Hash.ToLowerInvariant()
+            $digest = 'sha256:' + (Get-FileHash $destination -Algorithm SHA256).Hash.ToLowerInvariant()
             if ($digest -ne $asset[0].digest) { throw "Exact asset digest mismatch: $name" }
             Write-Host "Verified exact draft asset $name $digest"
           }
           $unpack = Join-Path $env:RUNNER_TEMP 'studyvis-recovery-nsis'
-          & 7z x '-y' "-o$unpack" 'assets/StudyVis_2.0.0_x64-setup.exe'
+          & 7z x '-y' "-o$unpack" (Join-Path $assetDirectory 'StudyVis_2.0.0_x64-setup.exe')
           if ($LASTEXITCODE -ne 0) { throw 'Installer extraction failed' }
           $validator = Join-Path $pwd 'scripts/check-windows-runtime.ps1'
           Set-Location tagged
@@ -672,8 +675,8 @@ jobs:
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-path: |
-            assets/StudyVis_2.0.0_x64-setup.exe
-            assets/StudyVis_2.0.0_x64-setup.exe.sig
+            ${{ env.WINDOWS_RECOVERY_ASSETS }}/StudyVis_2.0.0_x64-setup.exe
+            ${{ env.WINDOWS_RECOVERY_ASSETS }}/StudyVis_2.0.0_x64-setup.exe.sig
 
   # Fail closed before the dedicated publish workflow can be used. Once the
   # repository's `release` environment is protected, that workflow also adds
