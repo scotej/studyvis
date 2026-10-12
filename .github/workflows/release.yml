@@ -662,6 +662,11 @@ jobs:
           Set-Location tagged
           npm run check-notice-bundle -- $unpack
           if ($LASTEXITCODE -ne 0) { throw 'Tagged notice verification failed' }
+          # Reproduce the original APPDATA override while the repaired smoke
+          # observes the real known folder. A passing fresh log proves where
+          # this exact app writes despite the environment override.
+          $env:APPDATA = Join-Path $env:RUNNER_TEMP 'studyvis-recovery-appdata-override'
+          New-Item -ItemType Directory -Path $env:APPDATA -Force | Out-Null
           & $validator -ArtifactRoot $unpack
       - name: Attest verified existing Windows bytes with recovery provenance
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
