@@ -128,6 +128,27 @@ describe('Windows bundle configuration', () => {
       WINDOWS_RUNTIME_DIRECTORY
     )
   })
+
+  it('smokes the app from the exact extracted release installer', () => {
+    const releaseWorkflow = readFileSync(
+      resolve('.github/workflows/release.yml'),
+      'utf8'
+    )
+    const runtimeCheck = readFileSync(
+      resolve('scripts/check-windows-runtime.ps1'),
+      'utf8'
+    )
+    expect(releaseWorkflow).toContain(
+      'Verify notices and runtime in the exact Windows release installer'
+    )
+    expect(releaseWorkflow).toContain(
+      './scripts/check-windows-runtime.ps1 -ArtifactRoot $unpack'
+    )
+    expect(runtimeCheck).toContain(
+      "Invoke-PackagedApp (Join-Path $appRoot 'studyvis.exe') $appRoot"
+    )
+    expect(runtimeCheck).toContain('Test-PackagedAppRunStart $smokeData')
+  })
 })
 
 describe('packaged Windows runtime', () => {
