@@ -67,6 +67,102 @@ function Invoke-PackagedEngine {
     }
 }
 
+function Test-PackagedAppRunStart {
+    param([string]$DataRoot)
+
+    if (-not (Test-Path -LiteralPath $DataRoot)) {
+        return $false
+    }
+    foreach ($log in Get-ChildItem -LiteralPath $DataRoot -File -Filter 'studyvis.log' -Recurse -ErrorAction SilentlyContinue) {
+        foreach ($line in Get-Content -LiteralPath $log.FullName -ErrorAction SilentlyContinue) {
+            try {
+                $record = ConvertFrom-Json -InputObject $line -ErrorAction Stop
+                if ($record.win -eq 'main' -and $record.msg -eq 'run.start') {
+                    return $true
+                }
+            } catch {
+                # The renderer can append while the smoke test reads the file.
+                # Ignore a partial final line and retry on the next poll.
+            }
+        }
+    }
+    return $false
+}
+
+function Invoke-PackagedApp {
+    param(
+        [string]$Binary,
+        [string]$WorkingDirectory
+    )
+
+    $smokeRoot = Join-Path ([System.IO.Path]::GetTempPath()) "studyvis-app-smoke-$([guid]::NewGuid())"
+    $smokeData = Join-Path $smokeRoot 'roaming'
+    New-Item -ItemType Directory -Path $smokeData -Force | Out-Null
+
+    $start = [System.Diagnostics.ProcessStartInfo]::new()
+    $start.FileName = $Binary
+    $start.WorkingDirectory = $WorkingDirectory
+    $start.UseShellExecute = $false
+    $start.CreateNoWindow = $false
+    $start.Environment['APPDATA'] = $smokeData
+    $start.Environment['PATH'] = "$WorkingDirectory;$env:SystemRoot\System32;$env:SystemRoot"
+
+    $appProcess = [System.Diagnostics.Process]::new()
+    $appProcess.StartInfo = $start
+    $started = $false
+    try {
+        if (-not $appProcess.Start()) {
+            throw 'Failed to start the packaged StudyVis application'
+        }
+        $started = $true
+        $deadline = [DateTimeOffset]::UtcNow.AddSeconds(60)
+        $rendererReady = $false
+        $windowReady = $false
+        while ([DateTimeOffset]::UtcNow -lt $deadline) {
+            $appProcess.Refresh()
+            if ($appProcess.HasExited) {
+                throw "Packaged StudyVis exited before startup completed (exit $($appProcess.ExitCode))"
+            }
+            if (-not $rendererReady) {
+                $rendererReady = Test-PackagedAppRunStart $smokeData
+            }
+            if ($appProcess.MainWindowHandle -ne [IntPtr]::Zero -and $appProcess.MainWindowTitle -eq 'StudyVis') {
+                $windowReady = $true
+            }
+            if ($rendererReady -and $windowReady) {
+                break
+            }
+            Start-Sleep -Milliseconds 500
+        }
+        if (-not $rendererReady) {
+            throw 'Packaged StudyVis did not write its main renderer run.start record within 60 seconds'
+        }
+        if (-not $windowReady) {
+            throw "Packaged StudyVis did not show its StudyVis main window within 60 seconds (title '$($appProcess.MainWindowTitle)')"
+        }
+
+        # Keep the app alive briefly after both signals so a startup crash just
+        # after the first paint cannot pass the packaged-installer smoke test.
+        Start-Sleep -Seconds 3
+        $appProcess.Refresh()
+        if ($appProcess.HasExited) {
+            throw "Packaged StudyVis exited immediately after startup (exit $($appProcess.ExitCode))"
+        }
+        Write-Host 'Packaged StudyVis main window and renderer startup passed'
+    }
+    finally {
+        if ($started -and -not $appProcess.HasExited) {
+            $null = $appProcess.CloseMainWindow()
+            if (-not $appProcess.WaitForExit(5000)) {
+                $appProcess.Kill($true)
+                $appProcess.WaitForExit()
+            }
+        }
+        $appProcess.Dispose()
+        Remove-Item -LiteralPath $smokeRoot -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
 $stage = $null
 $prebuildStage = $null
 try {
@@ -108,7 +204,12 @@ try {
     $stagedEngine = Join-Path $stage 'llama-server.exe'
     Invoke-PackagedEngine $stagedEngine $stage '--version'
     Invoke-PackagedEngine $stagedEngine $stage '--list-devices'
-    Write-Host 'Windows runtime: packaged PE closure and engine startup passed'
+
+    if (-not $StagedPrebuild) {
+        $appRoot = Split-Path -Parent $runtimeInfo.engine
+        Invoke-PackagedApp (Join-Path $appRoot 'studyvis.exe') $appRoot
+    }
+    Write-Host 'Windows runtime: packaged PE closure and startup checks passed'
 }
 finally {
     foreach ($directory in @($stage, $prebuildStage)) {
