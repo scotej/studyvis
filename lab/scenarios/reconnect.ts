@@ -27,6 +27,11 @@ import {
 import type { LabMachine } from '../src/machine'
 import { scenario } from '../src/scenario'
 import type { JSHandle } from 'playwright-core'
+import {
+  originalInboundVideoCounters,
+  originalMediaWindowStopped,
+  type MediaTransportSnapshot,
+} from '../src/mediaCessation'
 
 // Measured against this harness: a 15 s freeze degrades alice's transport for
 // ~11 s. That is comfortably past the 5 s after which trystero closes the peer
@@ -126,6 +131,25 @@ async function tracksStillDelivering(
   return { delivering: after.frames > before.frames, before, after }
 }
 
+async function transportStats(
+  machine: LabMachine,
+  tracks?: JSHandle<MediaStreamTrack[]>
+): Promise<MediaTransportSnapshot[]> {
+  return machine.page().evaluate(
+    (original) =>
+      (
+        window as unknown as {
+          __lab: {
+            transportStats: (
+              tracks: MediaStreamTrack[] | null
+            ) => Promise<MediaTransportSnapshot[]>
+          }
+        }
+      ).__lab.transportStats(original),
+    tracks ?? null
+  )
+}
+
 function find(machine: LabMachine, scope: string, msg: string): LogRecord[] {
   return logRecords(machine).filter(
     (record) => record.scope === scope && record.msg === msg
@@ -206,7 +230,7 @@ scenario('reconnect', async ({ lab, step, check, ui }) => {
   // an empty session, unable to re-form it. The app has to shut that
   // connection itself.
   // ---------------------------------------------------------------------
-  step(`bob's renderer is frozen for ${LONG_FREEZE_MS / 1000}s, past the hold`)
+  step('the original receiver resumes decoded frames after the short stall')
   const joinsBefore = find(alice, 'session.lifecycle', 'peer.joined').length
   // Identify the media of the connection that is about to be abandoned, so the
   // assertion below follows THAT connection rather than whatever stream a
@@ -216,14 +240,31 @@ scenario('reconnect', async ({ lab, step, check, ui }) => {
     'bob is receiving alice over a known track',
     (await doomedTracks.evaluate((tracks) => tracks.length)) > 0
   )
-  const liveFrames = await tracksStillDelivering(bob, doomedTracks, 1_000)
+  const initialReceiver = await transportStats(bob, doomedTracks)
+  const initialInbound = originalInboundVideoCounters(initialReceiver, {
+    requireLive: true,
+  })
   process.stderr.write(
-    `  original receiver frames: ${JSON.stringify(liveFrames)}\n`
+    `  original receiver RTP control: ${JSON.stringify({ receiver: initialReceiver, inbound: initialInbound })}\n`
   )
-  check(
-    'the original receiver track is delivering frames',
-    liveFrames.delivering
+  check('the original live receiver has measurable inbound RTP', true)
+  // ICE recovery and a playing, sized video do not guarantee the decoder has
+  // resumed yet. Wait for real advancement on these exact receiver objects;
+  // a permanently frozen stream still fails this bounded positive control.
+  await ui.until(
+    async () => {
+      const liveFrames = await tracksStillDelivering(bob, doomedTracks, 1_000)
+      process.stderr.write(
+        `  original receiver frames: ${JSON.stringify(liveFrames)}\n`
+      )
+      return liveFrames.delivering
+    },
+    {
+      label: "bob's original receiver track to resume decoded frames",
+      timeoutMs: 30_000,
+    }
   )
+  check('the original receiver track is delivering frames', true)
   const doomedTransports = (await ui.evaluate(
     alice.page(),
     `window.__lab.peers().flatMap((peer, index) =>
@@ -234,6 +275,7 @@ scenario('reconnect', async ({ lab, step, check, ui }) => {
     'alice has a known media transport to retire',
     doomedTransports.length > 0
   )
+  step(`bob's renderer is frozen for ${LONG_FREEZE_MS / 1000}s, past the hold`)
   await freeze(bob, LONG_FREEZE_MS)
 
   // The hold ends one of two ways once the outage outlasts it: it expires and
@@ -266,15 +308,44 @@ scenario('reconnect', async ({ lab, step, check, ui }) => {
   )
   check('the original media transports are closed', true)
   step('bob stops receiving alice — she is no longer on camera to him')
-  const frames = await tracksStillDelivering(bob, doomedTracks, 4_000)
-  await doomedTracks.dispose()
-  process.stderr.write(
-    `  abandoned receiver frames: ${JSON.stringify(frames)}\n`
-  )
-  check(
-    'the abandoned connection stopped delivering frames to bob',
-    !frames.delivering
-  )
+  // A stopped renderer can decode its queued RTP after the sender closes.
+  // Allow a bounded drain, then require a FULL four-second window with both
+  // unchanged rendering and no incoming bytes, packets or complete frames.
+  const drainDeadline = performance.now() + 30_000
+  try {
+    await ui.until(
+      async () => {
+        if (performance.now() + 4_000 > drainDeadline)
+          throw new Error(
+            'original media did not cease within the 30s drain deadline'
+          )
+        const receiverBefore = await transportStats(bob, doomedTracks)
+        const inboundBefore = originalInboundVideoCounters(receiverBefore)
+        const frames = await tracksStillDelivering(bob, doomedTracks, 4_000)
+        const receiverAfter = await transportStats(bob, doomedTracks)
+        const inboundAfter = originalInboundVideoCounters(receiverAfter)
+        const stopped = originalMediaWindowStopped(
+          frames,
+          inboundBefore,
+          inboundAfter
+        )
+        process.stderr.write(
+          `  abandoned media window: ${JSON.stringify({ frames, inboundBefore, inboundAfter, stopped, sender: await transportStats(alice), receiverBefore, receiverAfter })}\n`
+        )
+        return stopped && performance.now() <= drainDeadline
+      },
+      {
+        label:
+          'a full 4s original-media quiescence window after the bounded drain',
+        timeoutMs: 30_000,
+        intervalMs: 0,
+      }
+    )
+  } finally {
+    await doomedTracks.dispose()
+  }
+  check('the abandoned connection stopped delivering frames to bob', true)
+  check('the original inbound RTP counters stopped', true)
 
   // Whether the session re-forms after an outage this long depends on how
   // fast the far side notices, so this asserts the held tile RESOLVES rather

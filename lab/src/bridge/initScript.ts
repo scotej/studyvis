@@ -280,6 +280,67 @@ export function installBridge(config: BridgeConfig): void {
           .length,
         dataChannels: dataChannelsOf(pc),
       })),
+    // Read-only media diagnostics. Track object identity ties an original
+    // receiver to its connection even when a later SDP reuses the same ids.
+    transportStats: async (originalTracks: MediaStreamTrack[] | null = null) =>
+      Promise.all(
+        peerConnections.flatMap((pc, index) => {
+          const senders = pc
+            .getSenders()
+            .flatMap((sender) =>
+              sender.track
+                ? [{ id: sender.track.id, kind: sender.track.kind }]
+                : []
+            )
+          const receivers = pc.getReceivers().map((receiver) => ({
+            id: receiver.track.id,
+            kind: receiver.track.kind,
+            original: originalTracks?.includes(receiver.track) ?? false,
+          }))
+          if (
+            originalTracks
+              ? !receivers.some((receiver) => receiver.original)
+              : !senders.some((sender) => sender.kind === 'video')
+          )
+            return []
+          return [
+            pc.getStats().then((report) => ({
+              index,
+              connectionState: pc.connectionState,
+              iceConnectionState: pc.iceConnectionState,
+              senders,
+              receivers,
+              rtp: [...report.values()]
+                .filter(
+                  (stat) =>
+                    stat.kind === 'video' &&
+                    (stat.type === 'inbound-rtp' ||
+                      stat.type === 'outbound-rtp')
+                )
+                .map((stat) =>
+                  Object.fromEntries(
+                    [
+                      'id',
+                      'type',
+                      'kind',
+                      'ssrc',
+                      'trackIdentifier',
+                      'bytesReceived',
+                      'packetsReceived',
+                      'framesReceived',
+                      'framesDecoded',
+                      'bytesSent',
+                      'packetsSent',
+                      'framesSent',
+                    ]
+                      .filter((key) => key in stat)
+                      .map((key) => [key, stat[key]])
+                  )
+                ),
+            })),
+          ]
+        })
+      ),
   }
 
   // A room's data channel is what carries an invite, a hello, chat and the
