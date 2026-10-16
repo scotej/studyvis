@@ -50,9 +50,7 @@ scenario('current-release-compatibility', async ({ lab, step, check, ui }) => {
   await pairViaContactCard(current, previous)
   await inviteAndAccept(current, previous, 'Previous', 'Current')
 
-  step(
-    'signed handshakes establish decoded bidirectional camera and microphone streams'
-  )
+  step('signed handshakes establish bidirectional camera and microphone tracks')
   for (const machine of [current, previous]) {
     await ui.until(
       async () =>
@@ -76,6 +74,130 @@ scenario('current-release-compatibility', async ({ lab, step, check, ui }) => {
       )
     )
   }
+
+  const qualifyMicrophones = async (phase: string) => {
+    step(`both peers decode microphone audio during push-to-talk ${phase}`)
+    for (const [sender, receiver] of [
+      [current, previous],
+      [previous, current],
+    ] as const) {
+      const probe = await receiver.page().evaluateHandle(async () => {
+        const track = Array.from(document.querySelectorAll('video'))
+          .filter((video) => !video.muted)
+          .flatMap((video) =>
+            video.srcObject instanceof MediaStream
+              ? video.srcObject.getAudioTracks()
+              : []
+          )
+          .find((track) => track.readyState === 'live')
+        if (!track) throw new Error('remote microphone track is missing')
+        const context = new AudioContext()
+        try {
+          await context.resume()
+          const source = context.createMediaStreamSource(
+            new MediaStream([track])
+          )
+          const analyser = context.createAnalyser()
+          analyser.fftSize = 4096
+          const gain = context.createGain()
+          gain.gain.value = 0
+          source.connect(analyser)
+          analyser.connect(gain)
+          gain.connect(context.destination)
+          const samples = new Float32Array(analyser.fftSize)
+          return {
+            sample: () => {
+              if (context.state !== 'running' || track.readyState !== 'live')
+                throw new Error('remote microphone PCM probe is not live')
+              analyser.getFloatTimeDomainData(samples)
+              let power = 0
+              for (const value of samples) power += value * value
+              return Math.sqrt(power / samples.length)
+            },
+            close: async () => {
+              source.disconnect()
+              analyser.disconnect()
+              gain.disconnect()
+              await context.close()
+            },
+          }
+        } catch (error) {
+          await context.close()
+          throw error
+        }
+      })
+      const enabledSenders = () =>
+        ui.evaluate<number>(
+          sender.page(),
+          'window.__lab.peers().reduce((count, peer) => count + peer.enabledAudioSenders, 0)'
+        )
+      let peakRms = 0
+      let voicedSamples = 0
+      try {
+        check(
+          `${sender.name} starts muted ${phase}`,
+          (await enabledSenders()) === 0
+        )
+        await sender.emit('ptt-friends-pressed', null)
+        await ui.until(async () => (await enabledSenders()) > 0, {
+          label: `${sender.name} unmutes its microphone ${phase}`,
+          timeoutMs: 15_000,
+        })
+        await ui.until(
+          async () => {
+            const rms = await probe.evaluate((probe) => probe.sample())
+            peakRms = Math.max(peakRms, rms)
+            if (rms > 0.02) voicedSamples++
+            return voicedSamples >= 3
+          },
+          {
+            label: `${receiver.name} decodes ${sender.name}'s microphone PCM ${phase}`,
+            timeoutMs: 15_000,
+            intervalMs: 100,
+          }
+        )
+        check(
+          `${receiver.name} decodes ${sender.name}'s microphone ${phase}`,
+          true
+        )
+        await sender.emit('ptt-friends-released', null)
+        await ui.until(async () => (await enabledSenders()) === 0, {
+          label: `${sender.name} mutes on PTT release ${phase}`,
+          timeoutMs: 15_000,
+        })
+        // Chromium's fake microphone pulses, so one quiet sample cannot prove mute.
+        let quietSince = Date.now()
+        await ui.until(
+          async () => {
+            if ((await probe.evaluate((probe) => probe.sample())) >= 0.005)
+              quietSince = Date.now()
+            return Date.now() - quietSince >= 1200
+          },
+          {
+            label: `${receiver.name} receives silence after PTT release ${phase}`,
+            timeoutMs: 15_000,
+            intervalMs: 100,
+          }
+        )
+        check(
+          `${sender.name}'s PTT release restores remote silence ${phase}`,
+          true
+        )
+      } finally {
+        process.stderr.write(
+          `microphone ${JSON.stringify({ phase, sender: sender.name, receiver: receiver.name, peakRms, voicedSamples })}\n`
+        )
+        try {
+          await sender.emit('ptt-friends-released', null)
+        } finally {
+          await probe
+            .evaluate((probe) => probe.close())
+            .finally(() => probe.dispose())
+        }
+      }
+    }
+  }
+  await qualifyMicrophones('before the outage')
 
   step('notes and Pomodoro messages cross release boundaries')
   for (const [sender, receiver] of [
@@ -208,6 +330,7 @@ scenario('current-release-compatibility', async ({ lab, step, check, ui }) => {
       }
     )
   }
+  await qualifyMicrophones('after the outage')
   await ui.fill(
     previous.page(),
     'Note to your session',
