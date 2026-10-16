@@ -1032,7 +1032,10 @@ fn extract_zip(archive: &Path, dest: &Path, bin_name: &str) -> Result<(), String
         if entry.is_dir() {
             continue;
         }
-        let raw_name = entry.name().to_owned();
+        let raw_name = entry
+            .name()
+            .map_err(|e| format!("read archive entry name: {e}"))?
+            .into_owned();
         let Some(name) = Path::new(&raw_name)
             .file_name()
             .and_then(|n| n.to_str())

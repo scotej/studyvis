@@ -1,6 +1,6 @@
 name: Deploy
 
-# Manual installer previews, requested from Actions or with
+# Weekly main installer canaries and manual previews requested from Actions or with
 # `gh workflow run deploy.yml --ref <branch>`. Build the selected ref's exact
 # commit into macOS, Windows, and Linux artifacts for testing before release.
 # Each platform records its own preview Deployment and retains its artifact
@@ -16,6 +16,14 @@ name: Deploy
 
 on:
   workflow_dispatch:
+    inputs:
+      platforms:
+        description: 'Installer platforms to build and smoke'
+        type: choice
+        options: [all, macos-windows, macos, windows, linux]
+        default: all
+  schedule:
+    - cron: '41 4 * * 6'
 
 # A repeated manual preview on the same ref supersedes the earlier request.
 # Production builds use release.yml's separate non-cancelling per-tag group.
@@ -44,6 +52,8 @@ jobs:
       contents: read
     outputs:
       installable: ${{ steps.classify.outputs.installable }}
+      matrix: ${{ steps.platforms.outputs.matrix }}
+      labels: ${{ steps.platforms.outputs.labels }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -131,6 +141,24 @@ jobs:
             } >> "$GITHUB_STEP_SUMMARY"
           fi
 
+      - name: Select requested installer platforms
+        id: platforms
+        env:
+          REQUESTED_PLATFORMS: ${{ inputs.platforms || 'all' }}
+          PLATFORM_MATRIX: >-
+            [{"label":"macOS","arch":"arm64","environment":"preview-macos","platform":"macos-latest","timeout":90,"rust-targets":"aarch64-apple-darwin","args":"--target aarch64-apple-darwin --bundles dmg","llama-triple":"aarch64-apple-darwin"},{"label":"Windows","arch":"x64","environment":"preview-windows","platform":"windows-2022","timeout":90,"rust-targets":"","args":"--bundles nsis","llama-triple":"x86_64-pc-windows-msvc"},{"label":"Linux","arch":"x64","environment":"preview-linux","platform":"ubuntu-24.04","timeout":360,"rust-targets":"","args":"--bundles appimage","llama-triple":"x86_64-unknown-linux-gnu"}]
+        run: |
+          set -euo pipefail
+          case "$REQUESTED_PLATFORMS" in
+            all) selected="$PLATFORM_MATRIX" ;;
+            macos-windows) selected=$(jq -c '[.[] | select(.label != "Linux")]' <<< "$PLATFORM_MATRIX") ;;
+            macos|windows|linux) selected=$(jq -c --arg environment "preview-$REQUESTED_PLATFORMS" '[.[] | select(.environment == $environment)]' <<< "$PLATFORM_MATRIX") ;;
+            *) echo 'Invalid installer platform selection' >&2; exit 1 ;;
+          esac
+          jq -e 'length > 0' <<< "$selected" >/dev/null
+          echo "matrix=$selected" >> "$GITHUB_OUTPUT"
+          echo "labels=$(jq -r 'map(.label) | join(", ")' <<< "$selected")" >> "$GITHUB_OUTPUT"
+
   installer:
     name: Installer (${{ matrix.label }})
     needs: scope
@@ -173,31 +201,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - label: macOS
-            arch: arm64
-            environment: preview-macos
-            platform: macos-latest
-            timeout: 90
-            rust-targets: aarch64-apple-darwin
-            args: --target aarch64-apple-darwin --bundles dmg
-            llama-triple: aarch64-apple-darwin
-          - label: Windows
-            arch: x64
-            environment: preview-windows
-            platform: windows-2022
-            timeout: 90
-            rust-targets: ''
-            args: --bundles nsis
-            llama-triple: x86_64-pc-windows-msvc
-          - label: Linux
-            arch: x64
-            environment: preview-linux
-            platform: ubuntu-24.04
-            timeout: 360
-            rust-targets: ''
-            args: --bundles appimage
-            llama-triple: x86_64-unknown-linux-gnu
+        include: ${{ fromJSON(needs.scope.outputs.matrix) }}
 
     steps:
       # Green on a docs commit means "nothing needed building", not "the
@@ -335,9 +339,11 @@ jobs:
             echo "STUDYVIS_WEBKIT_RUNTIME_DIR=${runtime_dir}"
             echo "STUDYVIS_WEBKIT_BUILD_DIR=${STUDYVIS_WEBKIT_BUILD_DIR}"
             echo "STUDYVIS_CARGO_C_VERSION=${STUDYVIS_CARGO_C_VERSION}"
+            echo "CARGO_C_INSTALL_ROOT=${RUNNER_TEMP}/studyvis-cargo-c"
             echo "PKG_CONFIG_PATH=${runtime_pkgconfig}${PKG_CONFIG_PATH:+:${PKG_CONFIG_PATH}}"
             echo "LD_LIBRARY_PATH=${runtime_lib}:${GITHUB_WORKSPACE}/src-tauri/binaries/llama-runtime-x86_64-unknown-linux-gnu${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
           } >> "$GITHUB_ENV"
+          echo "${RUNNER_TEMP}/studyvis-cargo-c/bin" >> "$GITHUB_PATH"
           {
             echo "runtime-dir=${runtime_dir}"
             echo "cargo-c-version=${STUDYVIS_CARGO_C_VERSION}"
@@ -376,15 +382,12 @@ jobs:
         if: env.SHIPPABLE == 'true' && runner.os == 'Linux'
         uses: actions/cache/restore@v6
         with:
-          path: |
-            ~/.cargo/bin/cargo-capi
-            ~/.cargo/bin/cargo-cbuild
-            ~/.cargo/bin/cargo-cinstall
-          key: studyvis-cargo-c-${{ runner.os }}-ubuntu-24.04-rust-1.97.1-${{ steps.webkit-runtime.outputs.cargo-c-version }}
+          path: ${{ runner.temp }}/studyvis-cargo-c
+          key: studyvis-cargo-c-${{ runner.os }}-ubuntu-24.04-rust-1.97.1-${{ steps.webkit-runtime.outputs.cargo-c-version }}-isolated-v1
 
       - name: Install pinned cargo-c
-        if: env.SHIPPABLE == 'true' && runner.os == 'Linux' && steps.cargo-c-cache.outputs.cache-hit != 'true'
-        run: cargo install cargo-c --version "=${STUDYVIS_CARGO_C_VERSION}" --locked
+        if: env.SHIPPABLE == 'true' && runner.os == 'Linux'
+        run: bash scripts/install-cargo-c.sh "$CARGO_C_INSTALL_ROOT" "$STUDYVIS_CARGO_C_VERSION"
 
       - name: Assert the pinned cargo-c version
         if: env.SHIPPABLE == 'true' && runner.os == 'Linux'
@@ -407,11 +410,8 @@ jobs:
         if: ${{ success() && env.SHIPPABLE == 'true' && runner.os == 'Linux' && steps.cargo-c-cache.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@v6
         with:
-          path: |
-            ~/.cargo/bin/cargo-capi
-            ~/.cargo/bin/cargo-cbuild
-            ~/.cargo/bin/cargo-cinstall
-          key: studyvis-cargo-c-${{ runner.os }}-ubuntu-24.04-rust-1.97.1-${{ steps.webkit-runtime.outputs.cargo-c-version }}
+          path: ${{ runner.temp }}/studyvis-cargo-c
+          key: studyvis-cargo-c-${{ runner.os }}-ubuntu-24.04-rust-1.97.1-${{ steps.webkit-runtime.outputs.cargo-c-version }}-isolated-v1
 
       - name: Install frontend dependencies
         if: env.SHIPPABLE == 'true'
@@ -588,6 +588,7 @@ jobs:
           hdiutil attach "$dmg" -nobrowse -readonly -mountpoint "$mountpoint"
           attached=true
           npm run check-notice-bundle -- "$mountpoint"
+          bash scripts/check-macos-runtime.sh "$mountpoint"
 
       - name: Verify notices and runtime in the exact Windows preview installer
         if: env.SHIPPABLE == 'true' && runner.os == 'Windows'
@@ -609,10 +610,10 @@ jobs:
             if ($LASTEXITCODE -ne 0) {
               throw "Bundled third-party notice verification failed (exit $LASTEXITCODE)"
             }
-            ./scripts/check-windows-runtime.ps1 -ArtifactRoot $unpack
           } finally {
             Remove-Item -Recurse -Force $unpack -ErrorAction SilentlyContinue
           }
+          ./scripts/check-windows-install.ps1 -Installer $installers[0].FullName
 
       - name: Validate the exact Linux preview AppImage
         if: env.SHIPPABLE == 'true' && runner.os == 'Linux'
@@ -698,6 +699,7 @@ jobs:
           SCOPE_RESULT: ${{ needs.scope.result }}
           INSTALLER_RESULT: ${{ needs.installer.result }}
           INSTALLABLE: ${{ needs.scope.outputs.installable }}
+          PLATFORMS: ${{ needs.scope.outputs.labels }}
         run: |
           set -euo pipefail
 
@@ -728,7 +730,7 @@ jobs:
           {
             echo "### Deployed"
             echo
-            echo "macOS (arm64), Windows (x64), and Linux (x64) installers were built from"
+            echo "$PLATFORMS installers were built from"
             echo "this commit and attached to the run. Download them from the"
             echo "**Artifacts** section of this page if you want to smoke-test."
             echo

@@ -401,7 +401,10 @@ mod tests {
         build_diagnostics_archive(&logs, &destination, metadata()).unwrap();
 
         let mut archive = zip::ZipArchive::new(File::open(destination).unwrap()).unwrap();
-        let names: Vec<String> = archive.file_names().map(str::to_string).collect();
+        let names: Vec<String> = archive
+            .file_names()
+            .map(|name| name.unwrap().into_owned())
+            .collect();
         assert_eq!(
             names,
             vec![

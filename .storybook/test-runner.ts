@@ -1,5 +1,5 @@
 import type { TestRunnerConfig } from '@storybook/test-runner'
-import { STORY_FINISHED } from 'storybook/internal/core-events'
+import { STORY_FINISHED, UPDATE_GLOBALS } from 'storybook/internal/core-events'
 
 type FinishedStory = {
   storyId: string
@@ -16,8 +16,12 @@ type FinishedStory = {
 
 type AuditWindow = typeof window & {
   __STORYBOOK_ADDONS_CHANNEL__: {
+    emit(event: string, payload: unknown): void
     on(event: string, listener: (data: FinishedStory) => void): void
     off(event: string, listener: (data: FinishedStory) => void): void
+  }
+  __STORYBOOK_PREVIEW__?: {
+    storyStore?: { userGlobals?: { get(): { theme?: string } } }
   }
   __studyvisA11y?: {
     storyId: string
@@ -27,6 +31,38 @@ type AuditWindow = typeof window & {
 }
 
 const config: TestRunnerConfig = {
+  async prepare({ page }) {
+    const theme = process.env.STUDYVIS_A11Y_THEME ?? 'dark'
+    if (theme !== 'dark' && theme !== 'light') {
+      throw new Error(`Unsupported accessibility theme: ${theme}`)
+    }
+    const url = new URL('iframe.html', process.env.TARGET_URL)
+    await page.setViewportSize({ width: 1024, height: 640 })
+    await page.emulateMedia({ reducedMotion: 'reduce', colorScheme: theme })
+    await page.goto(url.toString(), { waitUntil: 'load' })
+    await page.waitForFunction(
+      () =>
+        (window as AuditWindow).__STORYBOOK_PREVIEW__?.storyStore?.userGlobals
+    )
+    // With no initial story selection, Storybook ignores URL globals. Update
+    // its initialized store before the runner selects the first story.
+    await page.evaluate(
+      ({ theme, event }) => {
+        ;(window as AuditWindow).__STORYBOOK_ADDONS_CHANNEL__.emit(event, {
+          globals: { theme },
+        })
+      },
+      { theme, event: UPDATE_GLOBALS }
+    )
+    await page.waitForFunction(
+      (expected) =>
+        (
+          window as AuditWindow
+        ).__STORYBOOK_PREVIEW__?.storyStore?.userGlobals?.get().theme ===
+        expected,
+      theme
+    )
+  },
   async preVisit(page, { id }) {
     await page.evaluate(
       ({ id, event }) => {
@@ -49,6 +85,11 @@ const config: TestRunnerConfig = {
   async postVisit(page, { id, hasFailure }) {
     // Keep the runner's detailed render, play-function, and axe failures.
     if (hasFailure) return
+    const theme = process.env.STUDYVIS_A11Y_THEME ?? 'dark'
+    await page.waitForFunction(
+      (expected) => document.documentElement.dataset.theme === expected,
+      theme
+    )
     // The runner rejects violations, but ignores addon exceptions and missing
     // reports. Require a completed axe audit so those cannot produce green CI.
     await page.evaluate((id) => {

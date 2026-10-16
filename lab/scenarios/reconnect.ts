@@ -26,6 +26,12 @@ import {
 } from '../src/flows'
 import type { LabMachine } from '../src/machine'
 import { scenario } from '../src/scenario'
+import type { JSHandle } from 'playwright-core'
+import {
+  originalInboundVideoCounters,
+  originalMediaWindowStopped,
+  type MediaTransportSnapshot,
+} from '../src/mediaCessation'
 
 // Measured against this harness: a 15 s freeze degrades alice's transport for
 // ~11 s. That is comfortably past the 5 s after which trystero closes the peer
@@ -69,28 +75,79 @@ async function paintingVideos(machine: LabMachine): Promise<number> {
 
 // The remote camera tracks this machine is receiving. VideoTile mutes the
 // local preview and screen tiles, so an unmuted video is a peer's camera.
-async function remoteTrackIds(machine: LabMachine): Promise<string[]> {
-  const videos = await videoState(machine)
-  return videos.filter((video) => !video.muted).flatMap((v) => v.trackIds)
+async function remoteVideoTracks(
+  machine: LabMachine
+): Promise<JSHandle<MediaStreamTrack[]>> {
+  return machine.page().evaluateHandle(() =>
+    Array.from(document.querySelectorAll('video'))
+      .filter((video) => !video.muted)
+      .flatMap((video) =>
+        video.srcObject instanceof MediaStream
+          ? video.srcObject.getVideoTracks()
+          : []
+      )
+  )
 }
 
-// Frames still arriving over ONE specific set of tracks. A video element that
+// Frames still arriving over ONE specific set of track OBJECTS. A track's id
+// comes from the sender's SDP and can be reused by a new peer connection that
+// sends the same camera. Object identity distinguishes that fresh receiver
+// track from the abandoned connection. A video element that
 // no longer carries them — because the app dropped it, or a reconnection
 // replaced it — counts as not delivering, which is the point: the question is
 // whether the ABANDONED connection is still transmitting, not whether any
 // stream is.
 async function tracksStillDelivering(
   machine: LabMachine,
-  trackIds: readonly string[],
+  tracks: JSHandle<MediaStreamTrack[]>,
   overMs: number
-): Promise<boolean> {
-  const framesOver = async (): Promise<number> =>
-    (await videoState(machine))
-      .filter((video) => video.trackIds.some((id) => trackIds.includes(id)))
-      .reduce((total, video) => total + video.decodedFrames, 0)
-  const before = await framesOver()
+): Promise<{
+  delivering: boolean
+  before: { frames: number; trackedIds: string[]; matchingVideos: number }
+  after: { frames: number; trackedIds: string[]; matchingVideos: number }
+}> {
+  const sample = () =>
+    machine.page().evaluate((original) => {
+      const videos = Array.from(document.querySelectorAll('video')).filter(
+        (video) =>
+          video.srcObject instanceof MediaStream &&
+          video.srcObject
+            .getVideoTracks()
+            .some((track) => original.includes(track))
+      )
+      return {
+        frames: videos.reduce(
+          (total, video) =>
+            total + video.getVideoPlaybackQuality().totalVideoFrames,
+          0
+        ),
+        trackedIds: original.map((track) => track.id),
+        matchingVideos: videos.length,
+      }
+    }, tracks)
+  const before = await sample()
   await new Promise((resolve) => setTimeout(resolve, overMs))
-  return (await framesOver()) > before
+  const after = await sample()
+  return { delivering: after.frames > before.frames, before, after }
+}
+
+async function transportStats(
+  machine: LabMachine,
+  tracks?: JSHandle<MediaStreamTrack[]>
+): Promise<MediaTransportSnapshot[]> {
+  return machine.page().evaluate(
+    (original) =>
+      (
+        window as unknown as {
+          __lab: {
+            transportStats: (
+              tracks: MediaStreamTrack[] | null
+            ) => Promise<MediaTransportSnapshot[]>
+          }
+        }
+      ).__lab.transportStats(original),
+    tracks ?? null
+  )
 }
 
 function find(machine: LabMachine, scope: string, msg: string): LogRecord[] {
@@ -173,13 +230,52 @@ scenario('reconnect', async ({ lab, step, check, ui }) => {
   // an empty session, unable to re-form it. The app has to shut that
   // connection itself.
   // ---------------------------------------------------------------------
-  step(`bob's renderer is frozen for ${LONG_FREEZE_MS / 1000}s, past the hold`)
+  step('the original receiver resumes decoded frames after the short stall')
   const joinsBefore = find(alice, 'session.lifecycle', 'peer.joined').length
   // Identify the media of the connection that is about to be abandoned, so the
   // assertion below follows THAT connection rather than whatever stream a
   // later reconnection happens to deliver on a replaced element.
-  const doomedTracks = await remoteTrackIds(bob)
-  check('bob is receiving alice over a known track', doomedTracks.length > 0)
+  const doomedTracks = await remoteVideoTracks(bob)
+  check(
+    'bob is receiving alice over a known track',
+    (await doomedTracks.evaluate((tracks) => tracks.length)) > 0
+  )
+  const initialReceiver = await transportStats(bob, doomedTracks)
+  const initialInbound = originalInboundVideoCounters(initialReceiver, {
+    requireLive: true,
+  })
+  process.stderr.write(
+    `  original receiver RTP control: ${JSON.stringify({ receiver: initialReceiver, inbound: initialInbound })}\n`
+  )
+  check('the original live receiver has measurable inbound RTP', true)
+  // ICE recovery and a playing, sized video do not guarantee the decoder has
+  // resumed yet. Wait for real advancement on these exact receiver objects;
+  // a permanently frozen stream still fails this bounded positive control.
+  await ui.until(
+    async () => {
+      const liveFrames = await tracksStillDelivering(bob, doomedTracks, 1_000)
+      process.stderr.write(
+        `  original receiver frames: ${JSON.stringify(liveFrames)}\n`
+      )
+      return liveFrames.delivering
+    },
+    {
+      label: "bob's original receiver track to resume decoded frames",
+      timeoutMs: 30_000,
+    }
+  )
+  check('the original receiver track is delivering frames', true)
+  const doomedTransports = (await ui.evaluate(
+    alice.page(),
+    `window.__lab.peers().flatMap((peer, index) =>
+      peer.connectionState === 'connected' && peer.sendingTracks > 0 ? [index] : []
+    )`
+  )) as number[]
+  check(
+    'alice has a known media transport to retire',
+    doomedTransports.length > 0
+  )
+  step(`bob's renderer is frozen for ${LONG_FREEZE_MS / 1000}s, past the hold`)
   await freeze(bob, LONG_FREEZE_MS)
 
   // The hold ends one of two ways once the outage outlasts it: it expires and
@@ -200,16 +296,56 @@ scenario('reconnect', async ({ lab, step, check, ui }) => {
     'the departure was recorded as a transport loss',
     left?.data?.awaitingReconnect === true
   )
-  check(
-    'alice shut the connection trystero abandoned open',
-    find(alice, 'session.lifecycle', 'transport.closed_orphan').length > 0
+  await ui.until(
+    async () =>
+      (await ui.evaluate(
+        alice.page(),
+        `(${JSON.stringify(doomedTransports)}).every(index =>
+          window.__lab.peers()[index].connectionState === 'closed'
+        )`
+      )) === true,
+    { label: "alice's original media transports to close", timeoutMs: 10_000 }
   )
-
+  check('the original media transports are closed', true)
   step('bob stops receiving alice — she is no longer on camera to him')
-  check(
-    'the abandoned connection stopped delivering frames to bob',
-    !(await tracksStillDelivering(bob, doomedTracks, 4_000))
-  )
+  // A stopped renderer can decode its queued RTP after the sender closes.
+  // Allow a bounded drain, then require a FULL four-second window with both
+  // unchanged rendering and no incoming bytes, packets or complete frames.
+  const drainDeadline = performance.now() + 30_000
+  try {
+    await ui.until(
+      async () => {
+        if (performance.now() + 4_000 > drainDeadline)
+          throw new Error(
+            'original media did not cease within the 30s drain deadline'
+          )
+        const receiverBefore = await transportStats(bob, doomedTracks)
+        const inboundBefore = originalInboundVideoCounters(receiverBefore)
+        const frames = await tracksStillDelivering(bob, doomedTracks, 4_000)
+        const receiverAfter = await transportStats(bob, doomedTracks)
+        const inboundAfter = originalInboundVideoCounters(receiverAfter)
+        const stopped = originalMediaWindowStopped(
+          frames,
+          inboundBefore,
+          inboundAfter
+        )
+        process.stderr.write(
+          `  abandoned media window: ${JSON.stringify({ frames, inboundBefore, inboundAfter, stopped, sender: await transportStats(alice), receiverBefore, receiverAfter })}\n`
+        )
+        return stopped && performance.now() <= drainDeadline
+      },
+      {
+        label:
+          'a full 4s original-media quiescence window after the bounded drain',
+        timeoutMs: 30_000,
+        intervalMs: 0,
+      }
+    )
+  } finally {
+    await doomedTracks.dispose()
+  }
+  check('the abandoned connection stopped delivering frames to bob', true)
+  check('the original inbound RTP counters stopped', true)
 
   // Whether the session re-forms after an outage this long depends on how
   // fast the far side notices, so this asserts the held tile RESOLVES rather

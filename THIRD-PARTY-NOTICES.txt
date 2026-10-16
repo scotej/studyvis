@@ -1999,6 +1999,13 @@ CARGO
   source checksum: 71e2746dc3a24dd78b3cfcb7be93368c6de9963d30f43a6a73998a9cf4b17b46
   license: cargo:nix@0.29.0/LICENSE (SHA-256 66e3ee1fa7f909ad3c612d556f2a0cdabcd809ad6e66f3b0605015ac64841b70)
 
+- nix 0.31.3 — MIT
+  id: cargo:nix@0.31.3
+  targets: aarch64-apple-darwin
+  source: https://crates.io/api/v1/crates/nix/0.31.3/download
+  source checksum: cf20d2fde8ff38632c426f1165ed7436270b44f199fc55284c38276f9db47c3d
+  license: cargo:nix@0.31.3/LICENSE (SHA-256 66e3ee1fa7f909ad3c612d556f2a0cdabcd809ad6e66f3b0605015ac64841b70)
+
 - nom 7.1.3 — MIT
   id: cargo:nom@7.1.3
   targets: aarch64-apple-darwin, x86_64-pc-windows-msvc, x86_64-unknown-linux-gnu
@@ -2769,14 +2776,14 @@ CARGO
   license: cargo:rustix@1.1.4/LICENSE-Apache-2.0_WITH_LLVM-exception (SHA-256 a6c48161a09acc75a0e25503bab66a731eb5fba5392ed4bb4743e4ba5085327a)
   license: cargo:rustix@1.1.4/LICENSE-MIT (SHA-256 23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3)
 
-- rustls 0.23.45 — Apache-2.0 OR ISC OR MIT
-  id: cargo:rustls@0.23.45
+- rustls 0.23.46 — Apache-2.0 OR ISC OR MIT
+  id: cargo:rustls@0.23.46
   targets: aarch64-apple-darwin, x86_64-pc-windows-msvc, x86_64-unknown-linux-gnu
-  source: https://crates.io/api/v1/crates/rustls/0.23.45/download
-  source checksum: 0d41d731c7d2f962d1ccc364cec258de3c0e93b38c2fb3ba97ac74513048d634
-  license: cargo:rustls@0.23.45/LICENSE-APACHE (SHA-256 a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2)
-  license: cargo:rustls@0.23.45/LICENSE-ISC (SHA-256 7cfafc877eccc46c0e346ccbaa5c51bb6b894d2b818e617d970211e232785ad4)
-  license: cargo:rustls@0.23.45/LICENSE-MIT (SHA-256 709e3175b4212f7b13aa93971c9f62ff8c69ec45ad8c6532a7e0c41d7a7d6f8c)
+  source: https://crates.io/api/v1/crates/rustls/0.23.46/download
+  source checksum: 48e13bd8c0e9365c43cfa5c9e8f9ad49d3c8444926c9aac819e0e4dc503c8fdf
+  license: cargo:rustls@0.23.46/LICENSE-APACHE (SHA-256 a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2)
+  license: cargo:rustls@0.23.46/LICENSE-ISC (SHA-256 7cfafc877eccc46c0e346ccbaa5c51bb6b894d2b818e617d970211e232785ad4)
+  license: cargo:rustls@0.23.46/LICENSE-MIT (SHA-256 709e3175b4212f7b13aa93971c9f62ff8c69ec45ad8c6532a7e0c41d7a7d6f8c)
 
 - rustls-native-certs 0.8.4 — Apache-2.0 OR ISC OR MIT
   id: cargo:rustls-native-certs@0.8.4
@@ -4346,19 +4353,12 @@ CARGO
   source checksum: 625dc425cab0dca6dc3c3319506e6593dcb08a9f387ea3b284dbd52a92c40555
   license: cargo:zerovec-derive@0.11.3/LICENSE (SHA-256 f367c1b8e1aa262435251e442901da4607b4650e0e63a026f5044473ecfb90f2)
 
-- zip 4.6.1 — MIT
-  id: cargo:zip@4.6.1
-  targets: x86_64-pc-windows-msvc
-  source: https://crates.io/api/v1/crates/zip/4.6.1/download
-  source checksum: caa8cd6af31c3b31c6631b8f483848b91589021b28fffe50adada48d4f4d2ed1
-  license: cargo:zip@4.6.1/LICENSE (SHA-256 13f16f8435b4242f494f038d761bd99c5af70395aa39274bd287d22c4d35c3b7)
-
-- zip 8.6.0 — MIT
-  id: cargo:zip@8.6.0
+- zip 9.0.3 — MIT
+  id: cargo:zip@9.0.3
   targets: aarch64-apple-darwin, x86_64-pc-windows-msvc, x86_64-unknown-linux-gnu
-  source: https://crates.io/api/v1/crates/zip/8.6.0/download
-  source checksum: 2d04a6b5381502aa6087c94c669499eb1602eb9c5e8198e534de571f7154809b
-  license: cargo:zip@8.6.0/LICENSE (SHA-256 58545fed1565e42d687aecec6897d35c6d37ccb71479a137c0deb2203e125c79)
+  source: https://crates.io/api/v1/crates/zip/9.0.3/download
+  source checksum: c2d98561b612a84ae525331a7a094429ef8a5772514ed507ff6db5f54badc971
+  license: cargo:zip@9.0.3/LICENSE (SHA-256 58545fed1565e42d687aecec6897d35c6d37ccb71479a137c0deb2203e125c79)
 
 - zlib-rs 0.6.6 — Zlib
   id: cargo:zlib-rs@0.6.6
@@ -7918,39 +7918,6 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
-
-================================================================================
-
-SHA-256 13f16f8435b4242f494f038d761bd99c5af70395aa39274bd287d22c4d35c3b7
-Applies to:
-- cargo:zip@4.6.1 — cargo:zip@4.6.1/LICENSE
-
---------------------------------------------------------------------------------
-
-The MIT License (MIT)
-
-Copyright (c) 2014 Mathijs van de Nes
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-
-Some files in the "tests/data" subdirectory of this repository are under other
-licences; see files named LICENSE.*.txt for details.
 
 ================================================================================
 
@@ -14487,7 +14454,7 @@ DEALINGS IN THE SOFTWARE.
 
 SHA-256 58545fed1565e42d687aecec6897d35c6d37ccb71479a137c0deb2203e125c79
 Applies to:
-- cargo:zip@8.6.0 — cargo:zip@8.6.0/LICENSE
+- cargo:zip@9.0.3 — cargo:zip@9.0.3/LICENSE
 
 --------------------------------------------------------------------------------
 
@@ -15861,6 +15828,7 @@ Exhibit B - "Incompatible With Secondary Licenses" Notice
 SHA-256 66e3ee1fa7f909ad3c612d556f2a0cdabcd809ad6e66f3b0605015ac64841b70
 Applies to:
 - cargo:nix@0.29.0 — cargo:nix@0.29.0/LICENSE
+- cargo:nix@0.31.3 — cargo:nix@0.31.3/LICENSE
 
 --------------------------------------------------------------------------------
 
@@ -16870,7 +16838,7 @@ SHA-256 709e3175b4212f7b13aa93971c9f62ff8c69ec45ad8c6532a7e0c41d7a7d6f8c
 Applies to:
 - cargo:hyper-rustls@0.27.9 — cargo:hyper-rustls@0.27.9/LICENSE-MIT
 - cargo:rustls-native-certs@0.8.4 — cargo:rustls-native-certs@0.8.4/LICENSE-MIT
-- cargo:rustls@0.23.45 — cargo:rustls@0.23.45/LICENSE-MIT
+- cargo:rustls@0.23.46 — cargo:rustls@0.23.46/LICENSE-MIT
 
 --------------------------------------------------------------------------------
 
@@ -18012,7 +17980,7 @@ SHA-256 7cfafc877eccc46c0e346ccbaa5c51bb6b894d2b818e617d970211e232785ad4
 Applies to:
 - cargo:hyper-rustls@0.27.9 — cargo:hyper-rustls@0.27.9/LICENSE-ISC
 - cargo:rustls-native-certs@0.8.4 — cargo:rustls-native-certs@0.8.4/LICENSE-ISC
-- cargo:rustls@0.23.45 — cargo:rustls@0.23.45/LICENSE-ISC
+- cargo:rustls@0.23.46 — cargo:rustls@0.23.46/LICENSE-ISC
 
 --------------------------------------------------------------------------------
 
@@ -21549,7 +21517,7 @@ Applies to:
 - cargo:rusticata-macros@4.1.0 — cargo:rusticata-macros@4.1.0/LICENSE-APACHE
 - cargo:rustix@1.1.4 — cargo:rustix@1.1.4/LICENSE-APACHE
 - cargo:rustls-native-certs@0.8.4 — cargo:rustls-native-certs@0.8.4/LICENSE-APACHE
-- cargo:rustls@0.23.45 — cargo:rustls@0.23.45/LICENSE-APACHE
+- cargo:rustls@0.23.46 — cargo:rustls@0.23.46/LICENSE-APACHE
 - cargo:scopeguard@1.2.0 — cargo:scopeguard@1.2.0/LICENSE-APACHE
 - cargo:secret-service@4.0.0 — cargo:secret-service@4.0.0/LICENSE-APACHE
 - cargo:security-framework-sys@2.17.0 — cargo:security-framework-sys@2.17.0/LICENSE-APACHE

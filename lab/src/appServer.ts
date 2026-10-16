@@ -41,9 +41,11 @@ const CONTENT_TYPES: Record<string, string> = {
 }
 
 export async function startAppServer(
-  mode: AppServerMode
+  mode: AppServerMode,
+  dist?: string
 ): Promise<AppServerHandle> {
-  if (mode === 'built') return startStaticServer()
+  if (mode === 'built') return startStaticServer(dist)
+  if (dist) throw new Error('lab: a release bundle requires built mode')
   return startViteServer()
 }
 
@@ -75,9 +77,15 @@ async function startViteServer(): Promise<AppServerHandle> {
   throw new Error('lab: the Vite dev server did not come up within 60s')
 }
 
-async function startStaticServer(): Promise<AppServerHandle> {
-  const root = path.join(REPO_ROOT, 'dist')
-  await buildIfStale(root)
+async function startStaticServer(dist?: string): Promise<AppServerHandle> {
+  const root = dist ? path.resolve(dist) : path.join(REPO_ROOT, 'dist')
+  if (dist) {
+    if (!existsSync(path.join(root, 'index.html'))) {
+      throw new Error(`lab: release bundle is missing index.html: ${root}`)
+    }
+  } else {
+    await buildIfStale(root)
+  }
   // The bundle's file set is known the moment the server starts, so requests are
   // answered from a manifest built by walking it once. A request string is only
   // ever a KEY into that map — it never becomes a path — which makes traversal

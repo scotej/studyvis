@@ -5,13 +5,14 @@
 // failures exit non-zero with the message on stderr.
 
 import { spawn } from 'node:child_process'
-import { existsSync, mkdirSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 
 import { daemonMeta, isRunning, send } from './client'
 import { probeMqttBroker, probeNostrRelay } from './net/roundtrip'
 import { SOCKET_PATH } from './protocol'
 import { WORK_ROOT } from './lab'
+import { runScenarioProcess } from './scenarioProcess'
 
 const REPO_ROOT = path.resolve(import.meta.dirname, '../..')
 
@@ -60,7 +61,8 @@ const USAGE = `studyvis lab — run the real app as N virtual machines on this b
   fault relay|broker --faults JSON
 
   run <scenario.ts> [args...]  run a scenario file against a fresh lab
-  verify [--dev]               run every scenario and report one verdict
+  verify [--suite smoke|fault|all] [--dev] [--timeout-ms N] [--evidence-dir DIR]
+                              bounded scenarios with individual JSON evidence
   scenarios                    list the scenarios in lab/scenarios/
 `
 
@@ -195,9 +197,32 @@ async function doctor(): Promise<void> {
 async function verify(flags: Flags): Promise<void> {
   const dir = path.join(import.meta.dirname, '../scenarios')
   const { readdirSync } = await import('node:fs')
+  const suite = flags.suite ?? 'all'
+  if (!['smoke', 'fault', 'all'].includes(String(suite))) {
+    fail('lab: --suite must be smoke, fault, or all')
+  }
+  const faultScenarios = new Set([
+    'reconnect.ts',
+    'invite-recovery.ts',
+    'dark-relay.ts',
+  ])
   const files = readdirSync(dir)
     .filter((file) => file.endsWith('.ts'))
+    .filter((file) =>
+      suite === 'all'
+        ? true
+        : suite === 'fault'
+          ? faultScenarios.has(file)
+          : !faultScenarios.has(file)
+    )
     .sort()
+  if (files.length === 0) fail('lab: the requested suite has no scenarios')
+  const evidenceDir = path.resolve(
+    typeof flags['evidence-dir'] === 'string'
+      ? flags['evidence-dir']
+      : path.join(WORK_ROOT, 'evidence', `${suite}-${Date.now()}`)
+  )
+  mkdirSync(evidenceDir, { recursive: true })
   const results: {
     scenario: string
     ok: boolean
@@ -206,44 +231,123 @@ async function verify(flags: Flags): Promise<void> {
   }[] = []
   for (const file of files) {
     process.stderr.write(`\n── ${file}\n`)
-    const child = spawn(
-      process.execPath,
-      [
-        '--import',
-        'tsx',
-        path.join(dir, file),
-        ...(flags.dev === true ? ['--dev'] : []),
-      ],
-      { cwd: REPO_ROOT, stdio: ['ignore', 'pipe', 'inherit'] }
+    const result = await executeScenario(
+      path.join(dir, file),
+      flags.dev === true ? ['--dev'] : [],
+      flags,
+      evidenceDir
     )
-    let out = ''
-    child.stdout?.on('data', (chunk: Buffer) => {
-      out += chunk.toString('utf8')
-    })
-    // 'close' rather than 'exit': the process can exit with its stdio still
-    // draining, and a scenario's verdict is the last thing written.
-    await new Promise((resolve) => child.on('close', resolve))
-    const start = out.indexOf('{')
-    try {
-      const parsed = JSON.parse(out.slice(start)) as {
-        scenario: string
-        ok: boolean
-        ms: number
-        error?: string
-      }
-      results.push({
-        scenario: parsed.scenario,
-        ok: parsed.ok,
-        ms: parsed.ms,
-        error: parsed.error,
-      })
-    } catch {
-      results.push({ scenario: file, ok: false, ms: 0, error: 'no result' })
+    results.push(result)
+    if (result.interrupted) break
+  }
+  const ok =
+    results.length === files.length && results.every((result) => result.ok)
+  const summary = { ok, suite, evidenceDir, scenarios: results }
+  writeFileSync(
+    path.join(evidenceDir, 'summary.json'),
+    `${JSON.stringify(summary, null, 2)}\n`
+  )
+  json(summary)
+  if (!ok) process.exit(1)
+}
+
+function scenarioTimeout(flags: Flags): number {
+  const timeoutMs = Number(flags['timeout-ms'] ?? 300_000)
+  if (
+    !Number.isSafeInteger(timeoutMs) ||
+    timeoutMs < 1 ||
+    timeoutMs > 3_600_000
+  ) {
+    fail('lab: --timeout-ms must be an integer from 1 to 3600000')
+  }
+  return timeoutMs
+}
+
+async function executeScenario(
+  file: string,
+  args: string[],
+  flags: Flags,
+  evidenceDir: string
+): Promise<{
+  scenario: string
+  ok: boolean
+  ms: number
+  error?: string
+  evidence: string
+  interrupted: boolean
+}> {
+  const name = path.basename(file, path.extname(file))
+  const started = Date.now()
+  const outcome = await runScenarioProcess({
+    args: ['--import', 'tsx', file, ...args],
+    cwd: REPO_ROOT,
+    timeoutMs: scenarioTimeout(flags),
+    onStderr: (text) => process.stderr.write(text),
+  })
+  let report: Record<string, unknown>
+  try {
+    const parsed: unknown = JSON.parse(outcome.stdout)
+    if (
+      !parsed ||
+      typeof parsed !== 'object' ||
+      !('scenario' in parsed) ||
+      typeof parsed.scenario !== 'string' ||
+      parsed.scenario.length === 0 ||
+      !('ok' in parsed) ||
+      typeof parsed.ok !== 'boolean'
+    )
+      throw new Error('invalid scenario verdict')
+    report = parsed as Record<string, unknown>
+  } catch {
+    report = {
+      scenario: name,
+      ok: false,
+      error: 'no valid scenario JSON verdict',
     }
   }
-  const ok = results.every((result) => result.ok)
-  json({ ok, scenarios: results })
-  if (!ok) process.exit(1)
+  const ok =
+    report.ok === true &&
+    outcome.code === 0 &&
+    !outcome.timedOut &&
+    !outcome.interrupted
+  const error = outcome.timedOut
+    ? `scenario exceeded ${scenarioTimeout(flags)} ms`
+    : outcome.interrupted
+      ? 'scenario interrupted'
+      : typeof report.error === 'string'
+        ? report.error
+        : outcome.code !== 0
+          ? `scenario process exited with ${outcome.signal ?? outcome.code}`
+          : undefined
+  const evidence = path.join(evidenceDir, `${name}.json`)
+  writeFileSync(
+    evidence,
+    `${JSON.stringify(
+      {
+        ...report,
+        ok,
+        error,
+        process: {
+          exitCode: outcome.code,
+          signal: outcome.signal,
+          timedOut: outcome.timedOut,
+          interrupted: outcome.interrupted,
+        },
+      },
+      null,
+      2
+    )}\n`
+  )
+  writeFileSync(path.join(evidenceDir, `${name}.stdout.log`), outcome.stdout)
+  writeFileSync(path.join(evidenceDir, `${name}.stderr.log`), outcome.stderr)
+  return {
+    scenario: name,
+    ok,
+    ms: Date.now() - started,
+    error,
+    evidence,
+    interrupted: outcome.interrupted,
+  }
 }
 
 async function run(argv: string[]): Promise<void> {
@@ -255,15 +359,21 @@ async function run(argv: string[]): Promise<void> {
       : path.join(import.meta.dirname, '../scenarios', file)
   )
   if (!existsSync(resolved)) fail(`lab: no scenario at ${resolved}`)
-  const child = spawn(
-    process.execPath,
-    ['--import', 'tsx', resolved, ...argv.slice(1)],
-    { cwd: REPO_ROOT, stdio: 'inherit' }
+  const { flags } = parse(argv.slice(1))
+  const evidenceDir = path.resolve(
+    typeof flags['evidence-dir'] === 'string'
+      ? flags['evidence-dir']
+      : path.join(WORK_ROOT, 'evidence', `single-${Date.now()}`)
   )
-  const code: number = await new Promise((resolve) =>
-    child.on('exit', (c) => resolve(c ?? 1))
+  mkdirSync(evidenceDir, { recursive: true })
+  const result = await executeScenario(
+    resolved,
+    argv.slice(1),
+    flags,
+    evidenceDir
   )
-  process.exit(code)
+  json(result)
+  if (!result.ok) process.exit(1)
 }
 
 async function main(): Promise<void> {
@@ -276,7 +386,7 @@ async function main(): Promise<void> {
 
   if (command === 'up') return up(flags)
   if (command === 'doctor') return doctor()
-  if (command === 'run') return run(positional)
+  if (command === 'run') return run(rest)
   if (command === 'verify') return verify(flags)
   if (command === 'scenarios') {
     const dir = path.join(import.meta.dirname, '../scenarios')

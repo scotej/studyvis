@@ -41,6 +41,8 @@ export type LabOptions = {
 
 export type AddMachineOptions = {
   name: string
+  /** An independently built released frontend, served on its own origin. */
+  appDist?: string
   media?: MachineMedia
   clockSkewMs?: number
   settings?: Record<string, unknown>
@@ -62,6 +64,7 @@ export class Lab {
   readonly machines = new Map<string, LabMachine>()
 
   private readonly options: LabOptions
+  private readonly releaseApps = new Map<string, AppServerHandle>()
 
   private constructor(
     runId: string,
@@ -151,12 +154,18 @@ export class Lab {
     if (this.machines.has(options.name)) {
       throw new Error(`lab: machine '${options.name}' already exists`)
     }
+    let app = this.app
+    if (options.appDist) {
+      const dist = path.resolve(options.appDist)
+      app = this.releaseApps.get(dist) ?? (await startAppServer('built', dist))
+      this.releaseApps.set(dist, app)
+    }
     const machine = await LabMachine.start({
       name: options.name,
       workdir: path.join(this.workdir, options.name),
-      appUrl: this.app.url,
+      appUrl: app.url,
       websocketRewrites: this.websocketRewrites(),
-      allowedOrigins: [this.app.url, this.llama.url],
+      allowedOrigins: [app.url, this.llama.url],
       headless: this.options.headless ?? true,
       media: options.media,
       clockSkewMs: options.clockSkewMs,
@@ -218,6 +227,8 @@ export class Lab {
       this.broker.close(),
       this.llama.close(),
       this.app.close(),
+      ...[...this.releaseApps.values()].map((app) => app.close()),
     ])
+    this.releaseApps.clear()
   }
 }

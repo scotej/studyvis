@@ -88,7 +88,12 @@ export class LabMachine {
 
   static async start(options: MachineOptions): Promise<LabMachine> {
     const machine = new LabMachine(options)
-    await machine.boot()
+    try {
+      await machine.boot()
+    } catch (err) {
+      await machine.close().catch(() => {})
+      throw err
+    }
     return machine
   }
 
@@ -133,6 +138,22 @@ export class LabMachine {
         ? { executablePath: options.chromeExecutable ?? envExecutable }
         : { channel: options.chromeChannel ?? 'chrome' }),
     })
+    if (process.send && process.connected) {
+      const session = await this.browser.newBrowserCDPSession()
+      try {
+        const info = (await session.send(
+          'SystemInfo.getProcessInfo' as 'Browser.getVersion'
+        )) as unknown as { processInfo: { type: string; id: number }[] }
+        const browser = info.processInfo.find(
+          (entry) => entry.type === 'browser'
+        )
+        if (!browser)
+          throw new Error('lab: browser process identity is missing')
+        process.send({ type: 'lab:browser', pid: browser.id }, () => {})
+      } finally {
+        await session.detach()
+      }
+    }
 
     // ONE context for the whole machine, not one per window. The app's windows
     // are same-origin webviews that share localStorage — the AI dialog reads

@@ -182,7 +182,7 @@ audit_consumer() {
   local label=$1
   local path=$2
   local relationship name interpreter resolution_sha resolution_path
-  local headers type offset virtual physical file_size mem_size rest
+  local headers type offset virtual _physical _file_size mem_size rest
   local segment_start segment_end segment_delta prior
   local -a load_starts=() load_ends=() load_deltas=()
 
@@ -190,7 +190,7 @@ audit_consumer() {
   # file offset. A packaged PipeWire module once had this layout: readelf saw
   # DT_SYMTAB on disk, but glibc saw zeros at PT_DYNAMIC.
   headers=$(readelf -W -l -- "$path") || die "could not inspect ELF program headers: $label"
-  while read -r type offset virtual physical file_size mem_size rest; do
+  while read -r type offset virtual _physical _file_size mem_size rest; do
     [[ $type == LOAD ]] || continue
     [[ $offset =~ ^0x[[:xdigit:]]+$ && $virtual =~ ^0x[[:xdigit:]]+$ &&
        $mem_size =~ ^0x[[:xdigit:]]+$ ]] || die "invalid PT_LOAD header in $label"

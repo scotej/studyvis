@@ -56,13 +56,18 @@ subtle = "2.6"
 # extraction code and its tests run on all three CI legs.
 flate2 = "1"
 tar = "0.4"
-zip = { version = "8", default-features = false, features = ["deflate"] }
+zip = { version = "9.0.3", default-features = false, features = ["deflate"] }
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-global-shortcut = "2"
 tauri-plugin-autostart = "2"
 tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
-tauri-plugin-updater = "2"
+# Shipped NSIS/AppImage updates are raw; macOS tar support is unconditional.
+# Disable legacy archive formats to avoid the retired Windows zip 4 dependency.
+tauri-plugin-updater = { version = "2", default-features = false, features = [
+  "rustls-tls",
+  "system-proxy",
+] }
 battery = "0.7"
 
 [target.'cfg(target_os = "macos")'.dependencies]

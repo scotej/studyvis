@@ -35,6 +35,8 @@ BINARIES_DIR="${REPO_ROOT}/src-tauri/binaries"
 
 LLAMA_REPO="https://github.com/ggml-org/llama.cpp.git"
 LLAMA_PINNED_COMMIT="f3c3e0e9a087835639733485b8900b195ba4ca47"
+# The source tag documents the reviewed archive/commit pairing.
+# shellcheck disable=SC2034
 LLAMA_PINNED_TAG="b9095"
 
 usage() {
