@@ -26,6 +26,7 @@ import {
 } from '../src/flows'
 import type { LabMachine } from '../src/machine'
 import { scenario } from '../src/scenario'
+import type { JSHandle } from 'playwright-core'
 
 // Measured against this harness: a 15 s freeze degrades alice's transport for
 // ~11 s. That is comfortably past the 5 s after which trystero closes the peer
@@ -69,28 +70,60 @@ async function paintingVideos(machine: LabMachine): Promise<number> {
 
 // The remote camera tracks this machine is receiving. VideoTile mutes the
 // local preview and screen tiles, so an unmuted video is a peer's camera.
-async function remoteTrackIds(machine: LabMachine): Promise<string[]> {
-  const videos = await videoState(machine)
-  return videos.filter((video) => !video.muted).flatMap((v) => v.trackIds)
+async function remoteVideoTracks(
+  machine: LabMachine
+): Promise<JSHandle<MediaStreamTrack[]>> {
+  return machine.page().evaluateHandle(() =>
+    Array.from(document.querySelectorAll('video'))
+      .filter((video) => !video.muted)
+      .flatMap((video) =>
+        video.srcObject instanceof MediaStream
+          ? video.srcObject.getVideoTracks()
+          : []
+      )
+  )
 }
 
-// Frames still arriving over ONE specific set of tracks. A video element that
+// Frames still arriving over ONE specific set of track OBJECTS. A track's id
+// comes from the sender's SDP and can be reused by a new peer connection that
+// sends the same camera. Object identity distinguishes that fresh receiver
+// track from the abandoned connection. A video element that
 // no longer carries them — because the app dropped it, or a reconnection
 // replaced it — counts as not delivering, which is the point: the question is
 // whether the ABANDONED connection is still transmitting, not whether any
 // stream is.
 async function tracksStillDelivering(
   machine: LabMachine,
-  trackIds: readonly string[],
+  tracks: JSHandle<MediaStreamTrack[]>,
   overMs: number
-): Promise<boolean> {
-  const framesOver = async (): Promise<number> =>
-    (await videoState(machine))
-      .filter((video) => video.trackIds.some((id) => trackIds.includes(id)))
-      .reduce((total, video) => total + video.decodedFrames, 0)
-  const before = await framesOver()
+): Promise<{
+  delivering: boolean
+  before: { frames: number; trackedIds: string[]; matchingVideos: number }
+  after: { frames: number; trackedIds: string[]; matchingVideos: number }
+}> {
+  const sample = () =>
+    machine.page().evaluate((original) => {
+      const videos = Array.from(document.querySelectorAll('video')).filter(
+        (video) =>
+          video.srcObject instanceof MediaStream &&
+          video.srcObject
+            .getVideoTracks()
+            .some((track) => original.includes(track))
+      )
+      return {
+        frames: videos.reduce(
+          (total, video) =>
+            total + video.getVideoPlaybackQuality().totalVideoFrames,
+          0
+        ),
+        trackedIds: original.map((track) => track.id),
+        matchingVideos: videos.length,
+      }
+    }, tracks)
+  const before = await sample()
   await new Promise((resolve) => setTimeout(resolve, overMs))
-  return (await framesOver()) > before
+  const after = await sample()
+  return { delivering: after.frames > before.frames, before, after }
 }
 
 function find(machine: LabMachine, scope: string, msg: string): LogRecord[] {
@@ -178,8 +211,19 @@ scenario('reconnect', async ({ lab, step, check, ui }) => {
   // Identify the media of the connection that is about to be abandoned, so the
   // assertion below follows THAT connection rather than whatever stream a
   // later reconnection happens to deliver on a replaced element.
-  const doomedTracks = await remoteTrackIds(bob)
-  check('bob is receiving alice over a known track', doomedTracks.length > 0)
+  const doomedTracks = await remoteVideoTracks(bob)
+  check(
+    'bob is receiving alice over a known track',
+    (await doomedTracks.evaluate((tracks) => tracks.length)) > 0
+  )
+  const liveFrames = await tracksStillDelivering(bob, doomedTracks, 1_000)
+  process.stderr.write(
+    `  original receiver frames: ${JSON.stringify(liveFrames)}\n`
+  )
+  check(
+    'the original receiver track is delivering frames',
+    liveFrames.delivering
+  )
   const doomedTransports = (await ui.evaluate(
     alice.page(),
     `window.__lab.peers().flatMap((peer, index) =>
@@ -222,9 +266,14 @@ scenario('reconnect', async ({ lab, step, check, ui }) => {
   )
   check('the original media transports are closed', true)
   step('bob stops receiving alice — she is no longer on camera to him')
+  const frames = await tracksStillDelivering(bob, doomedTracks, 4_000)
+  await doomedTracks.dispose()
+  process.stderr.write(
+    `  abandoned receiver frames: ${JSON.stringify(frames)}\n`
+  )
   check(
     'the abandoned connection stopped delivering frames to bob',
-    !(await tracksStillDelivering(bob, doomedTracks, 4_000))
+    !frames.delivering
   )
 
   // Whether the session re-forms after an outage this long depends on how

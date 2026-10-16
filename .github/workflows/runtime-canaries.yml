@@ -49,7 +49,10 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build
-      - run: npx playwright-core install --with-deps chromium
+      - name: Install and select the locked Chromium build
+        run: |
+          npx playwright-core install --with-deps chromium
+          node -e 'const {chromium} = require("playwright-core"); require("node:fs").appendFileSync(process.env.GITHUB_ENV, "LAB_CHROME_EXECUTABLE=" + chromium.executablePath() + "\n")'
       - run: npm run lab -- verify --suite fault --timeout-ms 300000 --evidence-dir lab/.work/evidence/fault
       - uses: actions/upload-artifact@v7
         if: ${{ !cancelled() }}
@@ -102,7 +105,10 @@ jobs:
           node --input-type=module -e 'import {writeFileSync} from "node:fs"; writeFileSync("dist/ci-source.json", JSON.stringify({sha: process.env.SOURCE_SHA}))'
       - run: npm ci
       - run: npm run build
-      - run: npx playwright-core install --with-deps chromium
+      - name: Install and select the locked Chromium build
+        run: |
+          npx playwright-core install --with-deps chromium
+          node -e 'const {chromium} = require("playwright-core"); require("node:fs").appendFileSync(process.env.GITHUB_ENV, "LAB_CHROME_EXECUTABLE=" + chromium.executablePath() + "\n")'
       - name: Exchange real media and signed messages across releases
         env:
           STUDYVIS_COMPAT_SHA: ${{ steps.stable.outputs.sha }}
