@@ -31,6 +31,7 @@ use tokio_rustls::rustls::{self, pki_types::PrivatePkcs8KeyDer};
 use tokio_rustls::TlsAcceptor;
 
 const MAX_MESSAGE_BYTES: usize = 256 * 1024;
+const SOCKET_ACTIVATION_TIMEOUT: Duration = Duration::from_secs(10);
 const PAIR_WINDOW: Duration = Duration::from_secs(60);
 const COOKIE_NAME: &str = "__Host-studyvis-mirror";
 const PASSWORD_ALPHABET: &[u8; 32] = b"ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
@@ -652,6 +653,28 @@ async fn socket(
 }
 
 async fn connected(socket: WebSocket, shared: Arc<Shared>, client_id: String) {
+    let (mut sink, mut source) = socket.split();
+    let mut shutdown = shared.shutdown.subscribe();
+    if !shared.active() || *shutdown.borrow() {
+        return;
+    }
+    // A completed upgrade can belong to an already-abandoned document. Wait
+    // for its first application frame before replacing the live controller.
+    let first_message = tokio::select! {
+        _ = shutdown.changed() => return,
+        message = tokio::time::timeout(SOCKET_ACTIVATION_TIMEOUT, async {
+            loop {
+                match source.next().await {
+                    Some(Ok(message @ Message::Text(_))) => return Some(message),
+                    Some(Ok(Message::Ping(_) | Message::Pong(_))) => {},
+                    _ => return None,
+                }
+            }
+        }) => match message {
+            Ok(Some(message)) => message,
+            _ => return,
+        },
+    };
     let Ok(connection_id) = random_hex(16) else {
         return;
     };
@@ -684,8 +707,7 @@ async fn connected(socket: WebSocket, shared: Arc<Shared>, client_id: String) {
         });
         controller.socket_revision
     };
-    let (mut sink, mut source) = socket.split();
-    let mut shutdown = shared.shutdown.subscribe();
+    let mut source = futures_util::stream::iter([Ok(first_message)]).chain(source);
     let mut heartbeat = tokio::time::interval(Duration::from_secs(15));
     let mut last_pong = Instant::now();
     let mut message_window = Instant::now();
@@ -1243,7 +1265,7 @@ mod tests {
         let root =
             reqwest::Certificate::from_der(&fs::read(directory.join("root.crt")).unwrap()).unwrap();
         let client = reqwest::Client::builder()
-            .add_root_certificate(root)
+            .add_root_certificate(root.clone())
             .no_proxy()
             .build()
             .unwrap();
@@ -1337,6 +1359,13 @@ mod tests {
         assert_eq!(renewed.config().fingerprint, config.fingerprint);
         assert_ne!(renewed.config().generation, config.generation);
         assert_ne!(renewed.config().password, config.password);
+        // The old pool belongs to the intentionally stopped server, not the
+        // renewed listener at the same origin.
+        let client = reqwest::Client::builder()
+            .add_root_certificate(root)
+            .no_proxy()
+            .build()
+            .unwrap();
         assert_eq!(
             client
                 .get(format!("{url}/api/status"))
@@ -1676,96 +1705,56 @@ mod tests {
 
     #[tokio::test]
     async fn reconnect_assigns_a_new_socket_target_and_revokes_the_previous_one() {
-        use tokio::io::{AsyncReadExt, AsyncWriteExt};
-
-        let directory = test_directory();
-        let events = Arc::new(Mutex::new(Vec::new()));
-        let collected = events.clone();
-        let mut server_options = options(&directory, Duration::from_secs(60));
-        server_options.on_event = Arc::new(move |event| collected.lock().unwrap().push(event));
-        let server = MirrorServer::start(server_options).await.unwrap();
-        let url = &server.config().urls[0];
-        let client = reqwest::Client::builder()
-            .add_root_certificate(
-                reqwest::Certificate::from_der(&fs::read(directory.join("root.crt")).unwrap())
-                    .unwrap(),
-            )
-            .no_proxy()
-            .build()
-            .unwrap();
-        let response = client
-            .post(format!("{url}/api/pair"))
-            .header("Origin", url)
-            .header("Content-Type", "application/json")
-            .body(serde_json::json!({"password": server.config().password}).to_string())
-            .send()
-            .await
-            .unwrap();
-        let cookie = response.headers()["set-cookie"]
-            .to_str()
-            .unwrap()
-            .split(';')
-            .next()
-            .unwrap()
-            .to_string();
-        let upgrade = || {
-            client
-                .get(format!("{url}/api/socket"))
-                .header("Origin", url)
-                .header("Cookie", &cookie)
-                .header("Connection", "upgrade")
-                .header("Upgrade", "websocket")
-                .header("Sec-WebSocket-Version", "13")
-                .header("Sec-WebSocket-Key", "dGhlIHNhbXBsZSBub25jZQ==")
-        };
-        let first_response = upgrade().send().await.unwrap();
-        assert_eq!(first_response.status(), 101);
-        let mut first_socket = first_response.upgrade().await.unwrap();
-        let first_id = wait_for_connection(&events, 1).await;
+        let fixture = PairedSocketServer::new(Duration::from_secs(60)).await;
+        let events = &fixture.events;
+        let server = &fixture.server;
+        let mut first_socket = fixture.open().await;
+        write_client_frame(&mut first_socket, 1, b"first").await;
+        let first_id = wait_for_connection(events, 1).await;
         assert!(server.sender(&first_id).is_ok());
-        let second_response = upgrade().send().await.unwrap();
-        assert_eq!(second_response.status(), 101);
-        let mut second_socket = second_response.upgrade().await.unwrap();
-        let second_id = wait_for_connection(&events, 2).await;
+        let mut silent_socket = fixture.open().await;
+        // A pong proves the server processed this upgrade without relying on
+        // scheduler timing. Transport liveness alone must not take control.
+        write_client_frame(&mut silent_socket, 9, b"silent").await;
+        loop {
+            let (opcode, payload) = read_server_frame(&mut silent_socket).await;
+            if opcode == 10 {
+                assert_eq!(payload, b"silent");
+                break;
+            }
+        }
+        assert!(
+            server.sender(&first_id).is_ok(),
+            "an authenticated upgrade without a client text frame revoked the active controller"
+        );
+        drop(silent_socket);
+        write_client_frame(&mut first_socket, 1, b"still active").await;
+        wait_for_message(events, &first_id, "still active").await;
+        let mut closed_socket = fixture.open().await;
+        write_client_frame(&mut closed_socket, 8, &1000u16.to_be_bytes()).await;
+        wait_for_socket_end(&mut closed_socket, Duration::from_secs(2)).await;
+        write_client_frame(&mut first_socket, 1, b"after close").await;
+        wait_for_message(events, &first_id, "after close").await;
+        assert!(server.sender(&first_id).is_ok());
+        let mut second_socket = fixture.open().await;
+        write_client_frame(&mut second_socket, 1, b"replacement").await;
+        let second_id = wait_for_connection(events, 2).await;
         assert_ne!(first_id, second_id);
         assert!(server.sender(&first_id).is_err());
         assert!(server.sender(&second_id).is_ok());
         // A replaced tab must stop retrying, or two tabs can steal capture
         // from each other in a perpetual reconnect loop.
-        let close_code = tokio::time::timeout(Duration::from_secs(2), async {
-            loop {
-                let mut header = [0; 2];
-                first_socket.read_exact(&mut header).await.unwrap();
-                assert_eq!(header[1] & 0x80, 0);
-                assert!(header[1] < 126);
-                let mut payload = vec![0; header[1] as usize];
-                first_socket.read_exact(&mut payload).await.unwrap();
-                if header[0] & 0x0f == 8 {
-                    assert!(payload.len() >= 2);
-                    break u16::from_be_bytes([payload[0], payload[1]]);
-                }
+        let close_code = loop {
+            let (opcode, payload) = read_server_frame(&mut first_socket).await;
+            if opcode == 8 {
+                assert!(payload.len() >= 2);
+                break u16::from_be_bytes([payload[0], payload[1]]);
             }
-        })
-        .await
-        .unwrap();
+        };
         assert_eq!(close_code, 4001);
         // An actual client-masked text frame reaches only the replacement ID.
-        second_socket
-            .write_all(&[0x81, 0x82, 1, 2, 3, 4, b'{' ^ 1, b'}' ^ 2])
-            .await
-            .unwrap();
-        tokio::time::timeout(Duration::from_secs(2), async {
-            loop {
-                if events.lock().unwrap().iter().any(|event| {
-                    matches!(event, MirrorEvent::Message { client_id, data } if client_id == &second_id && data == "{}")
-                }) {
-                    break;
-                }
-                tokio::time::sleep(Duration::from_millis(5)).await;
-            }
-        })
-        .await
-        .unwrap();
+        write_client_frame(&mut second_socket, 1, b"{}").await;
+        wait_for_message(events, &second_id, "{}").await;
         {
             let collected = events.lock().unwrap();
             let ordered: Vec<_> = collected
@@ -1782,9 +1771,223 @@ mod tests {
                 ordered[..3],
                 [(&*first_id, true), (&*first_id, false), (&*second_id, true)]
             );
+            assert_eq!(ordered.len(), 3);
+            for (id, expected) in [(&first_id, "first"), (&second_id, "replacement")] {
+                assert_eq!(collected.iter().filter(|event| {
+                    matches!(event, MirrorEvent::Message { client_id, data } if client_id == id && data == expected)
+                }).count(), 1, "the activation frame must be forwarded exactly once");
+            }
         }
-        server.shutdown().await;
-        fs::remove_dir_all(directory).unwrap();
+        fixture.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn unconfirmed_socket_cannot_activate_after_shutdown_or_lease_expiry() {
+        use tokio::io::AsyncWriteExt;
+
+        for expires in [false, true] {
+            let fixture = PairedSocketServer::new(if expires {
+                Duration::from_secs(2)
+            } else {
+                Duration::from_secs(60)
+            })
+            .await;
+            let mut socket = fixture.open().await;
+            write_client_frame(&mut socket, 9, b"waiting").await;
+            assert_eq!(
+                read_server_frame(&mut socket).await,
+                (10, b"waiting".to_vec())
+            );
+            if expires {
+                tokio::time::sleep(
+                    fixture
+                        .server
+                        .shared
+                        .deadline
+                        .saturating_duration_since(Instant::now())
+                        + Duration::from_millis(10),
+                )
+                .await;
+            } else {
+                fixture.server.stop();
+            }
+            // A text frame racing the shutdown notification must still fail
+            // the active-lease check before any controller claim.
+            let _ = socket
+                .write_all(&[0x81, 0x82, 1, 2, 3, 4, b'{' ^ 1, b'}' ^ 2])
+                .await;
+            wait_for_socket_end(&mut socket, Duration::from_secs(2)).await;
+            assert!(!fixture.server.shared.active());
+            assert!(fixture.events.lock().unwrap().is_empty());
+            assert!(fixture.server.shared.controller.lock().unwrap().is_none());
+            fixture.shutdown().await;
+        }
+    }
+
+    #[tokio::test]
+    async fn unconfirmed_socket_has_a_finite_activation_deadline() {
+        let fixture = PairedSocketServer::new(Duration::from_secs(60)).await;
+        let mut socket = fixture.open().await;
+        write_client_frame(&mut socket, 9, b"waiting").await;
+        assert_eq!(
+            read_server_frame(&mut socket).await,
+            (10, b"waiting".to_vec())
+        );
+        tokio::time::sleep(SOCKET_ACTIVATION_TIMEOUT / 2).await;
+        write_client_frame(&mut socket, 9, b"still waiting").await;
+        assert_eq!(
+            read_server_frame(&mut socket).await,
+            (10, b"still waiting".to_vec())
+        );
+        wait_for_socket_end(
+            &mut socket,
+            SOCKET_ACTIVATION_TIMEOUT / 2 + Duration::from_secs(2),
+        )
+        .await;
+        assert!(fixture.events.lock().unwrap().is_empty());
+        {
+            let controller = fixture.server.shared.controller.lock().unwrap();
+            assert_eq!(controller.as_ref().unwrap().socket_revision, 0);
+        }
+        assert!(fixture.server.shared.active());
+        fixture.shutdown().await;
+    }
+
+    struct PairedSocketServer {
+        directory: PathBuf,
+        server: MirrorServer,
+        client: reqwest::Client,
+        cookie: String,
+        events: Arc<Mutex<Vec<MirrorEvent>>>,
+    }
+
+    impl PairedSocketServer {
+        async fn new(lease: Duration) -> Self {
+            let directory = test_directory();
+            let events = Arc::new(Mutex::new(Vec::new()));
+            let collected = events.clone();
+            let mut server_options = options(&directory, lease);
+            server_options.on_event = Arc::new(move |event| collected.lock().unwrap().push(event));
+            let server = MirrorServer::start(server_options).await.unwrap();
+            let url = &server.config().urls[0];
+            let client = reqwest::Client::builder()
+                .add_root_certificate(
+                    reqwest::Certificate::from_der(&fs::read(directory.join("root.crt")).unwrap())
+                        .unwrap(),
+                )
+                .no_proxy()
+                .build()
+                .unwrap();
+            let response = client
+                .post(format!("{url}/api/pair"))
+                .header("Origin", url)
+                .header("Content-Type", "application/json")
+                .body(serde_json::json!({"password": server.config().password}).to_string())
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(response.status(), 200);
+            let cookie = response.headers()["set-cookie"]
+                .to_str()
+                .unwrap()
+                .split(';')
+                .next()
+                .unwrap()
+                .to_string();
+            Self {
+                directory,
+                server,
+                client,
+                cookie,
+                events,
+            }
+        }
+
+        async fn open(&self) -> reqwest::Upgraded {
+            let url = &self.server.config().urls[0];
+            let response = self
+                .client
+                .get(format!("{url}/api/socket"))
+                .header("Origin", url)
+                .header("Cookie", &self.cookie)
+                .header("Connection", "upgrade")
+                .header("Upgrade", "websocket")
+                .header("Sec-WebSocket-Version", "13")
+                .header("Sec-WebSocket-Key", "dGhlIHNhbXBsZSBub25jZQ==")
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(response.status(), 101);
+            response.upgrade().await.unwrap()
+        }
+
+        async fn shutdown(self) {
+            self.server.shutdown().await;
+            fs::remove_dir_all(self.directory).unwrap();
+        }
+    }
+
+    async fn write_client_frame(socket: &mut reqwest::Upgraded, opcode: u8, payload: &[u8]) {
+        use tokio::io::AsyncWriteExt;
+
+        assert!(payload.len() < 126);
+        let mask = [1, 2, 3, 4];
+        let mut frame = vec![0x80 | opcode, 0x80 | payload.len() as u8];
+        frame.extend_from_slice(&mask);
+        frame.extend(
+            payload
+                .iter()
+                .enumerate()
+                .map(|(i, byte)| byte ^ mask[i % 4]),
+        );
+        socket.write_all(&frame).await.unwrap();
+    }
+
+    async fn read_server_frame(socket: &mut reqwest::Upgraded) -> (u8, Vec<u8>) {
+        use tokio::io::AsyncReadExt;
+
+        tokio::time::timeout(Duration::from_secs(2), async {
+            let mut header = [0; 2];
+            socket.read_exact(&mut header).await.unwrap();
+            assert_eq!(header[1] & 0x80, 0);
+            assert!(header[1] < 126);
+            let mut payload = vec![0; header[1] as usize];
+            socket.read_exact(&mut payload).await.unwrap();
+            (header[0] & 0x0f, payload)
+        })
+        .await
+        .unwrap()
+    }
+
+    async fn wait_for_socket_end(socket: &mut reqwest::Upgraded, deadline: Duration) {
+        use tokio::io::AsyncReadExt;
+
+        tokio::time::timeout(deadline, async {
+            let mut buffer = [0; 256];
+            loop {
+                match socket.read(&mut buffer).await {
+                    Ok(0) | Err(_) => break,
+                    Ok(_) => {}
+                }
+            }
+        })
+        .await
+        .unwrap();
+    }
+
+    async fn wait_for_message(events: &Mutex<Vec<MirrorEvent>>, id: &str, expected: &str) {
+        tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                if events.lock().unwrap().iter().any(|event| {
+                    matches!(event, MirrorEvent::Message { client_id, data } if client_id == id && data == expected)
+                }) {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .unwrap();
     }
 
     async fn wait_for_connection(events: &Mutex<Vec<MirrorEvent>>, count: usize) -> String {

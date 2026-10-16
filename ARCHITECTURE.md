@@ -701,7 +701,12 @@ Each enable creates an eight-character cryptographic pairing password and a
 12-hour lease. Global and per-IP authentication budgets protect the short secret.
 Pairing produces a random HttpOnly, Secure, SameSite=Strict cookie; one controller
 can reconnect with that lease. Stop, local session end and process exit revoke
-the lease and close listeners and media. Saved per-host ports and a stable certificate
+the lease and close listeners and media. An authenticated WebSocket upgrade must
+produce its first client text frame before taking control; upgrades abandoned
+before that frame cannot evict the active browser. This uses the existing framed messages,
+including the initial `ready` sent by released clients, and preserves explicit
+same-cookie tab takeover once the new connection confirms activity.
+Saved per-host ports and a stable certificate
 allow the browser's origin and offline shell to survive host restarts when those
 ports remain available. Corrupt port metadata or a persistent port conflict
 recovers with an available port and saves the new pair; an HTTPS port change

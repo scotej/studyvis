@@ -1,11 +1,13 @@
 # Changelog
 
-## 2.0.1 — 2026-10-16 — Security maintenance
+## 2.0.1 — 2026-10-16 — Security and reconnect reliability
 
 ### Fixed
 
 - Updated the bundled TLS library with upstream security fixes for encrypted
   connections.
+- Unfinished browser connections no longer take control from the active browser
+  companion during reconnect.
 
 ## 2.0.0 — 2026-10-12 — Browser companion
 
