@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "generatedBy": "scripts/generate-third-party-notices.ts",
   "noticePath": "THIRD-PARTY-NOTICES.txt",
-  "noticeSha256": "525ba10368cb0bb8abe7f5b908c85337a2a4c1e7bd1222eb4777d1991226c815",
+  "noticeSha256": "af74d24c60a8aabb4954d955d6ec8c422cf3b25d46851591ed3ed5cf2f1138fe",
   "scope": {
     "npm": "package-lock.json v3 entries beneath node_modules whose dev flag is not true",
     "cargo": "normal dependency edges reachable from the StudyVis root under each release target; build/dev edges excluded",
@@ -44,11 +44,11 @@
     },
     {
       "path": "src-tauri/Cargo.lock",
-      "sha256": "ed71ab546d687dd2e2660301f99c04f5440c36331c592c5a3a08ceadcfee00e4"
+      "sha256": "a7f836777f86fef29e0ac7c789a8f4696237857d1d1cc9f486a3ab7b691b9e4b"
     },
     {
       "path": "src-tauri/Cargo.toml",
-      "sha256": "3942b178ff253fc894f504b76c589638b66147472c9fd0949845722797ffd218"
+      "sha256": "a41f827fa60e37e200d2215fc73b7ca693d01c6b4f952900105fffbf8585256f"
     },
     {
       "path": "src-tauri/vendor/wry/LICENSE-MIT",
@@ -60,7 +60,7 @@
     "cargo": 560,
     "npm": 222,
     "external": 1,
-    "distinctLicenseTexts": 416
+    "distinctLicenseTexts": 415
   },
   "components": [
     {
@@ -5839,6 +5839,23 @@
       ]
     },
     {
+      "id": "cargo:nix@0.31.3",
+      "ecosystem": "cargo",
+      "name": "nix",
+      "version": "0.31.3",
+      "licenseExpression": "MIT",
+      "source": "https://crates.io/api/v1/crates/nix/0.31.3/download",
+      "checksum": "cf20d2fde8ff38632c426f1165ed7436270b44f199fc55284c38276f9db47c3d",
+      "repository": "https://github.com/nix-rust/nix",
+      "targets": ["aarch64-apple-darwin"],
+      "licenseFiles": [
+        {
+          "path": "cargo:nix@0.31.3/LICENSE",
+          "sha256": "66e3ee1fa7f909ad3c612d556f2a0cdabcd809ad6e66f3b0605015ac64841b70"
+        }
+      ]
+    },
+    {
       "id": "cargo:nom@7.1.3",
       "ecosystem": "cargo",
       "name": "nom",
@@ -8084,13 +8101,13 @@
       ]
     },
     {
-      "id": "cargo:rustls@0.23.45",
+      "id": "cargo:rustls@0.23.46",
       "ecosystem": "cargo",
       "name": "rustls",
-      "version": "0.23.45",
+      "version": "0.23.46",
       "licenseExpression": "Apache-2.0 OR ISC OR MIT",
-      "source": "https://crates.io/api/v1/crates/rustls/0.23.45/download",
-      "checksum": "0d41d731c7d2f962d1ccc364cec258de3c0e93b38c2fb3ba97ac74513048d634",
+      "source": "https://crates.io/api/v1/crates/rustls/0.23.46/download",
+      "checksum": "48e13bd8c0e9365c43cfa5c9e8f9ad49d3c8444926c9aac819e0e4dc503c8fdf",
       "repository": "https://github.com/rustls/rustls",
       "targets": [
         "aarch64-apple-darwin",
@@ -8099,15 +8116,15 @@
       ],
       "licenseFiles": [
         {
-          "path": "cargo:rustls@0.23.45/LICENSE-APACHE",
+          "path": "cargo:rustls@0.23.46/LICENSE-APACHE",
           "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
         },
         {
-          "path": "cargo:rustls@0.23.45/LICENSE-ISC",
+          "path": "cargo:rustls@0.23.46/LICENSE-ISC",
           "sha256": "7cfafc877eccc46c0e346ccbaa5c51bb6b894d2b818e617d970211e232785ad4"
         },
         {
-          "path": "cargo:rustls@0.23.45/LICENSE-MIT",
+          "path": "cargo:rustls@0.23.46/LICENSE-MIT",
           "sha256": "709e3175b4212f7b13aa93971c9f62ff8c69ec45ad8c6532a7e0c41d7a7d6f8c"
         }
       ]
@@ -12724,30 +12741,13 @@
       ]
     },
     {
-      "id": "cargo:zip@4.6.1",
+      "id": "cargo:zip@9.0.3",
       "ecosystem": "cargo",
       "name": "zip",
-      "version": "4.6.1",
+      "version": "9.0.3",
       "licenseExpression": "MIT",
-      "source": "https://crates.io/api/v1/crates/zip/4.6.1/download",
-      "checksum": "caa8cd6af31c3b31c6631b8f483848b91589021b28fffe50adada48d4f4d2ed1",
-      "repository": "https://github.com/zip-rs/zip2.git",
-      "targets": ["x86_64-pc-windows-msvc"],
-      "licenseFiles": [
-        {
-          "path": "cargo:zip@4.6.1/LICENSE",
-          "sha256": "13f16f8435b4242f494f038d761bd99c5af70395aa39274bd287d22c4d35c3b7"
-        }
-      ]
-    },
-    {
-      "id": "cargo:zip@8.6.0",
-      "ecosystem": "cargo",
-      "name": "zip",
-      "version": "8.6.0",
-      "licenseExpression": "MIT",
-      "source": "https://crates.io/api/v1/crates/zip/8.6.0/download",
-      "checksum": "2d04a6b5381502aa6087c94c669499eb1602eb9c5e8198e534de571f7154809b",
+      "source": "https://crates.io/api/v1/crates/zip/9.0.3/download",
+      "checksum": "c2d98561b612a84ae525331a7a094429ef8a5772514ed507ff6db5f54badc971",
       "repository": "https://github.com/zip-rs/zip2",
       "targets": [
         "aarch64-apple-darwin",
@@ -12756,7 +12756,7 @@
       ],
       "licenseFiles": [
         {
-          "path": "cargo:zip@8.6.0/LICENSE",
+          "path": "cargo:zip@9.0.3/LICENSE",
           "sha256": "58545fed1565e42d687aecec6897d35c6d37ccb71479a137c0deb2203e125c79"
         }
       ]

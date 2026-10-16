@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.0.1 — 2026-10-16 — Security maintenance
+
+### Fixed
+
+- Updated the bundled TLS library with upstream security fixes for encrypted
+  connections.
+
 ## 2.0.0 — 2026-10-12 — Browser companion
 
 ### Added
