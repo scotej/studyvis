@@ -496,11 +496,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          source_dir=$(mktemp -d "$RUNNER_TEMP/studyvis-apparmor-source.XXXXXX")
-          bash scripts/download-linux-apparmor-source.sh "$source_dir"
-          dsc="$source_dir/apparmor_4.0.1really4.0.1-0ubuntu0.24.04.7.dsc"
-          grep -Fxq 'Version: 4.0.1really4.0.1-0ubuntu0.24.04.7' "$dsc"
-          test "$(find "$source_dir" -mindepth 1 -maxdepth 1 -type f | wc -l)" -eq 3
+          for revision in 7 8; do
+            version="4.0.1really4.0.1-0ubuntu0.24.04.$revision"
+            source_dir=$(mktemp -d "$RUNNER_TEMP/studyvis-apparmor-source.XXXXXX")
+            bash scripts/download-linux-apparmor-source.sh "$source_dir" "$version"
+            dsc="$source_dir/apparmor_$version.dsc"
+            grep -Fxq "Version: $version" "$dsc"
+            test "$(find "$source_dir" -mindepth 1 -maxdepth 1 -type f | wc -l)" -eq 3
+          done
 
       # Ubuntu 24.04 restricts unprivileged user namespaces through AppArmor,
       # which is exactly what WebKit's bubblewrap sandbox needs to start. This
