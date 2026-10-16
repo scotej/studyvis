@@ -20,7 +20,7 @@
     },
     {
       "path": "package.json",
-      "sha256": "0b5e21404b733ee36e178a40899fd2e1e854db982885d3e986f8678d8b758786"
+      "sha256": "4a648bf9e90571f0f2b5349efbc8c0752814d4320217cb55e4f2554f1162847f"
     },
     {
       "path": "scripts/fetch-llama-server.sh",

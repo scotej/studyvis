@@ -1,0 +1,159 @@
+{
+  "schemaVersion": 1,
+  "advisorySinceYear": 2025,
+  "coverage": "Versioned WebKitGTK and GStreamer upstream advisories since 2025; upstream release or source freshness for all listed native components. Matches require reachability review and are not proof of an exploitable StudyVis path. This is not a comprehensive native CVE scan.",
+  "components": [
+    {
+      "id": "webkitgtk",
+      "pin": {
+        "env": "scripts/linux-webkit-runtime.env",
+        "key": "STUDYVIS_WEBKIT_VERSION"
+      },
+      "feed": {
+        "kind": "directory",
+        "url": "https://webkitgtk.org/releases/",
+        "pattern": "webkitgtk-(\\d+\\.\\d+\\.\\d+)\\.tar",
+        "evenMinor": true
+      },
+      "advisories": {
+        "kind": "webkit",
+        "url": "https://webkitgtk.org/security.html"
+      }
+    },
+    {
+      "id": "gstreamer",
+      "pin": {
+        "env": "scripts/linux-webkit-runtime.env",
+        "key": "STUDYVIS_GSTREAMER_VERSION"
+      },
+      "feed": {
+        "kind": "directory",
+        "url": "https://gstreamer.freedesktop.org/src/gstreamer/",
+        "pattern": "gstreamer-(\\d+\\.\\d+\\.\\d+)\\.tar",
+        "evenMinor": true
+      },
+      "advisories": {
+        "kind": "gstreamer",
+        "url": "https://gstreamer.freedesktop.org/security/"
+      }
+    },
+    {
+      "id": "librice",
+      "pin": {
+        "env": "scripts/linux-webkit-runtime.env",
+        "key": "STUDYVIS_LIBRICE_VERSION"
+      },
+      "feed": {
+        "kind": "github-tags",
+        "repo": "ystreet/librice",
+        "pattern": "^v?(\\d+\\.\\d+\\.\\d+)$"
+      }
+    },
+    {
+      "id": "libnice",
+      "pin": {
+        "env": "scripts/linux-webkit-runtime.env",
+        "key": "STUDYVIS_LIBNICE_VERSION"
+      },
+      "feed": {
+        "kind": "directory",
+        "url": "https://libnice.freedesktop.org/",
+        "pattern": "libnice-(\\d+\\.\\d+\\.\\d+)\\.tar"
+      }
+    },
+    {
+      "id": "llama.cpp",
+      "pin": {
+        "env": "scripts/fetch-llama-server.sh",
+        "key": "LLAMA_RELEASE_TAG"
+      },
+      "feed": {
+        "kind": "github-releases",
+        "repo": "ggml-org/llama.cpp",
+        "pattern": "^b(\\d+)$",
+        "includePrerelease": true
+      }
+    },
+    {
+      "id": "type2-runtime",
+      "pin": {
+        "tsv": "scripts/linux-appimage-runtime-sources.tsv",
+        "component": "type2-runtime"
+      },
+      "feed": { "kind": "github-commits", "repo": "AppImage/type2-runtime" }
+    },
+    {
+      "id": "musl",
+      "pin": {
+        "tsv": "scripts/linux-appimage-runtime-sources.tsv",
+        "component": "musl"
+      },
+      "feed": {
+        "kind": "directory",
+        "url": "https://git.musl-libc.org/cgit/musl/refs/tags",
+        "pattern": "v(\\d+\\.\\d+\\.\\d+)"
+      }
+    },
+    {
+      "id": "zlib",
+      "pin": {
+        "tsv": "scripts/linux-appimage-runtime-sources.tsv",
+        "component": "zlib"
+      },
+      "feed": {
+        "kind": "github-releases",
+        "repo": "madler/zlib",
+        "pattern": "^v(\\d+\\.\\d+(?:\\.\\d+)?)$"
+      }
+    },
+    {
+      "id": "zstd",
+      "pin": {
+        "tsv": "scripts/linux-appimage-runtime-sources.tsv",
+        "component": "zstd"
+      },
+      "feed": {
+        "kind": "github-releases",
+        "repo": "facebook/zstd",
+        "pattern": "^v(\\d+\\.\\d+\\.\\d+)$"
+      }
+    },
+    {
+      "id": "libfuse",
+      "pin": {
+        "tsv": "scripts/linux-appimage-runtime-sources.tsv",
+        "component": "libfuse"
+      },
+      "feed": {
+        "kind": "github-releases",
+        "repo": "libfuse/libfuse",
+        "pattern": "^(?:fuse-)?(3\\.\\d+\\.\\d+)$"
+      }
+    },
+    {
+      "id": "squashfuse",
+      "pin": {
+        "tsv": "scripts/linux-appimage-runtime-sources.tsv",
+        "component": "squashfuse"
+      },
+      "feed": {
+        "kind": "github-tags",
+        "repo": "vasi/squashfuse",
+        "pattern": "^v?(\\d+\\.\\d+\\.\\d+)$"
+      }
+    },
+    {
+      "id": "meson",
+      "pin": {
+        "tsv": "scripts/linux-appimage-runtime-sources.tsv",
+        "component": "meson"
+      },
+      "feed": {
+        "kind": "github-releases",
+        "repo": "mesonbuild/meson",
+        "pattern": "^(\\d+\\.\\d+\\.\\d+)$"
+      }
+    }
+  ],
+  "exceptions": []
+}

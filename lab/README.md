@@ -12,7 +12,9 @@ npm run lab -- click alice "Add friend"
 npm run lab -- db alice friends
 npm run lab -- down
 
-npm run lab -- verify                   # every scenario, one verdict (~80s)
+npm run lab -- verify --suite all       # every scenario, bounded verdict + evidence
+npm run lab -- verify --suite smoke     # fast PR scenarios
+npm run lab -- verify --suite fault     # signaling/renderer interruption scenarios
 npm run lab -- --help                   # the full verb list
 ```
 
@@ -89,3 +91,16 @@ WKWebView or WebKitGTK rendering, real `getUserMedia` against real hardware, OS
 keychain custody, the tray, global shortcuts, OS notifications, llama-server
 process management, applying an update, or packaging. Those stay physical —
 PLAN §8's matrix is still the standard for a Linux sign-off.
+
+`verify` and `run` accept `--timeout-ms` (default five minutes per scenario) and
+`--evidence-dir` (default `lab/.work/evidence`). They retain complete JSON verdicts
+and raw output, fail on unexpected page exceptions/unhandled IPC/egress, and stop
+owned browser groups on deadlines or cancellation. A deliberate negative case
+must declare its exact expected machine/error pattern/count with `expectFailure`.
+
+Mixed-release qualification uses `lab/compatibility/current-release.ts`. Build the
+immutable last stable source with its own lockfile, write its commit SHA to
+`dist/ci-source.json`, then set `STUDYVIS_COMPAT_DIST` and `STUDYVIS_COMPAT_SHA` when
+running that scenario. Each version is served independently and exchanges real
+browser media and signed messages. Native commands and key custody still use the
+lab adapters; the separate native upgrade/inference canaries cover those paths.

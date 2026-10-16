@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
+import { expect, userEvent, waitFor, within } from 'storybook/test'
 
 import { Button } from '@/components/ui/button'
 import {
@@ -37,6 +38,26 @@ export const Right: Story = {
       </SheetContent>
     </Sheet>
   ),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const body = within(canvasElement.ownerDocument.body)
+    const trigger = canvas.getByRole('button', { name: 'Open sheet' })
+    await userEvent.click(trigger)
+    const sheet = await body.findByRole('dialog', { name: 'Settings' })
+    const close = within(sheet).getByRole('button', { name: 'Close' })
+    await waitFor(() => expect(close).toHaveFocus())
+    await userEvent.tab()
+    await expect(close).toHaveFocus()
+    await userEvent.tab({ shift: true })
+    await expect(close).toHaveFocus()
+    await userEvent.keyboard('{Escape}')
+    await waitFor(() =>
+      expect(body.queryByRole('dialog')).not.toBeInTheDocument()
+    )
+    await expect(trigger).toHaveFocus()
+    await userEvent.click(trigger)
+    await body.findByRole('dialog', { name: 'Settings' })
+  },
 }
 
 export const AllSides: Story = {

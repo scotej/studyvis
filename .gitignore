@@ -50,3 +50,8 @@ src-tauri/binaries/windows-vc-runtime-*/
 
 # StudyVis lab: per-run machine disks, logs and the daemon socket.
 lab/.work/
+
+# Python validation tools
+__pycache__/
+linux-update-evidence/
+*.py[cod]

@@ -641,3 +641,29 @@ jobs:
           fi
           echo "Published $TAG unattended after full revalidation." \
             | tee -a "$GITHUB_STEP_SUMMARY"
+
+  public-channel:
+    name: Verify public stable update distribution
+    needs: publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+      - name: Fetch and verify updater bytes without credentials
+        env:
+          PUBLISHED_TAG: ${{ inputs.tag }}
+        run: node scripts/check-public-updater.mjs --published-tag "$PUBLISHED_TAG" --output "$RUNNER_TEMP/public-updater.json"
+      - uses: actions/upload-artifact@v7
+        if: ${{ !cancelled() }}
+        with:
+          name: public-update-channel
+          path: ${{ runner.temp }}/public-updater.json
+          if-no-files-found: error
+          retention-days: 7

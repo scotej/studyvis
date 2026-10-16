@@ -123,6 +123,74 @@ jobs:
       - name: Version lockstep across the five tracked files
         run: bash scripts/check-version-lockstep.sh "$(node -p "require('./package.json').version")"
 
+  browser-lab:
+    name: Browser lab
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npx playwright-core install --with-deps chromium
+      - name: Production frontend and real multi-peer media
+        run: npm run lab -- verify --suite smoke --timeout-ms 300000 --evidence-dir lab/.work/evidence/smoke
+      - name: Retain lab verdicts and diagnostics
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: browser-lab-evidence
+          path: lab/.work/evidence
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
+  ci-contracts:
+    name: CI and native boundary contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: npm
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Install correctness checkers
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends shellcheck unzip
+          python -m pip install PyYAML==6.0.3 ruff==0.14.1
+          curl --fail --silent --show-error --location --retry 3 \
+            https://github.com/PowerShell/PSScriptAnalyzer/releases/download/1.25.0/PSScriptAnalyzer.1.25.0.nupkg \
+            -o "$RUNNER_TEMP/pssa.zip"
+          echo "14e634c828eb98efb9f40b2918ba90f139ed5eccdf663a2a747736d996995d60  $RUNNER_TEMP/pssa.zip" | sha256sum --check --strict
+          mkdir -p "$RUNNER_TEMP/psmodules/PSScriptAnalyzer/1.25.0"
+          unzip -q "$RUNNER_TEMP/pssa.zip" -d "$RUNNER_TEMP/psmodules/PSScriptAnalyzer/1.25.0"
+          echo "PSModulePath=$RUNNER_TEMP/psmodules${PSModulePath:+:$PSModulePath}" >> "$GITHUB_ENV"
+      - run: npm ci
+      - name: Workflow, cache, supply-chain tuple and IPC contracts
+        run: python3 scripts/check-ci-contracts.py
+      - name: Mutation and failure-path regression checks
+        run: |
+          python3 -m unittest discover -s tests/ci -p 'test_*.py'
+          node --test tests/ci/*.test.mjs
+          bash scripts/check-macos-runtime.sh --self-test
+          python3 scripts/check-linux-update.py --self-test
+      - name: Standalone build and release script correctness
+        run: |
+          bash scripts/check-scripts.sh
+          bash scripts/check-scripts.sh --powershell
+
   windows-runtime:
     name: Windows engine runtime
     # Keep the staged DLL source and its redistribution license on VS 2022.
@@ -275,6 +343,20 @@ jobs:
       - name: cargo test
         working-directory: src-tauri
         run: cargo test --locked
+
+      - name: Native credential-store round trip
+        if: runner.os != 'Linux'
+        shell: bash
+        working-directory: src-tauri
+        run: |
+          set -euo pipefail
+          test_name=commands::identity::tests::native_credential_store_round_trip
+          discovered=$(cargo test --locked --lib "$test_name" -- --list --ignored --exact)
+          if ! printf '%s\n' "$discovered" | grep -Fxq "$test_name: test"; then
+            echo "::error::Expected ignored native credential-store test was not discovered"
+            exit 1
+          fi
+          cargo test --locked --lib "$test_name" -- --ignored --exact --nocapture
 
       - uses: actions/setup-node@v7
         if: runner.os == 'Linux'
@@ -465,9 +547,11 @@ jobs:
             echo "STUDYVIS_WEBKIT_RUNTIME_DIR=${runtime_dir}"
             echo "STUDYVIS_WEBKIT_BUILD_DIR=${STUDYVIS_WEBKIT_BUILD_DIR}"
             echo "STUDYVIS_CARGO_C_VERSION=${STUDYVIS_CARGO_C_VERSION}"
+            echo "CARGO_C_INSTALL_ROOT=${RUNNER_TEMP}/studyvis-cargo-c"
             echo "PKG_CONFIG_PATH=${runtime_pkgconfig}${PKG_CONFIG_PATH:+:${PKG_CONFIG_PATH}}"
             echo "LD_LIBRARY_PATH=${runtime_lib}:${GITHUB_WORKSPACE}/src-tauri/binaries/llama-runtime-x86_64-unknown-linux-gnu${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
           } >> "$GITHUB_ENV"
+          echo "${RUNNER_TEMP}/studyvis-cargo-c/bin" >> "$GITHUB_PATH"
           {
             echo "runtime-dir=${runtime_dir}"
             echo "cargo-c-version=${STUDYVIS_CARGO_C_VERSION}"
@@ -511,15 +595,11 @@ jobs:
         id: cargo-c-cache
         uses: actions/cache/restore@v6
         with:
-          path: |
-            ~/.cargo/bin/cargo-capi
-            ~/.cargo/bin/cargo-cbuild
-            ~/.cargo/bin/cargo-cinstall
-          key: studyvis-cargo-c-${{ runner.os }}-ubuntu-24.04-rust-1.97.1-${{ steps.webkit-runtime.outputs.cargo-c-version }}
+          path: ${{ runner.temp }}/studyvis-cargo-c
+          key: studyvis-cargo-c-${{ runner.os }}-ubuntu-24.04-rust-1.97.1-${{ steps.webkit-runtime.outputs.cargo-c-version }}-isolated-v1
 
       - name: Install pinned cargo-c
-        if: steps.cargo-c-cache.outputs.cache-hit != 'true'
-        run: cargo install cargo-c --version "=${STUDYVIS_CARGO_C_VERSION}" --locked
+        run: bash scripts/install-cargo-c.sh "$CARGO_C_INSTALL_ROOT" "$STUDYVIS_CARGO_C_VERSION"
 
       - name: Assert the pinned cargo-c version
         run: |
@@ -540,11 +620,8 @@ jobs:
         if: ${{ success() && steps.cargo-c-cache.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@v6
         with:
-          path: |
-            ~/.cargo/bin/cargo-capi
-            ~/.cargo/bin/cargo-cbuild
-            ~/.cargo/bin/cargo-cinstall
-          key: studyvis-cargo-c-${{ runner.os }}-ubuntu-24.04-rust-1.97.1-${{ steps.webkit-runtime.outputs.cargo-c-version }}
+          path: ${{ runner.temp }}/studyvis-cargo-c
+          key: studyvis-cargo-c-${{ runner.os }}-ubuntu-24.04-rust-1.97.1-${{ steps.webkit-runtime.outputs.cargo-c-version }}-isolated-v1
 
       # Everything below that does not need the private WebKit runtime runs
       # before the hour-long compile. A missing npm dependency, a broken
@@ -1018,6 +1095,8 @@ jobs:
     needs:
       [
         frontend,
+        browser-lab,
+        ci-contracts,
         windows-runtime,
         third-party-notices,
         rust,

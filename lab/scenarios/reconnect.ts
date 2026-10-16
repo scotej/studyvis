@@ -180,6 +180,16 @@ scenario('reconnect', async ({ lab, step, check, ui }) => {
   // later reconnection happens to deliver on a replaced element.
   const doomedTracks = await remoteTrackIds(bob)
   check('bob is receiving alice over a known track', doomedTracks.length > 0)
+  const doomedTransports = (await ui.evaluate(
+    alice.page(),
+    `window.__lab.peers().flatMap((peer, index) =>
+      peer.connectionState === 'connected' && peer.sendingTracks > 0 ? [index] : []
+    )`
+  )) as number[]
+  check(
+    'alice has a known media transport to retire',
+    doomedTransports.length > 0
+  )
   await freeze(bob, LONG_FREEZE_MS)
 
   // The hold ends one of two ways once the outage outlasts it: it expires and
@@ -200,11 +210,17 @@ scenario('reconnect', async ({ lab, step, check, ui }) => {
     'the departure was recorded as a transport loss',
     left?.data?.awaitingReconnect === true
   )
-  check(
-    'alice shut the connection trystero abandoned open',
-    find(alice, 'session.lifecycle', 'transport.closed_orphan').length > 0
+  await ui.until(
+    async () =>
+      (await ui.evaluate(
+        alice.page(),
+        `(${JSON.stringify(doomedTransports)}).every(index =>
+          window.__lab.peers()[index].connectionState === 'closed'
+        )`
+      )) === true,
+    { label: "alice's original media transports to close", timeoutMs: 10_000 }
   )
-
+  check('the original media transports are closed', true)
   step('bob stops receiving alice — she is no longer on camera to him')
   check(
     'the abandoned connection stopped delivering frames to bob',

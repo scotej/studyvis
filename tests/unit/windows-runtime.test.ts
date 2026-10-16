@@ -129,7 +129,7 @@ describe('Windows bundle configuration', () => {
     )
   })
 
-  it('smokes the app from the exact extracted release installer', () => {
+  it('installs the exact release artifact and smokes its installed runtime', () => {
     const releaseWorkflow = readFileSync(
       resolve('.github/workflows/release.yml'),
       'utf8'
@@ -142,7 +142,14 @@ describe('Windows bundle configuration', () => {
       'Verify notices and runtime in the exact Windows release installer'
     )
     expect(releaseWorkflow).toContain(
-      './scripts/check-windows-runtime.ps1 -ArtifactRoot $unpack'
+      './scripts/check-windows-install.ps1 -Installer $installers[0].FullName'
+    )
+    const installerCheck = readFileSync(
+      resolve('scripts/check-windows-install.ps1'),
+      'utf8'
+    )
+    expect(installerCheck).toContain(
+      "'check-windows-runtime.ps1') -ArtifactRoot $installRoot"
     )
     expect(runtimeCheck).toContain(
       "Invoke-PackagedApp (Join-Path $appRoot 'studyvis.exe') $appRoot"

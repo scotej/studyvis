@@ -8,12 +8,23 @@
 // on screen when it stopped".
 
 import { Lab, type LabOptions } from './lab'
+import type { LabMachine } from './machine'
+import {
+  unexpectedScenarioFailures,
+  type ExpectedFailure,
+} from './scenarioChecks'
 import * as ui from './ui'
 
 export type ScenarioContext = {
   lab: Lab
   step: (title: string) => void
   check: (label: string, condition: boolean) => void
+  expectFailure: (
+    machine: LabMachine,
+    kind: ExpectedFailure['kind'],
+    pattern: RegExp,
+    count?: number
+  ) => void
   ui: typeof ui
 }
 
@@ -21,6 +32,17 @@ export type ScenarioBody = (ctx: ScenarioContext) => Promise<void>
 
 export function scenario(name: string, body: ScenarioBody): void {
   void main(name, body)
+}
+
+export async function writeScenarioResult(result: unknown): Promise<void> {
+  // Failure snapshots can exceed the pipe buffer; exiting before this callback
+  // loses the JSON tail and hides the failure that the evidence should explain.
+  await new Promise<void>((resolve, reject) => {
+    process.stdout.write(`${JSON.stringify(result, null, 2)}\n`, (error) => {
+      if (error) reject(error)
+      else resolve()
+    })
+  })
 }
 
 // The app writes one JSON record per line; a failure dump wants the shape, not
@@ -57,6 +79,7 @@ async function main(name: string, body: ScenarioBody): Promise<void> {
   const started = Date.now()
   const steps: string[] = []
   const checks: { label: string; ok: boolean }[] = []
+  const expected: ExpectedFailure[] = []
   let failure: unknown = null
 
   let lab: Lab
@@ -65,22 +88,22 @@ async function main(name: string, body: ScenarioBody): Promise<void> {
   } catch (err) {
     // Nothing to tear down and nothing to snapshot, but the run still has to
     // answer in the shape a caller parses.
-    process.stdout.write(
-      `${JSON.stringify(
-        {
-          scenario: name,
-          ok: false,
-          ms: Date.now() - started,
-          steps,
-          checks,
-          error: `lab failed to start: ${err instanceof Error ? err.message : String(err)}`,
-        },
-        null,
-        2
-      )}\n`
-    )
+    await writeScenarioResult({
+      scenario: name,
+      ok: false,
+      ms: Date.now() - started,
+      steps,
+      checks,
+      error: `lab failed to start: ${err instanceof Error ? err.message : String(err)}`,
+    })
     process.exit(1)
   }
+
+  const interrupted = () => {
+    void lab.down().finally(() => process.exit(1))
+  }
+  process.once('SIGINT', interrupted)
+  process.once('SIGTERM', interrupted)
 
   const ctx: ScenarioContext = {
     lab,
@@ -92,6 +115,12 @@ async function main(name: string, body: ScenarioBody): Promise<void> {
       checks.push({ label, ok: condition })
       process.stderr.write(`  ${condition ? '✓' : '✗'} ${label}\n`)
       if (!condition) throw new Error(`lab: check failed — ${label}`)
+    },
+    expectFailure(machine, kind, pattern, count = 1) {
+      if (!Number.isSafeInteger(count) || count < 1) {
+        throw new Error('lab: an expected failure needs a positive exact count')
+      }
+      expected.push({ machine: machine.name, kind, pattern, count })
     },
     ui,
   }
@@ -109,6 +138,17 @@ async function main(name: string, body: ScenarioBody): Promise<void> {
   const machines: Record<string, unknown> = {}
   let egress: string[] = []
   try {
+    const problems = unexpectedScenarioFailures(
+      [...lab.machines.values()].map((machine) => ({
+        name: machine.name,
+        pageErrors: machine.pageErrors,
+        unhandled: machine.backend.unhandled,
+      })),
+      expected
+    )
+    if (problems.length > 0) {
+      failure ??= new Error(problems.join('\n'))
+    }
     for (const machine of lab.machines.values()) {
       machines[machine.name] = {
         windows: [...machine.pages.keys()],
@@ -127,29 +167,31 @@ async function main(name: string, body: ScenarioBody): Promise<void> {
   } catch (err) {
     failure ??= err
   } finally {
-    await lab.down().catch(() => {})
+    await lab.down().catch((err: unknown) => {
+      failure ??= err
+    })
+    process.off('SIGINT', interrupted)
+    process.off('SIGTERM', interrupted)
   }
 
   const ok = failure === null && egress.length === 0
-  process.stdout.write(
-    `${JSON.stringify(
-      {
-        scenario: name,
-        ok,
-        ms: Date.now() - started,
-        steps,
-        checks,
-        egressAttempts: egress,
-        error: failure
-          ? failure instanceof Error
-            ? failure.message
-            : String(failure)
-          : undefined,
-        machines,
-      },
-      null,
-      2
-    )}\n`
-  )
+  await writeScenarioResult({
+    scenario: name,
+    ok,
+    ms: Date.now() - started,
+    steps,
+    checks,
+    expectedFailures: expected.map((entry) => ({
+      ...entry,
+      pattern: entry.pattern.toString(),
+    })),
+    egressAttempts: egress,
+    error: failure
+      ? failure instanceof Error
+        ? failure.message
+        : String(failure)
+      : undefined,
+    machines,
+  })
   process.exit(ok ? 0 : 1)
 }

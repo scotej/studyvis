@@ -293,20 +293,19 @@ pub fn identity_box_encrypt(
     })
 }
 
-#[cfg(all(test, target_os = "linux"))]
+#[cfg(test)]
 mod tests {
     use super::Entry;
 
-    // This is ignored in the ordinary unit suite because it deliberately
-    // requires a live org.freedesktop.secrets provider on the session bus.
-    // Linux CI runs it explicitly inside an isolated gnome-keyring session;
-    // the CachyOS acceptance pass must repeat it against the desktop's real
-    // provider. It exercises the exact keyring crate and
-    // Secret Service backend used by identity_save_keys/load_stored without
-    // touching the user's real com.studyvis.app credential.
-    #[test]
-    #[ignore = "requires a live Linux Secret Service session"]
-    fn secret_service_round_trip() {
+    struct IsolatedCredential(Entry);
+
+    impl Drop for IsolatedCredential {
+        fn drop(&mut self) {
+            let _ = self.0.delete_credential();
+        }
+    }
+
+    fn credential_store_round_trip() {
         let unique = format!(
             "com.studyvis.app.smoke.{}.{}",
             std::process::id(),
@@ -315,22 +314,52 @@ mod tests {
                 .expect("clock must be after Unix epoch")
                 .as_nanos()
         );
-        let entry = Entry::new(&unique, "identity-keys")
-            .expect("create isolated Secret Service smoke-test entry");
-        let secret = format!("studyvis-secret-service-smoke-{}", std::process::id());
+        let isolated = IsolatedCredential(
+            Entry::new(&unique, "identity-keys")
+                .expect("create isolated native credential-store entry"),
+        );
+        let entry = &isolated.0;
+        assert!(matches!(entry.get_password(), Err(keyring::Error::NoEntry)));
+        let secret = format!("studyvis-credential-smoke-{}", std::process::id());
 
         entry
             .set_password(&secret)
-            .expect("write through the Linux keyring backend");
+            .expect("write through the native keyring backend");
         assert_eq!(
             entry
                 .get_password()
-                .expect("read through the Linux keyring backend"),
+                .expect("read through the native keyring backend"),
             secret
+        );
+        let replacement = format!("{secret}-updated");
+        entry
+            .set_password(&replacement)
+            .expect("update the isolated native credential");
+        let reopened = Entry::new(&unique, "identity-keys").expect("reopen isolated credential");
+        assert_eq!(
+            reopened.get_password().expect("read after reopening"),
+            replacement
         );
         entry
             .delete_credential()
-            .expect("delete isolated Secret Service smoke-test entry");
+            .expect("delete isolated native credential-store entry");
         assert!(matches!(entry.get_password(), Err(keyring::Error::NoEntry)));
+    }
+
+    // Separate opt-in tests retain Linux's isolated-session invocation and
+    // exercise the actual Keychain/Credential Manager backends on hosted CI.
+    // The unique service and Drop guard never read or modify production keys.
+    #[cfg(target_os = "linux")]
+    #[test]
+    #[ignore = "requires a live Linux Secret Service session"]
+    fn secret_service_round_trip() {
+        credential_store_round_trip();
+    }
+
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
+    #[test]
+    #[ignore = "requires an available native credential store"]
+    fn native_credential_store_round_trip() {
+        credential_store_round_trip();
     }
 }

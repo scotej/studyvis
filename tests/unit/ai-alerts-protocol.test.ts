@@ -136,7 +136,7 @@ describe('AI alert wire shape', () => {
     expect(Object.keys(payload)).not.toContain('scoreAfter')
   })
 
-  test('canonical serializer is byte-identical between sender and receiver', () => {
+  test('canonical serializer preserves the released JSON bytes', () => {
     const core = {
       v: AI_ALERT_VERSION,
       session_topic: 't',
@@ -145,10 +145,8 @@ describe('AI alert wire shape', () => {
       severity: 'mild' as const,
       reasoning: 'x',
     }
-    const senderBytes = serializeAiAlertForSig(core)
-    const receiverBytes = serializeAiAlertForSig(core)
-    // Reference-different but byte-equal arrays.
-    expect(senderBytes).not.toBe(receiverBytes)
-    expect(Array.from(senderBytes)).toEqual(Array.from(receiverBytes))
+    expect(new TextDecoder().decode(serializeAiAlertForSig(core))).toBe(
+      '{"v":1,"session_topic":"t","ts":1,"who":"aa","severity":"mild","reasoning":"x"}'
+    )
   })
 })

@@ -1,0 +1,207 @@
+name: Runtime qualification
+
+on:
+  schedule:
+    - cron: '17 3 * * 6'
+  workflow_dispatch:
+  workflow_run:
+    workflows: [Publish verified release]
+    types: [completed]
+    branches: [main]
+  pull_request:
+    paths:
+      - '.github/workflows/runtime-canaries.yml'
+      - 'lab/**'
+      - 'patches/**'
+      - 'src/lib/crypto/**'
+      - 'src/lib/audit-types.ts'
+      - 'src/lib/trystero/**'
+      - 'src/lib/webrtc/**'
+      - 'src/features/ai/**'
+      - 'src/features/updater/**'
+      - 'src-tauri/**'
+      - 'src/features/friends/**'
+      - 'src/features/session/**'
+      - 'scripts/check-linux-update.py'
+      - 'scripts/check-ai-inference.ts'
+      - 'src-tauri/examples/*_fixture.rs'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  browser-faults:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    name: Browser transport fault recovery
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npx playwright-core install --with-deps chromium
+      - run: npm run lab -- verify --suite fault --timeout-ms 300000 --evidence-dir lab/.work/evidence/fault
+      - uses: actions/upload-artifact@v7
+        if: ${{ !cancelled() }}
+        with:
+          name: transport-fault-evidence
+          path: lab/.work/evidence
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
+  peer-compatibility:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    name: Current and released peer interoperability
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Resolve the immutable last stable source
+        id: stable
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          release=$(gh api "repos/$GITHUB_REPOSITORY/releases/latest")
+          sha=$(jq -er 'select(.immutable == true and .draft == false and .prerelease == false) | .target_commitish | select(test("^[0-9a-f]{40}$"))' <<< "$release")
+          tag=$(jq -er '.tag_name | select(test("^v[0-9]+\\.[0-9]+\\.[0-9]+$"))' <<< "$release")
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ steps.stable.outputs.sha }}
+          path: .compat-release
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            .compat-release/package-lock.json
+      - name: Build the released frontend with its own lockfile
+        working-directory: .compat-release
+        env:
+          SOURCE_SHA: ${{ steps.stable.outputs.sha }}
+        run: |
+          npm ci
+          npm run build
+          node --input-type=module -e 'import {writeFileSync} from "node:fs"; writeFileSync("dist/ci-source.json", JSON.stringify({sha: process.env.SOURCE_SHA}))'
+      - run: npm ci
+      - run: npm run build
+      - run: npx playwright-core install --with-deps chromium
+      - name: Exchange real media and signed messages across releases
+        env:
+          STUDYVIS_COMPAT_SHA: ${{ steps.stable.outputs.sha }}
+          STUDYVIS_COMPAT_DIST: ${{ github.workspace }}/.compat-release/dist
+        run: npm run lab -- run lab/compatibility/current-release.ts --timeout-ms 300000 --evidence-dir lab/.work/evidence/compatibility
+      - uses: actions/upload-artifact@v7
+        if: ${{ !cancelled() }}
+        with:
+          name: peer-compatibility-evidence
+          path: lab/.work/evidence
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
+  linux-update:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    name: Signed N-1 AppImage update and data preservation
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      CARGO_BUILD_JOBS: '2'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+      - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # v1
+        with:
+          toolchain: '1.97.1'
+      - name: Native fixture and accessibility prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev \
+            libxdo-dev libssl-dev libdbus-1-dev build-essential file \
+            python3-gi gir1.2-atspi-2.0 at-spi2-core dbus-x11 gnome-keyring xvfb fuse3
+          if [ -e /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
+      - run: bash scripts/fetch-llama-server.sh --triple x86_64-unknown-linux-gnu
+      - name: Build the isolated production-custody fixture
+        working-directory: src-tauri
+        run: cargo build --locked --example update_fixture
+      - name: Apply the real public signed update and relaunch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/check-linux-update.py --fixture src-tauri/target/debug/examples/update_fixture --evidence "$RUNNER_TEMP/linux-update-evidence"
+      - uses: actions/upload-artifact@v7
+        if: ${{ !cancelled() }}
+        with:
+          name: linux-update-evidence
+          path: ${{ runner.temp }}/linux-update-evidence
+          if-no-files-found: error
+          retention-days: 7
+
+  cpu-inference:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    name: Real CPU inference and generated timeline
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      CARGO_BUILD_JOBS: '2'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: npm
+      - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # v1
+        with:
+          toolchain: '1.97.1'
+      - name: Native fixture prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev \
+            libxdo-dev libssl-dev libdbus-1-dev build-essential file dbus-x11 xvfb
+      - run: npm ci
+      - run: npx playwright-core install --with-deps chromium
+      - run: bash scripts/fetch-llama-server.sh --triple x86_64-unknown-linux-gnu
+      - name: Build the production sidecar and persistence fixture
+        working-directory: src-tauri
+        run: cargo build --locked --example ai_inference_fixture
+      # Re-download this weekly rather than evict the multi-hour WebKit cache
+      # with a second ~3 GB model entry. Every run verifies both registry hashes.
+      - name: Fetch and verify the exact model and projector
+        run: node --import tsx scripts/check-ai-inference.ts --models-dir "$RUNNER_TEMP/studyvis-ai-models" --prepare-models
+      - name: Run actual CPU focus inference and persist a generated timeline
+        run: dbus-run-session -- xvfb-run -a node --import tsx scripts/check-ai-inference.ts --models-dir "$RUNNER_TEMP/studyvis-ai-models" --fixture src-tauri/target/debug/examples/ai_inference_fixture --output lab/.work/evidence/ai-inference.json
+      - uses: actions/upload-artifact@v7
+        if: ${{ !cancelled() }}
+        with:
+          name: cpu-inference-evidence
+          path: |
+            lab/.work/evidence/ai-inference.json
+            lab/.work/evidence/ai-inference.json.native.log
+          if-no-files-found: error
+          retention-days: 7

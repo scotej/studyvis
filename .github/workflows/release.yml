@@ -408,6 +408,7 @@ jobs:
           trap 'rm -rf -- "$unpack"' EXIT
           tar --extract --gzip --file "$archive" --directory "$unpack"
           npm run check-notice-bundle -- "$unpack"
+          bash scripts/check-macos-runtime.sh "$unpack"
 
       - name: Verify notices and runtime in the exact Windows release installer
         if: runner.os == 'Windows'
@@ -429,10 +430,10 @@ jobs:
             if ($LASTEXITCODE -ne 0) {
               throw "Bundled third-party notice verification failed (exit $LASTEXITCODE)"
             }
-            ./scripts/check-windows-runtime.ps1 -ArtifactRoot $unpack
           } finally {
             Remove-Item -Recurse -Force $unpack -ErrorAction SilentlyContinue
           }
+          ./scripts/check-windows-install.ps1 -Installer $installers[0].FullName
 
       # CI validates its own independently built AppImage. Repeat the native
       # runtime inspection here so the exact signed artifact already uploaded
