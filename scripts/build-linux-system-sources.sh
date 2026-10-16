@@ -758,7 +758,7 @@ ABI in linux-appimage-external-sonames.txt; no other host borrowing is allowed.
 PACKAGE-INVENTORY.tsv records the exact binary-to-source version mapping and
 the packaged Debian copyright file. SOURCE-INVENTORY.tsv hashes every file
 downloaded from matching signed apt source indexes, except the hash-pinned
-historical AppArmor .7 snapshot. The sources directory
+historical AppArmor .7/.8 snapshots. The sources directory
 contains every .dsc/source component plus immutable llama/AppRun/linuxdeploy/
 plugin snapshots and the complete StudyVis type2 sources, licenses and link evidence.
 PACKAGING-TOOL-INVENTORY.tsv records verified input URLs/hashes and their pinned
@@ -862,14 +862,13 @@ if [[ $mode == bundle ]]; then
       cd "$download_dir"
       apt-get source --download-only --only-source "$source_package=$source_version" >/dev/null
     ); then
-      [[ $source_package == apparmor && \
-        $source_version == 4.0.1really4.0.1-0ubuntu0.24.04.7 ]] || {
+      [[ $source_package == apparmor ]] || {
         die "could not download exact Ubuntu source $source_package=$source_version"
       }
       [[ -z $(find "$download_dir" -mindepth 1 -maxdepth 1 -print -quit) ]] || {
         die "failed apt source left partial files for $source_package=$source_version"
       }
-      bash "$script_dir/download-linux-apparmor-source.sh" "$download_dir" || {
+      bash "$script_dir/download-linux-apparmor-source.sh" "$download_dir" "$source_version" || {
         die "could not download pinned Ubuntu snapshot source $source_package=$source_version"
       }
     fi
