@@ -21,6 +21,7 @@ type AuditWindow = typeof window & {
     off(event: string, listener: (data: FinishedStory) => void): void
   }
   __STORYBOOK_PREVIEW__?: {
+    ready(): Promise<void>
     storyStore?: { userGlobals?: { get(): { theme?: string } } }
   }
   __studyvisA11y?: {
@@ -41,8 +42,17 @@ const config: TestRunnerConfig = {
     await page.emulateMedia({ reducedMotion: 'reduce', colorScheme: theme })
     await page.goto(url.toString(), { waitUntil: 'load' })
     await page.waitForFunction(
-      () =>
-        (window as AuditWindow).__STORYBOOK_PREVIEW__?.storyStore?.userGlobals
+      () => {
+        const preview = (window as AuditWindow).__STORYBOOK_PREVIEW__
+        if (!preview) return false
+        return preview.ready().then(() => {
+          if (!preview.storyStore?.userGlobals)
+            throw new Error('Storybook initialized without user globals')
+          return true
+        })
+      },
+      undefined,
+      { timeout: 30_000 }
     )
     // With no initial story selection, Storybook ignores URL globals. Update
     // its initialized store before the runner selects the first story.
