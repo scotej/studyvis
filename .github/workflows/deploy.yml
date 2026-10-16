@@ -20,7 +20,7 @@ on:
       platforms:
         description: 'Installer platforms to build and smoke'
         type: choice
-        options: [all, macos-windows, linux]
+        options: [all, macos-windows, macos, windows, linux]
         default: all
   schedule:
     - cron: '41 4 * * 6'
@@ -152,7 +152,7 @@ jobs:
           case "$REQUESTED_PLATFORMS" in
             all) selected="$PLATFORM_MATRIX" ;;
             macos-windows) selected=$(jq -c '[.[] | select(.label != "Linux")]' <<< "$PLATFORM_MATRIX") ;;
-            linux) selected=$(jq -c '[.[] | select(.label == "Linux")]' <<< "$PLATFORM_MATRIX") ;;
+            macos|windows|linux) selected=$(jq -c --arg environment "preview-$REQUESTED_PLATFORMS" '[.[] | select(.environment == $environment)]' <<< "$PLATFORM_MATRIX") ;;
             *) echo 'Invalid installer platform selection' >&2; exit 1 ;;
           esac
           jq -e 'length > 0' <<< "$selected" >/dev/null

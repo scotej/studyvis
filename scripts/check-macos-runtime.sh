@@ -50,6 +50,17 @@ def startup_ready(contents, pid, version, started_ms):
     return native_version and renderer
 
 
+def engine_ready(option, output):
+    if option == "--version":
+        return re.search(r"version:\s+\d+", output) is not None
+    if option == "--list-devices":
+        # b9095 intentionally excludes CPU devices from this list. The macOS
+        # backend registration also emits no Windows/Linux-style dynamic
+        # loader message such as "loaded CPU backend".
+        return "Available devices:" in output
+    raise ValueError("unsupported engine smoke option: " + option)
+
+
 def visible_app_window(pid):
     # Read WindowServer metadata only; no screen pixels or Accessibility/TCC
     # grants are needed to correlate an on-screen application window by PID.
@@ -82,6 +93,11 @@ def visible_app_window(pid):
 
 
 def self_test():
+    assert engine_ready("--version", "version: 9095 (f3c3e0e9a)\nbuilt with AppleClang for Darwin arm64")
+    assert not engine_ready("--version", "built with AppleClang for Darwin arm64")
+    mac_devices = "Available devices:\n  MTL0: Apple Paravirtual device (4778 MiB, 4778 MiB free)\n  BLAS: Accelerate (0 MiB, 0 MiB free)"
+    assert engine_ready("--list-devices", mac_devices)
+    assert not engine_ready("--list-devices", "ggml_backend_load: loaded CPU backend")
     base = {"ts": "2026-01-01T00:00:01.000Z", "run": "native-run"}
     records = [
         {**base, "win": "native", "msg": "run.start", "data": {"pid": 123}},
@@ -104,7 +120,7 @@ def self_test():
         pass
     else:
         raise RuntimeError("unhandled renderer rejection passed the startup fixture")
-    print("macOS startup evidence fixtures passed (freshness, PID, versions, producer, partial log)")
+    print("macOS startup evidence fixtures passed (engine enumeration, freshness, PID, versions, producer, partial log)")
 
 
 def run(args, **kwargs):
@@ -202,10 +218,7 @@ def main():
     for option in ("--version", "--list-devices"):
         output = run([str(engine), option], cwd=runtime, env=engine_environment)
         print(output)
-        if option == "--version":
-            assert re.search(r"version:\s+\d+", output), "llama did not report its version"
-        else:
-            assert "Available devices:" in output and "loaded CPU backend" in output, "llama CPU fallback/device enumeration failed"
+        assert engine_ready(option, output), f"packaged llama did not report {option} output"
     process = None
     with tempfile.TemporaryDirectory(prefix="studyvis-macos-startup-") as temporary:
         log = data_roots[0] / "logs/studyvis.log"
