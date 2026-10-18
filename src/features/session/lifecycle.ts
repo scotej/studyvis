@@ -39,6 +39,7 @@ import { flushLog, logger, setLogContext } from '@/lib/log'
 import { clearSessionRecoveryOnLeave } from './recovery'
 
 const log = logger.child('session.lifecycle')
+export const LEAVE_ANNOUNCEMENT_TIMEOUT_MS = 1_000
 
 export type SessionRole = 'host' | 'guest'
 
@@ -515,8 +516,8 @@ export function buildLeaveHandler(args: {
   let teardownCommitted = false
   const performLeave = async () => {
     // Claim the end reason synchronously before the first await. The caller's
-    // UI path does the same before broadcasting `left`; this second claim is
-    // harmless and keeps direct handle.leave() calls correctly attributed.
+    // UI path may already have claimed it; this second claim is harmless and
+    // keeps direct handle.leave() calls correctly attributed.
     sessionStore.getState().setPendingEndReason('user')
     const endedAt = Date.now()
     const endedAtMono = monotonicNow()
@@ -592,6 +593,28 @@ export function buildLeaveHandler(args: {
       // Wrapper-local teardown (subscriptions/UI) cannot prevent the durable
       // room leave and session persistence after this non-retryable boundary.
       log.warn('session.teardown_commit_hook_failed', { err })
+    }
+    // #413: teardown owns the once-only announcement for Leave, companion,
+    // identity changes and confirmed quit. Bound signing/broadcast so a stuck
+    // peer cannot consume the quit budget before durable persistence starts.
+    if (endReason === 'user' && sessionState.announceLeave) {
+      const controller = new AbortController()
+      let timer: ReturnType<typeof setTimeout> | undefined
+      try {
+        await Promise.race([
+          sessionState.announceLeave(controller.signal).catch((err) => {
+            log.warn('session.left_announcement_failed', { err })
+          }),
+          new Promise<void>((resolve) => {
+            timer = setTimeout(resolve, LEAVE_ANNOUNCEMENT_TIMEOUT_MS)
+          }),
+        ])
+      } catch (err) {
+        log.warn('session.left_announcement_failed', { err })
+      } finally {
+        clearTimeout(timer)
+        controller.abort()
+      }
     }
     try {
       await args.room.leave()

@@ -77,6 +77,7 @@ vi.mock('@/features/ai/focusStore', () => ({
 
 import {
   buildLeaveHandler,
+  LEAVE_ANNOUNCEMENT_TIMEOUT_MS,
   mergeSessionStints,
 } from '@/features/session/lifecycle'
 import { useAuditStore } from '@/stores/auditStore'
@@ -136,6 +137,103 @@ describe('re-entry merge across leave cycles', () => {
     useSessionStore.getState().reset()
     vi.useFakeTimers()
     return () => vi.useRealTimers()
+  })
+
+  function announcedLeave(
+    announceLeave: (signal: AbortSignal) => Promise<void>
+  ) {
+    const roomLeave = vi.fn(async () => {})
+    const room = { leave: roomLeave } as unknown as TopicRoom
+    const store = createSessionStore()
+    const leave = buildLeaveHandler({
+      room,
+      store,
+      topic: 'announced',
+      startedAt: T0,
+    })
+    store.getState().begin({
+      sessionTopic: 'announced',
+      sessionPassword: 'pw',
+      isHost: false,
+      startedAt: T0,
+      room,
+      leave,
+    })
+    store.setState({ announceLeave })
+    return { store, leave, roomLeave }
+  }
+
+  test('every user teardown announces once before leaving, including concurrent quit (#413)', async () => {
+    const trace: string[] = []
+    let finish: (() => void) | undefined
+    const announce = vi.fn(async () => {
+      trace.push('left')
+      await new Promise<void>((resolve) => {
+        finish = resolve
+      })
+    })
+    const { leave, roomLeave, store } = announcedLeave(announce)
+    roomLeave.mockImplementation(async () => {
+      trace.push('room.leave')
+    })
+    const first = leave()
+    const quit = leave()
+    expect(quit).toBe(first)
+    expect(roomLeave).not.toHaveBeenCalled()
+    finish?.()
+    await Promise.all([first, quit])
+    expect(trace).toEqual(['left', 'room.leave'])
+    expect(announce).toHaveBeenCalledTimes(1)
+    expect(store.getState().status).toBe('ended')
+    expect(db.has('announced')).toBe(true)
+  })
+
+  test('a rejected announcement cannot prevent durable session teardown (#413)', async () => {
+    const { leave, store, roomLeave } = announcedLeave(async () => {
+      throw new Error('keychain unavailable')
+    })
+    await leave()
+    expect(roomLeave).toHaveBeenCalledTimes(1)
+    expect(store.getState().status).toBe('ended')
+    expect(db.has('announced')).toBe(true)
+  })
+
+  test('a hung announcement is aborted before teardown consumes the quit budget (#413)', async () => {
+    let signal: AbortSignal | undefined
+    const { leave, roomLeave, store } = announcedLeave(async (value) => {
+      signal = value
+      await new Promise<void>(() => {})
+    })
+    const pending = leave()
+    await vi.advanceTimersByTimeAsync(LEAVE_ANNOUNCEMENT_TIMEOUT_MS - 1)
+    expect(roomLeave).not.toHaveBeenCalled()
+    await vi.advanceTimersByTimeAsync(1)
+    await pending
+    expect(signal?.aborted).toBe(true)
+    expect(roomLeave).toHaveBeenCalledTimes(1)
+    expect(store.getState().status).toBe('ended')
+    expect(db.has('announced')).toBe(true)
+  })
+
+  test('a peer-forced ending does not announce a deliberate local departure (#413)', async () => {
+    const announce = vi.fn(async () => {})
+    const { leave, store } = announcedLeave(announce)
+    store.getState().setPendingEndReason('peer')
+    await leave()
+    expect(announce).not.toHaveBeenCalled()
+  })
+
+  test('a new stint cannot reuse the previous signed-audit producer (#413)', () => {
+    const { store } = announcedLeave(async () => {})
+    store.getState().begin({
+      sessionTopic: 'replacement',
+      sessionPassword: 'pw',
+      isHost: false,
+      startedAt: T0 + MIN,
+      room: fakeRoom(),
+      leave: async () => {},
+    })
+    expect(store.getState().announceLeave).toBeNull()
   })
 
   // I109 — the teardown flush is followed by four IPC round-trips, and the AI
