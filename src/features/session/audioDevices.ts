@@ -173,31 +173,41 @@ export async function swapAudioInput(
     const oldTrack = deps.localStream.getAudioTracks()[0] ?? null
 
     if (deps.room) {
-      for (const conn of Object.values(deps.room.getPeers())) {
-        for (const sender of conn.getSenders()) {
+      const attempted = new Set<RTCRtpSender>()
+      while (isCurrent()) {
+        // #381 — a join or same-ID replacement can publish the old local
+        // track during any await. Re-read current connections before commit.
+        const next = Object.values(deps.room.getPeers()).flatMap((connection) =>
+          connection
+            .getSenders()
+            .filter(
+              (sender) =>
+                sender.track?.kind === 'audio' &&
+                sender.track !== newTrack &&
+                !attempted.has(sender)
+            )
+            .map((sender) => ({ connection, sender }))
+        )[0]
+        if (!next) break
+        const { connection, sender } = next
+        // A failed/closed sender must not make reconciliation retry forever.
+        attempted.add(sender)
+        const operation = (async () => {
+          try {
+            await sender.replaceTrack(newTrack)
+          } catch (err) {
+            if (isCurrent()) log.error('replace_track.failed', { err })
+          }
+          completedSenders.push({ connection, sender })
           if (!isCurrent()) {
+            // Native replaceTrack can finish after ownership changed.
+            // Retire only this stopped track before the next capture is
+            // published, so addTrack cannot reuse a sender still changing.
             cancel()
-            return null
           }
-          if (sender.track && sender.track.kind === 'audio') {
-            const operation = (async () => {
-              try {
-                await sender.replaceTrack(newTrack)
-              } catch (err) {
-                if (isCurrent()) log.error('replace_track.failed', { err })
-              }
-              completedSenders.push({ connection: conn, sender })
-              if (!isCurrent()) {
-                // Native replaceTrack can finish after ownership changed.
-                // Retire only this stopped track before the next capture is
-                // published, so addTrack cannot reuse a sender still changing.
-                cancel()
-              }
-            })()
-            deps.onReplaceTrack?.(operation)
-            await operation
-          }
-        }
+        })()
+        deps.onReplaceTrack?.(operation)
+        await operation
       }
     }
 

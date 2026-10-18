@@ -99,6 +99,101 @@ describe('swapAudioInput (#47 A3)', () => {
     expect(local.tracks).toEqual([newTrack])
   })
 
+  test.each(['join', 'same-ID replacement'])(
+    'reconciles a %s arriving during each pending replacement',
+    async (arrival) => {
+      const old = fakeTrack()
+      const newTrack = fakeTrack()
+      const local = fakeLocalStream([old])
+      const pending: (() => void)[] = []
+      const connection = () => {
+        const sender = {
+          track: old,
+          replaceTrack: vi.fn(async (track: FakeTrack) => {
+            expect(newTrack.enabled).toBe(false)
+            await new Promise<void>((done) => pending.push(done))
+            sender.track = track
+          }),
+        }
+        return { getSenders: () => [sender], sender }
+      }
+      const incumbent = connection()
+      const firstArrival = connection()
+      const secondArrival = connection()
+      const peers: Record<string, ReturnType<typeof connection>> = { incumbent }
+      const deps = depsWith({ fresh: fakeFreshStream([newTrack]), local })
+      deps.room = {
+        getPeers: () => peers,
+      } as unknown as SwapAudioInputDeps['room']
+      const swapping = swapAudioInput('mic-2', deps, () => true)
+      await vi.waitFor(() => expect(pending).toHaveLength(1))
+      peers[arrival === 'join' ? 'arrival' : 'incumbent'] = firstArrival
+      pending.shift()!()
+      await vi.waitFor(() =>
+        expect(firstArrival.sender.replaceTrack).toHaveBeenCalledOnce()
+      )
+      peers[arrival === 'join' ? 'second-arrival' : 'incumbent'] = secondArrival
+      pending.shift()!()
+      await vi.waitFor(() =>
+        expect(secondArrival.sender.replaceTrack).toHaveBeenCalledOnce()
+      )
+      pending.shift()!()
+      expect(await swapping).toBe(newTrack)
+      expect(firstArrival.sender.track).toBe(newTrack)
+      expect(secondArrival.sender.track).toBe(newTrack)
+      expect(old.stop).toHaveBeenCalledOnce()
+      expect(newTrack.enabled).toBe(true)
+    }
+  )
+
+  test('skips a departed peer and does not retry a failed sender forever', async () => {
+    const old = fakeTrack()
+    const newTrack = fakeTrack()
+    const local = fakeLocalStream([old])
+    let release!: () => void
+    const first = {
+      getSenders: () => [
+        {
+          track: old,
+          replaceTrack: async () =>
+            new Promise<void>((done) => {
+              release = done
+            }),
+        },
+      ],
+    }
+    // Keep sender identity stable, as native getSenders() does.
+    const firstSenders = first.getSenders()
+    first.getSenders = () => firstSenders
+    const departedReplace = vi.fn(async () => {})
+    const failedReplace = vi.fn(async () => {
+      throw new Error('closed')
+    })
+    const peers = {
+      first,
+      departed: {
+        getSenders: () => [{ track: old, replaceTrack: departedReplace }],
+      },
+      failed: {
+        getSenders: () => [{ track: old, replaceTrack: failedReplace }],
+      },
+    }
+    const failedSenders = peers.failed.getSenders()
+    peers.failed.getSenders = () => failedSenders
+    const deps = depsWith({ fresh: fakeFreshStream([newTrack]), local })
+    deps.room = {
+      getPeers: () => peers,
+    } as unknown as SwapAudioInputDeps['room']
+    const swapping = swapAudioInput('mic-2', deps, () => false)
+    await vi.waitFor(() => expect(release).toBeTypeOf('function'))
+    delete (peers as Partial<typeof peers>).departed
+    release()
+    expect(await swapping).toBe(newTrack)
+    expect(departedReplace).not.toHaveBeenCalled()
+    expect(failedReplace).toHaveBeenCalledOnce()
+    expect(newTrack.enabled).toBe(false)
+  })
+
   test('mirrors the current PTT state onto the fresh track', async () => {
     const newTrack = fakeTrack()
     const local = fakeLocalStream([fakeTrack()])

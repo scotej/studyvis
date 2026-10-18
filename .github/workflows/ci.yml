@@ -88,6 +88,7 @@ jobs:
         run: |
           npx playwright-core install --with-deps chromium
           node --test tests/production/benchmark-images.mjs tests/production/turn-urls.mjs tests/production/signed-quit.mjs
+          node --test tests/production/audio-swap-join.mjs
 
       - name: Frontend interaction regressions
         run: npm run test:interaction
