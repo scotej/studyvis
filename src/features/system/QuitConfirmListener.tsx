@@ -36,6 +36,7 @@ export const QUIT_REQUESTED_EVENT = 'quit-requested'
 // behind a phantom confirm.
 export function QuitConfirmListener() {
   const [open, setOpen] = useState(false)
+  const isHost = useSessionStore((state) => state.isHost)
 
   useEffect(() => {
     let cancelled = false
@@ -90,7 +91,9 @@ export function QuitConfirmListener() {
         <DialogHeader>
           <DialogTitle>{strings.session.quitConfirm.title}</DialogTitle>
           <DialogDescription>
-            {strings.session.quitConfirm.body}
+            {isHost
+              ? strings.session.quitConfirm.hostBody
+              : strings.session.quitConfirm.body}
           </DialogDescription>
         </DialogHeader>
         <DialogFooter>

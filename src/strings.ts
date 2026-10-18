@@ -905,6 +905,8 @@ export const strings = {
     quitConfirm: {
       title: 'Leave your session and quit?',
       body: "You're in a live session. Quitting drops you from the call, and anyone else can keep studying. We'll offer to put you back in next time you open StudyVis.",
+      hostBody:
+        "You're hosting a live session. Quitting drops you from the call, and anyone else can keep studying. You won't be able to rejoin this session after reopening StudyVis.",
       cancelCta: 'Stay',
       confirmCta: 'Leave and quit',
     },
