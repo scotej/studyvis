@@ -1240,10 +1240,12 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   relaunchApp: async () => {
     try {
       await activeDeps.runtime.relaunchApp()
+      set({ error: null })
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
       log.error('relaunch.failed', { err })
       set({ error: message })
+      throw err
     }
   },
 }))

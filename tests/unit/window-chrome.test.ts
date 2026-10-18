@@ -198,10 +198,20 @@ describe('useSettingsStore — windowStyle setter + relaunchApp bridge', () => {
     expect(useSettingsStore.getState().error).toBeNull()
   })
 
-  test('relaunchApp surfaces runtime failure via store.error', async () => {
+  test('relaunchApp rejects to its caller and retains the diagnostic error (#414)', async () => {
     relaunchShouldFail = true
-    await useSettingsStore.getState().relaunchApp()
+    await expect(useSettingsStore.getState().relaunchApp()).rejects.toThrow(
+      'restart refused'
+    )
     expect(useSettingsStore.getState().error).toBe('restart refused')
+    expect(relaunchCalls).toBe(1)
+
+    relaunchShouldFail = false
+    await expect(
+      useSettingsStore.getState().relaunchApp()
+    ).resolves.toBeUndefined()
+    expect(useSettingsStore.getState().error).toBeNull()
+    expect(relaunchCalls).toBe(2)
   })
 
   test('readWindowStyleBootCache defaults to system in node-env', () => {
