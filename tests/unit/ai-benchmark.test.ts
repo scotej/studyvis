@@ -128,7 +128,7 @@ describe('runBenchmark', () => {
       })
     )
     try {
-      const pending = runBenchmark(SUPPORTED_MODELS[0], {
+      const pending = runBenchmark(SUPPORTED_MODELS[1], {
         modelPath: '/m.gguf',
         mmprojPath: '/p.gguf',
       })
@@ -244,7 +244,7 @@ describe('runBenchmark', () => {
       })
       try {
         await expect(
-          runBenchmark(SUPPORTED_MODELS[0], {
+          runBenchmark(SUPPORTED_MODELS[1], {
             modelPath: '/requested.gguf',
             mmprojPath: '/requested-mmproj.gguf',
           })
@@ -278,14 +278,14 @@ describe('runBenchmark', () => {
       await stop()
     }
     __setBenchmarkRuntime(env.runtime)
-    const first = runBenchmark(SUPPORTED_MODELS[0], {
+    const first = runBenchmark(SUPPORTED_MODELS[1], {
       modelPath: '/first.gguf',
       mmprojPath: '/first-mmproj.gguf',
     })
     await vi.waitFor(() => expect(env.startedWith).toHaveLength(1))
-    expect(useBenchmarkActivity.getState().modelId).toBe(SUPPORTED_MODELS[0].id)
+    expect(useBenchmarkActivity.getState().modelId).toBe(SUPPORTED_MODELS[1].id)
     await expect(
-      runBenchmark(SUPPORTED_MODELS[1], {
+      runBenchmark(SUPPORTED_MODELS[2], {
         modelPath: '/second.gguf',
         mmprojPath: '/second-mmproj.gguf',
       })
@@ -294,7 +294,7 @@ describe('runBenchmark', () => {
     releaseHealth()
     await vi.waitFor(() => expect(releaseStop).toBeTypeOf('function'))
     await expect(
-      runBenchmark(SUPPORTED_MODELS[1], {
+      runBenchmark(SUPPORTED_MODELS[2], {
         modelPath: '/second.gguf',
         mmprojPath: '/second-mmproj.gguf',
       })
@@ -308,7 +308,7 @@ describe('runBenchmark', () => {
     expect(useBenchmarkActivity.getState().modelId).toBeNull()
     env.runtime.waitForHealthy = async () => {}
     env.runtime.stopSidecar = stop
-    await runBenchmark(SUPPORTED_MODELS[1], {
+    await runBenchmark(SUPPORTED_MODELS[2], {
       modelPath: '/second.gguf',
       mmprojPath: '/second-mmproj.gguf',
     })
@@ -411,7 +411,7 @@ describe('runBenchmark', () => {
     }
     __setBenchmarkRuntime(wrapped)
     await expect(
-      runBenchmark(SUPPORTED_MODELS[0], {
+      runBenchmark(SUPPORTED_MODELS[1], {
         modelPath: '/m.gguf',
         mmprojPath: '/p.gguf',
       })
