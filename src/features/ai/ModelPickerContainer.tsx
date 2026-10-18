@@ -17,6 +17,7 @@ import {
   useState,
 } from 'react'
 import { toast } from 'sonner'
+import { Button } from '@/components/ui/button'
 
 import { ModelGuide } from './ModelGuide'
 import {
@@ -113,6 +114,9 @@ export const ModelPickerContainer = forwardRef<
   )
   const forget = useModelStore((s) => s.forget)
   const status = useModelStore((s) => s.status)
+  const modelError = useModelStore((s) => s.error)
+  const retryPersist = useModelStore((s) => s.retryPersist)
+  const [retryingSave, setRetryingSave] = useState(false)
   // Settings is reachable mid-session (#47 B2). Model setup is safe while AI
   // is off, but locks once the live loop owns the shared sidecar.
   const sessionActive = useSessionStore((s) => s.status === 'active')
@@ -262,7 +266,7 @@ export const ModelPickerContainer = forwardRef<
     (modelId: string) => {
       const bytes = lastDownloadBytes.current[modelId]
       if (typeof bytes === 'number' && bytes > 0) {
-        void recordInterruptedDownload(modelId, bytes)
+        void recordInterruptedDownload(modelId, bytes).catch(() => {})
       }
     },
     [recordInterruptedDownload]
@@ -617,9 +621,17 @@ export const ModelPickerContainer = forwardRef<
 
   const onDownload = useCallback(
     (spec: ModelSpec) => {
-      void runDownload(spec)
+      void runDownload(spec).catch((err) => {
+        const message = err instanceof Error ? err.message : String(err)
+        updateCard(spec.id, {
+          phase: 'failed',
+          downloadProgress: null,
+          errorMessage: message,
+        })
+        toast.error(strings.ai.picker.saveStateError(message))
+      })
     },
-    [runDownload]
+    [runDownload, updateCard]
   )
 
   const onBenchmark = useCallback(
@@ -731,8 +743,8 @@ export const ModelPickerContainer = forwardRef<
         })
         try {
           await getDownloadRuntime().remove(spec.id)
-          await forget(spec.id)
           await refreshInstallState(spec)
+          await forget(spec.id)
           updateCard(spec.id, {
             phase: 'idle',
             downloadProgress: null,
@@ -828,7 +840,29 @@ export const ModelPickerContainer = forwardRef<
     benchmarkBusy: benchmarkModelId !== null,
   }
 
-  return <ModelPicker {...props} />
+  return (
+    <div className="flex flex-col gap-4">
+      {status === 'ready' && modelError ? (
+        <div role="alert" className="flex flex-col gap-2">
+          <p>{strings.ai.picker.unsavedState(modelError)}</p>
+          <Button
+            variant="secondary"
+            size="sm"
+            disabled={retryingSave}
+            onClick={() => {
+              setRetryingSave(true)
+              void retryPersist()
+                .catch(() => {})
+                .finally(() => setRetryingSave(false))
+            }}
+          >
+            {strings.ai.picker.retrySaveCta}
+          </Button>
+        </div>
+      ) : null}
+      <ModelPicker {...props} />
+    </div>
+  )
 })
 
 function benchmarkPhaseToCard(p: BenchmarkProgress): DownloadPhase {

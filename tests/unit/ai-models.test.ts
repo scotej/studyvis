@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from 'vitest'
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 
 import {
   getModelUnavailableReason,
@@ -22,6 +22,11 @@ import {
   type ModelStoreDeps,
   type ProgressEvent,
 } from '@/features/ai'
+
+import {
+  __setDownloadRuntime,
+  __resetDownloadRuntime,
+} from '@/features/ai/download'
 
 class FakeStore {
   data = new Map<string, unknown>()
@@ -289,6 +294,123 @@ describe('useModelStore (LazyStore-backed)', () => {
   })
   afterEach(() => {
     __resetModelStoreDeps()
+    __resetDownloadRuntime()
+  })
+
+  test.each(['select', 'remove', 'remove-active'])(
+    'failed %s save is explicit and a retry persists the current snapshot (#424)',
+    async (operation) => {
+      const records = Object.fromEntries(
+        ['first', 'second'].map((modelId) => [
+          modelId,
+          { modelId, installedAt: 1, benchmark: null },
+        ])
+      )
+      let disk = { records, active_model_id: 'first' }
+      let pending = structuredClone(disk)
+      let fail = true
+      __setModelStoreDeps({
+        storeFactory: () => ({
+          get: async (key) =>
+            structuredClone(disk[key as keyof typeof disk]) as never,
+          set: async (key, value) => {
+            pending = { ...pending, [key]: structuredClone(value) }
+          },
+          delete: async () => false,
+          save: async () => {
+            if (fail) throw new Error('Synthetic write denied')
+            disk = structuredClone(pending)
+          },
+        }),
+      })
+      useModelStore.setState({
+        status: 'ready',
+        records,
+        activeModelId: 'first',
+        error: null,
+      })
+      const mutation =
+        operation === 'select'
+          ? useModelStore.getState().selectModel('second')
+          : useModelStore
+              .getState()
+              .forget(operation === 'remove-active' ? 'first' : 'second')
+      await expect(mutation).rejects.toThrow('Synthetic write denied')
+      expect(useModelStore.getState().error).toBe('Synthetic write denied')
+      expect(disk.active_model_id).toBe('first')
+      expect(Object.keys(disk.records)).toHaveLength(2)
+      fail = false
+      await useModelStore.getState().retryPersist()
+      expect(useModelStore.getState().error).toBeNull()
+      expect(disk.active_model_id).toBe(useModelStore.getState().activeModelId)
+      expect(disk.records).toEqual(useModelStore.getState().records)
+    }
+  )
+
+  test('rehydration cannot adopt a removed active model after its record save failed (#424)', async () => {
+    const { deps, store } = makeFakeDeps()
+    store.data.set('records', {
+      first: { modelId: 'first', installedAt: 1, benchmark: null },
+    })
+    store.data.set('active_model_id', 'first')
+    __setModelStoreDeps(deps)
+    __setDownloadRuntime({
+      installState: async () => ({
+        model: { exists: false, size: 0 },
+        mmproj: { exists: true, size: 1 },
+      }),
+    } as never)
+    await useModelStore.getState().hydrate()
+    expect(useModelStore.getState().activeModelId).toBeNull()
+    expect(useModelStore.getState().records.first.installedAt).toBeNull()
+    await expect(useModelStore.getState().selectModel('first')).rejects.toThrow(
+      'not installed'
+    )
+    expect(store.data.get('active_model_id')).toBeNull()
+  })
+
+  test('overlapping mutations save coherent snapshots in invocation order (#424)', async () => {
+    const saved: Array<{ records: unknown; active: unknown }> = []
+    let pending: Record<string, unknown> = {}
+    let releaseFirst!: () => void
+    let calls = 0
+    __setModelStoreDeps({
+      storeFactory: () => ({
+        get: async () => undefined,
+        set: async (key, value) => {
+          pending[key] = structuredClone(value)
+        },
+        delete: async () => false,
+        save: async () => {
+          if (++calls === 1)
+            await new Promise<void>((resolve) => {
+              releaseFirst = resolve
+            })
+          saved.push({
+            records: pending.records,
+            active: pending.active_model_id,
+          })
+          pending = {}
+        },
+      }),
+    })
+    useModelStore.setState({
+      status: 'ready',
+      records: {
+        first: { modelId: 'first', installedAt: 1, benchmark: null },
+        second: { modelId: 'second', installedAt: 1, benchmark: null },
+      },
+      activeModelId: 'first',
+    })
+    const first = useModelStore.getState().selectModel('second')
+    await vi.waitFor(() => expect(releaseFirst).toBeTypeOf('function'))
+    const second = useModelStore.getState().forget('first')
+    releaseFirst()
+    await Promise.all([first, second])
+    expect(Object.keys(saved[0].records as object)).toEqual(['first', 'second'])
+    expect(saved[0].active).toBe('second')
+    expect(Object.keys(saved[1].records as object)).toEqual(['second'])
+    expect(saved[1].active).toBe('second')
   })
 
   test('retained Moondream selection hydrates without mutation, refuses new activation, and remains explicitly removable', async () => {

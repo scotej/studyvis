@@ -2155,6 +2155,10 @@ export const strings = {
         `${displayName} installed and selected. Benchmark it for timing tuned to this computer.`,
       installedToast: (displayName: string) =>
         `${displayName} installed. Choose Use model when you're ready.`,
+      retrySaveCta: 'Retry saving',
+      unsavedState: (error: string) =>
+        `Couldn't save model setup. Your changes may be lost when StudyVis closes. ${error}`,
+      saveStateError: (error: string) => `Couldn't save model setup: ${error}`,
       selectedToast: (displayName: string) => `${displayName} is now in use.`,
       selectUnbenchmarkedTurnAiOff:
         'Turn AI off before choosing an unbenchmarked model. You can turn it back on and choose whether to benchmark first.',
