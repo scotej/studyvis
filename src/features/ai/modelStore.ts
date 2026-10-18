@@ -205,6 +205,8 @@ export const useModelStore = create<ModelState>((set, get) => ({
         typeof active === 'string' && active.length > 0 ? active : null
       let repaired = false
       for (const [modelId, record] of Object.entries(records)) {
+        // #422 retains unavailable model metadata until explicit removal.
+        if (getModelUnavailableReason(modelId)) continue
         if (!record || record.installedAt == null) continue
         try {
           const files = await getDownloadRuntime().installState(modelId)

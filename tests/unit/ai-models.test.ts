@@ -347,27 +347,80 @@ describe('useModelStore (LazyStore-backed)', () => {
     }
   )
 
-  test('rehydration cannot adopt a removed active model after its record save failed (#424)', async () => {
-    const { deps, store } = makeFakeDeps()
-    store.data.set('records', {
-      first: { modelId: 'first', installedAt: 1, benchmark: null },
-    })
-    store.data.set('active_model_id', 'first')
-    __setModelStoreDeps(deps)
-    __setDownloadRuntime({
-      installState: async () => ({
+  test.each(['selection-only', 'retained-record'])(
+    'rehydration preserves unavailable %s without filesystem probes or migration writes (#424, #422)',
+    async (mode) => {
+      const { deps, store } = makeFakeDeps()
+      const records =
+        mode === 'retained-record'
+          ? {
+              moondream2: {
+                modelId: 'moondream2',
+                installedAt: 123,
+                benchmark: summariseBenchmark({
+                  samplesSec: [2, 3, 4],
+                  completedAtSec: 99,
+                }),
+                interruptedDownload: { bytesReceived: 777, at: 789 },
+              },
+            }
+          : {}
+      store.data.set('records', records)
+      store.data.set('active_model_id', 'moondream2')
+      const before = structuredClone([...store.data])
+      const write = vi.spyOn(store, 'set')
+      const remove = vi.spyOn(store, 'delete')
+      const paths = vi.fn()
+      const installState = vi.fn(async () => ({
+        model: { exists: false, size: 0 },
+        mmproj: { exists: false, size: 0 },
+      }))
+      __setModelStoreDeps(deps)
+      __setDownloadRuntime({ paths, installState } as never)
+
+      await useModelStore.getState().hydrate()
+
+      expect(useModelStore.getState()).toMatchObject({
+        status: 'ready',
+        activeModelId: 'moondream2',
+        records,
+        error: null,
+      })
+      expect([...store.data]).toEqual(before)
+      expect(store.saved).toBe(0)
+      expect(write).not.toHaveBeenCalled()
+      expect(remove).not.toHaveBeenCalled()
+      expect(paths).not.toHaveBeenCalled()
+      expect(installState).not.toHaveBeenCalled()
+    }
+  )
+
+  test.each(['qwen2_5-vl-3b', 'unknown-installed-model'])(
+    'rehydration cannot adopt removed active %s after its record save failed (#424)',
+    async (modelId) => {
+      const { deps, store } = makeFakeDeps()
+      store.data.set('records', {
+        [modelId]: { modelId, installedAt: 1, benchmark: null },
+      })
+      store.data.set('active_model_id', modelId)
+      __setModelStoreDeps(deps)
+      const installState = vi.fn(async () => ({
         model: { exists: false, size: 0 },
         mmproj: { exists: true, size: 1 },
-      }),
-    } as never)
-    await useModelStore.getState().hydrate()
-    expect(useModelStore.getState().activeModelId).toBeNull()
-    expect(useModelStore.getState().records.first.installedAt).toBeNull()
-    await expect(useModelStore.getState().selectModel('first')).rejects.toThrow(
-      'not installed'
-    )
-    expect(store.data.get('active_model_id')).toBeNull()
-  })
+      }))
+      __setDownloadRuntime({
+        installState,
+      } as never)
+      await useModelStore.getState().hydrate()
+      expect(useModelStore.getState().activeModelId).toBeNull()
+      expect(useModelStore.getState().records[modelId].installedAt).toBeNull()
+      await expect(
+        useModelStore.getState().selectModel(modelId)
+      ).rejects.toThrow('not installed')
+      expect(store.data.get('active_model_id')).toBeNull()
+      expect(installState).toHaveBeenCalledExactlyOnceWith(modelId)
+    }
+  )
 
   test('overlapping mutations save coherent snapshots in invocation order (#424)', async () => {
     const saved: Array<{ records: unknown; active: unknown }> = []
