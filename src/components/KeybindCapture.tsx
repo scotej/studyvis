@@ -15,6 +15,15 @@ import { describeConflict } from '@/lib/keybindings-copy'
 import { cn } from '@/lib/utils'
 import { strings } from '@/strings'
 
+type CaptureOperation = {
+  cancel: () => void
+  active: boolean
+  committing: boolean
+}
+// #393 — keyboard capture is document-wide, so ownership must be shared by
+// every control in this document rather than one armed flag per instance.
+let activeCapture: CaptureOperation | null = null
+
 export type KeybindCaptureProps = {
   action: ShortcutAction
   combo: Combo
@@ -41,17 +50,32 @@ export function KeybindCapture({
   const [error, setError] = useState<string | null>(null)
   const buttonRef = useRef<HTMLButtonElement | null>(null)
   const errorId = useId()
+  const captureRef = useRef<CaptureOperation | null>(null)
 
   const cancel = useCallback(() => {
+    const capture = captureRef.current
+    if (capture) capture.active = false
+    if (activeCapture === capture) activeCapture = null
+    captureRef.current = null
     setArmed(false)
     setError(null)
   }, [])
 
+  useEffect(
+    () => () => {
+      const capture = captureRef.current
+      if (capture) capture.active = false
+      if (activeCapture === capture) activeCapture = null
+    },
+    []
+  )
+
   useEffect(() => {
-    if (!armed) return
+    const capture = captureRef.current
+    if (!armed || !capture) return
     buttonRef.current?.focus()
-    let commitInFlight = false
     const handler = (event: KeyboardEvent) => {
+      if (!capture.active || activeCapture !== capture) return
       // Held-key autorepeat fires a stream of keydowns — ignore them so a
       // single press doesn't queue multiple commit attempts (the second one
       // would race against the optimistic set + Rust re-register).
@@ -74,7 +98,7 @@ export function KeybindCapture({
       }
       event.preventDefault()
       event.stopPropagation()
-      if (commitInFlight) return
+      if (capture.committing) return
       const captured = comboFromKeyboardEvent(event, platform)
       const conflict = validateCombo(captured, {
         otherCombo,
@@ -85,16 +109,16 @@ export function KeybindCapture({
         setError(describeConflict(captured, conflict, platform))
         return
       }
-      commitInFlight = true
+      capture.committing = true
       void (async () => {
         try {
           await onCommit(captured)
-          setError(null)
-          setArmed(false)
+          if (capture.active && activeCapture === capture) cancel()
         } catch (err) {
+          if (!capture.active || activeCapture !== capture) return
           setError(err instanceof Error ? err.message : String(err))
         } finally {
-          commitInFlight = false
+          capture.committing = false
         }
       })()
     }
@@ -109,6 +133,10 @@ export function KeybindCapture({
       cancel()
       return
     }
+    activeCapture?.cancel()
+    const capture = { cancel, active: true, committing: false }
+    captureRef.current = capture
+    activeCapture = capture
     setError(null)
     setArmed(true)
   }, [armed, cancel, disabled])
