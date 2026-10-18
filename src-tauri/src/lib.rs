@@ -292,7 +292,11 @@ pub fn run() {
                 if QuitFlag::is_armed(app) {
                     return;
                 }
-                if !MinimizeToTrayFlag::is_enabled(app) {
+                // #421 — a saved preference cannot make an absent Linux tray
+                // reachable. Use the ordinary confirm/quit path after host loss.
+                if !(MinimizeToTrayFlag::is_enabled(app)
+                    && commands::system::tray_is_reachable(app))
+                {
                     // User has opted out of close-to-tray; honor a real quit.
                     // On macOS this matches native Cmd+Q expectation; on
                     // Windows / Linux closing the window exits the process.
@@ -816,7 +820,7 @@ fn setup_desktop(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>>
     // error out of setup() would panic before the window ever paints, and
     // succeeding-into-invisible is just as bad combined with close-to-tray:
     // the window hides and nothing can bring it back. So: log loudly and
-    // force the close behavior back to real quit by clearing the tray flag.
+    // keep closing on the ordinary quit path while the tray is unreachable.
     // While no tray exists, `system_minimize_to_tray_set_enabled` refuses
     // enables at the command layer and the JS toggle reverts, so the UI
     // never claims a behavior this desktop can't deliver.
@@ -885,10 +889,9 @@ fn setup_desktop(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>>
                     );
                 }
                 TrayAvailableFlag::set(app.app_handle(), host_ready);
-                if !host_ready {
-                    // No reachable tray → nothing can un-hide the window.
-                    MinimizeToTrayFlag::set(app.app_handle(), false);
-                }
+                // #421 — keep the preference intact. CloseRequested checks
+                // current reachability, so absence quits safely and late host
+                // arrival can honor the user's choice without a relaunch.
             }
             #[cfg(not(target_os = "linux"))]
             TrayAvailableFlag::set(app.app_handle(), true);

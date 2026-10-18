@@ -129,17 +129,10 @@ impl WindowStyleAppliedFlag {
     }
 }
 
-// #263 — Whether a StatusNotifier host can actually render the tray icon and
-// bring the window back. Set once by setup_desktop: true when the build
-// succeeded AND the session bus reports a watcher with a registered host
-// (`status_notifier_host_ready`). Construction alone proves nothing —
-// tray-icon's Linux constructor returns Ok even on stock GNOME, where no
-// host exists to draw anything, so a successfully built tray is exactly the
-// case that still strands the window. When false,
-// `system_minimize_to_tray_set_enabled` refuses enable requests — hiding the
-// only window with no way back reads to the user as "the app cannot be
-// closed". The stored settings.json value keeps whatever the user chose, so
-// fixing the desktop environment and relaunching restores their preference.
+// #263 / I114 / #421 — last observed tray reachability. Linux refreshes this
+// from the current watcher/host state before enabling close-to-tray or hiding;
+// tray construction and a previous host observation cannot prove reachability.
+// The stored settings preference remains independent of desktop availability.
 pub struct TrayAvailableFlag(pub AtomicBool);
 
 impl TrayAvailableFlag {
@@ -151,6 +144,7 @@ impl TrayAvailableFlag {
         app.state::<Self>().0.store(available, Ordering::Relaxed);
     }
 
+    #[cfg(not(target_os = "linux"))]
     pub fn is_available<R: Runtime>(app: &AppHandle<R>) -> bool {
         app.state::<Self>().0.load(Ordering::Relaxed)
     }
@@ -923,23 +917,19 @@ pub fn app_quit<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
     Ok(())
 }
 
-// I114 — re-run the boot-time tray probe and latch a newly available tray.
-// Linux is the only platform whose answer can change while the app runs: the
-// AppIndicator is registered either way and only becomes visible once a
-// StatusNotifier host is on the session bus. Elsewhere the flag is false only
-// because tray creation itself failed, which this cannot undo.
+// I114 / #421 — Linux's tray host can arrive OR disappear while the process
+// runs. Require both our constructed icon and a currently registered host.
 #[cfg(target_os = "linux")]
-fn refresh_tray_available<R: Runtime>(app: &AppHandle<R>) -> bool {
-    let ready = crate::linux_diagnostics::status_notifier_host_ready();
-    if ready {
-        TrayAvailableFlag::set(app, true);
-    }
+pub fn tray_is_reachable<R: Runtime>(app: &AppHandle<R>) -> bool {
+    let ready = app.tray_by_id("studyvis-main").is_some()
+        && crate::linux_diagnostics::status_notifier_host_ready();
+    TrayAvailableFlag::set(app, ready);
     ready
 }
 
 #[cfg(not(target_os = "linux"))]
-fn refresh_tray_available<R: Runtime>(_app: &AppHandle<R>) -> bool {
-    false
+pub fn tray_is_reachable<R: Runtime>(app: &AppHandle<R>) -> bool {
+    TrayAvailableFlag::is_available(app)
 }
 
 #[tauri::command]
@@ -951,13 +941,9 @@ pub fn system_minimize_to_tray_set_enabled<R: Runtime>(
     // window with no way to bring it back. Refuse; the JS store keeps the
     // user's chosen value so a fixed desktop environment restores it.
     //
-    // I114 — but ask again first. The flag is written once, inside
-    // `setup_desktop`, so a user who read that message, installed an
-    // AppIndicator extension and watched the StatusNotifier icon appear was
-    // still refused for the rest of the process, with nothing saying a relaunch
-    // was needed. The tray icon itself was registered at boot and is waiting
-    // for a host, so a host that has since arrived makes it genuinely usable.
-    if enabled && !TrayAvailableFlag::is_available(&app) && !refresh_tray_available(&app) {
+    // I114 / #421 — refresh on every enable, including after a previous
+    // success. A host may have appeared or disappeared since that observation.
+    if enabled && !tray_is_reachable(&app) {
         return Err(
             "tray unavailable: enable a tray/AppIndicator extension before using close-to-tray"
                 .to_string(),
