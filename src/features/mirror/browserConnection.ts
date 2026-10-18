@@ -62,6 +62,8 @@ export function createBrowserConnection(): BrowserConnection {
   let retries = 0
   let stopped = false
   let connectionRun = 0
+  let pairingRun = 0
+  let pendingPair: AbortController | null = null
   let currentSessionId = readMirrorSnapshot(restored)?.sessionId ?? null
   let completedSessionId =
     restoredReport?.mirrorSessionId ?? restoredReport?.session.id ?? null
@@ -293,34 +295,49 @@ export function createBrowserConnection(): BrowserConnection {
       }
     },
     async pair(password) {
-      const response = await fetch('/api/pair', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'same-origin',
-        cache: 'no-store',
-        body: JSON.stringify({
-          password: password.replace(/[\s-]/g, '').toUpperCase(),
-        }),
-      })
-      if (!response.ok) {
-        update({
-          error:
-            response.status === 429
-              ? 'rate_limited'
-              : response.status === 409
-                ? 'in_use'
-                : 'pair_failed',
+      const run = ++pairingRun
+      pendingPair?.abort()
+      const controller = new AbortController()
+      pendingPair = controller
+      try {
+        const response = await fetch('/api/pair', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'same-origin',
+          cache: 'no-store',
+          signal: controller.signal,
+          body: JSON.stringify({
+            password: password.replace(/[\s-]/g, '').toUpperCase(),
+          }),
         })
-        throw new Error('Pairing failed')
+        // #412: a response may have issued an HttpOnly cookie already. That
+        // cookie does not grant an abandoned attempt ownership of this UI.
+        if (run !== pairingRun || controller.signal.aborted) return
+        if (!response.ok) {
+          update({
+            error:
+              response.status === 429
+                ? 'rate_limited'
+                : response.status === 409
+                  ? 'in_use'
+                  : 'pair_failed',
+          })
+          throw new Error('Pairing failed')
+        }
+        stopped = false
+        cancelControls()
+        connectionRun++
+        socket?.close()
+        if (heartbeat) clearInterval(heartbeat)
+        heartbeat = null
+        clearMedia()
+        connect()
+      } catch (error) {
+        if (run !== pairingRun || controller.signal.aborted) return
+        throw error
+      } finally {
+        if (pendingPair === controller) pendingPair = null
       }
-      stopped = false
-      cancelControls()
-      connectionRun++
-      socket?.close()
-      if (heartbeat) clearInterval(heartbeat)
-      heartbeat = null
-      clearMedia()
-      connect()
     },
     sendControl(control) {
       if (state.status === 'connected') send({ type: 'control', control })
@@ -366,6 +383,9 @@ export function createBrowserConnection(): BrowserConnection {
       }
     },
     disconnect() {
+      pairingRun++
+      pendingPair?.abort()
+      pendingPair = null
       stopped = true
       cancelControls()
       currentSessionId = null
