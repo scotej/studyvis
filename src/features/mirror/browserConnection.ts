@@ -63,7 +63,7 @@ export function createBrowserConnection(): BrowserConnection {
   let stopped = false
   let connectionRun = 0
   let pairingRun = 0
-  let pendingPair: AbortController | null = null
+  let pendingPair: Promise<Response> | null = null
   let currentSessionId = readMirrorSnapshot(restored)?.sessionId ?? null
   let completedSessionId =
     restoredReport?.mirrorSessionId ?? restoredReport?.session.id ?? null
@@ -296,23 +296,32 @@ export function createBrowserConnection(): BrowserConnection {
     },
     async pair(password) {
       const run = ++pairingRun
-      pendingPair?.abort()
-      const controller = new AbortController()
-      pendingPair = controller
+      // #412: POST may have reserved the sole host controller before its
+      // HttpOnly cookie arrives. Let that credential handoff finish, including
+      // after Disconnect, before a replacement request can use the cookie.
+      if (pendingPair) {
+        try {
+          await pendingPair
+        } catch {
+          /* A failed earlier request does not prevent an explicit retry. */
+        }
+        if (run !== pairingRun) return
+      }
+      const request = fetch('/api/pair', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        cache: 'no-store',
+        body: JSON.stringify({
+          password: password.replace(/[\s-]/g, '').toUpperCase(),
+        }),
+      })
+      pendingPair = request
       try {
-        const response = await fetch('/api/pair', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          credentials: 'same-origin',
-          cache: 'no-store',
-          signal: controller.signal,
-          body: JSON.stringify({
-            password: password.replace(/[\s-]/g, '').toUpperCase(),
-          }),
-        })
+        const response = await request
         // #412: a response may have issued an HttpOnly cookie already. That
         // cookie does not grant an abandoned attempt ownership of this UI.
-        if (run !== pairingRun || controller.signal.aborted) return
+        if (run !== pairingRun) return
         if (!response.ok) {
           update({
             error:
@@ -333,10 +342,10 @@ export function createBrowserConnection(): BrowserConnection {
         clearMedia()
         connect()
       } catch (error) {
-        if (run !== pairingRun || controller.signal.aborted) return
+        if (run !== pairingRun) return
         throw error
       } finally {
-        if (pendingPair === controller) pendingPair = null
+        if (pendingPair === request) pendingPair = null
       }
     },
     sendControl(control) {
@@ -384,8 +393,6 @@ export function createBrowserConnection(): BrowserConnection {
     },
     disconnect() {
       pairingRun++
-      pendingPair?.abort()
-      pendingPair = null
       stopped = true
       cancelControls()
       currentSessionId = null
