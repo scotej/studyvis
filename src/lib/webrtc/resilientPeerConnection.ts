@@ -3,14 +3,12 @@
 // trystero declares a peer closed 5 s after its RTCPeerConnection reports
 // `disconnected` (`disconnectedCloseDelayMs` in @trystero-p2p/core's peer.mjs),
 // and that detaches EVERY room for that friend — session, presence and inbox
-// alike, since one connection is shared across all of them. Worse, it does
-// not close the connection: `SharedPeerManager.clear(…, {destroyPeer: false})`
-// leaves it open with our senders still attached, which is why #264's reporter
-// kept appearing LIVE to their friend while their own session sat empty. The
-// friend's side then goes on reading that connection as a healthy connected
-// peer and drops every offer we send, so the session cannot re-form until it
-// is actually shut — `closeTransport` below, called from
-// features/session/lifecycle.ts on the way out. Five seconds is shorter than
+// alike, since one connection is shared across all of them. Before the pinned
+// #403 fix, that close notification abandoned an open connection, leaving the
+// friend reading it as live and rejecting fresh offers. The pinned core now
+// destroys the physical peer before notifying every room, including presence
+// and inbox; closeTransport remains a defensive session departure fallback.
+// Five seconds is shorter than
 // an ordinary Wi-Fi roam and far shorter than the multi-second process stalls
 // a saturated machine produces while the on-device model runs: #264 lost a
 // ten-minute session to a 5.5 s stall.
@@ -45,9 +43,8 @@ export type TransportHealth = {
   // The last `connectionState` seen while the connection was live. Read at
   // peer-leave time to tell a clean remote departure ('connected') from a
   // transport loss ('disconnected' / 'failed'). It is needed because the
-  // instantaneous state does not answer the question: trystero declares a
-  // peer gone WITHOUT closing its connection, so by then the state may read
-  // anything from 'disconnected' to a recovered 'connected'.
+  // instantaneous state does not answer the question: the pinned core closes
+  // the connection before notifying its rooms, so it can already read 'closed'.
   lastLiveConnectionState: RTCPeerConnectionState
   // Wall-clock ms at which the ICE agent first reported `disconnected` in the
   // current degraded stretch, or null while the transport is healthy.
