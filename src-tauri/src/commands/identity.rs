@@ -222,7 +222,7 @@ fn check_stored_keys(payload: &str, record: &IdentityRecord) -> IdentityKeysStat
 
 // #380: possession alone does not prove identity.json describes the credential.
 // Derive and compare both public keys without returning private material to JS.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn identity_keys_status(record: IdentityRecord) -> Result<IdentityKeysStatus, String> {
     identity_keys_status_from_entry(&keys_entry()?, &record)
 }
