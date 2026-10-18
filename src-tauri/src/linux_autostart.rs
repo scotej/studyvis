@@ -253,10 +253,25 @@ fn migrate_legacy_entry_with_cleanup(
 ) -> Result<(), String> {
     // #420: HOME and XDG_CONFIG_HOME select roots, which may be directory
     // aliases. Resolve those roots while retaining link checks below them.
-    let resolve = |path: &Path| match path.canonicalize() {
-        Ok(path) => Ok(path),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(path.to_owned()),
-        Err(error) => Err(error.to_string()),
+    let resolve = |path: &Path| {
+        let mut ancestor = path;
+        let mut missing = Vec::new();
+        loop {
+            match ancestor.canonicalize() {
+                Ok(mut resolved) => {
+                    for component in missing.into_iter().rev() {
+                        resolved.push(component);
+                    }
+                    break Ok(resolved);
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                    let component = ancestor.file_name().ok_or_else(|| error.to_string())?;
+                    missing.push(component.to_owned());
+                    ancestor = ancestor.parent().ok_or_else(|| error.to_string())?;
+                }
+                Err(error) => break Err(error.to_string()),
+            }
+        }
     };
     let selected_directory = resolve(selected)?;
     let legacy_directory = resolve(legacy)?;
@@ -662,6 +677,34 @@ mod tests {
             expected
         );
         assert!(!entry_path(&legacy, "studyvis").exists());
+    }
+
+    #[test]
+    fn missing_xdg_directory_below_linked_home_migrates_existing_opt_in() {
+        let fixture = Fixture::new();
+        let target = fixture.0.join("actual-home");
+        let home = fixture.0.join("home-alias");
+        std::fs::create_dir(&target).unwrap();
+        std::os::unix::fs::symlink(&target, &home).unwrap();
+        let legacy = home.join(".config");
+        let selected =
+            selected_config_directory(&home, Some(home.join("new-parent/new-config").as_os_str()));
+        let executable = fixture.0.join("StudyVis.AppImage");
+        set_entry_enabled(&legacy, "studyvis", &executable, true).unwrap();
+        let expected = std::fs::read(entry_path(&legacy, "studyvis")).unwrap();
+        assert!(!selected.exists());
+
+        migrate_legacy_entry(&selected, &legacy, "studyvis", &executable).unwrap();
+
+        assert_eq!(
+            std::fs::read(entry_path(&selected, "studyvis")).unwrap(),
+            expected
+        );
+        assert!(!entry_path(&legacy, "studyvis").exists());
+        assert!(std::fs::symlink_metadata(&home)
+            .unwrap()
+            .file_type()
+            .is_symlink());
     }
 
     #[test]
