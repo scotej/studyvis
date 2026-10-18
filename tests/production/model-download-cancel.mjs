@@ -4,6 +4,8 @@ import { test } from 'node:test'
 import { chromium } from 'playwright-core'
 import { build } from 'vite'
 
+const DOWNLOAD_MODEL_ID = 'qwen2_5-vl-3b'
+
 test('Cancel owns model preflight and cannot cancel a later retry (#387)', async () => {
   const root = fileURLToPath(new URL('../../', import.meta.url))
   const fixture = `
@@ -16,6 +18,7 @@ test('Cancel owns model preflight and cannot cancel a later retry (#387)', async
     import { useSettingsStore } from '@/stores/settingsStore'
     import { useSessionStore } from '@/stores/sessionStore'
     const mode = new URLSearchParams(location.search).get('mode')
+    const downloadModelId = ${JSON.stringify(DOWNLOAD_MODEL_ID)}
     const traces = []
     const heads = []
     let finishDownload, finishCancel, emitProgress
@@ -49,7 +52,7 @@ test('Cancel owns model preflight and cannot cancel a later retry (#387)', async
       replyHead: index => heads[index](),
       finishDownload: () => finishDownload(),
       finishCancel: () => finishCancel(),
-      emitOldProgress: () => emitProgress({ model_id: 'moondream2', phase: 'downloading', file: 'model', file_index: 0, file_count: 2, bytes_received: 123, total_bytes: 456, error: null }),
+      emitOldProgress: () => emitProgress({ model_id: downloadModelId, phase: 'downloading', file: 'model', file_index: 0, file_count: 2, bytes_received: 123, total_bytes: 456, error: null }),
       remount: () => { root.unmount(); root = createRoot(document.getElementById('root')); root.render(React.createElement(ModelPickerContainer)) },
     })
     root = createRoot(document.getElementById('root'))
@@ -119,7 +122,9 @@ test('Cancel owns model preflight and cannot cancel a later retry (#387)', async
         (entryFile) => import('/' + entryFile),
         entry.fileName
       )
-      const card = page.locator('[data-slot="model-card"]').first()
+      const card = page.locator(
+        `[data-slot="model-card"][aria-labelledby="model-${DOWNLOAD_MODEL_ID}-name"]`
+      )
       await card.getByRole('button', { name: /Download/, exact: true }).click()
       await page.waitForFunction(() => window.snapshot().heads >= 1)
       if (mode !== 'preflight')
