@@ -3,6 +3,7 @@ import type { TurnServerConfig } from 'trystero'
 import { logger } from '@/lib/log'
 import {
   useSettingsStore,
+  normalizeTurnServer,
   type CustomTurnServer,
   type TurnPreference,
 } from '@/stores/settingsStore'
@@ -75,11 +76,13 @@ export function userTurnServers(
   server: CustomTurnServer | null
 ): TurnServerConfig[] {
   if (!server) return []
+  const valid = normalizeTurnServer(server)
+  if (!valid) return []
   return [
     {
-      urls: server.url,
-      username: server.username,
-      credential: server.credential,
+      urls: valid.url,
+      username: valid.username,
+      credential: valid.credential,
     },
   ]
 }

@@ -582,7 +582,27 @@ export function parseRelayUrls(text: string): string[] {
 
 // F3 — a TURN url must be turn:/turns: (RFC 7065). turns: is TURN-over-TLS.
 export function isValidTurnUrl(v: unknown): v is string {
-  return typeof v === 'string' && /^turns?:\S+$/i.test(v.trim())
+  if (typeof v !== 'string') return false
+  // RFC 7065 is an opaque URI: no // authority, path, userinfo or fragment.
+  // Validate its host separately instead of letting a generic URL parser
+  // reinterpret the whole TURN URI as a hierarchical address.
+  const match =
+    /^turns?:(\[[^\]]+\]|(?:[a-z0-9\-._~!$&'()*+,;=]|%[0-9a-f]{2})+)(?::([0-9]+))?(?:\?transport=(udp|tcp))?$/i.exec(
+      v.trim()
+    )
+  if (!match) return false
+  const [, host, port] = match
+  if (port !== undefined && !(Number(port) >= 1 && Number(port) <= 65535)) {
+    return false
+  }
+  if (!host.startsWith('[')) return true
+  const literal = host.slice(1, -1)
+  if (/^v[0-9a-f]+\.[a-z0-9\-._~!$&'()*+,;=:]+$/i.test(literal)) return true
+  try {
+    return new URL(`http://${host}`).hostname.startsWith('[')
+  } catch {
+    return false
+  }
 }
 
 // F3 — accept a TURN server only when all three fields are present and the url
@@ -606,16 +626,16 @@ export function normalizeTurnServer(input: {
   return { url, username, credential }
 }
 
-function isCustomTurnServer(v: unknown): v is CustomTurnServer {
-  if (!v || typeof v !== 'object') return false
+function readCustomTurnServer(v: unknown): CustomTurnServer | null {
+  if (!v || typeof v !== 'object') return null
   const t = v as Partial<CustomTurnServer>
-  return (
-    isValidTurnUrl(t.url) &&
-    typeof t.username === 'string' &&
-    t.username.length > 0 &&
-    typeof t.credential === 'string' &&
-    t.credential.length > 0
+  if (
+    typeof t.url !== 'string' ||
+    typeof t.username !== 'string' ||
+    typeof t.credential !== 'string'
   )
+    return null
+  return normalizeTurnServer(t)
 }
 
 function readCustomRelayUrls(v: unknown): string[] {
@@ -836,9 +856,7 @@ export async function hydrateValuesFromStore(
         ? stored.windowLayout
         : DEFAULT_SETTINGS.windowLayout,
       customRelayUrls: readCustomRelayUrls(stored.customRelays),
-      turnServer: isCustomTurnServer(stored.turnServer)
-        ? stored.turnServer
-        : DEFAULT_SETTINGS.turnServer,
+      turnServer: readCustomTurnServer(stored.turnServer),
       audioInputDeviceId: readNullableString(stored.audioInput),
       audioOutputDeviceId: readNullableString(stored.audioOutput),
       peerVolumes: readPeerVolumes(stored.peerVolumes),
