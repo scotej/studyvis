@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
-import { expect, waitFor, within } from 'storybook/test'
+import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
 import {
   Report,
@@ -194,6 +194,111 @@ export const UserLeftWithRejoin: Story = {
     onRejoin: () => {
       // no-op for stories
     },
+  },
+}
+
+const pendingReport: () => Promise<ResolvedReportData> = () =>
+  new Promise(() => {})
+const failedReport = () => Promise.reject(new Error('Report read unavailable'))
+
+export const LoadingCanRejoin: Story = {
+  args: { ...MostlyOnTask.args, onRejoin: fn() },
+  render: (args) => (
+    <Report
+      sessionId="loading-rejoin"
+      onClose={onClose}
+      onRejoin={args.onRejoin}
+      rejoinDeadline={Date.now() + 20_000}
+      __loader={pendingReport}
+    />
+  ),
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getByRole('status')).toBeInTheDocument()
+    const rejoin = canvas.getByRole('button', {
+      name: strings.report.rejoinCta,
+    })
+    await expect(rejoin).toBeEnabled()
+    await userEvent.click(rejoin)
+    await expect(args.onRejoin).toHaveBeenCalledTimes(1)
+  },
+}
+
+export const FailedReportCanRejoin: Story = {
+  args: { ...MostlyOnTask.args, onRejoin: fn() },
+  render: (args) => (
+    <Report
+      sessionId="failed-rejoin"
+      onClose={onClose}
+      onRejoin={args.onRejoin}
+      rejoinDeadline={Date.now() + 20_000}
+      __loader={failedReport}
+    />
+  ),
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement)
+    await canvas.findByRole('alert')
+    await userEvent.click(
+      canvas.getByRole('button', { name: strings.common.actions.retry })
+    )
+    await canvas.findByRole('alert')
+    const rejoin = canvas.getByRole('button', {
+      name: strings.report.rejoinCta,
+    })
+    await expect(rejoin).toBeEnabled()
+    await userEvent.click(rejoin)
+    await expect(args.onRejoin).toHaveBeenCalledTimes(1)
+  },
+}
+
+export const RetryDoesNotRearmRejoin: Story = {
+  args: { ...MostlyOnTask.args, onRejoin: fn() },
+  render: (args) => (
+    <Report
+      sessionId="expired-rejoin"
+      onClose={onClose}
+      onRejoin={args.onRejoin}
+      rejoinDeadline={Date.now() + 200}
+      __loader={failedReport}
+    />
+  ),
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement)
+    await canvas.findByRole('alert')
+    await waitFor(() =>
+      expect(
+        canvas.getByRole('button', { name: strings.report.rejoinCta })
+      ).toBeDisabled()
+    )
+    await userEvent.click(
+      canvas.getByRole('button', { name: strings.common.actions.retry })
+    )
+    await canvas.findByRole('alert')
+    const rejoin = canvas.getByRole('button', {
+      name: strings.report.rejoinCta,
+    })
+    await expect(rejoin).toBeDisabled()
+    // Native click ignores a disabled button; userEvent refuses its CSS hit target.
+    rejoin.click()
+    await expect(args.onRejoin).not.toHaveBeenCalled()
+  },
+}
+
+export const HistoricalLoadingHasNoRejoin: Story = {
+  args: MostlyOnTask.args,
+  render: () => (
+    <Report
+      sessionId="historical-loading"
+      onClose={onClose}
+      __loader={pendingReport}
+    />
+  ),
+  play: async ({ canvasElement }) => {
+    await expect(
+      within(canvasElement).queryByRole('button', {
+        name: strings.report.rejoinCta,
+      })
+    ).not.toBeInTheDocument()
   },
 }
 

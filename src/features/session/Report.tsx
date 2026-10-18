@@ -146,6 +146,40 @@ function isRejoinAvailable(
   return onRejoin !== undefined && (deadline === undefined || now < deadline)
 }
 
+function RejoinAction({
+  onRejoin,
+  deadline,
+}: {
+  onRejoin?: () => void
+  deadline?: number
+}) {
+  const [expiredDeadline, setExpiredDeadline] = useState<number | null>(null)
+  const available =
+    isRejoinAvailable(onRejoin, deadline) && expiredDeadline !== deadline
+  useEffect(() => {
+    if (!isRejoinAvailable(onRejoin, deadline) || deadline === undefined) return
+    const handle = setTimeout(
+      () => setExpiredDeadline(deadline),
+      Math.max(0, deadline - Date.now())
+    )
+    return () => clearTimeout(handle)
+  }, [onRejoin, deadline])
+
+  if (!onRejoin) return null
+  return (
+    <Button
+      variant="default"
+      size="sm"
+      disabled={!available}
+      onClick={() => {
+        if (available && isRejoinAvailable(onRejoin, deadline)) onRejoin()
+      }}
+    >
+      <RotateCcwIcon /> {strings.report.rejoinCta}
+    </Button>
+  )
+}
+
 export function Report({
   sessionId,
   topContent,
@@ -238,15 +272,18 @@ export function Report({
                 {strings.report.eyebrow}
               </h1>
             </div>
-            <Button
-              ref={closeButtonRef}
-              variant="secondary"
-              size="sm"
-              onClick={onClose}
-              autoFocus={focusCloseOnMount}
-            >
-              <ChevronLeftIcon /> {closeLabel}
-            </Button>
+            <div className="flex items-center gap-2">
+              <RejoinAction onRejoin={onRejoin} deadline={rejoinDeadline} />
+              <Button
+                ref={closeButtonRef}
+                variant="secondary"
+                size="sm"
+                onClick={onClose}
+                autoFocus={focusCloseOnMount}
+              >
+                <ChevronLeftIcon /> {closeLabel}
+              </Button>
+            </div>
           </div>
         </header>
 
@@ -378,20 +415,6 @@ export function ReportView({
   // must agree: one claiming "no score recorded" beside the other saying "Nice
   // work" is the contradiction issue #92 screenshotted.
   const coverage = aiCoverage(session)
-
-  const [expiredDeadline, setExpiredDeadline] = useState<number | null>(null)
-  const rejoinAvailable =
-    isRejoinAvailable(onRejoin, rejoinDeadline) &&
-    expiredDeadline !== rejoinDeadline
-  useEffect(() => {
-    if (!isRejoinAvailable(onRejoin, rejoinDeadline)) return
-    if (rejoinDeadline === undefined) return
-    const handle = setTimeout(
-      () => setExpiredDeadline(rejoinDeadline),
-      Math.max(0, rejoinDeadline - Date.now())
-    )
-    return () => clearTimeout(handle)
-  }, [onRejoin, rejoinDeadline])
 
   const [copied, setCopied] = useState(false)
   const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -572,16 +595,7 @@ export function ReportView({
             >
               <BracesIcon /> {exportCopy.auditCta}
             </Button>
-            {onRejoin ? (
-              <Button
-                variant="default"
-                size="sm"
-                onClick={onRejoin}
-                disabled={!rejoinAvailable}
-              >
-                <RotateCcwIcon /> {strings.report.rejoinCta}
-              </Button>
-            ) : null}
+            <RejoinAction onRejoin={onRejoin} deadline={rejoinDeadline} />
             <Button
               ref={closeButtonRef}
               variant="secondary"
