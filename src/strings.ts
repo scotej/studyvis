@@ -1690,6 +1690,7 @@ export const strings = {
         restartedToast: 'AI model restarting.',
         restartErrorFallback: "Couldn't restart the model.",
         pickModelFirstToast: 'Pick a model first.',
+        enableAiFirstToast: 'Enable AI features before restarting the model.',
       },
       // I73 — the llama.cpp engine row + auto-install toggle.
       engine: {

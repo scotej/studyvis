@@ -34,6 +34,8 @@ import {
   CONFIDENCE_FLOOR_MAX,
   DEFAULT_CTX_SIZE,
   effectiveIntervalSec,
+  ERR_AI_DISABLED,
+  ERR_ENGINE_NOT_INSTALLED,
   FALLBACK_SAMPLE_INTERVAL_SEC,
   getAiEnableReadiness,
   getDownloadRuntime,
@@ -404,11 +406,22 @@ export function AiCategory() {
     setRestarting(true)
     try {
       const paths = await getDownloadRuntime().paths(activeModelId)
-      await useSidecarStore.getState().start({
+      const port = await useSidecarStore.getState().start({
         modelPath: paths.model_path,
         mmprojPath: paths.mmproj_path,
         ctxSize: DEFAULT_CTX_SIZE,
       })
+      if (port === null) {
+        const error = useSidecarStore.getState().lastError
+        toast.error(
+          error === ERR_AI_DISABLED
+            ? copy.sidecar.enableAiFirstToast
+            : error === ERR_ENGINE_NOT_INSTALLED
+              ? strings.ai.picker.engineMissing
+              : error || copy.sidecar.restartErrorFallback
+        )
+        return
+      }
       toast.success(copy.sidecar.restartedToast)
     } catch (err) {
       toast.error(
@@ -852,7 +865,8 @@ export function AiCategory() {
             />
           ) : null}
 
-          {sidecarStatus === 'errored' ? (
+          {sidecarStatus === 'errored' ||
+          (sidecarStatus === 'idle' && sidecarLastError !== null) ? (
             <SettingsRow
               label={copy.sidecar.label}
               help={
