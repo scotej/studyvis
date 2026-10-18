@@ -969,6 +969,9 @@ when narration is not yet available, labelled `observations`; it does not start
 or wait for model inference during Leave. It respects the AI/write-up settings.
 A missing account is described separately from saved AI coverage on screen and
 in report exports, including legacy scored rows and disabled journaling (#410).
+Accounts with unknown or incomplete input coverage are replaced from the current
+journal or presented as unavailable, while fully covered stored accounts remain
+available independently of generation settings.
 
 Stage 1 is also the fallback: any window the model does not narrate is filled with its own digest, so a dead sidecar or an unusable response costs polish, not the feature. The stored `source` (`model` / `mixed` / `observations`) records which happened and the report labels anything other than `model`, so it can never imply the AI wrote an account it did not.
 

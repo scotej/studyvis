@@ -67,6 +67,7 @@ function report(): ResolvedReportData {
     timeline: {
       session_id: 'private-session-topic',
       generated_at: 61_000,
+      covered_until: 61_000,
       model_id: 'model',
       source: 'model',
       entries: '[]',
@@ -302,7 +303,9 @@ describe('companion report privacy and ownership', () => {
 })
 
 describe('bounded companion written account (#410)', () => {
-  function setup() {
+  function setup(
+    original: ResolvedReportData = { ...report(), timeline: null }
+  ) {
     useSettingsStore.setState((s) => ({
       values: {
         ...s.values,
@@ -310,7 +313,6 @@ describe('bounded companion written account (#410)', () => {
         sessionTimelineEnabled: true,
       },
     }))
-    const original = { ...report(), timeline: null }
     loader.load.mockResolvedValue(original)
     const finish = vi
       .fn<(report: unknown) => Promise<void>>()
@@ -321,6 +323,116 @@ describe('bounded companion written account (#410)', () => {
     )
     return { finish }
   }
+
+  function rejoinedReport(coveredUntil: number | null | undefined) {
+    const original = report()
+    original.session.ended_at = 121_000
+    original.timeline = {
+      ...original.timeline!,
+      generated_at: 500_000,
+      covered_until: coveredUntil,
+      entries: JSON.stringify([
+        { start_min: 0, end_min: 1, summary: 'Only the first stint' },
+      ]),
+    }
+    return original
+  }
+
+  test.each([61_000, null, undefined])(
+    'a nonempty row with coverage %s is replaced by the full rejoined journal',
+    async (coveredUntil) => {
+      const original = rejoinedReport(coveredUntil)
+      const { finish } = setup(original)
+      journal.read.mockResolvedValue({
+        observations: [
+          {
+            ts: 2000,
+            verdict: 'on_task',
+            reasoning: 'First stint maths',
+            confidence: 1,
+            topic: 'Maths',
+          },
+          {
+            ts: 91_000,
+            verdict: 'on_task',
+            reasoning: 'Second stint physics',
+            confidence: 1,
+            topic: 'Physics',
+          },
+        ] as never[],
+        truncated: false,
+        unreadableLines: 0,
+      })
+      await finishMirrorReport('private-session-topic')
+      const delivered = finish.mock.calls[0][0] as ResolvedReportData
+      expect(delivered.timeline).toMatchObject({
+        source: 'observations',
+        covered_until: 121_000,
+      })
+      const text = serializeReportToText(delivered)
+      expect(text).toContain('First stint maths')
+      expect(text).toContain('Second stint physics')
+      expect(text).not.toContain('Only the first stint')
+      expect(original.timeline?.source).toBe('model')
+    }
+  )
+
+  test('a fully covered model row remains available when generation settings are disabled', async () => {
+    const original = rejoinedReport(121_000)
+    const { finish } = setup(original)
+    useSettingsStore.setState((s) => ({
+      values: {
+        ...s.values,
+        aiFeaturesEnabled: false,
+        sessionTimelineEnabled: false,
+      },
+    }))
+    await finishMirrorReport('private-session-topic')
+    const delivered = finish.mock.calls[0][0] as ResolvedReportData
+    expect(delivered.timeline).toBe(original.timeline)
+    expect(journal.read).not.toHaveBeenCalled()
+  })
+
+  test.each(
+    [61_000, null].flatMap((coverage) =>
+      ['unreadable', 'empty', 'ai-disabled', 'writeups-disabled'].map(
+        (failure) => ({ coverage, failure })
+      )
+    )
+  )(
+    'obsolete coverage $coverage is not presented as complete when $failure',
+    async ({ coverage, failure }) => {
+      const { finish } = setup(rejoinedReport(coverage))
+      if (failure === 'unreadable')
+        journal.read.mockRejectedValue(new Error('permission denied'))
+      else
+        journal.read.mockResolvedValue({
+          observations: [],
+          truncated: false,
+          unreadableLines: 0,
+        })
+      if (failure === 'ai-disabled' || failure === 'writeups-disabled') {
+        useSettingsStore.setState((s) => ({
+          values: {
+            ...s.values,
+            aiFeaturesEnabled: failure !== 'ai-disabled',
+            sessionTimelineEnabled: failure !== 'writeups-disabled',
+          },
+        }))
+      }
+      await finishMirrorReport('private-session-topic')
+      const delivered = finish.mock.calls[0][0] as ResolvedReportData
+      expect(delivered.timeline).toBeNull()
+      expect(serializeReportToText(delivered)).toContain(
+        strings.report.sections.written.unavailable
+      )
+      expect(serializeReportToText(delivered)).not.toContain(
+        'Only the first stint'
+      )
+      if (failure.endsWith('disabled'))
+        expect(journal.read).not.toHaveBeenCalled()
+    }
+  )
 
   test('hands off labelled observations and matching export without waiting for model inference', async () => {
     const { finish } = setup()

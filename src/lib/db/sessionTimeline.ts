@@ -24,6 +24,19 @@ export type SessionTimelineRecord = {
   truncated: number
 }
 
+// #417 / I99: completion may follow a later stint; only input coverage proves
+// the account spans it. Legacy rows receive one conservative refresh.
+export function storedWriteUpIsStale(
+  timeline: SessionTimelineRecord | null,
+  sessionEndedAt: number | null
+): boolean {
+  if (timeline === null || sessionEndedAt === null) return false
+  if (!Number.isFinite(sessionEndedAt)) return false
+  return (
+    timeline.covered_until == null || timeline.covered_until < sessionEndedAt
+  )
+}
+
 export function isTimelineSource(
   value: string
 ): value is SessionTimelineSource {

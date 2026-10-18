@@ -5,6 +5,7 @@ import {
 import { observationTimelineEntries } from '@/features/session/sessionTimeline'
 import { writtenTimelineEntries } from '@/features/session/reportSerialize'
 import { useSettingsStore } from '@/stores/settingsStore'
+import { storedWriteUpIsStale } from '@/lib/db/sessionTimeline'
 import { loadReportData } from '@/features/session/reportLoader'
 import { logger } from '@/lib/log'
 import type { MirrorHost } from './runtime'
@@ -76,6 +77,10 @@ export async function finishMirrorReport(sessionId: string): Promise<void> {
     try {
       let report = await loadReportData(sessionId)
       if (!active || current !== registration) return
+      if (
+        storedWriteUpIsStale(report.timeline ?? null, report.session.ended_at)
+      )
+        report = { ...report, timeline: null }
       const settings = useSettingsStore.getState().values
       // #410: the companion disconnects after this bounded handoff. Give it
       // the journal's deterministic account without starting or waiting for
@@ -85,6 +90,7 @@ export async function finishMirrorReport(sessionId: string): Promise<void> {
         settings.aiFeaturesEnabled &&
         settings.sessionTimelineEnabled
       ) {
+        const coveredUntil = report.session.ended_at ?? Date.now()
         try {
           const journal = await readObservations(sessionId)
           if (!active || current !== registration) return
@@ -97,6 +103,7 @@ export async function finishMirrorReport(sessionId: string): Promise<void> {
               timeline: {
                 session_id: sessionId,
                 generated_at: Date.now(),
+                covered_until: coveredUntil,
                 model_id: null,
                 source: 'observations',
                 entries: JSON.stringify(entries),
