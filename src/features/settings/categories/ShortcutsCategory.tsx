@@ -72,10 +72,7 @@ export function ShortcutsCategory() {
   )
 
   const handleReset = useCallback(() => {
-    // `resetShortcutsToDefaults` attempts both bindings and rethrows the last
-    // runtime-registration refusal. Surface it as a toast so a residual
-    // collision (e.g. a fully-swapped pair, which no reset order can break)
-    // isn't a silent no-op — the store's `error` field is rendered nowhere.
+    // The pair resets together; registration/persistence refusals stay visible.
     void resetShortcutsToDefaults().catch((err) => {
       toast.error(
         strings.settings.shortcuts.reset.resetError(

@@ -392,12 +392,14 @@ export type RuntimeBridge = {
   // V3-P3 — re-registers a global shortcut via the Rust command. Awaited so
   // a registration failure (busy combo on the OS side, parse error) can be
   // surfaced in the store's `error` field and the rejecting setter can
-  // unwind. Rust uses the V1-P7 interior-mutability pattern (`Mutex<Shortcut>`
+  // unwind. Rust uses the V1-P7 interior-mutability pattern (a locked pair
   // in `ShortcutBindings`) to swap the live shortcut without restart.
   setGlobalShortcut: (
     action: ShortcutAction,
     accelerator: string
   ) => Promise<void>
+  // #394 — validate/swap both bindings together, including mutual swaps.
+  setGlobalShortcuts: (friends: string, ai: string) => Promise<void>
   // V3-P6 — Calls the Rust `system_relaunch_app` command to replace the
   // process. Returns void so the JS resolution shape matches the other
   // bridges; in practice the runtime never observes the resolved promise
@@ -502,7 +504,10 @@ export async function resolveWindowStyleAtBoot(
 
 let cachedLazyStore: LazyStore | null = null
 function defaultLazyStoreFactory(): StoreLike {
-  if (!cachedLazyStore) cachedLazyStore = new LazyStore(SETTINGS_FILE)
+  // Every settings mutation explicitly saves. A debounced plugin autosave
+  // could otherwise flush the first half of a two-key shortcut update.
+  if (!cachedLazyStore)
+    cachedLazyStore = new LazyStore(SETTINGS_FILE, { autoSave: false })
   return cachedLazyStore as unknown as StoreLike
 }
 
@@ -524,6 +529,10 @@ const defaultDeps: SettingsStoreDeps = {
     setGlobalShortcut: async (action, accelerator) => {
       if (!isTauriRuntime()) return
       await invoke('system_set_global_shortcut', { action, accelerator })
+    },
+    setGlobalShortcuts: async (friends, ai) => {
+      if (!isTauriRuntime()) return
+      await invoke('system_set_global_shortcuts', { friends, ai })
     },
     relaunchApp: async () => {
       if (!isTauriRuntime()) return
@@ -743,8 +752,10 @@ export async function hydrateValuesFromStore(
     const legacy = migrator.readLegacyTheme()
     if (legacy) {
       theme = legacy
-      await store.set(SETTINGS_KEY_THEME, legacy)
-      await store.save()
+      await withSettingsWrite(async () => {
+        await store.set(SETTINGS_KEY_THEME, legacy)
+        await store.save()
+      })
       wroteMigration = true
     }
   }
@@ -878,6 +889,15 @@ export function __resetSettingsStoreDeps(): void {
   activeDeps = defaultDeps
 }
 
+// #394 — a save writes the entire store cache. Keep another setting's save
+// from flushing a half-written shortcut pair, including during rollback.
+let settingsWriteQueue: Promise<void> = Promise.resolve()
+function withSettingsWrite(run: () => Promise<void>): Promise<void> {
+  const operation = settingsWriteQueue.then(run, run)
+  settingsWriteQueue = operation.catch(() => {})
+  return operation
+}
+
 // Setters fire-and-forget (call sites use `void setTheme(...)`), so any
 // rejection here would surface as an unhandled promise rejection. We catch,
 // log, and surface the failure via the store's `error` field — the
@@ -892,14 +912,25 @@ async function writeKey(
   if (!factory) return
   try {
     const store = factory()
-    await store.set(key, value)
-    await store.save()
+    await withSettingsWrite(async () => {
+      await store.set(key, value)
+      await store.save()
+    })
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
     // The key, never the value: turnServer carries a username and credential.
     log.error('write.failed', { settingsKey: key, err })
     set({ error: message })
   }
+}
+
+// Serialize the two rebind entry points: a reset must snapshot the pair after
+// an earlier single rebind has finished registering and persisting it.
+let shortcutQueue: Promise<void> = Promise.resolve()
+function withShortcutOperation(run: () => Promise<void>): Promise<void> {
+  const operation = shortcutQueue.then(run, run)
+  shortcutQueue = operation.catch(() => {})
+  return operation
 }
 
 export const useSettingsStore = create<SettingsState>((set, get) => ({
@@ -1131,57 +1162,101 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     await writeKey(set, SETTINGS_KEY_SESSION_TIMELINE, enabled)
   },
 
-  setShortcutAccelerator: async (action, accelerator) => {
-    const key =
-      action === 'ptt-friends'
-        ? SETTINGS_KEY_PTT_FRIENDS_ACCELERATOR
-        : SETTINGS_KEY_PTT_AI_ACCELERATOR
-    const valuesKey =
-      action === 'ptt-friends' ? 'pttFriendsAccelerator' : 'pttAiAccelerator'
-    const previous = get().values[valuesKey]
-    set((s) => ({ values: { ...s.values, [valuesKey]: accelerator } }))
-    try {
-      await activeDeps.runtime.setGlobalShortcut(action, accelerator)
-    } catch (err) {
-      // Runtime registration failed (parse error, OS-reserved combo, etc.).
-      // Roll back the optimistic update and surface the message so the
-      // rebind UI can render a refusal next to the row.
-      set((s) => ({
-        values: { ...s.values, [valuesKey]: previous },
-        error: err instanceof Error ? err.message : String(err),
-      }))
-      throw err
-    }
-    await writeKey(set, key, accelerator)
-  },
-
-  resetShortcutsToDefaults: async () => {
-    const setter = get().setShortcutAccelerator
-    // Reset the action currently squatting on the *other* action's default
-    // combo first, so that combo is free before we re-register it — a fixed
-    // order collides in the single-swap case (AI holding the friends default).
-    // Wrap each call so an OS registration refusal on one binding still lets
-    // the other reset, then rethrow the last failure so the UI can surface it.
-    const steps: ReadonlyArray<[ShortcutAction, string]> =
-      get().values.pttAiAccelerator === PTT_FRIENDS_DEFAULT_ACCELERATOR
-        ? [
-            ['ptt-ai', PTT_AI_DEFAULT_ACCELERATOR],
-            ['ptt-friends', PTT_FRIENDS_DEFAULT_ACCELERATOR],
-          ]
-        : [
-            ['ptt-friends', PTT_FRIENDS_DEFAULT_ACCELERATOR],
-            ['ptt-ai', PTT_AI_DEFAULT_ACCELERATOR],
-          ]
-    let lastError: unknown = null
-    for (const [action, accelerator] of steps) {
+  setShortcutAccelerator: (action, accelerator) =>
+    withShortcutOperation(async () => {
+      const key =
+        action === 'ptt-friends'
+          ? SETTINGS_KEY_PTT_FRIENDS_ACCELERATOR
+          : SETTINGS_KEY_PTT_AI_ACCELERATOR
+      const valuesKey =
+        action === 'ptt-friends' ? 'pttFriendsAccelerator' : 'pttAiAccelerator'
+      const previous = get().values[valuesKey]
+      set((s) => ({ values: { ...s.values, [valuesKey]: accelerator } }))
       try {
-        await setter(action, accelerator)
+        await activeDeps.runtime.setGlobalShortcut(action, accelerator)
       } catch (err) {
-        lastError = err
+        // Runtime registration failed (parse error, OS-reserved combo, etc.).
+        // Roll back the optimistic update and surface the message so the
+        // rebind UI can render a refusal next to the row.
+        set((s) => ({
+          values: { ...s.values, [valuesKey]: previous },
+          error: err instanceof Error ? err.message : String(err),
+        }))
+        throw err
       }
-    }
-    if (lastError !== null) throw lastError
-  },
+      await writeKey(set, key, accelerator)
+    }),
+
+  resetShortcutsToDefaults: () =>
+    withShortcutOperation(async () => {
+      const {
+        pttFriendsAccelerator: previousFriends,
+        pttAiAccelerator: previousAi,
+      } = get().values
+      const runtime = activeDeps.runtime
+      const store = activeDeps.storeFactory?.()
+      try {
+        await runtime.setGlobalShortcuts(
+          PTT_FRIENDS_DEFAULT_ACCELERATOR,
+          PTT_AI_DEFAULT_ACCELERATOR
+        )
+        await withSettingsWrite(async () => {
+          try {
+            if (store) {
+              await store.set(
+                SETTINGS_KEY_PTT_FRIENDS_ACCELERATOR,
+                PTT_FRIENDS_DEFAULT_ACCELERATOR
+              )
+              await store.set(
+                SETTINGS_KEY_PTT_AI_ACCELERATOR,
+                PTT_AI_DEFAULT_ACCELERATOR
+              )
+              await store.save()
+            }
+          } catch (err) {
+            // #394 — both keys are one durable update. Restore the native pair AND
+            // the store cache/disk if either set or the single save rejects.
+            const failures = [err]
+            try {
+              await runtime.setGlobalShortcuts(previousFriends, previousAi)
+            } catch (rollbackError) {
+              failures.push(rollbackError)
+            }
+            if (store) {
+              try {
+                await store.set(
+                  SETTINGS_KEY_PTT_FRIENDS_ACCELERATOR,
+                  previousFriends
+                )
+                await store.set(SETTINGS_KEY_PTT_AI_ACCELERATOR, previousAi)
+                await store.save()
+              } catch (rollbackError) {
+                failures.push(rollbackError)
+              }
+            }
+            throw new Error(
+              failures
+                .map((error) =>
+                  error instanceof Error ? error.message : String(error)
+                )
+                .join('; '),
+              { cause: err }
+            )
+          }
+        })
+        set((s) => ({
+          values: {
+            ...s.values,
+            pttFriendsAccelerator: PTT_FRIENDS_DEFAULT_ACCELERATOR,
+            pttAiAccelerator: PTT_AI_DEFAULT_ACCELERATOR,
+          },
+          error: null,
+        }))
+      } catch (err) {
+        set({ error: err instanceof Error ? err.message : String(err) })
+        throw err
+      }
+    }),
 
   setCaptureDisplays: async (mode) => {
     set((s) => ({ values: { ...s.values, captureDisplays: mode } }))

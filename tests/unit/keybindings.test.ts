@@ -307,6 +307,13 @@ describe('settingsStore — V3-P3 shortcut persistence & runtime push', () => {
           if (registerShouldFail) throw new Error('OS refused')
           pushed.push({ action, accelerator })
         },
+        setGlobalShortcuts: async (friends, ai) => {
+          if (registerShouldFail) throw new Error('OS refused')
+          pushed.push(
+            { action: 'ptt-friends', accelerator: friends },
+            { action: 'ptt-ai', accelerator: ai }
+          )
+        },
         relaunchApp: async () => {},
       },
     }
@@ -407,6 +414,13 @@ describe('resetShortcutsToDefaults — collision recovery (item 22)', () => {
           }
           held[action] = accelerator
         },
+        setGlobalShortcuts: async (friends, ai) => {
+          attempts.push(
+            { action: 'ptt-friends', accelerator: friends },
+            { action: 'ptt-ai', accelerator: ai }
+          )
+          held = { 'ptt-friends': friends, 'ptt-ai': ai }
+        },
         relaunchApp: async () => {},
       },
     }
@@ -426,7 +440,7 @@ describe('resetShortcutsToDefaults — collision recovery (item 22)', () => {
     __resetSettingsStoreDeps()
   })
 
-  test('reorders so a single collision still lands both bindings on defaults', async () => {
+  test('resets a pair when one action holds the other default', async () => {
     // AI squats on the friends-default combo. A fixed friends-first order would
     // collide (friends -> '[' while AI holds '['); resetting AI first frees it.
     install('CmdOrCtrl+K', PTT_FRIENDS_DEFAULT_ACCELERATOR)
@@ -443,18 +457,16 @@ describe('resetShortcutsToDefaults — collision recovery (item 22)', () => {
       'ptt-friends': PTT_FRIENDS_DEFAULT_ACCELERATOR,
       'ptt-ai': PTT_AI_DEFAULT_ACCELERATOR,
     })
-    expect(attempts[0]?.action).toBe('ptt-ai')
+    expect(attempts).toHaveLength(2)
   })
 
-  test('runs the second setter even when the first rejects', async () => {
-    // Fully swapped pair — no order can break a mutual swap, so the first
-    // register throws; the second must still be attempted, then the last
-    // failure rethrows for the toast.
+  test('resets a fully swapped pair together', async () => {
     install(PTT_AI_DEFAULT_ACCELERATOR, PTT_FRIENDS_DEFAULT_ACCELERATOR)
-
-    await expect(
-      useSettingsStore.getState().resetShortcutsToDefaults()
-    ).rejects.toThrow('AlreadyRegistered')
+    await useSettingsStore.getState().resetShortcutsToDefaults()
+    expect(held).toEqual({
+      'ptt-friends': PTT_FRIENDS_DEFAULT_ACCELERATOR,
+      'ptt-ai': PTT_AI_DEFAULT_ACCELERATOR,
+    })
 
     expect(attempts).toHaveLength(2)
     expect(attempts.map((a) => a.action).sort()).toEqual([

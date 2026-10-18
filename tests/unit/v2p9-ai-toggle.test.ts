@@ -107,6 +107,7 @@ describe('settingsStore — V2-P9 setters', () => {
           pushedAi.push(enabled)
         },
         setGlobalShortcut: async () => {},
+        setGlobalShortcuts: async () => {},
         relaunchApp: async () => {},
       },
     }
@@ -144,6 +145,7 @@ describe('settingsStore — V2-P9 setters', () => {
           throw new Error('boom')
         },
         setGlobalShortcut: async () => {},
+        setGlobalShortcuts: async () => {},
         relaunchApp: async () => {},
       },
     })
