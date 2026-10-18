@@ -66,6 +66,7 @@ for (const outcome of ['denied', 'error', 'success']) {
         await page.evaluate(() => window.fixture.activation[1]),
         true
       )
+      await page.getByRole('dialog').waitFor({ state: 'hidden' })
       await page.evaluate((result) => window.fixture.settle(1, result), outcome)
       if (outcome === 'denied') {
         await page
