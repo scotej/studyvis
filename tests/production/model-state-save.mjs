@@ -4,6 +4,9 @@ import { test } from 'node:test'
 import { chromium } from 'playwright-core'
 import { build } from 'vite'
 
+const ACTIVE_MODEL_ID = 'qwen2_5-vl-3b'
+const OTHER_MODEL_ID = 'gemma3-4b'
+
 test('failed model selection/removal saves remain visible and recoverable (#424)', async () => {
   const root = fileURLToPath(new URL('../../', import.meta.url))
   const fixture = `
@@ -18,7 +21,7 @@ test('failed model selection/removal saves remain visible and recoverable (#424)
     import { useSettingsStore } from '@/stores/settingsStore'
     import { useSessionStore } from '@/stores/sessionStore'
     let fail = true
-    let disk = { records: Object.fromEntries(SUPPORTED_MODELS.map(spec => [spec.id, { modelId: spec.id, installedAt: 1, benchmark: null }])), active_model_id: SUPPORTED_MODELS[1].id }
+    let disk = { records: Object.fromEntries(SUPPORTED_MODELS.map(spec => [spec.id, { modelId: spec.id, installedAt: 1, benchmark: null }])), active_model_id: ${JSON.stringify(ACTIVE_MODEL_ID)} }
     let pending = structuredClone(disk)
     const installed = new Set(SUPPORTED_MODELS.map(spec => spec.id))
     const store = {
@@ -109,17 +112,16 @@ test('failed model selection/removal saves remain visible and recoverable (#424)
         (entryFile) => import('/' + entryFile),
         entry.fileName
       )
-      const cards = page.locator('[data-slot="model-card"]')
+      const targetModelId =
+        mode === 'remove-active' ? ACTIVE_MODEL_ID : OTHER_MODEL_ID
+      const card = page.locator(
+        `[data-slot="model-card"][aria-labelledby="model-${targetModelId}-name"]`
+      )
       if (mode === 'select')
-        await cards
-          .first()
+        await card
           .getByRole('button', { name: 'Use model', exact: true })
           .click()
-      else
-        await cards
-          .nth(mode === 'remove-active' ? 1 : 0)
-          .getByRole('button', { name: /Remove/ })
-          .click()
+      else await card.getByRole('button', { name: /Remove/ }).click()
       await page
         .getByRole('alert')
         .filter({ hasText: "Couldn't save model setup" })
@@ -130,9 +132,9 @@ test('failed model selection/removal saves remain visible and recoverable (#424)
         mode
       )
       let snapshot = await page.evaluate(() => window.snapshot())
-      assert.equal(snapshot.disk.active_model_id, 'qwen2_5-vl-3b')
+      assert.equal(snapshot.disk.active_model_id, ACTIVE_MODEL_ID)
       if (mode !== 'select') {
-        const id = mode === 'remove-active' ? 'qwen2_5-vl-3b' : 'moondream2'
+        const id = targetModelId
         assert.ok(!snapshot.installed.includes(id))
         await page.evaluate(() => window.restart())
         await page
@@ -150,6 +152,14 @@ test('failed model selection/removal saves remain visible and recoverable (#424)
       await page.waitForFunction(() => window.snapshot().error === null)
       snapshot = await page.evaluate(() => window.snapshot())
       assert.equal(snapshot.disk.active_model_id, snapshot.active)
+      assert.equal(
+        snapshot.active,
+        mode === 'select'
+          ? OTHER_MODEL_ID
+          : mode === 'remove-active'
+            ? null
+            : ACTIVE_MODEL_ID
+      )
       await page.evaluate(() => window.restart())
       assert.equal(
         (await page.evaluate(() => window.snapshot())).active,
