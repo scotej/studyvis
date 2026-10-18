@@ -12,6 +12,7 @@ export type SessionTimelineSource = 'model' | 'mixed' | 'observations'
 export type SessionTimelineRecord = {
   session_id: string
   generated_at: number
+  covered_until?: number | null
   model_id: string | null
   // Widened to string on purpose: a row written by a newer build could carry a
   // source this one doesn't know. Callers narrow with `isTimelineSource`.
@@ -79,6 +80,7 @@ export async function sessionTimelineGet(
 export async function sessionTimelineSave(row: {
   sessionId: string
   generatedAt: number
+  coveredUntil?: number | null
   modelId: string | null
   source: SessionTimelineSource
   entries: string
@@ -87,6 +89,7 @@ export async function sessionTimelineSave(row: {
   await invoke('session_timeline_save', {
     sessionId: row.sessionId,
     generatedAt: row.generatedAt,
+    coveredUntil: row.coveredUntil ?? null,
     modelId: row.modelId,
     source: row.source,
     entries: row.entries,

@@ -15,6 +15,7 @@ use serde::{Deserialize, Serialize};
 pub struct SessionTimelineRow {
     pub session_id: String,
     pub generated_at: i64,
+    pub covered_until: Option<i64>,
     /// Model that wrote the narrative; NULL when every window fell back to the
     /// deterministic digest and no model output was used.
     pub model_id: Option<String>,
@@ -28,7 +29,7 @@ pub struct SessionTimelineRow {
 
 pub fn get(conn: &Connection, session_id: &str) -> Result<Option<SessionTimelineRow>> {
     let mut stmt = conn.prepare(
-        "SELECT session_id, generated_at, model_id, source, entries, truncated
+        "SELECT session_id, generated_at, model_id, source, entries, truncated, covered_until
          FROM session_timelines
          WHERE session_id = ?1",
     )?;
@@ -40,6 +41,7 @@ pub fn get(conn: &Connection, session_id: &str) -> Result<Option<SessionTimeline
             source: row.get(3)?,
             entries: row.get(4)?,
             truncated: row.get(5)?,
+            covered_until: row.get(6)?,
         })
     })?;
     rows.next().transpose()
@@ -66,15 +68,16 @@ pub fn get(conn: &Connection, session_id: &str) -> Result<Option<SessionTimeline
 /// WHERE clause as the disambiguator.
 pub fn upsert(conn: &Connection, row: &SessionTimelineRow) -> Result<bool> {
     let written = conn.execute(
-        "INSERT INTO session_timelines (session_id, generated_at, model_id, source, entries, truncated)
-         SELECT ?1, ?2, ?3, ?4, ?5, ?6
+        "INSERT INTO session_timelines (session_id, generated_at, model_id, source, entries, truncated, covered_until)
+         SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7
          WHERE EXISTS (SELECT 1 FROM sessions WHERE id = ?1)
          ON CONFLICT(session_id) DO UPDATE SET
            generated_at = excluded.generated_at,
            model_id     = excluded.model_id,
            source       = excluded.source,
            entries      = excluded.entries,
-           truncated    = excluded.truncated",
+           truncated    = excluded.truncated,
+           covered_until = excluded.covered_until",
         params![
             row.session_id,
             row.generated_at,
@@ -82,6 +85,7 @@ pub fn upsert(conn: &Connection, row: &SessionTimelineRow) -> Result<bool> {
             row.source,
             row.entries,
             row.truncated,
+            row.covered_until,
         ],
     )?;
     Ok(written > 0)
@@ -112,6 +116,7 @@ mod tests {
         SessionTimelineRow {
             session_id: session_id.to_string(),
             generated_at: 1_700_000_000_000,
+            covered_until: Some(1_700_000_600_000),
             model_id: Some("gemma-3-4b".to_string()),
             source: source.to_string(),
             entries: entries.to_string(),

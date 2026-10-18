@@ -52,6 +52,7 @@ export type SessionTimeline = {
   source: SessionTimelineSource
   modelId: string | null
   generatedAt: number
+  coveredUntil: number
   // The journal held more checks than were read back (a session long enough to
   // fill the file). The report says so rather than presenting a partial
   // account as the whole session.
@@ -124,6 +125,8 @@ export type SessionTimelineInput = {
   // the audit timeline the report renders directly beneath them. Optional: a
   // caller without the row falls back to the first recorded check.
   startedAtMs?: number | null
+  // Captured before the input journal is read, never after model completion.
+  coveredUntilMs?: number | null
   // The journal the caller has already read. The report probes it to tell "no
   // checks were recorded" apart from "the model failed", so re-reading and
   // re-parsing the same file here would double the work for nothing.
@@ -452,6 +455,7 @@ export async function generateSessionTimeline(
     )
   }
 
+  const coveredUntil = input.coveredUntilMs ?? Date.now()
   let journal: SessionJournalRead
   try {
     journal = input.journal ?? (await readObservations(input.sessionId))
@@ -510,12 +514,14 @@ export async function generateSessionTimeline(
     source,
     modelId: source === 'observations' ? null : input.modelId,
     generatedAt: Date.now(),
+    coveredUntil,
     truncated: journal.truncated,
   }
 
   await sessionTimelineSave({
     sessionId: input.sessionId,
     generatedAt: timeline.generatedAt,
+    coveredUntil: timeline.coveredUntil,
     modelId: timeline.modelId,
     source: timeline.source,
     entries: JSON.stringify(timeline.entries),
