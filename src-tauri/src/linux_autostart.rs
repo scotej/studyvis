@@ -261,7 +261,15 @@ fn migrate_legacy_entry_with_cleanup(
         repair_legacy_entry(selected, app_name, executable)?;
         return Ok(());
     }
+    // Absolute XDG paths may contain `..` without being symlinks. Compare the
+    // existing directories so cleanup cannot unlink their shared launch entry.
+    let same_directory = selected
+        .canonicalize()
+        .ok()
+        .zip(legacy.canonicalize().ok())
+        .is_some_and(|(selected, legacy)| selected == legacy);
     if selected == legacy
+        || same_directory
         || !legacy_path
             .try_exists()
             .map_err(|error| error.to_string())?
@@ -527,6 +535,57 @@ mod tests {
         .unwrap();
         assert!(!legacy_path.exists());
         assert_eq!(std::fs::read(&selected_path).unwrap(), original);
+    }
+
+    #[test]
+    fn dotdot_directory_alias_preserves_existing_opt_in() {
+        let fixture = Fixture::new();
+        let legacy = fixture.0.join("home/.config");
+        let selected = legacy.join("../.config");
+        let executable = fixture.0.join("StudyVis.AppImage");
+        set_entry_enabled(&legacy, "studyvis", &executable, true).unwrap();
+        let original = std::fs::read(entry_path(&legacy, "studyvis")).unwrap();
+        assert_ne!(selected, legacy);
+        assert_eq!(
+            selected.canonicalize().unwrap(),
+            legacy.canonicalize().unwrap()
+        );
+        migrate_legacy_entry(&selected, &legacy, "studyvis", &executable).unwrap();
+        assert!(
+            entry_path(&selected, "studyvis").exists(),
+            "directory alias must remain opted in"
+        );
+        assert_eq!(
+            std::fs::read(entry_path(&legacy, "studyvis")).unwrap(),
+            original
+        );
+    }
+
+    #[test]
+    fn different_directories_with_hardlinked_entries_still_remove_the_duplicate() {
+        let fixture = Fixture::new();
+        let legacy = fixture.0.join("legacy");
+        let selected = fixture.0.join("selected");
+        let executable = fixture.0.join("StudyVis.AppImage");
+        set_entry_enabled(&legacy, "studyvis", &executable, true).unwrap();
+        std::fs::create_dir_all(entry_path(&selected, "studyvis").parent().unwrap()).unwrap();
+        std::fs::hard_link(
+            entry_path(&legacy, "studyvis"),
+            entry_path(&selected, "studyvis"),
+        )
+        .unwrap();
+        let original = std::fs::read(entry_path(&legacy, "studyvis")).unwrap();
+        assert_ne!(
+            selected.canonicalize().unwrap(),
+            legacy.canonicalize().unwrap()
+        );
+        migrate_legacy_entry(&selected, &legacy, "studyvis", &executable).unwrap();
+        assert!(entry_path(&selected, "studyvis").exists());
+        assert!(!entry_path(&legacy, "studyvis").exists());
+        assert_eq!(
+            std::fs::read(entry_path(&selected, "studyvis")).unwrap(),
+            original
+        );
     }
 
     #[test]
