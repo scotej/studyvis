@@ -702,6 +702,13 @@ fn setup_desktop(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>>
         None::<Vec<&str>>,
     ))?;
 
+    // #419 — repair only the previous backend's exact opted-in template.
+    // Custom files and symlinks remain untouched; failure must not block startup.
+    #[cfg(target_os = "linux")]
+    if let Err(error) = linux_autostart::repair_legacy(app.handle()) {
+        eprintln!("[autostart] Linux legacy entry repair failed: {error}");
+    }
+
     // macOS registers the studyvis:// scheme at bundle time (CFBundleURLTypes
     // generated from `plugins.deep-link` in tauri.conf.json); Windows release
     // builds register via the installer. Linux and Windows dev builds need the
