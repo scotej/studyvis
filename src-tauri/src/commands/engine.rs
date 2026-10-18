@@ -32,9 +32,9 @@ use super::sidecar::{SidecarState, TARGET_TRIPLE};
 use crate::db::data_dir;
 
 pub const ENGINE_TAG: &str = "b9095";
-// Revision 3 replaces the Linux CPU-only archive with Vulkan. A separate
-// directory prevents repair/reinstall from reusing a prior CPU-only cache.
-const ENGINE_PACKAGE_REVISION: &str = "3";
+// #388: Windows revision 4 adds the app-owned Microsoft runtime closure.
+// Other platforms retain revision 3, whose Linux archive added Vulkan.
+const ENGINE_PACKAGE_REVISION: &str = if cfg!(windows) { "4" } else { "3" };
 const RELEASE_BASE: &str = "https://github.com/ggml-org/llama.cpp/releases/download";
 const ENGINE_DIR: &str = "engine";
 
@@ -149,11 +149,136 @@ pub fn resolve_candidates<R: Runtime>(app: &AppHandle<R>) -> Vec<(EngineSource, 
         candidates.push((EngineSource::Bundled, path));
     }
     if let Ok(path) = managed_binary_path(app) {
-        if path.is_file() {
+        if managed_binary_valid(&path) {
             candidates.push((EngineSource::Managed, path));
         }
     }
     candidates
+}
+
+fn managed_binary_valid(binary: &Path) -> bool {
+    if !binary.is_file() {
+        return false;
+    }
+    #[cfg(windows)]
+    {
+        windows_managed_binary_valid(binary)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = binary;
+        true
+    }
+}
+
+#[cfg(any(windows, test))]
+fn windows_managed_binary_valid(binary: &Path) -> bool {
+    binary.is_file()
+        && binary
+            .parent()
+            .is_some_and(|dir| windows_vc_runtime_payload(dir).is_ok())
+}
+
+#[cfg(any(windows, test))]
+const WINDOWS_VC_DLLS: [&str; 3] = ["msvcp140.dll", "vcruntime140.dll", "vcruntime140_1.dll"];
+#[cfg(any(windows, test))]
+const WINDOWS_VC_LICENSE_SHA256: &str =
+    "9c0cd52b20db9d081854c75bd1b50c75514b8f8cb09c8cad15e89d90b97b5bf3";
+
+#[cfg(any(windows, test))]
+fn windows_vc_runtime_payload(dir: &Path) -> Result<Vec<(&'static str, Vec<u8>)>, String> {
+    let read = |name: &str| {
+        fs::read(dir.join(name))
+            .map_err(|e| format!("Microsoft runtime {name} unavailable; reinstall StudyVis: {e}"))
+    };
+    let manifest_bytes = read("VC-RUNTIME-MANIFEST.json")?;
+    let manifest: serde_json::Value = serde_json::from_slice(&manifest_bytes)
+        .map_err(|e| format!("invalid Microsoft runtime manifest: {e}"))?;
+    let files = manifest["files"]
+        .as_array()
+        .ok_or("missing Microsoft runtime file inventory")?;
+    if manifest["schemaVersion"] != 1
+        || manifest["component"] != "Microsoft Visual C++ Runtime"
+        || manifest["architecture"] != "x64"
+        || manifest["source"]["kind"] != "visual-studio-redist"
+        || !matches!(
+            manifest["source"]["productId"].as_str(),
+            Some(
+                "Microsoft.VisualStudio.Product.Enterprise"
+                    | "Microsoft.VisualStudio.Product.Professional"
+            )
+        )
+        || files.len() != WINDOWS_VC_DLLS.len()
+        || manifest["license"]["name"] != "VC-RUNTIME-LICENSE.docx"
+        || manifest["license"]["sha256"] != WINDOWS_VC_LICENSE_SHA256
+    {
+        return Err("invalid Microsoft runtime provenance; reinstall StudyVis".into());
+    }
+    let mut payload = Vec::new();
+    for name in WINDOWS_VC_DLLS {
+        let entries: Vec<_> = files.iter().filter(|entry| entry["name"] == name).collect();
+        if entries.len() != 1 {
+            return Err(format!("invalid Microsoft runtime inventory for {name}"));
+        }
+        let entry = entries[0];
+        let bytes = read(name)?;
+        let pe = bytes
+            .get(0x3c..0x40)
+            .map(|offset| u32::from_le_bytes(offset.try_into().unwrap()) as usize);
+        let amd64 = bytes.starts_with(b"MZ")
+            && pe.is_some_and(|offset| {
+                offset >= 64
+                    && bytes
+                        .get(offset..offset.saturating_add(6))
+                        .is_some_and(|header| {
+                            header[..4] == *b"PE\0\0" && header[4..6] == [0x64, 0x86]
+                        })
+            });
+        let hash = hex::encode(Sha256::digest(&bytes));
+        if !amd64
+            || entry["machine"] != "AMD64"
+            || entry["size"].as_u64() != Some(bytes.len() as u64)
+            || entry["sha256"].as_str() != Some(hash.as_str())
+            || !entry["signerSubject"]
+                .as_str()
+                .is_some_and(|subject| subject.contains("Microsoft Corporation"))
+            || !entry["signerThumbprint"]
+                .as_str()
+                .is_some_and(|thumbprint| {
+                    thumbprint.len() == 40
+                        && thumbprint.bytes().all(|byte| byte.is_ascii_hexdigit())
+                })
+        {
+            return Err(format!(
+                "Microsoft runtime {name} failed integrity/architecture checks; reinstall StudyVis"
+            ));
+        }
+        payload.push((name, bytes));
+    }
+    let license = read("VC-RUNTIME-LICENSE.docx")?;
+    if hex::encode(Sha256::digest(&license)) != WINDOWS_VC_LICENSE_SHA256 {
+        return Err("Microsoft runtime license changed; reinstall StudyVis".into());
+    }
+    let notice = read("VC-RUNTIME-NOTICE.txt")?;
+    if !String::from_utf8_lossy(&notice).contains("Microsoft Corporation") {
+        return Err("Microsoft runtime attribution missing; reinstall StudyVis".into());
+    }
+    payload.push(("VC-RUNTIME-LICENSE.docx", license));
+    payload.push(("VC-RUNTIME-NOTICE.txt", notice));
+    payload.push(("VC-RUNTIME-MANIFEST.json", manifest_bytes));
+    Ok(payload)
+}
+
+#[cfg(any(windows, test))]
+fn write_windows_vc_runtime(
+    payload: Vec<(&'static str, Vec<u8>)>,
+    staging: &Path,
+) -> Result<(), String> {
+    for (name, bytes) in payload {
+        fs::write(staging.join(name), bytes)
+            .map_err(|e| format!("stage Microsoft runtime {name}: {e}"))?;
+    }
+    Ok(())
 }
 
 fn runtime_dir_for<R: Runtime>(
@@ -669,7 +794,7 @@ async fn install_locked<R: Runtime>(
     recover_interrupted_promotion(&managed_install_dir(app)?)?;
     if !force {
         if let Ok(path) = managed_binary_path(app) {
-            if path.is_file() {
+            if managed_binary_valid(&path) {
                 return Ok(());
             }
         }
@@ -714,6 +839,15 @@ async fn install_locked<R: Runtime>(
 async fn do_install<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
     let asset = asset_for(TARGET_TRIPLE)
         .ok_or_else(|| format!("no prebuilt llama.cpp {ENGINE_TAG} engine for {TARGET_TRIPLE}"))?;
+    #[cfg(windows)]
+    let vc_runtime = windows_vc_runtime_payload(
+        &app.path()
+            .resolve(
+                "binaries/llama-runtime-x86_64-pc-windows-msvc",
+                BaseDirectory::Resource,
+            )
+            .map_err(|e| format!("resolve Microsoft runtime resources: {e}"))?,
+    )?;
     let root = engine_root(app)?;
     fs::create_dir_all(&root).map_err(|e| format!("create engine dir: {e}"))?;
     cleanup_stale(&root);
@@ -737,7 +871,10 @@ async fn do_install<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
         let archive_path = archive_path.clone();
         let staging = staging.clone();
         tauri::async_runtime::spawn_blocking(move || {
-            extract_archive(&archive_path, &staging, binary_name())
+            extract_archive(&archive_path, &staging, binary_name())?;
+            #[cfg(windows)]
+            write_windows_vc_runtime(vc_runtime, &staging)?;
+            Ok(())
         })
         .await
         .map_err(|e| format!("extract task: {e}"))
@@ -1073,6 +1210,94 @@ fn set_executable(_path: &Path) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn windows_runtime_fixture(name: &str) -> PathBuf {
+        let dir = scratch_dir(name);
+        let mut bytes = vec![0u8; 128];
+        bytes[..2].copy_from_slice(b"MZ");
+        bytes[0x3c..0x40].copy_from_slice(&64u32.to_le_bytes());
+        bytes[64..68].copy_from_slice(b"PE\0\0");
+        bytes[68..70].copy_from_slice(&0x8664u16.to_le_bytes());
+        let files: Vec<_> = WINDOWS_VC_DLLS.iter().map(|name| {
+            fs::write(dir.join(name), &bytes).unwrap();
+            serde_json::json!({ "name": name, "size": bytes.len(), "sha256": hex::encode(Sha256::digest(&bytes)), "machine": "AMD64", "signerSubject": "CN=Microsoft Corporation, O=Microsoft Corporation", "signerThumbprint": "a".repeat(40) })
+        }).collect();
+        let manifest = serde_json::json!({ "schemaVersion": 1, "component": "Microsoft Visual C++ Runtime", "architecture": "x64", "source": { "kind": "visual-studio-redist", "productId": "Microsoft.VisualStudio.Product.Enterprise" }, "license": { "name": "VC-RUNTIME-LICENSE.docx", "sha256": WINDOWS_VC_LICENSE_SHA256 }, "files": files });
+        fs::write(
+            dir.join("VC-RUNTIME-MANIFEST.json"),
+            serde_json::to_vec(&manifest).unwrap(),
+        )
+        .unwrap();
+        fs::write(
+            dir.join("VC-RUNTIME-LICENSE.docx"),
+            include_bytes!("../../../scripts/licenses/MICROSOFT-VISUAL-STUDIO-2022-LICENSE.docx"),
+        )
+        .unwrap();
+        fs::write(
+            dir.join("VC-RUNTIME-NOTICE.txt"),
+            "Copyright Microsoft Corporation",
+        )
+        .unwrap();
+        dir
+    }
+
+    #[test]
+    fn managed_windows_runtime_carries_verified_dlls_and_license() {
+        let source = windows_runtime_fixture("vc-source");
+        let staging = scratch_dir("vc-managed");
+        write_windows_vc_runtime(windows_vc_runtime_payload(&source).unwrap(), &staging).unwrap();
+        assert_eq!(windows_vc_runtime_payload(&staging).unwrap().len(), 6);
+        for name in WINDOWS_VC_DLLS {
+            assert_eq!(
+                fs::read(source.join(name)).unwrap(),
+                fs::read(staging.join(name)).unwrap()
+            );
+        }
+        fs::remove_dir_all(source).unwrap();
+        fs::remove_dir_all(staging).unwrap();
+    }
+
+    #[test]
+    fn existing_windows_managed_install_requires_complete_runtime_before_reuse() {
+        let managed = windows_runtime_fixture("vc-existing-r4");
+        let binary = managed.join("llama-server.exe");
+        fs::write(&binary, b"synthetic engine").unwrap();
+        assert!(windows_managed_binary_valid(&binary));
+        fs::remove_file(managed.join("msvcp140.dll")).unwrap();
+        assert!(!windows_managed_binary_valid(&binary));
+        let source = windows_runtime_fixture("vc-repair-source");
+        write_windows_vc_runtime(windows_vc_runtime_payload(&source).unwrap(), &managed).unwrap();
+        assert!(windows_managed_binary_valid(&binary));
+        fs::write(managed.join("vcruntime140.dll"), b"changed DLL").unwrap();
+        assert!(!windows_managed_binary_valid(&binary));
+        fs::remove_dir_all(source).unwrap();
+        fs::remove_dir_all(managed).unwrap();
+    }
+
+    #[test]
+    fn managed_windows_runtime_rejects_missing_changed_or_wrong_architecture_dlls() {
+        for fault in ["missing", "changed", "architecture", "license"] {
+            let source = windows_runtime_fixture(&format!("vc-{fault}"));
+            let dll = source.join(WINDOWS_VC_DLLS[0]);
+            match fault {
+                "missing" => fs::remove_file(&dll).unwrap(),
+                "changed" => fs::write(&dll, b"changed DLL").unwrap(),
+                "architecture" => {
+                    let mut bytes = fs::read(&dll).unwrap();
+                    bytes[68..70].copy_from_slice(&0xaa64u16.to_le_bytes());
+                    fs::write(&dll, &bytes).unwrap();
+                    let path = source.join("VC-RUNTIME-MANIFEST.json");
+                    let mut manifest: serde_json::Value =
+                        serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+                    manifest["files"][0]["sha256"] = hex::encode(Sha256::digest(&bytes)).into();
+                    fs::write(path, serde_json::to_vec(&manifest).unwrap()).unwrap();
+                }
+                _ => fs::write(source.join("VC-RUNTIME-LICENSE.docx"), b"changed license").unwrap(),
+            }
+            assert!(windows_vc_runtime_payload(&source).is_err(), "{fault}");
+            fs::remove_dir_all(source).unwrap();
+        }
+    }
 
     #[test]
     fn pins_match_fetch_script() {
