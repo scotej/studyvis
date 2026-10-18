@@ -1,3 +1,10 @@
+import {
+  readObservations,
+  windowObservations,
+} from '@/features/session/sessionJournal'
+import { observationTimelineEntries } from '@/features/session/sessionTimeline'
+import { writtenTimelineEntries } from '@/features/session/reportSerialize'
+import { useSettingsStore } from '@/stores/settingsStore'
 import { loadReportData } from '@/features/session/reportLoader'
 import { logger } from '@/lib/log'
 import type { MirrorHost } from './runtime'
@@ -67,7 +74,40 @@ export async function finishMirrorReport(sessionId: string): Promise<void> {
   })
   const handoff = async () => {
     try {
-      const report = await loadReportData(sessionId)
+      let report = await loadReportData(sessionId)
+      if (!active || current !== registration) return
+      const settings = useSettingsStore.getState().values
+      // #410: the companion disconnects after this bounded handoff. Give it
+      // the journal's deterministic account without starting or waiting for
+      // model narration; the source label keeps that distinction explicit.
+      if (
+        writtenTimelineEntries(report.timeline).length === 0 &&
+        settings.aiFeaturesEnabled &&
+        settings.sessionTimelineEnabled
+      ) {
+        try {
+          const journal = await readObservations(sessionId)
+          if (!active || current !== registration) return
+          const entries = observationTimelineEntries(
+            windowObservations(journal.observations, report.session.started_at)
+          )
+          if (entries.length > 0)
+            report = {
+              ...report,
+              timeline: {
+                session_id: sessionId,
+                generated_at: Date.now(),
+                model_id: null,
+                source: 'observations',
+                entries: JSON.stringify(entries),
+                truncated: journal.truncated ? 1 : 0,
+              },
+            }
+        } catch {
+          // Coverage-aware report copy still describes unavailable accounts
+          // truthfully when a journal cannot be read within this handoff.
+        }
+      }
       if (!active || current !== registration) return
       await registration.host.finishReport(
         projectMirrorReport(report, registration.publicSessionId)

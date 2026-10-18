@@ -180,7 +180,7 @@ describe('serializeReportToText section order (R5)', () => {
     const text = serializeReportToText(
       buildData(baseSession(), [evt(ME, 'joined', 0)])
     )
-    expect(text).toContain(H.written.empty)
+    expect(text).toContain(H.written.unavailable)
     expect(text).not.toContain(H.written.sourceNote.observations)
   })
 
@@ -306,5 +306,70 @@ describe('serializeReportToText — AI coverage honesty (I83)', () => {
     )
     expect(text).not.toContain('Nice work')
     expect(text).not.toContain('No AI checks ran')
+  })
+})
+
+describe('written account availability matches saved coverage (#410)', () => {
+  test.each([
+    [
+      { score: 100, confident_samples: 3, skipped_samples: 0, ai_enabled: 1 },
+      H.written.unavailable,
+    ],
+    [
+      {
+        score: 100,
+        confident_samples: null,
+        skipped_samples: null,
+        ai_enabled: null,
+      },
+      H.written.unavailable,
+    ],
+    [
+      { score: null, confident_samples: 0, skipped_samples: 2, ai_enabled: 1 },
+      H.written.unavailable,
+    ],
+    [
+      { score: null, confident_samples: 0, skipped_samples: 0, ai_enabled: 1 },
+      H.written.empty,
+    ],
+    [
+      {
+        score: null,
+        confident_samples: null,
+        skipped_samples: null,
+        ai_enabled: 0,
+      },
+      H.written.empty,
+    ],
+    [
+      {
+        score: null,
+        confident_samples: null,
+        skipped_samples: null,
+        ai_enabled: null,
+      },
+      H.written.unknown,
+    ],
+  ])('exports truthful availability for %j', (coverage, expected) => {
+    const text = serializeReportToText(buildData(baseSession(coverage), []))
+    expect(text).toContain(expected)
+    if (expected !== H.written.empty)
+      expect(text).not.toContain(H.written.empty)
+  })
+
+  test('pending and blocked export use the same state copy as the screen', () => {
+    const data = buildData(baseSession(), [])
+    expect(serializeReportToText(data, { kind: 'generating' })).toContain(
+      H.written.loading
+    )
+    expect(
+      serializeReportToText(data, { kind: 'blocked', message: H.written.aiOff })
+    ).toContain(H.written.aiOff)
+    expect(
+      serializeReportToText(data, {
+        kind: 'blocked',
+        message: H.written.writeUpsOff,
+      })
+    ).toContain(H.written.writeUpsOff)
   })
 })

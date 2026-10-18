@@ -1,3 +1,5 @@
+import { serializeReportToText } from '@/features/session/reportSerialize'
+import { strings } from '@/strings'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 
 import { createBrowserConnection } from '@/features/mirror/browserConnection'
@@ -834,6 +836,38 @@ describe('browser recovery and local custody', () => {
     cleanup.push(reloaded.disconnect)
     expect(reloaded.getState().report).toEqual(report)
   })
+  test('a labelled observation account survives companion cache reload and export (#410)', async () => {
+    const connection = createBrowserConnection()
+    cleanup.push(connection.disconnect)
+    const socket = TestSocket.instances[0]
+    await activate(socket)
+    const fallback = {
+      ...report,
+      timeline: {
+        session_id: report.session.id,
+        generated_at: 61,
+        model_id: null,
+        source: 'observations',
+        truncated: 0,
+        entries: JSON.stringify([
+          { start_min: 0, end_min: 1, summary: 'Working on integrals' },
+        ]),
+      },
+    }
+    await incoming(socket, { type: 'report', report: fallback })
+    await vi.advanceTimersByTimeAsync(100)
+    const reloaded = createBrowserConnection()
+    cleanup.push(reloaded.disconnect)
+    expect(reloaded.getState().report?.timeline).toEqual(fallback.timeline)
+    expect(reloaded.getState().reportCached).toBe(true)
+    const text = serializeReportToText(reloaded.getState().report!)
+    expect(text).toContain('Working on integrals')
+    expect(text).toContain(
+      strings.report.sections.written.sourceNote.observations
+    )
+    expect(text).not.toContain(strings.report.sections.written.empty)
+  })
+
   test('storage denial preserves the live report and honestly marks it as unavailable offline', async () => {
     vi.stubGlobal('localStorage', {
       getItem: () => null,

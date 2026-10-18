@@ -675,3 +675,69 @@ export const TopicWithDelayedFirstAudit: Story = {
     ]),
   },
 }
+
+export const RecordedChecksWithoutJournal: Story = {
+  args: {
+    ...MostlyOnTask.args,
+    data: buildData(
+      baseSession({ confident_samples: 3, skipped_samples: 0, ai_enabled: 1 }),
+      []
+    ),
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(
+      canvas.getByText(strings.report.sections.written.unavailable)
+    ).toBeInTheDocument()
+    await expect(
+      canvas.queryByText(strings.report.sections.written.empty)
+    ).not.toBeInTheDocument()
+  },
+}
+
+export const TrueZeroChecks: Story = {
+  args: {
+    ...MostlyOnTask.args,
+    data: buildData(
+      baseSession({
+        score: null,
+        focused_pct: null,
+        confident_samples: 0,
+        skipped_samples: 0,
+        ai_enabled: 1,
+      }),
+      []
+    ),
+  },
+  play: async ({ canvasElement }) => {
+    await expect(
+      within(canvasElement).getByText(strings.report.sections.written.empty)
+    ).toBeInTheDocument()
+  },
+}
+
+export const CompanionObservationAccount: Story = {
+  args: {
+    ...MostlyOnTask.args,
+    data: {
+      ...buildData(baseSession(), []),
+      timeline: {
+        session_id: 'mock-session',
+        generated_at: ENDED_AT,
+        model_id: null,
+        source: 'observations',
+        truncated: 0,
+        entries: JSON.stringify([
+          { start_min: 0, end_min: 1, summary: 'Working on integrals' },
+        ]),
+      },
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(
+      canvas.getByText(strings.report.sections.written.sourceNote.observations)
+    ).toBeInTheDocument()
+    await expect(canvas.getByText('Working on integrals')).toBeInTheDocument()
+  },
+}

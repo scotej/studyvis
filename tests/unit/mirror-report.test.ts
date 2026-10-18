@@ -5,9 +5,23 @@ import {
   projectMirrorReport,
   registerMirrorReportHandoff,
 } from '@/features/mirror/reportHandoff'
+import { useSettingsStore } from '@/stores/settingsStore'
+import { serializeReportToText } from '@/features/session/reportSerialize'
+import { strings } from '@/strings'
 import type { MirrorHost } from '@/features/mirror/runtime'
 import type { ResolvedReportData } from '@/features/session/reportSerialize'
 
+const journal = vi.hoisted(() => ({
+  read: vi.fn(async () => ({
+    observations: [],
+    truncated: false,
+    unreadableLines: 0,
+  })),
+}))
+vi.mock('@/features/session/sessionJournal', async (original) => ({
+  ...(await original<typeof import('@/features/session/sessionJournal')>()),
+  readObservations: journal.read,
+}))
 const loader = vi.hoisted(() => ({ load: vi.fn() }))
 const log = vi.hoisted(() => ({ warn: vi.fn() }))
 vi.mock('@/features/session/reportLoader', () => ({
@@ -76,6 +90,10 @@ function report(): ResolvedReportData {
 const unregister: (() => void)[] = []
 afterEach(() => {
   for (const cleanup of unregister.splice(0)) cleanup()
+  journal.read.mockReset()
+  useSettingsStore.setState((s) => ({
+    values: { ...s.values, aiFeaturesEnabled: false },
+  }))
   loader.load.mockReset()
   log.warn.mockReset()
   vi.useRealTimers()
@@ -280,5 +298,87 @@ describe('companion report privacy and ownership', () => {
     await finishMirrorReport('private-session-topic')
     expect(log.warn).toHaveBeenCalledExactlyOnceWith('report.unavailable')
     expect(vi.getTimerCount()).toBe(0)
+  })
+})
+
+describe('bounded companion written account (#410)', () => {
+  function setup() {
+    useSettingsStore.setState((s) => ({
+      values: {
+        ...s.values,
+        aiFeaturesEnabled: true,
+        sessionTimelineEnabled: true,
+      },
+    }))
+    const original = { ...report(), timeline: null }
+    loader.load.mockResolvedValue(original)
+    const finish = vi
+      .fn<(report: unknown) => Promise<void>>()
+      .mockResolvedValue()
+    const host = { finishReport: finish } as unknown as MirrorHost
+    unregister.push(
+      registerMirrorReportHandoff('private-session-topic', host, 'generation')
+    )
+    return { finish }
+  }
+
+  test('hands off labelled observations and matching export without waiting for model inference', async () => {
+    const { finish } = setup()
+    journal.read.mockResolvedValue({
+      observations: [
+        {
+          ts: 2000,
+          verdict: 'on_task',
+          reasoning: 'Working on integrals',
+          confidence: 1,
+          topic: 'Maths',
+        },
+      ] as never[],
+      truncated: true,
+      unreadableLines: 0,
+    })
+    await finishMirrorReport('private-session-topic')
+    const delivered = finish.mock.calls[0][0] as ResolvedReportData
+    expect(delivered.timeline?.source).toBe('observations')
+    expect(delivered.timeline?.truncated).toBe(1)
+    expect(serializeReportToText(delivered)).toContain('Working on integrals')
+    expect(serializeReportToText(delivered)).toContain(
+      strings.report.sections.written.sourceNote.observations
+    )
+    expect(serializeReportToText(delivered)).not.toContain(
+      strings.report.sections.written.empty
+    )
+  })
+
+  test('unreadable journal retains a truthful report rather than losing the handoff', async () => {
+    const { finish } = setup()
+    journal.read.mockRejectedValue(new Error('permission denied'))
+    await finishMirrorReport('private-session-topic')
+    const delivered = finish.mock.calls[0][0] as ResolvedReportData
+    expect(serializeReportToText(delivered)).toContain(
+      strings.report.sections.written.unavailable
+    )
+  })
+
+  test('a hung or superseded journal read cannot extend Leave or deliver a stale report', async () => {
+    vi.useFakeTimers()
+    const { finish } = setup()
+    let release: ((value: never) => void) | undefined
+    journal.read.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          release = resolve
+        })
+    )
+    const pending = finishMirrorReport('private-session-topic')
+    await vi.advanceTimersByTimeAsync(3000)
+    await pending
+    release?.({
+      observations: [],
+      truncated: false,
+      unreadableLines: 0,
+    } as never)
+    await vi.advanceTimersByTimeAsync(0)
+    expect(finish).not.toHaveBeenCalled()
   })
 })

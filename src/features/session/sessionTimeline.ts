@@ -179,7 +179,7 @@ export function buildTimelineUserMessage(
   ].join('\n')
 }
 
-function fallbackEntries(
+export function observationTimelineEntries(
   windows: ReadonlyArray<ObservationWindow>
 ): TimelineEntry[] {
   return windows.map((window) => ({
@@ -368,7 +368,7 @@ function mergeWithFallback(
   )
   const entries = sortedWithoutOverlap([
     ...written,
-    ...fallbackEntries(uncovered),
+    ...observationTimelineEntries(uncovered),
   ])
   return { entries, uncovered: uncovered.length }
 }
@@ -492,7 +492,7 @@ export async function generateSessionTimeline(
     log.warn('generate.model_unavailable', {
       err: err instanceof AiAgentError ? err.code : err,
     })
-    entries = fallbackEntries(windows)
+    entries = observationTimelineEntries(windows)
     // Today only `ensureSidecar` reaches here, where the tally is still 0 —
     // `writeChunk` swallows its own failures and returns the digest. Reset it
     // anyway: `entries` has just been replaced wholesale, so a tally left
