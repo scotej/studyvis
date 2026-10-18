@@ -18,6 +18,7 @@ function isTauriRuntime(): boolean {
 // StrictMode mounts it twice — so this guard stays. Consume the launch URL once
 // per process; runtime links via `onOpenUrl` are unaffected and always deliver.
 let launchConsumed = false
+let launchRead: Promise<string[] | null> | null = null
 
 // F10 — routes an OS-delivered `studyvis://` link into the add-friend flow.
 // `getCurrent()` covers a launch triggered by the link (macOS Apple event,
@@ -54,9 +55,15 @@ export function subscribePairDeepLink(
   }
 
   if (!launchConsumed) {
-    launchConsumed = true
-    getCurrent()
-      .then(deliver)
+    launchRead ??= getCurrent()
+    launchRead
+      .then((urls) => {
+        // StrictMode can dispose the subscriber before IPC resolves. The next
+        // live subscriber consumes that same result instead of losing it.
+        if (disposed || launchConsumed) return
+        launchConsumed = true
+        deliver(urls)
+      })
       .catch(() => {})
   }
   onOpenUrl(deliver)
