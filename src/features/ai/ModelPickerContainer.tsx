@@ -53,6 +53,7 @@ type CardState = PickerStateForModel
 type CardUpdate = Partial<Omit<CardState, 'spec'>>
 
 type DownloadAttempt = {
+  id: string
   cancelled: boolean
   nativeStarted: boolean
   nativeSettled: boolean
@@ -70,7 +71,7 @@ function cancelDownloadAttempt(
   attempt: DownloadAttempt
 ): Promise<void> {
   if (attempt.cancelInFlight) return attempt.cancelInFlight
-  const request = getDownloadRuntime().cancelDownload(modelId)
+  const request = getDownloadRuntime().cancelDownload(modelId, attempt.id)
   attempt.cancellation = request
   attempt.cancelInFlight = request
   void request.then(
@@ -164,7 +165,7 @@ export const ModelPickerContainer = forwardRef<
     return () => {
       mounted.current = false
       for (const [modelId, attempt] of activeDownloadAttempts) {
-        if (attempt.owner !== owner) continue
+        if (attempt.owner !== owner || attempt.nativeSettled) continue
         attempt.cancelled = true
         if (attempt.nativeStarted && !attempt.nativeSettled) {
           attempt.cancellation = cancelDownloadAttempt(modelId, attempt)
@@ -261,7 +262,12 @@ export const ModelPickerContainer = forwardRef<
   const handleProgress = useCallback(
     (evt: ProgressEvent) => {
       const attempt = downloadAttempts.current.get(evt.model_id)
-      if (!attempt?.nativeStarted || attempt.nativeSettled) return
+      if (
+        !attempt?.nativeStarted ||
+        attempt.nativeSettled ||
+        evt.download_id !== attempt.id
+      )
+        return
       if (attempt.cancelled) {
         // Cancellation can reach Rust before model_download has registered its
         // flag. A first transfer event closes that transition race (#387).
@@ -450,6 +456,7 @@ export const ModelPickerContainer = forwardRef<
         finish = resolve
       })
       const attempt: DownloadAttempt = {
+        id: Array.from(crypto.getRandomValues(new Uint32Array(4))).join('-'),
         cancelled: false,
         nativeStarted: false,
         nativeSettled: false,
@@ -522,20 +529,8 @@ export const ModelPickerContainer = forwardRef<
         if (cancelled()) return
         attempt.nativeStarted = true
         try {
-          await runtime.startDownload(spec.id, files, spec.gated)
+          await runtime.startDownload(spec.id, files, spec.gated, attempt.id)
           attempt.nativeSettled = true
-          await attempt.cancellation
-          if (cancelled()) {
-            if (stillCurrent()) {
-              await refreshInstallState(spec)
-              updateCard(spec.id, {
-                phase: 'idle',
-                downloadProgress: null,
-                errorMessage: null,
-              })
-            }
-            return
-          }
         } catch (err) {
           attempt.nativeSettled = true
           await attempt.cancellation?.catch(() => {})
@@ -559,8 +554,8 @@ export const ModelPickerContainer = forwardRef<
           return
         }
 
-        await refreshInstallState(spec)
-        if (cancelled()) return
+        // Native success means both verified files are installed. Persist that
+        // result even if Settings closes or a late cancellation loses the race.
         await recordInstalled(spec.id)
 
         // First install becomes the selected model, but never switch models as
@@ -575,6 +570,8 @@ export const ModelPickerContainer = forwardRef<
           selected = true
         }
 
+        await attempt.cancellation?.catch(() => {})
+        await refreshInstallState(spec)
         updateCard(spec.id, {
           phase: 'idle',
           downloadProgress: null,
@@ -673,7 +670,7 @@ export const ModelPickerContainer = forwardRef<
   const onCancel = useCallback(
     (spec: ModelSpec) => {
       const attempt = downloadAttempts.current.get(spec.id)
-      if (!attempt) return
+      if (!attempt || attempt.nativeSettled) return
       attempt.cancelled = true
       if (!attempt.nativeStarted) {
         updateCard(spec.id, {
