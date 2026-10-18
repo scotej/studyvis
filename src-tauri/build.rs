@@ -29,6 +29,7 @@ const APP_COMMANDS: &[&str] = &[
     "identity_save_keys",
     "identity_exists",
     "identity_keys_present",
+    "identity_keys_status",
     "identity_save_record",
     "identity_load_record",
     "identity_sign",

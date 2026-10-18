@@ -54,7 +54,8 @@ use commands::friends::{friends_export, friends_import};
 #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 use commands::identity::{
     identity_box_decrypt, identity_box_encrypt, identity_exists, identity_keys_present,
-    identity_load_record, identity_save_keys, identity_save_record, identity_sign,
+    identity_keys_status, identity_load_record, identity_save_keys, identity_save_record,
+    identity_sign,
 };
 #[cfg(desktop)]
 use commands::mirror::{mirror_send, mirror_start, mirror_stop, MirrorState};
@@ -172,6 +173,7 @@ pub fn run() {
         identity_exists,
         #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
         identity_keys_present,
+        identity_keys_status,
         #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
         identity_save_record,
         #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]

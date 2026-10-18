@@ -6,7 +6,9 @@ import { IdentityLoadErrorView } from '@/features/identity/IdentityLoadErrorView
 
 const noop = () => undefined
 
-function render(variant: 'keysMissing' | 'keychainUnavailable'): string {
+function render(
+  variant: 'keysMissing' | 'keysInvalid' | 'keychainUnavailable'
+): string {
   return renderToStaticMarkup(
     createElement(IdentityLoadErrorView, {
       variant,
@@ -37,4 +39,13 @@ describe('IdentityLoadErrorView keychain failures', () => {
     expect(retryIndex).toBeGreaterThan(recoverIndex)
     expect(html.match(/<button/g)).toHaveLength(2)
   })
+})
+
+test('mismatched credentials offer recovery with precise guidance', () => {
+  const html = render('keysInvalid')
+  expect(html).toContain('Your identity file and protected keys do not match')
+  expect(html.indexOf('Restore from backup')).toBeLessThan(
+    html.indexOf('Check again')
+  )
+  expect(html).not.toContain('Create a new identity')
 })

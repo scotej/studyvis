@@ -35,3 +35,7 @@ export const KeysMissing: Story = {
 export const KeychainUnavailable: Story = {
   args: { variant: 'keychainUnavailable' },
 }
+
+export const KeysInvalid: Story = {
+  args: { variant: 'keysInvalid' },
+}

@@ -370,6 +370,15 @@ export const strings = {
       retryCta: 'Check again',
       recoverCta: 'Restore from backup',
     },
+    keysInvalid: {
+      ariaLabel: 'Identity keys need recovery',
+      heading: 'Your identity file and protected keys do not match',
+      body: "StudyVis couldn't verify both identity keys against your identity file. A partial restore or damaged credential can cause this. Restore from the 24-word backup for the identity you want to keep before pairing or starting a session.",
+      recoverNote:
+        'Use your original backup to keep the same identity, friends, and history.',
+      retryCta: 'Check again',
+      recoverCta: 'Restore from backup',
+    },
     // identity.json parsed, but the OS credential store rejected the probe.
     // This is deliberately separate from keysMissing: a locked provider does
     // not prove the keys are gone, and offering recovery could overwrite them.

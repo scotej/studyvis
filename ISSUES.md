@@ -134,7 +134,7 @@ Format: one `###` section per finding, ordered by ID. Entries are appended, neve
 
 **Evidence.** Identity commit (keychain then file) had no rollback; a failed file write + re-onboard overwrites the keychain entry.
 
-**Status.** **mitigated** (R2) — the file write is now atomic (see I16); residual is now only "rename succeeded but the keychain `set` itself fails", an OS-keychain fault recoverable via BIP39 (PLAN §7). Full two-store transactionality is out of scope for a Sev3.
+**Status.** **mitigated** (R2, #380) — the file write is atomic (see I16), but keys are saved first: a later file-write/rename failure can leave the old public record beside replacement private keys. Boot now derives and checks both public keys against the credential before marking identity ready and offers backup recovery for malformed or mismatched keys. An unavailable credential store still offers retry without overwrite. Full two-store transactionality remains out of scope; BIP39 recovery repairs the partial commit (PLAN §7).
 
 ### I16 — Sev3
 

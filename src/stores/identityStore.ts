@@ -17,7 +17,7 @@ import {
 } from '@/lib/crypto/identity'
 import {
   identityExists,
-  identityKeysPresent,
+  identityKeysStatus,
   loadIdentityRecord,
   saveIdentityRecord,
   saveKeys,
@@ -43,11 +43,14 @@ export type IdentityStatus = 'loading' | 'absent' | 'ready' | 'error'
 //                    holds no keys (file-level backup restore, Credential
 //                    Manager reset, the I15 residual). Every sign/decrypt
 //                    would fail; the 24-word Recover flow is the only fix.
+//   'keys-invalid' — protected keys are malformed or disagree with either
+//                    public key; backup recovery is required.
 //   'keychain-unavailable' — identity.json parsed fine, but the credential
 //                    store could not be opened (for example, a locked Linux
 //                    Secret Service provider). Retry after unlocking; do not
 //                    treat the keys as missing or offer to overwrite them.
-export type IdentityErrorKind = 'file' | 'keys-missing' | 'keychain-unavailable'
+export type IdentityErrorKind =
+  'file' | 'keys-missing' | 'keys-invalid' | 'keychain-unavailable'
 
 export type CreatedIdentity = {
   mnemonic: Mnemonic
@@ -165,29 +168,29 @@ export const useIdentityStore = create<IdentityState>((set, get) => {
       })
       return
     }
-    // #47 E1 — the file parsing is only half the identity: the keychain must
-    // hold the private keys, or every identity_sign / identity_box_decrypt
+    // #47 E1 / #380 — parsing is only half the identity: the credential must
+    // match BOTH public keys, or identity_sign / identity_box_decrypt
     // fails deep inside pairing/invites/audit signing with raw keyring
     // errors. Only a definitive keyring NoEntry (probe resolves false) routes
     // to the keys-missing Recover flow. A rejected probe means the credential
     // store itself is unavailable or locked: block boot with retry guidance,
     // but do not mislabel the keys as missing or offer to overwrite them.
     try {
-      const keysPresent = await identityKeysPresent()
-      if (!keysPresent) {
+      const keyStatus = await identityKeysStatus(record)
+      if (keyStatus !== 'matching') {
         // Keep the parsed record: its fingerprint + display name drive the
         // Recover flow's same-identity fast path (see IdentityState).
         set({
           identity: null,
           status: 'error',
-          errorKind: 'keys-missing',
+          errorKind: keyStatus === 'missing' ? 'keys-missing' : 'keys-invalid',
           staleRecord: record,
         })
         return
       }
     } catch (err) {
       log.error('keychain.probe.failed', {
-        cmd: 'identity_keys_present',
+        cmd: 'identity_keys_status',
         errorKind: 'keychain-unavailable',
         outcome: 'block',
         err,

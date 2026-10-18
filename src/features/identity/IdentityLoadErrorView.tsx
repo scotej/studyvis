@@ -10,7 +10,7 @@ export type IdentityLoadErrorViewProps = {
   // retrying can't fix that, so the 24-word restore leads.
   // 'keychainUnavailable' — the credential store could not be opened; Retry
   // leads and Recover is withheld because the keys may still be present.
-  variant?: 'file' | 'keysMissing' | 'keychainUnavailable'
+  variant?: 'file' | 'keysMissing' | 'keysInvalid' | 'keychainUnavailable'
   retrying: boolean
   onRetry: () => void
   onRecover: () => void
@@ -27,23 +27,21 @@ export function IdentityLoadErrorView({
   onRetry,
   onRecover,
 }: IdentityLoadErrorViewProps) {
+  const recoveryFirst = variant === 'keysMissing' || variant === 'keysInvalid'
   const copy =
-    variant === 'keysMissing'
-      ? strings.identity.keysMissing
-      : variant === 'keychainUnavailable'
-        ? strings.identity.keychainUnavailable
-        : strings.identity.loadError
-  const recoverCta =
-    variant === 'keysMissing'
-      ? strings.identity.keysMissing.recoverCta
-      : variant === 'file'
-        ? strings.identity.loadError.recoverCta
-        : null
+    variant === 'keysInvalid'
+      ? strings.identity.keysInvalid
+      : variant === 'keysMissing'
+        ? strings.identity.keysMissing
+        : variant === 'keychainUnavailable'
+          ? strings.identity.keychainUnavailable
+          : strings.identity.loadError
+  const recoverCta = 'recoverCta' in copy ? copy.recoverCta : null
   const retryButton = (
     <Button
       size="lg"
-      variant={variant === 'keysMissing' ? 'outline' : 'default'}
-      autoFocus={variant !== 'keysMissing'}
+      variant={recoveryFirst ? 'outline' : 'default'}
+      autoFocus={!recoveryFirst}
       onClick={onRetry}
       disabled={retrying}
       aria-disabled={retrying || undefined}
@@ -54,8 +52,8 @@ export function IdentityLoadErrorView({
   const recoverButton = recoverCta ? (
     <Button
       size="lg"
-      variant={variant === 'keysMissing' ? 'default' : 'outline'}
-      autoFocus={variant === 'keysMissing'}
+      variant={recoveryFirst ? 'default' : 'outline'}
+      autoFocus={recoveryFirst}
       onClick={onRecover}
     >
       {recoverCta}
@@ -87,7 +85,7 @@ export function IdentityLoadErrorView({
           {copy.recoverNote}
         </p>
         <div className="flex w-full max-w-xs flex-col gap-3">
-          {variant === 'keysMissing' ? (
+          {recoveryFirst ? (
             <>
               {recoverButton}
               {retryButton}

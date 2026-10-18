@@ -33,6 +33,7 @@ permissions = [
   "allow-identity-save-keys",
   "allow-identity-exists",
   "allow-identity-keys-present",
+  "allow-identity-keys-status",
   "allow-identity-save-record",
   "allow-identity-load-record",
   "allow-identity-sign",
