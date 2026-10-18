@@ -387,6 +387,30 @@ describe('requestBreak orchestrator', () => {
     expect(scheduledTimers).toHaveLength(0)
   })
 
+  test('zero-duration refusal emits a denial without starting a break (#423)', async () => {
+    const verdict = await requestBreak(
+      {
+        requestedDurationSec: 0,
+        aiRecommendation: 'deny',
+        aiReasoning: 'user requested indefinite break',
+        now: 1_700_000_000_000,
+      },
+      buildDeps(state())
+    )
+    expect(verdict).toEqual({
+      verdict: 'denied',
+      reason: 'user requested indefinite break',
+    })
+    expect(emitCalls).toEqual([
+      {
+        kind: 'break_denied',
+        detail: { reason: 'user requested indefinite break' },
+      },
+    ])
+    expect(startApprovedCalls).toHaveLength(0)
+    expect(scheduledTimers).toHaveLength(0)
+  })
+
   test('serializes concurrent requests across an awaited audit write', async () => {
     const liveState = state()
     const deps = buildDeps(liveState)
