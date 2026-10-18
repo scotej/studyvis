@@ -12,7 +12,7 @@ The product exists because every existing alternative either (a) routes everythi
 
 - Small groups of close friends (2–4 per session) who already know each other by name.
 - Hardware floor: 16GB RAM, mid-to-low-tier CPU, no dedicated GPU.
-- Operating systems: macOS (Apple Silicon) and Windows 10/11 (x86_64), plus Linux as the next x86_64 AppImage release-candidate target. CachyOS with KDE Plasma on Wayland is the reference Linux desktop. The builds are per-architecture, not universal, because the llama-server sidecar is per-architecture; Intel macOS, ARM64 Linux, and native Linux distro packages are outside the candidate matrix (see §5 and ARCHITECTURE §2).
+- Operating systems: macOS 11+ (Apple Silicon; optional local AI requires macOS 14+) and Windows 10/11 (x86_64), plus Linux as the next x86_64 AppImage release-candidate target. CachyOS with KDE Plasma on Wayland is the reference Linux desktop. The builds are per-architecture, not universal, because the llama-server sidecar is per-architecture; Intel macOS, ARM64 Linux, and native Linux distro packages are outside the candidate matrix (see §5 and ARCHITECTURE §2).
 - Anonymous to the public internet; pseudonymous to friends (chosen display name + Ed25519 keypair).
 - May expand to wider groups later, but every design decision should pass the "would my four friends like this?" test before the "would a stranger trust this?" test.
 

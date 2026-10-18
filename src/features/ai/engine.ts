@@ -19,6 +19,7 @@ export type EngineDevice = {
 
 export type EngineInfo = {
   supported: boolean
+  support_error?: 'macos_ai_requires_14' | null
   installed: boolean
   source: EngineSource | null
   version: string

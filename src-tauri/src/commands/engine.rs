@@ -91,6 +91,28 @@ fn asset_for(triple: &str) -> Option<&'static EngineAsset> {
     ENGINE_ASSETS.iter().find(|a| a.triple == triple)
 }
 
+pub(crate) const MACOS_AI_UNSUPPORTED: &str = "macos_ai_requires_14";
+
+fn support_error_for(triple: &str, macos_14_available: bool) -> Option<&'static str> {
+    if triple.ends_with("apple-darwin") && !macos_14_available {
+        Some(MACOS_AI_UNSUPPORTED)
+    } else {
+        None
+    }
+}
+
+fn platform_support_error() -> Option<&'static str> {
+    #[cfg(target_os = "macos")]
+    let macos_14_available = objc2::available!(macos = 14.0);
+    #[cfg(not(target_os = "macos"))]
+    let macos_14_available = true;
+    support_error_for(TARGET_TRIPLE, macos_14_available)
+}
+
+pub(crate) fn require_supported_platform() -> Result<(), String> {
+    platform_support_error().map_or(Ok(()), |error| Err(error.to_string()))
+}
+
 fn binary_name() -> &'static str {
     if cfg!(windows) {
         "llama-server.exe"
@@ -144,6 +166,9 @@ pub enum EngineSource {
 // path), managed second. Both resolve the same pinned tag + package revision,
 // so fallback cannot resurrect a CPU-only Windows or Linux engine.
 pub fn resolve_candidates<R: Runtime>(app: &AppHandle<R>) -> Vec<(EngineSource, PathBuf)> {
+    if platform_support_error().is_some() {
+        return Vec::new();
+    }
     let mut candidates = Vec::new();
     if let Some(path) = bundled_binary_path() {
         candidates.push((EngineSource::Bundled, path));
@@ -571,6 +596,7 @@ pub(crate) async fn resolve_hardware_identity<R: Runtime>(
 #[derive(Serialize)]
 pub struct EngineInfo {
     pub supported: bool,
+    pub support_error: Option<&'static str>,
     pub installed: bool,
     pub source: Option<EngineSource>,
     pub version: String,
@@ -593,7 +619,8 @@ pub async fn engine_info<R: Runtime>(
         resolved_hardware_identity(&selection, &discovery, !candidates.is_empty());
     let meta = state.meta.lock().map_err(|e| e.to_string())?;
     Ok(EngineInfo {
-        supported: asset_for(TARGET_TRIPLE).is_some(),
+        supported: asset_for(TARGET_TRIPLE).is_some() && platform_support_error().is_none(),
+        support_error: platform_support_error(),
         installed: !candidates.is_empty(),
         source: candidates.first().map(|(source, _)| *source),
         version: ENGINE_TAG.to_string(),
@@ -638,6 +665,7 @@ pub async fn engine_install<R: Runtime>(
     state: State<'_, EngineState>,
     sidecar: State<'_, SidecarState>,
 ) -> Result<(), String> {
+    require_supported_platform()?;
     let _gate = state.gate.lock().await;
     let _probe_gate = state.device_probe_gate.lock().await;
     super::sidecar::stop_now(&sidecar).await?;
@@ -651,6 +679,7 @@ pub async fn ensure_installed<R: Runtime>(
     app: &AppHandle<R>,
     state: &EngineState,
 ) -> Result<(), String> {
+    require_supported_platform()?;
     let _gate = state.gate.lock().await;
     install_locked(app, state, false).await
 }
@@ -1073,6 +1102,16 @@ fn set_executable(_path: &Path) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn macos_engine_support_requires_14_for_bundled_and_managed_paths() {
+        for triple in ["aarch64-apple-darwin", "x86_64-apple-darwin"] {
+            assert_eq!(support_error_for(triple, false), Some(MACOS_AI_UNSUPPORTED));
+            assert_eq!(support_error_for(triple, true), None);
+        }
+        assert_eq!(support_error_for("x86_64-pc-windows-msvc", false), None);
+        assert_eq!(support_error_for("x86_64-unknown-linux-gnu", false), None);
+    }
 
     #[test]
     fn pins_match_fetch_script() {

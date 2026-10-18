@@ -1722,6 +1722,8 @@ export const strings = {
           "Not installed yet. It'll download automatically when AI starts.",
         helpMissingManual: 'Not installed.',
         helpUnsupported: 'No prebuilt engine for this computer yet.',
+        helpMacosVersion:
+          'Local AI requires macOS 14 or later. You can still study with friends without AI.',
         helpInstallError: (error: string) => `Couldn't install: ${error}`,
         helpDownloading: (received: string, total: string) =>
           `Downloading the engine — ${received} of ${total}.`,

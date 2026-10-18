@@ -14,6 +14,7 @@ import platform
 import plistlib
 import re
 import shutil
+import struct
 import subprocess
 import sys
 import tempfile
@@ -92,7 +93,69 @@ def visible_app_window(pid):
         core.CFRelease(windows)
 
 
+def macho_contract(data, floor):
+    assert len(data) >= 32 and struct.unpack_from("<I", data)[0] == 0xfeedfacf, "expected a 64-bit Mach-O"
+    commands, command_bytes = struct.unpack_from("<II", data, 16)
+    command_end = 32 + command_bytes
+    assert command_end <= len(data), "truncated Mach-O load commands"
+    offset, minimum, symbols = 32, None, None
+    for _ in range(commands):
+        assert offset + 8 <= command_end, "truncated Mach-O command"
+        command, size = struct.unpack_from("<II", data, offset)
+        assert size >= 8 and offset + size <= command_end, "invalid Mach-O command size"
+        if command == 0x32:
+            assert size >= 24 and struct.unpack_from("<I", data, offset + 8)[0] == 1, "expected macOS build metadata"
+            minimum = struct.unpack_from("<I", data, offset + 12)[0]
+        elif command == 0x24:
+            assert size >= 16, "truncated macOS version metadata"
+            minimum = struct.unpack_from("<I", data, offset + 8)[0]
+        elif command == 0x2:
+            assert size >= 24, "truncated Mach-O symbol metadata"
+            symbols = struct.unpack_from("<IIII", data, offset + 8)
+        offset += size
+    assert offset == command_end and minimum is not None and symbols is not None, "missing Mach-O version/symbol metadata"
+    version = (minimum >> 16, (minimum >> 8) & 255, minimum & 255)
+    assert version <= floor, f"Mach-O minimum {version} exceeds supported floor {floor}"
+    symbol_offset, count, string_offset, string_size = symbols
+    assert symbol_offset + count * 16 <= len(data) and string_offset + string_size <= len(data), "truncated Mach-O symbol table"
+    strings = data[string_offset:string_offset + string_size]
+    strong = []
+    for index in range(count):
+        name_offset, kind, _, description, _ = struct.unpack_from("<IBBHQ", data, symbol_offset + index * 16)
+        if kind & 0xe or not kind & 1 or description & 0x40:
+            continue
+        assert name_offset < len(strings), "invalid Mach-O symbol name"
+        end = strings.find(b"\0", name_offset)
+        assert end >= 0, "unterminated Mach-O symbol name"
+        name = strings[name_offset:end].decode("utf-8")
+        strong.append(name)
+        # Apple's Accelerate NEWLAPACK/ILP64 entry points require macOS 13.3.
+        # A strong import is a loader dependency even when inference selects CPU.
+        if "$NEWLAPACK" in name or "$ILP64" in name:
+            assert floor >= (13, 3, 0), f"mandatory Accelerate import exceeds supported floor: {name}"
+    return version, strong
+
+
+def macho_fixture(minimum, symbol, weak=False):
+    strings = b"\0" + symbol.encode() + b"\0"
+    header = struct.pack("<8I", 0xfeedfacf, 0x100000c, 0, 2, 2, 48, 0, 0)
+    commands = struct.pack("<6I", 0x32, 24, 1, minimum, 0, 0) + struct.pack("<6I", 0x2, 24, 80, 1, 96, len(strings))
+    return header + commands + struct.pack("<IBBHQ", 1, 1, 0, 0x40 if weak else 0x200, 0) + strings
+
+
 def self_test():
+    symbol = "_cblas_sgemm$NEWLAPACK$ILP64"
+    assert macho_contract(macho_fixture(14 << 16, symbol), (14, 0, 0))[1] == [symbol]
+    assert macho_contract(macho_fixture(11 << 16, symbol, weak=True), (11, 0, 0))[1] == []
+    for data, floor in [(macho_fixture(15 << 16, symbol), (14, 0, 0)),
+                        (macho_fixture(14 << 16, "_malloc"), (11, 0, 0)),
+                        (macho_fixture(11 << 16, symbol), (11, 0, 0))]:
+        try:
+            macho_contract(data, floor)
+        except AssertionError:
+            pass
+        else:
+            raise RuntimeError("macOS deployment/import floor violation passed")
     assert engine_ready("--version", "version: 9095 (f3c3e0e9a)\nbuilt with AppleClang for Darwin arm64")
     assert not engine_ready("--version", "built with AppleClang for Darwin arm64")
     mac_devices = "Available devices:\n  MTL0: Apple Paravirtual device (4778 MiB, 4778 MiB free)\n  BLAS: Accelerate (0 MiB, 0 MiB free)"
@@ -136,6 +199,7 @@ def inside(path, root):
 def verify_bundle(app, expected):
     with (app / "Contents/Info.plist").open("rb") as handle:
         info = plistlib.load(handle)
+    assert info.get("LSMinimumSystemVersion") == "11.0", "app plist must declare macOS 11.0"
     assert info["CFBundleIdentifier"] == "com.studyvis.app", "wrong bundle identifier"
     assert info["CFBundleShortVersionString"] == expected, "wrong packaged app version"
     for key in ("NSCameraUsageDescription", "NSMicrophoneUsageDescription", "NSScreenCaptureUsageDescription"):
@@ -161,6 +225,9 @@ def verify_bundle(app, expected):
         machos.append(path)
     assert executable in machos and engine in machos, "main app and sidecar must both be arm64 Mach-O"
     for binary in machos:
+        ai_binary = inside(binary, runtime) or binary == engine
+        minimum, strong_imports = macho_contract(binary.read_bytes(), (14, 0, 0) if ai_binary else (11, 0, 0))
+        print(f"Mach-O floor/import check: {binary.relative_to(app)} minimum={minimum} strong_imports={len(strong_imports)} Accelerate={[name for name in strong_imports if '$NEWLAPACK' in name or '$ILP64' in name]}")
         loader = binary.parent
         executable_dir = engine.parent if inside(binary, runtime) or binary == engine else executable.parent
         rpaths = re.findall(r"cmd LC_RPATH\n\s+cmdsize \d+\n\s+path (.*?) \(offset", run(["otool", "-l", str(binary)]))

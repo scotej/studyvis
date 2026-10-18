@@ -17,6 +17,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { create } from 'zustand'
 
 import { logger } from '@/lib/log'
+import { strings } from '@/strings'
 import { useSettingsStore } from '@/stores/settingsStore'
 import {
   isAiHardwareIdentity,
@@ -416,7 +417,9 @@ export const useSidecarStore = create<SidecarState>((set, get) => ({
         const message =
           rawMessage === MODEL_UNAVAILABLE_ERROR
             ? (getModelUnavailableReason('moondream2') ?? rawMessage)
-            : rawMessage
+            : rawMessage === 'macos_ai_requires_14'
+              ? strings.settings.ai.engine.helpMacosVersion
+              : rawMessage
         set({ status: 'errored', lastError: message })
         stopPolling()
         log.error('start.failed', {

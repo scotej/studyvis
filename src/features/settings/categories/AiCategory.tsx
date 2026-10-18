@@ -538,6 +538,8 @@ export function AiCategory() {
           )
     }
     if (!engineInfo) return copy.engine.helpMissingManual
+    if (engineInfo.support_error === 'macos_ai_requires_14')
+      return copy.engine.helpMacosVersion
     if (!engineInfo.supported) return copy.engine.helpUnsupported
     if (engineInfo.installing) return copy.engine.helpExtracting
     if (engineInfo.installed) {
@@ -605,7 +607,11 @@ export function AiCategory() {
         control={
           <Switch
             checked={aiFeaturesEnabled}
-            disabled={toggling || (!aiFeaturesEnabled && modelSetupBusy)}
+            disabled={
+              toggling ||
+              (!aiFeaturesEnabled &&
+                (modelSetupBusy || engineInfo?.supported === false))
+            }
             onCheckedChange={(checked) => void handleToggle(Boolean(checked))}
             aria-label={copy.enable.ariaLabel}
           />

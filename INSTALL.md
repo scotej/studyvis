@@ -12,6 +12,9 @@ distro package.
 
 ## macOS (Apple Silicon)
 
+StudyVis requires macOS 11 or later. Optional local AI requires macOS 14 or
+later; on macOS 11–13, video study sessions remain available with AI off.
+
 > StudyVis ships an Apple Silicon (`aarch64`) `.dmg` only. Intel Macs are not in the release matrix. (In → About This Mac, "Apple M…" = Apple Silicon.)
 
 1. From the [Releases page](https://github.com/scotej/studyvis/releases), download `StudyVis_<version>_aarch64.dmg`.

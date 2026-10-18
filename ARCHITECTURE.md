@@ -773,6 +773,13 @@ permissions remain platform checks beyond headless browser acceptance.
 
 ## 8. AI inference pipeline (V2+)
 
+On Apple Silicon, the app supports macOS 11+, while the pinned bundled and
+managed AI engines require macOS 14+. Native version checks exclude unsupported
+engines before probing, installing or spawning; Settings explains the requirement.
+The packaged app declares 11.0 consistently in its Mach-O deployment target and
+Info.plist. Release checks enforce each binary's declared floor and inspect
+strong Accelerate NEWLAPACK/ILP64 imports against the engine's 14.0 contract.
+
 AI is opt-in and `ai_features_enabled` remains false by default. Model installation,
 selection, and benchmarking are separate operations: a completed model +
 mmproj download can be selected immediately, while the benchmark is optional
