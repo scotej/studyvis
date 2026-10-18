@@ -1,6 +1,7 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
+import { Button } from '@/components/ui/button'
 import {
   Report,
   ReportView,
@@ -220,6 +221,143 @@ export const LoadingCanRejoin: Story = {
     })
     await expect(rejoin).toBeEnabled()
     await userEvent.click(rejoin)
+    await expect(args.onRejoin).toHaveBeenCalledTimes(1)
+  },
+}
+
+let releaseRejoinTransition: (() => void) | null = null
+let failRejoinTransition: (() => void) | null = null
+
+function loadRejoinTransition(): Promise<ResolvedReportData> {
+  return new Promise((resolve, reject) => {
+    releaseRejoinTransition = () => resolve(focusTransitionData)
+    failRejoinTransition = () => reject(new Error('Report read unavailable'))
+  })
+}
+
+export const LoadingRejoinPreservesKeyboardFocus: Story = {
+  args: { ...MostlyOnTask.args, onRejoin: fn() },
+  render: (args) => {
+    releaseRejoinTransition = null
+    return (
+      <Report
+        sessionId="loading-rejoin-focus"
+        onClose={onClose}
+        onRejoin={args.onRejoin}
+        rejoinDeadline={Date.now() + 20_000}
+        __loader={loadRejoinTransition}
+      />
+    )
+  },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getByRole('status')).toBeInTheDocument()
+    await userEvent.tab()
+    await expect(
+      canvas.getByRole('button', { name: strings.report.rejoinCta })
+    ).toHaveFocus()
+    await waitFor(() => expect(releaseRejoinTransition).not.toBeNull())
+    releaseRejoinTransition?.()
+    await canvas.findByRole('heading', { name: 'Studied Focus transition' })
+    const rejoin = canvas.getByRole('button', {
+      name: strings.report.rejoinCta,
+    })
+    await expect(rejoin).toHaveFocus()
+    await expect(rejoin.matches(':focus-visible')).toBe(true)
+    await expect(window.getComputedStyle(rejoin).boxShadow).not.toBe('none')
+    await userEvent.keyboard('{Enter}')
+    await expect(args.onRejoin).toHaveBeenCalledTimes(1)
+  },
+}
+
+export const LoadingRejoinRespectsNewerKeyboardFocus: Story = {
+  args: { ...MostlyOnTask.args, onRejoin: fn() },
+  render: (args) => {
+    releaseRejoinTransition = null
+    return (
+      <>
+        <div role="region" aria-label="Pending invite controls">
+          <Button>Pending invite action</Button>
+        </div>
+        <Report
+          sessionId="loading-rejoin-newer-focus"
+          onClose={onClose}
+          onRejoin={args.onRejoin}
+          rejoinDeadline={Date.now() + 20_000}
+          __loader={loadRejoinTransition}
+        />
+      </>
+    )
+  },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getByRole('status')).toBeInTheDocument()
+    await userEvent.tab()
+    await userEvent.tab()
+    await expect(
+      canvas.getByRole('button', { name: strings.report.rejoinCta })
+    ).toHaveFocus()
+    await userEvent.tab({ shift: true })
+    const newerTarget = canvas.getByRole('button', {
+      name: 'Pending invite action',
+    })
+    await expect(newerTarget).toHaveFocus()
+    await waitFor(() => expect(releaseRejoinTransition).not.toBeNull())
+    releaseRejoinTransition?.()
+    await canvas.findByRole('heading', { name: 'Studied Focus transition' })
+    await expect(newerTarget).toHaveFocus()
+    await userEvent.keyboard('{Enter}')
+    await expect(args.onRejoin).not.toHaveBeenCalled()
+  },
+}
+
+export const FailedThenReadyRejoinPreservesKeyboardFocus: Story = {
+  args: { ...MostlyOnTask.args, onRejoin: fn() },
+  render: (args) => {
+    releaseRejoinTransition = null
+    failRejoinTransition = null
+    return (
+      <Report
+        sessionId="failed-rejoin-focus"
+        onClose={onClose}
+        onRejoin={args.onRejoin}
+        rejoinDeadline={Date.now() + 20_000}
+        __loader={loadRejoinTransition}
+      />
+    )
+  },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement)
+    await userEvent.tab()
+    await expect(
+      canvas.getByRole('button', { name: strings.report.rejoinCta })
+    ).toHaveFocus()
+    await waitFor(() => expect(failRejoinTransition).not.toBeNull())
+    failRejoinTransition?.()
+    await canvas.findByRole('alert')
+    await expect(
+      canvas.getByRole('button', { name: strings.report.rejoinCta })
+    ).toHaveFocus()
+    await userEvent.tab()
+    await userEvent.tab()
+    await expect(
+      canvas.getByRole('button', { name: strings.common.actions.retry })
+    ).toHaveFocus()
+    const previousRelease = releaseRejoinTransition
+    await userEvent.keyboard('{Enter}')
+    await waitFor(() =>
+      expect(releaseRejoinTransition).not.toBe(previousRelease)
+    )
+    await userEvent.tab()
+    await expect(
+      canvas.getByRole('button', { name: strings.report.rejoinCta })
+    ).toHaveFocus()
+    releaseRejoinTransition?.()
+    await canvas.findByRole('heading', { name: 'Studied Focus transition' })
+    await expect(
+      canvas.getByRole('button', { name: strings.report.rejoinCta })
+    ).toHaveFocus()
+    await userEvent.keyboard('{Enter}')
     await expect(args.onRejoin).toHaveBeenCalledTimes(1)
   },
 }
