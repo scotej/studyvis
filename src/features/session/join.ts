@@ -1,4 +1,5 @@
 import { assertSessionAdmissionAllowed } from '@/lib/updateInstallGuard'
+import { assertSessionIdentityStable } from '@/lib/identityCommitGuard'
 import { usePttStore } from '@/stores/pttStore'
 import { useIdentityStore } from '@/stores/identityStore'
 import {
@@ -71,6 +72,7 @@ function joinExistingSession(
   options?: JoinSessionOptions
 ): SessionHandle {
   assertSessionAdmissionAllowed()
+  assertSessionIdentityStable()
   const store = options?.store ?? useSessionStore
   // S2 — clear any PTT latched by a dropped Released event before the media-
   // acquire effect reads it, so the first audio track never comes up live.

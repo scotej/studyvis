@@ -260,6 +260,13 @@ export const strings = {
   },
 
   identity: {
+    sessionRestoreBlocked:
+      'Leave and save the current session before restoring a different identity.',
+    sessionStartBlocked:
+      'Your identity is being restored. Wait for it to finish before starting a session.',
+    commitInProgress:
+      'An identity update is still finishing. Try again in a moment.',
+
     secretServiceError:
       'Unlock your Linux keyring, then try again. StudyVis needs gnome-keyring, KWallet, KeePassXC, or another Secret Service provider to protect your identity keys.',
     setup: {
@@ -1306,6 +1313,10 @@ export const strings = {
         copyAriaLabel: 'Copy public key',
       },
       recoveryPhrase: {
+        sessionHelp:
+          'You can restore the same identity during a session. To restore a different identity, leave and save this session first.',
+        leaveCta: 'Leave and save session',
+
         label: 'Recovery phrase',
         // D4 — honest copy: the 24 words are never persisted, so they cannot
         // be re-shown here and lost words are unrecoverable by design.

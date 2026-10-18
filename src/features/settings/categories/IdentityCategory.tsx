@@ -23,6 +23,8 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { useIdentity } from '@/features/identity'
 import { useFriendsStore } from '@/stores/friendsStore'
+import { useSessionStore } from '@/stores/sessionStore'
+import { leaveForIdentityRecovery } from '../leaveForIdentityRecovery'
 import { strings } from '@/strings'
 
 export type IdentityCategoryProps = {
@@ -50,6 +52,8 @@ export function IdentityCategory({ onRestoreIdentity }: IdentityCategoryProps) {
   const [submitting, setSubmitting] = useState(false)
   const [copied, setCopied] = useState(false)
   const [backupBusy, setBackupBusy] = useState(false)
+  const [leaving, setLeaving] = useState(false)
+  const sessionActive = useSessionStore((s) => s.status === 'active')
   const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const copy = strings.settings.identity
 
@@ -220,17 +224,41 @@ export function IdentityCategory({ onRestoreIdentity }: IdentityCategoryProps) {
       />
       <SettingsRow
         label={copy.recoveryPhrase.label}
-        help={copy.recoveryPhrase.help}
+        help={
+          sessionActive
+            ? copy.recoveryPhrase.sessionHelp
+            : copy.recoveryPhrase.help
+        }
         control={
-          <Button
-            type="button"
-            variant="secondary"
-            size="sm"
-            onClick={() => onRestoreIdentity?.()}
-            disabled={!onRestoreIdentity}
-          >
-            <KeyRoundIcon /> {copy.recoveryPhrase.restoreCta}
-          </Button>
+          <div className="flex items-center gap-2">
+            {sessionActive ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={leaving}
+                onClick={() => {
+                  setLeaving(true)
+                  void leaveForIdentityRecovery()
+                    .catch(() =>
+                      toast.error(strings.session.errors.leaveFailedFallback)
+                    )
+                    .finally(() => setLeaving(false))
+                }}
+              >
+                {copy.recoveryPhrase.leaveCta}
+              </Button>
+            ) : null}
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              onClick={() => onRestoreIdentity?.()}
+              disabled={!onRestoreIdentity}
+            >
+              <KeyRoundIcon /> {copy.recoveryPhrase.restoreCta}
+            </Button>
+          </div>
         }
       />
       <SettingsRow

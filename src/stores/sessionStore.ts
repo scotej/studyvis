@@ -9,6 +9,7 @@ import { create, type StateCreator } from 'zustand'
 
 import type { TopicRoom } from '@/lib/trystero'
 import { assertSessionAdmissionAllowed } from '@/lib/updateInstallGuard'
+import { assertSessionIdentityStable } from '@/lib/identityCommitGuard'
 
 export type SessionStatus = 'idle' | 'active' | 'ended'
 
@@ -377,6 +378,7 @@ const sessionStateCreator: StateCreator<SessionState> = (set, get) => ({
   begin: (init) => {
     assertSessionAdmissionAllowed()
     set((s) => {
+      assertSessionIdentityStable()
       const declared = s.pendingInitialTopic?.trim()
       const topic =
         declared && declared.length > 0
