@@ -92,6 +92,18 @@ function fakeRoom(options: { wrapped?: boolean } = {}) {
       for (const fn of joinSubs) fn(peerId)
       connections.get(peerId)?.transition('connected', 'connected')
     },
+    replace(peerId: string) {
+      const previous = connections.get(peerId)
+      const replacement = new FakeConnection()
+      if (wrapped)
+        installTransientDisconnectHold(
+          replacement as unknown as RTCPeerConnection
+        )
+      replacement.transition('connected', 'connected')
+      connections.set(peerId, replacement)
+      for (const fn of joinSubs) fn(peerId)
+      return { previous, replacement }
+    },
     // Models trystero faithfully: on BOTH the clean and the unclean path it
     // detaches the room without closing the RTCPeerConnection
     // (`SharedPeerManager.clear(…, {destroyPeer: false})`). Leaving it open
@@ -166,6 +178,57 @@ describe('#264 peer reconnect grace', () => {
     expect(state.peers['peer-a']?.edPubkeyHex).toBeNull()
     expect(state.peerPresence[PEER_ED_PUBKEY]?.activeSinceWall).toBeNull()
 
+    lifecycle.dispose()
+  })
+
+  test('same-ID replacement keeps admission and identity but tracks the replacement loss', () => {
+    const harness = fakeRoom()
+    beginActive(harness.room)
+    const lifecycle = wireSessionRoom(harness.room, {
+      isHost: true,
+      leave: async () => {},
+    })
+    for (const id of ['peer-a', 'peer-b', 'peer-c']) harness.join(id)
+    helloFrom('peer-a')
+    const before = useSessionStore.getState()
+    const peerBefore = before.peers['peer-a']
+    const presenceBefore = before.peerPresence[PEER_ED_PUBKEY]
+    const { previous, replacement } = harness.replace('peer-a')
+    harness.join('peer-a') // Duplicate callback for the same new connection.
+    expect(lifecycle.peers()).toEqual(['peer-a', 'peer-b', 'peer-c'])
+    expect(useSessionStore.getState().peers['peer-a']).toBe(peerBefore)
+    expect(useSessionStore.getState().peerPresence[PEER_ED_PUBKEY]).toBe(
+      presenceBefore
+    )
+    expect(previous?.connectionState).toBe('connected')
+    replacement.transition('disconnected', 'disconnected')
+    harness.leave('peer-a')
+    expect(replacement.connectionState).toBe('closed')
+    expect(previous?.connectionState).toBe('connected')
+    expect(useSessionStore.getState().peers['peer-a']?.reconnecting).toBe(true)
+    expect(
+      useSessionStore.getState().peerPresence[PEER_ED_PUBKEY]?.activeSinceWall
+    ).toBeNull()
+    vi.advanceTimersByTime(PEER_RECONNECT_GRACE_MS)
+    expect(useSessionStore.getState().peers['peer-a']).toBeUndefined()
+    lifecycle.dispose()
+  })
+
+  test('a healthy replacement cleanly leaves even if its old connection degraded', () => {
+    const harness = fakeRoom()
+    beginActive(harness.room)
+    const lifecycle = wireSessionRoom(harness.room, {
+      isHost: true,
+      leave: async () => {},
+    })
+    harness.join('peer-a')
+    helloFrom('peer-a')
+    harness.connection('peer-a').transition('disconnected', 'disconnected')
+    const { replacement } = harness.replace('peer-a')
+    harness.leave('peer-a')
+    expect(replacement.connectionState).toBe('connected')
+    expect(useSessionStore.getState().peers['peer-a']).toBeUndefined()
+    expect(lifecycle.peers()).toEqual([])
     lifecycle.dispose()
   })
 
