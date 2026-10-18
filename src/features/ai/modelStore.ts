@@ -10,6 +10,7 @@ import type { BenchmarkResult } from './benchmark'
 import { getDownloadRuntime } from './download'
 import { getModelUnavailableReason } from './models'
 import { logger } from '@/lib/log'
+import { strings } from '@/strings'
 
 const log = logger.child('ai.models')
 
@@ -74,7 +75,9 @@ function isTauriRuntime(): boolean {
 
 let cachedLazyStore: LazyStore | null = null
 function defaultLazyStoreFactory(): StoreLike {
-  if (!cachedLazyStore) cachedLazyStore = new LazyStore(MODELS_FILE)
+  // Flush only complete snapshots through the serialized explicit save below.
+  if (!cachedLazyStore)
+    cachedLazyStore = new LazyStore(MODELS_FILE, { autoSave: false })
   return cachedLazyStore as unknown as StoreLike
 }
 
@@ -131,9 +134,37 @@ function persist(set: (partial: Partial<ModelState>) => void): Promise<void> {
     try {
       if (factory) {
         const store = factory()
-        await store.set(KEY_RECORDS, records)
-        await store.set(KEY_ACTIVE_MODEL, activeModelId)
-        await store.save()
+        const previous = [
+          [KEY_RECORDS, await store.get(KEY_RECORDS)],
+          [KEY_ACTIVE_MODEL, await store.get(KEY_ACTIVE_MODEL)],
+        ] as const
+        try {
+          await store.set(KEY_RECORDS, records)
+          await store.set(KEY_ACTIVE_MODEL, activeModelId)
+          await store.save()
+        } catch (error) {
+          // The plugin saves every loaded cache on exit, even with autosave off.
+          // Keep the unsaved draft in Zustand and restore both cached keys.
+          let restorationFailed = false
+          for (const [key, value] of previous) {
+            try {
+              if (value === undefined) await store.delete(key)
+              else await store.set(key, value)
+            } catch (restoreError) {
+              restorationFailed = true
+              log.error('persist.cache_restore_failed', { err: restoreError })
+            }
+          }
+          if (restorationFailed) {
+            const message =
+              error instanceof Error ? error.message : String(error)
+            throw new Error(
+              `${message} ${strings.ai.picker.cacheRestoreFailed}`,
+              { cause: error }
+            )
+          }
+          throw error
+        }
       }
       set({ error: null })
     } catch (err) {
