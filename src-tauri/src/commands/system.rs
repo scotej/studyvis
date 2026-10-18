@@ -29,6 +29,7 @@ use serde::Serialize;
 #[cfg(target_os = "macos")]
 use tauri::Emitter;
 use tauri::{AppHandle, Manager, Runtime};
+#[cfg(not(target_os = "linux"))]
 use tauri_plugin_autostart::ManagerExt;
 use tauri_plugin_dialog::DialogExt;
 #[cfg(target_os = "macos")]
@@ -354,17 +355,31 @@ pub fn system_set_global_shortcut<R: Runtime>(
 
 #[tauri::command]
 pub fn autostart_set_enabled<R: Runtime>(app: AppHandle<R>, enabled: bool) -> Result<(), String> {
-    let manager = app.autolaunch();
-    if enabled {
-        manager.enable().map_err(|e| e.to_string())
-    } else {
-        manager.disable().map_err(|e| e.to_string())
+    #[cfg(target_os = "linux")]
+    {
+        crate::linux_autostart::set_enabled(&app, enabled)
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let manager = app.autolaunch();
+        if enabled {
+            manager.enable().map_err(|e| e.to_string())
+        } else {
+            manager.disable().map_err(|e| e.to_string())
+        }
     }
 }
 
 #[tauri::command]
 pub fn autostart_is_enabled<R: Runtime>(app: AppHandle<R>) -> Result<bool, String> {
-    app.autolaunch().is_enabled().map_err(|e| e.to_string())
+    #[cfg(target_os = "linux")]
+    {
+        crate::linux_autostart::is_enabled(&app)
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        app.autolaunch().is_enabled().map_err(|e| e.to_string())
+    }
 }
 
 // #226 — per-keystroke emit outcomes. Incremented from the global-shortcut

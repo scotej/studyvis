@@ -23,6 +23,8 @@ mod commands;
 pub mod crypto;
 pub mod db;
 #[cfg(target_os = "linux")]
+mod linux_autostart;
+#[cfg(target_os = "linux")]
 mod linux_diagnostics;
 #[cfg(target_os = "linux")]
 mod linux_media_permissions;
