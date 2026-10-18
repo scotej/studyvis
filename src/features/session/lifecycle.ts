@@ -1693,7 +1693,13 @@ export function wireSessionRoom(
 
   room.onPeerJoin((peerId) => {
     if (disposed) return
-    if (peers.has(peerId) || pendingPeerJoins.has(peerId)) return
+    if (peers.has(peerId)) {
+      // #396 — Trystero can replace a transport without a leave callback.
+      // Keep admission/identity intact while departure follows the new owner.
+      bindTransport(peerId)
+      return
+    }
+    if (pendingPeerJoins.has(peerId)) return
     if (admissionsClosed && !reconnectPeerIds.has(peerId)) {
       rejectPeer(peerId, 'closed')
       return
