@@ -170,37 +170,117 @@ pub fn session_journal_read<R: Runtime>(
     Ok(SessionJournal { lines, truncated })
 }
 
-/// Best-effort unlink for one session's journal, called after the session's
-/// rows are deleted. A journal that outlived its session row would be evidence
-/// for a report the user asked us to forget.
-pub fn remove_journal<R: Runtime>(app: &AppHandle<R>, session_id: &str) {
-    let Ok(path) = journal_path(app, session_id) else {
-        return;
-    };
-    let _guard = journal_guard();
-    let _ = fs::remove_file(path);
+fn unlink_if_present(path: &std::path::Path) -> Result<(), String> {
+    match fs::remove_file(path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(format!("remove observation journal: {error}")),
+    }
 }
 
-/// Best-effort removal of every journal, called by `sessions_clear_all`.
-pub fn clear_journals<R: Runtime>(app: &AppHandle<R>) {
-    let Ok(dir) = journal_dir(app) else {
-        return;
+fn remove_journal_in(dir: &std::path::Path, session_id: &str) -> Result<(), String> {
+    unlink_if_present(&dir.join(journal_file_name(session_id)?))
+}
+
+fn clear_journals_in(dir: &std::path::Path) -> Result<(), String> {
+    let entries = match fs::read_dir(dir) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(format!("read observation journal directory: {error}")),
     };
-    let _guard = journal_guard();
-    let Ok(entries) = fs::read_dir(dir) else {
-        return;
-    };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.extension().and_then(|e| e.to_str()) == Some("ndjson") {
-            let _ = fs::remove_file(path);
+    let mut failed = 0;
+    let mut first_error = None;
+    for entry in entries {
+        let result = match entry {
+            Ok(entry) if entry.path().extension().and_then(|e| e.to_str()) == Some("ndjson") => {
+                unlink_if_present(&entry.path())
+            }
+            Ok(_) => Ok(()),
+            Err(error) => Err(format!("read observation journal entry: {error}")),
+        };
+        if let Err(error) = result {
+            failed += 1;
+            if first_error.is_none() {
+                first_error = Some(error);
+            }
         }
     }
+    match first_error {
+        Some(error) => Err(format!("{failed} journal cleanup failures: {error}")),
+        None => Ok(()),
+    }
+}
+
+// #405 / I100: SQL has already committed. Report cleanup failure and allow an
+// idempotent retry even after its session row has gone; missing files are done.
+pub fn remove_journal<R: Runtime>(app: &AppHandle<R>, session_id: &str) -> Result<(), String> {
+    let dir = data_dir(app)?.join(JOURNAL_DIR);
+    let _guard = journal_guard();
+    remove_journal_in(&dir, session_id)
+}
+
+pub fn clear_journals<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
+    let dir = data_dir(app)?.join(JOURNAL_DIR);
+    let _guard = journal_guard();
+    clear_journals_in(&dir)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn cleanup_fixture(label: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "studyvis-journal-cleanup-{label}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn cleanup_missing_files_is_success_and_failed_unlink_can_be_retried() {
+        let dir = cleanup_fixture("single");
+        remove_journal_in(&dir, "ab").unwrap();
+        let path = dir.join("ab.ndjson");
+        fs::create_dir(&path).unwrap();
+        assert!(remove_journal_in(&dir, "ab").is_err());
+        fs::remove_dir(&path).unwrap();
+        fs::write(&path, b"disposable observation").unwrap();
+        remove_journal_in(&dir, "ab").unwrap();
+        remove_journal_in(&dir, "ab").unwrap();
+        assert!(!path.exists());
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn clear_attempts_all_entries_and_reports_partial_cleanup_then_retries() {
+        let dir = cleanup_fixture("all");
+        fs::write(dir.join("ab.ndjson"), b"disposable observation").unwrap();
+        fs::create_dir(dir.join("cd.ndjson")).unwrap();
+        fs::write(dir.join("unrelated.txt"), b"leave alone").unwrap();
+        assert!(clear_journals_in(&dir).is_err());
+        assert!(!dir.join("ab.ndjson").exists());
+        assert!(dir.join("cd.ndjson").exists());
+        assert!(dir.join("unrelated.txt").exists());
+        fs::remove_dir(dir.join("cd.ndjson")).unwrap();
+        clear_journals_in(&dir).unwrap();
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn clear_distinguishes_missing_directory_from_unreadable_directory() {
+        let dir = cleanup_fixture("read");
+        clear_journals_in(&dir.join("missing")).unwrap();
+        let file = dir.join("file");
+        fs::write(&file, b"not a directory").unwrap();
+        assert!(clear_journals_in(&file).is_err());
+        fs::remove_dir_all(dir).unwrap();
+    }
 
     #[test]
     fn accepts_a_session_topic() {

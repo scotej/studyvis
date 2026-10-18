@@ -139,8 +139,8 @@ pub fn sessions_delete<R: Runtime>(
         let mut conn = lock(&state)?;
         sessions::delete(&mut conn, &id).map_err(|e| e.to_string())?;
     }
-    session_journal::remove_journal(&app, &id);
-    Ok(())
+    session_journal::remove_journal(&app, &id)
+        .map_err(|error| format!("SESSION_JOURNAL_CLEANUP_INCOMPLETE: {error}"))
 }
 
 #[tauri::command]
@@ -152,8 +152,8 @@ pub fn sessions_clear_all<R: Runtime>(
         let mut conn = lock(&state)?;
         sessions::clear_all(&mut conn).map_err(|e| e.to_string())?;
     }
-    session_journal::clear_journals(&app);
-    Ok(())
+    session_journal::clear_journals(&app)
+        .map_err(|error| format!("SESSION_JOURNAL_CLEANUP_INCOMPLETE: {error}"))
 }
 
 // #236 — the post-session written timeline. `entries` is the JSON array the

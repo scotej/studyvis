@@ -34,7 +34,10 @@ import {
 import { Switch } from '@/components/ui/switch'
 import { useOnboardingState } from '@/features/onboarding'
 import { useAutostart } from '@/features/system'
-import { sessionsClearAll } from '@/lib/db/sessions'
+import {
+  sessionsClearAll,
+  JournalCleanupIncompleteError,
+} from '@/lib/db/sessions'
 import {
   captureDiagnosticsSnapshot,
   saveDiagnosticsArchive,
@@ -67,6 +70,7 @@ export function AdvancedCategory() {
   const [resettingOnboarding, setResettingOnboarding] = useState(false)
   const [confirmingClear, setConfirmingClear] = useState(false)
   const [clearingHistory, setClearingHistory] = useState(false)
+  const [cleanupIncomplete, setCleanupIncomplete] = useState(false)
   const copy = strings.settings.advanced
 
   const handleOpenDataFolder = useCallback(async () => {
@@ -170,11 +174,18 @@ export function AdvancedCategory() {
       await sessionsClearAll()
       // Stats / Sessions / Report all read SQLite on mount, so the wipe flows
       // through the next time any of them opens — nothing in-memory to evict.
+      setCleanupIncomplete(false)
       toast.success(copy.clearHistory.clearedToast)
       setConfirmingClear(false)
     } catch (err) {
+      if (err instanceof JournalCleanupIncompleteError)
+        setCleanupIncomplete(true)
       const message =
-        err instanceof Error ? err.message : copy.clearHistory.errorFallback
+        err instanceof JournalCleanupIncompleteError
+          ? copy.clearHistory.cleanupIncomplete
+          : err instanceof Error
+            ? err.message
+            : copy.clearHistory.errorFallback
       toast.error(message)
     } finally {
       setClearingHistory(false)
@@ -326,7 +337,9 @@ export function AdvancedCategory() {
           <DialogHeader>
             <DialogTitle>{copy.clearHistory.confirmTitle}</DialogTitle>
             <DialogDescription>
-              {copy.clearHistory.confirmBody}
+              {cleanupIncomplete
+                ? copy.clearHistory.cleanupIncomplete
+                : copy.clearHistory.confirmBody}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -345,7 +358,9 @@ export function AdvancedCategory() {
               disabled={clearingHistory}
               aria-disabled={clearingHistory}
             >
-              {copy.clearHistory.confirmCta}
+              {cleanupIncomplete
+                ? copy.clearHistory.retryCleanup
+                : copy.clearHistory.confirmCta}
             </Button>
           </DialogFooter>
         </DialogContent>
