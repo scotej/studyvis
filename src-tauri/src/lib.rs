@@ -706,11 +706,11 @@ fn setup_desktop(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>>
         None::<Vec<&str>>,
     ))?;
 
-    // #419 — repair only the previous backend's exact opted-in template.
-    // Custom files and symlinks remain untouched; failure must not block startup.
+    // #419/#420 — repair known old entries and retain opt-in under XDG_CONFIG_HOME.
+    // A migration failure is visible but must not prevent the app opening.
     #[cfg(target_os = "linux")]
-    if let Err(error) = linux_autostart::repair_legacy(app.handle()) {
-        eprintln!("[autostart] Linux legacy entry repair failed: {error}");
+    if let Err(error) = linux_autostart::migrate(app.handle()) {
+        eprintln!("[autostart] Linux entry migration failed: {error}");
     }
 
     // macOS registers the studyvis:// scheme at bundle time (CFBundleURLTypes
