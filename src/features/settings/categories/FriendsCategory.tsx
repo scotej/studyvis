@@ -3,7 +3,7 @@
 // reach on its own — the friends store, the local identity the safety number
 // is computed against, and the session history the study totals come from.
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
 
 import { Button } from '@/components/ui/button'
@@ -52,6 +52,7 @@ export function FriendsCategory({ presence }: FriendsCategoryProps) {
   const { identity } = useIdentity()
   const [pendingRemoval, setPendingRemoval] = useState<Friend | null>(null)
   const [removing, setRemoving] = useState(false)
+  const removalInFlight = useRef(false)
   const [sessions, setSessions] = useState<readonly SessionRecord[]>([])
   const [studyStatus, setStudyStatus] = useState<StudyHistoryStatus>('loading')
   const copy = strings.settings.friends
@@ -97,7 +98,8 @@ export function FriendsCategory({ presence }: FriendsCategoryProps) {
   )
 
   const confirmRemoval = useCallback(async () => {
-    if (!pendingRemoval) return
+    if (!pendingRemoval || removalInFlight.current) return
+    removalInFlight.current = true
     setRemoving(true)
     try {
       await remove(pendingRemoval.ed_pubkey_hex)
@@ -106,12 +108,15 @@ export function FriendsCategory({ presence }: FriendsCategoryProps) {
           pendingRemoval.display_name?.trim() || copy.defaultFriendName
         )
       )
-      setPendingRemoval(null)
+      setPendingRemoval((current) =>
+        current?.ed_pubkey_hex === pendingRemoval.ed_pubkey_hex ? null : current
+      )
     } catch (err) {
       const message =
         err instanceof Error ? err.message : copy.removeErrorFallback
       toast.error(message)
     } finally {
+      removalInFlight.current = false
       setRemoving(false)
     }
   }, [pendingRemoval, remove, copy])
@@ -121,16 +126,29 @@ export function FriendsCategory({ presence }: FriendsCategoryProps) {
       <FriendsCategoryView
         details={details}
         studyStatus={studyStatus}
-        onRemove={setPendingRemoval}
+        onRemove={(friend) => {
+          if (!removalInFlight.current) setPendingRemoval(friend)
+        }}
       />
 
       <Dialog
         open={Boolean(pendingRemoval)}
         onOpenChange={(open) => {
-          if (!open) setPendingRemoval(null)
+          if (!open && !removalInFlight.current) setPendingRemoval(null)
         }}
       >
-        <DialogContent>
+        <DialogContent
+          showCloseButton={false}
+          onEscapeKeyDown={(event) => {
+            if (removalInFlight.current) event.preventDefault()
+          }}
+          onPointerDownOutside={(event) => {
+            if (removalInFlight.current) event.preventDefault()
+          }}
+          onInteractOutside={(event) => {
+            if (removalInFlight.current) event.preventDefault()
+          }}
+        >
           <DialogHeader>
             <DialogTitle>{copy.confirm.title}</DialogTitle>
             <DialogDescription>
