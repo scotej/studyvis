@@ -134,8 +134,8 @@ fn is_legacy_entry(contents: &str, app_name: &str, executable: &Path) -> bool {
 }
 
 fn has_symlink(path: &Path) -> Result<bool, String> {
-    // Include ancestor directories, so a custom linked config/autostart path
-    // is not silently followed by automatic startup repair or migration.
+    // Include ancestors so custom autostart paths and executable aliases do
+    // not silently acquire ownership during automatic repair.
     for ancestor in path.ancestors() {
         match std::fs::symlink_metadata(ancestor) {
             Ok(metadata) if metadata.file_type().is_symlink() => return Ok(true),
@@ -251,6 +251,17 @@ fn migrate_legacy_entry_with_cleanup(
     executable: &Path,
     cleanup: impl FnOnce(&Path, &str) -> Result<(), String>,
 ) -> Result<(), String> {
+    // #420: HOME and XDG_CONFIG_HOME select roots, which may be directory
+    // aliases. Resolve those roots while retaining link checks below them.
+    let resolve = |path: &Path| match path.canonicalize() {
+        Ok(path) => Ok(path),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(path.to_owned()),
+        Err(error) => Err(error.to_string()),
+    };
+    let selected_directory = resolve(selected)?;
+    let legacy_directory = resolve(legacy)?;
+    let selected = selected_directory.as_path();
+    let legacy = legacy_directory.as_path();
     let selected_path = entry_path(selected, app_name);
     let legacy_path = entry_path(legacy, app_name);
     // Automatic migration and repair must leave custom linked paths untouched.
@@ -599,6 +610,58 @@ mod tests {
         migrate_legacy_entry(&selected, &legacy, "studyvis", &executable).unwrap();
         assert!(entry_path(&selected, "studyvis").exists());
         assert!(entry_path(&legacy, "studyvis").exists());
+    }
+
+    #[test]
+    fn distinct_symlinked_xdg_root_retains_and_repairs_existing_opt_in() {
+        let fixture = Fixture::new();
+        let home = fixture.0.join("home");
+        let legacy = home.join(".config");
+        let target = fixture.0.join("config-target");
+        let alias = fixture.0.join("xdg-alias");
+        std::fs::create_dir_all(&target).unwrap();
+        std::os::unix::fs::symlink(&target, &alias).unwrap();
+        let selected = selected_config_directory(&home, Some(alias.as_os_str()));
+        let executable = fixture.0.join("Current version/StudyVis.AppImage");
+        let path = entry_path(&legacy, "studyvis");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, legacy_entry(&executable)).unwrap();
+
+        migrate_legacy_entry(&selected, &legacy, "studyvis", &executable).unwrap();
+
+        let expected = entry_contents("studyvis", &executable).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(entry_path(&target, "studyvis")).unwrap(),
+            expected
+        );
+        assert!(entry_path(&selected, "studyvis").try_exists().unwrap());
+        assert!(!path.exists());
+        assert!(std::fs::symlink_metadata(&alias)
+            .unwrap()
+            .file_type()
+            .is_symlink());
+    }
+
+    #[test]
+    fn linked_home_ancestor_retains_legacy_opt_in_in_a_distinct_config_root() {
+        let fixture = Fixture::new();
+        let target = fixture.0.join("actual-home");
+        let home = fixture.0.join("home-alias");
+        std::fs::create_dir(&target).unwrap();
+        std::os::unix::fs::symlink(&target, &home).unwrap();
+        let legacy = home.join(".config");
+        let selected = fixture.0.join("selected");
+        let executable = fixture.0.join("StudyVis.AppImage");
+        set_entry_enabled(&legacy, "studyvis", &executable, true).unwrap();
+        let expected = std::fs::read(entry_path(&legacy, "studyvis")).unwrap();
+
+        migrate_legacy_entry(&selected, &legacy, "studyvis", &executable).unwrap();
+
+        assert_eq!(
+            std::fs::read(entry_path(&selected, "studyvis")).unwrap(),
+            expected
+        );
+        assert!(!entry_path(&legacy, "studyvis").exists());
     }
 
     #[test]
