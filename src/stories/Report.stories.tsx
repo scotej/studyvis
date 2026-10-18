@@ -1011,3 +1011,32 @@ export const CompanionObservationAccount: Story = {
     await expect(canvas.getByText('Working on integrals')).toBeInTheDocument()
   },
 }
+
+export const RejoinedAfterTopicChange: Story = {
+  args: {
+    ...MostlyOnTask.args,
+    data: buildData(baseSession({ declared_topic: 'Maths' }), [
+      event(ME, 'topic_set', 0, { topic: 'Maths' }),
+      event(ME, 'topic_change', 120_000, {
+        previous_topic: 'Maths',
+        new_topic: 'Physics',
+      }),
+      event(ME, 'left', 180_000),
+      event(ME, 'joined', 240_000),
+      event(ME, 'left', 300_000),
+    ]),
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(
+      canvas.getByRole('heading', { name: 'Studied Maths' })
+    ).toBeInTheDocument()
+    const topic = canvas.getByRole('heading', {
+      name: strings.report.sections.topic.heading,
+    }).parentElement!
+    await expect(within(topic).getByText('Maths')).toBeInTheDocument()
+    await expect(within(topic).getByText('Physics')).toBeInTheDocument()
+    await expect(within(topic).getByText('started')).toBeInTheDocument()
+    await expect(within(topic).getByText('02:00')).toBeInTheDocument()
+  },
+}
