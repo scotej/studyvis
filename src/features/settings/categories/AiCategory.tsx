@@ -38,6 +38,9 @@ import {
   ERR_ENGINE_NOT_INSTALLED,
   FALLBACK_SAMPLE_INTERVAL_SEC,
   getAiEnableReadiness,
+  getAiPlatformSupported,
+  readEngineInfo,
+  useAiPlatformSupported,
   getDownloadRuntime,
   getEngineRuntime,
   getHfTokenRuntime,
@@ -94,6 +97,7 @@ const CONFIDENCE_FLOOR_UI_MIN = 0.05
 // layer with no `@/features/ai` import.
 export function AiCategory() {
   const aiFeaturesEnabled = useSettingsStore((s) => s.values.aiFeaturesEnabled)
+  const aiPlatformSupported = useAiPlatformSupported()
   const setAiFeaturesEnabled = useSettingsStore((s) => s.setAiFeaturesEnabled)
   const warningThreshold = useSettingsStore((s) => s.values.warningThreshold)
   const alertThreshold = useSettingsStore((s) => s.values.alertThreshold)
@@ -178,7 +182,7 @@ export function AiCategory() {
 
   const refreshEngineInfo = useCallback(async () => {
     try {
-      setEngineInfo(await getEngineRuntime().info())
+      setEngineInfo(await readEngineInfo())
     } catch {
       setEngineInfo(null)
     }
@@ -264,6 +268,7 @@ export function AiCategory() {
 
   const applyToggle = useCallback(
     async (next: boolean) => {
+      if (next && !getAiPlatformSupported()) return
       const unavailable = getModelUnavailableReason(
         useModelStore.getState().activeModelId
       )
@@ -311,6 +316,7 @@ export function AiCategory() {
         return
       }
 
+      if (!getAiPlatformSupported()) return
       const unavailable = getModelUnavailableReason(
         useModelStore.getState().activeModelId
       )
@@ -381,6 +387,7 @@ export function AiCategory() {
   }, [applyToggle])
 
   const handleRetryPermission = useCallback(async () => {
+    if (!getAiPlatformSupported()) return
     const unavailable = getModelUnavailableReason(
       useModelStore.getState().activeModelId
     )
@@ -393,6 +400,7 @@ export function AiCategory() {
     const isCurrent = () =>
       operation.active &&
       request === permissionRequest.current &&
+      getAiPlatformSupported() &&
       !getModelUnavailableReason(useModelStore.getState().activeModelId)
     try {
       await requestScreenCapturePermission()
@@ -603,14 +611,22 @@ export function AiCategory() {
 
       <SettingsRow
         label={copy.enable.label}
-        help={copy.enable.help}
+        help={
+          aiPlatformSupported === null
+            ? copy.enable.checkingHelp
+            : aiPlatformSupported === false && !engineInfo
+              ? copy.enable.supportCheckFailedHelp
+              : aiFeaturesEnabled && aiPlatformSupported === false
+                ? copy.enable.unavailablePreferenceHelp
+                : copy.enable.help
+        }
         control={
           <Switch
             checked={aiFeaturesEnabled}
             disabled={
               toggling ||
               (!aiFeaturesEnabled &&
-                (modelSetupBusy || engineInfo?.supported === false))
+                (modelSetupBusy || aiPlatformSupported !== true))
             }
             onCheckedChange={(checked) => void handleToggle(Boolean(checked))}
             aria-label={copy.enable.ariaLabel}
@@ -618,7 +634,7 @@ export function AiCategory() {
         }
       />
 
-      {!aiFeaturesEnabled ? (
+      {!aiFeaturesEnabled || aiPlatformSupported !== true ? (
         <SettingsRow label={copy.modelOff.label} help={copy.modelOff.help} />
       ) : !modelUnavailableReason ? (
         // D5 — only meaningful while AI can sample.
@@ -971,7 +987,7 @@ export function AiCategory() {
               type="button"
               variant="outline"
               onClick={handleEnableAnyway}
-              disabled={toggling}
+              disabled={toggling || aiPlatformSupported !== true}
             >
               {copy.benchmarkWarning.enableAnywayCta}
             </Button>

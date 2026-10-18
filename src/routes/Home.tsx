@@ -28,6 +28,9 @@ import { Button } from '@/components/ui/button'
 import { tokens } from '@/design/tokens'
 import {
   discardPendingScreenStream,
+  getAiPlatformSupported,
+  isAiPlatformSupportPending,
+  useAiPlatformSupported,
   preacquireScreenStream,
   useModelStore,
 } from '@/features/ai'
@@ -87,8 +90,22 @@ function rejectSessionDuringUpdate(): boolean {
   return true
 }
 
+function rejectSessionWhileAiSupportPending(): boolean {
+  if (
+    !useSettingsStore.getState().values.aiFeaturesEnabled ||
+    !isAiPlatformSupportPending()
+  )
+    return false
+  toast.info(strings.settings.ai.enable.checkingHelp)
+  return true
+}
+
 export function Home() {
   const { identity, status, actions } = useIdentity()
+  const aiPreferenceEnabled = useSettingsStore(
+    (state) => state.values.aiFeaturesEnabled
+  )
+  useAiPlatformSupported(aiPreferenceEnabled)
   const onboarding = useOnboardingState()
   // #225 — did StudyVis close while a session was live? Probed once the
   // identity resolves, and answered before the dashboard is reachable.
@@ -345,14 +362,17 @@ export function Home() {
     setSessionSettingsCategory(category ?? 'identity')
   }, [])
 
-  const aiOn = () => useSettingsStore.getState().values.aiFeaturesEnabled
+  const aiOn = () =>
+    getAiPlatformSupported() &&
+    useSettingsStore.getState().values.aiFeaturesEnabled
 
   // #47 B3 / #190 — re-enter the room after an accidental local Leave. Reuses
   // the already-declared topic (no AI topic-gate re-prompt) and the
   // credentials the store holds until the Report closes; joinSession's
   // begin() flips status to 'active', unmounting the Report.
   const handleRejoin = useCallback(() => {
-    if (rejectSessionDuringUpdate()) return
+    if (rejectSessionDuringUpdate() || rejectSessionWhileAiSupportPending())
+      return
     const request = useSessionStore.getState().getRejoinRequest()
     if (!request) return
     const s = useSessionStore.getState()
@@ -400,7 +420,8 @@ export function Home() {
   const dismissInterrupted = interrupted.dismiss
   const handleInterruptedRejoin = useCallback(
     (record: SessionRecoveryRecord) => {
-      if (rejectSessionDuringUpdate()) return
+      if (rejectSessionDuringUpdate() || rejectSessionWhileAiSupportPending())
+        return
       if (useSessionStore.getState().status === 'active') return
       if (aiOn()) {
         const models = useModelStore.getState()
@@ -451,7 +472,8 @@ export function Home() {
 
   const handleInvite = useCallback(
     (friend: Friend) => {
-      if (rejectSessionDuringUpdate()) return
+      if (rejectSessionDuringUpdate() || rejectSessionWhileAiSupportPending())
+        return
       if (aiOn()) setPendingStart({ kind: 'host', friend })
       else void runHostInvite(friend)
     },
@@ -460,7 +482,8 @@ export function Home() {
 
   const handleInviteAccepted = useCallback(
     (invite: ValidInvite) => {
-      if (rejectSessionDuringUpdate()) return
+      if (rejectSessionDuringUpdate() || rejectSessionWhileAiSupportPending())
+        return
       // Enforce the "leave first" guard BEFORE the topic gate too — otherwise
       // accepting an invite mid-session (AI on) would queue pendingStart and
       // pop the topic modal even though runGuestJoin would later refuse.
@@ -478,7 +501,8 @@ export function Home() {
     (topic: string) => {
       const req = pendingStart
       setPendingStart(undefined)
-      if (rejectSessionDuringUpdate()) return
+      if (rejectSessionDuringUpdate() || rejectSessionWhileAiSupportPending())
+        return
       if (!req) return
       // V2-P9 gesture fix — this submit click is the only place a
       // getDisplayMedia() call for the upcoming session's AI screen capture
@@ -504,6 +528,7 @@ export function Home() {
       const canStart =
         req.kind === 'guest' || Boolean(identity && identity.display_name)
       const preacquiredScreen =
+        aiOn() &&
         canStart &&
         Boolean(models.activeModelId || models.status === 'loading') &&
         !getModelUnavailableReason(models.activeModelId)

@@ -51,6 +51,7 @@ import { captureFace as defaultCaptureFace } from './captureFace'
 import {
   discardPendingScreenStream,
   mapDisplayMediaError,
+  discardPendingScreenStream,
   SCREEN_FRAME_MAX_WIDTH,
   SCREEN_FRAME_QUALITY,
   takePendingScreenStream,
@@ -62,6 +63,7 @@ import {
   type CaptureFrame,
 } from './captureShared'
 import { COMPOSITE_MAX_WIDTH, computeCompositeLayout } from './composite'
+import { readEngineInfo } from './engine'
 import { getDownloadRuntime } from './download'
 import { buildFocusRequest } from './focusRequest'
 import { useFocusStore } from './focusStore'
@@ -399,6 +401,7 @@ export function nextBackoffState(
 }
 
 export type SampleLoopRuntime = {
+  isPlatformSupported?: () => Promise<boolean>
   now: () => number
   // #269 / #350 — monotonic timing for lateness and wall-clock divergence.
   // Whether it advances during machine suspension depends on the platform.
@@ -444,6 +447,7 @@ export type SampleLoopRuntime = {
 }
 
 const defaultRuntime: SampleLoopRuntime = {
+  isPlatformSupported: async () => (await readEngineInfo()).supported,
   now: () => Date.now(),
   monotonicNow: () =>
     typeof performance === 'undefined' ? Date.now() : performance.now(),
@@ -1781,6 +1785,21 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
       opts.onStartFail?.('model_unavailable', unavailable)
       teardownInternal()
       return
+    }
+    if (runtime.isPlatformSupported) {
+      let supported = false
+      try {
+        supported = await runtime.isPlatformSupported()
+      } catch {
+        // No capture or engine work is allowed on a failed support preflight.
+      }
+      if (state.stopped) return
+      if (!supported) {
+        discardPendingScreenStream()
+        opts.onStartFail?.('sidecar_start_failed', 'ai_platform_unsupported')
+        teardownInternal()
+        return
+      }
     }
 
     let paths: { modelPath: string; mmprojPath: string }

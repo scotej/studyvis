@@ -1612,6 +1612,12 @@ export const strings = {
         "While the AI is sampling, your operating system's screen-recording indicator stays on for the whole session. That's expected — it turns off when you leave. On macOS, screen-recording access is granted and revoked only in System Settings → Privacy & Security → Screen Recording; StudyVis can open it for you when needed.",
       enable: {
         label: 'Enable AI features',
+        checkingHelp:
+          'AI is paused while this computer’s engine support is checked.',
+        supportCheckFailedHelp:
+          'AI is off because engine support could not be checked. Close and reopen Settings to try again. You can still study with friends.',
+        unavailablePreferenceHelp:
+          'AI is off on this computer. Your saved preference is kept; you can still turn it off.',
         help: "Off by default. Model setup and benchmarks stay available while AI is off. We'll ask for screen access when you turn AI on.",
         ariaLabel: 'Enable AI features',
         loadingToast:

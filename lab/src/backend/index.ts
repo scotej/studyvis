@@ -463,9 +463,18 @@ export class LabBackend {
       case 'sidecar_status':
         return this.sidecar(cmd)
       case 'engine_info':
-        return this.llamaPort === null
-          ? { installed: false, version: null, path: null }
-          : { installed: true, version: 'lab-stub', path: this.dir }
+        return {
+          supported: true,
+          support_error: null,
+          installed: this.llamaPort !== null,
+          source: this.llamaPort === null ? null : 'bundled',
+          version: 'lab-stub',
+          installing: false,
+          last_error: null,
+          devices: [],
+          device_error: null,
+          hardware_identity: LAB_HARDWARE_IDENTITY,
+        }
       case 'engine_install':
       case 'model_download':
       case 'model_head_check':

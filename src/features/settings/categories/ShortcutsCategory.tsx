@@ -2,6 +2,7 @@ import { useCallback, useMemo } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { toast } from 'sonner'
 
+import { useAiPlatformSupported } from '@/features/ai'
 import { KeybindCapture } from '@/components/KeybindCapture'
 import { SettingsRow, SettingsSection } from '@/components/SettingsRow'
 import { Button } from '@/components/ui/button'
@@ -36,7 +37,11 @@ export function ShortcutsCategory() {
     (s) => s.values.pttFriendsAccelerator
   )
   const pttAiAccelerator = useSettingsStore((s) => s.values.pttAiAccelerator)
-  const aiFeaturesEnabled = useSettingsStore((s) => s.values.aiFeaturesEnabled)
+  const aiPreferenceEnabled = useSettingsStore(
+    (s) => s.values.aiFeaturesEnabled
+  )
+  const aiPlatformSupported = useAiPlatformSupported(aiPreferenceEnabled)
+  const aiFeaturesEnabled = aiPreferenceEnabled && aiPlatformSupported === true
   const setShortcutAccelerator = useSettingsStore(
     (s) => s.setShortcutAccelerator
   )
