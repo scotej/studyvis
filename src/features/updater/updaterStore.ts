@@ -31,6 +31,7 @@ import { check, type Update } from '@tauri-apps/plugin-updater'
 import { create } from 'zustand'
 
 import { useSessionStore } from '@/stores/sessionStore'
+import { useSettingsStore } from '@/stores/settingsStore'
 import { logger } from '@/lib/log'
 import { reserveUpdateInstall } from '@/lib/updateInstallGuard'
 
@@ -91,6 +92,14 @@ async function discard(update: Update): Promise<void> {
   }
 }
 
+// An off→on toggle must not revive a background check started before the opt-out.
+let autoUpdateGeneration = 0
+useSettingsStore.subscribe((state, previous) => {
+  if (state.values.autoUpdateEnabled !== previous.values.autoUpdateEnabled) {
+    autoUpdateGeneration += 1
+  }
+})
+
 let deps: UpdaterDeps = defaultUpdaterDeps
 let releaseInstallReservation: (() => void) | null = null
 
@@ -144,6 +153,12 @@ export const useUpdaterStore = create<UpdaterState>((set, get) => ({
   pending: null,
 
   checkNow: async ({ userInitiated = false } = {}) => {
+    const generation = autoUpdateGeneration
+    const allowed = () =>
+      userInitiated ||
+      (useSettingsStore.getState().values.autoUpdateEnabled &&
+        autoUpdateGeneration === generation)
+    if (!allowed()) return
     const { status } = get()
     // A check already in flight, or an update already staged, wins — a second
     // pass would re-download bytes we have. Blocked is permanent for this
@@ -170,6 +185,12 @@ export const useUpdaterStore = create<UpdaterState>((set, get) => ({
       return
     }
 
+    if (!allowed()) {
+      if (update) await discard(update)
+      set({ status: 'idle' })
+      return
+    }
+
     if (!update) {
       set({ status: 'upToDate', version: null, notes: null })
       return
@@ -185,6 +206,11 @@ export const useUpdaterStore = create<UpdaterState>((set, get) => ({
       context = await deps.installContext()
     } catch (err) {
       log.error('install_context.failed', { failedOpen: true, err })
+    }
+    if (!allowed()) {
+      await discard(update)
+      set({ status: 'idle' })
+      return
     }
     if (!context.updatable) {
       log.warn('self_update.blocked', { reason: context.reason })

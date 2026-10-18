@@ -13,6 +13,8 @@ import {
   useUpdaterStore,
 } from '@/features/updater'
 
+import { useSettingsStore } from '@/stores/settingsStore'
+
 type DownloadEvent =
   | { event: 'Started'; data: { contentLength?: number } }
   | { event: 'Progress'; data: { chunkLength: number } }
@@ -57,6 +59,9 @@ function resetStore() {
 
 beforeEach(() => {
   resetStore()
+  useSettingsStore.setState((s) => ({
+    values: { ...s.values, autoUpdateEnabled: true },
+  }))
   resetUpdaterDeps()
   // The production default invokes Tauri, which doesn't exist in node-env;
   // pin the common case so only the blocked-path tests override it.
@@ -479,5 +484,68 @@ describe('session exclusion during installation (#377)', () => {
     expect(useUpdaterStore.getState().installing).toBe(false)
     await useUpdaterStore.getState().installAndRestart()
     expect(update.install).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe('background opt-out during a check (#376)', () => {
+  test.each(['release', 'context'] as const)(
+    'disabling during the %s await discards the handle without downloading',
+    async (phase) => {
+      let resolve!: () => void
+      const barrier = new Promise<void>((done) => (resolve = done))
+      const update = fakeUpdate()
+      setUpdaterDeps({
+        check: async () => {
+          if (phase === 'release') await barrier
+          return update as never
+        },
+        installContext: async () => {
+          if (phase === 'context') await barrier
+          return { updatable: true, reason: null }
+        },
+      })
+      const checking = useUpdaterStore.getState().checkNow()
+      await Promise.resolve()
+      await useSettingsStore.getState().setAutoUpdateEnabled(false)
+      resolve()
+      await checking
+      expect(update.download).not.toHaveBeenCalled()
+      expect(update.close).toHaveBeenCalledOnce()
+      expect(useUpdaterStore.getState().status).toBe('idle')
+    }
+  )
+
+  test('disabling then re-enabling never revives an earlier background request', async () => {
+    let resolve!: () => void
+    const barrier = new Promise<void>((done) => (resolve = done))
+    const stale = fakeUpdate()
+    setUpdaterDeps({
+      check: async () => {
+        await barrier
+        return stale as never
+      },
+    })
+    const checking = useUpdaterStore.getState().checkNow()
+    await useSettingsStore.getState().setAutoUpdateEnabled(false)
+    await useSettingsStore.getState().setAutoUpdateEnabled(true)
+    resolve()
+    await checking
+    expect(stale.download).not.toHaveBeenCalled()
+    expect(stale.close).toHaveBeenCalledOnce()
+    const fresh = fakeUpdate()
+    setUpdaterDeps({ check: async () => fresh as never })
+    await useUpdaterStore.getState().checkNow()
+    expect(fresh.download).toHaveBeenCalledOnce()
+  })
+
+  test('a manual check still downloads with automatic updates disabled', async () => {
+    await useSettingsStore.getState().setAutoUpdateEnabled(false)
+    const update = fakeUpdate()
+    const check = vi.fn(async () => update as never)
+    setUpdaterDeps({ check })
+    await useUpdaterStore.getState().checkNow()
+    expect(check).not.toHaveBeenCalled()
+    await useUpdaterStore.getState().checkNow({ userInitiated: true })
+    expect(update.download).toHaveBeenCalledOnce()
   })
 })
