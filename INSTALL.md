@@ -16,7 +16,7 @@ distro package.
 
 1. From the [Releases page](https://github.com/scotej/studyvis/releases), download `StudyVis_<version>_aarch64.dmg`.
 2. Double-click the `.dmg`. A window opens showing the StudyVis icon and an Applications shortcut. Drag StudyVis into Applications.
-3. Open Finder → Applications. **Right-click** (or Control-click) the StudyVis icon and choose **Open**. The app is ad-hoc signed, so macOS shows the milder _"macOS cannot verify the developer of 'StudyVis'. Are you sure you want to open it?"_ prompt — not a hard block. Click **Open**.
+3. Open Finder → Applications and try to open StudyVis. The app is ad-hoc signed and not notarized, so Gatekeeper may block the first launch. On **macOS 15 (Sequoia) and later**, open **System Settings → Privacy & Security**, scroll to the message about StudyVis, and click **Open Anyway**. Authenticate if asked, then confirm **Open**. This approves this app; it does not disable Gatekeeper. On older macOS versions, Control-click → Open may also offer the per-app exception. See [Apple's first-launch instructions](https://support.apple.com/en-us/102445).
 4. Subsequent launches do not re-prompt — double-click works normally.
 5. The first time you join a session, macOS asks for camera and microphone permission. Allow both. Screen-recording permission is requested separately when you share a screen or turn on AI features.
 
@@ -389,7 +389,7 @@ Your identity, friends list, and local session history live in your OS data dire
 
 ## Troubleshooting
 
-- **macOS, "App is damaged and can't be opened"** — uncommon now that the app is ad-hoc signed (the usual first-run prompt is the milder "cannot verify the developer" one above), but it can still happen on a stubborn download where quarantine is flagged and right-click → Open is skipped. From Terminal: `xattr -dr com.apple.quarantine /Applications/StudyVis.app`, then double-click again.
+- **macOS, "App is damaged and can't be opened"** — download a fresh copy from the official release and reinstall it. For an unverified-developer or notarization warning, follow the per-app **Privacy & Security → Open Anyway** steps above. A damaged-app warning can indicate changed or corrupted files; do not remove quarantine to bypass it.
 - **Windows, SmartScreen does not show "More info"** — make sure you're running Windows 10 1903 or later. Older builds present a different dialog.
 - **Linux, AppImage asks for FUSE / `libfuse.so.2`** — install CachyOS package
   `fuse2`, or use `--appimage-extract-and-run` for that launch. The extraction
