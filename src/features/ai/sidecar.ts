@@ -72,7 +72,7 @@ export type SidecarRuntime = {
   }) => Promise<SidecarStartResult>
   stop: () => Promise<void>
   status: () => Promise<SidecarStatus>
-  fetchHealth: (port: number) => Promise<boolean>
+  fetchHealth: (port: number, signal?: AbortSignal) => Promise<boolean>
   setInterval: (handler: () => void, ms: number) => unknown
   clearInterval: (handle: unknown) => void
   getAiFeaturesEnabled: () => boolean
@@ -114,10 +114,14 @@ async function defaultStatus(): Promise<SidecarStatus> {
   return invoke<SidecarStatus>('sidecar_status')
 }
 
-async function defaultFetchHealth(port: number): Promise<boolean> {
+async function defaultFetchHealth(
+  port: number,
+  signal?: AbortSignal
+): Promise<boolean> {
   try {
     const res = await fetch(`http://127.0.0.1:${port}/health`, {
       method: 'GET',
+      signal,
     })
     if (!res.ok) return false
     // llama-server's /health returns either {status:"ok"} or 503 while loading;
@@ -126,6 +130,53 @@ async function defaultFetchHealth(port: number): Promise<boolean> {
   } catch {
     return false
   }
+}
+
+// #386: health ownership needs its own deadline even if the transport never
+// settles. Late completion/rejection is consumed after cancellation.
+export function boundedHealthProbe<T>(
+  request: (signal: AbortSignal) => Promise<T>,
+  timeoutMs: number,
+  signal?: AbortSignal
+): Promise<T> {
+  const controller = new AbortController()
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => {
+      cleanup()
+      reject(controller.signal.reason)
+    }
+    const abortFromOwner = () => controller.abort(signal?.reason)
+    const timer = setTimeout(
+      () => controller.abort(new Error('AI health request timed out')),
+      Math.max(0, timeoutMs)
+    )
+    const cleanup = () => {
+      clearTimeout(timer)
+      signal?.removeEventListener('abort', abortFromOwner)
+      controller.signal.removeEventListener('abort', onAbort)
+    }
+    controller.signal.addEventListener('abort', onAbort, { once: true })
+    signal?.addEventListener('abort', abortFromOwner, { once: true })
+    if (signal?.aborted) {
+      abortFromOwner()
+      return
+    }
+    try {
+      request(controller.signal).then(
+        (value) => {
+          cleanup()
+          resolve(value)
+        },
+        (error: unknown) => {
+          cleanup()
+          reject(error)
+        }
+      )
+    } catch (error) {
+      cleanup()
+      reject(error)
+    }
+  })
 }
 
 const defaultRuntime: SidecarRuntime = {
@@ -172,6 +223,7 @@ export function __setSidecarRuntime(runtime: SidecarRuntime): void {
 }
 
 export function __resetSidecarRuntime(): void {
+  stopPolling()
   activeRuntime = defaultRuntime
   inFlightStart = null
   inFlightStop = null
@@ -519,6 +571,8 @@ export const useSidecarStore = create<SidecarState>((set, get) => ({
   },
 }))
 
+let pollingProbe: AbortController | null = null
+
 function ensurePollingStarted(): void {
   const state = useSidecarStore.getState()
   if (state.pollHandle !== null) return
@@ -528,16 +582,29 @@ function ensurePollingStarted(): void {
       stopPolling()
       return
     }
+    if (pollingProbe !== null) return
+    const controller = new AbortController()
+    pollingProbe = controller
     const probedPort = cur.port
     const probeStartedAt = Date.now()
-    void activeRuntime
-      .fetchHealth(probedPort)
+    const runtime = activeRuntime
+    void boundedHealthProbe(
+      (signal) => runtime.fetchHealth(probedPort, signal),
+      HEALTH_POLL_INTERVAL_MS,
+      controller.signal
+    )
       .then((healthy) => {
         // Re-check the store before writing: if the user called stop() (or the
         // sidecar respawned on a new port) while this fetch was in flight, our
         // probe is stale and shouldn't flip `healthy=true` on a dead port.
         const after = useSidecarStore.getState()
-        if (after.status !== 'running' || after.port !== probedPort) return
+        if (
+          pollingProbe !== controller ||
+          controller.signal.aborted ||
+          after.status !== 'running' ||
+          after.port !== probedPort
+        )
+          return
         if (after.healthy !== healthy) {
           log.info('health.changed', {
             healthy,
@@ -551,7 +618,13 @@ function ensurePollingStarted(): void {
       })
       .catch((err) => {
         const after = useSidecarStore.getState()
-        if (after.status !== 'running' || after.port !== probedPort) return
+        if (
+          pollingProbe !== controller ||
+          controller.signal.aborted ||
+          after.status !== 'running' ||
+          after.port !== probedPort
+        )
+          return
         log.warn('health.probe_failed', {
           probeMs: Date.now() - probeStartedAt,
           err,
@@ -560,6 +633,9 @@ function ensurePollingStarted(): void {
           healthy: false,
           lastHealthCheckAt: Date.now(),
         })
+      })
+      .finally(() => {
+        if (pollingProbe === controller) pollingProbe = null
       })
   }
   const handle = activeRuntime.setInterval(tick, HEALTH_POLL_INTERVAL_MS)
@@ -570,6 +646,9 @@ function ensurePollingStarted(): void {
 }
 
 function stopPolling(): void {
+  const pending = pollingProbe
+  pollingProbe = null
+  pending?.abort()
   const handle = useSidecarStore.getState().pollHandle
   if (handle === null) return
   activeRuntime.clearInterval(handle)

@@ -28,6 +28,7 @@ import { getCaptureRuntime, type CaptureFrame } from './captureShared'
 import { buildFocusRequest, type FocusChatRequest } from './focusRequest'
 import type { ModelSpec } from './models'
 import {
+  boundedHealthProbe,
   SIDECAR_HEALTH_RETRY_MS,
   SIDECAR_HEALTH_TIMEOUT_MS,
   useSidecarStore,
@@ -167,7 +168,11 @@ export type BenchmarkRuntime = {
   stopSidecar: () => Promise<void>
   // Wait for the sidecar's HTTP server to be ready. Returns once /health
   // responds 2xx; rejects if the sidecar errors out.
-  waitForHealthy: (port: number, timeoutMs: number) => Promise<void>
+  waitForHealthy: (
+    port: number,
+    timeoutMs: number,
+    signal?: AbortSignal
+  ) => Promise<void>
   // Run a single chat completion and return wall-clock seconds. Implementations
   // SHOULD set a reasonable per-request timeout themselves; the runtime here
   // doesn't enforce one because llama-server's first inference is the model
@@ -231,6 +236,46 @@ export async function prepareBundledBenchmarkImages(): Promise<BenchmarkImages> 
   }
 }
 
+export async function waitForBenchmarkHealthy(
+  port: number,
+  timeoutMs: number,
+  signal?: AbortSignal
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    if (signal?.aborted) throw signal.reason
+    try {
+      const response = await boundedHealthProbe(
+        (probeSignal) =>
+          fetch(`http://127.0.0.1:${port}/health`, { signal: probeSignal }),
+        deadline - Date.now(),
+        signal
+      )
+      if (response.ok) return
+    } catch {
+      if (signal?.aborted) throw signal.reason
+    }
+    const remainingMs = deadline - Date.now()
+    if (remainingMs > 0) {
+      await boundedHealthProbe(
+        (probeSignal) =>
+          new Promise<void>((resolve) => {
+            const timer = setTimeout(
+              resolve,
+              Math.min(SIDECAR_HEALTH_RETRY_MS, remainingMs)
+            )
+            probeSignal.addEventListener('abort', () => clearTimeout(timer), {
+              once: true,
+            })
+          }),
+        remainingMs,
+        signal
+      )
+    }
+  }
+  throw new Error(`sidecar /health did not return 2xx within ${timeoutMs} ms`)
+}
+
 const defaultRuntime: BenchmarkRuntime = {
   prepareImages: prepareBundledBenchmarkImages,
   startSidecar: async ({ modelPath, mmprojPath, ctxSize }) => {
@@ -252,19 +297,7 @@ const defaultRuntime: BenchmarkRuntime = {
   stopSidecar: async () => {
     await useSidecarStore.getState().stop()
   },
-  waitForHealthy: async (port, timeoutMs) => {
-    const startedAt = Date.now()
-    while (Date.now() - startedAt < timeoutMs) {
-      try {
-        const res = await fetch(`http://127.0.0.1:${port}/health`)
-        if (res.ok) return
-      } catch {
-        // probe failed; retry until the deadline
-      }
-      await sleep(SIDECAR_HEALTH_RETRY_MS)
-    }
-    throw new Error(`sidecar /health did not return 2xx within ${timeoutMs} ms`)
-  },
+  waitForHealthy: waitForBenchmarkHealthy,
   runChatCompletion: async (port, body) => {
     // Generous upper bound: warmup on a CPU-only 7B run is ~60–90 s; subsequent
     // samples land in 15–30 s. 5 minutes covers warmup + a wide tail. Without
@@ -317,11 +350,8 @@ export function __resetBenchmarkRuntime(): void {
   activeRuntime = defaultRuntime
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((r) => setTimeout(r, ms))
-}
-
 export type BenchmarkOptions = {
+  signal?: AbortSignal
   ctxSize?: number
   // The picker passes resolved absolute paths from `model_paths`.
   modelPath: string
@@ -397,7 +427,7 @@ export async function runBenchmark(
     })
     const { port } = started
     hardwareIdentity = started.hardwareIdentity
-    await runtime.waitForHealthy(port, SIDECAR_HEALTH_TIMEOUT_MS)
+    await runtime.waitForHealthy(port, SIDECAR_HEALTH_TIMEOUT_MS, opts.signal)
 
     // A1 — mirror the live tick's two-image shape (a camera frame + a screen
     // frame). NEW-FINDING-2: the two slots carry distinct re-encodes of the
