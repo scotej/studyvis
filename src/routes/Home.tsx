@@ -1,3 +1,4 @@
+import { isUpdateInstallReserved } from '@/lib/updateInstallGuard'
 // Top-level view orchestrator: switches between loading / identity-error /
 // onboarding / active-session / report / settings / friends-list, and owns
 // the flows that must survive any of those views — the add-friend dialog,
@@ -78,6 +79,12 @@ import { joinAndRemovePendingInvite } from './pendingInviteJoin'
 const isDev = import.meta.env.DEV
 
 type View = 'main' | 'settings'
+
+function rejectSessionDuringUpdate(): boolean {
+  if (!isUpdateInstallReserved()) return false
+  toast.error(strings.updater.sessionStartBlocked)
+  return true
+}
 
 export function Home() {
   const { identity, status, actions } = useIdentity()
@@ -344,6 +351,7 @@ export function Home() {
   // credentials the store holds until the Report closes; joinSession's
   // begin() flips status to 'active', unmounting the Report.
   const handleRejoin = useCallback(() => {
+    if (rejectSessionDuringUpdate()) return
     const request = useSessionStore.getState().getRejoinRequest()
     if (!request) return
     const s = useSessionStore.getState()
@@ -388,6 +396,7 @@ export function Home() {
   const dismissInterrupted = interrupted.dismiss
   const handleInterruptedRejoin = useCallback(
     (record: SessionRecoveryRecord) => {
+      if (rejectSessionDuringUpdate()) return
       if (useSessionStore.getState().status === 'active') return
       if (aiOn()) {
         const models = useModelStore.getState()
@@ -435,6 +444,7 @@ export function Home() {
 
   const handleInvite = useCallback(
     (friend: Friend) => {
+      if (rejectSessionDuringUpdate()) return
       if (aiOn()) setPendingStart({ kind: 'host', friend })
       else void runHostInvite(friend)
     },
@@ -443,6 +453,7 @@ export function Home() {
 
   const handleInviteAccepted = useCallback(
     (invite: ValidInvite) => {
+      if (rejectSessionDuringUpdate()) return
       // Enforce the "leave first" guard BEFORE the topic gate too — otherwise
       // accepting an invite mid-session (AI on) would queue pendingStart and
       // pop the topic modal even though runGuestJoin would later refuse.
@@ -460,6 +471,7 @@ export function Home() {
     (topic: string) => {
       const req = pendingStart
       setPendingStart(undefined)
+      if (rejectSessionDuringUpdate()) return
       if (!req) return
       // V2-P9 gesture fix — this submit click is the only place a
       // getDisplayMedia() call for the upcoming session's AI screen capture

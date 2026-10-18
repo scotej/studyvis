@@ -2307,6 +2307,8 @@ export const strings = {
   // you, and it only appears once the new version is already downloaded and
   // verified, so "Restart now" is instant. Nothing here fires mid-session.
   updater: {
+    sessionStartBlocked:
+      'StudyVis is installing an update. Wait for it to restart before starting a session.',
     banner: {
       ariaLabel: 'Update ready',
       title: (version: string) => `StudyVis ${version} is ready`,
