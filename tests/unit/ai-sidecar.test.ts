@@ -162,6 +162,32 @@ describe('useSidecarStore.start', () => {
     clearCurrentAiHardwareIdentity()
   })
 
+  test('serializes hung health probes and aborts the owned request on stop (#386)', async () => {
+    vi.useFakeTimers()
+    const env = makeFakeRuntime({ aiEnabled: true })
+    const signals: AbortSignal[] = []
+    env.runtime.fetchHealth = vi.fn((_port, signal) => {
+      signals.push(signal!)
+      return new Promise<boolean>(() => {})
+    })
+    __setSidecarRuntime(env.runtime)
+    try {
+      await useSidecarStore.getState().start({ modelPath: '/m.gguf' })
+      for (let i = 0; i < 15; i++) env.fireTick()
+      expect(signals).toHaveLength(1)
+      await vi.advanceTimersByTimeAsync(HEALTH_POLL_INTERVAL_MS)
+      expect(signals[0].aborted).toBe(true)
+      env.fireTick()
+      expect(signals).toHaveLength(2)
+      await useSidecarStore.getState().stop()
+      expect(signals[1].aborted).toBe(true)
+      expect(env.handlesAlive()).toBe(0)
+      expect(vi.getTimerCount()).toBe(0)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   test('refuses a live start when AI features are disabled', async () => {
     const env = makeFakeRuntime({ aiEnabled: false })
     __setSidecarRuntime(env.runtime)

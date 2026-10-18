@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from 'vitest'
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 
 import {
   __resetBenchmarkRuntime,
@@ -16,6 +16,8 @@ import {
   type BenchmarkRuntime,
   type ChatCompletionRequest,
 } from '@/features/ai'
+
+import { waitForBenchmarkHealthy } from '@/features/ai/benchmark'
 
 const TEST_HARDWARE_IDENTITY: AiHardwareIdentity = {
   selection: 'device:Vulkan0',
@@ -99,6 +101,65 @@ describe('runBenchmark', () => {
   afterEach(() => {
     __resetBenchmarkRuntime()
     clearCurrentAiHardwareIdentity()
+  })
+
+  test('hung production health fetch expires and frees the owned engine (#386)', async () => {
+    vi.useFakeTimers()
+    const env = makeFakeRuntime({ perCallSec: [1, 1, 1, 1] })
+    env.runtime.waitForHealthy = waitForBenchmarkHealthy
+    __setBenchmarkRuntime(env.runtime)
+    let healthSignal: AbortSignal | undefined
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((_input: unknown, init?: RequestInit) => {
+        healthSignal = init?.signal ?? undefined
+        return new Promise<Response>(() => {})
+      })
+    )
+    try {
+      const pending = runBenchmark(SUPPORTED_MODELS[0], {
+        modelPath: '/m.gguf',
+        mmprojPath: '/p.gguf',
+      })
+      const rejected = expect(pending).rejects.toThrow(
+        '/health did not return 2xx within 90000 ms'
+      )
+      await vi.advanceTimersByTimeAsync(90_000)
+      await rejected
+      expect(healthSignal?.aborted).toBe(true)
+      expect(env.stops).toBe(1)
+      expect(env.bodies).toHaveLength(0)
+      expect(vi.getTimerCount()).toBe(0)
+    } finally {
+      vi.unstubAllGlobals()
+      vi.useRealTimers()
+    }
+  })
+
+  test('readiness cancellation aborts transport and releases its timer (#386)', async () => {
+    vi.useFakeTimers()
+    const controller = new AbortController()
+    let healthSignal: AbortSignal | undefined
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((_input: unknown, init?: RequestInit) => {
+        healthSignal = init?.signal ?? undefined
+        return new Promise<Response>(() => {})
+      })
+    )
+    try {
+      const pending = waitForBenchmarkHealthy(31337, 90_000, controller.signal)
+      const rejected = expect(pending).rejects.toMatchObject({
+        name: 'AbortError',
+      })
+      controller.abort()
+      await rejected
+      expect(healthSignal?.aborted).toBe(true)
+      expect(vi.getTimerCount()).toBe(0)
+    } finally {
+      vi.unstubAllGlobals()
+      vi.useRealTimers()
+    }
   })
 
   test('discards the cold-start warmup sample and stops the sidecar', async () => {
