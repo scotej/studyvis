@@ -1452,12 +1452,13 @@ export function SessionView({
       if (stopped) return
       void emitAudit('joined', {})
       // V2-P9 — the only producer of `topic_set` (kind+label wired in V2-P7,
-      // no producer until now). Fires once per session, only when AI is on
+      // no producer until now). Fires once per local stint, only when AI is on
       // (the required topic prompt only runs in that case), right after
       // `joined` so the report's topic timeline anchors correctly. Reads the
-      // one-shot initialDeclaredTopic that `begin()` seeded from the gate.
+      // current topic after the hello await: #418 retains the logical starting
+      // topic separately, and a live topic change may have happened meanwhile.
       if (useSettingsStore.getState().values.aiFeaturesEnabled) {
-        const topic = useSessionStore.getState().initialDeclaredTopic
+        const topic = useSessionStore.getState().declaredStudyTopic
         void emitAudit('topic_set', { topic })
       }
     })()

@@ -1023,6 +1023,7 @@ export const RejoinedAfterTopicChange: Story = {
       }),
       event(ME, 'left', 180_000),
       event(ME, 'joined', 240_000),
+      event(ME, 'topic_set', 240_000, { topic: 'Physics' }),
       event(ME, 'left', 300_000),
     ]),
   },
@@ -1038,5 +1039,6 @@ export const RejoinedAfterTopicChange: Story = {
     await expect(within(topic).getByText('Physics')).toBeInTheDocument()
     await expect(within(topic).getByText('started')).toBeInTheDocument()
     await expect(within(topic).getByText('02:00')).toBeInTheDocument()
+    await expect(within(topic).queryByText('04:00')).toBeNull()
   },
 }
