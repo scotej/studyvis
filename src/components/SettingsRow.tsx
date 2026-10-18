@@ -96,7 +96,7 @@ export function SettingsSection({
       <h2
         ref={headingRef}
         tabIndex={headingRef ? -1 : undefined}
-        className="mb-3 text-xl font-semibold tracking-tight text-text-primary"
+        className="mb-3 text-xl font-semibold tracking-tight text-text-primary focus-visible:ring-3 focus-visible:ring-accent-ring"
       >
         {heading}
       </h2>
