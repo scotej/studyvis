@@ -184,6 +184,60 @@ pub fn identity_keys_present() -> Result<bool, String> {
     }
 }
 
+#[derive(Debug, Serialize, PartialEq)]
+#[serde(rename_all = "kebab-case")]
+pub enum IdentityKeysStatus {
+    Matching,
+    Missing,
+    Invalid,
+}
+
+fn check_stored_keys(payload: &str, record: &IdentityRecord) -> IdentityKeysStatus {
+    let matches = (|| -> Option<bool> {
+        let stored: StoredKeys = serde_json::from_str(payload).ok()?;
+        let ed_private: [u8; PRIV_KEY_LEN] =
+            hex::decode(stored.ed_priv_hex).ok()?.try_into().ok()?;
+        let x_private: [u8; PRIV_KEY_LEN] = hex::decode(stored.x_priv_hex).ok()?.try_into().ok()?;
+        let ed_public: [u8; PRIV_KEY_LEN] =
+            hex::decode(&record.ed_pubkey_hex).ok()?.try_into().ok()?;
+        let x_public: [u8; PRIV_KEY_LEN] =
+            hex::decode(&record.x_pubkey_hex).ok()?.try_into().ok()?;
+        Some(
+            SigningKey::from_bytes(&ed_private)
+                .verifying_key()
+                .to_bytes()
+                == ed_public
+                && crypto_box::SecretKey::from(x_private)
+                    .public_key()
+                    .as_bytes()
+                    == &x_public,
+        )
+    })();
+    if matches == Some(true) {
+        IdentityKeysStatus::Matching
+    } else {
+        IdentityKeysStatus::Invalid
+    }
+}
+
+// #380: possession alone does not prove identity.json describes the credential.
+// Derive and compare both public keys without returning private material to JS.
+#[tauri::command(async)]
+pub fn identity_keys_status(record: IdentityRecord) -> Result<IdentityKeysStatus, String> {
+    identity_keys_status_from_entry(&keys_entry()?, &record)
+}
+
+fn identity_keys_status_from_entry(
+    entry: &Entry,
+    record: &IdentityRecord,
+) -> Result<IdentityKeysStatus, String> {
+    match entry.get_password() {
+        Ok(payload) => Ok(check_stored_keys(&payload, record)),
+        Err(keyring::Error::NoEntry) => Ok(IdentityKeysStatus::Missing),
+        Err(error) => Err(format_keyring_error("read identity keys", error)),
+    }
+}
+
 #[tauri::command]
 pub fn identity_save_record(app: AppHandle, record: IdentityRecord) -> Result<(), String> {
     let path = identity_path(&app)?;
@@ -295,7 +349,83 @@ pub fn identity_box_encrypt(
 
 #[cfg(test)]
 mod tests {
-    use super::Entry;
+    use super::{
+        check_stored_keys, identity_keys_status_from_entry, Entry, IdentityKeysStatus,
+        IdentityRecord, StoredKeys,
+    };
+
+    fn key_fixture(ed: u8, x: u8) -> (String, IdentityRecord) {
+        let ed_private = [ed; 32];
+        let x_private = [x; 32];
+        let payload = serde_json::to_string(&StoredKeys {
+            ed_priv_hex: hex::encode(ed_private),
+            x_priv_hex: hex::encode(x_private),
+        })
+        .unwrap();
+        let record = IdentityRecord {
+            version: 1,
+            ed_pubkey_hex: hex::encode(
+                ed25519_dalek::SigningKey::from_bytes(&ed_private)
+                    .verifying_key()
+                    .to_bytes(),
+            ),
+            x_pubkey_hex: hex::encode(
+                crypto_box::SecretKey::from(x_private)
+                    .public_key()
+                    .as_bytes(),
+            ),
+            display_name: "Test".into(),
+            created_at: 0,
+            mnemonic_fingerprint: "test".into(),
+        };
+        (payload, record)
+    }
+
+    #[test]
+    fn identity_coherence_requires_both_key_pairs() {
+        let (payload, record) = key_fixture(1, 2);
+        assert_eq!(
+            check_stored_keys(&payload, &record),
+            IdentityKeysStatus::Matching
+        );
+        let (_, other) = key_fixture(3, 4);
+        assert_eq!(
+            check_stored_keys(&payload, &other),
+            IdentityKeysStatus::Invalid
+        );
+        let only_x_differs = IdentityRecord {
+            x_pubkey_hex: other.x_pubkey_hex.clone(),
+            ..record.clone()
+        };
+        assert_eq!(
+            check_stored_keys(&payload, &only_x_differs),
+            IdentityKeysStatus::Invalid
+        );
+        let only_ed_differs = IdentityRecord {
+            ed_pubkey_hex: other.ed_pubkey_hex.clone(),
+            ..record
+        };
+        assert_eq!(
+            check_stored_keys(&payload, &only_ed_differs),
+            IdentityKeysStatus::Invalid
+        );
+    }
+
+    #[test]
+    fn malformed_identity_keys_are_recoverable() {
+        let (_, record) = key_fixture(1, 2);
+        for payload in [
+            "invalid",
+            "{}",
+            r#"{"ed_priv_hex":"00", "x_priv_hex":"00"}"#,
+            r#"{"ed_priv_hex":"zz", "x_priv_hex":"ff"}"#,
+        ] {
+            assert_eq!(
+                check_stored_keys(payload, &record),
+                IdentityKeysStatus::Invalid
+            );
+        }
+    }
 
     struct IsolatedCredential(Entry);
 
@@ -340,10 +470,34 @@ mod tests {
             reopened.get_password().expect("read after reopening"),
             replacement
         );
+        let (payload, record) = key_fixture(1, 2);
+        entry
+            .set_password(&payload)
+            .expect("save isolated identity keys");
+        assert_eq!(
+            identity_keys_status_from_entry(entry, &record).unwrap(),
+            IdentityKeysStatus::Matching
+        );
+        let (_, other_record) = key_fixture(3, 4);
+        assert_eq!(
+            identity_keys_status_from_entry(entry, &other_record).unwrap(),
+            IdentityKeysStatus::Invalid
+        );
+        entry
+            .set_password("malformed")
+            .expect("save isolated malformed fixture");
+        assert_eq!(
+            identity_keys_status_from_entry(entry, &record).unwrap(),
+            IdentityKeysStatus::Invalid
+        );
         entry
             .delete_credential()
             .expect("delete isolated native credential-store entry");
         assert!(matches!(entry.get_password(), Err(keyring::Error::NoEntry)));
+        assert_eq!(
+            identity_keys_status_from_entry(entry, &record).unwrap(),
+            IdentityKeysStatus::Missing
+        );
     }
 
     // Separate opt-in tests retain Linux's isolated-session invocation and

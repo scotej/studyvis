@@ -14,8 +14,15 @@
 
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
+import * as ed from '@noble/ed25519'
+import { x25519 } from '@noble/curves/ed25519.js'
 
-import { boxDecrypt, boxEncrypt, signMessage } from '@/lib/crypto/identity'
+import {
+  boxDecrypt,
+  boxEncrypt,
+  bytesToHex,
+  signMessage,
+} from '@/lib/crypto/identity'
 
 export type IdentityRecord = {
   version: number
@@ -66,6 +73,28 @@ export class LabIdentity {
   // In the lab the answer is never ambiguous.
   keysPresent(): boolean {
     return this.keys !== null
+  }
+
+  keysStatus(record: IdentityRecord): 'matching' | 'missing' | 'invalid' {
+    if (this.keys === null) return 'missing'
+    try {
+      const edPrivate = hexToBytes(this.keys.edPrivHex)
+      const xPrivate = hexToBytes(this.keys.xPrivHex)
+      const edPublic = hexToBytes(record.ed_pubkey_hex)
+      const xPublic = hexToBytes(record.x_pubkey_hex)
+      if (
+        [edPrivate, xPrivate, edPublic, xPublic].some(
+          (key) => key.length !== 32
+        )
+      )
+        return 'invalid'
+      return bytesToHex(ed.getPublicKey(edPrivate)) === bytesToHex(edPublic) &&
+        bytesToHex(x25519.getPublicKey(xPrivate)) === bytesToHex(xPublic)
+        ? 'matching'
+        : 'invalid'
+    } catch {
+      return 'invalid'
+    }
   }
 
   loadRecord(): IdentityRecord | null {

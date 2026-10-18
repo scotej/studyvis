@@ -45,11 +45,13 @@ export function IdentityLoadError() {
   return (
     <IdentityLoadErrorView
       variant={
-        errorKind === 'keys-missing'
-          ? 'keysMissing'
-          : errorKind === 'keychain-unavailable'
-            ? 'keychainUnavailable'
-            : 'file'
+        errorKind === 'keys-invalid'
+          ? 'keysInvalid'
+          : errorKind === 'keys-missing'
+            ? 'keysMissing'
+            : errorKind === 'keychain-unavailable'
+              ? 'keychainUnavailable'
+              : 'file'
       }
       retrying={retrying}
       onRetry={() => {

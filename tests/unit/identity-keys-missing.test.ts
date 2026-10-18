@@ -12,21 +12,29 @@ const mockState = vi.hoisted(() => ({
   saved: { keys: [] as unknown[], records: [] as unknown[] },
   storedRecord: null as Record<string, unknown> | null,
   keysPresent: false,
+  keysInvalid: false,
   keysProbeError: null as unknown,
+  recordSaveFails: false,
 }))
 
 vi.mock('@/lib/db/identity', () => ({
   IDENTITY_VERSION: 1,
   identityExists: vi.fn(async () => mockState.storedRecord !== null),
   loadIdentityRecord: vi.fn(async () => mockState.storedRecord),
-  identityKeysPresent: vi.fn(async () => {
+  identityKeysStatus: vi.fn(async () => {
     if (mockState.keysProbeError !== null) throw mockState.keysProbeError
-    return mockState.keysPresent
+    return mockState.keysInvalid
+      ? 'invalid'
+      : mockState.keysPresent
+        ? 'matching'
+        : 'missing'
   }),
   saveKeys: vi.fn(async (...args: unknown[]) => {
     mockState.saved.keys.push(args)
+    if (mockState.recordSaveFails) mockState.keysInvalid = true
   }),
   saveIdentityRecord: vi.fn(async (record: unknown) => {
+    if (mockState.recordSaveFails) throw new Error('record replacement failed')
     mockState.saved.records.push(record)
   }),
   signWithKeyring: vi.fn(async () => new Uint8Array(64)),
@@ -43,6 +51,8 @@ describe('keys-missing retains the parsed record (#47 E1 follow-up)', () => {
     mockState.saved.keys.length = 0
     mockState.saved.records.length = 0
     mockState.keysPresent = false
+    mockState.keysInvalid = false
+    mockState.recordSaveFails = false
     mockState.keysProbeError = null
     mockState.storedRecord = {
       version: 1,
@@ -143,5 +153,37 @@ describe('keys-missing retains the parsed record (#47 E1 follow-up)', () => {
     expect(s.errorKind).toBeNull()
     expect(s.identity?.display_name).toBe('Sam')
     expect(s.staleRecord).toBeNull()
+  })
+  test('mismatched or malformed credentials are recoverable and never ready', async () => {
+    mockState.keysPresent = true
+    mockState.keysInvalid = true
+    await useIdentityStore.getState().actions.refresh()
+    expect(useIdentityStore.getState()).toMatchObject({
+      status: 'error',
+      errorKind: 'keys-invalid',
+      identity: null,
+      staleRecord: { display_name: 'Sam' },
+    })
+  })
+  test('refresh rejects a partial replacement after keys save but record save fails', async () => {
+    mockState.keysPresent = true
+    await useIdentityStore.getState().actions.refresh()
+    expect(useIdentityStore.getState().status).toBe('ready')
+    mockState.recordSaveFails = true
+    const replacement = generateIdentity()
+    const { commit } = useIdentityStore
+      .getState()
+      .actions.recover(replacement.mnemonic)
+    await expect(commit()).rejects.toThrow('record replacement failed')
+    expect(mockState.saved.keys).toHaveLength(1)
+    await useIdentityStore.getState().actions.refresh()
+    expect(useIdentityStore.getState()).toMatchObject({
+      status: 'error',
+      errorKind: 'keys-invalid',
+      identity: null,
+    })
+    expect(useIdentityStore.getState().staleRecord).toEqual(
+      mockState.storedRecord
+    )
   })
 })

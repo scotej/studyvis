@@ -33,6 +33,14 @@ export async function identityKeysPresent(): Promise<boolean> {
   return invoke<boolean>('identity_keys_present')
 }
 
+export type IdentityKeysStatus = 'matching' | 'missing' | 'invalid'
+
+export async function identityKeysStatus(
+  record: IdentityRecord
+): Promise<IdentityKeysStatus> {
+  return invoke<IdentityKeysStatus>('identity_keys_status', { record })
+}
+
 export async function loadIdentityRecord(): Promise<IdentityRecord | null> {
   return invoke<IdentityRecord | null>('identity_load_record')
 }

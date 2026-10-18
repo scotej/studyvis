@@ -353,6 +353,8 @@ export class LabBackend {
         return this.identity.exists()
       case 'identity_keys_present':
         return this.identity.keysPresent()
+      case 'identity_keys_status':
+        return this.identity.keysStatus(a.record as IdentityRecord)
       case 'identity_load_record':
         return this.identity.loadRecord()
       case 'identity_save_record':
