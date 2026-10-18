@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
 
 import { useIdentity } from '@/features/identity'
@@ -44,32 +44,38 @@ export function ContactImportDialog({
   const [savedName, setSavedName] = useState<string | null>(null)
   const [saveError, setSaveError] = useState<string | null>(null)
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const owner = useRef({ active: false })
 
   // A fresh card resets the transient confirm state (ack, saved, error). Done in
   // render (React's "adjust state when a prop changes" pattern) rather than an
   // effect, so the reset lands before the first paint of the new card.
-  const [prevCard, setPrevCard] = useState<Uint8Array | null>(cardBytes)
-  if (cardBytes !== prevCard) {
-    setPrevCard(cardBytes)
+  const [previous, setPrevious] = useState({ cardBytes, open, localEd, source })
+  if (
+    cardBytes !== previous.cardBytes ||
+    open !== previous.open ||
+    localEd !== previous.localEd ||
+    source !== previous.source
+  ) {
+    setPrevious({ cardBytes, open, localEd, source })
     setAcked(false)
     setSavedName(null)
     setSaveError(null)
     setSaving(false)
   }
 
-  // Cancel a still-pending post-add auto-close whenever the card changes (or on
-  // unmount), so a leftover timer from the PREVIOUS card can't fire and dismiss a
-  // newly-arrived card mid-review. Keyed on cardBytes; the ref is only touched in
-  // the effect cleanup, never during render.
-  useEffect(
-    () => () => {
+  // #383 — an add belongs to this exact confirmation lifetime. Invalidate it
+  // before another card/identity can paint, including close/reopen of one card.
+  useLayoutEffect(() => {
+    const operation = { active: open }
+    owner.current = operation
+    return () => {
+      operation.active = false
       if (closeTimer.current !== null) {
         clearTimeout(closeTimer.current)
         closeTimer.current = null
       }
-    },
-    [cardBytes]
-  )
+    }
+  }, [cardBytes, open, localEd, source])
 
   const read = useMemo(() => {
     if (!open || !cardBytes || !localEd) return null
@@ -100,7 +106,8 @@ export function ContactImportDialog({
   }, [savedName, saveError, read, localEd, source, copy])
 
   const handleConfirm = useCallback(async () => {
-    if (!read || !read.ok || read.isSelf) return
+    if (!open || saving || !read || !read.ok || read.isSelf) return
+    const operation = owner.current
     const persistName = sanitizeDisplayName(read.card.name)
     setSaving(true)
     try {
@@ -110,21 +117,24 @@ export function ContactImportDialog({
         persistName,
         Date.now()
       )
+      if (!operation.active) return
       setSavedName(persistName || copy.fallbackName)
       closeTimer.current = setTimeout(() => {
         closeTimer.current = null
-        onOpenChange(false)
+        if (operation.active) onOpenChange(false)
       }, ADDED_AUTOCLOSE_MS)
     } catch {
+      if (!operation.active) return
       setSaveError(copy.savingError)
       toast.error(copy.savingError)
     } finally {
-      setSaving(false)
+      if (operation.active) setSaving(false)
     }
-  }, [read, addFriend, copy, onOpenChange])
+  }, [open, saving, read, addFriend, copy, onOpenChange])
 
   const handleOpenChange = useCallback(
     (next: boolean) => {
+      if (!next) owner.current.active = false
       if (!next && closeTimer.current !== null) {
         clearTimeout(closeTimer.current)
         closeTimer.current = null

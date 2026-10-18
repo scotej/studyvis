@@ -89,6 +89,9 @@ jobs:
           npx playwright-core install --with-deps chromium
           node --test tests/production/benchmark-images.mjs tests/production/turn-urls.mjs
 
+      - name: Frontend interaction regressions
+        run: npm run test:interaction
+
       - name: Accessibility audit (axe-core over every Storybook story)
         run: npm run check-a11y
 
@@ -101,7 +104,7 @@ jobs:
       - name: Contrast audit (WCAG AA over token pairs, both themes)
         run: npm run check-contrast
 
-      # Storybook is the ONLY automated rendered component/a11y surface here
+      # Storybook supplies static rendered component/a11y coverage here
       # (vitest is node-env, there are no *.test.tsx), and check-a11y can only
       # audit a component that has a story. The gate rejects new uncovered
       # modules; three older component exceptions (one UI primitive, two
