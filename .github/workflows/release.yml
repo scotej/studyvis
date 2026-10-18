@@ -119,7 +119,8 @@ jobs:
           # shellcheck disable=SC2016
           boiler='Friends-only release — the macOS app is ad-hoc signed (not notarized);
           the Windows installer and Linux AppImage are unsigned. See INSTALL.md for first-run steps:
-          macOS users right-click the app and choose Open the first time;
+          macOS users first try opening the app, then approve it in
+          System Settings → Privacy & Security → Open Anyway and confirm Open;
           Windows users click "More info" → "Run anyway" on the SmartScreen warning;
           Linux x86_64 users download the AppImage, make it executable, and run it
           (CachyOS/Arch users may need the `fuse2` package).

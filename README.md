@@ -72,9 +72,10 @@ See [`INSTALL.md`](./INSTALL.md) for the full walkthrough.
 **macOS (Apple Silicon)** — download the `aarch64` `.dmg` from
 [Releases](https://github.com/scotej/studyvis/releases) (Apple Silicon
 only; Intel Macs aren't in the release matrix). Drag StudyVis into
-Applications. **Right-click** the app icon and choose **Open** the
-first time; macOS asks once, then remembers. The right-click is
-load-bearing — double-clicking will refuse.
+Applications and try to open it. If Gatekeeper blocks the first launch,
+open **System Settings → Privacy & Security → Open Anyway**, authenticate
+if asked, then confirm **Open**. macOS remembers this per-app exception.
+On macOS 15 and later, Control-click alone cannot approve the app.
 
 **Windows 10 / 11** — download `StudyVis_<version>_x64-setup.exe` from
 [Releases](https://github.com/scotej/studyvis/releases). Double-click
@@ -370,7 +371,7 @@ where you'd see it surface.
   publication.
 - **Signed installers.** No code-signing credentials. macOS
   notarization and Windows code-signing wait for a Developer ID and an
-  EV cert, so friends still right-click → Open on macOS and click
+  EV cert, so friends still approve StudyVis in Privacy & Security on macOS and click
   through SmartScreen on Windows _on the first install_. Auto-update
   itself shipped in v1.5.0 — it has its own signature check and doesn't
   need those certs. One consequence of staying unsigned on macOS: an
