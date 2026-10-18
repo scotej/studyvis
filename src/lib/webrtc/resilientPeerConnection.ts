@@ -319,17 +319,9 @@ export function installTransientDisconnectHold(
   connection.addEventListener('iceconnectionstatechange', onRealStateChange)
 }
 
-// #264 — shut a connection trystero abandoned open.
-//
-// On an unclean close trystero calls `SharedPeerManager.clear(…,
-// {destroyPeer: false})`, which empties `shared.bindings` before firing each
-// binding's close handler — so the `detachBinding` that would have removed our
-// senders early-returns, and the connection is left running with the camera
-// and screen still attached to a peer the app has already reported gone. It
-// leaves the FAR side pinned to it — their `state.connectedPeer` still points
-// here, it still reads healthy because our data channel never closed, and
-// trystero drops all signaling for such a peer — so the session cannot
-// re-form until this connection is actually shut.
+// #264/#403 — defensive cleanup for an abandoned native transport. The pinned
+// core now destroys a shared peer before notifying its rooms. This fallback
+// also covers connections which failed before gaining a shared owner.
 //
 // Ordering matches trystero's own `peer.destroy()`: data channels first, so
 // the remote learns from an SCTP stream reset instead of waiting out ICE
@@ -387,9 +379,9 @@ export function createResilientPeerConnection(
       observeNegotiationFailure(connection, 'setRemoteDescription')
       observeNegotiationFailure(connection, 'addIceCandidate')
       installTransientDisconnectHold(connection, holdMs)
-      // Trystero clears a failed answer peer without destroying it. Let its
-      // state handlers see the failure first, then close the abandoned PC so
-      // repeated failed handshakes cannot exhaust the browser's PC limit.
+      // An answering connection can fail before gaining a shared owner. Let
+      // Trystero's state handlers run first, then close any native PC left
+      // open so repeated failures cannot exhaust the browser's PC limit.
       let cleanupQueued = false
       const closeFailedConnection = () => {
         if (cleanupQueued) return

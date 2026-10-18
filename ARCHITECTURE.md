@@ -1337,8 +1337,8 @@ to active solo mode indefinitely; it does not call the survivor's Leave handler.
 When a departure follows an unclean transport loss (the connection's last live
 state was `disconnected` or `failed` rather than `connected`), the survivor
 keeps a name-only "Reconnecting…" tile for that peer for 30 s — long enough
-for trystero to re-establish, which it can do only because that same path
-closes the abandoned connection first (see §4).
+for trystero to re-establish after the pinned core retires the physical peer.
+The departure path retains a defensive closer (see §4).
 The tile is all that is held: the identity binding and the authenticated
 overlap interval close at the drop exactly as a clean departure closes them, so
 ending the session mid-grace cannot over-count overlap, and a same-peerId
