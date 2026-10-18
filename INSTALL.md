@@ -22,12 +22,7 @@ distro package.
 
 ## Windows 10 / 11
 
-The manual [v1.12.8.1 Windows packaging revision](https://github.com/scotej/studyvis/releases/tag/v1.12.8.1)
-includes the Visual C++ runtime needed by the AI engine. Download its
-`StudyVis_1.12.8.1_x64-setup.exe` and install it using the steps below. Its app
-version remains 1.12.8, and it is not offered through automatic updates.
-
-1. From the [Releases page](https://github.com/scotej/studyvis/releases), download `StudyVis_<version>_x64-setup.exe`.
+1. From the [latest stable release](https://github.com/scotej/studyvis/releases/latest), download `StudyVis_<version>_x64-setup.exe`. Choose the installer attached to that release; current full releases include the Visual C++ runtime needed by the AI engine.
 2. Double-click the installer. **SmartScreen** intercepts: _"Windows protected your PC"_. Click **More info**, then **Run anyway**.
 3. Step through the installer (defaults are fine). StudyVis lands in your Start menu and Programs list.
 4. The first time you join a session, Windows asks for camera and microphone permission via WebView2. Allow both.
