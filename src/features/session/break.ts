@@ -340,7 +340,9 @@ async function requestBreakNow(
   throwIfAborted(deps.signal)
   deps.startApprovedBreak({
     durationSec: verdict.durationSec,
-    startedAt: input.now,
+    // #390: queueing and signing can outlast the request timestamp. The
+    // stored deadline and the full-duration timeout both start at approval.
+    startedAt: deps.now(),
   })
   // The handle lives at module scope so session teardown can cancel it (for
   // example, SessionView unmounting on session end). requestBreak is the only

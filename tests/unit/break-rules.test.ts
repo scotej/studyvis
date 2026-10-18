@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
+import { useBreakStore } from '@/features/ai/breakStore'
 
 import {
   MAX_BREAKS_PER_SESSION,
@@ -296,6 +297,78 @@ describe('requestBreak orchestrator', () => {
     expect(scheduledTimers).toHaveLength(1)
     expect(scheduledTimers[0]!.ms).toBe(300_000)
   })
+
+  test.each([false, true])(
+    'delayed approval shares the countdown deadline (queued=%s, #390)',
+    async (queued) => {
+      vi.useFakeTimers()
+      vi.setSystemTime(0)
+      useBreakStore.getState().reset(0)
+      let releaseAudit!: () => void
+      let signalAudit!: () => void
+      const auditStarted = new Promise<void>((resolve) => {
+        signalAudit = resolve
+      })
+      const heldAudit = new Promise<void>((resolve) => {
+        releaseAudit = resolve
+      })
+      let first = true
+      const deps: RequestBreakOrchestratorDeps = {
+        appendLocalAudit: async () => {
+          if (!first) return
+          first = false
+          signalAudit()
+          await heldAudit
+        },
+        emitAudit: async () => {},
+        startApprovedBreak: (args) =>
+          useBreakStore.getState().startApprovedBreak(args),
+        endBreak: (now) => useBreakStore.getState().endBreak(now),
+        setTimeout: (handler, ms) => setTimeout(handler, ms),
+        clearTimeout: (handle) =>
+          clearTimeout(handle as ReturnType<typeof setTimeout>),
+        snapshot: () => useBreakStore.getState(),
+        now: () => Date.now(),
+      }
+      const input = {
+        requestedDurationSec: 90,
+        aiRecommendation: 'approve' as const,
+        aiReasoning: '',
+        now: 0,
+      }
+      try {
+        const firstRequest = requestBreak(
+          queued ? { ...input, requestedDurationSec: 0 } : input,
+          deps
+        )
+        await auditStarted
+        const approval = queued ? requestBreak(input, deps) : firstRequest
+        await vi.advanceTimersByTimeAsync(60_000)
+        releaseAudit()
+        await firstRequest
+        expect((await approval).verdict).toBe('approved')
+        expect(useBreakStore.getState()).toMatchObject({
+          onBreak: true,
+          breakStartedAt: 60_000,
+          breakEndsAt: 150_000,
+          breaksThisSession: 1,
+        })
+        await vi.advanceTimersByTimeAsync(89_999)
+        expect(useBreakStore.getState().onBreak).toBe(true)
+        expect(useBreakStore.getState().breakEndsAt! - Date.now()).toBe(1)
+        await vi.advanceTimersByTimeAsync(1)
+        expect(useBreakStore.getState()).toMatchObject({
+          onBreak: false,
+          breakEndsAt: null,
+          lastBreakEndedAt: 150_000,
+        })
+      } finally {
+        cancelActiveBreakTimer(deps.clearTimeout)
+        useBreakStore.getState().reset(null)
+        vi.useRealTimers()
+      }
+    }
+  )
 
   test('approve path: scheduled timer firing calls endBreak with the wall-clock now', async () => {
     const deps = buildDeps(state())
