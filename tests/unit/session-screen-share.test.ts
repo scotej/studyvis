@@ -441,6 +441,40 @@ describe('screen-share stream classification', () => {
     ).toBe('camera')
   })
 
+  test.each(['stop/restart', 'direct replacement'])(
+    'ignores retired screen callbacks after %s',
+    (transition) => {
+      const bus = fakeRoom()
+      const { controller } = start(bus)
+      bus.join('friend')
+      bus.announce('friend', { sharing: true, stream_id: 'old-screen' })
+      if (transition === 'stop/restart') bus.announce('friend', SILENT)
+      bus.announce('friend', { sharing: true, stream_id: 'new-screen' })
+      expect(
+        controller.classify('friend', stream('old-screen'), {
+          kind: 'screen',
+          stream_id: 'old-screen',
+        })
+      ).toBe('ignore')
+      expect(
+        controller.classify('friend', stream('new-screen'), {
+          kind: 'screen',
+          stream_id: 'old-screen',
+        })
+      ).toBe('screen')
+      expect(
+        controller.classify('friend', stream('camera'), {
+          kind: 'screen',
+          stream_id: 'old-screen',
+        })
+      ).toBe('camera')
+      bus.announce('friend', { sharing: true, stream_id: 'old-screen' })
+      expect(controller.classify('friend', stream('old-screen'))).toBe('screen')
+      expect(controller.classify('friend', stream('new-screen'))).toBe('ignore')
+      controller.teardown()
+    }
+  )
+
   test('id-bound metadata can start a new share before its next announce', () => {
     const bus = fakeRoom()
     const { controller } = start(bus)
