@@ -972,6 +972,12 @@ in report exports, including legacy scored rows and disabled journaling (#410).
 Accounts with unknown or incomplete input coverage are replaced from the current
 journal or presented as unavailable, while fully covered stored accounts remain
 available independently of generation settings.
+Optional journal enrichment waits at most half a second and does not spend the
+final second of the total handoff grace, leaving it for delivery and acknowledgment. If it
+does not finish in time, the loaded report is delivered with the account marked
+unavailable. An account derived from a truncated or partly unreadable journal
+retains readable entries but marks its coverage unknown and labels the account
+incomplete on screen and in exports; it does not claim to cover the final end.
 
 Stage 1 is also the fallback: any window the model does not narrate is filled with its own digest, so a dead sidecar or an unusable response costs polish, not the feature. The stored `source` (`model` / `mixed` / `observations`) records which happened and the report labels anything other than `model`, so it can never imply the AI wrote an account it did not.
 

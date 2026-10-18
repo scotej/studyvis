@@ -66,6 +66,7 @@ export async function finishMirrorReport(sessionId: string): Promise<void> {
   const registration = current
   if (!registration || registration.sessionId !== sessionId) return
   let active = true
+  const startedAt = performance.now()
   let timeout: ReturnType<typeof setTimeout> | undefined
   const deadline = new Promise<void>((resolve) => {
     timeout = setTimeout(() => {
@@ -90,29 +91,56 @@ export async function finishMirrorReport(sessionId: string): Promise<void> {
         settings.aiFeaturesEnabled &&
         settings.sessionTimelineEnabled
       ) {
-        const coveredUntil = report.session.ended_at ?? Date.now()
+        // #410 — optional enrichment must leave time for the report itself
+        // and its report_saved acknowledgment within the same Leave grace.
+        const journalBudget = Math.min(
+          500,
+          Math.max(0, 2000 - (performance.now() - startedAt))
+        )
+        let journalTimeout: ReturnType<typeof setTimeout> | undefined
         try {
-          const journal = await readObservations(sessionId)
+          const journal =
+            journalBudget > 0
+              ? await Promise.race([
+                  readObservations(sessionId),
+                  new Promise<null>((resolve) => {
+                    journalTimeout = setTimeout(
+                      () => resolve(null),
+                      journalBudget
+                    )
+                  }),
+                ])
+              : null
           if (!active || current !== registration) return
-          const entries = observationTimelineEntries(
-            windowObservations(journal.observations, report.session.started_at)
-          )
-          if (entries.length > 0)
-            report = {
-              ...report,
-              timeline: {
-                session_id: sessionId,
-                generated_at: Date.now(),
-                covered_until: coveredUntil,
-                model_id: null,
-                source: 'observations',
-                entries: JSON.stringify(entries),
-                truncated: journal.truncated ? 1 : 0,
-              },
-            }
+          if (journal) {
+            const entries = observationTimelineEntries(
+              windowObservations(
+                journal.observations,
+                report.session.started_at
+              )
+            )
+            const incomplete = journal.truncated || journal.unreadableLines > 0
+            if (entries.length > 0)
+              report = {
+                ...report,
+                timeline: {
+                  session_id: sessionId,
+                  generated_at: Date.now(),
+                  covered_until: incomplete
+                    ? null
+                    : (report.session.ended_at ?? Date.now()),
+                  model_id: null,
+                  source: 'observations',
+                  entries: JSON.stringify(entries),
+                  truncated: incomplete ? 1 : 0,
+                },
+              }
+          }
         } catch {
           // Coverage-aware report copy still describes unavailable accounts
           // truthfully when a journal cannot be read within this handoff.
+        } finally {
+          if (journalTimeout !== undefined) clearTimeout(journalTimeout)
         }
       }
       if (!active || current !== registration) return

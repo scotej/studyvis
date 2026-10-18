@@ -1057,6 +1057,8 @@ export const strings = {
         rewriteCta: 'Write it up again',
         truncated:
           'This session ran long enough to fill its check log, so the account below covers only the part that was recorded.',
+        incomplete:
+          'This account is incomplete. It includes only the saved checks that could be read.',
         // Honest labelling of where the entries came from. A model that could
         // not be reached still yields a real account — assembled from the raw
         // checks rather than written — and the report must not imply otherwise.

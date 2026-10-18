@@ -81,6 +81,14 @@ export function writtenSourceNote(
   return strings.report.sections.written.sourceNote.mixed
 }
 
+export function writtenCoverageNote(
+  timeline: SessionTimelineRecord | null | undefined
+): string | null {
+  if (!timeline?.truncated) return null
+  const copy = strings.report.sections.written
+  return timeline.covered_until == null ? copy.incomplete : copy.truncated
+}
+
 export function labelFor(
   edPubkeyHex: string,
   nameByEdPubkey: Record<string, string>,
@@ -232,9 +240,8 @@ export function serializeReportToText(
   } else {
     const note = writtenSourceNote(data.timeline)
     if (note) lines.push(note)
-    if (data.timeline?.truncated) {
-      lines.push(strings.report.sections.written.truncated)
-    }
+    const coverageNote = writtenCoverageNote(data.timeline)
+    if (coverageNote) lines.push(coverageNote)
     for (const entry of written) {
       lines.push(
         `- ${formatWrittenRange(entry.start_min, entry.end_min)} — ${entry.summary}`

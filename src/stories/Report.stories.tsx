@@ -488,6 +488,7 @@ export const AiRecoveredAfterSlowdown: Story = {
 function writtenTimeline(
   entries: Array<{ start_min: number; end_min: number; summary: string }>,
   overrides: Partial<{
+    covered_until: number | null
     source: string
     model_id: string | null
     truncated: number
@@ -496,6 +497,7 @@ function writtenTimeline(
   return {
     session_id: 'mock-session',
     generated_at: ENDED_AT + 20_000,
+    covered_until: ENDED_AT,
     model_id: 'gemma-3-4b',
     source: 'model',
     truncated: 0,
@@ -593,6 +595,31 @@ export const WrittenTimelineFromRawChecks: Story = {
       canvas.getByRole('button', {
         name: strings.report.sections.written.rewriteCta,
       })
+    ).toBeVisible()
+  },
+}
+
+export const WrittenTimelineFromIncompleteChecks: Story = {
+  args: {
+    ...WrittenTimelineFromRawChecks.args,
+    data: {
+      ...WrittenTimelineFromRawChecks.args!.data!,
+      timeline: {
+        ...WrittenTimelineFromRawChecks.args!.data!.timeline!,
+        covered_until: null,
+      },
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(
+      canvas.getByText(strings.report.sections.written.incomplete)
+    ).toBeVisible()
+    await expect(
+      canvas.queryByText(strings.report.sections.written.truncated)
+    ).not.toBeInTheDocument()
+    await expect(
+      canvas.getByText('On task — working through proofs')
     ).toBeVisible()
   },
 }

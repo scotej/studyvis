@@ -84,6 +84,7 @@ import {
   serializeReportToText,
   writtenSourceNote,
   writtenTimelineEntries,
+  writtenCoverageNote,
   writtenAccountEmptyMessage,
   type ResolvedReportData,
 } from './reportSerialize'
@@ -826,10 +827,11 @@ function WrittenTimeline({
   }
 
   const sourceNote = writtenSourceNote(timeline)
+  const coverageNote = writtenCoverageNote(timeline)
   return (
     <div className="flex flex-col gap-2">
-      {timeline?.truncated ? (
-        <p className="text-xs text-text-muted">{copy.truncated}</p>
+      {coverageNote ? (
+        <p className="text-xs text-text-muted">{coverageNote}</p>
       ) : null}
       {sourceNote ? (
         <p className="text-xs text-text-muted">{sourceNote}</p>

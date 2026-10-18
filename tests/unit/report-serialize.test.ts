@@ -140,6 +140,7 @@ describe('serializeReportToText section order (R5)', () => {
       timeline: {
         session_id: data.session.id,
         generated_at: 1_700_000_400_000,
+        covered_until: data.session.ended_at,
         model_id: null,
         source: 'observations',
         entries: JSON.stringify([
@@ -153,6 +154,27 @@ describe('serializeReportToText section order (R5)', () => {
     expect(text).toContain('- 3–5 min — Scrolled social media')
     expect(text).toContain(H.written.sourceNote.observations)
     expect(text).toContain(H.written.truncated)
+  })
+
+  test('a partial account with unknown coverage is not described as a full check log', () => {
+    const data = buildData(baseSession(), [])
+    const text = serializeReportToText({
+      ...data,
+      timeline: {
+        session_id: data.session.id,
+        generated_at: START_TS + 26 * 60_000,
+        covered_until: null,
+        model_id: null,
+        source: 'observations',
+        entries: JSON.stringify([
+          { start_min: 0, end_min: 1, summary: 'Readable check' },
+        ]),
+        truncated: 1,
+      },
+    })
+    expect(text).toContain('Readable check')
+    expect(text).toContain(H.written.incomplete)
+    expect(text).not.toContain(H.written.truncated)
   })
 
   // A row stored by a newer build and read back after a downgrade. Silence is
