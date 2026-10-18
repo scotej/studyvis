@@ -1,4 +1,5 @@
-import { useEffect, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
+import { strings } from '@/strings'
 import type { Decorator, Meta, StoryObj } from '@storybook/react-vite'
 import { expect, fn, userEvent, waitFor, within } from 'storybook/test'
 
@@ -376,5 +377,84 @@ export const KeyboardResize: Story = {
       'aria-valuenow',
       String(initial + 24)
     )
+  },
+}
+
+export const CompanionAttachmentConnection: Story = {
+  args: { notes: [], onSendImage: fn() },
+  render: function AttachmentConnection(args) {
+    const [disabled, setDisabled] = useState(true)
+    return (
+      <>
+        <button type="button" onClick={() => setDisabled(!disabled)}>
+          Toggle companion connection
+        </button>
+        <SessionNotesPanel
+          {...args}
+          mirror={{
+            sessionId: 'attachment-story',
+            peers: {},
+            aiAvailable: false,
+            chat: {
+              directMessages: {},
+              aiMessages: [],
+              aiSending: false,
+              directSending: false,
+            },
+            controls: {
+              sendDirectMessage: async () => {},
+              sendAi: async () => {},
+            },
+            disabled,
+          }}
+        />
+      </>
+    )
+  },
+  play: async ({ args, canvasElement }) => {
+    const canvas = within(canvasElement)
+    const attach = canvas.getByRole('button', {
+      name: strings.session.images.attachImage,
+    })
+    const input =
+      canvasElement.querySelector<HTMLInputElement>('input[type="file"]')!
+    const file = new File([IMAGE_BYTES], 'notes.png', { type: 'image/png' })
+    await expect(attach).toBeDisabled()
+    await expect(input).toBeDisabled()
+
+    await userEvent.click(
+      canvas.getByRole('button', { name: 'Toggle companion connection' })
+    )
+    await waitFor(() => expect(attach).toBeEnabled())
+    await expect(input).toBeEnabled()
+    await userEvent.upload(input, file)
+    await expect(args.onSendImage).toHaveBeenCalledTimes(1)
+
+    await userEvent.click(
+      canvas.getByRole('button', { name: 'Toggle companion connection' })
+    )
+    await waitFor(() => expect(attach).toBeDisabled())
+    // A chooser opened before an outage may deliver its selection afterward.
+    const selected = new DataTransfer()
+    selected.items.add(file)
+    const previousFiles = Object.getOwnPropertyDescriptor(input, 'files')
+    try {
+      Object.defineProperty(input, 'files', {
+        configurable: true,
+        value: selected.files,
+      })
+      input.dispatchEvent(new Event('change', { bubbles: true }))
+    } finally {
+      if (previousFiles) Object.defineProperty(input, 'files', previousFiles)
+      else Reflect.deleteProperty(input, 'files')
+    }
+    await expect(args.onSendImage).toHaveBeenCalledTimes(1)
+
+    await userEvent.click(
+      canvas.getByRole('button', { name: 'Toggle companion connection' })
+    )
+    await waitFor(() => expect(attach).toBeEnabled())
+    await userEvent.upload(input, file)
+    await expect(args.onSendImage).toHaveBeenCalledTimes(2)
   },
 }
