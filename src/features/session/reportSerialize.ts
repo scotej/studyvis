@@ -24,6 +24,7 @@ import {
   deriveBreaksSummary,
   deriveTopDistractions,
   deriveTopicTimeline,
+  reportTimelineOrigin,
   formatOffset,
   groupTimelineByWho,
   parseAuditDetail,
@@ -163,7 +164,8 @@ export function serializeReportToText(data: ResolvedReportData): string {
   const topicTimeline = deriveTopicTimeline(
     session.declared_topic,
     auditEvents,
-    myEdPubkeyHex
+    myEdPubkeyHex,
+    session.started_at
   )
   const grouped = groupTimelineByWho(auditEvents)
   const distractions = deriveTopDistractions(auditEvents, myEdPubkeyHex)
@@ -177,9 +179,7 @@ export function serializeReportToText(data: ResolvedReportData): string {
     session.focused_pct == null
       ? '—'
       : `${Math.round(session.focused_pct * 100)}%`
-  const anchor =
-    session.started_at ??
-    (auditEvents.length > 0 ? Math.min(...auditEvents.map((e) => e.ts)) : 0)
+  const anchor = reportTimelineOrigin(session.started_at, auditEvents)
 
   const lines: string[] = [
     formatTopicHeading(session.declared_topic),

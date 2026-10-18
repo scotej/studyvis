@@ -641,3 +641,37 @@ export const WrittenTimelineFailed: Story = {
     ).toBeVisible()
   },
 }
+
+export const TopicUsesSavedStart: Story = {
+  args: {
+    data: buildData(baseSession({ declared_topic: 'Maths' }), [
+      event(ALICE, 'joined', -300_000),
+      event(ME, 'topic_change', 120_000, {
+        previous_topic: 'Maths',
+        new_topic: 'Physics',
+      }),
+    ]),
+    animateScore: false,
+    onClose,
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getAllByText('02:00')).toHaveLength(2)
+    await expect(canvas.queryByText('07:00')).toBeNull()
+    await expect(canvas.getByText('Physics')).toBeVisible()
+  },
+}
+
+export const TopicWithDelayedFirstAudit: Story = {
+  ...TopicUsesSavedStart,
+  args: {
+    ...TopicUsesSavedStart.args,
+    data: buildData(baseSession({ declared_topic: 'Maths' }), [
+      event(ME, 'joined', 60_000),
+      event(ME, 'topic_change', 120_000, {
+        previous_topic: 'Maths',
+        new_topic: 'Physics',
+      }),
+    ]),
+  },
+}
