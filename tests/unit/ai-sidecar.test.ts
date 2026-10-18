@@ -4,6 +4,8 @@ import {
   __resetSidecarRuntime,
   __setSidecarRuntime,
   DEFAULT_CTX_SIZE,
+  currentSidecarGeneration,
+  stopOwnedSidecar,
   ERR_AI_DISABLED,
   ERR_BENCHMARK_REQUIRES_AI_OFF,
   ERR_ENGINE_NOT_INSTALLED,
@@ -186,6 +188,20 @@ describe('useSidecarStore.start', () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+
+  test('cleanup from a retired owner cannot stop a replacement engine (#385)', async () => {
+    const env = makeFakeRuntime({ aiEnabled: true })
+    __setSidecarRuntime(env.runtime)
+    await useSidecarStore.getState().start({ modelPath: '/first.gguf' })
+    const firstOwner = currentSidecarGeneration()
+    await useSidecarStore.getState().stop()
+    await useSidecarStore.getState().start({ modelPath: '/replacement.gguf' })
+    await stopOwnedSidecar(firstOwner)
+    expect(env.stopCalls).toBe(1)
+    expect(useSidecarStore.getState().model).toBe('/replacement.gguf')
+    await stopOwnedSidecar(currentSidecarGeneration())
+    expect(env.stopCalls).toBe(2)
   })
 
   test('refuses a live start when AI features are disabled', async () => {

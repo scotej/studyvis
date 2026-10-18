@@ -13,6 +13,10 @@
 // (~25 s/check), which is the only call the user is making.
 
 // The CSP allows same-origin fetches, but not Vite's inlined data: URLs.
+import { create } from 'zustand'
+import { strings } from '@/strings'
+import { useSettingsStore } from '@/stores/settingsStore'
+
 import benchmarkImageUrl from './assets/benchmark-desk.png?no-inline'
 import { FACE_FRAME_QUALITY, FACE_FRAME_SIZE } from './captureFace'
 import {
@@ -29,6 +33,8 @@ import { buildFocusRequest, type FocusChatRequest } from './focusRequest'
 import type { ModelSpec } from './models'
 import {
   boundedHealthProbe,
+  currentSidecarGeneration,
+  stopOwnedSidecar,
   SIDECAR_HEALTH_RETRY_MS,
   SIDECAR_HEALTH_TIMEOUT_MS,
   useSidecarStore,
@@ -182,6 +188,7 @@ export type BenchmarkRuntime = {
     body: ChatCompletionRequest
   ) => Promise<number>
   now: () => number
+  assertSidecarOwned?: () => void
 }
 
 // A1 — the benchmark request body is the shared focus shape. The benchmark's
@@ -276,12 +283,68 @@ export async function waitForBenchmarkHealthy(
   throw new Error(`sidecar /health did not return 2xx within ${timeoutMs} ms`)
 }
 
+let ownedSidecarGeneration: number | null = null
+let ownedSidecar: {
+  modelPath: string
+  mmprojPath: string | null
+  ctxSize: number
+  port: number
+  hardwareIdentity: AiHardwareIdentity
+} | null = null
+
+function assertSidecarOwned(): void {
+  const state = useSidecarStore.getState()
+  if (
+    !ownedSidecar ||
+    ownedSidecarGeneration !== currentSidecarGeneration() ||
+    state.status !== 'running' ||
+    state.port !== ownedSidecar.port ||
+    state.model !== ownedSidecar.modelPath ||
+    state.mmproj !== ownedSidecar.mmprojPath ||
+    state.ctxSize !== ownedSidecar.ctxSize ||
+    !state.hardwareIdentity ||
+    !aiHardwareIdentitiesEqual(
+      state.hardwareIdentity,
+      ownedSidecar.hardwareIdentity
+    )
+  ) {
+    throw new Error(strings.ai.picker.benchmarkEngineChanged)
+  }
+}
+
+export const useBenchmarkActivity = create<{
+  modelId: string | null
+  progress: BenchmarkProgress | null
+}>(() => ({
+  modelId: null,
+  progress: null,
+}))
+let benchmarkOwner: symbol | null = null
+
 const defaultRuntime: BenchmarkRuntime = {
   prepareImages: prepareBundledBenchmarkImages,
   startSidecar: async ({ modelPath, mmprojPath, ctxSize }) => {
-    const port = await useSidecarStore
+    if (useSettingsStore.getState().values.aiFeaturesEnabled) {
+      throw new Error(strings.ai.picker.benchmarkWhileAiEnabled)
+    }
+    ownedSidecar = null
+    const stopping = useSidecarStore.getState().stop()
+    ownedSidecarGeneration = currentSidecarGeneration()
+    await stopping
+    if (useSidecarStore.getState().status !== 'idle') {
+      ownedSidecarGeneration = null
+      throw new Error(strings.ai.picker.benchmarkEngineChanged)
+    }
+    const beforeStart = currentSidecarGeneration()
+    const starting = useSidecarStore
       .getState()
       .start({ modelPath, mmprojPath, ctxSize, purpose: 'benchmark' })
+    ownedSidecarGeneration = currentSidecarGeneration()
+    if (ownedSidecarGeneration !== beforeStart + 1) {
+      ownedSidecarGeneration = null
+      throw new Error(strings.ai.picker.benchmarkEngineChanged)
+    }
+    const port = await starting
     if (port == null) {
       const err = useSidecarStore.getState().lastError
       throw new Error(err ?? 'sidecar_start returned null')
@@ -292,10 +355,16 @@ const defaultRuntime: BenchmarkRuntime = {
         'AI hardware topology could not be resolved; retry after accelerator detection succeeds.'
       )
     }
+    ownedSidecar = { modelPath, mmprojPath, ctxSize, port, hardwareIdentity }
+    assertSidecarOwned()
     return { port, hardwareIdentity }
   },
+  assertSidecarOwned,
   stopSidecar: async () => {
-    await useSidecarStore.getState().stop()
+    const generation = ownedSidecarGeneration
+    ownedSidecarGeneration = null
+    ownedSidecar = null
+    if (generation !== null) await stopOwnedSidecar(generation)
   },
   waitForHealthy: waitForBenchmarkHealthy,
   runChatCompletion: async (port, body) => {
@@ -341,6 +410,10 @@ const defaultRuntime: BenchmarkRuntime = {
 }
 
 let activeRuntime: BenchmarkRuntime = defaultRuntime
+
+export function getBenchmarkRuntime(): BenchmarkRuntime {
+  return activeRuntime
+}
 
 export function __setBenchmarkRuntime(runtime: BenchmarkRuntime): void {
   activeRuntime = runtime
@@ -410,6 +483,30 @@ export async function runBenchmark(
   spec: ModelSpec,
   opts: BenchmarkOptions
 ): Promise<BenchmarkResult> {
+  if (benchmarkOwner !== null) throw new Error(strings.ai.picker.benchmarkBusy)
+  const owner = Symbol()
+  benchmarkOwner = owner
+  useBenchmarkActivity.setState({ modelId: spec.id })
+  try {
+    return await runOwnedBenchmark(spec, {
+      ...opts,
+      onProgress: (progress) => {
+        useBenchmarkActivity.setState({ progress })
+        opts.onProgress?.(progress)
+      },
+    })
+  } finally {
+    if (benchmarkOwner === owner) {
+      benchmarkOwner = null
+      useBenchmarkActivity.setState({ modelId: null, progress: null })
+    }
+  }
+}
+
+async function runOwnedBenchmark(
+  spec: ModelSpec,
+  opts: BenchmarkOptions
+): Promise<BenchmarkResult> {
   const runtime = activeRuntime
   const onProgress = opts.onProgress ?? (() => {})
   onProgress({ phase: 'loading-image' })
@@ -428,6 +525,7 @@ export async function runBenchmark(
     const { port } = started
     hardwareIdentity = started.hardwareIdentity
     await runtime.waitForHealthy(port, SIDECAR_HEALTH_TIMEOUT_MS, opts.signal)
+    runtime.assertSidecarOwned?.()
 
     // A1 — mirror the live tick's two-image shape (a camera frame + a screen
     // frame). NEW-FINDING-2: the two slots carry distinct re-encodes of the
@@ -460,6 +558,7 @@ export async function runBenchmark(
     // floor clamp then prevented the user from lowering it.
     onProgress({ phase: 'warmup' })
     await runtime.runChatCompletion(port, requestBody)
+    runtime.assertSidecarOwned?.()
 
     for (let i = 0; i < BENCHMARK_SAMPLE_COUNT; i += 1) {
       onProgress({
@@ -468,6 +567,7 @@ export async function runBenchmark(
         total: BENCHMARK_SAMPLE_COUNT,
       })
       const sec = await runtime.runChatCompletion(port, requestBody)
+      runtime.assertSidecarOwned?.()
       samplesSec.push(sec)
     }
   } finally {

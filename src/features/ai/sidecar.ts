@@ -218,6 +218,14 @@ let inFlightStop: Promise<void> | null = null
 // start invalidates old start and status-refresh callbacks even when the coarse
 // status string has returned to the same value for different work.
 let lifecycleGeneration = 0
+export function currentSidecarGeneration(): number {
+  return lifecycleGeneration
+}
+export async function stopOwnedSidecar(generation: number): Promise<void> {
+  if (generation === lifecycleGeneration)
+    await useSidecarStore.getState().stop()
+}
+
 export function __setSidecarRuntime(runtime: SidecarRuntime): void {
   activeRuntime = runtime
 }

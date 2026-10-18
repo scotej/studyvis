@@ -17,7 +17,18 @@ import {
   type ChatCompletionRequest,
 } from '@/features/ai'
 
-import { waitForBenchmarkHealthy } from '@/features/ai/benchmark'
+import {
+  getBenchmarkRuntime,
+  waitForBenchmarkHealthy,
+  useBenchmarkActivity,
+} from '@/features/ai/benchmark'
+import {
+  __setSidecarRuntime,
+  __resetSidecarRuntime,
+  useSidecarStore,
+  type SidecarRuntime,
+} from '@/features/ai/sidecar'
+import { useSettingsStore } from '@/stores/settingsStore'
 
 const TEST_HARDWARE_IDENTITY: AiHardwareIdentity = {
   selection: 'device:Vulkan0',
@@ -160,6 +171,149 @@ describe('runBenchmark', () => {
       vi.unstubAllGlobals()
       vi.useRealTimers()
     }
+  })
+
+  test.each(['start-race', 'readiness', 'sample'])(
+    'default runtime rejects foreign engine replacement during %s (#385)',
+    async (stage) => {
+      const originalStop = useSidecarStore.getState().stop
+      useSidecarStore.setState({
+        status: 'idle',
+        port: null,
+        model: null,
+        mmproj: null,
+        ctxSize: null,
+        pollHandle: null,
+        hardwareIdentity: null,
+      })
+      useSettingsStore.setState((s) => ({
+        values: { ...s.values, aiFeaturesEnabled: false },
+      }))
+      let nextPort = 8000
+      let stops = 0
+      const runtime: SidecarRuntime = {
+        start: async () => ({
+          port: nextPort++,
+          hardwareIdentity: TEST_HARDWARE_IDENTITY,
+        }),
+        stop: async () => {
+          stops++
+        },
+        status: async () => {
+          throw new Error('unused')
+        },
+        fetchHealth: async () => true,
+        setInterval: () => 99,
+        clearInterval: () => {},
+        getAiFeaturesEnabled: () => false,
+        getEngineAutoInstall: () => true,
+      }
+      __setSidecarRuntime(runtime)
+      const replace = async () => {
+        await originalStop()
+        await useSidecarStore.getState().start({
+          modelPath: '/foreign.gguf',
+          mmprojPath: '/foreign-mmproj.gguf',
+          purpose: 'benchmark',
+        })
+      }
+      const production = getBenchmarkRuntime()
+      const images = makeFakeRuntime({ perCallSec: [] }).runtime.prepareImages
+      let completions = 0
+      if (stage === 'start-race') {
+        useSidecarStore.setState({
+          stop: async () => {
+            await originalStop()
+            await useSidecarStore
+              .getState()
+              .start({ modelPath: '/foreign.gguf', purpose: 'benchmark' })
+          },
+        })
+      }
+      __setBenchmarkRuntime({
+        ...production,
+        prepareImages: images,
+        waitForHealthy: async () => {
+          if (stage === 'readiness') await replace()
+        },
+        runChatCompletion: async () => {
+          completions++
+          if (stage === 'sample' && completions === 2) await replace()
+          return 1
+        },
+      })
+      try {
+        await expect(
+          runBenchmark(SUPPORTED_MODELS[0], {
+            modelPath: '/requested.gguf',
+            mmprojPath: '/requested-mmproj.gguf',
+          })
+        ).rejects.toThrow('engine changed')
+        expect(useSidecarStore.getState().status).toBe('running')
+        expect(useSidecarStore.getState().model).toBe('/foreign.gguf')
+        expect(stops).toBe(stage === 'start-race' ? 1 : 2)
+        if (stage !== 'sample') expect(completions).toBe(0)
+        expect(useBenchmarkActivity.getState().modelId).toBeNull()
+      } finally {
+        useSidecarStore.setState({ stop: originalStop })
+        await originalStop()
+        __resetSidecarRuntime()
+      }
+    }
+  )
+
+  test('one benchmark owns preparation, inference and delayed cleanup across callers (#385)', async () => {
+    const env = makeFakeRuntime({ perCallSec: [1, 2, 3, 4, 1, 2, 3, 4] })
+    let releaseHealth!: () => void
+    let releaseStop!: () => void
+    env.runtime.waitForHealthy = () =>
+      new Promise((resolve) => {
+        releaseHealth = resolve
+      })
+    const stop = env.runtime.stopSidecar
+    env.runtime.stopSidecar = async () => {
+      await new Promise<void>((resolve) => {
+        releaseStop = resolve
+      })
+      await stop()
+    }
+    __setBenchmarkRuntime(env.runtime)
+    const first = runBenchmark(SUPPORTED_MODELS[0], {
+      modelPath: '/first.gguf',
+      mmprojPath: '/first-mmproj.gguf',
+    })
+    await vi.waitFor(() => expect(env.startedWith).toHaveLength(1))
+    expect(useBenchmarkActivity.getState().modelId).toBe(SUPPORTED_MODELS[0].id)
+    await expect(
+      runBenchmark(SUPPORTED_MODELS[1], {
+        modelPath: '/second.gguf',
+        mmprojPath: '/second-mmproj.gguf',
+      })
+    ).rejects.toThrow('Another model benchmark is running')
+    expect(env.startedWith).toHaveLength(1)
+    releaseHealth()
+    await vi.waitFor(() => expect(releaseStop).toBeTypeOf('function'))
+    await expect(
+      runBenchmark(SUPPORTED_MODELS[1], {
+        modelPath: '/second.gguf',
+        mmprojPath: '/second-mmproj.gguf',
+      })
+    ).rejects.toThrow('Another model benchmark is running')
+    expect(env.stops).toBe(0)
+    releaseStop()
+    const result = await first
+    expect(result.hardwareIdentity).toEqual(TEST_HARDWARE_IDENTITY)
+    expect(env.startedWith[0].modelPath).toBe('/first.gguf')
+    expect(env.stops).toBe(1)
+    expect(useBenchmarkActivity.getState().modelId).toBeNull()
+    env.runtime.waitForHealthy = async () => {}
+    env.runtime.stopSidecar = stop
+    await runBenchmark(SUPPORTED_MODELS[1], {
+      modelPath: '/second.gguf',
+      mmprojPath: '/second-mmproj.gguf',
+    })
+    expect(env.stops).toBe(2)
+    expect(env.startedWith[1].modelPath).toBe('/second.gguf')
   })
 
   test('discards the cold-start warmup sample and stops the sidecar', async () => {
