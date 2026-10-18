@@ -1,4 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from 'react'
 import { toast } from 'sonner'
 
 import { ScreenCapturePermissionOverlay } from '@/components/ScreenCapturePermissionOverlay'
@@ -130,6 +136,19 @@ export function AiCategory() {
   const sidecarLastError = useSidecarStore((s) => s.lastError)
 
   const [permissionOverlayOpen, setPermissionOverlayOpen] = useState(false)
+  const permissionLifetime = useRef({ active: true })
+  const permissionRequest = useRef(0)
+  useLayoutEffect(() => {
+    const operation = { active: true }
+    permissionLifetime.current = operation
+    return () => {
+      operation.active = false
+    }
+  }, [sessionActive])
+  const handlePermissionOpenChange = useCallback((next: boolean) => {
+    if (!next) permissionRequest.current++
+    setPermissionOverlayOpen(next)
+  }, [])
   const [benchmarkWarningOpen, setBenchmarkWarningOpen] = useState(false)
   const [modelSetupBusy, setModelSetupBusy] = useState(false)
   const [toggling, setToggling] = useState(false)
@@ -338,13 +357,21 @@ export function AiCategory() {
   }, [applyToggle])
 
   const handleRetryPermission = useCallback(async () => {
+    const operation = permissionLifetime.current
+    const request = ++permissionRequest.current
+    const isCurrent = () =>
+      operation.active && request === permissionRequest.current
     try {
       await requestScreenCapturePermission()
+      if (!isCurrent()) return
       setPermissionOverlayOpen(false)
       toast.success(copy.permissions.grantedToast)
     } catch (err) {
+      if (!isCurrent()) return
       if (err instanceof CaptureError && err.code === 'screen_capture_denied') {
-        // Still denied — keep the overlay up so the user can open Settings.
+        // #402 — Retry closes the overlay before invoking us (the session
+        // caller needs that contract). Restore guidance after another denial.
+        setPermissionOverlayOpen(true)
         return
       }
       toast.error(
@@ -889,7 +916,7 @@ export function AiCategory() {
 
       <ScreenCapturePermissionOverlay
         open={permissionOverlayOpen}
-        onOpenChange={setPermissionOverlayOpen}
+        onOpenChange={handlePermissionOpenChange}
         onRetry={() => void handleRetryPermission()}
       />
     </SettingsSection>
