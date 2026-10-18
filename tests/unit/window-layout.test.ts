@@ -179,6 +179,7 @@ describe('useSettingsStore — window layout setters', () => {
         pushMinimizeToTray: async () => {},
         pushAiFeaturesEnabled: async () => {},
         setGlobalShortcut: async () => {},
+        setGlobalShortcuts: async () => {},
         relaunchApp: async () => {},
       },
     }

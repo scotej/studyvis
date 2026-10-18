@@ -90,9 +90,9 @@ use commands::system::{
     system_minimize_to_tray_set_enabled, system_open_camera_settings, system_open_data_folder,
     system_open_microphone_settings, system_open_notification_settings, system_open_releases,
     system_open_screen_capture_settings, system_relaunch_app, system_save_image,
-    system_set_global_shortcut, system_window_style_is_custom_applied, system_write_text_file,
-    AiFeaturesFlag, MinimizeToTrayFlag, QuitFlag, SessionActiveFlag, ShortcutBindings,
-    TrayAvailableFlag, WindowStyleAppliedFlag,
+    system_set_global_shortcut, system_set_global_shortcuts, system_window_style_is_custom_applied,
+    system_write_text_file, AiFeaturesFlag, MinimizeToTrayFlag, QuitFlag, SessionActiveFlag,
+    ShortcutBindings, TrayAvailableFlag, WindowStyleAppliedFlag,
 };
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -210,6 +210,7 @@ pub fn run() {
         system_open_notification_settings,
         #[cfg(desktop)]
         system_set_global_shortcut,
+        system_set_global_shortcuts,
         #[cfg(desktop)]
         system_relaunch_app,
         #[cfg(desktop)]
@@ -733,16 +734,15 @@ fn setup_desktop(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>>
         app.deep_link().register_all()?;
     }
 
-    // Active shortcuts live in `ShortcutBindings::Mutex<Shortcut>` so the
-    // V3-P3 `system_set_global_shortcut` command can swap them at runtime.
+    // Active shortcuts live in one `ShortcutBindings` pair mutex so the
+    // V3-P3 / #394 commands can swap one or both at runtime.
     // The handler locks the same Mutex on every press/release — Mutex
     // contention is per-keystroke and trivial.
     app.handle().plugin(
         tauri_plugin_global_shortcut::Builder::new()
             .with_handler(move |app, shortcut, event| {
                 let bindings = app.state::<ShortcutBindings>();
-                let ptt_friends = bindings.ptt_friends();
-                let ptt_ai = bindings.ptt_ai();
+                let (ptt_friends, ptt_ai) = bindings.pair();
                 if shortcut == &ptt_friends {
                     // #226 — this runs per keystroke, so it counts and does
                     // nothing else. The counters are flushed to the log at

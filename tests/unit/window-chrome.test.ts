@@ -156,6 +156,7 @@ describe('useSettingsStore — windowStyle setter + relaunchApp bridge', () => {
         pushMinimizeToTray: async () => {},
         pushAiFeaturesEnabled: async () => {},
         setGlobalShortcut: async () => {},
+        setGlobalShortcuts: async () => {},
         relaunchApp: async () => {
           relaunchCalls++
           if (relaunchShouldFail) throw new Error('restart refused')

@@ -522,7 +522,7 @@ The shipped policy is the one recommended here, adjusted where Tauri's own proto
 
 **Evidence.** `resetShortcutsToDefaults` rethrew on the first setter's combo collision and never ran the second; the rejection was swallowed to `console.error`, so the button was a silent no-op.
 
-**Status.** **fixed** — reorder + per-call try/catch so both setters run; a residual collision surfaces a `toast.error` (copy in strings.ts). The Rust `is_registered` skip the original proposal suggested was dropped — it would re-open #47 B5. Stateful fake added to the keybindings test.
+**Status.** **fixed** — #394 replaces the sequential reset with a native pair registration transaction, including fully swapped bindings. Both targets are OS-validated before the feature/session registration windows are restored; registration failure restores the previous held pair. The settings reset writes both keys with one save and rolls back native and persisted state on failure. Refusals and rollback failures surface through `toast.error` (copy in strings.ts). No `is_registered` shortcut bypasses target validation (#47 B5). Stateful frontend and native registration tests cover swap, rollback and inactive owners.
 
 ### I62 — Sev3
 

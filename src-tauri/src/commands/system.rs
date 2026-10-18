@@ -177,15 +177,12 @@ impl SessionActiveFlag {
     }
 }
 
-// V3-P3 — runtime-mutable global shortcut bindings. The two `Mutex<Shortcut>`
-// fields are the V1-P7 interior-mutability pattern: the handler locks the
-// same Mutex per keystroke to compare against the *current* shortcut, and
-// `system_set_global_shortcut` swaps the held value after unregister +
-// register both succeed. `std::sync::Mutex` is enough — the lock is held
-// for a single field copy.
+// V3-P3 / #394 — copy the current pair under one short-lived lock so a
+// coordinated reset cannot expose half of a new pair to the shortcut handler.
+// The separate mutation lock serializes native register/unregister operations.
 pub struct ShortcutBindings {
-    ptt_friends: Mutex<Shortcut>,
-    ptt_ai: Mutex<Shortcut>,
+    mutation: Mutex<()>,
+    pair: Mutex<(Shortcut, Shortcut)>,
 }
 
 impl ShortcutBindings {
@@ -209,10 +206,10 @@ impl ShortcutBindings {
         };
 
         Self {
-            ptt_friends: Mutex::new(ptt_friends),
-            ptt_ai: Mutex::new(Self::parse_or_default(
-                initial_ptt_ai,
-                DEFAULT_PTT_AI_ACCELERATOR,
+            mutation: Mutex::new(()),
+            pair: Mutex::new((
+                ptt_friends,
+                Self::parse_or_default(initial_ptt_ai, DEFAULT_PTT_AI_ACCELERATOR),
             )),
         }
     }
@@ -224,23 +221,28 @@ impl ShortcutBindings {
         Shortcut::from_str(default_accelerator).expect("default accelerator must parse")
     }
 
+    pub fn pair(&self) -> (Shortcut, Shortcut) {
+        *self.pair.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
     pub fn ptt_friends(&self) -> Shortcut {
-        // Recover from a poisoned mutex (an unrelated panic while a previous
-        // handler held the lock) so the global shortcut handler never
-        // crashes the process on a hot path.
-        *self.ptt_friends.lock().unwrap_or_else(|e| e.into_inner())
+        self.pair().0
     }
 
     pub fn ptt_ai(&self) -> Shortcut {
-        *self.ptt_ai.lock().unwrap_or_else(|e| e.into_inner())
+        self.pair().1
     }
 
     fn store_ptt_friends(&self, shortcut: Shortcut) {
-        *self.ptt_friends.lock().unwrap_or_else(|e| e.into_inner()) = shortcut;
+        self.pair.lock().unwrap_or_else(|e| e.into_inner()).0 = shortcut;
     }
 
     fn store_ptt_ai(&self, shortcut: Shortcut) {
-        *self.ptt_ai.lock().unwrap_or_else(|e| e.into_inner()) = shortcut;
+        self.pair.lock().unwrap_or_else(|e| e.into_inner()).1 = shortcut;
+    }
+
+    fn store_pair(&self, friends: Shortcut, ai: Shortcut) {
+        *self.pair.lock().unwrap_or_else(|e| e.into_inner()) = (friends, ai);
     }
 }
 
@@ -285,6 +287,7 @@ pub fn system_set_global_shortcut<R: Runtime>(
     }
 
     let bindings = app.state::<ShortcutBindings>();
+    let _mutation = bindings.mutation.lock().unwrap_or_else(|e| e.into_inner());
     let (old_shortcut, other_shortcut) = match action.as_str() {
         "ptt-friends" => (bindings.ptt_friends(), bindings.ptt_ai()),
         "ptt-ai" => (bindings.ptt_ai(), bindings.ptt_friends()),
@@ -344,6 +347,108 @@ pub fn system_set_global_shortcut<R: Runtime>(
         }
         _ => unreachable!("action validated above"),
     }
+    Ok(())
+}
+
+// #394 — unregister our old pair before validating the new pair, so a mutual
+// swap never collides with an accelerator still held by the other action.
+// Every target is registered even for an inactive feature, preserving I61's
+// OS-validation rule; only the registrations its current owners need survive.
+fn replace_shortcut_pair(
+    old: [Shortcut; 2],
+    new: [Shortcut; 2],
+    wanted: [bool; 2],
+    mut is_registered: impl FnMut(Shortcut) -> bool,
+    mut register: impl FnMut(Shortcut) -> Result<(), String>,
+    mut unregister: impl FnMut(Shortcut) -> Result<(), String>,
+) -> Result<(), String> {
+    let mut previous = Vec::new();
+    for shortcut in old {
+        if !previous.contains(&shortcut) && is_registered(shortcut) {
+            previous.push(shortcut);
+        }
+    }
+    let mut introduced = Vec::new();
+    let attempt = (|| {
+        for &shortcut in &previous {
+            unregister(shortcut)?;
+        }
+        for shortcut in new {
+            if !introduced.contains(&shortcut) {
+                register(shortcut)?;
+                introduced.push(shortcut);
+            }
+        }
+        let validated = introduced.clone();
+        for shortcut in validated {
+            let keep = new
+                .iter()
+                .zip(wanted)
+                .any(|(binding, wanted)| *binding == shortcut && wanted);
+            if !keep {
+                unregister(shortcut)?;
+                introduced.retain(|registered| *registered != shortcut);
+            }
+        }
+        Ok(())
+    })();
+    if let Err(error) = attempt {
+        let mut failures = vec![error];
+        for &shortcut in introduced.iter().rev() {
+            if is_registered(shortcut) {
+                if let Err(error) = unregister(shortcut) {
+                    failures.push(format!("Couldn't release a reset shortcut: {error}"));
+                }
+            }
+        }
+        for shortcut in previous {
+            if !is_registered(shortcut) {
+                if let Err(error) = register(shortcut) {
+                    failures.push(format!("Couldn't restore a previous shortcut: {error}"));
+                }
+            }
+        }
+        return Err(failures.join("; "));
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn system_set_global_shortcuts<R: Runtime>(
+    app: AppHandle<R>,
+    friends: String,
+    ai: String,
+) -> Result<(), String> {
+    let new_friends =
+        Shortcut::from_str(&friends).map_err(|e| format!("Couldn't read {friends}: {e}"))?;
+    let new_ai = Shortcut::from_str(&ai).map_err(|e| format!("Couldn't read {ai}: {e}"))?;
+    #[cfg(target_os = "macos")]
+    if macos_key_code(new_friends.key).is_none() {
+        return Err("That Push to Talk key cannot be monitored safely on macOS. Choose a standard keyboard key.".to_string());
+    }
+    let bindings = app.state::<ShortcutBindings>();
+    let _mutation = bindings.mutation.lock().unwrap_or_else(|e| e.into_inner());
+    let manager = app.global_shortcut();
+    replace_shortcut_pair(
+        [bindings.ptt_friends(), bindings.ptt_ai()],
+        [new_friends, new_ai],
+        [
+            SessionActiveFlag::is_active(&app),
+            AiFeaturesFlag::is_enabled(&app),
+        ],
+        |shortcut| manager.is_registered(shortcut),
+        |shortcut| {
+            manager
+                .register(shortcut)
+                .map_err(|e| format!("Couldn't register shortcut: {e}"))
+        },
+        |shortcut| {
+            manager
+                .unregister(shortcut)
+                .map_err(|e| format!("Couldn't unregister shortcut: {e}"))
+        },
+    )?;
+    bindings.store_pair(new_friends, new_ai);
     Ok(())
 }
 
@@ -466,6 +571,7 @@ pub fn session_set_active<R: Runtime>(app: AppHandle<R>, active: bool) -> Result
 //     unregister a combo the AI shortcut still needs.
 fn apply_ptt_friends_registration<R: Runtime>(app: &AppHandle<R>, active: bool) {
     let bindings = app.state::<ShortcutBindings>();
+    let _mutation = bindings.mutation.lock().unwrap_or_else(|e| e.into_inner());
     let friends = bindings.ptt_friends();
     let ai = bindings.ptt_ai();
     let manager = app.global_shortcut();
@@ -536,6 +642,7 @@ fn apply_ptt_friends_registration<R: Runtime>(app: &AppHandle<R>, active: bool) 
 // still wants it.
 pub fn apply_ptt_ai_registration<R: Runtime>(app: &AppHandle<R>, enabled: bool) {
     let bindings = app.state::<ShortcutBindings>();
+    let _mutation = bindings.mutation.lock().unwrap_or_else(|e| e.into_inner());
     let ai = bindings.ptt_ai();
     let friends = bindings.ptt_friends();
     let manager = app.global_shortcut();
@@ -1663,5 +1770,144 @@ mod tests {
     fn unsupported_persisted_ptt_binding_falls_back_to_safe_default() {
         let bindings = super::ShortcutBindings::new("CmdOrCtrl+F24", "CmdOrCtrl+]");
         assert_eq!(bindings.ptt_friends().key, super::Code::BracketLeft);
+    }
+    #[derive(Default)]
+    struct PairRegistry {
+        held: Vec<super::Shortcut>,
+        registrations: Vec<super::Shortcut>,
+        fail_register_once: Option<super::Shortcut>,
+        fail_unregister_once: Option<super::Shortcut>,
+        fail_register_always: Option<super::Shortcut>,
+    }
+
+    fn shortcut(accelerator: &str) -> super::Shortcut {
+        use std::str::FromStr;
+        super::Shortcut::from_str(accelerator).unwrap()
+    }
+
+    fn replace_pair(
+        registry: &std::cell::RefCell<PairRegistry>,
+        old: [super::Shortcut; 2],
+        new: [super::Shortcut; 2],
+        wanted: [bool; 2],
+    ) -> Result<(), String> {
+        super::replace_shortcut_pair(
+            old,
+            new,
+            wanted,
+            |shortcut| registry.borrow().held.contains(&shortcut),
+            |shortcut| {
+                let mut registry = registry.borrow_mut();
+                registry.registrations.push(shortcut);
+                if registry.fail_register_once == Some(shortcut) {
+                    registry.fail_register_once = None;
+                    return Err("register refused".into());
+                }
+                if registry.fail_register_always == Some(shortcut) {
+                    return Err("register still refused".into());
+                }
+                if registry.held.contains(&shortcut) {
+                    return Err("AlreadyRegistered".into());
+                }
+                registry.held.push(shortcut);
+                Ok(())
+            },
+            |shortcut| {
+                let mut registry = registry.borrow_mut();
+                if registry.fail_unregister_once == Some(shortcut) {
+                    registry.fail_unregister_once = None;
+                    return Err("unregister refused".into());
+                }
+                if !registry.held.contains(&shortcut) {
+                    return Err("NotRegistered".into());
+                }
+                registry.held.retain(|held| *held != shortcut);
+                Ok(())
+            },
+        )
+    }
+
+    #[test]
+    fn pair_reset_breaks_mutual_swap_and_preserves_all_registration_windows() {
+        let defaults = [shortcut("CmdOrCtrl+["), shortcut("CmdOrCtrl+]")];
+        let old = [defaults[1], defaults[0]];
+        for wanted in [[false, false], [false, true], [true, false], [true, true]] {
+            let registry = std::cell::RefCell::new(PairRegistry {
+                held: old
+                    .into_iter()
+                    .zip(wanted)
+                    .filter_map(|(binding, wanted)| wanted.then_some(binding))
+                    .collect(),
+                ..Default::default()
+            });
+            replace_pair(&registry, old, defaults, wanted).unwrap();
+            let registry = registry.borrow();
+            for (binding, wanted) in defaults.into_iter().zip(wanted) {
+                assert_eq!(registry.held.contains(&binding), wanted);
+                assert!(
+                    registry.registrations.contains(&binding),
+                    "inactive targets are still OS-validated (I61)"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn pair_reset_releases_a_shared_old_registration_once() {
+        let previous = shortcut("CmdOrCtrl+K");
+        let defaults = [shortcut("CmdOrCtrl+["), shortcut("CmdOrCtrl+]")];
+        let registry = std::cell::RefCell::new(PairRegistry {
+            held: vec![previous],
+            ..Default::default()
+        });
+        replace_pair(&registry, [previous, previous], defaults, [true, true]).unwrap();
+        assert_eq!(registry.borrow().held, defaults);
+    }
+
+    #[test]
+    fn pair_reset_restores_old_registrations_after_second_register_failure() {
+        let defaults = [shortcut("CmdOrCtrl+["), shortcut("CmdOrCtrl+]")];
+        let old = [defaults[1], defaults[0]];
+        let registry = std::cell::RefCell::new(PairRegistry {
+            held: old.to_vec(),
+            fail_register_once: Some(defaults[1]),
+            ..Default::default()
+        });
+        assert!(replace_pair(&registry, old, defaults, [true, true]).is_err());
+        assert_eq!(registry.borrow().held.len(), 2);
+        assert!(old
+            .iter()
+            .all(|binding| registry.borrow().held.contains(binding)));
+    }
+
+    #[test]
+    fn pair_reset_restores_first_old_registration_if_second_unregister_fails() {
+        let old = [shortcut("CmdOrCtrl+K"), shortcut("CmdOrCtrl+L")];
+        let defaults = [shortcut("CmdOrCtrl+["), shortcut("CmdOrCtrl+]")];
+        let registry = std::cell::RefCell::new(PairRegistry {
+            held: old.to_vec(),
+            fail_unregister_once: Some(old[1]),
+            ..Default::default()
+        });
+        assert!(replace_pair(&registry, old, defaults, [true, true]).is_err());
+        assert!(old
+            .iter()
+            .all(|binding| registry.borrow().held.contains(binding)));
+        assert_eq!(registry.borrow().held.len(), 2);
+    }
+
+    #[test]
+    fn pair_reset_reports_failed_rollback_instead_of_claiming_success() {
+        let old = [shortcut("CmdOrCtrl+K"), shortcut("CmdOrCtrl+L")];
+        let defaults = [shortcut("CmdOrCtrl+["), shortcut("CmdOrCtrl+]")];
+        let registry = std::cell::RefCell::new(PairRegistry {
+            held: old.to_vec(),
+            fail_register_once: Some(defaults[1]),
+            fail_register_always: Some(old[0]),
+            ..Default::default()
+        });
+        let error = replace_pair(&registry, old, defaults, [true, true]).unwrap_err();
+        assert!(error.contains("register refused"));
+        assert!(error.contains("Couldn't restore a previous shortcut"));
     }
 }
