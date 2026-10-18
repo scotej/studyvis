@@ -38,6 +38,40 @@ describe('parseJudgment', () => {
     __resetLog()
   })
 
+  test.each([
+    ['severity', 'ACME payroll: Alice annual salary 123456', 'string'],
+    ['severity', ['private-screen-text'], 'array'],
+    ['severity', { screen: { content: 'private-screen-text' } }, 'object'],
+    ['reasoning', ['private-screen-text'], 'array'],
+    ['reasoning', { screen: { content: 'private-screen-text' } }, 'object'],
+    ['reasoning', null, 'null'],
+    ['on_topic_confidence', 'private-screen-text', 'string'],
+    ['on_topic_confidence', ['private-screen-text'], 'array'],
+    [
+      'on_topic_confidence',
+      { screen: { content: 'private-screen-text' } },
+      'object',
+    ],
+    ['on_topic_confidence', 123456, 'out of range'],
+  ])(
+    'logs only the category of malformed %s (#389)',
+    (field, value, category) => {
+      const raw = JSON.stringify({ ...VALID, [field as string]: value })
+      const result = parseJudgment(raw)
+      expectFallback(result, raw)
+      if (result.ok) return
+      expect(result.reason).toBe(`invalid ${field}: ${category}`)
+      const record = records.find((entry) => entry.msg === 'parse.fallback')
+      expect(record?.data).toMatchObject({
+        reason: result.reason,
+        rawLength: raw.length,
+      })
+      expect(JSON.stringify(records)).not.toContain('private-screen-text')
+      expect(JSON.stringify(records)).not.toContain('ACME payroll')
+      expect(JSON.stringify(records)).not.toContain('123456')
+    }
+  )
+
   test('parses a well-formed JSON response', () => {
     const raw = JSON.stringify(VALID)
     const result = parseJudgment(raw)

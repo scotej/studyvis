@@ -230,14 +230,20 @@ function pickJudgment(j: Judgment): Judgment {
   }
 }
 
+function diagnosticType(value: unknown): string {
+  if (value === null) return 'null'
+  if (Array.isArray(value)) return 'array'
+  return typeof value
+}
+
 function describeSchemaFailure(value: unknown): string {
   if (!value || typeof value !== 'object') return 'not a JSON object'
   const v = value as Partial<Judgment>
   if (!isSeverity(v.severity)) {
-    return `invalid severity: ${JSON.stringify(v.severity)}`
+    return `invalid severity: ${diagnosticType(v.severity)}`
   }
   if (typeof v.reasoning !== 'string') {
-    return `invalid reasoning: ${JSON.stringify(v.reasoning)}`
+    return `invalid reasoning: ${diagnosticType(v.reasoning)}`
   }
   if (
     typeof v.on_topic_confidence !== 'number' ||
@@ -245,7 +251,7 @@ function describeSchemaFailure(value: unknown): string {
     v.on_topic_confidence < 0 ||
     v.on_topic_confidence > 1
   ) {
-    return `invalid on_topic_confidence: ${JSON.stringify(v.on_topic_confidence)}`
+    return `invalid on_topic_confidence: ${typeof v.on_topic_confidence === 'number' ? 'out of range' : diagnosticType(v.on_topic_confidence)}`
   }
   return 'schema validation failed'
 }
