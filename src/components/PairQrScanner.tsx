@@ -80,6 +80,8 @@ export function PairQrScanner({
           video: { facingMode: 'environment' },
         })
       } catch {
+        // #395 — cancellation invalidates the entire acquisition, including fallback.
+        if (stopped) return
         try {
           stream = await openWebcamStream({ video: true })
         } catch {
