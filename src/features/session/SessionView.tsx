@@ -1895,6 +1895,20 @@ export function SessionView({
       })
     }
 
+    // #406: every topic source must refresh the already-open dialog, including
+    // companion controls. Keep this subscription scoped to this exact stint.
+    const stopTopicUpdates = useSessionStore.subscribe((next, previous) => {
+      if (
+        next.status === 'active' &&
+        next.room === room &&
+        next.sessionTopic === sessionTopic &&
+        next.startedAt === startedAt &&
+        next.declaredStudyTopic !== previous.declaredStudyTopic
+      ) {
+        emitToDialog(AI_DIALOG_CONTEXT, buildContextSnapshot())
+      }
+    })
+
     void (async () => {
       await registerListener(AI_DIALOG_CONTEXT_REQUEST, () => {
         emitToDialog(AI_DIALOG_CONTEXT, buildContextSnapshot())
@@ -1921,8 +1935,6 @@ export function SessionView({
               })
             })
           }
-          // Re-push context so a still-open dialog reflects the new value.
-          emitToDialog(AI_DIALOG_CONTEXT, buildContextSnapshot())
         }
       )
 
@@ -2000,6 +2012,7 @@ export function SessionView({
 
     return () => {
       cancelled = true
+      stopTopicUpdates()
       breakRequestsAbortController.abort()
       for (const off of unlistens) off()
     }
