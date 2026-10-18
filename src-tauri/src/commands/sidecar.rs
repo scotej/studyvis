@@ -57,6 +57,18 @@ pub(crate) const TARGET_TRIPLE: &str = env!("TAURI_ENV_TARGET_TRIPLE");
 // is off, so the UI should show the calm not-installed state, not a crash.
 pub(crate) const ENGINE_NOT_INSTALLED: &str = "engine_not_installed";
 
+// #422 — this exact managed model/projector pair cannot provide reliable
+// focus judgments with our pinned b9095 build. Keep its files and metadata
+// available for explicit management; refuse execution without a migration.
+pub(crate) const MODEL_UNAVAILABLE: &str = "model_moondream2_b9095_unavailable";
+
+fn ensure_model_runtime_available(managed_model_id: Option<&str>) -> Result<(), String> {
+    if super::engine::ENGINE_TAG == "b9095" && managed_model_id == Some("moondream2") {
+        return Err(MODEL_UNAVAILABLE.to_string());
+    }
+    Ok(())
+}
+
 const LOG_DIR: &str = "logs";
 pub(crate) const SIDECAR_LOG_FILE: &str = "llama-server.log";
 const SIDECAR_LOG_MAX_BYTES: u64 = 5 * 1024 * 1024;
@@ -269,6 +281,11 @@ pub async fn sidecar_start<R: Runtime>(
     // Custom GGUF paths intentionally have no managed-model gate.
     let model_ids =
         super::models::managed_model_ids_for_paths(&app, &model_path, mmproj_path.as_deref())?;
+    // Check the resolved text-model identity, not a filename or projector
+    // alone. Advanced custom GGUF paths retain their existing behavior.
+    let managed_model_id = super::models::managed_model_id_for_path(&app, &model_path)?;
+    ensure_model_runtime_available(managed_model_id.as_deref())?;
+
     let model_gates = model_operations.gates_for(&model_ids).await;
     let mut _model_guards = Vec::with_capacity(model_gates.len());
     for gate in &model_gates {
@@ -1407,6 +1424,24 @@ async fn watch<R: Runtime>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pinned_moondream_is_unavailable_without_rejecting_other_or_custom_models() {
+        assert_eq!(super::super::engine::ENGINE_TAG, "b9095");
+        assert_eq!(
+            ensure_model_runtime_available(Some("moondream2")),
+            Err(MODEL_UNAVAILABLE.into())
+        );
+        for id in [
+            None,
+            Some("qwen2_5-vl-3b"),
+            Some("gemma3-4b"),
+            Some("qwen2_5-vl-7b"),
+            Some("custom"),
+        ] {
+            assert_eq!(ensure_model_runtime_available(id), Ok(()));
+        }
+    }
 
     // These assertions pin the split b9095 policy rather than merely checking
     // the model flags. b9095 reads `--no-mmproj-offload` into

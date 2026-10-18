@@ -1,3 +1,4 @@
+import { getModelUnavailableReason } from '@/features/ai/models'
 import {
   useCallback,
   useEffect,
@@ -1562,7 +1563,12 @@ export function SessionView({
       modelId: activeModelId,
       onStartFail: (reason, detail) => {
         setAiRuntimeStatus('error')
-        if (reason === 'model_files_missing') {
+        if (reason === 'model_unavailable') {
+          toast.error(
+            detail ?? strings.session.errors.pickModel,
+            aiSettingsToastAction()
+          )
+        } else if (reason === 'model_files_missing') {
           toast.error(
             strings.session.errors.modelFilesMissing,
             aiSettingsToastAction()
@@ -1676,6 +1682,11 @@ export function SessionView({
           // #47 B2 — the copy names "Settings → AI"; the action takes the
           // user there without leaving the session.
           toast.error(strings.session.errors.pickModel, aiSettingsToastAction())
+        } else if (reason === 'model_unavailable') {
+          toast.error(
+            detail ?? strings.session.errors.pickModel,
+            aiSettingsToastAction()
+          )
         } else if (reason === 'model_files_missing') {
           toast.error(
             strings.session.errors.modelFilesMissing,
@@ -2501,7 +2512,9 @@ export function SessionView({
     activeModelId,
     modelStatus,
     hasLocalStream: Boolean(localStream),
-    runtimeStatus: aiRuntimeStatus,
+    runtimeStatus: getModelUnavailableReason(activeModelId)
+      ? ('error' as const)
+      : aiRuntimeStatus,
   }
   const aiChipStatus: AiStatus = mirror.takeover
     ? deriveMirrorAiChipStatus({

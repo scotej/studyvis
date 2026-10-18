@@ -30,7 +30,7 @@ import {
 import { SCREEN_FRAME_MAX_WIDTH, SCREEN_FRAME_QUALITY } from './captureScreen'
 import { getCaptureRuntime, type CaptureFrame } from './captureShared'
 import { buildFocusRequest, type FocusChatRequest } from './focusRequest'
-import type { ModelSpec } from './models'
+import { getModelUnavailableReason, type ModelSpec } from './models'
 import {
   boundedHealthProbe,
   currentSidecarGeneration,
@@ -483,6 +483,8 @@ export async function runBenchmark(
   spec: ModelSpec,
   opts: BenchmarkOptions
 ): Promise<BenchmarkResult> {
+  const unavailable = getModelUnavailableReason(spec.id)
+  if (unavailable) throw new Error(unavailable)
   if (benchmarkOwner !== null) throw new Error(strings.ai.picker.benchmarkBusy)
   const owner = Symbol()
   benchmarkOwner = owner

@@ -105,6 +105,28 @@ function makeFakeRuntime({
 }
 
 describe('runBenchmark', () => {
+  test('refuses the unavailable managed model before image preparation or any engine work', async () => {
+    const env = makeFakeRuntime({ perCallSec: [] })
+    let preparations = 0
+    __setBenchmarkRuntime({
+      ...env.runtime,
+      prepareImages: async () => {
+        preparations += 1
+        return env.runtime.prepareImages()
+      },
+    })
+    await expect(
+      runBenchmark(
+        SUPPORTED_MODELS.find((spec) => spec.id === 'moondream2')!,
+        { modelPath: '/m.gguf', mmprojPath: '/p.gguf' }
+      )
+    ).rejects.toThrow('unavailable')
+    expect(preparations).toBe(0)
+    expect(env.startedWith).toEqual([])
+    expect(env.bodies).toEqual([])
+    expect(env.stops).toBe(0)
+  })
+
   beforeEach(() => {
     __resetBenchmarkRuntime()
     setCurrentAiHardwareIdentity(TEST_HARDWARE_IDENTITY)
@@ -411,10 +433,13 @@ describe('runBenchmark', () => {
     }
     __setBenchmarkRuntime(wrapped)
     await expect(
-      runBenchmark(SUPPORTED_MODELS[1], {
-        modelPath: '/m.gguf',
-        mmprojPath: '/p.gguf',
-      })
+      runBenchmark(
+        SUPPORTED_MODELS.find((spec) => spec.id === 'qwen2_5-vl-3b')!,
+        {
+          modelPath: '/m.gguf',
+          mmprojPath: '/p.gguf',
+        }
+      )
     ).rejects.toThrow('mid-flight failure')
     expect(env.stops).toBe(1)
   })

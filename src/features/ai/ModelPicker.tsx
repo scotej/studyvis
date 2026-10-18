@@ -33,6 +33,7 @@ import { strings } from '@/strings'
 import { isBenchmarkStale, type BenchmarkResult } from './benchmark'
 import {
   type ModelSpec,
+  getModelUnavailableReason,
   modelCardGroups,
   tierLabel,
   totalDownloadBytes,
@@ -229,7 +230,9 @@ export function ModelPicker({
         <p className="text-sm text-text-secondary">{strings.ai.picker.body}</p>
         {actionsLocked ? (
           <p className="text-sm text-text-secondary">
-            {strings.ai.picker.lockedDuringSession}
+            {getModelUnavailableReason(activeModelId)
+              ? strings.ai.picker.unavailableSelectionLocked
+              : strings.ai.picker.lockedDuringSession}
           </p>
         ) : null}
       </header>
@@ -303,6 +306,12 @@ function ModelCard({
     states[0]
   const { spec, installState, record, phase, errorMessage } = state
   const isInstalled = installState.modelExists && installState.mmprojExists
+  const unavailableReason = getModelUnavailableReason(spec.id)
+  const hasOwnedState =
+    spec.id === activeModelId ||
+    record != null ||
+    installState.modelExists ||
+    installState.mmprojExists
   const isPartial =
     !isInstalled && (installState.modelExists || installState.mmprojExists)
   // A4 — a known partial download (the Rust backend kept the `.tmp` and will
@@ -318,7 +327,9 @@ function ModelCard({
     phaseClass.downloading && state.downloadProgress != null
   const benchmark = record?.benchmark ?? null
   const isActive = isInstalled && spec.id === activeModelId
-  const tokenPasteOpen = spec.gated && !hfTokenPresent && !busy && !isInstalled
+  const tokenPasteOpen =
+    !unavailableReason && spec.gated && !hfTokenPresent && !busy && !isInstalled
+  if (unavailableReason && !hasOwnedState) return null
 
   return (
     <article
@@ -333,7 +344,9 @@ function ModelCard({
         <div className="flex min-w-0 flex-col gap-1">
           <div className="flex items-center gap-2">
             <span className="rounded-full bg-bg-raised px-2 py-0.5 text-xs font-medium uppercase tracking-wide text-text-secondary">
-              {tierLabel(spec.defaultTier)}
+              {unavailableReason
+                ? strings.ai.picker.unavailableLabel
+                : tierLabel(spec.defaultTier)}
             </span>
             {spec.gated ? (
               <span className="rounded-full bg-accent-muted px-2 py-0.5 text-xs font-medium uppercase tracking-wide text-text-inverse">
@@ -341,11 +354,22 @@ function ModelCard({
               </span>
             ) : null}
             {isInstalled ? (
-              <span className="inline-flex items-center gap-1 rounded-full bg-status-focused px-2 py-0.5 text-xs font-semibold uppercase tracking-wide text-text-inverse">
+              <span
+                className={
+                  unavailableReason
+                    ? 'inline-flex items-center gap-1 rounded-full bg-bg-raised px-2 py-0.5 text-xs font-semibold uppercase tracking-wide text-text-secondary'
+                    : 'inline-flex items-center gap-1 rounded-full bg-status-focused px-2 py-0.5 text-xs font-semibold uppercase tracking-wide text-text-inverse'
+                }
+              >
                 <CheckIcon /> {strings.ai.picker.pills.installed}
               </span>
             ) : null}
-            {isActive ? (
+            {spec.id === activeModelId && unavailableReason ? (
+              <span className="text-xs text-text-secondary">
+                {strings.ai.picker.previouslySelected}
+              </span>
+            ) : null}
+            {isActive && !unavailableReason ? (
               <span className="inline-flex items-center gap-1 rounded-full bg-accent-muted px-2 py-0.5 text-xs font-semibold uppercase tracking-wide text-text-inverse">
                 <CheckIcon /> {strings.ai.picker.pills.active}
               </span>
@@ -362,7 +386,9 @@ function ModelCard({
           >
             {spec.displayName}
           </h3>
-          <p className="text-sm text-text-secondary">{spec.blurb}</p>
+          <p className="text-sm text-text-secondary">
+            {unavailableReason ?? spec.blurb}
+          </p>
         </div>
         <CardActions
           state={state}
@@ -446,7 +472,11 @@ function ModelCard({
         </div>
       </dl>
 
-      {isInstalled && !benchmark ? (
+      {unavailableReason && benchmark ? (
+        <p className="text-sm text-text-secondary">
+          {formatBenchmark(benchmark)} {strings.ai.picker.historicalBenchmark}
+        </p>
+      ) : unavailableReason ? null : isInstalled && !benchmark ? (
         <p className="flex items-start gap-2 text-sm text-status-warning">
           <GaugeIcon className="mt-0.5 shrink-0" />
           <span>{strings.ai.picker.notBenchmarked}</span>
@@ -471,9 +501,11 @@ function ModelCard({
 
       {interrupted && !busy ? (
         <p className="text-xs text-text-secondary">
-          {strings.ai.picker.resumeNote(
-            formatBytesHuman(interrupted.bytesReceived)
-          )}
+          {unavailableReason
+            ? strings.ai.picker.interruptedKept
+            : strings.ai.picker.resumeNote(
+                formatBytesHuman(interrupted.bytesReceived)
+              )}
         </p>
       ) : null}
 
@@ -541,6 +573,20 @@ function CardActions({
   const { spec, phase } = state
   const phaseClass = classifyPhase(phase)
   const blocksGated = spec.gated && !hfTokenPresent
+
+  if (getModelUnavailableReason(spec.id)) {
+    return (
+      <Button
+        variant="ghost"
+        size="icon-sm"
+        aria-label={strings.ai.picker.removeAriaLabel(spec.displayName)}
+        onClick={() => actions.onRemove(spec)}
+        disabled={phaseClass.busy}
+      >
+        <Trash2Icon />
+      </Button>
+    )
+  }
 
   // Downloads have a real Rust cancellation path. Benchmarks do not, so they
   // show progress without the old misleading Cancel button.

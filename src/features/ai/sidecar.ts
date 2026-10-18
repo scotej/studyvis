@@ -24,6 +24,8 @@ import {
   type AiHardwareIdentity,
 } from './computeDevice'
 
+import { getModelUnavailableReason, MODEL_UNAVAILABLE_ERROR } from './models'
+
 const log = logger.child('ai.sidecar')
 
 export type SidecarStatus = {
@@ -410,7 +412,11 @@ export const useSidecarStore = create<SidecarState>((set, get) => ({
           })
           return null
         }
-        const message = err instanceof Error ? err.message : String(err)
+        const rawMessage = err instanceof Error ? err.message : String(err)
+        const message =
+          rawMessage === MODEL_UNAVAILABLE_ERROR
+            ? (getModelUnavailableReason('moondream2') ?? rawMessage)
+            : rawMessage
         set({ status: 'errored', lastError: message })
         stopPolling()
         log.error('start.failed', {

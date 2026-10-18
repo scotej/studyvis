@@ -40,10 +40,25 @@ describe('getAiEnableReadiness', () => {
     expect(
       getAiEnableReadiness({
         status,
-        activeModelId: 'moondream2',
+        activeModelId: 'qwen2_5-vl-3b',
         records: {},
       })
     ).toBe(expected)
+  })
+
+  test('a retained unavailable selection is not enable-ready even with a fresh benchmark', () => {
+    const benchmark = summariseBenchmark({
+      samplesSec: [2, 3, 4],
+      completedAtSec: 99,
+      hardwareIdentity: HARDWARE_IDENTITY,
+    })
+    expect(
+      getAiEnableReadiness({
+        status: 'ready',
+        activeModelId: 'moondream2',
+        records: { moondream2: record('moondream2', benchmark) },
+      })
+    ).toBe('unavailable')
   })
 
   test('requires a selected model once the store is ready', () => {
@@ -51,7 +66,7 @@ describe('getAiEnableReadiness', () => {
       getAiEnableReadiness({
         status: 'ready',
         activeModelId: null,
-        records: { moondream2: record('moondream2') },
+        records: { 'qwen2_5-vl-3b': record('qwen2_5-vl-3b') },
       })
     ).toBe('no-model')
   })
@@ -60,8 +75,8 @@ describe('getAiEnableReadiness', () => {
     expect(
       getAiEnableReadiness({
         status: 'ready',
-        activeModelId: 'moondream2',
-        records: { moondream2: record('moondream2') },
+        activeModelId: 'qwen2_5-vl-3b',
+        records: { 'qwen2_5-vl-3b': record('qwen2_5-vl-3b') },
       })
     ).toBe('unbenchmarked')
   })
@@ -80,10 +95,10 @@ describe('getAiEnableReadiness', () => {
     expect(
       getAiEnableReadiness({
         status: 'ready',
-        activeModelId: 'moondream2',
+        activeModelId: 'qwen2_5-vl-3b',
         records: {
-          moondream2: {
-            ...record('moondream2'),
+          'qwen2_5-vl-3b': {
+            ...record('qwen2_5-vl-3b'),
             installedAt: null,
             interruptedDownload: { bytesReceived: 1024, at: 100 },
           },
@@ -102,8 +117,8 @@ describe('getAiEnableReadiness', () => {
     expect(
       getAiEnableReadiness({
         status: 'ready',
-        activeModelId: 'moondream2',
-        records: { moondream2: record('moondream2', benchmark) },
+        activeModelId: 'qwen2_5-vl-3b',
+        records: { 'qwen2_5-vl-3b': record('qwen2_5-vl-3b', benchmark) },
       })
     ).toBe('ready')
   })

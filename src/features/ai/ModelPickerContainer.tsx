@@ -43,7 +43,11 @@ import {
   type ProgressEvent,
 } from './download'
 import { getHfTokenRuntime } from './hfToken'
-import { SUPPORTED_MODELS, type ModelSpec } from './models'
+import {
+  SUPPORTED_MODELS,
+  getModelUnavailableReason,
+  type ModelSpec,
+} from './models'
 import { useModelStore } from './modelStore'
 import { useSessionStore } from '@/stores/sessionStore'
 import { useSettingsStore } from '@/stores/settingsStore'
@@ -377,6 +381,12 @@ export const ModelPickerContainer = forwardRef<
 
   const runBenchmarkFor = useCallback(
     async (spec: ModelSpec) => {
+      const unavailable = getModelUnavailableReason(spec.id)
+      if (unavailable) {
+        toast.info(unavailable)
+        return
+      }
+
       // Never let the benchmark process coexist with enabled AI. Even outside
       // a session, one could start while the multi-minute benchmark owns the
       // singleton sidecar. Benchmarking during an AI-off session is safe and
@@ -441,6 +451,12 @@ export const ModelPickerContainer = forwardRef<
 
   const runDownload = useCallback(
     async (spec: ModelSpec) => {
+      const unavailable = getModelUnavailableReason(spec.id)
+      if (unavailable) {
+        toast.info(unavailable)
+        return
+      }
+
       const runtime = getDownloadRuntime()
       const previous = downloadAttempts.current.get(spec.id)
       if (previous?.nativeStarted) {
@@ -619,7 +635,7 @@ export const ModelPickerContainer = forwardRef<
       benchmarkSelected: () => {
         const selectedId = useModelStore.getState().activeModelId
         const selected = SUPPORTED_MODELS.find((spec) => spec.id === selectedId)
-        if (!selected) return false
+        if (!selected || getModelUnavailableReason(selected.id)) return false
         onBenchmark(selected)
         return true
       },
@@ -630,6 +646,11 @@ export const ModelPickerContainer = forwardRef<
   const onActivate = useCallback(
     (spec: ModelSpec) => {
       void (async () => {
+        const unavailable = getModelUnavailableReason(spec.id)
+        if (unavailable) {
+          toast.info(unavailable)
+          return
+        }
         const sessionOwnsSidecar =
           useSessionStore.getState().status === 'active' &&
           useSettingsStore.getState().values.aiFeaturesEnabled
@@ -697,6 +718,7 @@ export const ModelPickerContainer = forwardRef<
       void (async () => {
         if (
           useModelStore.getState().activeModelId === spec.id &&
+          !getModelUnavailableReason(spec.id) &&
           useSettingsStore.getState().values.aiFeaturesEnabled
         ) {
           toast.info(strings.ai.picker.removeActiveTurnAiOff)

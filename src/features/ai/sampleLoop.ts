@@ -66,6 +66,7 @@ import { buildFocusRequest } from './focusRequest'
 import { useFocusStore } from './focusStore'
 import { isBenchmarkStale } from './benchmark'
 import { useModelStore } from './modelStore'
+import { getModelUnavailableReason } from './models'
 import {
   isUncertainVerdict,
   parseJudgment,
@@ -534,7 +535,10 @@ export function getSampleLoopRuntime(): SampleLoopRuntime {
 }
 
 export type SampleLoopStartReason =
-  'no_active_model' | 'model_files_missing' | 'sidecar_start_failed'
+  | 'no_active_model'
+  | 'model_unavailable'
+  | 'model_files_missing'
+  | 'sidecar_start_failed'
 
 export type SampleLoopOptions = {
   // The paired LAN companion supplies capture without opening host devices.
@@ -1762,6 +1766,17 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
     if (!opts.modelId) {
       log.warn('boot.refused', { reason: 'no_active_model' })
       opts.onStartFail?.('no_active_model')
+      teardownInternal()
+      return
+    }
+
+    const unavailable = getModelUnavailableReason(opts.modelId)
+    if (unavailable) {
+      log.warn('boot.refused', {
+        modelId: opts.modelId,
+        reason: 'model_unavailable',
+      })
+      opts.onStartFail?.('model_unavailable', unavailable)
       teardownInternal()
       return
     }

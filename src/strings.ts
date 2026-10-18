@@ -20,7 +20,7 @@
 // New strings: add them here, then reference. scripts/check-strings.ts
 // guards against raw literals slipping back into components.
 
-import type { AuditEventKind } from '@/lib/audit-types'
+import type { AuditEventKind } from './lib/audit-types'
 
 const ELLIPSIS = '…'
 
@@ -2061,6 +2061,16 @@ export const strings = {
 
   ai: {
     picker: {
+      unavailableReason:
+        'Moondream 2 is unavailable for AI checks in this version of StudyVis. Your downloaded files and previous session data are kept. Choose another model to use AI.',
+      unavailableLabel: 'Unavailable',
+      unavailableSelectionLocked:
+        'Turn AI off before choosing another model. You can remove this unavailable model without changing your AI setting.',
+      previouslySelected: 'Previously selected',
+      historicalBenchmark:
+        'Previous timing measurement; this model is unavailable.',
+      interruptedKept:
+        'Your partial download is kept until you choose to remove it.',
       ariaLabel: 'Vision model picker',
       heading: 'Pick a vision model',
       body: 'Download, choose, and benchmark separately. Benchmarking is recommended for tuned timing, but it is not required. The model runs only on this machine.',

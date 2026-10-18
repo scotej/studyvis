@@ -1,10 +1,12 @@
 import { getDownloadRuntime } from '@/features/ai/download'
+import { getModelUnavailableReason } from '@/features/ai/models'
 import { DEFAULT_CTX_SIZE, useSidecarStore } from '@/features/ai/sidecar'
 import { logger } from '@/lib/log'
 
 const log = logger.child('mirror.ai')
 
-type StartFailure = 'model_files_missing' | 'sidecar_start_failed'
+type StartFailure =
+  'model_unavailable' | 'model_files_missing' | 'sidecar_start_failed'
 
 type MirrorAiRuntime = {
   modelPaths: (modelId: string) => Promise<{
@@ -43,6 +45,11 @@ export function startMirrorAiRuntime(
   let stopPromise: Promise<void> | null = null
   let stage: StartFailure = 'model_files_missing'
   const ready = (async () => {
+    const unavailable = getModelUnavailableReason(options.modelId)
+    if (unavailable) {
+      options.onStartFail('model_unavailable', unavailable)
+      return false
+    }
     const paths = await runtime.modelPaths(options.modelId)
     if (stopped) return false
     stage = 'sidecar_start_failed'

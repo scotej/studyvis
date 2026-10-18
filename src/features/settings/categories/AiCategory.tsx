@@ -60,6 +60,10 @@ import {
   type EngineProgressEvent,
   type ModelPickerContainerHandle,
 } from '@/features/ai'
+import {
+  getModelUnavailableReason,
+  MODEL_UNAVAILABLE_ERROR,
+} from '@/features/ai/models'
 import { useSessionStore } from '@/stores/sessionStore'
 import {
   isCaptureDisplaysMode,
@@ -119,6 +123,7 @@ export function AiCategory() {
   const activeModelId = useModelStore((s) => s.activeModelId)
   const modelStatus = useModelStore((s) => s.status)
   const modelRecords = useModelStore((s) => s.records)
+  const modelUnavailableReason = getModelUnavailableReason(activeModelId)
   const activeBenchmark = activeModelId
     ? (modelRecords[activeModelId]?.benchmark ?? null)
     : null
@@ -257,6 +262,14 @@ export function AiCategory() {
 
   const applyToggle = useCallback(
     async (next: boolean) => {
+      const unavailable = getModelUnavailableReason(
+        useModelStore.getState().activeModelId
+      )
+      if (next && unavailable) {
+        toast.info(unavailable)
+        modelPickerSectionRef.current?.scrollIntoView({ block: 'start' })
+        return
+      }
       // V2-P9 gesture fix — when a session is already running, flipping AI
       // on fires sampleLoop's boot() from a useEffect the instant
       // aiFeaturesEnabled lands, with no gesture of its own to acquire the
@@ -293,6 +306,15 @@ export function AiCategory() {
     (next: boolean) => {
       if (!next) {
         void applyToggle(false)
+        return
+      }
+
+      const unavailable = getModelUnavailableReason(
+        useModelStore.getState().activeModelId
+      )
+      if (unavailable) {
+        toast.info(unavailable)
+        modelPickerSectionRef.current?.scrollIntoView({ block: 'start' })
         return
       }
 
@@ -397,6 +419,13 @@ export function AiCategory() {
   }, [refreshTokenPresence, copy.hfToken])
 
   const handleRestartSidecar = useCallback(async () => {
+    const unavailable = getModelUnavailableReason(
+      useModelStore.getState().activeModelId
+    )
+    if (unavailable) {
+      toast.info(unavailable)
+      return
+    }
     if (!activeModelId) {
       toast.error(copy.sidecar.pickModelFirstToast)
       return
@@ -542,6 +571,12 @@ export function AiCategory() {
           already carry the section rhythm. */}
       <p className="text-sm text-text-secondary">{copy.intro}</p>
 
+      {modelUnavailableReason ? (
+        <p role="status" className="text-sm text-text-secondary">
+          {modelUnavailableReason}
+        </p>
+      ) : null}
+
       <SettingsRow
         label={copy.enable.label}
         help={copy.enable.help}
@@ -557,12 +592,12 @@ export function AiCategory() {
 
       {!aiFeaturesEnabled ? (
         <SettingsRow label={copy.modelOff.label} help={copy.modelOff.help} />
-      ) : (
+      ) : !modelUnavailableReason ? (
         // D5 — only meaningful while AI can sample.
         <p className={cn(settingsRowChrome, 'text-sm text-text-secondary')}>
           {copy.screenIndicatorNote}
         </p>
-      )}
+      ) : null}
 
       <div ref={modelPickerSectionRef} className={settingsRowChrome}>
         <ModelPickerContainer
@@ -856,16 +891,20 @@ export function AiCategory() {
             <SettingsRow
               label={copy.sidecar.label}
               help={
-                sidecarLastError
-                  ? copy.sidecar.helpLastError(sidecarLastError)
-                  : copy.sidecar.helpExhausted
+                sidecarLastError === MODEL_UNAVAILABLE_ERROR
+                  ? strings.ai.picker.unavailableReason
+                  : sidecarLastError
+                    ? copy.sidecar.helpLastError(sidecarLastError)
+                    : copy.sidecar.helpExhausted
               }
               control={
                 <Button
                   variant="secondary"
                   size="sm"
                   onClick={() => void handleRestartSidecar()}
-                  disabled={restarting || !activeModelId}
+                  disabled={
+                    restarting || !activeModelId || !!modelUnavailableReason
+                  }
                 >
                   {copy.sidecar.restartCta}
                 </Button>

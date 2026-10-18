@@ -21,6 +21,12 @@
 // the first recorded eval run (D1): swapping models the eval has never
 // measured would trade a known-unmeasured catalog for an unknown one.
 
+import { strings } from '../../strings'
+
+// #422 — only this managed catalog tuple is unavailable with the current
+// pinned engine. Keep its identity/pins for installed files and saved records.
+export const MODEL_UNAVAILABLE_ERROR = 'model_moondream2_b9095_unavailable'
+
 export type ModelTier = 'fastest' | 'balanced' | 'best' | 'heaviest'
 
 export type ModelFileSpec = {
@@ -62,10 +68,12 @@ export type ModelSpec = {
   defaultTier: ModelTier
   // One-sentence positioning copy for the picker card.
   blurb: string
+  unavailable?: { engine: 'b9095'; reason: typeof MODEL_UNAVAILABLE_ERROR }
 }
 
 const FASTEST: ModelSpec = {
   id: 'moondream2',
+  unavailable: { engine: 'b9095', reason: MODEL_UNAVAILABLE_ERROR },
   displayName: 'Moondream 2',
   hfRepo: 'ggml-org/moondream2-20250414-GGUF',
   hfRevision: '97d0efa4667189aea70998d0b1ee36a7a3214fcb',
@@ -242,6 +250,14 @@ export const SUPPORTED_MODELS: ReadonlyArray<ModelSpec> = [
 
 export function getModel(id: string): ModelSpec | undefined {
   return SUPPORTED_MODELS.find((m) => m.id === id)
+}
+
+export function getModelUnavailableReason(
+  modelId: string | null | undefined
+): string | null {
+  return modelId && getModel(modelId)?.unavailable
+    ? strings.ai.picker.unavailableReason
+    : null
 }
 
 // Registry order collapsed into picker cards: specs sharing a quantFamily

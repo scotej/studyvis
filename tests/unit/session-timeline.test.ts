@@ -329,6 +329,30 @@ describe('generating a write-up', () => {
     )
   })
 
+  test('a retained unavailable model uses labelled observations without paths, health, or inference', async () => {
+    __setSessionJournalRuntime(journalOf([observation(0), observation(1)]))
+    const getSidecarStatus = vi.fn()
+    const fetch = vi.fn()
+    __setAiAgentRuntime({ now: () => T0, getSidecarStatus, fetch })
+    const paths = vi.fn()
+    __setDownloadRuntime({ paths } as unknown as DownloadRuntime)
+    const timeline = await generateSessionTimeline({
+      sessionId: SESSION,
+      modelId: 'moondream2',
+      declaredTopic: 'Maths',
+    })
+    expect(timeline?.source).toBe('observations')
+    expect(timeline?.entries.length).toBeGreaterThan(0)
+    expect(timeline?.modelId).toBeNull()
+    expect(paths).not.toHaveBeenCalled()
+    expect(getSidecarStatus).not.toHaveBeenCalled()
+    expect(fetch).not.toHaveBeenCalled()
+    expect(invokeMock).toHaveBeenCalledWith(
+      'session_timeline_save',
+      expect.objectContaining({ source: 'observations', modelId: null })
+    )
+  })
+
   test('a model that returns nothing usable still yields the raw account', async () => {
     __setSessionJournalRuntime(
       journalOf([

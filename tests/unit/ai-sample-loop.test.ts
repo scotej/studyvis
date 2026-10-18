@@ -370,6 +370,43 @@ describe('startSampleLoop — start failures', () => {
     __resetBatteryRuntime()
   })
 
+  test('refuses an unavailable retained model before paths, capture, health, or startup', async () => {
+    const onStartFail = vi.fn()
+    const runtime = buildSampleLoopRuntime({
+      clock: new FakeClock(),
+      fetch: vi.fn() as never,
+    })
+    runtime.modelPaths = vi.fn(runtime.modelPaths)
+    runtime.acquireScreenStream = vi.fn(runtime.acquireScreenStream)
+    runtime.captureFace = vi.fn(runtime.captureFace)
+    runtime.startSidecar = vi.fn(runtime.startSidecar)
+    runtime.refreshSidecarStatus = vi.fn(runtime.refreshSidecarStatus)
+    seedSidecarStoreRunning()
+    __setSampleLoopRuntime(runtime)
+    const handle = startSampleLoop({
+      getTopic: () => 'Maths',
+      modelId: 'moondream2',
+      getFaceTrack: () => null,
+      onStartFail,
+    })
+    await flushMicrotasks()
+    expect(onStartFail).toHaveBeenCalledWith(
+      'model_unavailable',
+      expect.stringContaining('unavailable')
+    )
+    for (const operation of [
+      runtime.modelPaths,
+      runtime.acquireScreenStream,
+      runtime.captureFace,
+      runtime.startSidecar,
+      runtime.refreshSidecarStatus,
+      runtime.fetch,
+    ])
+      expect(operation).not.toHaveBeenCalled()
+    expect(useSidecarStore.getState().status).toBe('running')
+    await handle.stop()
+  })
+
   test('refuses to start when modelId is null', async () => {
     const onStartFail = vi.fn()
     const clock = new FakeClock()
