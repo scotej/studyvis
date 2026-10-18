@@ -20,6 +20,8 @@ import {
   type SidecarStatus,
 } from '@/features/ai/sidecar'
 
+import { evaluateBreakRules } from '@/features/session/break'
+
 function chatCompletionResponse(content: string): Response {
   return new Response(JSON.stringify({ choices: [{ message: { content } }] }), {
     status: 200,
@@ -219,6 +221,42 @@ describe('parseAgentReply', () => {
       })
     )
     expect(reply.intent).toBe('unknown')
+  })
+
+  test('preserves the recorded zero-duration Qwen refusal through break policy (#423)', () => {
+    const reply = parseAgentReply(
+      JSON.stringify({
+        intent: 'break_request',
+        payload: {
+          duration_sec: 0,
+          recommendation: 'deny',
+          reasoning: 'user requested indefinite break',
+        },
+        reply_text:
+          "I'm sorry, but I can't approve an indefinite break. Let's take a 5-minute break instead.",
+      })
+    )
+    expect(reply.intent).toBe('break_request')
+    if (reply.intent !== 'break_request') throw new Error('refusal lost')
+    expect(reply.payload).toEqual({
+      duration_sec: 0,
+      recommendation: 'deny',
+      reasoning: 'user requested indefinite break',
+    })
+    expect(
+      evaluateBreakRules(
+        {
+          requestedDurationSec: reply.payload.duration_sec,
+          aiRecommendation: reply.payload.recommendation,
+          aiReasoning: reply.payload.reasoning,
+          now: 1_700_000_000_000,
+        },
+        { onBreak: false, lastBreakEndedAt: null, breaksThisSession: 0 }
+      )
+    ).toEqual({
+      verdict: 'denied',
+      reason: 'user requested indefinite break',
+    })
   })
 
   test('defaults recommendation to approve when missing', () => {

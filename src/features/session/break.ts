@@ -9,7 +9,8 @@
 // So even if the user manipulates the small local model into recommending
 // approve, this layer will deny when the deterministic constraints fail.
 // The AI's reasoning is surfaced when it tips a tie (rules pass, AI denies)
-// but never overrides a rule violation.
+// but never overrides a quota or cooldown. A duration is required only to
+// approve a break, so a refusal may carry zero seconds (#423).
 //
 // Constraints (V2-P7 step 4):
 //   - Cool-down:   ≥ 25 min between break ENDS and the next request.
@@ -101,6 +102,14 @@ export function evaluateBreakRules(
       return { verdict: 'denied', reason: reasons.cooldown(remainingMin) }
     }
   }
+  // #423: a refusal has no usable duration; preserve its reason before
+  // checking the duration required to approve a break.
+  if (input.aiRecommendation === 'deny') {
+    return {
+      verdict: 'denied',
+      reason: input.aiReasoning || reasons.aiDeniedFallback,
+    }
+  }
   if (
     !Number.isFinite(input.requestedDurationSec) ||
     input.requestedDurationSec < MIN_BREAK_DURATION_SEC
@@ -114,16 +123,6 @@ export function evaluateBreakRules(
   // asked for 15 min and the user-visible message just notes the cap.
   const clamped = Math.min(input.requestedDurationSec, MAX_BREAK_DURATION_SEC)
   const wasCapped = clamped < input.requestedDurationSec
-  // Rule layer passes; consult the AI's recommendation. Per the prompt
-  // "the rule layer is the final arbiter" so an AI deny here only surfaces
-  // its reasoning — the user-visible verdict honours the AI's read of
-  // the situation when rules are silent.
-  if (input.aiRecommendation === 'deny') {
-    return {
-      verdict: 'denied',
-      reason: input.aiReasoning || reasons.aiDeniedFallback,
-    }
-  }
   const displayDuration = formatBreakDuration(clamped)
   const reason = wasCapped
     ? reasons.approvedCapped(displayDuration, MAX_BREAK_DURATION_SEC / 60)
