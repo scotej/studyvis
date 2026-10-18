@@ -1,0 +1,81 @@
+import assert from 'node:assert/strict'
+import { test } from 'node:test'
+import { withComponentBrowser } from './component-browser.mjs'
+
+const source = `
+import React from 'react'
+import { createRoot } from 'react-dom/client'
+import { flushSync } from 'react-dom'
+import { Toaster } from 'sonner'
+import { FriendsCategory } from '@/features/settings/categories/FriendsCategory'
+import { useIdentityStore } from '@/stores/identityStore'
+import { useFriendsStore } from '@/stores/friendsStore'
+import '@/design/index.css'
+window.__TAURI_INTERNALS__ = { invoke: async () => [] }
+await Promise.resolve()
+useIdentityStore.setState({ identity: null, status: 'absent' })
+const friends = ['Alice', 'Bob', 'Cara'].map((name,i) => ({
+  ed_pubkey_hex: String(i+1).padStart(64,'0'), x_pubkey_hex: 'aa'.repeat(32),
+  display_name: name, paired_at: 10, last_studied_with: null,
+}))
+const pending = []
+useFriendsStore.setState({ friends, remove: key => new Promise((resolve,reject) => {
+  pending.push({ key, resolve: () => {
+    useFriendsStore.setState(s => ({ friends: s.friends.filter(f => f.ed_pubkey_hex !== key) }))
+    resolve()
+  }, reject })
+}) })
+flushSync(() => createRoot(document.getElementById('root')).render(<><FriendsCategory /><Toaster /></>))
+window.fixture = {
+  settle: (fail = false) => fail ? pending[0].reject(new Error('Removal failed.')) : pending[0].resolve(),
+  pending: () => pending.length,
+}
+`
+
+for (const fail of [false, true]) {
+  test(`busy friend removal survives Escape/outside interaction until ${fail ? 'failure' : 'success'}`, async () => {
+    await withComponentBrowser(source, async (page) => {
+      await page
+        .getByRole('button', { name: 'Remove Alice', exact: true })
+        .click()
+      await page
+        .getByRole('dialog')
+        .getByRole('button', { name: 'Remove', exact: true })
+        .click()
+      await page.waitForFunction(() => window.fixture.pending() === 1)
+      await page.keyboard.press('Escape')
+      await page.mouse.click(2, 2)
+      assert.equal(await page.getByRole('dialog').count(), 1)
+      assert.match(await page.getByRole('dialog').textContent(), /Alice/)
+      assert.equal(
+        await page
+          .getByRole('dialog')
+          .getByRole('button', { name: 'Cancel', exact: true })
+          .isDisabled(),
+        true
+      )
+      await page.evaluate((failed) => window.fixture.settle(failed), fail)
+      if (fail) {
+        await page.getByText('Removal failed.', { exact: true }).waitFor()
+        assert.match(await page.getByRole('dialog').textContent(), /Alice/)
+        await page
+          .getByRole('dialog')
+          .getByRole('button', { name: 'Cancel', exact: true })
+          .click()
+        await page.getByRole('dialog').waitFor({ state: 'hidden' })
+      } else {
+        await page.getByRole('dialog').waitFor({ state: 'hidden' })
+        assert.equal(
+          await page
+            .getByRole('button', { name: 'Remove Alice', exact: true })
+            .count(),
+          0
+        )
+      }
+      await page
+        .getByRole('button', { name: 'Remove Bob', exact: true })
+        .click()
+      assert.match(await page.getByRole('dialog').textContent(), /Bob/)
+    })
+  })
+}
