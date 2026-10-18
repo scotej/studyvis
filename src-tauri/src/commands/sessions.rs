@@ -173,6 +173,7 @@ pub fn session_timeline_save(
     state: State<'_, DbPool>,
     session_id: String,
     generated_at: i64,
+    covered_until: Option<i64>,
     model_id: Option<String>,
     source: String,
     entries: String,
@@ -182,6 +183,7 @@ pub fn session_timeline_save(
     let row = session_timelines::SessionTimelineRow {
         session_id,
         generated_at,
+        covered_until,
         model_id,
         source,
         entries,

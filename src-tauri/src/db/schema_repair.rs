@@ -99,6 +99,7 @@ const EXPECTED_SCHEMA: &[(&str, &[(&str, &str)])] = &[
     (
         "session_timelines",
         &[
+            ("covered_until", "INTEGER"),
             ("session_id", "TEXT"),
             ("generated_at", "INTEGER"),
             ("model_id", "TEXT"),

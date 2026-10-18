@@ -92,6 +92,7 @@ async fn command(app: &tauri::AppHandle, request: &Value) -> Result<Value, Strin
                 app.state(),
                 string(args, "sessionId")?,
                 args["generatedAt"].as_i64().ok_or("missing generatedAt")?,
+                args["coveredUntil"].as_i64(),
                 args["modelId"].as_str().map(str::to_owned),
                 string(args, "source")?,
                 string(args, "entries")?,

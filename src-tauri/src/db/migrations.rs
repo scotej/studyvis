@@ -40,6 +40,8 @@ const MIGRATION_006_PEER_PRESENCE_MS: &str = include_str!("migrations/006_peer_p
 const MIGRATION_007_TOTAL_DURATION_MS: &str = include_str!("migrations/007_total_duration_ms.sql");
 const MIGRATION_008_SESSION_TIMELINES: &str = include_str!("migrations/008_session_timelines.sql");
 
+const MIGRATION_009_TIMELINE_COVERAGE: &str = include_str!("migrations/009_timeline_coverage.sql");
+
 const MIGRATIONS: &[(u32, &str)] = &[
     (1, MIGRATION_001_INITIAL),
     (2, MIGRATION_002_V2),
@@ -49,6 +51,7 @@ const MIGRATIONS: &[(u32, &str)] = &[
     (6, MIGRATION_006_PEER_PRESENCE_MS),
     (7, MIGRATION_007_TOTAL_DURATION_MS),
     (8, MIGRATION_008_SESSION_TIMELINES),
+    (9, MIGRATION_009_TIMELINE_COVERAGE),
 ];
 
 pub const MAX_KNOWN_VERSION: u32 = MIGRATIONS[MIGRATIONS.len() - 1].0;
@@ -141,7 +144,7 @@ mod tests {
         .unwrap_or(0)
     }
 
-    const LATEST_VERSION: u32 = 8;
+    const LATEST_VERSION: u32 = 9;
 
     #[test]
     fn applies_full_schema_on_empty_db() {
@@ -441,6 +444,23 @@ mod tests {
         assert_eq!(confident, Some(24), "003 data must survive the 004 upgrade");
     }
 
+    #[test]
+    fn timeline_coverage_upgrade_preserves_existing_narrative_with_unknown_input() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("CREATE TABLE schema_version(version INTEGER PRIMARY KEY)")
+            .unwrap();
+        for (version, sql) in MIGRATIONS.iter().take(8) {
+            conn.execute_batch(sql).unwrap();
+            conn.execute("INSERT INTO schema_version VALUES (?1)", [version])
+                .unwrap();
+        }
+        conn.execute("INSERT INTO session_timelines(session_id,generated_at,source,entries) VALUES ('old', 1000, 'model', '[]')", []).unwrap();
+        run_migrations(&mut conn).unwrap();
+        let saved: (i64, String, Option<i64>) = conn.query_row("SELECT generated_at, entries, covered_until FROM session_timelines WHERE session_id='old'", [], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?))).unwrap();
+        assert_eq!(saved, (1000, "[]".into(), None));
+        run_migrations(&mut conn).unwrap();
+    }
+
     // #236 — 008 adds the written-timeline table beside existing history. A
     // database that predates it keeps every session row and simply has no
     // narrative yet; the report regenerates one from the raw journal on demand.
@@ -585,6 +605,10 @@ mod tests {
             (
                 8,
                 "9adbe0b37d2696c06b2a34fc87a88f9e1b6ca3e77560d0fcf89fdaa41be03c65",
+            ),
+            (
+                9,
+                "3fa633c8041c8e2cbb0ad8db99771bfe0f32243de811deb6f126297fa7595cb0",
             ),
         ];
         assert_eq!(

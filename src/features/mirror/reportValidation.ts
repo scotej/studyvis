@@ -72,6 +72,7 @@ export function readMirrorReport(value: unknown): MirrorReport | null {
     (!record(timeline) ||
       !text(timeline.session_id, 128) ||
       !timestamp(timeline.generated_at) ||
+      !(timeline.covered_until == null || timestamp(timeline.covered_until)) ||
       !(timeline.model_id === null || text(timeline.model_id, 256)) ||
       !text(timeline.source, 128) ||
       !text(timeline.entries, 1024 * 1024) ||

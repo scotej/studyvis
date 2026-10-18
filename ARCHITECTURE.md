@@ -959,6 +959,11 @@ After the session ends, the report turns that journal into the timeline stored i
 1. **Windowing** (`features/session/sessionJournal.ts`, pure): observations are grouped into consecutive fixed-width windows anchored on the first check — one minute each, widening in whole minutes so a long session never exceeds 60 windows. Each window carries its on-task / off-task / unreadable counts, the topics seen, and up to three distinct reasoning notes ordered by frequency. Windows with no checks are dropped rather than rendered as a gap, because a paused capture (break, camera off, pomodoro rest) records nothing.
 2. **Narration** (`features/session/sessionTimeline.ts`): the windows are sent to the same llama-server sidecar in text-only chunks of at most 12, temperature 0, with a JSON-schema `response_format`. Window text is declared UNTRUSTED DATA in the system prompt for the same reason the chat agent does — it is a record of what was on screen. Returned segments are clamped to the window boundaries they were asked about, sorted, and de-overlapped.
 
+Migration 009 stores the session end covered by the captured journal separately
+from model completion time. A later rejoin queues one replacement after an older
+pass; legacy narratives with unknown coverage are conservatively refreshed.
+The conditional save still refuses to recreate deleted sessions (I100).
+
 Stage 1 is also the fallback: any window the model does not narrate is filled with its own digest, so a dead sidecar or an unusable response costs polish, not the feature. The stored `source` (`model` / `mixed` / `observations`) records which happened and the report labels anything other than `model`, so it can never imply the AI wrote an account it did not.
 
 The write-up runs from the report, not from session teardown — it happens after the report has already rendered, so PLAN §5's "report generation completes within 5 seconds" is unaffected. Because only success is persisted, a session interrupted mid-write-up (app quit, AI off at the time, model missing) is simply retried the next time its report is opened. Sidecar ownership follows `benchmark.ts`: the write-up starts the sidecar if nothing else is using it and stops it again afterwards, and refuses to run at all while a session is active, since the live sample loop owns the sidecar then.

@@ -40,8 +40,10 @@ import {
 } from '@/features/session/sessionTimeline'
 import {
   createWriteUpLatch,
+  generateTimelineForCoverage,
   storedWriteUpIsStale,
 } from '@/features/session/useWrittenTimeline'
+import { readObservations } from '@/features/session/sessionJournal'
 import { parseTimelineEntries } from '@/lib/db/sessionTimeline'
 import { useSessionStore } from '@/stores/sessionStore'
 import { strings } from '@/strings'
@@ -713,9 +715,13 @@ describe('merging model output with the digest fallback', () => {
 // I99 — a rejoin ends the same session id twice, so a row generated before the
 // session's own end covers only the first stint.
 describe('recognising a stale stored write-up', () => {
-  const row = (generatedAt: number) => ({
+  const row = (
+    generatedAt: number,
+    coveredUntil: number | null = generatedAt
+  ) => ({
     session_id: SESSION,
     generated_at: generatedAt,
+    covered_until: coveredUntil,
     model_id: 'gemma',
     source: 'model',
     entries: '[]',
@@ -730,9 +736,105 @@ describe('recognising a stale stored write-up', () => {
     expect(storedWriteUpIsStale(row(T0 + 1), T0)).toBe(false)
   })
 
+  test('late completion cannot turn first-stint input into whole-session coverage (#417)', () => {
+    expect(storedWriteUpIsStale(row(T0 + 500, T0), T0 + 400)).toBe(true)
+    expect(storedWriteUpIsStale(row(T0 + 500, T0 + 400), T0 + 400)).toBe(false)
+  })
+
+  test('legacy narratives have unknown input coverage and need a conservative refresh (#417)', () => {
+    expect(storedWriteUpIsStale(row(T0 + 500, null), T0)).toBe(true)
+  })
+
   test('no row and no end are both "nothing to redo"', () => {
     expect(storedWriteUpIsStale(null, T0)).toBe(false)
     expect(storedWriteUpIsStale(row(T0), null)).toBe(false)
     expect(storedWriteUpIsStale(row(T0), Number.NaN)).toBe(false)
+  })
+})
+
+describe('coalescing write-ups by captured input coverage (#417)', () => {
+  test('one replacement covers both stints when an old pass is still in flight', async () => {
+    let resolveFirst: ((response: Response) => void) | undefined
+    const requests: string[] = []
+    const runtime = agentRuntime(() => chatResponse('{}'))
+    runtime.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).endsWith('/health'))
+        return new Response(null, { status: 200 })
+      requests.push(String(init?.body))
+      if (requests.length === 1)
+        return new Promise<Response>((resolve) => {
+          resolveFirst = resolve
+        })
+      return chatResponse(
+        JSON.stringify({
+          segments: [
+            { start_min: 0, end_min: 1, summary: 'Algebra notes' },
+            { start_min: 2, end_min: 3, summary: 'Later geometry work' },
+          ],
+        })
+      )
+    }) as typeof fetch
+    __setAiAgentRuntime(runtime)
+    __setSessionJournalRuntime(journalOf([observation(0)]))
+    const firstJournal = await readObservations(SESSION)
+    const first = generateTimelineForCoverage(
+      SESSION,
+      'gemma',
+      'Maths',
+      firstJournal,
+      T0,
+      T0 + 60_000
+    )
+    await vi.waitFor(() => expect(requests).toHaveLength(1))
+    __setSessionJournalRuntime(
+      journalOf([
+        observation(0),
+        observation(2, { reasoning: 'Later geometry work' }),
+      ])
+    )
+    const fullJournal = await readObservations(SESSION)
+    const later = generateTimelineForCoverage(
+      SESSION,
+      'gemma',
+      'Maths',
+      fullJournal,
+      T0,
+      T0 + 180_000
+    )
+    const simultaneous = generateTimelineForCoverage(
+      SESSION,
+      'gemma',
+      'Maths',
+      fullJournal,
+      T0,
+      T0 + 180_000
+    )
+    resolveFirst?.(
+      chatResponse(
+        JSON.stringify({
+          segments: [{ start_min: 0, end_min: 1, summary: 'Algebra notes' }],
+        })
+      )
+    )
+    const [old, current, duplicate] = await Promise.all([
+      first,
+      later,
+      simultaneous,
+    ])
+    expect(old?.coveredUntil).toBe(T0 + 60_000)
+    expect(current?.coveredUntil).toBe(T0 + 180_000)
+    expect(duplicate).toBe(current)
+    expect(requests).toHaveLength(2)
+    expect(requests[1]).toContain('Later geometry work')
+    expect(current?.entries.map((entry) => entry.summary)).toContain(
+      'Later geometry work'
+    )
+    const writes = invokeMock.mock.calls.filter(
+      ([command]) => command === 'session_timeline_save'
+    )
+    expect(writes.map(([, args]) => args.coveredUntil)).toEqual([
+      T0 + 60_000,
+      T0 + 180_000,
+    ])
   })
 })

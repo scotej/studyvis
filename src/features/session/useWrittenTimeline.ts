@@ -35,25 +35,18 @@ function hasStoredWriteUp(timeline: SessionTimelineRecord | null): boolean {
   return timeline !== null && parseTimelineEntries(timeline.entries).length > 0
 }
 
-// I99 — a rejoin ends the same session id a second time, appending to the same
-// journal and pointing at the same `session_timelines` row, so a write-up
-// generated before the session's own end no longer covers all of it. That is
-// what `db/session_timelines.rs` means by "a rejoined session ends twice, and
-// the second write-up spans both stints": the upsert always supported it and
-// nothing asked for it, so the first stint's account stood while the summary,
-// score and audit timeline beside it merged both.
-//
-// Comparing the two stored timestamps is enough, and self-limiting: an ordinary
-// write-up runs after the session ended, so it is never stale, and a
-// regenerated one is stamped later than the end that made it stale. A backward
-// clock step can cost one extra pass and nothing else.
+// #417 / I99: model completion can happen after a later stint ended. Only
+// the captured input coverage proves that the account spans that stint.
+// Older rows have unknown coverage and receive one conservative regeneration.
 export function storedWriteUpIsStale(
   timeline: SessionTimelineRecord | null,
   sessionEndedAt: number | null
 ): boolean {
   if (timeline === null || sessionEndedAt === null) return false
   if (!Number.isFinite(sessionEndedAt)) return false
-  return timeline.generated_at < sessionEndedAt
+  return (
+    timeline.covered_until == null || timeline.covered_until < sessionEndedAt
+  )
 }
 
 // Storybook renders the report shell outside Tauri, where the journal probe
@@ -78,27 +71,51 @@ export type WrittenTimelineStatus =
 // Mode runs effects twice and the two report surfaces can mount in sequence;
 // without this, one session could start two model passes that both then write
 // the same row.
-const inFlight = new Map<string, Promise<SessionTimeline | null>>()
+const inFlight = new Map<
+  string,
+  {
+    coveredUntil: number
+    attempt: Promise<SessionTimeline | null>
+  }
+>()
 
-function runOnce(
+export function generateTimelineForCoverage(
   sessionId: string,
   modelId: string,
   declaredTopic: string | null,
   journal: SessionJournalRead,
-  startedAtMs: number | null
+  startedAtMs: number | null,
+  coveredUntil: number
 ): Promise<SessionTimeline | null> {
   const existing = inFlight.get(sessionId)
-  if (existing) return existing
+  if (existing) {
+    if (existing.coveredUntil >= coveredUntil) return existing.attempt
+    // Finish the old pass before one replacement starts. Concurrent report
+    // mounts then join that replacement rather than accepting the old input.
+    return existing.attempt
+      .catch(() => null)
+      .then(() =>
+        generateTimelineForCoverage(
+          sessionId,
+          modelId,
+          declaredTopic,
+          journal,
+          startedAtMs,
+          coveredUntil
+        )
+      )
+  }
   const attempt = generateSessionTimeline({
     sessionId,
     modelId,
     declaredTopic,
     journal,
     startedAtMs,
+    coveredUntilMs: coveredUntil,
   }).finally(() => {
-    inFlight.delete(sessionId)
+    if (inFlight.get(sessionId)?.attempt === attempt) inFlight.delete(sessionId)
   })
-  inFlight.set(sessionId, attempt)
+  inFlight.set(sessionId, { coveredUntil, attempt })
   return attempt
 }
 
@@ -150,6 +167,7 @@ function toRecord(
   return {
     session_id: sessionId,
     generated_at: timeline.generatedAt,
+    covered_until: timeline.coveredUntil,
     model_id: timeline.modelId,
     source: timeline.source,
     entries: JSON.stringify(timeline.entries),
@@ -208,7 +226,7 @@ export function useWrittenTimeline({
     ) {
       return
     }
-    const key = `${sessionId}:${attempt}`
+    const key = `${sessionId}:${endedAt}:${attempt}`
     const claims = latch.current
     if (!claims?.claim(key)) return
 
@@ -220,6 +238,7 @@ export function useWrittenTimeline({
       // is different from saying the model failed. Reading the journal first is
       // what lets the two be told apart; the same read is then handed to the
       // write-up rather than paying for the file and its parse twice.
+      const coveredUntil = endedAt ?? Date.now()
       let journal: SessionJournalRead
       try {
         journal = await readObservations(sessionId)
@@ -262,12 +281,13 @@ export function useWrittenTimeline({
 
       setStatus({ kind: 'generating' })
       try {
-        const written = await runOnce(
+        const written = await generateTimelineForCoverage(
           sessionId,
           modelId,
           declaredTopic,
           journal,
-          startedAt
+          startedAt,
+          coveredUntil
         )
         if (cancelled) return
         if (!written) {
