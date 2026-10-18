@@ -991,10 +991,11 @@ export function SessionNotesPanel({
               className="sr-only"
               tabIndex={-1}
               aria-hidden="true"
+              disabled={inputDisabled}
               onChange={(event) => {
                 const file = event.target.files?.[0]
                 event.target.value = ''
-                if (file) onSendImage(file)
+                if (file && !inputDisabled) onSendImage(file)
               }}
             />
             <Button
@@ -1002,6 +1003,7 @@ export function SessionNotesPanel({
               variant="ghost"
               size="sm"
               onClick={() => fileInputRef.current?.click()}
+              disabled={inputDisabled}
               aria-label={imageCopy.attachImage}
             >
               <ImagePlusIcon />
