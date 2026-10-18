@@ -16,7 +16,8 @@
 //! SQLite data dir, NOT the Tauri `app_data_dir` that holds `settings.json`.
 
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine as _;
@@ -32,6 +33,9 @@ const KEYRING_SERVICE: &str = "com.studyvis.app";
 const KEYRING_USER: &str = "identity-keys";
 const IDENTITY_FILE: &str = "identity.json";
 const PRIV_KEY_LEN: usize = 32;
+// #404: worker dispatch must preserve the former single-writer operations.
+static IDENTITY_RECORD_LOCK: Mutex<()> = Mutex::new(());
+static IDENTITY_KEYS_LOCK: Mutex<()> = Mutex::new(());
 pub(crate) const LINUX_SECRET_SERVICE_ERROR_MARKER: &str =
     "Linux Secret Service is unavailable or locked";
 
@@ -113,6 +117,11 @@ pub(crate) fn load_ed_signing_key() -> Result<SigningKey, String> {
     Ok(SigningKey::from_bytes(&arr))
 }
 
+pub(crate) fn load_backup_keys() -> Result<([u8; X_KEY_LEN], SigningKey), String> {
+    let _guard = IDENTITY_KEYS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    Ok((load_x_priv()?, load_ed_signing_key()?))
+}
+
 // Stable substring the frontend matches to swap the generic save-identity
 // toast for "go back and restore from your backup" steering (see KEYS_EXIST_MARKER
 // in src/features/identity/IdentitySetup.tsx). Keep the two in sync.
@@ -129,7 +138,7 @@ pub(crate) const KEYS_EXIST_MARKER: &str = "identity keys already exist";
 // This unsticks the create path when a crash lands between save_keys and
 // save_record (orphaned keychain entry, no identity.json): re-running the SAME
 // create succeeds instead of dead-ending on the refuse-to-overwrite error.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn identity_save_keys(
     ed_priv_hex: String,
     x_priv_hex: String,
@@ -142,7 +151,11 @@ pub fn identity_save_keys(
         x_priv_hex,
     })
     .map_err(|e| e.to_string())?;
-    let entry = keys_entry()?;
+    save_keys_in_entry(&keys_entry()?, &payload, overwrite)
+}
+
+fn save_keys_in_entry(entry: &Entry, payload: &str, overwrite: bool) -> Result<(), String> {
+    let _guard = IDENTITY_KEYS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     if !overwrite {
         match entry.get_password() {
             Ok(existing) if existing == payload => return Ok(()),
@@ -156,12 +169,12 @@ pub fn identity_save_keys(
         }
     }
     entry
-        .set_password(&payload)
+        .set_password(payload)
         .map_err(|e| format_keyring_error("save identity keys", e))?;
     Ok(())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn identity_exists(app: AppHandle) -> Result<bool, String> {
     let path = identity_path(&app)?;
     Ok(path.exists())
@@ -175,7 +188,7 @@ pub fn identity_exists(app: AppHandle) -> Result<bool, String> {
 // keychain, access denied) is NOT "keys absent" and must not steer the user
 // toward the key-overwriting Recover flow, so it surfaces as Err and the
 // caller treats the probe as inconclusive.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn identity_keys_present() -> Result<bool, String> {
     match keys_entry()?.get_password() {
         Ok(_) => Ok(true),
@@ -238,26 +251,35 @@ fn identity_keys_status_from_entry(
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn identity_save_record(app: AppHandle, record: IdentityRecord) -> Result<(), String> {
-    let path = identity_path(&app)?;
-    let json = serde_json::to_vec_pretty(&record).map_err(|e| e.to_string())?;
+    save_record_at(&identity_path(&app)?, &record)
+}
+
+fn save_record_at(path: &Path, record: &IdentityRecord) -> Result<(), String> {
+    let _guard = IDENTITY_RECORD_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    let json = serde_json::to_vec_pretty(record).map_err(|e| e.to_string())?;
     // Atomic: write a sibling temp file then rename over the target, so a
     // crash mid-write can't leave a truncated identity.json that boot would
     // treat as "no identity" while the private keys sit orphaned in the
     // keychain (I16; mitigates I15). rename is atomic on the same FS.
     let tmp = path.with_extension("json.tmp");
     fs::write(&tmp, &json).map_err(|e| format!("write {}: {e}", tmp.display()))?;
-    fs::rename(&tmp, &path).map_err(|e| {
+    fs::rename(&tmp, path).map_err(|e| {
         let _ = fs::remove_file(&tmp);
         format!("rename {} -> {}: {e}", tmp.display(), path.display())
     })?;
     Ok(())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn identity_load_record(app: AppHandle) -> Result<Option<IdentityRecord>, String> {
     let path = identity_path(&app)?;
+    let _guard = IDENTITY_RECORD_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
     if !path.exists() {
         return Ok(None);
     }
@@ -266,7 +288,7 @@ pub fn identity_load_record(app: AppHandle) -> Result<Option<IdentityRecord>, St
     Ok(Some(record))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn identity_sign(message: Vec<u8>) -> Result<Vec<u8>, String> {
     let stored = load_stored()?;
     let priv_bytes = hex::decode(&stored.ed_priv_hex).map_err(|e| e.to_string())?;
@@ -279,7 +301,7 @@ pub fn identity_sign(message: Vec<u8>) -> Result<Vec<u8>, String> {
     Ok(sig.to_bytes().to_vec())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn identity_box_decrypt(
     their_x_pub_hex: String,
     nonce_b64: String,
@@ -317,7 +339,7 @@ pub struct BoxCiphertext {
     pub ciphertext_b64: String,
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn identity_box_encrypt(
     their_x_pub_hex: String,
     plaintext: Vec<u8>,
@@ -350,8 +372,8 @@ pub fn identity_box_encrypt(
 #[cfg(test)]
 mod tests {
     use super::{
-        check_stored_keys, identity_keys_status_from_entry, Entry, IdentityKeysStatus,
-        IdentityRecord, StoredKeys,
+        check_stored_keys, identity_keys_status_from_entry, save_keys_in_entry, save_record_at,
+        Entry, IdentityKeysStatus, IdentityRecord, StoredKeys, KEYS_EXIST_MARKER,
     };
 
     fn key_fixture(ed: u8, x: u8) -> (String, IdentityRecord) {
@@ -427,6 +449,61 @@ mod tests {
         }
     }
 
+    #[test]
+    fn concurrent_record_saves_remain_atomic_and_all_complete() {
+        let dir = std::env::temp_dir().join(format!(
+            "studyvis-identity-writers-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("identity.json");
+        let record = |writer: i64, iteration: i64| IdentityRecord {
+            version: 1,
+            ed_pubkey_hex: format!("{writer:064x}"),
+            x_pubkey_hex: format!("{iteration:064x}"),
+            display_name: format!("writer {writer} revision {iteration}"),
+            created_at: writer * 1000 + iteration,
+            mnemonic_fingerprint: format!("{writer}-{iteration}"),
+        };
+        save_record_at(&path, &record(0, 0)).unwrap();
+        let start = std::sync::Barrier::new(9);
+        std::thread::scope(|scope| {
+            let mut writers = Vec::new();
+            for writer in 1..=8 {
+                let path = &path;
+                let start = &start;
+                let record = &record;
+                writers.push(scope.spawn(move || {
+                    start.wait();
+                    for iteration in 0..32 {
+                        save_record_at(path, &record(writer, iteration)).unwrap();
+                    }
+                }));
+            }
+            start.wait();
+            // Read the real destination without the writer mutex: rename must
+            // expose one complete profile throughout the competing writes.
+            for _ in 0..256 {
+                let saved: IdentityRecord =
+                    serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+                let expected = record(saved.created_at / 1000, saved.created_at % 1000);
+                assert_eq!(
+                    serde_json::to_value(saved).unwrap(),
+                    serde_json::to_value(expected).unwrap()
+                );
+            }
+            for writer in writers {
+                writer.join().unwrap();
+            }
+        });
+        assert!(!path.with_extension("json.tmp").exists());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
     struct IsolatedCredential(Entry);
 
     impl Drop for IsolatedCredential {
@@ -490,6 +567,29 @@ mod tests {
             identity_keys_status_from_entry(entry, &record).unwrap(),
             IdentityKeysStatus::Invalid
         );
+        entry
+            .delete_credential()
+            .expect("clear before concurrent create");
+        let start = std::sync::Barrier::new(2);
+        let results = std::thread::scope(|scope| {
+            let first = scope.spawn(|| {
+                start.wait();
+                save_keys_in_entry(entry, "first isolated keys", false)
+            });
+            let second = scope.spawn(|| {
+                start.wait();
+                save_keys_in_entry(entry, "second isolated keys", false)
+            });
+            [first.join().unwrap(), second.join().unwrap()]
+        });
+        assert_eq!(results.iter().filter(|result| result.is_ok()).count(), 1);
+        assert!(results
+            .iter()
+            .filter_map(|result| result.as_ref().err())
+            .all(|error| error.contains(KEYS_EXIST_MARKER)));
+        let retained = entry.get_password().unwrap();
+        assert!(retained == "first isolated keys" || retained == "second isolated keys");
+        save_keys_in_entry(entry, &retained, false).expect("idempotent create remains accepted");
         entry
             .delete_credential()
             .expect("delete isolated native credential-store entry");

@@ -136,7 +136,7 @@ fn render_batch(lines: &[String]) -> String {
 /// the precedent: this command is one of the two custom commands the AI-dialog
 /// capability may invoke, so its narrow payload prevents that secondary
 /// webview from choosing a filesystem target.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn app_log_append<R: Runtime>(app: AppHandle<R>, lines: Vec<String>) -> Result<(), String> {
     if lines.is_empty() {
         return Ok(());
@@ -166,7 +166,7 @@ pub(crate) fn append_rendered_lines(path: &Path, lines: &[String]) -> Result<(),
 /// The last `max_lines` records, for Settings → Advanced → Copy diagnostics.
 /// Reads only the live generation: a file that just rolled yields a short tail,
 /// which is the honest answer rather than a stitched-together one.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn app_log_tail<R: Runtime>(
     app: AppHandle<R>,
     max_lines: usize,

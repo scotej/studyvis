@@ -85,7 +85,7 @@ pub struct SessionJournal {
     pub truncated: bool,
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn session_journal_append<R: Runtime>(
     app: AppHandle<R>,
     session_id: String,
@@ -136,7 +136,7 @@ pub fn session_journal_append<R: Runtime>(
         .map_err(|e| format!("write journal {}: {e}", path.display()))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn session_journal_read<R: Runtime>(
     app: AppHandle<R>,
     session_id: String,

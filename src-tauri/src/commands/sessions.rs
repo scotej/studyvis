@@ -15,7 +15,7 @@ fn lock<'a>(
     state.0.lock().map_err(|e| format!("db poisoned: {e}"))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 #[allow(clippy::too_many_arguments)]
 pub fn sessions_insert(
     state: State<'_, DbPool>,
@@ -66,7 +66,7 @@ pub fn sessions_insert(
         .map_err(|e| e.to_string())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 #[allow(clippy::too_many_arguments)]
 pub fn sessions_insert_if_absent(
     state: State<'_, DbPool>,
@@ -109,13 +109,13 @@ pub fn sessions_insert_if_absent(
     sessions::insert_if_absent(&conn, &row).map_err(|e| e.to_string())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn sessions_list(state: State<'_, DbPool>) -> Result<Vec<sessions::SessionRow>, String> {
     let conn = lock(&state)?;
     sessions::list(&conn).map_err(|e| e.to_string())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn sessions_get(
     state: State<'_, DbPool>,
     id: String,
@@ -129,7 +129,7 @@ pub fn sessions_get(
 // so it is unlinked after that transaction commits. Deleting rows first means a
 // failure can only ever leave an orphaned journal (which the next regeneration
 // or clear-all removes), never a narrative whose evidence is already gone.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn sessions_delete<R: Runtime>(
     app: AppHandle<R>,
     state: State<'_, DbPool>,
@@ -143,7 +143,7 @@ pub fn sessions_delete<R: Runtime>(
         .map_err(|error| format!("SESSION_JOURNAL_CLEANUP_INCOMPLETE: {error}"))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn sessions_clear_all<R: Runtime>(
     app: AppHandle<R>,
     state: State<'_, DbPool>,
@@ -159,7 +159,7 @@ pub fn sessions_clear_all<R: Runtime>(
 // #236 — the post-session written timeline. `entries` is the JSON array the
 // frontend validated before persisting; this layer stores it verbatim, the same
 // way audit-event detail is stored.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn session_timeline_get(
     state: State<'_, DbPool>,
     session_id: String,
@@ -168,7 +168,7 @@ pub fn session_timeline_get(
     session_timelines::get(&conn, &session_id).map_err(|e| e.to_string())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn session_timeline_save(
     state: State<'_, DbPool>,
     session_id: String,
@@ -201,7 +201,7 @@ pub fn session_timeline_save(
     Ok(())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn audit_event_insert(
     state: State<'_, DbPool>,
     session_id: String,
@@ -223,7 +223,7 @@ pub fn audit_event_insert(
     audit_events::insert(&conn, &row).map_err(|e| e.to_string())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn audit_events_list_for_session(
     state: State<'_, DbPool>,
     session_id: String,
@@ -235,7 +235,7 @@ pub fn audit_events_list_for_session(
 // R7 — cross-session audit events for the local focus-insights view. The
 // frontend shapes them in the pure statsInsights seam; this command only
 // reads.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn audit_events_list_all(
     state: State<'_, DbPool>,
 ) -> Result<Vec<audit_events::AuditEventRow>, String> {

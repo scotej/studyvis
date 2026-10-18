@@ -6,11 +6,15 @@
 
 use std::io::Read;
 use std::path::Path;
+use std::sync::Mutex;
 
 use serde::Serialize;
 use tauri::State;
 
 use crate::db::{friends, DbPool};
+
+// #404: independent worker calls can export to the same chosen destination.
+static BACKUP_WRITE_LOCK: Mutex<()> = Mutex::new(());
 
 fn lock<'a>(
     state: &'a State<'_, DbPool>,
@@ -20,15 +24,16 @@ fn lock<'a>(
 
 // These commands hold a `std::sync::MutexGuard` for their entire body. Keeping
 // them sync (no `async`) means a future caller cannot accidentally `.await`
-// across the lock and produce a deadlock. Tauri runs sync commands on its IPC
-// thread pool, which matches the rusqlite blocking call shape.
-#[tauri::command]
+// across the lock and produce a deadlock. #404: explicitly opt into Tauri
+// async dispatch so these synchronous bodies run on runtime workers, never
+// inline on the native GUI thread. The database mutex still serializes them.
+#[tauri::command(async)]
 pub fn friends_list(state: State<'_, DbPool>) -> Result<Vec<friends::Friend>, String> {
     let conn = lock(&state)?;
     friends::list(&conn).map_err(|e| e.to_string())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn friends_add(
     state: State<'_, DbPool>,
     ed_pubkey: String,
@@ -40,14 +45,14 @@ pub fn friends_add(
     friends::add(&conn, &ed_pubkey, &x_pubkey, &name, ts).map_err(|e| e.to_string())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn friends_remove(state: State<'_, DbPool>, ed_pubkey: String) -> Result<(), String> {
     let conn = lock(&state)?;
     friends::remove(&conn, &ed_pubkey).map_err(|e| e.to_string())?;
     Ok(())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn friends_update_last_studied(
     state: State<'_, DbPool>,
     ed_pubkey: String,
@@ -58,7 +63,7 @@ pub fn friends_update_last_studied(
     Ok(())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn friends_get_x_pubkey(
     state: State<'_, DbPool>,
     ed_pubkey: String,
@@ -275,7 +280,7 @@ fn import_rows(
 }
 
 #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
-#[tauri::command]
+#[tauri::command(async)]
 pub fn friends_export(state: State<'_, DbPool>, path: String) -> Result<u32, String> {
     let rows = {
         let conn = lock(&state)?;
@@ -287,9 +292,8 @@ pub fn friends_export(state: State<'_, DbPool>, path: String) -> Result<u32, Str
     if rows.is_empty() {
         return Ok(0);
     }
-    let my_x_priv = crate::commands::identity::load_x_priv()?;
+    let (my_x_priv, signing_key) = crate::commands::identity::load_backup_keys()?;
     let my_x_pub = crypto_box::SecretKey::from(my_x_priv).public_key();
-    let signing_key = crate::commands::identity::load_ed_signing_key()?;
     let bytes = encode_backup(&signing_key, my_x_pub.as_bytes(), &rows)?;
     if bytes.len() as u64 > MAX_BACKUP_FILE_BYTES {
         return Err(backup_too_large_error(
@@ -297,27 +301,33 @@ pub fn friends_export(state: State<'_, DbPool>, path: String) -> Result<u32, Str
             MAX_BACKUP_FILE_BYTES,
         ));
     }
+    write_backup_file(&path, &bytes)?;
+    Ok(rows.len() as u32)
+}
+
+fn write_backup_file(path: &str, bytes: &[u8]) -> Result<(), String> {
+    let _guard = BACKUP_WRITE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     // #47 A4 — atomic like identity_save_record's tmp+rename (I16 pattern): a
     // crash mid-write must not leave a truncated .svfb at the chosen path
     // that a later import would reject as corrupt.
     let tmp = format!("{path}.tmp");
-    std::fs::write(&tmp, &bytes).map_err(|e| format!("write {tmp}: {e}"))?;
-    std::fs::rename(&tmp, &path).map_err(|e| {
+    std::fs::write(&tmp, bytes).map_err(|e| format!("write {tmp}: {e}"))?;
+    std::fs::rename(&tmp, path).map_err(|e| {
         let _ = std::fs::remove_file(&tmp);
         format!("rename {tmp} -> {path}: {e}")
     })?;
-    Ok(rows.len() as u32)
+    Ok(())
 }
 
 #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
-#[tauri::command]
+#[tauri::command(async)]
 pub fn friends_import(
     state: State<'_, DbPool>,
     path: String,
 ) -> Result<FriendsImportResult, String> {
     let bytes = read_backup_bounded(Path::new(&path))?;
-    let my_x_priv = crate::commands::identity::load_x_priv()?;
-    let verifying_key = crate::commands::identity::load_ed_signing_key()?.verifying_key();
+    let (my_x_priv, signing_key) = crate::commands::identity::load_backup_keys()?;
+    let verifying_key = signing_key.verifying_key();
     let rows = decode_backup(&verifying_key, &my_x_priv, &bytes)?;
     let mut conn = lock(&state)?;
     import_rows(&mut conn, &rows).map_err(|e| e.to_string())
@@ -329,6 +339,46 @@ mod tests {
     use crate::db::migrations;
     use ed25519_dalek::{SigningKey, VerifyingKey};
     use rusqlite::Connection;
+
+    #[test]
+    fn concurrent_exports_to_one_path_remain_atomic_and_all_complete() {
+        let dir = std::env::temp_dir().join(format!(
+            "studyvis-backup-writers-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("friends.svfriends");
+        let destination = path.to_str().unwrap();
+        write_backup_file(destination, &[0; 256]).unwrap();
+        let start = std::sync::Barrier::new(9);
+        std::thread::scope(|scope| {
+            let mut writers = Vec::new();
+            for writer in 1..=8u8 {
+                let start = &start;
+                writers.push(scope.spawn(move || {
+                    start.wait();
+                    for _ in 0..32 {
+                        write_backup_file(destination, &[writer; 256]).unwrap();
+                    }
+                }));
+            }
+            start.wait();
+            for _ in 0..256 {
+                let saved = std::fs::read(&path).unwrap();
+                assert_eq!(saved.len(), 256);
+                assert!(saved.iter().all(|byte| *byte == saved[0]));
+            }
+            for writer in writers {
+                writer.join().unwrap();
+            }
+        });
+        assert!(!std::path::Path::new(&format!("{destination}.tmp")).exists());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 
     fn fresh() -> Connection {
         let mut conn = Connection::open_in_memory().expect("open in-memory");

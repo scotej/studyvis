@@ -249,7 +249,7 @@ pub struct ModelPaths {
     pub mmproj_path: String,
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn model_paths<R: Runtime>(app: AppHandle<R>, model_id: String) -> Result<ModelPaths, String> {
     let dir = model_dir(&app, &model_id)?;
     Ok(ModelPaths {
@@ -290,7 +290,7 @@ fn file_state(path: &Path) -> ModelFileState {
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn model_install_state<R: Runtime>(
     app: AppHandle<R>,
     model_id: String,
@@ -414,7 +414,7 @@ fn hf_token_entry() -> Result<Entry, String> {
 }
 
 #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
-#[tauri::command]
+#[tauri::command(async)]
 pub fn hf_token_save(token: String) -> Result<(), String> {
     let trimmed = token.trim();
     if trimmed.is_empty() {
@@ -429,7 +429,7 @@ pub fn hf_token_save(token: String) -> Result<(), String> {
 }
 
 #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
-#[tauri::command]
+#[tauri::command(async)]
 pub fn hf_token_present() -> Result<bool, String> {
     match hf_token_entry()?.get_password() {
         Ok(s) => Ok(!s.is_empty()),
@@ -442,7 +442,7 @@ pub fn hf_token_present() -> Result<bool, String> {
 }
 
 #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
-#[tauri::command]
+#[tauri::command(async)]
 pub fn hf_token_clear() -> Result<(), String> {
     match hf_token_entry()?.delete_credential() {
         Ok(()) => Ok(()),
