@@ -1,3 +1,4 @@
+import { mirrorCountdownDeadlines } from './sessionBridge'
 import {
   useCallback,
   useEffect,
@@ -75,12 +76,23 @@ function pairingErrorCopy(error: string | null): string {
   }
 }
 
+const monotonicNow = () => performance.now()
+const frozenNow = () => 0
+
 export function MirrorSession({ connection }: MirrorSessionProps) {
   const state = useSyncExternalStore(connection.subscribe, connection.getState)
   const snapshot = useMemo(
     () => readMirrorSnapshot(state.snapshot),
     [state.snapshot]
   )
+  const countdowns = snapshot
+    ? mirrorCountdownDeadlines(snapshot, state.snapshotReceivedAtMono)
+    : null
+  const countdownNow = countdowns
+    ? countdowns.live
+      ? monotonicNow
+      : frozenNow
+    : undefined
   const report = useMemo(() => readMirrorReport(state.report), [state.report])
   const hasReport = report !== null
   const connected =
@@ -813,6 +825,10 @@ export function MirrorSession({ connection }: MirrorSessionProps) {
           <fieldset disabled={!connected}>
             <SessionTimer
               {...snapshot.pomodoro}
+              endsAt={
+                countdowns ? countdowns.pomodoro : snapshot.pomodoro.endsAt
+              }
+              now={countdownNow}
               onStart={(args) => control({ type: 'pomodoro_start', args })}
               onStop={() => control({ type: 'pomodoro_stop' })}
             />
@@ -861,7 +877,10 @@ export function MirrorSession({ connection }: MirrorSessionProps) {
         />
       ) : null}
       {snapshot.breakEndsAt ? (
-        <BreakCountdownBadge endsAt={snapshot.breakEndsAt} />
+        <BreakCountdownBadge
+          endsAt={countdowns ? countdowns.break : snapshot.breakEndsAt}
+          now={countdownNow}
+        />
       ) : null}
       <ScreenShareViewer
         open={expandedStream !== null}

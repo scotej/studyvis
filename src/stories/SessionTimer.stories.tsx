@@ -1,8 +1,11 @@
 import { useState } from 'react'
+import { expect, within } from 'storybook/test'
+import { BreakCountdownBadge } from '@/components/BreakCountdownBadge'
 import type { Meta, StoryObj } from '@storybook/react-vite'
 
 import { SessionTimer } from '@/components/SessionTimer'
 import type { PomodoroPreset } from '@/lib/pomodoro-types'
+import { strings } from '@/strings'
 
 const NOW = Date.now()
 
@@ -108,5 +111,27 @@ export const Interactive: Story = {
         }}
       />
     )
+  },
+}
+
+export const CompanionMonotonicClock: Story = {
+  args: {
+    phase: 'work-25',
+    preset: '25/5',
+    endsAt: 1_505_000,
+    now: () => 5000,
+  },
+  render: (args) => (
+    <>
+      <SessionTimer {...args} />
+      <BreakCountdownBadge endsAt={305_000} now={() => 5000} />
+    </>
+  ),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getByText('25:00')).toBeInTheDocument()
+    await expect(
+      canvas.getByText(strings.session.badges.breakRemaining('5:00'))
+    ).toBeInTheDocument()
   },
 }

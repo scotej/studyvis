@@ -7,6 +7,7 @@ import { readMirrorReport, type MirrorReport } from './reportValidation'
 export type BrowserConnectionState = {
   status: 'pairing' | 'connecting' | 'connected' | 'disconnected'
   snapshot: unknown | null
+  snapshotReceivedAtMono?: number
   streams: Record<string, MediaStream>
   error: string | null
   report: MirrorReport | null
@@ -185,6 +186,7 @@ export function createBrowserConnection(): BrowserConnection {
           completedSessionId = null
           update({
             snapshot,
+            snapshotReceivedAtMono: performance.now(),
             report: null,
             reportCached: false,
             status: 'connected',

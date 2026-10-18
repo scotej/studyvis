@@ -85,6 +85,7 @@ export type MirrorTile = {
 
 export type MirrorSessionSnapshot = {
   version: 1
+  countdowns?: { pomodoroMs: number | null; breakMs: number | null }
   sessionId: string
   status: 'active' | 'ended'
   self: { edPubkeyHex: string; displayName: string }
@@ -304,6 +305,17 @@ export function readMirrorSnapshot(
     'sessionFull',
   ])
     if (typeof value[key] !== 'boolean') return null
+  if (
+    value.countdowns !== undefined &&
+    (!record(value.countdowns) ||
+      !nullableNumber(value.countdowns.pomodoroMs) ||
+      !nullableNumber(value.countdowns.breakMs) ||
+      (typeof value.countdowns.pomodoroMs === 'number' &&
+        value.countdowns.pomodoroMs < 0) ||
+      (typeof value.countdowns.breakMs === 'number' &&
+        value.countdowns.breakMs < 0))
+  )
+    return null
   if (
     (value.controlError !== undefined &&
       value.controlError !== null &&
@@ -528,4 +540,25 @@ export function blobToBase64(blob: Blob): Promise<string> {
 
 export function base64ToBytes(data: string): Uint8Array<ArrayBuffer> {
   return Uint8Array.from(atob(data), (character) => character.charCodeAt(0))
+}
+
+// Relative durations cross the LAN; only this browser's monotonic clock ticks
+// them. Cached snapshots restored after reload freeze until reconnect.
+export function mirrorCountdownDeadlines(
+  snapshot: Pick<MirrorSessionSnapshot, 'countdowns'>,
+  receivedAtMono: number | undefined
+) {
+  if (!snapshot.countdowns) return null
+  const origin = receivedAtMono ?? 0
+  return {
+    pomodoro:
+      snapshot.countdowns.pomodoroMs === null
+        ? null
+        : origin + snapshot.countdowns.pomodoroMs,
+    break:
+      snapshot.countdowns.breakMs === null
+        ? null
+        : origin + snapshot.countdowns.breakMs,
+    live: receivedAtMono !== undefined,
+  }
 }
