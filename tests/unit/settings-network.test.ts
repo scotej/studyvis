@@ -91,3 +91,42 @@ describe('F3 TURN server validation', () => {
     ).toEqual({ url: 'turn:turn.example:3478', username: 'u', credential: 'c' })
   })
 })
+
+describe('complete TURN URI grammar (#378)', () => {
+  test.each([
+    'turn:relay.example',
+    'turn:relay.example:3478?transport=udp',
+    'turn:192.0.2.1:65535?transport=tcp',
+    'turn:[2001:db8::1]:3478',
+    'turn:[::ffff:192.0.2.1]?transport=udp',
+    'turns:relay.example:443?transport=tcp',
+    'turns:[2001:db8::1]',
+    'TURN:relay.example?transport=UDP',
+  ])('accepts %s', (url) => {
+    expect(isValidTurnUrl(url)).toBe(true)
+  })
+
+  test.each([
+    'turn://relay.example',
+    'turn:host:invalid',
+    'turn:[bad',
+    'turn:[bad]',
+    'turn:[1:2:3]',
+    'turn:host?transport=bogus',
+    'turn:host:99999',
+    'turn:host:0',
+    'turn:host:',
+    'turn:host/path',
+    'turn:host#fragment',
+    'turn:user@host',
+    'turn:host?transport=udp&extra=1',
+    'turn:host%xy',
+    'turn:host with space',
+    'turn:',
+  ])('rejects %s in the form and normalizer', (url) => {
+    expect(isValidTurnUrl(url)).toBe(false)
+    expect(
+      normalizeTurnServer({ url, username: 'test', credential: 'test' })
+    ).toBeNull()
+  })
+})

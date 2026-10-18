@@ -346,3 +346,36 @@ describe('hydrateValuesFromStore — audio preferences (#47 B4)', () => {
     expect(values.peerVolumes).toEqual({ a: 1, b: 0, d: 0.7 })
   })
 })
+
+describe('TURN hydration (#378)', () => {
+  test.each([
+    'turn://relay.example',
+    'turn:host:invalid',
+    'turn:[bad',
+    'turn:host/path',
+    'turn:host?transport=bogus',
+  ])('drops malformed persisted URI %s', async (url) => {
+    const { values } = await hydrateValuesFromStore(
+      fakeStore({ turn_server: { url, username: 'test', credential: 'test' } }),
+      makeMigrator(null)
+    )
+    expect(values.turnServer).toBeNull()
+  })
+  test('normalizes retained credentials and URI on hydration', async () => {
+    const { values } = await hydrateValuesFromStore(
+      fakeStore({
+        turn_server: {
+          url: ' turns:[2001:db8::1]:443?transport=tcp ',
+          username: ' test ',
+          credential: ' test ',
+        },
+      }),
+      makeMigrator(null)
+    )
+    expect(values.turnServer).toEqual({
+      url: 'turns:[2001:db8::1]:443?transport=tcp',
+      username: 'test',
+      credential: 'test',
+    })
+  })
+})
