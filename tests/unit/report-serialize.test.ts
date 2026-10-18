@@ -71,6 +71,24 @@ function headingIndex(text: string, heading: string): number {
 }
 
 describe('serializeReportToText section order (R5)', () => {
+  test.each([-300_000, 60_000])(
+    'topic and audit export share the saved start with first offset %s (#416)',
+    (offset) => {
+      const text = serializeReportToText(
+        buildData(baseSession({ declared_topic: 'Maths' }), [
+          evt(offset < 0 ? ALICE : ME, 'joined', offset),
+          evt(ME, 'topic_change', 120_000, {
+            previous_topic: 'Maths',
+            new_topic: 'Physics',
+          }),
+        ])
+      )
+      expect(text).toMatch(/Physics.*02:00|02:00.*Physics/)
+      expect(text).not.toMatch(/Physics.*07:00|Physics.*01:00/)
+      expect(text.match(/02:00/g)?.length).toBeGreaterThanOrEqual(2)
+    }
+  )
+
   test('renders a recovered unknown duration without fabricating zero minutes', () => {
     const text = serializeReportToText(
       buildData(

@@ -190,6 +190,27 @@ describe('deriveTopicTimeline', () => {
     ])
   })
 
+  test.each([-5 * 60_000, 60_000])(
+    'uses saved start despite a first audit offset of %s (#416)',
+    (firstOffset) => {
+      const events = [
+        evt(firstOffset < 0 ? 'peer' : 'me', 'joined', firstOffset),
+        evt('me', 'topic_change', 2 * 60_000, {
+          previous_topic: 'Maths',
+          new_topic: 'Physics',
+        }),
+      ]
+      const timeline = deriveTopicTimeline('Maths', events, 'me', START_TS)
+      expect(timeline).toEqual([
+        { topic: 'Maths', ts: START_TS, label: 'started' },
+        { topic: 'Physics', ts: START_TS + 120_000, label: '02:00' },
+      ])
+      expect(deriveTopicTimeline('Maths', events, 'me', null)[1].label).toBe(
+        firstOffset < 0 ? '07:00' : '01:00'
+      )
+    }
+  )
+
   test('uses sessions.declared_topic as the anchor when present', () => {
     const events: AuditEventRecord[] = [evt('A', 'joined', 0)]
     const timeline = deriveTopicTimeline('Maths', events)

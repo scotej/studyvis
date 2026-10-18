@@ -221,14 +221,25 @@ export type TopicTimelineEntry = {
 // the LOCAL user's ed_pubkey so a peer's broadcast `topic_set`/`topic_change`
 // (persisted locally) doesn't render as a phantom topic-change in the local
 // user's own timeline. The anchor (initialTopic) is already the local declared
-// topic and the start offset uses the whole session's first event (shared
-// session start), so only the change rows need scoping. Omitted → walks every
+// topic. The saved session start anchors offsets; legacy rows fall back to
+// the first audit event, so only the change rows need scoping. Omitted → walks every
 // signer's topic events (raw-transform tests); null means the owner is unknown
 // and excludes all signer-specific transitions.
+export function reportTimelineOrigin(
+  startedAt: number | null | undefined,
+  events: ReadonlyArray<AuditEventRecord>
+): number {
+  return (
+    startedAt ??
+    (events.length > 0 ? Math.min(...events.map((event) => event.ts)) : 0)
+  )
+}
+
 export function deriveTopicTimeline(
   initialTopic: string | null,
   events: ReadonlyArray<AuditEventRecord>,
-  filterWho?: string | null
+  filterWho?: string | null,
+  startedAt?: number | null
 ): TopicTimelineEntry[] {
   const only = filterWho?.trim().toLowerCase()
   const topicEvents = events
@@ -243,7 +254,7 @@ export function deriveTopicTimeline(
       : topicEvents[0]
         ? (extractPreviousTopic(topicEvents[0]) ?? 'Studying')
         : 'Studying'
-  const startTs = events.length > 0 ? Math.min(...events.map((e) => e.ts)) : 0
+  const startTs = reportTimelineOrigin(startedAt, events)
   const out: TopicTimelineEntry[] = [
     { topic: anchor, ts: startTs, label: 'started' },
   ]

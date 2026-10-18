@@ -67,6 +67,7 @@ import {
   deriveBreaksSummary,
   deriveTopDistractions,
   deriveTopicTimeline,
+  reportTimelineOrigin,
   formatOffset,
   groupTimelineByWho,
   sampleQualitySummary,
@@ -358,8 +359,13 @@ export function ReportView({
   )
   const topicTimeline = useMemo(
     () =>
-      deriveTopicTimeline(session.declared_topic, auditEvents, myEdPubkeyHex),
-    [session.declared_topic, auditEvents, myEdPubkeyHex]
+      deriveTopicTimeline(
+        session.declared_topic,
+        auditEvents,
+        myEdPubkeyHex,
+        session.started_at
+      ),
+    [session.declared_topic, session.started_at, auditEvents, myEdPubkeyHex]
   )
   const breaksSummary = useMemo(
     () => deriveBreaksSummary(auditEvents),
@@ -503,9 +509,7 @@ export function ReportView({
   // session.started_at was null — Copilot review on PR #27 caught this.
   // Use sessions.started_at when present; otherwise pick the earliest
   // audit-event ts; default to 0 so formatOffset clamps cleanly.
-  const timelineAnchor =
-    startedAt ??
-    (auditEvents.length > 0 ? Math.min(...auditEvents.map((e) => e.ts)) : 0)
+  const timelineAnchor = reportTimelineOrigin(startedAt, auditEvents)
 
   return (
     <main
