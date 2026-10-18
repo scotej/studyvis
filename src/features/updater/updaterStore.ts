@@ -94,6 +94,7 @@ async function discard(update: Update): Promise<void> {
 
 // An off→on toggle must not revive a background check started before the opt-out.
 let autoUpdateGeneration = 0
+let activeCheck: { generation: number; userInitiated: boolean } | null = null
 useSettingsStore.subscribe((state, previous) => {
   if (state.values.autoUpdateEnabled !== previous.values.autoUpdateEnabled) {
     autoUpdateGeneration += 1
@@ -154,28 +155,39 @@ export const useUpdaterStore = create<UpdaterState>((set, get) => ({
 
   checkNow: async ({ userInitiated = false } = {}) => {
     const generation = autoUpdateGeneration
-    const allowed = () =>
+    const eligible = () =>
       userInitiated ||
       (useSettingsStore.getState().values.autoUpdateEnabled &&
         autoUpdateGeneration === generation)
-    if (!allowed()) return
+    if (!eligible()) return
     const { status } = get()
-    // A check already in flight, or an update already staged, wins — a second
-    // pass would re-download bytes we have. Blocked is permanent for this
-    // process (see UpdaterStatus), so re-checking it would only re-learn it.
+    // Invalidated background requests cannot hold the re-enabled scheduler's
+    // only near-term opportunity while their network/cleanup awaits finish.
+    // Manual checks and downloads already underway retain their ownership.
     if (
-      status === 'checking' ||
+      (status === 'checking' &&
+        (!activeCheck ||
+          activeCheck.userInitiated ||
+          activeCheck.generation === generation)) ||
       status === 'downloading' ||
       status === 'ready' ||
       status === 'blocked'
     )
       return
 
+    const attempt = { generation, userInitiated }
+    activeCheck = attempt
+    const ownsCheck = () => activeCheck === attempt
+    const allowed = () => ownsCheck() && eligible()
     set({ status: 'checking', errorKind: null })
     let update: Update | null
     try {
       update = await deps.check()
     } catch (err) {
+      if (!allowed()) {
+        if (ownsCheck()) set({ status: 'idle' })
+        return
+      }
       // Silent in the background path: no network is the common case on a
       // laptop that just woke up, and it isn't the user's problem — so it is
       // a warning there and an error only when the user asked.
@@ -187,7 +199,7 @@ export const useUpdaterStore = create<UpdaterState>((set, get) => ({
 
     if (!allowed()) {
       if (update) await discard(update)
-      set({ status: 'idle' })
+      if (ownsCheck()) set({ status: 'idle' })
       return
     }
 
@@ -209,7 +221,7 @@ export const useUpdaterStore = create<UpdaterState>((set, get) => ({
     }
     if (!allowed()) {
       await discard(update)
-      set({ status: 'idle' })
+      if (ownsCheck()) set({ status: 'idle' })
       return
     }
     if (!context.updatable) {
@@ -235,7 +247,7 @@ export const useUpdaterStore = create<UpdaterState>((set, get) => ({
       // The next check re-finds this release from scratch, so this handle is
       // abandoned rather than held — release it with the rest of them.
       await discard(update)
-      set({ status: 'idle' })
+      if (ownsCheck()) set({ status: 'idle' })
       return
     }
 

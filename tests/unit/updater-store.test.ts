@@ -44,6 +44,16 @@ function fakeUpdate(
   }
 }
 
+function barrier() {
+  let resolve!: () => void
+  let reject!: (error: Error) => void
+  const promise = new Promise<void>((done, fail) => {
+    resolve = done
+    reject = fail
+  })
+  return { promise, resolve, reject }
+}
+
 function resetStore() {
   useUpdaterStore.setState({
     status: 'idle',
@@ -536,6 +546,175 @@ describe('background opt-out during a check (#376)', () => {
     setUpdaterDeps({ check: async () => fresh as never })
     await useUpdaterStore.getState().checkNow()
     expect(fresh.download).toHaveBeenCalledOnce()
+  })
+
+  test.each(
+    (['release', 'context'] as const).flatMap((phase) =>
+      (['success', 'failure'] as const).flatMap((outcome) =>
+        (['checking', 'ready'] as const).map((freshStatus) => ({
+          phase,
+          outcome,
+          freshStatus,
+        }))
+      )
+    )
+  )(
+    'a fresh scheduled check survives stale $phase $outcome while $freshStatus',
+    async ({ phase, outcome, freshStatus }) => {
+      const entered = barrier()
+      const staleResult = barrier()
+      const freshResult = barrier()
+      const stale = fakeUpdate({ version: '2.1.0' })
+      const fresh = fakeUpdate({ version: '2.2.0', body: 'fresh notes' })
+      let requests = 0
+      let contexts = 0
+      const check = vi.fn(async () => {
+        if (requests++ === 0) {
+          if (phase === 'release') {
+            entered.resolve()
+            await staleResult.promise
+          }
+          return stale as never
+        }
+        await freshResult.promise
+        return fresh as never
+      })
+      setUpdaterDeps({
+        check,
+        installContext: async () => {
+          if (phase === 'context' && contexts++ === 0) {
+            entered.resolve()
+            await staleResult.promise
+            return { updatable: false, reason: 'stale context' }
+          }
+          return { updatable: true, reason: null }
+        },
+      })
+      const staleChecking = useUpdaterStore.getState().checkNow()
+      await entered.promise
+      await useSettingsStore.getState().setAutoUpdateEnabled(false)
+      await useSettingsStore.getState().setAutoUpdateEnabled(true)
+
+      // UpdaterBoot's new 20-second opportunity must run BEFORE the old
+      // request settles, rather than being lost until the six-hour repeat.
+      const freshChecking = useUpdaterStore.getState().checkNow()
+      expect(check).toHaveBeenCalledTimes(2)
+      if (freshStatus === 'ready') {
+        freshResult.resolve()
+        await freshChecking
+      }
+      if (outcome === 'failure') staleResult.reject(new Error('stale failure'))
+      else staleResult.resolve()
+      await staleChecking
+
+      expect(useUpdaterStore.getState().status).toBe(freshStatus)
+      expect(useUpdaterStore.getState().errorKind).toBeNull()
+      expect(stale.download).not.toHaveBeenCalled()
+      expect(stale.close).toHaveBeenCalledTimes(
+        phase === 'release' && outcome === 'failure' ? 0 : 1
+      )
+      if (freshStatus === 'checking') {
+        freshResult.resolve()
+        await freshChecking
+      }
+      expect(useUpdaterStore.getState()).toMatchObject({
+        status: 'ready',
+        version: '2.2.0',
+        notes: 'fresh notes',
+        pending: fresh,
+      })
+      expect(fresh.download).toHaveBeenCalledOnce()
+      expect(fresh.close).not.toHaveBeenCalled()
+    }
+  )
+
+  test.each(['opt-out', 'session'] as const)(
+    'slow %s cleanup cannot reset a newer staged update',
+    async (reason) => {
+      const staleResult = barrier()
+      const closing = barrier()
+      const closeResult = barrier()
+      const stale = fakeUpdate()
+      stale.close.mockImplementation(async () => {
+        closing.resolve()
+        await closeResult.promise
+      })
+      const fresh = fakeUpdate({ version: '2.2.0' })
+      setUpdaterDeps({
+        check: async () => {
+          await staleResult.promise
+          return stale as never
+        },
+        isSessionActive: () => reason === 'session',
+      })
+      const staleChecking = useUpdaterStore.getState().checkNow()
+      if (reason === 'opt-out')
+        await useSettingsStore.getState().setAutoUpdateEnabled(false)
+      staleResult.resolve()
+      await closing.promise
+      if (reason === 'session')
+        await useSettingsStore.getState().setAutoUpdateEnabled(false)
+      await useSettingsStore.getState().setAutoUpdateEnabled(true)
+      setUpdaterDeps({
+        check: async () => fresh as never,
+        isSessionActive: () => false,
+      })
+      await useUpdaterStore.getState().checkNow()
+      closeResult.resolve()
+      await staleChecking
+      expect(stale.download).not.toHaveBeenCalled()
+      expect(stale.close).toHaveBeenCalledOnce()
+      expect(useUpdaterStore.getState()).toMatchObject({
+        status: 'ready',
+        version: '2.2.0',
+        pending: fresh,
+      })
+    }
+  )
+
+  test('toggling automatic updates preserves a download already underway', async () => {
+    const downloading = barrier()
+    const downloaded = barrier()
+    const update = fakeUpdate({
+      onDownload: async () => {
+        downloading.resolve()
+        await downloaded.promise
+      },
+    })
+    const check = vi.fn(async () => update as never)
+    setUpdaterDeps({ check })
+    const checking = useUpdaterStore.getState().checkNow()
+    await downloading.promise
+    await useSettingsStore.getState().setAutoUpdateEnabled(false)
+    await useSettingsStore.getState().setAutoUpdateEnabled(true)
+    await useUpdaterStore.getState().checkNow()
+    expect(check).toHaveBeenCalledOnce()
+    downloaded.resolve()
+    await checking
+    expect(useUpdaterStore.getState().pending).toBe(update)
+    expect(useUpdaterStore.getState().status).toBe('ready')
+    expect(update.close).not.toHaveBeenCalled()
+  })
+
+  test('toggling automatic updates preserves a manual check already underway', async () => {
+    const release = barrier()
+    const update = fakeUpdate()
+    const check = vi.fn(async () => {
+      await release.promise
+      return update as never
+    })
+    setUpdaterDeps({ check })
+    const checking = useUpdaterStore
+      .getState()
+      .checkNow({ userInitiated: true })
+    await useSettingsStore.getState().setAutoUpdateEnabled(false)
+    await useSettingsStore.getState().setAutoUpdateEnabled(true)
+    await useUpdaterStore.getState().checkNow()
+    expect(check).toHaveBeenCalledOnce()
+    release.resolve()
+    await checking
+    expect(update.download).toHaveBeenCalledOnce()
+    expect(useUpdaterStore.getState().pending).toBe(update)
   })
 
   test('a manual check still downloads with automatic updates disabled', async () => {
