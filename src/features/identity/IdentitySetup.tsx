@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useLayoutEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 
 import { BipBackupPanel } from '@/components/BipBackupPanel'
@@ -37,13 +37,23 @@ export function IdentitySetup({
 }: IdentitySetupProps) {
   const [acknowledged, setAcknowledged] = useState(false)
   const [submitting, setSubmitting] = useState(false)
+  const lifetime = useRef({ active: true })
+  useLayoutEffect(() => {
+    const operation = { active: true }
+    lifetime.current = operation
+    return () => {
+      operation.active = false
+    }
+  }, [])
 
   async function handleContinue() {
     if (!acknowledged || submitting) return
+    const operation = lifetime.current
     setSubmitting(true)
     try {
       await onConfirm()
     } catch (err) {
+      if (!operation.active) return
       // The mnemonic is in scope on this screen. It is never a field here,
       // and the logger redacts a BIP39-shaped run out of err.message besides.
       log.error('create.failed', { op: 'identity_create', err })
@@ -56,7 +66,7 @@ export function IdentitySetup({
             : strings.common.errors.savingIdentity
       )
     } finally {
-      setSubmitting(false)
+      if (operation.active) setSubmitting(false)
     }
   }
 
@@ -66,7 +76,11 @@ export function IdentitySetup({
       progress={progress}
       secondaryAction={
         onBack
-          ? { label: strings.common.actions.back, onClick: onBack }
+          ? {
+              label: strings.common.actions.back,
+              onClick: onBack,
+              disabled: submitting,
+            }
           : undefined
       }
       primaryAction={{
