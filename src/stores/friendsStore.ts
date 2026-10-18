@@ -42,7 +42,7 @@ export type PeerStudiedAt = { edPubkey: string; ts: number }
 
 async function persistStudiedAt(
   entries: readonly PeerStudiedAt[],
-  setFriends: (friends: Friend[]) => void
+  refresh: () => Promise<void>
 ): Promise<void> {
   const latestByPeer = new Map<string, number>()
   for (const { edPubkey, ts } of entries) {
@@ -55,51 +55,89 @@ async function persistStudiedAt(
     )
   )
   try {
-    const friends = await listFriends()
-    setFriends(friends)
+    await refresh()
   } catch {
     // best-effort: leave list as-is; next mount/load will resync.
   }
 }
 
-export const useFriendsStore = create<FriendsState>((set, get) => ({
-  friends: [],
-  status: 'idle',
-  error: null,
+export const useFriendsStore = create<FriendsState>((set) => {
+  let mutationRevision = 0
+  let readGeneration = 0
+  let loadGeneration = 0
+  let latestRead: Promise<void> = Promise.resolve()
 
-  load: async () => {
-    if (get().status === 'loading') return
-    set({ status: 'loading', error: null })
-    try {
-      const friends = await listFriends()
-      set({ friends, status: 'ready' })
-    } catch (err) {
-      // Tauri rejects with a plain string — storing it verbatim would hand
-      // raw rusqlite text to whichever surface renders `error` next. Keep
-      // the raw value in the log; the store carries friendly copy.
-      log.error('list.failed', { cmd: 'friends_list', err })
-      set({ status: 'error', error: strings.friends.loadError })
+  // #384 — a snapshot may predate a completed write even when its IPC result
+  // arrives later. Retry across mutations; superseded readers await the latest
+  // read so their callers never mistake an early no-op for a completed resync.
+  const refresh = (): Promise<void> => {
+    const generation = ++readGeneration
+    const read = async () => {
+      for (;;) {
+        const revision = mutationRevision
+        let friends: Friend[]
+        try {
+          friends = await listFriends()
+        } catch (err) {
+          if (generation !== readGeneration) return latestRead
+          throw err
+        }
+        if (generation !== readGeneration) return latestRead
+        if (revision !== mutationRevision) continue
+        set({ friends })
+        return
+      }
     }
-  },
+    latestRead = read()
+    return latestRead
+  }
 
-  add: async (edPubkey, xPubkey, name, ts) => {
-    await dbAddFriend(edPubkey, xPubkey, name, ts)
-    const friends = await listFriends()
-    set({ friends })
-  },
+  const refreshAfterMutation = () => {
+    mutationRevision++
+    return refresh()
+  }
 
-  remove: async (edPubkey) => {
-    await dbRemoveFriend(edPubkey)
-    set((state) => ({
-      friends: state.friends.filter((f) => f.ed_pubkey_hex !== edPubkey),
-    }))
-  },
+  return {
+    friends: [],
+    status: 'idle',
+    error: null,
 
-  markStudied: async (edPubkeys, ts) =>
-    persistStudiedAt(
-      edPubkeys.map((edPubkey) => ({ edPubkey, ts })),
-      (friends) => set({ friends })
-    ),
-  markStudiedAt: async (entries) =>
-    persistStudiedAt(entries, (friends) => set({ friends })),
-}))
+    load: async () => {
+      const generation = ++loadGeneration
+      set({ status: 'loading', error: null })
+      try {
+        await refresh()
+        if (generation === loadGeneration) set({ status: 'ready', error: null })
+      } catch (err) {
+        // Tauri rejects with a plain string — storing it verbatim would hand
+        // raw rusqlite text to whichever surface renders `error` next. Keep
+        // the raw value in the log; the store carries friendly copy.
+        log.error('list.failed', { cmd: 'friends_list', err })
+        if (generation === loadGeneration) {
+          set({ status: 'error', error: strings.friends.loadError })
+        }
+      }
+    },
+
+    add: async (edPubkey, xPubkey, name, ts) => {
+      await dbAddFriend(edPubkey, xPubkey, name, ts)
+      await refreshAfterMutation()
+    },
+
+    remove: async (edPubkey) => {
+      await dbRemoveFriend(edPubkey)
+      mutationRevision++
+      set((state) => ({
+        friends: state.friends.filter((f) => f.ed_pubkey_hex !== edPubkey),
+      }))
+    },
+
+    markStudied: async (edPubkeys, ts) =>
+      persistStudiedAt(
+        edPubkeys.map((edPubkey) => ({ edPubkey, ts })),
+        refreshAfterMutation
+      ),
+    markStudiedAt: async (entries) =>
+      persistStudiedAt(entries, refreshAfterMutation),
+  }
+})
