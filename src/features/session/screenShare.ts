@@ -182,6 +182,12 @@ export function startScreenShareController({
     if (!isScreenSharePayload(data)) return
     announced.add(peerId)
     if (data.sharing && data.stream_id) {
+      const previousScreenId = screenStreamIds.get(peerId)
+      if (previousScreenId && previousScreenId !== data.stream_id) {
+        const retired = retiredScreenStreamIds.get(peerId) ?? new Set<string>()
+        retired.add(previousScreenId)
+        retiredScreenStreamIds.set(peerId, retired)
+      }
       screenStreamIds.set(peerId, data.stream_id)
       retiredScreenStreamIds.get(peerId)?.delete(data.stream_id)
     } else {
@@ -252,10 +258,10 @@ export function startScreenShareController({
       // trystero's FIFO metadata can land on the camera. Once the content-
       // addressed id is known it is authoritative in both directions: the
       // matching stream is the screen and every non-matching stream is not.
-      if (announcedScreenId !== undefined) {
-        return announcedScreenId === stream.id ? 'screen' : 'camera'
-      }
+      if (announcedScreenId === stream.id) return 'screen'
+      // #382 — a late retired share must never enter the camera slot.
       if (retiredScreenStreamIds.get(peerId)?.has(stream.id)) return 'ignore'
+      if (announcedScreenId !== undefined) return 'camera'
       const metadataStreamId = screenStreamMetadataId(metadata)
       if (metadataStreamId !== undefined) {
         return metadataStreamId === stream.id ? 'screen' : 'camera'
