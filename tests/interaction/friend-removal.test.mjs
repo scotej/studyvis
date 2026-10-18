@@ -29,6 +29,7 @@ flushSync(() => createRoot(document.getElementById('root')).render(<><FriendsCat
 window.fixture = {
   settle: (fail = false) => fail ? pending[0].reject(new Error('Removal failed.')) : pending[0].resolve(),
   pending: () => pending.length,
+  onlyOne: () => flushSync(() => useFriendsStore.setState({ friends: [friends[0]] })),
 }
 `
 
@@ -76,6 +77,82 @@ for (const fail of [false, true]) {
         .getByRole('button', { name: 'Remove Bob', exact: true })
         .click()
       assert.match(await page.getByRole('dialog').textContent(), /Bob/)
+    })
+  })
+}
+
+for (const index of [0, 1, 2]) {
+  test(`successful removal of row ${index + 1} restores focus to the list heading`, async () => {
+    await withComponentBrowser(source, async (page) => {
+      const opener = page.getByRole('button', {
+        name: `Remove ${['Alice', 'Bob', 'Cara'][index]}`,
+        exact: true,
+      })
+      await opener.focus()
+      await page.keyboard.press('Enter')
+      await page
+        .getByRole('dialog')
+        .getByRole('button', { name: 'Remove', exact: true })
+        .focus()
+      await page.keyboard.press('Enter')
+      await page.evaluate(() => window.fixture.settle())
+      await page.getByRole('dialog').waitFor({ state: 'hidden' })
+      await page.waitForFunction(() => document.activeElement?.tagName === 'H2')
+      assert.equal(
+        await page.evaluate(() => document.activeElement?.textContent),
+        'Friends'
+      )
+    })
+  })
+}
+
+test('removing the final friend still restores heading focus', async () => {
+  await withComponentBrowser(source, async (page) => {
+    await page.evaluate(() => window.fixture.onlyOne())
+    await page
+      .getByRole('button', { name: 'Remove Alice', exact: true })
+      .focus()
+    await page.keyboard.press('Enter')
+    await page
+      .getByRole('dialog')
+      .getByRole('button', { name: 'Remove', exact: true })
+      .click()
+    await page.evaluate(() => window.fixture.settle())
+    await page.getByRole('dialog').waitFor({ state: 'hidden' })
+    await page.waitForFunction(() => document.activeElement?.tagName === 'H2')
+    assert.equal(
+      await page.getByRole('button', { name: /^Remove / }).count(),
+      0
+    )
+  })
+})
+
+for (const fail of [false, true]) {
+  test(`${fail ? 'failed removal then cancel' : 'cancellation'} restores the surviving opener`, async () => {
+    await withComponentBrowser(source, async (page) => {
+      const opener = page.getByRole('button', {
+        name: 'Remove Bob',
+        exact: true,
+      })
+      await opener.focus()
+      await page.keyboard.press('Enter')
+      if (fail) {
+        await page
+          .getByRole('dialog')
+          .getByRole('button', { name: 'Remove', exact: true })
+          .click()
+        await page.evaluate(() => window.fixture.settle(true))
+        await page.getByText('Removal failed.', { exact: true }).waitFor()
+      }
+      await page
+        .getByRole('dialog')
+        .getByRole('button', { name: 'Cancel', exact: true })
+        .click()
+      await page.getByRole('dialog').waitFor({ state: 'hidden' })
+      await page.waitForFunction(
+        () =>
+          document.activeElement?.getAttribute('aria-label') === 'Remove Bob'
+      )
     })
   })
 }

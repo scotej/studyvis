@@ -53,6 +53,9 @@ export function FriendsCategory({ presence }: FriendsCategoryProps) {
   const [pendingRemoval, setPendingRemoval] = useState<Friend | null>(null)
   const [removing, setRemoving] = useState(false)
   const removalInFlight = useRef(false)
+  const removalOpener = useRef<HTMLButtonElement | null>(null)
+  const removalSucceeded = useRef(false)
+  const friendsHeading = useRef<HTMLHeadingElement | null>(null)
   const [sessions, setSessions] = useState<readonly SessionRecord[]>([])
   const [studyStatus, setStudyStatus] = useState<StudyHistoryStatus>('loading')
   const copy = strings.settings.friends
@@ -108,6 +111,7 @@ export function FriendsCategory({ presence }: FriendsCategoryProps) {
           pendingRemoval.display_name?.trim() || copy.defaultFriendName
         )
       )
+      removalSucceeded.current = true
       setPendingRemoval((current) =>
         current?.ed_pubkey_hex === pendingRemoval.ed_pubkey_hex ? null : current
       )
@@ -121,13 +125,31 @@ export function FriendsCategory({ presence }: FriendsCategoryProps) {
     }
   }, [pendingRemoval, remove, copy])
 
+  const restoreRemovalFocus = useCallback((event: Event) => {
+    // #399 — a successful removal deletes its opener. The surviving list
+    // heading is a deliberate, stable point from which to continue browsing.
+    event.preventDefault()
+    if (removalSucceeded.current || !removalOpener.current?.isConnected) {
+      friendsHeading.current?.focus()
+    } else {
+      removalOpener.current.focus()
+    }
+    removalSucceeded.current = false
+    removalOpener.current = null
+  }, [])
+
   return (
     <>
       <FriendsCategoryView
         details={details}
         studyStatus={studyStatus}
-        onRemove={(friend) => {
-          if (!removalInFlight.current) setPendingRemoval(friend)
+        headingRef={friendsHeading}
+        onRemove={(friend, opener) => {
+          if (!removalInFlight.current) {
+            removalSucceeded.current = false
+            removalOpener.current = opener
+            setPendingRemoval(friend)
+          }
         }}
       />
 
@@ -139,6 +161,7 @@ export function FriendsCategory({ presence }: FriendsCategoryProps) {
       >
         <DialogContent
           showCloseButton={false}
+          onCloseAutoFocus={restoreRemovalFocus}
           onEscapeKeyDown={(event) => {
             if (removalInFlight.current) event.preventDefault()
           }}
