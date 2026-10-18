@@ -135,10 +135,27 @@ export async function sessionsGet(id: string): Promise<SessionRecord | null> {
 // R4 — deletes the session row + its audit_events in one Rust transaction.
 // `id` is the session topic.
 export async function sessionsDelete(id: string): Promise<void> {
-  await invoke('sessions_delete', { id })
+  try {
+    await invoke('sessions_delete', { id })
+  } catch (error) {
+    throw historyDeletionError(error)
+  }
 }
 
 // R4 — clears every session row and all audit_events in one Rust transaction.
 export async function sessionsClearAll(): Promise<void> {
-  await invoke('sessions_clear_all')
+  try {
+    await invoke('sessions_clear_all')
+  } catch (error) {
+    throw historyDeletionError(error)
+  }
+}
+
+export class JournalCleanupIncompleteError extends Error {}
+
+function historyDeletionError(error: unknown): unknown {
+  const message = error instanceof Error ? error.message : String(error)
+  return message.startsWith('SESSION_JOURNAL_CLEANUP_INCOMPLETE:')
+    ? new JournalCleanupIncompleteError(message)
+    : error
 }

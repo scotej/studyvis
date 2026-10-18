@@ -17,6 +17,7 @@ import {
 import {
   listSessions,
   sessionsDelete,
+  JournalCleanupIncompleteError,
   type SessionRecord,
 } from '@/lib/db/sessions'
 import { logger } from '@/lib/log'
@@ -48,6 +49,7 @@ export function SessionsCategory({
   const [error, setError] = useState<string | null>(null)
   const [pendingDelete, setPendingDelete] = useState<SessionRecord | null>(null)
   const [deleting, setDeleting] = useState(false)
+  const [cleanupIncomplete, setCleanupIncomplete] = useState(false)
   const latestLoadRequest = useRef(0)
   const deleteOpenerRef = useRef<HTMLButtonElement | null>(null)
   const deleteSucceededRef = useRef(false)
@@ -97,6 +99,13 @@ export function SessionsCategory({
         current?.id === sessionToDelete.id ? null : current
       )
     } catch (err) {
+      if (err instanceof JournalCleanupIncompleteError) {
+        setCleanupIncomplete(true)
+        deleteSucceededRef.current = true
+        await load()
+        toast.error(copy.delete.cleanupIncomplete)
+        return
+      }
       const message =
         err instanceof Error ? err.message : copy.delete.errorFallback
       toast.error(message)
@@ -138,6 +147,7 @@ export function SessionsCategory({
           if (!deleting) {
             deleteSucceededRef.current = false
             deleteOpenerRef.current = opener
+            setCleanupIncomplete(false)
             setPendingDelete(session)
           }
         }}
@@ -167,7 +177,11 @@ export function SessionsCategory({
         >
           <DialogHeader>
             <DialogTitle>{copy.delete.confirmTitle}</DialogTitle>
-            <DialogDescription>{copy.delete.confirmBody}</DialogDescription>
+            <DialogDescription>
+              {cleanupIncomplete
+                ? copy.delete.cleanupIncomplete
+                : copy.delete.confirmBody}
+            </DialogDescription>
           </DialogHeader>
           <DialogFooter>
             <Button
@@ -185,7 +199,9 @@ export function SessionsCategory({
               disabled={deleting}
               aria-disabled={deleting}
             >
-              {copy.delete.confirmCta}
+              {cleanupIncomplete
+                ? copy.delete.retryCleanup
+                : copy.delete.confirmCta}
             </Button>
           </DialogFooter>
         </DialogContent>

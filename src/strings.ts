@@ -1422,6 +1422,9 @@ export const strings = {
       // Friends remove pattern. Deleting removes the session row and its
       // audit events; stats/report read SQLite, so the change flows through.
       delete: {
+        cleanupIncomplete:
+          'The session was removed, but its local check log could not be deleted. Check folder access, then retry. You can also retry later using Advanced → Clear history.',
+        retryCleanup: 'Retry cleanup',
         cta: 'Delete',
         ariaLabel: (ordinal: number, when: string) =>
           `Delete session ${ordinal} from ${when}`,
@@ -1866,6 +1869,9 @@ export const strings = {
       // per-session delete. Wipes every session row and all audit events;
       // identity and friends are untouched (different tables / the keychain).
       clearHistory: {
+        cleanupIncomplete:
+          'History was removed, but some local check logs could not be deleted. Check folder access, then try Clear history again.',
+        retryCleanup: 'Retry cleanup',
         label: 'Clear all session history',
         help: 'Permanently deletes every past session and its focus history from this device. Your identity and friends are kept.',
         clearCta: 'Clear history',

@@ -963,6 +963,14 @@ Stage 1 is also the fallback: any window the model does not narrate is filled wi
 
 The write-up runs from the report, not from session teardown — it happens after the report has already rendered, so PLAN §5's "report generation completes within 5 seconds" is unaffected. Because only success is persisted, a session interrupted mid-write-up (app quit, AI off at the time, model missing) is simply retried the next time its report is opened. Sidecar ownership follows `benchmark.ts`: the write-up starts the sidecar if nothing else is using it and stops it again afterwards, and refuses to run at all while a session is active, since the live sample loop owns the sidecar then.
 
+History deletion commits its SQL cascade before removing observation files (I100).
+If journal enumeration or unlinking fails, the operation reports incomplete local
+cleanup instead of success (#405). The confirmation remains available for retry
+after the row has gone; Advanced → Clear session history is always available to
+retry orphan cleanup, including after reopening Settings or restarting the app.
+Missing journals are normal success. A partial clear attempts the other files
+and reports the failures without undoing the database deletion.
+
 ## 9. Audit log
 
 Single shared log per session, visible to all peers in real time on a dedicated panel. Each entry:
