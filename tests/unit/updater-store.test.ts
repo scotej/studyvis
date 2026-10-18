@@ -379,3 +379,105 @@ describe('installAndRestart', () => {
     expect(update.install).not.toHaveBeenCalled()
   })
 })
+
+// Production admission paths must reject before constructing any room, even
+// while the installer is awaiting a different stage of shutdown/relaunch.
+describe('session exclusion during installation (#377)', () => {
+  test.each(['shutdown', 'install', 'relaunch'] as const)(
+    '%s owns session creation, invite acceptance, rejoin and direct begin',
+    async (stage) => {
+      const { hostSession } = await import('@/features/session/host')
+      const { joinSession, rejoinSession } =
+        await import('@/features/session/join')
+      const { useSessionStore } = await import('@/stores/sessionStore')
+      const { strings } = await import('@/strings')
+      let resolve!: () => void
+      const barrier = new Promise<void>((done) => (resolve = done))
+      const entered = vi.fn()
+      const block = async () => {
+        entered()
+        await barrier
+      }
+      const update = fakeUpdate({
+        install: stage === 'install' ? block : async () => {},
+      })
+      setUpdaterDeps({
+        check: async () => update as never,
+        stopSidecar: stage === 'shutdown' ? block : async () => {},
+        relaunch: async () => {
+          if (stage === 'relaunch') await block()
+          throw new Error('keep test process running')
+        },
+      })
+      await useUpdaterStore.getState().checkNow()
+      const installing = useUpdaterStore.getState().installAndRestart()
+      await vi.waitFor(() => expect(entered).toHaveBeenCalledOnce())
+      expect(() => hostSession()).toThrow(strings.updater.sessionStartBlocked)
+      expect(() => joinSession('topic', 'password')).toThrow(
+        strings.updater.sessionStartBlocked
+      )
+      expect(() => rejoinSession('topic', 'password', true)).toThrow(
+        strings.updater.sessionStartBlocked
+      )
+      expect(() => useSessionStore.getState().begin({} as never)).toThrow(
+        strings.updater.sessionStartBlocked
+      )
+      expect(useSessionStore.getState().status).toBe('idle')
+      resolve()
+      await expect(installing).resolves.toBe(false)
+      const { isUpdateInstallReserved } =
+        await import('@/lib/updateInstallGuard')
+      expect(isUpdateInstallReserved()).toBe(false)
+    }
+  )
+
+  test('a live session keeps its normal leave and persistence owner', async () => {
+    const { useSessionStore } = await import('@/stores/sessionStore')
+    const leave = vi.fn(async () => {})
+    const update = fakeUpdate()
+    const stopSidecar = vi.fn(async () => {})
+    setUpdaterDeps({ check: async () => update as never, stopSidecar })
+    await useUpdaterStore.getState().checkNow()
+    useSessionStore.getState().begin({
+      sessionTopic: 'active-topic',
+      sessionPassword: 'password',
+      isHost: true,
+      startedAt: Date.now(),
+      room: {} as never,
+      leave,
+    })
+    try {
+      await expect(
+        useUpdaterStore.getState().installAndRestart()
+      ).resolves.toBe(false)
+      expect(stopSidecar).not.toHaveBeenCalled()
+      expect(update.install).not.toHaveBeenCalled()
+      expect(leave).not.toHaveBeenCalled()
+      expect(useSessionStore.getState().status).toBe('active')
+      expect(useSessionStore.getState().leave).toBe(leave)
+    } finally {
+      useSessionStore.getState().reset()
+    }
+  })
+
+  test('install failure releases admission and allows a retry', async () => {
+    const { isUpdateInstallReserved } = await import('@/lib/updateInstallGuard')
+    const update = fakeUpdate({
+      install: async () => {
+        throw new Error('read only')
+      },
+    })
+    setUpdaterDeps({
+      check: async () => update as never,
+      stopSidecar: async () => {},
+    })
+    await useUpdaterStore.getState().checkNow()
+    await expect(useUpdaterStore.getState().installAndRestart()).resolves.toBe(
+      false
+    )
+    expect(isUpdateInstallReserved()).toBe(false)
+    expect(useUpdaterStore.getState().installing).toBe(false)
+    await useUpdaterStore.getState().installAndRestart()
+    expect(update.install).toHaveBeenCalledTimes(2)
+  })
+})

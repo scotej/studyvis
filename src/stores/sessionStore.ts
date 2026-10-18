@@ -8,6 +8,7 @@
 import { create, type StateCreator } from 'zustand'
 
 import type { TopicRoom } from '@/lib/trystero'
+import { assertSessionAdmissionAllowed } from '@/lib/updateInstallGuard'
 
 export type SessionStatus = 'idle' | 'active' | 'ended'
 
@@ -369,7 +370,8 @@ function departPeer(
 
 const sessionStateCreator: StateCreator<SessionState> = (set, get) => ({
   ...INITIAL,
-  begin: (init) =>
+  begin: (init) => {
+    assertSessionAdmissionAllowed()
     set((s) => {
       const declared = s.pendingInitialTopic?.trim()
       const topic =
@@ -403,7 +405,8 @@ const sessionStateCreator: StateCreator<SessionState> = (set, get) => ({
         seenPeerNames: {},
         peerPresence: {},
       }
-    }),
+    })
+  },
   setPendingInitialTopic: (topic) => set({ pendingInitialTopic: topic }),
   setDeclaredStudyTopic: (next) => set({ declaredStudyTopic: next }),
   peerJoined: (peerId) =>

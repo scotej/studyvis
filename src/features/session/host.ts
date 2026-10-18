@@ -1,3 +1,4 @@
+import { assertSessionAdmissionAllowed } from '@/lib/updateInstallGuard'
 import { usePttStore } from '@/stores/pttStore'
 import { useIdentityStore } from '@/stores/identityStore'
 import { useSessionStore, type SessionStore } from '@/stores/sessionStore'
@@ -20,6 +21,7 @@ export type HostSessionOptions = {
 }
 
 export function hostSession(options?: HostSessionOptions): SessionHandle {
+  assertSessionAdmissionAllowed()
   const store = options?.store ?? useSessionStore
   // S2 — clear any PTT latched by a dropped Released event before the media-
   // acquire effect reads it, so the first audio track never comes up live.

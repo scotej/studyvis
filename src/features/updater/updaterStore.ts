@@ -32,6 +32,7 @@ import { create } from 'zustand'
 
 import { useSessionStore } from '@/stores/sessionStore'
 import { logger } from '@/lib/log'
+import { reserveUpdateInstall } from '@/lib/updateInstallGuard'
 
 const log = logger.child('updater')
 
@@ -91,12 +92,15 @@ async function discard(update: Update): Promise<void> {
 }
 
 let deps: UpdaterDeps = defaultUpdaterDeps
+let releaseInstallReservation: (() => void) | null = null
 
 export function setUpdaterDeps(next: Partial<UpdaterDeps>) {
   deps = { ...deps, ...next }
 }
 
 export function resetUpdaterDeps() {
+  releaseInstallReservation?.()
+  releaseInstallReservation = null
   deps = defaultUpdaterDeps
 }
 
@@ -266,6 +270,9 @@ export const useUpdaterStore = create<UpdaterState>((set, get) => ({
     // lib.rs CloseRequested confirm, so the session's audit flush / sessions
     // upsert / markStudied never run and the session is lost.
     if (deps.isSessionActive()) return false
+    const release = reserveUpdateInstall()
+    if (!release) return false
+    releaseInstallReservation = release
     set({ installing: true, errorKind: null })
 
     // The sidecar has to die before the bundle is swapped. On Windows the
@@ -285,6 +292,7 @@ export const useUpdaterStore = create<UpdaterState>((set, get) => ({
       // Most often macOS refusing to overwrite a bundle the user doesn't own
       // (a root-installed /Applications, or still running from the .dmg).
       log.error('install.failed', { err })
+      release()
       set({ installing: false, errorKind: 'install' })
       return false
     }
@@ -296,6 +304,7 @@ export const useUpdaterStore = create<UpdaterState>((set, get) => ({
       await deps.relaunch()
     } catch (err) {
       log.error('relaunch.failed', { installSucceeded: true, err })
+      release()
       set({ installing: false, errorKind: 'install' })
       return false
     }
