@@ -49,6 +49,7 @@ import {
 import { useBreakStore } from './breakStore'
 import { captureFace as defaultCaptureFace } from './captureFace'
 import {
+  discardPendingScreenStream,
   mapDisplayMediaError,
   SCREEN_FRAME_MAX_WIDTH,
   SCREEN_FRAME_QUALITY,
@@ -1772,6 +1773,7 @@ export function startSampleLoop(opts: SampleLoopOptions): SampleLoopHandle {
 
     const unavailable = getModelUnavailableReason(opts.modelId)
     if (unavailable) {
+      discardPendingScreenStream()
       log.warn('boot.refused', {
         modelId: opts.modelId,
         reason: 'model_unavailable',

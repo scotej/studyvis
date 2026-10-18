@@ -51,6 +51,7 @@ import {
   type SampleLoopRuntime,
   type SidecarRuntime,
 } from '@/features/ai'
+import { takePendingScreenStream } from '@/features/ai/captureScreen'
 import { SCORE_EVENTS_TIMEOUT_MS } from '@/features/ai/sampleLoop'
 import { __resetLog, __setLogRecordSink, type LogRecord } from '@/lib/log'
 import { useSettingsStore } from '@/stores/settingsStore'
@@ -406,6 +407,46 @@ describe('startSampleLoop — start failures', () => {
     expect(useSidecarStore.getState().status).toBe('running')
     await handle.stop()
   })
+
+  test.each([false, true])(
+    'unavailable model releases an unconsumed gesture acquisition (late=%s)',
+    async (late) => {
+      const stream = makeFakeScreenStream()
+      const stop = vi.spyOn(stream.getTracks()[0], 'stop')
+      let settle!: (stream: MediaStream) => void
+      __setScreenCaptureRuntime({
+        getDisplayMedia: () =>
+          late
+            ? new Promise<MediaStream>((resolve) => {
+                settle = resolve
+              })
+            : Promise.resolve(stream),
+      })
+      void preacquireScreenStream()
+      __setSampleLoopRuntime(
+        buildSampleLoopRuntime({
+          clock: new FakeClock(),
+          fetch: vi.fn() as never,
+        })
+      )
+      const handle = startSampleLoop({
+        getTopic: () => 'Maths',
+        modelId: 'moondream2',
+        getFaceTrack: () => null,
+      })
+      await flushMicrotasks()
+      expect(takePendingScreenStream()).toBeNull()
+      if (late) {
+        expect(stop).not.toHaveBeenCalled()
+        settle(stream)
+        await flushMicrotasks()
+      }
+      expect(stop).toHaveBeenCalledTimes(1)
+      await handle.stop()
+      expect(stop).toHaveBeenCalledTimes(1)
+      __resetScreenCaptureRuntime()
+    }
+  )
 
   test('refuses to start when modelId is null', async () => {
     const onStartFail = vi.fn()

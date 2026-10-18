@@ -1600,6 +1600,7 @@ export function SessionView({
   // Stops on any of those flipping. Topic defaults to "Studying" — V2-P9
   // replaces this with the user's required session-start input.
   useEffect(() => {
+    if (getModelUnavailableReason(activeModelId)) discardPendingScreenStream()
     if (status !== 'active') return
     if (!aiFeaturesEnabled) return
     if (!activeModelId) return
@@ -2434,7 +2435,12 @@ export function SessionView({
   // condition the loop effect uses.
   const handleMediaRetry = useCallback(() => {
     if (mirror.takeover) return
-    if (aiFeaturesEnabled && activeModelId && !captureDenied) {
+    if (
+      aiFeaturesEnabled &&
+      activeModelId &&
+      !getModelUnavailableReason(activeModelId) &&
+      !captureDenied
+    ) {
       void preacquireScreenStream()
     }
     setMediaErrorName(null)
@@ -2467,12 +2473,18 @@ export function SessionView({
   // boot()'s existing onCaptureDenied/onCaptureError handling takes it from
   // there — no need to duplicate that branching here.
   const handleCaptureRetry = useCallback(() => {
-    if (mirror.takeover) return
+    if (
+      mirror.takeover ||
+      !aiFeaturesEnabled ||
+      !activeModelId ||
+      getModelUnavailableReason(activeModelId)
+    )
+      return
     void preacquireScreenStream()
     useFocusStore.getState().reset()
     setCaptureDenied(false)
     setAiRuntimeStatus('active')
-  }, [mirror.takeover])
+  }, [mirror.takeover, aiFeaturesEnabled, activeModelId])
 
   const auditEntries = useMemo(
     () => mapAuditEntries(auditEvents, identity, peers, seenPeerNames),
@@ -2634,7 +2646,10 @@ export function SessionView({
             const signal = mirrorAbortRef.current?.signal
             if (!signal || signal.aborted || mirrorAiPendingRef.current) return
             const model = useModelStore.getState().activeModelId
-            if (control.type === 'ai_action' && (!model || !aiFeaturesEnabled))
+            if (
+              control.type === 'ai_action' &&
+              (!model || !aiFeaturesEnabled || getModelUnavailableReason(model))
+            )
               return
             mirrorAiPendingRef.current = true
             ownsAiRequest = true
@@ -2946,7 +2961,10 @@ export function SessionView({
           elapsedMs: mirrorElapsedMs,
           declaredTopic: useSessionStore.getState().declaredStudyTopic,
           aiEnabled: aiFeaturesEnabled,
-          aiAvailable: aiFeaturesEnabled && activeModelId !== null,
+          aiAvailable:
+            aiFeaturesEnabled &&
+            activeModelId !== null &&
+            !getModelUnavailableReason(activeModelId),
           aiEnableNeedsConsent:
             getAiEnableReadiness(useModelStore.getState()) === 'unbenchmarked',
           aiStatus: aiChipStatus,

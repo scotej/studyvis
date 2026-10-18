@@ -30,6 +30,7 @@ import {
 import { Input } from '@/components/ui/input'
 import { useReduceMotion } from '@/design/reduce-motion'
 import { AiAgentError, useModelStore } from '@/features/ai'
+import { getModelUnavailableReason } from '@/features/ai/models'
 import { useIdentity } from '@/features/identity'
 import { signWithKeyring } from '@/lib/db/identity'
 import type { TopicAction } from '@/lib/trystero'
@@ -213,7 +214,10 @@ export function SessionNotesPanel({
   // useful only when at least three people are present, matching issue #186.
   const showDirectMessageOptions = peerList.length >= 2
   const aiAvailable =
-    mirror?.aiAvailable ?? (aiFeaturesEnabled && activeModelId != null)
+    mirror?.aiAvailable ??
+    (aiFeaturesEnabled &&
+      activeModelId != null &&
+      !getModelUnavailableReason(activeModelId))
 
   const groupEntries = useMemo(
     () => [...notes, ...images].sort((a, b) => a.ts - b.ts),

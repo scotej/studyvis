@@ -150,10 +150,10 @@ describe('runBenchmark', () => {
       })
     )
     try {
-      const pending = runBenchmark(SUPPORTED_MODELS[1], {
-        modelPath: '/m.gguf',
-        mmprojPath: '/p.gguf',
-      })
+      const pending = runBenchmark(
+        SUPPORTED_MODELS.find((spec) => spec.id === 'qwen2_5-vl-3b')!,
+        { modelPath: '/m.gguf', mmprojPath: '/p.gguf' }
+      )
       const rejected = expect(pending).rejects.toThrow(
         '/health did not return 2xx within 90000 ms'
       )

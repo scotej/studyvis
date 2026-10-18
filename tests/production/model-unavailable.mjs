@@ -324,3 +324,213 @@ test('unavailable managed model preserves saved choice and files until explicit 
     await browser.close()
   }
 })
+
+// Keep Home's actual handlers and topic gate; replace only discovery and room
+// entry boundaries, with real notes controls after the synthetic session starts.
+test('retained unavailable selection never captures on start or rejoin (#422)', async () => {
+  const root = fileURLToPath(new URL('../../', import.meta.url))
+  const fixture = `
+    import React from 'react'
+    import { createRoot } from 'react-dom/client'
+    import { Home } from '@/routes/Home'
+    import { useIdentityStore } from '@/stores/identityStore'
+    import { useFriendsStore } from '@/stores/friendsStore'
+    import { useSettingsStore } from '@/stores/settingsStore'
+    import { useSessionStore } from '@/stores/sessionStore'
+    import { useModelStore } from '@/features/ai/modelStore'
+    import { __setScreenCaptureRuntime, discardPendingScreenStream } from '@/features/ai/captureScreen'
+    import '@/design/index.css'
+    const query = new URL(location.href).searchParams
+    const flow = query.get('flow'), model = query.get('model'), traces = [], streams = []
+    const record = { modelId: 'moondream2', installedAt: 123, benchmark: { p95Sec: 3 } }
+    await useIdentityStore.getState().actions.refresh()
+    useIdentityStore.setState({ status: 'ready', identity: {
+      ed_pubkey_hex: '11'.repeat(32), x_pubkey_hex: '22'.repeat(32), display_name: 'Local' } })
+    useFriendsStore.setState({ status: 'ready', friends: [] })
+    useSettingsStore.setState(state => ({ status: 'ready', values: { ...state.values, aiFeaturesEnabled: true } }))
+    useModelStore.setState({ status: model === 'loading' ? 'loading' : 'ready', activeModelId: model === 'loading' ? null : model,
+      records: { moondream2: record }, hydrate: async () => {} })
+    const request = { sessionTopic: 'fixture-session', sessionPassword: 'fixture-password', isHost: true,
+      expectedAuthorityEdPubkeyHex: null }
+    useSessionStore.setState({ status: flow === 'rejoin' ? 'ended' : 'idle', sessionTopic: flow === 'rejoin' ? request.sessionTopic : null,
+      endedBy: 'user', rejoinDeadline: Date.now() + 20_000, getRejoinRequest: () => request })
+    __setScreenCaptureRuntime({ getDisplayMedia: async () => {
+      traces.push('capture')
+      const canvas = document.createElement('canvas'); canvas.width = 16; canvas.height = 16
+      const stream = canvas.captureStream(); streams.push(stream); return stream
+    } })
+    window.sessionFixture = { flow, traces, request,
+      snapshot: () => ({ traces: [...traces], model: useModelStore.getState().activeModelId,
+        records: useModelStore.getState().records, ai: useSettingsStore.getState().values.aiFeaturesEnabled,
+        tracks: streams.flatMap(stream => stream.getTracks().map(track => track.readyState)) }),
+      entered: () => { traces.push('entered'); useSessionStore.setState({ status: 'active' }) },
+      dispose: discardPendingScreenStream }
+    createRoot(document.getElementById('root')).render(React.createElement(Home))
+  `
+  const stubs = {
+    '@/features/friends': `
+      import React from 'react'
+      export class InviteRelayError extends Error {}
+      export class InviteTimeoutError extends Error {}
+      export const AddFriendDialog = () => null, ContactImportDialog = () => null,
+        PairDeepLinkBoot = () => null, InboxBoot = () => null, PendingInvites = () => null
+      export const pendingInviteKey = () => 'fixture-invite', presenceState = () => ({ state: 'offline' })
+      export const usePendingInvitesStore = { getState: () => ({ pending: [] }) }
+      export const FriendsList = ({ onInvite }) => React.createElement('button', {
+        onClick: () => onInvite({ ed_pubkey_hex: '33'.repeat(32), display_name: 'Friend' }),
+      }, 'Start fixture session')`,
+    '@/features/session': `
+      import React from 'react'
+      import { SessionNotesPanel } from '@/features/session/SessionNotesPanel'
+      export { TopicGateModal } from '@/features/session/TopicGateModal'
+      export class InviteWhileGuestError extends Error {}
+      export const inviteToCurrentSession = async () => { window.sessionFixture.entered(); return { acked: true } }
+      export const joinSession = () => window.sessionFixture.entered(), rejoinSession = joinSession
+      export const Report = ({ onRejoin }) => React.createElement('button', { onClick: onRejoin }, 'Rejoin fixture session')
+      export const SessionView = () => React.createElement(SessionNotesPanel, {
+        notes: [], images: [], resolveName: () => 'Local', onSend: () => {}, onSendImage: () => {}, onOpenImage: () => {} })
+      export const InterruptedSessionView = ({ onRejoin }) => React.createElement('button', { onClick: onRejoin }, 'Resume fixture session')
+      export const useInterruptedSession = () => ({ state: window.sessionFixture.flow === 'interrupted' && !window.sessionFixture.traces.includes('entered')
+        ? { status: 'prompt', record: { ...window.sessionFixture.request, startedAt: Date.now() - 60_000,
+            declaredStudyTopic: 'Maths' }, loadedAt: Date.now() } : { status: 'absent' }, dismiss: () => {}, end: () => {} })`,
+    '@/features/onboarding':
+      'export const useOnboardingState = () => ({ status: "ready" }); export const Onboarding = () => null',
+    '@/features/settings':
+      'export const Settings = () => null; export const SettingsOverlay = () => null',
+    '@/components/UpdateReadyBanner':
+      'export const UpdateReadyBanner = () => null',
+  }
+  const result = await build({
+    root,
+    logLevel: 'error',
+    plugins: [
+      {
+        name: 'unavailable-session-boundaries',
+        enforce: 'pre',
+        transform(code, id) {
+          if (!id.endsWith('/src/routes/Home.tsx')) return
+          for (const specifier of Object.keys(stubs))
+            code = code.replaceAll(
+              "'" + specifier + "'",
+              "'session-boundary:" + specifier + "'"
+            )
+          return code
+        },
+        resolveId(id) {
+          if (id === 'unavailable-session-check')
+            return '\0unavailable-session-check'
+          if (id.startsWith('session-boundary:')) return '\0' + id
+        },
+        load(id) {
+          if (id === '\0unavailable-session-check') return fixture
+          if (id.startsWith('\0session-boundary:'))
+            return stubs[id.slice('\0session-boundary:'.length)]
+        },
+      },
+    ],
+    build: {
+      write: false,
+      rollupOptions: {
+        input: 'unavailable-session-check',
+        preserveEntrySignatures: 'strict',
+      },
+    },
+  })
+  const output = (Array.isArray(result) ? result[0] : result).output
+  const entry = output.find((item) => item.type === 'chunk' && item.isEntry)
+  assert.ok(entry)
+  const browser = await chromium.launch({
+    headless: true,
+    executablePath: process.env.LAB_CHROME_EXECUTABLE,
+  })
+  try {
+    for (const flow of ['start', 'rejoin', 'interrupted']) {
+      for (const model of ['moondream2', 'qwen2_5-vl-3b', 'loading']) {
+        const page = await browser.newPage()
+        page.setDefaultTimeout(10_000)
+        const errors = []
+        page.on('pageerror', (error) => errors.push(error.message))
+        await page.route('http://studyvis.test/**', (route) => {
+          const filename = new URL(route.request().url()).pathname.slice(1)
+          const asset = output.find((item) => item.fileName === filename)
+          return route.fulfill(
+            asset
+              ? {
+                  contentType:
+                    asset.type === 'chunk'
+                      ? 'text/javascript'
+                      : asset.fileName.endsWith('.css')
+                        ? 'text/css'
+                        : 'application/octet-stream',
+                  body: asset.type === 'chunk' ? asset.code : asset.source,
+                }
+              : {
+                  contentType: 'text/html',
+                  body: `<div id="root"></div><script type="module" src="/${entry.fileName}"></script>`,
+                }
+          )
+        })
+        await page.goto(`http://studyvis.test/?flow=${flow}&model=${model}`)
+        await page.waitForFunction(() => window.sessionFixture)
+        if (flow === 'start') {
+          await page
+            .getByRole('button', { name: 'Start fixture session' })
+            .click()
+          await page.getByRole('textbox').fill('Maths')
+          await page
+            .getByRole('button', { name: 'Start studying', exact: true })
+            .click()
+        } else {
+          await page
+            .getByRole('button', {
+              name:
+                flow === 'rejoin'
+                  ? 'Rejoin fixture session'
+                  : 'Resume fixture session',
+            })
+            .click()
+        }
+        await page.waitForFunction(() =>
+          window.sessionFixture.traces.includes('entered')
+        )
+        const snapshot = await page.evaluate(() =>
+          window.sessionFixture.snapshot()
+        )
+        assert.equal(
+          snapshot.traces.filter((value) => value === 'capture').length,
+          model === 'moondream2' ? 0 : 1,
+          `${flow} ${model}`
+        )
+        assert.equal(snapshot.ai, true)
+        assert.equal(snapshot.model, model === 'loading' ? null : model)
+        assert.deepEqual(snapshot.records.moondream2, {
+          modelId: 'moondream2',
+          installedAt: 123,
+          benchmark: { p95Sec: 3 },
+        })
+        await page.getByRole('button', { name: 'Add conversation' }).click()
+        await page
+          .getByRole('menuitem')
+          .filter({ hasText: 'StudyVis AI' })
+          .click()
+        assert.equal(
+          await page
+            .getByRole('textbox', { name: 'Message StudyVis AI', exact: true })
+            .isDisabled(),
+          model !== 'qwen2_5-vl-3b'
+        )
+        assert.deepEqual(errors, [], `${flow} ${model}`)
+        await page.evaluate(() => window.sessionFixture.dispose())
+        await page.waitForFunction(() =>
+          window.sessionFixture
+            .snapshot()
+            .tracks.every((state) => state === 'ended')
+        )
+        console.log('verified session entry and chat:', flow, model)
+        await page.close()
+      }
+    }
+  } finally {
+    await browser.close()
+  }
+})

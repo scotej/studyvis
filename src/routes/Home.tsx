@@ -31,6 +31,7 @@ import {
   preacquireScreenStream,
   useModelStore,
 } from '@/features/ai'
+import { getModelUnavailableReason } from '@/features/ai/models'
 import {
   AddFriendDialog,
   ContactImportDialog,
@@ -363,7 +364,10 @@ export function Home() {
     // handleTopicSubmit's.
     if (aiOn()) {
       const models = useModelStore.getState()
-      if (models.activeModelId || models.status === 'loading') {
+      if (
+        (models.activeModelId || models.status === 'loading') &&
+        !getModelUnavailableReason(models.activeModelId)
+      ) {
         void preacquireScreenStream()
       }
       s.setPendingInitialTopic(s.declaredStudyTopic)
@@ -400,7 +404,10 @@ export function Home() {
       if (useSessionStore.getState().status === 'active') return
       if (aiOn()) {
         const models = useModelStore.getState()
-        if (models.activeModelId || models.status === 'loading') {
+        if (
+          (models.activeModelId || models.status === 'loading') &&
+          !getModelUnavailableReason(models.activeModelId)
+        ) {
           void preacquireScreenStream()
         }
         useSessionStore
@@ -497,7 +504,9 @@ export function Home() {
       const canStart =
         req.kind === 'guest' || Boolean(identity && identity.display_name)
       const preacquiredScreen =
-        canStart && Boolean(models.activeModelId || models.status === 'loading')
+        canStart &&
+        Boolean(models.activeModelId || models.status === 'loading') &&
+        !getModelUnavailableReason(models.activeModelId)
       if (preacquiredScreen) {
         void preacquireScreenStream()
       }
