@@ -94,3 +94,33 @@ export const LeaveSessionBeforeIdentityChange: Story = {
     await waitFor(() => expect(useSessionStore.getState().status).toBe('ended'))
   },
 }
+
+export const RetrySessionSaveBeforeIdentityChange: Story = {
+  ...Identity,
+  beforeEach: () => {
+    useSessionStore.getState().reset()
+    useSessionStore.getState().setPendingSave(async () => {
+      useSessionStore.getState().setPendingSave(null)
+    })
+    return () => {
+      useSessionStore.getState().setPendingSave(null)
+      useSessionStore.getState().reset()
+    }
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const copy = strings.settings.identity.recoveryPhrase
+    await expect(canvas.getByText(copy.savePendingHelp)).toBeVisible()
+    await userEvent.click(
+      canvas.getByRole('button', { name: copy.retrySaveCta })
+    )
+    await waitFor(() =>
+      expect(useSessionStore.getState().pendingSave).toBeNull()
+    )
+    await waitFor(() =>
+      expect(
+        canvas.queryByRole('button', { name: copy.retrySaveCta })
+      ).toBeNull()
+    )
+  },
+}

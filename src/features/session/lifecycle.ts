@@ -28,6 +28,7 @@ import { userRelayConfig } from '@/lib/trystero/relays'
 import { useAuditStore } from '@/stores/auditStore'
 import { useFriendsStore } from '@/stores/friendsStore'
 import {
+  assertSessionSaved,
   useSessionStore,
   type GuestAdmissionSnapshot,
   type SessionStore,
@@ -471,6 +472,32 @@ function unionPeerPubkeys(a: string | null, b: string | null): string | null {
 // production reads the webview's monotonic clock.
 const defaultMonotonicNow = (): number => performance.now()
 
+// A fallback insert can commit before an IPC failure. Recognize that exact
+// row on retry instead of merging the same stint into itself.
+function savedRowMatches(row: SessionRow, saved: SessionRecord): boolean {
+  return [
+    [row.id, saved.id],
+    [row.startedAt, saved.started_at],
+    [row.endedAt, saved.ended_at],
+    [row.totalMinutes, saved.total_minutes],
+    [row.totalDurationMs, saved.total_duration_ms ?? null],
+    [row.peerPubkeys, saved.peer_pubkeys],
+    [row.peerPresenceMs ?? null, saved.peer_presence_ms ?? null],
+    [row.declaredTopic ?? null, saved.declared_topic],
+    [row.score ?? null, saved.score],
+    [row.focusedPct ?? null, saved.focused_pct],
+    [row.generatedAt ?? null, saved.generated_at],
+    [row.confidentSamples ?? null, saved.confident_samples],
+    [row.skippedSamples ?? null, saved.skipped_samples],
+    [row.aiEnabled ?? null, saved.ai_enabled],
+    [
+      row.localEdPubkey?.toLowerCase() ?? null,
+      saved.local_ed_pubkey?.toLowerCase() ?? null,
+    ],
+    [row.localDisplayName ?? null, saved.local_display_name ?? null],
+  ].every(([expected, actual]) => expected === actual)
+}
+
 // Single teardown path: leaves trystero, generates the V2-P8 post-session
 // report by snapshotting per-user score / focused-time / declared topic
 // from in-memory stores BEFORE reset() clears anything, and upserts a
@@ -514,7 +541,9 @@ export function buildLeaveHandler(args: {
   const sessionStore = args.store ?? useSessionStore
   let leaveAttempt: Promise<void> | null = null
   let teardownCommitted = false
+  let releasePendingSave = () => {}
   const performLeave = async () => {
+    assertSessionSaved(sessionStore.getState())
     // Claim the end reason synchronously before the first await. The caller's
     // UI path may already have claimed it; this second claim is harmless and
     // keeps direct handle.leave() calls correctly attributed.
@@ -551,7 +580,7 @@ export function buildLeaveHandler(args: {
     })
     const peerPresenceMs = encodePeerPresenceMs(finalizedPresence.durationsMs)
     const initialDeclaredTopic = sessionState.initialDeclaredTopic
-    const focusSnapshot = snapshotFocusForReport()
+    const focusSnapshot = { ...snapshotFocusForReport() }
     // Persisted study minutes are the SHORTER of wall-clock and monotonic
     // elapsed. A laptop slept mid-session advances Date.now() across the whole
     // overnight span, so a 45-minute session ended by closing the lid used to
@@ -578,6 +607,138 @@ export function buildLeaveHandler(args: {
       wallMs,
       awakeMs: monoMs,
     })
+
+    const stint = {
+      startedAt: args.startedAt,
+      totalMinutes,
+      totalDurationMs,
+      peerPubkeys,
+      peerPresenceMs,
+    }
+    const topic = args.topic
+    const continuesFocus = args.continuesFocus
+    const localEdPubkey = args.localEdPubkey ?? null
+    const localDisplayName = args.localDisplayName ?? null
+    let merged: ReturnType<typeof mergeSessionStints> = stint
+    let sessionPersisted = false
+    let preparedRow: SessionRow | null = null
+    let fallbackRow: SessionRow | null = null
+    let priorStint: SessionRecord | null = null
+    let saveAttempt: Promise<void> | null = null
+    const buildSessionRow = (
+      summary: ReturnType<typeof mergeSessionStints>,
+      focus: PersistedFocusMetrics,
+      replaceFocusMetrics: boolean
+    ): SessionRow => ({
+      id: topic,
+      startedAt: summary.startedAt,
+      endedAt,
+      totalMinutes: summary.totalMinutes,
+      totalDurationMs: summary.totalDurationMs,
+      peerPubkeys: summary.peerPubkeys,
+      peerPresenceMs: summary.peerPresenceMs,
+      declaredTopic: initialDeclaredTopic,
+      score: focus.score,
+      focusedPct: focus.focusedPct,
+      generatedAt: endedAt,
+      confidentSamples: focus.confidentSamples,
+      skippedSamples: focus.skippedSamples,
+      aiEnabled: focus.aiEnabled,
+      localEdPubkey,
+      localDisplayName,
+      replaceFocusMetrics,
+    })
+    const performSave = async () => {
+      if (!preparedRow) {
+        let priorStintReadSucceeded = false
+        priorStint = null
+        for (let attempt = 1; attempt <= 2; attempt += 1) {
+          try {
+            priorStint = (await sessionsGet(topic)) ?? null
+            priorStintReadSucceeded = true
+            log.debug('sessions_get.succeeded', {
+              priorStintFound: priorStint !== null,
+              attempt,
+            })
+            break
+          } catch (err) {
+            if (attempt === 1)
+              log.warn('sessions_get.retrying', { attempt, err })
+            else
+              log.error('sessions_get.failed', {
+                attempts: attempt,
+                fallback: 'insert-if-absent',
+                err,
+              })
+          }
+        }
+        if (!priorStintReadSucceeded) {
+          fallbackRow ??= buildSessionRow(stint, focusSnapshot, false)
+          if (!(await sessionsInsertIfAbsent(fallbackRow)))
+            throw new Error(strings.session.errors.savePending)
+        } else if (
+          !fallbackRow ||
+          !priorStint ||
+          !savedRowMatches(fallbackRow, priorStint)
+        ) {
+          // Freeze the merged replacement before writing. A rejected IPC may
+          // have committed already; retrying this exact row is idempotent.
+          merged = mergeSessionStints(priorStint, stint)
+          const discontinuousFocus = priorStint !== null && !continuesFocus
+          const persistedFocus =
+            priorStint !== null && !continuesFocus
+              ? mergeDiscontinuousFocusMetrics(priorStint, focusSnapshot)
+              : priorStint !== null
+                ? {
+                    ...focusSnapshot,
+                    aiEnabled: mergeAiEnabled(
+                      priorStint,
+                      focusSnapshot.aiEnabled
+                    ),
+                  }
+                : focusSnapshot
+          preparedRow = buildSessionRow(
+            merged,
+            persistedFocus,
+            discontinuousFocus
+          )
+        }
+      }
+      if (preparedRow) await sessionsInsert(preparedRow)
+      sessionPersisted = true
+      releaseSaved()
+      log.debug('sessions_insert.succeeded', {
+        totalMinutes: merged.totalMinutes,
+      })
+    }
+    const save = (): Promise<void> => {
+      if (sessionPersisted) {
+        releaseSaved()
+        return Promise.resolve()
+      }
+      if (saveAttempt) return saveAttempt
+      const attempt = performSave()
+      saveAttempt = attempt
+      void attempt
+        .finally(() => {
+          if (saveAttempt === attempt) saveAttempt = null
+        })
+        .catch(() => {})
+      return attempt
+    }
+    const releaseSaved = () => {
+      const current = sessionStore.getState()
+      if (
+        sessionPersisted &&
+        current.status !== 'active' &&
+        current.pendingSave === save
+      )
+        current.setPendingSave(null)
+    }
+    releasePendingSave = releaseSaved
+    // Keep this frozen persistence owner after Report closes/reset. Admission
+    // stays blocked until saving succeeds, so no later stint can overtake it.
+    sessionStore.getState().setPendingSave(save)
 
     // From the first room-leave attempt onward, retrying the whole stint would
     // risk merging its minutes/presence twice. Expected teardown failures are
@@ -636,128 +797,18 @@ export function buildLeaveHandler(args: {
       log.error('audit_flush.failed', { phase: 'teardown', err })
     }
 
-    const stint = {
-      startedAt: args.startedAt,
-      totalMinutes,
-      totalDurationMs,
-      peerPubkeys,
-      peerPresenceMs,
-    }
-    const buildSessionRow = (
-      summary: ReturnType<typeof mergeSessionStints>,
-      focus: PersistedFocusMetrics,
-      replaceFocusMetrics: boolean
-    ): SessionRow => ({
-      id: args.topic,
-      startedAt: summary.startedAt,
-      endedAt,
-      totalMinutes: summary.totalMinutes,
-      totalDurationMs: summary.totalDurationMs,
-      peerPubkeys: summary.peerPubkeys,
-      peerPresenceMs: summary.peerPresenceMs,
-      declaredTopic: initialDeclaredTopic,
-      score: focus.score,
-      focusedPct: focus.focusedPct,
-      generatedAt: endedAt,
-      confidentSamples: focus.confidentSamples,
-      skippedSamples: focus.skippedSamples,
-      aiEnabled: focus.aiEnabled,
-      localEdPubkey: args.localEdPubkey ?? null,
-      localDisplayName: args.localDisplayName ?? null,
-      replaceFocusMetrics,
-    })
-
-    // A prior row for this topic can only be an earlier stint of this same
-    // session (the topic derives from 32 random bytes) — merge rather than
-    // rewind it. Retry one transient read failure. If the row is still
-    // indeterminate, use an atomic insert-if-absent: that retains a first-ever
-    // stint but cannot overwrite an existing session with tail-stint values.
-    let merged: ReturnType<typeof mergeSessionStints> = stint
-    let priorStintFound = false
-    let priorStintReadSucceeded = false
-    let priorStint: SessionRecord | null = null
-    for (let attempt = 1; attempt <= 2; attempt += 1) {
-      try {
-        const prior = await sessionsGet(args.topic)
-        // IPC promises should resolve null for an absent row, but normalize an
-        // undefined mock/older bridge response too: it is absence, never a row
-        // whose focus fields may be read below.
-        priorStintFound = prior != null
-        priorStint = prior ?? null
-        merged = mergeSessionStints(priorStint, stint)
-        priorStintReadSucceeded = true
-        log.debug('sessions_get.succeeded', { priorStintFound, attempt })
-        break
-      } catch (err) {
-        if (attempt === 1) {
-          log.warn('sessions_get.retrying', { attempt, err })
-        } else {
-          log.error('sessions_get.failed', {
-            attempts: attempt,
-            fallback: 'insert-if-absent',
-            err,
-          })
-        }
-      }
-    }
-
-    let sessionPersisted = false
-    if (priorStintReadSucceeded) {
-      try {
-        const discontinuousFocus = priorStint !== null && !args.continuesFocus
-        const persistedFocus =
-          priorStint !== null && !args.continuesFocus
-            ? mergeDiscontinuousFocusMetrics(priorStint, focusSnapshot)
-            : priorStint !== null
-              ? {
-                  ...focusSnapshot,
-                  aiEnabled: mergeAiEnabled(
-                    priorStint,
-                    focusSnapshot.aiEnabled
-                  ),
-                }
-              : focusSnapshot
-        await sessionsInsert(
-          buildSessionRow(merged, persistedFocus, discontinuousFocus)
-        )
-        sessionPersisted = true
-        log.debug('sessions_insert.succeeded', {
-          priorStintFound,
-          totalMinutes: merged.totalMinutes,
-          seenPeerCount: peerEdPubkeys.length,
-        })
-      } catch (err) {
-        log.error('sessions_insert.failed', {
-          totalMinutes: merged.totalMinutes,
-          peerCount: peerEdPubkeys.length,
-          scoreRecorded: focusSnapshot.score !== null,
-          focusedPctRecorded: focusSnapshot.focusedPct !== null,
-          confidentSamples: focusSnapshot.confidentSamples,
-          skippedSamples: focusSnapshot.skippedSamples,
-          err,
-        })
-      }
-    } else {
-      try {
-        sessionPersisted = await sessionsInsertIfAbsent(
-          buildSessionRow(stint, focusSnapshot, false)
-        )
-        log.debug('sessions_insert_if_absent.succeeded', {
-          inserted: sessionPersisted,
-          totalMinutes: stint.totalMinutes,
-          seenPeerCount: peerEdPubkeys.length,
-        })
-      } catch (err) {
-        log.error('sessions_insert_if_absent.failed', {
-          totalMinutes: stint.totalMinutes,
-          peerCount: peerEdPubkeys.length,
-          scoreRecorded: focusSnapshot.score !== null,
-          focusedPctRecorded: focusSnapshot.focusedPct !== null,
-          confidentSamples: focusSnapshot.confidentSamples,
-          skippedSamples: focusSnapshot.skippedSamples,
-          err,
-        })
-      }
+    try {
+      await save()
+    } catch (err) {
+      log.error('sessions_insert.failed', {
+        totalMinutes: merged.totalMinutes,
+        peerCount: peerEdPubkeys.length,
+        scoreRecorded: focusSnapshot.score !== null,
+        focusedPctRecorded: focusSnapshot.focusedPct !== null,
+        confidentSamples: focusSnapshot.confidentSamples,
+        skippedSamples: focusSnapshot.skippedSamples,
+        err,
+      })
     }
     let friendsUpdated = false
     try {
@@ -823,6 +874,7 @@ export function buildLeaveHandler(args: {
     // been retired alongside the SessionEndedSplash.
     await finishMirrorReport(args.topic)
     sessionStore.getState().markEnded()
+    releaseSaved()
     setLogContext({ sess: undefined })
   }
   return () => {
@@ -839,6 +891,7 @@ export function buildLeaveHandler(args: {
       // safe. End locally and surface the unexpected failure in diagnostics.
       log.error('session.end_unexpected_failure', { err })
       sessionStore.getState().markEnded()
+      releasePendingSave()
       setLogContext({ sess: undefined })
     })
     leaveAttempt = attempt

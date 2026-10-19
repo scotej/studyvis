@@ -134,6 +134,7 @@ describe('re-entry merge across leave cycles', () => {
     }
     onSessionsInsert = null
     useAuditStore.getState().reset()
+    useSessionStore.getState().setPendingSave(null)
     useSessionStore.getState().reset()
     vi.useFakeTimers()
     return () => vi.useRealTimers()

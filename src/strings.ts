@@ -853,6 +853,8 @@ export const strings = {
     },
     errors: {
       leaveFailedFallback: "Couldn't leave the session.",
+      savePending:
+        "Couldn't confirm that your session was saved. Retry saving in Settings → Identity before starting another session or restoring a different identity.",
       switchMicFailedFallback: "Couldn't switch microphone.",
       requestAccessFallback: "Couldn't request access.",
       // #47 B2 — toast action that opens the in-session settings overlay at
@@ -1316,6 +1318,9 @@ export const strings = {
         sessionHelp:
           'You can restore the same identity during a session. To restore a different identity, leave and save this session first.',
         leaveCta: 'Leave and save session',
+        retrySaveCta: 'Retry saving session',
+        savePendingHelp:
+          'The session ended, but saving it has not been confirmed. Retry saving before restoring a different identity.',
 
         label: 'Recovery phrase',
         // D4 — honest copy: the 24 words are never persisted, so they cannot

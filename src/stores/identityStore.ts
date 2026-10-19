@@ -250,7 +250,11 @@ export const useIdentityStore = create<IdentityState>((set, get) => {
         current.ed_pubkey_hex.toLowerCase() !==
           record.ed_pubkey_hex.toLowerCase() ||
         current.x_pubkey_hex.toLowerCase() !== record.x_pubkey_hex.toLowerCase()
-      if (changesIdentity && useSessionStore.getState().status === 'active') {
+      const session = useSessionStore.getState()
+      if (
+        changesIdentity &&
+        (session.status === 'active' || session.pendingSave)
+      ) {
         throw new IdentityCommitBlockedError(
           strings.identity.sessionRestoreBlocked
         )

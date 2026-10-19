@@ -54,6 +54,7 @@ export function IdentityCategory({ onRestoreIdentity }: IdentityCategoryProps) {
   const [backupBusy, setBackupBusy] = useState(false)
   const [leaving, setLeaving] = useState(false)
   const sessionActive = useSessionStore((s) => s.status === 'active')
+  const sessionUnsaved = useSessionStore((s) => s.pendingSave !== null)
   const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const copy = strings.settings.identity
 
@@ -227,11 +228,13 @@ export function IdentityCategory({ onRestoreIdentity }: IdentityCategoryProps) {
         help={
           sessionActive
             ? copy.recoveryPhrase.sessionHelp
-            : copy.recoveryPhrase.help
+            : sessionUnsaved
+              ? copy.recoveryPhrase.savePendingHelp
+              : copy.recoveryPhrase.help
         }
         control={
           <div className="flex items-center gap-2">
-            {sessionActive ? (
+            {sessionActive || sessionUnsaved ? (
               <Button
                 type="button"
                 variant="outline"
@@ -241,12 +244,18 @@ export function IdentityCategory({ onRestoreIdentity }: IdentityCategoryProps) {
                   setLeaving(true)
                   void leaveForIdentityRecovery()
                     .catch(() =>
-                      toast.error(strings.session.errors.leaveFailedFallback)
+                      toast.error(
+                        useSessionStore.getState().pendingSave
+                          ? strings.session.errors.savePending
+                          : strings.session.errors.leaveFailedFallback
+                      )
                     )
                     .finally(() => setLeaving(false))
                 }}
               >
-                {copy.recoveryPhrase.leaveCta}
+                {sessionActive
+                  ? copy.recoveryPhrase.leaveCta
+                  : copy.recoveryPhrase.retrySaveCta}
               </Button>
             ) : null}
             <Button
