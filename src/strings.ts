@@ -260,6 +260,13 @@ export const strings = {
   },
 
   identity: {
+    sessionRestoreBlocked:
+      'Leave and save the current session before restoring a different identity.',
+    sessionStartBlocked:
+      'Your identity is being restored. Wait for it to finish before starting a session.',
+    commitInProgress:
+      'An identity update is still finishing. Try again in a moment.',
+
     secretServiceError:
       'Unlock your Linux keyring, then try again. StudyVis needs gnome-keyring, KWallet, KeePassXC, or another Secret Service provider to protect your identity keys.',
     setup: {
@@ -846,6 +853,8 @@ export const strings = {
     },
     errors: {
       leaveFailedFallback: "Couldn't leave the session.",
+      savePending:
+        "Couldn't confirm that your session was saved. Retry saving in Settings → Identity before starting another session or restoring a different identity.",
       switchMicFailedFallback: "Couldn't switch microphone.",
       requestAccessFallback: "Couldn't request access.",
       // #47 B2 — toast action that opens the in-session settings overlay at
@@ -1309,6 +1318,13 @@ export const strings = {
         copyAriaLabel: 'Copy public key',
       },
       recoveryPhrase: {
+        sessionHelp:
+          'You can restore the same identity during a session. To restore a different identity, leave and save this session first.',
+        leaveCta: 'Leave and save session',
+        retrySaveCta: 'Retry saving session',
+        savePendingHelp:
+          'The session ended, but saving it has not been confirmed. Retry saving before restoring a different identity.',
+
         label: 'Recovery phrase',
         // D4 — honest copy: the 24 words are never persisted, so they cannot
         // be re-shown here and lost words are unrecoverable by design.

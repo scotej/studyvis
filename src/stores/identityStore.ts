@@ -26,6 +26,12 @@ import {
   type IdentityRecord,
 } from '@/lib/db/identity'
 import { logger } from '@/lib/log'
+import {
+  IdentityCommitBlockedError,
+  reserveIdentityCommit,
+} from '@/lib/identityCommitGuard'
+import { useSessionStore } from '@/stores/sessionStore'
+import { strings } from '@/strings'
 
 const log = logger.child('identity')
 
@@ -110,7 +116,12 @@ function recordFromIdentity(id: Identity, displayName: string): IdentityRecord {
 }
 
 export const useIdentityStore = create<IdentityState>((set, get) => {
+  let loadGeneration = 0
   const refresh: IdentityActions['refresh'] = async () => {
+    const generation = ++loadGeneration
+    const publish = (next: Partial<IdentityState>) => {
+      if (generation === loadGeneration) set(next)
+    }
     // The ONLY clean route to 'absent' is identity_exists() returning false.
     // Any throw — or a present-but-unreadable file — resolves to 'error' so a
     // corrupt load never steers the user into create-new onboarding (D1).
@@ -123,7 +134,7 @@ export const useIdentityStore = create<IdentityState>((set, get) => {
         errorKind: 'file',
         err,
       })
-      set({
+      publish({
         identity: null,
         status: 'error',
         errorKind: 'file',
@@ -132,7 +143,7 @@ export const useIdentityStore = create<IdentityState>((set, get) => {
       return
     }
     if (!exists) {
-      set({
+      publish({
         identity: null,
         status: 'absent',
         errorKind: null,
@@ -149,7 +160,7 @@ export const useIdentityStore = create<IdentityState>((set, get) => {
         errorKind: 'file',
         err,
       })
-      set({
+      publish({
         identity: null,
         status: 'error',
         errorKind: 'file',
@@ -160,7 +171,7 @@ export const useIdentityStore = create<IdentityState>((set, get) => {
     // File exists; a null/unparseable record is a corrupt-file signal, not a
     // fresh user. Route to 'error', never 'absent'.
     if (!record) {
-      set({
+      publish({
         identity: null,
         status: 'error',
         errorKind: 'file',
@@ -180,7 +191,7 @@ export const useIdentityStore = create<IdentityState>((set, get) => {
       if (keyStatus !== 'matching') {
         // Keep the parsed record: its fingerprint + display name drive the
         // Recover flow's same-identity fast path (see IdentityState).
-        set({
+        publish({
           identity: null,
           status: 'error',
           errorKind: keyStatus === 'missing' ? 'keys-missing' : 'keys-invalid',
@@ -195,7 +206,7 @@ export const useIdentityStore = create<IdentityState>((set, get) => {
         outcome: 'block',
         err,
       })
-      set({
+      publish({
         identity: null,
         status: 'error',
         errorKind: 'keychain-unavailable',
@@ -203,7 +214,7 @@ export const useIdentityStore = create<IdentityState>((set, get) => {
       })
       return
     }
-    set({
+    publish({
       identity: record,
       status: 'ready',
       errorKind: null,
@@ -233,23 +244,63 @@ export const useIdentityStore = create<IdentityState>((set, get) => {
       get().identity?.display_name ?? get().staleRecord?.display_name ?? ''
     )
     const commit = async () => {
-      if (!allowOverwrite && (await identityExists())) {
-        throw new Error(
-          'identity already exists; refusing to overwrite without explicit confirmation'
+      const current = get().identity ?? get().staleRecord
+      const changesIdentity =
+        !current ||
+        current.ed_pubkey_hex.toLowerCase() !==
+          record.ed_pubkey_hex.toLowerCase() ||
+        current.x_pubkey_hex.toLowerCase() !== record.x_pubkey_hex.toLowerCase()
+      const session = useSessionStore.getState()
+      if (
+        changesIdentity &&
+        (session.status === 'active' || session.pendingSave)
+      ) {
+        throw new IdentityCommitBlockedError(
+          strings.identity.sessionRestoreBlocked
         )
       }
-      await saveKeys(
-        bytesToHex(id.edPriv),
-        bytesToHex(id.xPriv),
-        allowOverwrite
-      )
-      await saveIdentityRecord(record)
-      set({
-        identity: record,
-        status: 'ready',
-        errorKind: null,
-        staleRecord: null,
-      })
+      // Reserve before any keychain/file await. A restore begun while idle
+      // must not admit a session midway through replacing its signing keys.
+      const release = reserveIdentityCommit(changesIdentity)
+      loadGeneration += 1
+      try {
+        if (!allowOverwrite && (await identityExists())) {
+          throw new Error(
+            'identity already exists; refusing to overwrite without explicit confirmation'
+          )
+        }
+        await saveKeys(
+          bytesToHex(id.edPriv),
+          bytesToHex(id.xPriv),
+          allowOverwrite
+        )
+        try {
+          await saveIdentityRecord(record)
+        } catch (error) {
+          // A competing refresh can supersede this verification. Publish a
+          // conservative gate first so failure cannot unlock the old identity.
+          if (changesIdentity) {
+            loadGeneration += 1
+            set({
+              identity: null,
+              status: 'error',
+              errorKind: 'keys-invalid',
+              staleRecord: current,
+            })
+          }
+          await refresh()
+          throw error
+        }
+        set({
+          identity: record,
+          status: 'ready',
+          errorKind: null,
+          staleRecord: null,
+        })
+      } finally {
+        loadGeneration += 1
+        release()
+      }
     }
     return { record, commit }
   }
@@ -268,11 +319,18 @@ export const useIdentityStore = create<IdentityState>((set, get) => {
   const setDisplayName: IdentityActions['setDisplayName'] = async (name) => {
     const trimmed = name.trim()
     if (!trimmed) throw new Error('display name must not be empty')
-    const current = get().identity
-    if (!current) throw new Error('no identity loaded')
-    const next: IdentityRecord = { ...current, display_name: trimmed }
-    await saveIdentityRecord(next)
-    set({ identity: next })
+    const release = reserveIdentityCommit(false)
+    loadGeneration += 1
+    try {
+      const current = get().identity
+      if (!current) throw new Error('no identity loaded')
+      const next: IdentityRecord = { ...current, display_name: trimmed }
+      await saveIdentityRecord(next)
+      set({ identity: next })
+    } finally {
+      loadGeneration += 1
+      release()
+    }
   }
 
   return {

@@ -23,6 +23,8 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { useIdentity } from '@/features/identity'
 import { useFriendsStore } from '@/stores/friendsStore'
+import { useSessionStore } from '@/stores/sessionStore'
+import { leaveForIdentityRecovery } from '../leaveForIdentityRecovery'
 import { strings } from '@/strings'
 
 export type IdentityCategoryProps = {
@@ -50,6 +52,9 @@ export function IdentityCategory({ onRestoreIdentity }: IdentityCategoryProps) {
   const [submitting, setSubmitting] = useState(false)
   const [copied, setCopied] = useState(false)
   const [backupBusy, setBackupBusy] = useState(false)
+  const [leaving, setLeaving] = useState(false)
+  const sessionActive = useSessionStore((s) => s.status === 'active')
+  const sessionUnsaved = useSessionStore((s) => s.pendingSave !== null)
   const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const copy = strings.settings.identity
 
@@ -220,17 +225,49 @@ export function IdentityCategory({ onRestoreIdentity }: IdentityCategoryProps) {
       />
       <SettingsRow
         label={copy.recoveryPhrase.label}
-        help={copy.recoveryPhrase.help}
+        help={
+          sessionActive
+            ? copy.recoveryPhrase.sessionHelp
+            : sessionUnsaved
+              ? copy.recoveryPhrase.savePendingHelp
+              : copy.recoveryPhrase.help
+        }
         control={
-          <Button
-            type="button"
-            variant="secondary"
-            size="sm"
-            onClick={() => onRestoreIdentity?.()}
-            disabled={!onRestoreIdentity}
-          >
-            <KeyRoundIcon /> {copy.recoveryPhrase.restoreCta}
-          </Button>
+          <div className="flex items-center gap-2">
+            {sessionActive || sessionUnsaved ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={leaving}
+                onClick={() => {
+                  setLeaving(true)
+                  void leaveForIdentityRecovery()
+                    .catch(() =>
+                      toast.error(
+                        useSessionStore.getState().pendingSave
+                          ? strings.session.errors.savePending
+                          : strings.session.errors.leaveFailedFallback
+                      )
+                    )
+                    .finally(() => setLeaving(false))
+                }}
+              >
+                {sessionActive
+                  ? copy.recoveryPhrase.leaveCta
+                  : copy.recoveryPhrase.retrySaveCta}
+              </Button>
+            ) : null}
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              onClick={() => onRestoreIdentity?.()}
+              disabled={!onRestoreIdentity}
+            >
+              <KeyRoundIcon /> {copy.recoveryPhrase.restoreCta}
+            </Button>
+          </div>
         }
       />
       <SettingsRow

@@ -15,6 +15,7 @@ import {
   type RecoverPhase,
 } from './RecoverView'
 import { logger } from '@/lib/log'
+import { IdentityCommitBlockedError } from '@/lib/identityCommitGuard'
 
 const log = logger.child('identity.recover')
 const LINUX_SECRET_SERVICE_ERROR_MARKER =
@@ -89,9 +90,11 @@ export function Recover({
       })
       const raw = err instanceof Error ? err.message : String(err)
       toast.error(
-        raw.includes(LINUX_SECRET_SERVICE_ERROR_MARKER)
-          ? strings.identity.secretServiceError
-          : strings.common.errors.savingIdentity
+        err instanceof IdentityCommitBlockedError
+          ? err.message
+          : raw.includes(LINUX_SECRET_SERVICE_ERROR_MARKER)
+            ? strings.identity.secretServiceError
+            : strings.common.errors.savingIdentity
       )
       setPhase('input')
     }

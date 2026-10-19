@@ -1,4 +1,7 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
+import { useSessionStore } from '@/stores/sessionStore'
+import { expect, userEvent, within, waitFor } from 'storybook/test'
+import { strings } from '@/strings'
 
 import { AboutCategory } from '@/features/settings/categories/AboutCategory'
 import { AdvancedCategory } from '@/features/settings/categories/AdvancedCategory'
@@ -64,4 +67,60 @@ export const Advanced: Story = {
 
 export const About: Story = {
   render: () => <AboutCategory />,
+}
+
+export const IdentityDuringSession: Story = {
+  beforeEach: () => {
+    useSessionStore.setState({
+      status: 'active',
+      leave: async () => {
+        useSessionStore.getState().markEnded()
+      },
+    })
+    return () => useSessionStore.getState().reset()
+  },
+  render: () => <IdentityCategory onRestoreIdentity={() => undefined} />,
+}
+
+export const LeaveSessionBeforeIdentityChange: Story = {
+  ...IdentityDuringSession,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await userEvent.click(
+      canvas.getByRole('button', {
+        name: strings.settings.identity.recoveryPhrase.leaveCta,
+      })
+    )
+    await waitFor(() => expect(useSessionStore.getState().status).toBe('ended'))
+  },
+}
+
+export const RetrySessionSaveBeforeIdentityChange: Story = {
+  ...Identity,
+  beforeEach: () => {
+    useSessionStore.getState().reset()
+    useSessionStore.getState().setPendingSave(async () => {
+      useSessionStore.getState().setPendingSave(null)
+    })
+    return () => {
+      useSessionStore.getState().setPendingSave(null)
+      useSessionStore.getState().reset()
+    }
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const copy = strings.settings.identity.recoveryPhrase
+    await expect(canvas.getByText(copy.savePendingHelp)).toBeVisible()
+    await userEvent.click(
+      canvas.getByRole('button', { name: copy.retrySaveCta })
+    )
+    await waitFor(() =>
+      expect(useSessionStore.getState().pendingSave).toBeNull()
+    )
+    await waitFor(() =>
+      expect(
+        canvas.queryByRole('button', { name: copy.retrySaveCta })
+      ).toBeNull()
+    )
+  },
 }

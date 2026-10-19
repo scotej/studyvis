@@ -9,6 +9,8 @@ import { create, type StateCreator } from 'zustand'
 
 import type { TopicRoom } from '@/lib/trystero'
 import { assertSessionAdmissionAllowed } from '@/lib/updateInstallGuard'
+import { assertSessionIdentityStable } from '@/lib/identityCommitGuard'
+import { strings } from '@/strings'
 
 export type SessionStatus = 'idle' | 'active' | 'ended'
 
@@ -143,6 +145,10 @@ export type SessionState = {
   leave: (() => Promise<void>) | null
   // #413: the active signed-audit producer is shared by every user leave path.
   announceLeave: ((signal: AbortSignal) => Promise<void>) | null
+  // Retained through reset until the ended stint is durably saved. This owns
+  // frozen persistence data, never another room teardown or stint merge.
+  pendingSave: (() => Promise<void>) | null
+  setPendingSave: (save: (() => Promise<void>) | null) => void
   authenticateAuthority: ((peerId: string, edPubkeyHex: string) => void) | null
   // User's declared study topic, consumed by the AI sample loop (V2-P5)
   // and the Ctrl+] AI dialog (V2-P7). Defaults to
@@ -374,9 +380,13 @@ function departPeer(
 
 const sessionStateCreator: StateCreator<SessionState> = (set, get) => ({
   ...INITIAL,
+  pendingSave: null,
+  setPendingSave: (pendingSave) => set({ pendingSave }),
   begin: (init) => {
     assertSessionAdmissionAllowed()
     set((s) => {
+      assertSessionIdentityStable()
+      assertSessionSaved(s)
       const declared = s.pendingInitialTopic?.trim()
       const topic =
         declared && declared.length > 0
@@ -598,6 +608,7 @@ const sessionStateCreator: StateCreator<SessionState> = (set, get) => ({
     const s = get()
     if (
       s.status !== 'ended' ||
+      s.pendingSave !== null ||
       s.endedBy !== 'user' ||
       s.rejoinDeadline === null ||
       now >= s.rejoinDeadline ||
@@ -630,6 +641,12 @@ const sessionStateCreator: StateCreator<SessionState> = (set, get) => ({
 
 export function createSessionStore() {
   return create<SessionState>(sessionStateCreator)
+}
+
+export function assertSessionSaved(
+  state: Pick<SessionState, 'pendingSave'>
+): void {
+  if (state.pendingSave) throw new Error(strings.session.errors.savePending)
 }
 
 export type SessionStore = ReturnType<typeof createSessionStore>
