@@ -39,6 +39,8 @@ const rows = new Map()
 const audit = []
 const sent = []
 const exports = []
+const journalReads = []
+const timelineReads = []
 let next = 1
 let helloWaiting = false
 let releaseHello = () => {}
@@ -65,6 +67,11 @@ Object.assign(window, {
       if (cmd === 'system_window_style_is_custom_applied') return false
       if (cmd === 'identity_sign')
         return Array.from(signMessage(person.edPriv, new Uint8Array(args.message)))
+      if (cmd === 'session_timeline_get') { timelineReads.push(args.sessionId); return null }
+      if (cmd === 'session_journal_read') {
+        journalReads.push(args.sessionId)
+        return { lines: [], truncated: false }
+      }
       if (cmd === 'sessions_get') return rows.get(args.id) ?? null
       if (cmd === 'sessions_insert') { rows.set(args.id, record(args)); return }
       if (cmd === 'sessions_insert_if_absent') {
@@ -161,7 +168,7 @@ window.fixture = {
     status: useSessionStore.getState().status,
     initial: useSessionStore.getState().initialDeclaredTopic,
     current: useSessionStore.getState().declaredStudyTopic,
-    row: rows.get(topic), helloWaiting, exports,
+    row: rows.get(topic), helloWaiting, exports, journalReads, timelineReads,
     topics: sent.filter(item => ['topic_set', 'topic_change'].includes(item.data?.kind))
       .map(item => ({ kind: item.data.kind, detail: item.data.detail, ts: item.data.ts })),
     verified: sent.filter(item => item.data?.kind)
@@ -280,6 +287,16 @@ for (const scenario of ['changed', 'unchanged', 'hello delayed past change']) {
         .getByRole('heading', { name: 'Studied Maths', exact: true })
         .waitFor()
       const copy = await page.evaluate(() => window.fixture.copy)
+      await page.waitForFunction(
+        () => window.fixture.snapshot().journalReads.length > 0
+      )
+      await page
+        .getByText(copy.sections.written.empty, { exact: true })
+        .waitFor()
+      const io = await page.evaluate(() => window.fixture.snapshot())
+      assert.ok(io.timelineReads.length > 0)
+      assert.deepEqual([...new Set(io.journalReads)], ['c'.repeat(64)])
+      assert.deepEqual([...new Set(io.timelineReads)], ['c'.repeat(64)])
       const topicSection = page
         .getByRole('heading', {
           name: copy.sections.topic.heading,
