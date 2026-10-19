@@ -404,14 +404,16 @@ diff --git a/node_modules/@trystero-p2p/core/dist/shared-peer.mjs b/node_modules
  	}
  	register(appId, peerId, peer, idleMs) {
  		const map = this.getMap(appId);
-@@ -131,10 +132,16 @@
+@@ -131,10 +132,18 @@
  		peer.setHandlers({
  			data: (data) => this.dispatchData(shared, data),
  			signal: (signal) => this.dispatchSignal(shared, signal),
 -			close: () => this.clear(appId, peerId, { destroyPeer: false }),
 +			close: () => {
 +				if (this.get(appId, peerId) !== shared) return;
-+				this.clear(appId, peerId, { destroyPeer: false });
++				// #403 — close abandons every room, even before native ICE fails.
++				// Retire its channel too so the remote can accept fresh offers.
++				this.clear(appId, peerId, { destroyPeer: true });
 +			},
  			error: (err) => {
 +				if (this.get(appId, peerId) !== shared) return;

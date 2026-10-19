@@ -3,14 +3,12 @@
 // trystero declares a peer closed 5 s after its RTCPeerConnection reports
 // `disconnected` (`disconnectedCloseDelayMs` in @trystero-p2p/core's peer.mjs),
 // and that detaches EVERY room for that friend — session, presence and inbox
-// alike, since one connection is shared across all of them. Worse, it does
-// not close the connection: `SharedPeerManager.clear(…, {destroyPeer: false})`
-// leaves it open with our senders still attached, which is why #264's reporter
-// kept appearing LIVE to their friend while their own session sat empty. The
-// friend's side then goes on reading that connection as a healthy connected
-// peer and drops every offer we send, so the session cannot re-form until it
-// is actually shut — `closeTransport` below, called from
-// features/session/lifecycle.ts on the way out. Five seconds is shorter than
+// alike, since one connection is shared across all of them. Before the pinned
+// #403 fix, that close notification abandoned an open connection, leaving the
+// friend reading it as live and rejecting fresh offers. The pinned core now
+// destroys the physical peer before notifying every room, including presence
+// and inbox; closeTransport remains a defensive session departure fallback.
+// Five seconds is shorter than
 // an ordinary Wi-Fi roam and far shorter than the multi-second process stalls
 // a saturated machine produces while the on-device model runs: #264 lost a
 // ten-minute session to a 5.5 s stall.
@@ -45,9 +43,8 @@ export type TransportHealth = {
   // The last `connectionState` seen while the connection was live. Read at
   // peer-leave time to tell a clean remote departure ('connected') from a
   // transport loss ('disconnected' / 'failed'). It is needed because the
-  // instantaneous state does not answer the question: trystero declares a
-  // peer gone WITHOUT closing its connection, so by then the state may read
-  // anything from 'disconnected' to a recovered 'connected'.
+  // instantaneous state does not answer the question: the pinned core closes
+  // the connection before notifying its rooms, so it can already read 'closed'.
   lastLiveConnectionState: RTCPeerConnectionState
   // Wall-clock ms at which the ICE agent first reported `disconnected` in the
   // current degraded stretch, or null while the transport is healthy.
@@ -322,17 +319,9 @@ export function installTransientDisconnectHold(
   connection.addEventListener('iceconnectionstatechange', onRealStateChange)
 }
 
-// #264 — shut a connection trystero abandoned open.
-//
-// On an unclean close trystero calls `SharedPeerManager.clear(…,
-// {destroyPeer: false})`, which empties `shared.bindings` before firing each
-// binding's close handler — so the `detachBinding` that would have removed our
-// senders early-returns, and the connection is left running with the camera
-// and screen still attached to a peer the app has already reported gone. It
-// leaves the FAR side pinned to it — their `state.connectedPeer` still points
-// here, it still reads healthy because our data channel never closed, and
-// trystero drops all signaling for such a peer — so the session cannot
-// re-form until this connection is actually shut.
+// #264/#403 — defensive cleanup for an abandoned native transport. The pinned
+// core now destroys a shared peer before notifying its rooms. This fallback
+// also covers connections which failed before gaining a shared owner.
 //
 // Ordering matches trystero's own `peer.destroy()`: data channels first, so
 // the remote learns from an SCTP stream reset instead of waiting out ICE
@@ -390,9 +379,9 @@ export function createResilientPeerConnection(
       observeNegotiationFailure(connection, 'setRemoteDescription')
       observeNegotiationFailure(connection, 'addIceCandidate')
       installTransientDisconnectHold(connection, holdMs)
-      // Trystero clears a failed answer peer without destroying it. Let its
-      // state handlers see the failure first, then close the abandoned PC so
-      // repeated failed handshakes cannot exhaust the browser's PC limit.
+      // An answering connection can fail before gaining a shared owner. Let
+      // Trystero's state handlers run first, then close any native PC left
+      // open so repeated failures cannot exhaust the browser's PC limit.
       let cleanupQueued = false
       const closeFailedConnection = () => {
         if (cleanupQueued) return
