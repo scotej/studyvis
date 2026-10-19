@@ -33,9 +33,10 @@ import {
 import {
   isBenchmarkStale,
   runBenchmark,
+  useBenchmarkActivity,
   type BenchmarkProgress,
 } from './benchmark'
-import { ERR_ENGINE_NOT_INSTALLED, useSidecarStore } from './sidecar'
+import { ERR_ENGINE_NOT_INSTALLED } from './sidecar'
 import {
   getDownloadRuntime,
   specToFileRequests,
@@ -87,9 +88,13 @@ export const ModelPickerContainer = forwardRef<
   const [hfTokenPresent, setHfTokenPresent] = useState(false)
   const [hfTokenChecked, setHfTokenChecked] = useState(false)
 
-  const setupBusy = Object.values(cards).some(
-    (card) => card.phase !== 'idle' && card.phase !== 'failed'
-  )
+  const benchmarkActivity = useBenchmarkActivity()
+  const benchmarkModelId = benchmarkActivity.modelId
+  const setupBusy =
+    benchmarkModelId !== null ||
+    Object.values(cards).some(
+      (card) => card.phase !== 'idle' && card.phase !== 'failed'
+    )
 
   useEffect(() => {
     onBusyChange?.(setupBusy)
@@ -326,10 +331,6 @@ export const ModelPickerContainer = forwardRef<
       })
       try {
         const paths = await runtime.paths(spec.id)
-        // V2-P1 carryover: stop any in-flight sidecar before launching the
-        // benchmark so re-benchmark doesn't trip the "child already running"
-        // re-entry rejection.
-        await useSidecarStore.getState().stop()
         const result = await runBenchmark(spec, {
           modelPath: paths.model_path,
           mmprojPath: paths.mmproj_path,
@@ -639,6 +640,19 @@ export const ModelPickerContainer = forwardRef<
         spec.id,
         {
           ...card,
+          ...(benchmarkModelId === spec.id && benchmarkActivity.progress
+            ? {
+                phase: benchmarkPhaseToCard(benchmarkActivity.progress),
+                benchmarkSampleIndex:
+                  benchmarkActivity.progress.phase === 'sample'
+                    ? benchmarkActivity.progress.index
+                    : undefined,
+                benchmarkSampleTotal:
+                  benchmarkActivity.progress.phase === 'sample'
+                    ? benchmarkActivity.progress.total
+                    : undefined,
+              }
+            : {}),
           record: records[spec.id] ?? null,
         },
       ]
@@ -660,6 +674,7 @@ export const ModelPickerContainer = forwardRef<
       onClearHfToken,
     },
     actionsLocked,
+    benchmarkBusy: benchmarkModelId !== null,
   }
 
   return <ModelPicker {...props} />

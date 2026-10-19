@@ -103,6 +103,7 @@ export type ModelPickerProps = {
   // a model deletes files a running llama-server holds open. Download /
   // model changes are disabled while a live AI loop owns the sidecar.
   actionsLocked?: boolean
+  benchmarkBusy?: boolean
   className?: string
 }
 
@@ -210,6 +211,7 @@ export function ModelPicker({
   guide,
   actions,
   actionsLocked = false,
+  benchmarkBusy = false,
   className,
 }: ModelPickerProps) {
   return (
@@ -254,6 +256,7 @@ export function ModelPicker({
               hfTokenPresent={hfTokenPresent}
               actions={actions}
               actionsLocked={actionsLocked}
+              benchmarkBusy={benchmarkBusy}
             />
           )
         })}
@@ -274,6 +277,7 @@ function ModelCard({
   hfTokenPresent,
   actions,
   actionsLocked,
+  benchmarkBusy,
 }: {
   // One entry per quant variant, registry order; single-quant models pass
   // exactly one. Every entry shares displayName/tier — only the files and
@@ -283,6 +287,7 @@ function ModelCard({
   hfTokenPresent: boolean
   actions: PickerActions
   actionsLocked: boolean
+  benchmarkBusy: boolean
 }) {
   // The user's explicit quant choice; null until they touch the selector.
   const [chosenId, setChosenId] = useState<string | null>(null)
@@ -369,6 +374,7 @@ function ModelCard({
           hfTokenPresent={hfTokenPresent}
           actions={actions}
           actionsLocked={actionsLocked}
+          benchmarkBusy={benchmarkBusy}
         />
       </div>
 
@@ -517,6 +523,7 @@ function CardActions({
   hfTokenPresent,
   actions,
   actionsLocked,
+  benchmarkBusy,
 }: {
   state: PickerStateForModel
   isInstalled: boolean
@@ -529,6 +536,7 @@ function CardActions({
   hfTokenPresent: boolean
   actions: PickerActions
   actionsLocked: boolean
+  benchmarkBusy: boolean
 }) {
   const { spec, phase } = state
   const phaseClass = classifyPhase(phase)
@@ -568,7 +576,7 @@ function CardActions({
           variant="secondary"
           size="sm"
           onClick={() => actions.onBenchmark(spec)}
-          disabled={actionsLocked}
+          disabled={actionsLocked || benchmarkBusy}
         >
           <RefreshCwIcon />{' '}
           {benchmark

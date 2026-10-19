@@ -2060,6 +2060,10 @@ export const strings = {
         'Measured on an older StudyVis — re-run the benchmark for current numbers.',
       // A download that resolves mid-session must not chain into the
       // benchmark (it would stop the live sample loop's sidecar).
+      benchmarkEngineChanged:
+        'The AI engine changed during this benchmark. Try benchmarking again with AI off.',
+      benchmarkBusy:
+        'Another model benchmark is running. Wait for it to finish, then try again.',
       benchmarkWhileAiEnabled:
         'Turn AI off before benchmarking. This keeps the benchmark from sharing the model process with live focus checks.',
       modelChangesWhileAiRunning:
