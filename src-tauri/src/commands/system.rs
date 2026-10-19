@@ -1089,9 +1089,17 @@ pub fn system_ai_features_set_enabled<R: Runtime>(
 // surface narrower than a general filesystem plugin (least-new-surface, same
 // rationale as the single-destination `system_open_releases`). The contents
 // are UTF-8 text (markdown / CSV / JSON), so a plain write_string suffices.
+static TEXT_EXPORT_LOCK: Mutex<()> = Mutex::new(());
+
 #[tauri::command]
-pub fn system_write_text_file(path: String, contents: String) -> Result<(), String> {
-    std::fs::write(&path, contents.as_bytes()).map_err(|e| format!("Couldn't write {path}: {e}"))
+pub async fn system_write_text_file(path: String, contents: String) -> Result<(), String> {
+    super::blocking(move || write_text_file(&path, &contents)).await
+}
+
+fn write_text_file(path: &str, contents: &str) -> Result<(), String> {
+    // #404: concurrent worker exports must not truncate each other's output.
+    let _guard = TEXT_EXPORT_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    std::fs::write(path, contents.as_bytes()).map_err(|e| format!("Couldn't write {path}: {e}"))
 }
 
 const IMAGE_SAVE_MAX_BYTES: usize = 5 * 1024 * 1024;
@@ -1556,7 +1564,11 @@ fn linux_install_context(appimage: Option<&std::ffi::OsStr>) -> InstallContext {
 }
 
 #[tauri::command]
-pub fn system_install_context() -> InstallContext {
+pub async fn system_install_context() -> Result<InstallContext, String> {
+    super::blocking(|| Ok(install_context())).await
+}
+
+fn install_context() -> InstallContext {
     #[cfg(target_os = "macos")]
     {
         let Ok(exe) = std::env::current_exe() else {
@@ -1601,6 +1613,53 @@ pub fn system_install_context() -> InstallContext {
 #[cfg(test)]
 mod tests {
     use super::{image_extension, safe_image_filename, RELEASES_URL};
+
+    #[test]
+    fn concurrent_text_exports_retain_one_complete_report() {
+        let dir = std::env::temp_dir().join(format!(
+            "studyvis-text-writers-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("report.md");
+        let reports: Vec<String> = (0..8u8)
+            .map(|writer| {
+                format!(
+                    "Report {writer}\n{}",
+                    char::from(b'A' + writer)
+                        .to_string()
+                        .repeat((usize::from(writer) + 1) * 131_071)
+                )
+            })
+            .collect();
+        let start = std::sync::Barrier::new(8);
+        std::thread::scope(|scope| {
+            let mut writers = Vec::new();
+            for report in &reports {
+                let start = &start;
+                let path = &path;
+                writers.push(scope.spawn(move || {
+                    start.wait();
+                    for _ in 0..8 {
+                        super::write_text_file(path.to_str().unwrap(), report).unwrap();
+                    }
+                }));
+            }
+            for writer in writers {
+                writer.join().unwrap();
+            }
+        });
+        let saved = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            reports.contains(&saved),
+            "concurrent exports left mixed or truncated data"
+        );
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 
     #[test]
     fn image_save_metadata_is_constrained() {

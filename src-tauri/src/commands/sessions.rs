@@ -1,6 +1,5 @@
-//! Session + audit-event commands: thin sync wrappers over `db::sessions` and
-//! `db::audit_events` (same held-guard, no-async locking pattern as
-//! `commands/friends.rs`). Upsert/cascade semantics live in the `db` layer;
+//! Session + audit-event commands: blocking workers over `db::sessions` and
+//! `db::audit_events` (same closure-scoped locking as `commands/friends.rs`). Upsert/cascade semantics live in the `db` layer;
 //! the TS callers are `src/lib/db/sessions.ts` and `src/lib/db/audit.ts`
 //! (camelCase invoke args in, snake_case serde rows out).
 
@@ -9,15 +8,13 @@ use tauri::{AppHandle, Runtime, State};
 use crate::commands::session_journal;
 use crate::db::{audit_events, session_timelines, sessions, DbPool};
 
-fn lock<'a>(
-    state: &'a State<'_, DbPool>,
-) -> Result<std::sync::MutexGuard<'a, rusqlite::Connection>, String> {
+fn lock<'a>(state: &'a DbPool) -> Result<std::sync::MutexGuard<'a, rusqlite::Connection>, String> {
     state.0.lock().map_err(|e| format!("db poisoned: {e}"))
 }
 
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
-pub fn sessions_insert(
+pub async fn sessions_insert(
     state: State<'_, DbPool>,
     id: String,
     started_at: i64,
@@ -43,32 +40,40 @@ pub fn sessions_insert(
     // null can clear the stale score instead of COALESCE retaining it.
     replace_focus_metrics: Option<bool>,
 ) -> Result<(), String> {
-    let conn = lock(&state)?;
-    let row = sessions::SessionRow {
-        id,
-        started_at: Some(started_at),
-        ended_at: Some(ended_at),
-        total_minutes,
-        total_duration_ms,
-        peer_pubkeys,
-        declared_topic,
-        score,
-        focused_pct,
-        generated_at,
-        confident_samples,
-        skipped_samples,
-        ai_enabled,
-        local_ed_pubkey,
-        local_display_name,
-        peer_presence_ms,
-    };
-    sessions::insert_with_focus_metrics_mode(&conn, &row, replace_focus_metrics.unwrap_or(false))
+    let state = DbPool(state.0.clone());
+    super::blocking(move || {
+        let conn = lock(&state)?;
+        let row = sessions::SessionRow {
+            id,
+            started_at: Some(started_at),
+            ended_at: Some(ended_at),
+            total_minutes,
+            total_duration_ms,
+            peer_pubkeys,
+            declared_topic,
+            score,
+            focused_pct,
+            generated_at,
+            confident_samples,
+            skipped_samples,
+            ai_enabled,
+            local_ed_pubkey,
+            local_display_name,
+            peer_presence_ms,
+        };
+        sessions::insert_with_focus_metrics_mode(
+            &conn,
+            &row,
+            replace_focus_metrics.unwrap_or(false),
+        )
         .map_err(|e| e.to_string())
+    })
+    .await
 }
 
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
-pub fn sessions_insert_if_absent(
+pub async fn sessions_insert_if_absent(
     state: State<'_, DbPool>,
     id: String,
     started_at: i64,
@@ -87,41 +92,53 @@ pub fn sessions_insert_if_absent(
     local_ed_pubkey: Option<String>,
     local_display_name: Option<String>,
 ) -> Result<bool, String> {
-    let conn = lock(&state)?;
-    let row = sessions::SessionRow {
-        id,
-        started_at: Some(started_at),
-        ended_at: Some(ended_at),
-        total_minutes,
-        total_duration_ms,
-        peer_pubkeys,
-        declared_topic,
-        score,
-        focused_pct,
-        generated_at,
-        confident_samples,
-        skipped_samples,
-        ai_enabled,
-        local_ed_pubkey,
-        local_display_name,
-        peer_presence_ms,
-    };
-    sessions::insert_if_absent(&conn, &row).map_err(|e| e.to_string())
+    let state = DbPool(state.0.clone());
+    super::blocking(move || {
+        let conn = lock(&state)?;
+        let row = sessions::SessionRow {
+            id,
+            started_at: Some(started_at),
+            ended_at: Some(ended_at),
+            total_minutes,
+            total_duration_ms,
+            peer_pubkeys,
+            declared_topic,
+            score,
+            focused_pct,
+            generated_at,
+            confident_samples,
+            skipped_samples,
+            ai_enabled,
+            local_ed_pubkey,
+            local_display_name,
+            peer_presence_ms,
+        };
+        sessions::insert_if_absent(&conn, &row).map_err(|e| e.to_string())
+    })
+    .await
 }
 
 #[tauri::command]
-pub fn sessions_list(state: State<'_, DbPool>) -> Result<Vec<sessions::SessionRow>, String> {
-    let conn = lock(&state)?;
-    sessions::list(&conn).map_err(|e| e.to_string())
+pub async fn sessions_list(state: State<'_, DbPool>) -> Result<Vec<sessions::SessionRow>, String> {
+    let state = DbPool(state.0.clone());
+    super::blocking(move || {
+        let conn = lock(&state)?;
+        sessions::list(&conn).map_err(|e| e.to_string())
+    })
+    .await
 }
 
 #[tauri::command]
-pub fn sessions_get(
+pub async fn sessions_get(
     state: State<'_, DbPool>,
     id: String,
 ) -> Result<Option<sessions::SessionRow>, String> {
-    let conn = lock(&state)?;
-    sessions::get(&conn, &id).map_err(|e| e.to_string())
+    let state = DbPool(state.0.clone());
+    super::blocking(move || {
+        let conn = lock(&state)?;
+        sessions::get(&conn, &id).map_err(|e| e.to_string())
+    })
+    .await
 }
 
 // R4 + #236 — the SQL cascade drops the session, its audit events, and its
@@ -130,46 +147,58 @@ pub fn sessions_get(
 // failure can only ever leave an orphaned journal (which the next regeneration
 // or clear-all removes), never a narrative whose evidence is already gone.
 #[tauri::command]
-pub fn sessions_delete<R: Runtime>(
+pub async fn sessions_delete<R: Runtime>(
     app: AppHandle<R>,
     state: State<'_, DbPool>,
     id: String,
 ) -> Result<(), String> {
-    {
-        let mut conn = lock(&state)?;
-        sessions::delete(&mut conn, &id).map_err(|e| e.to_string())?;
-    }
-    session_journal::remove_journal(&app, &id)
-        .map_err(|error| format!("SESSION_JOURNAL_CLEANUP_INCOMPLETE: {error}"))
+    let state = DbPool(state.0.clone());
+    super::blocking(move || {
+        {
+            let mut conn = lock(&state)?;
+            sessions::delete(&mut conn, &id).map_err(|e| e.to_string())?;
+        }
+        session_journal::remove_journal(&app, &id)
+            .map_err(|error| format!("SESSION_JOURNAL_CLEANUP_INCOMPLETE: {error}"))
+    })
+    .await
 }
 
 #[tauri::command]
-pub fn sessions_clear_all<R: Runtime>(
+pub async fn sessions_clear_all<R: Runtime>(
     app: AppHandle<R>,
     state: State<'_, DbPool>,
 ) -> Result<(), String> {
-    {
-        let mut conn = lock(&state)?;
-        sessions::clear_all(&mut conn).map_err(|e| e.to_string())?;
-    }
-    session_journal::clear_journals(&app)
-        .map_err(|error| format!("SESSION_JOURNAL_CLEANUP_INCOMPLETE: {error}"))
+    let state = DbPool(state.0.clone());
+    super::blocking(move || {
+        {
+            let mut conn = lock(&state)?;
+            sessions::clear_all(&mut conn).map_err(|e| e.to_string())?;
+        }
+        session_journal::clear_journals(&app)
+            .map_err(|error| format!("SESSION_JOURNAL_CLEANUP_INCOMPLETE: {error}"))
+    })
+    .await
 }
 
 // #236 — the post-session written timeline. `entries` is the JSON array the
 // frontend validated before persisting; this layer stores it verbatim, the same
 // way audit-event detail is stored.
 #[tauri::command]
-pub fn session_timeline_get(
+pub async fn session_timeline_get(
     state: State<'_, DbPool>,
     session_id: String,
 ) -> Result<Option<session_timelines::SessionTimelineRow>, String> {
-    let conn = lock(&state)?;
-    session_timelines::get(&conn, &session_id).map_err(|e| e.to_string())
+    let state = DbPool(state.0.clone());
+    super::blocking(move || {
+        let conn = lock(&state)?;
+        session_timelines::get(&conn, &session_id).map_err(|e| e.to_string())
+    })
+    .await
 }
 
 #[tauri::command]
-pub fn session_timeline_save(
+pub async fn session_timeline_save(
     state: State<'_, DbPool>,
     session_id: String,
     generated_at: i64,
@@ -179,30 +208,34 @@ pub fn session_timeline_save(
     entries: String,
     truncated: bool,
 ) -> Result<(), String> {
-    let conn = lock(&state)?;
-    let row = session_timelines::SessionTimelineRow {
-        session_id,
-        generated_at,
-        covered_until,
-        model_id,
-        source,
-        entries,
-        truncated: i64::from(truncated),
-    };
-    // I100 — a write-up runs for minutes and outlives the report that started
-    // it, so the session it describes can be deleted underneath it. The db
-    // layer refuses to write a narrative for a session that is gone and says so
-    // in its return value. Discarding it is the intended outcome, not an error
-    // the caller can act on: the user asked for the session to be forgotten and
-    // the write-up lost the race, which is the direction that race should go.
-    // `native_log` is desktop-gated and this module is not, so the outcome is
-    // deliberately not recorded here.
-    let _stored = session_timelines::upsert(&conn, &row).map_err(|e| e.to_string())?;
-    Ok(())
+    let state = DbPool(state.0.clone());
+    super::blocking(move || {
+        let conn = lock(&state)?;
+        let row = session_timelines::SessionTimelineRow {
+            session_id,
+            generated_at,
+            covered_until,
+            model_id,
+            source,
+            entries,
+            truncated: i64::from(truncated),
+        };
+        // I100 — a write-up runs for minutes and outlives the report that started
+        // it, so the session it describes can be deleted underneath it. The db
+        // layer refuses to write a narrative for a session that is gone and says so
+        // in its return value. Discarding it is the intended outcome, not an error
+        // the caller can act on: the user asked for the session to be forgotten and
+        // the write-up lost the race, which is the direction that race should go.
+        // `native_log` is desktop-gated and this module is not, so the outcome is
+        // deliberately not recorded here.
+        let _stored = session_timelines::upsert(&conn, &row).map_err(|e| e.to_string())?;
+        Ok(())
+    })
+    .await
 }
 
 #[tauri::command]
-pub fn audit_event_insert(
+pub async fn audit_event_insert(
     state: State<'_, DbPool>,
     session_id: String,
     ts: i64,
@@ -211,34 +244,46 @@ pub fn audit_event_insert(
     detail: String,
     sig: String,
 ) -> Result<(), String> {
-    let conn = lock(&state)?;
-    let row = audit_events::AuditEventRow {
-        session_id,
-        ts,
-        who,
-        kind,
-        detail,
-        sig,
-    };
-    audit_events::insert(&conn, &row).map_err(|e| e.to_string())
+    let state = DbPool(state.0.clone());
+    super::blocking(move || {
+        let conn = lock(&state)?;
+        let row = audit_events::AuditEventRow {
+            session_id,
+            ts,
+            who,
+            kind,
+            detail,
+            sig,
+        };
+        audit_events::insert(&conn, &row).map_err(|e| e.to_string())
+    })
+    .await
 }
 
 #[tauri::command]
-pub fn audit_events_list_for_session(
+pub async fn audit_events_list_for_session(
     state: State<'_, DbPool>,
     session_id: String,
 ) -> Result<Vec<audit_events::AuditEventRow>, String> {
-    let conn = lock(&state)?;
-    audit_events::list_for_session(&conn, &session_id).map_err(|e| e.to_string())
+    let state = DbPool(state.0.clone());
+    super::blocking(move || {
+        let conn = lock(&state)?;
+        audit_events::list_for_session(&conn, &session_id).map_err(|e| e.to_string())
+    })
+    .await
 }
 
 // R7 — cross-session audit events for the local focus-insights view. The
 // frontend shapes them in the pure statsInsights seam; this command only
 // reads.
 #[tauri::command]
-pub fn audit_events_list_all(
+pub async fn audit_events_list_all(
     state: State<'_, DbPool>,
 ) -> Result<Vec<audit_events::AuditEventRow>, String> {
-    let conn = lock(&state)?;
-    audit_events::list_ai_distractions_all(&conn).map_err(|e| e.to_string())
+    let state = DbPool(state.0.clone());
+    super::blocking(move || {
+        let conn = lock(&state)?;
+        audit_events::list_ai_distractions_all(&conn).map_err(|e| e.to_string())
+    })
+    .await
 }

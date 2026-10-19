@@ -352,6 +352,23 @@ jobs:
         working-directory: src-tauri
         run: cargo test --locked
 
+      - name: Verify Windows integration-test activation context
+        if: ${{ !cancelled() && runner.os == 'Windows' }}
+        shell: pwsh
+        run: >-
+          ./scripts/check-windows-test-loader.ps1
+          -TargetDirectory src-tauri/target/debug/deps
+          -EvidenceDirectory "${{ runner.temp }}/studyvis-test-loader"
+
+      - name: Retain Windows test-loader failure evidence
+        if: ${{ failure() && runner.os == 'Windows' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: windows-test-loader-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/studyvis-test-loader
+          if-no-files-found: error
+          retention-days: 7
+
       - name: Native credential-store round trip
         if: runner.os != 'Linux'
         shell: bash

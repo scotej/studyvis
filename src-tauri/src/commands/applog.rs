@@ -137,12 +137,18 @@ fn render_batch(lines: &[String]) -> String {
 /// capability may invoke, so its narrow payload prevents that secondary
 /// webview from choosing a filesystem target.
 #[tauri::command]
-pub fn app_log_append<R: Runtime>(app: AppHandle<R>, lines: Vec<String>) -> Result<(), String> {
-    if lines.is_empty() {
-        return Ok(());
-    }
-    let path = app_log_path(&app)?;
-    append_rendered_lines(&path, &lines)
+pub async fn app_log_append<R: Runtime>(
+    app: AppHandle<R>,
+    lines: Vec<String>,
+) -> Result<(), String> {
+    super::blocking(move || {
+        if lines.is_empty() {
+            return Ok(());
+        }
+        let path = app_log_path(&app)?;
+        append_rendered_lines(&path, &lines)
+    })
+    .await
 }
 
 /// The shared write path for both producers: the JS sink through
@@ -167,34 +173,37 @@ pub(crate) fn append_rendered_lines(path: &Path, lines: &[String]) -> Result<(),
 /// Reads only the live generation: a file that just rolled yields a short tail,
 /// which is the honest answer rather than a stitched-together one.
 #[tauri::command]
-pub fn app_log_tail<R: Runtime>(
+pub async fn app_log_tail<R: Runtime>(
     app: AppHandle<R>,
     max_lines: usize,
 ) -> Result<Vec<String>, String> {
-    let path = app_log_path(&app)?;
-    let _guard = app_log_guard();
-    let Ok(mut file) = File::open(&path) else {
-        return Ok(Vec::new());
-    };
-    let len = file
-        .metadata()
-        .map_err(|e| format!("stat app log: {e}"))?
-        .len();
-    let from = len.saturating_sub(TAIL_READ_BYTES);
-    file.seek(SeekFrom::Start(from))
-        .map_err(|e| format!("seek app log: {e}"))?;
-    let mut buf = Vec::new();
-    file.read_to_end(&mut buf)
-        .map_err(|e| format!("read app log: {e}"))?;
-    let text = String::from_utf8_lossy(&buf);
-    let mut lines: Vec<&str> = text.lines().collect();
-    // A mid-file seek lands inside a line; drop that fragment.
-    if from > 0 && !lines.is_empty() {
-        lines.remove(0);
-    }
-    let want = max_lines.min(MAX_TAIL_LINES);
-    let start = lines.len().saturating_sub(want);
-    Ok(lines[start..].iter().map(|s| (*s).to_string()).collect())
+    super::blocking(move || {
+        let path = app_log_path(&app)?;
+        let _guard = app_log_guard();
+        let Ok(mut file) = File::open(&path) else {
+            return Ok(Vec::new());
+        };
+        let len = file
+            .metadata()
+            .map_err(|e| format!("stat app log: {e}"))?
+            .len();
+        let from = len.saturating_sub(TAIL_READ_BYTES);
+        file.seek(SeekFrom::Start(from))
+            .map_err(|e| format!("seek app log: {e}"))?;
+        let mut buf = Vec::new();
+        file.read_to_end(&mut buf)
+            .map_err(|e| format!("read app log: {e}"))?;
+        let text = String::from_utf8_lossy(&buf);
+        let mut lines: Vec<&str> = text.lines().collect();
+        // A mid-file seek lands inside a line; drop that fragment.
+        if from > 0 && !lines.is_empty() {
+            lines.remove(0);
+        }
+        let want = max_lines.min(MAX_TAIL_LINES);
+        let start = lines.len().saturating_sub(want);
+        Ok(lines[start..].iter().map(|s| (*s).to_string()).collect())
+    })
+    .await
 }
 
 #[cfg(test)]
