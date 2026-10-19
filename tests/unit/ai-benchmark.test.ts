@@ -105,6 +105,28 @@ function makeFakeRuntime({
 }
 
 describe('runBenchmark', () => {
+  test('refuses the unavailable managed model before image preparation or any engine work', async () => {
+    const env = makeFakeRuntime({ perCallSec: [] })
+    let preparations = 0
+    __setBenchmarkRuntime({
+      ...env.runtime,
+      prepareImages: async () => {
+        preparations += 1
+        return env.runtime.prepareImages()
+      },
+    })
+    await expect(
+      runBenchmark(
+        SUPPORTED_MODELS.find((spec) => spec.id === 'moondream2')!,
+        { modelPath: '/m.gguf', mmprojPath: '/p.gguf' }
+      )
+    ).rejects.toThrow('unavailable')
+    expect(preparations).toBe(0)
+    expect(env.startedWith).toEqual([])
+    expect(env.bodies).toEqual([])
+    expect(env.stops).toBe(0)
+  })
+
   beforeEach(() => {
     __resetBenchmarkRuntime()
     setCurrentAiHardwareIdentity(TEST_HARDWARE_IDENTITY)
@@ -128,10 +150,10 @@ describe('runBenchmark', () => {
       })
     )
     try {
-      const pending = runBenchmark(SUPPORTED_MODELS[1], {
-        modelPath: '/m.gguf',
-        mmprojPath: '/p.gguf',
-      })
+      const pending = runBenchmark(
+        SUPPORTED_MODELS.find((spec) => spec.id === 'qwen2_5-vl-3b')!,
+        { modelPath: '/m.gguf', mmprojPath: '/p.gguf' }
+      )
       const rejected = expect(pending).rejects.toThrow(
         '/health did not return 2xx within 90000 ms'
       )
@@ -284,6 +306,16 @@ describe('runBenchmark', () => {
     })
     await vi.waitFor(() => expect(env.startedWith).toHaveLength(1))
     expect(useBenchmarkActivity.getState().modelId).toBe(SUPPORTED_MODELS[1].id)
+    const ownedActivity = useBenchmarkActivity.getState()
+    await expect(
+      runBenchmark(
+        SUPPORTED_MODELS.find((spec) => spec.id === 'moondream2')!,
+        { modelPath: '/retired.gguf', mmprojPath: '/retired-mmproj.gguf' }
+      )
+    ).rejects.toThrow('unavailable')
+    expect(useBenchmarkActivity.getState()).toBe(ownedActivity)
+    expect(env.startedWith).toHaveLength(1)
+    expect(env.stops).toBe(0)
     await expect(
       runBenchmark(SUPPORTED_MODELS[2], {
         modelPath: '/second.gguf',
@@ -411,10 +443,13 @@ describe('runBenchmark', () => {
     }
     __setBenchmarkRuntime(wrapped)
     await expect(
-      runBenchmark(SUPPORTED_MODELS[1], {
-        modelPath: '/m.gguf',
-        mmprojPath: '/p.gguf',
-      })
+      runBenchmark(
+        SUPPORTED_MODELS.find((spec) => spec.id === 'qwen2_5-vl-3b')!,
+        {
+          modelPath: '/m.gguf',
+          mmprojPath: '/p.gguf',
+        }
+      )
     ).rejects.toThrow('mid-flight failure')
     expect(env.stops).toBe(1)
   })

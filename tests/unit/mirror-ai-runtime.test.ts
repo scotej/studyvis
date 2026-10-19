@@ -31,6 +31,23 @@ function runtime() {
 }
 
 describe('mirrored session AI ownership', () => {
+  test('refuses the retained unavailable model before resolving paths or reusing an engine', async () => {
+    const deps = runtime()
+    const onStartFail = vi.fn()
+    const engine = startMirrorAiRuntime(
+      { modelId: 'moondream2', onStartFail },
+      deps
+    )
+    expect(await engine.ready).toBe(false)
+    expect(onStartFail).toHaveBeenCalledWith(
+      'model_unavailable',
+      expect.stringContaining('unavailable')
+    )
+    expect(deps.modelPaths).not.toHaveBeenCalled()
+    expect(deps.start).not.toHaveBeenCalled()
+    expect(deps.stop).not.toHaveBeenCalled()
+  })
+
   test('starts the selected local model without requiring browser capture', async () => {
     const deps = runtime()
     const onStartFail = vi.fn()

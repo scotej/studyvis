@@ -1,6 +1,11 @@
 import { afterEach, beforeEach, describe, expect, test } from 'vitest'
 
 import {
+  getModelUnavailableReason,
+  MODEL_UNAVAILABLE_ERROR,
+} from '@/features/ai/models'
+
+import {
   __resetModelStoreDeps,
   __setModelStoreDeps,
   BENCHMARK_SAMPLE_COUNT,
@@ -44,7 +49,26 @@ function makeFakeDeps(): { deps: ModelStoreDeps; store: FakeStore } {
 }
 
 describe('models registry', () => {
-  test('exposes the four ARCHITECTURE.md §8 tiers, with three Gemma quants on Best', () => {
+  test('only the current managed Moondream entry is unavailable; pins and custom IDs remain intact', () => {
+    const retired = SUPPORTED_MODELS.filter((spec) =>
+      getModelUnavailableReason(spec.id)
+    )
+    expect(retired.map((spec) => spec.id)).toEqual(['moondream2'])
+    expect(retired[0].unavailable).toEqual({
+      engine: 'b9095',
+      reason: MODEL_UNAVAILABLE_ERROR,
+    })
+    expect(retired[0].modelFile.sha256).toBe(
+      '925bcb666baf69ed747e26121af287b16ae7764483be9548b1382f29783689a5'
+    )
+    expect(retired[0].mmprojFile.sha256).toBe(
+      '4cc1cb3660d87ff56432ebeb7884ad35d67c48c7b9f6b2856f305e39c38eed8f'
+    )
+    for (const id of [null, undefined, 'advanced-custom-model'])
+      expect(getModelUnavailableReason(id)).toBeNull()
+  })
+
+  test('retains the four historical tiers for compatibility, with three Gemma quants on Best', () => {
     expect(SUPPORTED_MODELS).toHaveLength(6)
     expect(SUPPORTED_MODELS.map((m) => m.defaultTier)).toEqual([
       'fastest',
@@ -267,6 +291,39 @@ describe('useModelStore (LazyStore-backed)', () => {
     __resetModelStoreDeps()
   })
 
+  test('retained Moondream selection hydrates without mutation, refuses new activation, and remains explicitly removable', async () => {
+    const { deps, store } = makeFakeDeps()
+    const record = {
+      modelId: 'moondream2',
+      installedAt: 123,
+      benchmark: summariseBenchmark({
+        samplesSec: [2, 3, 4],
+        completedAtSec: 99,
+      }),
+      interruptedDownload: { bytesReceived: 2048, at: 456 },
+    }
+    store.data.set('records', { moondream2: record })
+    store.data.set('active_model_id', 'moondream2')
+    const before = JSON.stringify([...store.data])
+    __setModelStoreDeps(deps)
+    await useModelStore.getState().hydrate()
+    expect(useModelStore.getState().activeModelId).toBe('moondream2')
+    expect(useModelStore.getState().records).toEqual({ moondream2: record })
+    expect(JSON.stringify([...store.data])).toBe(before)
+    expect(store.saved).toBe(0)
+    const hydrated = useModelStore.getState()
+    await expect(hydrated.selectModel('moondream2')).rejects.toThrow(
+      'unavailable'
+    )
+    expect(useModelStore.getState()).toBe(hydrated)
+    expect(JSON.stringify([...store.data])).toBe(before)
+    expect(store.saved).toBe(0)
+    await hydrated.forget('moondream2')
+    expect(useModelStore.getState().activeModelId).toBeNull()
+    expect(useModelStore.getState().records.moondream2).toBeUndefined()
+    expect(store.saved).toBe(1)
+  })
+
   test('hydrate populates from store and persists subsequent writes', async () => {
     const { deps, store } = makeFakeDeps()
     store.data.set('records', {
@@ -300,13 +357,13 @@ describe('useModelStore (LazyStore-backed)', () => {
     __setModelStoreDeps(deps)
     await useModelStore.getState().hydrate()
 
-    await useModelStore.getState().recordInstalled('moondream2', 200)
-    await useModelStore.getState().selectModel('moondream2')
+    await useModelStore.getState().recordInstalled('qwen2_5-vl-3b', 200)
+    await useModelStore.getState().selectModel('qwen2_5-vl-3b')
 
     const state = useModelStore.getState()
-    expect(state.activeModelId).toBe('moondream2')
-    expect(state.records['moondream2']?.benchmark).toBeNull()
-    expect(store.data.get('active_model_id')).toBe('moondream2')
+    expect(state.activeModelId).toBe('qwen2_5-vl-3b')
+    expect(state.records['qwen2_5-vl-3b']?.benchmark).toBeNull()
+    expect(store.data.get('active_model_id')).toBe('qwen2_5-vl-3b')
     expect(store.saved).toBe(2)
   })
 
@@ -316,8 +373,8 @@ describe('useModelStore (LazyStore-backed)', () => {
     await useModelStore.getState().hydrate()
 
     await expect(
-      useModelStore.getState().selectModel('moondream2')
-    ).rejects.toThrow('model is not installed: moondream2')
+      useModelStore.getState().selectModel('qwen2_5-vl-3b')
+    ).rejects.toThrow('model is not installed: qwen2_5-vl-3b')
     expect(useModelStore.getState().activeModelId).toBeNull()
     expect(store.saved).toBe(0)
   })
@@ -326,11 +383,13 @@ describe('useModelStore (LazyStore-backed)', () => {
     const { deps } = makeFakeDeps()
     __setModelStoreDeps(deps)
     await useModelStore.getState().hydrate()
-    await useModelStore.getState().recordInterruptedDownload('moondream2', 1024)
+    await useModelStore
+      .getState()
+      .recordInterruptedDownload('qwen2_5-vl-3b', 1024)
 
     await expect(
-      useModelStore.getState().selectModel('moondream2')
-    ).rejects.toThrow('model is not installed: moondream2')
+      useModelStore.getState().selectModel('qwen2_5-vl-3b')
+    ).rejects.toThrow('model is not installed: qwen2_5-vl-3b')
     expect(useModelStore.getState().activeModelId).toBeNull()
   })
 
@@ -338,9 +397,9 @@ describe('useModelStore (LazyStore-backed)', () => {
     const { deps, store } = makeFakeDeps()
     __setModelStoreDeps(deps)
     await useModelStore.getState().hydrate()
-    await useModelStore.getState().recordInstalled('moondream2', 100)
+    await useModelStore.getState().recordInstalled('qwen2_5-vl-3b', 100)
     await useModelStore.getState().recordInstalled('gemma3-4b', 200)
-    await useModelStore.getState().selectModel('moondream2')
+    await useModelStore.getState().selectModel('qwen2_5-vl-3b')
     const result = summariseBenchmark({
       samplesSec: [2, 3, 4],
       completedAtSec: 99,
@@ -348,9 +407,9 @@ describe('useModelStore (LazyStore-backed)', () => {
     await useModelStore.getState().recordBenchmark('gemma3-4b', result)
 
     const state = useModelStore.getState()
-    expect(state.activeModelId).toBe('moondream2')
+    expect(state.activeModelId).toBe('qwen2_5-vl-3b')
     expect(state.records['gemma3-4b']?.benchmark?.p95Sec).toBe(4)
-    expect(store.data.get('active_model_id')).toBe('moondream2')
+    expect(store.data.get('active_model_id')).toBe('qwen2_5-vl-3b')
     expect(store.saved).toBe(4)
   })
 
@@ -358,7 +417,7 @@ describe('useModelStore (LazyStore-backed)', () => {
     const { deps } = makeFakeDeps()
     __setModelStoreDeps(deps)
     await useModelStore.getState().hydrate()
-    await useModelStore.getState().recordInstalled('moondream2', 100)
+    await useModelStore.getState().recordInstalled('qwen2_5-vl-3b', 100)
     await useModelStore.getState().recordInstalled('gemma3-4b', 200)
     await useModelStore
       .getState()
@@ -366,13 +425,13 @@ describe('useModelStore (LazyStore-backed)', () => {
         'gemma3-4b',
         summariseBenchmark({ samplesSec: [10, 11, 12], completedAtSec: 0 })
       )
-    await useModelStore.getState().selectModel('moondream2')
+    await useModelStore.getState().selectModel('qwen2_5-vl-3b')
     await useModelStore.getState().selectModel('gemma3-4b')
 
     const state = useModelStore.getState()
     expect(useModelStore.getState().activeModelId).toBe('gemma3-4b')
-    expect(state.records['moondream2']?.installedAt).toBe(100)
-    expect(state.records['moondream2']?.benchmark).toBeNull()
+    expect(state.records['qwen2_5-vl-3b']?.installedAt).toBe(100)
+    expect(state.records['qwen2_5-vl-3b']?.benchmark).toBeNull()
     expect(state.records['gemma3-4b']?.installedAt).toBe(200)
     expect(state.records['gemma3-4b']?.benchmark?.p95Sec).toBe(12)
   })

@@ -10,6 +10,7 @@ import {
   getAiAgentRuntime,
   handleUserText,
   parseAgentReply,
+  waitForSidecarReady,
   __resetAiAgentRuntime,
   __setAiAgentRuntime,
   type AiAgentRuntime,
@@ -78,6 +79,34 @@ afterEach(() => {
   __resetAiAgentRuntime()
   vi.useRealTimers()
   vi.restoreAllMocks()
+})
+
+test('retained unavailable model cannot adopt a healthy engine or issue text inference', async () => {
+  const getSidecarStatus = vi.fn(async () => sidecarStatus())
+  const fetch = vi.fn() as unknown as typeof globalThis.fetch
+  const runtime = buildRuntime({ getSidecarStatus, fetch, fetchHealth: fetch })
+  await expect(
+    waitForSidecarReady('moondream2', runtime, {
+      unavailableMessage: 'not ready',
+    })
+  ).rejects.toMatchObject({
+    code: 'sidecar_unavailable',
+    message: expect.stringContaining('unavailable'),
+  })
+  await expect(
+    handleUserText(
+      {
+        modelId: 'moondream2',
+        text: 'break',
+        declaredTopic: 'Maths',
+        recentAuditKinds: [],
+      },
+      runtime
+    )
+  ).rejects.toMatchObject({ code: 'sidecar_unavailable' })
+  expect(getSidecarStatus).not.toHaveBeenCalled()
+  expect(fetch).not.toHaveBeenCalled()
+  expect(invokeMock).not.toHaveBeenCalled()
 })
 
 describe('handleUserText cancellation', () => {

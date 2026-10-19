@@ -20,6 +20,7 @@
 // a session is active — the live sample loop owns the sidecar then, and
 // stopping it underneath the loop would silently end that session's AI.
 
+import { getModelUnavailableReason } from '@/features/ai/models'
 import {
   AiAgentError,
   getAiAgentRuntime,
@@ -397,6 +398,9 @@ async function ensureSidecar(modelId: string): Promise<{
   port: number
   startedHere: boolean
 }> {
+  const unavailable = getModelUnavailableReason(modelId)
+  if (unavailable)
+    throw new SessionTimelineError('sidecar_unavailable', unavailable)
   const before = useSidecarStore.getState().status
   // Only a sidecar this write-up brought up from nothing is ours to stop.
   // `starting` means another consumer's start is already in flight and would

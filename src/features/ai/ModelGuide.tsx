@@ -8,6 +8,7 @@ import { strings } from '@/strings'
 
 import {
   SUPPORTED_MODELS,
+  getModelUnavailableReason,
   totalDownloadBytes,
   type ModelSpec,
   tierLabel,
@@ -89,7 +90,9 @@ export function ModelGuide({
               </tr>
             </thead>
             <tbody>
-              {SUPPORTED_MODELS.map((spec: ModelSpec) => (
+              {SUPPORTED_MODELS.filter(
+                (spec) => !getModelUnavailableReason(spec.id)
+              ).map((spec: ModelSpec) => (
                 <tr
                   key={spec.id}
                   className="border-t border-border-subtle align-top"

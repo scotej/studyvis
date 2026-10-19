@@ -7,6 +7,7 @@ import { LazyStore } from '@tauri-apps/plugin-store'
 import { create } from 'zustand'
 
 import type { BenchmarkResult } from './benchmark'
+import { getModelUnavailableReason } from './models'
 import { logger } from '@/lib/log'
 
 const log = logger.child('ai.models')
@@ -194,6 +195,8 @@ export const useModelStore = create<ModelState>((set, get) => ({
   },
 
   selectModel: async (modelId) => {
+    const unavailable = getModelUnavailableReason(modelId)
+    if (unavailable) throw new Error(unavailable)
     const record = get().records[modelId]
     if (!record || record.installedAt == null) {
       throw new Error(`model is not installed: ${modelId}`)

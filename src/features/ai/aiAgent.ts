@@ -29,6 +29,8 @@ import {
   type SidecarStatus,
 } from './sidecar'
 
+import { getModelUnavailableReason } from './models'
+
 const log = logger.child('ai.agent')
 
 export const AGENT_REQUEST_TIMEOUT_MS = 60_000
@@ -307,6 +309,8 @@ export async function waitForSidecarReady(
   options: SidecarReadinessOptions
 ): Promise<number> {
   if (options.signal?.aborted) throw abortReason(options.signal)
+  const unavailable = getModelUnavailableReason(modelId)
+  if (unavailable) throw new AiAgentError('sidecar_unavailable', unavailable)
 
   const controller = new AbortController()
   let abortSource: 'external' | 'timeout' | null = null

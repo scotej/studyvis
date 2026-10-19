@@ -151,8 +151,8 @@ export const OneInstalled: Story = {
 export const InstalledUnbenchmarked: Story = {
   args: {
     installed: {
-      moondream2: {
-        modelId: 'moondream2',
+      'qwen2_5-vl-3b': {
+        modelId: 'qwen2_5-vl-3b',
         benchmark: null,
         installedAt: Date.now(),
       },
@@ -165,13 +165,13 @@ export const InstalledUnbenchmarked: Story = {
 export const ActiveUnbenchmarked: Story = {
   args: {
     installed: {
-      moondream2: {
-        modelId: 'moondream2',
+      'qwen2_5-vl-3b': {
+        modelId: 'qwen2_5-vl-3b',
         benchmark: null,
         installedAt: Date.now(),
       },
     },
-    activeModelId: 'moondream2',
+    activeModelId: 'qwen2_5-vl-3b',
     hfTokenPresent: false,
   },
 }
@@ -252,7 +252,7 @@ export const Benchmarking: Story = {
     },
     hfTokenPresent: true,
     pickerOverrides: {
-      moondream2: {
+      'qwen2_5-vl-3b': {
         installState: { modelExists: true, mmprojExists: true },
         phase: 'benchmark-running',
         benchmarkSampleIndex: 2,
@@ -267,7 +267,7 @@ export const PartiallyInstalled: Story = {
     installed: {},
     hfTokenPresent: false,
     pickerOverrides: {
-      moondream2: {
+      'qwen2_5-vl-3b': {
         installState: { modelExists: true, mmprojExists: false },
         phase: 'idle',
       },
@@ -342,4 +342,59 @@ export const GuideExpanded: Story = {
       <ModelGuide records={{}} defaultOpen />
     </div>
   ),
+}
+
+export const UnavailableSelectedModel: Story = {
+  args: {
+    installed: {
+      moondream2: { ...makeRecord(3.2, 2.7), modelId: 'moondream2' },
+    },
+    activeModelId: 'moondream2',
+    hfTokenPresent: false,
+    actionsLocked: true,
+  },
+  play: async ({ canvasElement }) => {
+    const card = within(canvasElement).getByRole('article', {
+      name: 'Moondream 2',
+    })
+    expect(within(card).getByText('Unavailable')).toBeVisible()
+    expect(
+      within(card).getByRole('button', { name: 'Remove Moondream 2' })
+    ).toBeEnabled()
+    expect(
+      within(card).queryByRole('button', { name: 'Use model' })
+    ).not.toBeInTheDocument()
+    expect(within(card).queryByText('In use')).not.toBeInTheDocument()
+    expect(
+      within(card).queryByRole('button', { name: /[Bb]enchmark/ })
+    ).not.toBeInTheDocument()
+  },
+}
+
+export const UnavailableInterruptedModel: Story = {
+  args: {
+    installed: {},
+    hfTokenPresent: false,
+    pickerOverrides: {
+      moondream2: {
+        record: {
+          modelId: 'moondream2',
+          benchmark: null,
+          installedAt: null,
+          interruptedDownload: { bytesReceived: 1024, at: 1 },
+        },
+      },
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const card = within(canvasElement).getByRole('article', {
+      name: 'Moondream 2',
+    })
+    expect(
+      within(card).getByRole('button', { name: 'Remove Moondream 2' })
+    ).toBeEnabled()
+    expect(
+      within(card).queryByRole('button', { name: 'Resume download' })
+    ).not.toBeInTheDocument()
+  },
 }
