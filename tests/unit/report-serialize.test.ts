@@ -140,6 +140,7 @@ describe('serializeReportToText section order (R5)', () => {
       timeline: {
         session_id: data.session.id,
         generated_at: 1_700_000_400_000,
+        covered_until: data.session.ended_at,
         model_id: null,
         source: 'observations',
         entries: JSON.stringify([
@@ -153,6 +154,27 @@ describe('serializeReportToText section order (R5)', () => {
     expect(text).toContain('- 3–5 min — Scrolled social media')
     expect(text).toContain(H.written.sourceNote.observations)
     expect(text).toContain(H.written.truncated)
+  })
+
+  test('a partial account with unknown coverage is not described as a full check log', () => {
+    const data = buildData(baseSession(), [])
+    const text = serializeReportToText({
+      ...data,
+      timeline: {
+        session_id: data.session.id,
+        generated_at: START_TS + 26 * 60_000,
+        covered_until: null,
+        model_id: null,
+        source: 'observations',
+        entries: JSON.stringify([
+          { start_min: 0, end_min: 1, summary: 'Readable check' },
+        ]),
+        truncated: 1,
+      },
+    })
+    expect(text).toContain('Readable check')
+    expect(text).toContain(H.written.incomplete)
+    expect(text).not.toContain(H.written.truncated)
   })
 
   // A row stored by a newer build and read back after a downgrade. Silence is
@@ -180,7 +202,7 @@ describe('serializeReportToText section order (R5)', () => {
     const text = serializeReportToText(
       buildData(baseSession(), [evt(ME, 'joined', 0)])
     )
-    expect(text).toContain(H.written.empty)
+    expect(text).toContain(H.written.unavailable)
     expect(text).not.toContain(H.written.sourceNote.observations)
   })
 
@@ -306,5 +328,70 @@ describe('serializeReportToText — AI coverage honesty (I83)', () => {
     )
     expect(text).not.toContain('Nice work')
     expect(text).not.toContain('No AI checks ran')
+  })
+})
+
+describe('written account availability matches saved coverage (#410)', () => {
+  test.each([
+    [
+      { score: 100, confident_samples: 3, skipped_samples: 0, ai_enabled: 1 },
+      H.written.unavailable,
+    ],
+    [
+      {
+        score: 100,
+        confident_samples: null,
+        skipped_samples: null,
+        ai_enabled: null,
+      },
+      H.written.unavailable,
+    ],
+    [
+      { score: null, confident_samples: 0, skipped_samples: 2, ai_enabled: 1 },
+      H.written.unavailable,
+    ],
+    [
+      { score: null, confident_samples: 0, skipped_samples: 0, ai_enabled: 1 },
+      H.written.empty,
+    ],
+    [
+      {
+        score: null,
+        confident_samples: null,
+        skipped_samples: null,
+        ai_enabled: 0,
+      },
+      H.written.empty,
+    ],
+    [
+      {
+        score: null,
+        confident_samples: null,
+        skipped_samples: null,
+        ai_enabled: null,
+      },
+      H.written.unknown,
+    ],
+  ])('exports truthful availability for %j', (coverage, expected) => {
+    const text = serializeReportToText(buildData(baseSession(coverage), []))
+    expect(text).toContain(expected)
+    if (expected !== H.written.empty)
+      expect(text).not.toContain(H.written.empty)
+  })
+
+  test('pending and blocked export use the same state copy as the screen', () => {
+    const data = buildData(baseSession(), [])
+    expect(serializeReportToText(data, { kind: 'generating' })).toContain(
+      H.written.loading
+    )
+    expect(
+      serializeReportToText(data, { kind: 'blocked', message: H.written.aiOff })
+    ).toContain(H.written.aiOff)
+    expect(
+      serializeReportToText(data, {
+        kind: 'blocked',
+        message: H.written.writeUpsOff,
+      })
+    ).toContain(H.written.writeUpsOff)
   })
 })

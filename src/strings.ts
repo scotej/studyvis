@@ -1045,11 +1045,12 @@ export const strings = {
         heading: 'Minute by minute',
         help: 'Written on this device after the session, from the AI checks it recorded. Times are counted from the start of the session.',
         loading: 'Writing up this session…',
-        // Nothing was recorded to write up: AI was off, it never produced a
-        // readable check, or the session predates this feature. The copy stays
-        // cause-neutral for the same reason `noScore.body` does.
+        // Only known zero-check sessions may claim there were no checks.
         empty:
           'No AI checks were recorded for this session, so there is nothing to write up.',
+        unavailable:
+          'AI checks were recorded, but a written account is not available for this session.',
+        unknown: 'A written account is not available for this session.',
         // The journal exists but the user has since turned AI off, so the
         // model cannot be asked to narrate it.
         aiOff:
@@ -1065,6 +1066,8 @@ export const strings = {
         rewriteCta: 'Write it up again',
         truncated:
           'This session ran long enough to fill its check log, so the account below covers only the part that was recorded.',
+        incomplete:
+          'This account is incomplete. It includes only the saved checks that could be read.',
         // Honest labelling of where the entries came from. A model that could
         // not be reached still yields a real account — assembled from the raw
         // checks rather than written — and the report must not imply otherwise.

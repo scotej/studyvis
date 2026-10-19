@@ -84,6 +84,8 @@ import {
   serializeReportToText,
   writtenSourceNote,
   writtenTimelineEntries,
+  writtenCoverageNote,
+  writtenAccountEmptyMessage,
   type ResolvedReportData,
 } from './reportSerialize'
 import {
@@ -455,7 +457,9 @@ export function ReportView({
   }, [])
   const handleCopyReport = async () => {
     try {
-      await navigator.clipboard.writeText(serializeReportToText(data))
+      await navigator.clipboard.writeText(
+        serializeReportToText(data, writtenStatus)
+      )
       setCopied(true)
       if (copyTimer.current) clearTimeout(copyTimer.current)
       copyTimer.current = setTimeout(() => setCopied(false), 1500)
@@ -524,7 +528,7 @@ export function ReportView({
 
   const handleSaveReport = () =>
     runExport(
-      () => serializeReportToText(data),
+      () => serializeReportToText(data, writtenStatus),
       {
         defaultPath: `${fileStem}.md`,
         filterName: exportCopy.reportFilterName,
@@ -709,6 +713,7 @@ export function ReportView({
           help={strings.report.sections.written.help}
         >
           <WrittenTimeline
+            emptyMessage={writtenAccountEmptyMessage(session, writtenStatus)}
             timeline={data.timeline ?? null}
             status={writtenStatus}
             onRewrite={onRewriteTimeline}
@@ -818,10 +823,12 @@ function Section({
 // that exists (labelled when the model did not produce all of it), a reason it
 // cannot be written right now, or a failure the user can retry.
 function WrittenTimeline({
+  emptyMessage,
   timeline,
   status,
   onRewrite,
 }: {
+  emptyMessage: string
   timeline: SessionTimelineRecord | null
   status: WrittenTimelineStatus
   onRewrite?: () => void
@@ -864,18 +871,15 @@ function WrittenTimeline({
         </div>
       )
     }
-    return (
-      <Empty
-        message={status.kind === 'blocked' ? status.message : copy.empty}
-      />
-    )
+    return <Empty message={emptyMessage} />
   }
 
   const sourceNote = writtenSourceNote(timeline)
+  const coverageNote = writtenCoverageNote(timeline)
   return (
     <div className="flex flex-col gap-2">
-      {timeline?.truncated ? (
-        <p className="text-xs text-text-muted">{copy.truncated}</p>
+      {coverageNote ? (
+        <p className="text-xs text-text-muted">{coverageNote}</p>
       ) : null}
       {sourceNote ? (
         <p className="text-xs text-text-muted">{sourceNote}</p>

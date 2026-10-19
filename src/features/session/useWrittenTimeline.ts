@@ -13,6 +13,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useModelStore } from '@/features/ai/modelStore'
 import {
   parseTimelineEntries,
+  storedWriteUpIsStale,
   type SessionTimelineRecord,
 } from '@/lib/db/sessionTimeline'
 import { logger } from '@/lib/log'
@@ -35,19 +36,7 @@ function hasStoredWriteUp(timeline: SessionTimelineRecord | null): boolean {
   return timeline !== null && parseTimelineEntries(timeline.entries).length > 0
 }
 
-// #417 / I99: model completion can happen after a later stint ended. Only
-// the captured input coverage proves that the account spans that stint.
-// Older rows have unknown coverage and receive one conservative regeneration.
-export function storedWriteUpIsStale(
-  timeline: SessionTimelineRecord | null,
-  sessionEndedAt: number | null
-): boolean {
-  if (timeline === null || sessionEndedAt === null) return false
-  if (!Number.isFinite(sessionEndedAt)) return false
-  return (
-    timeline.covered_until == null || timeline.covered_until < sessionEndedAt
-  )
-}
+export { storedWriteUpIsStale }
 
 // Storybook renders the report shell outside Tauri, where the journal probe
 // would reject and paint a failure banner over a fixture that has no journal at

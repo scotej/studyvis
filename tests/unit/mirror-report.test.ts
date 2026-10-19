@@ -5,9 +5,29 @@ import {
   projectMirrorReport,
   registerMirrorReportHandoff,
 } from '@/features/mirror/reportHandoff'
+import { useSettingsStore } from '@/stores/settingsStore'
+import { serializeReportToText } from '@/features/session/reportSerialize'
+import { strings } from '@/strings'
 import type { MirrorHost } from '@/features/mirror/runtime'
 import type { ResolvedReportData } from '@/features/session/reportSerialize'
+import {
+  __resetSessionJournalRuntime,
+  __setSessionJournalRuntime,
+  serializeObservation,
+  type SessionJournalRead,
+} from '@/features/session/sessionJournal'
 
+const journal = vi.hoisted(() => ({
+  read: vi.fn<(sessionId: string) => Promise<SessionJournalRead>>(async () => ({
+    observations: [],
+    truncated: false,
+    unreadableLines: 0,
+  })),
+}))
+vi.mock('@/features/session/sessionJournal', async (original) => ({
+  ...(await original<typeof import('@/features/session/sessionJournal')>()),
+  readObservations: journal.read,
+}))
 const loader = vi.hoisted(() => ({ load: vi.fn() }))
 const log = vi.hoisted(() => ({ warn: vi.fn() }))
 vi.mock('@/features/session/reportLoader', () => ({
@@ -53,6 +73,7 @@ function report(): ResolvedReportData {
     timeline: {
       session_id: 'private-session-topic',
       generated_at: 61_000,
+      covered_until: 61_000,
       model_id: 'model',
       source: 'model',
       entries: '[]',
@@ -76,6 +97,11 @@ function report(): ResolvedReportData {
 const unregister: (() => void)[] = []
 afterEach(() => {
   for (const cleanup of unregister.splice(0)) cleanup()
+  journal.read.mockReset()
+  __resetSessionJournalRuntime()
+  useSettingsStore.setState((s) => ({
+    values: { ...s.values, aiFeaturesEnabled: false },
+  }))
   loader.load.mockReset()
   log.warn.mockReset()
   vi.useRealTimers()
@@ -280,5 +306,344 @@ describe('companion report privacy and ownership', () => {
     await finishMirrorReport('private-session-topic')
     expect(log.warn).toHaveBeenCalledExactlyOnceWith('report.unavailable')
     expect(vi.getTimerCount()).toBe(0)
+  })
+})
+
+describe('bounded companion written account (#410)', () => {
+  function setup(
+    original: ResolvedReportData = { ...report(), timeline: null }
+  ) {
+    useSettingsStore.setState((s) => ({
+      values: {
+        ...s.values,
+        aiFeaturesEnabled: true,
+        sessionTimelineEnabled: true,
+      },
+    }))
+    loader.load.mockResolvedValue(original)
+    const finish = vi
+      .fn<(report: unknown) => Promise<void>>()
+      .mockResolvedValue()
+    const host = { finishReport: finish } as unknown as MirrorHost
+    unregister.push(
+      registerMirrorReportHandoff('private-session-topic', host, 'generation')
+    )
+    return { finish }
+  }
+
+  function rejoinedReport(coveredUntil: number | null | undefined) {
+    const original = report()
+    original.session.ended_at = 121_000
+    original.timeline = {
+      ...original.timeline!,
+      generated_at: 500_000,
+      covered_until: coveredUntil,
+      entries: JSON.stringify([
+        { start_min: 0, end_min: 1, summary: 'Only the first stint' },
+      ]),
+    }
+    return original
+  }
+
+  test.each([61_000, null, undefined])(
+    'a nonempty row with coverage %s is replaced by the full rejoined journal',
+    async (coveredUntil) => {
+      const original = rejoinedReport(coveredUntil)
+      const { finish } = setup(original)
+      journal.read.mockResolvedValue({
+        observations: [
+          {
+            ts: 2000,
+            verdict: 'on_task',
+            reasoning: 'First stint maths',
+            confidence: 1,
+            topic: 'Maths',
+          },
+          {
+            ts: 91_000,
+            verdict: 'on_task',
+            reasoning: 'Second stint physics',
+            confidence: 1,
+            topic: 'Physics',
+          },
+        ] as never[],
+        truncated: false,
+        unreadableLines: 0,
+      })
+      await finishMirrorReport('private-session-topic')
+      const delivered = finish.mock.calls[0][0] as ResolvedReportData
+      expect(delivered.timeline).toMatchObject({
+        source: 'observations',
+        covered_until: 121_000,
+      })
+      const text = serializeReportToText(delivered)
+      expect(text).toContain('First stint maths')
+      expect(text).toContain('Second stint physics')
+      expect(text).not.toContain('Only the first stint')
+      expect(original.timeline?.source).toBe('model')
+    }
+  )
+
+  test('a fully covered model row remains available when generation settings are disabled', async () => {
+    const original = rejoinedReport(121_000)
+    const { finish } = setup(original)
+    useSettingsStore.setState((s) => ({
+      values: {
+        ...s.values,
+        aiFeaturesEnabled: false,
+        sessionTimelineEnabled: false,
+      },
+    }))
+    await finishMirrorReport('private-session-topic')
+    const delivered = finish.mock.calls[0][0] as ResolvedReportData
+    expect(delivered.timeline).toBe(original.timeline)
+    expect(journal.read).not.toHaveBeenCalled()
+  })
+
+  test.each(
+    [61_000, null].flatMap((coverage) =>
+      ['unreadable', 'empty', 'ai-disabled', 'writeups-disabled'].map(
+        (failure) => ({ coverage, failure })
+      )
+    )
+  )(
+    'obsolete coverage $coverage is not presented as complete when $failure',
+    async ({ coverage, failure }) => {
+      const { finish } = setup(rejoinedReport(coverage))
+      if (failure === 'unreadable')
+        journal.read.mockRejectedValue(new Error('permission denied'))
+      else
+        journal.read.mockResolvedValue({
+          observations: [],
+          truncated: false,
+          unreadableLines: 0,
+        })
+      if (failure === 'ai-disabled' || failure === 'writeups-disabled') {
+        useSettingsStore.setState((s) => ({
+          values: {
+            ...s.values,
+            aiFeaturesEnabled: failure !== 'ai-disabled',
+            sessionTimelineEnabled: failure !== 'writeups-disabled',
+          },
+        }))
+      }
+      await finishMirrorReport('private-session-topic')
+      const delivered = finish.mock.calls[0][0] as ResolvedReportData
+      expect(delivered.timeline).toBeNull()
+      expect(serializeReportToText(delivered)).toContain(
+        strings.report.sections.written.unavailable
+      )
+      expect(serializeReportToText(delivered)).not.toContain(
+        'Only the first stint'
+      )
+      if (failure.endsWith('disabled'))
+        expect(journal.read).not.toHaveBeenCalled()
+    }
+  )
+
+  test('hands off labelled observations and matching export without waiting for model inference', async () => {
+    const { finish } = setup()
+    journal.read.mockResolvedValue({
+      observations: [
+        {
+          ts: 2000,
+          verdict: 'on_task',
+          reasoning: 'Working on integrals',
+          confidence: 1,
+          topic: 'Maths',
+        },
+      ] as never[],
+      truncated: true,
+      unreadableLines: 0,
+    })
+    await finishMirrorReport('private-session-topic')
+    const delivered = finish.mock.calls[0][0] as ResolvedReportData
+    expect(delivered.timeline?.source).toBe('observations')
+    expect(delivered.timeline?.truncated).toBe(1)
+    expect(serializeReportToText(delivered)).toContain('Working on integrals')
+    expect(serializeReportToText(delivered)).toContain(
+      strings.report.sections.written.sourceNote.observations
+    )
+    expect(serializeReportToText(delivered)).not.toContain(
+      strings.report.sections.written.empty
+    )
+  })
+
+  test('unreadable journal retains a truthful report rather than losing the handoff', async () => {
+    const { finish } = setup()
+    journal.read.mockRejectedValue(new Error('permission denied'))
+    await finishMirrorReport('private-session-topic')
+    const delivered = finish.mock.calls[0][0] as ResolvedReportData
+    expect(serializeReportToText(delivered)).toContain(
+      strings.report.sections.written.unavailable
+    )
+  })
+
+  test('a hung journal still delivers the loaded report with time for its acknowledgment', async () => {
+    vi.useFakeTimers()
+    const { finish } = setup()
+    let release!: (value: SessionJournalRead) => void
+    journal.read.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          release = resolve
+        })
+    )
+    let acknowledge!: () => void
+    finish.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          acknowledge = resolve
+        })
+    )
+    let completed = false
+    const pending = finishMirrorReport('private-session-topic').then(() => {
+      completed = true
+    })
+    await vi.advanceTimersByTimeAsync(499)
+    expect(finish).not.toHaveBeenCalled()
+    await vi.advanceTimersByTimeAsync(1)
+    expect(finish).toHaveBeenCalledOnce()
+    const delivered = finish.mock.calls[0][0] as ResolvedReportData
+    expect(delivered.timeline).toBeNull()
+    expect(serializeReportToText(delivered)).toContain(
+      strings.report.sections.written.unavailable
+    )
+    expect(completed).toBe(false)
+    await vi.advanceTimersByTimeAsync(2000)
+    acknowledge()
+    await pending
+    expect(completed).toBe(true)
+    release({
+      observations: [],
+      truncated: false,
+      unreadableLines: 0,
+    })
+    await vi.advanceTimersByTimeAsync(0)
+    expect(finish).toHaveBeenCalledOnce()
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  test('journal enrichment preserves an acknowledgment window after a slow report load', async () => {
+    vi.useFakeTimers()
+    const { finish } = setup()
+    let loaded!: (value: ResolvedReportData) => void
+    loader.load.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          loaded = resolve
+        })
+    )
+    journal.read.mockImplementation(() => new Promise(() => {}))
+    let acknowledge!: () => void
+    finish.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          acknowledge = resolve
+        })
+    )
+    const pending = finishMirrorReport('private-session-topic')
+    await vi.advanceTimersByTimeAsync(1900)
+    loaded({ ...report(), timeline: null })
+    await vi.advanceTimersByTimeAsync(99)
+    expect(finish).not.toHaveBeenCalled()
+    await vi.advanceTimersByTimeAsync(1)
+    expect(finish).toHaveBeenCalledOnce()
+    await vi.advanceTimersByTimeAsync(999)
+    acknowledge()
+    await pending
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  test('a report loaded late skips optional journal work and is delivered immediately', async () => {
+    vi.useFakeTimers()
+    const { finish } = setup()
+    let loaded!: (value: ResolvedReportData) => void
+    loader.load.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          loaded = resolve
+        })
+    )
+    const pending = finishMirrorReport('private-session-topic')
+    await vi.advanceTimersByTimeAsync(2500)
+    loaded({ ...report(), timeline: null })
+    await pending
+    expect(finish).toHaveBeenCalledOnce()
+    expect(journal.read).not.toHaveBeenCalled()
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  test('a superseded journal read cannot deliver to either companion generation', async () => {
+    vi.useFakeTimers()
+    const { finish } = setup()
+    let release!: (value: SessionJournalRead) => void
+    journal.read.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          release = resolve
+        })
+    )
+    const pending = finishMirrorReport('private-session-topic')
+    await vi.advanceTimersByTimeAsync(0)
+    const replacement = {
+      finishReport: vi.fn(async () => {}),
+    } as unknown as MirrorHost
+    unregister.push(
+      registerMirrorReportHandoff(
+        'private-session-topic',
+        replacement,
+        'replacement'
+      )
+    )
+    release({ observations: [], truncated: false, unreadableLines: 0 })
+    await pending
+    expect(finish).not.toHaveBeenCalled()
+    expect(replacement.finishReport).not.toHaveBeenCalled()
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  test('a partly malformed native journal retains readable entries with truthful partial coverage', async () => {
+    const { finish } = setup()
+    const actual = await vi.importActual<
+      typeof import('@/features/session/sessionJournal')
+    >('@/features/session/sessionJournal')
+    __setSessionJournalRuntime({
+      append: async () => {},
+      read: async () => ({
+        lines: [
+          serializeObservation({
+            ts: 2000,
+            verdict: 'on_task',
+            reasoning: 'Readable first check',
+            confidence: 1,
+            topic: 'Maths',
+          }),
+          '{"partial":',
+          serializeObservation({
+            ts: 32_000,
+            verdict: 'on_task',
+            reasoning: 'Readable later check',
+            confidence: 1,
+            topic: 'Maths',
+          }),
+        ],
+        truncated: false,
+      }),
+      now: () => 61_000,
+    })
+    journal.read.mockImplementation(actual.readObservations)
+    await finishMirrorReport('private-session-topic')
+    const delivered = finish.mock.calls[0][0] as ResolvedReportData
+    expect(delivered.timeline).toMatchObject({
+      covered_until: null,
+      truncated: 1,
+      source: 'observations',
+    })
+    const text = serializeReportToText(delivered)
+    expect(text).toContain('Readable first check')
+    expect(text).toContain('Readable later check')
+    expect(text).toContain(strings.report.sections.written.incomplete)
+    expect(text).not.toContain(strings.report.sections.written.truncated)
   })
 })

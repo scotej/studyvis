@@ -731,6 +731,7 @@ export const AiRecoveredAfterSlowdown: Story = {
 function writtenTimeline(
   entries: Array<{ start_min: number; end_min: number; summary: string }>,
   overrides: Partial<{
+    covered_until: number | null
     source: string
     model_id: string | null
     truncated: number
@@ -739,6 +740,7 @@ function writtenTimeline(
   return {
     session_id: 'mock-session',
     generated_at: ENDED_AT + 20_000,
+    covered_until: ENDED_AT,
     model_id: 'gemma-3-4b',
     source: 'model',
     truncated: 0,
@@ -840,6 +842,31 @@ export const WrittenTimelineFromRawChecks: Story = {
   },
 }
 
+export const WrittenTimelineFromIncompleteChecks: Story = {
+  args: {
+    ...WrittenTimelineFromRawChecks.args,
+    data: {
+      ...WrittenTimelineFromRawChecks.args!.data!,
+      timeline: {
+        ...WrittenTimelineFromRawChecks.args!.data!.timeline!,
+        covered_until: null,
+      },
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(
+      canvas.getByText(strings.report.sections.written.incomplete)
+    ).toBeVisible()
+    await expect(
+      canvas.queryByText(strings.report.sections.written.truncated)
+    ).not.toBeInTheDocument()
+    await expect(
+      canvas.getByText('On task — working through proofs')
+    ).toBeVisible()
+  },
+}
+
 export const WrittenTimelineInProgress: Story = {
   args: {
     ...MostlyOnTask.args,
@@ -916,5 +943,71 @@ export const TopicWithDelayedFirstAudit: Story = {
         new_topic: 'Physics',
       }),
     ]),
+  },
+}
+
+export const RecordedChecksWithoutJournal: Story = {
+  args: {
+    ...MostlyOnTask.args,
+    data: buildData(
+      baseSession({ confident_samples: 3, skipped_samples: 0, ai_enabled: 1 }),
+      []
+    ),
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(
+      canvas.getByText(strings.report.sections.written.unavailable)
+    ).toBeInTheDocument()
+    await expect(
+      canvas.queryByText(strings.report.sections.written.empty)
+    ).not.toBeInTheDocument()
+  },
+}
+
+export const TrueZeroChecks: Story = {
+  args: {
+    ...MostlyOnTask.args,
+    data: buildData(
+      baseSession({
+        score: null,
+        focused_pct: null,
+        confident_samples: 0,
+        skipped_samples: 0,
+        ai_enabled: 1,
+      }),
+      []
+    ),
+  },
+  play: async ({ canvasElement }) => {
+    await expect(
+      within(canvasElement).getByText(strings.report.sections.written.empty)
+    ).toBeInTheDocument()
+  },
+}
+
+export const CompanionObservationAccount: Story = {
+  args: {
+    ...MostlyOnTask.args,
+    data: {
+      ...buildData(baseSession(), []),
+      timeline: {
+        session_id: 'mock-session',
+        generated_at: ENDED_AT,
+        model_id: null,
+        source: 'observations',
+        truncated: 0,
+        entries: JSON.stringify([
+          { start_min: 0, end_min: 1, summary: 'Working on integrals' },
+        ]),
+      },
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(
+      canvas.getByText(strings.report.sections.written.sourceNote.observations)
+    ).toBeInTheDocument()
+    await expect(canvas.getByText('Working on integrals')).toBeInTheDocument()
   },
 }

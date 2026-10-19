@@ -965,6 +965,21 @@ from model completion time. A later rejoin queues one replacement after an older
 pass; legacy narratives with unknown coverage are conservatively refreshed.
 The conditional save still refuses to recreate deleted sessions (I100).
 
+The companion's bounded report handoff includes that deterministic journal account
+when narration is not yet available, labelled `observations`; it does not start
+or wait for model inference during Leave. It respects the AI/write-up settings.
+A missing account is described separately from saved AI coverage on screen and
+in report exports, including legacy scored rows and disabled journaling (#410).
+Accounts with unknown or incomplete input coverage are replaced from the current
+journal or presented as unavailable, while fully covered stored accounts remain
+available independently of generation settings.
+Optional journal enrichment waits at most half a second and does not spend the
+final second of the total handoff grace, leaving it for delivery and acknowledgment. If it
+does not finish in time, the loaded report is delivered with the account marked
+unavailable. An account derived from a truncated or partly unreadable journal
+retains readable entries but marks its coverage unknown and labels the account
+incomplete on screen and in exports; it does not claim to cover the final end.
+
 Stage 1 is also the fallback: any window the model does not narrate is filled with its own digest, so a dead sidecar or an unusable response costs polish, not the feature. The stored `source` (`model` / `mixed` / `observations`) records which happened and the report labels anything other than `model`, so it can never imply the AI wrote an account it did not.
 
 The write-up runs from the report, not from session teardown — it happens after the report has already rendered, so PLAN §5's "report generation completes within 5 seconds" is unaffected. Because only success is persisted, a session interrupted mid-write-up (app quit, AI off at the time, model missing) is simply retried the next time its report is opened. Sidecar ownership follows `benchmark.ts`: the write-up starts the sidecar if nothing else is using it and stops it again afterwards, and refuses to run at all while a session is active, since the live sample loop owns the sidecar then.

@@ -81,6 +81,14 @@ export function writtenSourceNote(
   return strings.report.sections.written.sourceNote.mixed
 }
 
+export function writtenCoverageNote(
+  timeline: SessionTimelineRecord | null | undefined
+): string | null {
+  if (!timeline?.truncated) return null
+  const copy = strings.report.sections.written
+  return timeline.covered_until == null ? copy.incomplete : copy.truncated
+}
+
 export function labelFor(
   edPubkeyHex: string,
   nameByEdPubkey: Record<string, string>,
@@ -159,7 +167,30 @@ export function formatTopicHeading(topic: string | null): string {
 // and "Save as…" actions — mirrors the on-screen sections so a pasted/saved
 // summary matches what the user saw. Local-only; the user pastes or writes it
 // wherever they choose. The single source of truth for the export text.
-export function serializeReportToText(data: ResolvedReportData): string {
+export type WrittenAccountState =
+  | { kind: 'idle' | 'generating' }
+  | { kind: 'blocked' | 'failed'; message: string }
+
+export function writtenAccountEmptyMessage(
+  session: SessionRecord,
+  status?: WrittenAccountState
+): string {
+  const copy = strings.report.sections.written
+  if (status?.kind === 'generating') return copy.loading
+  if (status?.kind === 'blocked' || status?.kind === 'failed')
+    return status.message
+  const coverage = aiCoverage(session)
+  return coverage === 'ran' || coverage === 'noConfident'
+    ? copy.unavailable
+    : coverage === 'unknown'
+      ? copy.unknown
+      : copy.empty
+}
+
+export function serializeReportToText(
+  data: ResolvedReportData,
+  writtenStatus?: WrittenAccountState
+): string {
   const { session, auditEvents, nameByEdPubkey, myEdPubkeyHex } = data
   const topicTimeline = deriveTopicTimeline(
     session.declared_topic,
@@ -205,13 +236,12 @@ export function serializeReportToText(data: ResolvedReportData): string {
   lines.push('', `## ${strings.report.sections.written.heading}`)
   const written = writtenTimelineEntries(data.timeline)
   if (written.length === 0) {
-    lines.push(strings.report.sections.written.empty)
+    lines.push(writtenAccountEmptyMessage(session, writtenStatus))
   } else {
     const note = writtenSourceNote(data.timeline)
     if (note) lines.push(note)
-    if (data.timeline?.truncated) {
-      lines.push(strings.report.sections.written.truncated)
-    }
+    const coverageNote = writtenCoverageNote(data.timeline)
+    if (coverageNote) lines.push(coverageNote)
     for (const entry of written) {
       lines.push(
         `- ${formatWrittenRange(entry.start_min, entry.end_min)} — ${entry.summary}`

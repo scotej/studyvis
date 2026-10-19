@@ -1,3 +1,11 @@
+import {
+  readObservations,
+  windowObservations,
+} from '@/features/session/sessionJournal'
+import { observationTimelineEntries } from '@/features/session/sessionTimeline'
+import { writtenTimelineEntries } from '@/features/session/reportSerialize'
+import { useSettingsStore } from '@/stores/settingsStore'
+import { storedWriteUpIsStale } from '@/lib/db/sessionTimeline'
 import { loadReportData } from '@/features/session/reportLoader'
 import { logger } from '@/lib/log'
 import type { MirrorHost } from './runtime'
@@ -58,6 +66,7 @@ export async function finishMirrorReport(sessionId: string): Promise<void> {
   const registration = current
   if (!registration || registration.sessionId !== sessionId) return
   let active = true
+  const startedAt = performance.now()
   let timeout: ReturnType<typeof setTimeout> | undefined
   const deadline = new Promise<void>((resolve) => {
     timeout = setTimeout(() => {
@@ -67,7 +76,73 @@ export async function finishMirrorReport(sessionId: string): Promise<void> {
   })
   const handoff = async () => {
     try {
-      const report = await loadReportData(sessionId)
+      let report = await loadReportData(sessionId)
+      if (!active || current !== registration) return
+      if (
+        storedWriteUpIsStale(report.timeline ?? null, report.session.ended_at)
+      )
+        report = { ...report, timeline: null }
+      const settings = useSettingsStore.getState().values
+      // #410: the companion disconnects after this bounded handoff. Give it
+      // the journal's deterministic account without starting or waiting for
+      // model narration; the source label keeps that distinction explicit.
+      if (
+        writtenTimelineEntries(report.timeline).length === 0 &&
+        settings.aiFeaturesEnabled &&
+        settings.sessionTimelineEnabled
+      ) {
+        // #410 — optional enrichment must leave time for the report itself
+        // and its report_saved acknowledgment within the same Leave grace.
+        const journalBudget = Math.min(
+          500,
+          Math.max(0, 2000 - (performance.now() - startedAt))
+        )
+        let journalTimeout: ReturnType<typeof setTimeout> | undefined
+        try {
+          const journal =
+            journalBudget > 0
+              ? await Promise.race([
+                  readObservations(sessionId),
+                  new Promise<null>((resolve) => {
+                    journalTimeout = setTimeout(
+                      () => resolve(null),
+                      journalBudget
+                    )
+                  }),
+                ])
+              : null
+          if (!active || current !== registration) return
+          if (journal) {
+            const entries = observationTimelineEntries(
+              windowObservations(
+                journal.observations,
+                report.session.started_at
+              )
+            )
+            const incomplete = journal.truncated || journal.unreadableLines > 0
+            if (entries.length > 0)
+              report = {
+                ...report,
+                timeline: {
+                  session_id: sessionId,
+                  generated_at: Date.now(),
+                  covered_until: incomplete
+                    ? null
+                    : (report.session.ended_at ?? Date.now()),
+                  model_id: null,
+                  source: 'observations',
+                  entries: JSON.stringify(entries),
+                  truncated: incomplete ? 1 : 0,
+                },
+              }
+          }
+        } catch {
+          // Coverage-aware report copy still describes unavailable accounts
+          // truthfully when a journal cannot be read within this handoff.
+        } finally {
+          if (journalTimeout !== undefined) clearTimeout(journalTimeout)
+        }
+      }
       if (!active || current !== registration) return
       await registration.host.finishReport(
         projectMirrorReport(report, registration.publicSessionId)

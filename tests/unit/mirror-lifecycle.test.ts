@@ -1,9 +1,16 @@
+import { serializeReportToText } from '@/features/session/reportSerialize'
+import { strings } from '@/strings'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 
 import { createBrowserConnection } from '@/features/mirror/browserConnection'
 import { createMirrorHost } from '@/features/mirror/runtime'
 import { MirrorCodec, type MirrorMessage } from '@/features/mirror/wire'
 import type { MirrorSessionSnapshot } from '@/features/mirror/sessionBridge'
+import {
+  finishMirrorReport,
+  registerMirrorReportHandoff,
+} from '@/features/mirror/reportHandoff'
+import { useSettingsStore } from '@/stores/settingsStore'
 
 const doubles = vi.hoisted(() => ({
   invoke: vi.fn(),
@@ -222,9 +229,116 @@ afterEach(async () => {
   vi.clearAllTimers()
   vi.useRealTimers()
   vi.unstubAllGlobals()
+  useSettingsStore.setState((s) => ({
+    values: { ...s.values, aiFeaturesEnabled: false },
+  }))
 })
 
 describe('desktop mirror lifecycle', () => {
+  test.each(['hung', 'malformed'] as const)(
+    'Leave delivers and caches a truthful report before acknowledgment with a %s journal',
+    async (journalState) => {
+      useSettingsStore.setState((s) => ({
+        values: {
+          ...s.values,
+          aiFeaturesEnabled: true,
+          sessionTimelineEnabled: true,
+        },
+      }))
+      const savedSession = {
+        ...report.session,
+        confident_samples: 2,
+        ai_enabled: 1,
+      }
+      const connection = createBrowserConnection()
+      cleanup.push(connection.disconnect)
+      const socket = TestSocket.instances[0]
+      let cachedAtAcknowledgment: unknown = null
+      doubles.invoke.mockImplementation(
+        async (command: string, args?: { data: string }) => {
+          if (command === 'mirror_start') return configuration
+          if (command === 'sessions_get') return savedSession
+          if (
+            command === 'audit_events_list_for_session' ||
+            command === 'friends_list'
+          )
+            return []
+          if (command === 'session_timeline_get') return null
+          if (command === 'session_journal_read') {
+            if (journalState === 'hung') return new Promise(() => {})
+            return {
+              lines: [
+                JSON.stringify({
+                  ts: 2,
+                  v: 'on_task',
+                  r: 'Readable companion check',
+                  c: 1,
+                  t: 'Read chapter one',
+                }),
+                '{"partial":',
+              ],
+              truncated: false,
+            }
+          }
+          if (command === 'mirror_send')
+            socket.onmessage?.({ data: args!.data })
+        }
+      )
+      const host = createMirrorHost({
+        onConnected: vi.fn(),
+        onControl: vi.fn(),
+        onCapture: vi.fn(),
+      })
+      cleanup.push(host.stop)
+      await host.start('session-1')
+      const outgoing = new MirrorCodec()
+      socket.send.mockImplementation((data: string) => {
+        if (outgoing.receive(data)?.type === 'report_saved') {
+          cachedAtAcknowledgment = JSON.parse(
+            storage.get('studyvis.mirror.report.v1')!
+          )
+        }
+        doubles.events.get('mirror:message')?.({
+          payload: { clientId: 'one', data },
+        })
+      })
+      socket.open()
+      host.publish(snapshot())
+      doubles.events.get('mirror:client')!({
+        payload: { clientId: 'one', connected: true },
+      })
+      await vi.advanceTimersByTimeAsync(100)
+      cleanup.push(registerMirrorReportHandoff('session-1', host, 'session-1'))
+      let completed = false
+      const pending = finishMirrorReport('session-1').then(() => {
+        completed = true
+      })
+      await vi.advanceTimersByTimeAsync(600)
+      expect(completed).toBe(true)
+      await pending
+      const received = connection.getState().report!
+      expect(received.session).toEqual(savedSession)
+      expect(connection.getState().reportCached).toBe(true)
+      expect(cachedAtAcknowledgment).toEqual(received)
+      const reloaded = createBrowserConnection()
+      cleanup.push(reloaded.disconnect)
+      expect(reloaded.getState().report).toEqual(received)
+      const text = serializeReportToText(reloaded.getState().report!)
+      if (journalState === 'hung') {
+        expect(received.timeline).toBeNull()
+        expect(text).toContain(strings.report.sections.written.unavailable)
+      } else {
+        expect(received.timeline).toMatchObject({
+          covered_until: null,
+          truncated: 1,
+        })
+        expect(text).toContain('Readable companion check')
+        expect(text).toContain(strings.report.sections.written.incomplete)
+        expect(text).not.toContain(strings.report.sections.written.truncated)
+      }
+    }
+  )
+
   test.each([true, false, undefined, 'throw'] as const)(
     'controls acknowledge only a successful host result (%s)',
     async (result) => {
@@ -834,6 +948,38 @@ describe('browser recovery and local custody', () => {
     cleanup.push(reloaded.disconnect)
     expect(reloaded.getState().report).toEqual(report)
   })
+  test('a labelled observation account survives companion cache reload and export (#410)', async () => {
+    const connection = createBrowserConnection()
+    cleanup.push(connection.disconnect)
+    const socket = TestSocket.instances[0]
+    await activate(socket)
+    const fallback = {
+      ...report,
+      timeline: {
+        session_id: report.session.id,
+        generated_at: 61,
+        model_id: null,
+        source: 'observations',
+        truncated: 0,
+        entries: JSON.stringify([
+          { start_min: 0, end_min: 1, summary: 'Working on integrals' },
+        ]),
+      },
+    }
+    await incoming(socket, { type: 'report', report: fallback })
+    await vi.advanceTimersByTimeAsync(100)
+    const reloaded = createBrowserConnection()
+    cleanup.push(reloaded.disconnect)
+    expect(reloaded.getState().report?.timeline).toEqual(fallback.timeline)
+    expect(reloaded.getState().reportCached).toBe(true)
+    const text = serializeReportToText(reloaded.getState().report!)
+    expect(text).toContain('Working on integrals')
+    expect(text).toContain(
+      strings.report.sections.written.sourceNote.observations
+    )
+    expect(text).not.toContain(strings.report.sections.written.empty)
+  })
+
   test('storage denial preserves the live report and honestly marks it as unavailable offline', async () => {
     vi.stubGlobal('localStorage', {
       getItem: () => null,
