@@ -30,6 +30,7 @@ type BreakState = {
   // Wall-clock ms epoch the active break is scheduled to end. Drives the
   // countdown UI and is the target the rule layer's setTimeout fires on.
   breakEndsAt: number | null
+  breakEndsAtMono: number | null
   // Wall-clock ms epoch the most recent break ended (any reason — natural
   // expiry, manual end, session teardown). Drives the 25-min cool-down.
   lastBreakEndedAt: number | null
@@ -58,6 +59,7 @@ export const useBreakStore = create<BreakState>((set) => ({
   onBreak: false,
   breakStartedAt: null,
   breakEndsAt: null,
+  breakEndsAtMono: null,
   lastBreakEndedAt: null,
   breaksThisSession: 0,
   sessionStartedAt: null,
@@ -66,6 +68,7 @@ export const useBreakStore = create<BreakState>((set) => ({
       onBreak: true,
       breakStartedAt: startedAt,
       breakEndsAt: startedAt + durationSec * 1000,
+      breakEndsAtMono: performance.now() + durationSec * 1000,
       breaksThisSession: s.breaksThisSession + 1,
     })),
   endBreak: (endedAt) =>
@@ -73,6 +76,7 @@ export const useBreakStore = create<BreakState>((set) => ({
       onBreak: false,
       breakStartedAt: null,
       breakEndsAt: null,
+      breakEndsAtMono: null,
       lastBreakEndedAt: endedAt,
     }),
   reset: (sessionStartedAt) =>
@@ -80,6 +84,7 @@ export const useBreakStore = create<BreakState>((set) => ({
       onBreak: false,
       breakStartedAt: null,
       breakEndsAt: null,
+      breakEndsAtMono: null,
       lastBreakEndedAt: null,
       breaksThisSession: 0,
       sessionStartedAt,

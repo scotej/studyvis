@@ -88,6 +88,23 @@ function session(): MirrorSessionSnapshot {
 }
 
 describe('browser snapshot and offline storage boundary', () => {
+  test('relative countdown extension is optional, finite and nonnegative (#392)', () => {
+    expect(readMirrorSnapshot(session())).not.toBeNull()
+    const current = {
+      ...session(),
+      countdowns: { pomodoroMs: 1_500_000, breakMs: 300_000 },
+    }
+    expect(readMirrorSnapshot(current)?.countdowns).toEqual(current.countdowns)
+    for (const invalid of [-1, NaN, Infinity, '300000']) {
+      expect(
+        readMirrorSnapshot({
+          ...current,
+          countdowns: { ...current.countdowns, breakMs: invalid },
+        })
+      ).toBeNull()
+    }
+  })
+
   test('peer turnover keeps only currently visible DM threads without discarding desktop history', () => {
     const snapshot = session()
     const keys = Array.from({ length: 6 }, (_, index) =>

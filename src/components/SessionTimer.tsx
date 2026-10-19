@@ -36,6 +36,7 @@ export type SessionTimerProps = {
   onStart: (args: PomodoroStartArgs) => void
   onStop: () => void
   className?: string
+  now?: () => number
 }
 
 const PHASE_LABEL: Record<Exclude<PomodoroPhase, 'idle'>, string> = strings
@@ -54,6 +55,7 @@ export function SessionTimer({
   onStart,
   onStop,
   className,
+  now = wallClockNow,
 }: SessionTimerProps) {
   const [open, setOpen] = useState(false)
   const [pickedPreset, setPickedPreset] = useState<PomodoroPreset>(
@@ -64,7 +66,7 @@ export function SessionTimer({
   // start-time via `clampCustomMinutes`.
   const [customWork, setCustomWork] = useState('45')
   const [customRest, setCustomRest] = useState('15')
-  const remaining = useRemainingMs(endsAt)
+  const remaining = useRemainingMs(endsAt, now)
   const active = phase !== 'idle'
   const phaseLabel = active
     ? PHASE_LABEL[phase as Exclude<PomodoroPhase, 'idle'>]
@@ -320,15 +322,17 @@ function startArgsFor(
 // tick so the countdown updates in the bottom-bar without re-rendering the
 // whole SessionView. Tracks `now` rather than the derived `remaining` so
 // the effect body never calls setState synchronously.
-function useRemainingMs(endsAt: number | null): number {
-  const [now, setNow] = useState(() => Date.now())
+const wallClockNow = () => Date.now()
+
+function useRemainingMs(endsAt: number | null, now: () => number): number {
+  const [, setTick] = useState(0)
   useEffect(() => {
     if (endsAt == null) return
-    const handle = setInterval(() => setNow(Date.now()), 1000)
+    const handle = setInterval(() => setTick((tick) => tick + 1), 1000)
     return () => clearInterval(handle)
   }, [endsAt])
   if (endsAt == null) return 0
-  return Math.max(0, endsAt - now)
+  return Math.max(0, endsAt - now())
 }
 
 function formatMs(ms: number): string {

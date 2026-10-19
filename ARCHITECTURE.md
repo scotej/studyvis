@@ -977,6 +977,13 @@ retry orphan cleanup, including after reopening Settings or restarting the app.
 Missing journals are normal success. A partial clear attempts the other files
 and reports the failures without undoing the database deletion.
 
+The browser companion receives optional remaining-duration countdowns rather than
+subtracting desktop epoch deadlines from its own wall clock (#392). The desktop
+retains monotonic phase/break deadlines; each live snapshot is projected onto the
+browser's monotonic receipt time. Cached snapshots restored after reload freeze the last known value,
+and reconnect/phase updates replace that projection. Legacy snapshots retain the
+original rendering path; peer Pomodoro wire messages are unchanged.
+
 ## 9. Audit log
 
 Single shared log per session, visible to all peers in real time on a dedicated panel. Each entry:

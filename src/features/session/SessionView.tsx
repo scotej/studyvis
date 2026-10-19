@@ -324,6 +324,7 @@ export function SessionView({
     useShallow((s) => ({
       phase: s.phase,
       endsAt: s.endsAt,
+      endsAtMono: s.endsAtMono,
       preset: s.preset,
       broadcasterEdPubkey: s.broadcasterEdPubkey,
       iAmBroadcaster: s.iAmBroadcaster,
@@ -2895,6 +2896,20 @@ export function SessionView({
           return
         publishMirrorSnapshot({
           version: 1,
+          countdowns: {
+            pomodoroMs:
+              pomodoroSnapshot.endsAtMono === null
+                ? null
+                : Math.max(0, pomodoroSnapshot.endsAtMono - performance.now()),
+            breakMs:
+              !onBreak || useBreakStore.getState().breakEndsAtMono === null
+                ? null
+                : Math.max(
+                    0,
+                    useBreakStore.getState().breakEndsAtMono! -
+                      performance.now()
+                  ),
+          },
           sessionId: mirrorSessionId,
           status: status === 'active' ? 'active' : 'ended',
           self: {
