@@ -280,6 +280,19 @@ export function installBridge(config: BridgeConfig): void {
           .length,
         dataChannels: dataChannelsOf(pc),
       })),
+    // Capture these objects before a fault; a later healthy connection cannot
+    // establish that the abandoned native connection and channels closed.
+    mediaTransports: () =>
+      peerConnections
+        .filter(
+          (pc) =>
+            pc.connectionState === 'connected' &&
+            pc.getSenders().some((sender) => sender.track?.kind === 'video')
+        )
+        .map((connection) => ({
+          connection,
+          channels: [...(channelsByConnection.get(connection) ?? [])],
+        })),
     // Read-only media diagnostics. Track object identity ties an original
     // receiver to its connection even when a later SDP reuses the same ids.
     transportStats: async (originalTracks: MediaStreamTrack[] | null = null) =>
