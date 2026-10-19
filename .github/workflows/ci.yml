@@ -1097,6 +1097,38 @@ jobs:
           fail: false
           jobSummary: true
 
+  ipad-companion:
+    name: iPad Safari companion qualification
+    runs-on: xcode-27
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: npm
+      - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f
+        with:
+          toolchain: 1.97.1
+      - run: npm ci
+      - name: Probe verdict negative controls
+        run: node --test tests/ipad-companion/verdict.test.mjs
+      - name: Install locked desktop receiver browser
+        run: node node_modules/playwright-core/cli.js install chromium
+      - name: Actual iPad Simulator Safari probe
+        run: bash scripts/check-ipad-companion.sh --output "$RUNNER_TEMP/ipad-companion-evidence"
+      - name: Retain public diagnostic evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ipad-companion-evidence
+          path: ${{ runner.temp }}/ipad-companion-evidence
+          if-no-files-found: error
+
   all-green:
     name: All pre-merge checks
     # The single check to require in branch protection: one rule to
@@ -1124,6 +1156,7 @@ jobs:
       [
         frontend,
         browser-lab,
+        ipad-companion,
         ci-contracts,
         windows-runtime,
         third-party-notices,
