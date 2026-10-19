@@ -375,7 +375,9 @@ test('retained unavailable selection never captures on start or rejoin (#422)', 
       export const AddFriendDialog = () => null, ContactImportDialog = () => null,
         PairDeepLinkBoot = () => null, InboxBoot = () => null, PendingInvites = () => null
       export const pendingInviteKey = () => 'fixture-invite', presenceState = () => ({ state: 'offline' })
-      export const usePendingInvitesStore = { getState: () => ({ pending: [] }) }
+      const pendingState = { pending: [] }
+      export const usePendingInvitesStore = select => select(pendingState)
+      usePendingInvitesStore.getState = () => pendingState
       export const FriendsList = ({ onInvite }) => React.createElement('button', {
         onClick: () => onInvite({ ed_pubkey_hex: '33'.repeat(32), display_name: 'Friend' }),
       }, 'Start fixture session')`,

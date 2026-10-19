@@ -159,17 +159,24 @@ pub fn system_window_style_is_custom_applied<R: Runtime>(app: AppHandle<R>) -> b
 // via `session_set_active` so every real-quit path in lib.rs (window close
 // with minimize-to-tray off, tray Quit, macOS Cmd+Q) can intercept with a
 // "quit-requested" event instead of dropping peers mid-session. Relaxed
-// ordering matches the flags above: last-write-wins, and a stale read costs
-// at most one unnecessary (or skipped) confirm.
-pub struct SessionActiveFlag(pub AtomicBool);
+// ordering serves readers; the transition lock keeps an old renderer cleanup
+// from disarming a replacement session during native side effects.
+pub struct SessionActiveFlag(pub AtomicBool, Mutex<Option<String>>);
 
 impl SessionActiveFlag {
     pub fn new() -> Self {
-        Self(AtomicBool::new(false))
+        Self(AtomicBool::new(false), Mutex::new(None))
     }
 
-    pub fn set<R: Runtime>(app: &AppHandle<R>, active: bool) {
-        app.state::<Self>().0.store(active, Ordering::Relaxed);
+    fn transition(&self, active: bool, activation: Option<String>, apply: impl FnOnce()) -> bool {
+        let mut current = self.1.lock().unwrap();
+        if !active && current.is_some() && *current != activation {
+            return false;
+        }
+        *current = if active { activation } else { None };
+        self.0.store(active, Ordering::Relaxed);
+        apply();
+        true
     }
 
     pub fn is_active<R: Runtime>(app: &AppHandle<R>) -> bool {
@@ -509,56 +516,65 @@ pub fn count_ptt_released_emit(ok: bool) {
 }
 
 #[tauri::command]
-pub fn session_set_active<R: Runtime>(app: AppHandle<R>, active: bool) -> Result<(), String> {
-    SessionActiveFlag::set(&app, active);
-    if !active {
-        crate::commands::mirror::MirrorState::stop_for_app(&app);
-    }
-    // #47 B5 — the friends-PTT global shortcut only exists while a session is
-    // live; boot registers just the AI shortcut (see lib.rs).
-    apply_ptt_friends_registration(&app, active);
-    update_ptt_physical_monitor(&app, active);
+pub fn session_set_active<R: Runtime>(
+    app: AppHandle<R>,
+    active: bool,
+    session_activation_id: Option<String>,
+) -> Result<(), String> {
+    app.state::<SessionActiveFlag>()
+        .transition(active, session_activation_id.clone(), || {
+            if !active {
+                crate::commands::mirror::MirrorState::end_session_for_app(
+                    &app,
+                    session_activation_id,
+                );
+            }
+            // #47 B5 — the friends-PTT global shortcut only exists while a session is
+            // live; boot registers just the AI shortcut (see lib.rs).
+            apply_ptt_friends_registration(&app, active);
+            update_ptt_physical_monitor(&app, active);
 
-    // #226 — the renderer logs `ptt/session.armed` for the same transition.
-    // Both records present means PTT really was armed; a renderer record with
-    // no native counterpart means the invoke never landed.
-    let (friends_registered, ai_registered) = {
-        let bindings = app.state::<ShortcutBindings>();
-        let manager = app.global_shortcut();
-        (
-            manager.is_registered(bindings.ptt_friends()),
-            manager.is_registered(bindings.ptt_ai()),
-        )
-    };
-    native_log::record(
-        native_log::NativeLevel::Info,
-        "ptt.native",
-        "session.state",
-        &[
-            ("active", native_log::NativeValue::Bool(active)),
-            (
-                "friendsRegistered",
-                native_log::NativeValue::Bool(friends_registered),
-            ),
-            ("aiRegistered", native_log::NativeValue::Bool(ai_registered)),
-            (
-                "pressedEmitOk",
-                native_log::NativeValue::U64(PTT_PRESSED_EMIT_OK.load(Ordering::Relaxed)),
-            ),
-            (
-                "pressedEmitErr",
-                native_log::NativeValue::U64(PTT_PRESSED_EMIT_ERR.load(Ordering::Relaxed)),
-            ),
-            (
-                "releasedEmitOk",
-                native_log::NativeValue::U64(PTT_RELEASED_EMIT_OK.load(Ordering::Relaxed)),
-            ),
-            (
-                "releasedEmitErr",
-                native_log::NativeValue::U64(PTT_RELEASED_EMIT_ERR.load(Ordering::Relaxed)),
-            ),
-        ],
-    );
+            // #226 — the renderer logs `ptt/session.armed` for the same transition.
+            // Both records present means PTT really was armed; a renderer record with
+            // no native counterpart means the invoke never landed.
+            let (friends_registered, ai_registered) = {
+                let bindings = app.state::<ShortcutBindings>();
+                let manager = app.global_shortcut();
+                (
+                    manager.is_registered(bindings.ptt_friends()),
+                    manager.is_registered(bindings.ptt_ai()),
+                )
+            };
+            native_log::record(
+                native_log::NativeLevel::Info,
+                "ptt.native",
+                "session.state",
+                &[
+                    ("active", native_log::NativeValue::Bool(active)),
+                    (
+                        "friendsRegistered",
+                        native_log::NativeValue::Bool(friends_registered),
+                    ),
+                    ("aiRegistered", native_log::NativeValue::Bool(ai_registered)),
+                    (
+                        "pressedEmitOk",
+                        native_log::NativeValue::U64(PTT_PRESSED_EMIT_OK.load(Ordering::Relaxed)),
+                    ),
+                    (
+                        "pressedEmitErr",
+                        native_log::NativeValue::U64(PTT_PRESSED_EMIT_ERR.load(Ordering::Relaxed)),
+                    ),
+                    (
+                        "releasedEmitOk",
+                        native_log::NativeValue::U64(PTT_RELEASED_EMIT_OK.load(Ordering::Relaxed)),
+                    ),
+                    (
+                        "releasedEmitErr",
+                        native_log::NativeValue::U64(PTT_RELEASED_EMIT_ERR.load(Ordering::Relaxed)),
+                    ),
+                ],
+            );
+        });
     Ok(())
 }
 
@@ -1659,6 +1675,75 @@ mod tests {
             "concurrent exports left mixed or truncated data"
         );
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn stale_session_cleanup_cannot_disarm_the_replacement_or_emit_its_end() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        let flag = super::SessionActiveFlag::new();
+        let armed = AtomicBool::new(false);
+        let ended = std::sync::Mutex::new(Vec::new());
+        for token in ["session-a", "session-b"] {
+            assert!(flag.transition(true, Some(token.into()), || {
+                armed.store(true, Ordering::SeqCst);
+            }));
+        }
+        for token in [Some("session-a".into()), None] {
+            assert!(!flag.transition(false, token.clone(), || {
+                armed.store(false, Ordering::SeqCst);
+                ended.lock().unwrap().push(token);
+            }));
+            assert!(flag.0.load(Ordering::Relaxed));
+            assert!(armed.load(Ordering::SeqCst));
+            assert!(ended.lock().unwrap().is_empty());
+        }
+        assert!(flag.transition(false, Some("session-b".into()), || {
+            armed.store(false, Ordering::SeqCst);
+            ended.lock().unwrap().push(Some("session-b".into()));
+        }));
+        assert!(!flag.0.load(Ordering::Relaxed));
+        assert!(!armed.load(Ordering::SeqCst));
+        assert_eq!(*ended.lock().unwrap(), vec![Some("session-b".into())]);
+
+        assert!(flag.transition(true, None, || {}));
+        assert!(flag.transition(false, None, || {}));
+        assert!(!flag.0.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn session_ownership_check_and_native_effects_share_one_serialized_transition() {
+        use std::sync::{mpsc, Arc};
+        use std::time::Duration;
+        let flag = Arc::new(super::SessionActiveFlag::new());
+        flag.transition(true, Some("session-a".into()), || {});
+        let (entered, wait_entered) = mpsc::channel();
+        let (release, wait_release) = mpsc::channel();
+        let (applied, wait_applied) = mpsc::channel();
+        let first_flag = flag.clone();
+        let first = std::thread::spawn(move || {
+            first_flag.transition(false, Some("session-a".into()), || {
+                entered.send(()).unwrap();
+                wait_release.recv().unwrap();
+            });
+        });
+        wait_entered.recv().unwrap();
+        let next_flag = flag.clone();
+        let second = std::thread::spawn(move || {
+            next_flag.transition(true, Some("session-b".into()), || {
+                applied.send(()).unwrap();
+            });
+        });
+        assert!(wait_applied
+            .recv_timeout(Duration::from_millis(30))
+            .is_err());
+        release.send(()).unwrap();
+        first.join().unwrap();
+        second.join().unwrap();
+        wait_applied.recv().unwrap();
+        assert!(flag.0.load(std::sync::atomic::Ordering::Relaxed));
+        assert!(!flag.transition(false, Some("session-a".into()), || panic!(
+            "stale native cleanup"
+        )));
     }
 
     #[test]

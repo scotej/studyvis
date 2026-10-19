@@ -1,7 +1,7 @@
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, Runtime};
 
 use super::system::SessionActiveFlag;
@@ -21,13 +21,33 @@ struct MirrorSlot {
     retiring: Vec<MirrorServer>,
     request_id: Option<String>,
     revision: u64,
+    scope: MirrorScope,
+}
+
+#[derive(Clone, Copy, Default, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum MirrorScope {
+    #[default]
+    Session,
+    App,
+}
+
+impl MirrorScope {
+    fn permits_start(self, session_active: bool, session_id: Option<&str>) -> bool {
+        self == Self::App || (session_active && session_id.is_some_and(valid_session_id))
+    }
+}
+
+fn valid_session_id(value: &str) -> bool {
+    value.len() == 64 && value.bytes().all(|b| b.is_ascii_hexdigit())
 }
 
 impl MirrorState {
-    fn begin(&self, request_id: String) -> (u64, Vec<MirrorServer>) {
+    fn begin(&self, request_id: String, scope: MirrorScope) -> (u64, Vec<MirrorServer>) {
         let mut slot = self.slot.lock().unwrap();
         slot.revision += 1;
         slot.request_id = Some(request_id);
+        slot.scope = scope;
         let mut previous = std::mem::take(&mut slot.retiring);
         if let Some(server) = slot.server.take() {
             server.stop();
@@ -66,6 +86,38 @@ impl MirrorState {
             state.stop();
         }
     }
+
+    fn end_session(&self, session_activation_id: Option<String>) -> Option<SessionEndedEvent> {
+        let slot = self.slot.lock().unwrap();
+        if slot.scope == MirrorScope::App {
+            slot.request_id.clone().map(|request_id| SessionEndedEvent {
+                request_id,
+                session_activation_id,
+            })
+        } else {
+            drop(slot);
+            self.stop();
+            None
+        }
+    }
+
+    pub fn end_session_for_app<R: Runtime>(
+        app: &AppHandle<R>,
+        session_activation_id: Option<String>,
+    ) {
+        if let Some(state) = app.try_state::<Self>() {
+            if let Some(event) = state.end_session(session_activation_id) {
+                let _ = app.emit_to("main", "mirror:session-ended", event);
+            }
+        }
+    }
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SessionEndedEvent {
+    request_id: String,
+    session_activation_id: Option<String>,
 }
 
 #[derive(Clone, Serialize)]
@@ -85,13 +137,18 @@ struct MessageEvent {
 #[tauri::command]
 pub async fn mirror_start<R: Runtime>(
     app: AppHandle<R>,
-    session_id: String,
+    session_id: Option<String>,
     request_id: String,
+    scope: Option<MirrorScope>,
 ) -> Result<MirrorConfig, String> {
-    if !SessionActiveFlag::is_active(&app) {
+    let scope = scope.unwrap_or_default();
+    if !scope.permits_start(SessionActiveFlag::is_active(&app), session_id.as_deref()) {
         return Err("start a study session before enabling browser access".into());
     }
-    if session_id.len() != 64 || !session_id.bytes().all(|b| b.is_ascii_hexdigit()) {
+    if session_id
+        .as_deref()
+        .is_some_and(|id| !valid_session_id(id))
+    {
         return Err("invalid study session".into());
     }
     if request_id.is_empty()
@@ -105,12 +162,14 @@ pub async fn mirror_start<R: Runtime>(
     let state = app.state::<MirrorState>();
     // Claim ownership before awaiting the previous start. An older request's
     // eventual cleanup must never stop its replacement.
-    let (revision, previous) = state.begin(request_id.clone());
+    let (revision, previous) = state.begin(request_id.clone(), scope);
     let _starting = state.starting.lock().await;
     for previous in previous {
         previous.shutdown().await;
     }
-    if !state.owns(&request_id, revision) || !SessionActiveFlag::is_active(&app) {
+    if !state.owns(&request_id, revision)
+        || !scope.permits_start(SessionActiveFlag::is_active(&app), session_id.as_deref())
+    {
         return Err("browser access was cancelled".into());
     }
     let asset_app = app.clone();
@@ -151,7 +210,7 @@ pub async fn mirror_start<R: Runtime>(
     let server = MirrorServer::start(options).await?;
     {
         let mut slot = state.slot.lock().unwrap();
-        if SessionActiveFlag::is_active(&app)
+        if scope.permits_start(SessionActiveFlag::is_active(&app), session_id.as_deref())
             && slot.revision == revision
             && slot.request_id.as_deref() == Some(&request_id)
         {
@@ -194,19 +253,127 @@ pub async fn mirror_send<R: Runtime>(
 
 #[cfg(test)]
 mod tests {
-    use super::MirrorState;
+    use super::{MirrorAsset, MirrorScope, MirrorServer, MirrorServerOptions, MirrorState};
+    use std::net::Ipv4Addr;
+    use std::sync::Arc;
+    use std::time::{Duration, SystemTime};
 
     #[test]
     fn cancelled_start_cannot_stop_a_newer_request() {
         let state = MirrorState::default();
-        let (first, _) = state.begin("first".into());
+        let (first, _) = state.begin("first".into(), MirrorScope::Session);
         assert!(state.owns("first", first));
         state.cancel(Some("first"));
-        let (second, _) = state.begin("second".into());
+        let (second, _) = state.begin("second".into(), MirrorScope::App);
         state.cancel(Some("first"));
         assert!(state.owns("second", second));
         assert!(!state.owns("first", first));
         state.stop();
         assert!(!state.owns("second", second));
+    }
+
+    #[test]
+    fn session_scope_still_requires_a_real_active_session() {
+        let id = "a".repeat(64);
+        assert!(!MirrorScope::Session.permits_start(false, Some(&id)));
+        assert!(!MirrorScope::Session.permits_start(true, None));
+        assert!(!MirrorScope::Session.permits_start(true, Some("invalid")));
+        assert!(MirrorScope::Session.permits_start(true, Some(&id)));
+        assert!(MirrorScope::App.permits_start(false, None));
+        assert!(serde_json::from_str::<MirrorScope>("\"unknown\"").is_err());
+    }
+
+    #[test]
+    fn session_end_retires_session_scope_but_keeps_explicit_app_scope() {
+        let state = MirrorState::default();
+        let (session_revision, _) = state.begin("session".into(), MirrorScope::Session);
+        assert!(state.end_session(None).is_none());
+        assert!(!state.owns("session", session_revision));
+        let (app_revision, _) = state.begin("app".into(), MirrorScope::App);
+        assert_eq!(state.end_session(None).unwrap().request_id, "app");
+        assert!(state.owns("app", app_revision));
+        state.stop();
+        assert!(!state.owns("app", app_revision));
+    }
+
+    #[test]
+    fn session_end_payload_captures_the_ended_activation_on_the_long_lived_listener() {
+        let state = MirrorState::default();
+        let (revision, _) = state.begin("app".into(), MirrorScope::App);
+        let first = state.end_session(Some("session-1".into())).unwrap();
+        let second = state.end_session(Some("session-2".into())).unwrap();
+        assert!(state.owns("app", revision));
+        assert_eq!(first.request_id, second.request_id);
+        assert_eq!(first.session_activation_id.as_deref(), Some("session-1"));
+        assert_eq!(second.session_activation_id.as_deref(), Some("session-2"));
+        assert_eq!(
+            serde_json::to_value(first).unwrap(),
+            serde_json::json!({"requestId": "app", "sessionActivationId": "session-1"})
+        );
+        assert!(state
+            .end_session(None)
+            .unwrap()
+            .session_activation_id
+            .is_none());
+    }
+
+    #[tokio::test]
+    async fn actual_tls_listener_only_survives_leave_with_explicit_app_scope() {
+        for scope in [MirrorScope::Session, MirrorScope::App] {
+            let directory = std::env::temp_dir().join(format!(
+                "studyvis-app-scope-{}-{}",
+                std::process::id(),
+                SystemTime::now()
+                    .duration_since(SystemTime::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos()
+            ));
+            let server = MirrorServer::start(MirrorServerOptions {
+                certificate_dir: directory.clone(),
+                addresses: vec![Ipv4Addr::LOCALHOST],
+                asset: Arc::new(|path| {
+                    (path == "mirror.html").then(|| MirrorAsset {
+                        bytes: b"companion".to_vec(),
+                        mime_type: "text/plain".into(),
+                    })
+                }),
+                on_event: Arc::new(|_| {}),
+                lease: Duration::from_secs(60),
+            })
+            .await
+            .unwrap();
+            let url = server.config().urls[0].clone();
+            let root =
+                reqwest::Certificate::from_der(&std::fs::read(directory.join("root.crt")).unwrap())
+                    .unwrap();
+            let client = reqwest::Client::builder()
+                .add_root_certificate(root)
+                .no_proxy()
+                .build()
+                .unwrap();
+            let state = MirrorState::default();
+            let (revision, _) = state.begin("scope-proof".into(), scope);
+            state.slot.lock().unwrap().server = Some(server);
+            assert_eq!(client.get(&url).send().await.unwrap().status(), 200);
+            state.end_session(None);
+            if scope == MirrorScope::App {
+                assert!(state.owns("scope-proof", revision));
+                assert_eq!(client.get(&url).send().await.unwrap().status(), 200);
+            } else {
+                assert!(!state.owns("scope-proof", revision));
+                if let Ok(response) = client.get(&url).send().await {
+                    assert_eq!(response.status(), 410);
+                }
+            }
+            state.stop();
+            if let Ok(response) = client.get(&url).send().await {
+                assert_eq!(response.status(), 410);
+            }
+            let retired = std::mem::take(&mut state.slot.lock().unwrap().retiring);
+            for server in retired {
+                server.shutdown().await;
+            }
+            std::fs::remove_dir_all(directory).unwrap();
+        }
     }
 }

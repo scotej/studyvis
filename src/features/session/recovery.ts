@@ -351,6 +351,31 @@ export function clearSessionRecovery(): Promise<void> {
   })
 }
 
+// #365 — the queue may outlive the remote owner which requested this clear.
+// Check at the actual store operations, and report this operation's durability
+// instead of treating the desktop helper's logged failure as a successful ACK.
+export async function clearSessionRecoveryGuarded(
+  isCurrent: () => boolean
+): Promise<boolean> {
+  let saved = false
+  await enqueue(async () => {
+    const factory = activeDeps.storeFactory
+    if (!factory || !isCurrent()) return
+    try {
+      const store = factory()
+      if (!isCurrent()) return
+      await store.delete(SESSION_RECOVERY_KEY)
+      if (!isCurrent()) return
+      await store.save()
+      retainedForQuit = false
+      saved = true
+    } catch (err) {
+      log.error('clear.failed', { err })
+    }
+  })
+  return saved
+}
+
 // The leave handler runs on the confirmed-quit path too. Quitting is the one
 // ending that is meant to be resumable, so it keeps the record.
 export function clearSessionRecoveryOnLeave(): Promise<void> {

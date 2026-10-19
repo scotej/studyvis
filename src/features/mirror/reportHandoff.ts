@@ -18,6 +18,15 @@ let current: {
   publicSessionId: string
   host: MirrorHost
 } | null = null
+let application: { host: MirrorHost } | null = null
+
+export function registerMirrorAppNotifications(host: MirrorHost): () => void {
+  const registration = { host }
+  application = registration
+  return () => {
+    if (application === registration) application = null
+  }
+}
 
 export function projectMirrorReport(
   report: ResolvedReportData,
@@ -47,7 +56,7 @@ export function projectMirrorReport(
 }
 
 export function notifyCurrentMirror(notification: MirrorNotification): void {
-  current?.host.sendNotification(notification)
+  ;(application?.host ?? current?.host)?.sendNotification(notification)
 }
 
 export function registerMirrorReportHandoff(

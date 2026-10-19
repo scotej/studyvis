@@ -34,7 +34,7 @@ class Contracts(unittest.TestCase):
             destination = self.root / path
             destination.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(REPO / path, destination)
-        for directory in ("scripts/patches", "src-tauri/capabilities"):
+        for directory in ("scripts/patches", "src-tauri/capabilities", "tests/production"):
             shutil.copytree(REPO / directory, self.root / directory)
 
     def modify_workflow(self, name, change):
@@ -160,6 +160,38 @@ class Contracts(unittest.TestCase):
         path = self.root / "scripts/linux-appimage-runtime-sources.tsv"
         path.write_text(path.read_text() + "new-component\t1.0.0\tsource.tar.gz\thttps://example.com/source.tar.gz\t" + "0" * 64 + "\tMIT\tLICENSE\n")
         self.assert_failure("native monitoring must cover every pinned")
+
+    def test_native_app_companion_cannot_be_omitted(self):
+        def mutate(doc):
+            for step in doc["jobs"]["rust"]["steps"]:
+                if step.get("name") == "Browser companion acceptance (Chromium, Firefox, WebKit)":
+                    step["run"] = step["run"].replace(" tests/production/mirror-app-browser.mjs", "")
+        self.modify_workflow("ci.yml", mutate)
+        self.assert_failure("every native companion suite must execute")
+
+    def test_other_production_suite_cannot_be_excluded(self):
+        def mutate(doc):
+            for step in doc["jobs"]["frontend"]["steps"]:
+                if step.get("name") == "Production browser regressions":
+                    step["run"] = step["run"].replace(" -print0", " ! -name model-state-save.mjs -print0")
+        self.modify_workflow("ci.yml", mutate)
+        self.assert_failure("may exclude only")
+
+    def test_native_companion_failure_cannot_be_waived(self):
+        def mutate(doc):
+            for step in doc["jobs"]["rust"]["steps"]:
+                if step.get("name") == "Browser companion acceptance (Chromium, Firefox, WebKit)":
+                    step["continue-on-error"] = True
+        self.modify_workflow("ci.yml", mutate)
+        self.assert_failure("without an error waiver")
+
+    def test_private_app_certificate_cannot_enter_failure_artifact(self):
+        def mutate(doc):
+            for step in doc["jobs"]["rust"]["steps"]:
+                if step.get("name") == "Upload browser companion evidence":
+                    step["with"]["path"] = step["with"]["path"].replace("!lab/.work/**/app-certificate/**", "")
+        self.modify_workflow("ci.yml", mutate)
+        self.assert_failure("exclude every private fixture certificate")
 
 
 if __name__ == "__main__":

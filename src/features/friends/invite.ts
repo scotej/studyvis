@@ -67,6 +67,8 @@ export type InviteSender = {
 }
 
 export type InviteOptions = {
+  signal?: AbortSignal
+  isCurrent?: () => boolean
   ttlMs?: number
   now?: () => number
   // Maximum time to wait for the recipient to be on their inbox topic before
@@ -127,6 +129,7 @@ export async function buildInvitePayload(
   session: SessionInvite,
   opts: InviteOptions = {}
 ): Promise<InvitePayload> {
+  assertInviteCurrent(opts)
   const now = opts.now ? opts.now() : Date.now()
   const expires_at = now + (opts.ttlMs ?? INVITE_TTL_MS)
   const core: InvitePayloadCore = {
@@ -136,6 +139,7 @@ export async function buildInvitePayload(
     expires_at,
   }
   const sig = await sender.sign(serializePayloadForSig(core))
+  assertInviteCurrent(opts)
   return { ...core, sig: bytesToHex(sig) }
 }
 
@@ -150,8 +154,10 @@ export async function buildInviteEnvelope(
     throw new Error('recipient x_pubkey must decode to 32 bytes')
   }
   const payload = await buildInvitePayload(sender, session, opts)
+  assertInviteCurrent(opts)
   const plaintext = new TextEncoder().encode(JSON.stringify(payload))
   const { nonce, ciphertext } = await sender.encryptTo(recipientXPub, plaintext)
+  assertInviteCurrent(opts)
   return {
     v: INVITE_ENVELOPE_VERSION,
     from_ed_pubkey: sender.edPubkeyHex,
@@ -161,6 +167,7 @@ export async function buildInviteEnvelope(
 }
 
 type SendEnvelopeOpts = {
+  isCurrent?: () => boolean
   sendTimeoutMs?: number
   // #47 C2 — session topic the delivery ACK must name; when provided the
   // sender lingers ackTimeoutMs for a verified ACK and reports it.
@@ -182,6 +189,14 @@ function createAbortError(): Error {
 
 function throwIfAborted(signal: AbortSignal | undefined): void {
   if (signal?.aborted) throw createAbortError()
+}
+
+function assertInviteCurrent(opts: {
+  signal?: AbortSignal
+  isCurrent?: () => boolean
+}): void {
+  throwIfAborted(opts.signal)
+  if (opts.isCurrent && !opts.isCurrent()) throw createAbortError()
 }
 
 function waitForAbortableDelay(
@@ -286,7 +301,7 @@ async function sendInviteEnvelopeNow(
 ): Promise<InviteSendResult> {
   const timeoutMs = opts.sendTimeoutMs ?? DEFAULT_SEND_TIMEOUT_MS
   const signal = opts.signal
-  throwIfAborted(signal)
+  assertInviteCurrent(opts)
   // #47 C1 — the send path now races both transports, so the network-down
   // verdict at timeout must consider both socket maps (the same PR-21
   // rationale as pairing).
@@ -379,6 +394,12 @@ async function sendInviteEnvelopeNow(
       // settles even if no peer ever joins.
       unsubscribePeerJoin = room.onPeerJoin(() => {
         if (settled) return
+        try {
+          assertInviteCurrent(opts)
+        } catch (err) {
+          settle(() => reject(err))
+          return
+        }
         action
           .send(envelope)
           .then(() => settle(resolve))
@@ -423,15 +444,16 @@ export async function inviteFriend(
       ackSessionTopic: sessionTopic,
       ackTimeoutMs: opts.ackTimeoutMs,
       signal,
+      isCurrent: opts.isCurrent,
     })
   try {
-    const result = await deliver()
+    const result = await deliver(opts.signal)
     // A transport-level send can be observed by anyone on the inbox topic.
     // Only the signed ACK verified in sendInviteEnvelope proves this recipient
     // received it, so unconfirmed sends remain eligible for presence retry.
     if (result.acked) {
       inviteRetryManager.markDelivered(recipient.edPubkeyHex, sessionTopic)
-    } else {
+    } else if (!opts.isCurrent || opts.isCurrent()) {
       inviteRetryManager.register(recipient.edPubkeyHex, sessionTopic, deliver)
     }
     return result
@@ -441,7 +463,10 @@ export async function inviteFriend(
     // the retry window. A relay-unreachable failure (InviteRelayError) is the
     // user's own network, not an offline friend, so we don't queue a retry —
     // the same relay would be just as unreachable.
-    if (err instanceof InviteTimeoutError) {
+    if (
+      err instanceof InviteTimeoutError &&
+      (!opts.isCurrent || opts.isCurrent())
+    ) {
       inviteRetryManager.register(recipient.edPubkeyHex, sessionTopic, deliver)
     }
     throw err

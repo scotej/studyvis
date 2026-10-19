@@ -18,7 +18,14 @@ import { isUpdateInstallReserved } from '@/lib/updateInstallGuard'
 //   fall through to Onboarding — its create path would overwrite still-valid
 //   keychain keys (D1).
 
-import { Fragment, useCallback, useEffect, useRef, useState } from 'react'
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from 'react'
 import { Link } from 'react-router'
 import { Settings2Icon } from 'lucide-react'
 import { toast } from 'sonner'
@@ -74,6 +81,13 @@ import {
 } from '@/stores/sessionStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { strings } from '@/strings'
+import { useMirrorAppOwner } from '@/features/mirror/useMirrorAppOwner'
+import {
+  registerMirrorHome,
+  type MirrorHomeData,
+} from '@/features/mirror/homeBridge'
+import type { MirrorOperationScope } from '@/features/mirror/appOwner'
+import { clearSessionRecoveryGuarded } from '@/features/session/recovery'
 
 import { joinAndRemovePendingInvite } from './pendingInviteJoin'
 
@@ -88,6 +102,8 @@ function rejectSessionDuringUpdate(): boolean {
 }
 
 export function Home() {
+  const mirrorApp = useMirrorAppOwner()
+  const mirrorOwner = mirrorApp?.owner
   const { identity, status, actions } = useIdentity()
   const onboarding = useOnboardingState()
   // #225 — did StudyVis close while a session was live? Probed once the
@@ -172,7 +188,10 @@ export function Home() {
   }, [])
 
   const runHostInvite = useCallback(
-    async (friend: Friend): Promise<boolean> => {
+    async (
+      friend: Friend,
+      remoteScope?: MirrorOperationScope
+    ): Promise<boolean> => {
       if (!identity || !identity.display_name) return false
       try {
         const result = await inviteToCurrentSession({
@@ -180,9 +199,27 @@ export function Home() {
           sender: {
             edPubkeyHex: identity.ed_pubkey_hex,
             displayName: identity.display_name,
-            sign: actions.signWithKeyring,
-            encryptTo: boxEncryptWithKeyring,
+            sign: async (message) => {
+              remoteScope?.pinSession()
+              if (remoteScope && !remoteScope.isCurrent())
+                throw new Error('Companion invite cancelled')
+              const result = await actions.signWithKeyring(message)
+              if (remoteScope && !remoteScope.isCurrent())
+                throw new Error('Companion invite cancelled')
+              return result
+            },
+            encryptTo: async (key, plaintext) => {
+              if (remoteScope && !remoteScope.isCurrent())
+                throw new Error('Companion invite cancelled')
+              const result = await boxEncryptWithKeyring(key, plaintext)
+              if (remoteScope && !remoteScope.isCurrent())
+                throw new Error('Companion invite cancelled')
+              return result
+            },
           },
+          options: remoteScope
+            ? { signal: remoteScope.signal, isCurrent: remoteScope.isCurrent }
+            : undefined,
         })
         const name =
           friend.display_name?.trim() ||
@@ -217,7 +254,7 @@ export function Home() {
         return false
       }
     },
-    [identity, actions.signWithKeyring]
+    [identity, actions]
   )
 
   const runGuestJoin = useCallback((invite: ValidInvite) => {
@@ -284,6 +321,20 @@ export function Home() {
       return false
     }
   }, [])
+
+  const inviteFromSession = useCallback(
+    async (friend: Friend) => {
+      const scope = mirrorOwner?.getState().enabled
+        ? mirrorOwner.operationScope()
+        : undefined
+      try {
+        return await runHostInvite(friend, scope)
+      } finally {
+        scope?.release()
+      }
+    },
+    [mirrorOwner, runHostInvite]
+  )
 
   // F10 — an OS-delivered pairing link opens the Add-friend dialog straight on
   // the Enter-code tab with the words prefilled. We leave settings/session if
@@ -365,6 +416,7 @@ export function Home() {
     if (aiOn()) {
       const models = useModelStore.getState()
       if (
+        !mirrorOwner?.getState().enabled &&
         (models.activeModelId || models.status === 'loading') &&
         !getModelUnavailableReason(models.activeModelId)
       ) {
@@ -391,7 +443,7 @@ export function Home() {
         err instanceof Error ? err.message : strings.friends.joinErrorFallback
       toast.error(message)
     }
-  }, [])
+  }, [mirrorOwner])
 
   // #225 — re-enter the room StudyVis was in when it closed. Same shape as
   // handleRejoin above (including spending this click on the AI screen
@@ -405,6 +457,7 @@ export function Home() {
       if (aiOn()) {
         const models = useModelStore.getState()
         if (
+          !mirrorOwner?.getState().enabled &&
           (models.activeModelId || models.status === 'loading') &&
           !getModelUnavailableReason(models.activeModelId)
         ) {
@@ -446,7 +499,7 @@ export function Home() {
         }
       }
     },
-    [dismissInterrupted]
+    [dismissInterrupted, mirrorOwner]
   )
 
   const handleInvite = useCallback(
@@ -504,6 +557,7 @@ export function Home() {
       const canStart =
         req.kind === 'guest' || Boolean(identity && identity.display_name)
       const preacquiredScreen =
+        !mirrorOwner?.getState().enabled &&
         canStart &&
         Boolean(models.activeModelId || models.status === 'loading') &&
         !getModelUnavailableReason(models.activeModelId)
@@ -523,7 +577,7 @@ export function Home() {
         discardPendingScreenStream()
       }
     },
-    [pendingStart, runHostInvite, runGuestJoin, identity]
+    [pendingStart, runHostInvite, runGuestJoin, identity, mirrorOwner]
   )
 
   // #225 — hold the dashboard until the interrupted-session probe answers, so
@@ -539,6 +593,237 @@ export function Home() {
     canProbeInterrupted &&
     (interrupted.state.status === 'idle' ||
       interrupted.state.status === 'loading')
+
+  const pendingInvites = usePendingInvitesStore((s) => s.pending)
+  const friendRows = useFriendsStore((s) => s.friends)
+  const aiPreference = useSettingsStore((s) => s.values.aiFeaturesEnabled)
+  const pendingSave = useSessionStore((s) => s.pendingSave)
+  const inviteHandles = useRef(
+    new Map<string, { id: string; invite: ValidInvite }>()
+  )
+  const homeHandlers = useRef<Parameters<typeof registerMirrorHome>[1]>(null!)
+  const assertHomeReady = () => {
+    if (
+      status !== 'ready' ||
+      !identity ||
+      onboarding.status !== 'completed' ||
+      interruptedPending ||
+      useIdentityStore.getState().identity?.ed_pubkey_hex !==
+        identity.ed_pubkey_hex ||
+      isUpdateInstallReserved()
+    )
+      throw new Error('Companion Home unavailable')
+  }
+  const startTopic = (topic: string | null) => {
+    if (useSessionStore.getState().status === 'active') return
+    if (aiOn() && !topic) throw new Error('Study topic required')
+    if (topic) useSessionStore.getState().setPendingInitialTopic(topic)
+  }
+  useLayoutEffect(() => {
+    homeHandlers.current = {
+      read(offset): MirrorHomeData {
+        if (
+          status !== 'ready' ||
+          onboarding.status !== 'completed' ||
+          interruptedPending
+        )
+          return {
+            friends: [],
+            invites: [],
+            interrupted: null,
+            aiEnabled: false,
+            savePending: false,
+            rejoinDeadline: null,
+            rosterReady: false,
+            totalFriends: 0,
+            offset,
+          }
+        const friends = useFriendsStore.getState()
+        const pending = usePendingInvitesStore.getState()
+        const ownerIdentity =
+          useIdentityStore.getState().identity?.ed_pubkey_hex
+        const visible =
+          pending.identityEdPubkeyHex === ownerIdentity?.toLowerCase()
+            ? pending.pending.filter(
+                (row) => row.invite.payload.expires_at > Date.now()
+              )
+            : []
+        const current = new Set(visible.map((row) => row.invite.payload.sig))
+        for (const key of inviteHandles.current.keys())
+          if (!current.has(key)) inviteHandles.current.delete(key)
+        for (const row of visible)
+          if (!inviteHandles.current.has(row.invite.payload.sig))
+            inviteHandles.current.set(row.invite.payload.sig, {
+              id: crypto.randomUUID(),
+              invite: row.invite,
+            })
+        const s = useSessionStore.getState()
+        return {
+          friends: friends.friends.slice(offset, offset + 64).map((friend) => {
+            const p = presenceState(presenceRef.current, friend.ed_pubkey_hex)
+            return {
+              id: friend.ed_pubkey_hex,
+              displayName: (
+                friend.display_name?.trim() ||
+                strings.friends.addDialog.defaultFriendName
+              ).slice(0, 256),
+              presence: p.state,
+              limited: p.state === 'online' && p.limited,
+            }
+          }),
+          invites: visible.map((row) => ({
+            id: inviteHandles.current.get(row.invite.payload.sig)!.id,
+            displayName: row.invite.payload.our_display_name.slice(0, 256),
+            expiresAt: row.invite.payload.expires_at,
+          })),
+          interrupted:
+            interrupted.state.status === 'prompt'
+              ? {
+                  startedAt: interrupted.state.record.startedAt,
+                  topic: interrupted.state.record.declaredStudyTopic,
+                }
+              : null,
+          aiEnabled: aiOn(),
+          savePending: s.pendingSave !== null,
+          rejoinDeadline: s.getRejoinRequest() ? s.rejoinDeadline : null,
+          rosterReady: friends.status === 'ready',
+          totalFriends: friends.friends.length,
+          offset,
+        }
+      },
+      async invite(args, context) {
+        assertHomeReady()
+        if (interrupted.state.status === 'prompt')
+          throw new Error('Resolve interrupted session first')
+        const friend = useFriendsStore
+          .getState()
+          .friends.find((row) => row.ed_pubkey_hex === args.id)
+        if (
+          !friend ||
+          useFriendsStore.getState().status !== 'ready' ||
+          !mirrorOwner
+        )
+          throw new Error('Friend unavailable')
+        const scope = mirrorOwner.operationScope()
+        try {
+          return await context.commit(async () => {
+            if (!scope.isCurrent())
+              throw new Error('Companion invite cancelled')
+            startTopic(args.topic)
+            if (!(await runHostInvite(friend, scope)))
+              throw new Error('Invite unavailable')
+            return { accepted: true }
+          })
+        } finally {
+          scope.release()
+        }
+      },
+      async accept(args, context) {
+        assertHomeReady()
+        if (interrupted.state.status === 'prompt')
+          throw new Error('Resolve interrupted session first')
+        const invitation = [...inviteHandles.current.values()].find(
+          (row) => row.id === args.id
+        )
+        if (!invitation) throw new Error('Invite unavailable')
+        return context.commit(() => {
+          startTopic(args.topic)
+          if (!runGuestJoin(invitation.invite))
+            throw new Error('Invite unavailable')
+          return { accepted: true }
+        })
+      },
+      async rejoin(source, context) {
+        assertHomeReady()
+        return context.commit(() => {
+          if (useSessionStore.getState().status === 'active')
+            throw new Error('Already in session')
+          const record =
+            source === 'interrupted' && interrupted.state.status === 'prompt'
+              ? interrupted.state.record
+              : source === 'recent'
+                ? useSessionStore.getState().getRejoinRequest()
+                : null
+          if (!record) throw new Error('Rejoin unavailable')
+          if (aiOn())
+            useSessionStore
+              .getState()
+              .setPendingInitialTopic(
+                'declaredStudyTopic' in record
+                  ? (record.declaredStudyTopic ?? DEFAULT_DECLARED_STUDY_TOPIC)
+                  : useSessionStore.getState().declaredStudyTopic
+              )
+          rejoinSession(
+            record.sessionTopic,
+            record.sessionPassword,
+            record.isHost,
+            {
+              expectedAuthorityEdPubkeyHex: record.expectedAuthorityEdPubkeyHex,
+            }
+          )
+          if (source === 'interrupted') dismissInterrupted()
+          return { accepted: true }
+        })
+      },
+      async endInterrupted(context) {
+        assertHomeReady()
+        if (interrupted.state.status !== 'prompt' || !mirrorOwner)
+          throw new Error('Recovery unavailable')
+        const scope = mirrorOwner.operationScope()
+        scope.pinSession()
+        try {
+          const saved = await context.commit(() =>
+            clearSessionRecoveryGuarded(scope.isCurrent)
+          )
+          if (!saved) throw new Error('Recovery clear unavailable')
+          if (scope.isCurrent()) dismissInterrupted()
+          return { accepted: true }
+        } finally {
+          scope.release()
+        }
+      },
+    }
+  })
+  useLayoutEffect(() => {
+    if (!mirrorOwner) return
+    return registerMirrorHome(mirrorOwner.runtime, {
+      read: (offset) => homeHandlers.current.read(offset),
+      invite: (args, context) => homeHandlers.current.invite(args, context),
+      accept: (args, context) => homeHandlers.current.accept(args, context),
+      rejoin: (source, context) => homeHandlers.current.rejoin(source, context),
+      endInterrupted: (context) => homeHandlers.current.endInterrupted(context),
+    })
+  }, [mirrorOwner])
+  const setMirrorHomePhase = mirrorApp?.setHomePhase
+  useLayoutEffect(() => {
+    setMirrorHomePhase?.(
+      status === 'error'
+        ? 'identity_error'
+        : status === 'absent' || onboarding.status === 'pending'
+          ? 'onboarding'
+          : status === 'loading' ||
+              onboarding.status === 'loading' ||
+              interruptedPending
+            ? 'loading'
+            : 'home'
+    )
+    mirrorOwner?.touch()
+  }, [
+    setMirrorHomePhase,
+    mirrorOwner,
+    status,
+    onboarding.status,
+    interruptedPending,
+    interrupted.state,
+    presence,
+    pendingInvites,
+    friendRows,
+    friendsStatus,
+    aiPreference,
+    pendingSave,
+    sessionStatus,
+    rejoinDeadline,
+  ])
 
   if (
     status === 'loading' ||
@@ -655,7 +940,7 @@ export function Home() {
         <div inert={sessionSettingsCategory !== null} className="contents">
           <SessionView
             presence={presence}
-            onInviteFriend={runHostInvite}
+            onInviteFriend={inviteFromSession}
             onOpenSettings={openSessionSettings}
           />
         </div>

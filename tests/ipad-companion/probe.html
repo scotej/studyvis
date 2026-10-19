@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>StudyVis iPad Safari probe</title>
+  </head>
+  <body>
+    <h1>StudyVis iPad Safari probe</h1>
+    <p>Test fixture only. Capture stays within the disposable Simulator run.</p>
+    <button id="deny">Deny screen capture</button>
+    <button id="camera">Request camera and microphone</button>
+    <button id="capture">Request screen capture</button>
+    <button id="stop">Stop screen capture</button>
+    <button id="takeover">Take over transport</button>
+    <button id="reconnect">Reconnect transport</button>
+    <button id="finish">Finish probe</button>
+    <div id="videos"></div>
+    <div id="results" aria-live="polite"></div>
+    <script type="module" src="/assets/probe.js"></script>
+  </body>
+</html>

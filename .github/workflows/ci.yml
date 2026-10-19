@@ -82,13 +82,13 @@ jobs:
         run: npx playwright install --with-deps chromium
 
       - name: Production browser regressions
-        # mirror-browser has its own browser-matrix acceptance job below.
+        # Native companion suites run below with the compiled Rust fixture.
         # Storybook and these direct playwright-core probes can use different versions.
         env:
           PLAYWRIGHT_SKIP_BROWSER_GC: '1'
         run: |
           npx playwright-core install --with-deps chromium
-          mapfile -d '' -t production_tests < <(find tests/production -maxdepth 1 -type f -name '*.mjs' ! -name mirror-browser.mjs -print0 | sort -z)
+          mapfile -d '' -t production_tests < <(find tests/production -maxdepth 1 -type f -name '*.mjs' ! -name mirror-browser.mjs ! -name mirror-app-browser.mjs -print0 | sort -z)
           node --test --test-concurrency=1 "${production_tests[@]}"
 
       - name: Frontend interaction regressions
@@ -402,7 +402,8 @@ jobs:
           PLAYWRIGHT_SKIP_BROWSER_GC: '1'
         run: |
           npx playwright-core install --with-deps chromium firefox webkit
-          node --import tsx --test tests/production/mirror-browser.mjs
+          node --import tsx --test --test-concurrency=1 \
+            tests/production/mirror-browser.mjs tests/production/mirror-app-browser.mjs
 
       - name: Upload browser companion evidence
         if: ${{ failure() && runner.os == 'Linux' }}
@@ -412,6 +413,8 @@ jobs:
           path: |
             lab/.work
             !lab/.work/**/mirror-certificate/**
+            !lab/.work/**/app-certificate/**
+            !lab/.work/**/legacy-to-app-certificate/**
           include-hidden-files: true
           if-no-files-found: ignore
           retention-days: 7
@@ -1097,6 +1100,42 @@ jobs:
           fail: false
           jobSummary: true
 
+  ipad-companion:
+    name: iPad Safari companion qualification
+    runs-on: xcode-27
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: npm
+      - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f
+        with:
+          toolchain: 1.97.1
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: src-tauri -> target
+          cache-on-failure: true
+      - run: npm ci
+      - name: Probe verdict negative controls
+        run: node --test tests/ipad-companion/verdict.test.mjs
+      - name: Install locked desktop receiver browser
+        run: node node_modules/playwright-core/cli.js install chromium
+      - name: Actual iPad Simulator Safari probe
+        run: bash scripts/check-ipad-companion.sh --output "$RUNNER_TEMP/ipad-companion-evidence"
+      - name: Retain public diagnostic evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ipad-companion-evidence
+          path: ${{ runner.temp }}/ipad-companion-evidence
+          if-no-files-found: error
+
   all-green:
     name: All pre-merge checks
     # The single check to require in branch protection: one rule to
@@ -1124,6 +1163,7 @@ jobs:
       [
         frontend,
         browser-lab,
+        ipad-companion,
         ci-contracts,
         windows-runtime,
         third-party-notices,

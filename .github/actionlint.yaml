@@ -1,0 +1,5 @@
+# GitHub documents this hosted preview image; the pinned actionlint label list
+# predates it. Keep the additional label exact rather than suppressing the rule.
+# https://docs.github.com/en/actions/reference/runners/github-hosted-runners
+self-hosted-runner:
+  labels: [xcode-27]

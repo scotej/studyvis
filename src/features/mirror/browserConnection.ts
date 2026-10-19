@@ -3,6 +3,16 @@ import { createMirrorPeer, type MirrorPeer } from './peer'
 import { MirrorCodec, type CaptureKind, type MirrorMessage } from './wire'
 import { projectOfflineSnapshot, readMirrorSnapshot } from './sessionBridge'
 import { readMirrorReport, type MirrorReport } from './reportValidation'
+import {
+  readMirrorAppRequest,
+  readMirrorAppSnapshot,
+  type MirrorAppSnapshot,
+  type MirrorAppCommandName,
+  type MirrorAppJson,
+  type MirrorAppRequest,
+  type MirrorAppResult,
+  type MirrorAppJob,
+} from './appBridge'
 
 export type BrowserConnectionState = {
   status: 'pairing' | 'connecting' | 'connected' | 'disconnected'
@@ -12,6 +22,8 @@ export type BrowserConnectionState = {
   error: string | null
   report: MirrorReport | null
   reportCached?: boolean
+  appSnapshot?: MirrorAppSnapshot | null
+  jobs?: Record<string, MirrorAppJob>
 }
 
 export type BrowserConnection = {
@@ -20,6 +32,21 @@ export type BrowserConnection = {
   pair: (password: string) => Promise<void>
   sendControl: (control: unknown) => void
   requestControl: (control: unknown) => Promise<boolean>
+  requestApp: (
+    command: MirrorAppCommandName,
+    args: MirrorAppJson,
+    options?: Partial<
+      Pick<
+        MirrorAppRequest,
+        | 'requestId'
+        | 'ownerEpoch'
+        | 'sessionActivationId'
+        | 'expectedRevision'
+        | 'replayGeneration'
+        | 'replaySequence'
+      >
+    >
+  ) => Promise<MirrorAppResult>
   setCapture: (kind: CaptureKind, stream: MediaStream | null) => void
   disconnect: () => void
 }
@@ -59,6 +86,7 @@ export function createBrowserConnection(): BrowserConnection {
   let queue = Promise.resolve()
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null
   let heartbeat: ReturnType<typeof setInterval> | null = null
+  let retireCurrent: (() => void) | null = null
   let lastHeardAt = 0
   let retries = 0
   let stopped = false
@@ -68,6 +96,7 @@ export function createBrowserConnection(): BrowserConnection {
   let currentSessionId = readMirrorSnapshot(restored)?.sessionId ?? null
   let completedSessionId =
     restoredReport?.mirrorSessionId ?? restoredReport?.session.id ?? null
+  let lastAppOwnerEpoch: string | null = null
   const pendingControls = new Map<
     string,
     {
@@ -75,6 +104,31 @@ export function createBrowserConnection(): BrowserConnection {
       timeout: ReturnType<typeof setTimeout>
     }
   >()
+  const pendingApp = new Map<
+    string,
+    {
+      resolve: (result: MirrorAppResult) => void
+      timeout: ReturnType<typeof setTimeout>
+      ownerEpoch: string
+    }
+  >()
+  type Attempt = Pick<
+    MirrorAppRequest,
+    | 'ownerEpoch'
+    | 'sessionActivationId'
+    | 'expectedRevision'
+    | 'replayGeneration'
+    | 'replaySequence'
+  >
+  const appAttempts = new Map<string, Attempt>()
+  let replay: { generation: string; next: number } | null = null
+  const finishApp = (result: MirrorAppResult) => {
+    const pending = pendingApp.get(result.requestId)
+    if (!pending || pending.ownerEpoch !== result.ownerEpoch) return
+    pendingApp.delete(result.requestId)
+    clearTimeout(pending.timeout)
+    pending.resolve(result)
+  }
   const finishControl = (requestId: string, ok: boolean) => {
     const pending = pendingControls.get(requestId)
     if (!pending) return
@@ -85,6 +139,14 @@ export function createBrowserConnection(): BrowserConnection {
   const cancelControls = () => {
     for (const requestId of pendingControls.keys())
       finishControl(requestId, false)
+    for (const [requestId, pending] of pendingApp)
+      finishApp({
+        version: 1,
+        requestId,
+        ownerEpoch: pending.ownerEpoch,
+        ok: false,
+        error: 'cancelled',
+      })
   }
 
   const update = (patch: Partial<BrowserConnectionState>) => {
@@ -124,7 +186,10 @@ export function createBrowserConnection(): BrowserConnection {
         })
       })
       .catch(() => {
-        if (socket === current) current?.close()
+        if (socket === current) {
+          retireCurrent?.()
+          current?.close()
+        }
       })
   }
 
@@ -138,6 +203,148 @@ export function createBrowserConnection(): BrowserConnection {
     update({ streams: {} })
   }
 
+  const makePeer = () => {
+    const context = state.appSnapshot
+    const connection = socket
+    const current = createMirrorPeer({
+      role: 'browser',
+      send: (signal) => {
+        if (socket !== connection || peer !== current) return
+        if (context?.sessionActivationId)
+          send({
+            type: 'app_signal',
+            ownerEpoch: context.ownerEpoch,
+            sessionActivationId: context.sessionActivationId,
+            signal,
+          })
+        else if (!context) send({ type: 'signal', signal })
+      },
+      onStreams: (streams) => {
+        if (socket === connection && peer === current) update({ streams })
+      },
+      onFailure: () => {
+        if (socket === connection && peer === current) {
+          retireCurrent?.()
+          connection?.close()
+        }
+      },
+    })
+    peer = current
+    for (const kind of ['camera', 'screen'] as const)
+      peer.setCapture(kind, captures[kind])
+  }
+
+  const requestApp: BrowserConnection['requestApp'] = (
+    command,
+    args,
+    options
+  ) => {
+    const app = state.appSnapshot
+    const requestId = options?.requestId ?? crypto.randomUUID()
+    const previous = appAttempts.get(requestId)
+    const ownerEpoch =
+      options?.ownerEpoch ??
+      previous?.ownerEpoch ??
+      app?.ownerEpoch ??
+      'unavailable'
+    const failed = (
+      error:
+        | 'unsupported'
+        | 'busy'
+        | 'invalid_request'
+        | 'cancelled'
+        | 'expired'
+        | 'request_conflict'
+    ) =>
+      Promise.resolve({
+        version: 1,
+        requestId,
+        ownerEpoch,
+        ok: false,
+        error,
+      } as MirrorAppResult)
+    if (
+      state.status !== 'connected' ||
+      !app ||
+      !replay ||
+      !socket ||
+      socket.readyState !== WebSocket.OPEN
+    )
+      return failed('cancelled')
+    if (!app.capabilities.includes(command) && options?.requestId === undefined)
+      return failed('unsupported')
+    // An evicted retry ID must never acquire a fresh sequence and become a
+    // second write. Callers can retain the full original tuple explicitly.
+    if (
+      options?.requestId !== undefined &&
+      !previous &&
+      options.replayGeneration === undefined &&
+      options.replaySequence === undefined
+    )
+      return failed('expired')
+    if (pendingApp.size >= 32 || pendingApp.has(requestId))
+      return failed('busy')
+    if (
+      (options?.replayGeneration === undefined) !==
+      (options?.replaySequence === undefined)
+    )
+      return failed('invalid_request')
+    const attempt: Attempt = {
+      ownerEpoch,
+      replayGeneration:
+        options?.replayGeneration ??
+        previous?.replayGeneration ??
+        replay.generation,
+      replaySequence:
+        options?.replaySequence ?? previous?.replaySequence ?? replay.next,
+      sessionActivationId:
+        options && 'sessionActivationId' in options
+          ? options.sessionActivationId!
+          : previous
+            ? previous.sessionActivationId
+            : app.sessionActivationId,
+      expectedRevision:
+        options?.expectedRevision ?? previous?.expectedRevision ?? app.revision,
+    }
+    if (previous && JSON.stringify(previous) !== JSON.stringify(attempt))
+      return failed('request_conflict')
+    if (
+      attempt.replayGeneration === replay.generation &&
+      attempt.replaySequence > replay.next
+    )
+      return failed('invalid_request')
+    const request = readMirrorAppRequest({
+      version: 1,
+      requestId,
+      ...attempt,
+      command,
+      args,
+    })
+    if (!request) return failed('invalid_request')
+    if (attempt.replayGeneration === replay.generation)
+      replay.next = Math.max(replay.next, attempt.replaySequence + 1)
+    appAttempts.set(requestId, attempt)
+    for (const id of appAttempts.keys()) {
+      if (appAttempts.size <= 128) break
+      if (!pendingApp.has(id) && id !== requestId) appAttempts.delete(id)
+    }
+    return new Promise((resolve) => {
+      const timeout = setTimeout(
+        () =>
+          finishApp({
+            version: 1,
+            requestId,
+            ownerEpoch,
+            ok: false,
+            error: 'expired',
+          }),
+        30_000
+      )
+      pendingApp.set(requestId, { resolve, timeout, ownerEpoch })
+      send({ type: 'app_request', request })
+    })
+  }
+
   const connect = () => {
     if (stopped) return
     const run = ++connectionRun
@@ -149,7 +356,44 @@ export function createBrowserConnection(): BrowserConnection {
     )
     socket = current
     update({ status: 'connecting', error: null })
-    const openDeadline = setTimeout(() => current.close(), 15_000)
+    const openDeadline = setTimeout(() => close(), 15_000)
+    const retire = (code?: number) => {
+      clearTimeout(openDeadline)
+      if (run !== connectionRun || socket !== current) return
+      connectionRun++
+      if (heartbeat) clearInterval(heartbeat)
+      heartbeat = null
+      retireCurrent = null
+      socket = null
+      cancelControls()
+      clearMedia()
+      if (code === 4001) {
+        stopped = true
+        lastAppOwnerEpoch = null
+        completedSessionId = null
+        try {
+          localStorage.removeItem(REPORT_KEY)
+        } catch {
+          /* unavailable */
+        }
+        update({
+          status: 'disconnected',
+          error: 'session_moved',
+          report: null,
+          reportCached: false,
+        })
+      } else update({ status: stopped ? 'pairing' : 'disconnected' })
+      if (!stopped)
+        reconnectTimer = setTimeout(
+          connect,
+          Math.min(10_000, 1000 * 2 ** retries++)
+        )
+    }
+    const close = () => {
+      retire()
+      current.close()
+    }
+    retireCurrent = retire
     current.onopen = () => {
       clearTimeout(openDeadline)
       if (run !== connectionRun || stopped) {
@@ -158,17 +402,11 @@ export function createBrowserConnection(): BrowserConnection {
       }
       retries = 0
       lastHeardAt = Date.now()
-      peer = createMirrorPeer({
-        role: 'browser',
-        send: (signal) => send({ type: 'signal', signal }),
-        onStreams: (streams) => update({ streams }),
-        onFailure: () => current.close(),
-      })
-      for (const kind of ['camera', 'screen'] as const)
-        peer.setCapture(kind, captures[kind])
-      send({ type: 'ready' })
+      update({ appSnapshot: null, jobs: {} })
+      makePeer()
+      send({ type: 'ready', appProtocol: 1 })
       heartbeat = setInterval(() => {
-        if (Date.now() - lastHeardAt > 15_000) current.close()
+        if (Date.now() - lastHeardAt > 15_000) close()
         else send({ type: 'ping' })
       }, 5000)
     }
@@ -178,10 +416,87 @@ export function createBrowserConnection(): BrowserConnection {
         const message = codec.receive(data)
         lastHeardAt = Date.now()
         if (!message) return
-        if (message.type === 'signal') peer?.receive(message.signal)
-        else if (message.type === 'snapshot') {
+        if (message.type === 'signal') {
+          if (!state.appSnapshot) peer?.receive(message.signal)
+        } else if (message.type === 'app_signal') {
+          if (
+            state.appSnapshot?.ownerEpoch === message.ownerEpoch &&
+            state.appSnapshot.sessionActivationId ===
+              message.sessionActivationId
+          )
+            peer?.receive(message.signal)
+        } else if (message.type === 'app_snapshot') {
+          const appSnapshot = readMirrorAppSnapshot(message.snapshot)
+          if (!appSnapshot)
+            throw new Error('Incompatible companion app snapshot')
+          const previous = state.appSnapshot
+          if (
+            previous?.ownerEpoch === appSnapshot.ownerEpoch &&
+            previous.revision > appSnapshot.revision
+          )
+            return
+          replay = {
+            generation: appSnapshot.replayGeneration,
+            next:
+              replay?.generation === appSnapshot.replayGeneration
+                ? Math.max(replay.next, appSnapshot.replayNextSequence)
+                : appSnapshot.replayNextSequence,
+          }
+          const changed =
+            previous?.ownerEpoch !== appSnapshot.ownerEpoch ||
+            previous?.sessionActivationId !== appSnapshot.sessionActivationId
+          const preserveReport =
+            (previous?.ownerEpoch ?? lastAppOwnerEpoch) ===
+              appSnapshot.ownerEpoch &&
+            appSnapshot.sessionActivationId === null &&
+            state.report !== null
+          lastAppOwnerEpoch = appSnapshot.ownerEpoch
+          if (changed) {
+            cancelControls()
+            clearMedia()
+            try {
+              localStorage.removeItem(SNAPSHOT_KEY)
+              if (!preserveReport) localStorage.removeItem(REPORT_KEY)
+            } catch {
+              /* unavailable */
+            }
+            currentSessionId = null
+            if (!preserveReport) completedSessionId = null
+          }
+          update({
+            appSnapshot,
+            status: 'connected',
+            ...(changed
+              ? {
+                  snapshot: null,
+                  ...(!preserveReport
+                    ? { report: null, reportCached: false }
+                    : {}),
+                  jobs: {},
+                }
+              : {}),
+          })
+          if (changed && appSnapshot.sessionActivationId !== null) makePeer()
+        } else if (message.type === 'app_result') {
+          if (message.result.ownerEpoch === state.appSnapshot?.ownerEpoch)
+            finishApp(message.result)
+        } else if (message.type === 'app_job') {
+          const job = message.job
+          if (job.ownerEpoch !== state.appSnapshot?.ownerEpoch) return
+          const jobs = new Map(Object.entries(state.jobs ?? {}))
+          const previous = jobs.get(job.jobId)
+          if (previous && previous.revision >= job.revision) return
+          jobs.set(job.jobId, job)
+          if (jobs.size > 64) jobs.delete(jobs.keys().next().value!)
+          update({ jobs: Object.fromEntries(jobs) })
+        } else if (message.type === 'snapshot') {
           const snapshot = readMirrorSnapshot(message.snapshot)
           if (!snapshot) throw new Error('Incompatible mirror snapshot')
+          if (
+            state.appSnapshot &&
+            snapshot.sessionId !== state.appSnapshot.sessionActivationId
+          )
+            return
           if (snapshot.sessionId === completedSessionId) return
           if (snapshot.sessionId !== currentSessionId) cancelControls()
           currentSessionId = snapshot.sessionId
@@ -256,28 +571,13 @@ export function createBrowserConnection(): BrowserConnection {
             })
           }
         } else if (message.type === 'ping') send({ type: 'pong' })
-        else if (message.type === 'reconnect') current.close()
+        else if (message.type === 'reconnect') close()
       } catch {
-        current.close()
+        close()
       }
     }
     current.onclose = (event) => {
-      clearTimeout(openDeadline)
-      if (run !== connectionRun) return
-      if (heartbeat) clearInterval(heartbeat)
-      heartbeat = null
-      socket = null
-      cancelControls()
-      clearMedia()
-      if (event?.code === 4001) {
-        stopped = true
-        update({ status: 'disconnected', error: 'session_moved' })
-      } else update({ status: stopped ? 'pairing' : 'disconnected' })
-      if (!stopped)
-        reconnectTimer = setTimeout(
-          connect,
-          Math.min(10_000, 1000 * 2 ** retries++)
-        )
+      retire(event?.code)
     }
     current.onerror = () => {
       /* onclose owns recovery; browsers redact TLS errors. */
@@ -336,6 +636,14 @@ export function createBrowserConnection(): BrowserConnection {
           throw new Error('Pairing failed')
         }
         stopped = false
+        lastAppOwnerEpoch = null
+        completedSessionId = null
+        update({ report: null, reportCached: false })
+        try {
+          localStorage.removeItem(REPORT_KEY)
+        } catch {
+          /* unavailable */
+        }
         cancelControls()
         connectionRun++
         socket?.close()
@@ -351,9 +659,22 @@ export function createBrowserConnection(): BrowserConnection {
       }
     },
     sendControl(control) {
+      if (state.appSnapshot) {
+        void requestApp('session.control', control as MirrorAppJson)
+        return
+      }
       if (state.status === 'connected') send({ type: 'control', control })
     },
     requestControl(control) {
+      if (state.appSnapshot)
+        return requestApp('session.control', control as MirrorAppJson).then(
+          (result) =>
+            result.ok &&
+            result.value !== null &&
+            typeof result.value === 'object' &&
+            !Array.isArray(result.value) &&
+            result.value.accepted === true
+        )
       if (
         state.status !== 'connected' ||
         !socket ||
@@ -371,8 +692,12 @@ export function createBrowserConnection(): BrowserConnection {
         send({ type: 'control', control, requestId })
       })
     },
+    requestApp,
     setCapture(kind, stream) {
-      if (state.status !== 'connected') {
+      if (
+        state.status !== 'connected' ||
+        (state.appSnapshot && state.appSnapshot.sessionActivationId === null)
+      ) {
         stopMediaStream(stream)
         return
       }
@@ -396,6 +721,7 @@ export function createBrowserConnection(): BrowserConnection {
     disconnect() {
       pairingRun++
       stopped = true
+      lastAppOwnerEpoch = null
       cancelControls()
       currentSessionId = null
       completedSessionId = null
@@ -404,6 +730,7 @@ export function createBrowserConnection(): BrowserConnection {
       if (heartbeat) clearInterval(heartbeat)
       reconnectTimer = null
       heartbeat = null
+      retireCurrent = null
       socket?.close()
       socket = null
       clearMedia()
@@ -413,6 +740,8 @@ export function createBrowserConnection(): BrowserConnection {
         error: null,
         report: null,
         reportCached: false,
+        appSnapshot: null,
+        jobs: {},
       })
       try {
         localStorage.removeItem(SNAPSHOT_KEY)
