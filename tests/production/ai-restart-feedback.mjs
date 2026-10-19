@@ -24,7 +24,7 @@ test('AI Restart reserves success feedback for a started engine (#391)', async (
     const enabled = mode !== 'disabled'
     useSessionStore.setState({ status: 'idle' })
     useSettingsStore.setState(s => ({ status: 'ready', values: { ...s.values, aiFeaturesEnabled: true } }))
-    useModelStore.setState({ status: 'ready', activeModelId: SUPPORTED_MODELS[0].id,
+    useModelStore.setState({ status: 'ready', activeModelId: 'qwen2_5-vl-3b',
       records: Object.fromEntries(SUPPORTED_MODELS.map(spec => [spec.id, { modelId: spec.id, installedAt: 1, benchmark: null }])) })
     useSidecarStore.setState({ status: 'errored', lastError: 'Initial engine failure' })
     __setHfTokenRuntime({ present: async () => false, save: async () => {}, clear: async () => {} })
