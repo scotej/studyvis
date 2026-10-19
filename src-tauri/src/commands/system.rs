@@ -512,7 +512,7 @@ pub fn count_ptt_released_emit(ok: bool) {
 pub fn session_set_active<R: Runtime>(app: AppHandle<R>, active: bool) -> Result<(), String> {
     SessionActiveFlag::set(&app, active);
     if !active {
-        crate::commands::mirror::MirrorState::stop_for_app(&app);
+        crate::commands::mirror::MirrorState::end_session_for_app(&app);
     }
     // #47 B5 — the friends-PTT global shortcut only exists while a session is
     // live; boot registers just the AI shortcut (see lib.rs).

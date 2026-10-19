@@ -9,12 +9,35 @@ import {
   type MirrorSessionSnapshot,
 } from './sessionBridge'
 
+export type MirrorSessionOwner = {
+  config: MirrorConfig | null
+  starting: boolean
+  connected: boolean
+  takeover: boolean
+  camera: MediaStream | null
+  screen: MediaStream | null
+  start: () => Promise<void>
+  stop: () => Promise<void>
+  publish: (snapshot: MirrorSessionSnapshot) => void
+  setStreams: (streams: Record<string, MediaStream>) => void
+  notify: (notification: MirrorNotification) => void
+  attach: (
+    sessionId: string,
+    onControl: (
+      control: MirrorControl
+    ) => boolean | void | Promise<boolean | void>
+  ) => () => void
+}
+
 export function useSessionMirror(
   sessionId: string | null,
   onControl: (
     control: MirrorControl
-  ) => boolean | void | Promise<boolean | void>
+  ) => boolean | void | Promise<boolean | void>,
+  applicationOwner?: MirrorSessionOwner
 ) {
+  const attach = applicationOwner?.attach
+  const externallyOwned = applicationOwner !== undefined
   const [config, setConfig] = useState<MirrorConfig | null>(null)
   const [starting, setStarting] = useState(false)
   const [connected, setConnected] = useState(false)
@@ -25,6 +48,10 @@ export function useSessionMirror(
   useEffect(() => {
     controlRef.current = onControl
   }, [onControl])
+  useEffect(() => {
+    if (!attach || !sessionId) return
+    return attach(sessionId, (control) => controlRef.current(control))
+  }, [attach, sessionId])
   const hostRef = useRef<ReturnType<typeof createMirrorHost> | null>(null)
   const startGeneration = useRef(0)
   const snapshotRef = useRef<MirrorSessionSnapshot | null>(null)
@@ -105,7 +132,7 @@ export function useSessionMirror(
       unregisterReport.current = null
       void host?.stop()
     },
-    [sessionId]
+    [sessionId, externallyOwned]
   )
 
   const publish = useCallback((snapshot: MirrorSessionSnapshot) => {
@@ -119,17 +146,19 @@ export function useSessionMirror(
     hostRef.current?.sendNotification(notification)
   }, [])
 
-  return {
-    config,
-    starting,
-    connected,
-    takeover,
-    camera,
-    screen,
-    start,
-    stop,
-    publish,
-    setStreams,
-    notify,
-  }
+  return (
+    applicationOwner ?? {
+      config,
+      starting,
+      connected,
+      takeover,
+      camera,
+      screen,
+      start,
+      stop,
+      publish,
+      setStreams,
+      notify,
+    }
+  )
 }

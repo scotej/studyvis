@@ -4,6 +4,8 @@ import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 
 import { createBrowserConnection } from '@/features/mirror/browserConnection'
 import { createMirrorHost } from '@/features/mirror/runtime'
+import { createMirrorAppRuntime } from '@/features/mirror/appRuntime'
+import type { MirrorAppSnapshot } from '@/features/mirror/appBridge'
 import { MirrorCodec, type MirrorMessage } from '@/features/mirror/wire'
 import type { MirrorSessionSnapshot } from '@/features/mirror/sessionBridge'
 import {
@@ -1073,5 +1075,356 @@ describe('browser recovery and local custody', () => {
     cleanup.push(connection.disconnect)
     expect(TestSocket.instances).toHaveLength(0)
     expect(connection.getState().status).toBe('pairing')
+  })
+})
+
+const appSnapshot = (
+  patch: Partial<MirrorAppSnapshot> = {}
+): MirrorAppSnapshot => ({
+  version: 1,
+  ownerEpoch: 'owner-1',
+  revision: 1,
+  phase: 'home',
+  identity: { edPubkeyHex: 'a'.repeat(64), displayName: 'Alice' },
+  sessionActivationId: null,
+  capabilities: [],
+  ...patch,
+})
+
+function hostMessages() {
+  const codec = new MirrorCodec()
+  return doubles.invoke.mock.calls
+    .filter(([command]) => command === 'mirror_send')
+    .map(([, args]) => codec.receive(args.data))
+    .filter(Boolean)
+}
+
+describe('app-scoped companion transport', () => {
+  test('a saved report survives session retirement and is cleared only by a new session or owner', async () => {
+    const connection = createBrowserConnection()
+    cleanup.push(connection.disconnect)
+    const socket = TestSocket.instances[0]
+    socket.open()
+    await incoming(socket, {
+      type: 'app_snapshot',
+      snapshot: appSnapshot({
+        phase: 'session',
+        sessionActivationId: 'session-1',
+      }),
+    })
+    await incoming(socket, { type: 'report', report })
+    await incoming(socket, {
+      type: 'app_snapshot',
+      snapshot: appSnapshot({ phase: 'report', revision: 2 }),
+    })
+    expect(connection.getState().report).toEqual(report)
+    expect(storage.has('studyvis.mirror.report.v1')).toBe(true)
+    await incoming(socket, {
+      type: 'app_snapshot',
+      snapshot: appSnapshot({
+        phase: 'session',
+        revision: 3,
+        sessionActivationId: 'session-2',
+      }),
+    })
+    expect(connection.getState().report).toBeNull()
+    expect(storage.has('studyvis.mirror.report.v1')).toBe(false)
+  })
+  test('app data is sent only after capability negotiation and unsupported features stay absent', async () => {
+    const app = createMirrorAppRuntime()
+    app.setSnapshot(appSnapshot())
+    const host = createMirrorHost({
+      app,
+      onCapture: vi.fn(),
+      onConnected: vi.fn(),
+      onControl: vi.fn(),
+    })
+    cleanup.push(host.stop)
+    await host.start(null, 'app')
+    expect(doubles.invoke).toHaveBeenCalledWith(
+      'mirror_start',
+      expect.objectContaining({ sessionId: null, scope: 'app' })
+    )
+    doubles.events.get('mirror:client')!({
+      payload: { clientId: 'one', connected: true },
+    })
+    await vi.advanceTimersByTimeAsync(100)
+    expect(hostMessages()).toEqual([])
+    expect(doubles.peers).toHaveLength(0)
+    await hostIncoming('one', { type: 'ready' })
+    expect(
+      hostMessages().some((message) => message?.type === 'app_snapshot')
+    ).toBe(false)
+    await hostIncoming('one', { type: 'ready', appProtocol: 1 })
+    const latest = hostMessages().findLast(
+      (message) => message?.type === 'app_snapshot'
+    )
+    expect(latest).toMatchObject({
+      type: 'app_snapshot',
+      snapshot: { phase: 'home', capabilities: [] },
+    })
+  })
+
+  test('native session end retires media but retains the app listener and permits a new scoped session', async () => {
+    const app = createMirrorAppRuntime()
+    app.setSnapshot(
+      appSnapshot({ phase: 'session', sessionActivationId: 'session-1' })
+    )
+    const onControl = vi.fn(async () => true)
+    const onCapture = vi.fn()
+    const host = createMirrorHost({
+      app,
+      onCapture,
+      onConnected: vi.fn(),
+      onControl,
+    })
+    cleanup.push(host.stop)
+    await host.start(null, 'app')
+    const start = doubles.invoke.mock.calls.find(
+      ([command]) => command === 'mirror_start'
+    )![1]
+    doubles.events.get('mirror:client')!({
+      payload: { clientId: 'one', connected: true },
+    })
+    await hostIncoming('one', { type: 'ready', appProtocol: 1 })
+    const oldPeer = doubles.peers[0]
+    expect(oldPeer).toBeDefined()
+    await hostIncoming('one', {
+      type: 'app_request',
+      request: {
+        version: 1,
+        requestId: 'camera-1',
+        ownerEpoch: 'owner-1',
+        expectedRevision: 1,
+        sessionActivationId: 'session-1',
+        command: 'session.control',
+        args: { type: 'camera', on: true },
+      },
+    })
+    expect(onControl).toHaveBeenCalledWith({ type: 'camera', on: true })
+    doubles.events.get('mirror:session-ended')!({
+      payload: { requestId: start.requestId },
+    })
+    await vi.advanceTimersByTimeAsync(100)
+    expect(oldPeer.close).toHaveBeenCalled()
+    expect(onCapture).toHaveBeenCalledWith('camera', null)
+    expect(onCapture).toHaveBeenCalledWith('screen', null)
+    expect(
+      doubles.invoke.mock.calls.some(([command]) => command === 'mirror_stop')
+    ).toBe(false)
+    expect(app.getSnapshot()).toMatchObject({
+      phase: 'home',
+      sessionActivationId: null,
+      capabilities: [],
+    })
+    app.setSnapshot(
+      appSnapshot({
+        revision: 3,
+        phase: 'session',
+        sessionActivationId: 'session-2',
+      })
+    )
+    await vi.advanceTimersByTimeAsync(100)
+    expect(doubles.peers).toHaveLength(2)
+    await hostIncoming('one', {
+      type: 'app_signal',
+      ownerEpoch: 'owner-1',
+      sessionActivationId: 'session-1',
+      signal: { type: 'answer', sdp: 'old' },
+    })
+    expect(doubles.peers[1].receive).not.toHaveBeenCalled()
+    await hostIncoming('one', {
+      type: 'app_signal',
+      ownerEpoch: 'owner-1',
+      sessionActivationId: 'session-2',
+      signal: { type: 'answer', sdp: 'new' },
+    })
+    expect(doubles.peers[1].receive).toHaveBeenCalledWith({
+      type: 'answer',
+      sdp: 'new',
+    })
+    await hostIncoming('one', {
+      type: 'app_request',
+      request: {
+        version: 1,
+        requestId: 'camera-stale',
+        ownerEpoch: 'owner-1',
+        expectedRevision: 1,
+        sessionActivationId: 'session-1',
+        command: 'session.control',
+        args: { type: 'camera', on: true },
+      },
+    })
+    expect(onControl).toHaveBeenCalledOnce()
+    expect(hostMessages()).toContainEqual(
+      expect.objectContaining({
+        type: 'app_result',
+        result: expect.objectContaining({ error: 'stale_session' }),
+      })
+    )
+  })
+
+  test('a legacy cached browser cannot send controls into a later session even after reconnect', async () => {
+    const app = createMirrorAppRuntime()
+    app.setSnapshot(
+      appSnapshot({ phase: 'session', sessionActivationId: 'session-1' })
+    )
+    const onControl = vi.fn(async () => true)
+    const host = createMirrorHost({
+      app,
+      onCapture: vi.fn(),
+      onConnected: vi.fn(),
+      onControl,
+    })
+    cleanup.push(host.stop)
+    await host.start(null, 'app')
+    doubles.events.get('mirror:client')!({
+      payload: { clientId: 'legacy', connected: true },
+    })
+    await hostIncoming('legacy', { type: 'ready' })
+    host.publish(snapshot())
+    await vi.advanceTimersByTimeAsync(100)
+    await hostIncoming('legacy', {
+      type: 'control',
+      control: { type: 'camera', on: true },
+    })
+    expect(onControl).toHaveBeenCalledOnce()
+    app.retireSession()
+    app.setSnapshot(
+      appSnapshot({
+        phase: 'session',
+        revision: 3,
+        sessionActivationId: 'session-2',
+      })
+    )
+    doubles.events.get('mirror:client')!({
+      payload: { clientId: 'replacement', connected: true },
+    })
+    await hostIncoming('replacement', { type: 'ready' })
+    await hostIncoming('replacement', {
+      type: 'control',
+      control: { type: 'leave' },
+    })
+    expect(onControl).toHaveBeenCalledOnce()
+    expect(
+      hostMessages().filter((message) => message?.type === 'snapshot')
+    ).toHaveLength(1)
+  })
+
+  test('browser app requests use structured ACKs and cannot invoke an unadvertised operation', async () => {
+    const connection = createBrowserConnection()
+    cleanup.push(connection.disconnect)
+    const socket = TestSocket.instances[0]
+    socket.open()
+    await incoming(socket, {
+      type: 'app_snapshot',
+      snapshot: appSnapshot({ capabilities: ['home.read'] }),
+    })
+    expect(connection.getState().status).toBe('connected')
+    expect(
+      await connection.requestApp('models.download', { modelId: 'qwen' })
+    ).toMatchObject({ error: 'unsupported' })
+    const result = connection.requestApp(
+      'home.read',
+      {},
+      { requestId: 'home-1' }
+    )
+    await vi.advanceTimersByTimeAsync(100)
+    expect(sent(socket)).toContainEqual({
+      type: 'app_request',
+      request: {
+        version: 1,
+        requestId: 'home-1',
+        ownerEpoch: 'owner-1',
+        sessionActivationId: null,
+        expectedRevision: 1,
+        command: 'home.read',
+        args: {},
+      },
+    })
+    await incoming(socket, {
+      type: 'app_result',
+      result: {
+        version: 1,
+        requestId: 'home-1',
+        ownerEpoch: 'owner-1',
+        ok: true,
+        value: { ready: true },
+      },
+    })
+    expect(await result).toMatchObject({ ok: true, value: { ready: true } })
+    expect([...storage.values()].join('')).not.toContain('home-1')
+    const camera = capture()
+    connection.setCapture('camera', camera.stream)
+    expect(camera.track.stop).toHaveBeenCalledOnce()
+  })
+
+  test('browser session controls and media follow the current app activation without closing its socket', async () => {
+    const connection = createBrowserConnection()
+    cleanup.push(connection.disconnect)
+    const socket = TestSocket.instances[0]
+    socket.open()
+    await incoming(socket, {
+      type: 'app_snapshot',
+      snapshot: appSnapshot({
+        phase: 'session',
+        sessionActivationId: 'session-1',
+        capabilities: ['session.control'],
+      }),
+    })
+    const camera = capture()
+    connection.setCapture('camera', camera.stream)
+    const result = connection.requestControl({ type: 'camera', on: true })
+    await vi.advanceTimersByTimeAsync(100)
+    const message = sent(socket).findLast(
+      (value) => value?.type === 'app_request'
+    )
+    if (message?.type !== 'app_request') throw new Error('Missing app request')
+    expect(message.request).toMatchObject({
+      command: 'session.control',
+      sessionActivationId: 'session-1',
+    })
+    expect(sent(socket).some((value) => value?.type === 'control')).toBe(false)
+    await incoming(socket, {
+      type: 'app_result',
+      result: {
+        version: 1,
+        requestId: message.request.requestId,
+        ownerEpoch: 'owner-1',
+        ok: true,
+        value: { accepted: true },
+      },
+    })
+    expect(await result).toBe(true)
+    await incoming(socket, {
+      type: 'app_snapshot',
+      snapshot: appSnapshot({ revision: 2 }),
+    })
+    expect(camera.track.stop).toHaveBeenCalledOnce()
+    expect(socket.readyState).toBe(TestSocket.OPEN)
+    expect(connection.getState().status).toBe('connected')
+    await incoming(socket, {
+      type: 'app_snapshot',
+      snapshot: appSnapshot({
+        phase: 'session',
+        revision: 3,
+        sessionActivationId: 'session-2',
+      }),
+    })
+    const peer = doubles.peers.at(-1)!
+    await incoming(socket, {
+      type: 'app_signal',
+      ownerEpoch: 'owner-1',
+      sessionActivationId: 'session-1',
+      signal: { type: 'offer', sdp: 'old' },
+    })
+    expect(peer.receive).not.toHaveBeenCalled()
+    await incoming(socket, {
+      type: 'app_signal',
+      ownerEpoch: 'owner-1',
+      sessionActivationId: 'session-2',
+      signal: { type: 'offer', sdp: 'current' },
+    })
+    expect(peer.receive).toHaveBeenCalledWith({ type: 'offer', sdp: 'current' })
   })
 })

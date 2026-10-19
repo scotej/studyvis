@@ -148,6 +148,13 @@ function connection(
     pair: fn(async () => {}),
     sendControl: fn(),
     requestControl: fn(async () => true),
+    requestApp: fn(async (_command, _args, options) => ({
+      version: 1 as const,
+      requestId: options?.requestId ?? 'unsupported-story-request',
+      ownerEpoch: options?.ownerEpoch ?? 'unsupported-story-owner',
+      ok: false as const,
+      error: 'unsupported' as const,
+    })),
     setCapture: fn(),
     disconnect: fn(),
   }

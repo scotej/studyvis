@@ -1,3 +1,16 @@
+import {
+  appId,
+  appFields,
+  readMirrorAppRequest,
+  readMirrorAppResult,
+  readMirrorAppSnapshot,
+  readMirrorAppJob,
+  type MirrorAppRequest,
+  type MirrorAppResult,
+  type MirrorAppSnapshot,
+  type MirrorAppJob,
+} from './appBridge'
+
 export type MirrorConfig = {
   urls: string[]
   password: string
@@ -29,8 +42,18 @@ export type MirrorMessage =
   | { type: 'report_saved' }
   | { type: 'control'; control: unknown; requestId?: string }
   | { type: 'control_result'; requestId: string; ok: boolean }
+  | { type: 'app_snapshot'; snapshot: MirrorAppSnapshot }
+  | { type: 'app_request'; request: MirrorAppRequest }
+  | { type: 'app_result'; result: MirrorAppResult }
+  | { type: 'app_job'; job: MirrorAppJob }
+  | {
+      type: 'app_signal'
+      ownerEpoch: string
+      sessionActivationId: string
+      signal: SignalMessage
+    }
   | ({ type: 'notification' } & MirrorNotification)
-  | { type: 'ready' }
+  | { type: 'ready'; appProtocol?: 1 }
   | { type: 'reconnect' }
   | { type: 'ping' | 'pong' }
 
@@ -88,6 +111,31 @@ export function isMirrorMessage(value: unknown): value is MirrorMessage {
           typeof v.onlyWhenHidden === 'boolean')
       )
     case 'ready':
+      return v.appProtocol === undefined || v.appProtocol === 1
+    case 'app_snapshot':
+      return (
+        appFields(v, ['type', 'snapshot']) &&
+        readMirrorAppSnapshot(v.snapshot) !== null
+      )
+    case 'app_request':
+      return (
+        appFields(v, ['type', 'request']) &&
+        readMirrorAppRequest(v.request) !== null
+      )
+    case 'app_result':
+      return (
+        appFields(v, ['type', 'result']) &&
+        readMirrorAppResult(v.result) !== null
+      )
+    case 'app_job':
+      return appFields(v, ['type', 'job']) && readMirrorAppJob(v.job) !== null
+    case 'app_signal':
+      return (
+        appFields(v, ['type', 'ownerEpoch', 'sessionActivationId', 'signal']) &&
+        appId(v.ownerEpoch) &&
+        appId(v.sessionActivationId) &&
+        isSignalMessage(v.signal)
+      )
     case 'report_saved':
     case 'reconnect':
     case 'ping':
