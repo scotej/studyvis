@@ -355,6 +355,24 @@ pub struct BoxCiphertext {
     pub ciphertext_b64: String,
 }
 
+fn encrypt_box_with_keys(
+    their_x_pub: &[u8; X_KEY_LEN],
+    my_x_priv: &[u8; X_KEY_LEN],
+    plaintext: &[u8],
+) -> Result<BoxCiphertext, String> {
+    use crypto_box::{
+        aead::{AeadCore, OsRng},
+        SalsaBox,
+    };
+
+    let nonce: [u8; NONCE_LEN] = SalsaBox::generate_nonce(&mut OsRng).into();
+    let ciphertext = nacl_box_encrypt(their_x_pub, my_x_priv, &nonce, plaintext)?;
+    Ok(BoxCiphertext {
+        nonce_b64: BASE64.encode(nonce),
+        ciphertext_b64: BASE64.encode(&ciphertext),
+    })
+}
+
 #[tauri::command]
 pub async fn identity_box_encrypt(
     their_x_pub_hex: String,
@@ -374,16 +392,7 @@ pub async fn identity_box_encrypt(
             .try_into()
             .map_err(|_| format!("x25519 priv key must be {PRIV_KEY_LEN} bytes"))?;
 
-        use crypto_box::aead::{rand_core::RngCore, OsRng};
-        let mut nonce = [0u8; NONCE_LEN];
-        OsRng.fill_bytes(&mut nonce);
-
-        let ciphertext = nacl_box_encrypt(&their_pub_arr, &my_priv_arr, &nonce, &plaintext)?;
-
-        Ok(BoxCiphertext {
-            nonce_b64: BASE64.encode(nonce),
-            ciphertext_b64: BASE64.encode(&ciphertext),
-        })
+        encrypt_box_with_keys(&their_pub_arr, &my_priv_arr, &plaintext)
     })
     .await
 }
@@ -394,6 +403,51 @@ mod tests {
         check_stored_keys, identity_keys_status_from_entry, save_keys_in_entry, save_record_at,
         Entry, IdentityKeysStatus, IdentityRecord, StoredKeys, KEYS_EXIST_MARKER,
     };
+
+    #[test]
+    fn encrypted_boxes_use_fresh_nonces_and_keep_the_nacl_wire_format() {
+        use base64::Engine as _;
+        let sender_private = [7u8; crate::crypto::X_KEY_LEN];
+        let recipient_private = [9u8; crate::crypto::X_KEY_LEN];
+        let sender_public = crypto_box::SecretKey::from(sender_private).public_key();
+        let recipient_public = crypto_box::SecretKey::from(recipient_private).public_key();
+        let plaintext = b"same message, independent envelopes";
+        let mut nonces = std::collections::HashSet::new();
+        let mut ciphertexts = std::collections::HashSet::new();
+        for _ in 0..32 {
+            let wire = super::encrypt_box_with_keys(
+                recipient_public.as_bytes(),
+                &sender_private,
+                plaintext,
+            )
+            .unwrap();
+            let nonce: [u8; crate::crypto::NONCE_LEN] = super::BASE64
+                .decode(&wire.nonce_b64)
+                .unwrap()
+                .try_into()
+                .unwrap();
+            let ciphertext = super::BASE64.decode(&wire.ciphertext_b64).unwrap();
+            assert_eq!(ciphertext.len(), plaintext.len() + 16);
+            assert_eq!(
+                crate::crypto::nacl_box_decrypt(
+                    sender_public.as_bytes(),
+                    &recipient_private,
+                    &nonce,
+                    &ciphertext
+                )
+                .unwrap(),
+                plaintext
+            );
+            assert!(
+                nonces.insert(nonce),
+                "independent envelopes must use fresh nonces"
+            );
+            assert!(
+                ciphertexts.insert(ciphertext),
+                "repeating the message must produce independent ciphertexts"
+            );
+        }
+    }
 
     fn key_fixture(ed: u8, x: u8) -> (String, IdentityRecord) {
         let ed_private = [ed; 32];

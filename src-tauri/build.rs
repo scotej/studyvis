@@ -88,6 +88,20 @@ fn main() {
             .app_manifest(tauri_build::AppManifest::new().commands(APP_COMMANDS)),
     )
     .expect("failed to generate Tauri command permissions");
+
+    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows")
+        && std::env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("msvc")
+    {
+        // tauri-winres links this resource only into application binaries.
+        // Tests using Tauri's menu paths also need its Common Controls v6 manifest.
+        let resource = PathBuf::from(std::env::var_os("OUT_DIR").expect("Cargo output directory"))
+            .join("resource.lib");
+        assert!(
+            resource.is_file(),
+            "Tauri's Windows resource was not generated"
+        );
+        println!("cargo:rustc-link-arg-tests={}", resource.display());
+    }
 }
 
 // I73 — tauri-build hard-fails when the `externalBin` file is missing, which
