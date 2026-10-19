@@ -465,6 +465,78 @@ describe('startSampleLoop — start failures', () => {
     await handle.stop()
   })
 
+  test.each(['unsupported', 'lookup-error'] as const)(
+    'stored AI ON never captures or starts an engine after %s support preflight',
+    async (result) => {
+      const acquireScreenStream = vi.fn(async () => makeFakeScreenStream())
+      const modelPaths = vi.fn(async () => ({
+        modelPath: '/m',
+        mmprojPath: '/p',
+      }))
+      const startSidecar = vi.fn(async () => 9999)
+      const onStartFail = vi.fn()
+      __setSampleLoopRuntime({
+        ...buildSampleLoopRuntime({
+          clock: new FakeClock(),
+          fetch: vi.fn() as never,
+          acquireScreenStream,
+          modelPaths,
+          startSidecar,
+        }),
+        isPlatformSupported: async () => {
+          if (result === 'lookup-error') throw new Error('IPC unavailable')
+          return false
+        },
+      })
+      const handle = startSampleLoop({
+        getTopic: () => 'Maths',
+        modelId: 'test-model',
+        getFaceTrack: () => null,
+        onStartFail,
+      })
+      await flushMicrotasks()
+      expect(useSettingsStore.getState().values.aiFeaturesEnabled).toBe(true)
+      expect(acquireScreenStream).not.toHaveBeenCalled()
+      expect(modelPaths).not.toHaveBeenCalled()
+      expect(startSidecar).not.toHaveBeenCalled()
+      expect(onStartFail).toHaveBeenCalledWith(
+        'sidecar_start_failed',
+        'ai_platform_unsupported'
+      )
+      expect(handle.__state().stopped).toBe(true)
+      await handle.stop()
+    }
+  )
+
+  test('a replaced loop cannot capture after its support preflight settles', async () => {
+    let settle!: (supported: boolean) => void
+    const acquireScreenStream = vi.fn(async () => makeFakeScreenStream())
+    const onStartFail = vi.fn()
+    __setSampleLoopRuntime({
+      ...buildSampleLoopRuntime({
+        clock: new FakeClock(),
+        fetch: vi.fn() as never,
+        acquireScreenStream,
+      }),
+      isPlatformSupported: () =>
+        new Promise((resolve) => {
+          settle = resolve
+        }),
+    })
+    const handle = startSampleLoop({
+      getTopic: () => 'Maths',
+      modelId: 'test-model',
+      getFaceTrack: () => null,
+      onStartFail,
+    })
+    const stopped = handle.stop()
+    settle(true)
+    await stopped
+    await flushMicrotasks()
+    expect(acquireScreenStream).not.toHaveBeenCalled()
+    expect(onStartFail).not.toHaveBeenCalled()
+  })
+
   test('refuses to start when model_paths command rejects', async () => {
     const onStartFail = vi.fn()
     const clock = new FakeClock()

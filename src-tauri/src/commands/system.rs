@@ -96,7 +96,9 @@ pub struct AiFeaturesFlag(pub AtomicBool);
 
 impl AiFeaturesFlag {
     pub fn new(initial: bool) -> Self {
-        Self(AtomicBool::new(initial))
+        Self(AtomicBool::new(
+            initial && super::engine::require_supported_platform().is_ok(),
+        ))
     }
 
     pub fn set<R: Runtime>(app: &AppHandle<R>, enabled: bool) {
@@ -1065,6 +1067,7 @@ pub fn system_ai_features_set_enabled<R: Runtime>(
     app: AppHandle<R>,
     enabled: bool,
 ) -> Result<(), String> {
+    let enabled = enabled && super::engine::require_supported_platform().is_ok();
     AiFeaturesFlag::set(&app, enabled);
     // I112 — "zero AI surface" has to include the OS-level grab, not just the
     // handler gate: the combo is held only while the feature is on.

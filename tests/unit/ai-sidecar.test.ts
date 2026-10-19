@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 
+import { strings } from '@/strings'
+
 import {
   __resetSidecarRuntime,
   __setSidecarRuntime,
@@ -473,6 +475,26 @@ describe('useSidecarStore.start', () => {
     expect(env.stopCalls).toBe(1)
     expect(env.handlesAlive()).toBe(0)
   })
+
+  test.each(['live', 'benchmark'] as const)(
+    'explains the macOS requirement for a %s start',
+    async (purpose) => {
+      const env = makeFakeRuntime({
+        aiEnabled: purpose === 'live',
+        startThrows: 'macos_ai_requires_14',
+      })
+      __setSidecarRuntime(env.runtime)
+      expect(
+        await useSidecarStore
+          .getState()
+          .start({ modelPath: '/m.gguf', purpose })
+      ).toBeNull()
+      expect(useSidecarStore.getState().lastError).toBe(
+        strings.settings.ai.engine.helpMacosVersion
+      )
+      expect(env.handlesAlive()).toBe(0)
+    }
+  )
 
   test('records the error when the Rust command rejects', async () => {
     const env = makeFakeRuntime({

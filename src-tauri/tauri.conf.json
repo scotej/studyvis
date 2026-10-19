@@ -61,6 +61,7 @@
       "resources/THIRD-PARTY-NOTICES.json"
     ],
     "macOS": {
+      "minimumSystemVersion": "11.0",
       "signingIdentity": "-",
       "hardenedRuntime": false
     },

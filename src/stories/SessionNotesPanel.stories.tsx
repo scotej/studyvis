@@ -7,6 +7,8 @@ import {
   __resetAiAgentRuntime,
   __setAiAgentRuntime,
   getAiAgentRuntime,
+  getEngineRuntime,
+  __setEngineRuntime,
   useModelStore,
 } from '@/features/ai'
 import { useSessionStore } from '@/stores/sessionStore'
@@ -66,6 +68,22 @@ function StoryStateBoundary({ children }: { children: ReactNode }) {
     const previousAiEnabled =
       useSettingsStore.getState().values.aiFeaturesEnabled
     const previousAiRuntime = getAiAgentRuntime()
+    const previousEngineRuntime = getEngineRuntime()
+    __setEngineRuntime({
+      info: async () => ({
+        supported: true,
+        installed: true,
+        source: 'bundled',
+        version: 'fixture',
+        installing: false,
+        last_error: null,
+        devices: [],
+        device_error: null,
+        hardware_identity: { selection: 'auto', topology: [] },
+      }),
+      install: async () => {},
+      subscribeProgress: async () => () => {},
+    })
 
     useSessionStore.setState({
       peers: {},
@@ -89,6 +107,7 @@ function StoryStateBoundary({ children }: { children: ReactNode }) {
         values: { ...state.values, aiFeaturesEnabled: previousAiEnabled },
       }))
       __setAiAgentRuntime(previousAiRuntime)
+      __setEngineRuntime(previousEngineRuntime)
     }
   }, [])
 

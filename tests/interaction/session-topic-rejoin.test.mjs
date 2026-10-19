@@ -18,6 +18,7 @@ import { deriveTopicTimeline } from '@/features/session/reportData'
 import { serializeReportToText } from '@/features/session/reportSerialize'
 import { AI_DIALOG_TOPIC_CHANGE } from '@/features/ai/aiDialogChannels'
 import { useModelStore } from '@/features/ai/modelStore'
+import { readEngineInfo } from '@/features/ai/engine'
 import { generateIdentity, signMessage } from '@/lib/crypto/identity'
 import { bytesToHex } from '@/lib/encoding'
 import { useIdentityStore } from '@/stores/identityStore'
@@ -65,6 +66,11 @@ Object.assign(window, {
       if (cmd === 'plugin:window|available_monitors' || cmd === 'friends_list') return []
       if (cmd === 'plugin:window|is_focused' || cmd === 'plugin:window|is_visible') return true
       if (cmd === 'system_window_style_is_custom_applied') return false
+      if (cmd === 'engine_info') return {
+        supported: true, support_error: null, installed: true, source: 'bundled',
+        version: 'b9095', installing: false, last_error: null, devices: [],
+        device_error: null, hardware_identity: { selection: 'auto', topology: [] },
+      }
       if (cmd === 'identity_sign')
         return Array.from(signMessage(person.edPriv, new Uint8Array(args.message)))
       if (cmd === 'session_timeline_get') { timelineReads.push(args.sessionId); return null }
@@ -89,6 +95,7 @@ Object.assign(window, {
   },
 })
 await new Promise(resolve => setTimeout(resolve, 0))
+await readEngineInfo()
 useIdentityStore.setState({
   status: 'ready',
   identity: {

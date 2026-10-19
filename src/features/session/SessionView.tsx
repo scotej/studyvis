@@ -54,6 +54,8 @@ import {
   AI_DIALOG_TOPIC_CHANGE,
   AI_DIALOG_WINDOW_LABEL,
   discardPendingScreenStream,
+  getAiPlatformSupported,
+  useAiPlatformSupported,
   ERR_ENGINE_NOT_INSTALLED,
   isUncertainVerdict,
   preacquireScreenStream,
@@ -273,7 +275,11 @@ export function SessionView({
   // level membership rather than signed-hello history, so a peer who drops
   // before their hello lands still moves the empty-room UI into solo mode.
   const hadAnyPeer = useSessionStore((s) => s.hadAnyPeer)
-  const aiFeaturesEnabled = useSettingsStore((s) => s.values.aiFeaturesEnabled)
+  const aiPreferenceEnabled = useSettingsStore(
+    (s) => s.values.aiFeaturesEnabled
+  )
+  const aiPlatformSupported = useAiPlatformSupported(aiPreferenceEnabled)
+  const aiFeaturesEnabled = aiPreferenceEnabled && aiPlatformSupported === true
   // The footer hint must show the PERSISTED binding: rebinding shipped in
   // V3-P3, and a hardcoded default lied every session to exactly the users
   // who rebound because CmdOrCtrl+[ clashed with another app.
@@ -1458,7 +1464,10 @@ export function SessionView({
       // `joined` so the report's topic timeline anchors correctly. Reads the
       // current topic after the hello await: #418 retains the logical starting
       // topic separately, and a live topic change may have happened meanwhile.
-      if (useSettingsStore.getState().values.aiFeaturesEnabled) {
+      if (
+        getAiPlatformSupported() &&
+        useSettingsStore.getState().values.aiFeaturesEnabled
+      ) {
         const topic = useSessionStore.getState().declaredStudyTopic
         void emitAudit('topic_set', { topic })
       }
@@ -2476,6 +2485,7 @@ export function SessionView({
   const handleCaptureRetry = useCallback(() => {
     if (
       mirror.takeover ||
+      !getAiPlatformSupported() ||
       !aiFeaturesEnabled ||
       !activeModelId ||
       getModelUnavailableReason(activeModelId)

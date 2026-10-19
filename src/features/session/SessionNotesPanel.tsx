@@ -29,7 +29,12 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
 import { useReduceMotion } from '@/design/reduce-motion'
-import { AiAgentError, useModelStore } from '@/features/ai'
+import {
+  AiAgentError,
+  getAiPlatformSupported,
+  useAiPlatformSupported,
+  useModelStore,
+} from '@/features/ai'
 import { getModelUnavailableReason } from '@/features/ai/models'
 import { useIdentity } from '@/features/identity'
 import { signWithKeyring } from '@/lib/db/identity'
@@ -151,9 +156,13 @@ export function SessionNotesPanel({
   const declaredStudyTopic = useSessionStore(
     (state) => state.declaredStudyTopic
   )
-  const aiFeaturesEnabled = useSettingsStore(
+  const aiPreferenceEnabled = useSettingsStore(
     (state) => state.values.aiFeaturesEnabled
   )
+  const aiPlatformSupported = useAiPlatformSupported(
+    !mirror && aiPreferenceEnabled
+  )
+  const aiFeaturesEnabled = aiPreferenceEnabled && aiPlatformSupported === true
   const activeModelId = useModelStore((state) => state.activeModelId)
   const auditEvents = useAuditStore((state) => state.events)
 
@@ -506,6 +515,7 @@ export function SessionNotesPanel({
       useSessionStore.getState().sessionTopic === requestSessionTopic &&
       useSessionStore.getState().room === room &&
       useSessionStore.getState().status === 'active' &&
+      getAiPlatformSupported() &&
       useSettingsStore.getState().values.aiFeaturesEnabled &&
       useModelStore.getState().activeModelId === activeModelId
 

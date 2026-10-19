@@ -257,6 +257,7 @@ pub async fn sidecar_start<R: Runtime>(
     ctx_size: u32,
     engine_auto_install: bool,
 ) -> Result<SidecarStartResult, String> {
+    super::engine::require_supported_platform()?;
     let arc = state.0.clone();
     // Capture request ownership before any filesystem work or managed-model
     // gate await. A later stop increments this epoch, so this invocation cannot
@@ -792,6 +793,7 @@ fn spawn_with_fallback<R: Runtime>(
     port: u16,
     compute_device: &super::compute_device::ComputeDeviceSelection,
 ) -> Result<(tauri::async_runtime::Receiver<CommandEvent>, CommandChild), String> {
+    super::engine::require_supported_platform()?;
     let candidates = super::engine::resolve_candidates(app);
     if candidates.is_empty() {
         return Err(ENGINE_NOT_INSTALLED.to_string());

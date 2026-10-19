@@ -333,6 +333,7 @@ test('retained unavailable selection never captures on start or rejoin (#422)', 
     import React from 'react'
     import { createRoot } from 'react-dom/client'
     import { Home } from '@/routes/Home'
+    import { __setEngineRuntime, readEngineInfo } from '@/features/ai/engine'
     import { useIdentityStore } from '@/stores/identityStore'
     import { useFriendsStore } from '@/stores/friendsStore'
     import { useSettingsStore } from '@/stores/settingsStore'
@@ -365,6 +366,12 @@ test('retained unavailable selection never captures on start or rejoin (#422)', 
         tracks: streams.flatMap(stream => stream.getTracks().map(track => track.readyState)) }),
       entered: () => { traces.push('entered'); useSessionStore.setState({ status: 'active' }) },
       dispose: discardPendingScreenStream }
+    __setEngineRuntime({
+      info: async () => ({ supported: true, installed: true, source: 'bundled', version: 'b9095', installing: false,
+        last_error: null, devices: [], device_error: null, hardware_identity: { selection: 'auto', topology: [] } }),
+      install: async () => {}, subscribeProgress: async () => () => {},
+    })
+    await readEngineInfo()
     createRoot(document.getElementById('root')).render(React.createElement(Home))
   `
   const stubs = {

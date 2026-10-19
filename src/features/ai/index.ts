@@ -18,6 +18,10 @@ export type {
 
 export {
   getEngineRuntime,
+  readEngineInfo,
+  getAiPlatformSupported,
+  isAiPlatformSupportPending,
+  useAiPlatformSupported,
   __setEngineRuntime,
   __resetEngineRuntime,
 } from './engine'
