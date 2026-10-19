@@ -249,20 +249,26 @@ pub struct ModelPaths {
     pub mmproj_path: String,
 }
 
-#[tauri::command(async)]
-pub fn model_paths<R: Runtime>(app: AppHandle<R>, model_id: String) -> Result<ModelPaths, String> {
-    let dir = model_dir(&app, &model_id)?;
-    Ok(ModelPaths {
-        dir: dir.to_string_lossy().into_owned(),
-        model_path: dir
-            .join(MODEL_LOCAL_FILENAME)
-            .to_string_lossy()
-            .into_owned(),
-        mmproj_path: dir
-            .join(MMPROJ_LOCAL_FILENAME)
-            .to_string_lossy()
-            .into_owned(),
+#[tauri::command]
+pub async fn model_paths<R: Runtime>(
+    app: AppHandle<R>,
+    model_id: String,
+) -> Result<ModelPaths, String> {
+    super::blocking(move || {
+        let dir = model_dir(&app, &model_id)?;
+        Ok(ModelPaths {
+            dir: dir.to_string_lossy().into_owned(),
+            model_path: dir
+                .join(MODEL_LOCAL_FILENAME)
+                .to_string_lossy()
+                .into_owned(),
+            mmproj_path: dir
+                .join(MMPROJ_LOCAL_FILENAME)
+                .to_string_lossy()
+                .into_owned(),
+        })
     })
+    .await
 }
 
 #[derive(Serialize)]
@@ -290,16 +296,19 @@ fn file_state(path: &Path) -> ModelFileState {
     }
 }
 
-#[tauri::command(async)]
-pub fn model_install_state<R: Runtime>(
+#[tauri::command]
+pub async fn model_install_state<R: Runtime>(
     app: AppHandle<R>,
     model_id: String,
 ) -> Result<ModelInstallState, String> {
-    let dir = model_dir(&app, &model_id)?;
-    Ok(ModelInstallState {
-        model: file_state(&dir.join(MODEL_LOCAL_FILENAME)),
-        mmproj: file_state(&dir.join(MMPROJ_LOCAL_FILENAME)),
+    super::blocking(move || {
+        let dir = model_dir(&app, &model_id)?;
+        Ok(ModelInstallState {
+            model: file_state(&dir.join(MODEL_LOCAL_FILENAME)),
+            mmproj: file_state(&dir.join(MMPROJ_LOCAL_FILENAME)),
+        })
     })
+    .await
 }
 
 // Removal must consult the sidecar: a running llama-server memory-maps the
@@ -414,44 +423,49 @@ fn hf_token_entry() -> Result<Entry, String> {
 }
 
 #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
-#[tauri::command(async)]
-pub fn hf_token_save(token: String) -> Result<(), String> {
-    let trimmed = token.trim();
-    if trimmed.is_empty() {
-        return Err("token must not be empty".into());
-    }
-    if !trimmed.chars().all(|c| c.is_ascii_graphic()) {
-        return Err("token must be ASCII printable (no whitespace or controls)".into());
-    }
-    hf_token_entry()?
-        .set_password(trimmed)
-        .map_err(|e| super::identity::format_keyring_error("save Hugging Face token", e))
+#[tauri::command]
+pub async fn hf_token_save(token: String) -> Result<(), String> {
+    super::blocking(move || {
+        let trimmed = token.trim();
+        if trimmed.is_empty() {
+            return Err("token must not be empty".into());
+        }
+        if !trimmed.chars().all(|c| c.is_ascii_graphic()) {
+            return Err("token must be ASCII printable (no whitespace or controls)".into());
+        }
+        hf_token_entry()?
+            .set_password(trimmed)
+            .map_err(|e| super::identity::format_keyring_error("save Hugging Face token", e))
+    })
+    .await
 }
 
 #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
-#[tauri::command(async)]
-pub fn hf_token_present() -> Result<bool, String> {
-    match hf_token_entry()?.get_password() {
+#[tauri::command]
+pub async fn hf_token_present() -> Result<bool, String> {
+    super::blocking(move || match hf_token_entry()?.get_password() {
         Ok(s) => Ok(!s.is_empty()),
         Err(keyring::Error::NoEntry) => Ok(false),
         Err(e) => Err(super::identity::format_keyring_error(
             "read Hugging Face token",
             e,
         )),
-    }
+    })
+    .await
 }
 
 #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
-#[tauri::command(async)]
-pub fn hf_token_clear() -> Result<(), String> {
-    match hf_token_entry()?.delete_credential() {
+#[tauri::command]
+pub async fn hf_token_clear() -> Result<(), String> {
+    super::blocking(move || match hf_token_entry()?.delete_credential() {
         Ok(()) => Ok(()),
         Err(keyring::Error::NoEntry) => Ok(()),
         Err(e) => Err(super::identity::format_keyring_error(
             "delete Hugging Face token",
             e,
         )),
-    }
+    })
+    .await
 }
 
 #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]

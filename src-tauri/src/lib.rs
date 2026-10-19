@@ -146,7 +146,7 @@ pub fn run() {
     // entries (each becomes a match arm in the generated dispatcher), so a
     // single invocation with `#[cfg(...)]` gates per-command replaces the
     // previous three near-duplicate handler blocks.
-    let builder = builder.invoke_handler(tauri::generate_handler![
+    let invoke_handler = commands::session_journal::with_append_receipts(tauri::generate_handler![
         friends_list,
         friends_add,
         friends_remove,
@@ -283,6 +283,7 @@ pub fn run() {
         ))]
         hf_token_clear,
     ]);
+    let builder = builder.invoke_handler(invoke_handler);
 
     let builder = builder.on_window_event(|window, event| {
         if window.label() != "main" {

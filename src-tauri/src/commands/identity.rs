@@ -138,20 +138,23 @@ pub(crate) const KEYS_EXIST_MARKER: &str = "identity keys already exist";
 // This unsticks the create path when a crash lands between save_keys and
 // save_record (orphaned keychain entry, no identity.json): re-running the SAME
 // create succeeds instead of dead-ending on the refuse-to-overwrite error.
-#[tauri::command(async)]
-pub fn identity_save_keys(
+#[tauri::command]
+pub async fn identity_save_keys(
     ed_priv_hex: String,
     x_priv_hex: String,
     overwrite: bool,
 ) -> Result<(), String> {
-    validate_priv_hex("ed_priv_hex", &ed_priv_hex)?;
-    validate_priv_hex("x_priv_hex", &x_priv_hex)?;
-    let payload = serde_json::to_string(&StoredKeys {
-        ed_priv_hex,
-        x_priv_hex,
+    super::blocking(move || {
+        validate_priv_hex("ed_priv_hex", &ed_priv_hex)?;
+        validate_priv_hex("x_priv_hex", &x_priv_hex)?;
+        let payload = serde_json::to_string(&StoredKeys {
+            ed_priv_hex,
+            x_priv_hex,
+        })
+        .map_err(|e| e.to_string())?;
+        save_keys_in_entry(&keys_entry()?, &payload, overwrite)
     })
-    .map_err(|e| e.to_string())?;
-    save_keys_in_entry(&keys_entry()?, &payload, overwrite)
+    .await
 }
 
 fn save_keys_in_entry(entry: &Entry, payload: &str, overwrite: bool) -> Result<(), String> {
@@ -174,10 +177,13 @@ fn save_keys_in_entry(entry: &Entry, payload: &str, overwrite: bool) -> Result<(
     Ok(())
 }
 
-#[tauri::command(async)]
-pub fn identity_exists(app: AppHandle) -> Result<bool, String> {
-    let path = identity_path(&app)?;
-    Ok(path.exists())
+#[tauri::command]
+pub async fn identity_exists(app: AppHandle) -> Result<bool, String> {
+    super::blocking(move || {
+        let path = identity_path(&app)?;
+        Ok(path.exists())
+    })
+    .await
 }
 
 // #47 E1 — cheap boot probe (mirrors hf_token_present): does the keychain
@@ -188,13 +194,14 @@ pub fn identity_exists(app: AppHandle) -> Result<bool, String> {
 // keychain, access denied) is NOT "keys absent" and must not steer the user
 // toward the key-overwriting Recover flow, so it surfaces as Err and the
 // caller treats the probe as inconclusive.
-#[tauri::command(async)]
-pub fn identity_keys_present() -> Result<bool, String> {
-    match keys_entry()?.get_password() {
+#[tauri::command]
+pub async fn identity_keys_present() -> Result<bool, String> {
+    super::blocking(move || match keys_entry()?.get_password() {
         Ok(_) => Ok(true),
         Err(keyring::Error::NoEntry) => Ok(false),
         Err(e) => Err(format_keyring_error("read identity keys", e)),
-    }
+    })
+    .await
 }
 
 #[derive(Debug, Serialize, PartialEq)]
@@ -235,9 +242,9 @@ fn check_stored_keys(payload: &str, record: &IdentityRecord) -> IdentityKeysStat
 
 // #380: possession alone does not prove identity.json describes the credential.
 // Derive and compare both public keys without returning private material to JS.
-#[tauri::command(async)]
-pub fn identity_keys_status(record: IdentityRecord) -> Result<IdentityKeysStatus, String> {
-    identity_keys_status_from_entry(&keys_entry()?, &record)
+#[tauri::command]
+pub async fn identity_keys_status(record: IdentityRecord) -> Result<IdentityKeysStatus, String> {
+    super::blocking(move || identity_keys_status_from_entry(&keys_entry()?, &record)).await
 }
 
 fn identity_keys_status_from_entry(
@@ -251,9 +258,9 @@ fn identity_keys_status_from_entry(
     }
 }
 
-#[tauri::command(async)]
-pub fn identity_save_record(app: AppHandle, record: IdentityRecord) -> Result<(), String> {
-    save_record_at(&identity_path(&app)?, &record)
+#[tauri::command]
+pub async fn identity_save_record(app: AppHandle, record: IdentityRecord) -> Result<(), String> {
+    super::blocking(move || save_record_at(&identity_path(&app)?, &record)).await
 }
 
 fn save_record_at(path: &Path, record: &IdentityRecord) -> Result<(), String> {
@@ -274,63 +281,72 @@ fn save_record_at(path: &Path, record: &IdentityRecord) -> Result<(), String> {
     Ok(())
 }
 
-#[tauri::command(async)]
-pub fn identity_load_record(app: AppHandle) -> Result<Option<IdentityRecord>, String> {
-    let path = identity_path(&app)?;
-    let _guard = IDENTITY_RECORD_LOCK
-        .lock()
-        .unwrap_or_else(|e| e.into_inner());
-    if !path.exists() {
-        return Ok(None);
-    }
-    let bytes = fs::read(&path).map_err(|e| format!("read {}: {e}", path.display()))?;
-    let record: IdentityRecord = serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
-    Ok(Some(record))
+#[tauri::command]
+pub async fn identity_load_record(app: AppHandle) -> Result<Option<IdentityRecord>, String> {
+    super::blocking(move || {
+        let path = identity_path(&app)?;
+        let _guard = IDENTITY_RECORD_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        if !path.exists() {
+            return Ok(None);
+        }
+        let bytes = fs::read(&path).map_err(|e| format!("read {}: {e}", path.display()))?;
+        let record: IdentityRecord = serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
+        Ok(Some(record))
+    })
+    .await
 }
 
-#[tauri::command(async)]
-pub fn identity_sign(message: Vec<u8>) -> Result<Vec<u8>, String> {
-    let stored = load_stored()?;
-    let priv_bytes = hex::decode(&stored.ed_priv_hex).map_err(|e| e.to_string())?;
-    let priv_arr: [u8; PRIV_KEY_LEN] = priv_bytes
-        .as_slice()
-        .try_into()
-        .map_err(|_| format!("ed25519 priv key must be {PRIV_KEY_LEN} bytes"))?;
-    let signing_key = SigningKey::from_bytes(&priv_arr);
-    let sig = signing_key.sign(&message);
-    Ok(sig.to_bytes().to_vec())
+#[tauri::command]
+pub async fn identity_sign(message: Vec<u8>) -> Result<Vec<u8>, String> {
+    super::blocking(move || {
+        let stored = load_stored()?;
+        let priv_bytes = hex::decode(&stored.ed_priv_hex).map_err(|e| e.to_string())?;
+        let priv_arr: [u8; PRIV_KEY_LEN] = priv_bytes
+            .as_slice()
+            .try_into()
+            .map_err(|_| format!("ed25519 priv key must be {PRIV_KEY_LEN} bytes"))?;
+        let signing_key = SigningKey::from_bytes(&priv_arr);
+        let sig = signing_key.sign(&message);
+        Ok(sig.to_bytes().to_vec())
+    })
+    .await
 }
 
-#[tauri::command(async)]
-pub fn identity_box_decrypt(
+#[tauri::command]
+pub async fn identity_box_decrypt(
     their_x_pub_hex: String,
     nonce_b64: String,
     ciphertext_b64: String,
 ) -> Result<Vec<u8>, String> {
-    let their_pub_bytes = hex::decode(&their_x_pub_hex).map_err(|e| e.to_string())?;
-    let their_pub_arr: [u8; X_KEY_LEN] = their_pub_bytes
-        .as_slice()
-        .try_into()
-        .map_err(|_| format!("their_x_pub must decode to {X_KEY_LEN} bytes"))?;
-    let nonce_bytes = BASE64
-        .decode(nonce_b64.as_bytes())
-        .map_err(|e| format!("nonce base64: {e}"))?;
-    let nonce_arr: [u8; NONCE_LEN] = nonce_bytes
-        .as_slice()
-        .try_into()
-        .map_err(|_| format!("nonce must decode to {NONCE_LEN} bytes"))?;
-    let ciphertext = BASE64
-        .decode(ciphertext_b64.as_bytes())
-        .map_err(|e| format!("ciphertext base64: {e}"))?;
+    super::blocking(move || {
+        let their_pub_bytes = hex::decode(&their_x_pub_hex).map_err(|e| e.to_string())?;
+        let their_pub_arr: [u8; X_KEY_LEN] = their_pub_bytes
+            .as_slice()
+            .try_into()
+            .map_err(|_| format!("their_x_pub must decode to {X_KEY_LEN} bytes"))?;
+        let nonce_bytes = BASE64
+            .decode(nonce_b64.as_bytes())
+            .map_err(|e| format!("nonce base64: {e}"))?;
+        let nonce_arr: [u8; NONCE_LEN] = nonce_bytes
+            .as_slice()
+            .try_into()
+            .map_err(|_| format!("nonce must decode to {NONCE_LEN} bytes"))?;
+        let ciphertext = BASE64
+            .decode(ciphertext_b64.as_bytes())
+            .map_err(|e| format!("ciphertext base64: {e}"))?;
 
-    let stored = load_stored()?;
-    let my_priv_bytes = hex::decode(&stored.x_priv_hex).map_err(|e| e.to_string())?;
-    let my_priv_arr: [u8; PRIV_KEY_LEN] = my_priv_bytes
-        .as_slice()
-        .try_into()
-        .map_err(|_| format!("x25519 priv key must be {PRIV_KEY_LEN} bytes"))?;
+        let stored = load_stored()?;
+        let my_priv_bytes = hex::decode(&stored.x_priv_hex).map_err(|e| e.to_string())?;
+        let my_priv_arr: [u8; PRIV_KEY_LEN] = my_priv_bytes
+            .as_slice()
+            .try_into()
+            .map_err(|_| format!("x25519 priv key must be {PRIV_KEY_LEN} bytes"))?;
 
-    nacl_box_decrypt(&their_pub_arr, &my_priv_arr, &nonce_arr, &ciphertext)
+        nacl_box_decrypt(&their_pub_arr, &my_priv_arr, &nonce_arr, &ciphertext)
+    })
+    .await
 }
 
 #[derive(Debug, Serialize)]
@@ -339,34 +355,37 @@ pub struct BoxCiphertext {
     pub ciphertext_b64: String,
 }
 
-#[tauri::command(async)]
-pub fn identity_box_encrypt(
+#[tauri::command]
+pub async fn identity_box_encrypt(
     their_x_pub_hex: String,
     plaintext: Vec<u8>,
 ) -> Result<BoxCiphertext, String> {
-    let their_pub_bytes = hex::decode(&their_x_pub_hex).map_err(|e| e.to_string())?;
-    let their_pub_arr: [u8; X_KEY_LEN] = their_pub_bytes
-        .as_slice()
-        .try_into()
-        .map_err(|_| format!("their_x_pub must decode to {X_KEY_LEN} bytes"))?;
+    super::blocking(move || {
+        let their_pub_bytes = hex::decode(&their_x_pub_hex).map_err(|e| e.to_string())?;
+        let their_pub_arr: [u8; X_KEY_LEN] = their_pub_bytes
+            .as_slice()
+            .try_into()
+            .map_err(|_| format!("their_x_pub must decode to {X_KEY_LEN} bytes"))?;
 
-    let stored = load_stored()?;
-    let my_priv_bytes = hex::decode(&stored.x_priv_hex).map_err(|e| e.to_string())?;
-    let my_priv_arr: [u8; PRIV_KEY_LEN] = my_priv_bytes
-        .as_slice()
-        .try_into()
-        .map_err(|_| format!("x25519 priv key must be {PRIV_KEY_LEN} bytes"))?;
+        let stored = load_stored()?;
+        let my_priv_bytes = hex::decode(&stored.x_priv_hex).map_err(|e| e.to_string())?;
+        let my_priv_arr: [u8; PRIV_KEY_LEN] = my_priv_bytes
+            .as_slice()
+            .try_into()
+            .map_err(|_| format!("x25519 priv key must be {PRIV_KEY_LEN} bytes"))?;
 
-    use crypto_box::aead::{rand_core::RngCore, OsRng};
-    let mut nonce = [0u8; NONCE_LEN];
-    OsRng.fill_bytes(&mut nonce);
+        use crypto_box::aead::{rand_core::RngCore, OsRng};
+        let mut nonce = [0u8; NONCE_LEN];
+        OsRng.fill_bytes(&mut nonce);
 
-    let ciphertext = nacl_box_encrypt(&their_pub_arr, &my_priv_arr, &nonce, &plaintext)?;
+        let ciphertext = nacl_box_encrypt(&their_pub_arr, &my_priv_arr, &nonce, &plaintext)?;
 
-    Ok(BoxCiphertext {
-        nonce_b64: BASE64.encode(nonce),
-        ciphertext_b64: BASE64.encode(&ciphertext),
+        Ok(BoxCiphertext {
+            nonce_b64: BASE64.encode(nonce),
+            ciphertext_b64: BASE64.encode(&ciphertext),
+        })
     })
+    .await
 }
 
 #[cfg(test)]

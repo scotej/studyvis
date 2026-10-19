@@ -29,9 +29,9 @@ pub mod session_timelines;
 pub mod sessions;
 
 /// The app's single shared connection behind a `Mutex` (not an actual pool),
-/// managed as Tauri state in `lib.rs`. Commands lock it synchronously for
-/// their whole body — keep command fns non-async so a caller can never hold
-/// the guard across an `.await`.
+/// managed as Tauri state in `lib.rs`. Commands clone the Arc into blocking
+/// workers and keep each guard inside its synchronous closure, never across
+/// an `.await`.
 pub struct DbPool(pub Arc<Mutex<Connection>>);
 
 pub struct DbInit {

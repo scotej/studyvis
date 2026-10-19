@@ -2,6 +2,12 @@
 pub use studyvis_lib::{crypto, db};
 
 #[cfg(target_os = "linux")]
+#[path = "../src/commands/worker.rs"]
+mod worker;
+#[cfg(target_os = "linux")]
+use worker::blocking;
+
+#[cfg(target_os = "linux")]
 #[allow(dead_code)]
 #[path = "../src/commands/identity.rs"]
 mod identity;
@@ -56,10 +62,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let friend_box = crypto_box::SecretKey::from([8; 32]);
     let path = root.join("data/studyvis/identity.json");
     if mode == "seed" {
-        if path.exists() || identity::identity_keys_present()? {
+        if path.exists() || tauri::async_runtime::block_on(identity::identity_keys_present())? {
             return Err("refusing existing identity in the private test provider".into());
         }
-        identity::identity_save_keys(hex::encode([1; 32]), hex::encode([2; 32]), false)?;
+        tauri::async_runtime::block_on(identity::identity_save_keys(
+            hex::encode([1; 32]),
+            hex::encode([2; 32]),
+            false,
+        ))?;
         let record = identity::IdentityRecord {
             version: 1,
             ed_pubkey_hex: own_ed.clone(),
@@ -80,7 +90,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Err("public identity changed across the update".into());
     }
     let challenge = b"StudyVis isolated N-1 key-custody preservation";
-    let proof = identity::identity_sign(challenge.to_vec())?;
+    let proof = tauri::async_runtime::block_on(identity::identity_sign(challenge.to_vec()))?;
     own_signing
         .verifying_key()
         .verify_strict(challenge, &Signature::from_slice(&proof)?)?;
@@ -91,11 +101,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         &nonce,
         challenge,
     )?;
-    let decrypted = identity::identity_box_decrypt(
+    let decrypted = tauri::async_runtime::block_on(identity::identity_box_decrypt(
         hex::encode(friend_box.public_key().as_bytes()),
         BASE64.encode(nonce),
         BASE64.encode(encrypted),
-    )?;
+    ))?;
     if decrypted != challenge {
         return Err("stored X25519 key did not survive the update".into());
     }
@@ -119,7 +129,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         kind: "topic_set",
         detail: json!({"topic": "Algebra updater preservation"}),
     };
-    let signature = identity::identity_sign(serde_json::to_vec(&core)?)?;
+    let signature =
+        tauri::async_runtime::block_on(identity::identity_sign(serde_json::to_vec(&core)?))?;
     own_signing.verifying_key().verify_strict(
         &serde_json::to_vec(&core)?,
         &Signature::from_slice(&signature)?,

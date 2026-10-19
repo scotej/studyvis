@@ -1,4 +1,4 @@
-//! Friends commands: thin sync wrappers over `db::friends`, plus the
+//! Friends commands: blocking workers over `db::friends`, plus the
 //! encrypted `.svfb` friends-list backup (export/import on release-matrix
 //! desktops — it needs the keychain/Secret Service identity). The backup's
 //! authenticity envelope is security-critical; see the banner above
@@ -16,60 +16,75 @@ use crate::db::{friends, DbPool};
 // #404: independent worker calls can export to the same chosen destination.
 static BACKUP_WRITE_LOCK: Mutex<()> = Mutex::new(());
 
-fn lock<'a>(
-    state: &'a State<'_, DbPool>,
-) -> Result<std::sync::MutexGuard<'a, rusqlite::Connection>, String> {
+fn lock<'a>(state: &'a DbPool) -> Result<std::sync::MutexGuard<'a, rusqlite::Connection>, String> {
     state.0.lock().map_err(|e| format!("db poisoned: {e}"))
 }
 
-// These commands hold a `std::sync::MutexGuard` for their entire body. Keeping
-// them sync (no `async`) means a future caller cannot accidentally `.await`
-// across the lock and produce a deadlock. #404: explicitly opt into Tauri
-// async dispatch so these synchronous bodies run on runtime workers, never
-// inline on the native GUI thread. The database mutex still serializes them.
-#[tauri::command(async)]
-pub fn friends_list(state: State<'_, DbPool>) -> Result<Vec<friends::Friend>, String> {
-    let conn = lock(&state)?;
-    friends::list(&conn).map_err(|e| e.to_string())
+// #404: clone the managed connection into a blocking worker; acquire and
+// release its synchronous mutex entirely within that worker's closure.
+#[tauri::command]
+pub async fn friends_list(state: State<'_, DbPool>) -> Result<Vec<friends::Friend>, String> {
+    let state = DbPool(state.0.clone());
+    super::blocking(move || {
+        let conn = lock(&state)?;
+        friends::list(&conn).map_err(|e| e.to_string())
+    })
+    .await
 }
 
-#[tauri::command(async)]
-pub fn friends_add(
+#[tauri::command]
+pub async fn friends_add(
     state: State<'_, DbPool>,
     ed_pubkey: String,
     x_pubkey: String,
     name: String,
     ts: i64,
 ) -> Result<(), String> {
-    let conn = lock(&state)?;
-    friends::add(&conn, &ed_pubkey, &x_pubkey, &name, ts).map_err(|e| e.to_string())
+    let state = DbPool(state.0.clone());
+    super::blocking(move || {
+        let conn = lock(&state)?;
+        friends::add(&conn, &ed_pubkey, &x_pubkey, &name, ts).map_err(|e| e.to_string())
+    })
+    .await
 }
 
-#[tauri::command(async)]
-pub fn friends_remove(state: State<'_, DbPool>, ed_pubkey: String) -> Result<(), String> {
-    let conn = lock(&state)?;
-    friends::remove(&conn, &ed_pubkey).map_err(|e| e.to_string())?;
-    Ok(())
+#[tauri::command]
+pub async fn friends_remove(state: State<'_, DbPool>, ed_pubkey: String) -> Result<(), String> {
+    let state = DbPool(state.0.clone());
+    super::blocking(move || {
+        let conn = lock(&state)?;
+        friends::remove(&conn, &ed_pubkey).map_err(|e| e.to_string())?;
+        Ok(())
+    })
+    .await
 }
 
-#[tauri::command(async)]
-pub fn friends_update_last_studied(
+#[tauri::command]
+pub async fn friends_update_last_studied(
     state: State<'_, DbPool>,
     ed_pubkey: String,
     ts: i64,
 ) -> Result<(), String> {
-    let conn = lock(&state)?;
-    friends::update_last_studied(&conn, &ed_pubkey, ts).map_err(|e| e.to_string())?;
-    Ok(())
+    let state = DbPool(state.0.clone());
+    super::blocking(move || {
+        let conn = lock(&state)?;
+        friends::update_last_studied(&conn, &ed_pubkey, ts).map_err(|e| e.to_string())?;
+        Ok(())
+    })
+    .await
 }
 
-#[tauri::command(async)]
-pub fn friends_get_x_pubkey(
+#[tauri::command]
+pub async fn friends_get_x_pubkey(
     state: State<'_, DbPool>,
     ed_pubkey: String,
 ) -> Result<Option<String>, String> {
-    let conn = lock(&state)?;
-    friends::get_x_pubkey(&conn, &ed_pubkey).map_err(|e| e.to_string())
+    let state = DbPool(state.0.clone());
+    super::blocking(move || {
+        let conn = lock(&state)?;
+        friends::get_x_pubkey(&conn, &ed_pubkey).map_err(|e| e.to_string())
+    })
+    .await
 }
 
 // ── D3 friends backup — local file, crypto_box sealed-box to the user's own
@@ -280,29 +295,33 @@ fn import_rows(
 }
 
 #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
-#[tauri::command(async)]
-pub fn friends_export(state: State<'_, DbPool>, path: String) -> Result<u32, String> {
-    let rows = {
-        let conn = lock(&state)?;
-        friends::list(&conn).map_err(|e| e.to_string())?
-    };
-    // No friends → write nothing and report 0, so the frontend's "nothing to
-    // back up" toast doesn't contradict a file sitting on disk at the chosen
-    // path. (An empty sealed backup is harmless, just pointless.)
-    if rows.is_empty() {
-        return Ok(0);
-    }
-    let (my_x_priv, signing_key) = crate::commands::identity::load_backup_keys()?;
-    let my_x_pub = crypto_box::SecretKey::from(my_x_priv).public_key();
-    let bytes = encode_backup(&signing_key, my_x_pub.as_bytes(), &rows)?;
-    if bytes.len() as u64 > MAX_BACKUP_FILE_BYTES {
-        return Err(backup_too_large_error(
-            bytes.len() as u64,
-            MAX_BACKUP_FILE_BYTES,
-        ));
-    }
-    write_backup_file(&path, &bytes)?;
-    Ok(rows.len() as u32)
+#[tauri::command]
+pub async fn friends_export(state: State<'_, DbPool>, path: String) -> Result<u32, String> {
+    let state = DbPool(state.0.clone());
+    super::blocking(move || {
+        let rows = {
+            let conn = lock(&state)?;
+            friends::list(&conn).map_err(|e| e.to_string())?
+        };
+        // No friends → write nothing and report 0, so the frontend's "nothing to
+        // back up" toast doesn't contradict a file sitting on disk at the chosen
+        // path. (An empty sealed backup is harmless, just pointless.)
+        if rows.is_empty() {
+            return Ok(0);
+        }
+        let (my_x_priv, signing_key) = crate::commands::identity::load_backup_keys()?;
+        let my_x_pub = crypto_box::SecretKey::from(my_x_priv).public_key();
+        let bytes = encode_backup(&signing_key, my_x_pub.as_bytes(), &rows)?;
+        if bytes.len() as u64 > MAX_BACKUP_FILE_BYTES {
+            return Err(backup_too_large_error(
+                bytes.len() as u64,
+                MAX_BACKUP_FILE_BYTES,
+            ));
+        }
+        write_backup_file(&path, &bytes)?;
+        Ok(rows.len() as u32)
+    })
+    .await
 }
 
 fn write_backup_file(path: &str, bytes: &[u8]) -> Result<(), String> {
@@ -320,17 +339,21 @@ fn write_backup_file(path: &str, bytes: &[u8]) -> Result<(), String> {
 }
 
 #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
-#[tauri::command(async)]
-pub fn friends_import(
+#[tauri::command]
+pub async fn friends_import(
     state: State<'_, DbPool>,
     path: String,
 ) -> Result<FriendsImportResult, String> {
-    let bytes = read_backup_bounded(Path::new(&path))?;
-    let (my_x_priv, signing_key) = crate::commands::identity::load_backup_keys()?;
-    let verifying_key = signing_key.verifying_key();
-    let rows = decode_backup(&verifying_key, &my_x_priv, &bytes)?;
-    let mut conn = lock(&state)?;
-    import_rows(&mut conn, &rows).map_err(|e| e.to_string())
+    let state = DbPool(state.0.clone());
+    super::blocking(move || {
+        let bytes = read_backup_bounded(Path::new(&path))?;
+        let (my_x_priv, signing_key) = crate::commands::identity::load_backup_keys()?;
+        let verifying_key = signing_key.verifying_key();
+        let rows = decode_backup(&verifying_key, &my_x_priv, &bytes)?;
+        let mut conn = lock(&state)?;
+        import_rows(&mut conn, &rows).map_err(|e| e.to_string())
+    })
+    .await
 }
 
 #[cfg(test)]

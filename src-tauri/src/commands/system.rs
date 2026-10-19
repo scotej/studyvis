@@ -1091,11 +1091,15 @@ pub fn system_ai_features_set_enabled<R: Runtime>(
 // are UTF-8 text (markdown / CSV / JSON), so a plain write_string suffices.
 static TEXT_EXPORT_LOCK: Mutex<()> = Mutex::new(());
 
-#[tauri::command(async)]
-pub fn system_write_text_file(path: String, contents: String) -> Result<(), String> {
+#[tauri::command]
+pub async fn system_write_text_file(path: String, contents: String) -> Result<(), String> {
+    super::blocking(move || write_text_file(&path, &contents)).await
+}
+
+fn write_text_file(path: &str, contents: &str) -> Result<(), String> {
     // #404: concurrent worker exports must not truncate each other's output.
     let _guard = TEXT_EXPORT_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    std::fs::write(&path, contents.as_bytes()).map_err(|e| format!("Couldn't write {path}: {e}"))
+    std::fs::write(path, contents.as_bytes()).map_err(|e| format!("Couldn't write {path}: {e}"))
 }
 
 const IMAGE_SAVE_MAX_BYTES: usize = 5 * 1024 * 1024;
@@ -1559,8 +1563,12 @@ fn linux_install_context(appimage: Option<&std::ffi::OsStr>) -> InstallContext {
     }
 }
 
-#[tauri::command(async)]
-pub fn system_install_context() -> InstallContext {
+#[tauri::command]
+pub async fn system_install_context() -> Result<InstallContext, String> {
+    super::blocking(|| Ok(install_context())).await
+}
+
+fn install_context() -> InstallContext {
     #[cfg(target_os = "macos")]
     {
         let Ok(exe) = std::env::current_exe() else {
@@ -1637,11 +1645,7 @@ mod tests {
                 writers.push(scope.spawn(move || {
                     start.wait();
                     for _ in 0..8 {
-                        super::system_write_text_file(
-                            path.to_str().unwrap().into(),
-                            report.clone(),
-                        )
-                        .unwrap();
+                        super::write_text_file(path.to_str().unwrap(), report).unwrap();
                     }
                 }));
             }

@@ -48,7 +48,7 @@
     },
     {
       "path": "src-tauri/Cargo.toml",
-      "sha256": "532396e523074efd1051831911dc3e0fbb1d749c9dfb4b16357ef21049843a49"
+      "sha256": "e45afcc1c53b68cc89bb53f013fa3323f6bfccb1c7f497833323fb42ea99f830"
     },
     {
       "path": "src-tauri/vendor/wry/LICENSE-MIT",

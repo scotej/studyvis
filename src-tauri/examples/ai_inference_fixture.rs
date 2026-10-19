@@ -1,5 +1,9 @@
 //! Disposable native command host for the scheduled CPU inference canary.
 
+#[path = "../src/commands/worker.rs"]
+mod worker;
+use worker::blocking;
+
 #[path = "../src/commands/applog.rs"]
 pub mod applog;
 #[path = "../src/commands/compute_device.rs"]
@@ -84,7 +88,7 @@ async fn command(app: &tauri::AppHandle, request: &Value) -> Result<Value, Strin
             Ok(Value::Null)
         }
         "model_paths" => {
-            serde_json::to_value(models::model_paths(app.clone(), string(args, "modelId")?)?)
+            serde_json::to_value(models::model_paths(app.clone(), string(args, "modelId")?).await?)
                 .map_err(|e| e.to_string())
         }
         "session_timeline_save" => {
@@ -97,17 +101,17 @@ async fn command(app: &tauri::AppHandle, request: &Value) -> Result<Value, Strin
                 string(args, "source")?,
                 string(args, "entries")?,
                 args["truncated"].as_bool().ok_or("missing truncated")?,
-            )?;
+            )
+            .await?;
             Ok(Value::Null)
         }
-        "session_timeline_get" => serde_json::to_value(sessions::session_timeline_get(
-            app.state(),
-            string(args, "sessionId")?,
-        )?)
+        "session_timeline_get" => serde_json::to_value(
+            sessions::session_timeline_get(app.state(), string(args, "sessionId")?).await?,
+        )
         .map_err(|e| e.to_string()),
         "app_log_append" => {
             let lines = serde_json::from_value(args["lines"].clone()).map_err(|e| e.to_string())?;
-            applog::app_log_append(app.clone(), lines)?;
+            applog::app_log_append(app.clone(), lines).await?;
             Ok(Value::Null)
         }
         _ => Err("unsupported canary command".to_owned()),
@@ -145,29 +149,34 @@ fn main() {
             let initialized =
                 db::init(app.handle()).map_err(|_| "disposable database initialization failed")?;
             app.manage(initialized.pool);
-            sessions::sessions_insert(
-                app.state(),
-                "cb".repeat(32),
-                1_700_000_000_000,
-                1_700_000_180_000,
-                Some(3),
-                Some(180_000),
-                None,
-                Some("{}".to_owned()),
-                Some("Synthetic algebra study".to_owned()),
-                Some(100),
-                Some(1.0),
-                Some(1_700_000_180_000),
-                Some(3),
-                Some(0),
-                Some(1),
-                Some("ab".repeat(32)),
-                Some("Synthetic CI canary".to_owned()),
-                None,
-            )
-            .map_err(std::io::Error::other)?;
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
+                if let Err(error) = sessions::sessions_insert(
+                    handle.state(),
+                    "cb".repeat(32),
+                    1_700_000_000_000,
+                    1_700_000_180_000,
+                    Some(3),
+                    Some(180_000),
+                    None,
+                    Some("{}".to_owned()),
+                    Some("Synthetic algebra study".to_owned()),
+                    Some(100),
+                    Some(1.0),
+                    Some(1_700_000_180_000),
+                    Some(3),
+                    Some(0),
+                    Some(1),
+                    Some("ab".repeat(32)),
+                    Some("Synthetic CI canary".to_owned()),
+                    None,
+                )
+                .await
+                {
+                    output(json!({"error": error}));
+                    handle.exit(1);
+                    return;
+                }
                 output(json!({"ready": true, "dataDir": data}));
                 while let Some(request) = requests.recv().await {
                     let id = request["id"].clone();
