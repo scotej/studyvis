@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from 'vitest'
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 
 import {
   getModelUnavailableReason,
@@ -22,6 +22,11 @@ import {
   type ModelStoreDeps,
   type ProgressEvent,
 } from '@/features/ai'
+
+import {
+  __setDownloadRuntime,
+  __resetDownloadRuntime,
+} from '@/features/ai/download'
 
 class FakeStore {
   data = new Map<string, unknown>()
@@ -280,6 +285,12 @@ describe('emptyPickerState', () => {
 
 describe('useModelStore (LazyStore-backed)', () => {
   beforeEach(() => {
+    __setDownloadRuntime({
+      installState: async () => ({
+        model: { exists: true, size: 1 },
+        mmproj: { exists: true, size: 1 },
+      }),
+    } as never)
     useModelStore.setState({
       status: 'loading',
       records: {},
@@ -289,6 +300,284 @@ describe('useModelStore (LazyStore-backed)', () => {
   })
   afterEach(() => {
     __resetModelStoreDeps()
+    __resetDownloadRuntime()
+  })
+
+  test.each(['select', 'remove', 'remove-active'])(
+    'failed %s save is explicit and a retry persists the current snapshot (#424)',
+    async (operation) => {
+      const records = Object.fromEntries(
+        ['first', 'second'].map((modelId) => [
+          modelId,
+          { modelId, installedAt: 1, benchmark: null },
+        ])
+      )
+      let disk = { records, active_model_id: 'first' }
+      let pending = structuredClone(disk)
+      let fail = true
+      __setModelStoreDeps({
+        storeFactory: () => ({
+          get: async (key) =>
+            structuredClone(disk[key as keyof typeof disk]) as never,
+          set: async (key, value) => {
+            pending = { ...pending, [key]: structuredClone(value) }
+          },
+          delete: async () => false,
+          save: async () => {
+            if (fail) throw new Error('Synthetic write denied')
+            disk = structuredClone(pending)
+          },
+        }),
+      })
+      useModelStore.setState({
+        status: 'ready',
+        records,
+        activeModelId: 'first',
+        error: null,
+      })
+      const mutation =
+        operation === 'select'
+          ? useModelStore.getState().selectModel('second')
+          : useModelStore
+              .getState()
+              .forget(operation === 'remove-active' ? 'first' : 'second')
+      await expect(mutation).rejects.toThrow('Synthetic write denied')
+      expect(useModelStore.getState().error).toBe('Synthetic write denied')
+      expect(disk.active_model_id).toBe('first')
+      expect(Object.keys(disk.records)).toHaveLength(2)
+      fail = false
+      await useModelStore.getState().retryPersist()
+      expect(useModelStore.getState().error).toBeNull()
+      expect(disk.active_model_id).toBe(useModelStore.getState().activeModelId)
+      expect(disk.records).toEqual(useModelStore.getState().records)
+    }
+  )
+
+  test.each(['selection-only', 'retained-record'])(
+    'rehydration preserves unavailable %s without filesystem probes or migration writes (#424, #422)',
+    async (mode) => {
+      const { deps, store } = makeFakeDeps()
+      const records =
+        mode === 'retained-record'
+          ? {
+              moondream2: {
+                modelId: 'moondream2',
+                installedAt: 123,
+                benchmark: summariseBenchmark({
+                  samplesSec: [2, 3, 4],
+                  completedAtSec: 99,
+                }),
+                interruptedDownload: { bytesReceived: 777, at: 789 },
+              },
+            }
+          : {}
+      store.data.set('records', records)
+      store.data.set('active_model_id', 'moondream2')
+      const before = structuredClone([...store.data])
+      const write = vi.spyOn(store, 'set')
+      const remove = vi.spyOn(store, 'delete')
+      const paths = vi.fn()
+      const installState = vi.fn(async () => ({
+        model: { exists: false, size: 0 },
+        mmproj: { exists: false, size: 0 },
+      }))
+      __setModelStoreDeps(deps)
+      __setDownloadRuntime({ paths, installState } as never)
+
+      await useModelStore.getState().hydrate()
+
+      expect(useModelStore.getState()).toMatchObject({
+        status: 'ready',
+        activeModelId: 'moondream2',
+        records,
+        error: null,
+      })
+      expect([...store.data]).toEqual(before)
+      expect(store.saved).toBe(0)
+      expect(write).not.toHaveBeenCalled()
+      expect(remove).not.toHaveBeenCalled()
+      expect(paths).not.toHaveBeenCalled()
+      expect(installState).not.toHaveBeenCalled()
+    }
+  )
+
+  test.each(['Permission denied', 'Input/output error'])(
+    'metadata %s preserves saved selection, benchmark, and retired records until Retry (#424)',
+    async (message) => {
+      const { deps, store } = makeFakeDeps()
+      const benchmark = summariseBenchmark({
+        samplesSec: [2, 3, 4],
+        completedAtSec: 99,
+      })
+      const records = {
+        'qwen2_5-vl-3b': {
+          modelId: 'qwen2_5-vl-3b',
+          installedAt: 123,
+          benchmark,
+        },
+        moondream2: {
+          modelId: 'moondream2',
+          installedAt: 456,
+          benchmark,
+          interruptedDownload: { bytesReceived: 789, at: 999 },
+        },
+      }
+      store.data.set('records', records)
+      store.data.set('active_model_id', 'qwen2_5-vl-3b')
+      const before = structuredClone([...store.data])
+      let denied = true
+      const installState = vi.fn(async () => {
+        if (denied) throw new Error(message)
+        return {
+          model: { exists: true, size: 1 },
+          mmproj: { exists: true, size: 1 },
+        }
+      })
+      __setModelStoreDeps(deps)
+      __setDownloadRuntime({ installState } as never)
+
+      await useModelStore.getState().hydrate()
+      expect(useModelStore.getState()).toMatchObject({
+        status: 'error',
+        error: message,
+        records,
+        activeModelId: 'qwen2_5-vl-3b',
+      })
+      expect([...store.data]).toEqual(before)
+      expect(store.saved).toBe(0)
+      expect(installState.mock.calls).toEqual([['qwen2_5-vl-3b']])
+
+      denied = false
+      await useModelStore.getState().hydrate()
+      expect(useModelStore.getState()).toMatchObject({
+        status: 'ready',
+        error: null,
+        records,
+        activeModelId: 'qwen2_5-vl-3b',
+      })
+      expect([...store.data]).toEqual(before)
+      expect(store.saved).toBe(0)
+      expect(installState.mock.calls).toEqual([
+        ['qwen2_5-vl-3b'],
+        ['qwen2_5-vl-3b'],
+      ])
+    }
+  )
+
+  test('a later inspection error prevents an earlier missing-file repair from being persisted (#424)', async () => {
+    const { deps, store } = makeFakeDeps()
+    const benchmark = summariseBenchmark({
+      samplesSec: [2, 3, 4],
+      completedAtSec: 99,
+    })
+    const records = {
+      first: { modelId: 'first', installedAt: 1, benchmark },
+      second: { modelId: 'second', installedAt: 2, benchmark },
+    }
+    store.data.set('records', records)
+    store.data.set('active_model_id', 'second')
+    const before = structuredClone([...store.data])
+    let denied = true
+    __setModelStoreDeps(deps)
+    __setDownloadRuntime({
+      installState: async (id: string) => {
+        if (id === 'second' && denied) throw new Error('Permission denied')
+        return {
+          model: { exists: id !== 'first', size: 1 },
+          mmproj: { exists: true, size: 1 },
+        }
+      },
+    } as never)
+    await useModelStore.getState().hydrate()
+    expect(useModelStore.getState()).toMatchObject({
+      status: 'error',
+      records,
+      activeModelId: 'second',
+    })
+    expect([...store.data]).toEqual(before)
+    expect(store.saved).toBe(0)
+
+    denied = false
+    await useModelStore.getState().hydrate()
+    expect(useModelStore.getState().status).toBe('ready')
+    expect(useModelStore.getState().records.first).toMatchObject({
+      installedAt: null,
+      benchmark: null,
+    })
+    expect(useModelStore.getState().records.second).toEqual(records.second)
+    expect(useModelStore.getState().activeModelId).toBe('second')
+    expect(store.saved).toBe(1)
+  })
+
+  test.each(['qwen2_5-vl-3b', 'unknown-installed-model'])(
+    'rehydration cannot adopt removed active %s after its record save failed (#424)',
+    async (modelId) => {
+      const { deps, store } = makeFakeDeps()
+      store.data.set('records', {
+        [modelId]: { modelId, installedAt: 1, benchmark: null },
+      })
+      store.data.set('active_model_id', modelId)
+      __setModelStoreDeps(deps)
+      const installState = vi.fn(async () => ({
+        model: { exists: false, size: 0 },
+        mmproj: { exists: true, size: 1 },
+      }))
+      __setDownloadRuntime({
+        installState,
+      } as never)
+      await useModelStore.getState().hydrate()
+      expect(useModelStore.getState().activeModelId).toBeNull()
+      expect(useModelStore.getState().records[modelId].installedAt).toBeNull()
+      await expect(
+        useModelStore.getState().selectModel(modelId)
+      ).rejects.toThrow('not installed')
+      expect(store.data.get('active_model_id')).toBeNull()
+      expect(installState).toHaveBeenCalledExactlyOnceWith(modelId)
+    }
+  )
+
+  test('overlapping mutations save coherent snapshots in invocation order (#424)', async () => {
+    const saved: Array<{ records: unknown; active: unknown }> = []
+    let pending: Record<string, unknown> = {}
+    let releaseFirst!: () => void
+    let calls = 0
+    __setModelStoreDeps({
+      storeFactory: () => ({
+        get: async () => undefined,
+        set: async (key, value) => {
+          pending[key] = structuredClone(value)
+        },
+        delete: async () => false,
+        save: async () => {
+          if (++calls === 1)
+            await new Promise<void>((resolve) => {
+              releaseFirst = resolve
+            })
+          saved.push({
+            records: pending.records,
+            active: pending.active_model_id,
+          })
+          pending = {}
+        },
+      }),
+    })
+    useModelStore.setState({
+      status: 'ready',
+      records: {
+        first: { modelId: 'first', installedAt: 1, benchmark: null },
+        second: { modelId: 'second', installedAt: 1, benchmark: null },
+      },
+      activeModelId: 'first',
+    })
+    const first = useModelStore.getState().selectModel('second')
+    await vi.waitFor(() => expect(releaseFirst).toBeTypeOf('function'))
+    const second = useModelStore.getState().forget('first')
+    releaseFirst()
+    await Promise.all([first, second])
+    expect(Object.keys(saved[0].records as object)).toEqual(['first', 'second'])
+    expect(saved[0].active).toBe('second')
+    expect(Object.keys(saved[1].records as object)).toEqual(['second'])
+    expect(saved[1].active).toBe('second')
   })
 
   test('retained Moondream selection hydrates without mutation, refuses new activation, and remains explicitly removable', async () => {
