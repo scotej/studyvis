@@ -15,6 +15,7 @@ import {
   useRef,
   useState,
   type ReactNode,
+  type Ref,
 } from 'react'
 import { CheckIcon, ChevronRightIcon, CopyIcon, Trash2Icon } from 'lucide-react'
 import { toast } from 'sonner'
@@ -55,12 +56,13 @@ export type FriendsCategoryViewProps = {
   // Only the "Studied together" / "Last together" rows depend on this; the
   // rest of a panel renders immediately from the friends row itself.
   studyStatus: StudyHistoryStatus
-  onRemove: (friend: Friend) => void
+  onRemove: (friend: Friend, opener: HTMLButtonElement) => void
   now?: number
   // ed_pubkey_hex of a panel to render already open. Storybook uses it to keep
   // the expanded content inside the axe-core gate, exactly as Disclosure's
   // defaultOpen does.
   defaultExpanded?: string
+  headingRef?: Ref<HTMLHeadingElement>
 }
 
 export function FriendsCategoryView({
@@ -69,10 +71,11 @@ export function FriendsCategoryView({
   onRemove,
   now,
   defaultExpanded,
+  headingRef,
 }: FriendsCategoryViewProps) {
   const copy = strings.settings.friends
   return (
-    <SettingsSection heading={copy.heading}>
+    <SettingsSection heading={copy.heading} headingRef={headingRef}>
       {details.length === 0 ? (
         <SettingsRow label={copy.emptyLabel} help={copy.emptyHelp} />
       ) : (
@@ -94,7 +97,7 @@ export function FriendsCategoryView({
 type FriendEntryProps = {
   detail: FriendDetail
   studyStatus: StudyHistoryStatus
-  onRemove: (friend: Friend) => void
+  onRemove: (friend: Friend, opener: HTMLButtonElement) => void
   now?: number
   defaultOpen: boolean
 }
@@ -171,7 +174,7 @@ function FriendEntry({
             type="button"
             variant="ghost"
             size="sm"
-            onClick={() => onRemove(friend)}
+            onClick={(event) => onRemove(friend, event.currentTarget)}
             aria-label={copy.removeAriaLabel(name || short)}
           >
             <Trash2Icon /> {copy.removeCta}
