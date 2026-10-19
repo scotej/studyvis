@@ -1,5 +1,45 @@
 # Changelog
 
+## 2.0.2 — 2026-10-19 — Session reliability and recovery safeguards
+
+### Changed
+
+- Local AI now explains and enforces its macOS 14 requirement. Study sessions
+  without AI remain available on macOS 11 and later.
+- Moondream 2 is unavailable with this version's AI engine. Existing downloads,
+  saved selections and session history are kept; choose another model to use AI.
+
+### Fixed
+
+- Identity recovery checks that protected keys match the saved profile.
+  Changing identity waits for the current session to be saved, with a retry
+  when saving fails.
+- Rejoining preserves the session's starting topic and subsequent changes.
+  Report timelines use consistent timestamps and refresh written accounts
+  after rejoins.
+- Browser reports distinguish missing and incomplete written accounts from
+  sessions with no AI checks, including copied and downloaded reports.
+- Abandoned peer connections close fully. Replacement connections and
+  microphone or screen changes retain the current media.
+- Approved breaks receive their full duration. Browser countdowns no longer
+  depend on desktop and browser clocks agreeing.
+- Model download cancellation stays with its own attempt. Unsaved model setup
+  changes show an error and can be retried.
+- Model benchmarks have exclusive use of the AI engine. Health checks are
+  bounded, restart results are accurate, and native work keeps the window
+  responsive.
+- Cancelled pairing and QR scanning stay cancelled. Contact saves, friend
+  removal and list refreshes retain the correct state and keyboard focus.
+- Turning off automatic updates stops pending background checks. Installing an
+  update prevents new sessions, and failed restart requests show an error.
+- Quitting announces the session departure to friends. Hosts receive accurate
+  guidance about rejoining after restarting the app.
+- Linux autostart handles executable paths and custom configuration directories.
+  Hiding the window checks that the tray is currently reachable.
+- Shortcut capture and resetting both bindings avoid conflicting changes.
+- Incomplete deletion of local AI check logs is reported and can be retried.
+- TURN settings reject malformed server addresses before connecting.
+
 ## 2.0.1 — 2026-10-16 — Security and reconnect reliability
 
 ### Fixed
