@@ -306,6 +306,16 @@ describe('runBenchmark', () => {
     })
     await vi.waitFor(() => expect(env.startedWith).toHaveLength(1))
     expect(useBenchmarkActivity.getState().modelId).toBe(SUPPORTED_MODELS[1].id)
+    const ownedActivity = useBenchmarkActivity.getState()
+    await expect(
+      runBenchmark(
+        SUPPORTED_MODELS.find((spec) => spec.id === 'moondream2')!,
+        { modelPath: '/retired.gguf', mmprojPath: '/retired-mmproj.gguf' }
+      )
+    ).rejects.toThrow('unavailable')
+    expect(useBenchmarkActivity.getState()).toBe(ownedActivity)
+    expect(env.startedWith).toHaveLength(1)
+    expect(env.stops).toBe(0)
     await expect(
       runBenchmark(SUPPORTED_MODELS[2], {
         modelPath: '/second.gguf',
