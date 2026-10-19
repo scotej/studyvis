@@ -70,7 +70,7 @@ Object.assign(window,{traces,getEvents:()=>[...events.values()].map(x=>x.event),
 const companionCodec=new MirrorCodec()
 Object.assign(window,{connectMirror:()=>accept({kind:'event',event:'mirror:client',payload:{clientId:'probe-companion',connected:true}}),companionControl:(control:any)=>companionCodec.send({type:'control',control,requestId:'probe-request'},async data=>accept({kind:'event',event:'mirror:message',payload:{clientId:'probe-companion',data}}))})
 useSettingsStore.setState(s=>({status:'ready',values:{...s.values,aiFeaturesEnabled:true,sessionTimelineEnabled:true,captureDisplays:'primary'}}))
-useModelStore.setState({status:'ready',activeModelId:'moondream2',records:{moondream2:{modelId:'moondream2',installedAt:1,benchmark:null}}})
+useModelStore.setState({status:'ready',activeModelId:'qwen2_5-vl-3b',records:{'qwen2_5-vl-3b':{modelId:'qwen2_5-vl-3b',installedAt:1,benchmark:null}}})
 useIdentityStore.setState({status:'ready',identity:null})
 __setSessionJournalRuntime({append:async(sid,lines)=>{traces.push({event:'journal',sid,lines})},read:async()=>[],now:Date.now})
 __setCaptureRuntime({extractFrame:async()=>({bitmap:{} as ImageBitmap,sourceWidth:640,sourceHeight:360}),encodeJpegBase64:async()=> 'AA==',encodeCompositeJpegBase64:async()=> 'AA==',disposeFrame:()=>{}})
