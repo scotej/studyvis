@@ -492,7 +492,7 @@ function ModelCard({
         </div>
       ) : null}
 
-      {phase === 'failed' && errorMessage ? (
+      {(phase === 'failed' || phase === 'cancelling') && errorMessage ? (
         <p
           role="alert"
           className="flex items-start gap-2 rounded-md border border-status-alerted bg-bg-raised p-3 text-sm text-status-alerted"

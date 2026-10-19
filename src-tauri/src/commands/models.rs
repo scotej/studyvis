@@ -474,7 +474,12 @@ fn load_hf_token_internal() -> Option<String> {
 
 #[derive(Default)]
 pub struct DownloadInner {
-    cancellations: HashMap<String, Arc<AtomicBool>>,
+    cancellations: HashMap<String, DownloadCancellation>,
+}
+
+struct DownloadCancellation {
+    download_id: String,
+    flag: Arc<AtomicBool>,
 }
 
 pub struct DownloadState(Arc<Mutex<DownloadInner>>);
@@ -488,8 +493,8 @@ impl DownloadState {
 async fn request_download_cancel(state: &DownloadState, model_id: &str) {
     let arc = state.0.clone();
     let guard = arc.lock().await;
-    if let Some(flag) = guard.cancellations.get(model_id) {
-        flag.store(true, Ordering::SeqCst);
+    if let Some(cancellation) = guard.cancellations.get(model_id) {
+        cancellation.flag.store(true, Ordering::SeqCst);
     }
 }
 
@@ -526,6 +531,7 @@ impl ModelFileKind {
 
 #[derive(Serialize, Clone)]
 pub struct ProgressEvent {
+    pub download_id: String,
     pub model_id: String,
     pub file: &'static str,
     pub file_index: usize,
@@ -553,6 +559,7 @@ fn emit_progress<R: Runtime>(app: &AppHandle<R>, evt: &ProgressEvent) {
 }
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn model_download<R: Runtime>(
     app: AppHandle<R>,
     state: State<'_, DownloadState>,
@@ -561,7 +568,11 @@ pub async fn model_download<R: Runtime>(
     model_id: String,
     files: Vec<ModelFileRequest>,
     use_token: bool,
+    download_id: String,
 ) -> Result<(), String> {
+    if download_id.is_empty() || download_id.len() > 128 {
+        return Err("download_id length must be 1..=128".into());
+    }
     if files.is_empty() {
         return Err("files must not be empty".into());
     }
@@ -577,7 +588,13 @@ pub async fn model_download<R: Runtime>(
                 "download already in flight for model_id={model_id}"
             ));
         }
-        guard.cancellations.insert(model_id.clone(), cancel.clone());
+        guard.cancellations.insert(
+            model_id.clone(),
+            DownloadCancellation {
+                download_id: download_id.clone(),
+                flag: cancel.clone(),
+            },
+        );
     }
 
     // Register cancellation BEFORE waiting for the model-operation gate.
@@ -612,7 +629,7 @@ pub async fn model_download<R: Runtime>(
         // Run the per-file downloads sequentially. We don't parallelize: HF's
         // CDN throttles per-connection and parallel HTTP/2 streams for the
         // same origin would just contend. Sequential keeps progress simple.
-        run_download(&app, &dir, &model_id, &files, token, &cancel).await
+        run_download(&app, &dir, &model_id, &download_id, &files, token, &cancel).await
     }
     .await;
 
@@ -627,6 +644,7 @@ pub async fn model_download<R: Runtime>(
             emit_progress(
                 &app,
                 &ProgressEvent {
+                    download_id,
                     model_id,
                     file: "all",
                     file_index: files.len(),
@@ -647,6 +665,7 @@ pub async fn model_download<R: Runtime>(
             emit_progress(
                 &app,
                 &ProgressEvent {
+                    download_id,
                     model_id,
                     file: "all",
                     file_index: 0,
@@ -663,6 +682,7 @@ pub async fn model_download<R: Runtime>(
             emit_progress(
                 &app,
                 &ProgressEvent {
+                    download_id,
                     model_id,
                     file: "all",
                     file_index: 0,
@@ -682,10 +702,20 @@ pub async fn model_download<R: Runtime>(
 pub async fn model_download_cancel(
     state: State<'_, DownloadState>,
     model_id: String,
+    download_id: String,
 ) -> Result<(), String> {
     validate_model_id(&model_id)?;
-    request_download_cancel(&state, &model_id).await;
+    request_download_attempt_cancel(&state, &model_id, &download_id).await;
     Ok(())
+}
+
+async fn request_download_attempt_cancel(state: &DownloadState, model_id: &str, download_id: &str) {
+    let guard = state.0.lock().await;
+    if let Some(cancellation) = guard.cancellations.get(model_id) {
+        if cancellation.download_id == download_id {
+            cancellation.flag.store(true, Ordering::SeqCst);
+        }
+    }
 }
 
 enum DownloadError {
@@ -697,6 +727,7 @@ async fn run_download<R: Runtime>(
     app: &AppHandle<R>,
     dir: &Path,
     model_id: &str,
+    download_id: &str,
     files: &[ModelFileRequest],
     token: Option<String>,
     cancel: &Arc<AtomicBool>,
@@ -729,6 +760,7 @@ async fn run_download<R: Runtime>(
                         emit_progress(
                             app,
                             &ProgressEvent {
+                                download_id: download_id.to_string(),
                                 model_id: model_id.to_string(),
                                 file: file.kind.label(),
                                 file_index,
@@ -751,6 +783,7 @@ async fn run_download<R: Runtime>(
             app,
             &client,
             model_id,
+            download_id,
             file_index,
             file_count,
             file,
@@ -768,6 +801,7 @@ async fn download_one<R: Runtime>(
     app: &AppHandle<R>,
     client: &reqwest::Client,
     model_id: &str,
+    download_id: &str,
     file_index: usize,
     file_count: usize,
     file: &ModelFileRequest,
@@ -871,6 +905,7 @@ async fn download_one<R: Runtime>(
     emit_progress(
         app,
         &ProgressEvent {
+            download_id: download_id.to_string(),
             model_id: model_id.to_string(),
             file: file.kind.label(),
             file_index,
@@ -912,6 +947,7 @@ async fn download_one<R: Runtime>(
             emit_progress(
                 app,
                 &ProgressEvent {
+                    download_id: download_id.to_string(),
                     model_id: model_id.to_string(),
                     file: file.kind.label(),
                     file_index,
@@ -940,6 +976,7 @@ async fn download_one<R: Runtime>(
     emit_progress(
         app,
         &ProgressEvent {
+            download_id: download_id.to_string(),
             model_id: model_id.to_string(),
             file: file.kind.label(),
             file_index,
@@ -982,6 +1019,7 @@ async fn download_one<R: Runtime>(
     emit_progress(
         app,
         &ProgressEvent {
+            download_id: download_id.to_string(),
             model_id: model_id.to_string(),
             file: file.kind.label(),
             file_index,
@@ -1139,11 +1177,36 @@ mod tests {
         tauri::async_runtime::block_on(async {
             {
                 let mut guard = state.0.lock().await;
-                guard.cancellations.insert("qwen".to_string(), flag.clone());
+                guard.cancellations.insert(
+                    "qwen".to_string(),
+                    DownloadCancellation {
+                        download_id: "download-1".to_string(),
+                        flag: flag.clone(),
+                    },
+                );
             }
             request_download_cancel(&state, "qwen").await;
         });
         assert!(flag.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn stale_cancellation_cannot_cancel_the_next_attempt() {
+        let state = DownloadState::new();
+        let flag = Arc::new(AtomicBool::new(false));
+        tauri::async_runtime::block_on(async {
+            state.0.lock().await.cancellations.insert(
+                "qwen".to_string(),
+                DownloadCancellation {
+                    download_id: "download-2".to_string(),
+                    flag: flag.clone(),
+                },
+            );
+            request_download_attempt_cancel(&state, "qwen", "download-1").await;
+            assert!(!flag.load(Ordering::SeqCst));
+            request_download_attempt_cancel(&state, "qwen", "download-2").await;
+            assert!(flag.load(Ordering::SeqCst));
+        });
     }
 
     #[test]

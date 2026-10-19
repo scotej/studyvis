@@ -171,6 +171,7 @@ describe('summariseBenchmark', () => {
 describe('progressEventToPhase / downloadFraction', () => {
   function makeProgress(overrides: Partial<ProgressEvent> = {}): ProgressEvent {
     return {
+      download_id: 'test-download',
       model_id: 'moondream2',
       file: 'model',
       file_index: 0,

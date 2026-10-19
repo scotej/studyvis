@@ -53,6 +53,39 @@ type CardState = PickerStateForModel
 
 type CardUpdate = Partial<Omit<CardState, 'spec'>>
 
+type DownloadAttempt = {
+  id: string
+  cancelled: boolean
+  nativeStarted: boolean
+  nativeSettled: boolean
+  finished: Promise<void>
+  finish: () => void
+  owner: symbol
+  cancellation: Promise<void> | null
+  cancelInFlight: Promise<void> | null
+}
+
+const activeDownloadAttempts = new Map<string, DownloadAttempt>()
+
+function cancelDownloadAttempt(
+  modelId: string,
+  attempt: DownloadAttempt
+): Promise<void> {
+  if (attempt.cancelInFlight) return attempt.cancelInFlight
+  const request = getDownloadRuntime().cancelDownload(modelId, attempt.id)
+  attempt.cancellation = request
+  attempt.cancelInFlight = request
+  void request.then(
+    () => {
+      if (attempt.cancelInFlight === request) attempt.cancelInFlight = null
+    },
+    () => {
+      if (attempt.cancelInFlight === request) attempt.cancelInFlight = null
+    }
+  )
+  return request
+}
+
 export type ModelPickerContainerProps = {
   onBusyChange?: (busy: boolean) => void
 }
@@ -115,8 +148,12 @@ export const ModelPickerContainer = forwardRef<
   // (the running count includes any prior resume offset), so the "X
   // downloaded" resume label stays honest.
   const lastDownloadBytes = useRef<Record<string, number>>({})
+  const downloadAttempts = useRef(activeDownloadAttempts)
+  const downloadOwner = useRef(Symbol())
+  const mounted = useRef(true)
 
   const updateCard = useCallback((modelId: string, patch: CardUpdate) => {
+    if (!mounted.current) return
     setCards((prev) => {
       const existing =
         prev[modelId] ??
@@ -125,6 +162,22 @@ export const ModelPickerContainer = forwardRef<
         } satisfies CardState)
       return { ...prev, [modelId]: { ...existing, ...patch } }
     })
+  }, [])
+
+  useEffect(() => {
+    mounted.current = true
+    const owner = downloadOwner.current
+    return () => {
+      mounted.current = false
+      for (const [modelId, attempt] of activeDownloadAttempts) {
+        if (attempt.owner !== owner || attempt.nativeSettled) continue
+        attempt.cancelled = true
+        if (attempt.nativeStarted && !attempt.nativeSettled) {
+          attempt.cancellation = cancelDownloadAttempt(modelId, attempt)
+          void attempt.cancellation.catch(() => {})
+        }
+      }
+    }
   }, [])
 
   // Notify the settings gate in the originating click before async work can
@@ -213,6 +266,20 @@ export const ModelPickerContainer = forwardRef<
 
   const handleProgress = useCallback(
     (evt: ProgressEvent) => {
+      const attempt = downloadAttempts.current.get(evt.model_id)
+      if (
+        !attempt?.nativeStarted ||
+        attempt.nativeSettled ||
+        evt.download_id !== attempt.id
+      )
+        return
+      if (attempt.cancelled) {
+        // Cancellation can reach Rust before model_download has registered its
+        // flag. A first transfer event closes that transition race (#387).
+        attempt.cancellation = cancelDownloadAttempt(evt.model_id, attempt)
+        void attempt.cancellation.catch(() => {})
+        return
+      }
       const next = progressEventToPhase(evt)
       if (next) {
         // A4 — only the streaming 'downloading' events carry a real byte
@@ -375,103 +442,157 @@ export const ModelPickerContainer = forwardRef<
   const runDownload = useCallback(
     async (spec: ModelSpec) => {
       const runtime = getDownloadRuntime()
-      startCardWork(spec.id, {
-        phase: 'starting',
-        downloadProgress: 0,
-        errorMessage: null,
-      })
-
-      // 1) HEAD-check both URLs to fail fast on size mismatch / auth errors
-      // before committing to the full download.
-      const files = specToFileRequests(spec)
-      try {
-        for (const file of files) {
-          const head = await runtime.headCheck(file.url, spec.gated)
-          if (head.status === 401 || head.status === 403) {
-            throw new Error(
-              spec.gated
-                ? strings.ai.picker.hfRejectedDetailed(head.status, spec.hfRepo)
-                : strings.ai.picker.hfRejected(head.status)
-            )
-          }
-          if (head.status >= 400) {
-            throw new Error(strings.ai.picker.headBadUrl(file.url, head.status))
-          }
-          if (
-            head.content_length != null &&
-            head.content_length !== file.size_bytes
-          ) {
-            throw new Error(
-              strings.ai.picker.sizeMismatch(
-                head.content_length,
-                file.kind,
-                file.size_bytes
-              )
-            )
-          }
-        }
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err)
-        updateCard(spec.id, {
-          phase: 'failed',
+      const previous = downloadAttempts.current.get(spec.id)
+      if (previous?.nativeStarted) {
+        startCardWork(spec.id, {
+          phase: 'cancelling',
           downloadProgress: null,
-          errorMessage: message,
+          errorMessage: null,
         })
-        return
+        await previous.finished
+        if (!mounted.current) return
       }
-
-      // 2) Kick off the actual download. Progress events flip phase via the
-      // listener installed in useEffect above.
+      let finish!: () => void
+      const finished = new Promise<void>((resolve) => {
+        finish = resolve
+      })
+      const attempt: DownloadAttempt = {
+        id: Array.from(crypto.getRandomValues(new Uint32Array(4))).join('-'),
+        cancelled: false,
+        nativeStarted: false,
+        nativeSettled: false,
+        finished,
+        finish,
+        owner: downloadOwner.current,
+        cancellation: null,
+        cancelInFlight: null,
+      }
+      downloadAttempts.current.set(spec.id, attempt)
       try {
-        await runtime.startDownload(spec.id, files, spec.gated)
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err)
-        if (message === 'cancelled') {
-          updateCard(spec.id, {
-            phase: 'idle',
-            downloadProgress: null,
-            errorMessage: null,
-          })
-        } else {
+        const stillCurrent = () =>
+          downloadAttempts.current.get(spec.id) === attempt
+        const cancelled = () => attempt.cancelled || !stillCurrent()
+        startCardWork(spec.id, {
+          phase: 'starting',
+          downloadProgress: 0,
+          errorMessage: null,
+        })
+
+        // 1) HEAD-check both URLs to fail fast on size mismatch / auth errors
+        // before committing to the full download.
+        const files = specToFileRequests(spec)
+        try {
+          for (const file of files) {
+            if (cancelled()) return
+            const head = await runtime.headCheck(file.url, spec.gated)
+            if (cancelled()) return
+            if (head.status === 401 || head.status === 403) {
+              throw new Error(
+                spec.gated
+                  ? strings.ai.picker.hfRejectedDetailed(
+                      head.status,
+                      spec.hfRepo
+                    )
+                  : strings.ai.picker.hfRejected(head.status)
+              )
+            }
+            if (head.status >= 400) {
+              throw new Error(
+                strings.ai.picker.headBadUrl(file.url, head.status)
+              )
+            }
+            if (
+              head.content_length != null &&
+              head.content_length !== file.size_bytes
+            ) {
+              throw new Error(
+                strings.ai.picker.sizeMismatch(
+                  head.content_length,
+                  file.kind,
+                  file.size_bytes
+                )
+              )
+            }
+          }
+        } catch (err) {
+          if (cancelled()) return
+          const message = err instanceof Error ? err.message : String(err)
           updateCard(spec.id, {
             phase: 'failed',
             downloadProgress: null,
             errorMessage: message,
           })
+          return
         }
+
+        // 2) Kick off the actual download. Progress events flip phase via the
+        // listener installed in useEffect above.
+        if (cancelled()) return
+        attempt.nativeStarted = true
+        try {
+          await runtime.startDownload(spec.id, files, spec.gated, attempt.id)
+          attempt.nativeSettled = true
+        } catch (err) {
+          attempt.nativeSettled = true
+          await attempt.cancellation?.catch(() => {})
+          if (!stillCurrent()) return
+          recordPartialFromLastSeen(spec.id)
+          const message = err instanceof Error ? err.message : String(err)
+          if (message === 'cancelled' || attempt.cancelled) {
+            updateCard(spec.id, {
+              phase: 'idle',
+              downloadProgress: null,
+              errorMessage: null,
+            })
+          } else {
+            updateCard(spec.id, {
+              phase: 'failed',
+              downloadProgress: null,
+              errorMessage: message,
+            })
+          }
+          await refreshInstallState(spec)
+          return
+        }
+
+        // Native success means both verified files are installed. Persist that
+        // result even if Settings closes or a late cancellation loses the race.
+        await recordInstalled(spec.id)
+
+        // First install becomes the selected model, but never switch models as
+        // an in-flight download finishes while AI is enabled. That would bypass
+        // the unbenchmarked enable warning. A later model stays installed until
+        // the user explicitly clicks "Use model."
+        let selected = false
+        const modelState = useModelStore.getState()
+        const aiEnabled = useSettingsStore.getState().values.aiFeaturesEnabled
+        if (!modelState.activeModelId && !aiEnabled) {
+          await selectModel(spec.id)
+          selected = true
+        }
+
+        await attempt.cancellation?.catch(() => {})
         await refreshInstallState(spec)
-        return
+        updateCard(spec.id, {
+          phase: 'idle',
+          downloadProgress: null,
+          errorMessage: null,
+        })
+        toast.success(
+          selected
+            ? strings.ai.picker.installedAndSelectedToast(spec.displayName)
+            : strings.ai.picker.installedToast(spec.displayName)
+        )
+      } finally {
+        if (downloadAttempts.current.get(spec.id) === attempt)
+          downloadAttempts.current.delete(spec.id)
+        attempt.finish()
       }
-
-      await refreshInstallState(spec)
-      await recordInstalled(spec.id)
-
-      // First install becomes the selected model, but never switch models as
-      // an in-flight download finishes while AI is enabled. That would bypass
-      // the unbenchmarked enable warning. A later model stays installed until
-      // the user explicitly clicks "Use model."
-      let selected = false
-      const modelState = useModelStore.getState()
-      const aiEnabled = useSettingsStore.getState().values.aiFeaturesEnabled
-      if (!modelState.activeModelId && !aiEnabled) {
-        await selectModel(spec.id)
-        selected = true
-      }
-
-      updateCard(spec.id, {
-        phase: 'idle',
-        downloadProgress: null,
-        errorMessage: null,
-      })
-      toast.success(
-        selected
-          ? strings.ai.picker.installedAndSelectedToast(spec.displayName)
-          : strings.ai.picker.installedToast(spec.displayName)
-      )
     },
     [
       updateCard,
       startCardWork,
+      recordPartialFromLastSeen,
       refreshInstallState,
       recordInstalled,
       selectModel,
@@ -549,16 +670,24 @@ export const ModelPickerContainer = forwardRef<
 
   const onCancel = useCallback(
     (spec: ModelSpec) => {
-      updateCard(spec.id, { phase: 'cancelling' })
-      void getDownloadRuntime()
-        .cancelDownload(spec.id)
-        .catch((err) => {
-          const message = err instanceof Error ? err.message : String(err)
-          updateCard(spec.id, {
-            phase: 'failed',
-            errorMessage: message,
-          })
+      const attempt = downloadAttempts.current.get(spec.id)
+      if (!attempt || attempt.nativeSettled) return
+      attempt.cancelled = true
+      if (!attempt.nativeStarted) {
+        updateCard(spec.id, {
+          phase: 'idle',
+          downloadProgress: null,
+          errorMessage: null,
         })
+        return
+      }
+      updateCard(spec.id, { phase: 'cancelling' })
+      attempt.cancellation = cancelDownloadAttempt(spec.id, attempt)
+      void attempt.cancellation.catch((err) => {
+        if (downloadAttempts.current.get(spec.id) !== attempt) return
+        const message = err instanceof Error ? err.message : String(err)
+        updateCard(spec.id, { phase: 'cancelling', errorMessage: message })
+      })
     },
     [updateCard]
   )

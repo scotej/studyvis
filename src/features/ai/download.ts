@@ -13,6 +13,7 @@ export type ProgressPhase =
   'downloading' | 'verifying' | 'done' | 'failed' | 'cancelled'
 
 export type ProgressEvent = {
+  download_id: string
   model_id: string
   // The Rust side emits 'all' for the terminal events; per-file events use
   // the kind label.
@@ -57,9 +58,10 @@ export type DownloadRuntime = {
   startDownload: (
     modelId: string,
     files: DownloadFileRequest[],
-    useToken: boolean
+    useToken: boolean,
+    downloadId: string
   ) => Promise<void>
-  cancelDownload: (modelId: string) => Promise<void>
+  cancelDownload: (modelId: string, downloadId: string) => Promise<void>
   subscribeProgress: (
     handler: (e: ProgressEvent) => void
   ) => Promise<UnlistenFn>
@@ -74,10 +76,10 @@ const defaultRuntime: DownloadRuntime = {
   remove: (modelId) => invoke<void>('model_remove', { modelId }),
   headCheck: (url, withToken) =>
     invoke<HeadResult>('model_head_check', { url, withToken }),
-  startDownload: (modelId, files, useToken) =>
-    invoke<void>('model_download', { modelId, files, useToken }),
-  cancelDownload: (modelId) =>
-    invoke<void>('model_download_cancel', { modelId }),
+  startDownload: (modelId, files, useToken, downloadId) =>
+    invoke<void>('model_download', { modelId, files, useToken, downloadId }),
+  cancelDownload: (modelId, downloadId) =>
+    invoke<void>('model_download_cancel', { modelId, downloadId }),
   subscribeProgress: (handler) =>
     listen<ProgressEvent>(PROGRESS_EVENT_NAME, (evt) => handler(evt.payload)),
 }
