@@ -32,6 +32,10 @@ import {
   originalMediaWindowStopped,
   type MediaTransportSnapshot,
 } from '../src/mediaCessation'
+import {
+  originalTransportsClosed,
+  type OriginalMediaTransport,
+} from '../src/transportClosure'
 
 // Measured against this harness: a 15 s freeze degrades alice's transport for
 // ~11 s. That is comfortably past the 5 s after which trystero closes the peer
@@ -265,15 +269,25 @@ scenario('reconnect', async ({ lab, step, check, ui }) => {
     }
   )
   check('the original receiver track is delivering frames', true)
-  const doomedTransports = (await ui.evaluate(
-    alice.page(),
-    `window.__lab.peers().flatMap((peer, index) =>
-      peer.connectionState === 'connected' && peer.sendingTracks > 0 ? [index] : []
-    )`
-  )) as number[]
+  const doomedTransports = await alice.page().evaluateHandle(() =>
+    (
+      window as unknown as {
+        __lab: { mediaTransports: () => OriginalMediaTransport[] }
+      }
+    ).__lab.mediaTransports()
+  )
   check(
-    'alice has a known media transport to retire',
-    doomedTransports.length > 0
+    'alice has a known media transport with open channels to retire',
+    await doomedTransports.evaluate(
+      (transports) =>
+        transports.length > 0 &&
+        transports.every(
+          ({ connection, channels }) =>
+            connection.connectionState === 'connected' &&
+            connection.getSenders().some((sender) => sender.track) &&
+            channels.some((channel) => channel.readyState === 'open')
+        )
+    )
   )
   step(`bob's renderer is frozen for ${LONG_FREEZE_MS / 1000}s, past the hold`)
   await freeze(bob, LONG_FREEZE_MS)
@@ -296,17 +310,31 @@ scenario('reconnect', async ({ lab, step, check, ui }) => {
     'the departure was recorded as a transport loss',
     left?.data?.awaitingReconnect === true
   )
-  await ui.until(
-    async () =>
-      (await ui.evaluate(
-        alice.page(),
-        `(${JSON.stringify(doomedTransports)}).every(index =>
-          window.__lab.peers()[index].connectionState === 'closed'
-        )`
-      )) === true,
-    { label: "alice's original media transports to close", timeoutMs: 10_000 }
-  )
-  check('the original media transports are closed', true)
+  try {
+    await ui.until(() => doomedTransports.evaluate(originalTransportsClosed), {
+      label: "alice's original media transports and channels to close",
+      timeoutMs: 10_000,
+    })
+    check(
+      'the original media transports are closed with no open channels',
+      true
+    )
+  } finally {
+    process.stderr.write(
+      `  original transport closure: ${JSON.stringify(
+        await doomedTransports.evaluate((transports) =>
+          transports.map(({ connection, channels }) => ({
+            connectionState: connection.connectionState,
+            channels: channels.map((channel) => ({
+              label: channel.label,
+              readyState: channel.readyState,
+            })),
+          }))
+        )
+      )}\n`
+    )
+    await doomedTransports.dispose()
+  }
   step('bob stops receiving alice — she is no longer on camera to him')
   // A stopped renderer can decode its queued RTP after the sender closes.
   // Allow a bounded drain, then require a FULL four-second window with both
