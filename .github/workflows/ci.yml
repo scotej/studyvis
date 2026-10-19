@@ -82,13 +82,13 @@ jobs:
         run: npx playwright install --with-deps chromium
 
       - name: Production browser regressions
-        # mirror-browser has its own browser-matrix acceptance job below.
+        # Native companion suites run below with the compiled Rust fixture.
         # Storybook and these direct playwright-core probes can use different versions.
         env:
           PLAYWRIGHT_SKIP_BROWSER_GC: '1'
         run: |
           npx playwright-core install --with-deps chromium
-          mapfile -d '' -t production_tests < <(find tests/production -maxdepth 1 -type f -name '*.mjs' ! -name mirror-browser.mjs -print0 | sort -z)
+          mapfile -d '' -t production_tests < <(find tests/production -maxdepth 1 -type f -name '*.mjs' ! -name mirror-browser.mjs ! -name mirror-app-browser.mjs -print0 | sort -z)
           node --test --test-concurrency=1 "${production_tests[@]}"
 
       - name: Frontend interaction regressions
@@ -402,7 +402,8 @@ jobs:
           PLAYWRIGHT_SKIP_BROWSER_GC: '1'
         run: |
           npx playwright-core install --with-deps chromium firefox webkit
-          node --import tsx --test tests/production/mirror-browser.mjs
+          node --import tsx --test --test-concurrency=1 \
+            tests/production/mirror-browser.mjs tests/production/mirror-app-browser.mjs
 
       - name: Upload browser companion evidence
         if: ${{ failure() && runner.os == 'Linux' }}
@@ -412,6 +413,8 @@ jobs:
           path: |
             lab/.work
             !lab/.work/**/mirror-certificate/**
+            !lab/.work/**/app-certificate/**
+            !lab/.work/**/legacy-to-app-certificate/**
           include-hidden-files: true
           if-no-files-found: ignore
           retention-days: 7

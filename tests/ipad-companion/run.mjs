@@ -50,6 +50,7 @@ const report = {
   commands: [],
   errors: [],
   sourceSha256: {},
+  nativeScreenCaptureKitSymbolCompile: false,
 }
 const secrets = new Set()
 const scrub = (value) => {
@@ -158,9 +159,154 @@ async function command(
     record.exitCode = code
     if (required && code !== 0)
       throw new Error(`${executable} failed (${code}); see ${name}: ${stderr}`)
-    return { code, stdout, stderr }
+    return { code, stdout, stderr, log: name }
   } finally {
     await new Promise((resolve) => log.end(resolve))
+  }
+}
+
+async function compileNativeScreenCaptureKitSymbol() {
+  const source = 'tests/ipad-companion/ProbeHarness/ProbeHarness.swift'
+  const compile = {
+    sdk: 'iphoneos',
+    target: 'arm64-apple-ios27.0',
+    source,
+    sourceSha256: report.sourceSha256[source],
+    startedAt: new Date().toISOString(),
+    sdkVersion: null,
+    sdkPath: null,
+    compilerPath: null,
+    compilerVersion: null,
+    phase: 'sdk-version',
+    logs: {},
+    log: null,
+    exitCode: null,
+    object: null,
+    error: null,
+  }
+  report.nativeScreenCaptureKitCompile = compile
+  try {
+    const sdk = await command(
+      'xcrun',
+      ['--sdk', 'iphoneos', '--show-sdk-version'],
+      { required: false }
+    )
+    compile.logs.sdkVersion = sdk.log
+    compile.sdkVersion = sdk.stdout.trim()
+    assert.equal(
+      sdk.code,
+      0,
+      `Device SDK version discovery failed; see ${sdk.log}`
+    )
+    assert.equal(
+      Number(compile.sdkVersion.split('.')[0]),
+      27,
+      'An installed iOS device 27 SDK is required'
+    )
+    compile.phase = 'sdk-path'
+    const sdkPath = await command(
+      'xcrun',
+      ['--sdk', 'iphoneos', '--show-sdk-path'],
+      { required: false }
+    )
+    compile.logs.sdkPath = sdkPath.log
+    compile.sdkPath = sdkPath.stdout.trim()
+    assert.equal(
+      sdkPath.code,
+      0,
+      `Device SDK path discovery failed; see ${sdkPath.log}`
+    )
+    assert.ok(
+      path.isAbsolute(compile.sdkPath),
+      'Device SDK path must be absolute'
+    )
+    compile.phase = 'compiler-path'
+    const compiler = await command(
+      'xcrun',
+      ['--sdk', 'iphoneos', '--find', 'swiftc'],
+      { required: false }
+    )
+    compile.logs.compilerPath = compiler.log
+    compile.compilerPath = compiler.stdout.trim()
+    assert.equal(
+      compiler.code,
+      0,
+      `Swift compiler discovery failed; see ${compiler.log}`
+    )
+    assert.ok(
+      path.isAbsolute(compile.compilerPath),
+      'Swift compiler path must be absolute'
+    )
+    compile.phase = 'compiler-version'
+    const version = await command(
+      'xcrun',
+      ['--sdk', 'iphoneos', 'swiftc', '--version'],
+      { required: false }
+    )
+    compile.logs.compilerVersion = version.log
+    compile.compilerVersion = version.stdout.trim()
+    assert.equal(
+      version.code,
+      0,
+      `Swift compiler version failed; see ${version.log}`
+    )
+    assert.ok(
+      compile.compilerVersion,
+      'Swift compiler version must be recorded'
+    )
+    const objectPath = path.join(privateDirectory, 'ScreenCaptureKitSymbol.o')
+    compile.phase = 'object-compile'
+    const result = await command(
+      'xcrun',
+      [
+        '--sdk',
+        'iphoneos',
+        'swiftc',
+        '-sdk',
+        compile.sdkPath,
+        '-target',
+        compile.target,
+        '-parse-as-library',
+        '-c',
+        path.join(root, source),
+        '-o',
+        objectPath,
+      ],
+      { timeout: 120_000, required: false }
+    )
+    compile.log = result.log
+    compile.logs.object = result.log
+    compile.exitCode = result.code
+    assert.equal(
+      result.code,
+      0,
+      `Device SDK symbol compile failed; see ${result.log}: ${result.stderr}`
+    )
+    compile.phase = 'object-verification'
+    const object = await readFile(objectPath)
+    assert.ok(object.length > 0, 'Device SDK symbol compile emitted no object')
+    assert.equal(
+      createHash('sha256')
+        .update(await readFile(path.join(root, source)))
+        .digest('hex'),
+      compile.sourceSha256,
+      'Harness source changed during device SDK compilation'
+    )
+    await copyFile(objectPath, path.join(output, 'ScreenCaptureKitSymbol.o'))
+    compile.object = {
+      file: 'ScreenCaptureKitSymbol.o',
+      bytes: object.length,
+      sha256: createHash('sha256').update(object).digest('hex'),
+    }
+    compile.phase = 'complete'
+    report.nativeScreenCaptureKitSymbolCompile = true
+  } catch (error) {
+    const failedCommand = report.commands.at(-1)
+    compile.log ??= failedCommand?.log ?? null
+    compile.exitCode ??= failedCommand?.exitCode ?? null
+    compile.error = scrub(error.stack ?? error)
+  } finally {
+    compile.finishedAt = new Date().toISOString()
   }
 }
 
@@ -443,6 +589,7 @@ async function runProbe() {
   )
   await page.goto(`${url}/mirror.html?role=host`)
   await page.waitForFunction(() => window.ipadProbeHost)
+  await compileNativeScreenCaptureKitSymbol()
   const project = path.join(here, 'Probe.xcodeproj')
   const common = [
     '-project',
@@ -460,7 +607,6 @@ async function runProbe() {
   await command('xcodebuild', ['build-for-testing', ...common], {
     timeout: 10 * 60_000,
   })
-  report.nativeScreenCaptureKitSymbolCompile = true
   await command(
     'xcrun',
     [

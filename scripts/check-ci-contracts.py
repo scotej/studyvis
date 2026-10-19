@@ -291,6 +291,38 @@ def check_ipc(root: Path, errors: list[str]) -> None:
             errors.append(f"{config_path.name}: inline/override capability selection requires explicit policy review")
 
 
+def check_companion_suites(root: Path, ci: dict, errors: list[str]) -> None:
+    suites = {"mirror-browser.mjs", "mirror-app-browser.mjs"}
+    native = {name for name in suites if (root / "tests/production" / name).is_file()}
+    if not native:
+        return
+    frontend = ci["jobs"].get("frontend", {}).get("steps", [])
+    discovery = [step.get("run", "") for step in frontend
+                 if step.get("name") == "Production browser regressions"]
+    if len(discovery) != 1 or "find tests/production" not in discovery[0] or '"${production_tests[@]}"' not in discovery[0]:
+        errors.append("production browser suites must be discovered automatically")
+    elif set(re.findall(r"!\s+-name\s+([a-z.-]+)", discovery[0])) != native:
+        errors.append("production discovery may exclude only the separately required native companion suites")
+    steps = ci["jobs"].get("rust", {}).get("steps", [])
+    acceptance = [step for step in steps if step.get("name") == "Browser companion acceptance (Chromium, Firefox, WebKit)"]
+    if len(acceptance) != 1:
+        errors.append("native companion acceptance must remain in the required Rust job")
+        return
+    step = acceptance[0]
+    script = step.get("run", "")
+    if step.get("continue-on-error") or expression(step.get("if", "")) != "runner.os == 'Linux'":
+        errors.append("native companion acceptance must run without an error waiver on the Linux Rust leg")
+    if "node --import tsx --test --test-concurrency=1" not in script or any(f"tests/production/{name}" not in script for name in native):
+        errors.append("every native companion suite must execute with the TypeScript loader and compiled fixture")
+    earlier = steps[:steps.index(step)]
+    if not any("cargo build --locked --manifest-path src-tauri/Cargo.toml --example mirror_fixture" in item.get("run", "") for item in earlier):
+        errors.append("native companion acceptance requires its fixture build first")
+    artifacts = [item for item in steps if item.get("name") == "Upload browser companion evidence"]
+    private_directories = {"mirror-certificate", "app-certificate", "legacy-to-app-certificate"}
+    if len(artifacts) != 1 or any(f"!lab/.work/**/{name}/**" not in artifacts[0].get("with", {}).get("path", "") for name in private_directories):
+        errors.append("native companion artifacts must exclude every private fixture certificate directory")
+
+
 def check_contracts(root: Path = ROOT) -> list[str]:
     errors: list[str] = []
     try:
@@ -299,6 +331,7 @@ def check_contracts(root: Path = ROOT) -> list[str]:
         check_caches(root, ci, deploy, release, errors)
         check_native_manifest(root, errors)
         check_ipc(root, errors)
+        check_companion_suites(root, ci, errors)
     except (OSError, ValueError, KeyError, TypeError, yaml.YAMLError) as error:
         errors.append(f"could not verify repository contracts: {error}")
     return errors

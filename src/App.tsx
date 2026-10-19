@@ -19,6 +19,10 @@ import {
   useAppliedWindowStyle,
 } from '@/lib/appliedWindowStyle'
 import { Home } from '@/routes/Home'
+import {
+  MirrorAppAccess,
+  MirrorAppOwnerProvider,
+} from '@/features/mirror/MirrorAppOwnerProvider'
 import { StyleGuide } from '@/routes/StyleGuide'
 import type { WindowStyleMode } from '@/stores/settingsStore'
 
@@ -68,19 +72,26 @@ function App({
         <PomodoroNotifyListener />
         <WindowLayoutListener />
         <UpdaterBoot />
-        <BrowserRouter>
-          <ChromeAwareShell>
-            <ErrorBoundary surface="routes">
-              <Routes>
-                <Route path="/" element={<Home />} />
-                {isDev ? (
-                  <Route path="/style" element={<StyleGuide />} />
-                ) : null}
-              </Routes>
-            </ErrorBoundary>
-          </ChromeAwareShell>
-          <Toaster position="bottom-right" />
-        </BrowserRouter>
+        <MirrorAppOwnerProvider>
+          <div className="flex h-full flex-col">
+            <MirrorAppAccess />
+            <div className="min-h-0 flex-1 overflow-auto">
+              <BrowserRouter>
+                <ChromeAwareShell>
+                  <ErrorBoundary surface="routes">
+                    <Routes>
+                      <Route path="/" element={<Home />} />
+                      {isDev ? (
+                        <Route path="/style" element={<StyleGuide />} />
+                      ) : null}
+                    </Routes>
+                  </ErrorBoundary>
+                </ChromeAwareShell>
+                <Toaster position="bottom-right" />
+              </BrowserRouter>
+            </div>
+          </div>
+        </MirrorAppOwnerProvider>
       </ThemeProvider>
     </AppliedWindowStyleContext.Provider>
   )

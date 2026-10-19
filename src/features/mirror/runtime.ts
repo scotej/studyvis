@@ -282,17 +282,20 @@ export function createMirrorHost(options: MirrorHostOptions): MirrorHost {
             })
           )
           listeners.push(
-            await listen<{ requestId: string }>(
-              'mirror:session-ended',
-              ({ payload }) => {
-                if (
-                  active &&
-                  run === generation &&
-                  requestId === payload.requestId
-                )
-                  retireSession()
-              }
-            )
+            await listen<{
+              requestId: string
+              sessionActivationId: string | null
+            }>('mirror:session-ended', ({ payload }) => {
+              if (
+                active &&
+                run === generation &&
+                requestId === payload.requestId &&
+                typeof payload.sessionActivationId === 'string' &&
+                options.app?.getSnapshot()?.sessionActivationId ===
+                  payload.sessionActivationId
+              )
+                retireSession()
+            })
           )
         }
         listeners.push(

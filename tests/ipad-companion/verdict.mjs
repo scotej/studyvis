@@ -7,6 +7,9 @@ function live(tracks, kind) {
 }
 
 export function evaluateProbe(report) {
+  const nativeCompile = report.nativeScreenCaptureKitCompile
+  const harness = 'tests/ipad-companion/ProbeHarness/ProbeHarness.swift'
+  const sha256 = /^[a-f0-9]{64}$/
   const browser = report.browserEvents ?? []
   const desktop = report.desktopEvents ?? []
   const rows = (kind) => browser.filter((event) => event.kind === kind)
@@ -76,7 +79,21 @@ export function evaluateProbe(report) {
       report.simulator?.deviceType?.includes('iPad') === true,
     uiTestSucceeded: report.xcodeTestExit === 0,
     nativeSdkSymbolCompiled:
-      report.nativeScreenCaptureKitSymbolCompile === true,
+      report.nativeScreenCaptureKitSymbolCompile === true &&
+      nativeCompile?.sdk === 'iphoneos' &&
+      nativeCompile.target === 'arm64-apple-ios27.0' &&
+      /^27(?:\.\d+)*$/.test(nativeCompile.sdkVersion ?? '') &&
+      nativeCompile.phase === 'complete' &&
+      nativeCompile.exitCode === 0 &&
+      nativeCompile.error === null &&
+      nativeCompile.source === harness &&
+      sha256.test(nativeCompile.sourceSha256 ?? '') &&
+      nativeCompile.sourceSha256 === report.sourceSha256?.[harness] &&
+      /^\d+-xcrun\.log$/.test(nativeCompile.log ?? '') &&
+      nativeCompile.object?.file === 'ScreenCaptureKitSymbol.o' &&
+      Number.isSafeInteger(nativeCompile.object.bytes) &&
+      nativeCompile.object.bytes > 0 &&
+      sha256.test(nativeCompile.object.sha256 ?? ''),
     trustedHttps:
       report.trustedHttps === true && runtime?.secureContext === true,
     actualSimulatorSafari:

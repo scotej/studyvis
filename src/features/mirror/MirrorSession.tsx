@@ -60,7 +60,12 @@ import {
   type MirrorControl,
 } from './sessionBridge'
 
-export type MirrorSessionProps = { connection: BrowserConnection }
+export type MirrorSessionProps = {
+  connection: BrowserConnection
+  onCloseReport?: () => void
+  onRejoin?: () => void
+  rejoinDeadline?: number
+}
 
 function pairingErrorCopy(error: string | null): string {
   const copy = strings.mirror
@@ -79,7 +84,12 @@ function pairingErrorCopy(error: string | null): string {
 const monotonicNow = () => performance.now()
 const frozenNow = () => 0
 
-export function MirrorSession({ connection }: MirrorSessionProps) {
+export function MirrorSession({
+  connection,
+  onCloseReport,
+  onRejoin,
+  rejoinDeadline,
+}: MirrorSessionProps) {
   const state = useSyncExternalStore(connection.subscribe, connection.getState)
   const snapshot = useMemo(
     () => readMirrorSnapshot(state.snapshot),
@@ -515,7 +525,10 @@ export function MirrorSession({ connection }: MirrorSessionProps) {
     return (
       <ReportView
         data={report}
-        onClose={() => connection.disconnect()}
+        onClose={onCloseReport ?? (() => connection.disconnect())}
+        closeLabel={onCloseReport ? strings.mirror.app.home : undefined}
+        onRejoin={onRejoin}
+        rejoinDeadline={rejoinDeadline}
         autoFocusClose
         topContent={
           state.status !== 'connected' || state.reportCached === false ? (
@@ -545,6 +558,16 @@ export function MirrorSession({ connection }: MirrorSessionProps) {
           ) : undefined
         }
       />
+    )
+
+  if (!snapshot && state.appSnapshot && state.status === 'connected')
+    return (
+      <main
+        className="flex min-h-full items-center justify-center bg-bg-base px-6 py-6 text-text-secondary"
+        aria-busy="true"
+      >
+        <span role="status">{strings.mirror.app.loading}</span>
+      </main>
     )
 
   if (!snapshot)

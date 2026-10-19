@@ -74,6 +74,8 @@ export type MirrorAppRequest = {
   version: 1
   requestId: string
   ownerEpoch: string
+  replayGeneration: string
+  replaySequence: number
   sessionActivationId: string | null
   expectedRevision: number
   command: MirrorAppCommandName
@@ -89,6 +91,8 @@ export type MirrorAppResult = {
 export type MirrorAppSnapshot = {
   version: 1
   ownerEpoch: string
+  replayGeneration: string
+  replayNextSequence: number
   revision: number
   phase:
     'loading' | 'identity_error' | 'onboarding' | 'home' | 'session' | 'report'
@@ -131,7 +135,9 @@ const unsafeKeys =
   /^(?:__proto__|prototype|constructor|ed_?priv(?:ate)?(?:_?hex)?|x_?priv(?:ate)?(?:_?hex)?|private_?key|mnemonic|password|session_?password|credential|token|model_?path|mmproj_?path|log_?path|app_?log_?path)$/i
 
 export const appId = (v: unknown): v is string =>
-  typeof v === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(v)
+  typeof v === 'string' &&
+  /^[A-Za-z0-9_-]{1,128}$/.test(v) &&
+  !['__proto__', 'prototype', 'constructor'].includes(v)
 export const appRevision = (v: unknown): v is number =>
   typeof v === 'number' && Number.isSafeInteger(v) && v >= 0
 export const appRecord = (v: unknown): v is Record<string, unknown> =>
@@ -200,6 +206,8 @@ export function readMirrorAppRequest(v: unknown): MirrorAppRequest | null {
       'version',
       'requestId',
       'ownerEpoch',
+      'replayGeneration',
+      'replaySequence',
       'sessionActivationId',
       'expectedRevision',
       'command',
@@ -208,6 +216,8 @@ export function readMirrorAppRequest(v: unknown): MirrorAppRequest | null {
     v.version !== 1 ||
     !appId(v.requestId) ||
     !appId(v.ownerEpoch) ||
+    !appId(v.replayGeneration) ||
+    !appRevision(v.replaySequence) ||
     !(v.sessionActivationId === null || appId(v.sessionActivationId)) ||
     !appRevision(v.expectedRevision) ||
     !isMirrorAppCommand(v.command) ||
@@ -218,6 +228,8 @@ export function readMirrorAppRequest(v: unknown): MirrorAppRequest | null {
     version: 1,
     requestId: v.requestId,
     ownerEpoch: v.ownerEpoch,
+    replayGeneration: v.replayGeneration,
+    replaySequence: v.replaySequence,
     sessionActivationId: v.sessionActivationId,
     expectedRevision: v.expectedRevision,
     command: v.command,
@@ -231,6 +243,8 @@ export function readMirrorAppSnapshot(v: unknown): MirrorAppSnapshot | null {
     !appFields(v, [
       'version',
       'ownerEpoch',
+      'replayGeneration',
+      'replayNextSequence',
       'revision',
       'phase',
       'identity',
@@ -239,6 +253,8 @@ export function readMirrorAppSnapshot(v: unknown): MirrorAppSnapshot | null {
     ]) ||
     v.version !== 1 ||
     !appId(v.ownerEpoch) ||
+    !appId(v.replayGeneration) ||
+    !appRevision(v.replayNextSequence) ||
     !appRevision(v.revision) ||
     typeof v.phase !== 'string' ||
     !phases.has(v.phase) ||

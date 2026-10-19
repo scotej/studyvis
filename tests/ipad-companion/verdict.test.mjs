@@ -42,6 +42,25 @@ function completeRecords() {
     },
     xcodeTestExit: 0,
     nativeScreenCaptureKitSymbolCompile: true,
+    sourceSha256: {
+      'tests/ipad-companion/ProbeHarness/ProbeHarness.swift': 'a'.repeat(64),
+    },
+    nativeScreenCaptureKitCompile: {
+      sdk: 'iphoneos',
+      sdkVersion: '27.0',
+      target: 'arm64-apple-ios27.0',
+      source: 'tests/ipad-companion/ProbeHarness/ProbeHarness.swift',
+      sourceSha256: 'a'.repeat(64),
+      phase: 'complete',
+      exitCode: 0,
+      error: null,
+      log: '20-xcrun.log',
+      object: {
+        file: 'ScreenCaptureKitSymbol.o',
+        bytes: 4096,
+        sha256: 'b'.repeat(64),
+      },
+    },
     trustedHttps: true,
     errors: [],
     connectionEvents: [
@@ -152,6 +171,115 @@ test('unsupported API is a completed diagnostic and a failing capture qualificat
     result.missingEvidence.includes('displayFramesBeforeAndAfterReconnect')
   )
 })
+
+test('a failed device SDK compile permits completed Safari diagnostics but never acceptance', () => {
+  const report = completeRecords()
+  report.nativeScreenCaptureKitSymbolCompile = false
+  Object.assign(report.nativeScreenCaptureKitCompile, {
+    phase: 'object-compile',
+    exitCode: 1,
+    error: 'Device SDK symbol compile failed; see 20-xcrun.log',
+    object: null,
+  })
+  const result = evaluateProbe(report)
+  assert.equal(result.diagnosticComplete, true)
+  assert.equal(result.checks.nativeSdkSymbolCompiled, false)
+  assert.equal(result.simulatorScreenSharingAccepted, false)
+  assert.equal(result.issue365Accepted, false)
+  assert.deepEqual(result.missingEvidence, ['nativeSdkSymbolCompiled'])
+})
+
+for (const [label, mutate] of [
+  [
+    'missing compile provenance',
+    (r) => {
+      delete r.nativeScreenCaptureKitCompile
+    },
+  ],
+  [
+    'a Simulator target',
+    (r) => {
+      r.nativeScreenCaptureKitCompile.target += '-simulator'
+    },
+  ],
+  [
+    'a Simulator SDK',
+    (r) => {
+      r.nativeScreenCaptureKitCompile.sdk = 'iphonesimulator'
+    },
+  ],
+  [
+    'an older device SDK',
+    (r) => {
+      r.nativeScreenCaptureKitCompile.sdkVersion = '26.0'
+    },
+  ],
+  [
+    'a failed compile despite a true flag',
+    (r) => {
+      r.nativeScreenCaptureKitCompile.exitCode = 1
+    },
+  ],
+  [
+    'an unfinished compile',
+    (r) => {
+      r.nativeScreenCaptureKitCompile.phase = 'object-compile'
+    },
+  ],
+  [
+    'a recorded compiler error',
+    (r) => {
+      r.nativeScreenCaptureKitCompile.error = 'compile failed'
+    },
+  ],
+  [
+    'a different compiled source',
+    (r) => {
+      r.nativeScreenCaptureKitCompile.source = 'Other.swift'
+    },
+  ],
+  [
+    'changed source after compilation',
+    (r) => {
+      r.nativeScreenCaptureKitCompile.sourceSha256 = 'c'.repeat(64)
+    },
+  ],
+  [
+    'a missing compile log',
+    (r) => {
+      r.nativeScreenCaptureKitCompile.log = null
+    },
+  ],
+  [
+    'no emitted object',
+    (r) => {
+      r.nativeScreenCaptureKitCompile.object = null
+    },
+  ],
+  [
+    'an empty emitted object',
+    (r) => {
+      r.nativeScreenCaptureKitCompile.object.bytes = 0
+    },
+  ],
+  [
+    'an unhashed object',
+    (r) => {
+      delete r.nativeScreenCaptureKitCompile.object.sha256
+    },
+  ],
+]) {
+  test(`device SDK qualification rejects ${label} even with completed Safari diagnostics`, () => {
+    const report = completeRecords()
+    mutate(report)
+    const result = evaluateProbe(report)
+    assert.equal(result.diagnosticComplete, true)
+    assert.equal(result.checks.nativeSdkSymbolCompiled, false)
+    assert.equal(result.simulatorScreenSharingAccepted, false)
+    assert.equal(result.issue365Accepted, false)
+    assert.deepEqual(result.missingEvidence, ['nativeSdkSymbolCompiled'])
+  })
+}
 
 for (const [label, mutate, missing] of [
   [

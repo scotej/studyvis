@@ -87,10 +87,13 @@ impl MirrorState {
         }
     }
 
-    fn end_session(&self) -> Option<String> {
+    fn end_session(&self, session_activation_id: Option<String>) -> Option<SessionEndedEvent> {
         let slot = self.slot.lock().unwrap();
         if slot.scope == MirrorScope::App {
-            slot.request_id.clone()
+            slot.request_id.clone().map(|request_id| SessionEndedEvent {
+                request_id,
+                session_activation_id,
+            })
         } else {
             drop(slot);
             self.stop();
@@ -98,14 +101,13 @@ impl MirrorState {
         }
     }
 
-    pub fn end_session_for_app<R: Runtime>(app: &AppHandle<R>) {
+    pub fn end_session_for_app<R: Runtime>(
+        app: &AppHandle<R>,
+        session_activation_id: Option<String>,
+    ) {
         if let Some(state) = app.try_state::<Self>() {
-            if let Some(request_id) = state.end_session() {
-                let _ = app.emit_to(
-                    "main",
-                    "mirror:session-ended",
-                    SessionEndedEvent { request_id },
-                );
+            if let Some(event) = state.end_session(session_activation_id) {
+                let _ = app.emit_to("main", "mirror:session-ended", event);
             }
         }
     }
@@ -115,6 +117,7 @@ impl MirrorState {
 #[serde(rename_all = "camelCase")]
 struct SessionEndedEvent {
     request_id: String,
+    session_activation_id: Option<String>,
 }
 
 #[derive(Clone, Serialize)]
@@ -284,13 +287,34 @@ mod tests {
     fn session_end_retires_session_scope_but_keeps_explicit_app_scope() {
         let state = MirrorState::default();
         let (session_revision, _) = state.begin("session".into(), MirrorScope::Session);
-        assert!(state.end_session().is_none());
+        assert!(state.end_session(None).is_none());
         assert!(!state.owns("session", session_revision));
         let (app_revision, _) = state.begin("app".into(), MirrorScope::App);
-        assert_eq!(state.end_session().as_deref(), Some("app"));
+        assert_eq!(state.end_session(None).unwrap().request_id, "app");
         assert!(state.owns("app", app_revision));
         state.stop();
         assert!(!state.owns("app", app_revision));
+    }
+
+    #[test]
+    fn session_end_payload_captures_the_ended_activation_on_the_long_lived_listener() {
+        let state = MirrorState::default();
+        let (revision, _) = state.begin("app".into(), MirrorScope::App);
+        let first = state.end_session(Some("session-1".into())).unwrap();
+        let second = state.end_session(Some("session-2".into())).unwrap();
+        assert!(state.owns("app", revision));
+        assert_eq!(first.request_id, second.request_id);
+        assert_eq!(first.session_activation_id.as_deref(), Some("session-1"));
+        assert_eq!(second.session_activation_id.as_deref(), Some("session-2"));
+        assert_eq!(
+            serde_json::to_value(first).unwrap(),
+            serde_json::json!({"requestId": "app", "sessionActivationId": "session-1"})
+        );
+        assert!(state
+            .end_session(None)
+            .unwrap()
+            .session_activation_id
+            .is_none());
     }
 
     #[tokio::test]
@@ -331,7 +355,7 @@ mod tests {
             let (revision, _) = state.begin("scope-proof".into(), scope);
             state.slot.lock().unwrap().server = Some(server);
             assert_eq!(client.get(&url).send().await.unwrap().status(), 200);
-            state.end_session();
+            state.end_session(None);
             if scope == MirrorScope::App {
                 assert!(state.owns("scope-proof", revision));
                 assert_eq!(client.get(&url).send().await.unwrap().status(), 200);

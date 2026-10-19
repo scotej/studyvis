@@ -8,7 +8,7 @@ import { Toaster } from '@/components/ui/sonner'
 import { ApplyReduceMotion } from '@/design/reduce-motion'
 import { ThemeProvider } from '@/design/theme'
 import { createBrowserConnection } from '@/features/mirror/browserConnection'
-import { MirrorSession } from '@/features/mirror/MirrorSession'
+import { MirrorApp } from '@/features/mirror/MirrorApp'
 import { registerMirrorOffline } from '@/features/mirror/offline'
 import { useSettingsStore } from '@/stores/settingsStore'
 
@@ -23,7 +23,7 @@ createRoot(document.getElementById('root')!).render(
   <ThemeProvider defaultMode="auto">
     <ApplyReduceMotion />
     <ErrorBoundary surface="mirror">
-      <MirrorSession connection={connection} />
+      <MirrorApp connection={connection} />
     </ErrorBoundary>
     <Toaster position="bottom-right" />
   </ThemeProvider>

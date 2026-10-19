@@ -6,7 +6,11 @@ import { createBrowserConnection } from '@/features/mirror/browserConnection'
 import { createMirrorHost } from '@/features/mirror/runtime'
 import { createMirrorAppRuntime } from '@/features/mirror/appRuntime'
 import type { MirrorAppSnapshot } from '@/features/mirror/appBridge'
-import { MirrorCodec, type MirrorMessage } from '@/features/mirror/wire'
+import {
+  MirrorCodec,
+  isMirrorMessage,
+  type MirrorMessage,
+} from '@/features/mirror/wire'
 import type { MirrorSessionSnapshot } from '@/features/mirror/sessionBridge'
 import {
   finishMirrorReport,
@@ -1083,6 +1087,8 @@ const appSnapshot = (
 ): MirrorAppSnapshot => ({
   version: 1,
   ownerEpoch: 'owner-1',
+  replayGeneration: 'test-generation',
+  replayNextSequence: 0,
   revision: 1,
   phase: 'home',
   identity: { edPubkeyHex: 'a'.repeat(64), displayName: 'Alice' },
@@ -1100,6 +1106,381 @@ function hostMessages() {
 }
 
 describe('app-scoped companion transport', () => {
+  test.each(['session', 'app'])(
+    'heartbeat expiry retires %s capture and requests before a pending closing handshake, and late old close cannot retire replacement',
+    async (scope) => {
+      const connection = createBrowserConnection()
+      cleanup.push(connection.disconnect)
+      const original = TestSocket.instances[0]
+      original.open()
+      if (scope === 'app')
+        await incoming(original, {
+          type: 'app_snapshot',
+          snapshot: appSnapshot({
+            phase: 'session',
+            sessionActivationId: 'session-1',
+            capabilities: ['session.control', 'home.read'],
+          }),
+        })
+      await incoming(original, { type: 'snapshot', snapshot: snapshot() })
+      const camera = capture()
+      const screen = capture()
+      connection.setCapture('camera', camera.stream)
+      connection.setCapture('screen', screen.stream)
+      const pendingControl = connection.requestControl({
+        type: 'ptt',
+        active: true,
+      })
+      const pendingApp =
+        scope === 'app' ? connection.requestApp('home.read', {}) : null
+      const close = vi.spyOn(original, 'close').mockImplementation(() => {
+        original.readyState = 2
+      })
+      await vi.advanceTimersByTimeAsync(20_000)
+      expect(close).toHaveBeenCalledOnce()
+      expect(original.readyState).toBe(2)
+      expect(connection.getState().status).toBe('disconnected')
+      expect(camera.track.stop).toHaveBeenCalledOnce()
+      expect(screen.track.stop).toHaveBeenCalledOnce()
+      expect(await pendingControl).toBe(false)
+      if (pendingApp)
+        expect(await pendingApp).toMatchObject({ error: 'cancelled' })
+      const sentBefore = original.send.mock.calls.length
+      connection.sendControl({ type: 'note', text: 'offline must not queue' })
+      expect(
+        await connection.requestControl({ type: 'ptt', active: true })
+      ).toBe(false)
+      const denied = capture()
+      connection.setCapture('camera', denied.stream)
+      expect(denied.track.stop).toHaveBeenCalledOnce()
+      await vi.advanceTimersByTimeAsync(1000)
+      expect(original.send).toHaveBeenCalledTimes(sentBefore)
+      expect(TestSocket.instances).toHaveLength(2)
+      const replacement = TestSocket.instances[1]
+      replacement.open()
+      if (scope === 'app')
+        await incoming(replacement, {
+          type: 'app_snapshot',
+          snapshot: appSnapshot({
+            phase: 'session',
+            sessionActivationId: 'session-1',
+            capabilities: ['session.control'],
+            replayNextSequence: 2,
+          }),
+        })
+      await incoming(replacement, { type: 'snapshot', snapshot: snapshot() })
+      const peer = doubles.peers.at(-1)!
+      expect(peer.setCapture.mock.calls).toEqual([
+        ['camera', null],
+        ['screen', null],
+      ])
+      original.onclose?.({ code: 4001 })
+      expect(connection.getState()).toMatchObject({
+        status: 'connected',
+        error: null,
+      })
+      expect(peer.close).not.toHaveBeenCalled()
+      await vi.advanceTimersByTimeAsync(1000)
+      expect(TestSocket.instances).toHaveLength(2)
+    }
+  )
+
+  test.each(['home', 'report'] as const)(
+    'same-owner automatic reconnect to %s retains only the saved read-only report while awaiting negotiation',
+    async (phase) => {
+      const connection = createBrowserConnection()
+      cleanup.push(connection.disconnect)
+      const original = TestSocket.instances[0]
+      original.open()
+      await incoming(original, {
+        type: 'app_snapshot',
+        snapshot: appSnapshot(),
+      })
+      await incoming(original, { type: 'report', report })
+      original.close()
+      await vi.advanceTimersByTimeAsync(1000)
+      const replacement = TestSocket.instances[1]
+      replacement.open()
+      expect(connection.getState()).toMatchObject({
+        status: 'connecting',
+        appSnapshot: null,
+        report,
+      })
+      expect(
+        await connection.requestControl({ type: 'ptt', active: true })
+      ).toBe(false)
+      const denied = capture()
+      connection.setCapture('camera', denied.stream)
+      expect(denied.track.stop).toHaveBeenCalledOnce()
+      await incoming(replacement, {
+        type: 'app_snapshot',
+        snapshot: appSnapshot({ phase, revision: 2 }),
+      })
+      expect(connection.getState()).toMatchObject({
+        status: 'connected',
+        snapshot: null,
+        report,
+        reportCached: true,
+      })
+      expect(storage.has('studyvis.mirror.report.v1')).toBe(true)
+      expect(
+        await connection.requestControl({ type: 'ptt', active: true })
+      ).toBe(false)
+    }
+  )
+
+  test.each([
+    'new owner',
+    'new activation',
+    'explicit pair',
+    'disconnect',
+    'revocation',
+  ])(
+    '%s clears an app report and its remembered reconnect owner',
+    async (reason) => {
+      const connection = createBrowserConnection()
+      cleanup.push(connection.disconnect)
+      const socket = TestSocket.instances[0]
+      socket.open()
+      await incoming(socket, { type: 'app_snapshot', snapshot: appSnapshot() })
+      await incoming(socket, { type: 'report', report })
+      if (reason === 'new owner')
+        await incoming(socket, {
+          type: 'app_snapshot',
+          snapshot: appSnapshot({ ownerEpoch: 'owner-2', revision: 2 }),
+        })
+      else if (reason === 'new activation')
+        await incoming(socket, {
+          type: 'app_snapshot',
+          snapshot: appSnapshot({
+            phase: 'session',
+            sessionActivationId: 'session-2',
+            revision: 2,
+          }),
+        })
+      else if (reason === 'explicit pair') {
+        vi.stubGlobal(
+          'fetch',
+          vi.fn(async () => new Response('{}', { status: 200 }))
+        )
+        await connection.pair('ABCDEFGH')
+      } else if (reason === 'revocation') socket.close(4001)
+      else connection.disconnect()
+      expect(connection.getState().report).toBeNull()
+      expect(storage.has('studyvis.mirror.report.v1')).toBe(false)
+    }
+  )
+
+  test('a delayed old native leave cannot retire the replacement activation or its controls', async () => {
+    const app = createMirrorAppRuntime()
+    app.setSnapshot(
+      appSnapshot({ phase: 'session', sessionActivationId: 'session-1' })
+    )
+    const onCapture = vi.fn()
+    const onControl = vi.fn(async () => true)
+    const host = createMirrorHost({
+      app,
+      onCapture,
+      onControl,
+      onConnected: vi.fn(),
+    })
+    cleanup.push(host.stop)
+    await host.start(null, 'app')
+    const start = doubles.invoke.mock.calls.find(
+      ([command]) => command === 'mirror_start'
+    )![1]
+    doubles.events.get('mirror:client')!({
+      payload: { clientId: 'one', connected: true },
+    })
+    await hostIncoming('one', { type: 'ready', appProtocol: 1 })
+    app.setSnapshot(
+      appSnapshot({
+        phase: 'session',
+        sessionActivationId: 'session-2',
+        revision: 2,
+      })
+    )
+    await vi.advanceTimersByTimeAsync(100)
+    const currentPeer = doubles.peers.at(-1)!
+    onCapture.mockClear()
+    for (const payload of [
+      { requestId: start.requestId, sessionActivationId: 'session-1' },
+      { requestId: start.requestId },
+      { requestId: start.requestId, sessionActivationId: null },
+    ])
+      doubles.events.get('mirror:session-ended')!({ payload })
+    await vi.advanceTimersByTimeAsync(100)
+    expect(app.getSnapshot()).toMatchObject({
+      phase: 'session',
+      sessionActivationId: 'session-2',
+      revision: 2,
+    })
+    expect(currentPeer.close).not.toHaveBeenCalled()
+    expect(onCapture).not.toHaveBeenCalled()
+    await hostIncoming('one', {
+      type: 'app_request',
+      request: {
+        version: 1,
+        requestId: 'current-control',
+        ownerEpoch: 'owner-1',
+        replayGeneration: app.getSnapshot()!.replayGeneration,
+        replaySequence: 0,
+        expectedRevision: 2,
+        sessionActivationId: 'session-2',
+        command: 'session.control',
+        args: { type: 'ptt', active: true },
+      },
+    })
+    expect(onControl).toHaveBeenCalledWith({ type: 'ptt', active: true })
+    expect(currentPeer.close).not.toHaveBeenCalled()
+  })
+
+  test('browser concurrent allocations and reconnect retries preserve the original replay tuple', async () => {
+    const connection = createBrowserConnection()
+    cleanup.push(connection.disconnect)
+    const firstSocket = TestSocket.instances[0]
+    firstSocket.open()
+    await incoming(firstSocket, {
+      type: 'app_snapshot',
+      snapshot: appSnapshot({
+        capabilities: ['home.read'],
+        replayNextSequence: 10,
+      }),
+    })
+    const first = connection.requestApp('home.read', {})
+    const second = connection.requestApp('home.read', {})
+    await vi.advanceTimersByTimeAsync(100)
+    const requests = sent(firstSocket).filter((m) => m?.type === 'app_request')
+    expect(requests.map((m) => m.request.replaySequence)).toEqual([10, 11])
+    firstSocket.close()
+    expect(await first).toMatchObject({ error: 'cancelled' })
+    expect(await second).toMatchObject({ error: 'cancelled' })
+    await vi.advanceTimersByTimeAsync(1000)
+    const nextSocket = TestSocket.instances.at(-1)!
+    nextSocket.open()
+    await incoming(nextSocket, {
+      type: 'app_snapshot',
+      snapshot: appSnapshot({
+        capabilities: ['home.read'],
+        replayNextSequence: 12,
+        revision: 2,
+        phase: 'session',
+        sessionActivationId: 'next-session',
+      }),
+    })
+    const retry = connection.requestApp(
+      'home.read',
+      {},
+      { requestId: requests[0].request.requestId }
+    )
+    const fresh = connection.requestApp('home.read', {})
+    await vi.advanceTimersByTimeAsync(100)
+    const retried = sent(nextSocket).filter((m) => m?.type === 'app_request')
+    expect(retried[0]).toEqual(requests[0])
+    expect(retried[1].request).toMatchObject({
+      replaySequence: 12,
+      expectedRevision: 2,
+      sessionActivationId: 'next-session',
+    })
+    await incoming(nextSocket, {
+      type: 'app_result',
+      result: {
+        version: 1,
+        requestId: requests[0].request.requestId,
+        ownerEpoch: 'owner-1',
+        ok: true,
+        value: {},
+      },
+    })
+    expect(await retry).toMatchObject({ ok: true })
+    expect(
+      await connection.requestApp(
+        'home.read',
+        {},
+        {
+          requestId: requests[0].request.requestId,
+          replayGeneration: 'test-generation',
+          replaySequence: 99,
+        }
+      )
+    ).toMatchObject({ error: 'request_conflict' })
+    nextSocket.close()
+    await Promise.all([retry, fresh])
+  })
+
+  test('remote job keys reject prototype names and retain at most 64 safe jobs', async () => {
+    const connection = createBrowserConnection()
+    cleanup.push(connection.disconnect)
+    const socket = TestSocket.instances[0]
+    socket.open()
+    await incoming(socket, { type: 'app_snapshot', snapshot: appSnapshot() })
+    for (let index = 0; index < 65; index++)
+      await incoming(socket, {
+        type: 'app_job',
+        job: {
+          ownerEpoch: 'owner-1',
+          jobId: `job-${index}`,
+          revision: 1,
+          status: 'running',
+          progress: null,
+        },
+      })
+    expect(Object.keys(connection.getState().jobs!)).toHaveLength(64)
+    expect(Object.hasOwn(connection.getState().jobs!, 'job-0')).toBe(false)
+    for (const jobId of ['__proto__', 'prototype', 'constructor'])
+      expect(
+        isMirrorMessage({
+          type: 'app_job',
+          job: {
+            ownerEpoch: 'owner-1',
+            jobId,
+            revision: 1,
+            status: 'running',
+            progress: null,
+          },
+        })
+      ).toBe(false)
+    expect(Object.getPrototypeOf(connection.getState().jobs!)).toBe(
+      Object.prototype
+    )
+  })
+
+  test('an evicted browser retry ID is expired instead of being silently reissued at a fresh sequence', async () => {
+    const connection = createBrowserConnection()
+    cleanup.push(connection.disconnect)
+    const socket = TestSocket.instances[0]
+    socket.open()
+    await incoming(socket, {
+      type: 'app_snapshot',
+      snapshot: appSnapshot({ capabilities: ['home.read'] }),
+    })
+    let oldest = ''
+    for (let index = 0; index < 130; index++) {
+      const pending = connection.requestApp('home.read', {})
+      await vi.advanceTimersByTimeAsync(100)
+      const message = sent(socket).findLast((m) => m?.type === 'app_request')!
+      expect(message.request.replaySequence).toBe(index)
+      if (index === 0) oldest = message.request.requestId
+      await incoming(socket, {
+        type: 'app_result',
+        result: {
+          version: 1,
+          requestId: message.request.requestId,
+          ownerEpoch: 'owner-1',
+          ok: true,
+          value: {},
+        },
+      })
+      expect(await pending).toMatchObject({ ok: true })
+    }
+    const count = socket.send.mock.calls.length
+    expect(
+      await connection.requestApp('home.read', {}, { requestId: oldest })
+    ).toMatchObject({ error: 'expired' })
+    await vi.advanceTimersByTimeAsync(100)
+    expect(socket.send).toHaveBeenCalledTimes(count)
+  })
+
   test('a saved report survives session retirement and is cleared only by a new session or owner', async () => {
     const connection = createBrowserConnection()
     cleanup.push(connection.disconnect)
@@ -1194,6 +1575,8 @@ describe('app-scoped companion transport', () => {
       request: {
         version: 1,
         requestId: 'camera-1',
+        replayGeneration: app.getSnapshot()!.replayGeneration,
+        replaySequence: 0,
         ownerEpoch: 'owner-1',
         expectedRevision: 1,
         sessionActivationId: 'session-1',
@@ -1203,7 +1586,7 @@ describe('app-scoped companion transport', () => {
     })
     expect(onControl).toHaveBeenCalledWith({ type: 'camera', on: true })
     doubles.events.get('mirror:session-ended')!({
-      payload: { requestId: start.requestId },
+      payload: { requestId: start.requestId, sessionActivationId: 'session-1' },
     })
     await vi.advanceTimersByTimeAsync(100)
     expect(oldPeer.close).toHaveBeenCalled()
@@ -1248,6 +1631,8 @@ describe('app-scoped companion transport', () => {
       request: {
         version: 1,
         requestId: 'camera-stale',
+        replayGeneration: app.getSnapshot()!.replayGeneration,
+        replaySequence: 1,
         ownerEpoch: 'owner-1',
         expectedRevision: 1,
         sessionActivationId: 'session-1',
@@ -1327,7 +1712,11 @@ describe('app-scoped companion transport', () => {
     const result = connection.requestApp(
       'home.read',
       {},
-      { requestId: 'home-1' }
+      {
+        requestId: 'home-1',
+        replayGeneration: 'test-generation',
+        replaySequence: 0,
+      }
     )
     await vi.advanceTimersByTimeAsync(100)
     expect(sent(socket)).toContainEqual({
@@ -1335,6 +1724,8 @@ describe('app-scoped companion transport', () => {
       request: {
         version: 1,
         requestId: 'home-1',
+        replayGeneration: 'test-generation',
+        replaySequence: 0,
         ownerEpoch: 'owner-1',
         sessionActivationId: null,
         expectedRevision: 1,

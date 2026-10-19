@@ -35,6 +35,7 @@ export type MirrorAppCommandSpec<T> = {
 
 type Registration = MirrorAppCommandSpec<unknown>
 type Entry = {
+  sequence: number
   fingerprint: string
   result?: MirrorAppResult
   pending?: Promise<MirrorAppResult>
@@ -48,12 +49,16 @@ type Active = {
 }
 
 export type MirrorAppRuntime = ReturnType<typeof createMirrorAppRuntime>
+export const MIRROR_APP_REPLAY_WINDOW = 4096
 
 export function createMirrorAppRuntime() {
   let snapshot: MirrorAppSnapshot | null = null
   let cachedBytes = 0
+  let replayGeneration = crypto.randomUUID()
+  let highestSequence = -1
   const commands = new Map<MirrorAppCommandName, Registration>()
   const entries = new Map<string, Entry>()
+  const sequences = new Map<number, string>()
   const active = new Set<Active>()
   const listeners = new Set<() => void>()
   const jobListeners = new Set<(job: MirrorAppJob) => void>()
@@ -66,7 +71,10 @@ export function createMirrorAppRuntime() {
       operation.releaseWait?.('cancelled')
     }
     entries.clear()
+    sequences.clear()
     cachedBytes = 0
+    highestSequence = -1
+    replayGeneration = crypto.randomUUID()
   }
   const capabilities = () =>
     snapshot
@@ -86,7 +94,12 @@ export function createMirrorAppRuntime() {
       : []
   const currentSnapshot = () =>
     snapshot
-      ? readMirrorAppSnapshot({ ...snapshot, capabilities: capabilities() })
+      ? readMirrorAppSnapshot({
+          ...snapshot,
+          replayGeneration,
+          replayNextSequence: highestSequence + 1,
+          capabilities: capabilities(),
+        })
       : null
   const fail = (
     request: MirrorAppRequest,
@@ -109,12 +122,28 @@ export function createMirrorAppRuntime() {
         results--
       }
     }
+    const floor = highestSequence - MIRROR_APP_REPLAY_WINDOW + 1
+    for (const [key, entry] of entries)
+      if (entry.sequence < floor && !entry.pending && !entry.result) {
+        entries.delete(key)
+        sequences.delete(entry.sequence)
+      }
   }
 
   return {
     getSnapshot: currentSnapshot,
-    setSnapshot(next: Omit<MirrorAppSnapshot, 'capabilities'>) {
-      const parsed = readMirrorAppSnapshot({ ...next, capabilities: [] })
+    setSnapshot(
+      next: Omit<
+        MirrorAppSnapshot,
+        'capabilities' | 'replayGeneration' | 'replayNextSequence'
+      >
+    ) {
+      const parsed = readMirrorAppSnapshot({
+        ...next,
+        replayGeneration,
+        replayNextSequence: highestSequence + 1,
+        capabilities: [],
+      })
       if (
         !parsed ||
         (snapshot?.ownerEpoch === parsed.ownerEpoch &&
@@ -169,8 +198,14 @@ export function createMirrorAppRuntime() {
       for (const listener of jobListeners) listener(parsed)
       return true
     },
-    retireSession() {
-      if (!snapshot || snapshot.sessionActivationId === null) return
+    retireSession(activationId?: string) {
+      if (
+        !snapshot ||
+        snapshot.sessionActivationId === null ||
+        (activationId !== undefined &&
+          snapshot.sessionActivationId !== activationId)
+      )
+        return
       for (const operation of active)
         if (!operation.committed) {
           operation.abort.abort()
@@ -207,6 +242,8 @@ export function createMirrorAppRuntime() {
       if (!start || request.ownerEpoch !== start.ownerEpoch)
         return fail(request, 'stale_owner')
       if (!ownsController()) return fail(request, 'cancelled')
+      if (request.replayGeneration !== replayGeneration)
+        return fail(request, 'expired')
       const key = request.requestId
       const fingerprint = Array.from(
         sha256(new TextEncoder().encode(JSON.stringify(request))),
@@ -218,6 +255,15 @@ export function createMirrorAppRuntime() {
           return fail(request, 'request_conflict')
         return previous.pending ?? previous.result ?? fail(request, 'expired')
       }
+      if (sequences.has(request.replaySequence))
+        return fail(request, 'request_conflict')
+      if (request.replaySequence <= highestSequence - MIRROR_APP_REPLAY_WINDOW)
+        return fail(request, 'expired')
+      if (
+        request.replaySequence > highestSequence + MIRROR_APP_REPLAY_WINDOW ||
+        request.replaySequence === Number.MAX_SAFE_INTEGER
+      )
+        return fail(request, 'invalid_request')
       const spec = commands.get(request.command)
       if (!spec || !capabilities().includes(request.command))
         return fail(request, 'unsupported')
@@ -225,8 +271,7 @@ export function createMirrorAppRuntime() {
         return fail(request, 'stale_session')
       if (spec.mutates && request.expectedRevision !== start.revision)
         return fail(request, 'stale_revision')
-      if (active.size >= 32 || entries.size >= 4096)
-        return fail(request, 'busy')
+      if (active.size >= 32) return fail(request, 'busy')
       let args: unknown
       try {
         args = spec.parse(request.args)
@@ -257,8 +302,14 @@ export function createMirrorAppRuntime() {
           return write()
         },
       }
-      const entry: Entry = { fingerprint, bytes: 0 }
+      const entry: Entry = {
+        fingerprint,
+        bytes: 0,
+        sequence: request.replaySequence,
+      }
       entries.set(key, entry)
+      sequences.set(request.replaySequence, key)
+      highestSequence = Math.max(highestSequence, request.replaySequence)
       let timer: ReturnType<typeof setTimeout> | undefined
       const wait = new Promise<MirrorAppResult>((resolve) => {
         operation.releaseWait = (error) => {
@@ -310,8 +361,10 @@ export function createMirrorAppRuntime() {
             entry.result = result
             entry.bytes = JSON.stringify(result).length
             cachedBytes += entry.bytes
-            trimResults()
+            entries.delete(key)
+            entries.set(key, entry)
           }
+          trimResults()
           return result
         })
       entry.pending = Promise.race([pending, wait])

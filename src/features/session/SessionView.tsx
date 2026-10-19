@@ -96,6 +96,7 @@ import { useSettingsStore } from '@/stores/settingsStore'
 import { usePttStore, withPttButtonMutation } from '@/stores/pttStore'
 import { strings } from '@/strings'
 import { MirrorHostPanel } from '@/features/mirror/MirrorHostPanel'
+import { useMirrorAppOwner } from '@/features/mirror/useMirrorAppOwner'
 import { useSessionMirror } from '@/features/mirror/useSessionMirror'
 import { startMirrorAiRuntime } from '@/features/mirror/aiRuntime'
 import { notifyCurrentMirror } from '@/features/mirror/reportHandoff'
@@ -377,9 +378,16 @@ export function SessionView({
   >(() => false)
   const mirrorChatControlsRef = useRef<MirrorChatControls | null>(null)
   const mirrorAiReadyRef = useRef<Promise<boolean> | null>(null)
-  const mirror = useSessionMirror(sessionTopic, (control) =>
-    mirrorControlRef.current(control)
+  const mirrorApp = useMirrorAppOwner()
+  const mirror = useSessionMirror(
+    sessionTopic,
+    (control) => mirrorControlRef.current(control),
+    mirrorApp?.sessionOwner
   )
+  const mirrorActivationId = mirrorApp?.state.enabled
+    ? mirrorApp.state.activationId
+    : mirror.config?.generation
+  const mirrorControllerRevision = mirrorApp?.state.controllerRevision
   const mirrorTakeoverRef = useRef(mirror.takeover)
   useLayoutEffect(() => {
     mirrorTakeoverRef.current = mirror.takeover
@@ -601,6 +609,8 @@ export function SessionView({
   // (window close with
   // minimize-to-tray off, tray Quit, macOS Cmd+Q) is intercepted by Rust and
   // routed to QuitConfirmListener instead of dropping peers mid-session.
+  const nativeSessionActivationId =
+    mirrorApp?.state.activationId ?? sessionTopic
   useEffect(() => {
     if (status !== 'active') return
     // #226 — this invoke is what registers the global PTT shortcut and starts
@@ -608,7 +618,11 @@ export function SessionView({
     // arm meant PTT was inert for the whole session with nothing in the log to
     // say so, and Rust writes its own matching record from the other side.
     const armAt = performance.now()
-    void invoke('session_set_active', { active: true }).then(
+    const sessionActivationId = nativeSessionActivationId
+    void invoke('session_set_active', {
+      active: true,
+      sessionActivationId,
+    }).then(
       () =>
         pttLog.info('session.armed', {
           active: true,
@@ -626,7 +640,10 @@ export function SessionView({
     )
     return () => {
       const disarmAt = performance.now()
-      void invoke('session_set_active', { active: false }).then(
+      void invoke('session_set_active', {
+        active: false,
+        sessionActivationId,
+      }).then(
         () =>
           pttLog.info('session.armed', {
             active: false,
@@ -643,7 +660,7 @@ export function SessionView({
           })
       )
     }
-  }, [status])
+  }, [status, nativeSessionActivationId])
 
   // Capture the camera + mic once per active session and publish the resulting
   // MediaStream to the room. I77 — publishing is `publishLocalStream`, not a
@@ -2539,6 +2556,21 @@ export function SessionView({
 
   const mirrorAbortRef = useRef<AbortController | null>(null)
   const mirrorAiPendingRef = useRef(false)
+  const appControlOwner = mirrorApp?.owner
+  useLayoutEffect(() => {
+    if (!appControlOwner) return
+    let previous = appControlOwner.getState()
+    return appControlOwner.subscribe(() => {
+      const next = appControlOwner.getState()
+      if (
+        next.controllerRevision !== previous.controllerRevision ||
+        next.activationId !== previous.activationId ||
+        next.enabled !== previous.enabled
+      )
+        mirrorAbortRef.current?.abort()
+      previous = next
+    })
+  }, [appControlOwner])
   useEffect(() => {
     const controller = new AbortController()
     mirrorAbortRef.current = controller
@@ -2547,7 +2579,14 @@ export function SessionView({
       controller.abort()
       if (mirrorAbortRef.current === controller) mirrorAbortRef.current = null
     }
-  }, [room, activeModelId, aiFeaturesEnabled, mirror.takeover])
+  }, [
+    room,
+    activeModelId,
+    aiFeaturesEnabled,
+    mirror.takeover,
+    mirror.connected,
+    mirrorControllerRevision,
+  ])
 
   useEffect(() => {
     mirrorControlRef.current = (control) => {
@@ -2844,7 +2883,8 @@ export function SessionView({
       return
     }
     const revision = ++mirrorPublishRevisionRef.current
-    const mirrorSessionId = mirror.config.generation
+    const mirrorSessionId = mirrorActivationId
+    if (!mirrorSessionId) return
     const cache = mirrorImageCacheRef.current
     const ids = new Set(sessionImages.map((image) => image.id))
     for (const key of cache.keys()) if (!ids.has(key)) cache.delete(key)
@@ -3054,6 +3094,7 @@ export function SessionView({
     setMirrorStreams,
     mirrorElapsedMs,
     mirror.config,
+    mirrorActivationId,
   ])
 
   if (!room) return null

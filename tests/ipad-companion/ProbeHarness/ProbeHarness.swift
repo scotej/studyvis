@@ -1,5 +1,7 @@
 import UIKit
+#if !targetEnvironment(simulator)
 import ScreenCaptureKit
+#endif
 
 @main
 final class ProbeHarness: UIResponder, UIApplicationDelegate {
@@ -9,7 +11,9 @@ final class ProbeHarness: UIResponder, UIApplicationDelegate {
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
+        #if !targetEnvironment(simulator)
         _ = SCContentSharingPicker.shared
+        #endif
         let window = UIWindow(frame: UIScreen.main.bounds)
         let view = UIViewController()
         view.view.backgroundColor = .systemBackground

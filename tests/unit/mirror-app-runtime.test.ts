@@ -8,11 +8,17 @@ import {
   readMirrorAppSnapshot,
   type MirrorAppRequest,
 } from '@/features/mirror/appBridge'
-import { createMirrorAppRuntime } from '@/features/mirror/appRuntime'
+import {
+  createMirrorAppRuntime,
+  MIRROR_APP_REPLAY_WINDOW,
+  type MirrorAppRuntime,
+} from '@/features/mirror/appRuntime'
 
 const initial = {
   version: 1 as const,
   ownerEpoch: 'owner-1',
+  replayGeneration: 'test-generation',
+  replayNextSequence: 0,
   revision: 1,
   phase: 'home' as const,
   identity: { edPubkeyHex: 'a'.repeat(64), displayName: 'Alice' },
@@ -21,6 +27,8 @@ const initial = {
 const request = (patch: Partial<MirrorAppRequest> = {}): MirrorAppRequest => ({
   version: 1,
   requestId: 'request-1',
+  replayGeneration: 'test-generation',
+  replaySequence: 0,
   ownerEpoch: 'owner-1',
   sessionActivationId: null,
   expectedRevision: 1,
@@ -28,6 +36,18 @@ const request = (patch: Partial<MirrorAppRequest> = {}): MirrorAppRequest => ({
   args: { name: 'Bob' },
   ...patch,
 })
+const requestFor = (app: MirrorAppRuntime) => {
+  const sequences = new Map<string, number>()
+  return (patch: Partial<MirrorAppRequest> = {}) => {
+    const id = patch.requestId ?? 'request-1'
+    if (!sequences.has(id)) sequences.set(id, sequences.size)
+    return request({
+      replayGeneration: app.getSnapshot()!.replayGeneration,
+      replaySequence: sequences.get(id)!,
+      ...patch,
+    })
+  }
+}
 const parseName = (input: unknown) =>
   appRecord(input) &&
   appFields(input, ['name']) &&
@@ -52,6 +72,11 @@ describe('companion app contract', () => {
       { command: 'system.invoke' },
       { expectedRevision: NaN },
       { ownerEpoch: '' },
+      { requestId: '__proto__' },
+      { replayGeneration: '' },
+      { replaySequence: -1 },
+      { replaySequence: 0.5 },
+      { replaySequence: Number.MAX_SAFE_INTEGER + 1 },
       { arbitrary: true },
       { args: JSON.parse('{"__proto__":{"injected":true}}') },
       { args: { value: Infinity } },
@@ -108,6 +133,150 @@ describe('companion app contract', () => {
 })
 
 describe('desktop-owned companion app execution', () => {
+  test('sustained PTT edges advance beyond the replay window without reopening old writes', async () => {
+    const app = createMirrorAppRuntime()
+    app.setSnapshot({
+      ...initial,
+      phase: 'session',
+      sessionActivationId: 'session-1',
+    })
+    const request = requestFor(app)
+    const write = vi.fn()
+    app.register('session.control', {
+      parse: (args) => args,
+      mutates: true,
+      requiresSession: true,
+      execute: async (args, context) => {
+        await context.commit(() => write(args))
+        return { accepted: true }
+      },
+    })
+    const first = request({
+      command: 'session.control',
+      sessionActivationId: 'session-1',
+      args: { type: 'ptt', active: true },
+    })
+    for (let index = 0; index < MIRROR_APP_REPLAY_WINDOW + 512; index++) {
+      const input =
+        index === 0
+          ? first
+          : request({
+              requestId: `ptt-${index}`,
+              command: 'session.control',
+              sessionActivationId: 'session-1',
+              args: { type: 'ptt', active: index % 2 === 0 },
+            })
+      expect(await app.handle(input, 'one', () => true)).toMatchObject({
+        ok: true,
+      })
+    }
+    expect(write).toHaveBeenCalledTimes(MIRROR_APP_REPLAY_WINDOW + 512)
+    expect(await app.handle(first, 'new-controller', () => true)).toMatchObject(
+      { error: 'expired' }
+    )
+    expect(write).toHaveBeenCalledTimes(MIRROR_APP_REPLAY_WINDOW + 512)
+    const oldGeneration = app.getSnapshot()!.replayGeneration
+    app.reset()
+    app.setSnapshot(initial)
+    expect(app.getSnapshot()!.replayGeneration).not.toBe(oldGeneration)
+    expect(await app.handle(first, 'new-controller', () => true)).toMatchObject(
+      { error: 'expired' }
+    )
+    expect(write).toHaveBeenCalledTimes(MIRROR_APP_REPLAY_WINDOW + 512)
+  })
+
+  test('sequence collisions, bounded gaps and out-of-order arrivals fail closed', async () => {
+    const app = createMirrorAppRuntime()
+    app.setSnapshot(initial)
+    const request = requestFor(app)
+    const execute = vi.fn(() => ({}))
+    app.register('home.read', { parse: () => ({}), execute })
+    const first = request({ command: 'home.read', args: {} })
+    expect(await app.handle(first, 'one', () => true)).toMatchObject({
+      ok: true,
+    })
+    expect(
+      await app.handle({ ...first, requestId: 'collision' }, 'one', () => true)
+    ).toMatchObject({ error: 'request_conflict' })
+    expect(
+      await app.handle({ ...first, replaySequence: 1 }, 'one', () => true)
+    ).toMatchObject({ error: 'request_conflict' })
+    expect(
+      await app.handle(
+        {
+          ...first,
+          requestId: 'jump',
+          replaySequence: MIRROR_APP_REPLAY_WINDOW + 1,
+        },
+        'one',
+        () => true
+      )
+    ).toMatchObject({ error: 'invalid_request' })
+    for (const sequence of [2, 1])
+      expect(
+        await app.handle(
+          request({
+            command: 'home.read',
+            args: {},
+            requestId: `gap-${sequence}`,
+            replaySequence: sequence,
+          }),
+          'one',
+          () => true
+        )
+      ).toMatchObject({ ok: true })
+    expect(execute).toHaveBeenCalledTimes(3)
+    expect(app.getSnapshot()?.replayNextSequence).toBe(3)
+  })
+
+  test('a committed in-flight write and its lost ACK survive window retirement, session rotation and controller replacement', async () => {
+    const app = createMirrorAppRuntime()
+    app.setSnapshot(initial)
+    const request = requestFor(app)
+    const disk = deferred<void>()
+    let oldOwns = true
+    const write = vi.fn(() => disk.promise)
+    app.register('identity.rename', {
+      parse: parseName,
+      mutates: true,
+      execute: async (_args, context) => {
+        await context.commit(write)
+        return { name: 'Bob' }
+      },
+    })
+    app.register('home.read', { parse: () => ({}), execute: () => ({}) })
+    const input = request()
+    const pending = app.handle(input, 'old', () => oldOwns)
+    await Promise.resolve()
+    for (let index = 0; index < MIRROR_APP_REPLAY_WINDOW + 8; index++)
+      expect(
+        await app.handle(
+          request({
+            command: 'home.read',
+            requestId: `read-${index}`,
+            args: {},
+          }),
+          'old',
+          () => oldOwns
+        )
+      ).toMatchObject({ ok: true })
+    oldOwns = false
+    app.retireController('old')
+    app.setSnapshot({
+      ...initial,
+      phase: 'session',
+      sessionActivationId: 'new-session',
+      revision: 2,
+    })
+    const retry = app.handle(input, 'new', () => true)
+    disk.resolve()
+    expect(await retry).toEqual(await pending)
+    expect(await app.handle(input, 'new', () => true)).toMatchObject({
+      ok: true,
+    })
+    expect(write).toHaveBeenCalledOnce()
+  })
+
   test('public snapshots do not retain mutable references to desktop identity objects', () => {
     const app = createMirrorAppRuntime()
     const identity = { edPubkeyHex: 'a'.repeat(64), displayName: 'Alice' }
@@ -119,6 +288,7 @@ describe('desktop-owned companion app execution', () => {
   })
   test('advertises only registered, parsed and currently available semantic commands', async () => {
     const app = createMirrorAppRuntime()
+    const request = requestFor(app)
     app.setSnapshot(initial)
     expect(app.getSnapshot()?.capabilities).toEqual([])
     expect(await app.handle(request(), 'one', () => true)).toMatchObject({
@@ -157,6 +327,7 @@ describe('desktop-owned companion app execution', () => {
     '%s change while a port awaits prevents its actual write boundary',
     async (change) => {
       const app = createMirrorAppRuntime()
+      const request = requestFor(app)
       app.setSnapshot(initial)
       const ready = deferred<void>()
       let owns = true
@@ -195,6 +366,7 @@ describe('desktop-owned companion app execution', () => {
 
   test('in-flight committed writes survive disconnect and deduplicate a lost ACK on the new controller', async () => {
     const app = createMirrorAppRuntime()
+    const request = requestFor(app)
     app.setSnapshot(initial)
     const disk = deferred<void>()
     let oldOwns = true
@@ -226,6 +398,7 @@ describe('desktop-owned companion app execution', () => {
 
   test('a prior controller cannot cancel the replacement controller operation', async () => {
     const app = createMirrorAppRuntime()
+    const request = requestFor(app)
     app.setSnapshot(initial)
     const ready = deferred<void>()
     const write = vi.fn()
@@ -248,6 +421,7 @@ describe('desktop-owned companion app execution', () => {
 
   test('sensitive results and evicted ACKs are not replayed or re-executed', async () => {
     const app = createMirrorAppRuntime()
+    const request = requestFor(app)
     app.setSnapshot(initial)
     const execute = vi.fn(async () => ({
       operationId: 'one-use-owner-operation',
@@ -286,6 +460,7 @@ describe('desktop-owned companion app execution', () => {
 
   test('a mutation cannot succeed without using the commit boundary, and native errors stay categorical', async () => {
     const app = createMirrorAppRuntime()
+    const request = requestFor(app)
     app.setSnapshot(initial)
     app.register('identity.rename', {
       parse: parseName,
@@ -339,6 +514,7 @@ describe('desktop-owned companion app execution', () => {
       vi.useFakeTimers()
       try {
         const app = createMirrorAppRuntime()
+        const request = requestFor(app)
         app.setSnapshot(initial)
         const disk = deferred<void>()
         const write = vi.fn(() => disk.promise)

@@ -38,7 +38,12 @@ export type BrowserConnection = {
     options?: Partial<
       Pick<
         MirrorAppRequest,
-        'requestId' | 'ownerEpoch' | 'sessionActivationId' | 'expectedRevision'
+        | 'requestId'
+        | 'ownerEpoch'
+        | 'sessionActivationId'
+        | 'expectedRevision'
+        | 'replayGeneration'
+        | 'replaySequence'
       >
     >
   ) => Promise<MirrorAppResult>
@@ -81,6 +86,7 @@ export function createBrowserConnection(): BrowserConnection {
   let queue = Promise.resolve()
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null
   let heartbeat: ReturnType<typeof setInterval> | null = null
+  let retireCurrent: (() => void) | null = null
   let lastHeardAt = 0
   let retries = 0
   let stopped = false
@@ -90,6 +96,7 @@ export function createBrowserConnection(): BrowserConnection {
   let currentSessionId = readMirrorSnapshot(restored)?.sessionId ?? null
   let completedSessionId =
     restoredReport?.mirrorSessionId ?? restoredReport?.session.id ?? null
+  let lastAppOwnerEpoch: string | null = null
   const pendingControls = new Map<
     string,
     {
@@ -105,6 +112,16 @@ export function createBrowserConnection(): BrowserConnection {
       ownerEpoch: string
     }
   >()
+  type Attempt = Pick<
+    MirrorAppRequest,
+    | 'ownerEpoch'
+    | 'sessionActivationId'
+    | 'expectedRevision'
+    | 'replayGeneration'
+    | 'replaySequence'
+  >
+  const appAttempts = new Map<string, Attempt>()
+  let replay: { generation: string; next: number } | null = null
   const finishApp = (result: MirrorAppResult) => {
     const pending = pendingApp.get(result.requestId)
     if (!pending || pending.ownerEpoch !== result.ownerEpoch) return
@@ -169,7 +186,10 @@ export function createBrowserConnection(): BrowserConnection {
         })
       })
       .catch(() => {
-        if (socket === current) current?.close()
+        if (socket === current) {
+          retireCurrent?.()
+          current?.close()
+        }
       })
   }
 
@@ -203,7 +223,10 @@ export function createBrowserConnection(): BrowserConnection {
         if (socket === connection && peer === current) update({ streams })
       },
       onFailure: () => {
-        if (socket === connection && peer === current) connection?.close()
+        if (socket === connection && peer === current) {
+          retireCurrent?.()
+          connection?.close()
+        }
       },
     })
     peer = current
@@ -218,9 +241,20 @@ export function createBrowserConnection(): BrowserConnection {
   ) => {
     const app = state.appSnapshot
     const requestId = options?.requestId ?? crypto.randomUUID()
-    const ownerEpoch = options?.ownerEpoch ?? app?.ownerEpoch ?? 'unavailable'
+    const previous = appAttempts.get(requestId)
+    const ownerEpoch =
+      options?.ownerEpoch ??
+      previous?.ownerEpoch ??
+      app?.ownerEpoch ??
+      'unavailable'
     const failed = (
-      error: 'unsupported' | 'busy' | 'invalid_request' | 'cancelled'
+      error:
+        | 'unsupported'
+        | 'busy'
+        | 'invalid_request'
+        | 'cancelled'
+        | 'expired'
+        | 'request_conflict'
     ) =>
       Promise.resolve({
         version: 1,
@@ -232,27 +266,68 @@ export function createBrowserConnection(): BrowserConnection {
     if (
       state.status !== 'connected' ||
       !app ||
+      !replay ||
       !socket ||
       socket.readyState !== WebSocket.OPEN
     )
       return failed('cancelled')
     if (!app.capabilities.includes(command) && options?.requestId === undefined)
       return failed('unsupported')
+    // An evicted retry ID must never acquire a fresh sequence and become a
+    // second write. Callers can retain the full original tuple explicitly.
+    if (
+      options?.requestId !== undefined &&
+      !previous &&
+      options.replayGeneration === undefined &&
+      options.replaySequence === undefined
+    )
+      return failed('expired')
     if (pendingApp.size >= 32 || pendingApp.has(requestId))
       return failed('busy')
+    if (
+      (options?.replayGeneration === undefined) !==
+      (options?.replaySequence === undefined)
+    )
+      return failed('invalid_request')
+    const attempt: Attempt = {
+      ownerEpoch,
+      replayGeneration:
+        options?.replayGeneration ??
+        previous?.replayGeneration ??
+        replay.generation,
+      replaySequence:
+        options?.replaySequence ?? previous?.replaySequence ?? replay.next,
+      sessionActivationId:
+        options && 'sessionActivationId' in options
+          ? options.sessionActivationId!
+          : previous
+            ? previous.sessionActivationId
+            : app.sessionActivationId,
+      expectedRevision:
+        options?.expectedRevision ?? previous?.expectedRevision ?? app.revision,
+    }
+    if (previous && JSON.stringify(previous) !== JSON.stringify(attempt))
+      return failed('request_conflict')
+    if (
+      attempt.replayGeneration === replay.generation &&
+      attempt.replaySequence > replay.next
+    )
+      return failed('invalid_request')
     const request = readMirrorAppRequest({
       version: 1,
       requestId,
-      ownerEpoch,
-      sessionActivationId:
-        options && 'sessionActivationId' in options
-          ? options.sessionActivationId
-          : app.sessionActivationId,
-      expectedRevision: options?.expectedRevision ?? app.revision,
+      ...attempt,
       command,
       args,
     })
     if (!request) return failed('invalid_request')
+    if (attempt.replayGeneration === replay.generation)
+      replay.next = Math.max(replay.next, attempt.replaySequence + 1)
+    appAttempts.set(requestId, attempt)
+    for (const id of appAttempts.keys()) {
+      if (appAttempts.size <= 128) break
+      if (!pendingApp.has(id) && id !== requestId) appAttempts.delete(id)
+    }
     return new Promise((resolve) => {
       const timeout = setTimeout(
         () =>
@@ -281,7 +356,44 @@ export function createBrowserConnection(): BrowserConnection {
     )
     socket = current
     update({ status: 'connecting', error: null })
-    const openDeadline = setTimeout(() => current.close(), 15_000)
+    const openDeadline = setTimeout(() => close(), 15_000)
+    const retire = (code?: number) => {
+      clearTimeout(openDeadline)
+      if (run !== connectionRun || socket !== current) return
+      connectionRun++
+      if (heartbeat) clearInterval(heartbeat)
+      heartbeat = null
+      retireCurrent = null
+      socket = null
+      cancelControls()
+      clearMedia()
+      if (code === 4001) {
+        stopped = true
+        lastAppOwnerEpoch = null
+        completedSessionId = null
+        try {
+          localStorage.removeItem(REPORT_KEY)
+        } catch {
+          /* unavailable */
+        }
+        update({
+          status: 'disconnected',
+          error: 'session_moved',
+          report: null,
+          reportCached: false,
+        })
+      } else update({ status: stopped ? 'pairing' : 'disconnected' })
+      if (!stopped)
+        reconnectTimer = setTimeout(
+          connect,
+          Math.min(10_000, 1000 * 2 ** retries++)
+        )
+    }
+    const close = () => {
+      retire()
+      current.close()
+    }
+    retireCurrent = retire
     current.onopen = () => {
       clearTimeout(openDeadline)
       if (run !== connectionRun || stopped) {
@@ -294,7 +406,7 @@ export function createBrowserConnection(): BrowserConnection {
       makePeer()
       send({ type: 'ready', appProtocol: 1 })
       heartbeat = setInterval(() => {
-        if (Date.now() - lastHeardAt > 15_000) current.close()
+        if (Date.now() - lastHeardAt > 15_000) close()
         else send({ type: 'ping' })
       }, 5000)
     }
@@ -323,13 +435,22 @@ export function createBrowserConnection(): BrowserConnection {
             previous.revision > appSnapshot.revision
           )
             return
+          replay = {
+            generation: appSnapshot.replayGeneration,
+            next:
+              replay?.generation === appSnapshot.replayGeneration
+                ? Math.max(replay.next, appSnapshot.replayNextSequence)
+                : appSnapshot.replayNextSequence,
+          }
           const changed =
             previous?.ownerEpoch !== appSnapshot.ownerEpoch ||
             previous?.sessionActivationId !== appSnapshot.sessionActivationId
           const preserveReport =
-            previous?.ownerEpoch === appSnapshot.ownerEpoch &&
+            (previous?.ownerEpoch ?? lastAppOwnerEpoch) ===
+              appSnapshot.ownerEpoch &&
             appSnapshot.sessionActivationId === null &&
             state.report !== null
+          lastAppOwnerEpoch = appSnapshot.ownerEpoch
           if (changed) {
             cancelControls()
             clearMedia()
@@ -362,13 +483,12 @@ export function createBrowserConnection(): BrowserConnection {
         } else if (message.type === 'app_job') {
           const job = message.job
           if (job.ownerEpoch !== state.appSnapshot?.ownerEpoch) return
-          const jobs = state.jobs ?? {}
-          if (jobs[job.jobId] && jobs[job.jobId].revision >= job.revision)
-            return
-          const next = { ...jobs, [job.jobId]: job }
-          const ids = Object.keys(next)
-          if (ids.length > 64) delete next[ids[0]]
-          update({ jobs: next })
+          const jobs = new Map(Object.entries(state.jobs ?? {}))
+          const previous = jobs.get(job.jobId)
+          if (previous && previous.revision >= job.revision) return
+          jobs.set(job.jobId, job)
+          if (jobs.size > 64) jobs.delete(jobs.keys().next().value!)
+          update({ jobs: Object.fromEntries(jobs) })
         } else if (message.type === 'snapshot') {
           const snapshot = readMirrorSnapshot(message.snapshot)
           if (!snapshot) throw new Error('Incompatible mirror snapshot')
@@ -451,28 +571,13 @@ export function createBrowserConnection(): BrowserConnection {
             })
           }
         } else if (message.type === 'ping') send({ type: 'pong' })
-        else if (message.type === 'reconnect') current.close()
+        else if (message.type === 'reconnect') close()
       } catch {
-        current.close()
+        close()
       }
     }
     current.onclose = (event) => {
-      clearTimeout(openDeadline)
-      if (run !== connectionRun) return
-      if (heartbeat) clearInterval(heartbeat)
-      heartbeat = null
-      socket = null
-      cancelControls()
-      clearMedia()
-      if (event?.code === 4001) {
-        stopped = true
-        update({ status: 'disconnected', error: 'session_moved' })
-      } else update({ status: stopped ? 'pairing' : 'disconnected' })
-      if (!stopped)
-        reconnectTimer = setTimeout(
-          connect,
-          Math.min(10_000, 1000 * 2 ** retries++)
-        )
+      retire(event?.code)
     }
     current.onerror = () => {
       /* onclose owns recovery; browsers redact TLS errors. */
@@ -531,6 +636,14 @@ export function createBrowserConnection(): BrowserConnection {
           throw new Error('Pairing failed')
         }
         stopped = false
+        lastAppOwnerEpoch = null
+        completedSessionId = null
+        update({ report: null, reportCached: false })
+        try {
+          localStorage.removeItem(REPORT_KEY)
+        } catch {
+          /* unavailable */
+        }
         cancelControls()
         connectionRun++
         socket?.close()
@@ -608,6 +721,7 @@ export function createBrowserConnection(): BrowserConnection {
     disconnect() {
       pairingRun++
       stopped = true
+      lastAppOwnerEpoch = null
       cancelControls()
       currentSessionId = null
       completedSessionId = null
@@ -616,6 +730,7 @@ export function createBrowserConnection(): BrowserConnection {
       if (heartbeat) clearInterval(heartbeat)
       reconnectTimer = null
       heartbeat = null
+      retireCurrent = null
       socket?.close()
       socket = null
       clearMedia()

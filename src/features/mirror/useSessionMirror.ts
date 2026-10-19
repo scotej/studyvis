@@ -10,6 +10,7 @@ import {
 } from './sessionBridge'
 
 export type MirrorSessionOwner = {
+  sessionActivationId?: string | null
   config: MirrorConfig | null
   starting: boolean
   connected: boolean
@@ -74,7 +75,7 @@ export function useSessionMirror(
   }, [])
 
   const start = useCallback(async () => {
-    if (!sessionId || hostRef.current) return
+    if (externallyOwned || !sessionId || hostRef.current) return
     const generation = ++startGeneration.current
     setStarting(true)
     const host = createMirrorHost({
@@ -121,18 +122,13 @@ export function useSessionMirror(
     } finally {
       if (generation === startGeneration.current) setStarting(false)
     }
-  }, [sessionId])
+  }, [sessionId, externallyOwned])
 
   useEffect(
     () => () => {
-      startGeneration.current += 1
-      const host = hostRef.current
-      hostRef.current = null
-      unregisterReport.current?.()
-      unregisterReport.current = null
-      void host?.stop()
+      void stop()
     },
-    [sessionId, externallyOwned]
+    [sessionId, externallyOwned, stop]
   )
 
   const publish = useCallback((snapshot: MirrorSessionSnapshot) => {

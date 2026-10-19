@@ -26,6 +26,32 @@ const ELLIPSIS = '…'
 
 export const strings = {
   mirror: {
+    app: {
+      title: 'Desktop companion access',
+      open: 'Use this app in a browser',
+      access:
+        'Allow a browser on your network to use Home, invitations, sessions, and every desktop setting you enable. This desktop keeps your identity, saved data, and AI engine. Access stays open after Leave until you stop it here or close StudyVis.',
+      consent: 'Allow app access from my paired browser',
+      home: 'Home',
+      loading: 'Waiting for your desktop',
+      unavailable:
+        'Finish setting up or unlocking StudyVis on your desktop to continue.',
+      interrupted: 'An interrupted study session is available.',
+      rejoin: 'Rejoin session',
+      endInterrupted: 'End interrupted session',
+      savePending:
+        'The desktop still needs to save the previous session. Retry saving on the desktop before starting another session.',
+      empty: 'Your friends will appear here after you add them on the desktop.',
+      online: 'Online',
+      offline: 'Offline',
+      invite: 'Invite',
+      accept: 'Join',
+      previous: 'Previous friends',
+      next: 'More friends',
+      invitations: 'Invitations',
+      disconnected:
+        'Your desktop is disconnected. Home actions will return when it reconnects.',
+    },
     title: 'Browser companion',
     open: 'Use a browser',
     intro:
