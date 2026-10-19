@@ -141,6 +141,8 @@ export type SessionState = {
   peers: Record<string, PeerSnapshot>
   room: TopicRoom | null
   leave: (() => Promise<void>) | null
+  // #413: the active signed-audit producer is shared by every user leave path.
+  announceLeave: ((signal: AbortSignal) => Promise<void>) | null
   authenticateAuthority: ((peerId: string, edPubkeyHex: string) => void) | null
   // User's declared study topic, consumed by the AI sample loop (V2-P5)
   // and the Ctrl+] AI dialog (V2-P7). Defaults to
@@ -253,6 +255,7 @@ const INITIAL: Pick<
   | 'peers'
   | 'room'
   | 'leave'
+  | 'announceLeave'
   | 'authenticateAuthority'
   | 'declaredStudyTopic'
   | 'initialDeclaredTopic'
@@ -278,6 +281,7 @@ const INITIAL: Pick<
   peers: {},
   room: null,
   leave: null,
+  announceLeave: null,
   authenticateAuthority: null,
   declaredStudyTopic: DEFAULT_DECLARED_STUDY_TOPIC,
   initialDeclaredTopic: DEFAULT_DECLARED_STUDY_TOPIC,
@@ -397,6 +401,7 @@ const sessionStateCreator: StateCreator<SessionState> = (set, get) => ({
         peers: {},
         room: init.room,
         leave: init.leave,
+        announceLeave: null,
         authenticateAuthority: init.authenticateAuthority ?? null,
         declaredStudyTopic: topic,
         initialDeclaredTopic: topic,

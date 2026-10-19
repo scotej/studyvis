@@ -1255,6 +1255,13 @@ export function SessionView({
       }
     }
     emitAuditRef.current = emitAudit
+    const announceLeave = (signal: AbortSignal) =>
+      emitAudit('left', {}, { signal })
+    useSessionStore.setState((current) =>
+      current.room === room && current.startedAt === startedAt
+        ? { announceLeave }
+        : current
+    )
 
     auditAction.receive((data, peerId) => {
       const expectedEd =
@@ -1461,6 +1468,11 @@ export function SessionView({
       controller.teardown()
       helloHandle.teardown()
       dispatcher.teardown()
+      useSessionStore.setState((current) =>
+        current.announceLeave === announceLeave
+          ? { announceLeave: null }
+          : current
+      )
       emitAuditRef.current = null
       appendLocalAuditRef.current = null
       pomodoroStartRef.current = null
@@ -1998,14 +2010,6 @@ export function SessionView({
     leaveRequestedRef.current = true
     useSessionStore.getState().setPendingEndReason('user')
     void (async () => {
-      const emit = emitAuditRef.current
-      if (emit) {
-        try {
-          await emit('left', {})
-        } catch {
-          // best-effort; never block leaving on a failed broadcast
-        }
-      }
       try {
         await sessionLeave()
       } catch (err) {
