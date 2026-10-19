@@ -16,6 +16,7 @@ import { useSessionStore } from '@/stores/sessionStore'
 import { useIdentityStore } from '@/stores/identityStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { useModelStore } from '@/features/ai/modelStore'
+import { __setEngineRuntime, readEngineInfo } from '@/features/ai/engine'
 import { useFocusStore } from '@/features/ai/focusStore'
 import { __setSampleLoopRuntime, getSampleLoopRuntime } from '@/features/ai/sampleLoop'
 import { __setCaptureRuntime } from '@/features/ai/captureShared'
@@ -69,6 +70,8 @@ bc.onmessage=e=>accept(e.data)
 Object.assign(window,{traces,getEvents:()=>[...events.values()].map(x=>x.event),nativeBlur:()=>accept({kind:'event',event:'tauri://blur'}),snapshot:()=>({sessionTopic:useSessionStore.getState().sessionTopic,topic:useSessionStore.getState().declaredStudyTopic,status:useSessionStore.getState().status,totalSamples:useFocusStore.getState().totalSamples,streak:useFocusStore.getState().machine.consecutiveOffTask})})
 const companionCodec=new MirrorCodec()
 Object.assign(window,{connectMirror:()=>accept({kind:'event',event:'mirror:client',payload:{clientId:'probe-companion',connected:true}}),companionControl:(control:any)=>companionCodec.send({type:'control',control,requestId:'probe-request'},async data=>accept({kind:'event',event:'mirror:message',payload:{clientId:'probe-companion',data}}))})
+__setEngineRuntime({info:async()=>({supported:true,installed:true,source:'bundled',version:'b9095',installing:false,last_error:null,devices:[],device_error:null,hardware_identity:{selection:'auto',topology:[]}}),install:async()=>{},subscribeProgress:async()=>()=>{}})
+await readEngineInfo()
 useSettingsStore.setState(s=>({status:'ready',values:{...s.values,aiFeaturesEnabled:true,sessionTimelineEnabled:true,captureDisplays:'primary'}}))
 useModelStore.setState({status:'ready',activeModelId:'qwen2_5-vl-3b',records:{'qwen2_5-vl-3b':{modelId:'qwen2_5-vl-3b',installedAt:1,benchmark:null}}})
 useIdentityStore.setState({status:'ready',identity:null})

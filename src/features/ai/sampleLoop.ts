@@ -51,7 +51,6 @@ import { captureFace as defaultCaptureFace } from './captureFace'
 import {
   discardPendingScreenStream,
   mapDisplayMediaError,
-  discardPendingScreenStream,
   SCREEN_FRAME_MAX_WIDTH,
   SCREEN_FRAME_QUALITY,
   takePendingScreenStream,
