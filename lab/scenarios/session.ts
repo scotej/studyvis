@@ -29,6 +29,7 @@ scenario('session', async ({ lab, step, check, ui }) => {
   step('both are in the same session, seeing each other')
   await ui.waitForText(alice.page(), 'Bob', 20_000)
   await ui.waitForText(bob.page(), 'Alice', 20_000)
+  await ui.waitForText(alice.page(), 'Bob joined', 30_000)
   const aliceScreen = await ui.text(alice.page())
   const bobScreen = await ui.text(bob.page())
   check('alice logged both joins', aliceScreen.includes('Bob joined'))
