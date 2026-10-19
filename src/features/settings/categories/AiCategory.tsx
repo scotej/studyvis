@@ -379,10 +379,19 @@ export function AiCategory() {
   }, [applyToggle])
 
   const handleRetryPermission = useCallback(async () => {
+    const unavailable = getModelUnavailableReason(
+      useModelStore.getState().activeModelId
+    )
+    if (unavailable) {
+      toast.info(unavailable)
+      return
+    }
     const operation = permissionLifetime.current
     const request = ++permissionRequest.current
     const isCurrent = () =>
-      operation.active && request === permissionRequest.current
+      operation.active &&
+      request === permissionRequest.current &&
+      !getModelUnavailableReason(useModelStore.getState().activeModelId)
     try {
       await requestScreenCapturePermission()
       if (!isCurrent()) return

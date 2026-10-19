@@ -35,6 +35,7 @@ window.fixture = {
     const stream=canvas.captureStream(1);tracks.push(...stream.getTracks());pending[index].resolve(stream)
   },
   count: () => pending.length,
+  retireModel: () => flushSync(() => useModelStore.setState({activeModelId:'moondream2'})),
   session: active => flushSync(() => useSessionStore.setState({status:active?'active':'idle'})),
   unmount: () => flushSync(() => root.unmount()),
   activation,
@@ -115,3 +116,30 @@ for (const change of ['session', 'unmount']) {
     })
   })
 }
+
+test('retiring the selected model prevents permission retry capture', async () => {
+  await withComponentBrowser(source, async (page) => {
+    await denyInitial(page)
+    await page.evaluate(() => window.fixture.retireModel())
+    await page.getByRole('button', { name: 'Try again', exact: true }).click()
+    await page.getByRole('dialog').waitFor({ state: 'hidden' })
+    await page.locator('[data-sonner-toast]').waitFor()
+    assert.equal(await page.evaluate(() => window.fixture.count()), 1)
+  })
+})
+
+test('a permission result for a retired selection cannot show success', async () => {
+  await withComponentBrowser(source, async (page) => {
+    await denyInitial(page)
+    await page.getByRole('button', { name: 'Try again', exact: true }).click()
+    await page.waitForFunction(() => window.fixture.count() === 2)
+    await page.getByRole('dialog').waitFor({ state: 'hidden' })
+    await page.evaluate(() => window.fixture.retireModel())
+    await page.evaluate(() => window.fixture.settle(1, 'success'))
+    await page.waitForFunction(() =>
+      window.fixture.tracks().every((state) => state === 'ended')
+    )
+    assert.equal(await page.getByRole('dialog').count(), 0)
+    assert.equal(await page.locator('[data-sonner-toast]').count(), 0)
+  })
+})
