@@ -2156,6 +2156,8 @@ export const strings = {
       installedToast: (displayName: string) =>
         `${displayName} installed. Choose Use model when you're ready.`,
       retrySaveCta: 'Retry saving',
+      loadStateError: (error: string) =>
+        `Couldn't check your saved model setup. Retry after restoring file access. ${error}`,
       cacheRestoreFailed:
         'The previous model setup could not be restored in memory. Retry saving before closing StudyVis.',
       unsavedState: (error: string) =>

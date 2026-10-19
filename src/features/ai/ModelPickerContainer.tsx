@@ -116,7 +116,7 @@ export const ModelPickerContainer = forwardRef<
   const status = useModelStore((s) => s.status)
   const modelError = useModelStore((s) => s.error)
   const retryPersist = useModelStore((s) => s.retryPersist)
-  const [retryingSave, setRetryingSave] = useState(false)
+  const [retryingState, setRetryingState] = useState(false)
   // Settings is reachable mid-session (#47 B2). Model setup is safe while AI
   // is off, but locks once the live loop owns the shared sidecar.
   const sessionActive = useSessionStore((s) => s.status === 'active')
@@ -213,9 +213,10 @@ export const ModelPickerContainer = forwardRef<
     if (status !== 'ready') void hydrate()
   }, [status, hydrate])
 
-  // Probe initial install state for every model so the cards reflect what's
-  // already on disk. Runs once after mount.
+  // Recheck the cards after hydration or a successful Retry, so an earlier
+  // metadata failure cannot leave installed files displayed as absent.
   useEffect(() => {
+    if (status !== 'ready') return
     let cancelled = false
     void (async () => {
       const runtime = getDownloadRuntime()
@@ -237,7 +238,7 @@ export const ModelPickerContainer = forwardRef<
     return () => {
       cancelled = true
     }
-  }, [updateCard])
+  }, [status, updateCard])
 
   // Probe HF-token presence once. A thrown invoke (Storybook, a locked
   // keychain/Secret Service, or an unavailable native runtime) is treated as
@@ -842,25 +843,31 @@ export const ModelPickerContainer = forwardRef<
 
   return (
     <div className="flex flex-col gap-4">
-      {status === 'ready' && modelError ? (
+      {modelError ? (
         <div role="alert" className="flex flex-col gap-2">
-          <p>{strings.ai.picker.unsavedState(modelError)}</p>
+          <p>
+            {status === 'error'
+              ? strings.ai.picker.loadStateError(modelError)
+              : strings.ai.picker.unsavedState(modelError)}
+          </p>
           <Button
             variant="secondary"
             size="sm"
-            disabled={retryingSave}
+            disabled={retryingState}
             onClick={() => {
-              setRetryingSave(true)
-              void retryPersist()
+              setRetryingState(true)
+              void (status === 'error' ? hydrate() : retryPersist())
                 .catch(() => {})
-                .finally(() => setRetryingSave(false))
+                .finally(() => setRetryingState(false))
             }}
           >
-            {strings.ai.picker.retrySaveCta}
+            {status === 'error'
+              ? strings.common.actions.retry
+              : strings.ai.picker.retrySaveCta}
           </Button>
         </div>
       ) : null}
-      <ModelPicker {...props} />
+      {status !== 'error' ? <ModelPicker {...props} /> : null}
     </div>
   )
 })

@@ -196,6 +196,7 @@ export const useModelStore = create<ModelState>((set, get) => ({
       })
       return
     }
+    let loadedSnapshot: ModelStoreSnapshot | null = null
     try {
       const store = factory()
       const stored = await store.get<Record<string, ModelRecord>>(KEY_RECORDS)
@@ -203,28 +204,26 @@ export const useModelStore = create<ModelState>((set, get) => ({
       let records = isRecordsMap(stored) ? stored : EMPTY_RECORDS
       let activeModelId =
         typeof active === 'string' && active.length > 0 ? active : null
+      loadedSnapshot = { records, activeModelId }
       let repaired = false
       for (const [modelId, record] of Object.entries(records)) {
         // #422 retains unavailable model metadata until explicit removal.
         if (getModelUnavailableReason(modelId)) continue
         if (!record || record.installedAt == null) continue
-        try {
-          const files = await getDownloadRuntime().installState(modelId)
-          if (files.model.exists && files.mmproj.exists) continue
-          records = {
-            ...records,
-            [modelId]: { ...record, installedAt: null, benchmark: null },
-          }
-          if (activeModelId === modelId) activeModelId = null
-          repaired = true
-        } catch {
-          // An unavailable native probe is not evidence that files are absent.
+        const files = await getDownloadRuntime().installState(modelId)
+        if (files.model.exists && files.mmproj.exists) continue
+        records = {
+          ...records,
+          [modelId]: { ...record, installedAt: null, benchmark: null },
         }
+        if (activeModelId === modelId) activeModelId = null
+        repaired = true
       }
       set({ status: 'ready', records, activeModelId, error: null })
       if (repaired) await persist(set).catch(() => {})
     } catch (err) {
       set({
+        ...loadedSnapshot,
         status: 'error',
         error: err instanceof Error ? err.message : String(err),
       })

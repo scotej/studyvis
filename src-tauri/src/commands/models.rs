@@ -283,17 +283,29 @@ pub struct ModelInstallState {
     pub mmproj: ModelFileState,
 }
 
-fn file_state(path: &Path) -> ModelFileState {
+fn file_state(path: &Path) -> Result<ModelFileState, String> {
     match fs::metadata(path) {
-        Ok(m) if m.is_file() => ModelFileState {
+        Ok(metadata) if metadata.is_file() => Ok(ModelFileState {
             exists: true,
-            size: m.len(),
-        },
-        _ => ModelFileState {
+            size: metadata.len(),
+        }),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(ModelFileState {
             exists: false,
             size: 0,
-        },
+        }),
+        Ok(_) => Err(format!(
+            "model path is not a regular file: {}",
+            path.display()
+        )),
+        Err(error) => Err(format!("inspect model file {}: {error}", path.display())),
     }
+}
+
+fn install_state_in(dir: &Path) -> Result<ModelInstallState, String> {
+    Ok(ModelInstallState {
+        model: file_state(&dir.join(MODEL_LOCAL_FILENAME))?,
+        mmproj: file_state(&dir.join(MMPROJ_LOCAL_FILENAME))?,
+    })
 }
 
 #[tauri::command]
@@ -301,14 +313,7 @@ pub async fn model_install_state<R: Runtime>(
     app: AppHandle<R>,
     model_id: String,
 ) -> Result<ModelInstallState, String> {
-    super::blocking(move || {
-        let dir = model_dir(&app, &model_id)?;
-        Ok(ModelInstallState {
-            model: file_state(&dir.join(MODEL_LOCAL_FILENAME)),
-            mmproj: file_state(&dir.join(MMPROJ_LOCAL_FILENAME)),
-        })
-    })
-    .await
+    super::blocking(move || install_state_in(&model_dir(&app, &model_id)?)).await
 }
 
 // Removal must consult the sidecar: a running llama-server memory-maps the
@@ -1097,6 +1102,99 @@ fn seed_hasher_blocking(path: &Path) -> Result<(Sha256, u64), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn install_state_fixture(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "studyvis-model-state-{name}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn install_state_distinguishes_existing_files_from_not_found() {
+        let dir = install_state_fixture("missing");
+        fs::write(dir.join(MODEL_LOCAL_FILENAME), b"model").unwrap();
+        let state = install_state_in(&dir).unwrap();
+        assert!(state.model.exists);
+        assert_eq!(state.model.size, 5);
+        assert!(!state.mmproj.exists);
+        assert_eq!(state.mmproj.size, 0);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn install_state_rejects_non_file_paths() {
+        let dir = install_state_fixture("types");
+        fs::create_dir(dir.join(MODEL_LOCAL_FILENAME)).unwrap();
+        assert!(install_state_in(&dir)
+            .err()
+            .unwrap()
+            .contains("not a regular file"));
+        fs::remove_dir(dir.join(MODEL_LOCAL_FILENAME)).unwrap();
+        fs::write(dir.join(MODEL_LOCAL_FILENAME), b"model").unwrap();
+        #[cfg(unix)]
+        assert!(file_state(&dir.join(MODEL_LOCAL_FILENAME).join("child")).is_err());
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn install_state_permission_error_preserves_both_installed_files() {
+        use std::os::unix::fs::PermissionsExt;
+        if unsafe { libc::geteuid() } == 0 {
+            return; // Root bypasses the ordinary profile owner's access checks.
+        }
+        let dir = install_state_fixture("permission");
+        fs::write(dir.join(MODEL_LOCAL_FILENAME), b"model").unwrap();
+        fs::write(dir.join(MMPROJ_LOCAL_FILENAME), b"projector").unwrap();
+        fs::set_permissions(&dir, fs::Permissions::from_mode(0o000)).unwrap();
+        let metadata = fs::metadata(dir.join(MODEL_LOCAL_FILENAME));
+        let state = install_state_in(&dir);
+        fs::set_permissions(&dir, fs::Permissions::from_mode(0o700)).unwrap();
+        assert_eq!(
+            metadata.unwrap_err().kind(),
+            std::io::ErrorKind::PermissionDenied
+        );
+        assert!(state.is_err());
+        let restored = install_state_in(&dir).unwrap();
+        assert!(restored.model.exists && restored.mmproj.exists);
+        assert_eq!(fs::read(dir.join(MODEL_LOCAL_FILENAME)).unwrap(), b"model");
+        assert_eq!(
+            fs::read(dir.join(MMPROJ_LOCAL_FILENAME)).unwrap(),
+            b"projector"
+        );
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn install_state_missing_model_and_unreadable_projector_is_an_error() {
+        use std::os::unix::fs::{symlink, PermissionsExt};
+        if unsafe { libc::geteuid() } == 0 {
+            return;
+        }
+        let dir = install_state_fixture("partial-error");
+        let private = dir.join("private");
+        fs::create_dir(&private).unwrap();
+        let target = private.join("projector.gguf");
+        fs::write(&target, b"projector").unwrap();
+        symlink(&target, dir.join(MMPROJ_LOCAL_FILENAME)).unwrap();
+        fs::set_permissions(&private, fs::Permissions::from_mode(0o000)).unwrap();
+        let state = install_state_in(&dir);
+        fs::set_permissions(&private, fs::Permissions::from_mode(0o700)).unwrap();
+        assert!(
+            state.is_err(),
+            "partial metadata errors cannot authorize repair"
+        );
+        assert_eq!(fs::read(target).unwrap(), b"projector");
+        fs::remove_dir_all(dir).unwrap();
+    }
 
     // I72 — a HEAD response body is empty, so reqwest's content_length()
     // (the body size hint) is always 0 over HTTP/1.1; the command must

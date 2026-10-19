@@ -285,6 +285,12 @@ describe('emptyPickerState', () => {
 
 describe('useModelStore (LazyStore-backed)', () => {
   beforeEach(() => {
+    __setDownloadRuntime({
+      installState: async () => ({
+        model: { exists: true, size: 1 },
+        mmproj: { exists: true, size: 1 },
+      }),
+    } as never)
     useModelStore.setState({
       status: 'loading',
       records: {},
@@ -394,6 +400,114 @@ describe('useModelStore (LazyStore-backed)', () => {
       expect(installState).not.toHaveBeenCalled()
     }
   )
+
+  test.each(['Permission denied', 'Input/output error'])(
+    'metadata %s preserves saved selection, benchmark, and retired records until Retry (#424)',
+    async (message) => {
+      const { deps, store } = makeFakeDeps()
+      const benchmark = summariseBenchmark({
+        samplesSec: [2, 3, 4],
+        completedAtSec: 99,
+      })
+      const records = {
+        'qwen2_5-vl-3b': {
+          modelId: 'qwen2_5-vl-3b',
+          installedAt: 123,
+          benchmark,
+        },
+        moondream2: {
+          modelId: 'moondream2',
+          installedAt: 456,
+          benchmark,
+          interruptedDownload: { bytesReceived: 789, at: 999 },
+        },
+      }
+      store.data.set('records', records)
+      store.data.set('active_model_id', 'qwen2_5-vl-3b')
+      const before = structuredClone([...store.data])
+      let denied = true
+      const installState = vi.fn(async () => {
+        if (denied) throw new Error(message)
+        return {
+          model: { exists: true, size: 1 },
+          mmproj: { exists: true, size: 1 },
+        }
+      })
+      __setModelStoreDeps(deps)
+      __setDownloadRuntime({ installState } as never)
+
+      await useModelStore.getState().hydrate()
+      expect(useModelStore.getState()).toMatchObject({
+        status: 'error',
+        error: message,
+        records,
+        activeModelId: 'qwen2_5-vl-3b',
+      })
+      expect([...store.data]).toEqual(before)
+      expect(store.saved).toBe(0)
+      expect(installState.mock.calls).toEqual([['qwen2_5-vl-3b']])
+
+      denied = false
+      await useModelStore.getState().hydrate()
+      expect(useModelStore.getState()).toMatchObject({
+        status: 'ready',
+        error: null,
+        records,
+        activeModelId: 'qwen2_5-vl-3b',
+      })
+      expect([...store.data]).toEqual(before)
+      expect(store.saved).toBe(0)
+      expect(installState.mock.calls).toEqual([
+        ['qwen2_5-vl-3b'],
+        ['qwen2_5-vl-3b'],
+      ])
+    }
+  )
+
+  test('a later inspection error prevents an earlier missing-file repair from being persisted (#424)', async () => {
+    const { deps, store } = makeFakeDeps()
+    const benchmark = summariseBenchmark({
+      samplesSec: [2, 3, 4],
+      completedAtSec: 99,
+    })
+    const records = {
+      first: { modelId: 'first', installedAt: 1, benchmark },
+      second: { modelId: 'second', installedAt: 2, benchmark },
+    }
+    store.data.set('records', records)
+    store.data.set('active_model_id', 'second')
+    const before = structuredClone([...store.data])
+    let denied = true
+    __setModelStoreDeps(deps)
+    __setDownloadRuntime({
+      installState: async (id: string) => {
+        if (id === 'second' && denied) throw new Error('Permission denied')
+        return {
+          model: { exists: id !== 'first', size: 1 },
+          mmproj: { exists: true, size: 1 },
+        }
+      },
+    } as never)
+    await useModelStore.getState().hydrate()
+    expect(useModelStore.getState()).toMatchObject({
+      status: 'error',
+      records,
+      activeModelId: 'second',
+    })
+    expect([...store.data]).toEqual(before)
+    expect(store.saved).toBe(0)
+
+    denied = false
+    await useModelStore.getState().hydrate()
+    expect(useModelStore.getState().status).toBe('ready')
+    expect(useModelStore.getState().records.first).toMatchObject({
+      installedAt: null,
+      benchmark: null,
+    })
+    expect(useModelStore.getState().records.second).toEqual(records.second)
+    expect(useModelStore.getState().activeModelId).toBe('second')
+    expect(store.saved).toBe(1)
+  })
 
   test.each(['qwen2_5-vl-3b', 'unknown-installed-model'])(
     'rehydration cannot adopt removed active %s after its record save failed (#424)',

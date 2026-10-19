@@ -14,6 +14,7 @@ test('failed model selection/removal saves remain visible and recoverable (#424)
     import { createRoot } from 'react-dom/client'
     import { Toaster } from 'sonner'
     import { ModelPickerContainer } from '@/features/ai/ModelPickerContainer'
+    import { summariseBenchmark } from '@/features/ai/benchmark'
     import { __setDownloadRuntime } from '@/features/ai/download'
     import { __setHfTokenRuntime } from '@/features/ai/hfToken'
     import { SUPPORTED_MODELS } from '@/features/ai/models'
@@ -21,12 +22,15 @@ test('failed model selection/removal saves remain visible and recoverable (#424)
     import { useSettingsStore } from '@/stores/settingsStore'
     import { useSessionStore } from '@/stores/sessionStore'
     let fail = true
+    let failInspection = false
+    let saveAttempts = 0
     let disk = { records: Object.fromEntries(SUPPORTED_MODELS.map(spec => [spec.id, { modelId: spec.id, installedAt: 1, benchmark: null }])), active_model_id: ${JSON.stringify(ACTIVE_MODEL_ID)} }
+    disk.records[${JSON.stringify(ACTIVE_MODEL_ID)}].benchmark = summariseBenchmark({ samplesSec: [2, 3, 4], completedAtSec: 99 })
     let pending = structuredClone(disk)
     const installed = new Set(SUPPORTED_MODELS.map(spec => spec.id))
     const store = {
       get: async key => structuredClone(disk[key]), set: async (key, value) => { pending[key] = structuredClone(value) }, delete: async () => false,
-      save: async () => { if (fail) throw new Error('Synthetic models.json write denied'); disk = structuredClone(pending) },
+      save: async () => { saveAttempts++; if (fail) throw new Error('Synthetic models.json write denied'); disk = structuredClone(pending) },
     }
     __setModelStoreDeps({ storeFactory: () => store })
     useSessionStore.setState({ status: 'idle' })
@@ -35,15 +39,17 @@ test('failed model selection/removal saves remain visible and recoverable (#424)
     __setHfTokenRuntime({ present: async () => false, save: async () => {}, clear: async () => {} })
     __setDownloadRuntime({
       paths: async id => ({ dir: '/' + id, model_path: '/' + id + '/model.gguf', mmproj_path: '/' + id + '/mmproj.gguf' }),
-      installState: async id => ({ model: { exists: installed.has(id), size: 123 }, mmproj: { exists: installed.has(id), size: 123 } }),
+      installState: async id => { if (failInspection && id === ${JSON.stringify(ACTIVE_MODEL_ID)}) throw new Error('Synthetic model directory permission denied'); return { model: { exists: installed.has(id), size: 123 }, mmproj: { exists: installed.has(id), size: 123 } } },
       subscribeProgress: async () => () => {}, headCheck: async () => ({ status: 200, content_length: null }), startDownload: async () => {}, cancelDownload: async () => {},
       remove: async id => { installed.delete(id) },
     })
     let root
     function render() { root = createRoot(document.getElementById('root')); root.render(React.createElement(React.Fragment, null, React.createElement(Toaster), React.createElement(ModelPickerContainer))) }
     Object.assign(window, {
-      snapshot: () => ({ active: useModelStore.getState().activeModelId, records: structuredClone(useModelStore.getState().records), error: useModelStore.getState().error, disk: structuredClone(disk), installed: [...installed] }),
+      snapshot: () => ({ status: useModelStore.getState().status, saveAttempts, active: useModelStore.getState().activeModelId, records: structuredClone(useModelStore.getState().records), error: useModelStore.getState().error, disk: structuredClone(disk), installed: [...installed] }),
       allowSave: () => { fail = false },
+      denyInspection: () => { failInspection = true },
+      allowInspection: () => { failInspection = false },
       restart: async () => { root.unmount(); pending = structuredClone(disk); useModelStore.setState({ status: 'loading', records: {}, activeModelId: null, error: null }); await useModelStore.getState().hydrate(); render() },
     })
     render()
@@ -80,7 +86,7 @@ test('failed model selection/removal saves remain visible and recoverable (#424)
       : {}),
   })
   try {
-    for (const mode of ['select', 'remove', 'remove-active']) {
+    for (const mode of ['select', 'remove', 'remove-active', 'inspection']) {
       const page = await browser.newPage()
       const errors = []
       page.on('pageerror', (error) => errors.push(error.message))
@@ -112,6 +118,45 @@ test('failed model selection/removal saves remain visible and recoverable (#424)
         (entryFile) => import('/' + entryFile),
         entry.fileName
       )
+      if (mode === 'inspection') {
+        const initial = await page.evaluate(() => window.snapshot())
+        await page.evaluate(async () => {
+          window.denyInspection()
+          await window.restart()
+        })
+        await page
+          .getByRole('alert')
+          .filter({ hasText: "Couldn't check your saved model setup" })
+          .waitFor()
+        let denied = await page.evaluate(() => window.snapshot())
+        assert.equal(denied.status, 'error')
+        assert.equal(denied.active, initial.active)
+        assert.deepEqual(denied.records, initial.records)
+        assert.deepEqual(denied.disk, initial.disk)
+        assert.equal(denied.saveAttempts, 0)
+        assert.equal(await page.locator('[data-slot="model-card"]').count(), 0)
+        await page.evaluate(() => window.allowInspection())
+        await page.getByRole('button', { name: 'Retry', exact: true }).click()
+        await page.waitForFunction(
+          () =>
+            window.snapshot().status === 'ready' &&
+            window.snapshot().error === null
+        )
+        const recovered = await page.evaluate(() => window.snapshot())
+        assert.equal(recovered.active, initial.active)
+        assert.deepEqual(recovered.records, initial.records)
+        assert.deepEqual(recovered.disk, initial.disk)
+        assert.equal(recovered.saveAttempts, 0)
+        await page
+          .locator(
+            `[data-slot="model-card"][aria-labelledby="model-${ACTIVE_MODEL_ID}-name"]`
+          )
+          .getByRole('button', { name: 'Re-benchmark', exact: true })
+          .waitFor()
+        assert.deepEqual(errors, [], mode)
+        await page.close()
+        continue
+      }
       const targetModelId =
         mode === 'remove-active' ? ACTIVE_MODEL_ID : OTHER_MODEL_ID
       const card = page.locator(
