@@ -146,6 +146,43 @@ function isRejoinAvailable(
   return onRejoin !== undefined && (deadline === undefined || now < deadline)
 }
 
+function RejoinAction({
+  onRejoin,
+  deadline,
+  buttonRef,
+}: {
+  onRejoin?: () => void
+  deadline?: number
+  buttonRef?: Ref<HTMLButtonElement>
+}) {
+  const [expiredDeadline, setExpiredDeadline] = useState<number | null>(null)
+  const available =
+    isRejoinAvailable(onRejoin, deadline) && expiredDeadline !== deadline
+  useEffect(() => {
+    if (!isRejoinAvailable(onRejoin, deadline) || deadline === undefined) return
+    const handle = setTimeout(
+      () => setExpiredDeadline(deadline),
+      Math.max(0, deadline - Date.now())
+    )
+    return () => clearTimeout(handle)
+  }, [onRejoin, deadline])
+
+  if (!onRejoin) return null
+  return (
+    <Button
+      ref={buttonRef}
+      variant="default"
+      size="sm"
+      disabled={!available}
+      onClick={() => {
+        if (available && isRejoinAvailable(onRejoin, deadline)) onRejoin()
+      }}
+    >
+      <RotateCcwIcon /> {strings.report.rejoinCta}
+    </Button>
+  )
+}
+
 export function Report({
   sessionId,
   topContent,
@@ -162,6 +199,26 @@ export function Report({
   const [focusCloseOnMount, setFocusCloseOnMount] = useState(autoFocusClose)
   const closeButtonRef = useRef<HTMLButtonElement>(null)
   const autoFocusCloseEnabledRef = useRef(autoFocusClose)
+  const rejoinButtonRef = useRef<HTMLButtonElement>(null)
+  const restoreRejoinFocusRef = useRef(false)
+  const setRejoinButtonRef = useCallback((button: HTMLButtonElement | null) => {
+    if (button === null) {
+      // #400 — the ready report replaces the loading tree. Observe focus at
+      // removal, so an async read cannot override newer keyboard intent.
+      restoreRejoinFocusRef.current =
+        rejoinButtonRef.current !== null &&
+        document.activeElement === rejoinButtonRef.current
+    } else {
+      if (
+        restoreRejoinFocusRef.current &&
+        document.activeElement === document.body
+      ) {
+        button.focus()
+      }
+      restoreRejoinFocusRef.current = false
+    }
+    rejoinButtonRef.current = button
+  }, [])
 
   useEffect(() => {
     autoFocusCloseEnabledRef.current = autoFocusClose
@@ -238,15 +295,22 @@ export function Report({
                 {strings.report.eyebrow}
               </h1>
             </div>
-            <Button
-              ref={closeButtonRef}
-              variant="secondary"
-              size="sm"
-              onClick={onClose}
-              autoFocus={focusCloseOnMount}
-            >
-              <ChevronLeftIcon /> {closeLabel}
-            </Button>
+            <div className="flex items-center gap-2">
+              <RejoinAction
+                onRejoin={onRejoin}
+                deadline={rejoinDeadline}
+                buttonRef={setRejoinButtonRef}
+              />
+              <Button
+                ref={closeButtonRef}
+                variant="secondary"
+                size="sm"
+                onClick={onClose}
+                autoFocus={focusCloseOnMount}
+              >
+                <ChevronLeftIcon /> {closeLabel}
+              </Button>
+            </div>
           </div>
         </header>
 
@@ -297,6 +361,7 @@ export function Report({
       closeLabel={closeLabel}
       autoFocusClose={focusCloseOnMount}
       closeButtonRef={closeButtonRef}
+      rejoinButtonRef={setRejoinButtonRef}
       onRejoin={onRejoin}
       rejoinDeadline={rejoinDeadline}
       showDiagnosticsExport={showDiagnosticsExport}
@@ -316,6 +381,7 @@ export type ReportViewProps = {
   // Report's async shell uses this to preserve focus across its loading and
   // ready trees without overriding a user's newer focus target.
   closeButtonRef?: Ref<HTMLButtonElement>
+  rejoinButtonRef?: Ref<HTMLButtonElement>
   topContent?: ReactNode
   // #47 B3 — see ReportProps.onRejoin.
   onRejoin?: () => void
@@ -339,6 +405,7 @@ export function ReportView({
   closeLabel = strings.common.actions.close,
   autoFocusClose = false,
   closeButtonRef,
+  rejoinButtonRef,
   topContent,
   onRejoin,
   rejoinDeadline,
@@ -378,20 +445,6 @@ export function ReportView({
   // must agree: one claiming "no score recorded" beside the other saying "Nice
   // work" is the contradiction issue #92 screenshotted.
   const coverage = aiCoverage(session)
-
-  const [expiredDeadline, setExpiredDeadline] = useState<number | null>(null)
-  const rejoinAvailable =
-    isRejoinAvailable(onRejoin, rejoinDeadline) &&
-    expiredDeadline !== rejoinDeadline
-  useEffect(() => {
-    if (!isRejoinAvailable(onRejoin, rejoinDeadline)) return
-    if (rejoinDeadline === undefined) return
-    const handle = setTimeout(
-      () => setExpiredDeadline(rejoinDeadline),
-      Math.max(0, rejoinDeadline - Date.now())
-    )
-    return () => clearTimeout(handle)
-  }, [onRejoin, rejoinDeadline])
 
   const [copied, setCopied] = useState(false)
   const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -572,16 +625,11 @@ export function ReportView({
             >
               <BracesIcon /> {exportCopy.auditCta}
             </Button>
-            {onRejoin ? (
-              <Button
-                variant="default"
-                size="sm"
-                onClick={onRejoin}
-                disabled={!rejoinAvailable}
-              >
-                <RotateCcwIcon /> {strings.report.rejoinCta}
-              </Button>
-            ) : null}
+            <RejoinAction
+              onRejoin={onRejoin}
+              deadline={rejoinDeadline}
+              buttonRef={rejoinButtonRef}
+            />
             <Button
               ref={closeButtonRef}
               variant="secondary"
