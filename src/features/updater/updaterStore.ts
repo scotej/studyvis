@@ -31,6 +31,7 @@ import { check, type Update } from '@tauri-apps/plugin-updater'
 import { create } from 'zustand'
 
 import { useSessionStore } from '@/stores/sessionStore'
+import { useSettingsStore } from '@/stores/settingsStore'
 import { logger } from '@/lib/log'
 import { reserveUpdateInstall } from '@/lib/updateInstallGuard'
 
@@ -91,6 +92,15 @@ async function discard(update: Update): Promise<void> {
   }
 }
 
+// An off→on toggle must not revive a background check started before the opt-out.
+let autoUpdateGeneration = 0
+let activeCheck: { generation: number; userInitiated: boolean } | null = null
+useSettingsStore.subscribe((state, previous) => {
+  if (state.values.autoUpdateEnabled !== previous.values.autoUpdateEnabled) {
+    autoUpdateGeneration += 1
+  }
+})
+
 let deps: UpdaterDeps = defaultUpdaterDeps
 let releaseInstallReservation: (() => void) | null = null
 
@@ -144,29 +154,52 @@ export const useUpdaterStore = create<UpdaterState>((set, get) => ({
   pending: null,
 
   checkNow: async ({ userInitiated = false } = {}) => {
+    const generation = autoUpdateGeneration
+    const eligible = () =>
+      userInitiated ||
+      (useSettingsStore.getState().values.autoUpdateEnabled &&
+        autoUpdateGeneration === generation)
+    if (!eligible()) return
     const { status } = get()
-    // A check already in flight, or an update already staged, wins — a second
-    // pass would re-download bytes we have. Blocked is permanent for this
-    // process (see UpdaterStatus), so re-checking it would only re-learn it.
+    // Invalidated background requests cannot hold the re-enabled scheduler's
+    // only near-term opportunity while their network/cleanup awaits finish.
+    // Manual checks and downloads already underway retain their ownership.
     if (
-      status === 'checking' ||
+      (status === 'checking' &&
+        (!activeCheck ||
+          activeCheck.userInitiated ||
+          activeCheck.generation === generation)) ||
       status === 'downloading' ||
       status === 'ready' ||
       status === 'blocked'
     )
       return
 
+    const attempt = { generation, userInitiated }
+    activeCheck = attempt
+    const ownsCheck = () => activeCheck === attempt
+    const allowed = () => ownsCheck() && eligible()
     set({ status: 'checking', errorKind: null })
     let update: Update | null
     try {
       update = await deps.check()
     } catch (err) {
+      if (!allowed()) {
+        if (ownsCheck()) set({ status: 'idle' })
+        return
+      }
       // Silent in the background path: no network is the common case on a
       // laptop that just woke up, and it isn't the user's problem — so it is
       // a warning there and an error only when the user asked.
       const record = userInitiated ? log.error : log.warn
       record('check.failed', { userInitiated, err })
       set({ status: 'error', errorKind: userInitiated ? 'check' : null })
+      return
+    }
+
+    if (!allowed()) {
+      if (update) await discard(update)
+      if (ownsCheck()) set({ status: 'idle' })
       return
     }
 
@@ -185,6 +218,11 @@ export const useUpdaterStore = create<UpdaterState>((set, get) => ({
       context = await deps.installContext()
     } catch (err) {
       log.error('install_context.failed', { failedOpen: true, err })
+    }
+    if (!allowed()) {
+      await discard(update)
+      if (ownsCheck()) set({ status: 'idle' })
+      return
     }
     if (!context.updatable) {
       log.warn('self_update.blocked', { reason: context.reason })
@@ -209,7 +247,7 @@ export const useUpdaterStore = create<UpdaterState>((set, get) => ({
       // The next check re-finds this release from scratch, so this handle is
       // abandoned rather than held — release it with the rest of them.
       await discard(update)
-      set({ status: 'idle' })
+      if (ownsCheck()) set({ status: 'idle' })
       return
     }
 
