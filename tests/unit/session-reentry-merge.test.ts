@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, test, vi } from 'vitest'
 
 import type { FocusSnapshot } from '@/features/ai/focusStore'
 import { serializeReportToText } from '@/features/session/reportSerialize'
-import { sessionsGet } from '@/lib/db/sessions'
+import { sessionsGet, sessionsInsert } from '@/lib/db/sessions'
 import { encodePeerPresenceMs } from '@/lib/db/sessionPresence'
 
 // Re-entering the same session room (Rejoin after a local Leave, or a guest
@@ -289,6 +289,33 @@ describe('re-entry merge across leave cycles', () => {
     await runStint(T0 + 2 * MIN, T0 + 3 * MIN)
     expect(db.get('topic-1')?.declaredTopic).toBeNull()
   })
+
+  test.each(['Maths', null])(
+    'save retry retains original topic %s after rejoin and report reset (#418, #428)',
+    async (originalTopic) => {
+      useSessionStore.getState().setPendingInitialTopic('Maths')
+      await runStint(T0, T0 + 2 * MIN)
+      db.get('topic-1')!.declaredTopic = originalTopic
+      useSessionStore.getState().reset()
+      useSessionStore.getState().setPendingInitialTopic('Physics')
+      const insert = vi.mocked(sessionsInsert)
+      insert.mockRejectedValueOnce(new Error('transient write failure'))
+      await runStint(T0 + 3 * MIN, T0 + 5 * MIN)
+      const failedRow = insert.mock.calls.at(-1)![0]
+      expect(failedRow.declaredTopic).toBe(originalTopic)
+      const retry = useSessionStore.getState().pendingSave!
+      expect(retry).toBeTypeOf('function')
+      useSessionStore.getState().reset()
+      await Promise.all([retry(), retry()])
+      expect(insert.mock.calls.at(-1)![0]).toEqual(failedRow)
+      expect(db.get('topic-1')).toMatchObject({
+        declaredTopic: originalTopic,
+        startedAt: T0,
+        totalDurationMs: 4 * MIN,
+      })
+      expect(useSessionStore.getState().pendingSave).toBeNull()
+    }
+  )
 
   // I109 — the teardown flush is followed by four IPC round-trips, and the AI
   // sample loop runs through all of them: its handle lives in SessionView's
