@@ -636,7 +636,10 @@ export function buildLeaveHandler(args: {
       totalDurationMs: summary.totalDurationMs,
       peerPubkeys: summary.peerPubkeys,
       peerPresenceMs: summary.peerPresenceMs,
-      declaredTopic: initialDeclaredTopic,
+      // #418: keep first-stint provenance in the frozen retry row too.
+      declaredTopic: priorStint
+        ? priorStint.declared_topic
+        : initialDeclaredTopic,
       score: focus.score,
       focusedPct: focus.focusedPct,
       generatedAt: endedAt,

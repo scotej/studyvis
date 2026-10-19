@@ -414,7 +414,10 @@ const sessionStateCreator: StateCreator<SessionState> = (set, get) => ({
         announceLeave: null,
         authenticateAuthority: init.authenticateAuthority ?? null,
         declaredStudyTopic: topic,
-        initialDeclaredTopic: topic,
+        initialDeclaredTopic:
+          init.isRejoin && s.sessionTopic === init.sessionTopic
+            ? s.initialDeclaredTopic
+            : topic,
         pendingInitialTopic: null,
         seenPeerEdPubkeys: [],
         seenPeerNames: {},

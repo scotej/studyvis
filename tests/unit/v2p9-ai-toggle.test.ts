@@ -62,6 +62,28 @@ describe('sessionStore — one-shot session-start topic', () => {
     expect(s.pendingInitialTopic).toBeNull()
   })
 
+  test('same-session rejoin keeps the original topic while resuming the current topic (#418)', () => {
+    useSessionStore.getState().setPendingInitialTopic('Maths')
+    useSessionStore.getState().begin(fakeInit())
+    useSessionStore.getState().setDeclaredStudyTopic('Physics')
+    useSessionStore.getState().markEnded()
+    useSessionStore.getState().setPendingInitialTopic('Physics')
+    useSessionStore.getState().begin({ ...fakeInit(), isRejoin: true })
+    expect(useSessionStore.getState().initialDeclaredTopic).toBe('Maths')
+    expect(useSessionStore.getState().declaredStudyTopic).toBe('Physics')
+  })
+
+  test('a different logical session owns its new initial topic (#418)', () => {
+    useSessionStore.getState().setPendingInitialTopic('Maths')
+    useSessionStore.getState().begin(fakeInit())
+    useSessionStore.getState().markEnded()
+    useSessionStore.getState().setPendingInitialTopic('Chemistry')
+    useSessionStore
+      .getState()
+      .begin({ ...fakeInit(), sessionTopic: 'different', isRejoin: true })
+    expect(useSessionStore.getState().initialDeclaredTopic).toBe('Chemistry')
+  })
+
   test('no pending topic falls back to the default (AI-off path)', () => {
     useSessionStore.getState().begin(fakeInit())
     const s = useSessionStore.getState()

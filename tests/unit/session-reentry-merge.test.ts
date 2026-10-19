@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, test, vi } from 'vitest'
 
 import type { FocusSnapshot } from '@/features/ai/focusStore'
+import { serializeReportToText } from '@/features/session/reportSerialize'
+import { sessionsGet, sessionsInsert } from '@/lib/db/sessions'
 import { encodePeerPresenceMs } from '@/lib/db/sessionPresence'
 
 // Re-entering the same session room (Rejoin after a local Leave, or a guest
@@ -35,7 +37,7 @@ vi.mock('@/lib/db/sessions', () => ({
       total_duration_ms: row.totalDurationMs ?? null,
       peer_pubkeys: row.peerPubkeys ?? null,
       peer_presence_ms: row.peerPresenceMs ?? null,
-      declared_topic: null,
+      declared_topic: row.declaredTopic ?? null,
       score: row.score ?? null,
       focused_pct: row.focusedPct ?? null,
       generated_at: null,
@@ -236,6 +238,84 @@ describe('re-entry merge across leave cycles', () => {
     })
     expect(store.getState().announceLeave).toBeNull()
   })
+
+  test.each(['Physics', 'Maths'])(
+    'rejoined persistence retains Maths when the current subject is %s (#418)',
+    async (resumedTopic) => {
+      useSessionStore.getState().setPendingInitialTopic('Maths')
+      await runStint(T0, T0 + 2 * MIN)
+      expect(db.get('topic-1')?.declaredTopic).toBe('Maths')
+      // Model cross-process re-entry too: no live initial-topic state survives.
+      useSessionStore.getState().reset()
+      useSessionStore.getState().setPendingInitialTopic(resumedTopic)
+      await runStint(T0 + 3 * MIN, T0 + 5 * MIN)
+      expect(db.get('topic-1')?.declaredTopic).toBe('Maths')
+      expect(db.get('topic-1')?.startedAt).toBe(T0)
+      const session = await sessionsGet('topic-1')
+      const text = serializeReportToText({
+        session: session!,
+        myEdPubkeyHex: 'a',
+        nameByEdPubkey: { a: 'You' },
+        auditEvents: [
+          {
+            session_id: 'topic-1',
+            ts: T0,
+            who: 'a',
+            kind: 'topic_set',
+            detail: '{"topic":"Maths"}',
+            sig: 'first',
+          },
+          {
+            session_id: 'topic-1',
+            ts: T0 + 2 * MIN,
+            who: 'a',
+            kind: 'topic_change',
+            detail: '{"previous_topic":"Maths","new_topic":"Physics"}',
+            sig: 'change',
+          },
+        ],
+      })
+      expect(text).toContain('Studied Maths')
+      expect(text).toContain('Maths (started)')
+      expect(text).toContain('Physics (02:00)')
+      expect(text).not.toContain('Physics (started)')
+    }
+  )
+
+  test('an unknown legacy starting topic stays unknown after rejoin (#418)', async () => {
+    await runStint(T0, T0 + MIN)
+    db.get('topic-1')!.declaredTopic = null
+    useSessionStore.getState().setPendingInitialTopic('Physics')
+    await runStint(T0 + 2 * MIN, T0 + 3 * MIN)
+    expect(db.get('topic-1')?.declaredTopic).toBeNull()
+  })
+
+  test.each(['Maths', null])(
+    'save retry retains original topic %s after rejoin and report reset (#418, #428)',
+    async (originalTopic) => {
+      useSessionStore.getState().setPendingInitialTopic('Maths')
+      await runStint(T0, T0 + 2 * MIN)
+      db.get('topic-1')!.declaredTopic = originalTopic
+      useSessionStore.getState().reset()
+      useSessionStore.getState().setPendingInitialTopic('Physics')
+      const insert = vi.mocked(sessionsInsert)
+      insert.mockRejectedValueOnce(new Error('transient write failure'))
+      await runStint(T0 + 3 * MIN, T0 + 5 * MIN)
+      const failedRow = insert.mock.calls.at(-1)![0]
+      expect(failedRow.declaredTopic).toBe(originalTopic)
+      const retry = useSessionStore.getState().pendingSave!
+      expect(retry).toBeTypeOf('function')
+      useSessionStore.getState().reset()
+      await Promise.all([retry(), retry()])
+      expect(insert.mock.calls.at(-1)![0]).toEqual(failedRow)
+      expect(db.get('topic-1')).toMatchObject({
+        declaredTopic: originalTopic,
+        startedAt: T0,
+        totalDurationMs: 4 * MIN,
+      })
+      expect(useSessionStore.getState().pendingSave).toBeNull()
+    }
+  )
 
   // I109 — the teardown flush is followed by four IPC round-trips, and the AI
   // sample loop runs through all of them: its handle lives in SessionView's
