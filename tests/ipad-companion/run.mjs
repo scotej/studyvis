@@ -172,6 +172,7 @@ function collect(target, event) {
 async function trustedGet(url, ca) {
   return new Promise((resolve, reject) => {
     const request = get(url, { ca }, (response) => {
+      const authorized = response.socket?.authorized === true
       let text = ''
       response.setEncoding('utf8')
       response.on('data', (chunk) => {
@@ -181,7 +182,7 @@ async function trustedGet(url, ca) {
       response.on('end', () =>
         resolve({
           status: response.statusCode,
-          authorized: response.socket.authorized,
+          authorized,
           text,
         })
       )
@@ -283,7 +284,7 @@ async function runProbe() {
   ])
   simulatorId = created.stdout.trim()
   assert.match(simulatorId, /^[A-F0-9-]{36}$/i)
-  report.simulator.udid = simulatorId
+  report.simulator.simulatorId = simulatorId
   await command('xcrun', ['simctl', 'boot', simulatorId])
   await command('xcrun', ['simctl', 'bootstatus', simulatorId, '-b'], {
     timeout: 240_000,
