@@ -96,7 +96,10 @@ and `vcruntime140_1.dll` beside `llama-server.exe`, as well as in its runtime
 resource directory. The adjacent copies take precedence over older system
 copies. They come from the official Visual Studio 2022 x64 redistributable
 directory; staging validates Microsoft signatures, PE architecture, and hashes,
-and ships the original license document and a provenance manifest. Required
+and ships the original license document and a provenance manifest. Managed Windows
+installation copies that same checked runtime closure, notice, license, and manifest
+beside the extracted engine before atomic promotion; existing managed candidates
+with missing or changed runtime files are rejected and repaired. Required
 Windows CI checks the staged engine; release and preview checks validate the
 exact extracted NSIS installer and exercise engine startup and CPU fallback.
 
