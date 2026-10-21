@@ -1187,6 +1187,26 @@ pub fn system_open_releases<R: Runtime>(app: AppHandle<R>) -> Result<(), String>
         .map_err(|e| e.to_string())
 }
 
+fn turn_login_url(ticket: &str) -> Result<String, String> {
+    if ticket.len() != 43
+        || !ticket
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_')
+    {
+        return Err("Invalid login ticket".into());
+    }
+    Ok(format!(
+        "https://studyvis-turn.ashcroft-estate.workers.dev/oauth/start?ticket={ticket}"
+    ))
+}
+
+#[tauri::command]
+pub fn system_open_turn_login<R: Runtime>(app: AppHandle<R>, ticket: String) -> Result<(), String> {
+    app.opener()
+        .open_url(turn_login_url(&ticket)?, None::<&str>)
+        .map_err(|_| "Could not open the sign-in browser".into())
+}
+
 // V2-P5 battery awareness for the AI sample loop. ARCHITECTURE.md §8: "if
 // user_on_battery and battery_pct < 20: pause AI". Returned shape matches
 // the `RawBattery` interface in `src/features/ai/battery.ts`.
@@ -1616,6 +1636,27 @@ fn install_context() -> InstallContext {
 #[cfg(test)]
 mod tests {
     use super::{image_extension, safe_image_filename, RELEASES_URL};
+
+    #[test]
+    fn turn_login_opener_accepts_only_a_ticket_for_the_fixed_broker() {
+        let ticket = "a".repeat(43);
+        assert_eq!(
+            super::turn_login_url(&ticket).unwrap(),
+            format!(
+                "https://studyvis-turn.ashcroft-estate.workers.dev/oauth/start?ticket={ticket}"
+            )
+        );
+        for invalid in [
+            "".to_string(),
+            "a".repeat(42),
+            "a".repeat(44),
+            format!("{}&", "a".repeat(42)),
+            "https://attacker.invalid/".to_string(),
+            format!("{}\n", "a".repeat(42)),
+        ] {
+            assert!(super::turn_login_url(&invalid).is_err());
+        }
+    }
 
     #[test]
     fn concurrent_text_exports_retain_one_complete_report() {

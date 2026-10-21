@@ -69,6 +69,7 @@ import { Settings, SettingsOverlay } from '@/features/settings'
 import type { SettingsCategoryId } from '@/features/settings'
 import type { Friend } from '@/lib/db/friends'
 import { boxEncryptWithKeyring } from '@/lib/db/identity'
+import { managedTurn } from '@/lib/managedTurn'
 import { useFriendsStore } from '@/stores/friendsStore'
 import { useIdentityStore } from '@/stores/identityStore'
 import {
@@ -123,6 +124,40 @@ export function Home() {
   // OR error (an error leaves `values` at defaults, so default relays are the
   // only option anyway and proceeding beats never starting presence/inbox).
   const settingsStatus = useSettingsStore((s) => s.status)
+  const turnPreference = useSettingsStore((s) => s.values.turnPreference)
+  const managedTurnOptedIn = useSettingsStore(
+    (s) =>
+      !!identity &&
+      s.values.managedTurnIdentities.includes(identity.ed_pubkey_hex)
+  )
+  useEffect(() => {
+    const key =
+      status === 'ready' && settingsStatus === 'ready'
+        ? (identity?.ed_pubkey_hex ?? null)
+        : null
+    managedTurn.setIdentity(key)
+    managedTurn.setEnabled(key !== null && managedTurnOptedIn)
+    return () => {
+      managedTurn.setEnabled(false)
+      managedTurn.setIdentity(null)
+    }
+  }, [identity?.ed_pubkey_hex, status, settingsStatus, managedTurnOptedIn])
+  useEffect(() => {
+    managedTurn.setPreference(turnPreference)
+  }, [turnPreference])
+  useEffect(() => {
+    const resume = () => {
+      if (document.visibilityState !== 'hidden') managedTurn.resume()
+    }
+    window.addEventListener('online', resume)
+    window.addEventListener('focus', resume)
+    document.addEventListener('visibilitychange', resume)
+    return () => {
+      window.removeEventListener('online', resume)
+      window.removeEventListener('focus', resume)
+      document.removeEventListener('visibilitychange', resume)
+    }
+  }, [])
   const sessionStatus = useSessionStore((s) => s.status)
   const sessionTopic = useSessionStore((s) => s.sessionTopic)
   // #47 B3 / #190 — a deliberate local ending may be rejoinable until its

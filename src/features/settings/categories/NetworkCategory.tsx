@@ -21,6 +21,7 @@ import {
 } from '@/stores/settingsStore'
 import { probeTurnServer } from '@/lib/turnProbe'
 import { strings } from '@/strings'
+import { BackupRelayRow } from './BackupRelayRow'
 
 export function NetworkCategory() {
   const turn = useSettingsStore((s) => s.values.turnPreference)
@@ -30,6 +31,7 @@ export function NetworkCategory() {
   return (
     <SettingsSection heading={copy.heading}>
       <SettingsRow label={copy.about.label} help={copy.about.help} />
+      <BackupRelayRow />
       <SettingsRow
         label={copy.preference.label}
         help={copy.preference.help}

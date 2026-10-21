@@ -30,6 +30,8 @@ import {
 } from 'trystero'
 
 import { logger } from '@/lib/log'
+import { managedTurn } from '@/lib/managedTurn'
+import { createManagedTurnPeerConnection } from '@/lib/webrtc/managedTurnPeerConnection'
 import { createResilientPeerConnection } from '@/lib/webrtc/resilientPeerConnection'
 import { DEFAULT_MQTT_BROKER_URLS } from './mqttRelayUrls'
 import { DEFAULT_RELAY_URLS } from './relays'
@@ -47,7 +49,10 @@ export const APP_ID = 'studyvis'
 // falls back to the global constructor it can't find either.
 const resilientPeerConnection =
   typeof RTCPeerConnection === 'function'
-    ? createResilientPeerConnection(RTCPeerConnection)
+    ? createManagedTurnPeerConnection(
+        createResilientPeerConnection(RTCPeerConnection),
+        managedTurn
+      )
     : undefined
 
 const resilientRtcConfig = resilientPeerConnection

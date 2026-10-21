@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Optional GitHub (recommended) and Google sign-in for approved backup-relay
+  access in Network settings. Existing identities, friends, recovery backups,
+  and study history are preserved without re-pairing. Direct connections remain
+  preferred; managed relay traffic stays disabled until a provider-enforced
+  free-only limit is confirmed and owner setup is complete.
+
 ## 2.0.2 — 2026-10-19 — Session reliability and recovery safeguards
 
 ### Changed
