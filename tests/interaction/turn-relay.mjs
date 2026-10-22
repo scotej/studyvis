@@ -1,4 +1,4 @@
-import { createHash, createHmac } from 'node:crypto'
+import { createHmac } from 'node:crypto'
 import { createSocket } from 'node:dgram'
 
 // A loopback-only TURN boundary: browsers own ICE, DTLS and SCTP. Short
@@ -7,6 +7,11 @@ export async function startTurnRelay() {
   const cookie = 0x2112a442
   const realm = 'studyvis-local-turn-test'
   const nonce = 'studyvis-local-turn-nonce'
+  // RFC 5389 long-term keys for the fixture's public old/next passwords.
+  const authenticationKeys = new Map([
+    ['old', Buffer.from('661b17c9e3d68a41ad7229defecde96c', 'hex')],
+    ['next', Buffer.from('863d00a1766073aaaf94a82c8860e9ee', 'hex')],
+  ])
   const socket = createSocket('udp4')
   const allocations = new Map()
   const expired = new Set()
@@ -51,17 +56,15 @@ export async function startTurnRelay() {
   const lifetime = Buffer.alloc(4)
   lifetime.writeUInt32BE(8)
   const reply = (request, remote, type, parts, username) => {
+    const key = authenticationKeys.get(username)
     const content = Buffer.concat(parts)
     const header = Buffer.alloc(20)
     header.writeUInt16BE(type)
-    header.writeUInt16BE(content.length + (username ? 24 : 0), 2)
+    header.writeUInt16BE(content.length + (key ? 24 : 0), 2)
     header.writeUInt32BE(cookie, 4)
     request.copy(header, 8, 8, 20)
     let response = Buffer.concat([header, content])
-    if (username) {
-      const key = createHash('md5')
-        .update(`${username}:${realm}:${username}-password`)
-        .digest()
+    if (key) {
       response = Buffer.concat([
         response,
         attr(8, createHmac('sha1', key).update(response).digest()),
@@ -111,7 +114,7 @@ export async function startTurnRelay() {
       return
     }
     requests.push({ type, username })
-    if (!username || expired.has(username)) {
+    if (!authenticationKeys.has(username) || expired.has(username)) {
       reply(message, remote, type | 0x110, [
         attr(9, Buffer.from([0, 0, 4, 1, ...Buffer.from('Unauthorized')])),
         attr(0x14, Buffer.from(realm)),
