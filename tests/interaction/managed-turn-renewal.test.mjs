@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { createSocket } from 'node:dgram'
 import { test } from 'node:test'
 import { tsImport } from 'tsx/esm/api'
 
@@ -76,7 +77,11 @@ window.fixture = {
       const transport = [...stats.values()].find(entry => entry.type === 'transport' && entry.selectedCandidatePairId)
       const pair = transport && stats.get(transport.selectedCandidatePairId)
       const local = pair && stats.get(pair.localCandidateId)
-      return {state: pc.connectionState, type: local?.candidateType, port: local?.port,
+      return {state: pc.connectionState, signaling: pc.signalingState, ice: pc.iceConnectionState, type: local?.candidateType, port: local?.port,
+        currentUfrag: pc.currentLocalDescription?.sdp.match(/a=ice-ufrag:([^\\s]+)/)?.[1],
+        currentRemoteUfrag: pc.currentRemoteDescription?.sdp.match(/a=ice-ufrag:([^\\s]+)/)?.[1],
+        pendingUfrag: pc.pendingLocalDescription?.sdp.match(/a=ice-ufrag:([^\\s]+)/)?.[1],
+        pendingRemoteUfrag: pc.pendingRemoteDescription?.sdp.match(/a=ice-ufrag:([^\\s]+)/)?.[1],
         ufrag: pc.localDescription?.sdp.match(/a=ice-ufrag:([^\\s]+)/)?.[1],
         remoteUfrag: pc.remoteDescription?.sdp.match(/a=ice-ufrag:([^\\s]+)/)?.[1],
         media: pc.localDescription?.sdp.includes('a=rtpmap'),
@@ -88,6 +93,64 @@ window.fixture = {
   stop: async () => { tickers.forEach(clearInterval); await Promise.all(rooms.map(item => item.leave())) },
 }
 `
+
+test(
+  'local TURN Allocate retransmissions preserve the relayed address',
+  { timeout: 5_000 },
+  async () => {
+    const turn = await startTurnRelay()
+    const client = createSocket('udp4')
+    try {
+      const header = Buffer.alloc(20)
+      header.writeUInt16BE(3)
+      header.writeUInt16BE(8, 2)
+      header.writeUInt32BE(0x2112a442, 4)
+      header.fill(7, 8)
+      const request = Buffer.concat([
+        header,
+        Buffer.from([0, 6, 0, 4, ...Buffer.from('next')]),
+      ])
+      const port = Number(turn.url.match(/:(\d+)\?/)[1])
+      const responses = []
+      client.on('message', (message) => responses.push(message))
+      client.send(request, port, '127.0.0.1')
+      client.send(request, port, '127.0.0.1')
+      await assertEventually(async () => responses.length === 2)
+      assert.deepEqual(responses[0], responses[1])
+      let relayedPort
+      for (let offset = 20; offset < responses[0].length;) {
+        const type = responses[0].readUInt16BE(offset)
+        const length = responses[0].readUInt16BE(offset + 2)
+        if (type === 0x16)
+          relayedPort = responses[0].readUInt16BE(offset + 6) ^ 0x2112
+        offset += 4 + ((length + 3) & ~3)
+      }
+      assert.equal(turn.credentialAt(relayedPort), 'next')
+      client.send(request, port, '127.0.0.1')
+      await assertEventually(async () => responses.length === 3)
+      assert.deepEqual(responses[2], responses[0])
+      assert.equal(turn.credentialAt(relayedPort), 'next')
+      const conflicting = Buffer.from(request)
+      conflicting[8] ^= 1
+      client.send(conflicting, port, '127.0.0.1')
+      await assertEventually(async () => responses.length === 4)
+      assert.equal(responses[3].readUInt16BE(0), 0x113)
+      let errorCode
+      for (let offset = 20; offset < responses[3].length;) {
+        const type = responses[3].readUInt16BE(offset)
+        const length = responses[3].readUInt16BE(offset + 2)
+        if (type === 9)
+          errorCode = responses[3][offset + 6] * 100 + responses[3][offset + 7]
+        offset += 4 + ((length + 3) & ~3)
+      }
+      assert.equal(errorCode, 437)
+      assert.equal(turn.credentialAt(relayedPort), 'next')
+    } finally {
+      client.close()
+      await turn.close()
+    }
+  }
+)
 
 for (const { relayOnly, early, shared } of [
   { relayOnly: true, early: false },
@@ -195,25 +258,33 @@ for (const { relayOnly, early, shared } of [
                 )
               )
               if (relayOnly) {
-                await assertEventually(async () => {
-                  const states = await snapshot()
-                  return (
-                    states.some((state) => state.restarts > 0) &&
-                    states.every(
-                      (state, index) =>
-                        state.connections[0]?.state === 'connected' &&
-                        (early ||
-                          state.connections[0]?.ufrag !==
-                            before[index].connections[0].ufrag) &&
-                        (early ||
-                          state.connections[0]?.remoteUfrag !==
-                            before[index].connections[0].remoteUfrag) &&
-                        (state.connections[0]?.type !== 'relay' ||
-                          turn.credentialAt(state.connections[0].port) ===
-                            'next')
+                let rotationSnapshot
+                await assertEventually(
+                  async () => {
+                    const states = (rotationSnapshot = await snapshot())
+                    return (
+                      states.some((state) => state.restarts > 0) &&
+                      states.every(
+                        (state, index) =>
+                          state.connections[0]?.state === 'connected' &&
+                          (early ||
+                            state.connections[0]?.ufrag !==
+                              before[index].connections[0].ufrag) &&
+                          (early ||
+                            state.connections[0]?.remoteUfrag !==
+                              before[index].connections[0].remoteUfrag) &&
+                          (state.connections[0]?.type !== 'relay' ||
+                            turn.credentialAt(state.connections[0].port) ===
+                              'next')
+                      )
                     )
-                  )
-                })
+                  },
+                  () => ({
+                    before,
+                    current: rotationSnapshot,
+                    turnRequests: turn.requests.slice(-100),
+                  })
+                )
                 assert.ok(
                   turn.requests.some(
                     (request) =>
@@ -276,13 +347,13 @@ for (const { relayOnly, early, shared } of [
   )
 }
 
-async function assertEventually(check) {
+async function assertEventually(check, details = () => undefined) {
   const deadline = Date.now() + 20_000
   while (Date.now() < deadline) {
     if (await check()) return
     await new Promise((resolve) => setTimeout(resolve, 100))
   }
   assert.fail(
-    'TURN renewal did not satisfy the expected live connection state within 20 seconds'
+    `TURN renewal did not satisfy the expected live connection state within 20 seconds: ${JSON.stringify(details())}`
   )
 }

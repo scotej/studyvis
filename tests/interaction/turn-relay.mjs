@@ -71,6 +71,7 @@ export async function startTurnRelay() {
       ])
     }
     socket.send(response, remote.port, remote.address)
+    return response
   }
   socket.on('message', (message, remote) => {
     const id = `${remote.address}:${remote.port}`
@@ -113,7 +114,8 @@ export async function startTurnRelay() {
       }
       return
     }
-    requests.push({ type, username })
+    const transactionId = message.subarray(8, 20).toString('hex')
+    requests.push({ type, username, transactionId })
     if (!authenticationKeys.has(username) || expired.has(username)) {
       reply(message, remote, type | 0x110, [
         attr(9, Buffer.from([0, 0, 4, 1, ...Buffer.from('Unauthorized')])),
@@ -123,8 +125,44 @@ export async function startTurnRelay() {
       return
     }
     if (type === 3) {
+      // PR-499: UDP retries reuse one allocation and its exact response, even
+      // when the duplicate arrives before the relay socket finishes binding.
+      if (allocation) {
+        if (allocation.transactionId === transactionId) {
+          if (allocation.response)
+            socket.send(allocation.response, remote.port, remote.address)
+          else allocation.waiting.push(remote)
+        } else {
+          reply(
+            message,
+            remote,
+            0x113,
+            [
+              attr(
+                9,
+                Buffer.from([
+                  0,
+                  0,
+                  4,
+                  37,
+                  ...Buffer.from('Allocation Mismatch'),
+                ])
+              ),
+            ],
+            username
+          )
+        }
+        return
+      }
       const relay = createSocket('udp4')
-      const record = { socket: relay, username, channels: new Map() }
+      const record = {
+        socket: relay,
+        username,
+        transactionId,
+        response: null,
+        waiting: [],
+        channels: new Map(),
+      }
       allocations.set(id, record)
       relay.on('message', (data, peer) => {
         if (expired.has(username)) return
@@ -149,7 +187,7 @@ export async function startTurnRelay() {
         }
       })
       relay.bind(0, '127.0.0.1', () => {
-        reply(
+        record.response = reply(
           message,
           remote,
           0x103,
@@ -160,6 +198,8 @@ export async function startTurnRelay() {
           ],
           username
         )
+        for (const waiting of record.waiting.splice(0))
+          socket.send(record.response, waiting.port, waiting.address)
       })
     } else if (type === 4) {
       reply(message, remote, 0x104, [attr(0xd, lifetime)], username)
