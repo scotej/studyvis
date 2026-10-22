@@ -47,6 +47,7 @@ permissions = [
   "allow-system-write-text-file",
   "allow-system-save-image",
   "allow-system-open-releases",
+  "allow-system-open-turn-login",
   "allow-system-open-screen-capture-settings",
   "allow-system-open-camera-settings",
   "allow-system-open-microphone-settings",

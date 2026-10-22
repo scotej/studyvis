@@ -2811,12 +2811,12 @@ CARGO
   license: cargo:rustls-platform-verifier@0.7.0/LICENSE-APACHE (SHA-256 c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4)
   license: cargo:rustls-platform-verifier@0.7.0/LICENSE-MIT (SHA-256 1c7cf76689c837a68ed8d704994e52a0f2940c087958f860d17f3186afbdcc0c)
 
-- rustls-webpki 0.103.15 — ISC
-  id: cargo:rustls-webpki@0.103.15
+- rustls-webpki 0.103.16 — ISC
+  id: cargo:rustls-webpki@0.103.16
   targets: aarch64-apple-darwin, x86_64-pc-windows-msvc, x86_64-unknown-linux-gnu
-  source: https://crates.io/api/v1/crates/rustls-webpki/0.103.15/download
-  source checksum: f3c3cf1d8b1e7d4927e2d154c3fcb02979afb9939629c62cd9048d4f07b60ac2
-  license: cargo:rustls-webpki@0.103.15/LICENSE (SHA-256 5b698ca13897be3afdb7174256fa1574f8c6892b8bea1a66dd6469d3fe27885a)
+  source: https://crates.io/api/v1/crates/rustls-webpki/0.103.16/download
+  source checksum: 4443b1b6d39d7c663139942cc4558262562d2c84123bb6282ef177009ca8b281
+  license: cargo:rustls-webpki@0.103.16/LICENSE (SHA-256 5b698ca13897be3afdb7174256fa1574f8c6892b8bea1a66dd6469d3fe27885a)
 
 - ryu 1.0.23 — Apache-2.0 OR BSL-1.0
   id: cargo:ryu@1.0.23
@@ -3907,12 +3907,12 @@ CARGO
   source checksum: 916a5f65c2ef0dfe12fff695960a2ec3d4565359fdbb2e9943c974e06c734ea5
   license: cargo:webkit2gtk-sys@2.0.2/LICENSE (SHA-256 281b72cb008466810da31680e72005b9899c7e9d7705b909c86098260e12aa7d)
 
-- webpki-roots 1.0.7 — CDLA-Permissive-2.0
-  id: cargo:webpki-roots@1.0.7
+- webpki-roots 1.0.10 — CDLA-Permissive-2.0
+  id: cargo:webpki-roots@1.0.10
   targets: aarch64-apple-darwin, x86_64-pc-windows-msvc, x86_64-unknown-linux-gnu
-  source: https://crates.io/api/v1/crates/webpki-roots/1.0.7/download
-  source checksum: 52f5ee44c96cf55f1b349600768e3ece3a8f26010c05265ab73f945bb1a2eb9d
-  license: cargo:webpki-roots@1.0.7/LICENSE (SHA-256 e271993808fec50ab29350b39539cdec611a9103f827e0aa26d61da70e2d33f8)
+  source: https://crates.io/api/v1/crates/webpki-roots/1.0.10/download
+  source checksum: 1c1c8e20c8a38fc7d65abfe74eb7280e4aa667e8eec8bc84996d2874810748d9
+  license: cargo:webpki-roots@1.0.10/LICENSE (SHA-256 e271993808fec50ab29350b39539cdec611a9103f827e0aa26d61da70e2d33f8)
 
 - webview2-com 0.38.2 — MIT; selected alternative: MIT
   id: cargo:webview2-com@0.38.2
@@ -14587,7 +14587,7 @@ THE SOFTWARE.
 
 SHA-256 5b698ca13897be3afdb7174256fa1574f8c6892b8bea1a66dd6469d3fe27885a
 Applies to:
-- cargo:rustls-webpki@0.103.15 — cargo:rustls-webpki@0.103.15/LICENSE
+- cargo:rustls-webpki@0.103.16 — cargo:rustls-webpki@0.103.16/LICENSE
 
 --------------------------------------------------------------------------------
 
@@ -27640,7 +27640,7 @@ DEALINGS IN THE SOFTWARE.
 
 SHA-256 e271993808fec50ab29350b39539cdec611a9103f827e0aa26d61da70e2d33f8
 Applies to:
-- cargo:webpki-roots@1.0.7 — cargo:webpki-roots@1.0.7/LICENSE
+- cargo:webpki-roots@1.0.10 — cargo:webpki-roots@1.0.10/LICENSE
 
 --------------------------------------------------------------------------------
 

@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "generatedBy": "scripts/generate-third-party-notices.ts",
   "noticePath": "THIRD-PARTY-NOTICES.txt",
-  "noticeSha256": "af74d24c60a8aabb4954d955d6ec8c422cf3b25d46851591ed3ed5cf2f1138fe",
+  "noticeSha256": "d6a85e9663de2b45c87e8d668e50bc3136911c9e4ab2154604808c658b3684fd",
   "scope": {
     "npm": "package-lock.json v3 entries beneath node_modules whose dev flag is not true",
     "cargo": "normal dependency edges reachable from the StudyVis root under each release target; build/dev edges excluded",
@@ -44,7 +44,7 @@
     },
     {
       "path": "src-tauri/Cargo.lock",
-      "sha256": "1c906d0b10822254a369590b0d6a45a8583314cd7eb106be1b021c45bf427fae"
+      "sha256": "abcfd45a1dc2e3f45b58cf21c521436a16193599f71e05cab154ccb3da35e6f0"
     },
     {
       "path": "src-tauri/Cargo.toml",
@@ -8209,13 +8209,13 @@
       ]
     },
     {
-      "id": "cargo:rustls-webpki@0.103.15",
+      "id": "cargo:rustls-webpki@0.103.16",
       "ecosystem": "cargo",
       "name": "rustls-webpki",
-      "version": "0.103.15",
+      "version": "0.103.16",
       "licenseExpression": "ISC",
-      "source": "https://crates.io/api/v1/crates/rustls-webpki/0.103.15/download",
-      "checksum": "f3c3cf1d8b1e7d4927e2d154c3fcb02979afb9939629c62cd9048d4f07b60ac2",
+      "source": "https://crates.io/api/v1/crates/rustls-webpki/0.103.16/download",
+      "checksum": "4443b1b6d39d7c663139942cc4558262562d2c84123bb6282ef177009ca8b281",
       "repository": "https://github.com/rustls/webpki",
       "targets": [
         "aarch64-apple-darwin",
@@ -8224,7 +8224,7 @@
       ],
       "licenseFiles": [
         {
-          "path": "cargo:rustls-webpki@0.103.15/LICENSE",
+          "path": "cargo:rustls-webpki@0.103.16/LICENSE",
           "sha256": "5b698ca13897be3afdb7174256fa1574f8c6892b8bea1a66dd6469d3fe27885a"
         }
       ]
@@ -11528,13 +11528,13 @@
       ]
     },
     {
-      "id": "cargo:webpki-roots@1.0.7",
+      "id": "cargo:webpki-roots@1.0.10",
       "ecosystem": "cargo",
       "name": "webpki-roots",
-      "version": "1.0.7",
+      "version": "1.0.10",
       "licenseExpression": "CDLA-Permissive-2.0",
-      "source": "https://crates.io/api/v1/crates/webpki-roots/1.0.7/download",
-      "checksum": "52f5ee44c96cf55f1b349600768e3ece3a8f26010c05265ab73f945bb1a2eb9d",
+      "source": "https://crates.io/api/v1/crates/webpki-roots/1.0.10/download",
+      "checksum": "1c1c8e20c8a38fc7d65abfe74eb7280e4aa667e8eec8bc84996d2874810748d9",
       "repository": "https://github.com/rustls/webpki-roots",
       "targets": [
         "aarch64-apple-darwin",
@@ -11543,7 +11543,7 @@
       ],
       "licenseFiles": [
         {
-          "path": "cargo:webpki-roots@1.0.7/LICENSE",
+          "path": "cargo:webpki-roots@1.0.10/LICENSE",
           "sha256": "e271993808fec50ab29350b39539cdec611a9103f827e0aa26d61da70e2d33f8"
         }
       ]

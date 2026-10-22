@@ -43,6 +43,7 @@ const APP_COMMANDS: &[&str] = &[
     "system_write_text_file",
     "system_save_image",
     "system_open_releases",
+    "system_open_turn_login",
     "system_open_screen_capture_settings",
     "system_open_camera_settings",
     "system_open_microphone_settings",

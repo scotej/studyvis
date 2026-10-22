@@ -25,6 +25,11 @@ import type { AuditEventKind } from './lib/audit-types'
 const ELLIPSIS = '…'
 
 export const strings = {
+  turnBrokerBrowser: {
+    title: 'StudyVis account connection',
+    complete: 'Sign-in complete. Return to StudyVis to confirm this account.',
+    failed: 'Sign-in could not be completed. Return to StudyVis and try again.',
+  },
   mirror: {
     title: 'Browser companion',
     open: 'Use a browser',
@@ -1759,6 +1764,42 @@ export const strings = {
 
     network: {
       heading: 'Network',
+      backup: {
+        label: 'Backup relay',
+        help: 'Optionally link GitHub or Google to this StudyVis profile. Approval is required for relay access. Your friends, history and private keys stay on this device.',
+        enabled: 'Enable the backup relay for this profile',
+        github: 'Sign in with GitHub (recommended)',
+        google: 'Sign in with Google',
+        disabled:
+          'Off. Direct connections and your own TURN server still work.',
+        checking: 'Checking relay access…',
+        waiting: 'Finish signing in through your browser.',
+        confirmHelp:
+          'Confirm that this is your account before linking it to your existing StudyVis profile.',
+        confirm: 'Link this account',
+        cancel: 'Cancel sign-in',
+        pending: 'Account linked. Relay access is waiting for approval.',
+        approved: 'Account approved for relay access.',
+        signInHelp: 'Choose GitHub or Google to request backup relay access.',
+        accountId: 'Relay account ID',
+        ready:
+          'Approved. Direct connections are preferred; the relay is a backup.',
+        freeOnly:
+          'The relay is unavailable until its free-only limit is confirmed. You can still link an account.',
+        unavailable:
+          'Sign-in is not available yet. Direct connections still work.',
+        error: "Couldn't contact the backup relay. Try again.",
+        conflict:
+          'This account or provider is already linked. Unlink the existing account from its original StudyVis profile before linking a different one. Profiles are never merged automatically.',
+        rateLimited: 'Too many relay requests. Try again later.',
+        retry: 'Check access again',
+        unlink: 'Unlink account',
+        unlinkHelp:
+          'Unlinking stops new relay credentials. Existing credentials may work until they expire. Your StudyVis profile stays on this device.',
+        never: 'Backup relay disabled by “Never use TURN”.',
+        identityRequired:
+          'Set up or restore your StudyVis profile before linking an account.',
+      },
       about: {
         label: 'About connections',
         // F8 — STUN-only by default. No TURN relay ships, so the old "a relay

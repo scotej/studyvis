@@ -7,10 +7,15 @@ import { chromium } from 'playwright-core'
 
 // Exercise the production React components and Radix focus behavior in a real
 // browser. Only each fixture's persistence/permission boundary is replaced.
-export async function withComponentBrowser(source, run) {
+export async function withComponentBrowser(
+  source,
+  run,
+  { freshDependencies = false } = {}
+) {
   const entry = '/__component-test.tsx'
   const fixtureId = `${process.cwd()}${entry}`
   const server = await createServer({
+    optimizeDeps: { force: freshDependencies },
     cacheDir: join(
       tmpdir(),
       `studyvis-components-${createHash('sha256').update(process.cwd()).digest('hex').slice(0, 16)}`

@@ -115,6 +115,7 @@ export type SettingsValues = {
   minimizeToTrayOnClose: boolean
   debugLogEnabled: boolean
   turnPreference: TurnPreference
+  managedTurnIdentities: string[]
   // V2 AI feature gate. Defaults to `false` so V1 builds and the first V2
   // launch keep the llama-server sidecar dormant. The toggle UI + setter
   // land in V2-P9; for V2-P1 the value is read-only and consumed by
@@ -208,6 +209,7 @@ export const SETTINGS_KEY_AUTO_UPDATE = 'auto_update_enabled'
 export const SETTINGS_KEY_MINIMIZE_TRAY = 'minimize_to_tray_on_close'
 export const SETTINGS_KEY_DEBUG_LOG = 'debug_log_enabled'
 export const SETTINGS_KEY_TURN_PREF = 'turn_preference'
+export const SETTINGS_KEY_MANAGED_TURN_IDENTITIES = 'managed_turn_identities'
 export const SETTINGS_KEY_AI_FEATURES = 'ai_features_enabled'
 export const SETTINGS_KEY_ENGINE_AUTO_INSTALL = 'engine_auto_install'
 export const SETTINGS_KEY_WARNING_THRESHOLD = 'warning_threshold'
@@ -248,6 +250,7 @@ export const DEFAULT_SETTINGS: SettingsValues = {
   minimizeToTrayOnClose: defaultMinimizeToTray(detectChromePlatform()),
   debugLogEnabled: false,
   turnPreference: 'auto',
+  managedTurnIdentities: [],
   aiFeaturesEnabled: false,
   engineAutoInstall: true,
   warningThreshold: 2,
@@ -296,6 +299,7 @@ type SettingsState = {
   setMinimizeToTrayOnClose: (enabled: boolean) => Promise<void>
   setDebugLogEnabled: (enabled: boolean) => Promise<void>
   setTurnPreference: (pref: TurnPreference) => Promise<void>
+  setManagedTurnEnabled: (identity: string, enabled: boolean) => Promise<void>
   // F3 — persist the user's custom signaling relays. The argument is the raw
   // textarea text; the store parses + validates + dedupes via parseRelayUrls
   // and stores only the clean wss:// list (empty = use the built-in defaults).
@@ -717,6 +721,18 @@ function readPeerVolumes(v: unknown): Record<string, number> {
   return out
 }
 
+export function readManagedTurnIdentities(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  return [
+    ...new Set(
+      value.filter(
+        (key): key is string =>
+          typeof key === 'string' && /^[0-9a-f]{64}$/.test(key)
+      )
+    ),
+  ].slice(0, 100)
+}
+
 // Hydrates `values` from persistent storage, applies the V1-P11 one-shot
 // migration of the legacy `studyvis.theme` localStorage key, and returns the
 // resolved settings + whether anything was written. Pure (deps-injected) so
@@ -737,6 +753,9 @@ export async function hydrateValuesFromStore(
     tray: await store.get(SETTINGS_KEY_MINIMIZE_TRAY),
     debug: await store.get(SETTINGS_KEY_DEBUG_LOG),
     turn: await store.get(SETTINGS_KEY_TURN_PREF),
+    managedTurnIdentities: await store.get(
+      SETTINGS_KEY_MANAGED_TURN_IDENTITIES
+    ),
     ai: await store.get(SETTINGS_KEY_AI_FEATURES),
     engineAutoInstall: await store.get(SETTINGS_KEY_ENGINE_AUTO_INSTALL),
     warning: await store.get(SETTINGS_KEY_WARNING_THRESHOLD),
@@ -823,6 +842,9 @@ export async function hydrateValuesFromStore(
       ),
       debugLogEnabled: readBool(stored.debug, DEFAULT_SETTINGS.debugLogEnabled),
       turnPreference: turn,
+      managedTurnIdentities: readManagedTurnIdentities(
+        stored.managedTurnIdentities
+      ),
       aiFeaturesEnabled: readBool(
         stored.ai,
         DEFAULT_SETTINGS.aiFeaturesEnabled
@@ -1096,6 +1118,18 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   setTurnPreference: async (pref) => {
     set((s) => ({ values: { ...s.values, turnPreference: pref } }))
     await writeKey(set, SETTINGS_KEY_TURN_PREF, pref)
+  },
+
+  setManagedTurnEnabled: async (identity, enabled) => {
+    if (!/^[0-9a-f]{64}$/.test(identity)) return
+    const identities = get().values.managedTurnIdentities.filter(
+      (key) => key !== identity
+    )
+    if (enabled) identities.push(identity)
+    set((state) => ({
+      values: { ...state.values, managedTurnIdentities: identities },
+    }))
+    await writeKey(set, SETTINGS_KEY_MANAGED_TURN_IDENTITIES, identities)
   },
 
   setCustomRelayUrls: async (text) => {

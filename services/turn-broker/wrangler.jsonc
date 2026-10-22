@@ -1,0 +1,21 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "studyvis-turn",
+  "main": "worker.ts",
+  "compatibility_date": "2026-10-21",
+  "workers_dev": true,
+  "preview_urls": false,
+  "observability": { "enabled": false },
+  "vars": {
+    "BROKER_ORIGIN": "https://studyvis-turn.ashcroft-estate.workers.dev",
+    "TURN_ENABLED": "false",
+    "FREE_ONLY_CONFIRMED": "false",
+    "GITHUB_CLIENT_ID": "",
+    "GOOGLE_CLIENT_ID": "",
+    "TURN_KEY_ID": "",
+  },
+  "durable_objects": {
+    "bindings": [{ "name": "BROKER", "class_name": "TurnBroker" }],
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["TurnBroker"] }],
+}

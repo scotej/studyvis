@@ -10,13 +10,13 @@
                                   │                                │
                                   │   ┌──────────┐   ┌──────────┐  │
                                   │   │ Nostr    │   │ TURN     │  │
-                                  │   │ relays   │   │ (user-   │  │
-                                  │   │ (signal) │   │ supplied)│  │
+                                  │   │ relays   │   │ (backup /│  │
+                                  │   │ (signal) │   │ custom)  │  │
                                   │   └────┬─────┘   └────┬─────┘  │
                                   └────────┼──────────────┼────────┘
                                            │              │
-                              signaling ◀──┘              │ ~15% of conns
-                                           │              │ (none ships;
+                              signaling ◀──┘              │ strict NATs
+                                           │              │ (optional;
                                            │              │  see §4)
                                            ▲              ▼
                   ┌──────────────────────  │  ────────────────────────────┐
@@ -42,6 +42,14 @@
 ```
 
 Each desktop is fully self-contained. AI inference runs only on the user's own desktop and judges only that user. With opt-in LAN mirroring (#365), the user's paired browser supplies camera/screen capture to that desktop over encrypted WebRTC. AI pixels are never sent to a third-party inference service. Judgments are broadcast to peers; ordinary session video and explicit screen sharing retain their existing peer contracts.
+
+The optional backup TURN broker at `https://studyvis-turn.ashcroft-estate.workers.dev`
+is an operated-service exception to this topology: it links an approved GitHub
+or Google account to an existing StudyVis public identity and issues temporary
+relay credentials. It does not carry discovery messages, session content, or
+private identity keys. TURN issuance is disabled until a provider-enforced
+free-only cutoff is confirmed; implementing or deploying the broker does not
+activate the relay.
 
 ## 2. Tech stack
 
@@ -347,7 +355,7 @@ gates publication.
 - **Ollama**: requires user to install and run a separate daemon. Conflicts with the polished single-installer goal.
 - **Candle / mistral.rs**: viable Rust-native alternatives but less mature for vision GGUF support. Revisit in V3 if sidecar overhead matters.
 - **Electron**: ~150 MB vs Tauri's ~10 MB. No specific Electron API we need.
-- **Self-hosted signaling**: violates the "no backend we operate" principle.
+- **Self-hosted signaling**: public Nostr/MQTT discovery remains independent of the optional account/relay broker. Operating a signaling service is outside its narrow scope.
 
 ## 3. Identity model
 
@@ -382,6 +390,24 @@ Pseudonymous. Not unique system-wide (no central registry to enforce uniqueness 
 ### What identity gives you
 Identity is the basis for: friend recognition (Ed25519 pubkey is the canonical ID), encrypted invite envelopes (X25519 pubkey is the recipient address for NaCl box), signatures on real-time alert events (Ed25519). Identity is **not** used for: anti-cheat on score (the user can lie about their own score to friends — accepted limitation, see PLAN §7).
 
+### Optional provider linking
+
+GitHub (recommended) and Google sign-in grant only backup-relay entitlement.
+The existing Ed25519 public key remains the canonical StudyVis ID; key
+derivation, identity-file format, friend links, SQLite data, and peer wire
+formats do not change. Existing users opt in under Settings → Network → Backup
+relay without regenerating keys or re-pairing. OAuth cannot recover lost local
+keys, friends, or history; the 24-word backup keeps its existing role.
+
+Linking requires a fresh browser authorization and a signed confirmation from
+the current local identity after the desktop displays the selected provider
+account. Provider identities use GitHub's numeric user ID or Google's `sub`,
+never an email-address match. Links are scoped to the StudyVis public key;
+changing profiles does not transfer access or opt-in preferences. Operator
+approval is separate from successful OAuth: control of a provider account is
+not proof of humanity. No provider password, access token, client secret, or
+TURN master key is stored in a StudyVis profile or recovery phrase.
+
 ## 4. Discovery layer
 
 ### Trystero, with built-in encryption
@@ -397,7 +423,9 @@ The `trystero` package uses Nostr by default — a network of public WebSocket r
 2. **MQTT** (`@trystero-p2p/mqtt`) — raced alongside Nostr for every **data-only** room: pairing (since v1.2.2) and, since the post-v1.3.1 line, presence, the inbox, and the invite send path. `joinTopic` opens one room per strategy on the same topic + password over a single shared `@trystero-p2p/core`, so a peer keeps one stable `selfId`/peerId across transports; joins/leaves are **refcounted per peer across transports** (join fires on the first transport that sees the peer, leave only when the last one loses them) and both rooms are torn down on `leave` (see `src/lib/trystero/index.ts` `mergeRooms`). This survives a dark/blocked Nostr relay set **or** a clock-skewed peer (Nostr filters ephemeral announces on `since: now()`; MQTT has no time filter and shares no infrastructure) — without it, a friend added via offline ContactCard behind a Nostr-blocking firewall showed permanently offline and every invite died. Duplicate delivery over both transports is absorbed per consumer (idempotent heartbeats, the inbox nonce replay guard, the latched invite-ACK). The media-carrying **session room stays single-strategy Nostr**: a peer connected over two transport rooms would open duplicate `RTCPeerConnection`s and double every video stream; racing it needs a dedicated design pass.
 3. **BitTorrent trackers** (`@trystero-p2p/torrent`) — available in the library as a further fallback but **not wired**.
 
-We never ship Firebase or Supabase strategies; both require keys we'd own (= backend we operate).
+We do not ship Firebase or Supabase discovery strategies. The optional
+Cloudflare broker authenticates relay access only; public-relay discovery and
+signed peer protocols continue to work without it.
 
 ### Relay selection
 Trystero does **not** pick relays at random per peer. Its Nostr strategy shuffles its bundled relay list with a seed derived **only from the `appId`** (`'studyvis'`) and takes the first `redundancy` (default 5) — so every peer on the same version deterministically targets the *identical* relays. Discovery overlap between two peers is therefore 100% by construction; the failure mode is not "no shared relay" but the chosen relays being low-uptime or unreachable from a given network, with no per-peer diversity to fall back on. We therefore **pin curated `relayConfig.urls` lists** for Nostr (`src/lib/trystero/relayUrls.ts`) and MQTT (`src/lib/trystero/mqttRelayUrls.ts`). The Nostr entries are verified to accept anonymous ephemeral events; the MQTT entries are verified with a public-access subscribe/publish/receive round-trip (Shiftr uses its documented shared `public:public` credential, not a private StudyVis secret). `npm run check-relays` imports and probes these exact shipped lists. Passing `urls` makes each trystero strategy use the entire corresponding list (its `redundancy` knob is then ignored). User-configured relay overrides extend only the Nostr list; MQTT keeps its independent broker pin.
@@ -412,7 +440,100 @@ All topics are 32-byte SHA-256 hashes serialized as hex.
 
 ### TURN
 
-Connections are **STUN-only by default**: no public TURN server currently ships (`PUBLIC_TURN_SERVERS` in `src/lib/trystero/ice.ts` is empty — the old free public TURN endpoints are dead and a zero-config public TURN no longer exists). The TURN path is fully wired into **every** room that carries WebRTC traffic — pairing, session rooms, the per-send invite room, and the always-on inbox + presence rooms — via `iceOptionsFor`, which maps the user's Network preference (`auto`/`always`/`never`) to ICE config. It applies to the next pairing/session/invite send the instant a server is added; the always-on inbox + presence rooms capture it at join and pick a change up on relaunch (same caveat as relays). Until a server is configured there is **no relay fallback**, so the ~15% of connections behind symmetric/CGNAT/strict-firewall networks that need a relay can fail to establish. Adding a server is gated on a cost/ownership decision: a long-lived credential baked into a distributed binary is extractable (quota/billing abuse), and safe short-lived credentials require a backend we don't operate. Onboarding documents the symptom: "if you regularly connect from a corporate / school network and sessions are choppy, this is why."
+Connections are **STUN-only by default**: `PUBLIC_TURN_SERVERS` in
+`src/lib/trystero/ice.ts` stays empty, and managed backup-relay opt-in is off for
+each StudyVis identity. User-supplied TURN remains available through Network
+settings. `iceOptionsFor` maps the user's `auto`/`always`/`never` preference to
+ICE configuration for pairing, sessions, invite sends, inbox, and presence.
+The managed service supplies temporary credentials only to an opted-in,
+linked, approved identity and respects `never`. It uses standard ICE with
+`iceTransportPolicy: 'all'`: direct paths have normal priority and TURN is a
+backup candidate, not a forced relay or a separate delayed retry guarantee.
+The user's custom TURN server and its explicit routing preference remain
+independent.
+
+The client holds managed credentials in memory and updates tracked live peer
+connections with `setConfiguration` when the lease changes; future connections
+read the current lease even when a Trystero room captured older options. Custom
+relay-only configurations exclude managed servers. Changing identity clears
+cached credentials and reapplies only the selected identity's saved opt-in.
+Credential rotation checks the selected ICE path and requests a negotiated ICE
+restart for an active managed relay allocation before its old credentials
+expire. Selected direct paths remain connected. Trystero carries data-only
+restart offers and answers over the established peer's control channel;
+discovery traffic cannot replace an open data-only connection. Older peers
+without this support may reconnect when an idle data-only allocation expires.
+Completed ICE gathering may still need a fresh connection attempt before newly
+enabled TURN can help. Opt-out removes future managed candidates without
+forcibly closing an existing allocation. Actual provider long-session behavior
+still needs an enabled-provider runtime test.
+
+No long-lived public TURN credential is bundled in the app. Provider client
+secrets and the Cloudflare TURN master token belong only in encrypted Worker
+secret bindings. Credential issuance stays disabled by default until a
+provider-enforced free-only cutoff is confirmed. Cloudflare's published free
+allowance followed by paid bandwidth is not a hard cap; rate limits and short
+TTLs cannot guarantee zero charges. A broker outage or denied entitlement must
+leave direct connections and user-supplied TURN usable. TURN sees IP addresses
+and encrypted traffic sizes/timing, while WebRTC retains end-to-end media/data
+encryption.
+
+### Backup-relay authentication service
+
+`services/turn-broker/worker.ts` runs in the separate `studyvis-turn` Worker.
+Its `BROKER` binding targets the SQLite-backed `TurnBroker` Durable Object;
+it shares no namespace, bindings, or deployments with other projects on the
+Cloudflare account. Free-plan quotas remain account-wide.
+
+`POST /v1/challenge` returns a one-use, 60-second nonce bound to the identity,
+action, and daily HMAC of the request IP. Every subsequent `POST /v1/status`,
+`login`, `poll`, `confirm`, `credentials`, or `unlink` requires the current
+Ed25519 identity's signature over the broker origin, action, public key,
+challenge/expiry, and canonical JSON payload. Signatures use a broker-specific
+domain separator; a peer message cannot be reused as a broker authorization.
+Request sizes, request counts, upstream responses, and upstream timeouts are
+bounded. Missing configuration denies access.
+
+Login creates a ten-minute transaction and a one-use `/oauth/start?ticket=…`
+URL for the system browser. Provider authorization uses S256 PKCE, state, and
+a Secure/HttpOnly/SameSite cookie; Google additionally verifies the OIDC nonce,
+JWT signature, issuer, audience, expiry, and verified email. Callback routes
+are exactly `/oauth/callback/github` and `/oauth/callback/google`. The browser
+receives a plain completion message, never a provider token or app-link token.
+The desktop polls using signed requests, displays the selected account, and
+requires a separate signed confirmation before creating a link. A provider
+subject cannot be silently transferred from another StudyVis identity.
+
+The durable link stores provider, stable subject, public StudyVis key, and
+display label (GitHub login or verified Google email). Provider access/ID
+tokens are used transiently during the callback and are not persisted.
+Short-lived login state, challenge records, rate-limit buckets, and temporary
+TURN issuance/revocation records are retained only as needed for their expiry
+and cleanup. Raw IP addresses are not stored in the broker database; the
+daily HMAC supports abuse controls but does not hide traffic metadata from
+Cloudflare or the sign-in provider.
+
+`APPROVED_ACCOUNTS` is an encrypted Worker secret containing provider-subject
+keys mapped to approval expiry timestamps in Unix milliseconds. Empty,
+malformed, absent, or expired approval denies entitlement. Approval changes use
+the deployment/secret-management boundary; there is no public admin endpoint.
+`GITHUB_CLIENT_SECRET`, `GOOGLE_CLIENT_SECRET`, `TURN_KEY_API_TOKEN`, and
+`RATE_LIMIT_SECRET` also remain Worker secrets. `TURN_KEY_API_TOKEN` is the
+dedicated TURN-key token, not a general account-management token. The
+nonsecret client IDs, TURN key ID, and exact broker origin are configuration.
+
+Issuance requires both `TURN_ENABLED` and `FREE_ONLY_CONFIRMED` to equal
+`"true"`; both ship as `"false"`. The latter is an operator assertion only,
+not a Cloudflare spending control. Do not change it without verifying a
+provider-enforced free-only boundary. Issued credentials expire within one
+hour and cannot outlast the linked account's approval. Cached leases must match
+the active provider key. Credential generation rechecks authorization after
+the provider responds and revokes leases invalidated by account changes.
+Unlinking also cancels pending desktop sign-in, clears the link and cached
+credentials, and attempts provider revocation; failed revokes
+are retried, and already issued bearer credentials may remain usable until
+revoked or expired. Client-side opt-out stops new local requests without
+revoking credentials already copied elsewhere.
 
 ### Surviving a transient disconnect (#264)
 
@@ -1410,7 +1531,9 @@ unknown-preserving merge rule in §9.
 | Friend impersonates another friend on Nostr | Ed25519 signatures on every event. Receivers verify against saved pubkey. | Very low. |
 | Prompt injection of vision model via on-screen text | System prompt enumerates patterns; small models still fail sometimes. | Friend-acceptable; V3 may add structured-observation alternative. |
 | Lost laptop, no BIP39 backup | Re-pair with friends as a new identity. | User-bears. |
-| Strict NAT / firewall blocks direct connection | No public TURN ships (STUN-only by default — see §4); user can add their own TURN server in Settings → Network. Document the symptom in onboarding. | ~15% of network setups; sessions may fail to connect until a TURN server is configured. |
+| Strict NAT / firewall blocks direct connection | STUN-only by default; user-supplied TURN or optional approved-account backup credentials participate in normal ICE (see §4). Managed issuance stays disabled pending a provider-enforced free-only boundary. | A strict network may still need a user-supplied server; a broker does not repair blocked signaling. |
+| OAuth account is linked to the wrong local profile | One-use browser flow with PKCE/state/cookie protection, stable provider IDs, signed desktop confirmation, and a uniqueness check on provider links. No email-based account merging. | Compromised devices/providers remain a risk; OAuth cannot recover private keys or local data. |
+| Public broker abuse or TURN credential sharing | Signed one-use requests, operator approval with expiry, bounded request rates, short-lived credentials, revocation, and encrypted Worker secrets. | OAuth is not proof of humanity; temporary credentials are reusable bearer secrets. Application quotas do not enforce a free bandwidth cap. |
 | Linux bundled WebKitGTK/librice becomes stale | Pin and hash every input; monitor both upstreams; ship license/source material; rebuild, re-run packaged checks plus the exact-AppImage physical matrix, and deliver fixes through the signed updater. | Distro WebKit security upgrades do not patch the AppImage; StudyVis owns response time and compliance for its private copy. |
 | Linux desktop service missing or misconfigured | CachyOS prerequisites install a Secret Service provider plus the KDE portal/PipeWire host services; the WebKit/WebRTC runtime itself is bundled. Release sign-off must exercise `getUserMedia`/`getDisplayMedia` on the exact AppImage. | Screen capture or secure credential storage cannot work until the missing user-session service is restored; other Linux desktops are best-effort. |
 | Battery drain from continuous inference | Auto-pause on battery <20%. | Low. |

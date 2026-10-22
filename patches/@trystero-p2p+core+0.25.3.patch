@@ -167,8 +167,189 @@ index 992caaa..b6e80f0 100644
  		}
  	};
  };
+diff --git a/node_modules/@trystero-p2p/core/dist/media.mjs b/node_modules/@trystero-p2p/core/dist/media.mjs
+index 2fd4906..e4c2dd2 100644
+--- a/node_modules/@trystero-p2p/core/dist/media.mjs
++++ b/node_modules/@trystero-p2p/core/dist/media.mjs
+@@ -28,7 +28,7 @@ const createMediaIdentityCache = () => {
+ 		getStreamKey: makeKeyGetter(localStreamKeys),
+ 		getTrackKey: makeKeyGetter(localTrackKeys),
+ 		rememberRemoteStream: (key, stream, streamId) => {
+-			remoteStreamsByKey.set(key, stream);
++			if (key !== void 0) remoteStreamsByKey.set(key, stream);
+ 			if (streamId) remoteStreamsById.set(streamId, stream);
+ 		},
+ 		getRemoteStream: (key, streamId) => remoteStreamsByKey.get(key) ?? (streamId ? remoteStreamsById.get(streamId) : void 0),
+@@ -116,7 +116,15 @@ const createMediaManager = ({ iterate, isActive, getSharedMediaPeer }) => {
+ 		},
+ 		receiveRemoteStream: (id, stream) => {
+ 			if (!isActive(id)) return;
+-			const next = pendingStreamMetas[id]?.shift();
++			// #312: native track events can precede metadata, and each camera
++			// track repeats its stream. Match identities, not arrival positions.
++			getSharedMediaPeer(id)?.__trysteroMedia?.rememberRemoteStream(void 0, stream, stream.id);
++			const pending = pendingStreamMetas[id];
++			if (!pending) return;
++			let index = pending.findIndex((meta) => meta.streamId === stream.id);
++			if (index < 0) index = pending.findIndex((meta) => meta.streamId === void 0);
++			if (index < 0) return;
++			const next = pending.splice(index, 1)[0];
+ 			if (!next) return;
+ 			emitStream(id, next.key, stream, next.metadata);
+ 		},
+diff --git a/node_modules/@trystero-p2p/core/dist/offer-pool.mjs b/node_modules/@trystero-p2p/core/dist/offer-pool.mjs
+index 7340a4f..2eadbbb 100644
+--- a/node_modules/@trystero-p2p/core/dist/offer-pool.mjs
++++ b/node_modules/@trystero-p2p/core/dist/offer-pool.mjs
+@@ -8,7 +8,6 @@ var OfferPool = class {
+ 	pool = [];
+ 	pooled = /* @__PURE__ */ new Set();
+ 	leased = /* @__PURE__ */ new Map();
+-	recycling = /* @__PURE__ */ new Set();
+ 	cleanupTimer = null;
+ 	active = false;
+ 	constructor(makeOffer) {
+@@ -43,6 +42,13 @@ var OfferPool = class {
+ 			const peer = this.pool.shift();
+ 			if (!peer) break;
+ 			this.pooled.delete(peer);
++			// #350 — restarting an unused offer can drop its SCTP section.
++			// Retire expired warm peers and let checkout allocate fresh ones.
++			if (peer.isDead) continue;
++			if (Date.now() - peer.created > offerTtl) {
++				peer.destroy();
++				continue;
++			}
+ 			peers.push(peer);
+ 		}
+ 		return peers;
+@@ -55,7 +61,7 @@ var OfferPool = class {
+ 		}
+ 	}
+ 	recycle(peer) {
+-		if (peer.isDead || this.recycling.has(peer)) return;
++		if (peer.isDead) return;
+ 		if (peer.connection.remoteDescription) {
+ 			peer.destroy();
+ 			return;
+@@ -64,19 +70,20 @@ var OfferPool = class {
+ 			peer.destroy();
+ 			return;
+ 		}
+-		this.recycling.add(peer);
+ 		peer.setHandlers({
+ 			connect: noOp,
+ 			close: noOp,
+ 			error: noOp
+ 		});
+-		peer.getOffer(true).then((offer) => {
+-			if (!offer || offer.type !== "offer" || peer.isDead || !this.active) {
+-				peer.destroy();
+-				return;
+-			}
+-			this.push(peer);
+-		}).catch(() => peer.destroy()).finally(() => this.recycling.delete(peer));
++		// #350 — even a young unused offer loses its data channel on rollback.
++		// Keep the pool slot, but replace the native connection instead.
++		peer.destroy();
++		try {
++			this.push(this.makeOffer());
++		} catch {
++			// Native allocation may fail; keep the owner reset unblocked.
++			// Checkout fills missing slots and reports its own failures.
++		}
+ 	}
+ 	reclaimLeased(peer) {
+ 		const timer = this.leased.get(peer);
+@@ -139,8 +146,6 @@ var OfferPool = class {
+ 			peer.destroy();
+ 		});
+ 		this.leased.clear();
+-		this.recycling.forEach((peer) => peer.destroy());
+-		this.recycling.clear();
+ 	}
+ };
+ //#endregion
+diff --git a/node_modules/@trystero-p2p/core/dist/peer.mjs b/node_modules/@trystero-p2p/core/dist/peer.mjs
+index 8003df9..0d628bd 100644
+--- a/node_modules/@trystero-p2p/core/dist/peer.mjs
++++ b/node_modules/@trystero-p2p/core/dist/peer.mjs
+@@ -24,6 +24,7 @@ var peer_default = (initiator, { trickleIce, rtcConfig, rtcPolyfill, turnConfig,
+ 	let dataChannel = null;
+ 	let disconnectedCloseTimer = null;
+ 	let didEmitClose = false;
++	let rejectInitialOffer = null;
+ 	const clearDisconnectedCloseTimer = () => disconnectedCloseTimer = resetTimer(disconnectedCloseTimer);
+ 	const emitClose = () => {
+ 		if (didEmitClose) return;
+@@ -64,6 +65,8 @@ var peer_default = (initiator, { trickleIce, rtcConfig, rtcPolyfill, turnConfig,
+ 	const getRemoteMediaSectionCount = () => (pc.remoteDescription?.sdp?.match(/^m=/gm) ?? []).length;
+ 	const canApplyRemoteCandidate = (candidate) => {
+ 		if (!pc.remoteDescription) return false;
++		// #349: retain provisional or future MID candidates until matching SDP arrives.
++		if (typeof candidate.sdpMid === "string" && ![...(pc.remoteDescription.sdp ?? "").matchAll(/^a=mid:([^\s]+)/gm)].some((match) => match[1] === candidate.sdpMid)) return false;
+ 		const remoteMLineCount = getRemoteMediaSectionCount();
+ 		if (typeof candidate.sdpMLineIndex === "number" && remoteMLineCount > 0 && candidate.sdpMLineIndex >= remoteMLineCount) return false;
+ 		const remoteUfrag = getRemoteUfrag();
+@@ -154,7 +157,11 @@ var peer_default = (initiator, { trickleIce, rtcConfig, rtcPolyfill, turnConfig,
+ 			await pc.setLocalDescription(restartIce ? await pc.createOffer({ iceRestart: true }) : void 0);
+ 			return await emitLocalDescriptionSignal();
+ 		} catch (err) {
+-			handlers.error?.(toError(err, "failed to create local offer"));
++			const error = toError(err, "failed to create local offer");
++			// #350 — pooled peers can fail before an error handler is installed.
++			// Reject checkout too, so the failed offer is destroyed and retried.
++			rejectInitialOffer?.(error);
++			handlers.error?.(error);
+ 		} finally {
+ 			makingOffer = false;
+ 		}
+@@ -207,9 +214,14 @@ var peer_default = (initiator, { trickleIce, rtcConfig, rtcPolyfill, turnConfig,
+ 		}
+ 	};
+ 	pc.onremovestream = (e) => handlers.stream?.(e.stream);
+-	const offerPromise = initiator ? new Promise((res) => appendSignalHandler((signal) => {
+-		if (signal.type === offerType) res(signal);
+-	})) : Promise.resolve();
++	const offerPromise = initiator ? new Promise((res, reject) => {
++		rejectInitialOffer = reject;
++		appendSignalHandler((signal) => {
++			if (signal.type === offerType) res(signal);
++		});
++	}) : Promise.resolve();
++	// Warm offers may fail before checkout attaches its rejection handler.
++	offerPromise.catch(() => {});
+ 	if (initiator) queueMicrotask(() => {
+ 		if (!makingOffer && pc.signalingState === "stable" && !pc.localDescription && pc.connectionState !== "closed") pc.onnegotiationneeded?.(new Event("negotiationneeded"));
+ 	});
+@@ -228,7 +240,7 @@ var peer_default = (initiator, { trickleIce, rtcConfig, rtcPolyfill, turnConfig,
+ 			if (pc.localDescription?.type === offerType) return shouldTrickleIce ? localDescriptionSignal(pc) : waitForIceGathering(pc);
+ 			return offerPromise;
+ 		},
+-		async signal(sdp) {
++		async signal(sdp, renegotiation = false) {
+ 			if (sdp.type === "candidate") {
+ 				try {
+ 					const candidate = JSON.parse(sdp.sdp);
+@@ -238,7 +250,15 @@ var peer_default = (initiator, { trickleIce, rtcConfig, rtcPolyfill, turnConfig,
+ 				}
+ 				return;
+ 			}
+-			if (dataChannel?.readyState === "open" && !sdp.sdp?.includes("a=rtpmap")) return;
++			if (dataChannel?.readyState === "open" && !sdp.sdp?.includes("a=rtpmap")) {
++				// PR-499: only an active room's authenticated control channel may
++				// replace data-only ICE credentials; ignore stale discovery SDP.
++				const remoteUfrag = getRemoteUfrag();
++				const remotePwd = pc.remoteDescription?.sdp?.match(/a=ice-pwd:([^\s]+)/)?.[1];
++				const nextUfrag = sdp.sdp?.match(/a=ice-ufrag:([^\s]+)/)?.[1];
++				const nextPwd = sdp.sdp?.match(/a=ice-pwd:([^\s]+)/)?.[1];
++				if (!renegotiation || !remoteUfrag || !remotePwd || !nextUfrag || !nextPwd || nextUfrag === remoteUfrag && nextPwd === remotePwd) return;
++			}
+ 			try {
+ 				const rtcSdp = {
+ 					...sdp,
 diff --git a/node_modules/@trystero-p2p/core/dist/room.mjs b/node_modules/@trystero-p2p/core/dist/room.mjs
-index a09d8b9..3c5134d 100644
+index a09d8b9..115bae8 100644
 --- a/node_modules/@trystero-p2p/core/dist/room.mjs
 +++ b/node_modules/@trystero-p2p/core/dist/room.mjs
 @@ -5,6 +5,7 @@ import { createMediaManager } from "./media.mjs";
@@ -250,11 +431,202 @@ index a09d8b9..3c5134d 100644
  	const pingAction = makeActionInternal(internalNs("ping"));
  	const pongAction = makeActionInternal(internalNs("pong"));
  	const signalAction = makeActionInternal(internalNs("signal"));
+@@ -102,6 +143,8 @@ var room_default = (onPeer, onPeerLeave, onSelfLeave, { onPeerHandshake, onHands
+ 		sendHandshakeReady: handshakeReadyAction.send,
+ 		onActivate: (id, peer) => {
+ 			activePeerMap[id] = peer;
++			// PR-499: publish active control routing before renewing this peer's ICE.
++			peer.setHandlers({ signalReady: () => Boolean(activePeerMap[id]) });
+ 			listeners.onPeerJoin?.(id);
+ 		},
+ 		onFailure: (id, peer, reason) => exitPeer(id, peer, reason)
+@@ -114,7 +157,7 @@ var room_default = (onPeer, onPeerLeave, onSelfLeave, { onPeerHandshake, onHands
+ 	});
+ 	signalAction.onMessage((sdp, id) => {
+ 		if (!activePeerMap[id]) return;
+-		peerMap[id]?.signal(sdp);
++		peerMap[id]?.signal(sdp, true);
+ 	});
+ 	streamMetaAction.onMessage((meta, id) => mediaManager.receiveStreamMeta(meta, id));
+ 	trackMetaAction.onMessage((meta, id) => mediaManager.receiveTrackMeta(meta, id));
+@@ -134,6 +177,7 @@ var room_default = (onPeer, onPeerLeave, onSelfLeave, { onPeerHandshake, onHands
+ 			data: (d) => handleData(id, d),
+ 			stream: (stream) => mediaManager.receiveRemoteStream(id, stream),
+ 			track: (track, stream) => mediaManager.receiveRemoteTrack(id, track, stream),
++			signalReady: () => Boolean(activePeerMap[id]),
+ 			signal: (sdp) => {
+ 				if (!activePeerMap[id]) return;
+ 				signalAction.send(sdp, id);
+diff --git a/node_modules/@trystero-p2p/core/dist/shared-peer.mjs b/node_modules/@trystero-p2p/core/dist/shared-peer.mjs
+index 5fca48a..07831f6 100644
+--- a/node_modules/@trystero-p2p/core/dist/shared-peer.mjs
++++ b/node_modules/@trystero-p2p/core/dist/shared-peer.mjs
+@@ -102,7 +102,8 @@ var SharedPeerManager = class {
+ 		shared.media.clearRemote();
+ 		shared.pendingDataByToken.clear();
+ 		shared.remoteRoomTokens.clear();
+-		if (keys(map).length === 0) delete this.byApp[appId];
++		// Strategy instances retain this map for their room's lifetime.
++		// Keep its identity when the last peer leaves so reconnects stay visible.
+ 	}
+ 	register(appId, peerId, peer, idleMs) {
+ 		const map = this.getMap(appId);
+@@ -126,15 +127,24 @@ var SharedPeerManager = class {
+ 			trackOwners: /* @__PURE__ */ new Map(),
+ 			media: createMediaIdentityCache(),
+ 			idleMs,
+-			isClosing: false
++			isClosing: false,
++			signalingReady: false
+ 		};
+ 		peer.setHandlers({
+ 			data: (data) => this.dispatchData(shared, data),
+ 			signal: (signal) => this.dispatchSignal(shared, signal),
+-			close: () => this.clear(appId, peerId, { destroyPeer: false }),
++			close: () => {
++				if (this.get(appId, peerId) !== shared) return;
++				// #403 — close abandons every room, even before native ICE fails.
++				// Retire its channel too so the remote can accept fresh offers.
++				this.clear(appId, peerId, { destroyPeer: true });
++			},
+ 			error: (err) => {
++				if (this.get(appId, peerId) !== shared) return;
+ 				console.error(`${libName} peer error:`, err);
+-				this.clear(appId, peerId, { destroyPeer: false });
++				// Negotiation can fail while ICE remains connected. Close the
++				// channel and transport so the remote can discard it and reconnect.
++				this.clear(appId, peerId, { destroyPeer: true });
+ 			},
+ 			track: (track, stream) => this.dispatchTrack(shared, track, stream)
+ 		});
+@@ -168,6 +178,7 @@ var SharedPeerManager = class {
+ 			if (binding.roomToken && shared.bindingsByToken[binding.roomToken] === binding) delete shared.bindingsByToken[binding.roomToken];
+ 			if (shared.controlRoomId === roomId) shared.controlRoomId = keys(shared.bindings)[0] ?? null;
+ 			onDetach();
++			this.notifySignalReadiness(shared);
+ 			this.scheduleIdleTimer(shared);
+ 		};
+ 		const proxy = {
+@@ -182,7 +193,7 @@ var SharedPeerManager = class {
+ 				return shared.peer.isDead;
+ 			},
+ 			getOffer: (restartIce) => shared.peer.getOffer(restartIce),
+-			signal: (sdp) => shared.peer.signal(sdp),
++			signal: (sdp, renegotiation) => shared.peer.signal(sdp, renegotiation),
+ 			sendData: (data) => {
+ 				if (!binding.roomToken) {
+ 					binding.pendingSendData.push(data);
+@@ -195,6 +206,7 @@ var SharedPeerManager = class {
+ 				const { signal, ...rest } = newHandlers;
+ 				Object.assign(binding.handlers, rest);
+ 				if (signal) binding.handlers.signal = signal;
++				this.notifySignalReadiness(shared);
+ 				this.flushBindingQueues(binding);
+ 			},
+ 			offerPromise: shared.peer.offerPromise,
+@@ -297,12 +309,21 @@ var SharedPeerManager = class {
+ 			this.clear(shared.appId, shared.peerId, { destroyPeer: true });
+ 		}, shared.idleMs);
+ 	}
++	notifySignalReadiness(shared) {
++		const ready = Boolean(this.getSignalBinding(shared));
++		if (ready === shared.signalingReady) return;
++		shared.signalingReady = ready;
++		shared.peer.connection.dispatchEvent?.(new Event(ready ? "studyvis:trystero-ready" : "studyvis:trystero-pending"));
++	}
+ 	getSignalBinding(shared) {
++		// PR-499: the first bound room may still be authenticating while a
++		// later room is ready to carry this physical peer's restart signals.
++		const canSignal = (binding) => Boolean(binding?.handlers.signal) && (binding.handlers.signalReady?.() ?? true);
+ 		if (shared.controlRoomId) {
+ 			const selected = shared.bindings[shared.controlRoomId];
+-			if (selected?.handlers.signal) return selected;
++			if (canSignal(selected)) return selected;
+ 		}
+-		const fallback = values(shared.bindings).find((binding) => Boolean(binding.handlers.signal));
++		const fallback = values(shared.bindings).find(canSignal);
+ 		if (!fallback) return null;
+ 		shared.controlRoomId = fallback.roomId;
+ 		return fallback;
+diff --git a/node_modules/@trystero-p2p/core/dist/signal-handler.mjs b/node_modules/@trystero-p2p/core/dist/signal-handler.mjs
+index cf12b0b..d43643a 100644
+--- a/node_modules/@trystero-p2p/core/dist/signal-handler.mjs
++++ b/node_modules/@trystero-p2p/core/dist/signal-handler.mjs
+@@ -164,7 +164,7 @@ const ensureOffer = (ctx, state, peerId, relayId) => {
+ 		offerId: state.offerId
+ 	});
+ 	if (state.offerInitPromise) return state.offerInitPromise;
+-	state.offerInitPromise = (async () => {
++	const offerInitPromise = (async () => {
+ 		const firstOffer = (await ctx.offerPool.checkout(1, false, ctx.encryptOffer))[0];
+ 		if (!firstOffer) throw mkErr("failed to allocate offer peer");
+ 		const { peer, offer } = firstOffer;
+@@ -199,8 +199,19 @@ const ensureOffer = (ctx, state, peerId, relayId) => {
+ 			offer,
+ 			offerId: state.offerId
+ 		};
+-	})().finally(() => state.offerInitPromise = null);
+-	return state.offerInitPromise;
++	})().catch((err) => {
++		// #350 — a failed checkout must release announcement placeholders too.
++		// No offer expiry exists yet; keeping them would suppress every retry.
++		if (ctx.peerStates[peerId] === state && state.offerInitPromise === offerInitPromise) {
++			resetOfferState(state, ctx.offerPool);
++			ctx.checkDeactivate();
++		}
++		throw err;
++	}).finally(() => {
++		if (state.offerInitPromise === offerInitPromise) state.offerInitPromise = null;
++	});
++	state.offerInitPromise = offerInitPromise;
++	return offerInitPromise;
+ };
+ const handleAnnouncement = async (ctx, relayId, peerId, shared, signalPeer) => {
+ 	if (shared) {
+@@ -213,7 +224,19 @@ const handleAnnouncement = async (ctx, relayId, peerId, shared, signalPeer) => {
+ 		return;
+ 	}
+ 	if (state.offerRelays[relayId] !== offerRelayPlaceholder) return;
+-	const [peerTopic, offerInfo] = await all([sha1(topicPath(ctx.rootTopicPlaintext, peerId)), ensureOffer(ctx, state, peerId, relayId)]);
++	let peerTopic, offerInfo;
++	try {
++		[peerTopic, offerInfo] = await all([sha1(topicPath(ctx.rootTopicPlaintext, peerId)), ensureOffer(ctx, state, peerId, relayId)]);
++	} catch {
++		// Signaling subscriptions do not consume rejected handler promises.
++		if (!ctx.isLeaving()) ctx.onJoinError?.({
++			error: "failed to create local offer",
++			appId: ctx.appId,
++			peerId,
++			roomId: ctx.roomId
++		});
++		return;
++	}
+ 	if (ctx.isLeaving()) return;
+ 	if (state.connectedPeer || state.answeringPeer || state.offerAnswered || state.offerRelays[relayId] !== offerRelayPlaceholder) {
+ 		clearOfferRelayIfPlaceholder(state, relayId);
 diff --git a/node_modules/@trystero-p2p/core/dist/strategy.mjs b/node_modules/@trystero-p2p/core/dist/strategy.mjs
-index a75dfcf..68ebb96 100644
+index a75dfcf..35e58f7 100644
 --- a/node_modules/@trystero-p2p/core/dist/strategy.mjs
 +++ b/node_modules/@trystero-p2p/core/dist/strategy.mjs
-@@ -295,46 +295,74 @@ var strategy_default = ({ init, subscribe, announce, deactivate }) => {
+@@ -1,6 +1,6 @@
+ import { all, entries, keys, libName, mkErr, noOp, resetTimer, selfId, toErrorMessage, topicPath, values, watchOnline } from "./utils.mjs";
+ import { decrypt, deriveRoomNamespace, encrypt, genKey, sha1 } from "./crypto.mjs";
+-import { OfferPool, offerTtl } from "./offer-pool.mjs";
++import { OfferPool } from "./offer-pool.mjs";
+ import { createPasswordHandshake } from "./handshake.mjs";
+ import peer_default from "./peer.mjs";
+ import room_default from "./room.mjs";
+@@ -96,7 +96,8 @@ var strategy_default = ({ init, subscribe, announce, deactivate }) => {
+ 		offerPool ||= new OfferPool(makeOffer);
+ 		const pool = offerPool;
+ 		const encryptOffer = async (peer) => {
+-			const plainOffer = await peer.getOffer(Date.now() - peer.created > offerTtl);
++			// #350 — the pool owns unused-peer expiry; do not restart it after checkout.
++			const plainOffer = await peer.getOffer();
+ 			if (!plainOffer || plainOffer.type !== "offer") throw mkErr("failed to get offer for peer");
+ 			return (await toCipher(plainOffer)).sdp;
+ 		};
+@@ -295,46 +296,74 @@ var strategy_default = ({ init, subscribe, announce, deactivate }) => {
  				updateStatus(state);
  				checkDeactivate();
  			}
@@ -361,266 +733,24 @@ index a75dfcf..68ebb96 100644
  		}, roomOptions);
  		roomRegistration = {
  			roomToken: null,
-diff --git a/node_modules/@trystero-p2p/core/dist/media.mjs b/node_modules/@trystero-p2p/core/dist/media.mjs
-index 2fd4906..e4c2dd2 100644
---- a/node_modules/@trystero-p2p/core/dist/media.mjs
-+++ b/node_modules/@trystero-p2p/core/dist/media.mjs
-@@ -28,7 +28,7 @@ const createMediaIdentityCache = () => {
- 		getStreamKey: makeKeyGetter(localStreamKeys),
- 		getTrackKey: makeKeyGetter(localTrackKeys),
- 		rememberRemoteStream: (key, stream, streamId) => {
--			remoteStreamsByKey.set(key, stream);
-+			if (key !== void 0) remoteStreamsByKey.set(key, stream);
- 			if (streamId) remoteStreamsById.set(streamId, stream);
- 		},
- 		getRemoteStream: (key, streamId) => remoteStreamsByKey.get(key) ?? (streamId ? remoteStreamsById.get(streamId) : void 0),
-@@ -116,7 +116,15 @@ const createMediaManager = ({ iterate, isActive, getSharedMediaPeer }) => {
- 		},
- 		receiveRemoteStream: (id, stream) => {
- 			if (!isActive(id)) return;
--			const next = pendingStreamMetas[id]?.shift();
-+			// #312: native track events can precede metadata, and each camera
-+			// track repeats its stream. Match identities, not arrival positions.
-+			getSharedMediaPeer(id)?.__trysteroMedia?.rememberRemoteStream(void 0, stream, stream.id);
-+			const pending = pendingStreamMetas[id];
-+			if (!pending) return;
-+			let index = pending.findIndex((meta) => meta.streamId === stream.id);
-+			if (index < 0) index = pending.findIndex((meta) => meta.streamId === void 0);
-+			if (index < 0) return;
-+			const next = pending.splice(index, 1)[0];
- 			if (!next) return;
- 			emitStream(id, next.key, stream, next.metadata);
- 		},
-diff --git a/node_modules/@trystero-p2p/core/dist/shared-peer.mjs b/node_modules/@trystero-p2p/core/dist/shared-peer.mjs
---- a/node_modules/@trystero-p2p/core/dist/shared-peer.mjs
-+++ b/node_modules/@trystero-p2p/core/dist/shared-peer.mjs
-@@ -102,7 +102,8 @@
- 		shared.media.clearRemote();
- 		shared.pendingDataByToken.clear();
- 		shared.remoteRoomTokens.clear();
--		if (keys(map).length === 0) delete this.byApp[appId];
-+		// Strategy instances retain this map for their room's lifetime.
-+		// Keep its identity when the last peer leaves so reconnects stay visible.
- 	}
- 	register(appId, peerId, peer, idleMs) {
- 		const map = this.getMap(appId);
-@@ -131,10 +132,18 @@
- 		peer.setHandlers({
- 			data: (data) => this.dispatchData(shared, data),
- 			signal: (signal) => this.dispatchSignal(shared, signal),
--			close: () => this.clear(appId, peerId, { destroyPeer: false }),
-+			close: () => {
-+				if (this.get(appId, peerId) !== shared) return;
-+				// #403 — close abandons every room, even before native ICE fails.
-+				// Retire its channel too so the remote can accept fresh offers.
-+				this.clear(appId, peerId, { destroyPeer: true });
-+			},
- 			error: (err) => {
-+				if (this.get(appId, peerId) !== shared) return;
- 				console.error(`${libName} peer error:`, err);
--				this.clear(appId, peerId, { destroyPeer: false });
-+				// Negotiation can fail while ICE remains connected. Close the
-+				// channel and transport so the remote can discard it and reconnect.
-+				this.clear(appId, peerId, { destroyPeer: true });
- 			},
- 			track: (track, stream) => this.dispatchTrack(shared, track, stream)
- 		});
-diff --git a/node_modules/@trystero-p2p/core/dist/peer.mjs b/node_modules/@trystero-p2p/core/dist/peer.mjs
---- a/node_modules/@trystero-p2p/core/dist/peer.mjs
-+++ b/node_modules/@trystero-p2p/core/dist/peer.mjs
-@@ -24,6 +24,7 @@
- 	let dataChannel = null;
- 	let disconnectedCloseTimer = null;
- 	let didEmitClose = false;
-+	let rejectInitialOffer = null;
- 	const clearDisconnectedCloseTimer = () => disconnectedCloseTimer = resetTimer(disconnectedCloseTimer);
- 	const emitClose = () => {
- 		if (didEmitClose) return;
-@@ -64,6 +65,8 @@ var peer_default = (initiator, { trickleIce, rtcConfig, rtcPolyfill, turnConfig,
- 	const getRemoteMediaSectionCount = () => (pc.remoteDescription?.sdp?.match(/^m=/gm) ?? []).length;
- 	const canApplyRemoteCandidate = (candidate) => {
- 		if (!pc.remoteDescription) return false;
-+		// #349: retain provisional or future MID candidates until matching SDP arrives.
-+		if (typeof candidate.sdpMid === "string" && ![...(pc.remoteDescription.sdp ?? "").matchAll(/^a=mid:([^\s]+)/gm)].some((match) => match[1] === candidate.sdpMid)) return false;
- 		const remoteMLineCount = getRemoteMediaSectionCount();
- 		if (typeof candidate.sdpMLineIndex === "number" && remoteMLineCount > 0 && candidate.sdpMLineIndex >= remoteMLineCount) return false;
- 		const remoteUfrag = getRemoteUfrag();
-@@ -154,7 +157,11 @@
- 			await pc.setLocalDescription(restartIce ? await pc.createOffer({ iceRestart: true }) : void 0);
- 			return await emitLocalDescriptionSignal();
- 		} catch (err) {
--			handlers.error?.(toError(err, "failed to create local offer"));
-+			const error = toError(err, "failed to create local offer");
-+			// #350 — pooled peers can fail before an error handler is installed.
-+			// Reject checkout too, so the failed offer is destroyed and retried.
-+			rejectInitialOffer?.(error);
-+			handlers.error?.(error);
- 		} finally {
- 			makingOffer = false;
- 		}
-@@ -207,9 +214,14 @@
- 		}
- 	};
- 	pc.onremovestream = (e) => handlers.stream?.(e.stream);
--	const offerPromise = initiator ? new Promise((res) => appendSignalHandler((signal) => {
--		if (signal.type === offerType) res(signal);
--	})) : Promise.resolve();
-+	const offerPromise = initiator ? new Promise((res, reject) => {
-+		rejectInitialOffer = reject;
-+		appendSignalHandler((signal) => {
-+			if (signal.type === offerType) res(signal);
-+		});
-+	}) : Promise.resolve();
-+	// Warm offers may fail before checkout attaches its rejection handler.
-+	offerPromise.catch(() => {});
- 	if (initiator) queueMicrotask(() => {
- 		if (!makingOffer && pc.signalingState === "stable" && !pc.localDescription && pc.connectionState !== "closed") pc.onnegotiationneeded?.(new Event("negotiationneeded"));
- 	});
-diff --git a/node_modules/@trystero-p2p/core/dist/signal-handler.mjs b/node_modules/@trystero-p2p/core/dist/signal-handler.mjs
---- a/node_modules/@trystero-p2p/core/dist/signal-handler.mjs
-+++ b/node_modules/@trystero-p2p/core/dist/signal-handler.mjs
-@@ -164,7 +164,7 @@
- 		offerId: state.offerId
- 	});
- 	if (state.offerInitPromise) return state.offerInitPromise;
--	state.offerInitPromise = (async () => {
-+	const offerInitPromise = (async () => {
- 		const firstOffer = (await ctx.offerPool.checkout(1, false, ctx.encryptOffer))[0];
- 		if (!firstOffer) throw mkErr("failed to allocate offer peer");
- 		const { peer, offer } = firstOffer;
-@@ -199,8 +199,19 @@
- 			offer,
- 			offerId: state.offerId
- 		};
--	})().finally(() => state.offerInitPromise = null);
--	return state.offerInitPromise;
-+	})().catch((err) => {
-+		// #350 — a failed checkout must release announcement placeholders too.
-+		// No offer expiry exists yet; keeping them would suppress every retry.
-+		if (ctx.peerStates[peerId] === state && state.offerInitPromise === offerInitPromise) {
-+			resetOfferState(state, ctx.offerPool);
-+			ctx.checkDeactivate();
-+		}
-+		throw err;
-+	}).finally(() => {
-+		if (state.offerInitPromise === offerInitPromise) state.offerInitPromise = null;
-+	});
-+	state.offerInitPromise = offerInitPromise;
-+	return offerInitPromise;
+diff --git a/node_modules/@trystero-p2p/core/dist/types.d.mts b/node_modules/@trystero-p2p/core/dist/types.d.mts
+index adef69b..86b86dc 100644
+--- a/node_modules/@trystero-p2p/core/dist/types.d.mts
++++ b/node_modules/@trystero-p2p/core/dist/types.d.mts
+@@ -168,6 +168,7 @@ type PeerHandlers = {
+   stream?: (stream: MediaStream) => void;
+   track?: (track: MediaStreamTrack, stream: MediaStream) => void;
+   signal?: (signal: Signal) => void;
++  signalReady?: () => boolean;
+   error?: (err: Error) => void;
  };
- const handleAnnouncement = async (ctx, relayId, peerId, shared, signalPeer) => {
- 	if (shared) {
-@@ -213,7 +224,19 @@
- 		return;
- 	}
- 	if (state.offerRelays[relayId] !== offerRelayPlaceholder) return;
--	const [peerTopic, offerInfo] = await all([sha1(topicPath(ctx.rootTopicPlaintext, peerId)), ensureOffer(ctx, state, peerId, relayId)]);
-+	let peerTopic, offerInfo;
-+	try {
-+		[peerTopic, offerInfo] = await all([sha1(topicPath(ctx.rootTopicPlaintext, peerId)), ensureOffer(ctx, state, peerId, relayId)]);
-+	} catch {
-+		// Signaling subscriptions do not consume rejected handler promises.
-+		if (!ctx.isLeaving()) ctx.onJoinError?.({
-+			error: "failed to create local offer",
-+			appId: ctx.appId,
-+			peerId,
-+			roomId: ctx.roomId
-+		});
-+		return;
-+	}
- 	if (ctx.isLeaving()) return;
- 	if (state.connectedPeer || state.answeringPeer || state.offerAnswered || state.offerRelays[relayId] !== offerRelayPlaceholder) {
- 		clearOfferRelayIfPlaceholder(state, relayId);
-diff --git a/node_modules/@trystero-p2p/core/dist/offer-pool.mjs b/node_modules/@trystero-p2p/core/dist/offer-pool.mjs
---- a/node_modules/@trystero-p2p/core/dist/offer-pool.mjs
-+++ b/node_modules/@trystero-p2p/core/dist/offer-pool.mjs
-@@ -8,7 +8,6 @@
- 	pool = [];
- 	pooled = /* @__PURE__ */ new Set();
- 	leased = /* @__PURE__ */ new Map();
--	recycling = /* @__PURE__ */ new Set();
- 	cleanupTimer = null;
- 	active = false;
- 	constructor(makeOffer) {
-@@ -43,6 +42,13 @@
- 			const peer = this.pool.shift();
- 			if (!peer) break;
- 			this.pooled.delete(peer);
-+			// #350 — restarting an unused offer can drop its SCTP section.
-+			// Retire expired warm peers and let checkout allocate fresh ones.
-+			if (peer.isDead) continue;
-+			if (Date.now() - peer.created > offerTtl) {
-+				peer.destroy();
-+				continue;
-+			}
- 			peers.push(peer);
- 		}
- 		return peers;
-@@ -55,7 +61,7 @@
- 		}
- 	}
- 	recycle(peer) {
--		if (peer.isDead || this.recycling.has(peer)) return;
-+		if (peer.isDead) return;
- 		if (peer.connection.remoteDescription) {
- 			peer.destroy();
- 			return;
-@@ -64,19 +70,20 @@
- 			peer.destroy();
- 			return;
- 		}
--		this.recycling.add(peer);
- 		peer.setHandlers({
- 			connect: noOp,
- 			close: noOp,
- 			error: noOp
- 		});
--		peer.getOffer(true).then((offer) => {
--			if (!offer || offer.type !== "offer" || peer.isDead || !this.active) {
--				peer.destroy();
--				return;
--			}
--			this.push(peer);
--		}).catch(() => peer.destroy()).finally(() => this.recycling.delete(peer));
-+		// #350 — even a young unused offer loses its data channel on rollback.
-+		// Keep the pool slot, but replace the native connection instead.
-+		peer.destroy();
-+		try {
-+			this.push(this.makeOffer());
-+		} catch {
-+			// Native allocation may fail; keep the owner reset unblocked.
-+			// Checkout fills missing slots and reports its own failures.
-+		}
- 	}
- 	reclaimLeased(peer) {
- 		const timer = this.leased.get(peer);
-@@ -139,8 +146,6 @@
- 			peer.destroy();
- 		});
- 		this.leased.clear();
--		this.recycling.forEach((peer) => peer.destroy());
--		this.recycling.clear();
- 	}
- };
- //#endregion
-diff --git a/node_modules/@trystero-p2p/core/dist/strategy.mjs b/node_modules/@trystero-p2p/core/dist/strategy.mjs
---- a/node_modules/@trystero-p2p/core/dist/strategy.mjs
-+++ b/node_modules/@trystero-p2p/core/dist/strategy.mjs
-@@ -1,6 +1,6 @@
- import { all, entries, keys, libName, mkErr, noOp, resetTimer, selfId, toErrorMessage, topicPath, values, watchOnline } from "./utils.mjs";
- import { decrypt, deriveRoomNamespace, encrypt, genKey, sha1 } from "./crypto.mjs";
--import { OfferPool, offerTtl } from "./offer-pool.mjs";
-+import { OfferPool } from "./offer-pool.mjs";
- import { createPasswordHandshake } from "./handshake.mjs";
- import peer_default from "./peer.mjs";
- import room_default from "./room.mjs";
-@@ -96,7 +96,8 @@
- 		offerPool ||= new OfferPool(makeOffer);
- 		const pool = offerPool;
- 		const encryptOffer = async (peer) => {
--			const plainOffer = await peer.getOffer(Date.now() - peer.created > offerTtl);
-+			// #350 — the pool owns unused-peer expiry; do not restart it after checkout.
-+			const plainOffer = await peer.getOffer();
- 			if (!plainOffer || plainOffer.type !== "offer") throw mkErr("failed to get offer for peer");
- 			return (await toCipher(plainOffer)).sdp;
- 		};
+ type PeerHandle = {
+@@ -176,7 +177,7 @@ type PeerHandle = {
+   channel: RTCDataChannel | null;
+   isDead: boolean;
+   getOffer: (restartIce?: boolean) => Promise<Signal | void>;
+-  signal: (sdp: Signal) => Promise<Signal | void>;
++  signal: (sdp: Signal, renegotiation?: boolean) => Promise<Signal | void>;
+   sendData: (data: Uint8Array) => void;
+   destroy: () => void;
+   setHandlers: (newHandlers: PeerHandlers) => void;

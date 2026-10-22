@@ -1,8 +1,8 @@
 # StudyVis
 
 A peer-to-peer desktop study app for close friends. Body-doubling
-accountability with on-device AI focus detection. Local-first, no
-servers we run, no telemetry.
+accountability with on-device AI focus detection. Local-first, with an
+optional approved-account backup relay and no telemetry.
 
 You start a session, your friends join over video, and you keep each
 other on task by being seen working. Turn on the optional AI and the
@@ -31,13 +31,20 @@ A few honest disclosures, in the spirit of "no surprises":
   a second transport — while you're idle. That's the channel friends
   use to send you invites. The traffic is small — kilobytes per hour —
   and neither the relays nor the brokers can read it.
-- **WebRTC during a session.** Audio and video go directly
-  peer-to-peer. This works on most home networks. Some networks
-  (corporate firewalls, strict NATs, locked-down school Wi-Fi) block
-  direct connections — about 15% of setups — and those sessions can
-  fail to connect. StudyVis ships with no relay fallback today; to get
-  through such networks you can add your own TURN relay in Settings →
-  Network (it only ever sees encrypted bytes).
+- **WebRTC during a session.** Audio and video prefer a direct
+  peer-to-peer connection. Some networks (corporate firewalls, strict
+  NATs, locked-down school Wi-Fi) require a TURN relay. Settings →
+  Network accepts your own server and offers an optional approved-account
+  backup relay. The managed relay is off by default and its traffic
+  remains disabled until a provider-enforced free-only limit is confirmed.
+  A TURN relay handles encrypted bytes and sees connection metadata.
+- **Optional relay sign-in.** Enabling Backup relay for a StudyVis profile
+  adds GitHub (recommended) or Google browser sign-in and signed requests
+  to `https://studyvis-turn.ashcroft-estate.workers.dev`. The service links
+  the provider account to your existing public StudyVis identity, subject
+  to separate operator approval. The service and providers see connection
+  metadata. Your private keys, recovery phrase, friends, and study history
+  remain on your device. Ordinary StudyVis use needs no sign-in.
 - **Camera and microphone permission** are requested the first time
   you join a session. They live with the OS, not with StudyVis — you
   can revoke them in your OS privacy panel any time.
@@ -146,6 +153,45 @@ You can turn updates off in Settings → About.
 Once you're past onboarding you land on your friends list. Click an
 online friend, click **Invite**, they accept, and you're in a session
 together.
+
+## Optional backup relay
+
+Existing users keep the same StudyVis identity, friends, contact links, and
+history. There is no account conversion or need to re-pair when linking a
+provider account.
+
+1. Open **Settings → Network → Backup relay** and enable it for the current
+   StudyVis profile.
+2. Choose **GitHub** (recommended) or **Google**. Authorize in your system
+   browser, return to StudyVis, and check the displayed account before
+   confirming the link.
+3. The service operator must approve that provider account separately.
+   Sign-in alone does not establish that an account is trustworthy.
+
+The integration does not mean the hosted service is activated: provider
+registration and secret configuration are owner setup steps, and credential
+issuance remains disabled until a provider-enforced free-only limit is
+confirmed. Cloudflare currently publishes a free allowance followed by paid
+bandwidth, without a documented hard spending cap. App rate limits cannot
+guarantee zero charges. Your own TURN server remains an option in the meantime.
+[Cloudflare TURN pricing and limits](https://developers.cloudflare.com/realtime/turn/faq/)
+
+Once enabled at the service, the managed relay uses normal ICE selection with
+direct connections preferred. It respects **Never use TURN** and is never
+forced on by **Always route through TURN**; that setting remains available for
+your own TURN server. A relay may be contacted while ICE checks connection
+paths, so “backup” does not promise that it waits for a separate failed attempt.
+Credential renewal refreshes an active managed relay path while preserving
+existing direct connections. A connection whose ICE gathering already finished
+may need a fresh connection attempt before it can use newly enabled TURN.
+Turning the option off does not forcibly disconnect an allocation already in
+use.
+
+Opt-in and links belong to the selected StudyVis identity. Switching identity
+does not transfer them. Unlinking cancels any pending sign-in and stops new credentials; temporary credentials
+already issued may work until they expire. GitHub/Google login cannot restore
+lost keys, friends, or local study history, and accounts are never merged by
+email address. Keep your existing 24-word recovery backup safe.
 
 ## Use a browser on another device
 
@@ -460,6 +506,10 @@ where you'd see it surface.
   envelopes), both deterministically derived from one 24-word BIP39
   mnemonic.
 - **rusqlite** for local persistence (friends, sessions, audit log).
+- **Cloudflare Worker + Durable Object** for optional approved-account TURN
+  entitlement. It stores provider-to-public-identity links and authentication
+  state separately from study data. Public Nostr/MQTT discovery remains
+  independent of this service.
 - **llama-server (llama.cpp build) sidecar** for V2 vision-model
   inference. Bundled per platform, started on demand. The packaged
   Linux build includes Vulkan acceleration and a CPU fallback.
@@ -491,6 +541,85 @@ automatically" is still on (its default) and the machine is online; with it
 off, run the script or use the pane's Install now button. The script is still
 **required** before `tauri build` (release-profile builds fail without real
 binaries, by design).
+
+### Backup-relay service setup (maintainers)
+
+The client integration does not register provider applications or activate TURN.
+The broker is isolated in `services/turn-broker/`, using the `studyvis-turn`
+Worker and its own `TurnBroker` Durable Object. Leave other Workers and their
+namespaces unchanged. Cloudflare Free account quotas are shared with those
+projects; use Free resources and do not attach a paid subscription for this
+setup.
+
+The owner must register OAuth applications in the provider consoles:
+
+1. [Register a GitHub OAuth app](https://github.com/settings/applications/new)
+   named **StudyVis backup relay**, using a public StudyVis homepage. Set
+   **Authorization callback URL** to
+   `https://studyvis-turn.ashcroft-estate.workers.dev/oauth/callback/github`.
+   Leave device flow off. The broker requests no repository or email scopes.
+   [GitHub registration instructions](https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/creating-an-oauth-app)
+2. Create or select a free Google Cloud project and configure
+   [Google Auth Platform branding](https://console.cloud.google.com/auth/branding)
+   and an [External audience](https://console.cloud.google.com/auth/audience).
+   In [Clients](https://console.cloud.google.com/auth/clients), create a **Web
+   application** client with the exact authorized redirect URI
+   `https://studyvis-turn.ashcroft-estate.workers.dev/oauth/callback/google`.
+   The broker requests only `openid email`. Basic sign-in scopes are exempt
+   from the usual testing-mode test-user and seven-day authorization rules.
+   Follow any console branding/domain verification requirements; no sensitive
+   Google API scopes or billing-enabled services are needed for this flow.
+   [Google OpenID setup](https://developers.google.com/identity/openid-connect/openid-connect),
+   [testing-mode exception](https://support.google.com/cloud/answer/15549945?hl=en)
+3. Put the public `GITHUB_CLIENT_ID` and `GOOGLE_CLIENT_ID` in the broker's
+   Wrangler configuration. Keep `BROKER_ORIGIN` exactly
+   `https://studyvis-turn.ashcroft-estate.workers.dev` without a trailing slash.
+   Keep `TURN_ENABLED` and `FREE_ONLY_CONFIRMED` as `"false"`. Deploy the
+   disabled broker using the owner's Cloudflare authentication:
+
+   ```sh
+   npx wrangler deploy --config services/turn-broker/wrangler.jsonc
+   ```
+
+4. Enter secrets directly through the masked Wrangler prompts below, or
+   Cloudflare dashboard encrypted secret bindings. Never paste them into chat,
+   commit them, put them in Wrangler `vars`, or embed them in the desktop app.
+   Use a password manager to generate `RATE_LIMIT_SECRET` with at least 32
+   random characters. Initialize `APPROVED_ACCOUNTS` to `{}` so nobody receives
+   relay entitlement by default.
+
+   ```sh
+   npx wrangler secret put GITHUB_CLIENT_SECRET --config services/turn-broker/wrangler.jsonc
+   npx wrangler secret put GOOGLE_CLIENT_SECRET --config services/turn-broker/wrangler.jsonc
+   npx wrangler secret put RATE_LIMIT_SECRET --config services/turn-broker/wrangler.jsonc
+   npx wrangler secret put APPROVED_ACCOUNTS --config services/turn-broker/wrangler.jsonc
+   ```
+
+5. Review trusted users separately from OAuth. The approval secret is a JSON
+   object mapping `github:<numeric-user-id>` or `google:<sub>` to a future
+   approval expiry in **Unix milliseconds**. Use the stable subject shown for
+   the linked account, not its email address or display name. Replace the
+   entire approval secret when adding or removing entries, and bound each
+   approval with an expiry. There is no public admin endpoint.
+
+**Keep TURN issuance disabled.** Cloudflare's free allowance is not a hard
+spending cap, and `FREE_ONLY_CONFIRMED` is merely an application gate. Setting
+it to `"true"` does not create a Cloudflare spending limit. Before activation,
+the owner must establish and verify a provider-enforced free-only cutoff; none
+is documented currently. Only after that boundary exists should the owner
+create a dedicated StudyVis TURN key, set its nonsecret ID as `TURN_KEY_ID`,
+and enter its dedicated bearer token as the encrypted `TURN_KEY_API_TOKEN`
+secret. Never use a general Cloudflare account API token as that runtime secret.
+Both service switches must remain false while the free-only requirement is
+unresolved. [TURN key and credential setup](https://developers.cloudflare.com/realtime/turn/generate-credentials/)
+
+Unlinking requests credential revocation and stops new issuance. Already issued
+credentials can remain usable until revocation succeeds or they expire, for at
+most an hour under this broker's issuance policy. To respond to a suspected
+leak, disable new issuance first, remove the affected approval, revoke the
+dedicated provider key/credentials as appropriate, and rotate the compromised
+Worker secret. Do not publish secrets in diagnostics. Free-quota exhaustion or
+broker downtime must leave ordinary direct connections and custom TURN usable.
 
 Two lighter loops when you don't need the desktop shell:
 
