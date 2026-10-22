@@ -181,13 +181,14 @@ direct connections preferred. It respects **Never use TURN** and is never
 forced on by **Always route through TURN**; that setting remains available for
 your own TURN server. A relay may be contacted while ICE checks connection
 paths, so “backup” does not promise that it waits for a separate failed attempt.
-Changes update available ICE servers without interrupting an existing direct
-connection. A connection whose ICE gathering already finished may need a fresh
-connection attempt before it can use newly enabled TURN. Turning the option
-off does not forcibly disconnect an allocation already in use.
+Credential renewal refreshes an active managed relay path while preserving
+existing direct connections. A connection whose ICE gathering already finished
+may need a fresh connection attempt before it can use newly enabled TURN.
+Turning the option off does not forcibly disconnect an allocation already in
+use.
 
 Opt-in and links belong to the selected StudyVis identity. Switching identity
-does not transfer them. Unlinking stops new credentials; temporary credentials
+does not transfer them. Unlinking cancels any pending sign-in and stops new credentials; temporary credentials
 already issued may work until they expire. GitHub/Google login cannot restore
 lost keys, friends, or local study history, and accounts are never merged by
 email address. Keep your existing 24-word recovery backup safe.

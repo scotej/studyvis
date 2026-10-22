@@ -219,12 +219,20 @@ export class ManagedTurnController {
 
   startLogin = async (provider: BrokerProvider): Promise<string> => {
     const generation = this.generation
-    const loginGeneration = ++this.loginGeneration
     this.requireActive(generation)
+    if (this.pendingUnlinks > 0) {
+      throw new ManagedTurnRequestError('cancelled')
+    }
+    const loginGeneration = ++this.loginGeneration
     this.clearPoll()
     this.publish({ login: null, pendingAccount: null, error: null })
     try {
-      const value = await this.request('login', { provider }, generation)
+      const value = await this.request(
+        'login',
+        { provider },
+        generation,
+        loginGeneration
+      )
       if (
         !object(value) ||
         typeof value.transactionId !== 'string' ||
@@ -273,6 +281,7 @@ export class ManagedTurnController {
   pollLogin = async (): Promise<void> => {
     this.clearPoll()
     const generation = this.generation
+    const loginGeneration = this.loginGeneration
     const login = this.snapshot.login
     if (!this.isActive() || !login || this.snapshot.status === 'confirm') return
     if (login.expiresAt <= this.now()) {
@@ -283,7 +292,8 @@ export class ManagedTurnController {
       const value = await this.request(
         'poll',
         { transactionId: login.transactionId },
-        generation
+        generation,
+        loginGeneration
       )
       if (!object(value)) throw new ManagedTurnRequestError('invalid_response')
       this.requireActive(generation)
@@ -309,6 +319,7 @@ export class ManagedTurnController {
 
   confirmLogin = async (): Promise<void> => {
     const generation = this.generation
+    const loginGeneration = this.loginGeneration
     const { login, pendingAccount } = this.snapshot
     this.requireActive(generation)
     if (!login || !pendingAccount || login.expiresAt <= this.now()) {
@@ -324,7 +335,8 @@ export class ManagedTurnController {
           provider: pendingAccount.provider,
           subject: pendingAccount.subject,
         },
-        generation
+        generation,
+        loginGeneration
       )
       this.requireActive(generation)
       if (
@@ -342,6 +354,7 @@ export class ManagedTurnController {
     } catch (error) {
       if (
         generation === this.generation &&
+        loginGeneration === this.loginGeneration &&
         accountGeneration === this.accountGeneration
       ) {
         this.accountGeneration += 1
@@ -357,12 +370,23 @@ export class ManagedTurnController {
   unlink = async (provider: BrokerProvider, subject: string): Promise<void> => {
     const generation = this.generation
     this.requireActive(generation)
+    this.pendingUnlinks += 1
+    // PR-499 — unlink deletes every broker login for this identity, including
+    // actions still waiting for a challenge or keychain signature locally.
+    this.loginGeneration += 1
+    this.clearPoll()
     const accountGeneration = ++this.accountGeneration
     this.statusRequest = null
     // Stop local issuance before the server round-trip, including a previously
     // started renewal which might otherwise repopulate the cache afterwards.
     this.clearLease()
-    this.publish({ approved: false })
+    this.publish({
+      approved: false,
+      login: null,
+      pendingAccount: null,
+      status: this.snapshot.accounts.length > 0 ? 'linked' : 'signed-out',
+      error: null,
+    })
     try {
       const value = await this.request(
         'unlink',
@@ -388,6 +412,8 @@ export class ManagedTurnController {
         this.reportError(error, generation)
       }
       throw this.safeError(error)
+    } finally {
+      if (generation === this.generation) this.pendingUnlinks -= 1
     }
   }
 
@@ -491,11 +517,13 @@ export class ManagedTurnController {
   private leaseGeneration = 0
   private loginGeneration = 0
   private accountGeneration = 0
+  private pendingUnlinks = 0
 
   private reset(publicKey: string | null): void {
     this.generation += 1
     this.accountGeneration += 1
     this.loginGeneration += 1
+    this.pendingUnlinks = 0
     this.abort.abort()
     this.abort = new AbortController()
     this.statusRequest = null
@@ -545,8 +573,13 @@ export class ManagedTurnController {
     )
   }
 
-  private requireActive(generation: number): void {
-    if (!this.isActive() || generation !== this.generation) {
+  private requireActive(generation: number, loginGeneration?: number): void {
+    if (
+      !this.isActive() ||
+      generation !== this.generation ||
+      (loginGeneration !== undefined &&
+        loginGeneration !== this.loginGeneration)
+    ) {
       throw new ManagedTurnRequestError('cancelled')
     }
   }
@@ -648,14 +681,16 @@ export class ManagedTurnController {
   private async request(
     action: BrokerAction,
     payload: JsonObject,
-    generation: number
+    generation: number,
+    loginGeneration?: number
   ): Promise<unknown> {
-    this.requireActive(generation)
+    this.requireActive(generation, loginGeneration)
     const publicKey = this.snapshot.identityEdPubkeyHex!
     const challenge = await this.post(
       '/v1/challenge',
       { publicKey, action },
-      generation
+      generation,
+      loginGeneration
     )
     if (
       !object(challenge) ||
@@ -666,7 +701,7 @@ export class ManagedTurnController {
     ) {
       throw new ManagedTurnRequestError('invalid_response')
     }
-    this.requireActive(generation)
+    this.requireActive(generation, loginGeneration)
     const message = brokerSigningBytes(
       MANAGED_TURN_BROKER_ORIGIN,
       action,
@@ -675,7 +710,7 @@ export class ManagedTurnController {
       payload
     )
     const signature = await this.sign(message)
-    this.requireActive(generation)
+    this.requireActive(generation, loginGeneration)
     if (signature.length !== 64)
       throw new ManagedTurnRequestError('unauthorized')
     return this.post(
@@ -687,16 +722,18 @@ export class ManagedTurnController {
         payload,
         signature: bytesToHex(signature),
       },
-      generation
+      generation,
+      loginGeneration
     )
   }
 
   private async post(
     path: string,
     body: object,
-    generation: number
+    generation: number,
+    loginGeneration?: number
   ): Promise<unknown> {
-    this.requireActive(generation)
+    this.requireActive(generation, loginGeneration)
     const abort = new AbortController()
     const epochSignal = this.abort.signal
     const cancel = () => abort.abort()
@@ -716,12 +753,12 @@ export class ManagedTurnController {
           signal: abort.signal,
         }
       )
-      this.requireActive(generation)
+      this.requireActive(generation, loginGeneration)
       if (Number(response.headers.get('content-length')) > MAX_RESPONSE_BYTES) {
         throw new ManagedTurnRequestError('invalid_response')
       }
       const text = await response.text()
-      this.requireActive(generation)
+      this.requireActive(generation, loginGeneration)
       if (text.length > MAX_RESPONSE_BYTES)
         throw new ManagedTurnRequestError('invalid_response')
       let value: unknown

@@ -127,10 +127,12 @@ function harness(overrides: Partial<BrokerEnv> = {}, fetcher?: typeof fetch) {
       })
   )
   const state = storage()
-  const broker = new TurnBroker(state, env, {
-    fetch: fetchMock as typeof fetch,
-    now: () => now,
-  })
+  const createBroker = () =>
+    new TurnBroker(state, env, {
+      fetch: fetchMock as typeof fetch,
+      now: () => now,
+    })
+  let broker = createBroker()
   const request = (path: string, init: RequestInit = {}, ip = '192.0.2.1') =>
     broker.fetch(
       new Request(`${ORIGIN}${path}`, {
@@ -204,7 +206,9 @@ function harness(overrides: Partial<BrokerEnv> = {}, fetcher?: typeof fetch) {
   return {
     env,
     state,
-    broker,
+    get broker() {
+      return broker
+    },
     post,
     request,
     signed,
@@ -213,9 +217,43 @@ function harness(overrides: Partial<BrokerEnv> = {}, fetcher?: typeof fetch) {
     callback,
     enroll,
     fetchMock,
+    restart: () => {
+      broker = createBroker()
+    },
     setNow: (value: number) => {
       now = value
     },
+  }
+}
+
+function heldIssuance(h: ReturnType<typeof harness>) {
+  let started!: () => void
+  let release!: (response: Response) => void
+  const arrived = new Promise<void>((resolve) => {
+    started = resolve
+  })
+  const response = new Promise<Response>((resolve) => {
+    release = resolve
+  })
+  h.fetchMock.mockImplementationOnce(async (input) => {
+    expect(String(input)).toContain('generate-ice-servers')
+    started()
+    return response
+  })
+  return {
+    arrived,
+    release: () =>
+      release(
+        Response.json({
+          iceServers: [
+            {
+              urls: ['turn:turn.cloudflare.com:3478?transport=udp'],
+              username: 'raced-username',
+              credential: 'raced-credential',
+            },
+          ],
+        })
+      ),
   }
 }
 
@@ -764,6 +802,172 @@ describe('TURN broker free-only controls and credential lifecycle', () => {
     expect([...h.state.storage.sql.exec('SELECT * FROM revocations')]).toEqual(
       []
     )
+  })
+
+  it('revokes an in-flight issuance when unlink removes the longer of two approved grants', async () => {
+    const h = harness({
+      TURN_ENABLED: 'true',
+      FREE_ONLY_CONFIRMED: 'true',
+      APPROVED_ACCOUNTS: JSON.stringify({
+        'github:123': NOW + 86_400_000,
+        'google:456': NOW + 300_000,
+      }),
+    })
+    const who = await identity()
+    await h.enroll(who)
+    h.state.storage.sql.exec(
+      'INSERT INTO links(provider, subject, public_key, label) VALUES (?, ?, ?, ?)',
+      'google',
+      '456',
+      who.publicKey,
+      'friend@example.com'
+    )
+    const held = heldIssuance(h)
+    const request = h.signed(who, 'credentials')
+    await held.arrived
+    const unlinked = await (
+      await h.signed(who, 'unlink', { provider: 'github', subject: '123' })
+    ).json()
+    expect(unlinked).toMatchObject({
+      approved: true,
+      links: [{ provider: 'google', subject: '456', approved: true }],
+    })
+    held.release()
+    expect((await request).status).toBe(401)
+    expect([...h.state.storage.sql.exec('SELECT * FROM credentials')]).toEqual(
+      []
+    )
+    expect([...h.state.storage.sql.exec('SELECT * FROM issued')]).toEqual([])
+    expect(
+      h.fetchMock.mock.calls.some(([url]) =>
+        String(url).endsWith('/raced-username/revoke')
+      )
+    ).toBe(true)
+    const replacement = await h.signed(who, 'credentials')
+    expect(replacement.status).toBe(200)
+    expect((await replacement.json()).expiresAt).toBe(NOW + 300_000)
+  })
+
+  it('revokes an in-flight issuance even when the same account is unlinked and relinked', async () => {
+    const h = harness({ TURN_ENABLED: 'true', FREE_ONLY_CONFIRMED: 'true' })
+    const who = await identity()
+    await h.enroll(who)
+    const initial = await (await h.signed(who, 'status')).json()
+    const held = heldIssuance(h)
+    const request = h.signed(who, 'credentials')
+    await held.arrived
+    expect(
+      (await h.signed(who, 'unlink', { provider: 'github', subject: '123' }))
+        .status
+    ).toBe(200)
+    await h.enroll(who)
+    expect((await (await h.signed(who, 'status')).json()).links).toEqual(
+      initial.links
+    )
+    held.release()
+    expect((await request).status).toBe(401)
+    expect([...h.state.storage.sql.exec('SELECT * FROM credentials')]).toEqual(
+      []
+    )
+    expect(
+      h.fetchMock.mock.calls.some(([url]) =>
+        String(url).endsWith('/raced-username/revoke')
+      )
+    ).toBe(true)
+  })
+
+  it.each([
+    'shortened approval',
+    'expired approval',
+    'pending revocation',
+    'disabled service',
+    'changed key',
+  ] as const)('rejects in-flight credentials after %s', async (change) => {
+    const h = harness({ TURN_ENABLED: 'true', FREE_ONLY_CONFIRMED: 'true' })
+    const who = await identity()
+    await h.enroll(who)
+    const held = heldIssuance(h)
+    const request = h.signed(who, 'credentials')
+    await held.arrived
+    switch (change) {
+      case 'shortened approval':
+        h.env.APPROVED_ACCOUNTS = JSON.stringify({
+          'github:123': NOW + 300_000,
+        })
+        break
+      case 'expired approval':
+        h.setNow(NOW + 86_400_001)
+        break
+      case 'pending revocation':
+        h.state.storage.sql.exec(
+          'INSERT INTO revocations(username, public_key, key_id, expires_at) VALUES (?, ?, ?, ?)',
+          'pending-username',
+          who.publicKey,
+          TURN_KEY_ID,
+          NOW + 3_600_000
+        )
+        break
+      case 'disabled service':
+        h.env.TURN_ENABLED = 'false'
+        break
+      case 'changed key':
+        h.env.TURN_KEY_ID = 'b'.repeat(32)
+        h.env.TURN_KEY_API_TOKEN = 'replacement-turn-secret'
+        break
+    }
+    held.release()
+    expect((await request).status).toBe(401)
+    expect([...h.state.storage.sql.exec('SELECT * FROM credentials')]).toEqual(
+      []
+    )
+    expect([...h.state.storage.sql.exec('SELECT * FROM issued')]).toEqual([])
+    if (change === 'changed key') {
+      expect([
+        ...h.state.storage.sql.exec('SELECT username, key_id FROM revocations'),
+      ]).toEqual([{ username: 'raced-username', key_id: TURN_KEY_ID }])
+    } else if (change !== 'expired approval') {
+      expect(
+        h.fetchMock.mock.calls.some(([url]) =>
+          String(url).endsWith('/raced-username/revoke')
+        )
+      ).toBe(true)
+    }
+  })
+
+  it('replaces a cached lease from the retired TURN key after a broker restart', async () => {
+    const h = harness({ TURN_ENABLED: 'true', FREE_ONLY_CONFIRMED: 'true' })
+    const who = await identity()
+    await h.enroll(who)
+    expect((await h.signed(who, 'credentials')).status).toBe(200)
+    h.env.TURN_KEY_ID = 'b'.repeat(32)
+    h.env.TURN_KEY_API_TOKEN = 'replacement-turn-secret'
+    h.restart()
+    const held = heldIssuance(h)
+    const request = h.signed(who, 'credentials')
+    await held.arrived
+    held.release()
+    const replacement = await request
+    expect(replacement.status).toBe(200)
+    expect((await replacement.json()).iceServers[0].username).toBe(
+      'raced-username'
+    )
+    const generations = h.fetchMock.mock.calls.filter(([url]) =>
+      String(url).includes('generate-ice-servers')
+    )
+    expect(generations).toHaveLength(2)
+    expect(String(generations[1][0])).toContain(`/keys/${h.env.TURN_KEY_ID}/`)
+    expect(new Headers(generations[1][1]?.headers).get('Authorization')).toBe(
+      'Bearer replacement-turn-secret'
+    )
+    expect([
+      ...h.state.storage.sql.exec('SELECT key_id FROM credentials'),
+    ]).toEqual([{ key_id: h.env.TURN_KEY_ID }])
+    expect((await h.signed(who, 'credentials')).status).toBe(200)
+    expect(
+      h.fetchMock.mock.calls.filter(([url]) =>
+        String(url).includes('generate-ice-servers')
+      )
+    ).toHaveLength(2)
   })
 
   it('rejects expired or malformed manual grants', async () => {

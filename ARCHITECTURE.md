@@ -457,12 +457,16 @@ connections with `setConfiguration` when the lease changes; future connections
 read the current lease even when a Trystero room captured older options. Custom
 relay-only configurations exclude managed servers. Changing identity clears
 cached credentials and reapplies only the selected identity's saved opt-in.
-Updating servers does not force an ICE restart or close a selected direct path,
-so completed ICE gathering may need a
-fresh connection attempt before newly enabled TURN can help. Opt-out removes
-future managed candidates without forcibly closing an existing allocation.
-Lease renewal updates credentials before expiry, but production relayed
-long-session behavior still needs an enabled-provider runtime test.
+Credential rotation checks the selected ICE path and requests a negotiated ICE
+restart for an active managed relay allocation before its old credentials
+expire. Selected direct paths remain connected. Trystero carries data-only
+restart offers and answers over the established peer's control channel;
+discovery traffic cannot replace an open data-only connection. Older peers
+without this support may reconnect when an idle data-only allocation expires.
+Completed ICE gathering may still need a fresh connection attempt before newly
+enabled TURN can help. Opt-out removes future managed candidates without
+forcibly closing an existing allocation. Actual provider long-session behavior
+still needs an enabled-provider runtime test.
 
 No long-lived public TURN credential is bundled in the app. Provider client
 secrets and the Cloudflare TURN master token belong only in encrypted Worker
@@ -522,8 +526,11 @@ Issuance requires both `TURN_ENABLED` and `FREE_ONLY_CONFIRMED` to equal
 `"true"`; both ship as `"false"`. The latter is an operator assertion only,
 not a Cloudflare spending control. Do not change it without verifying a
 provider-enforced free-only boundary. Issued credentials expire within one
-hour and cannot outlast the linked account's approval. Unlinking clears the
-link and cached credentials and attempts provider revocation; failed revokes
+hour and cannot outlast the linked account's approval. Cached leases must match
+the active provider key. Credential generation rechecks authorization after
+the provider responds and revokes leases invalidated by account changes.
+Unlinking also cancels pending desktop sign-in, clears the link and cached
+credentials, and attempts provider revocation; failed revokes
 are retried, and already issued bearer credentials may remain usable until
 revoked or expired. Client-side opt-out stops new local requests without
 revoking credentials already copied elsewhere.

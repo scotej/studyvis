@@ -37,7 +37,7 @@ function deferred<T>() {
 }
 
 class FakeConnection extends EventTarget {
-  connectionState: RTCPeerConnectionState = 'connected'
+  connectionState: RTCPeerConnectionState = 'new'
   updates: RTCConfiguration[] = []
   restarts = 0
   private config: RTCConfiguration
@@ -71,7 +71,10 @@ function harness(initial: Partial<BrokerStatus> = {}) {
     ...initial,
   }
   let issued = 0
+  let loginCount = 0
+  const loginTransactions = new Set<string>()
   const calls: { action: string; body: Record<string, unknown> }[] = []
+  const signing = new Map<BrokerAction, () => Promise<void>>()
   const overrides = new Map<
     string,
     (body: Record<string, unknown>) => unknown | Promise<unknown>
@@ -121,20 +124,37 @@ function harness(initial: Partial<BrokerStatus> = {}) {
         expiresAt: Date.now() + 60 * 60_000,
       })
     }
-    if (action === 'login')
+    if (action === 'login') {
+      loginCount += 1
+      const transactionId =
+        loginCount === 1
+          ? 'login-transaction'
+          : `login-transaction-${loginCount}`
+      loginTransactions.add(transactionId)
       return Response.json({
-        transactionId: 'login-transaction',
+        transactionId,
         url: loginUrl,
         expiresAt: Date.now() + 600_000,
       })
-    if (action === 'poll')
+    }
+    if (action === 'poll' || action === 'confirm') {
+      if (!loginTransactions.has(String(signed.payload.transactionId))) {
+        return Response.json({ error: 'unauthorized' }, { status: 401 })
+      }
+    }
+    if (action === 'poll') {
       return Response.json({
         state: 'ready',
         account: linkedAccount,
         expiresAt: Date.now() + 600_000,
       })
-    if (action === 'confirm') return Response.json(status)
+    }
+    if (action === 'confirm') {
+      loginTransactions.delete(String(signed.payload.transactionId))
+      return Response.json(status)
+    }
     if (action === 'unlink') {
+      loginTransactions.clear()
       status = { ...status, links: [], approved: false }
       return Response.json(status)
     }
@@ -142,7 +162,13 @@ function harness(initial: Partial<BrokerStatus> = {}) {
   }
   const controller = new ManagedTurnController({
     fetch: fetcher,
-    sign: async (message) => signMessage(privateKey, message),
+    sign: async (message) => {
+      const action = new TextDecoder()
+        .decode(message)
+        .split('\n')[2] as BrokerAction
+      await signing.get(action)?.()
+      return signMessage(privateKey, message)
+    },
   })
   const connect = async () => {
     controller.setIdentity(publicKey)
@@ -154,6 +180,8 @@ function harness(initial: Partial<BrokerStatus> = {}) {
     controller,
     calls,
     overrides,
+    signing,
+    loginTransactions,
     connect,
     setStatus: (next: BrokerStatus) => {
       status = next
@@ -268,6 +296,206 @@ describe('optional relay identity and OAuth lifecycle', () => {
     expect(controller.getSnapshot().status).toBe('linked')
   })
 
+  test.each(['pending', 'confirm'])(
+    'unlink cancels a second account sign-in in the %s state',
+    async (stage) => {
+      const {
+        controller,
+        connect,
+        calls,
+        overrides,
+        loginTransactions,
+        setStatus,
+      } = setup({ enabled: false })
+      await connect()
+      await controller.startLogin('google')
+      if (stage === 'confirm') {
+        overrides.set('poll', () => ({
+          state: 'ready',
+          account: {
+            provider: 'google',
+            subject: '456',
+            label: 'friend@example.com',
+            approved: false,
+          },
+        }))
+        await controller.pollLogin()
+      }
+      expect(controller.getSnapshot().status).toBe(stage)
+      await controller.unlink('github', '123')
+      expect(loginTransactions.size).toBe(0)
+      expect(controller.getSnapshot()).toMatchObject({
+        status: 'signed-out',
+        accounts: [],
+        login: null,
+        pendingAccount: null,
+        error: null,
+      })
+      const count = calls.length
+      await vi.advanceTimersByTimeAsync(30_000)
+      expect(calls).toHaveLength(count)
+      await expect(controller.confirmLogin()).rejects.toThrow('expired')
+      expect(calls).toHaveLength(count)
+
+      overrides.delete('poll')
+      await controller.startLogin('github')
+      await controller.pollLogin()
+      setStatus({
+        providers: { github: true, google: true },
+        links: [linkedAccount],
+        approved: true,
+        enabled: false,
+        freeOnlyConfirmed: false,
+      })
+      await controller.confirmLogin()
+      expect(controller.getSnapshot().accounts).toEqual([linkedAccount])
+      expect(controller.getSnapshot().status).toBe('linked')
+    }
+  )
+
+  test.each(['login', 'poll', 'confirm'] as const)(
+    'unlink ignores a late %s response from the cancelled sign-in',
+    async (action) => {
+      const { controller, connect, calls, overrides } = setup({
+        enabled: false,
+      })
+      await connect()
+      if (action !== 'login') await controller.startLogin('google')
+      if (action === 'confirm') await controller.pollLogin()
+      const response = deferred<unknown>()
+      const entered = deferred<void>()
+      overrides.set(action, async () => {
+        entered.resolve()
+        return response.promise
+      })
+      const pending = (
+        action === 'login'
+          ? controller.startLogin('google')
+          : action === 'poll'
+            ? controller.pollLogin()
+            : controller.confirmLogin()
+      ).catch(() => {})
+      await entered.promise
+      await controller.unlink('github', '123')
+      response.resolve(
+        action === 'login'
+          ? {
+              transactionId: 'late-login',
+              url: loginUrl,
+              expiresAt: Date.now() + 600_000,
+            }
+          : action === 'poll'
+            ? { state: 'ready', account: linkedAccount }
+            : {
+                providers: { github: true, google: true },
+                links: [linkedAccount],
+                approved: true,
+                enabled: true,
+                freeOnlyConfirmed: true,
+              }
+      )
+      await pending
+      expect(controller.getSnapshot()).toMatchObject({
+        status: 'signed-out',
+        accounts: [],
+        approved: false,
+        login: null,
+        pendingAccount: null,
+        error: null,
+      })
+      expect(controller.getIceServers()).toEqual([])
+      const count = calls.length
+      await vi.advanceTimersByTimeAsync(30_000)
+      expect(calls).toHaveLength(count)
+    }
+  )
+
+  test.each(['login', 'poll', 'confirm'] as const)(
+    'unlink prevents a cancelled %s action from being posted after a delayed signature',
+    async (action) => {
+      const { controller, connect, calls, signing } = setup({ enabled: false })
+      await connect()
+      if (action !== 'login') await controller.startLogin('google')
+      if (action === 'confirm') await controller.pollLogin()
+      const signature = deferred<void>()
+      const entered = deferred<void>()
+      signing.set(action, () => {
+        entered.resolve()
+        return signature.promise
+      })
+      const count = calls.filter((call) => call.action === action).length
+      const pending = (
+        action === 'login'
+          ? controller.startLogin('google')
+          : action === 'poll'
+            ? controller.pollLogin()
+            : controller.confirmLogin()
+      ).catch(() => {})
+      await entered.promise
+      await controller.unlink('github', '123')
+      signature.resolve()
+      await pending
+      expect(calls.filter((call) => call.action === action)).toHaveLength(count)
+      expect(controller.getSnapshot()).toMatchObject({
+        status: 'signed-out',
+        login: null,
+        pendingAccount: null,
+        error: null,
+      })
+    }
+  )
+
+  test('new sign-ins wait until every overlapping unlink has settled', async () => {
+    const { controller, connect, calls, overrides } = setup({ enabled: false })
+    await connect()
+    const responses = [deferred<unknown>(), deferred<unknown>()]
+    const entered = [deferred<void>(), deferred<void>()]
+    let requests = 0
+    overrides.set('unlink', () => {
+      const index = requests++
+      entered[index].resolve()
+      return responses[index].promise
+    })
+    const first = controller.unlink('github', '123')
+    await entered[0].promise
+    const second = controller.unlink('github', '123')
+    await entered[1].promise
+    const count = calls.length
+    await expect(controller.startLogin('google')).rejects.toThrow('cancelled')
+    expect(calls).toHaveLength(count)
+    const unlinked = {
+      providers: { github: true, google: true },
+      links: [],
+      approved: false,
+      enabled: false,
+      freeOnlyConfirmed: false,
+    }
+    responses[1].resolve(unlinked)
+    await second
+    await expect(controller.startLogin('google')).rejects.toThrow('cancelled')
+    responses[0].resolve(unlinked)
+    await first
+    await expect(controller.startLogin('google')).resolves.toBe(loginUrl)
+  })
+
+  test('failed unlink still cancels the old sign-in and allows a fresh attempt', async () => {
+    const { controller, connect, overrides } = setup({ enabled: false })
+    await connect()
+    await controller.startLogin('google')
+    await controller.pollLogin()
+    overrides.set('unlink', () => {
+      throw new Error('network unavailable')
+    })
+    await expect(controller.unlink('github', '123')).rejects.toThrow(
+      'unavailable'
+    )
+    expect(controller.getSnapshot()).toMatchObject({
+      login: null,
+      pendingAccount: null,
+    })
+    await expect(controller.startLogin('google')).resolves.toBe(loginUrl)
+  })
+
   test('late responses and signatures cannot disclose or restore a replaced identity', async () => {
     const { controller, calls, connect, overrides } = setup({ enabled: false })
     await connect()
@@ -373,7 +601,7 @@ describe('temporary credentials and active peer configurations', () => {
     expect(controller.getIceServers()).toEqual([])
   })
 
-  test('a warm pool using its old config receives current credentials; live peers rotate without restart', async () => {
+  test('warm pool construction and pending peers receive current credentials', async () => {
     const { controller, connect } = setup()
     const Constructor = createManagedTurnPeerConnection(
       FakeConnection as unknown as typeof RTCPeerConnection,

@@ -207,6 +207,7 @@ export class TurnBroker {
   private state: BrokerState
   private env: BrokerEnv
   private deps: Dependencies
+  private activeIssuances = new Map<string, symbol>()
 
   constructor(state: BrokerState, env: BrokerEnv, deps?: Dependencies) {
     this.state = state
@@ -348,6 +349,16 @@ export class TurnBroker {
     return this.rows<LinkRow>(
       'SELECT provider, subject, public_key, label FROM links WHERE public_key = ? ORDER BY provider',
       publicKey
+    )
+  }
+
+  private approvalExpiry(publicKey: string): number {
+    const approved = this.approvals()
+    return Math.max(
+      0,
+      ...this.linked(publicKey).map(
+        (link) => approved[`${link.provider}:${link.subject}`] ?? 0
+      )
     )
   }
 
@@ -554,6 +565,7 @@ export class TurnBroker {
       )
       this.state.storage.sql.exec('DELETE FROM logins WHERE id = ?', id)
     })
+    this.activeIssuances.delete(publicKey)
     return this.status(publicKey)
   }
 
@@ -861,12 +873,7 @@ export class TurnBroker {
     if (!status.enabled) throw new BrokerFailure('disabled', 403)
     if (!status.approved || status.revocationPending)
       throw new BrokerFailure('unauthorized', 401)
-    const approved = this.approvals()
-    const expiry = Math.max(
-      ...this.linked(publicKey).map(
-        (link) => approved[`${link.provider}:${link.subject}`] ?? 0
-      )
-    )
+    const expiry = this.approvalExpiry(publicKey)
     const now = this.deps.now()
     const cached = this.rows<CredentialRow>(
       'SELECT * FROM credentials WHERE public_key = ?',
@@ -874,6 +881,7 @@ export class TurnBroker {
     )[0]
     if (
       cached &&
+      cached.key_id === this.env.TURN_KEY_ID &&
       cached.expires_at > now + 600_000 &&
       cached.expires_at <= expiry
     )
@@ -899,6 +907,10 @@ export class TurnBroker {
         now + 30_000
       )
     })
+    // PR-499: link mutations invalidate this token even if an unlink is followed
+    // by a relink before the provider replies. Only active requests retain it.
+    const authorization = Symbol()
+    this.activeIssuances.set(publicKey, authorization)
     try {
       const keyId = text(this.env.TURN_KEY_ID, /^[0-9a-f]{32}$/)
       const result = await this.upstreamJson(
@@ -936,8 +948,6 @@ export class TurnBroker {
       })
       if (servers.length !== 1) throw new BrokerFailure('unavailable', 503)
       const response = { iceServers: servers, expiresAt: now + ttl * 1000 }
-      // An unlink can interleave with the provider fetch. Never cache or return
-      // credentials once their account authorization has disappeared.
       this.state.storage.sql.exec(
         'INSERT INTO issued(username, public_key, key_id, expires_at) VALUES (?, ?, ?, ?)',
         servers[0].username,
@@ -945,7 +955,16 @@ export class TurnBroker {
         keyId,
         response.expiresAt
       )
-      if (!this.status(publicKey).approved || !this.status(publicKey).enabled) {
+      const currentStatus = this.status(publicKey)
+      if (
+        this.activeIssuances.get(publicKey) !== authorization ||
+        keyId !== this.env.TURN_KEY_ID ||
+        !currentStatus.enabled ||
+        !currentStatus.approved ||
+        currentStatus.revocationPending ||
+        response.expiresAt <= this.deps.now() ||
+        response.expiresAt > this.approvalExpiry(publicKey)
+      ) {
         await this.queueRevocations(publicKey)
         throw new BrokerFailure('unauthorized', 401)
       }
@@ -959,6 +978,8 @@ export class TurnBroker {
       )
       return response
     } finally {
+      if (this.activeIssuances.get(publicKey) === authorization)
+        this.activeIssuances.delete(publicKey)
       this.state.storage.sql.exec(
         'DELETE FROM rates WHERE bucket = ?',
         `issuance:${publicKey}`
@@ -1040,6 +1061,7 @@ export class TurnBroker {
       'DELETE FROM logins WHERE public_key = ?',
       publicKey
     )
+    this.activeIssuances.delete(publicKey)
     await this.queueRevocations(publicKey)
     return this.status(publicKey)
   }
