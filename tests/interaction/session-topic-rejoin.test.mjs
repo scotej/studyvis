@@ -439,7 +439,8 @@ test('late peers receive the original signed join after their hello', async () =
               item.data?.kind === 'joined' && item.target === 'late-peer'
           ).data
     )
-    const { seq: _seq, ...wire } = original
+    const wire = { ...original }
+    delete wire.seq
     assert.deepEqual(
       delivered,
       wire,
