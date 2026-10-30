@@ -137,7 +137,7 @@ Runtime revision 10 has this reviewable input identity:
 |-|-|-|
 | WebKitGTK | `webkitgtk-2.54.2.tar.xz` from `webkitgtk.org/releases` | `a76345b391bef6211fb5ab6cfab2e86b285d18cda17cbb9ade595f1252b86065` |
 | librice | GitHub tag archive `v0.4.3` | `4671e1835f9ab0f8d87e8d9e22b6bfb06f928aeae442841ab81881dff61e3f4b` |
-| WebKit AppImage portability delta | `scripts/patches/webkitgtk-2.54.2-appimage-sandbox.patch` | `7b80a66cd6898fb47e0695ff5c38be504e9538755ae73040766432a0ab95f12d` |
+| WebKit AppImage portability delta | `scripts/patches/webkitgtk-2.54.2-appimage-sandbox.patch` | `320c81d020741208164289fd26e2ccf2db10c5d750ec8a3837ed2444e57434bc` |
 | GStreamer core | `gstreamer-1.28.8.tar.xz` from `gstreamer.freedesktop.org/src` | `baa8e86985ad6417cc0ad6e7b79ff2884c6779c8b1c7a6240e7121822c86e524` |
 | GStreamer base | `gst-plugins-base-1.28.8.tar.xz` from `gstreamer.freedesktop.org/src` | `ade70e3381fcbb024f1f20aa9ede9b5654aeed39d5bd70b1a98f53015e501117` |
 | GStreamer good | `gst-plugins-good-1.28.8.tar.xz` from `gstreamer.freedesktop.org/src` | `a7670ed900d3d03be744d25c1873b239896e9a82ce6d17f8febc6fffbaee9521` |
@@ -160,6 +160,8 @@ compiled native locations. This avoids silently resolving the host's
 it does not disable the sandbox. Runtime revision 10 also accepts empty-SDP
 rollback, restores stable transceiver ownership after collided offers, and
 starts queued sources only after their exact committed pad is configured.
+Live-stream player construction skips viewport suspension before its URL/source
+is installed, preventing a muted remote video from remaining suspended at startup.
 Answers retain supported offered RTP extension IDs; future sources reserve
 accepted IDs while committed per-MID mappings remain stable. Remote transport
 and SSRC identity and raw payload-specific feedback stay out of local codec

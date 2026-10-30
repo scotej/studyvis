@@ -248,6 +248,21 @@ diff --git a/Source/WebCore/platform/mediastream/gstreamer/DesktopPortal.cpp b/S
      return nodeData;
  }
  
+diff --git a/Source/WebCore/platform/graphics/gstreamer/MediaPlayerPrivateGStreamer.cpp b/Source/WebCore/platform/graphics/gstreamer/MediaPlayerPrivateGStreamer.cpp
+--- a/Source/WebCore/platform/graphics/gstreamer/MediaPlayerPrivateGStreamer.cpp
++++ b/Source/WebCore/platform/graphics/gstreamer/MediaPlayerPrivateGStreamer.cpp
+@@ -3684,7 +3684,10 @@
+             g_object_set(m_pipeline.get(), "audio-filter", scale, nullptr);
+     }
+ 
+-    managePlayerSuspend();
++    // The URL and source are installed after construction. Until then,
++    // isMediaStreamPlayer() cannot recognize a live stream and may suspend it.
++    if (!isMediaStream)
++        managePlayerSuspend();
+ #if ENABLE(MEDIA_TELEMETRY)
+     MediaTelemetryReport::singleton().reportDrmInfo(getDrm());
+     MediaTelemetryReport::singleton().reportPlaybackState(MediaTelemetryReport::AVPipelineState::Create);
 diff --git a/Source/WebCore/platform/mediastream/gstreamer/GStreamerIncomingTrackProcessor.cpp b/Source/WebCore/platform/mediastream/gstreamer/GStreamerIncomingTrackProcessor.cpp
 --- a/Source/WebCore/platform/mediastream/gstreamer/GStreamerIncomingTrackProcessor.cpp
 +++ b/Source/WebCore/platform/mediastream/gstreamer/GStreamerIncomingTrackProcessor.cpp
