@@ -189,7 +189,7 @@ read -r gstreamer_patch_sha256 _ < <(sha256sum "$license_dir/gst-plugins-bad-web
 [[ $gstreamer_patch_sha256 == "$STUDYVIS_GSTREAMER_BAD_PATCH_SHA256" ]] || {
   die "packaged GStreamer rollback patch has the wrong SHA256: $gstreamer_patch_sha256"
 }
-[[ $(wc -l <"$license_dir/WEBKIT-LICENSE-FILES.sha256") -eq 59 ]] || {
+[[ $(wc -l <"$license_dir/WEBKIT-LICENSE-FILES.sha256") -eq 64 ]] || {
   die "packaged WebKit license hash inventory is incomplete"
 }
 node "$script_dir/generate-librice-third-party-notices.mjs" --check \

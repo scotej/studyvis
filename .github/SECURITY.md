@@ -102,14 +102,14 @@ copy rests on three things:
    builds in the maintained Linux path compile the GTK `ENABLE_WEB_RTC`
    peer-connection binding out (not the media-device API), so the candidate
    cannot inherit either that functionality or later distro security fixes. Its
-   AppImage carries hash-pinned WebKitGTK 2.52.5 + librice 0.4.3 plus one
+   AppImage carries hash-pinned WebKitGTK 2.54.2 + librice 0.4.3 plus one
    reviewed AppImage runtime portability patch. That patch resolves the
    packaged WebKit subprocesses, injected bundle, and sandbox helpers relative
    to the executable before native fallbacks; it does not disable the process
    sandbox. The exact source and patch hashes are in `INSTALL.md` and
    `ARCHITECTURE.md`, and in the AppImage's own `BUILD-MANIFEST.txt`. Its
    adjacent readable/hash-addressed
-   inventory covers all 59 upstream WebKit license/notice files found by the
+   inventory covers all 64 upstream WebKit license/notice files found by the
    pinned build. A separate generated librice text/JSON pair covers the exact
    locked normal dependency union for the `rice-proto` and `rice-io` `cargo-c`
    roots with `capi` enabled. After the exact tagged AppImage smoke, the draft also receives

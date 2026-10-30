@@ -131,18 +131,18 @@ experimental features still off but WebRTC explicitly on; it also reasserts
 media streams, GStreamer WebRTC, librice, and the bubblewrap sandbox. librice
 keeps ICE/network work in WebKit's sandboxed NetworkProcess.
 
-Runtime revision 9 has this reviewable input identity:
+Runtime revision 10 has this reviewable input identity:
 
 | Input | Version/source | SHA-256 |
 |-|-|-|
-| WebKitGTK | `webkitgtk-2.52.5.tar.xz` from `webkitgtk.org/releases` | `8a531a9abd2215936e8a8a914c077b586c0228b31d652f205286a8ec90f3364b` |
+| WebKitGTK | `webkitgtk-2.54.2.tar.xz` from `webkitgtk.org/releases` | `a76345b391bef6211fb5ab6cfab2e86b285d18cda17cbb9ade595f1252b86065` |
 | librice | GitHub tag archive `v0.4.3` | `4671e1835f9ab0f8d87e8d9e22b6bfb06f928aeae442841ab81881dff61e3f4b` |
-| WebKit AppImage portability delta | `scripts/patches/webkitgtk-2.52.5-appimage-sandbox.patch` | `a4773c3a942440b6c00eb3bad4f81f0d0bcd86010275eb54bab6f9e965db8145` |
-| GStreamer core | `gstreamer-1.28.7.tar.xz` from `gstreamer.freedesktop.org/src` | `787329b2c5758e228a71d926a6dcf960bceaacca3cadd63874ba665dfcda013e` |
-| GStreamer base | `gst-plugins-base-1.28.7.tar.xz` from `gstreamer.freedesktop.org/src` | `ed6e5410f496d171818763af2265e7977154bc7f9b827e98acf8c5bed21dd5a7` |
-| GStreamer good | `gst-plugins-good-1.28.7.tar.xz` from `gstreamer.freedesktop.org/src` | `87256969c82cf3bc8574301f3e7044a90de0ac500a5a27d8ba38c4dde894dd8b` |
-| GStreamer bad | `gst-plugins-bad-1.28.7.tar.xz` from `gstreamer.freedesktop.org/src` | `dc525383c18b2c265bbe6a43d498656cd918aaa130aa4e3abeabcdaa741c3ffe` |
-| GStreamer rollback delta | `scripts/patches/gst-plugins-bad-1.28.7-webrtc-rollback.patch` | `e3105c73dc2ff3479ecd79320068d112e7370901c48a297288f02cbefcb03799` |
+| WebKit AppImage portability delta | `scripts/patches/webkitgtk-2.54.2-appimage-sandbox.patch` | `0f60cd48661679ff66948588b76207f731ee0ea47d4fa30b00534e21af8588f3` |
+| GStreamer core | `gstreamer-1.28.8.tar.xz` from `gstreamer.freedesktop.org/src` | `baa8e86985ad6417cc0ad6e7b79ff2884c6779c8b1c7a6240e7121822c86e524` |
+| GStreamer base | `gst-plugins-base-1.28.8.tar.xz` from `gstreamer.freedesktop.org/src` | `ade70e3381fcbb024f1f20aa9ede9b5654aeed39d5bd70b1a98f53015e501117` |
+| GStreamer good | `gst-plugins-good-1.28.8.tar.xz` from `gstreamer.freedesktop.org/src` | `a7670ed900d3d03be744d25c1873b239896e9a82ce6d17f8febc6fffbaee9521` |
+| GStreamer bad | `gst-plugins-bad-1.28.8.tar.xz` from `gstreamer.freedesktop.org/src` | `670d888bde8242579b0d8e91f60cf337aa7be20ca7c315ebfbdd6e5a9218d104` |
+| GStreamer rollback delta | `scripts/patches/gst-plugins-bad-1.28.8-webrtc-rollback.patch` | `e3105c73dc2ff3479ecd79320068d112e7370901c48a297288f02cbefcb03799` |
 | libnice | `libnice-0.1.24.tar.gz` from `libnice.freedesktop.org/releases` | `cfb5e8e778534f2f5b3c6f4958a1eb057c6b95c537c0f100817a537cf5d64fcc` |
 | Meson | GitHub release archive `1.7.2` | `4d40d63aa748a9c139cc41ab9bffe43edd113c5639d78bde81544ca955aea890` |
 
@@ -157,7 +157,7 @@ from `studyvis-webkit-runtime/` beside the AppImage executable, and packaged
 `bwrap`/`xdg-dbus-proxy` directly beside it, before falling back to WebKit's
 compiled native locations. This avoids silently resolving the host's
 `PKGLIBEXEC`/`PKGLIBDIR` while retaining native-package/development fallbacks;
-it does not disable the sandbox. Runtime revision 9 also accepts empty-SDP
+it does not disable the sandbox. Runtime revision 10 also accepts empty-SDP
 rollback, restores stable transceiver ownership after collided offers, and
 starts queued sources only after their exact committed pad is configured.
 Answers retain supported offered RTP extension IDs; future sources reserve
@@ -191,7 +191,7 @@ remote-audio processing. Reproducibility here means pinned and checked
 source inputs, local delta, build environment, and configuration—not a claim of
 bit-for-bit identical output from arbitrary machines. Production builds use
 Ubuntu 24.04, Rust 1.97.1, and `cargo-c` 0.10.24, retaining the artifact's
-glibc 2.39 floor. The private runtime also builds matched GStreamer 1.28.7
+glibc 2.39 floor. The private runtime also builds matched GStreamer 1.28.8
 core/base/good/bad and libnice 0.1.24 libraries and curated plugins using source-pinned Meson
 1.7.2. Noble's 1.24.2 satisfies WebKit's advertised configure minimum but
 misassigns sending pads, creates receiving transceivers too late, and omits
@@ -251,7 +251,7 @@ the applied patches under `usr/share/licenses/studyvis-webkit-runtime/`.
 identity, including the AppImage-relative subprocess, injected-bundle, and
 sandbox-helper layout, while `WEBKIT-THIRD-PARTY-LICENSES.txt` and
 `WEBKIT-LICENSE-FILES.sha256` preserve a readable and hash-addressed inventory
-of all 59 upstream WebKit license/notice files discovered by the pinned source
+of all 64 upstream WebKit license/notice files discovered by the pinned source
 build. A separate GStreamer license inventory and Meson license accompany its
 matched source-built media stack. The builder's `--source-bundle` mode separately creates a deterministic
 corresponding-source archive containing the exact verified WebKitGTK/librice,
@@ -288,7 +288,7 @@ is not something a merge should wait behind, and mandatory in substance because
 the tagged release leg repeats it against the exact shipped artifact — builds
 the pinned private runtime, packages it with the
 media-framework and sandbox helpers, validates runtime/license files, ELF
-dependencies, the shipped build manifest and 59-file license inventory, and the
+dependencies, the shipped build manifest and 64-file license inventory, and the
 packaged-only GStreamer WebRTC/SCTP elements, verifies a gnome-keyring Secret
 Service round-trip, and starts the extracted AppImage under Xvfb. The first
 document must log `runtime.webrtc ready` after constructing a
@@ -1346,7 +1346,7 @@ its exact AppImage built from `x86_64-unknown-linux-gnu`.
   where the peer-connection binding was compiled out.
 - WebKit's unhandled `permission-request` default denies capture.
   `linux_media_permissions.rs` handles only
-  `WebKitUserMediaPermissionRequest`. WebKitGTK 2.52.5's public request wrapper
+  `WebKitUserMediaPermissionRequest`. WebKitGTK 2.54.2's public request wrapper
   does not expose its camera/microphone `SecurityOrigin` values, so this is a
   top-level-view boundary rather than a claim of per-request-origin
   authentication: the handler reads the current `webview.uri()` and allows only

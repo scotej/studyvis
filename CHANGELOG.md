@@ -15,7 +15,8 @@
 
 ### Fixed
 
-- Updated a bundled networking dependency to address a security advisory.
+- Updated the bundled Linux browser and media runtimes and a networking
+  dependency to address security advisories.
 - Push-to-talk applies microphone changes immediately while StudyVis is in the
   background. On macOS 14 and later, the main window also keeps running when
   minimized or hidden.

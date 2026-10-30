@@ -1,8 +1,7 @@
 diff --git a/Source/WTF/wtf/glib/Sandbox.h b/Source/WTF/wtf/glib/Sandbox.h
-index 43a3f4db29d2..baf7500b1fc2 100644
 --- a/Source/WTF/wtf/glib/Sandbox.h
 +++ b/Source/WTF/wtf/glib/Sandbox.h
-@@ -22,6 +22,10 @@
+@@ -23,6 +23,10 @@
  
  namespace WTF {
  
@@ -13,7 +12,7 @@ index 43a3f4db29d2..baf7500b1fc2 100644
  WTF_EXPORT_PRIVATE bool isInsideFlatpak();
  WTF_EXPORT_PRIVATE bool isInsideUnsupportedContainer();
  WTF_EXPORT_PRIVATE bool isInsideSnap();
-@@ -33,6 +37,10 @@ WTF_EXPORT_PRIVATE const CString& sandboxedUserRuntimeDirectory();
+@@ -34,6 +38,10 @@
  
  } // namespace WTF
  
@@ -25,10 +24,9 @@ index 43a3f4db29d2..baf7500b1fc2 100644
  using WTF::isInsideUnsupportedContainer;
  using WTF::isInsideSnap;
 diff --git a/Source/WTF/wtf/glib/Sandbox.cpp b/Source/WTF/wtf/glib/Sandbox.cpp
-index b99a94fd7f0a..e9aa1df1c48b 100644
 --- a/Source/WTF/wtf/glib/Sandbox.cpp
 +++ b/Source/WTF/wtf/glib/Sandbox.cpp
-@@ -28,6 +28,7 @@
+@@ -30,6 +30,7 @@
  #include <wtf/FileSystem.h>
  #include <wtf/NeverDestroyed.h>
  #include <wtf/glib/GRefPtr.h>
@@ -36,7 +34,7 @@ index b99a94fd7f0a..e9aa1df1c48b 100644
  #include <wtf/text/CString.h>
  
  namespace WTF {
-@@ -41,6 +42,33 @@ bool isInsideFlatpak()
+@@ -41,6 +42,33 @@
  }
  
  #if ENABLE(BUBBLEWRAP_SANDBOX)
@@ -70,7 +68,7 @@ index b99a94fd7f0a..e9aa1df1c48b 100644
  bool isInsideUnsupportedContainer()
  {
      static bool inContainer = g_file_test("/run/.containerenv", G_FILE_TEST_EXISTS);
-@@ -51,7 +79,7 @@ bool isInsideUnsupportedContainer()
+@@ -51,7 +79,7 @@
      // So this just does a basic test of if `bwrap` runs successfully.
      if (inContainer && supportedContainer == -1) {
          const char* bwrapArgs[] = {
@@ -80,19 +78,18 @@ index b99a94fd7f0a..e9aa1df1c48b 100644
              "--proc", "/proc",
              "--dev", "/dev",
 diff --git a/Source/WebKit/UIProcess/Launcher/glib/BubblewrapLauncher.cpp b/Source/WebKit/UIProcess/Launcher/glib/BubblewrapLauncher.cpp
-index 67eb870f16fd..b52b78f29271 100644
 --- a/Source/WebKit/UIProcess/Launcher/glib/BubblewrapLauncher.cpp
 +++ b/Source/WebKit/UIProcess/Launcher/glib/BubblewrapLauncher.cpp
-@@ -851,7 +851,7 @@ static void bindDBusProxyPaths(ProcessLauncher::LaunchOptions& launchOptions, Ve
+@@ -865,7 +865,7 @@
  
      if (launchOptions.processType == ProcessLauncher::ProcessType::DBusProxy) {
-         sandboxArgs.appendVector(Vector<CString>({
+         sandboxArgs.appendList<CString>({
 -            "--ro-bind", DBUS_PROXY_EXECUTABLE, DBUS_PROXY_EXECUTABLE,
 +            "--ro-bind", dbusProxyExecutable(), dbusProxyExecutable(),
-             "--bind", sandboxedUserRuntimeDirectory().data(), sandboxedUserRuntimeDirectory().data(),
-         }));
+             "--bind", sandboxedUserRuntimeDirectory(), sandboxedUserRuntimeDirectory(),
+         });
  
-@@ -986,7 +986,7 @@ GRefPtr<GSubprocess> bubblewrapSpawn(GSubprocessLauncher* launcher, const Proces
+@@ -1000,7 +1000,7 @@
      g_subprocess_launcher_take_fd(launcher, bwrapFd, bwrapFd);
  
      Vector<CString> bwrapArgs = {
@@ -102,10 +99,9 @@ index 67eb870f16fd..b52b78f29271 100644
          bwrapFdStr.get(),
          "--",
 diff --git a/Source/WebKit/UIProcess/Launcher/glib/XDGDBusProxy.cpp b/Source/WebKit/UIProcess/Launcher/glib/XDGDBusProxy.cpp
-index eb0c6b529ce3..f0afed5bc614 100644
 --- a/Source/WebKit/UIProcess/Launcher/glib/XDGDBusProxy.cpp
 +++ b/Source/WebKit/UIProcess/Launcher/glib/XDGDBusProxy.cpp
-@@ -197,7 +197,7 @@ void XDGDBusProxy::launch(const CString& proxyPath, CompletionHandler<void()>&&
+@@ -195,7 +195,7 @@
      int proxyFd = argumentsToFileDescriptor(proxyArgs, "dbus-proxy");
      GUniquePtr<char> proxyArgsStr(g_strdup_printf("--args=%d", proxyFd));
      Vector<CString> args = {
@@ -113,19 +109,19 @@ index eb0c6b529ce3..f0afed5bc614 100644
 +        dbusProxyExecutable(),
          proxyArgsStr.get(),
      };
-     int nargs = args.size() + 1;
+     auto argv = args.map([](auto& arg) {
 diff --git a/Source/WebKit/Shared/glib/ProcessExecutablePathGLib.cpp b/Source/WebKit/Shared/glib/ProcessExecutablePathGLib.cpp
 --- a/Source/WebKit/Shared/glib/ProcessExecutablePathGLib.cpp
 +++ b/Source/WebKit/Shared/glib/ProcessExecutablePathGLib.cpp
-@@ -29,9 +29,25 @@
+@@ -29,8 +29,24 @@
  
  #include <glib.h>
  #include <wtf/FileSystem.h>
 +#include <wtf/glib/GUniquePtr.h>
  
  namespace WebKit {
- 
-+static String packagedWebKitProcess(const char* processName)
++
++static String packagedWebKitProcess(ASCIILiteral processName)
 +{
 +    // AppImages are not chroots. Resolve the subprocesses in a stable
 +    // directory beside the application executable before trying the native
@@ -134,18 +130,17 @@ diff --git a/Source/WebKit/Shared/glib/ProcessExecutablePathGLib.cpp b/Source/We
 +    if (executablePath.isNull())
 +        return { };
 +    GUniquePtr<char> executableDirectory(g_path_get_dirname(executablePath.data()));
-+    GUniquePtr<char> processPath(g_build_filename(executableDirectory.get(), "studyvis-webkit-runtime", processName, nullptr));
++    GUniquePtr<char> processPath(g_build_filename(executableDirectory.get(), "studyvis-webkit-runtime", processName.characters(), nullptr));
 +    if (g_file_test(processPath.get(), G_FILE_TEST_IS_EXECUTABLE))
 +        return FileSystem::stringFromFileSystemRepresentation(processPath.get());
 +    return { };
 +}
-+
+ 
  #if ENABLE(DEVELOPER_MODE)
  static String getExecutablePath()
- {
-@@ -44,6 +60,10 @@ static String getExecutablePath()
+@@ -44,6 +60,10 @@
  
- static String findWebKitProcess(const char* processName)
+ static String findWebKitProcess(const ASCIILiteral processName)
  {
 +    String packagedProcessPath = packagedWebKitProcess(processName);
 +    if (!packagedProcessPath.isNull())
@@ -157,7 +152,7 @@ diff --git a/Source/WebKit/Shared/glib/ProcessExecutablePathGLib.cpp b/Source/We
 diff --git a/Source/cmake/FindRice.cmake b/Source/cmake/FindRice.cmake
 --- a/Source/cmake/FindRice.cmake
 +++ b/Source/cmake/FindRice.cmake
-@@ -109,6 +109,7 @@ if (Rice_IO_LIBRARY AND NOT TARGET Rice::Io)
+@@ -109,6 +109,7 @@
      set_target_properties(Rice::Io PROPERTIES
          IMPORTED_LOCATION "${Rice_IO_LIBRARY}"
          INTERFACE_INCLUDE_DIRECTORIES "${RiceIo_INCLUDE_DIR}"
@@ -168,7 +163,7 @@ diff --git a/Source/cmake/FindRice.cmake b/Source/cmake/FindRice.cmake
 diff --git a/Source/WebKit/UIProcess/API/glib/WebKitWebContext.cpp b/Source/WebKit/UIProcess/API/glib/WebKitWebContext.cpp
 --- a/Source/WebKit/UIProcess/API/glib/WebKitWebContext.cpp
 +++ b/Source/WebKit/UIProcess/API/glib/WebKitWebContext.cpp
-@@ -344,8 +344,27 @@ static void webkitWebContextInvalidateAutomationSession(WebKitWebContext* webCon
+@@ -341,8 +341,27 @@
  #define INJECTED_BUNDLE_FILENAME "libWPEInjectedBundle.so"
  #endif
  
@@ -218,7 +213,7 @@ diff --git a/Source/WebCore/platform/mediastream/gstreamer/DesktopPortal.cpp b/S
 diff --git a/Source/WebCore/platform/mediastream/gstreamer/GStreamerIncomingTrackProcessor.cpp b/Source/WebCore/platform/mediastream/gstreamer/GStreamerIncomingTrackProcessor.cpp
 --- a/Source/WebCore/platform/mediastream/gstreamer/GStreamerIncomingTrackProcessor.cpp
 +++ b/Source/WebCore/platform/mediastream/gstreamer/GStreamerIncomingTrackProcessor.cpp
-@@ -82,8 +82,11 @@
+@@ -83,8 +83,11 @@
  
      g_object_get(m_pad.get(), "transceiver", &m_data.transceiver.outPtr(), nullptr);
  
@@ -231,7 +226,7 @@ diff --git a/Source/WebCore/platform/mediastream/gstreamer/GStreamerIncomingTrac
          if (startsWith(msIdAttribute.span(), " "_s))
              m_sdpMsIdAndTrackId = { emptyString(), msIdAttribute.span().subspan(1) };
          else {
-@@ -134,6 +134,12 @@
+@@ -132,6 +135,12 @@
  {
      // Look-up the mediastream ID, using the msid attribute, fall back to pad name if there is no msid.
      String mediaStreamId;
@@ -244,25 +239,22 @@ diff --git a/Source/WebCore/platform/mediastream/gstreamer/GStreamerIncomingTrac
      if (gstObjectHasProperty(m_pad.get(), "msid"_s)) {
          GUniqueOutPtr<char> msidChars;
          g_object_get(m_pad.get(), "msid", &msidChars.outPtr(), nullptr);
-@@ -147,11 +153,6 @@
+@@ -144,11 +153,6 @@
+ 
      if (!mediaStreamId.isEmpty())
          return mediaStreamId;
- 
+-
 -    if (!m_sdpMsIdAndTrackId.first.isEmpty()) {
 -        GST_DEBUG_OBJECT(m_bin.get(), "msid set from SDP media msid attribute: '%s'", m_sdpMsIdAndTrackId.first.utf8().data());
 -        return m_sdpMsIdAndTrackId.first;
 -    }
--
+ 
      auto name = GMallocString::unsafeAdoptFromUTF8(gst_pad_get_name(m_pad.get()));
      mediaStreamId = name.span();
-     GST_DEBUG_OBJECT(m_bin.get(), "msid set from webrtcbin src pad name: %s", name.utf8());
-     return mediaStreamId;
- }
-
 diff --git a/Source/WebCore/Modules/mediastream/gstreamer/GStreamerMediaEndpoint.cpp b/Source/WebCore/Modules/mediastream/gstreamer/GStreamerMediaEndpoint.cpp
 --- a/Source/WebCore/Modules/mediastream/gstreamer/GStreamerMediaEndpoint.cpp
 +++ b/Source/WebCore/Modules/mediastream/gstreamer/GStreamerMediaEndpoint.cpp
-@@ -559,16 +559,20 @@
+@@ -573,16 +573,20 @@
  Vector<String> getMediaStreamIdsFromSDPMedia(const GstSDPMedia& media)
  {
      HashSet<String> mediaStreamIdsSet;
@@ -285,17 +277,20 @@ diff --git a/Source/WebCore/Modules/mediastream/gstreamer/GStreamerMediaEndpoint
          // a=ssrc:3612593434 msid:e1019f4a-0983-4863-b923-b75903cced2c webrtctransceiver1
          if (key == "ssrc"_s) {
              auto outerComponents = String::fromUTF8(attribute->value).split(' ');
-@@ -576,14 +580,15 @@
+@@ -590,14 +594,15 @@
                  auto innerComponents = outer.split(':');
                  if (innerComponents.size() < 2)
                      continue;
 -                if (innerComponents[0] == "msid"_s)
 -                    mediaStreamIdsSet.add(innerComponents[1]);
+-            }
+-        }
+-    }
 +                if (innerComponents[0] == "msid"_s && innerComponents[1] != "-"_s)
 +                    legacyStreamIds.add(innerComponents[1]);
-             }
-         }
-     }
++            }
++        }
++    }
 +    const auto& streamIds = mediaStreamIdsSet.isEmpty() ? legacyStreamIds : mediaStreamIdsSet;
      Vector<String> mediaStreamIds;
 -    mediaStreamIds.reserveInitialCapacity(mediaStreamIdsSet.size());
@@ -305,7 +300,7 @@ diff --git a/Source/WebCore/Modules/mediastream/gstreamer/GStreamerMediaEndpoint
          mediaStreamIds.append(msid);
      return mediaStreamIds;
  }
-@@ -674,8 +679,139 @@
+@@ -688,8 +693,139 @@
      return states;
  }
  
@@ -447,7 +442,7 @@ diff --git a/Source/WebCore/Modules/mediastream/gstreamer/GStreamerMediaEndpoint
      unsigned totalMedias = gst_sdp_message_medias_len(sdpMessage);
  #ifndef GST_DISABLE_GST_DEBUG
      GST_DEBUG_OBJECT(m_pipeline.get(), "Linking outgoing sources for %u m-lines", totalMedias);
-@@ -697,28 +833,90 @@
+@@ -711,28 +847,90 @@
              continue;
          }
  
@@ -550,7 +545,7 @@ diff --git a/Source/WebCore/Modules/mediastream/gstreamer/GStreamerMediaEndpoint
              }
  
              auto& sinkPad = source->pad();
-@@ -728,6 +926,7 @@
+@@ -742,6 +940,7 @@
              }
  
              source->link();
@@ -558,7 +553,7 @@ diff --git a/Source/WebCore/Modules/mediastream/gstreamer/GStreamerMediaEndpoint
              callOnMainThreadAndWait([&] {
                  source->start();
              });
-@@ -826,21 +1025,23 @@
+@@ -840,21 +1039,23 @@
              peerConnectionBackend->setLocalDescriptionFailed(Exception { ExceptionCode::OperationError, "Invalid SDP"_s });
              return;
          }
@@ -586,7 +581,7 @@ diff --git a/Source/WebCore/Modules/mediastream/gstreamer/GStreamerMediaEndpoint
  
          auto descriptions = descriptionsFromWebRTCBin(m_webrtcBin.get(), GatherSignalingState::Yes);
  
-@@ -959,11 +1160,9 @@
+@@ -990,11 +1191,9 @@
                  return;
              }
          }
@@ -601,7 +596,7 @@ diff --git a/Source/WebCore/Modules/mediastream/gstreamer/GStreamerMediaEndpoint
          if (protectedThis->isStopped())
              return;
          auto peerConnectionBackend = this->peerConnectionBackend();
-@@ -980,6 +1179,13 @@
+@@ -1011,6 +1210,13 @@
                  g_object_set(ice.get(), "ice-lite", TRUE, nullptr);
              }
          });
@@ -615,66 +610,7 @@ diff --git a/Source/WebCore/Modules/mediastream/gstreamer/GStreamerMediaEndpoint
  
          GST_DEBUG_OBJECT(m_pipeline.get(), "Acking remote description");
          auto descriptions = descriptionsFromWebRTCBin(m_webrtcBin.get(), GatherSignalingState::Yes);
-@@ -1057,32 +1263,38 @@
-     auto sdpType = RTCSdpType::Offer;
- 
-     if (description) {
--        if (description->sdp().isEmpty()) {
-+        sdpType = description->type();
-+        if (description->sdp().isEmpty() && sdpType != RTCSdpType::Rollback) {
-             failureCallback(nullptr);
-             return;
-         }
--        auto sdp = makeStringByReplacingAll(description->sdp(), "opus"_s, "OPUS"_s);
--        if (gst_sdp_message_new_from_text(sdp.utf8().data(), &message.outPtr()) != GST_SDP_OK) {
--            failureCallback(nullptr);
--            return;
--        }
--        sdpType = description->type();
--        if (descriptionType == DescriptionType::Local && sdpType == RTCSdpType::Answer && !gst_sdp_message_get_version(message.get())) {
--            GError error;
--            error.message = const_cast<gchar*>("Expect line: v=");
--            failureCallback(&error);
--            return;
--        }
--        if (descriptionType == DescriptionType::Remote) {
--            GUniqueOutPtr<GstWebRTCSessionDescription> currentDescription;
--
--            g_object_get(m_webrtcBin.get(), "current-remote-description", &currentDescription.outPtr(), nullptr);
--            if (currentDescription && !validateRTPHeaderExtensions(currentDescription->sdp, message.get())) {
-+
-+        if (!description->sdp().isEmpty()) {
-+            auto sdp = makeStringByReplacingAll(description->sdp(), "opus"_s, "OPUS"_s);
-+            if (gst_sdp_message_new_from_text(sdp.utf8().data(), &message.outPtr()) != GST_SDP_OK) {
-                 failureCallback(nullptr);
-                 return;
-             }
--        }
--    } else if (gst_sdp_message_new(&message.outPtr()) != GST_SDP_OK) {
-+
-+            if (descriptionType == DescriptionType::Local && sdpType == RTCSdpType::Answer && !gst_sdp_message_get_version(message.get())) {
-+                GError error;
-+                error.message = const_cast<gchar*>("Expect line: v=");
-+                failureCallback(&error);
-+                return;
-+            }
-+            if (descriptionType == DescriptionType::Remote) {
-+                GUniqueOutPtr<GstWebRTCSessionDescription> currentDescription;
-+
-+                g_object_get(m_webrtcBin.get(), "current-remote-description", &currentDescription.outPtr(), nullptr);
-+                if (currentDescription && !validateRTPHeaderExtensions(currentDescription->sdp, message.get())) {
-+                    failureCallback(nullptr);
-+                    return;
-+                }
-+            }
-+        }
-+    }
-+
-+    if (!message && gst_sdp_message_new(&message.outPtr()) != GST_SDP_OK) {
-         failureCallback(nullptr);
-         return;
-     }
-@@ -1180,6 +1392,9 @@
+@@ -1216,6 +1422,9 @@
      source.setInitialParameters(WTF::move(parameters));
  
      auto sourceBin = source.bin();
@@ -684,7 +620,7 @@ diff --git a/Source/WebCore/Modules/mediastream/gstreamer/GStreamerMediaEndpoint
      gst_bin_add(GST_BIN_CAST(m_pipeline.get()), sourceBin.get());
  
  #ifndef GST_DISABLE_GST_DEBUG
-@@ -1317,16 +1532,26 @@
+@@ -1353,16 +1562,26 @@
  void GStreamerMediaEndpoint::removeTrack(GStreamerRtpSenderBackend& sender)
  {
      GST_DEBUG_OBJECT(m_pipeline.get(), "Removing track");
@@ -716,7 +652,7 @@ diff --git a/Source/WebCore/Modules/mediastream/gstreamer/GStreamerMediaEndpoint
  
      unsigned mLineIndex;
      g_object_get(transceiver, "mlineindex", &mLineIndex, nullptr);
-@@ -1337,28 +1562,70 @@
+@@ -1373,28 +1592,70 @@
          return;
  
      const auto media = gst_sdp_message_get_media(remoteDescription->sdp, mLineIndex);
@@ -808,7 +744,7 @@ diff --git a/Source/WebCore/Modules/mediastream/gstreamer/GStreamerMediaEndpoint
  }
  
  void GStreamerMediaEndpoint::doCreateOffer(const RTCOfferOptions& options)
-@@ -1699,7 +1966,9 @@
+@@ -1765,7 +2026,9 @@
          // https://datatracker.ietf.org/doc/html/rfc8285#section-4.2
          // The 4-bit ID is the local identifier of this element in the range 1-14 inclusive. In the
          // signaling section, this is referred to as the valid range.
@@ -819,7 +755,7 @@ diff --git a/Source/WebCore/Modules/mediastream/gstreamer/GStreamerMediaEndpoint
          if (identifier > 14) {
              ASSERT_NOT_REACHED_WITH_MESSAGE("Attempting to use too many RTP header extensions");
              gst_printerrln("Attempting to use too many RTP header extensions, bailing out.");
-@@ -1707,6 +1976,7 @@
+@@ -1773,6 +2036,7 @@
          }
  
          m_rtpHeaderExtensions.add(extension.uri, identifier);
@@ -839,15 +775,15 @@ diff --git a/Source/WebCore/Modules/mediastream/gstreamer/GStreamerMediaEndpoint
  #include <wtf/ThreadSafeRefCounted.h>
  #include <wtf/glib/GUniquePtr.h>
 @@ -91,7 +92,7 @@
-     ExceptionOr<RefPtr<GStreamerRtpSenderBackend>> addTrack(MediaStreamTrack&, const FixedVector<String>&);
+     ExceptionOr<Ref<GStreamerRtpSenderBackend>> addTrack(MediaStreamTrack&, const FixedVector<String>&);
      void removeTrack(GStreamerRtpSenderBackend&);
  
 -    void recycleTransceiverForSenderTrack(GStreamerRtpTransceiverBackend*, MediaStreamTrack&, const FixedVector<String>&);
 +    void recycleTransceiverForSenderTrack(GStreamerRtpTransceiverBackend*, GStreamerRtpSenderBackend&, MediaStreamTrack&, const FixedVector<String>&);
  
      struct Backends {
-         RefPtr<GStreamerRtpSenderBackend> senderBackend;
-@@ -188,7 +189,8 @@
+         Ref<GStreamerRtpSenderBackend> senderBackend;
+@@ -189,7 +190,8 @@
      Seconds statsLogInterval(Seconds) const;
  #endif
  
@@ -857,7 +793,7 @@ diff --git a/Source/WebCore/Modules/mediastream/gstreamer/GStreamerMediaEndpoint
  
      String trackIdFromSDPMedia(const GstSDPMedia&);
  
-@@ -246,6 +248,10 @@
+@@ -245,6 +247,10 @@
      HashMap<uint32_t, GRefPtr<GstBuffer>> m_inputBuffers;
  
      RTPHeaderExtensionMapping m_rtpHeaderExtensions;
@@ -871,16 +807,16 @@ diff --git a/Source/WebCore/Modules/mediastream/gstreamer/GStreamerMediaEndpoint
 diff --git a/Source/WebCore/Modules/mediastream/gstreamer/GStreamerPeerConnectionBackend.cpp b/Source/WebCore/Modules/mediastream/gstreamer/GStreamerPeerConnectionBackend.cpp
 --- a/Source/WebCore/Modules/mediastream/gstreamer/GStreamerPeerConnectionBackend.cpp
 +++ b/Source/WebCore/Modules/mediastream/gstreamer/GStreamerPeerConnectionBackend.cpp
-@@ -333,7 +333,7 @@
+@@ -344,7 +344,7 @@
          if (!transceiver)
              return Exception { ExceptionCode::TypeError, "Unable to add track"_s };
  
--        m_endpoint->recycleTransceiverForSenderTrack(reinterpret_cast<GStreamerRtpTransceiverBackend*>(transceiver->backend()), track, mediaStreamIds);
-+        m_endpoint->recycleTransceiverForSenderTrack(reinterpret_cast<GStreamerRtpTransceiverBackend*>(transceiver->backend()), backendFromRTPSender(*sender), track, mediaStreamIds);
+-        m_endpoint->recycleTransceiverForSenderTrack(reinterpret_cast<GStreamerRtpTransceiverBackend*>(&transceiver->backend()), track, mediaStreamIds);
++        m_endpoint->recycleTransceiverForSenderTrack(reinterpret_cast<GStreamerRtpTransceiverBackend*>(&transceiver->backend()), backendFromRTPSender(*sender), track, mediaStreamIds);
  
          // 5. If transceiver.[[Direction]] is "recvonly", set transceiver.[[Direction]] to "sendrecv".
          // 6. If transceiver.[[Direction]] is "inactive", set transceiver.[[Direction]] to "sendonly".
-@@ -436,6 +436,19 @@
+@@ -455,6 +455,19 @@
  void GStreamerPeerConnectionBackend::removeTrack(RTCRtpSender& sender)
  {
      ALWAYS_LOG(LOGIDENTIFIER, "Removing "_s, sender.trackKind(), " track with ID "_s, sender.trackId());
@@ -903,7 +839,7 @@ diff --git a/Source/WebCore/Modules/mediastream/gstreamer/GStreamerPeerConnectio
 diff --git a/Source/WebCore/Modules/mediastream/gstreamer/GStreamerRtpSenderBackend.cpp b/Source/WebCore/Modules/mediastream/gstreamer/GStreamerRtpSenderBackend.cpp
 --- a/Source/WebCore/Modules/mediastream/gstreamer/GStreamerRtpSenderBackend.cpp
 +++ b/Source/WebCore/Modules/mediastream/gstreamer/GStreamerRtpSenderBackend.cpp
-@@ -89,6 +89,7 @@ void GStreamerRtpSenderBackend::setSource(Source&& source)
+@@ -89,6 +89,7 @@
  {
      ASSERT(!hasSource());
      GST_DEBUG_OBJECT(m_rtcSender.get(), "Setting source");
@@ -911,22 +847,23 @@ diff --git a/Source/WebCore/Modules/mediastream/gstreamer/GStreamerRtpSenderBack
      m_source = WTF::move(source);
      ASSERT(hasSource());
  
-@@ -125,13 +126,16 @@ void GStreamerRtpSenderBackend::startSource()
+@@ -125,13 +126,16 @@
  void GStreamerRtpSenderBackend::stopSource()
  {
      GST_DEBUG_OBJECT(m_rtcSender.get(), "Stopping source");
-+    auto sourceGeneration = m_sourceGeneration;
-     switchOn(m_source, [&](Ref<RealtimeOutgoingAudioSourceGStreamer>& source) {
--        source->stop([self = RefPtr { this }] {
+-    switchOn(m_source, [&](Ref<RealtimeOutgoingAudioSourceGStreamer>& source) {
+-        source->stop([self = protect(this)] {
 -            self->clearSource();
-+        source->stop([self = RefPtr { this }, sourceGeneration] {
++    auto sourceGeneration = m_sourceGeneration;
++    switchOn(m_source, [&](Ref<RealtimeOutgoingAudioSourceGStreamer>& source) {
++        source->stop([self = protect(this), sourceGeneration] {
 +            if (self->m_sourceGeneration == sourceGeneration)
 +                self->clearSource();
          });
      }, [&](Ref<RealtimeOutgoingVideoSourceGStreamer>& source) {
--        source->stop([self = RefPtr { this }] {
+-        source->stop([self = protect(this)] {
 -            self->clearSource();
-+        source->stop([self = RefPtr { this }, sourceGeneration] {
++        source->stop([self = protect(this), sourceGeneration] {
 +            if (self->m_sourceGeneration == sourceGeneration)
 +                self->clearSource();
          });
@@ -935,7 +872,7 @@ diff --git a/Source/WebCore/Modules/mediastream/gstreamer/GStreamerRtpSenderBack
 diff --git a/Source/WebCore/Modules/mediastream/gstreamer/GStreamerRtpSenderBackend.h b/Source/WebCore/Modules/mediastream/gstreamer/GStreamerRtpSenderBackend.h
 --- a/Source/WebCore/Modules/mediastream/gstreamer/GStreamerRtpSenderBackend.h
 +++ b/Source/WebCore/Modules/mediastream/gstreamer/GStreamerRtpSenderBackend.h
-@@ -100,6 +100,7 @@ private:
+@@ -100,6 +100,7 @@
      WeakPtr<GStreamerPeerConnectionBackend> m_peerConnectionBackend;
      GRefPtr<GstWebRTCRTPSender> m_rtcSender;
      Source m_source;
@@ -943,19 +880,13 @@ diff --git a/Source/WebCore/Modules/mediastream/gstreamer/GStreamerRtpSenderBack
      GUniquePtr<GstStructure> m_initData;
      mutable GUniquePtr<GstStructure> m_currentParameters;
  };
-
 diff --git a/Source/WebCore/platform/mediastream/gstreamer/RealtimeOutgoingMediaSourceGStreamer.cpp b/Source/WebCore/platform/mediastream/gstreamer/RealtimeOutgoingMediaSourceGStreamer.cpp
 --- a/Source/WebCore/platform/mediastream/gstreamer/RealtimeOutgoingMediaSourceGStreamer.cpp
 +++ b/Source/WebCore/platform/mediastream/gstreamer/RealtimeOutgoingMediaSourceGStreamer.cpp
-@@ -171,38 +187,41 @@
-         return;
-     }
- 
-     auto data = createProbeData();
-     data->source = this;
+@@ -178,16 +178,18 @@
      data->callback = WTF::move(callback);
  
-     auto pad = adoptGRef(gst_element_get_static_pad(m_inputSelector.get(), "src"));
+     GRefPtr pad = adoptGRef(gst_element_get_static_pad(m_inputSelector.get(), "src"));
 -    gst_pad_add_probe(pad.get(), GST_PAD_PROBE_TYPE_EVENT_DOWNSTREAM, reinterpret_cast<GstPadProbeCallback>(+[](GstPad*, GstPadProbeInfo* info, gpointer userData) -> GstPadProbeReturn {
 +    gst_pad_add_probe(pad.get(), GST_PAD_PROBE_TYPE_EVENT_DOWNSTREAM, reinterpret_cast<GstPadProbeCallback>(+[](GstPad* pad, GstPadProbeInfo* info, gpointer userData) -> GstPadProbeReturn {
          auto event = GST_PAD_PROBE_INFO_EVENT(info);
@@ -973,11 +904,7 @@ diff --git a/Source/WebCore/platform/mediastream/gstreamer/RealtimeOutgoingMedia
          }
  
          callOnMainThread([weakSelf = WTF::move(self), callback = WTF::move(data->callback)] {
-             auto self = weakSelf.get();
-             if (!self) {
-                 callback();
-                 return;
-             }
+@@ -199,7 +201,8 @@
              self->removeOutgoingSource();
              callback();
          });
@@ -987,11 +914,6 @@ diff --git a/Source/WebCore/platform/mediastream/gstreamer/RealtimeOutgoingMedia
      }), data, reinterpret_cast<GDestroyNotify>(destroyProbeData));
  
      if (WEBKIT_IS_MEDIA_STREAM_SRC(m_outgoingSource.get()))
-         webkitMediaStreamSrcSignalEndOfStream(WEBKIT_MEDIA_STREAM_SRC_CAST(m_outgoingSource.get()));
- 
-     if (m_fallbackSource)
-         gst_element_send_event(m_fallbackSource.get(), gst_event_new_eos());
- }
 diff --git a/Source/WebCore/platform/mediastream/gstreamer/RealtimeOutgoingMediaSourceGStreamer.h b/Source/WebCore/platform/mediastream/gstreamer/RealtimeOutgoingMediaSourceGStreamer.h
 --- a/Source/WebCore/platform/mediastream/gstreamer/RealtimeOutgoingMediaSourceGStreamer.h
 +++ b/Source/WebCore/platform/mediastream/gstreamer/RealtimeOutgoingMediaSourceGStreamer.h
@@ -1029,12 +951,12 @@ diff --git a/Source/WebCore/platform/mediastream/gstreamer/RealtimeIncomingSourc
 +    if (isRebinding) {
 +        auto retiredBin = m_bin;
 +        tearDown();
-+        auto sinkPad = adoptGRef(gst_element_get_static_pad(retiredBin.get(), "sink"));
-+        auto peer = adoptGRef(gst_pad_get_peer(sinkPad.get()));
++        GRefPtr sinkPad = adoptGRef(gst_element_get_static_pad(retiredBin.get(), "sink"));
++        GRefPtr peer = adoptGRef(gst_pad_get_peer(sinkPad.get()));
 +        if (peer)
 +            gst_pad_unlink(peer.get(), sinkPad.get());
 +        gst_element_set_state(retiredBin.get(), GST_STATE_NULL);
-+        auto parent = adoptGRef(gst_object_get_parent(GST_OBJECT(retiredBin.get())));
++        GRefPtr parent = adoptGRef(gst_object_get_parent(GST_OBJECT(retiredBin.get())));
 +        if (parent && GST_IS_BIN(parent.get()))
 +            gst_bin_remove(GST_BIN_CAST(parent.get()), retiredBin.get());
 +    }
@@ -1053,8 +975,8 @@ diff --git a/Source/WebCore/platform/mediastream/gstreamer/RealtimeIncomingSourc
      auto handoffCallback = G_CALLBACK(+[](GstElement*, GstBuffer* buffer, GstPad* pad, gpointer userData) {
 -        auto source = reinterpret_cast<RealtimeIncomingSourceGStreamer*>(userData);
 +        auto& context = *static_cast<CallbackContext*>(userData);
-         auto caps = adoptGRef(gst_pad_get_current_caps(pad));
-         auto sample = adoptGRef(gst_sample_new(buffer, caps.get(), nullptr, nullptr));
+         GRefPtr caps = adoptGRef(gst_pad_get_current_caps(pad));
+         GRefPtr sample = adoptGRef(gst_sample_new(buffer, caps.get(), nullptr, nullptr));
          // dispatchSample might trigger RealtimeMediaSource::notifySettingsDidChangeObservers()
          // which expects to run in the main thread.
 -        callOnMainThread([source, sample = WTF::move(sample)]() mutable {
@@ -1073,7 +995,7 @@ diff --git a/Source/WebCore/platform/mediastream/gstreamer/RealtimeIncomingSourc
 +
 +    // I125: retire this binding at its own input EOS. The decoder queue may
 +    // delay sink EOS until after a replacement track is ready to bind.
-+    auto binSinkPad = adoptGRef(gst_element_get_static_pad(m_bin.get(), "sink"));
++    GRefPtr binSinkPad = adoptGRef(gst_element_get_static_pad(m_bin.get(), "sink"));
 +    m_binSinkPadProbeId = gst_pad_add_probe(binSinkPad.get(), GST_PAD_PROBE_TYPE_EVENT_DOWNSTREAM, reinterpret_cast<GstPadProbeCallback>(+[](GstPad*, GstPadProbeInfo* info, gpointer userData) -> GstPadProbeReturn {
 +        auto& context = *static_cast<CallbackContext*>(userData);
 +        auto self = context.source.get();
@@ -1089,7 +1011,7 @@ diff --git a/Source/WebCore/platform/mediastream/gstreamer/RealtimeIncomingSourc
 +        return currentBinState == context.binState ? GST_PAD_PROBE_OK : GST_PAD_PROBE_DROP;
 +    }), new CallbackContext { ThreadSafeWeakPtr { *this }, binState }, +[](gpointer data) { delete static_cast<CallbackContext*>(data); });
  
-     auto sinkPad = adoptGRef(gst_element_get_static_pad(m_sink.get(), "sink"));
+     GRefPtr sinkPad = adoptGRef(gst_element_get_static_pad(m_sink.get(), "sink"));
 -    m_sinkPadProbeId = gst_pad_add_probe(sinkPad.get(), static_cast<GstPadProbeType>(GST_PAD_PROBE_TYPE_EVENT_DOWNSTREAM | GST_PAD_PROBE_TYPE_QUERY_DOWNSTREAM), reinterpret_cast<GstPadProbeCallback>(+[](GstPad*, GstPadProbeInfo* info, gpointer userData) -> GstPadProbeReturn {
 -        auto self = reinterpret_cast<RealtimeIncomingSourceGStreamer*>(userData);
 +    m_sinkPadProbeId = gst_pad_add_probe(sinkPad.get(), static_cast<GstPadProbeType>(GST_PAD_PROBE_TYPE_EVENT_DOWNSTREAM | GST_PAD_PROBE_TYPE_QUERY_DOWNSTREAM), reinterpret_cast<GstPadProbeCallback>(+[](GstPad* pad, GstPadProbeInfo* info, gpointer userData) -> GstPadProbeReturn {
@@ -1108,7 +1030,7 @@ diff --git a/Source/WebCore/platform/mediastream/gstreamer/RealtimeIncomingSourc
          if (info->type & GST_PAD_PROBE_TYPE_EVENT_DOWNSTREAM) {
              GRefPtr event = GST_PAD_PROBE_INFO_EVENT(info);
 -            return self->handleDownstreamEvent(WTF::move(event));
-+            auto sink = adoptGRef(gst_pad_get_parent_element(pad));
++            GRefPtr sink = adoptGRef(gst_pad_get_parent_element(pad));
 +            return self->handleDownstreamEvent(sink.get(), WTF::move(event), context.binState);
          }
  
@@ -1130,12 +1052,12 @@ diff --git a/Source/WebCore/platform/mediastream/gstreamer/RealtimeIncomingSourc
  
 +    m_binState.store((m_binState.load() & ~uint64_t { 1 }) + 2);
 +
-+    auto binSinkPad = adoptGRef(gst_element_get_static_pad(m_bin.get(), "sink"));
++    GRefPtr binSinkPad = adoptGRef(gst_element_get_static_pad(m_bin.get(), "sink"));
 +    gst_pad_remove_probe(binSinkPad.get(), m_binSinkPadProbeId);
 +
      g_object_set(m_sink.get(), "signal-handoffs", FALSE, nullptr);
  
-     auto sinkPad = adoptGRef(gst_element_get_static_pad(m_sink.get(), "sink"));
+     GRefPtr sinkPad = adoptGRef(gst_element_get_static_pad(m_sink.get(), "sink"));
      gst_pad_remove_probe(sinkPad.get(), m_sinkPadProbeId);
 -    g_signal_handlers_disconnect_by_data(m_sink.get(), this);
 +    g_signal_handler_disconnect(m_sink.get(), m_prerollHandoffHandlerId);
@@ -1179,7 +1101,7 @@ diff --git a/Source/WebCore/platform/mediastream/gstreamer/RealtimeIncomingSourc
 @@ -197,7 +266,7 @@
  
      forEachClient([&](auto* appsrc) {
-         auto pad = adoptGRef(gst_element_get_static_pad(appsrc, "src"));
+         GRefPtr pad = adoptGRef(gst_element_get_static_pad(appsrc, "src"));
 -        GST_DEBUG_OBJECT(m_sink.get(), "Forwarding event %" GST_PTR_FORMAT " to client %" GST_PTR_FORMAT, event.get(), appsrc);
 +        GST_DEBUG_OBJECT(sink, "Forwarding event %" GST_PTR_FORMAT " to client %" GST_PTR_FORMAT, event.get(), appsrc);
          gst_pad_push_event(pad.get(), event.ref());

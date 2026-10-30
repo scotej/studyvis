@@ -50,7 +50,7 @@ publication still depends on physical sign-off. Official distro WebKitGTK
 production builds in the maintained Linux path compile the GTK
 `ENABLE_WEB_RTC` peer-connection binding out (while retaining the media-device
 API); a Wry preference cannot turn compiled-out code back on. The
-candidate therefore bundles a pinned WebKitGTK 2.52.5 + librice 0.4.3 runtime
+candidate therefore bundles a pinned WebKitGTK 2.54.2 + librice 0.4.3 runtime
 instead of trusting the host package. CachyOS KDE Wayland must exercise the
 exact x86_64 AppImage's data channel, camera, microphone, portal/PipeWire screen
 capture, AI capture, Secret Service key custody, and real physical peers before
@@ -187,7 +187,7 @@ Promoting it to shipped support requires all of the following:
 2. Its advisory `Linux AppImage startup smoke` job — excluded from the
    `All pre-merge checks` aggregator because it compiles WebKitGTK from
    source, but run and reported on every pull request — builds the pinned WebKitGTK
-   2.52.5 + librice 0.4.3 + GStreamer 1.28.7 + libnice 0.1.24 runtime, packages that private copy with the
+   2.54.2 + librice 0.4.3 + GStreamer 1.28.8 + libnice 0.1.24 runtime, packages that private copy with the
    media-framework and sandbox helpers, verifies the expected runtime files,
    build manifest, complete upstream license inventory, cross-platform notice
    pair, ELF dependencies, and packaged-only GStreamer WebRTC/SCTP elements,
