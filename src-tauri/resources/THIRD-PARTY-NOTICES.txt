@@ -3545,12 +3545,12 @@ CARGO
   license: cargo:tinyvec_macros@0.1.1/LICENSE-MIT.md (SHA-256 1dd8eca0f83669e75fa119e34fb9e1be9d16e3e9b6368962b8019db6e8ae5f7b)
   license: cargo:tinyvec_macros@0.1.1/LICENSE-ZLIB.md (SHA-256 6abdec69ada0c5f06d4819d9a0db0824ce54d610665df0b64c774480db9c1f2a)
 
-- tokio 1.52.2 — MIT
-  id: cargo:tokio@1.52.2
+- tokio 1.53.3 — MIT
+  id: cargo:tokio@1.53.3
   targets: aarch64-apple-darwin, x86_64-pc-windows-msvc, x86_64-unknown-linux-gnu
-  source: https://crates.io/api/v1/crates/tokio/1.52.2/download
-  source checksum: 110a78583f19d5cdb2c5ccf321d1290344e71313c6c37d43520d386027d18386
-  license: cargo:tokio@1.52.2/LICENSE (SHA-256 253cd04c6714889df2d32f3f64d669179a1c95c76ac43c40882c52eb06bc3552)
+  source: https://crates.io/api/v1/crates/tokio/1.53.3/download
+  source checksum: ce3335fa71841cda333a58d7615b03901380ecf09d59b3296d21f8bbac0dde4e
+  license: cargo:tokio@1.53.3/LICENSE (SHA-256 253cd04c6714889df2d32f3f64d669179a1c95c76ac43c40882c52eb06bc3552)
 
 - tokio-macros 2.7.0 — MIT
   id: cargo:tokio-macros@2.7.0
@@ -10099,7 +10099,7 @@ SOFTWARE.
 SHA-256 253cd04c6714889df2d32f3f64d669179a1c95c76ac43c40882c52eb06bc3552
 Applies to:
 - cargo:tokio-util@0.7.18 — cargo:tokio-util@0.7.18/LICENSE
-- cargo:tokio@1.52.2 — cargo:tokio@1.52.2/LICENSE
+- cargo:tokio@1.53.3 — cargo:tokio@1.53.3/LICENSE
 
 --------------------------------------------------------------------------------
 
