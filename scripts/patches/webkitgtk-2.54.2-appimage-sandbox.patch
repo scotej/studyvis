@@ -215,6 +215,20 @@ diff --git a/Source/WebCore/platform/PlatformTouchPoint.h b/Source/WebCore/platf
  
  #if ENABLE(TOUCH_EVENTS)
  
+diff --git a/Source/WebCore/platform/glib/SelectionData.h b/Source/WebCore/platform/glib/SelectionData.h
+--- a/Source/WebCore/platform/glib/SelectionData.h
++++ b/Source/WebCore/platform/glib/SelectionData.h
+@@ -18,8 +18,8 @@
+ 
+ #pragma once
+ 
+-#include "Image.h"
+-#include "SharedBuffer.h"
++#include <WebCore/Image.h>
++#include <WebCore/SharedBuffer.h>
+ #include <wtf/HashMap.h>
+ #include <wtf/TZoneMalloc.h>
+ #include <wtf/URL.h>
 diff --git a/Source/WebCore/platform/mediastream/gstreamer/DesktopPortal.cpp b/Source/WebCore/platform/mediastream/gstreamer/DesktopPortal.cpp
 --- a/Source/WebCore/platform/mediastream/gstreamer/DesktopPortal.cpp
 +++ b/Source/WebCore/platform/mediastream/gstreamer/DesktopPortal.cpp
