@@ -1,9 +1,10 @@
-import { describe, expect, test } from 'vitest'
+import { describe, expect, test, vi } from 'vitest'
 
 import {
   HELLO_NAME_CAP,
   HELLO_VERSION,
   serializeHelloForSig,
+  startHelloProtocol,
   validateHelloPayload,
   type HelloPayload,
 } from '@/features/session/hello'
@@ -13,8 +14,123 @@ import {
   signMessage,
   type Identity,
 } from '@/lib/crypto/identity'
+import type { TopicRoom } from '@/lib/trystero'
 
 const PEER_ID = 'peer-1'
+
+function helloTransport() {
+  const joins = new Set<(peerId: string) => void>()
+  const leaves = new Set<(peerId: string) => void>()
+  const send = vi.fn<(payload: HelloPayload, target?: string) => Promise<void>>(
+    async () => {}
+  )
+  const room = {
+    selfId: 'self',
+    makeAction: () => ({ send, receive: () => {} }),
+    onPeerJoin: (fn: (peerId: string) => void) => {
+      joins.add(fn)
+      return () => joins.delete(fn)
+    },
+    onPeerLeave: (fn: (peerId: string) => void) => {
+      leaves.add(fn)
+      return () => leaves.delete(fn)
+    },
+  } as unknown as TopicRoom
+  const identity = generateIdentity()
+  const sentToPeer = vi.fn<(peerId: string, signal: AbortSignal) => void>()
+  const start = (
+    sign = async (bytes: Uint8Array) => signMessage(identity.edPriv, bytes)
+  ) =>
+    startHelloProtocol({
+      room,
+      myEdPubkeyHex: bytesToHex(identity.edPub),
+      myDisplayName: 'Self',
+      selfJoinedAt: 1000,
+      sign,
+      onPeerHello: () => {},
+      onPeerLeave: () => {},
+      onOurHelloSentToPeer: sentToPeer,
+    })
+  return {
+    send,
+    start,
+    sentToPeer,
+    join: () => joins.forEach((fn) => fn(PEER_ID)),
+    leave: () => leaves.forEach((fn) => fn(PEER_ID)),
+  }
+}
+
+describe('targeted hello completion scopes', () => {
+  test('a failed targeted send cannot authorize a signed join publication', async () => {
+    const transport = helloTransport()
+    const handle = transport.start()
+    await handle.ourHelloSent
+    transport.send.mockRejectedValueOnce(new Error('closed data channel'))
+    transport.join()
+    await vi.waitFor(() => expect(transport.send).toHaveBeenCalledTimes(2))
+    expect(transport.sentToPeer).not.toHaveBeenCalled()
+    handle.teardown()
+  })
+
+  test('leave aborts a completed hello while its consumer awaits a signature', async () => {
+    const transport = helloTransport()
+    const handle = transport.start()
+    await handle.ourHelloSent
+    transport.join()
+    await vi.waitFor(() =>
+      expect(transport.sentToPeer).toHaveBeenCalledTimes(1)
+    )
+    const signal = transport.sentToPeer.mock.calls[0][1]
+    expect(signal.aborted).toBe(false)
+    transport.leave()
+    expect(signal.aborted).toBe(true)
+    handle.teardown()
+  })
+
+  test('a reused peer ID cannot inherit an earlier transport completion', async () => {
+    const transport = helloTransport()
+    const handle = transport.start()
+    await handle.ourHelloSent
+    let completeOldSend!: () => void
+    transport.send.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          completeOldSend = resolve
+        })
+    )
+    transport.join()
+    await vi.waitFor(() => expect(transport.send).toHaveBeenCalledTimes(2))
+    transport.leave()
+    transport.join()
+    await vi.waitFor(() =>
+      expect(transport.sentToPeer).toHaveBeenCalledTimes(1)
+    )
+    completeOldSend()
+    await Promise.resolve()
+    expect(transport.sentToPeer).toHaveBeenCalledTimes(1)
+    const signal = transport.sentToPeer.mock.calls[0][1]
+    expect(signal.aborted).toBe(false)
+    handle.teardown()
+    expect(signal.aborted).toBe(true)
+  })
+
+  test('teardown while signing prevents even the old hello from being sent', async () => {
+    const transport = helloTransport()
+    let finishSigning!: (signature: Uint8Array) => void
+    const handle = transport.start(
+      () =>
+        new Promise<Uint8Array>((resolve) => {
+          finishSigning = resolve
+        })
+    )
+    transport.join()
+    handle.teardown()
+    finishSigning(new Uint8Array(64))
+    await handle.ourHelloSent
+    expect(transport.send).not.toHaveBeenCalled()
+    expect(transport.sentToPeer).not.toHaveBeenCalled()
+  })
+})
 
 function makeHello(displayName: string): HelloPayload {
   const identity = generateIdentity()

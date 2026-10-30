@@ -1170,6 +1170,13 @@ What stays **private** (not in audit log) until session end: the running numeric
 
 What's **broadcast in real time**: session-presence, Pomodoro, topic, approved/denied break, and `ai_alert` events. `ai_warning`, `break_request`, `ai_stalled`, and `ai_resumed` remain local-only. Peers can see "Sam: looking off-task" after an alert, but never Sam's running numeric score or local machine-health events. This honours the user's privacy nuance from the design conversation.
 
+The local `joined` entry is signed once per session stint and sent to later
+transports after their targeted signed hello, preserving its timestamp and
+signature. Duplicate delivery remains one log entry. A receiver may retain one
+verified join per provisional hello within the bounded admission set; it appends
+the entry only after admission and a final identity-binding check. Transport
+departure and session teardown discard pending delivery.
+
 Audit log is also written to local SQLite per session for the post-session report and (V3) stats.
 
 The audit log is not the #236 observation journal, and the two must not be merged. Audit events are signed, some of them are broadcast, and their vocabulary is a cross-version wire contract; the journal is an unsigned local text file of every AI check, written for one purpose (the post-session write-up) and deleted with its session. Putting per-check rows in `audit_events` would flood the shared in-session panel and the report's event timeline with the on-task checks nobody asked to see.

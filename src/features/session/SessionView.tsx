@@ -1200,13 +1200,37 @@ export function SessionView({
       useIdentityStore.getState().identity?.display_name ?? ''
     const sign = signWithKeyring
     const provisionalAuthorityHellos = provisionalAuthorityHellosRef.current
+    // A verified hello can precede the authority roster that admits its
+    // transport. Retain only its signed join, without creating peer history.
+    const pendingJoinedAudits = new Map<string, AuditEvent>()
+    const isCurrent = () => {
+      const session = useSessionStore.getState()
+      return (
+        !stopped &&
+        !leaveRequestedRef.current &&
+        session.status === 'active' &&
+        session.room === room &&
+        session.startedAt === startedAt
+      )
+    }
     const promoteProvisionalHellos = () => {
       const session = useSessionStore.getState()
-      if (stopped || session.room !== room) return
+      if (!isCurrent()) return
       for (const [peerId, hello] of provisionalAuthorityHellos) {
         if (!session.peers[peerId]) continue
         provisionalAuthorityHellos.delete(peerId)
         setPeerHello(peerId, hello)
+        const joined = pendingJoinedAudits.get(peerId)
+        pendingJoinedAudits.delete(peerId)
+        if (
+          joined &&
+          verifyIncomingAuditEvent(
+            joined,
+            useSessionStore.getState().peers[peerId]?.edPubkeyHex ?? null
+          )
+        ) {
+          useAuditStore.getState().append(joined)
+        }
       }
     }
     // A hello action cannot unregister its receiver in Trystero, so scope
@@ -1221,6 +1245,15 @@ export function SessionView({
       myDisplayName,
       selfJoinedAt: startedAt,
       sign,
+      onOurHelloSentToPeer: (peerId, signal) => {
+        void (async () => {
+          const event = await joinedEventPromise
+          if (!event || signal.aborted || !isCurrent()) return
+          await sendJoined(event, peerId)
+        })().catch((err: unknown) => {
+          log.error('audit_join.failed', { err })
+        })
+      },
       onPeerHello: (peerId, hello) => {
         const session = useSessionStore.getState()
         if (stopped || session.room !== room) return
@@ -1248,6 +1281,7 @@ export function SessionView({
         // callback must not erase a same-ID hello cached by the current room.
         if (stopped || useSessionStore.getState().room !== room) return
         provisionalAuthorityHellos.delete(peerId)
+        pendingJoinedAudits.delete(peerId)
       },
     })
 
@@ -1324,13 +1358,29 @@ export function SessionView({
     )
 
     auditAction.receive((data, peerId) => {
+      if (!isCurrent()) return
       const expectedEd =
         useSessionStore.getState().peers[peerId]?.edPubkeyHex ?? null
-      const verified = verifyIncomingAuditEvent(data, expectedEd)
+      const verified = verifyIncomingAuditEvent(
+        data,
+        expectedEd ??
+          provisionalAuthorityHellos.get(peerId)?.ed_pubkey_hex ??
+          null
+      )
       if (!verified) return
       // Drop a (signed, valid) event addressed to a different session —
       // mirrors the ai-alert path's replay guard (aiAlerts.ts). (I8)
       if (verified.session_topic !== sessionTopic) return
+      if (!expectedEd) {
+        if (
+          verified.kind === 'joined' &&
+          (pendingJoinedAudits.has(peerId) ||
+            pendingJoinedAudits.size < MAX_REMOTE_PEERS + 1)
+        ) {
+          pendingJoinedAudits.set(peerId, verified)
+        }
+        return
+      }
       useAuditStore.getState().append(verified)
     })
 
@@ -1498,18 +1548,42 @@ export function SessionView({
     pomodoroStartRef.current = controller.start
     pomodoroStopRef.current = controller.stop
 
-    // Send our hello first; once it's been written to all currently-connected
-    // peers in trystero's per-channel order, fire our "joined" audit event
-    // so receivers already have the peerId↔ed_pubkey binding.
-    void (async () => {
+    // Sign once per stint. A broadcast while alone reaches nobody; every
+    // later transport receives this exact event after its targeted hello.
+    const sendJoined = async (event: AuditEvent, peerId?: string) => {
+      try {
+        await auditAction.send(event, peerId)
+      } catch (err) {
+        log.error('audit_broadcast.failed', {
+          auditKind: 'joined',
+          localAppendSucceeded: true,
+          err,
+        })
+      }
+    }
+    const joinedEventPromise = (async () => {
       try {
         await helloHandle.ourHelloSent
       } catch {
         // Hello broadcast failures are best-effort; we still emit "joined"
         // locally so the session-log panel reflects our presence.
       }
-      if (stopped) return
-      void emitAudit('joined', {})
+      if (!isCurrent()) return null
+      const event = await buildAuditEvent({
+        sessionTopic,
+        myEdPubkeyHex,
+        kind: 'joined',
+        detail: {},
+        sign,
+      })
+      if (!isCurrent()) return null
+      useAuditStore.getState().append(event)
+      return event
+    })()
+    void (async () => {
+      const event = await joinedEventPromise
+      if (!event || !isCurrent()) return
+      void sendJoined(event)
       // V2-P9 — the only producer of `topic_set` (kind+label wired in V2-P7,
       // no producer until now). Fires once per local stint, only when AI is on
       // (the required topic prompt only runs in that case), right after
@@ -1523,10 +1597,13 @@ export function SessionView({
         const topic = useSessionStore.getState().declaredStudyTopic
         void emitAudit('topic_set', { topic })
       }
-    })()
+    })().catch((err: unknown) => {
+      log.error('audit_join.failed', { err })
+    })
 
     return () => {
       stopped = true
+      pendingJoinedAudits.clear()
       provisionalAuthorityHellos.clear()
       stopHelloPromotionWatch()
       controller.teardown()
