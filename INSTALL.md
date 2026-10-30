@@ -224,7 +224,7 @@ The pinned, hash-verified input tuple for runtime revision 10 is:
 | ---------------------------------- | --------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
 | WebKitGTK                          | `https://webkitgtk.org/releases/webkitgtk-2.54.2.tar.xz`                                | `a76345b391bef6211fb5ab6cfab2e86b285d18cda17cbb9ade595f1252b86065` |
 | librice                            | `https://github.com/ystreet/librice/archive/refs/tags/v0.4.3.tar.gz`                    | `4671e1835f9ab0f8d87e8d9e22b6bfb06f928aeae442841ab81881dff61e3f4b` |
-| AppImage runtime portability patch | `scripts/patches/webkitgtk-2.54.2-appimage-sandbox.patch`                               | `0ec80346101584ce5d7184c05db6bbd7a537d7f5ce1a51a2e08cdd88111f2cb5` |
+| AppImage runtime portability patch | `scripts/patches/webkitgtk-2.54.2-appimage-sandbox.patch`                               | `3d028a481a5ab1d96e65fa731ac785aca3cf6a9949ff26bd991d5bef0405991e` |
 | GStreamer core                     | `https://gstreamer.freedesktop.org/src/gstreamer/gstreamer-1.28.8.tar.xz`               | `baa8e86985ad6417cc0ad6e7b79ff2884c6779c8b1c7a6240e7121822c86e524` |
 | GStreamer base                     | `https://gstreamer.freedesktop.org/src/gst-plugins-base/gst-plugins-base-1.28.8.tar.xz` | `ade70e3381fcbb024f1f20aa9ede9b5654aeed39d5bd70b1a98f53015e501117` |
 | GStreamer good                     | `https://gstreamer.freedesktop.org/src/gst-plugins-good/gst-plugins-good-1.28.8.tar.xz` | `a7670ed900d3d03be744d25c1873b239896e9a82ce6d17f8febc6fffbaee9521` |
