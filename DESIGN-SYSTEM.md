@@ -290,9 +290,9 @@ These components only import from `ui/`, `design/tokens.ts`, and shared utilitie
 
 | Component | Purpose |
 |-|-|
-| `VideoTile` | One peer's video + name + per-tile status dot + PTT indicator. `variant="screen"` renders a shared screen instead of a face: letterboxed rather than cropped, no status dot / PTT / volume, and an expand control. |
+| `VideoTile` | One peer's video + name + per-tile status dot + PTT indicator. `variant="screen"` renders a shared screen instead of a face: letterboxed rather than cropped, no status dot / PTT / volume, and an expand control. Remote camera tiles also expose fullscreen while video is available. |
 | `VideoGrid` | Mesh layout of tiles. 1–8 children, since each of the (max 4) people can publish a screen alongside their camera. Aspect-aware. |
-| `ScreenShareViewer` | Native fullscreen view of one shared screen, opened from a screen tile's expand control. The modal fills the webview as a browser fallback; Escape or leaving native fullscreen closes it rather than arming leave-the-session. |
+| `ScreenShareViewer` | Native fullscreen view of one shared screen or friend's camera, opened from the tile's expand control. The extra video is muted so playback retains the grid tile's output and volume settings. The modal fills the webview as a browser fallback; Escape or leaving native fullscreen closes it rather than arming leave-the-session. |
 | `WaitingTile` | Calm "waiting for your friend" tile shown beside the self tile when alone in an active session. §10 empty-state pattern, no spinner. `invite` / `reconnect` variants. |
 | `AudioOutputPicker` | Speaker/headphone output selector for the session footer (`setSinkId`). Feature-detected — renders nothing where unsupported (macOS WKWebView). |
 | `AudioDevicePicker` | Session-footer dropdown that swaps the active microphone mid-session without renegotiating SDP; refreshes on `devicechange`. |
@@ -601,13 +601,16 @@ Period at the end of full sentences, none on labels, none on button text. Use co
 
 ## 17. Keybindings
 
-Two global shortcuts are registered in the system layer via `tauri-plugin-global-shortcut`. They fire unfocused on macOS, Windows, and X11. Native Wayland deliberately blocks X11 global grabs while another native client owns focus, so Linux also exposes an in-session hold-to-talk button and a Settings → Shortcuts button for the AI dialog. Their registration windows differ (#47 B5):
+Three global shortcuts are registered in the system layer via `tauri-plugin-global-shortcut`. They fire unfocused on macOS, Windows, and X11. Native Wayland deliberately blocks X11 global grabs while another native client owns focus, so Linux also exposes an in-session hold-to-talk button and a Settings → Shortcuts button for the AI dialog. Their registration windows differ (#47 B5):
 
 | Action | macOS | Windows / Linux | Registered |
 | --- | --- | --- | --- |
 | Push to talk · friends | `⌘ [` | `Ctrl [` | Only while a session is live — registered on session start, released on end, so a tray-idle StudyVis never swallows `⌘ [` ("back" in Safari/Finder/IDEs) system-wide. |
+| Toggle always-on microphone | `⌘ \` | `Ctrl \` | Only while a session is live; defaults off, resets when leaving, and remains enabled while StudyVis is in the background. |
 | Talk to AI | `⌘ ]` | `Ctrl ]` | For the app's lifetime, gated by the AI-features flag; opens the floating AI dialog window (V2-P7). |
 
-**Conflicts to know about.** During a session on macOS, Windows, or X11, the friends-PTT shortcut wins over app-level `⌘ [` bindings in whatever app is foreground. Native Wayland clients use the visible fallbacks above. Both shortcuts are rebindable in Settings → Shortcuts (V3-P3).
+**Conflicts to know about.** During a session on macOS, Windows, or X11, the friends-PTT shortcut wins over app-level `⌘ [` bindings in whatever app is foreground. Native Wayland clients use the visible fallbacks above. All shortcuts are rebindable in Settings → Shortcuts (V3-P3).
+
+**Microphone controls.** The session footer has an explicit always-on microphone toggle with a visible state label and `aria-pressed`. Its tooltip shows the saved shortcut. PTT releases and the stuck-key cutoff affect held PTT only; the explicit always-on mode stays enabled until toggled off or the session ends. Switching to or from browser capture resets microphone consent. Shortcut capture suspends native actions until recording ends. On upgrade, an occupied new default falls back to an unused modified Backslash shortcut without changing existing bindings.
 
 **Surface in the UI.** Show the active binding via `<Kbd>` in any session-time UI that mentions PTT (the wireframe footer in §8.3, the onboarding tutorial). The label derives from the persisted binding — never hardcode the default. Use the `⌘` glyph on macOS, the literal `Ctrl` on other platforms — match the OS-native rendering convention.

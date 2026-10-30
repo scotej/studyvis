@@ -4,12 +4,14 @@ import {
   __resetSettingsStoreDeps,
   __setSettingsStoreDeps,
   DEFAULT_SETTINGS,
+  SETTINGS_KEY_MIC_TOGGLE_ACCELERATOR,
   SETTINGS_KEY_PTT_AI_ACCELERATOR,
   SETTINGS_KEY_PTT_FRIENDS_ACCELERATOR,
   useSettingsStore,
   type SettingsStoreDeps,
 } from '@/stores/settingsStore'
 import {
+  MIC_TOGGLE_DEFAULT_ACCELERATOR,
   PTT_AI_DEFAULT_ACCELERATOR,
   PTT_FRIENDS_DEFAULT_ACCELERATOR,
 } from '@/lib/keybindings'
@@ -17,32 +19,40 @@ import {
 const keys = [
   SETTINGS_KEY_PTT_FRIENDS_ACCELERATOR,
   SETTINGS_KEY_PTT_AI_ACCELERATOR,
+  SETTINGS_KEY_MIC_TOGGLE_ACCELERATOR,
 ] as const
 const previous = [
   PTT_AI_DEFAULT_ACCELERATOR,
   PTT_FRIENDS_DEFAULT_ACCELERATOR,
+  MIC_TOGGLE_DEFAULT_ACCELERATOR,
 ] as const
 const defaults = [
   PTT_FRIENDS_DEFAULT_ACCELERATOR,
   PTT_AI_DEFAULT_ACCELERATOR,
+  MIC_TOGGLE_DEFAULT_ACCELERATOR,
 ] as const
 
-function install(failure?: 'friends-set' | 'ai-set' | 'save' | 'runtime') {
+function install(
+  failure?: 'friends-set' | 'ai-set' | 'mic-set' | 'save' | 'runtime'
+) {
   let live: readonly string[] = previous
   let durable: Record<string, unknown> = {
     [keys[0]]: previous[0],
     [keys[1]]: previous[1],
+    [keys[2]]: previous[2],
   }
   const cache = { ...durable }
   const saved: Record<string, unknown>[] = []
   let fail = failure
-  const runtime = vi.fn(async (friends: string, ai: string) => {
-    if (fail === 'runtime') {
-      fail = undefined
-      throw new Error('Native registration refused')
+  const runtime = vi.fn(
+    async (friends: string, ai: string, micToggle: string) => {
+      if (fail === 'runtime') {
+        fail = undefined
+        throw new Error('Native registration refused')
+      }
+      live = [friends, ai, micToggle]
     }
-    live = [friends, ai]
-  })
+  )
   const save = vi.fn(async () => {
     if (fail === 'save') {
       fail = undefined
@@ -57,7 +67,8 @@ function install(failure?: 'friends-set' | 'ai-set' | 'save' | 'runtime') {
       set: async (key, value) => {
         if (
           (fail === 'friends-set' && key === keys[0]) ||
-          (fail === 'ai-set' && key === keys[1])
+          (fail === 'ai-set' && key === keys[1]) ||
+          (fail === 'mic-set' && key === keys[2])
         ) {
           fail = undefined
           throw new Error('Persistence refused')
@@ -84,6 +95,7 @@ function install(failure?: 'friends-set' | 'ai-set' | 'save' | 'runtime') {
       ...DEFAULT_SETTINGS,
       pttFriendsAccelerator: previous[0],
       pttAiAccelerator: previous[1],
+      micToggleAccelerator: previous[2],
     },
   })
   return {
@@ -98,7 +110,11 @@ function install(failure?: 'friends-set' | 'ai-set' | 'save' | 'runtime') {
 }
 function shown() {
   const values = useSettingsStore.getState().values
-  return [values.pttFriendsAccelerator, values.pttAiAccelerator]
+  return [
+    values.pttFriendsAccelerator,
+    values.pttAiAccelerator,
+    values.micToggleAccelerator,
+  ]
 }
 
 afterEach(__resetSettingsStoreDeps)
@@ -114,7 +130,13 @@ describe('coordinated shortcut reset (#394)', () => {
     expect(keys.map((key) => fixture.durable()[key])).toEqual(defaults)
   })
 
-  for (const failure of ['friends-set', 'ai-set', 'save', 'runtime'] as const) {
+  for (const failure of [
+    'friends-set',
+    'ai-set',
+    'mic-set',
+    'save',
+    'runtime',
+  ] as const) {
     it(`keeps native, durable and displayed pairs aligned after ${failure} failure`, async () => {
       const fixture = install(failure)
       await expect(

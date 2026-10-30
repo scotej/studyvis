@@ -12,6 +12,7 @@ import {
   type ShortcutAction,
 } from '@/lib/keybindings'
 import { describeConflict } from '@/lib/keybindings-copy'
+import { setShortcutCaptureActive } from '@/lib/shortcutCapture'
 import { cn } from '@/lib/utils'
 import { strings } from '@/strings'
 
@@ -19,16 +20,23 @@ type CaptureOperation = {
   cancel: () => void
   active: boolean
   committing: boolean
+  keyDown: string | null
+  releaseCodes: string[]
+  committed: boolean
 }
 // #393 — keyboard capture is document-wide, so ownership must be shared by
 // every control in this document rather than one armed flag per instance.
 let activeCapture: CaptureOperation | null = null
+function syncNativeCapture(): Promise<void> {
+  return setShortcutCaptureActive(activeCapture?.active === true)
+}
 
 export type KeybindCaptureProps = {
   action: ShortcutAction
   combo: Combo
   otherCombo: Combo
   otherAction: ShortcutAction
+  additionalBindings?: readonly { combo: Combo; action: ShortcutAction }[]
   platform: Platform
   // Awaited so a downstream rejection (Rust-side registration refusal —
   // OS-reserved combo we didn't catch locally) keeps the control armed and
@@ -42,6 +50,7 @@ export function KeybindCapture({
   combo,
   otherCombo,
   otherAction,
+  additionalBindings,
   platform,
   onCommit,
   disabled,
@@ -59,6 +68,7 @@ export function KeybindCapture({
     captureRef.current = null
     setArmed(false)
     setError(null)
+    void syncNativeCapture().catch(() => {})
   }, [])
 
   useEffect(
@@ -66,9 +76,26 @@ export function KeybindCapture({
       const capture = captureRef.current
       if (capture) capture.active = false
       if (activeCapture === capture) activeCapture = null
+      void syncNativeCapture().catch(() => {})
     },
     []
   )
+
+  useEffect(() => {
+    const handleBlur = () => {
+      const capture = captureRef.current
+      if (capture?.active && activeCapture === capture) cancel()
+    }
+    const handleVisibility = () => {
+      if (document.hidden) handleBlur()
+    }
+    window.addEventListener('blur', handleBlur)
+    document.addEventListener('visibilitychange', handleVisibility)
+    return () => {
+      window.removeEventListener('blur', handleBlur)
+      document.removeEventListener('visibilitychange', handleVisibility)
+    }
+  }, [cancel])
 
   useEffect(() => {
     const capture = captureRef.current
@@ -103,29 +130,59 @@ export function KeybindCapture({
       const conflict = validateCombo(captured, {
         otherCombo,
         otherAction,
+        additionalBindings,
         platform,
       })
       if (conflict) {
         setError(describeConflict(captured, conflict, platform))
         return
       }
+      capture.keyDown = event.code
+      capture.releaseCodes = [
+        event.code,
+        ...(event.metaKey
+          ? ['MetaLeft', 'MetaRight', 'OSLeft', 'OSRight']
+          : []),
+        ...(event.ctrlKey ? ['ControlLeft', 'ControlRight'] : []),
+        ...(event.altKey ? ['AltLeft', 'AltRight'] : []),
+        ...(event.shiftKey ? ['ShiftLeft', 'ShiftRight'] : []),
+      ]
       capture.committing = true
       void (async () => {
         try {
           await onCommit(captured)
-          if (capture.active && activeCapture === capture) cancel()
+          capture.committed = true
+          if (capture.active && activeCapture === capture && !capture.keyDown)
+            cancel()
         } catch (err) {
           if (!capture.active || activeCapture !== capture) return
           setError(err instanceof Error ? err.message : String(err))
         } finally {
-          capture.committing = false
+          if (!capture.committed) capture.committing = false
         }
       })()
     }
+    const handleRelease = (event: KeyboardEvent) => {
+      if (!capture.releaseCodes.includes(event.code)) return
+      capture.keyDown = null
+      if (capture.committed && capture.active && activeCapture === capture)
+        cancel()
+    }
     document.addEventListener('keydown', handler, { capture: true })
-    return () =>
+    document.addEventListener('keyup', handleRelease, { capture: true })
+    return () => {
       document.removeEventListener('keydown', handler, { capture: true })
-  }, [armed, platform, otherCombo, otherAction, onCommit, cancel])
+      document.removeEventListener('keyup', handleRelease, { capture: true })
+    }
+  }, [
+    armed,
+    platform,
+    otherCombo,
+    otherAction,
+    additionalBindings,
+    onCommit,
+    cancel,
+  ])
 
   const handleClick = useCallback(() => {
     if (disabled) return
@@ -134,11 +191,27 @@ export function KeybindCapture({
       return
     }
     activeCapture?.cancel()
-    const capture = { cancel, active: true, committing: false }
+    const capture: CaptureOperation = {
+      cancel,
+      active: true,
+      committing: false,
+      keyDown: null,
+      releaseCodes: [],
+      committed: false,
+    }
     captureRef.current = capture
     activeCapture = capture
     setError(null)
-    setArmed(true)
+    void syncNativeCapture().then(
+      () => {
+        if (capture.active && activeCapture === capture) setArmed(true)
+      },
+      (err: unknown) => {
+        if (!capture.active || activeCapture !== capture) return
+        cancel()
+        setError(err instanceof Error ? err.message : String(err))
+      }
+    )
   }, [armed, cancel, disabled])
 
   const labels = comboToKbdLabels(combo, platform)

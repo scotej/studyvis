@@ -6,13 +6,16 @@ import {
   comboToAccelerator,
   comboToInlineDisplay,
   comboToKbdLabels,
+  DEFAULT_MIC_TOGGLE_COMBO,
   DEFAULT_PTT_AI_COMBO,
   DEFAULT_PTT_FRIENDS_COMBO,
   isModifierCode,
   parseAccelerator,
+  MIC_TOGGLE_DEFAULT_ACCELERATOR,
   PTT_AI_DEFAULT_ACCELERATOR,
   PTT_FRIENDS_DEFAULT_ACCELERATOR,
   reservedCombos,
+  resolveMicToggleAccelerator,
   validateCombo,
   type Combo,
 } from '@/lib/keybindings'
@@ -22,6 +25,7 @@ import {
   __setSettingsStoreDeps,
   DEFAULT_SETTINGS,
   hydrateValuesFromStore,
+  SETTINGS_KEY_MIC_TOGGLE_ACCELERATOR,
   SETTINGS_KEY_PTT_AI_ACCELERATOR,
   SETTINGS_KEY_PTT_FRIENDS_ACCELERATOR,
   useSettingsStore,
@@ -39,10 +43,25 @@ describe('keybindings — combo serialization round-trips', () => {
     )
   })
 
+  test('mic toggle uses the backslash key with the platform modifier', () => {
+    expect(parseAccelerator(MIC_TOGGLE_DEFAULT_ACCELERATOR)).toEqual(
+      DEFAULT_MIC_TOGGLE_COMBO
+    )
+    expect(comboToKbdLabels(DEFAULT_MIC_TOGGLE_COMBO, 'mac')).toEqual([
+      '⌘',
+      '\\',
+    ])
+    expect(comboToKbdLabels(DEFAULT_MIC_TOGGLE_COMBO, 'other')).toEqual([
+      'Ctrl',
+      '\\',
+    ])
+  })
+
   test('parseAccelerator inverts comboToAccelerator', () => {
     const samples: Combo[] = [
       DEFAULT_PTT_FRIENDS_COMBO,
       DEFAULT_PTT_AI_COMBO,
+      DEFAULT_MIC_TOGGLE_COMBO,
       { mod: true, ctrl: false, alt: false, shift: true, code: 'Period' },
       { mod: true, ctrl: false, alt: true, shift: false, code: 'KeyF' },
       { mod: false, ctrl: false, alt: true, shift: false, code: 'F11' },
@@ -152,6 +171,19 @@ describe('keybindings — validation', () => {
     if (conflict?.kind === 'self_conflict') {
       expect(conflict.otherAction).toBe('ptt-ai')
     }
+  })
+
+  test('flags collisions with every additional StudyVis binding', () => {
+    expect(
+      validateCombo(DEFAULT_MIC_TOGGLE_COMBO, {
+        otherCombo,
+        otherAction: 'ptt-ai',
+        additionalBindings: [
+          { combo: DEFAULT_MIC_TOGGLE_COMBO, action: 'mic-toggle' },
+        ],
+        platform: 'other',
+      })
+    ).toEqual({ kind: 'self_conflict', otherAction: 'mic-toggle' })
   })
 
   test('flags a reserved system combo on the active platform', () => {
@@ -307,11 +339,12 @@ describe('settingsStore — V3-P3 shortcut persistence & runtime push', () => {
           if (registerShouldFail) throw new Error('OS refused')
           pushed.push({ action, accelerator })
         },
-        setGlobalShortcuts: async (friends, ai) => {
+        setGlobalShortcuts: async (friends, ai, micToggle) => {
           if (registerShouldFail) throw new Error('OS refused')
           pushed.push(
             { action: 'ptt-friends', accelerator: friends },
-            { action: 'ptt-ai', accelerator: ai }
+            { action: 'ptt-ai', accelerator: ai },
+            { action: 'mic-toggle', accelerator: micToggle }
           )
         },
         relaunchApp: async () => {},
@@ -342,6 +375,21 @@ describe('settingsStore — V3-P3 shortcut persistence & runtime push', () => {
     expect(saved[SETTINGS_KEY_PTT_FRIENDS_ACCELERATOR]).toBe('CmdOrCtrl+.')
   })
 
+  test('mic-toggle persists only its accelerator and pushes the action', async () => {
+    await useSettingsStore
+      .getState()
+      .setShortcutAccelerator('mic-toggle', 'CmdOrCtrl+K')
+    expect(useSettingsStore.getState().values.micToggleAccelerator).toBe(
+      'CmdOrCtrl+K'
+    )
+    expect(pushed).toEqual([
+      { action: 'mic-toggle', accelerator: 'CmdOrCtrl+K' },
+    ])
+    expect(saved).toEqual({
+      [SETTINGS_KEY_MIC_TOGGLE_ACCELERATOR]: 'CmdOrCtrl+K',
+    })
+  })
+
   test('a runtime rejection rolls back and surfaces error', async () => {
     registerShouldFail = true
     await expect(
@@ -356,7 +404,7 @@ describe('settingsStore — V3-P3 shortcut persistence & runtime push', () => {
     expect(saved[SETTINGS_KEY_PTT_FRIENDS_ACCELERATOR]).toBeUndefined()
   })
 
-  test('resetShortcutsToDefaults re-registers both bindings', async () => {
+  test('resetShortcutsToDefaults re-registers all bindings', async () => {
     await useSettingsStore
       .getState()
       .setShortcutAccelerator('ptt-friends', 'CmdOrCtrl+.')
@@ -375,6 +423,7 @@ describe('settingsStore — V3-P3 shortcut persistence & runtime push', () => {
     expect(pushed).toEqual([
       { action: 'ptt-friends', accelerator: PTT_FRIENDS_DEFAULT_ACCELERATOR },
       { action: 'ptt-ai', accelerator: PTT_AI_DEFAULT_ACCELERATOR },
+      { action: 'mic-toggle', accelerator: MIC_TOGGLE_DEFAULT_ACCELERATOR },
     ])
   })
 })
@@ -383,11 +432,15 @@ describe('resetShortcutsToDefaults — collision recovery (item 22)', () => {
   // Stateful fake: each action "holds" a combo, and registering a combo the
   // *other* action currently holds throws AlreadyRegistered, mirroring
   // global-hotkey's real duplicate-registration error on shipped desktops.
-  let held: Record<'ptt-friends' | 'ptt-ai', string>
+  let held: Record<'ptt-friends' | 'ptt-ai' | 'mic-toggle', string>
   let attempts: Array<{ action: string; accelerator: string }>
 
   function install(friends: string, ai: string) {
-    held = { 'ptt-friends': friends, 'ptt-ai': ai }
+    held = {
+      'ptt-friends': friends,
+      'ptt-ai': ai,
+      'mic-toggle': MIC_TOGGLE_DEFAULT_ACCELERATOR,
+    }
     attempts = []
     const saved: Record<string, unknown> = {}
     const fakeStore: StoreLike = {
@@ -414,12 +467,17 @@ describe('resetShortcutsToDefaults — collision recovery (item 22)', () => {
           }
           held[action] = accelerator
         },
-        setGlobalShortcuts: async (friends, ai) => {
+        setGlobalShortcuts: async (friends, ai, micToggle) => {
           attempts.push(
             { action: 'ptt-friends', accelerator: friends },
-            { action: 'ptt-ai', accelerator: ai }
+            { action: 'ptt-ai', accelerator: ai },
+            { action: 'mic-toggle', accelerator: micToggle }
           )
-          held = { 'ptt-friends': friends, 'ptt-ai': ai }
+          held = {
+            'ptt-friends': friends,
+            'ptt-ai': ai,
+            'mic-toggle': micToggle,
+          }
         },
         relaunchApp: async () => {},
       },
@@ -456,8 +514,9 @@ describe('resetShortcutsToDefaults — collision recovery (item 22)', () => {
     expect(held).toEqual({
       'ptt-friends': PTT_FRIENDS_DEFAULT_ACCELERATOR,
       'ptt-ai': PTT_AI_DEFAULT_ACCELERATOR,
+      'mic-toggle': MIC_TOGGLE_DEFAULT_ACCELERATOR,
     })
-    expect(attempts).toHaveLength(2)
+    expect(attempts).toHaveLength(3)
   })
 
   test('resets a fully swapped pair together', async () => {
@@ -466,10 +525,12 @@ describe('resetShortcutsToDefaults — collision recovery (item 22)', () => {
     expect(held).toEqual({
       'ptt-friends': PTT_FRIENDS_DEFAULT_ACCELERATOR,
       'ptt-ai': PTT_AI_DEFAULT_ACCELERATOR,
+      'mic-toggle': MIC_TOGGLE_DEFAULT_ACCELERATOR,
     })
 
-    expect(attempts).toHaveLength(2)
+    expect(attempts).toHaveLength(3)
     expect(attempts.map((a) => a.action).sort()).toEqual([
+      'mic-toggle',
       'ptt-ai',
       'ptt-friends',
     ])
@@ -477,10 +538,42 @@ describe('resetShortcutsToDefaults — collision recovery (item 22)', () => {
 })
 
 describe('hydrateValuesFromStore — V3-P3 shortcut keys', () => {
+  test('preserves installed shortcuts that occupy the new microphone default', async () => {
+    const store = makeFakeStore({
+      [SETTINGS_KEY_PTT_FRIENDS_ACCELERATOR]: 'Control+\\',
+      [SETTINGS_KEY_PTT_AI_ACCELERATOR]: 'CmdOrCtrl+Shift+backslash',
+    })
+    const { values } = await hydrateValuesFromStore(store, {
+      readLegacyTheme: () => null,
+      clearLegacyTheme: () => {},
+    })
+    expect(values.pttFriendsAccelerator).toBe('Control+\\')
+    expect(values.pttAiAccelerator).toBe('CmdOrCtrl+Shift+backslash')
+    expect(values.micToggleAccelerator).toBe('CmdOrCtrl+Alt+Backslash')
+  })
+
+  test('distinguishes Mac Control from Command when choosing a free shortcut', () => {
+    expect(
+      resolveMicToggleAccelerator(
+        MIC_TOGGLE_DEFAULT_ACCELERATOR,
+        ['Control+Backslash'],
+        'mac'
+      )
+    ).toBe(MIC_TOGGLE_DEFAULT_ACCELERATOR)
+    expect(
+      resolveMicToggleAccelerator(
+        MIC_TOGGLE_DEFAULT_ACCELERATOR,
+        ['Control+Backslash'],
+        'other'
+      )
+    ).toBe('CmdOrCtrl+Shift+Backslash')
+  })
+
   test('rehydrates persisted accelerators', async () => {
     const store: StoreLike = makeFakeStore({
       [SETTINGS_KEY_PTT_FRIENDS_ACCELERATOR]: 'CmdOrCtrl+.',
       [SETTINGS_KEY_PTT_AI_ACCELERATOR]: 'CmdOrCtrl+;',
+      [SETTINGS_KEY_MIC_TOGGLE_ACCELERATOR]: 'CmdOrCtrl+K',
     })
     const { values } = await hydrateValuesFromStore(store, {
       readLegacyTheme: () => null,
@@ -488,12 +581,14 @@ describe('hydrateValuesFromStore — V3-P3 shortcut keys', () => {
     })
     expect(values.pttFriendsAccelerator).toBe('CmdOrCtrl+.')
     expect(values.pttAiAccelerator).toBe('CmdOrCtrl+;')
+    expect(values.micToggleAccelerator).toBe('CmdOrCtrl+K')
   })
 
   test('falls back to defaults for missing or non-string entries', async () => {
     const store: StoreLike = makeFakeStore({
       [SETTINGS_KEY_PTT_FRIENDS_ACCELERATOR]: 42,
       [SETTINGS_KEY_PTT_AI_ACCELERATOR]: '',
+      [SETTINGS_KEY_MIC_TOGGLE_ACCELERATOR]: false,
     })
     const { values } = await hydrateValuesFromStore(store, {
       readLegacyTheme: () => null,
@@ -501,6 +596,7 @@ describe('hydrateValuesFromStore — V3-P3 shortcut keys', () => {
     })
     expect(values.pttFriendsAccelerator).toBe(PTT_FRIENDS_DEFAULT_ACCELERATOR)
     expect(values.pttAiAccelerator).toBe(PTT_AI_DEFAULT_ACCELERATOR)
+    expect(values.micToggleAccelerator).toBe(MIC_TOGGLE_DEFAULT_ACCELERATOR)
   })
 })
 

@@ -635,6 +635,14 @@ export const strings = {
   session: {
     footerHoldBefore: 'Hold ',
     footerHoldAfter: ' to talk.',
+    mic: {
+      on: 'Mic always on',
+      off: 'Always-on mic',
+      toggleShortcut: (shortcut: string) =>
+        `Toggle always-on microphone (${shortcut})`,
+      enabled: 'Always-on microphone on.',
+      disabled: 'Always-on microphone off.',
+    },
     holdToTalkCta: 'Hold to talk',
     talkingCta: 'Talking',
     holdToTalkAriaLabel: 'Hold to talk to everyone in the session',
@@ -1261,6 +1269,9 @@ export const strings = {
         'minimize',
       ],
       shortcuts: [
+        'microphone',
+        'always-on',
+        'hot mic',
         'keybindings',
         'push to talk',
         'ptt',
@@ -1577,6 +1588,10 @@ export const strings = {
 
     shortcuts: {
       heading: 'Shortcuts',
+      micToggle: {
+        label: 'Always-on microphone',
+        help: 'Keep your microphone on without holding push to talk.',
+      },
       pttFriends: {
         label: 'Push to talk · friends',
         help: 'Hold to unmute your microphone for everyone in the session.',
@@ -1595,10 +1610,9 @@ export const strings = {
       },
       reset: {
         label: 'Reset to defaults',
-        help: 'Restores the original combos for both shortcuts.',
+        help: 'Restores the original combos for all shortcuts.',
         cta: 'Reset',
-        resetError: (message: string) =>
-          `Couldn't reset both shortcuts: ${message}`,
+        resetError: (message: string) => `Couldn't reset shortcuts: ${message}`,
       },
     },
 
@@ -2334,10 +2348,12 @@ export const strings = {
 
   keybindings: {
     actionLabels: {
+      'mic-toggle': 'Always-on microphone',
       'ptt-friends': 'Push to talk',
       'ptt-ai': 'Talk to AI',
     },
     actionLabelsLower: {
+      'mic-toggle': 'always-on microphone',
       'ptt-friends': 'push to talk',
       'ptt-ai': 'talk to AI',
     },

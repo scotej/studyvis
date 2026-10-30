@@ -23,10 +23,11 @@ export type Combo = {
   code: string
 }
 
-export type ShortcutAction = 'ptt-friends' | 'ptt-ai'
+export type ShortcutAction = 'ptt-friends' | 'ptt-ai' | 'mic-toggle'
 
 export const PTT_FRIENDS_DEFAULT_ACCELERATOR = 'CmdOrCtrl+['
 export const PTT_AI_DEFAULT_ACCELERATOR = 'CmdOrCtrl+]'
+export const MIC_TOGGLE_DEFAULT_ACCELERATOR = 'CmdOrCtrl+Backslash'
 
 export const DEFAULT_PTT_FRIENDS_COMBO: Combo = {
   mod: true,
@@ -42,6 +43,14 @@ export const DEFAULT_PTT_AI_COMBO: Combo = {
   alt: false,
   shift: false,
   code: 'BracketRight',
+}
+
+export const DEFAULT_MIC_TOGGLE_COMBO: Combo = {
+  mod: true,
+  ctrl: false,
+  alt: false,
+  shift: false,
+  code: 'Backslash',
 }
 
 const MODIFIER_CODES = new Set([
@@ -89,6 +98,9 @@ const CODE_TO_ACCEL_TOKEN: Record<string, string> = {
 const ACCEL_TOKEN_TO_CODE: Record<string, string> = {
   '[': 'BracketLeft',
   ']': 'BracketRight',
+  BRACKETLEFT: 'BracketLeft',
+  BRACKETRIGHT: 'BracketRight',
+  BACKSLASH: 'Backslash',
   ',': 'Comma',
   '.': 'Period',
   '/': 'Slash',
@@ -222,6 +234,45 @@ export function combosEqual(a: Combo, b: Combo): boolean {
     a.shift === b.shift &&
     a.code === b.code
   )
+}
+
+function combosEqualOnPlatform(
+  a: Combo,
+  b: Combo,
+  platform: Platform
+): boolean {
+  if (platform === 'mac') return combosEqual(a, b)
+  return combosEqual(
+    { ...a, mod: a.mod || a.ctrl, ctrl: false },
+    { ...b, mod: b.mod || b.ctrl, ctrl: false }
+  )
+}
+
+// An installed user may already use the new default for PTT or AI. Preserve
+// those bindings and choose the same available microphone shortcut as Rust.
+export function resolveMicToggleAccelerator(
+  requested: string,
+  occupied: readonly string[],
+  platform: Platform
+): string {
+  const combos = occupied
+    .map(parseAccelerator)
+    .filter((combo) => combo !== null)
+  for (const accelerator of [
+    requested,
+    MIC_TOGGLE_DEFAULT_ACCELERATOR,
+    'CmdOrCtrl+Shift+Backslash',
+    'CmdOrCtrl+Alt+Backslash',
+  ]) {
+    const combo = parseAccelerator(accelerator)
+    if (
+      combo &&
+      combos.every((other) => !combosEqualOnPlatform(combo, other, platform))
+    ) {
+      return accelerator
+    }
+  }
+  return MIC_TOGGLE_DEFAULT_ACCELERATOR
 }
 
 // Display tokens. Mac uses native glyphs (⌘ ⌥ ⇧ ⌃) per DESIGN-SYSTEM §17;
@@ -360,6 +411,7 @@ export type ConflictReason =
 export type ValidationContext = {
   otherCombo: Combo
   otherAction: ShortcutAction
+  additionalBindings?: readonly { combo: Combo; action: ShortcutAction }[]
   platform: Platform
 }
 
@@ -373,8 +425,13 @@ export function validateCombo(
   if (!combo.mod && !combo.ctrl && !combo.alt) {
     return { kind: 'no_modifier' }
   }
-  if (combosEqual(combo, ctx.otherCombo)) {
-    return { kind: 'self_conflict', otherAction: ctx.otherAction }
+  for (const binding of [
+    { combo: ctx.otherCombo, action: ctx.otherAction },
+    ...(ctx.additionalBindings ?? []),
+  ]) {
+    if (combosEqualOnPlatform(combo, binding.combo, ctx.platform)) {
+      return { kind: 'self_conflict', otherAction: binding.action }
+    }
   }
   if (reservedCombos(ctx.platform).has(comboToAccelerator(combo))) {
     return { kind: 'reserved' }

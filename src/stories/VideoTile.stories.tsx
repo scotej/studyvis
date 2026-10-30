@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import type { Meta, StoryObj } from '@storybook/react-vite'
+import { expect, userEvent, waitFor, within } from 'storybook/test'
 
+import { ScreenShareViewer } from '@/components/ScreenShareViewer'
 import { VideoTile, type VideoTileProps } from '@/components/VideoTile'
 import { tokens } from '@/design/tokens'
 
@@ -251,5 +253,58 @@ export const WithVolume: Story = {
       )
     }
     return <VolumeDemo />
+  },
+}
+
+function FullscreenPeerDemo() {
+  const stream = useColorStream('Alice', tokens.color.status.focused)
+  const [open, setOpen] = useState(false)
+  const [volume, setVolume] = useState(0.6)
+  return (
+    <div className="w-full max-w-md">
+      <VideoTile
+        name="Alice"
+        stream={stream}
+        onExpand={() => setOpen(true)}
+        volume={volume}
+        onVolumeChange={setVolume}
+      />
+      <ScreenShareViewer
+        open={open}
+        onOpenChange={setOpen}
+        name="Alice"
+        stream={stream}
+      />
+    </div>
+  )
+}
+
+export const FullscreenPeer: Story = {
+  render: () => <FullscreenPeerDemo />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    const body = within(canvasElement.ownerDocument.body)
+    const trigger = await canvas.findByRole('button', {
+      name: 'View Alice in fullscreen',
+    })
+    trigger.focus()
+    await userEvent.keyboard('{Enter}')
+    const dialog = await body.findByRole('dialog', { name: 'Alice' })
+    const video = within(dialog).getByTestId(
+      'screen-share-viewer-video'
+    ) as HTMLVideoElement
+    await waitFor(() => expect(video.srcObject).not.toBeNull())
+    await expect(video.muted).toBe(true)
+    await userEvent.tab()
+    await expect(dialog).toContainElement(
+      canvasElement.ownerDocument.activeElement as HTMLElement
+    )
+    await userEvent.keyboard('{Escape}')
+    await waitFor(() =>
+      expect(body.queryByRole('dialog')).not.toBeInTheDocument()
+    )
+    await expect(trigger).toHaveFocus()
+    await userEvent.click(trigger)
+    await body.findByRole('dialog', { name: 'Alice' })
   },
 }

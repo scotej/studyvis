@@ -1,14 +1,24 @@
 # Changelog
 
-## Unreleased
+## 2.1.0 — 2026-10-30 — Background voice and fullscreen sessions
 
 ### Added
 
+- An always-on microphone button in sessions, with a customizable `Command/Ctrl+\`
+  shortcut. Each session starts muted.
+- Fullscreen viewing of friends' cameras from their video tiles.
 - Optional GitHub (recommended) and Google sign-in for approved backup-relay
   access in Network settings. Existing identities, friends, recovery backups,
   and study history are preserved without re-pairing. Direct connections remain
   preferred; managed relay traffic stays disabled until a provider-enforced
   free-only limit is confirmed and owner setup is complete.
+
+### Fixed
+
+- Updated a bundled networking dependency to address a security advisory.
+- Push-to-talk applies microphone changes immediately while StudyVis is in the
+  background. On macOS 14 and later, the main window also keeps running when
+  minimized or hidden.
 
 ## 2.0.2 — 2026-10-19 — Session reliability and recovery safeguards
 

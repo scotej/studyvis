@@ -8,6 +8,8 @@ import { useEffect } from 'react'
 
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 
+import { isKeybindCaptureActive } from '@/lib/shortcutCapture'
+
 import {
   setDiagnosticsSnapshotHook,
   type DiagnosticsTrigger,
@@ -17,6 +19,7 @@ import type { TopicRoom } from '@/lib/trystero'
 import { detectChromePlatform } from '@/lib/windowChrome'
 import {
   inPttButtonMutation,
+  isMicActive,
   MAX_HOLD_MS,
   usePttStore,
 } from '@/stores/pttStore'
@@ -205,6 +208,7 @@ export function PttListener() {
         peerPttActive: activePeerPttCount(session.peers),
         store: {
           active: store.active,
+          hotMic: store.hotMic,
           awaitingRelease: store.awaitingRelease,
           heldSources: store.heldSources,
           revision: store.revision,
@@ -324,7 +328,7 @@ export function PttListener() {
       const peers = useSessionStore.getState().peers
       return {
         room,
-        localActive: local.active,
+        localActive: isMicActive(local),
         localRevision: local.revision,
         activePeerIds: activePeerIds(peers),
         peerEdgeSeq,
@@ -642,7 +646,9 @@ export function PttListener() {
               physicalEvents += 1
               lastPhysicalAtMs = monotonicNow()
               const before = edgeReconciler.snapshot()
-              const edges = edgeReconciler.physicalState(held)
+              const edges = edgeReconciler.physicalState(
+                isKeybindCaptureActive() ? false : held
+              )
               const after = edgeReconciler.snapshot()
               // #226 — the watcher now repeats each level for a bounded window,
               // so most of these events are confirmations of a state this
@@ -671,6 +677,7 @@ export function PttListener() {
               dispatchReconciled(edges)
             },
             onPressed: () => {
+              if (isKeybindCaptureActive()) return
               pressedEvents += 1
               const before = edgeReconciler.snapshot()
               const edges = edgeReconciler.shortcutPressed()
@@ -717,16 +724,16 @@ export function PttListener() {
     const unsubscribePtt = usePttStore.subscribe((state, previous) => {
       if (
         state.active === previous.active &&
+        state.hotMic === previous.hotMic &&
         state.awaitingRelease === previous.awaitingRelease &&
         state.heldSources === previous.heldSources
       ) {
         return
       }
-      const cause = classifyPttStoreChange(
-        previous,
-        state,
-        inPttButtonMutation()
-      )
+      const cause =
+        state.hotMic !== previous.hotMic
+          ? 'hot-mic'
+          : classifyPttStoreChange(previous, state, inPttButtonMutation())
       if (cause === null) return
 
       const nowMs = monotonicNow()
@@ -736,6 +743,7 @@ export function PttListener() {
       const fields = {
         cause,
         active: state.active,
+        hotMic: state.hotMic,
         awaitingRelease: state.awaitingRelease,
         heldSources: state.heldSources,
         previousActive: previous.active,

@@ -28,8 +28,10 @@ import { logger } from '@/lib/log'
 const log = logger.child('settings')
 
 import {
+  MIC_TOGGLE_DEFAULT_ACCELERATOR,
   PTT_AI_DEFAULT_ACCELERATOR,
   PTT_FRIENDS_DEFAULT_ACCELERATOR,
+  resolveMicToggleAccelerator,
   type ShortcutAction,
 } from '@/lib/keybindings'
 import { detectChromePlatform, type ChromePlatform } from '@/lib/windowChrome'
@@ -157,6 +159,7 @@ export type SettingsValues = {
   // side and the Rust handler agree on the wire shape.
   pttFriendsAccelerator: string
   pttAiAccelerator: string
+  micToggleAccelerator: string
   // V3-P4 multi-monitor capture toggle. See `CaptureDisplaysMode` above.
   captureDisplays: CaptureDisplaysMode
   // V3-P6 opt-in custom window chrome. See `WindowStyleMode` above.
@@ -219,6 +222,7 @@ export const SETTINGS_KEY_SAMPLE_INTERVAL = 'sample_interval_s'
 export const SETTINGS_KEY_SESSION_TIMELINE = 'session_timeline_enabled'
 export const SETTINGS_KEY_PTT_FRIENDS_ACCELERATOR = 'ptt_friends_accelerator'
 export const SETTINGS_KEY_PTT_AI_ACCELERATOR = 'ptt_ai_accelerator'
+export const SETTINGS_KEY_MIC_TOGGLE_ACCELERATOR = 'mic_toggle_accelerator'
 export const SETTINGS_KEY_CAPTURE_DISPLAYS = 'capture_displays'
 export const SETTINGS_KEY_WINDOW_STYLE = 'window_style'
 export const SETTINGS_KEY_REMEMBER_WINDOW_LAYOUT = 'remember_window_layout'
@@ -263,6 +267,7 @@ export const DEFAULT_SETTINGS: SettingsValues = {
   sessionTimelineEnabled: true,
   pttFriendsAccelerator: PTT_FRIENDS_DEFAULT_ACCELERATOR,
   pttAiAccelerator: PTT_AI_DEFAULT_ACCELERATOR,
+  micToggleAccelerator: MIC_TOGGLE_DEFAULT_ACCELERATOR,
   captureDisplays: 'primary',
   // System chrome is the v1.0.3 shipped behavior — keep it as the default
   // so a fresh install or a missing-key file matches what users have today.
@@ -328,7 +333,7 @@ type SettingsState = {
   setSampleIntervalSec: (seconds: number | null) => Promise<void>
   // #236 — record per-check observations and write the session up afterwards.
   setSessionTimelineEnabled: (enabled: boolean) => Promise<void>
-  // V3-P3 — set the accelerator for one of the two global shortcuts. The
+  // V3-P3 — set the accelerator for one of the global shortcuts. The
   // order intentionally inverts `setMinimizeToTrayOnClose` because shortcut
   // semantics are binary: registration must succeed before persistence is
   // committed, otherwise the on-disk value would disagree with the live OS
@@ -340,7 +345,7 @@ type SettingsState = {
     action: ShortcutAction,
     accelerator: string
   ) => Promise<void>
-  // Reset both accelerators to their DESIGN-SYSTEM §17 defaults.
+  // Reset all accelerators to their DESIGN-SYSTEM §17 defaults.
   resetShortcutsToDefaults: () => Promise<void>
   // V3-P4 — Persist the multi-monitor capture mode. Takes effect on the next
   // sample-loop boot; in-flight loops are not reshaped.
@@ -402,8 +407,12 @@ export type RuntimeBridge = {
     action: ShortcutAction,
     accelerator: string
   ) => Promise<void>
-  // #394 — validate/swap both bindings together, including mutual swaps.
-  setGlobalShortcuts: (friends: string, ai: string) => Promise<void>
+  // #394 — validate/swap all bindings together, including mutual swaps.
+  setGlobalShortcuts: (
+    friends: string,
+    ai: string,
+    micToggle: string
+  ) => Promise<void>
   // V3-P6 — Calls the Rust `system_relaunch_app` command to replace the
   // process. Returns void so the JS resolution shape matches the other
   // bridges; in practice the runtime never observes the resolved promise
@@ -534,9 +543,9 @@ const defaultDeps: SettingsStoreDeps = {
       if (!isTauriRuntime()) return
       await invoke('system_set_global_shortcut', { action, accelerator })
     },
-    setGlobalShortcuts: async (friends, ai) => {
+    setGlobalShortcuts: async (friends, ai, micToggle) => {
       if (!isTauriRuntime()) return
-      await invoke('system_set_global_shortcuts', { friends, ai })
+      await invoke('system_set_global_shortcuts', { friends, ai, micToggle })
     },
     relaunchApp: async () => {
       if (!isTauriRuntime()) return
@@ -765,6 +774,7 @@ export async function hydrateValuesFromStore(
     sessionTimeline: await store.get(SETTINGS_KEY_SESSION_TIMELINE),
     pttFriends: await store.get(SETTINGS_KEY_PTT_FRIENDS_ACCELERATOR),
     pttAi: await store.get(SETTINGS_KEY_PTT_AI_ACCELERATOR),
+    micToggle: await store.get(SETTINGS_KEY_MIC_TOGGLE_ACCELERATOR),
     captureDisplays: await store.get(SETTINGS_KEY_CAPTURE_DISPLAYS),
     windowStyle: await store.get(SETTINGS_KEY_WINDOW_STYLE),
     rememberWindowLayout: await store.get(SETTINGS_KEY_REMEMBER_WINDOW_LAYOUT),
@@ -802,6 +812,20 @@ export async function hydrateValuesFromStore(
   const turn: TurnPreference = isTurnPreference(stored.turn)
     ? stored.turn
     : DEFAULT_SETTINGS.turnPreference
+
+  const pttFriendsAccelerator = readAccelerator(
+    stored.pttFriends,
+    DEFAULT_SETTINGS.pttFriendsAccelerator
+  )
+  const pttAiAccelerator = readAccelerator(
+    stored.pttAi,
+    DEFAULT_SETTINGS.pttAiAccelerator
+  )
+  const micToggleAccelerator = resolveMicToggleAccelerator(
+    readAccelerator(stored.micToggle, MIC_TOGGLE_DEFAULT_ACCELERATOR),
+    [pttFriendsAccelerator, pttAiAccelerator],
+    detectChromePlatform() === 'mac' ? 'mac' : 'other'
+  )
 
   return {
     values: {
@@ -867,14 +891,9 @@ export async function hydrateValuesFromStore(
         stored.sessionTimeline,
         DEFAULT_SETTINGS.sessionTimelineEnabled
       ),
-      pttFriendsAccelerator: readAccelerator(
-        stored.pttFriends,
-        DEFAULT_SETTINGS.pttFriendsAccelerator
-      ),
-      pttAiAccelerator: readAccelerator(
-        stored.pttAi,
-        DEFAULT_SETTINGS.pttAiAccelerator
-      ),
+      pttFriendsAccelerator,
+      pttAiAccelerator,
+      micToggleAccelerator,
       captureDisplays: isCaptureDisplaysMode(stored.captureDisplays)
         ? stored.captureDisplays
         : DEFAULT_SETTINGS.captureDisplays,
@@ -1219,9 +1238,15 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       const key =
         action === 'ptt-friends'
           ? SETTINGS_KEY_PTT_FRIENDS_ACCELERATOR
-          : SETTINGS_KEY_PTT_AI_ACCELERATOR
+          : action === 'ptt-ai'
+            ? SETTINGS_KEY_PTT_AI_ACCELERATOR
+            : SETTINGS_KEY_MIC_TOGGLE_ACCELERATOR
       const valuesKey =
-        action === 'ptt-friends' ? 'pttFriendsAccelerator' : 'pttAiAccelerator'
+        action === 'ptt-friends'
+          ? 'pttFriendsAccelerator'
+          : action === 'ptt-ai'
+            ? 'pttAiAccelerator'
+            : 'micToggleAccelerator'
       const previous = get().values[valuesKey]
       set((s) => ({ values: { ...s.values, [valuesKey]: accelerator } }))
       try {
@@ -1244,13 +1269,15 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       const {
         pttFriendsAccelerator: previousFriends,
         pttAiAccelerator: previousAi,
+        micToggleAccelerator: previousMicToggle,
       } = get().values
       const runtime = activeDeps.runtime
       const store = activeDeps.storeFactory?.()
       try {
         await runtime.setGlobalShortcuts(
           PTT_FRIENDS_DEFAULT_ACCELERATOR,
-          PTT_AI_DEFAULT_ACCELERATOR
+          PTT_AI_DEFAULT_ACCELERATOR,
+          MIC_TOGGLE_DEFAULT_ACCELERATOR
         )
         await withSettingsWrite(async () => {
           try {
@@ -1263,14 +1290,22 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
                 SETTINGS_KEY_PTT_AI_ACCELERATOR,
                 PTT_AI_DEFAULT_ACCELERATOR
               )
+              await store.set(
+                SETTINGS_KEY_MIC_TOGGLE_ACCELERATOR,
+                MIC_TOGGLE_DEFAULT_ACCELERATOR
+              )
               await store.save()
             }
           } catch (err) {
-            // #394 — both keys are one durable update. Restore the native pair AND
-            // the store cache/disk if either set or the single save rejects.
+            // #394 — all shortcut keys are one durable update. Restore native bindings AND
+            // the store cache/disk if any set or the single save rejects.
             const failures = [err]
             try {
-              await runtime.setGlobalShortcuts(previousFriends, previousAi)
+              await runtime.setGlobalShortcuts(
+                previousFriends,
+                previousAi,
+                previousMicToggle
+              )
             } catch (rollbackError) {
               failures.push(rollbackError)
             }
@@ -1281,6 +1316,10 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
                   previousFriends
                 )
                 await store.set(SETTINGS_KEY_PTT_AI_ACCELERATOR, previousAi)
+                await store.set(
+                  SETTINGS_KEY_MIC_TOGGLE_ACCELERATOR,
+                  previousMicToggle
+                )
                 await store.save()
               } catch (rollbackError) {
                 failures.push(rollbackError)
@@ -1301,6 +1340,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
             ...s.values,
             pttFriendsAccelerator: PTT_FRIENDS_DEFAULT_ACCELERATOR,
             pttAiAccelerator: PTT_AI_DEFAULT_ACCELERATOR,
+            micToggleAccelerator: MIC_TOGGLE_DEFAULT_ACCELERATOR,
           },
           error: null,
         }))

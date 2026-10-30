@@ -1,6 +1,5 @@
-// #96 / #184 — fullscreen view of one shared screen. A 4K display rendered
-// in the session grid is unreadable, so the tile is the affordance and this is
-// where the screen is actually read. The viewer fills the webview and asks
+// #96 / #184 — fullscreen view of a shared screen or a remote camera.
+// The viewer fills the webview and asks
 // Tauri to put the native window into fullscreen; the full-webview layout is
 // also the browser/Storybook fallback when native fullscreen is unavailable.
 
@@ -34,6 +33,7 @@ export function ScreenShareViewer({
   stream,
 }: ScreenShareViewerProps) {
   const onOpenChangeRef = useRef(onOpenChange)
+  const returnFocusRef = useRef<HTMLElement | null>(null)
 
   useEffect(() => {
     onOpenChangeRef.current = onOpenChange
@@ -94,6 +94,15 @@ export function ScreenShareViewer({
       <DialogContent
         className="inset-0 top-0 left-0 flex h-full max-w-none translate-x-0 translate-y-0 flex-col gap-3 rounded-none border-0 p-4"
         aria-describedby={undefined}
+        onOpenAutoFocus={() => {
+          const active = document.activeElement
+          returnFocusRef.current = active instanceof HTMLElement ? active : null
+        }}
+        onCloseAutoFocus={(event) => {
+          if (!returnFocusRef.current?.isConnected) return
+          event.preventDefault()
+          returnFocusRef.current.focus()
+        }}
       >
         <DialogHeader className="shrink-0">
           <DialogTitle className="pr-8 text-base">{name}</DialogTitle>
