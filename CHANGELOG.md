@@ -20,6 +20,8 @@
 - Push-to-talk applies microphone changes immediately while StudyVis is in the
   background. On macOS 14 and later, the main window also keeps running when
   minimized or hidden.
+- Friends joining later receive the original signed session-presence entry.
+- Closing a dialog with Escape no longer arms the shortcut to leave a session.
 
 ## 2.0.2 — 2026-10-19 — Session reliability and recovery safeguards
 
