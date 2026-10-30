@@ -109,7 +109,7 @@ and `vulkan-intel`, while NVIDIA's userspace driver supplies its Vulkan ICD.
 Driver updates may require a reboot. Reopen Settings → AI after the driver is
 working; device discovery refreshes automatically.
 
-It also contains the pinned WebKitGTK 2.52.5 + librice 0.4.3 runtime required
+It also contains the pinned WebKitGTK 2.54.2 + librice 0.4.3 runtime required
 for peer connections. A window opening successfully is not proof that this
 runtime works: Linux remains a release candidate until the exact downloaded
 AppImage completes the data-channel/media/physical-peer matrix in `PLAN.md` §8.
@@ -218,18 +218,18 @@ binding. StudyVis therefore builds that binding into a private AppImage runtime,
 explicitly reasserts media streams, and keeps the rest of WebKit's experimental
 feature set disabled.
 
-The pinned, hash-verified input tuple for runtime revision 9 is:
+The pinned, hash-verified input tuple for runtime revision 10 is:
 
 | Input                              | Pinned source                                                                           | SHA-256                                                            |
 | ---------------------------------- | --------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
-| WebKitGTK                          | `https://webkitgtk.org/releases/webkitgtk-2.52.5.tar.xz`                                | `8a531a9abd2215936e8a8a914c077b586c0228b31d652f205286a8ec90f3364b` |
+| WebKitGTK                          | `https://webkitgtk.org/releases/webkitgtk-2.54.2.tar.xz`                                | `a76345b391bef6211fb5ab6cfab2e86b285d18cda17cbb9ade595f1252b86065` |
 | librice                            | `https://github.com/ystreet/librice/archive/refs/tags/v0.4.3.tar.gz`                    | `4671e1835f9ab0f8d87e8d9e22b6bfb06f928aeae442841ab81881dff61e3f4b` |
-| AppImage runtime portability patch | `scripts/patches/webkitgtk-2.52.5-appimage-sandbox.patch`                               | `a4773c3a942440b6c00eb3bad4f81f0d0bcd86010275eb54bab6f9e965db8145` |
-| GStreamer core                     | `https://gstreamer.freedesktop.org/src/gstreamer/gstreamer-1.28.7.tar.xz`               | `787329b2c5758e228a71d926a6dcf960bceaacca3cadd63874ba665dfcda013e` |
-| GStreamer base                     | `https://gstreamer.freedesktop.org/src/gst-plugins-base/gst-plugins-base-1.28.7.tar.xz` | `ed6e5410f496d171818763af2265e7977154bc7f9b827e98acf8c5bed21dd5a7` |
-| GStreamer good                     | `https://gstreamer.freedesktop.org/src/gst-plugins-good/gst-plugins-good-1.28.7.tar.xz` | `87256969c82cf3bc8574301f3e7044a90de0ac500a5a27d8ba38c4dde894dd8b` |
-| GStreamer bad                      | `https://gstreamer.freedesktop.org/src/gst-plugins-bad/gst-plugins-bad-1.28.7.tar.xz`   | `dc525383c18b2c265bbe6a43d498656cd918aaa130aa4e3abeabcdaa741c3ffe` |
-| GStreamer rollback delta           | `scripts/patches/gst-plugins-bad-1.28.7-webrtc-rollback.patch`                          | `e3105c73dc2ff3479ecd79320068d112e7370901c48a297288f02cbefcb03799` |
+| AppImage runtime portability patch | `scripts/patches/webkitgtk-2.54.2-appimage-sandbox.patch`                               | `320c81d020741208164289fd26e2ccf2db10c5d750ec8a3837ed2444e57434bc` |
+| GStreamer core                     | `https://gstreamer.freedesktop.org/src/gstreamer/gstreamer-1.28.8.tar.xz`               | `baa8e86985ad6417cc0ad6e7b79ff2884c6779c8b1c7a6240e7121822c86e524` |
+| GStreamer base                     | `https://gstreamer.freedesktop.org/src/gst-plugins-base/gst-plugins-base-1.28.8.tar.xz` | `ade70e3381fcbb024f1f20aa9ede9b5654aeed39d5bd70b1a98f53015e501117` |
+| GStreamer good                     | `https://gstreamer.freedesktop.org/src/gst-plugins-good/gst-plugins-good-1.28.8.tar.xz` | `a7670ed900d3d03be744d25c1873b239896e9a82ce6d17f8febc6fffbaee9521` |
+| GStreamer bad                      | `https://gstreamer.freedesktop.org/src/gst-plugins-bad/gst-plugins-bad-1.28.8.tar.xz`   | `670d888bde8242579b0d8e91f60cf337aa7be20ca7c315ebfbdd6e5a9218d104` |
+| GStreamer rollback delta           | `scripts/patches/gst-plugins-bad-1.28.8-webrtc-rollback.patch`                          | `e3105c73dc2ff3479ecd79320068d112e7370901c48a297288f02cbefcb03799` |
 | libnice                            | `https://libnice.freedesktop.org/releases/libnice-0.1.24.tar.gz`                        | `cfb5e8e778534f2f5b3c6f4958a1eb057c6b95c537c0f100817a537cf5d64fcc` |
 | Meson                              | `https://github.com/mesonbuild/meson/releases/download/1.7.2/meson-1.7.2.tar.gz`        | `4d40d63aa748a9c139cc41ab9bffe43edd113c5639d78bde81544ca955aea890` |
 
@@ -253,7 +253,9 @@ StudyVis executable. It does not weaken or disable the Web/GPU/Network process
 sandbox.
 It also accepts empty-SDP rollback and restores stable transceiver ownership
 after collided offers. Queued sources start only after their exact committed
-pad is configured. Answers retain supported offered RTP extension IDs,
+pad is configured. Live-stream player construction skips viewport suspension
+before its URL/source is installed so muted remote video can start normally.
+Answers retain supported offered RTP extension IDs,
 future sources reserve accepted IDs, and committed per-MID mappings remain
 stable. Remote transport/SSRC identity and raw payload-specific feedback stay
 out of local codec preferences. Track removal forwards the owning transceiver's
@@ -284,7 +286,7 @@ bundled Wayland client by accident.
 This is a pinned, reviewable build recipe, not a claim that independent builds
 are bit-for-bit identical. Production builds use Ubuntu 24.04, Rust 1.97.1,
 `cargo-c` 0.10.24, and the workflow's declared source-build dependency set.
-The private runtime builds GStreamer 1.28.7 core/base/good/bad and libnice 0.1.24
+The private runtime builds GStreamer 1.28.8 core/base/good/bad and libnice 0.1.24
 using pinned Meson 1.7.2. Noble's 1.24.2 meets WebKit's configure minimum but has
 incompatible transceiver and incoming-stream behavior (#312). Only the PipeWire
 plugin remains distro-provided; the remaining GStreamer libraries, plugins,
@@ -306,7 +308,7 @@ helpers, upstream license texts, librice licenses, and the applied patches. Unde
 exact URLs/hashes, patch, `cargo-c`, compiler policy, effective CMake/Rice and
 pkg-config inputs, AppImage-relative process/helper layout, runtime identity,
 and payload list;
-`WEBKIT-THIRD-PARTY-LICENSES.txt` concatenates the 59 upstream WebKit
+`WEBKIT-THIRD-PARTY-LICENSES.txt` concatenates the 64 upstream WebKit
 license/notice files and `WEBKIT-LICENSE-FILES.sha256` records their individual
 hashes. The builder also derives `LIBRICE-THIRD-PARTY-NOTICES.txt` and its JSON
 manifest from the exact locked/offline normal-dependency union for the

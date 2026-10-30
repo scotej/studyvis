@@ -17,16 +17,28 @@ import { createManagedTurnPeerConnection } from '@/lib/webrtc/managedTurnPeerCon
 import { createResilientPeerConnection } from '@/lib/webrtc/resilientPeerConnection'
 
 let room, roomConfig, servers = [], listeners = [], received = 0, joins = 0, leaves = 0, restarts = 0, releaseHandshake
+let lastMessageAt, observationStartedAt, observationLastMessageAt, observationReceived = 0, maxMessageGap = 0
 const rooms = [], tickers = []
 const nativeConnections = []
+const nativeDetails = new WeakMap()
 const failures = []
+const ufrag = description => description?.sdp.match(/a=ice-ufrag:([^\\s]+)/)?.[1]
 const strip = description => description && ({type: description.type, sdp: description.sdp.split('\\r\\n').filter(line => !line.startsWith('a=candidate:') || line.includes(' typ relay ')).join('\\r\\n')})
 function wireRoom(channelRoom) {
   rooms.push(channelRoom)
   channelRoom.onPeerJoin = () => joins++
   channelRoom.onPeerLeave = () => leaves++
   const messages = channelRoom.makeAction('lease-proof')
-  messages.onMessage = () => received++
+  messages.onMessage = () => {
+    const at = Date.now()
+    received++
+    lastMessageAt = at
+    if (observationStartedAt) {
+      observationReceived++
+      maxMessageGap = Math.max(maxMessageGap, at - observationLastMessageAt)
+      observationLastMessageAt = at
+    }
+  }
   tickers.push(setInterval(() => {
     if (Object.keys(channelRoom.getPeers()).length) messages.send('ping').catch(error => failures.push(error.message))
   }, 75))
@@ -37,9 +49,30 @@ window.fixture = {
     servers = [{urls: [turn], username: 'old', credential: 'old-password'}]
     const native = new Proxy(RTCPeerConnection, {construct(target, args) {
       const pc = Reflect.construct(target, args)
+      const details = {id: nativeConnections.length, createdAt: Date.now(), timeline: []}
+      nativeDetails.set(pc, details)
       nativeConnections.push(pc)
+      const record = (kind, data = {}) => {
+        const at = Date.now()
+        if (pc.connectionState === 'connected' && !details.connectedAt) details.connectedAt = at
+        if (kind === 'icegatheringstatechange' && pc.iceGatheringState === 'complete') {
+          details.firstGatheringCompleteAt ??= at
+          details.gatheringCompleteAt = at
+        }
+        details.timeline.push({at, kind, state: pc.connectionState, signaling: pc.signalingState, ice: pc.iceConnectionState, gathering: pc.iceGatheringState, localUfrag: ufrag(pc.localDescription), remoteUfrag: ufrag(pc.remoteDescription), ...data})
+        if (details.timeline.length > 64) details.timeline.shift()
+      }
+      for (const event of ['connectionstatechange', 'signalingstatechange', 'iceconnectionstatechange', 'icegatheringstatechange']) pc.addEventListener(event, () => record(event))
+      pc.addEventListener('icecandidate', event => record('icecandidate', {candidate: event.candidate?.toJSON()}))
+      pc.addEventListener('icecandidateerror', event => record('icecandidateerror', {errorCode: event.errorCode}))
+      const configure = pc.setConfiguration.bind(pc)
+      pc.setConfiguration = config => {
+        const result = configure(config)
+        record('configuration', {servers: config.iceServers?.map(server => ({urls: server.urls, username: server.username}))})
+        return result
+      }
       const restart = pc.restartIce.bind(pc)
-      pc.restartIce = () => { restarts++; restart() }
+      pc.restartIce = () => { record('restart'); restarts++; restart() }
       if (relayOnly) {
         // Limit reachable paths at the native test boundary. Production ICE
         // configuration and Trystero signaling/negotiation remain unchanged.
@@ -70,14 +103,27 @@ window.fixture = {
     servers = servers.map(server => ({...server, username: 'next', credential: 'next-password'}))
     listeners.forEach(listener => listener())
   },
+  beginExpiryObservation: () => {
+    observationStartedAt = observationLastMessageAt = Date.now()
+    observationReceived = maxMessageGap = 0
+  },
   snapshot: async () => {
+    const at = Date.now()
     const peers = Object.values(room.getPeers())
     const connections = await Promise.all(peers.map(async pc => {
+      const details = nativeDetails.get(pc)
+      details.seenAsPeer = true
       const stats = await pc.getStats()
       const transport = [...stats.values()].find(entry => entry.type === 'transport' && entry.selectedCandidatePairId)
       const pair = transport && stats.get(transport.selectedCandidatePairId)
       const local = pair && stats.get(pair.localCandidateId)
-      return {state: pc.connectionState, signaling: pc.signalingState, ice: pc.iceConnectionState, type: local?.candidateType, port: local?.port,
+      const candidateStats = [...stats.values()].filter(entry => ['transport', 'candidate-pair', 'local-candidate', 'remote-candidate'].includes(entry.type))
+      return {id: details.id, state: pc.connectionState, signaling: pc.signalingState, ice: pc.iceConnectionState, gathering: pc.iceGatheringState, type: local?.candidateType, port: local?.port,
+        connectedAt: details.connectedAt, connectedAge: details.connectedAt && at - details.connectedAt,
+        firstGatheringCompleteAt: details.firstGatheringCompleteAt, gatheringCompleteAt: details.gatheringCompleteAt,
+        gatheringCompleteAge: details.gatheringCompleteAt && at - details.gatheringCompleteAt,
+        selectedPair: pair, localCandidate: local, remoteCandidate: pair && stats.get(pair.remoteCandidateId),
+        candidateStats: candidateStats.slice(-256), candidateStatsCount: candidateStats.length, candidateStatsDropped: Math.max(0, candidateStats.length - 256),
         currentUfrag: pc.currentLocalDescription?.sdp.match(/a=ice-ufrag:([^\\s]+)/)?.[1],
         currentRemoteUfrag: pc.currentRemoteDescription?.sdp.match(/a=ice-ufrag:([^\\s]+)/)?.[1],
         pendingUfrag: pc.pendingLocalDescription?.sdp.match(/a=ice-ufrag:([^\\s]+)/)?.[1],
@@ -87,7 +133,7 @@ window.fixture = {
         media: pc.localDescription?.sdp.includes('a=rtpmap'),
       }
     }))
-    return {received, joins, leaves, restarts, failures: [...failures], connections, nativeConnected: nativeConnections.filter(pc => pc.connectionState === 'connected').length, firstActive: Object.keys(rooms[0].getPeers()).length}
+    return {at, received, joins, leaves, restarts, failures: [...failures], connections, messages: {lastMessageAt, timeSinceLastMessage: lastMessageAt && at - lastMessageAt, observationStartedAt, observationReceived, maxInterMessageGap: observationStartedAt ? Math.max(maxMessageGap, at - observationLastMessageAt) : null}, nativeTimeline: nativeConnections.map(pc => nativeDetails.get(pc)).filter(details => details.seenAsPeer).slice(-4).map(details => ({...details, timeline: [...details.timeline]})), nativeConnected: nativeConnections.filter(pc => pc.connectionState === 'connected').length, firstActive: Object.keys(rooms[0].getPeers()).length}
   },
   releaseHandshake: () => releaseHandshake?.(),
   stop: async () => { tickers.forEach(clearInterval); await Promise.all(rooms.map(item => item.leave())) },
@@ -257,10 +303,18 @@ for (const { relayOnly, early, shared } of [
                   item.evaluate(() => window.fixture.rotate())
                 )
               )
+              const errors = []
+              const check = (verify) => {
+                try {
+                  verify()
+                } catch (error) {
+                  errors.push(error)
+                }
+              }
+              let rotationSnapshot
               if (relayOnly) {
-                let rotationSnapshot
-                await assertEventually(
-                  async () => {
+                try {
+                  await assertEventually(async () => {
                     const states = (rotationSnapshot = await snapshot())
                     return (
                       states.some((state) => state.restarts > 0) &&
@@ -278,61 +332,124 @@ for (const { relayOnly, early, shared } of [
                               'next')
                       )
                     )
-                  },
-                  () => ({
-                    before,
-                    current: rotationSnapshot,
-                    turnRequests: turn.requests.slice(-100),
                   })
-                )
-                assert.ok(
-                  turn.requests.some(
-                    (request) =>
-                      request.type === 3 && request.username === 'next'
+                } catch (error) {
+                  // Retain the cutover failure while observing its actual expiry impact.
+                  errors.push(error)
+                }
+                check(() =>
+                  assert.ok(
+                    turn.requests.some(
+                      (request) =>
+                        request.type === 3 && request.username === 'next'
+                    ),
+                    'rotation must allocate with the next credential'
                   )
                 )
               }
               const cutover = await snapshot()
+              await Promise.all(
+                pages.map((item) =>
+                  item.evaluate(() => window.fixture.beginExpiryObservation())
+                )
+              )
               turn.expire('old')
+              const expiredAt = Date.now()
               await new Promise((resolve) => setTimeout(resolve, 9_000))
               const after = await snapshot()
               if (shared)
-                assert.ok(
-                  after.every(
-                    (state) =>
-                      state.firstActive === 0 && state.nativeConnected === 1
-                  ),
-                  JSON.stringify(after)
+                check(() =>
+                  assert.ok(
+                    after.every(
+                      (state) =>
+                        state.firstActive === 0 && state.nativeConnected === 1
+                    ),
+                    'the shared transport must remain connected'
+                  )
                 )
               for (let index = 0; index < after.length; index++) {
-                assert.equal(after[index].joins, 1, JSON.stringify(after))
-                assert.equal(after[index].leaves, 0, JSON.stringify(after))
-                assert.deepEqual(
-                  after[index].failures,
-                  [],
-                  JSON.stringify(after)
+                check(() =>
+                  assert.equal(
+                    after[index].joins,
+                    1,
+                    `peer ${index} join count`
+                  )
                 )
-                assert.equal(
-                  after[index].connections[0]?.state,
-                  'connected',
-                  JSON.stringify(after)
+                check(() =>
+                  assert.equal(
+                    after[index].leaves,
+                    0,
+                    `peer ${index} leave count`
+                  )
                 )
-                assert.ok(
-                  after[index].received > cutover[index].received + 20,
-                  JSON.stringify(after)
+                check(() =>
+                  assert.deepEqual(
+                    after[index].failures,
+                    [],
+                    `peer ${index} failures`
+                  )
+                )
+                check(() =>
+                  assert.equal(
+                    after[index].connections[0]?.state,
+                    'connected',
+                    `peer ${index} must remain connected after expiry`
+                  )
+                )
+                check(() =>
+                  assert.ok(
+                    after[index].received > cutover[index].received + 20,
+                    `peer ${index} must receive more than 20 payloads after expiry`
+                  )
                 )
                 if (!relayOnly)
-                  assert.equal(after[index].restarts, 0, JSON.stringify(after))
+                  check(() =>
+                    assert.equal(
+                      after[index].restarts,
+                      0,
+                      `peer ${index} direct restart count`
+                    )
+                  )
               }
               if (relayOnly)
-                assert.ok(
-                  turn.requests.some(
-                    (request) =>
-                      request.type === 4 && request.username === 'next'
+                check(() =>
+                  assert.ok(
+                    turn.requests.some(
+                      (request) =>
+                        request.type === 4 && request.username === 'next'
+                    ),
+                    'the next credential must refresh its allocation'
                   )
+                )
+              const turnDiagnostics = turn.diagnostics()
+              const scenario = { relayOnly, early: !!early, shared: !!shared }
+              const summarize = (states) =>
+                states.map((state, index) => ({
+                  received: state.received,
+                  payloadsAfterExpiry:
+                    state.at >= expiredAt
+                      ? state.received - cutover[index].received
+                      : undefined,
+                  restarts: state.restarts,
+                  messages: state.messages,
+                  connections: state.connections.map((connection) => ({
+                    port: connection.port,
+                    type: connection.type,
+                    gathering: connection.gathering,
+                    localPriority: connection.localCandidate?.priority,
+                    remotePriority: connection.remoteCandidate?.priority,
+                  })),
+                }))
+              if (errors.length)
+                throw new AggregateError(
+                  errors,
+                  `TURN renewal diagnostics: ${JSON.stringify({ scenario, expiredAt, before, current: rotationSnapshot, cutover, after, turn: turnDiagnostics })}`
                 )
               await Promise.all(
                 pages.map((item) => item.evaluate(() => window.fixture.stop()))
+              )
+              console.log(
+                `TURN renewal passed: ${JSON.stringify({ scenario, before: summarize(before), cutover: summarize(cutover), after: summarize(after), nextAllocations: turnDiagnostics.allocations.filter((allocation) => allocation.username === 'next').length })}`
               )
             } finally {
               await friend.close()

@@ -29,7 +29,9 @@ import { AudioOutputPicker } from '@/components/AudioOutputPicker'
 import { AuditLogPanel, type AuditLogEntry } from '@/components/AuditLogPanel'
 import { BreakCountdownBadge } from '@/components/BreakCountdownBadge'
 import type { FocusState } from '@/components/FocusIndicator'
+import { isKeybindCaptureActive } from '@/lib/shortcutCapture'
 import { MediaErrorBanner } from '@/components/MediaErrorBanner'
+import { MicToggleButton } from '@/components/MicToggleButton'
 import { ScreenCapturePermissionOverlay } from '@/components/ScreenCapturePermissionOverlay'
 import { ScreenShareViewer } from '@/components/ScreenShareViewer'
 import { SelfWarningBadge } from '@/components/SelfWarningBadge'
@@ -81,6 +83,7 @@ import { mediaErrorKind } from '@/lib/mediaError'
 import {
   comboToInlineDisplay,
   DEFAULT_PTT_FRIENDS_COMBO,
+  DEFAULT_MIC_TOGGLE_COMBO,
   parseAccelerator,
 } from '@/lib/keybindings'
 import { isMacLikePlatform } from '@/lib/utils'
@@ -95,7 +98,12 @@ import { useIdentityStore } from '@/stores/identityStore'
 import { usePomodoroStore } from '@/stores/pomodoroStore'
 import { useSessionStore } from '@/stores/sessionStore'
 import { useSettingsStore } from '@/stores/settingsStore'
-import { usePttStore, withPttButtonMutation } from '@/stores/pttStore'
+import {
+  isMicActive,
+  usePttStore,
+  withPttButtonMutation,
+} from '@/stores/pttStore'
+import { subscribeMicrophone } from './microphone'
 import { strings } from '@/strings'
 import { MirrorHostPanel } from '@/features/mirror/MirrorHostPanel'
 import { useSessionMirror } from '@/features/mirror/useSessionMirror'
@@ -290,6 +298,13 @@ export function SessionView({
     parseAccelerator(pttFriendsAccelerator) ?? DEFAULT_PTT_FRIENDS_COMBO,
     isMacLikePlatform() ? 'mac' : 'other'
   )
+  const micToggleAccelerator = useSettingsStore(
+    (s) => s.values.micToggleAccelerator
+  )
+  const micToggleLabel = comboToInlineDisplay(
+    parseAccelerator(micToggleAccelerator) ?? DEFAULT_MIC_TOGGLE_COMBO,
+    isMacLikePlatform() ? 'mac' : 'other'
+  )
   const showLinuxHoldFallback = detectChromePlatform() === 'linux'
   // #47 B4 — persisted per-friend volumes (ed_pubkey → 0..1); the fallback
   // when this session hasn't touched a peer's slider yet.
@@ -311,7 +326,9 @@ export function SessionView({
   // reflects whatever name was set when we joined.
   const myEdPubkeyHex = identity?.ed_pubkey_hex ?? null
   const myXPubkeyHex = identity?.x_pubkey_hex ?? null
-  const pttActive = usePttStore((s) => s.active)
+  const pttActive = usePttStore(isMicActive)
+  const hotMic = usePttStore((s) => s.hotMic)
+  const pttHeld = usePttStore((s) => s.active)
   const auditEvents = useAuditStore((s) => s.events)
   // #47 B6 — the ephemeral note feed + the wire sender owned by the
   // hello/audit effect (same ref pattern as emitAuditRef).
@@ -388,6 +405,9 @@ export function SessionView({
   )
   const mirrorTakeoverRef = useRef(mirror.takeover)
   useLayoutEffect(() => {
+    if (mirrorTakeoverRef.current !== mirror.takeover) {
+      usePttStore.getState().reset()
+    }
     mirrorTakeoverRef.current = mirror.takeover
   }, [mirror.takeover])
   useLayoutEffect(() => {
@@ -508,16 +528,30 @@ export function SessionView({
     string | null
   >(() => useSettingsStore.getState().values.audioOutputDeviceId)
   const [peerVolumes, setPeerVolumes] = useState<Record<string, number>>({})
-  // #96 — screen sharing. The local stream is the one we publish; the peer map
-  // is fed by the controller's classifier, so a friend's screen never lands on
-  // their face tile. `expandedScreen` holds the key of the screen open in the
-  // full-size viewer (LOCAL_SCREEN_KEY or a peerId) — keyed rather than holding
-  // the stream itself so a share that stops closes the viewer on its own.
+  // #96 — the classifier keeps shared screens separate from camera streams.
   const [screenStream, setScreenStream] = useState<MediaStream | null>(null)
   const [peerScreenStreams, setPeerScreenStreams] = useState<
     Record<string, MediaStream>
   >({})
-  const [expandedScreen, setExpandedScreen] = useState<string | null>(null)
+  const [expandedVideo, setExpandedVideo] = useState<{
+    kind: 'camera' | 'screen'
+    id: string
+  } | null>(null)
+  const expandedVideoStream =
+    expandedVideo === null
+      ? null
+      : expandedVideo.kind === 'camera'
+        ? peerCameraOff[expandedVideo.id]
+          ? null
+          : (remoteStreams[expandedVideo.id] ?? null)
+        : expandedVideo.id === LOCAL_SCREEN_KEY
+          ? screenStream
+          : (peerScreenStreams[expandedVideo.id] ?? null)
+  useEffect(() => {
+    if (expandedVideo === null || expandedVideoStream !== null) return
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- a retired stream must not reopen fullscreen when the peer resumes capture
+    setExpandedVideo(null)
+  }, [expandedVideo, expandedVideoStream])
   const screenStreamRef = useRef<MediaStream | null>(null)
   const screenShareRef = useRef<ScreenShareController | null>(null)
   const screenRequestGenerationRef = useRef(0)
@@ -663,7 +697,7 @@ export function SessionView({
       for (const track of stream?.getVideoTracks() ?? [])
         track.enabled = cameraOnRef.current
       for (const track of stream?.getAudioTracks() ?? [])
-        track.enabled = usePttStore.getState().active
+        track.enabled = isMicActive(usePttStore.getState())
       let offJoin: (() => void) | null = null
       localStreamRef.current = stream
       let cancelled = false
@@ -739,7 +773,7 @@ export function SessionView({
         // MediaErrorBanner "Try again" while pressing the key) comes up
         // unmuted — the PTT effect only re-fires on change and would
         // otherwise leave the fresh track silently muted.
-        const pttHeld = usePttStore.getState().active
+        const pttHeld = isMicActive(usePttStore.getState())
         for (const t of stream.getAudioTracks()) t.enabled = pttHeld
         // S3 — a fresh track defaults to enabled; if the user re-acquires
         // (MediaErrorBanner "Try again") while the camera is toggled off, mirror
@@ -787,7 +821,7 @@ export function SessionView({
           return
         }
         for (const track of stream.getAudioTracks())
-          track.enabled = usePttStore.getState().active
+          track.enabled = isMicActive(usePttStore.getState())
         for (const track of stream.getVideoTracks())
           track.enabled = cameraOnRef.current
         offJoinStream = publishLocalStream(room, stream)
@@ -849,6 +883,33 @@ export function SessionView({
       usePttStore.getState().reset()
     }
   }, [room])
+
+  useEffect(() => {
+    if (!room || mirror.takeover) return
+    let cancelled = false
+    let unlisten: (() => void) | undefined
+    void listen('mic-toggle', () => {
+      if (
+        cancelled ||
+        mirrorTakeoverRef.current ||
+        leaveRequestedRef.current ||
+        isKeybindCaptureActive()
+      )
+        return
+      const session = useSessionStore.getState()
+      if (session.room === room && session.status === 'active')
+        usePttStore.getState().toggleHotMic()
+    })
+      .then((off) => {
+        if (cancelled) off()
+        else unlisten = off
+      })
+      .catch((err: unknown) => log.warn('mic.toggle_listen_failed', { err }))
+    return () => {
+      cancelled = true
+      unlisten?.()
+    }
+  }, [room, mirror.takeover])
 
   // Bind peer streams to per-peer state. I77 — `onPeerStream` does NOT replay:
   // trystero assigns it bare (room.mjs:511) and only `onPeerJoin` sweeps
@@ -967,7 +1028,7 @@ export function SessionView({
     // while we're mid-transmit would never light our PTT indicator until we
     // re-press. Send our current state directly to each new peer on join.
     const offJoin = room.onPeerJoin((peerId) => {
-      const want = usePttStore.getState().active
+      const want = isMicActive(usePttStore.getState())
       recordPttBroadcast({ active: want, kind: 'resend' })
       void action.send({ active: want }, peerId).then(
         () => pttLog.debug('broadcast.resend', { want, ok: true }),
@@ -983,58 +1044,49 @@ export function SessionView({
     }
   }, [room])
 
-  // Reflect local PTT state on the local audio track AND broadcast it so
-  // peers can light their PTT indicator while we're transmitting.
-  useEffect(() => {
-    const stream = localStreamRef.current
-    // #226 — read the tracks BACK in the same turn as the write. This is the
-    // only direct observation anywhere that the mute actually took effect; a
-    // store that says transmitting over a disabled track is the reported shape.
-    let audioTracks = 0
-    let enabledTracks = 0
-    if (stream) {
-      for (const t of stream.getAudioTracks()) t.enabled = pttActive
-      for (const t of stream.getAudioTracks()) {
-        audioTracks += 1
-        if (t.enabled) enabledTracks += 1
-      }
-    }
-    const revision = usePttStore.getState().revision
-    const send = pttSendRef.current
-    if (send) {
-      recordPttBroadcast({ active: pttActive, kind: 'state-change' })
-      void send({ active: pttActive }).then(
-        () => {
-          pttLog.debug('broadcast.sent', {
-            reason: 'state-change',
-            want: pttActive,
-            storeRevision: revision,
-            ok: true,
-            audioTracks,
-            enabledTracks,
-          })
-        },
-        (err: unknown) => {
-          recordPttBroadcastFailure()
-          pttLog.warn('broadcast.failed', {
-            reason: 'state-change',
-            want: pttActive,
-            storeRevision: revision,
-            err,
-          })
+  useEffect(
+    () =>
+      subscribeMicrophone(
+        () => localStreamRef.current,
+        ({ active: pttActive, revision, audioTracks, enabledTracks }) => {
+          const send = pttSendRef.current
+          if (send) {
+            recordPttBroadcast({ active: pttActive, kind: 'state-change' })
+            void send({ active: pttActive }).then(
+              () => {
+                pttLog.debug('broadcast.sent', {
+                  reason: 'state-change',
+                  want: pttActive,
+                  storeRevision: revision,
+                  ok: true,
+                  audioTracks,
+                  enabledTracks,
+                })
+              },
+              (err: unknown) => {
+                recordPttBroadcastFailure()
+                pttLog.warn('broadcast.failed', {
+                  reason: 'state-change',
+                  want: pttActive,
+                  storeRevision: revision,
+                  err,
+                })
+              }
+            )
+          } else {
+            pttLog.debug('broadcast.sent', {
+              reason: 'state-change',
+              want: pttActive,
+              storeRevision: revision,
+              ok: false,
+              audioTracks,
+              enabledTracks,
+            })
+          }
         }
-      )
-    } else {
-      pttLog.debug('broadcast.sent', {
-        reason: 'state-change',
-        want: pttActive,
-        storeRevision: revision,
-        ok: false,
-        audioTracks,
-        enabledTracks,
-      })
-    }
-  }, [pttActive])
+      ),
+    []
+  )
 
   // #226 — effects run after the DOM is committed, so this is the earliest
   // point the rendered indicator can be compared with the state it is supposed
@@ -1132,7 +1184,7 @@ export function SessionView({
       if (stream) stopTracks(stream)
       setScreenStream(null)
       setPeerScreenStreams({})
-      setExpandedScreen(null)
+      setExpandedVideo(null)
     }
   }, [room])
 
@@ -1148,13 +1200,37 @@ export function SessionView({
       useIdentityStore.getState().identity?.display_name ?? ''
     const sign = signWithKeyring
     const provisionalAuthorityHellos = provisionalAuthorityHellosRef.current
+    // A verified hello can precede the authority roster that admits its
+    // transport. Retain only its signed join, without creating peer history.
+    const pendingJoinedAudits = new Map<string, AuditEvent>()
+    const isCurrent = () => {
+      const session = useSessionStore.getState()
+      return (
+        !stopped &&
+        !leaveRequestedRef.current &&
+        session.status === 'active' &&
+        session.room === room &&
+        session.startedAt === startedAt
+      )
+    }
     const promoteProvisionalHellos = () => {
       const session = useSessionStore.getState()
-      if (stopped || session.room !== room) return
+      if (!isCurrent()) return
       for (const [peerId, hello] of provisionalAuthorityHellos) {
         if (!session.peers[peerId]) continue
         provisionalAuthorityHellos.delete(peerId)
         setPeerHello(peerId, hello)
+        const joined = pendingJoinedAudits.get(peerId)
+        pendingJoinedAudits.delete(peerId)
+        if (
+          joined &&
+          verifyIncomingAuditEvent(
+            joined,
+            useSessionStore.getState().peers[peerId]?.edPubkeyHex ?? null
+          )
+        ) {
+          useAuditStore.getState().append(joined)
+        }
       }
     }
     // A hello action cannot unregister its receiver in Trystero, so scope
@@ -1169,6 +1245,15 @@ export function SessionView({
       myDisplayName,
       selfJoinedAt: startedAt,
       sign,
+      onOurHelloSentToPeer: (peerId, signal) => {
+        void (async () => {
+          const event = await joinedEventPromise
+          if (!event || signal.aborted || !isCurrent()) return
+          await sendJoined(event, peerId)
+        })().catch((err: unknown) => {
+          log.error('audit_join.failed', { err })
+        })
+      },
       onPeerHello: (peerId, hello) => {
         const session = useSessionStore.getState()
         if (stopped || session.room !== room) return
@@ -1196,6 +1281,7 @@ export function SessionView({
         // callback must not erase a same-ID hello cached by the current room.
         if (stopped || useSessionStore.getState().room !== room) return
         provisionalAuthorityHellos.delete(peerId)
+        pendingJoinedAudits.delete(peerId)
       },
     })
 
@@ -1272,13 +1358,29 @@ export function SessionView({
     )
 
     auditAction.receive((data, peerId) => {
+      if (!isCurrent()) return
       const expectedEd =
         useSessionStore.getState().peers[peerId]?.edPubkeyHex ?? null
-      const verified = verifyIncomingAuditEvent(data, expectedEd)
+      const verified = verifyIncomingAuditEvent(
+        data,
+        expectedEd ??
+          provisionalAuthorityHellos.get(peerId)?.ed_pubkey_hex ??
+          null
+      )
       if (!verified) return
       // Drop a (signed, valid) event addressed to a different session —
       // mirrors the ai-alert path's replay guard (aiAlerts.ts). (I8)
       if (verified.session_topic !== sessionTopic) return
+      if (!expectedEd) {
+        if (
+          verified.kind === 'joined' &&
+          (pendingJoinedAudits.has(peerId) ||
+            pendingJoinedAudits.size < MAX_REMOTE_PEERS + 1)
+        ) {
+          pendingJoinedAudits.set(peerId, verified)
+        }
+        return
+      }
       useAuditStore.getState().append(verified)
     })
 
@@ -1446,18 +1548,42 @@ export function SessionView({
     pomodoroStartRef.current = controller.start
     pomodoroStopRef.current = controller.stop
 
-    // Send our hello first; once it's been written to all currently-connected
-    // peers in trystero's per-channel order, fire our "joined" audit event
-    // so receivers already have the peerId↔ed_pubkey binding.
-    void (async () => {
+    // Sign once per stint. A broadcast while alone reaches nobody; every
+    // later transport receives this exact event after its targeted hello.
+    const sendJoined = async (event: AuditEvent, peerId?: string) => {
+      try {
+        await auditAction.send(event, peerId)
+      } catch (err) {
+        log.error('audit_broadcast.failed', {
+          auditKind: 'joined',
+          localAppendSucceeded: true,
+          err,
+        })
+      }
+    }
+    const joinedEventPromise = (async () => {
       try {
         await helloHandle.ourHelloSent
       } catch {
         // Hello broadcast failures are best-effort; we still emit "joined"
         // locally so the session-log panel reflects our presence.
       }
-      if (stopped) return
-      void emitAudit('joined', {})
+      if (!isCurrent()) return null
+      const event = await buildAuditEvent({
+        sessionTopic,
+        myEdPubkeyHex,
+        kind: 'joined',
+        detail: {},
+        sign,
+      })
+      if (!isCurrent()) return null
+      useAuditStore.getState().append(event)
+      return event
+    })()
+    void (async () => {
+      const event = await joinedEventPromise
+      if (!event || !isCurrent()) return
+      void sendJoined(event)
       // V2-P9 — the only producer of `topic_set` (kind+label wired in V2-P7,
       // no producer until now). Fires once per local stint, only when AI is on
       // (the required topic prompt only runs in that case), right after
@@ -1471,10 +1597,13 @@ export function SessionView({
         const topic = useSessionStore.getState().declaredStudyTopic
         void emitAudit('topic_set', { topic })
       }
-    })()
+    })().catch((err: unknown) => {
+      log.error('audit_join.failed', { err })
+    })
 
     return () => {
       stopped = true
+      pendingJoinedAudits.clear()
       provisionalAuthorityHellos.clear()
       stopHelloPromotionWatch()
       controller.teardown()
@@ -2044,6 +2173,7 @@ export function SessionView({
   const handleLeave = useCallback(() => {
     if (!sessionLeave || leaveRequestedRef.current) return
     leaveRequestedRef.current = true
+    usePttStore.getState().reset()
     useSessionStore.getState().setPendingEndReason('user')
     void (async () => {
       try {
@@ -2077,21 +2207,24 @@ export function SessionView({
     if (status !== 'active') return
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return
-      // Avoid stealing ESC from input fields (none today, but the AI dialog
-      // window in V2-P7 might mount inside this same view).
-      const target = e.target as HTMLElement | null
-      const tag = target?.tagName
-      if (tag === 'INPUT' || tag === 'TEXTAREA' || target?.isContentEditable) {
-        return
-      }
       // #47 B2 — any open modal (Radix dialogs) or the settings overlay
       // (role=dialog, intentionally not aria-modal so the custom-chrome
       // TitleBar stays AT-reachable) owns Esc. Arming leave-on-Esc
       // underneath one risks an invisible second-Esc ending the session
       // for everyone.
       if (
+        e.defaultPrevented ||
         document.querySelector('[aria-modal="true"], [data-settings-overlay]')
       ) {
+        escLeaveArmedAtRef.current = null
+        toast.dismiss('esc-leave-hint')
+        return
+      }
+      // Avoid stealing ESC from input fields (none today, but the AI dialog
+      // window in V2-P7 might mount inside this same view).
+      const target = e.target as HTMLElement | null
+      const tag = target?.tagName
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || target?.isContentEditable) {
         return
       }
       e.preventDefault()
@@ -2158,7 +2291,7 @@ export function SessionView({
               )
             },
           },
-          () => usePttStore.getState().active
+          () => isMicActive(usePttStore.getState())
         )
         if (!newTrack) return
         if (!isCurrent()) {
@@ -2209,7 +2342,9 @@ export function SessionView({
     const stream = screenStreamRef.current
     screenStreamRef.current = null
     setScreenStream(null)
-    setExpandedScreen((cur) => (cur === LOCAL_SCREEN_KEY ? null : cur))
+    setExpandedVideo((cur) =>
+      cur?.kind === 'screen' && cur.id === LOCAL_SCREEN_KEY ? null : cur
+    )
     screenShareRef.current?.unpublish()
     if (stream) stopTracks(stream)
   }, [])
@@ -3082,27 +3217,21 @@ export function SessionView({
   const presenceCheck = (edPubkeyHex: string) =>
     presence !== undefined && isOnline(presence, edPubkeyHex)
   const youName = identity?.display_name?.trim() || strings.session.selfFallback
-  // #96 — resolve the expanded screen from its key at render time, so a share
-  // that stops (locally or remotely) closes the viewer without a second piece
-  // of state to keep in step.
-  const expandedScreenStream =
-    expandedScreen === null
-      ? null
-      : expandedScreen === LOCAL_SCREEN_KEY
-        ? screenStream
-        : (peerScreenStreams[expandedScreen] ?? null)
   // Radix keeps the dialog mounted through its close animation, so this still
   // renders for a frame after the key clears — hence the null branch, without
   // which the title would flip to a mangled peer label on the way out.
-  const expandedScreenName =
-    expandedScreen === null
+  const expandedVideoPeerName = expandedVideo
+    ? (peerEntries.find((p) => p.peerId === expandedVideo.id)?.displayName ??
+      peerLabel(expandedVideo.id))
+    : ''
+  const expandedVideoName =
+    expandedVideo === null
       ? ''
-      : expandedScreen === LOCAL_SCREEN_KEY
-        ? strings.session.screenShare.selfTileName
-        : strings.session.screenShare.peerTileName(
-            peerEntries.find((p) => p.peerId === expandedScreen)?.displayName ??
-              peerLabel(expandedScreen)
-          )
+      : expandedVideo.kind === 'camera'
+        ? expandedVideoPeerName
+        : expandedVideo.id === LOCAL_SCREEN_KEY
+          ? strings.session.screenShare.selfTileName
+          : strings.session.screenShare.peerTileName(expandedVideoPeerName)
   const broadcasterName = pomodoroSnapshot.iAmBroadcaster
     ? strings.session.broadcasterSelf
     : pomodoroSnapshot.broadcasterEdPubkey
@@ -3158,7 +3287,9 @@ export function SessionView({
                 stream={screenStream}
                 variant="screen"
                 isLocal
-                onExpand={() => setExpandedScreen(LOCAL_SCREEN_KEY)}
+                onExpand={() =>
+                  setExpandedVideo({ kind: 'screen', id: LOCAL_SCREEN_KEY })
+                }
               />
             ) : null}
             {peerEntries.length === 0 ? (
@@ -3196,6 +3327,9 @@ export function SessionView({
                   key={peer.peerId}
                   name={peerName}
                   stream={peerStream}
+                  onExpand={() =>
+                    setExpandedVideo({ kind: 'camera', id: peer.peerId })
+                  }
                   mutePlayback={mirror.takeover}
                   ptt={peerPtt[peer.peerId] ?? false}
                   cameraOff={peerCameraOff[peer.peerId] ?? false}
@@ -3220,7 +3354,9 @@ export function SessionView({
                     name={strings.session.screenShare.peerTileName(peerName)}
                     stream={peerScreen}
                     variant="screen"
-                    onExpand={() => setExpandedScreen(peer.peerId)}
+                    onExpand={() =>
+                      setExpandedVideo({ kind: 'screen', id: peer.peerId })
+                    }
                   />
                 )
               }
@@ -3254,16 +3390,30 @@ export function SessionView({
         }}
         resolveName={resolveNoteName}
       />
-      <footer className="flex shrink-0 items-center justify-between gap-4 border-t border-border-subtle bg-bg-surface px-6 py-4 text-sm">
-        <span className="flex items-center gap-3 text-text-secondary">
+      <footer className="flex shrink-0 flex-wrap items-center justify-between gap-4 border-t border-border-subtle bg-bg-surface px-6 py-4 text-sm">
+        <span className="flex flex-wrap items-center gap-3 text-text-secondary">
+          <MicToggleButton
+            enabled={hotMic}
+            onToggle={() => {
+              if (!mirrorTakeoverRef.current && !leaveRequestedRef.current)
+                usePttStore.getState().toggleHotMic()
+            }}
+            shortcutLabel={micToggleLabel}
+            disabled={mirror.takeover}
+          />
+          <span role="status" className="sr-only">
+            {hotMic
+              ? strings.session.mic.enabled
+              : strings.session.mic.disabled}
+          </span>
           {showLinuxHoldFallback ? (
             <Button
               type="button"
-              variant={pttActive ? 'secondary' : 'ghost'}
+              variant={pttHeld ? 'secondary' : 'ghost'}
               size="sm"
-              aria-pressed={pttActive}
+              aria-pressed={pttHeld}
               aria-label={strings.session.holdToTalkAriaLabel}
-              data-ptt-hold={String(pttActive)}
+              data-ptt-hold={String(pttHeld)}
               onPointerDown={(event) => {
                 if (!event.isPrimary || event.button !== 0) return
                 event.currentTarget.setPointerCapture(event.pointerId)
@@ -3296,8 +3446,8 @@ export function SessionView({
               onBlur={() => releaseHoldToTalk('blur')}
               className="gap-2"
             >
-              {pttActive ? <MicIcon /> : <MicOffIcon />}
-              {pttActive
+              {pttHeld ? <MicIcon /> : <MicOffIcon />}
+              {pttHeld
                 ? strings.session.talkingCta
                 : strings.session.holdToTalkCta}
             </Button>
@@ -3461,12 +3611,12 @@ export function SessionView({
         onRetry={handleCaptureRetry}
       />
       <ScreenShareViewer
-        open={expandedScreenStream !== null}
+        open={expandedVideoStream !== null}
         onOpenChange={(next) => {
-          if (!next) setExpandedScreen(null)
+          if (!next) setExpandedVideo(null)
         }}
-        name={expandedScreenName}
-        stream={expandedScreenStream}
+        name={expandedVideoName}
+        stream={expandedVideoStream}
       />
       {canInvite ? (
         <SessionInviteDialog

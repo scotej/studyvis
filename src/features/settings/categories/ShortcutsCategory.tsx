@@ -8,6 +8,7 @@ import { SettingsRow, SettingsSection } from '@/components/SettingsRow'
 import { Button } from '@/components/ui/button'
 import {
   comboToAccelerator,
+  DEFAULT_MIC_TOGGLE_COMBO,
   DEFAULT_PTT_AI_COMBO,
   DEFAULT_PTT_FRIENDS_COMBO,
   parseAccelerator,
@@ -37,6 +38,9 @@ export function ShortcutsCategory() {
     (s) => s.values.pttFriendsAccelerator
   )
   const pttAiAccelerator = useSettingsStore((s) => s.values.pttAiAccelerator)
+  const micToggleAccelerator = useSettingsStore(
+    (s) => s.values.micToggleAccelerator
+  )
   const aiPreferenceEnabled = useSettingsStore(
     (s) => s.values.aiFeaturesEnabled
   )
@@ -60,6 +64,26 @@ export function ShortcutsCategory() {
   const pttAiCombo = useMemo(
     () => comboFromAccelerator(pttAiAccelerator, DEFAULT_PTT_AI_COMBO),
     [pttAiAccelerator]
+  )
+
+  const micToggleCombo = useMemo(
+    () => comboFromAccelerator(micToggleAccelerator, DEFAULT_MIC_TOGGLE_COMBO),
+    [micToggleAccelerator]
+  )
+  const additionalMicBinding = useMemo(
+    () => [{ combo: micToggleCombo, action: 'mic-toggle' as const }],
+    [micToggleCombo]
+  )
+  const additionalAiBinding = useMemo(
+    () => [{ combo: pttAiCombo, action: 'ptt-ai' as const }],
+    [pttAiCombo]
+  )
+
+  const handleCommitMicToggle = useCallback(
+    async (next: Combo) => {
+      await setShortcutAccelerator('mic-toggle', comboToAccelerator(next))
+    },
+    [setShortcutAccelerator]
   )
 
   const handleCommitFriends = useCallback(
@@ -101,6 +125,7 @@ export function ShortcutsCategory() {
             combo={pttFriendsCombo}
             otherCombo={pttAiCombo}
             otherAction="ptt-ai"
+            additionalBindings={additionalMicBinding}
             platform={p}
             onCommit={handleCommitFriends}
           />
@@ -116,8 +141,25 @@ export function ShortcutsCategory() {
             combo={pttAiCombo}
             otherCombo={pttFriendsCombo}
             otherAction="ptt-friends"
+            additionalBindings={additionalMicBinding}
             platform={p}
             onCommit={handleCommitAi}
+          />
+        }
+      />
+      <SettingsRow
+        label={copy.micToggle.label}
+        help={copy.micToggle.help}
+        className="items-start"
+        control={
+          <KeybindCapture
+            action="mic-toggle"
+            combo={micToggleCombo}
+            otherCombo={pttFriendsCombo}
+            otherAction="ptt-friends"
+            additionalBindings={additionalAiBinding}
+            platform={p}
+            onCommit={handleCommitMicToggle}
           />
         }
       />

@@ -98,6 +98,32 @@ function violationIds(events: PttInvariantEvent[]): PttInvariantId[] {
     .map((e) => (e as { id: PttInvariantId }).id)
 }
 
+test('always-on audio, indicator and broadcast agree without a physical hold', () => {
+  const monitor = createPttInvariantMonitor()
+  const events = settle(monitor, (atMs) => {
+    const o = healthy({ atMs })
+    o.store.hotMic = true
+    o.track.enabledAudioSenders = 1
+    o.render.selfLit = true
+    o.render.opacityLit = true
+    o.broadcast.lastActive = true
+    return o
+  })
+  expect(violationIds(events)).toEqual([])
+})
+
+test('always-on mode still detects a muted sender', () => {
+  const monitor = createPttInvariantMonitor()
+  const events = settle(monitor, (atMs) => {
+    const o = healthy({ atMs })
+    o.store.hotMic = true
+    o.render.selfLit = true
+    o.broadcast.lastActive = true
+    return o
+  })
+  expect(violationIds(events)).toEqual(['track.disabled_while_active'])
+})
+
 describe('PTT invariants', () => {
   test('a healthy observation held indefinitely fires nothing', () => {
     const monitor = createPttInvariantMonitor()

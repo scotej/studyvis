@@ -115,7 +115,36 @@ export async function startTurnRelay() {
       return
     }
     const transactionId = message.subarray(8, 20).toString('hex')
-    requests.push({ type, username, transactionId })
+    const at = Date.now()
+    const server = socket.address()
+    const requestedLifetime = values.get(0xd)
+    requests.push({
+      type,
+      username,
+      transactionId,
+      at,
+      lifetime:
+        requestedLifetime?.length === 4
+          ? requestedLifetime.readUInt32BE(0)
+          : null,
+      fiveTuple: {
+        protocol: 'udp',
+        clientAddress: remote.address,
+        clientPort: remote.port,
+        serverAddress: server.address,
+        serverPort: server.port,
+      },
+      allocationUsername: allocation?.username,
+      allocationRelayPort: allocation?.relayAddress?.port,
+    })
+    if (allocation) {
+      allocation.lastRequestAt = at
+      if (type === 4) {
+        allocation.lastRefreshAt = at
+        allocation.lastRefreshUsername = username
+        allocation.refreshCount++
+      }
+    }
     if (!authenticationKeys.has(username) || expired.has(username)) {
       reply(message, remote, type | 0x110, [
         attr(9, Buffer.from([0, 0, 4, 1, ...Buffer.from('Unauthorized')])),
@@ -162,6 +191,10 @@ export async function startTurnRelay() {
         response: null,
         waiting: [],
         channels: new Map(),
+        createdAt: at,
+        lastRequestAt: at,
+        relayAddress: null,
+        refreshCount: 0,
       }
       allocations.set(id, record)
       relay.on('message', (data, peer) => {
@@ -187,6 +220,8 @@ export async function startTurnRelay() {
         }
       })
       relay.bind(0, '127.0.0.1', () => {
+        record.relayAddress = relay.address()
+        record.boundAt = Date.now()
         record.response = reply(
           message,
           remote,
@@ -219,6 +254,45 @@ export async function startTurnRelay() {
   return {
     url: `turn:127.0.0.1:${socket.address().port}?transport=udp`,
     requests,
+    diagnostics: () => ({
+      at: Date.now(),
+      expired: [...expired],
+      allocationCount: allocations.size,
+      allocationsDropped: Math.max(0, allocations.size - 128),
+      allocations: [...allocations.entries()]
+        .slice(-128)
+        .map(([client, record]) => ({
+          client,
+          fiveTuple: {
+            protocol: 'udp',
+            clientAddress: client.slice(0, client.lastIndexOf(':')),
+            clientPort: Number(client.slice(client.lastIndexOf(':') + 1)),
+            serverAddress: socket.address().address,
+            serverPort: socket.address().port,
+          },
+          username: record.username,
+          relayAddress: record.relayAddress?.address,
+          relayPort: record.relayAddress?.port,
+          transactionId: record.transactionId,
+          createdAt: record.createdAt,
+          boundAt: record.boundAt,
+          lastRequestAt: record.lastRequestAt,
+          lastRefreshAt: record.lastRefreshAt,
+          lastRefreshUsername: record.lastRefreshUsername,
+          refreshCount: record.refreshCount,
+        })),
+      requestCount: requests.length,
+      allocateRequestCount: requests.filter((request) => request.type === 3)
+        .length,
+      allocateRequestsDropped: Math.max(
+        0,
+        requests.filter((request) => request.type === 3).length - 128
+      ),
+      requests: [
+        ...requests.filter((request) => request.type === 3).slice(-128),
+        ...requests.filter((request) => request.type !== 3).slice(-100),
+      ].sort((a, b) => a.at - b.at),
+    }),
     expire: (username) => expired.add(username),
     credentialAt: (port) =>
       [...allocations.values()].find(

@@ -92,9 +92,9 @@ use commands::system::{
     system_open_microphone_settings, system_open_notification_settings, system_open_releases,
     system_open_screen_capture_settings, system_open_turn_login, system_relaunch_app,
     system_save_image, system_set_global_shortcut, system_set_global_shortcuts,
-    system_window_style_is_custom_applied, system_write_text_file, AiFeaturesFlag,
-    MinimizeToTrayFlag, QuitFlag, SessionActiveFlag, ShortcutBindings, TrayAvailableFlag,
-    WindowStyleAppliedFlag,
+    system_set_shortcut_capture_active, system_window_style_is_custom_applied,
+    system_write_text_file, AiFeaturesFlag, MinimizeToTrayFlag, QuitFlag, SessionActiveFlag,
+    ShortcutBindings, TrayAvailableFlag, WindowStyleAppliedFlag,
 };
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -216,6 +216,8 @@ pub fn run() {
         #[cfg(desktop)]
         system_set_global_shortcut,
         system_set_global_shortcuts,
+        #[cfg(desktop)]
+        system_set_shortcut_capture_active,
         #[cfg(desktop)]
         system_relaunch_app,
         #[cfg(desktop)]
@@ -379,9 +381,13 @@ pub fn run() {
                 let initial_ai_features =
                     read_ai_features_from_settings(app.handle()).unwrap_or(false);
                 app.manage(AiFeaturesFlag::new(initial_ai_features));
-                let (initial_ptt_friends, initial_ptt_ai) =
+                let (initial_ptt_friends, initial_ptt_ai, initial_mic_toggle) =
                     read_shortcut_accelerators_from_settings(app.handle());
-                app.manage(ShortcutBindings::new(&initial_ptt_friends, &initial_ptt_ai));
+                app.manage(ShortcutBindings::new(
+                    &initial_ptt_friends,
+                    &initial_ptt_ai,
+                    &initial_mic_toggle,
+                ));
                 // #226 — resolve the native log path before anything PTT-shaped
                 // can happen, so no lifecycle record is dropped pre-init.
                 commands::native_log::init(app.handle(), env!("CARGO_PKG_VERSION"));
@@ -629,12 +635,14 @@ fn apply_window_style<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
 #[cfg(desktop)]
 fn read_shortcut_accelerators_from_settings<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
-) -> (String, String) {
+) -> (String, String, String) {
     const SETTINGS_FILE: &str = "settings.json";
     const KEY_PTT_FRIENDS: &str = "ptt_friends_accelerator";
     const KEY_PTT_AI: &str = "ptt_ai_accelerator";
+    const KEY_MIC_TOGGLE: &str = "mic_toggle_accelerator";
     const DEFAULT_PTT_FRIENDS: &str = "CmdOrCtrl+[";
     const DEFAULT_PTT_AI: &str = "CmdOrCtrl+]";
+    const DEFAULT_MIC_TOGGLE: &str = "CmdOrCtrl+Backslash";
     let read = || -> Option<serde_json::Value> {
         let dir = app.path().app_data_dir().ok()?;
         let bytes = std::fs::read(dir.join(SETTINGS_FILE)).ok()?;
@@ -660,7 +668,14 @@ fn read_shortcut_accelerators_from_settings<R: tauri::Runtime>(
         .filter(|s| !s.is_empty())
         .map(str::to_owned)
         .unwrap_or_else(|| DEFAULT_PTT_AI.to_owned());
-    (friends, ai)
+    let mic_toggle = value
+        .as_ref()
+        .and_then(|v| v.get(KEY_MIC_TOGGLE))
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .map(str::to_owned)
+        .unwrap_or_else(|| DEFAULT_MIC_TOGGLE.to_owned());
+    (friends, ai, mic_toggle)
 }
 
 #[cfg(desktop)]
@@ -740,15 +755,18 @@ fn setup_desktop(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>>
         app.deep_link().register_all()?;
     }
 
-    // Active shortcuts live in one `ShortcutBindings` pair mutex so the
-    // V3-P3 / #394 commands can swap one or both at runtime.
+    // Active shortcuts live in one `ShortcutBindings` mutex so the
+    // V3-P3 / #394 commands can swap bindings atomically at runtime.
     // The handler locks the same Mutex on every press/release — Mutex
     // contention is per-keystroke and trivial.
     app.handle().plugin(
         tauri_plugin_global_shortcut::Builder::new()
             .with_handler(move |app, shortcut, event| {
                 let bindings = app.state::<ShortcutBindings>();
-                let (ptt_friends, ptt_ai) = bindings.pair();
+                if bindings.capture_active() {
+                    return;
+                }
+                let [ptt_friends, ptt_ai, mic_toggle] = bindings.all();
                 if shortcut == &ptt_friends {
                     // #226 — this runs per keystroke, so it counts and does
                     // nothing else. The counters are flushed to the log at
@@ -769,6 +787,15 @@ fn setup_desktop(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>>
                                 commands::system::count_ptt_released_emit(false);
                             }
                         }
+                    }
+                } else if shortcut == &mic_toggle && shortcut != &ptt_ai {
+                    match event.state() {
+                        ShortcutState::Pressed => {
+                            if SessionActiveFlag::is_active(app) && bindings.mic_toggle_pressed() {
+                                let _ = app.emit("mic-toggle", ());
+                            }
+                        }
+                        ShortcutState::Released => bindings.reset_mic_toggle(),
                     }
                 } else if shortcut == &ptt_ai {
                     // V2-P7 wires this shortcut to the floating Ctrl+] AI

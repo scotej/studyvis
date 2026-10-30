@@ -106,7 +106,7 @@ The candidate does not rely on the host distribution's WebKit for sessions.
 Official distro WebKitGTK release builds in the maintained Linux path compile
 the GTK `ENABLE_WEB_RTC` peer-connection binding out, so installing or upgrading
 that package cannot make `RTCPeerConnection` available (its media-device API is
-still present). The AppImage instead carries the StudyVis-built WebKitGTK 2.52.5
+still present). The AppImage instead carries the StudyVis-built WebKitGTK 2.54.2
 and librice 0.4.3 runtime. Linux remains a release candidate until that exact
 AppImage—not a dev build using host libraries—passes the data-channel,
 camera/microphone, screen-capture, AI-capture, and physical cross-platform peer
@@ -755,7 +755,7 @@ license material ship under
 `usr/share/licenses/studyvis-webkit-runtime/` in the AppImage. That directory's
 `BUILD-MANIFEST.txt` records the source URLs/hashes, patch hash, tool/config
 inputs, and payload list; `WEBKIT-THIRD-PARTY-LICENSES.txt` and
-`WEBKIT-LICENSE-FILES.sha256` carry the readable 59-file upstream inventory.
+`WEBKIT-LICENSE-FILES.sha256` carry the readable 64-file upstream inventory.
 `LIBRICE-THIRD-PARTY-NOTICES.txt` and its JSON manifest separately inventory
 the exact locked normal-dependency union selected by the `rice-proto` and
 `rice-io` `cargo-c` builds, including their `capi` features and source hashes.

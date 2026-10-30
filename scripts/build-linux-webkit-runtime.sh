@@ -358,7 +358,7 @@ expected_manifest() {
     'rice-link-policy=Rice::Io imports Rice::Proto; both are direct WebKit subprocess dependencies' \
     'wayland-protocols-policy=resolve host pkgdatadir without PKG_CONFIG_SYSROOT_DIR and assert Ninja inputs' \
     'pkg-config-policy=runtime .pc files are rebased to ${RUNTIME_ROOT}; no PKG_CONFIG_SYSROOT_DIR' \
-    'webkit-license-file-count=59' \
+    'webkit-license-file-count=64' \
     'license-payload=COPYING.LIB' \
     'license-payload=LICENSE-APPLE' \
     'license-payload=LICENSE-LGPL-2' \
@@ -797,7 +797,7 @@ runtime_is_complete() {
   [[ $actual_gstreamer_sha256 == "$gstreamer_license_inventory_sha256" ]] || return 1
   [[ $(wc -l <"$licenses/GSTREAMER-LICENSE-FILES.sha256") -eq 15 ]] || return 1
   gstreamer_runtime_is_complete || return 1
-  [[ $(wc -l <"$licenses/WEBKIT-LICENSE-FILES.sha256") -eq 59 ]] || return 1
+  [[ $(wc -l <"$licenses/WEBKIT-LICENSE-FILES.sha256") -eq 64 ]] || return 1
   node "$librice_notice_generator" --check "$licenses" \
     --expected-lock-sha "$rice_lock_sha256" >/dev/null || return 1
   read -r actual_notice_sha256 _ < <(sha256sum "$librice_notice")
@@ -1241,8 +1241,8 @@ mapfile -d '' -t webkit_license_files < <(
     \( -iname 'copying*' -o -iname 'license*' -o -iname 'notice*' \) \
     -print0 | LC_ALL=C sort -z
 )
-[[ ${#webkit_license_files[@]} -eq 59 ]] || {
-  die "expected 59 WebKit license files, found ${#webkit_license_files[@]}"
+[[ ${#webkit_license_files[@]} -eq 64 ]] || {
+  die "expected 64 WebKit license files, found ${#webkit_license_files[@]}"
 }
 license_bundle="$licenses/WEBKIT-THIRD-PARTY-LICENSES.txt"
 license_hashes="$licenses/WEBKIT-LICENSE-FILES.sha256"

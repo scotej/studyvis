@@ -77,7 +77,7 @@ exact artifact identity, not a minimum-version range.
 
 ### Tauri plugins (all v2.x)
 - **tauri-plugin-shell** — required for sidecar binaries (llama-server).
-- **tauri-plugin-global-shortcut** — system-wide PTT and AI-dialog hotkeys.
+- **tauri-plugin-global-shortcut** — system-wide PTT, always-on microphone toggle, and AI-dialog hotkeys.
 - **tauri-plugin-notification** — incoming-invite + pomodoro / friend-online notifications.
 - **tauri-plugin-autostart** — opt-in launch-at-login.
 - **tauri-plugin-single-instance** (with the `deep-link` feature) — registered first, so relaunching a hidden (close-to-tray) app focuses the existing window instead of spawning a second process; its callback also forwards any `studyvis://` argv from the second instance into the deep-link stream.
@@ -131,18 +131,18 @@ experimental features still off but WebRTC explicitly on; it also reasserts
 media streams, GStreamer WebRTC, librice, and the bubblewrap sandbox. librice
 keeps ICE/network work in WebKit's sandboxed NetworkProcess.
 
-Runtime revision 9 has this reviewable input identity:
+Runtime revision 10 has this reviewable input identity:
 
 | Input | Version/source | SHA-256 |
 |-|-|-|
-| WebKitGTK | `webkitgtk-2.52.5.tar.xz` from `webkitgtk.org/releases` | `8a531a9abd2215936e8a8a914c077b586c0228b31d652f205286a8ec90f3364b` |
+| WebKitGTK | `webkitgtk-2.54.2.tar.xz` from `webkitgtk.org/releases` | `a76345b391bef6211fb5ab6cfab2e86b285d18cda17cbb9ade595f1252b86065` |
 | librice | GitHub tag archive `v0.4.3` | `4671e1835f9ab0f8d87e8d9e22b6bfb06f928aeae442841ab81881dff61e3f4b` |
-| WebKit AppImage portability delta | `scripts/patches/webkitgtk-2.52.5-appimage-sandbox.patch` | `a4773c3a942440b6c00eb3bad4f81f0d0bcd86010275eb54bab6f9e965db8145` |
-| GStreamer core | `gstreamer-1.28.7.tar.xz` from `gstreamer.freedesktop.org/src` | `787329b2c5758e228a71d926a6dcf960bceaacca3cadd63874ba665dfcda013e` |
-| GStreamer base | `gst-plugins-base-1.28.7.tar.xz` from `gstreamer.freedesktop.org/src` | `ed6e5410f496d171818763af2265e7977154bc7f9b827e98acf8c5bed21dd5a7` |
-| GStreamer good | `gst-plugins-good-1.28.7.tar.xz` from `gstreamer.freedesktop.org/src` | `87256969c82cf3bc8574301f3e7044a90de0ac500a5a27d8ba38c4dde894dd8b` |
-| GStreamer bad | `gst-plugins-bad-1.28.7.tar.xz` from `gstreamer.freedesktop.org/src` | `dc525383c18b2c265bbe6a43d498656cd918aaa130aa4e3abeabcdaa741c3ffe` |
-| GStreamer rollback delta | `scripts/patches/gst-plugins-bad-1.28.7-webrtc-rollback.patch` | `e3105c73dc2ff3479ecd79320068d112e7370901c48a297288f02cbefcb03799` |
+| WebKit AppImage portability delta | `scripts/patches/webkitgtk-2.54.2-appimage-sandbox.patch` | `320c81d020741208164289fd26e2ccf2db10c5d750ec8a3837ed2444e57434bc` |
+| GStreamer core | `gstreamer-1.28.8.tar.xz` from `gstreamer.freedesktop.org/src` | `baa8e86985ad6417cc0ad6e7b79ff2884c6779c8b1c7a6240e7121822c86e524` |
+| GStreamer base | `gst-plugins-base-1.28.8.tar.xz` from `gstreamer.freedesktop.org/src` | `ade70e3381fcbb024f1f20aa9ede9b5654aeed39d5bd70b1a98f53015e501117` |
+| GStreamer good | `gst-plugins-good-1.28.8.tar.xz` from `gstreamer.freedesktop.org/src` | `a7670ed900d3d03be744d25c1873b239896e9a82ce6d17f8febc6fffbaee9521` |
+| GStreamer bad | `gst-plugins-bad-1.28.8.tar.xz` from `gstreamer.freedesktop.org/src` | `670d888bde8242579b0d8e91f60cf337aa7be20ca7c315ebfbdd6e5a9218d104` |
+| GStreamer rollback delta | `scripts/patches/gst-plugins-bad-1.28.8-webrtc-rollback.patch` | `e3105c73dc2ff3479ecd79320068d112e7370901c48a297288f02cbefcb03799` |
 | libnice | `libnice-0.1.24.tar.gz` from `libnice.freedesktop.org/releases` | `cfb5e8e778534f2f5b3c6f4958a1eb057c6b95c537c0f100817a537cf5d64fcc` |
 | Meson | GitHub release archive `1.7.2` | `4d40d63aa748a9c139cc41ab9bffe43edd113c5639d78bde81544ca955aea890` |
 
@@ -157,9 +157,11 @@ from `studyvis-webkit-runtime/` beside the AppImage executable, and packaged
 `bwrap`/`xdg-dbus-proxy` directly beside it, before falling back to WebKit's
 compiled native locations. This avoids silently resolving the host's
 `PKGLIBEXEC`/`PKGLIBDIR` while retaining native-package/development fallbacks;
-it does not disable the sandbox. Runtime revision 9 also accepts empty-SDP
+it does not disable the sandbox. Runtime revision 10 also accepts empty-SDP
 rollback, restores stable transceiver ownership after collided offers, and
 starts queued sources only after their exact committed pad is configured.
+Live-stream player construction skips viewport suspension before its URL/source
+is installed, preventing a muted remote video from remaining suspended at startup.
 Answers retain supported offered RTP extension IDs; future sources reserve
 accepted IDs while committed per-MID mappings remain stable. Remote transport
 and SSRC identity and raw payload-specific feedback stay out of local codec
@@ -191,7 +193,7 @@ remote-audio processing. Reproducibility here means pinned and checked
 source inputs, local delta, build environment, and configuration—not a claim of
 bit-for-bit identical output from arbitrary machines. Production builds use
 Ubuntu 24.04, Rust 1.97.1, and `cargo-c` 0.10.24, retaining the artifact's
-glibc 2.39 floor. The private runtime also builds matched GStreamer 1.28.7
+glibc 2.39 floor. The private runtime also builds matched GStreamer 1.28.8
 core/base/good/bad and libnice 0.1.24 libraries and curated plugins using source-pinned Meson
 1.7.2. Noble's 1.24.2 satisfies WebKit's advertised configure minimum but
 misassigns sending pads, creates receiving transceivers too late, and omits
@@ -251,7 +253,7 @@ the applied patches under `usr/share/licenses/studyvis-webkit-runtime/`.
 identity, including the AppImage-relative subprocess, injected-bundle, and
 sandbox-helper layout, while `WEBKIT-THIRD-PARTY-LICENSES.txt` and
 `WEBKIT-LICENSE-FILES.sha256` preserve a readable and hash-addressed inventory
-of all 59 upstream WebKit license/notice files discovered by the pinned source
+of all 64 upstream WebKit license/notice files discovered by the pinned source
 build. A separate GStreamer license inventory and Meson license accompany its
 matched source-built media stack. The builder's `--source-bundle` mode separately creates a deterministic
 corresponding-source archive containing the exact verified WebKitGTK/librice,
@@ -288,7 +290,7 @@ is not something a merge should wait behind, and mandatory in substance because
 the tagged release leg repeats it against the exact shipped artifact — builds
 the pinned private runtime, packages it with the
 media-framework and sandbox helpers, validates runtime/license files, ELF
-dependencies, the shipped build manifest and 59-file license inventory, and the
+dependencies, the shipped build manifest and 64-file license inventory, and the
 packaged-only GStreamer WebRTC/SCTP elements, verifies a gnome-keyring Secret
 Service round-trip, and starts the extracted AppImage under Xvfb. The first
 document must log `runtime.webrtc ready` after constructing a
@@ -803,11 +805,24 @@ Several signals ride trystero `makeAction`s on their own channels rather than th
 
 - **`camera-state`** `{ off: boolean }` — on the **session room** (S3). Broadcast on every local camera toggle, and re-sent to a peer on its `onPeerJoin` so a late joiner learns the current state. A disabled video track sends black, not a clean "off" signal, so this drives the explicit camera-off tile. An older peer simply never receives it and keeps rendering the (black) frame; no protocol break.
 - **`screen-share`** `{ sharing: boolean, stream_id: string | null }` — on the **session room** (#96). Sent on `onPeerJoin`, on every local start/stop, and targeted at a peer immediately before its copy of the screen stream is added. It does three jobs at once. It **announces capability**: a screen stream is only ever added for a peer that has sent one of these, because a pre-1.9 build binds any incoming stream to that friend's face tile and trystero has no stream-removed event with which to clear it. It **identifies the stream**: `stream_id` is the sender's `MediaStream.id`, which the receiver matches against `onPeerStream` — content-addressed, unlike the `{ kind: 'screen' }` metadata also tagged onto `addStream`, which trystero pairs to incoming streams FIFO and which therefore serves only as the fallback when media outruns the announce. And it **retires the tile**: `sharing: false` is the sole signal that a share has stopped. The stream itself is `getDisplayMedia({ video: { frameRate: { max: 15 } }, audio: false })` — screens are read rather than watched, so the frame rate is what gives (resolution is what makes text legible), and a full 4-mesh where everyone shares is eight concurrent video streams. On Windows the request prefers a `monitor` surface; because the Screen Capture API cannot constrain the picker to monitor surfaces, StudyVis verifies the returned track and stops any window, browser, or unknown surface before publication, asking the user to try again and choose **Entire Screen**. macOS retains its existing native picker and request behavior. No audio: it would echo against the live mic, and no audit-log kind is emitted for a share, because `AuditEventKind` is a cross-version wire contract and an unknown kind renders as a blank row on an older peer.
+
 - **`ptt-state`** and **`session-full`** — on the **session room** (V1-era): the not-transmitting indicator on peer tiles, and the host-enforced 4-user cap eviction notice.
 - **`session-note`** `{ v, session_topic, from_ed_pubkey, text, ts, sig }` — on the **session room** (#47 B6). Quiet in-session text notes ("brb 5", a link) so a short message doesn't break the silence or force a messenger switch. Signed over canonical bytes like audit events and verified against the signed-hello peer binding; replay-guarded by `session_topic`; text hard-capped at 500 chars; memory-only on the desktop. An explicitly paired LAN companion caches a bounded text snapshot for read-only offline recovery (§7, LAN browser mirroring); no session media is recorded. Older builds never register the action and are unaffected.
 - **`session-image`** — binary JPEG / PNG / WebP / GIF data on the **session room** (#185), capped at 5 MiB. Trystero performs the data-channel chunking; its action metadata carries a signed manifest `{ v, session_topic, from_ed_pubkey, filename, mime_type, byte_length, width, height, sha256, ts, sig }`. Receivers authenticate the sender against the signed-hello binding, reject cross-session payloads, enforce the size/type/dimension limits, recompute SHA-256 over the received bytes, then verify the manifest signature before rendering. The pinned `@trystero-p2p/core` is patched at install time because its public action API has no receive-limit hook: payloads above 5 MiB, metadata above 16 KiB, and over-budget pending/unknown-action queues are rejected while chunks arrive, before full action reassembly, and the offending peer is disconnected. This core boundary applies to every action, so future action payloads must also stay under 5 MiB. Images remain memory-only and their object URLs are revoked at session reset; clicking an inline thumbnail opens the zoomable viewer, whose download action writes only through an explicit native save dialog or browser download action. Older builds never register the action and are unaffected.
 - **`invite-ack`** — on the **inbox topic** (#47 C2, recipient-signed). A delivery confirmation the sender lingers ~5 s for after an invite send; no verified ACK within the window renders honest "sent, unconfirmed" copy instead of a false "Invite sent". Wire-compatible with v1.2.x: older recipients simply never answer. This is UX legibility only — the §14 inbox-eavesdropper acceptance stands.
 - **presence goodbye** `{ leaving: true }` — on the **presence channel** (F7), an alternate shape of the existing `heartbeat` action. Sent best-effort just before `room.leave()` so subscribers flip the leaver offline immediately instead of waiting out the 60 s `ONLINE_WINDOW_MS`. It deliberately omits `ts`: an older receiver hits the `typeof ts !== 'number'` guard, drops it, and ages the peer out via the window exactly as before (the I2 receiver-clock model is untouched); a new receiver checks `leaving === true` first and marks the pubkey offline at once. Since I74 the heartbeat/goodbye pair also rides the relay-presence leg (§4) as sealed ephemeral Nostr events; a goodbye there keeps `lastSeenAt` for the "seen … ago" row copy.
+
+Local microphone transmission is the union of a held PTT source and the
+explicit always-on microphone mode. The latter is session-only, defaults off,
+and resets on leave or capture ownership changes. Shortcut edges update track
+`enabled` and the existing `ptt-state` broadcast synchronously through a store
+subscription, without waiting for a React render. Microphone acquisition and
+replacement read that same effective state. Peer indicators and late-join
+resends retain the existing boolean wire format. The main webview config sets
+`backgroundThrottling: disabled`; the native policy is supported on macOS 14+
+and prevents hidden/minimized document suspension there. Other platforms and
+older macOS retain their existing native scheduling behavior.
+
 
 ### LAN browser mirroring (#365)
 
@@ -1157,6 +1172,13 @@ What stays **private** (not in audit log) until session end: the running numeric
 
 What's **broadcast in real time**: session-presence, Pomodoro, topic, approved/denied break, and `ai_alert` events. `ai_warning`, `break_request`, `ai_stalled`, and `ai_resumed` remain local-only. Peers can see "Sam: looking off-task" after an alert, but never Sam's running numeric score or local machine-health events. This honours the user's privacy nuance from the design conversation.
 
+The local `joined` entry is signed once per session stint and sent to later
+transports after their targeted signed hello, preserving its timestamp and
+signature. Duplicate delivery remains one log entry. A receiver may retain one
+verified join per provisional hello within the bounded admission set; it appends
+the entry only after admission and a final identity-binding check. Transport
+departure and session teardown discard pending delivery.
+
 Audit log is also written to local SQLite per session for the post-session report and (V3) stats.
 
 The audit log is not the #236 observation journal, and the two must not be merged. Audit events are signed, some of them are broadcast, and their vocabulary is a cross-version wire contract; the journal is an unsigned local text file of every AI check, written for one purpose (the post-session write-up) and deleted with its session. Putting per-check rows in `audit_events` would flood the shared in-session panel and the report's event timeline with the on-task checks nobody asked to see.
@@ -1333,7 +1355,7 @@ its exact AppImage built from `x86_64-unknown-linux-gnu`.
   where the peer-connection binding was compiled out.
 - WebKit's unhandled `permission-request` default denies capture.
   `linux_media_permissions.rs` handles only
-  `WebKitUserMediaPermissionRequest`. WebKitGTK 2.52.5's public request wrapper
+  `WebKitUserMediaPermissionRequest`. WebKitGTK 2.54.2's public request wrapper
   does not expose its camera/microphone `SecurityOrigin` values, so this is a
   top-level-view boundary rather than a claim of per-request-origin
   authentication: the handler reads the current `webview.uri()` and allows only

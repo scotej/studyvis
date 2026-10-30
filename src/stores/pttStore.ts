@@ -72,16 +72,19 @@ function clearHoldTimer(): void {
 
 type PttState = {
   active: boolean
+  hotMic: boolean
   awaitingRelease: boolean
   heldSources: PttSource[]
   revision: number
   press: (source?: PttSource) => void
   release: (source?: PttSource) => void
+  toggleHotMic: () => void
   reset: () => void
 }
 
 export const usePttStore = create<PttState>((set, get) => ({
   active: false,
+  hotMic: false,
   awaitingRelease: false,
   heldSources: [],
   revision: 0,
@@ -139,18 +142,31 @@ export const usePttStore = create<PttState>((set, get) => ({
       revision: state.revision + 1,
     }))
   },
+  toggleHotMic: () => {
+    set((state) => ({
+      hotMic: !state.hotMic,
+      revision: state.revision + 1,
+    }))
+  },
   reset: () => {
     clearHoldTimer()
     const current = get()
-    if (!current.active && !current.awaitingRelease) return
+    if (!current.active && !current.awaitingRelease && !current.hotMic) return
     set((state) => ({
       active: false,
+      hotMic: false,
       awaitingRelease: false,
       heldSources: [],
       revision: state.revision + 1,
     }))
   },
 }))
+
+export function isMicActive(
+  state: Pick<PttState, 'active' | 'hotMic'>
+): boolean {
+  return state.active || state.hotMic
+}
 
 // I108 — the in-window hold-to-talk button mutates this store directly, and a
 // last-holder `release()` produces the same transition a `reset()` does;

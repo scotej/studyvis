@@ -121,6 +121,9 @@ export type HelloProtocolArgs = {
   sign: (bytes: Uint8Array) => Promise<Uint8Array>
   onPeerHello: (peerId: string, hello: Hello) => void
   onPeerLeave: (peerId: string) => void
+  // The signal belongs to this transport incarnation and is aborted on leave
+  // or teardown, including while the caller awaits its signed presence event.
+  onOurHelloSentToPeer?: (peerId: string, signal: AbortSignal) => void
 }
 
 export type HelloProtocolHandle = {
@@ -141,6 +144,8 @@ export function startHelloProtocol(
   args: HelloProtocolArgs
 ): HelloProtocolHandle {
   const action = args.room.makeAction<HelloPayload>(HELLO_ACTION)
+  let stopped = false
+  const peerSends = new Map<string, AbortController>()
 
   const buildPayload = async (): Promise<HelloPayload> => {
     const core: HelloCore = {
@@ -167,6 +172,7 @@ export function startHelloProtocol(
   // resolves, the hello has been written to all current peers in order.
   const ourHelloSent = (async () => {
     const payload = await payloadPromise
+    if (stopped) return
     await action.send(payload)
   })()
 
@@ -174,10 +180,18 @@ export function startHelloProtocol(
   // binding immediately rather than after our next broadcast (there is none —
   // hello is one-shot per peer).
   const offJoin = args.room.onPeerJoin((peerId) => {
+    if (stopped) return
+    peerSends.get(peerId)?.abort()
+    const scope = new AbortController()
+    peerSends.set(peerId, scope)
     void (async () => {
-      const payload = await payloadPromise
       try {
+        const payload = await payloadPromise
+        if (scope.signal.aborted) return
         await action.send(payload, peerId)
+        if (!scope.signal.aborted) {
+          args.onOurHelloSentToPeer?.(peerId, scope.signal)
+        }
       } catch {
         // best-effort; the joiner will silently lack our binding and ignore
         // our subsequent audit events. Acceptable in friends-only mode.
@@ -186,18 +200,25 @@ export function startHelloProtocol(
   })
 
   action.receive((data, peerId) => {
+    if (stopped) return
     const hello = validateHelloPayload(data, peerId)
     if (!hello) return
     args.onPeerHello(peerId, hello)
   })
 
   const offLeave = args.room.onPeerLeave((peerId) => {
+    peerSends.get(peerId)?.abort()
+    peerSends.delete(peerId)
+    if (stopped) return
     args.onPeerLeave(peerId)
   })
 
   return {
     ourHelloSent,
     teardown: () => {
+      stopped = true
+      for (const scope of peerSends.values()) scope.abort()
+      peerSends.clear()
       offJoin()
       offLeave()
     },

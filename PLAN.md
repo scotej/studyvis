@@ -50,7 +50,7 @@ publication still depends on physical sign-off. Official distro WebKitGTK
 production builds in the maintained Linux path compile the GTK
 `ENABLE_WEB_RTC` peer-connection binding out (while retaining the media-device
 API); a Wry preference cannot turn compiled-out code back on. The
-candidate therefore bundles a pinned WebKitGTK 2.52.5 + librice 0.4.3 runtime
+candidate therefore bundles a pinned WebKitGTK 2.54.2 + librice 0.4.3 runtime
 instead of trusting the host package. CachyOS KDE Wayland must exercise the
 exact x86_64 AppImage's data channel, camera, microphone, portal/PipeWire screen
 capture, AI capture, Secret Service key custody, and real physical peers before
@@ -70,7 +70,7 @@ A complete, polished video-study app for friends. Zero AI code present. The app 
 - Pseudonymous identity (Ed25519 keypair + display name + 24-word BIP39 backup shown once).
 - Friends list — add a friend with a 12-word ephemeral pairing code (sent over any messenger), exchange persistent public keys, save permanently. List shows online/offline state, last-studied-with date, and presence dot.
 - Session invitation — click a friend to invite them; their app receives an encrypted invite over Nostr inbox topic and shows an OS notification. Multi-friend invites for 2–4 user mesh sessions.
-- Session room — full-mesh WebRTC video + audio. Default-muted with `Ctrl+[` / `Cmd+[` push-to-talk for friends on macOS, Windows, and X11; native Wayland sessions expose an in-window hold-to-talk control because global grabs are not reliable there. Per-tile presence indicators (online / on-break / disconnected). Audit log panel showing per-user events: joined, took break, returned, left.
+- Session room — full-mesh WebRTC video + audio. Default-muted with `Ctrl+[` / `Cmd+[` push-to-talk for friends on macOS, Windows, and X11; native Wayland sessions expose an in-window hold-to-talk control because global grabs are not reliable there. An explicit always-on microphone button and customizable `Ctrl+\` / `Cmd+\` toggle keep audio live without holding a key; this mode resets on session end. Friends' cameras can open fullscreen from their tiles. Per-tile presence indicators (online / on-break / disconnected). Audit log panel showing per-user events: joined, took break, returned, left.
 - Pomodoro timer — opt-in, synced across all users via WebRTC data channel. Broadcaster role transfers on disconnect.
 - Free-form sessions also supported (no timer).
 - Losing or leaving peers never ends another user's session: zero remote peers is an active solo state whose camera, optional AI, timer, and elapsed study time continue until that user chooses Leave. A user who leaves can rejoin the same logical session for 20 seconds after an accidental exit; that personal recovery window never times out anyone who stayed.
@@ -187,7 +187,7 @@ Promoting it to shipped support requires all of the following:
 2. Its advisory `Linux AppImage startup smoke` job — excluded from the
    `All pre-merge checks` aggregator because it compiles WebKitGTK from
    source, but run and reported on every pull request — builds the pinned WebKitGTK
-   2.52.5 + librice 0.4.3 + GStreamer 1.28.7 + libnice 0.1.24 runtime, packages that private copy with the
+   2.54.2 + librice 0.4.3 + GStreamer 1.28.8 + libnice 0.1.24 runtime, packages that private copy with the
    media-framework and sandbox helpers, verifies the expected runtime files,
    build manifest, complete upstream license inventory, cross-platform notice
    pair, ELF dependencies, and packaged-only GStreamer WebRTC/SCTP elements,

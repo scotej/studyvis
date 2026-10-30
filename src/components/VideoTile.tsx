@@ -19,8 +19,7 @@ export type VideoTileProps = {
   name: string
   stream: MediaStream | null
   variant?: VideoTileVariant
-  // #96 — screen tiles only: opens the full-size viewer. A screen at quarter
-  // grid size is unreadable, so this is what makes the tile useful.
+  // Opens the full-size viewer for a remote camera or a shared screen.
   onExpand?: () => void
   state?: FocusState
   ptt?: boolean
@@ -179,7 +178,7 @@ export function VideoTile({
           </span>
         </div>
         <div className="flex shrink-0 items-center gap-3">
-          {isScreen && onExpand ? (
+          {onExpand && stream && !cameraOff && (isScreen || !isLocal) ? (
             <Button
               type="button"
               variant="ghost"

@@ -26,7 +26,6 @@ use std::sync::Mutex;
 use std::time::Duration;
 
 use serde::Serialize;
-#[cfg(target_os = "macos")]
 use tauri::Emitter;
 use tauri::{AppHandle, Manager, Runtime};
 #[cfg(not(target_os = "linux"))]
@@ -179,12 +178,15 @@ impl SessionActiveFlag {
     }
 }
 
-// V3-P3 / #394 — copy the current pair under one short-lived lock so a
-// coordinated reset cannot expose half of a new pair to the shortcut handler.
+// V3-P3 / #394 — copy current bindings under one short-lived lock so a
+// coordinated reset cannot expose partially updated bindings to the handler.
 // The separate mutation lock serializes native register/unregister operations.
 pub struct ShortcutBindings {
     mutation: Mutex<()>,
-    pair: Mutex<(Shortcut, Shortcut)>,
+    bindings: Mutex<[Shortcut; 3]>,
+    mic_toggle_held: AtomicBool,
+    mic_toggle_blocked: AtomicBool,
+    capture_active: AtomicBool,
 }
 
 impl ShortcutBindings {
@@ -194,7 +196,7 @@ impl ShortcutBindings {
     // is as forgiving as the JS hydrator. On macOS friends-PTT also requires
     // a key the CoreGraphics physical-state watcher can observe; a legacy or
     // hand-edited unsupported key falls back to the safe shipped default.
-    pub fn new(initial_ptt_friends: &str, initial_ptt_ai: &str) -> Self {
+    pub fn new(initial_ptt_friends: &str, initial_ptt_ai: &str, initial_mic_toggle: &str) -> Self {
         let ptt_friends =
             Self::parse_or_default(initial_ptt_friends, DEFAULT_PTT_FRIENDS_ACCELERATOR);
         #[cfg(target_os = "macos")]
@@ -207,12 +209,37 @@ impl ShortcutBindings {
             )
         };
 
+        let ptt_ai = Self::parse_or_default(initial_ptt_ai, DEFAULT_PTT_AI_ACCELERATOR);
+        let mic_toggle = Self::parse_or_default(initial_mic_toggle, DEFAULT_MIC_TOGGLE_ACCELERATOR);
+        #[cfg(target_os = "macos")]
+        let mic_toggle = if macos_key_code(mic_toggle.key).is_some() {
+            mic_toggle
+        } else {
+            Self::parse_or_default(
+                DEFAULT_MIC_TOGGLE_ACCELERATOR,
+                DEFAULT_MIC_TOGGLE_ACCELERATOR,
+            )
+        };
+        let mic_toggle = if mic_toggle == ptt_friends || mic_toggle == ptt_ai {
+            [
+                DEFAULT_MIC_TOGGLE_ACCELERATOR,
+                "CmdOrCtrl+Shift+Backslash",
+                "CmdOrCtrl+Alt+Backslash",
+            ]
+            .into_iter()
+            .map(|candidate| Self::parse_or_default(candidate, DEFAULT_MIC_TOGGLE_ACCELERATOR))
+            .find(|candidate| *candidate != ptt_friends && *candidate != ptt_ai)
+            .expect("three toggle defaults cover two occupied shortcuts")
+        } else {
+            mic_toggle
+        };
+
         Self {
             mutation: Mutex::new(()),
-            pair: Mutex::new((
-                ptt_friends,
-                Self::parse_or_default(initial_ptt_ai, DEFAULT_PTT_AI_ACCELERATOR),
-            )),
+            bindings: Mutex::new([ptt_friends, ptt_ai, mic_toggle]),
+            mic_toggle_held: AtomicBool::new(false),
+            mic_toggle_blocked: AtomicBool::new(false),
+            capture_active: AtomicBool::new(false),
         }
     }
 
@@ -223,33 +250,66 @@ impl ShortcutBindings {
         Shortcut::from_str(default_accelerator).expect("default accelerator must parse")
     }
 
-    pub fn pair(&self) -> (Shortcut, Shortcut) {
-        *self.pair.lock().unwrap_or_else(|e| e.into_inner())
+    pub fn all(&self) -> [Shortcut; 3] {
+        *self.bindings.lock().unwrap_or_else(|e| e.into_inner())
     }
 
     pub fn ptt_friends(&self) -> Shortcut {
-        self.pair().0
+        self.all()[0]
     }
 
     pub fn ptt_ai(&self) -> Shortcut {
-        self.pair().1
+        self.all()[1]
     }
 
-    fn store_ptt_friends(&self, shortcut: Shortcut) {
-        self.pair.lock().unwrap_or_else(|e| e.into_inner()).0 = shortcut;
+    pub fn mic_toggle(&self) -> Shortcut {
+        self.all()[2]
     }
 
-    fn store_ptt_ai(&self, shortcut: Shortcut) {
-        self.pair.lock().unwrap_or_else(|e| e.into_inner()).1 = shortcut;
+    fn store_all(&self, shortcuts: [Shortcut; 3]) {
+        *self.bindings.lock().unwrap_or_else(|e| e.into_inner()) = shortcuts;
+        self.reset_mic_toggle();
     }
 
-    fn store_pair(&self, friends: Shortcut, ai: Shortcut) {
-        *self.pair.lock().unwrap_or_else(|e| e.into_inner()) = (friends, ai);
+    pub fn mic_toggle_pressed(&self) -> bool {
+        !self.mic_toggle_blocked.load(Ordering::Relaxed)
+            && !self.mic_toggle_held.swap(true, Ordering::Relaxed)
+    }
+
+    pub fn capture_active(&self) -> bool {
+        self.capture_active.load(Ordering::Relaxed)
+    }
+
+    #[cfg(any(target_os = "macos", test))]
+    fn reconcile_mic_toggle_physical_state(&self, held: Option<bool>) {
+        if held == Some(false) {
+            self.reset_mic_toggle();
+            if !self.capture_active() {
+                self.mic_toggle_blocked.store(false, Ordering::Relaxed);
+            }
+        }
+    }
+
+    fn set_capture_active(&self, active: bool) {
+        if active {
+            self.mic_toggle_blocked.store(true, Ordering::Relaxed);
+        }
+        self.capture_active.store(active, Ordering::Relaxed);
+        #[cfg(not(target_os = "macos"))]
+        if !active {
+            self.mic_toggle_blocked.store(false, Ordering::Relaxed);
+        }
+        self.reset_mic_toggle();
+    }
+
+    pub fn reset_mic_toggle(&self) {
+        self.mic_toggle_held.store(false, Ordering::Relaxed);
     }
 }
 
 const DEFAULT_PTT_FRIENDS_ACCELERATOR: &str = "CmdOrCtrl+[";
 const DEFAULT_PTT_AI_ACCELERATOR: &str = "CmdOrCtrl+]";
+const DEFAULT_MIC_TOGGLE_ACCELERATOR: &str = "CmdOrCtrl+Backslash";
 
 #[cfg(target_os = "macos")]
 static PTT_PHYSICAL_MONITOR_GENERATION: AtomicU64 = AtomicU64::new(0);
@@ -262,7 +322,7 @@ const PTT_PHYSICAL_CONFIRMATION_EVERY_POLLS: u8 = 5;
 #[cfg(target_os = "macos")]
 const PTT_PHYSICAL_STATE_EVENT: &str = "ptt-friends-physical-state";
 
-// Swap one of the two global shortcuts at runtime. Unregister-then-register
+// Swap one global shortcut at runtime. Unregister-then-register
 // (per the tauri-plugin-global-shortcut guidance; double-registering the
 // same combo silently fails on some macOS versions). The Mutex update only
 // runs after both side-effects succeed so a partial failure can't leave
@@ -281,85 +341,87 @@ pub fn system_set_global_shortcut<R: Runtime>(
     // friends-PTT key BEFORE unregistering the working binding, so settings
     // never silently downgrade to a two-minute-only stuck-key fallback.
     #[cfg(target_os = "macos")]
-    if action == "ptt-friends" && macos_key_code(new_shortcut.key).is_none() {
+    if (action == "ptt-friends" || action == "mic-toggle")
+        && macos_key_code(new_shortcut.key).is_none()
+    {
         return Err(
-            "That Push to Talk key cannot be monitored safely on macOS. Choose a standard keyboard key."
+            "That microphone shortcut cannot be monitored safely on macOS. Choose a standard keyboard key."
                 .to_string(),
         );
     }
 
     let bindings = app.state::<ShortcutBindings>();
     let _mutation = bindings.mutation.lock().unwrap_or_else(|e| e.into_inner());
-    let (old_shortcut, other_shortcut) = match action.as_str() {
-        "ptt-friends" => (bindings.ptt_friends(), bindings.ptt_ai()),
-        "ptt-ai" => (bindings.ptt_ai(), bindings.ptt_friends()),
+    let mut shortcuts = bindings.all();
+    let index = match action.as_str() {
+        "ptt-friends" => 0,
+        "ptt-ai" => 1,
+        "mic-toggle" => 2,
         _ => return Err(format!("unknown shortcut action: {action}")),
     };
-    if old_shortcut == new_shortcut {
+    if shortcuts[index] == new_shortcut {
         return Ok(());
     }
+    if shortcuts
+        .iter()
+        .enumerate()
+        .any(|(other, shortcut)| other != index && *shortcut == new_shortcut)
+    {
+        return Err("That shortcut is already used by another action.".into());
+    }
+    let old_shortcut = shortcuts[index];
     let manager = app.global_shortcut();
-    // Only unregister the old combo if it's ACTUALLY registered at the OS level
-    // AND the other action isn't still bound to it. Two ways the stored binding
-    // can point at a combo that was never OS-registered: (1) both actions shared
-    // one combo (hand-edited settings.json — the UI rejects equal accelerators),
-    // so it has a single registration the other action still needs; (2) the
-    // boot-time registration failed (OS conflict; PR-8 registers best-effort),
-    // leaving ShortcutBindings holding an unregistered combo. Calling unregister
-    // on an unregistered shortcut errors and would wedge the rebind, so gate it.
-    let old_is_shared = other_shortcut == old_shortcut;
-    let should_unregister_old = !old_is_shared && manager.is_registered(old_shortcut);
-    if should_unregister_old {
+    let old_is_shared = shortcuts
+        .iter()
+        .enumerate()
+        .any(|(other, shortcut)| other != index && *shortcut == old_shortcut);
+    let removed_old = !old_is_shared && manager.is_registered(old_shortcut);
+    if removed_old {
         manager
             .unregister(old_shortcut)
-            .map_err(|e| format!("Couldn't unregister the old shortcut: {e}"))?;
+            .map_err(|error| format!("Couldn't unregister the old shortcut: {error}"))?;
     }
-    if let Err(err) = manager.register(new_shortcut) {
-        // Best-effort: put the old one back (only if we actually removed it) so
-        // the user isn't left with no PTT binding while their UI shows the
-        // rejected new one.
-        if should_unregister_old {
+    if let Err(error) = manager.register(new_shortcut) {
+        if removed_old {
             let _ = manager.register(old_shortcut);
         }
-        return Err(format!("Couldn't register {accelerator}: {err}"));
+        return Err(format!("Couldn't register {accelerator}: {error}"));
     }
-    match action.as_str() {
-        "ptt-friends" => {
-            bindings.store_ptt_friends(new_shortcut);
-            // #47 B5 — the register above validated the OS accepts the combo,
-            // but friends-PTT only lives while a session is active. Outside
-            // one, release it right away (never when the AI action shares the
-            // combo — that registration must survive).
-            if !SessionActiveFlag::is_active(&app) && new_shortcut != other_shortcut {
-                let _ = manager.unregister(new_shortcut);
+    let wanted = if index == 1 {
+        AiFeaturesFlag::is_enabled(&app)
+    } else {
+        SessionActiveFlag::is_active(&app)
+    };
+    if !wanted {
+        if let Err(error) = manager.unregister(new_shortcut) {
+            if removed_old {
+                let _ = manager.register(old_shortcut);
             }
+            return Err(format!("Couldn't release the inactive shortcut: {error}"));
         }
-        "ptt-ai" => {
-            bindings.store_ptt_ai(new_shortcut);
-            // I112 — same shape as the friends arm above: the register
-            // validated that the OS accepts the combo, but the AI combo is only
-            // held while AI features are on. Release it otherwise, and never
-            // when the friends action is holding the same combo for a live
-            // session.
-            if !AiFeaturesFlag::is_enabled(&app)
-                && !(new_shortcut == other_shortcut && SessionActiveFlag::is_active(&app))
-            {
-                let _ = manager.unregister(new_shortcut);
-            }
-        }
-        _ => unreachable!("action validated above"),
     }
+    shortcuts[index] = new_shortcut;
+    bindings.store_all(shortcuts);
     Ok(())
+}
+
+#[tauri::command]
+pub fn system_set_shortcut_capture_active<R: Runtime>(app: AppHandle<R>, active: bool) {
+    let bindings = app.state::<ShortcutBindings>();
+    bindings.set_capture_active(active);
+    if active {
+        let _ = app.emit("ptt-friends-released", ());
+    }
 }
 
 // #394 — unregister our old pair before validating the new pair, so a mutual
 // swap never collides with an accelerator still held by the other action.
 // Every target is registered even for an inactive feature, preserving I61's
 // OS-validation rule; only the registrations its current owners need survive.
-fn replace_shortcut_pair(
-    old: [Shortcut; 2],
-    new: [Shortcut; 2],
-    wanted: [bool; 2],
+fn replace_shortcut_pair<const N: usize>(
+    old: [Shortcut; N],
+    new: [Shortcut; N],
+    wanted: [bool; N],
     mut is_registered: impl FnMut(Shortcut) -> bool,
     mut register: impl FnMut(Shortcut) -> Result<(), String>,
     mut unregister: impl FnMut(Shortcut) -> Result<(), String>,
@@ -415,28 +477,20 @@ fn replace_shortcut_pair(
     Ok(())
 }
 
-#[tauri::command]
-pub fn system_set_global_shortcuts<R: Runtime>(
-    app: AppHandle<R>,
-    friends: String,
-    ai: String,
+fn replace_app_shortcuts<R: Runtime>(
+    app: &AppHandle<R>,
+    old: [Shortcut; 3],
+    new: [Shortcut; 3],
 ) -> Result<(), String> {
-    let new_friends =
-        Shortcut::from_str(&friends).map_err(|e| format!("Couldn't read {friends}: {e}"))?;
-    let new_ai = Shortcut::from_str(&ai).map_err(|e| format!("Couldn't read {ai}: {e}"))?;
-    #[cfg(target_os = "macos")]
-    if macos_key_code(new_friends.key).is_none() {
-        return Err("That Push to Talk key cannot be monitored safely on macOS. Choose a standard keyboard key.".to_string());
-    }
-    let bindings = app.state::<ShortcutBindings>();
-    let _mutation = bindings.mutation.lock().unwrap_or_else(|e| e.into_inner());
     let manager = app.global_shortcut();
+    let session_active = SessionActiveFlag::is_active(app);
     replace_shortcut_pair(
-        [bindings.ptt_friends(), bindings.ptt_ai()],
-        [new_friends, new_ai],
+        old,
+        new,
         [
-            SessionActiveFlag::is_active(&app),
-            AiFeaturesFlag::is_enabled(&app),
+            session_active,
+            AiFeaturesFlag::is_enabled(app),
+            session_active,
         ],
         |shortcut| manager.is_registered(shortcut),
         |shortcut| {
@@ -449,8 +503,33 @@ pub fn system_set_global_shortcuts<R: Runtime>(
                 .unregister(shortcut)
                 .map_err(|e| format!("Couldn't unregister shortcut: {e}"))
         },
-    )?;
-    bindings.store_pair(new_friends, new_ai);
+    )
+}
+
+#[tauri::command]
+pub fn system_set_global_shortcuts<R: Runtime>(
+    app: AppHandle<R>,
+    friends: String,
+    ai: String,
+    mic_toggle: String,
+) -> Result<(), String> {
+    let new_friends =
+        Shortcut::from_str(&friends).map_err(|e| format!("Couldn't read {friends}: {e}"))?;
+    let new_ai = Shortcut::from_str(&ai).map_err(|e| format!("Couldn't read {ai}: {e}"))?;
+    let new_mic_toggle =
+        Shortcut::from_str(&mic_toggle).map_err(|e| format!("Couldn't read {mic_toggle}: {e}"))?;
+    #[cfg(target_os = "macos")]
+    if macos_key_code(new_friends.key).is_none() || macos_key_code(new_mic_toggle.key).is_none() {
+        return Err("That microphone shortcut cannot be monitored safely on macOS. Choose a standard keyboard key.".to_string());
+    }
+    if new_friends == new_ai || new_friends == new_mic_toggle || new_ai == new_mic_toggle {
+        return Err("Each action needs a different shortcut.".into());
+    }
+    let bindings = app.state::<ShortcutBindings>();
+    let _mutation = bindings.mutation.lock().unwrap_or_else(|e| e.into_inner());
+    let new = [new_friends, new_ai, new_mic_toggle];
+    replace_app_shortcuts(&app, bindings.all(), new)?;
+    bindings.store_all(new);
     Ok(())
 }
 
@@ -519,6 +598,8 @@ pub fn session_set_active<R: Runtime>(app: AppHandle<R>, active: bool) -> Result
     // #47 B5 — the friends-PTT global shortcut only exists while a session is
     // live; boot registers just the AI shortcut (see lib.rs).
     apply_ptt_friends_registration(&app, active);
+    apply_mic_toggle_registration(&app, active);
+    app.state::<ShortcutBindings>().reset_mic_toggle();
     update_ptt_physical_monitor(&app, active);
 
     // #226 — the renderer logs `ptt/session.armed` for the same transition.
@@ -628,6 +709,26 @@ fn apply_ptt_friends_registration<R: Runtime>(app: &AppHandle<R>, active: bool) 
     );
 }
 
+fn apply_mic_toggle_registration<R: Runtime>(app: &AppHandle<R>, active: bool) {
+    let bindings = app.state::<ShortcutBindings>();
+    let _mutation = bindings.mutation.lock().unwrap_or_else(|e| e.into_inner());
+    let shortcut = bindings.mic_toggle();
+    let manager = app.global_shortcut();
+    let result = if active && !manager.is_registered(shortcut) {
+        manager.register(shortcut)
+    } else if !active
+        && manager.is_registered(shortcut)
+        && !(shortcut == bindings.ptt_ai() && AiFeaturesFlag::is_enabled(app))
+    {
+        manager.unregister(shortcut)
+    } else {
+        return;
+    };
+    if let Err(error) = result {
+        eprintln!("[global-shortcut] couldn't update the microphone toggle shortcut: {error}");
+    }
+}
+
 // I112 — the AI dialog's combo, registered only while AI features are on.
 //
 // It used to be registered for the whole process at boot and never released.
@@ -657,7 +758,7 @@ pub fn apply_ptt_ai_registration<R: Runtime>(app: &AppHandle<R>, enabled: bool) 
         } else {
             ("register", true, None)
         }
-    } else if ai == friends && SessionActiveFlag::is_active(app) {
+    } else if (ai == friends || ai == bindings.mic_toggle()) && SessionActiveFlag::is_active(app) {
         ("unregister", true, Some("shared-combo"))
     } else if !manager.is_registered(ai) {
         ("unregister", true, Some("not-registered"))
@@ -764,6 +865,7 @@ fn update_ptt_physical_monitor<R: Runtime>(app: &AppHandle<R>, active: bool) {
         let mut emit_err: u64 = 0;
         let mut unobservable_polls: u64 = 0;
         let mut last_state: Option<Option<bool>> = None;
+        let mut wait_for_release = false;
         let mut emit_failure_logged = false;
 
         let mut confirmation = super::level_confirmation::LevelConfirmation::new(
@@ -774,8 +876,20 @@ fn update_ptt_physical_monitor<R: Runtime>(app: &AppHandle<R>, active: bool) {
             && SessionActiveFlag::is_active(&app)
         {
             polls += 1;
-            let shortcut = app.state::<ShortcutBindings>().ptt_friends();
-            let current_state = macos_shortcut_is_held(shortcut);
+            let bindings = app.state::<ShortcutBindings>();
+            bindings
+                .reconcile_mic_toggle_physical_state(macos_shortcut_is_held(bindings.mic_toggle()));
+            let physical_state = macos_shortcut_is_held(bindings.ptt_friends());
+            if bindings.capture_active() {
+                wait_for_release = true;
+            } else if physical_state == Some(false) {
+                wait_for_release = false;
+            }
+            let current_state = if wait_for_release {
+                Some(false)
+            } else {
+                physical_state
+            };
             if current_state.is_none() {
                 unobservable_polls += 1;
             }
@@ -1871,7 +1985,8 @@ mod tests {
     #[cfg(target_os = "macos")]
     #[test]
     fn unsupported_persisted_ptt_binding_falls_back_to_safe_default() {
-        let bindings = super::ShortcutBindings::new("CmdOrCtrl+F24", "CmdOrCtrl+]");
+        let bindings =
+            super::ShortcutBindings::new("CmdOrCtrl+F24", "CmdOrCtrl+]", "CmdOrCtrl+Backslash");
         assert_eq!(bindings.ptt_friends().key, super::Code::BracketLeft);
     }
     #[derive(Default)]
@@ -1888,11 +2003,11 @@ mod tests {
         super::Shortcut::from_str(accelerator).unwrap()
     }
 
-    fn replace_pair(
+    fn replace_pair<const N: usize>(
         registry: &std::cell::RefCell<PairRegistry>,
-        old: [super::Shortcut; 2],
-        new: [super::Shortcut; 2],
-        wanted: [bool; 2],
+        old: [super::Shortcut; N],
+        new: [super::Shortcut; N],
+        wanted: [bool; N],
     ) -> Result<(), String> {
         super::replace_shortcut_pair(
             old,
@@ -1928,6 +2043,107 @@ mod tests {
                 Ok(())
             },
         )
+    }
+
+    #[test]
+    fn microphone_toggle_default_parses_and_repeats_require_release() {
+        let bindings = super::ShortcutBindings::new("", "", "");
+        assert_eq!(bindings.mic_toggle(), shortcut("CmdOrCtrl+Backslash"));
+        assert!(bindings.mic_toggle_pressed());
+        assert!(!bindings.mic_toggle_pressed());
+        bindings.reset_mic_toggle();
+        assert!(bindings.mic_toggle_pressed());
+    }
+
+    #[test]
+    fn microphone_toggle_recovers_a_dropped_release_from_physical_state() {
+        let bindings = super::ShortcutBindings::new("", "", "");
+        assert!(bindings.mic_toggle_pressed());
+        assert!(!bindings.mic_toggle_pressed());
+        bindings.reconcile_mic_toggle_physical_state(Some(true));
+        assert!(!bindings.mic_toggle_pressed());
+        bindings.reconcile_mic_toggle_physical_state(None);
+        assert!(!bindings.mic_toggle_pressed());
+        bindings.reconcile_mic_toggle_physical_state(Some(false));
+        assert!(bindings.mic_toggle_pressed());
+    }
+
+    #[test]
+    fn microphone_toggle_stays_blocked_during_capture_and_until_physical_release() {
+        let bindings = super::ShortcutBindings::new("", "", "");
+        bindings.set_capture_active(true);
+        assert!(!bindings.mic_toggle_pressed());
+        bindings.reconcile_mic_toggle_physical_state(Some(false));
+        assert!(!bindings.mic_toggle_pressed());
+        bindings
+            .capture_active
+            .store(false, std::sync::atomic::Ordering::Relaxed);
+        bindings.reconcile_mic_toggle_physical_state(Some(true));
+        assert!(!bindings.mic_toggle_pressed());
+        bindings.reconcile_mic_toggle_physical_state(Some(false));
+        assert!(bindings.mic_toggle_pressed());
+    }
+
+    #[test]
+    fn microphone_default_preserves_existing_custom_shortcuts_on_upgrade() {
+        let bindings =
+            super::ShortcutBindings::new("CmdOrCtrl+Backslash", "CmdOrCtrl+Shift+Backslash", "");
+        assert_eq!(bindings.ptt_friends(), shortcut("CmdOrCtrl+Backslash"));
+        assert_eq!(bindings.ptt_ai(), shortcut("CmdOrCtrl+Shift+Backslash"));
+        assert_eq!(bindings.mic_toggle(), shortcut("CmdOrCtrl+Alt+Backslash"));
+    }
+
+    #[test]
+    fn triple_reset_rotates_bindings_and_validates_inactive_microphone() {
+        let defaults = [
+            shortcut("CmdOrCtrl+["),
+            shortcut("CmdOrCtrl+]"),
+            shortcut("CmdOrCtrl+Backslash"),
+        ];
+        let old = [defaults[2], defaults[0], defaults[1]];
+        for session in [false, true] {
+            for ai in [false, true] {
+                let wanted = [session, ai, session];
+                let registry = std::cell::RefCell::new(PairRegistry {
+                    held: old
+                        .into_iter()
+                        .zip(wanted)
+                        .filter_map(|(binding, wanted)| wanted.then_some(binding))
+                        .collect(),
+                    ..Default::default()
+                });
+                replace_pair(&registry, old, defaults, wanted).unwrap();
+                let registry = registry.borrow();
+                for (binding, wanted) in defaults.into_iter().zip(wanted) {
+                    assert_eq!(registry.held.contains(&binding), wanted);
+                    assert!(registry.registrations.contains(&binding));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn triple_reset_restores_all_bindings_when_microphone_registration_fails() {
+        let defaults = [
+            shortcut("CmdOrCtrl+["),
+            shortcut("CmdOrCtrl+]"),
+            shortcut("CmdOrCtrl+Backslash"),
+        ];
+        let old = [
+            shortcut("CmdOrCtrl+J"),
+            shortcut("CmdOrCtrl+K"),
+            shortcut("CmdOrCtrl+L"),
+        ];
+        let registry = std::cell::RefCell::new(PairRegistry {
+            held: old.to_vec(),
+            fail_register_once: Some(defaults[2]),
+            ..Default::default()
+        });
+        assert!(replace_pair(&registry, old, defaults, [true, true, true]).is_err());
+        assert_eq!(registry.borrow().held.len(), 3);
+        assert!(old
+            .iter()
+            .all(|binding| registry.borrow().held.contains(binding)));
     }
 
     #[test]

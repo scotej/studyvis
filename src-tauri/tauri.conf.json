@@ -19,6 +19,7 @@
         "minHeight": 640,
         "resizable": true,
         "fullscreen": false,
+        "backgroundThrottling": "disabled",
         "visible": false
       }
     ],

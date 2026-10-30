@@ -52,6 +52,7 @@ export type PttPlatform = 'macos' | 'windows' | 'linux' | 'unknown'
 
 export type PttStoreObservation = {
   active: boolean
+  hotMic?: boolean
   awaitingRelease: boolean
   heldSources: readonly string[]
   revision: number
@@ -165,6 +166,9 @@ type Invariant = {
 const heldByShortcut = (o: PttObservation): boolean =>
   o.store.heldSources.includes('native-shortcut')
 
+const micActive = (o: PttObservation): boolean =>
+  o.store.active || o.store.hotMic === true
+
 export const PTT_INVARIANTS: readonly Invariant[] = [
   // The mic is live while the app believes it is not transmitting. This is the
   // privacy-relevant direction and is always an error.
@@ -176,7 +180,7 @@ export const PTT_INVARIANTS: readonly Invariant[] = [
     requiresPhysicalWatch: false,
     requiresSession: true,
     predicate: (o) =>
-      !o.store.active &&
+      !micActive(o) &&
       !o.track.collectionError &&
       o.track.enabledAudioSenders > 0 &&
       // An `enabled` but ENDED sender is not a live microphone; reporting it as
@@ -193,7 +197,7 @@ export const PTT_INVARIANTS: readonly Invariant[] = [
     requiresPhysicalWatch: false,
     requiresSession: true,
     predicate: (o) =>
-      o.store.active &&
+      micActive(o) &&
       !o.track.collectionError &&
       o.track.audioSenders > 0 &&
       // `< audioSenders`, not `=== 0`: with several peers, one sender left
@@ -214,7 +218,7 @@ export const PTT_INVARIANTS: readonly Invariant[] = [
     predicate: (o) =>
       !o.render.probeError &&
       o.render.selfLit !== null &&
-      o.render.selfLit !== o.store.active,
+      o.render.selfLit !== micActive(o),
   },
   // The badge is shown by opacity, so what the user SEES can disagree with the
   // committed attribute above. #226 was reported as a visibly lit indicator,
@@ -239,7 +243,7 @@ export const PTT_INVARIANTS: readonly Invariant[] = [
     predicate: (o) =>
       !o.render.probeError &&
       o.render.opacityLit !== null &&
-      o.render.opacityLit !== o.store.active,
+      o.render.opacityLit !== micActive(o),
   },
   // We told peers one thing and believe another. `msSinceSend` keeps a send
   // that is merely in flight from counting.
@@ -252,7 +256,7 @@ export const PTT_INVARIANTS: readonly Invariant[] = [
     requiresSession: true,
     predicate: (o) =>
       o.broadcast.lastActive !== null &&
-      o.broadcast.lastActive !== o.store.active &&
+      o.broadcast.lastActive !== micActive(o) &&
       o.broadcast.msSinceSend !== null &&
       o.broadcast.msSinceSend > 1_000,
   },

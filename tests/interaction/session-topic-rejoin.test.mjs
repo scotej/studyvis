@@ -20,11 +20,12 @@ import { AI_DIALOG_TOPIC_CHANGE } from '@/features/ai/aiDialogChannels'
 import { useModelStore } from '@/features/ai/modelStore'
 import { readEngineInfo } from '@/features/ai/engine'
 import { generateIdentity, signMessage } from '@/lib/crypto/identity'
+import { serializeHelloForSig } from '@/features/session/hello'
 import { bytesToHex } from '@/lib/encoding'
 import { useIdentityStore } from '@/stores/identityStore'
 import { useSessionStore } from '@/stores/sessionStore'
 import { useSettingsStore, DEFAULT_SETTINGS } from '@/stores/settingsStore'
-import { verifyIncomingAuditEvent } from '@/stores/auditStore'
+import { buildAuditEvent, useAuditStore, verifyIncomingAuditEvent } from '@/stores/auditStore'
 import { strings } from '@/strings'
 import '@/design/index.css'
 
@@ -45,6 +46,14 @@ const timelineReads = []
 let next = 1
 let helloWaiting = false
 let releaseHello = () => {}
+let currentTransport
+let holdTargetedHello = false
+let releaseTargetedHello = () => {}
+let holdJoinedSignature = false
+let joinedSignatureWaiting = false
+let releaseJoinedSignature = () => {}
+const remotePerson = generateIdentity()
+const remoteEd = bytesToHex(remotePerson.edPub)
 
 const record = (args) => Object.fromEntries(
   Object.entries(args).map(([key, value]) => [
@@ -71,8 +80,16 @@ Object.assign(window, {
         version: 'b9095', installing: false, last_error: null, devices: [],
         device_error: null, hardware_identity: { selection: 'auto', topology: [] },
       }
-      if (cmd === 'identity_sign')
+      if (cmd === 'identity_sign') {
+        const payload = JSON.parse(new TextDecoder().decode(new Uint8Array(args.message)))
+        if (payload.kind === 'joined' && holdJoinedSignature) {
+          holdJoinedSignature = false
+          joinedSignatureWaiting = true
+          await new Promise(resolve => { releaseJoinedSignature = resolve })
+          joinedSignatureWaiting = false
+        }
         return Array.from(signMessage(person.edPriv, new Uint8Array(args.message)))
+      }
       if (cmd === 'session_timeline_get') { timelineReads.push(args.sessionId); return null }
       if (cmd === 'session_journal_read') {
         journalReads.push(args.sessionId)
@@ -119,15 +136,22 @@ Object.defineProperty(navigator.mediaDevices, 'getUserMedia', {
 })
 
 const begin = (isRejoin, holdHello = false) => {
+  const joins = new Set()
+  const leaves = new Set()
+  const receivers = new Map()
+  currentTransport = { joins, leaves, receivers }
   const room = {
     selfId: 'topic-self', getPeers: () => ({}),
-    onPeerJoin: () => () => {}, onPeerLeave: () => () => {},
+    onPeerJoin: fn => { joins.add(fn); return () => joins.delete(fn) },
+    onPeerLeave: fn => { leaves.add(fn); return () => leaves.delete(fn) },
     onPeerStream: () => () => {}, addStream: () => {}, removeStream: () => {},
     leave: async () => {},
     makeAction: name => ({
-      receive: () => {},
-      send: async data => {
-        sent.push({ name, data })
+      receive: fn => receivers.set(name, fn),
+      send: async (data, target) => {
+        sent.push({ name, data, target })
+        if (name === 'session-hello' && target && holdTargetedHello)
+          await new Promise(resolve => { releaseTargetedHello = resolve })
         if (name === 'session-hello' && holdHello) {
           helloWaiting = true
           await new Promise(resolve => { releaseHello = resolve })
@@ -171,11 +195,38 @@ window.fixture = {
     flushSync(() => begin(true, holdHello))
   },
   releaseHello: () => releaseHello(),
+  holdJoinedSignature: () => { holdJoinedSignature = true },
+  releaseJoinedSignature: () => releaseJoinedSignature(),
+  holdTargetedHello: () => { holdTargetedHello = true },
+  releaseTargetedHello: () => {
+    holdTargetedHello = false
+    releaseTargetedHello()
+  },
+  joinPeer: peerId => { for (const fn of currentTransport.joins) fn(peerId) },
+  leavePeer: peerId => { for (const fn of currentTransport.leaves) fn(peerId) },
+  admitPeer: peerId => useSessionStore.getState().peerJoined(peerId),
+  admitPeerWithOtherIdentity: peerId => useSessionStore.getState().setPeerHello(peerId, {
+    ed_pubkey_hex: bytesToHex(generateIdentity().edPub), display_name: 'Other identity', joined_at: now,
+  }),
+  receiveJoin: async (peerId, { badSignature = false, wrongTopic = false } = {}) => {
+    const hello = { v: 1, peer_id: peerId, ed_pubkey_hex: remoteEd,
+      display_name: 'Remote friend', joined_at: now }
+    currentTransport.receivers.get('session-hello')({ ...hello,
+      sig: bytesToHex(signMessage(remotePerson.edPriv, serializeHelloForSig(hello))),
+    }, peerId)
+    const event = await buildAuditEvent({ sessionTopic: wrongTopic ? 'd'.repeat(64) : topic,
+      myEdPubkeyHex: remoteEd, kind: 'joined', detail: {},
+      sign: async bytes => signMessage(remotePerson.edPriv, bytes), now: () => now })
+    if (badSignature) event.sig = '0'.repeat(128)
+    currentTransport.receivers.get('audit')(event, peerId)
+  },
   snapshot: () => ({
     status: useSessionStore.getState().status,
     initial: useSessionStore.getState().initialDeclaredTopic,
     current: useSessionStore.getState().declaredStudyTopic,
-    row: rows.get(topic), helloWaiting, exports, journalReads, timelineReads,
+    row: rows.get(topic), helloWaiting, joinedSignatureWaiting, exports, journalReads, timelineReads,
+    sent, joined: useAuditStore.getState().events.filter(event => event.kind === 'joined'),
+    peerHistory: useSessionStore.getState().seenPeerEdPubkeys,
     topics: sent.filter(item => ['topic_set', 'topic_change'].includes(item.data?.kind))
       .map(item => ({ kind: item.data.kind, detail: item.data.detail, ts: item.data.ts })),
     verified: sent.filter(item => item.data?.kind)
@@ -337,3 +388,274 @@ for (const scenario of ['changed', 'unchanged', 'hello delayed past change']) {
     })
   })
 }
+
+test('late peers receive the original signed join after their hello', async () => {
+  await withComponentBrowser(source, async (page) => {
+    await page.waitForFunction(
+      () => window.fixture.snapshot().joined.length === 1
+    )
+    const original = await page.evaluate(
+      () => window.fixture.snapshot().joined[0]
+    )
+    await page.evaluate(() => {
+      window.fixture.advance(120_000)
+      window.fixture.holdTargetedHello()
+      window.fixture.joinPeer('late-peer')
+    })
+    await page.waitForFunction(() =>
+      window.fixture
+        .snapshot()
+        .sent.some(
+          (item) => item.name === 'session-hello' && item.target === 'late-peer'
+        )
+    )
+    assert.equal(
+      await page.evaluate(
+        () =>
+          window.fixture
+            .snapshot()
+            .sent.filter(
+              (item) =>
+                item.data?.kind === 'joined' && item.target === 'late-peer'
+            ).length
+      ),
+      0,
+      'a pending hello must not be overtaken by the audit event'
+    )
+    await page.evaluate(() => window.fixture.releaseTargetedHello())
+    await page.waitForFunction(() =>
+      window.fixture
+        .snapshot()
+        .sent.some(
+          (item) => item.data?.kind === 'joined' && item.target === 'late-peer'
+        )
+    )
+    const delivered = await page.evaluate(
+      () =>
+        window.fixture
+          .snapshot()
+          .sent.find(
+            (item) =>
+              item.data?.kind === 'joined' && item.target === 'late-peer'
+          ).data
+    )
+    const wire = { ...original }
+    delete wire.seq
+    assert.deepEqual(
+      delivered,
+      wire,
+      'signature and original timestamp are reused'
+    )
+    assert.equal(
+      await page.evaluate(() => window.fixture.snapshot().joined.length),
+      1
+    )
+    assert.equal(
+      await page.evaluate(() => window.fixture.snapshot().verified),
+      true
+    )
+    await page.evaluate(() => window.fixture.stop())
+  })
+})
+
+for (const interruption of [
+  'peer leave',
+  'controller teardown',
+  'controller replacement',
+]) {
+  test(`a pending targeted hello cannot replay a join after ${interruption}`, async () => {
+    await withComponentBrowser(source, async (page) => {
+      await page.waitForFunction(
+        () => window.fixture.snapshot().joined.length === 1
+      )
+      await page.evaluate(() => {
+        window.fixture.holdTargetedHello()
+        window.fixture.joinPeer('departed-peer')
+      })
+      await page.waitForFunction(() =>
+        window.fixture
+          .snapshot()
+          .sent.some(
+            (item) =>
+              item.name === 'session-hello' && item.target === 'departed-peer'
+          )
+      )
+      await page.evaluate((action) => {
+        if (action === 'peer leave') window.fixture.leavePeer('departed-peer')
+        else if (action === 'controller teardown') window.fixture.stop()
+        else {
+          window.fixture.advance(120_000)
+          window.fixture.rejoin(false)
+        }
+        window.fixture.releaseTargetedHello()
+      }, interruption)
+      // Drain the released promise and its publication continuation without a
+      // timing-dependent sleep; the original callback must have been aborted.
+      await page.evaluate(
+        () => new Promise((resolve) => setTimeout(resolve, 0))
+      )
+      assert.equal(
+        await page.evaluate(
+          () =>
+            window.fixture
+              .snapshot()
+              .sent.filter(
+                (item) =>
+                  item.data?.kind === 'joined' &&
+                  item.target === 'departed-peer'
+              ).length
+        ),
+        0
+      )
+      if (interruption !== 'controller teardown')
+        await page.evaluate(() => window.fixture.stop())
+    })
+  })
+}
+
+test('a signed join waits for admission and duplicate delivery remains one row', async () => {
+  await withComponentBrowser(source, async (page) => {
+    await page.waitForFunction(
+      () => window.fixture.snapshot().joined.length === 1
+    )
+    await page.evaluate(() => window.fixture.receiveJoin('pending-peer'))
+    let state = await page.evaluate(() => window.fixture.snapshot())
+    assert.equal(state.joined.length, 1)
+    assert.deepEqual(
+      state.peerHistory,
+      [],
+      'a provisional hello cannot create history'
+    )
+    await page.evaluate(() => window.fixture.admitPeer('pending-peer'))
+    await page.waitForFunction(
+      () => window.fixture.snapshot().joined.length === 2
+    )
+    await page.evaluate(() => window.fixture.receiveJoin('pending-peer'))
+    state = await page.evaluate(() => window.fixture.snapshot())
+    assert.equal(state.joined.length, 2, 'the same signed event is idempotent')
+    assert.equal(state.peerHistory.length, 1)
+    await page.evaluate(() => window.fixture.stop())
+  })
+})
+
+for (const rejected of [
+  'bad signature',
+  'wrong session',
+  'departed transport',
+]) {
+  test(`a provisional join cannot enter history with ${rejected}`, async () => {
+    await withComponentBrowser(source, async (page) => {
+      await page.waitForFunction(
+        () => window.fixture.snapshot().joined.length === 1
+      )
+      await page.evaluate(async (reason) => {
+        await window.fixture.receiveJoin('rejected-peer', {
+          badSignature: reason === 'bad signature',
+          wrongTopic: reason === 'wrong session',
+        })
+        if (reason === 'departed transport')
+          window.fixture.leavePeer('rejected-peer')
+        window.fixture.admitPeer('rejected-peer')
+      }, rejected)
+      assert.equal(
+        await page.evaluate(() => window.fixture.snapshot().joined.length),
+        1
+      )
+      await page.evaluate(() => window.fixture.stop())
+    })
+  })
+}
+
+for (const interruption of ['teardown', 'replacement']) {
+  test(`a pending joined signature cannot publish after controller ${interruption}`, async () => {
+    await withComponentBrowser(source, async (page) => {
+      await page.waitForFunction(
+        () => window.fixture.snapshot().joined.length === 1
+      )
+      await page.evaluate(() => {
+        window.fixture.advance(120_000)
+        window.fixture.holdJoinedSignature()
+        window.fixture.rejoin(false)
+      })
+      await page.waitForFunction(
+        () => window.fixture.snapshot().joinedSignatureWaiting
+      )
+      await page.evaluate((action) => {
+        if (action === 'teardown') window.fixture.stop()
+        else {
+          window.fixture.advance(240_000)
+          window.fixture.rejoin(false)
+        }
+        window.fixture.releaseJoinedSignature()
+      }, interruption)
+      await page.waitForFunction(
+        () => !window.fixture.snapshot().joinedSignatureWaiting
+      )
+      await page.evaluate(
+        () => new Promise((resolve) => setTimeout(resolve, 0))
+      )
+      const state = await page.evaluate(() => window.fixture.snapshot())
+      assert.equal(
+        state.sent.filter(
+          (item) =>
+            item.data?.kind === 'joined' && item.data.ts === 1700000120000
+        ).length,
+        0
+      )
+      assert.equal(
+        state.joined.some((event) => event.ts === 1700000120000),
+        false
+      )
+      if (interruption === 'replacement')
+        await page.evaluate(() => window.fixture.stop())
+    })
+  })
+}
+
+test('a provisional join cannot override the final admitted identity binding', async () => {
+  await withComponentBrowser(source, async (page) => {
+    await page.waitForFunction(
+      () => window.fixture.snapshot().joined.length === 1
+    )
+    await page.evaluate(async () => {
+      await window.fixture.receiveJoin('rebound-peer')
+      window.fixture.admitPeerWithOtherIdentity('rebound-peer')
+    })
+    assert.equal(
+      await page.evaluate(() => window.fixture.snapshot().joined.length),
+      1
+    )
+    assert.equal(
+      await page.evaluate(() => window.fixture.snapshot().peerHistory.length),
+      1
+    )
+    await page.evaluate(() => window.fixture.stop())
+  })
+})
+
+test('pending signed joins are bounded while admission is outstanding', async () => {
+  await withComponentBrowser(source, async (page) => {
+    await page.waitForFunction(
+      () => window.fixture.snapshot().joined.length === 1
+    )
+    await page.evaluate(async () => {
+      for (let i = 1; i <= 5; i++) {
+        window.fixture.advance(i * 1000)
+        await window.fixture.receiveJoin('candidate-' + i)
+      }
+    })
+    assert.equal(
+      await page.evaluate(() => window.fixture.snapshot().joined.length),
+      1
+    )
+    await page.evaluate(() => {
+      for (let i = 1; i <= 5; i++) window.fixture.admitPeer('candidate-' + i)
+    })
+    assert.equal(
+      await page.evaluate(() => window.fixture.snapshot().joined.length),
+      5,
+      'only four provisional transports may retain a pending event'
+    )
+    await page.evaluate(() => window.fixture.stop())
+  })
+})

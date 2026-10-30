@@ -54,6 +54,7 @@ permissions = [
   "allow-system-open-notification-settings",
   "allow-system-set-global-shortcut",
   "allow-system-set-global-shortcuts",
+  "allow-system-set-shortcut-capture-active",
   "allow-system-relaunch-app",
   "allow-system-install-context",
   "allow-system-window-style-is-custom-applied",

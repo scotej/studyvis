@@ -50,6 +50,7 @@ const APP_COMMANDS: &[&str] = &[
     "system_open_notification_settings",
     "system_set_global_shortcut",
     "system_set_global_shortcuts",
+    "system_set_shortcut_capture_active",
     "system_relaunch_app",
     "system_install_context",
     "system_window_style_is_custom_applied",

@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "generatedBy": "scripts/generate-third-party-notices.ts",
   "noticePath": "THIRD-PARTY-NOTICES.txt",
-  "noticeSha256": "d6a85e9663de2b45c87e8d668e50bc3136911c9e4ab2154604808c658b3684fd",
+  "noticeSha256": "7032843fb05337f6c61c4ff22a5ad8bcac964225cac69a3000b29b308d393567",
   "scope": {
     "npm": "package-lock.json v3 entries beneath node_modules whose dev flag is not true",
     "cargo": "normal dependency edges reachable from the StudyVis root under each release target; build/dev edges excluded",
@@ -44,7 +44,7 @@
     },
     {
       "path": "src-tauri/Cargo.lock",
-      "sha256": "abcfd45a1dc2e3f45b58cf21c521436a16193599f71e05cab154ccb3da35e6f0"
+      "sha256": "46a14e78d08ee09be196e8d21d270ef5bcff5daaa2aaf7844602dce139a6fc97"
     },
     {
       "path": "src-tauri/Cargo.toml",
@@ -10431,13 +10431,13 @@
       ]
     },
     {
-      "id": "cargo:tokio@1.52.2",
+      "id": "cargo:tokio@1.53.3",
       "ecosystem": "cargo",
       "name": "tokio",
-      "version": "1.52.2",
+      "version": "1.53.3",
       "licenseExpression": "MIT",
-      "source": "https://crates.io/api/v1/crates/tokio/1.52.2/download",
-      "checksum": "110a78583f19d5cdb2c5ccf321d1290344e71313c6c37d43520d386027d18386",
+      "source": "https://crates.io/api/v1/crates/tokio/1.53.3/download",
+      "checksum": "ce3335fa71841cda333a58d7615b03901380ecf09d59b3296d21f8bbac0dde4e",
       "repository": "https://github.com/tokio-rs/tokio",
       "targets": [
         "aarch64-apple-darwin",
@@ -10446,7 +10446,7 @@
       ],
       "licenseFiles": [
         {
-          "path": "cargo:tokio@1.52.2/LICENSE",
+          "path": "cargo:tokio@1.53.3/LICENSE",
           "sha256": "253cd04c6714889df2d32f3f64d669179a1c95c76ac43c40882c52eb06bc3552"
         }
       ]
