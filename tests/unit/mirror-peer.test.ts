@@ -37,7 +37,12 @@ class TestStream extends EventTarget {
 }
 
 function track(kind: 'video' | 'audio', id: string): MediaStreamTrack {
-  return { kind, id, readyState: 'live' } as MediaStreamTrack
+  return {
+    kind,
+    id,
+    readyState: 'live',
+    stop: vi.fn(),
+  } as unknown as MediaStreamTrack
 }
 
 type TestTransceiver = {
@@ -431,7 +436,69 @@ describe('LAN peer media ownership', () => {
     expect(vi.getTimerCount()).toBe(0)
   })
 
-  test('a transient ICE disconnect pauses capture and restores the same receivers within the grace period', async () => {
+  test('camera capture restart publishes a new stream identity without stopping its reusable receiver tracks', async () => {
+    const onCapture = vi.fn()
+    const host = createMirrorPeer({
+      role: 'host',
+      send: vi.fn(),
+      onCapture,
+      onFailure: vi.fn(),
+    })
+    await flush()
+    const connection = TestConnection.instances[0]
+    connection.connectionState = 'connected'
+    connection.onconnectionstatechange?.()
+    expect(onCapture.mock.calls.slice(-2)[0]).toEqual(['camera', null])
+    host.receive({ type: 'capture', camera: true, screen: false })
+    const first = onCapture.mock.calls.findLast(
+      ([kind, stream]) => kind === 'camera' && stream !== null
+    )![1] as MediaStream
+    const tracks = first.getTracks()
+    host.receive({ type: 'capture', camera: true, screen: false })
+    connection.ontrack?.({ streams: [] } as unknown as RTCTrackEvent)
+    expect(onCapture.mock.calls.slice(-2)[0]).toEqual(['camera', first])
+
+    host.receive({ type: 'capture', camera: false, screen: false })
+    expect(onCapture.mock.calls.slice(-2)[0]).toEqual(['camera', null])
+    for (const item of tracks) expect(item.stop).not.toHaveBeenCalled()
+    host.receive({ type: 'capture', camera: true, screen: false })
+    const restarted = onCapture.mock.calls.slice(-2)[0][1] as MediaStream
+    expect(restarted).not.toBe(first)
+    expect(restarted.id).not.toBe(first.id)
+    expect(restarted.getTracks()).toEqual(tracks)
+    for (const item of tracks) expect(item.stop).not.toHaveBeenCalled()
+    host.close()
+  })
+
+  test('active camera receiver track replacement publishes a new wrapper for the current tracks', async () => {
+    const onCapture = vi.fn()
+    const host = createMirrorPeer({
+      role: 'host',
+      send: vi.fn(),
+      onCapture,
+      onFailure: vi.fn(),
+    })
+    await flush()
+    const connection = TestConnection.instances[0]
+    connection.connectionState = 'connected'
+    connection.onconnectionstatechange?.()
+    host.receive({ type: 'capture', camera: true, screen: false })
+    const first = onCapture.mock.calls.slice(-2)[0][1] as MediaStream
+    const nextAudio = track('audio', 'replacement-mic')
+    connection.transceivers[1].receiver.track = nextAudio
+    connection.ontrack?.({ streams: [] } as unknown as RTCTrackEvent)
+    const replacement = onCapture.mock.calls.slice(-2)[0][1] as MediaStream
+    expect(replacement).not.toBe(first)
+    expect(replacement.getTracks()).toEqual([
+      first.getVideoTracks()[0],
+      nextAudio,
+    ])
+    for (const item of first.getTracks())
+      expect(item.stop).not.toHaveBeenCalled()
+    host.close()
+  })
+
+  test('a transient ICE disconnect republishes camera with a fresh stream ID and the same receiver tracks within the grace period', async () => {
     vi.useFakeTimers()
     const onCapture = vi.fn()
     const failure = vi.fn()
@@ -472,10 +539,13 @@ describe('LAN peer media ownership', () => {
 
     connection.connectionState = 'connected'
     connection.onconnectionstatechange?.()
-    expect(onCapture.mock.calls.slice(-2)).toEqual([
-      ['camera', camera],
-      ['screen', screen],
-    ])
+    const restored = onCapture.mock.calls.slice(-2)[0][1] as MediaStream
+    expect(restored).not.toBe(camera)
+    expect(restored.id).not.toBe(camera.id)
+    expect(restored.getTracks()).toEqual(camera.getTracks())
+    for (const item of camera.getTracks())
+      expect(item.stop).not.toHaveBeenCalled()
+    expect(onCapture.mock.calls.at(-1)).toEqual(['screen', screen])
     await vi.advanceTimersByTimeAsync(2000)
     expect(failure).not.toHaveBeenCalled()
     expect(TestConnection.instances).toHaveLength(1)

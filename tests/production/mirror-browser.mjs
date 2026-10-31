@@ -204,9 +204,17 @@ async function audioRms(page, capture = false) {
     const videos = [...document.querySelectorAll('video')].filter(
       (element) => !element.muted && element.srcObject?.getAudioTracks().length
     )
-    const streams = capture
-      ? [window.__mirrorTestCapture.camera.at(-1)].filter(Boolean)
-      : videos.map((video) => video.srcObject)
+    const streams =
+      capture === 'local'
+        ? [
+            document
+              .querySelector('[data-ptt-scope="self"]')
+              ?.closest('figure')
+              ?.querySelector('video')?.srcObject,
+          ].filter(Boolean)
+        : capture
+          ? [window.__mirrorTestCapture.camera.at(-1)].filter(Boolean)
+          : videos.map((video) => video.srcObject)
     if (!streams.length) return 0
     const context = new AudioContext()
     await context.resume()
@@ -231,6 +239,140 @@ async function audioRms(page, capture = false) {
     await context.close()
     return peak
   }, capture)
+}
+
+async function assertMicrophoneMuted(page, friend, label) {
+  await ui.until(
+    () =>
+      page.evaluate(() =>
+        window.__mirrorTestCapture.camera
+          .at(-1)
+          ?.getAudioTracks()
+          .every((track) => !track.enabled)
+      ),
+    { label: `${label}: local microphone is disabled` }
+  )
+  await ui.until(async () => (await audioRms(friend.page())) < 0.002, {
+    label: `${label}: friend decodes silence after the receiver drains`,
+    timeoutMs: 15_000,
+  })
+}
+
+async function assertBackgroundMicrophone(page, friend, context) {
+  const session = await context.newCDPSession(page)
+  await session.send('Emulation.setFocusEmulationEnabled', { enabled: false })
+  const { windowId } = await session.send('Browser.getWindowForTarget')
+  const otherTab = await context.newPage()
+  const foreground = async () => {
+    await session.send('Browser.setWindowBounds', {
+      windowId,
+      bounds: { windowState: 'normal' },
+    })
+    await page.bringToFront()
+  }
+  const background = async () => {
+    // Headless tabs otherwise remain focused even after bringToFront. Changing
+    // the actual browser window state produces native focus/blur events.
+    await session.send('Browser.setWindowBounds', {
+      windowId,
+      bounds: { windowState: 'minimized' },
+    })
+    await otherTab.bringToFront()
+  }
+  try {
+    await foreground()
+    await ui.click(page, strings.mirror.keepMicrophoneOn, { exact: true })
+    await background()
+    await ui.until(
+      () =>
+        page.evaluate(
+          () => document.visibilityState === 'hidden' || !document.hasFocus()
+        ),
+      { label: 'the actual companion tab loses browser focus' }
+    )
+    assert.equal(
+      await page
+        .getByRole('button', {
+          name: strings.mirror.muteMicrophone,
+          exact: true,
+        })
+        .getAttribute('aria-pressed'),
+      'true',
+      'explicit open-microphone intent survives another tab taking focus'
+    )
+    assert.ok(
+      (await audioRms(page, true)) > 0.02,
+      'the background companion still captures actual microphone PCM'
+    )
+    await ui.until(async () => (await audioRms(friend.page())) > 0.02, {
+      label: 'friend decodes actual PCM from the background companion',
+      timeoutMs: 20_000,
+    })
+    await foreground()
+    await ui.click(page, strings.mirror.muteMicrophone, { exact: true })
+    await assertMicrophoneMuted(page, friend, 'explicit microphone mute')
+
+    const hold = page.getByRole('button', {
+      name: strings.session.holdToTalkAriaLabel,
+      exact: true,
+    })
+    await hold.hover()
+    await page.mouse.down()
+    assert.equal(await hold.getAttribute('aria-pressed'), 'true')
+    await background()
+    await ui.until(
+      async () => (await hold.getAttribute('aria-pressed')) === 'false',
+      { label: 'focus loss safely releases the temporary microphone hold' }
+    )
+    await assertMicrophoneMuted(page, friend, 'hold-to-talk focus loss')
+    await page.mouse.up()
+    await foreground()
+    await assertMicrophoneMuted(page, friend, 'returning to the companion tab')
+  } finally {
+    await page.mouse.up()
+    await otherTab.close()
+    await foreground()
+    await session.detach()
+  }
+}
+
+async function assertLaptopControls(page, directory) {
+  for (const width of [1024, 1280, 1440]) {
+    await page.setViewportSize({ width, height: 900 })
+    const layout = await page.locator('footer').evaluate((footer) => {
+      const groups = [...footer.children].map((element) => {
+        const rect = element.getBoundingClientRect()
+        return { top: rect.top, center: rect.top + rect.height / 2 }
+      })
+      return {
+        overflow: document.documentElement.scrollWidth > window.innerWidth,
+        centers: groups.map((group) => group.center),
+      }
+    })
+    assert.equal(layout.overflow, false, `no companion overflow at ${width}`)
+    assert.ok(
+      Math.max(...layout.centers) - Math.min(...layout.centers) <= 1,
+      `all companion footer control groups share one row at ${width}`
+    )
+    for (const label of [
+      strings.settings.openAriaLabel,
+      strings.session.leaveCta,
+    ]) {
+      assert.equal(
+        await page
+          .locator('header')
+          .getByRole('button', { name: label, exact: true })
+          .count(),
+        1,
+        `${label} is available in the companion header at ${width}`
+      )
+    }
+    await page.screenshot({
+      path: path.join(directory, `companion-laptop-${width}.png`),
+      fullPage: true,
+    })
+  }
+  await page.setViewportSize({ width: 1280, height: 800 })
 }
 
 function observeCapture() {
@@ -1198,6 +1340,8 @@ for (const [name, engine] of Object.entries({ chromium, firefox, webkit })) {
           } finally {
             await page.mouse.up()
           }
+          await assertMicrophoneMuted(page, friend, 'released microphone hold')
+          await assertBackgroundMicrophone(page, friend, context)
           const requestStart = lab.llama.requests.length
           await ui.click(page, strings.settings.openAriaLabel)
           await ui.click(page, strings.mirror.screenCapture)
@@ -1255,10 +1399,33 @@ for (const [name, engine] of Object.entries({ chromium, firefox, webkit })) {
           )
           await ui.click(page, 'Share screen')
           await ui.waitForText(friend.page(), "Alice's screen", 30_000)
+          await assertLaptopControls(page, lab.workdir)
           await assertAiOnlyScreenAfterShareLoss(host, friend, page)
+          await ui.click(page, strings.mirror.enableMedia, { exact: true })
         }
 
         if (name === 'chromium') {
+          await ui.click(page, strings.mirror.keepMicrophoneOn, { exact: true })
+          try {
+            await ui.until(async () => (await audioRms(friend.page())) > 0.02, {
+              label: 'microphone is open before another tab takes control',
+              timeoutMs: 20_000,
+            })
+          } catch (error) {
+            t.diagnostic(
+              JSON.stringify({
+                browserMicrophoneRms: await audioRms(page, true),
+                hostRelayRms: await audioRms(host.page(), 'local'),
+                friendPlaybackRms: await audioRms(friend.page()),
+                hostMedia: await mediaState(host.page()),
+                friendVideo: await videoEvidence(friend.page()),
+                friendPeers: await friend
+                  .page()
+                  .evaluate(() => window.__lab.peers()),
+              })
+            )
+            throw error
+          }
           const replaced = page
           const replacement = await context.newPage()
           replacement.on('pageerror', (error) => errors.push(error.message))
@@ -1305,6 +1472,18 @@ for (const [name, engine] of Object.entries({ chromium, firefox, webkit })) {
           )
           await replaced.close()
           page = replacement
+          assert.equal(
+            await page
+              .getByRole('button', {
+                name: strings.mirror.keepMicrophoneOn,
+                exact: true,
+              })
+              .getAttribute('aria-pressed'),
+            'false',
+            'a replacement controller starts with explicit microphone mode off'
+          )
+          await ui.click(page, strings.mirror.enableMedia, { exact: true })
+          await assertMicrophoneMuted(page, friend, 'replacement controller')
           await assertNoNativeCaptureOverlay(host)
         }
         await ui.until(

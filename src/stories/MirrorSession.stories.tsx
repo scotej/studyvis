@@ -82,6 +82,7 @@ const snapshot: MirrorSessionSnapshot = {
   hadAnyPeer: true,
   cameraOn: true,
   pttActive: false,
+  pttFriendsAccelerator: 'CmdOrCtrl+[',
   screenSharing: false,
   audit: [
     {
@@ -174,6 +175,29 @@ export const Connected: Story = {
       type: 'camera',
       on: false,
     })
+  },
+}
+export const CrowdedControls: Story = {
+  args: {
+    connection: connection({
+      snapshot: { ...snapshot, aiStatus: 'unconfigured', screenSharing: true },
+    }),
+  },
+  play: async ({ canvasElement }) => {
+    const footer = canvasElement.querySelector('footer')!
+    if (window.innerWidth < 1024) return
+    const groups = [...footer.children].map((child) =>
+      child.getBoundingClientRect()
+    )
+    await expect(
+      Math.abs(
+        groups[0]!.y +
+          groups[0]!.height / 2 -
+          groups[1]!.y -
+          groups[1]!.height / 2
+      )
+    ).toBeLessThan(1)
+    await expect(footer.scrollWidth).toBeLessThanOrEqual(footer.clientWidth)
   },
 }
 export const OfflineReview: Story = {

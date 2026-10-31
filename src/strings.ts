@@ -85,7 +85,12 @@ export const strings = {
     retryMedia: 'Try camera and microphone again',
     enableAudio: 'Enable session audio',
     mediaHelp:
-      'Choose this device’s camera and microphone. Your microphone stays muted until you hold Talk.',
+      'Choose this device’s camera and microphone. Your microphone starts muted. Hold Talk, or choose Keep mic on to talk while using another tab.',
+    keepMicrophoneOn: 'Keep mic on',
+    muteMicrophone: 'Mute mic',
+    backgroundTalkHelp:
+      'Hold to talk works while this tab has focus. Choose Keep mic on before switching tabs or apps, then Mute mic when finished. Closing or disconnecting the companion mutes it.',
+    shortcutHelp: 'Hold to talk while this tab has focus:',
     screenHelp:
       'Choose a screen for local AI checks. Sharing with friends is a separate control.',
     screenCapture: 'Choose screen for AI',
@@ -100,6 +105,15 @@ export const strings = {
     aiToggleHelp:
       'AI runs on the desktop and checks only the camera and screen you choose here.',
     notifications: 'Enable browser notifications',
+    notificationsTest: 'Test browser notifications',
+    notificationsTestBody:
+      'Browser notifications are ready for this study session.',
+    notificationsEnabled:
+      'Notifications enabled. A test notification was sent. If it is hidden, check your system notification settings and Do Not Disturb.',
+    notificationsPending:
+      'Allow notifications when the browser asks. Permission is needed for alerts outside this tab.',
+    notificationsFailed:
+      'Notifications are allowed, but this browser could not display one. Check site and system notification settings, then try again.',
     notificationsUnavailable:
       'Browser notifications are unavailable here. On iPad, add the companion to your Home Screen and open it there. Session events still appear in the app.',
     notificationsDenied:

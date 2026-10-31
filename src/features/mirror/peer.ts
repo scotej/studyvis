@@ -112,8 +112,17 @@ export function createMirrorPeer(options: MirrorPeerOptions): MirrorPeer {
     const video = transceivers[0]?.receiver.track
     const audio = transceivers[1]?.receiver.track
     const screen = transceivers[2]?.receiver.track
-    if (!cameraReceiver && video && audio)
+    if (!connected || !captureFlags.camera || !video || !audio) {
+      cameraReceiver = null
+    } else if (
+      !cameraReceiver ||
+      cameraReceiver.getVideoTracks()[0] !== video ||
+      cameraReceiver.getAudioTracks()[0] !== audio
+    ) {
+      // Browser companion restarts need a fresh stream ID: Trystero caches
+      // remote streams by ID even when the receiver tracks are unchanged.
       cameraReceiver = new MediaStream([video, audio])
+    }
     if (!screenReceiver && screen) screenReceiver = new MediaStream([screen])
     options.onCapture?.(
       'camera',

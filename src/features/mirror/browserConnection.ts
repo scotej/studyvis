@@ -3,6 +3,7 @@ import { createMirrorPeer, type MirrorPeer } from './peer'
 import { MirrorCodec, type CaptureKind, type MirrorMessage } from './wire'
 import { projectOfflineSnapshot, readMirrorSnapshot } from './sessionBridge'
 import { readMirrorReport, type MirrorReport } from './reportValidation'
+import { showBrowserNotification } from './browserNotifications'
 
 export type BrowserConnectionState = {
   status: 'pairing' | 'connecting' | 'connected' | 'disconnected'
@@ -232,29 +233,9 @@ export function createBrowserConnection(): BrowserConnection {
         } else if (message.type === 'control_result') {
           finishControl(message.requestId, message.ok)
         } else if (message.type === 'notification') {
-          if (
-            'Notification' in window &&
-            Notification.permission === 'granted' &&
-            !(
-              message.onlyWhenHidden &&
-              typeof document !== 'undefined' &&
-              document.visibilityState === 'visible' &&
-              document.hasFocus()
-            )
-          ) {
-            const show = async () => {
-              const registration =
-                await navigator.serviceWorker?.getRegistration()
-              if (registration)
-                await registration.showNotification(message.title, {
-                  body: message.body,
-                })
-              else new Notification(message.title, { body: message.body })
-            }
-            void show().catch(() => {
-              /* Notification denial must not disconnect media. */
-            })
-          }
+          void showBrowserNotification(message).catch(() => {
+            /* Notification denial must not disconnect media. */
+          })
         } else if (message.type === 'ping') send({ type: 'pong' })
         else if (message.type === 'reconnect') current.close()
       } catch {

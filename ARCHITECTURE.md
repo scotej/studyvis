@@ -866,6 +866,11 @@ companion releases desktop capture and mutes local peer playback while pairing
 and throughout browser operation.
 Pending desktop microphone swaps are cancelled across capture ownership changes;
 fresh tracks stay muted until committed to the current desktop stream.
+Browser hold-to-talk releases on focus loss and uses the desktop's configured
+shortcut only while the tab is focused. Explicit Keep mic on is separate from
+temporary holds, survives tab changes, and is cleared on disconnect, report,
+or session changes. Its host intent is scoped to the companion generation;
+native hold-to-talk retains its existing safety timeout.
 Browser screen capture for AI is distinct from explicitly sharing it with peers.
 Losing the browser screen, disconnecting or ending takeover clears sharing consent;
 an AI-only capture after reconnect requires a new explicit share action.

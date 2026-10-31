@@ -329,6 +329,7 @@ export function SessionView({
   const pttActive = usePttStore(isMicActive)
   const hotMic = usePttStore((s) => s.hotMic)
   const pttHeld = usePttStore((s) => s.active)
+  const mirrorMicrophoneGenerationRef = useRef<string | null>(null)
   const auditEvents = useAuditStore((s) => s.events)
   // #47 B6 — the ephemeral note feed + the wire sender owned by the
   // hello/audit effect (same ref pattern as emitAuditRef).
@@ -403,9 +404,19 @@ export function SessionView({
   const mirror = useSessionMirror(sessionTopic, (control) =>
     mirrorControlRef.current(control)
   )
+  useLayoutEffect(() => {
+    if (
+      mirrorMicrophoneGenerationRef.current !== null &&
+      mirrorMicrophoneGenerationRef.current !== mirror.config?.generation
+    ) {
+      mirrorMicrophoneGenerationRef.current = null
+      if (usePttStore.getState().hotMic) usePttStore.getState().toggleHotMic()
+    }
+  }, [mirror.config?.generation])
   const mirrorTakeoverRef = useRef(mirror.takeover)
   useLayoutEffect(() => {
     if (mirrorTakeoverRef.current !== mirror.takeover) {
+      mirrorMicrophoneGenerationRef.current = null
       usePttStore.getState().reset()
     }
     mirrorTakeoverRef.current = mirror.takeover
@@ -2700,7 +2711,10 @@ export function SessionView({
         return false
       if (
         leaveRequestedRef.current &&
-        (control.type !== 'ptt' || control.active)
+        !(
+          (control.type === 'ptt' && !control.active) ||
+          (control.type === 'microphone' && control.muted)
+        )
       )
         return false
       setMirrorControlError(null)
@@ -2713,6 +2727,16 @@ export function SessionView({
               usePttStore.getState().press('browser-companion')
             else usePttStore.getState().release('browser-companion')
             return
+          case 'microphone': {
+            const generation = mirror.config?.generation
+            if (!control.muted && !generation) return
+            mirrorMicrophoneGenerationRef.current = control.muted
+              ? null
+              : (generation ?? null)
+            const state = usePttStore.getState()
+            if (state.hotMic === control.muted) state.toggleHotMic()
+            return
+          }
           case 'camera':
             setCameraOn(control.on)
             return
@@ -2880,12 +2904,11 @@ export function SessionView({
                   text: verdict.reason,
                   tone: verdict.verdict === 'approved' ? 'approved' : 'denied',
                 })
-                if (control.type === 'ai_action')
-                  notifyCurrentMirror({
-                    title: strings.notifications.aiReply.title,
-                    body: strings.notifications.aiReply.body(verdict.reason),
-                    onlyWhenHidden: true,
-                  })
+                notifyCurrentMirror({
+                  title: strings.notifications.aiReply.title,
+                  body: strings.notifications.aiReply.body(verdict.reason),
+                  onlyWhenHidden: true,
+                })
               }
               return
             }
@@ -2952,6 +2975,7 @@ export function SessionView({
     friends,
     handleLeave,
     isHost,
+    mirror.config?.generation,
     onInviteFriend,
     room,
     status,
@@ -3122,6 +3146,7 @@ export function SessionView({
           hadAnyPeer,
           cameraOn,
           pttActive,
+          pttFriendsAccelerator,
           screenSharing: mirror.takeover
             ? mirrorSharing
             : screenStream !== null,
@@ -3165,6 +3190,7 @@ export function SessionView({
     seenPeerNames,
     selfTileState,
     pttActive,
+    pttFriendsAccelerator,
     cameraOn,
     selfAlertReasoning,
     screenStream,
@@ -3254,6 +3280,56 @@ export function SessionView({
           panel + footer; none of those would carry "the page title" on their
           own. */}
       <h1 className="sr-only">{strings.app.sessionSrHeading}</h1>
+      <header className="flex shrink-0 items-center justify-between gap-3 border-b border-border-subtle bg-bg-surface px-6 py-2">
+        <span className="truncate text-sm font-medium">
+          {strings.app.sessionSrHeading}
+        </span>
+        <div className="ml-auto flex shrink-0 items-center gap-2">
+          {onOpenSettings ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => onOpenSettings()}
+              aria-haspopup="dialog"
+              aria-label={strings.settings.openAriaLabel}
+            >
+              <Settings2Icon />
+            </Button>
+          ) : null}
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={() => setMirrorOpen(true)}
+            aria-haspopup="dialog"
+            aria-label={strings.mirror.open}
+          >
+            <LaptopIcon />
+          </Button>
+          {canInvite ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => setInviteOpen(true)}
+              aria-haspopup="dialog"
+              aria-label={strings.session.invite.ctaAriaLabel}
+              className="gap-2"
+            >
+              <UserPlusIcon /> {strings.session.invite.cta}
+            </Button>
+          ) : null}
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={handleLeave}
+            aria-keyshortcuts="Escape"
+          >
+            {strings.session.leaveCta}
+          </Button>
+        </div>
+      </header>
       <div className="flex min-h-0 flex-1">
         <div className="flex min-h-0 min-w-0 flex-1 flex-col px-6 py-6">
           {mediaErrorName !== null ? (
@@ -3390,8 +3466,8 @@ export function SessionView({
         }}
         resolveName={resolveNoteName}
       />
-      <footer className="flex shrink-0 flex-wrap items-center justify-between gap-4 border-t border-border-subtle bg-bg-surface px-6 py-4 text-sm">
-        <span className="flex flex-wrap items-center gap-3 text-text-secondary">
+      <footer className="flex shrink-0 items-center justify-between gap-3 whitespace-nowrap border-t border-border-subtle bg-bg-surface px-6 py-3 text-sm">
+        <div className="flex shrink-0 items-center gap-2 text-text-secondary">
           <MicToggleButton
             enabled={hotMic}
             onToggle={() => {
@@ -3459,11 +3535,13 @@ export function SessionView({
             </span>
           )}
           <AudioDevicePicker
+            compact
             currentDeviceId={activeAudioDeviceId}
             onSelect={handleSwapAudioDevice}
             swapping={audioSwapping}
           />
           <AudioOutputPicker
+            compact
             currentDeviceId={activeOutputDeviceId}
             onSelect={handleSelectOutputDevice}
           />
@@ -3507,20 +3585,8 @@ export function SessionView({
               <ScreenShareIcon />
             )}
           </Button>
-          {onOpenSettings ? (
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              onClick={() => onOpenSettings()}
-              aria-haspopup="dialog"
-              aria-label={strings.settings.openAriaLabel}
-            >
-              <Settings2Icon />
-            </Button>
-          ) : null}
-        </span>
-        <span className="flex items-center gap-4">
+        </div>
+        <div className="flex shrink-0 items-center gap-3">
           {onOpenSettings ? (
             <button
               type="button"
@@ -3545,40 +3611,7 @@ export function SessionView({
             onStart={handleStartPomodoro}
             onStop={handleStopPomodoro}
           />
-        </span>
-        <span className="flex items-center gap-2">
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            onClick={() => setMirrorOpen(true)}
-            aria-haspopup="dialog"
-            aria-label={strings.mirror.open}
-          >
-            <LaptopIcon />
-          </Button>
-          {canInvite ? (
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              onClick={() => setInviteOpen(true)}
-              aria-haspopup="dialog"
-              aria-label={strings.session.invite.ctaAriaLabel}
-              className="gap-2"
-            >
-              <UserPlusIcon /> {strings.session.invite.cta}
-            </Button>
-          ) : null}
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={handleLeave}
-            aria-keyshortcuts="Escape"
-          >
-            {strings.session.leaveCta}
-          </Button>
-        </span>
+        </div>
       </footer>
       <Dialog open={mirrorOpen} onOpenChange={setMirrorOpen}>
         <DialogContent

@@ -8,6 +8,10 @@ describe('paired-browser session authority', () => {
       type: 'ptt',
       active: false,
     })
+    expect(parseMirrorControl({ type: 'microphone', muted: false })).toEqual({
+      type: 'microphone',
+      muted: false,
+    })
     expect(
       parseMirrorControl({ type: 'topic', topic: '  Chapter three  ' })
     ).toEqual({ type: 'topic', topic: 'Chapter three' })
@@ -40,6 +44,8 @@ describe('paired-browser session authority', () => {
     { type: 'model_download', url: 'https://example.com/model' },
     { type: 'sidecar_start', modelPath: '/a-model' },
     { type: 'ptt', active: 'true' },
+    { type: 'microphone', muted: 'false' },
+    { type: 'microphone', active: true },
     { type: 'topic', topic: '   ' },
     { type: 'note', text: 'x'.repeat(501) },
     { type: 'direct_message', recipient: '../identity', text: 'x' },

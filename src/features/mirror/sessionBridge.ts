@@ -7,6 +7,7 @@ import type { PomodoroStartArgs } from '@/lib/pomodoro-types'
 import type { PeerSnapshot } from '@/stores/sessionStore'
 import type { SessionNote } from '@/features/session/notesStore'
 import { isAuditEventKind } from '@/lib/audit-types'
+import { parseAccelerator } from '@/lib/keybindings'
 import {
   IMAGE_MAX_DIMENSION,
   IMAGE_MAX_PIXELS,
@@ -107,6 +108,7 @@ export type MirrorSessionSnapshot = {
   hadAnyPeer: boolean
   cameraOn: boolean
   pttActive: boolean
+  pttFriendsAccelerator?: string
   screenSharing: boolean
   audit: AuditLogEntry[]
   notes: SessionNote[]
@@ -128,6 +130,7 @@ export type MirrorSessionSnapshot = {
 
 export type MirrorControl =
   | { type: 'ptt'; active: boolean }
+  | { type: 'microphone'; muted: boolean }
   | { type: 'camera'; on: boolean }
   | { type: 'screen_sharing'; sharing: boolean }
   | { type: 'note'; text: string }
@@ -163,6 +166,10 @@ export function parseMirrorControl(value: unknown): MirrorControl | null {
     case 'ptt':
       return typeof value.active === 'boolean'
         ? { type: 'ptt', active: value.active }
+        : null
+    case 'microphone':
+      return typeof value.muted === 'boolean'
+        ? { type: 'microphone', muted: value.muted }
         : null
     case 'camera':
       return typeof value.on === 'boolean'
@@ -317,6 +324,9 @@ export function readMirrorSnapshot(
   )
     return null
   if (
+    (value.pttFriendsAccelerator !== undefined &&
+      (!text(value.pttFriendsAccelerator, 128) ||
+        !parseAccelerator(value.pttFriendsAccelerator))) ||
     (value.controlError !== undefined &&
       value.controlError !== null &&
       !string(value.controlError, 500)) ||

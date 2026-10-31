@@ -9,6 +9,7 @@ import {
 } from 'react'
 import {
   BotIcon,
+  BellIcon,
   MicIcon,
   MicOffIcon,
   ScreenShareIcon,
@@ -42,6 +43,7 @@ import {
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Kbd } from '@/components/ui/kbd'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Switch } from '@/components/ui/switch'
 import { SessionImageViewer } from '@/features/session/SessionImageViewer'
@@ -51,6 +53,18 @@ import { ReportView } from '@/features/session/Report'
 import type { SessionImage, SessionNote } from '@/features/session/notesStore'
 import { validateOutgoingImage } from '@/features/session/images'
 import { strings } from '@/strings'
+import { parseAccelerator, comboToInlineDisplay } from '@/lib/keybindings'
+import { isMacLikePlatform } from '@/lib/utils'
+import {
+  createBrowserTalk,
+  installBrowserTalkShortcut,
+  type BrowserTalkState,
+} from './browserTalk'
+import {
+  browserNotificationPermission,
+  requestBrowserNotificationPermission,
+  showBrowserNotification,
+} from './browserNotifications'
 import type { BrowserConnection } from './browserConnection'
 import { readMirrorReport } from './reportValidation'
 import {
@@ -119,6 +133,11 @@ export function MirrorSession({ connection }: MirrorSessionProps) {
   const [imageId, setImageId] = useState<string | null>(null)
   const [images, setImages] = useState<SessionImage[]>([])
   const [talking, setTalking] = useState(false)
+  const [holdActive, setHoldActive] = useState(false)
+  const [microphoneOpen, setMicrophoneOpen] = useState(false)
+  const [notificationPermission, setNotificationPermission] = useState(
+    browserNotificationPermission
+  )
   const [notificationHelp, setNotificationHelp] = useState<string | null>(null)
   const [awake, setAwake] = useState(false)
   const capturesRef = useRef({ camera, screen })
@@ -140,6 +159,47 @@ export function MirrorSession({ connection }: MirrorSessionProps) {
     (action: MirrorControl) => connection.sendControl(action),
     [connection]
   )
+  const handleTalkChange = useCallback(
+    (next: BrowserTalkState) => {
+      talkRef.current = next.active
+      for (const track of capturesRef.current.camera?.getAudioTracks() ?? [])
+        track.enabled = next.active
+      setTalking(next.active)
+      setHoldActive(next.held)
+      setMicrophoneOpen(next.microphoneOpen)
+      control({ type: 'ptt', active: next.held })
+      control({ type: 'microphone', muted: !next.microphoneOpen })
+    },
+    [control]
+  )
+  const talk = useMemo(
+    // eslint-disable-next-line react-hooks/refs -- the factory stores this event callback without invoking it during render
+    () => createBrowserTalk(handleTalkChange),
+    [handleTalkChange]
+  )
+  const platform = isMacLikePlatform() ? 'mac' : 'other'
+  const shortcut = snapshot?.pttFriendsAccelerator
+  useEffect(() => {
+    const combo = shortcut ? parseAccelerator(shortcut) : null
+    if (!combo) return
+    return installBrowserTalkShortcut({
+      target: window,
+      document,
+      talk,
+      combo,
+      platform,
+      enabled: () =>
+        connected &&
+        Boolean(
+          capturesRef.current.camera
+            ?.getAudioTracks()
+            .some((track) => track.readyState === 'live')
+        ),
+    })
+  }, [talk, shortcut, platform, connected])
+  useEffect(() => {
+    if (connected) return () => talk.reset()
+  }, [talk, connected, snapshot?.sessionId, hasReport])
   useEffect(() => {
     let previous = connection.getState()
     const id = (snapshot: unknown) =>
@@ -214,37 +274,36 @@ export function MirrorSession({ connection }: MirrorSessionProps) {
   )
 
   const stopTalking = useCallback(() => {
-    talkRef.current = false
-    for (const track of capturesRef.current.camera?.getAudioTracks() ?? [])
-      track.enabled = false
-    setTalking(false)
-    control({ type: 'ptt', active: false })
-  }, [control])
+    talk.release()
+  }, [talk])
   const startTalking = () => {
-    if (!connected || !camera) return
-    talkRef.current = true
-    for (const track of camera.getAudioTracks()) track.enabled = true
-    setTalking(true)
-    control({ type: 'ptt', active: true })
+    if (
+      !connected ||
+      !camera?.getAudioTracks().some((track) => track.readyState === 'live')
+    )
+      return
+    talk.press()
   }
   useEffect(() => {
-    window.addEventListener('blur', stopTalking)
+    window.addEventListener('blur', talk.blur)
+    window.addEventListener('pagehide', talk.reset)
     const hidden = () => {
-      if (document.visibilityState === 'hidden') stopTalking()
+      if (document.visibilityState === 'hidden') talk.blur()
     }
     document.addEventListener('visibilitychange', hidden)
     return () => {
-      window.removeEventListener('blur', stopTalking)
+      window.removeEventListener('blur', talk.blur)
+      window.removeEventListener('pagehide', talk.reset)
       document.removeEventListener('visibilitychange', hidden)
-      stopTalking()
+      talk.reset()
     }
-  }, [stopTalking])
+  }, [talk])
   useEffect(() => {
     if (state.status === 'connected') return
     let cancelled = false
     queueMicrotask(() => {
       if (cancelled) return
-      stopTalking()
+      talk.reset()
       cameraRequestRef.current += 1
       screenRequestRef.current += 1
       setCameraBusy(false)
@@ -255,7 +314,7 @@ export function MirrorSession({ connection }: MirrorSessionProps) {
     return () => {
       cancelled = true
     }
-  }, [state.status, stopTalking])
+  }, [state.status, talk])
   useEffect(() => {
     for (const track of camera?.getVideoTracks() ?? [])
       track.enabled = snapshot?.cameraOn ?? true
@@ -326,7 +385,7 @@ export function MirrorSession({ connection }: MirrorSessionProps) {
               if (capturesRef.current.camera !== stream) return
               setMediaError('NotReadableError')
               setCamera(null)
-              stopTalking()
+              talk.reset()
             },
             { once: true }
           )
@@ -424,16 +483,25 @@ export function MirrorSession({ connection }: MirrorSessionProps) {
     }
   }
   const notifications = async () => {
-    if (!('Notification' in window)) {
-      setNotificationHelp(copy.notificationsUnavailable)
+    const result = await requestBrowserNotificationPermission()
+    setNotificationPermission(result)
+    if (result !== 'granted') {
+      setNotificationHelp(
+        result === 'denied'
+          ? copy.notificationsDenied
+          : result === 'default'
+            ? copy.notificationsPending
+            : copy.notificationsUnavailable
+      )
       return
     }
-    try {
-      const result = await Notification.requestPermission()
-      setNotificationHelp(result === 'denied' ? copy.notificationsDenied : null)
-    } catch {
-      setNotificationHelp(copy.notificationsUnavailable)
-    }
+    const shown = await showBrowserNotification({
+      title: strings.app.name,
+      body: copy.notificationsTestBody,
+    })
+    setNotificationHelp(
+      shown ? copy.notificationsEnabled : copy.notificationsFailed
+    )
   }
   const toggleAwake = async (next: boolean) => {
     const request = ++wakeRequestRef.current
@@ -577,6 +645,57 @@ export function MirrorSession({ connection }: MirrorSessionProps) {
       aria-label={strings.session.mainAriaLabel}
     >
       <h1 className="sr-only">{strings.app.sessionSrHeading}</h1>
+      <header className="flex shrink-0 items-center justify-between gap-3 border-b border-border-subtle bg-bg-surface px-4 py-2">
+        <span className="truncate text-sm font-medium">{copy.title}</span>
+        <div className="ml-auto flex shrink-0 items-center gap-2">
+          <Button
+            size="sm"
+            variant="ghost"
+            aria-label={copy.notifications}
+            title={copy.notifications}
+            onClick={() => {
+              setTopicDraft(snapshot.declaredTopic)
+              setSettingsOpen(true)
+              void notifications()
+            }}
+          >
+            <BellIcon />
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            aria-label={strings.settings.openAriaLabel}
+            onClick={() => {
+              setTopicDraft(snapshot.declaredTopic)
+              setSettingsOpen(true)
+            }}
+          >
+            <Settings2Icon />
+          </Button>
+          {snapshot.canInvite ? (
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={!connected}
+              onClick={() => {
+                inviteGenerationRef.current += 1
+                setInviteError(null)
+                setInviteOpen(true)
+              }}
+            >
+              {strings.session.invite.cta}
+            </Button>
+          ) : null}
+          <Button
+            size="sm"
+            variant="secondary"
+            disabled={!connected}
+            onClick={() => control({ type: 'leave' })}
+          >
+            {strings.session.leaveCta}
+          </Button>
+        </div>
+      </header>
       {!connected ? (
         <div
           role="status"
@@ -613,7 +732,7 @@ export function MirrorSession({ connection }: MirrorSessionProps) {
         </p>
       ) : null}
       <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
-        <div className="flex min-h-0 flex-1 flex-col gap-3 px-4 py-4">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-3 px-4 py-4">
           {mediaError ? (
             <MediaErrorBanner
               errorName={mediaError}
@@ -714,15 +833,15 @@ export function MirrorSession({ connection }: MirrorSessionProps) {
           />
         </aside>
       </div>
-      <footer className="flex flex-wrap items-center justify-between gap-3 border-t border-border-subtle bg-bg-surface px-4 py-3 text-sm">
+      <footer className="flex shrink-0 flex-wrap items-center justify-between gap-3 whitespace-nowrap border-t border-border-subtle bg-bg-surface px-4 py-3 text-sm lg:flex-nowrap">
         <fieldset
           disabled={!connected}
-          className="flex flex-wrap items-center gap-2"
+          className="flex shrink-0 items-center gap-2"
         >
           <Button
-            variant={talking ? 'secondary' : 'ghost'}
+            variant={holdActive ? 'secondary' : 'ghost'}
             size="sm"
-            aria-pressed={talking}
+            aria-pressed={holdActive}
             aria-label={strings.session.holdToTalkAriaLabel}
             disabled={!camera}
             onPointerDown={(event) => {
@@ -747,12 +866,29 @@ export function MirrorSession({ connection }: MirrorSessionProps) {
               if (event.key === ' ' || event.key === 'Enter') stopTalking()
             }}
           >
-            {talking ? <MicIcon /> : <MicOffIcon />}
-            {talking
+            {holdActive ? <MicIcon /> : <MicOffIcon />}
+            {holdActive
               ? strings.session.talkingCta
               : strings.session.holdToTalkCta}
           </Button>
+          <Button
+            size="sm"
+            variant={microphoneOpen ? 'secondary' : 'ghost'}
+            aria-pressed={microphoneOpen}
+            aria-label={
+              microphoneOpen ? copy.muteMicrophone : copy.keepMicrophoneOn
+            }
+            title={microphoneOpen ? copy.muteMicrophone : copy.keepMicrophoneOn}
+            disabled={!camera}
+            onClick={() => talk.setMicrophoneOpen(!microphoneOpen)}
+          >
+            {microphoneOpen ? <MicIcon /> : <MicOffIcon />}
+            <span>
+              {microphoneOpen ? copy.muteMicrophone : copy.keepMicrophoneOn}
+            </span>
+          </Button>
           <AudioDevicePicker
+            compact
             currentDeviceId={audioDevice}
             onSelect={(id) => {
               setAudioDevice(id)
@@ -761,6 +897,7 @@ export function MirrorSession({ connection }: MirrorSessionProps) {
             swapping={cameraBusy}
           />
           <AudioOutputPicker
+            compact
             currentDeviceId={outputDevice}
             onSelect={setOutputDevice}
           />
@@ -817,7 +954,7 @@ export function MirrorSession({ connection }: MirrorSessionProps) {
             <BotIcon />
           </Button>
         </fieldset>
-        <div className="flex flex-wrap items-center gap-3">
+        <div className="flex shrink-0 items-center gap-3">
           <AiStatusChip status={snapshot.aiStatus} />
           <span className="font-mono text-text-secondary">
             {copy.elapsed(Math.floor(snapshot.elapsedMs / 60_000))}
@@ -833,41 +970,6 @@ export function MirrorSession({ connection }: MirrorSessionProps) {
               onStop={() => control({ type: 'pomodoro_stop' })}
             />
           </fieldset>
-        </div>
-        <div className="flex items-center gap-2">
-          <Button
-            size="sm"
-            variant="ghost"
-            aria-label={strings.settings.openAriaLabel}
-            onClick={() => {
-              setTopicDraft(snapshot.declaredTopic)
-              setSettingsOpen(true)
-            }}
-          >
-            <Settings2Icon />
-          </Button>
-          {snapshot.canInvite ? (
-            <Button
-              size="sm"
-              variant="ghost"
-              disabled={!connected}
-              onClick={() => {
-                inviteGenerationRef.current += 1
-                setInviteError(null)
-                setInviteOpen(true)
-              }}
-            >
-              {strings.session.invite.cta}
-            </Button>
-          ) : null}
-          <Button
-            size="sm"
-            variant="secondary"
-            disabled={!connected}
-            onClick={() => control({ type: 'leave' })}
-          >
-            {strings.session.leaveCta}
-          </Button>
         </div>
       </footer>
       {snapshot.warning && !snapshot.breakEndsAt ? (
@@ -1020,12 +1122,30 @@ export function MirrorSession({ connection }: MirrorSessionProps) {
             <Button variant="secondary" onClick={enableAudio}>
               {copy.enableAudio}
             </Button>
+            <p className="text-sm text-text-secondary">
+              {copy.backgroundTalkHelp}
+            </p>
+            {shortcut && parseAccelerator(shortcut) ? (
+              <p className="text-sm text-text-secondary">
+                {copy.shortcutHelp}{' '}
+                <Kbd>
+                  {comboToInlineDisplay(parseAccelerator(shortcut)!, platform)}
+                </Kbd>
+              </p>
+            ) : null}
             <Button variant="secondary" onClick={() => void notifications()}>
-              {copy.notifications}
+              {notificationPermission === 'granted'
+                ? copy.notificationsTest
+                : copy.notifications}
             </Button>
-            {notificationHelp ? (
+            {notificationHelp || notificationPermission !== 'granted' ? (
               <p role="status" className="text-sm text-text-secondary">
-                {notificationHelp}
+                {notificationHelp ??
+                  (notificationPermission === 'denied'
+                    ? copy.notificationsDenied
+                    : notificationPermission === 'unavailable'
+                      ? copy.notificationsUnavailable
+                      : copy.notificationsPending)}
               </p>
             ) : null}
             <div className="flex items-center justify-between gap-3">
@@ -1040,7 +1160,7 @@ export function MirrorSession({ connection }: MirrorSessionProps) {
             <Button
               variant="secondary"
               onClick={() => {
-                stopTalking()
+                talk.reset()
                 connection.disconnect()
                 setSettingsOpen(false)
               }}

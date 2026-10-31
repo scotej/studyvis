@@ -1008,6 +1008,7 @@ describe('browser recovery and local custody', () => {
     })
     vi.stubGlobal('Notification', notification)
     const registration = {
+      active: {},
       showNotification: vi.fn(async () => {
         throw new Error('Platform notifications unavailable')
       }),
@@ -1042,7 +1043,10 @@ describe('browser recovery and local custody', () => {
       vi.stubGlobal('window', { isSecureContext: true, Notification: {} })
       vi.stubGlobal('Notification', { permission: 'granted' })
       vi.stubGlobal('document', { visibilityState, hasFocus: () => focused })
-      const registration = { showNotification: vi.fn(async () => {}) }
+      const registration = {
+        active: {},
+        showNotification: vi.fn(async () => {}),
+      }
       vi.stubGlobal('navigator', {
         serviceWorker: { getRegistration: vi.fn(async () => registration) },
       })

@@ -6,6 +6,7 @@ import { useAlertsUiStore } from '@/features/ai/alertsUiStore'
 import { useIdentityStore } from '@/stores/identityStore'
 import { useSessionStore } from '@/stores/sessionStore'
 import { strings } from '@/strings'
+import { notifyCurrentMirror } from '@/features/mirror/reportHandoff'
 
 import { useNotesStore } from './notesStore'
 import { overlayItemFromToast, overlayToastSignature } from './sessionOverlay'
@@ -59,6 +60,11 @@ export function useSessionOverlayBridge(): void {
     if (selfWarningKey.current === key) return
     selfWarningKey.current = key
     if (status !== 'active') return
+    notifyCurrentMirror({
+      title: strings.session.badges.selfWarningTitle,
+      body: selfWarning.reasoning,
+      onlyWhenHidden: true,
+    })
     void pushSessionOverlayItem({
       id: `self-warning:${key}`,
       title: strings.session.badges.selfWarningTitle,
@@ -81,6 +87,11 @@ export function useSessionOverlayBridge(): void {
         selfDisplayName,
         seenPeerNames
       )
+      notifyCurrentMirror({
+        title: strings.session.focusStates.alerted,
+        body: `${name}: ${alert.reasoning}`,
+        onlyWhenHidden: true,
+      })
       void pushSessionOverlayItem({
         id: `off-task:${key}`,
         title: strings.session.focusStates.alerted,

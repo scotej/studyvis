@@ -43,6 +43,7 @@ export function useSessionMirror(
     setTakeover(false)
     setStarting(false)
     controlRef.current({ type: 'ptt', active: false })
+    controlRef.current({ type: 'microphone', muted: true })
     await host?.stop()
   }, [])
 
@@ -68,6 +69,7 @@ export function useSessionMirror(
         if (next) setTakeover(true)
         else {
           controlRef.current({ type: 'ptt', active: false })
+          controlRef.current({ type: 'microphone', muted: true })
           controlRef.current({ type: 'screen_sharing', sharing: false })
         }
       },
@@ -103,6 +105,8 @@ export function useSessionMirror(
       hostRef.current = null
       unregisterReport.current?.()
       unregisterReport.current = null
+      controlRef.current({ type: 'ptt', active: false })
+      controlRef.current({ type: 'microphone', muted: true })
       void host?.stop()
     },
     [sessionId]
