@@ -16,11 +16,11 @@
   "inputs": [
     {
       "path": "package-lock.json",
-      "sha256": "db045e75a92c3e0713168ddbea264313823e12466f20e837d6da5c4afc09203d"
+      "sha256": "4b0b58b45d943ddf24e2cd318b11627ce293f2d63be2af8660aa96aeb36d8a09"
     },
     {
       "path": "package.json",
-      "sha256": "7de98f2ff0207f0ec70837a0327dbf0c933ebb76279e2622252af0893615eff3"
+      "sha256": "29073125b457b7622371dd058d8b96f192cbf9c8cdeb5b108a667a046ad5a04f"
     },
     {
       "path": "scripts/fetch-llama-server.sh",
@@ -44,11 +44,11 @@
     },
     {
       "path": "src-tauri/Cargo.lock",
-      "sha256": "9ec69041f17b4a3c1ee6d1980d122a2fa1a387ff98dc0eed2973a125215b44e1"
+      "sha256": "ef0f7ddfe09ce867971302a3a7f3d65cfa55d497595f3d2204c6472be03a120f"
     },
     {
       "path": "src-tauri/Cargo.toml",
-      "sha256": "0bec241eebbc129674dedb468e10d83f521ffe1b26151d6d76ca24212f717e92"
+      "sha256": "d8edf1b1e944a0fce831b492867cb9c639dc635eac02966bcddd9af9d0f79296"
     },
     {
       "path": "src-tauri/vendor/wry/LICENSE-MIT",
