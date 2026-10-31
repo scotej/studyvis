@@ -196,19 +196,20 @@ email address. Keep your existing 24-word recovery backup safe.
 ## Use a browser on another device
 
 During a session, open **Use a browser** in the session footer and choose
-**Start browser companion**. StudyVis displays a local HTTPS address, QR code, pairing
-password, and certificate fingerprint. Keep the desktop awake and connect the
+**Start browser companion**. StudyVis displays one **HTTPS secure link**, its QR code,
+and a pairing password. Keep the desktop awake and connect the
 browser device to the same private IPv4 network.
 
-1. Choose a companion address reachable from the browser device, and open the
-   certificate download address shown with that address. Compare its
+1. On your first visit, expand **First-time certificate setup** and choose
+   **Copy certificate download link**. Open that address on the browser device. Compare its
    SHA-256 fingerprint with the one displayed by StudyVis, then install and
    trust the certificate on that device. On iPadOS, installing the profile is
    followed by **Settings → General → About → Certificate Trust Settings →
    Enable full trust**. Desktop browsers use the device or browser certificate
    store. Merely dismissing a certificate warning does not reliably enable
    camera access or offline caching.
-2. Open the HTTPS address or scan its QR code and enter the displayed password.
+2. Copy the entire HTTPS secure link, including **https://**, or scan its QR code
+   and enter the displayed password.
    Choose **Enable camera and microphone** when ready. The microphone stays
    muted until you hold **Talk**. Enabling the companion releases desktop
    capture; capture stays paused until you enable it in the paired browser.

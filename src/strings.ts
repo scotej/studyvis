@@ -53,16 +53,19 @@ export const strings = {
     password: 'Pairing password',
     pair: 'Connect',
     pairingHelp: 'Enter the password shown in StudyVis on your desktop.',
+    certificateSetup: 'First-time certificate setup',
     certificate:
-      'Trust the local certificate on the device where you will use the browser before opening the companion link. Compare its fingerprint with the desktop.',
-    certificateDownload: 'Download local certificate',
+      'Copy the certificate download link and open it on the browser device. Compare its fingerprint below, then trust the certificate on that device before opening the HTTPS secure link.',
+    certificateDownload: 'Copy certificate download link',
     certificateCopied: 'Certificate link copied.',
     savedReport:
       'Your report is available here while the desktop is disconnected.',
     reportNotCached:
       "Download this report to keep it. This browser couldn't save an offline copy, so reloading will lose this view.",
     fingerprint: 'Certificate fingerprint',
-    link: 'Companion link',
+    link: 'HTTPS secure link',
+    linkHelp:
+      'Copy the entire link, including https://, and open it on your other device. On your first visit, complete the certificate setup below.',
     copy: 'Copy link',
     copied: 'Companion link copied.',
     copyFailed: "Couldn't copy the link.",
