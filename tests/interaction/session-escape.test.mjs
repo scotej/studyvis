@@ -78,7 +78,7 @@ function App() {
 const root = createRoot(document.getElementById('root'))
 flushSync(() => root.render(<App />))
 window.fixture = {
-  copy: {open: strings.mirror.open, title: strings.mirror.title, hint: strings.session.escLeaveHint, start: strings.mirror.start, fingerprint: strings.mirror.fingerprint},
+  copy: {open: strings.mirror.open, title: strings.mirror.title, hint: strings.session.escLeaveHint, start: strings.mirror.start, certificateSetup: strings.mirror.certificateSetup, fingerprint: strings.mirror.fingerprint},
   snapshot: () => ({status: useSessionStore.getState().status, leaves}),
   stop: () => flushSync(() => root.unmount()),
 }
@@ -147,6 +147,8 @@ test('input-focused dialog Escape clears an earlier leave warning', async () => 
     await openMirror(page, copy)
     const start = page.getByRole('button', { name: copy.start, exact: true })
     await start.focus()
+    await page.keyboard.press('Enter')
+    await page.getByText(copy.certificateSetup, { exact: true }).focus()
     await page.keyboard.press('Enter')
     const fingerprint = page.getByLabel(copy.fingerprint, { exact: true })
     await fingerprint.waitFor()

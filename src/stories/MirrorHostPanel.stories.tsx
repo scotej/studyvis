@@ -1,10 +1,10 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
-import { expect, fn, within } from 'storybook/test'
+import { expect, fn, userEvent, within } from 'storybook/test'
 import { MirrorHostPanel } from '@/features/mirror/MirrorHostPanel'
 import { strings } from '@/strings'
 
 const config = {
-  urls: ['https://192.168.1.12:8443/'],
+  urls: ['https://192.168.1.12:8443/', 'https://127.0.0.1:8443/'],
   password: 'demo-pairing-password',
   fingerprint: 'abcd'.repeat(16),
   certificateUrl: 'http://192.168.1.12:8444/certificate.crt',
@@ -50,17 +50,20 @@ export const MultipleInterfaces: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     const links = canvas.getAllByRole('textbox', { name: strings.mirror.link })
-    const certificates = canvas.getAllByRole('textbox', {
-      name: strings.mirror.certificateDownload,
-    })
-    await expect(links).toHaveLength(2)
-    await expect(certificates).toHaveLength(2)
-    for (const [index, address] of ['10.0.0.4', '192.168.1.12'].entries()) {
-      await expect(links[index]).toHaveValue(`https://${address}:8443`)
-      await expect(certificates[index]).toHaveValue(
-        `http://${address}:8444/certificate.crt`
-      )
-    }
+    await expect(links).toHaveLength(1)
+    await expect(links[0]).toHaveValue('https://10.0.0.4:8443')
+    await expect(
+      canvas.queryByRole('textbox', {
+        name: strings.mirror.certificateDownload,
+      })
+    ).not.toBeInTheDocument()
+  },
+}
+export const CertificateSetup: Story = {
+  args: { config },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await userEvent.click(canvas.getByText(strings.mirror.certificateSetup))
   },
 }
 export const Connected: Story = {
