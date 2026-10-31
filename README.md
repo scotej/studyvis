@@ -195,7 +195,7 @@ email address. Keep your existing 24-word recovery backup safe.
 
 ## Use a browser on another device
 
-During a session, open **Use a browser** in the session footer and choose
+During a session, open **Use a browser** in the top-right session header and choose
 **Start browser companion**. StudyVis displays one **HTTPS secure link**, its QR code,
 and a pairing password. Keep the desktop awake and connect the
 browser device to the same private IPv4 network.
@@ -211,7 +211,8 @@ browser device to the same private IPv4 network.
 2. Copy the entire HTTPS secure link, including **https://**, or scan its QR code
    and enter the displayed password.
    Choose **Enable camera and microphone** when ready. The microphone stays
-   muted until you hold **Talk**. Enabling the companion releases desktop
+   muted until you hold **Talk** or choose **Keep mic on** to talk while using
+   another tab or app. Enabling the companion releases desktop
    capture; capture stays paused until you enable it in the paired browser.
 3. Use the session controls, chat, direct messages, shared images, timer and AI
    dialogue as usual. Capture a screen for AI in the browser's session settings;

@@ -104,6 +104,22 @@ describe('browser snapshot and offline storage boundary', () => {
       ).toBeNull()
     }
   })
+  test('keeps an optional valid host shortcut and accepts older snapshots', () => {
+    expect(readMirrorSnapshot(session())).not.toBeNull()
+    const snapshot = { ...session(), pttFriendsAccelerator: 'CmdOrCtrl+K' }
+    expect(readMirrorSnapshot(snapshot)?.pttFriendsAccelerator).toBe(
+      'CmdOrCtrl+K'
+    )
+  })
+
+  test.each(['', 'Invalid+K', 'x'.repeat(129), null, 42])(
+    'rejects malformed host shortcut %s',
+    (pttFriendsAccelerator) => {
+      expect(
+        readMirrorSnapshot({ ...session(), pttFriendsAccelerator })
+      ).toBeNull()
+    }
+  )
 
   test('peer turnover keeps only currently visible DM threads without discarding desktop history', () => {
     const snapshot = session()

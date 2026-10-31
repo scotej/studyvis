@@ -549,6 +549,14 @@ remain explicit user gestures. Missing browser capabilities receive text
 guidance, and disconnected controls are disabled while the last view stays
 visible. Keep-awake is opt-in and never replaces the disconnected status.
 
+Session actions (Settings, browser companion on desktop, Invite, Leave) sit in
+the top-right header. Media controls and session status/timer share a single
+footer row at laptop widths; audio device names collapse to labelled icons
+below `xl`. The browser footer may wrap on narrower screens. Browser keyboard
+hold-to-talk uses the desktop's configured binding while the tab is focused.
+An explicit Keep mic on control allows background talking until muted or
+disconnected; focus loss releases temporary holds without reopening them.
+
 - **Window minimum**: 1024 × 640.
 - **Window default on first launch**: 1280 × 800.
 - **Content max width** (onboarding): 1200 (`sizes.contentMaxWidth`).

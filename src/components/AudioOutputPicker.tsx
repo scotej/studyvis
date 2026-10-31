@@ -33,11 +33,13 @@ import { strings } from '@/strings'
 export type AudioOutputPickerProps = {
   currentDeviceId: string | null
   onSelect: (deviceId: string) => void
+  compact?: boolean
 }
 
 export function AudioOutputPicker({
   currentDeviceId,
   onSelect,
+  compact = false,
 }: AudioOutputPickerProps) {
   const [supported] = useState(() => setSinkIdSupported())
   const [devices, setDevices] = useState<AudioInputOption[]>([])
@@ -84,10 +86,19 @@ export function AudioOutputPicker({
           variant="ghost"
           size="sm"
           aria-label={strings.session.output.ariaLabel(label)}
+          title={strings.session.output.ariaLabel(label)}
           className="gap-2"
         >
           <Volume2Icon />
-          <span className="max-w-[14ch] truncate">{label}</span>
+          <span
+            className={
+              compact
+                ? 'hidden max-w-[14ch] truncate xl:inline'
+                : 'max-w-[14ch] truncate'
+            }
+          >
+            {label}
+          </span>
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="min-w-[16rem]">

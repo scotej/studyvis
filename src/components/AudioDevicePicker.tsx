@@ -38,12 +38,14 @@ export type AudioDevicePickerProps = {
   // While a swap is in flight the trigger goes disabled. The session view
   // owns this state so multiple swaps queue cleanly.
   swapping: boolean
+  compact?: boolean
 }
 
 export function AudioDevicePicker({
   currentDeviceId,
   onSelect,
   swapping,
+  compact = false,
 }: AudioDevicePickerProps) {
   const [devices, setDevices] = useState<AudioInputOption[]>([])
 
@@ -91,10 +93,19 @@ export function AudioDevicePicker({
           size="sm"
           disabled={swapping}
           aria-label={strings.session.audio.micAriaLabel(label)}
+          title={strings.session.audio.micAriaLabel(label)}
           className="gap-2"
         >
           <MicIcon />
-          <span className="max-w-[14ch] truncate">{label}</span>
+          <span
+            className={
+              compact
+                ? 'hidden max-w-[14ch] truncate xl:inline'
+                : 'max-w-[14ch] truncate'
+            }
+          >
+            {label}
+          </span>
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="min-w-[16rem]">
