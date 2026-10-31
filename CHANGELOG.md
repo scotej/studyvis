@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.1.1 — 2026-10-31 — Simpler browser companion setup
+
+### Changed
+
+- Browser Companion now shows one HTTPS secure link and reminds you to copy
+  the complete address, including `https://`. First-time certificate setup
+  remains available in a separate section.
+
 ## 2.1.0 — 2026-10-30 — Background voice and fullscreen sessions
 
 ### Added
