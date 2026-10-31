@@ -1,5 +1,17 @@
 # Changelog
 
+## 2.1.2 — 2026-10-31 — Browser companion reliability
+
+### Fixed
+
+- Browser companion notifications now handle permission and delivery failures,
+  and include focus warnings. Use the notification button to test delivery.
+- Browser microphone audio recovers after camera capture restarts. Hold to talk
+  uses the configured shortcut while the tab is focused, and Keep mic on allows
+  talking while using another tab or app.
+- Session actions move to the top right, leaving room for media and timer
+  controls on one line at laptop widths.
+
 ## 2.1.1 — 2026-10-31 — Simpler browser companion setup
 
 ### Changed
