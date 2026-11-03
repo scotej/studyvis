@@ -8,7 +8,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { strings } from '@/strings'
 import type { MirrorDiagnostic } from './runtime'
-import { reachableAddresses } from './addresses'
+import { hasLanAddress, reachableAddresses } from './addresses'
 import type { MirrorConfig } from './wire'
 
 export type MirrorHostPanelProps = {
@@ -110,6 +110,11 @@ export function MirrorHostPanel({
           {takeover ? (
             <p className="text-sm text-text-secondary">{copy.takeover}</p>
           ) : null}
+          {!hasLanAddress(config) ? (
+            <p role="alert" className="text-sm text-status-alerted">
+              {copy.loopbackOnly}
+            </p>
+          ) : null}
           {url ? (
             <>
               <div className="flex flex-col gap-2">
@@ -137,11 +142,7 @@ export function MirrorHostPanel({
                 <PairQrCode value={url} label={copy.link} />
               </div>
             </>
-          ) : (
-            <p role="alert" className="text-sm text-status-alerted">
-              {copy.loopbackOnly}
-            </p>
-          )}
+          ) : null}
           {diagnostic && !connected ? (
             <p role="status" className="text-sm text-status-alerted">
               {diagnostic.problem === 'blocked_network'

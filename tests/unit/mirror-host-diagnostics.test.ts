@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test, vi } from 'vitest'
 
-import { reachableAddresses } from '@/features/mirror/addresses'
+import { hasLanAddress, reachableAddresses } from '@/features/mirror/addresses'
 import {
   createMirrorHost,
   readMirrorDiagnostic,
@@ -72,21 +72,32 @@ describe('#515 companion reachability', () => {
       {
         url: 'https://192.168.1.4:9000',
         host: '192.168.1.4',
+        loopback: false,
         certificateUrl: 'http://192.168.1.4:9001/certificate.crt',
       },
       {
         url: 'https://172.20.0.1:9000',
         host: '172.20.0.1',
+        loopback: false,
         certificateUrl: 'http://172.20.0.1:9001/certificate.crt',
       },
     ])
-    expect(
-      reachableAddresses({
-        ...config,
-        urls: ['https://127.0.0.1:9000'],
+    // With no LAN address the loopback link still serves this computer's
+    // browser (and the CI companion fixture), behind the loopback warning.
+    const loopbackOnly = {
+      ...config,
+      urls: ['https://127.0.0.1:9000'],
+      certificateUrl: 'http://127.0.0.1:9001/certificate.crt',
+    }
+    expect(reachableAddresses(loopbackOnly)).toEqual([
+      {
+        url: 'https://127.0.0.1:9000',
+        host: '127.0.0.1',
+        loopback: true,
         certificateUrl: 'http://127.0.0.1:9001/certificate.crt',
-      })
-    ).toEqual([])
+      },
+    ])
+    expect(hasLanAddress(loopbackOnly)).toBe(false)
   })
 
   test('accepts only well-formed diagnostics', () => {

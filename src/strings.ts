@@ -77,7 +77,7 @@ export const strings = {
     useAddress: 'Use this address',
     usingAddress: 'In use',
     loopbackOnly:
-      'This network didn’t give your computer a local address other devices can reach. Connect both devices to the same Wi-Fi or wired network, then restart the browser companion.',
+      'This network didn’t give your computer a local address other devices can reach. Connect both devices to the same Wi-Fi or wired network, then restart the browser companion. Until then, the link below works only in a browser on this computer.',
     troubleshooting: 'Can’t connect?',
     troubleshootingSteps: [
       'Make sure both devices are on the same Wi-Fi or wired network.',

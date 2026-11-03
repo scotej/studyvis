@@ -407,6 +407,10 @@ export class LabBackend {
       case 'session_set_active':
         this.sessionActive = Boolean(a.active)
         return null
+      // #515 — every session start asks whether a reloaded page can adopt a
+      // live companion; a machine without a companion driver has none.
+      case 'mirror_resumable':
+        return false
       case 'system_battery':
         // A desktop with no battery is the shape the AI battery guard must
         // already handle, and it keeps scenarios deterministic.

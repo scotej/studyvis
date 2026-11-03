@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
-import { expect, fn, userEvent, within } from 'storybook/test'
+import { expect, fn, userEvent, within, waitFor } from 'storybook/test'
 
 import { MirrorSession } from '@/features/mirror/MirrorSession'
 import type {
@@ -228,9 +228,11 @@ export const NotificationsDialog: Story = {
       canvas.getByRole('button', { name: strings.mirror.notifications })
     )
     const body = within(canvasElement.ownerDocument.body)
-    await expect(
-      body.getByRole('dialog', { name: strings.mirror.notificationsTitle })
-    ).toBeVisible()
+    // The dialog fades in from opacity 0; wait for it rather than sample it.
+    const dialog = await body.findByRole('dialog', {
+      name: strings.mirror.notificationsTitle,
+    })
+    await waitFor(() => expect(dialog).toBeVisible())
     await expect(
       body.queryByRole('dialog', { name: strings.mirror.controls })
     ).toBeNull()
