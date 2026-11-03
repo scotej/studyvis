@@ -124,13 +124,13 @@ CARGO
   license: cargo:async-channel@2.5.0/LICENSE-APACHE (SHA-256 a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2)
   license: cargo:async-channel@2.5.0/LICENSE-MIT (SHA-256 23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3)
 
-- async-executor 1.14.0 — Apache-2.0 OR MIT
-  id: cargo:async-executor@1.14.0
+- async-executor 1.14.1 — Apache-2.0 OR MIT
+  id: cargo:async-executor@1.14.1
   targets: x86_64-unknown-linux-gnu
-  source: https://crates.io/api/v1/crates/async-executor/1.14.0/download
-  source checksum: c96bf972d85afc50bf5ab8fe2d54d1586b4e0b46c97c50a0c9e71e2f7bcd812a
-  license: cargo:async-executor@1.14.0/LICENSE-APACHE (SHA-256 a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2)
-  license: cargo:async-executor@1.14.0/LICENSE-MIT (SHA-256 23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3)
+  source: https://crates.io/api/v1/crates/async-executor/1.14.1/download
+  source checksum: f426a31126c735126297bc5ea7a521263c9faff4f63ca415267ee625651c4f37
+  license: cargo:async-executor@1.14.1/LICENSE-APACHE (SHA-256 a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2)
+  license: cargo:async-executor@1.14.1/LICENSE-MIT (SHA-256 23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3)
 
 - async-io 2.6.0 — Apache-2.0 OR MIT
   id: cargo:async-io@2.6.0
@@ -9839,7 +9839,7 @@ Applies to:
 - cargo:adler2@2.0.1 — cargo:adler2@2.0.1/LICENSE-MIT
 - cargo:anyhow@1.0.103 — cargo:anyhow@1.0.103/LICENSE-MIT
 - cargo:async-channel@2.5.0 — cargo:async-channel@2.5.0/LICENSE-MIT
-- cargo:async-executor@1.14.0 — cargo:async-executor@1.14.0/LICENSE-MIT
+- cargo:async-executor@1.14.1 — cargo:async-executor@1.14.1/LICENSE-MIT
 - cargo:async-io@2.6.0 — cargo:async-io@2.6.0/LICENSE-MIT
 - cargo:async-lock@3.4.2 — cargo:async-lock@3.4.2/LICENSE-MIT
 - cargo:async-process@2.5.0 — cargo:async-process@2.5.0/LICENSE-MIT
@@ -21423,7 +21423,7 @@ Applies to:
 - cargo:asn1-rs-impl@0.2.0 — cargo:asn1-rs@0.7.2/LICENSE-APACHE
 - cargo:asn1-rs@0.7.2 — cargo:asn1-rs@0.7.2/LICENSE-APACHE
 - cargo:async-channel@2.5.0 — cargo:async-channel@2.5.0/LICENSE-APACHE
-- cargo:async-executor@1.14.0 — cargo:async-executor@1.14.0/LICENSE-APACHE
+- cargo:async-executor@1.14.1 — cargo:async-executor@1.14.1/LICENSE-APACHE
 - cargo:async-io@2.6.0 — cargo:async-io@2.6.0/LICENSE-APACHE
 - cargo:async-lock@3.4.2 — cargo:async-lock@3.4.2/LICENSE-APACHE
 - cargo:async-process@2.5.0 — cargo:async-process@2.5.0/LICENSE-APACHE
