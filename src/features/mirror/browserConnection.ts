@@ -1,4 +1,5 @@
 import { stopMediaStream } from '@/lib/media'
+import { isIpv4Literal } from './lanAddress'
 import { createMirrorPeer, type MirrorPeer } from './peer'
 import { MirrorCodec, type CaptureKind, type MirrorMessage } from './wire'
 import { projectOfflineSnapshot, readMirrorSnapshot } from './sessionBridge'
@@ -13,6 +14,10 @@ export type BrowserConnectionState = {
   error: string | null
   report: MirrorReport | null
   reportCached?: boolean
+  // Captures this connection still owns, including while it reconnects.
+  captures?: Record<CaptureKind, MediaStream | null>
+  // A transient drop is holding captures for the reconnect grace (#515).
+  resuming?: boolean
 }
 
 export type BrowserConnection = {
@@ -28,6 +33,10 @@ export type BrowserConnection = {
 const SNAPSHOT_KEY = 'studyvis.mirror.snapshot.v1'
 const REPORT_KEY = 'studyvis.mirror.report.v1'
 const MAX_SAVED_SNAPSHOT = 2 * 1024 * 1024
+// #515 — a Wi-Fi blip or host restart must not switch off the camera, screen
+// and microphone. Capture stays owned by this page only this long without a
+// host; explicit disconnect, report, session change and takeover release it.
+export const MIRROR_RESUME_GRACE_MS = 30_000
 
 export function createBrowserConnection(): BrowserConnection {
   let restored: unknown = null
@@ -48,6 +57,8 @@ export function createBrowserConnection(): BrowserConnection {
     error: null,
     report: restoredReport,
     reportCached: restoredReport !== null,
+    captures: { camera: null, screen: null },
+    resuming: false,
   }
   const listeners = new Set<(state: BrowserConnectionState) => void>()
   const captures: Record<CaptureKind, MediaStream | null> = {
@@ -59,6 +70,7 @@ export function createBrowserConnection(): BrowserConnection {
   let codec = new MirrorCodec()
   let queue = Promise.resolve()
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null
+  let resumeTimer: ReturnType<typeof setTimeout> | null = null
   let heartbeat: ReturnType<typeof setInterval> | null = null
   let lastHeardAt = 0
   let retries = 0
@@ -129,14 +141,44 @@ export function createBrowserConnection(): BrowserConnection {
       })
   }
 
-  const clearMedia = () => {
-    peer?.close()
-    peer = null
+  const publishCaptures = (patch: Partial<BrowserConnectionState> = {}) =>
+    update({ ...patch, captures: { ...captures } })
+
+  const releaseCaptures = () => {
+    if (resumeTimer) clearTimeout(resumeTimer)
+    resumeTimer = null
     for (const kind of ['camera', 'screen'] as const) {
       stopMediaStream(captures[kind])
       captures[kind] = null
     }
-    update({ streams: {} })
+  }
+
+  const clearMedia = () => {
+    peer?.close()
+    peer = null
+    releaseCaptures()
+    publishCaptures({ streams: {}, resuming: false })
+  }
+
+  const suspendMedia = () => {
+    peer?.close()
+    peer = null
+    const held = captures.camera !== null || captures.screen !== null
+    if (held && !resumeTimer)
+      resumeTimer = setTimeout(() => {
+        resumeTimer = null
+        releaseCaptures()
+        peer?.setCapture('camera', null)
+        peer?.setCapture('screen', null)
+        publishCaptures({ resuming: false })
+      }, MIRROR_RESUME_GRACE_MS)
+    publishCaptures({ streams: {}, resuming: held })
+  }
+
+  const finishResume = () => {
+    if (resumeTimer) clearTimeout(resumeTimer)
+    resumeTimer = null
+    if (state.resuming) update({ resuming: false })
   }
 
   const connect = () => {
@@ -161,6 +203,9 @@ export function createBrowserConnection(): BrowserConnection {
       lastHeardAt = Date.now()
       peer = createMirrorPeer({
         role: 'browser',
+        remoteAddress: isIpv4Literal(location.hostname)
+          ? location.hostname
+          : null,
         send: (signal) => send({ type: 'signal', signal }),
         onStreams: (streams) => update({ streams }),
         onFailure: () => current.close(),
@@ -173,6 +218,7 @@ export function createBrowserConnection(): BrowserConnection {
         else send({ type: 'ping' })
       }, 5000)
     }
+    let releaseOnClose = false
     current.onmessage = ({ data }: MessageEvent<unknown>) => {
       if (run !== connectionRun || typeof data !== 'string') return
       try {
@@ -184,7 +230,14 @@ export function createBrowserConnection(): BrowserConnection {
           const snapshot = readMirrorSnapshot(message.snapshot)
           if (!snapshot) throw new Error('Incompatible mirror snapshot')
           if (snapshot.sessionId === completedSessionId) return
-          if (snapshot.sessionId !== currentSessionId) cancelControls()
+          if (snapshot.sessionId !== currentSessionId) {
+            cancelControls()
+            // Consent to capture belonged to the previous session.
+            releaseCaptures()
+            peer?.setCapture('camera', null)
+            peer?.setCapture('screen', null)
+            publishCaptures({ resuming: false })
+          } else finishResume()
           currentSessionId = snapshot.sessionId
           completedSessionId = null
           update({
@@ -239,6 +292,8 @@ export function createBrowserConnection(): BrowserConnection {
         } else if (message.type === 'ping') send({ type: 'pong' })
         else if (message.type === 'reconnect') current.close()
       } catch {
+        // An incompatible host is not a transient drop.
+        releaseOnClose = true
         current.close()
       }
     }
@@ -249,11 +304,14 @@ export function createBrowserConnection(): BrowserConnection {
       heartbeat = null
       socket = null
       cancelControls()
-      clearMedia()
+      if (event?.code === 4001 || releaseOnClose || stopped) clearMedia()
+      else suspendMedia()
       if (event?.code === 4001) {
         stopped = true
         update({ status: 'disconnected', error: 'session_moved' })
       } else update({ status: stopped ? 'pairing' : 'disconnected' })
+      // 4002: the desktop page restarted and adopted this companion.
+      if (event?.code === 4002) retries = 0
       if (!stopped)
         reconnectTimer = setTimeout(
           connect,
@@ -353,7 +411,15 @@ export function createBrowserConnection(): BrowserConnection {
       })
     },
     setCapture(kind, stream) {
-      if (state.status !== 'connected') {
+      // Nothing left to hold ends the reconnect grace early.
+      function publishHeld() {
+        if (!captures.camera && !captures.screen && resumeTimer) {
+          clearTimeout(resumeTimer)
+          resumeTimer = null
+          publishCaptures({ resuming: false })
+        } else publishCaptures()
+      }
+      if (state.status !== 'connected' && stream !== null) {
         stopMediaStream(stream)
         return
       }
@@ -361,6 +427,7 @@ export function createBrowserConnection(): BrowserConnection {
       captures[kind] = stream
       peer?.setCapture(kind, stream)
       if (previous !== stream) stopMediaStream(previous)
+      publishHeld()
       for (const track of stream?.getTracks() ?? []) {
         track.addEventListener(
           'ended',
@@ -369,6 +436,7 @@ export function createBrowserConnection(): BrowserConnection {
             captures[kind] = null
             peer?.setCapture(kind, null)
             stopMediaStream(stream)
+            publishHeld()
           },
           { once: true }
         )

@@ -7,6 +7,8 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { strings } from '@/strings'
+import type { MirrorDiagnostic } from './runtime'
+import { hasLanAddress, reachableAddresses } from './addresses'
 import type { MirrorConfig } from './wire'
 
 export type MirrorHostPanelProps = {
@@ -14,6 +16,7 @@ export type MirrorHostPanelProps = {
   starting: boolean
   connected: boolean
   takeover: boolean
+  diagnostic?: MirrorDiagnostic | null
   onStart: () => Promise<void>
   onStop: () => Promise<void>
 }
@@ -23,14 +26,28 @@ export function MirrorHostPanel({
   starting,
   connected,
   takeover,
+  diagnostic = null,
   onStart,
   onStop,
 }: MirrorHostPanelProps) {
   const [error, setError] = useState<string | null>(null)
   const [now, setNow] = useState(Date.now)
   const [stopping, setStopping] = useState(false)
+  const [selected, setSelected] = useState<{
+    generation: string
+    url: string
+  } | null>(null)
   const copy = strings.mirror
-  const url = config?.urls[0]
+  const addresses = config ? reachableAddresses(config) : []
+  const chosen =
+    (selected && selected.generation === config?.generation
+      ? addresses.find((address) => address.url === selected.url)
+      : undefined) ?? addresses[0]
+  const url = chosen?.url
+  const certificateUrl =
+    chosen?.certificateUrl ??
+    config?.certificateUrls?.[0] ??
+    config?.certificateUrl
   const expired = config !== null && now >= config.expiresAt
   useEffect(() => {
     if (!config) return
@@ -93,6 +110,11 @@ export function MirrorHostPanel({
           {takeover ? (
             <p className="text-sm text-text-secondary">{copy.takeover}</p>
           ) : null}
+          {!hasLanAddress(config) ? (
+            <p role="alert" className="text-sm text-status-alerted">
+              {copy.loopbackOnly}
+            </p>
+          ) : null}
           {url ? (
             <>
               <div className="flex flex-col gap-2">
@@ -121,6 +143,54 @@ export function MirrorHostPanel({
               </div>
             </>
           ) : null}
+          {diagnostic && !connected ? (
+            <p role="status" className="text-sm text-status-alerted">
+              {diagnostic.problem === 'blocked_network'
+                ? copy.blockedNetwork(diagnostic.address)
+                : copy.certificateRejected(diagnostic.address)}
+            </p>
+          ) : null}
+          {addresses.length > 1 ? (
+            <Disclosure
+              summary={copy.otherAddresses}
+              summaryClassName="text-sm font-medium"
+            >
+              <div className="mt-3 flex flex-col gap-2">
+                <p className="text-sm text-text-secondary">
+                  {copy.otherAddressesHelp}
+                </p>
+                <ul className="flex flex-col gap-2">
+                  {addresses.map((address) => (
+                    <li
+                      key={address.url}
+                      className="flex items-center justify-between gap-2"
+                    >
+                      <span className="truncate font-mono text-sm">
+                        {address.host}
+                      </span>
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        disabled={address.url === url}
+                        aria-label={`${copy.useAddress}: ${address.host}`}
+                        onClick={() =>
+                          config &&
+                          setSelected({
+                            generation: config.generation,
+                            url: address.url,
+                          })
+                        }
+                      >
+                        {address.url === url
+                          ? copy.usingAddress
+                          : copy.useAddress}
+                      </Button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </Disclosure>
+          ) : null}
           <div className="flex flex-col gap-2">
             <Label htmlFor="mirror-password">{copy.password}</Label>
             <Input
@@ -139,10 +209,7 @@ export function MirrorHostPanel({
               <Button
                 variant="secondary"
                 onClick={() =>
-                  void copyLink(
-                    config.certificateUrls?.[0] ?? config.certificateUrl,
-                    true
-                  )
+                  void copyLink(certificateUrl ?? config.certificateUrl, true)
                 }
               >
                 {copy.certificateDownload}
@@ -158,6 +225,18 @@ export function MirrorHostPanel({
               </div>
             </div>
           </Disclosure>
+          {!connected ? (
+            <Disclosure
+              summary={copy.troubleshooting}
+              summaryClassName="text-sm font-medium"
+            >
+              <ul className="mt-3 flex list-disc flex-col gap-2 pl-5 text-sm text-text-secondary">
+                {copy.troubleshootingSteps.map((step) => (
+                  <li key={step}>{step}</li>
+                ))}
+              </ul>
+            </Disclosure>
+          ) : null}
           <Button
             variant="secondary"
             disabled={stopping}

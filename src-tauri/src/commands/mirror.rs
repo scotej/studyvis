@@ -4,6 +4,7 @@ use std::time::Duration;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, Runtime};
 
+use super::native_log::{self, NativeLevel};
 use super::system::SessionActiveFlag;
 use crate::mirror::{
     local_addresses, MirrorAsset, MirrorConfig, MirrorEvent, MirrorServer, MirrorServerOptions,
@@ -18,9 +19,18 @@ pub struct MirrorState {
 #[derive(Default)]
 struct MirrorSlot {
     server: Option<MirrorServer>,
+    // The study session the live server was started for; a restarted desktop
+    // page that rejoins it adopts the server instead of rotating the password.
+    session_id: Option<String>,
     retiring: Vec<MirrorServer>,
     request_id: Option<String>,
     revision: u64,
+}
+
+/// What a start request should do with the slot it found.
+enum StartPlan {
+    Adopt(MirrorConfig),
+    Replace(u64, Vec<MirrorServer>),
 }
 
 impl MirrorState {
@@ -28,12 +38,43 @@ impl MirrorState {
         let mut slot = self.slot.lock().unwrap();
         slot.revision += 1;
         slot.request_id = Some(request_id);
+        slot.session_id = None;
         let mut previous = std::mem::take(&mut slot.retiring);
         if let Some(server) = slot.server.take() {
             server.stop();
             previous.push(server);
         }
         (slot.revision, previous)
+    }
+
+    fn plan(&self, session_id: &str, request_id: String) -> StartPlan {
+        if let Some(config) = self.adopt(session_id, request_id.clone()) {
+            return StartPlan::Adopt(config);
+        }
+        let (revision, previous) = self.begin(request_id);
+        StartPlan::Replace(revision, previous)
+    }
+
+    /// Transfers a live server for the same session to a new request and asks
+    /// its browser to reconnect, keeping the password, cookie and expiry.
+    fn adopt(&self, session_id: &str, request_id: String) -> Option<MirrorConfig> {
+        let mut slot = self.slot.lock().unwrap();
+        if slot.session_id.as_deref() != Some(session_id)
+            || !slot.server.as_ref().is_some_and(MirrorServer::is_active)
+        {
+            return None;
+        }
+        slot.revision += 1;
+        slot.request_id = Some(request_id);
+        let server = slot.server.as_ref()?;
+        server.reconnect_controller();
+        Some(server.config().clone())
+    }
+
+    fn resumable(&self, session_id: &str) -> bool {
+        let slot = self.slot.lock().unwrap();
+        slot.session_id.as_deref() == Some(session_id)
+            && slot.server.as_ref().is_some_and(MirrorServer::is_active)
     }
 
     fn owns(&self, request_id: &str, revision: u64) -> bool {
@@ -48,6 +89,7 @@ impl MirrorState {
         }
         slot.revision += 1;
         slot.request_id = None;
+        slot.session_id = None;
         slot.server.take().inspect(MirrorServer::stop)
     }
 
@@ -55,6 +97,7 @@ impl MirrorState {
         let mut slot = self.slot.lock().unwrap();
         slot.revision += 1;
         slot.request_id = None;
+        slot.session_id = None;
         if let Some(server) = slot.server.take() {
             server.stop();
             slot.retiring.push(server);
@@ -73,6 +116,14 @@ impl MirrorState {
 struct ClientEvent {
     client_id: String,
     connected: bool,
+    address: Option<String>,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DiagnosticEvent {
+    address: String,
+    problem: &'static str,
 }
 
 #[derive(Clone, Serialize)]
@@ -87,6 +138,7 @@ pub async fn mirror_start<R: Runtime>(
     app: AppHandle<R>,
     session_id: String,
     request_id: String,
+    resume: Option<bool>,
 ) -> Result<MirrorConfig, String> {
     if !SessionActiveFlag::is_active(&app) {
         return Err("start a study session before enabling browser access".into());
@@ -105,7 +157,24 @@ pub async fn mirror_start<R: Runtime>(
     let state = app.state::<MirrorState>();
     // Claim ownership before awaiting the previous start. An older request's
     // eventual cleanup must never stop its replacement.
-    let (revision, previous) = state.begin(request_id.clone());
+    // An automatic resume must never mint a new password the paired browser
+    // doesn't have; it adopts the live server or fails without touching it.
+    if resume == Some(true) {
+        return match state.adopt(&session_id, request_id) {
+            Some(config) => {
+                native_log::record(NativeLevel::Info, "mirror.server", "server.adopted", &[]);
+                Ok(config)
+            }
+            None => Err("the browser companion is no longer running".into()),
+        };
+    }
+    let (revision, previous) = match state.plan(&session_id, request_id.clone()) {
+        StartPlan::Adopt(config) => {
+            native_log::record(NativeLevel::Info, "mirror.server", "server.adopted", &[]);
+            return Ok(config);
+        }
+        StartPlan::Replace(revision, previous) => (revision, previous),
+    };
     let _starting = state.starting.lock().await;
     for previous in previous {
         previous.shutdown().await;
@@ -131,6 +200,7 @@ pub async fn mirror_start<R: Runtime>(
             MirrorEvent::Client {
                 client_id,
                 connected,
+                address,
             } => {
                 let _ = event_app.emit_to(
                     "main",
@@ -138,6 +208,17 @@ pub async fn mirror_start<R: Runtime>(
                     ClientEvent {
                         client_id,
                         connected,
+                        address: address.map(|ip| ip.to_string()),
+                    },
+                );
+            }
+            MirrorEvent::Diagnostic { address, problem } => {
+                let _ = event_app.emit_to(
+                    "main",
+                    "mirror:diagnostic",
+                    DiagnosticEvent {
+                        address: address.to_string(),
+                        problem: problem.as_str(),
                     },
                 );
             }
@@ -157,11 +238,17 @@ pub async fn mirror_start<R: Runtime>(
         {
             let config = server.config().clone();
             slot.server = Some(server);
+            slot.session_id = Some(session_id);
             return Ok(config);
         }
     }
     server.shutdown().await;
     Err("browser access was cancelled".into())
+}
+
+#[tauri::command]
+pub fn mirror_resumable<R: Runtime>(app: AppHandle<R>, session_id: String) -> bool {
+    app.state::<MirrorState>().resumable(&session_id)
 }
 
 #[tauri::command]
@@ -194,7 +281,60 @@ pub async fn mirror_send<R: Runtime>(
 
 #[cfg(test)]
 mod tests {
-    use super::MirrorState;
+    use super::{MirrorState, StartPlan};
+    use crate::mirror::{MirrorServer, MirrorServerOptions};
+    use std::net::Ipv4Addr;
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    async fn server(directory: &std::path::Path) -> MirrorServer {
+        MirrorServer::start(MirrorServerOptions {
+            certificate_dir: directory.to_path_buf(),
+            addresses: vec![Ipv4Addr::LOCALHOST],
+            asset: Arc::new(|_| None),
+            on_event: Arc::new(|_| {}),
+            lease: Duration::from_secs(60),
+        })
+        .await
+        .unwrap()
+    }
+
+    #[tokio::test]
+    async fn restarted_page_adopts_the_live_server_for_its_session_only() {
+        let directory =
+            std::env::temp_dir().join(format!("studyvis-mirror-adopt-{}", std::process::id()));
+        let state = MirrorState::default();
+        let (revision, _) = state.begin("first".into());
+        let started = server(&directory).await;
+        let config = started.config().clone();
+        {
+            let mut slot = state.slot.lock().unwrap();
+            assert_eq!(slot.revision, revision);
+            slot.server = Some(started);
+            slot.session_id = Some("a".repeat(64));
+        }
+        assert!(state.resumable(&"a".repeat(64)));
+        assert!(!state.resumable(&"b".repeat(64)));
+        let StartPlan::Adopt(adopted) = state.plan(&"a".repeat(64), "second".into()) else {
+            panic!("the same session must adopt its live server");
+        };
+        assert_eq!(adopted.password, config.password);
+        assert_eq!(adopted.generation, config.generation);
+        assert_eq!(adopted.expires_at, config.expires_at);
+        // The page that started it can no longer stop its successor.
+        assert!(state.cancel(Some("first")).is_none());
+        assert!(state.resumable(&"a".repeat(64)));
+        let StartPlan::Replace(_, previous) = state.plan(&"b".repeat(64), "third".into()) else {
+            panic!("a different session must replace the server");
+        };
+        assert_eq!(previous.len(), 1);
+        assert!(!state.resumable(&"a".repeat(64)));
+        for server in previous {
+            server.shutdown().await;
+        }
+        state.stop();
+        let _ = std::fs::remove_dir_all(directory);
+    }
 
     #[test]
     fn cancelled_start_cannot_stop_a_newer_request() {

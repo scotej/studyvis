@@ -60,7 +60,7 @@ use commands::identity::{
     identity_sign,
 };
 #[cfg(desktop)]
-use commands::mirror::{mirror_send, mirror_start, mirror_stop, MirrorState};
+use commands::mirror::{mirror_resumable, mirror_send, mirror_start, mirror_stop, MirrorState};
 #[cfg(all(
     desktop,
     any(target_os = "macos", target_os = "windows", target_os = "linux")
@@ -260,6 +260,8 @@ pub fn run() {
         mirror_stop,
         #[cfg(desktop)]
         mirror_send,
+        #[cfg(desktop)]
+        mirror_resumable,
         #[cfg(desktop)]
         model_paths,
         #[cfg(desktop)]

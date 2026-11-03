@@ -1,6 +1,8 @@
 import { invoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 
+import { logger } from '@/lib/log'
+
 import { createMirrorPeer, type MirrorPeer } from './peer'
 import {
   MirrorCodec,
@@ -10,14 +12,41 @@ import {
   type MirrorNotification,
 } from './wire'
 
+const log = logger.child('mirror.host')
+
+export type MirrorDiagnosticProblem = 'blocked_network' | 'certificate'
+
+// #515 — a browser reached this computer but could not use the companion.
+export type MirrorDiagnostic = {
+  address: string
+  problem: MirrorDiagnosticProblem
+  at: number
+}
+
+export function readMirrorDiagnostic(
+  value: unknown,
+  at: number
+): MirrorDiagnostic | null {
+  if (!value || typeof value !== 'object') return null
+  const { address, problem } = value as Record<string, unknown>
+  if (
+    typeof address !== 'string' ||
+    !/^[0-9a-fA-F:.]{2,45}$/.test(address) ||
+    (problem !== 'blocked_network' && problem !== 'certificate')
+  )
+    return null
+  return { address, problem, at }
+}
+
 export type MirrorHostOptions = {
   onControl: (control: unknown) => boolean | void | Promise<boolean | void>
   onCapture: (kind: CaptureKind, stream: MediaStream | null) => void
   onConnected: (connected: boolean) => void
+  onDiagnostic?: (diagnostic: MirrorDiagnostic) => void
 }
 
 export type MirrorHost = {
-  start: (sessionId: string) => Promise<MirrorConfig>
+  start: (sessionId: string, resume?: boolean) => Promise<MirrorConfig>
   stop: () => Promise<void>
   publish: (snapshot: unknown) => void
   setStreams: (streams: Record<string, MediaStream>) => void
@@ -44,9 +73,10 @@ export function createMirrorHost(options: MirrorHostOptions): MirrorHost {
   let reportSaved: (() => void) | null = null
   let finishing = false
 
-  const disconnect = () => {
+  const disconnect = (reason?: string) => {
     const old = client
     client = null
+    if (old) log.info('client.detached', { reason: reason ?? 'replaced' })
     old?.peer.close()
     reportSaved?.()
     reportSaved = null
@@ -66,7 +96,9 @@ export function createMirrorHost(options: MirrorHostOptions): MirrorHost {
       })
     })
     current.queue = job.catch(() => {
-      if (client === current) disconnect()
+      if (client !== current) return
+      log.warn('send.failed', { type: message.type })
+      disconnect('send_failed')
     })
     return current.queue
   }
@@ -74,8 +106,9 @@ export function createMirrorHost(options: MirrorHostOptions): MirrorHost {
   const recover = () => {
     const current = client
     if (!current) return
+    log.warn('peer.failed')
     void send({ type: 'reconnect' }).then(() => {
-      if (client === current) disconnect()
+      if (client === current) disconnect('peer_failed')
     })
   }
 
@@ -100,13 +133,13 @@ export function createMirrorHost(options: MirrorHostOptions): MirrorHost {
     starting = false
     for (const off of unlisten) off()
     unlisten = []
-    disconnect()
+    disconnect('stopped')
     if (stoppedRequest)
       await invoke('mirror_stop', { requestId: stoppedRequest })
   }
 
   return {
-    async start(sessionId) {
+    async start(sessionId, resume = false) {
       if (active || starting) throw new Error('Mirroring is already enabled')
       starting = true
       finishing = false
@@ -116,36 +149,51 @@ export function createMirrorHost(options: MirrorHostOptions): MirrorHost {
       const listeners: UnlistenFn[] = []
       try {
         listeners.push(
-          await listen<{ clientId: string; connected: boolean }>(
-            'mirror:client',
-            ({ payload }) => {
-              if (run !== generation || !active) return
-              if (!payload.connected) {
-                if (client?.id === payload.clientId) disconnect()
-                return
-              }
-              disconnect()
-              const codec = new MirrorCodec()
-              const peer = createMirrorPeer({
-                role: 'host',
-                send: (signal) => {
-                  void send({ type: 'signal', signal })
-                },
-                onCapture: options.onCapture,
-                onFailure: recover,
-              })
-              client = {
-                id: payload.clientId,
-                codec,
-                peer,
-                queue: Promise.resolve(),
-              }
-              peer.setStreams(streams)
-              options.onConnected(true)
-              pendingSnapshot = true
-              void publishLatest()
+          await listen<{
+            clientId: string
+            connected: boolean
+            address?: string | null
+          }>('mirror:client', ({ payload }) => {
+            if (run !== generation || !active) return
+            if (!payload.connected) {
+              if (client?.id === payload.clientId) disconnect('socket_closed')
+              return
             }
-          )
+            disconnect()
+            log.info('client.connected', {
+              observedAddress: typeof payload.address === 'string',
+            })
+            const codec = new MirrorCodec()
+            const peer = createMirrorPeer({
+              role: 'host',
+              remoteAddress:
+                typeof payload.address === 'string' ? payload.address : null,
+              send: (signal) => {
+                void send({ type: 'signal', signal })
+              },
+              onCapture: options.onCapture,
+              onFailure: recover,
+            })
+            client = {
+              id: payload.clientId,
+              codec,
+              peer,
+              queue: Promise.resolve(),
+            }
+            peer.setStreams(streams)
+            options.onConnected(true)
+            pendingSnapshot = true
+            void publishLatest()
+          })
+        )
+        listeners.push(
+          await listen<unknown>('mirror:diagnostic', ({ payload }) => {
+            if (run !== generation) return
+            const diagnostic = readMirrorDiagnostic(payload, Date.now())
+            if (!diagnostic) return
+            log.info('client.diagnostic', { problem: diagnostic.problem })
+            options.onDiagnostic?.(diagnostic)
+          })
         )
         listeners.push(
           await listen<{ clientId: string; data: string }>(
@@ -210,6 +258,7 @@ export function createMirrorHost(options: MirrorHostOptions): MirrorHost {
                     break
                 }
               } catch {
+                log.warn('message.invalid')
                 recover()
               }
             }
@@ -220,6 +269,7 @@ export function createMirrorHost(options: MirrorHostOptions): MirrorHost {
         const config = await invoke<MirrorConfig>('mirror_start', {
           sessionId,
           requestId: startedRequest,
+          resume,
         })
         if (run !== generation) {
           await invoke('mirror_stop', { requestId: startedRequest })

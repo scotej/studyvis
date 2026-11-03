@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
-import { expect, fn, userEvent, within } from 'storybook/test'
+import { expect, fn, userEvent, within, waitFor } from 'storybook/test'
 
 import { MirrorSession } from '@/features/mirror/MirrorSession'
 import type {
@@ -206,6 +206,36 @@ export const OfflineReview: Story = {
       status: 'disconnected',
       snapshot: { ...snapshot, offlineImagesOmitted: true },
     }),
+  },
+}
+export const Reconnecting: Story = {
+  args: {
+    connection: connection({ status: 'connecting', resuming: true }),
+  },
+  play: async ({ canvasElement }) => {
+    await expect(
+      within(canvasElement).getByText(strings.mirror.reconnecting)
+    ).toBeVisible()
+    await expect(
+      within(canvasElement).queryByLabelText(strings.mirror.password)
+    ).toBeNull()
+  },
+}
+export const NotificationsDialog: Story = {
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await userEvent.click(
+      canvas.getByRole('button', { name: strings.mirror.notifications })
+    )
+    const body = within(canvasElement.ownerDocument.body)
+    // The dialog fades in from opacity 0; wait for it rather than sample it.
+    const dialog = await body.findByRole('dialog', {
+      name: strings.mirror.notificationsTitle,
+    })
+    await waitFor(() => expect(dialog).toBeVisible())
+    await expect(
+      body.queryByRole('dialog', { name: strings.mirror.controls })
+    ).toBeNull()
   },
 }
 export const Pairing: Story = {

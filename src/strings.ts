@@ -48,7 +48,7 @@ export const strings = {
     takeover:
       'Desktop capture is paused. Choose your camera, microphone, and screen in the browser. Stop the companion to use this desktop again.',
     disconnected:
-      'Desktop disconnected. Your session continues on the desktop. Controls will return when it reconnects.',
+      'Desktop disconnected. Your session continues on the desktop. If StudyVis closed or restarted, rejoin the session there. This page reconnects automatically.',
     pairing: 'Connect to your desktop',
     password: 'Pairing password',
     pair: 'Connect',
@@ -69,6 +69,26 @@ export const strings = {
     copy: 'Copy link',
     copied: 'Companion link copied.',
     copyFailed: "Couldn't copy the link.",
+    // #515 — reachability help for the desktop companion panel.
+    companionResumed: 'Browser companion reconnected.',
+    otherAddresses: 'Other addresses on this computer',
+    otherAddressesHelp:
+      'If the link above doesn’t open on your other device, try one of these. Virtual network and VPN adapters usually aren’t reachable.',
+    useAddress: 'Use this address',
+    usingAddress: 'In use',
+    loopbackOnly:
+      'This network didn’t give your computer a local address other devices can reach. Connect both devices to the same Wi-Fi or wired network, then restart the browser companion. Until then, the link below works only in a browser on this computer.',
+    troubleshooting: 'Can’t connect?',
+    troubleshootingSteps: [
+      'Make sure both devices are on the same Wi-Fi or wired network.',
+      'Guest, hotel, and some school networks keep devices from reaching each other. Try a home network or a phone hotspot.',
+      'Allow StudyVis through your firewall. On Windows, networks set to Public block other devices — set this network to Private.',
+      'Try another address on this computer from the list above.',
+    ],
+    blockedNetwork: (address: string) =>
+      `A device at ${address} tried to connect, but it isn’t on a private local network. VPNs and carrier networks use addresses like this. Connect both devices to the same local network.`,
+    certificateRejected: (address: string) =>
+      `A device at ${address} reached this computer but hasn’t trusted its certificate yet. Finish the first-time certificate setup on that device.`,
     failed: "Couldn't start the browser companion.",
     pairFailed: "Couldn't connect. Check the password and local certificate.",
     pairRateLimited: 'Too many pairing attempts. Wait a minute and try again.',
@@ -128,6 +148,10 @@ export const strings = {
     invalidSnapshot:
       'The desktop sent an incompatible session. Update StudyVis and reconnect.',
     offlineImages: 'Images will return when the desktop reconnects.',
+    reconnecting: `Reconnecting to your desktop${ELLIPSIS} Your camera, microphone, and screen stay on for a moment while it reconnects.`,
+    notificationsTitle: 'Browser notifications',
+    notificationsReady:
+      'Notifications are on for this browser. Send a test to check your system settings.',
     secondsRemaining: (seconds: number) =>
       `Pairing expires in ${seconds} seconds.`,
     elapsed: (minutes: number) => `${minutes} min`,
@@ -847,6 +871,8 @@ export const strings = {
       // state ("Turn camera on, pressed").
       toggleAriaLabel: 'Camera',
       offTileLabel: 'Camera off',
+      // #515 — a friend is pairing or reconnecting their browser companion.
+      companionTileLabel: `Connecting browser companion${ELLIPSIS}`,
     },
     // #96 — screen sharing. Everyone in the session can publish their screen
     // alongside their camera; the tiles below sit in the same grid.

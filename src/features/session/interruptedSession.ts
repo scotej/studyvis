@@ -6,8 +6,11 @@
 // "show the prompt" and "carry on".
 
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { invoke } from '@tauri-apps/api/core'
 
 import { logger } from '@/lib/log'
+
+import { useSessionStore } from '@/stores/sessionStore'
 
 import {
   clearSessionRecovery,
@@ -16,6 +19,16 @@ import {
 } from './recovery'
 
 const log = logger.child('session.recovery')
+
+// #515 — a reloaded page never ran its session teardown, so the native session
+// flag and any browser companion server it started can outlive it. Clear them
+// once no session from that page will be resumed.
+function releaseStaleNativeSession(): void {
+  if (useSessionStore.getState().status === 'active') return
+  void invoke('session_set_active', { active: false }).catch((err: unknown) =>
+    log.warn('recovery.native_release_failed', { err })
+  )
+}
 
 export type InterruptedSessionState =
   | { status: 'idle' }
@@ -71,6 +84,8 @@ export function useInterruptedSession(
         // read fine, and say so in diagnostics.
         if (result.kind === 'unavailable') {
           log.warn('recovery.unreadable_this_boot')
+        } else {
+          releaseStaleNativeSession()
         }
         setState({ status: 'settled' })
       } catch (err) {
@@ -87,6 +102,7 @@ export function useInterruptedSession(
 
   const end = useCallback(() => {
     setState({ status: 'settled' })
+    releaseStaleNativeSession()
     void clearSessionRecovery()
   }, [])
 

@@ -59,6 +59,60 @@ export const MultipleInterfaces: Story = {
     ).not.toBeInTheDocument()
   },
 }
+export const SwitchAddress: Story = {
+  args: MultipleInterfaces.args,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await userEvent.click(canvas.getByText(strings.mirror.otherAddresses))
+    await userEvent.click(
+      canvas.getByRole('button', {
+        name: `${strings.mirror.useAddress}: 192.168.1.12`,
+      })
+    )
+    await expect(
+      canvas.getByRole('textbox', { name: strings.mirror.link })
+    ).toHaveValue('https://192.168.1.12:8443')
+  },
+}
+export const LoopbackOnly: Story = {
+  args: {
+    config: {
+      ...config,
+      urls: ['https://127.0.0.1:8443/'],
+      certificateUrl: 'http://127.0.0.1:8444/certificate.crt',
+      certificateUrls: ['http://127.0.0.1:8444/certificate.crt'],
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await expect(canvas.getByRole('alert')).toHaveTextContent(
+      strings.mirror.loopbackOnly
+    )
+  },
+}
+export const BlockedNetwork: Story = {
+  args: {
+    config,
+    diagnostic: {
+      address: '100.72.4.9',
+      problem: 'blocked_network',
+      at: 0,
+    },
+  },
+}
+export const CertificateNotTrusted: Story = {
+  args: {
+    config,
+    diagnostic: { address: '192.168.1.40', problem: 'certificate', at: 0 },
+  },
+}
+export const Troubleshooting: Story = {
+  args: { config },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await userEvent.click(canvas.getByText(strings.mirror.troubleshooting))
+  },
+}
 export const CertificateSetup: Story = {
   args: { config },
   play: async ({ canvasElement }) => {

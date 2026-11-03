@@ -76,9 +76,18 @@ async fn main() {
                         MirrorEvent::Client {
                             client_id,
                             connected,
+                            address,
                         } => output(json!({
                             "event": "mirror:client",
-                            "payload": { "clientId": client_id, "connected": connected }
+                            "payload": {
+                                "clientId": client_id,
+                                "connected": connected,
+                                "address": address.map(|ip| ip.to_string()),
+                            }
+                        })),
+                        MirrorEvent::Diagnostic { address, problem } => output(json!({
+                            "event": "mirror:diagnostic",
+                            "payload": { "address": address.to_string(), "problem": problem.as_str() }
                         })),
                         MirrorEvent::Message { client_id, data } => output(json!({
                             "event": "mirror:message",
@@ -107,6 +116,7 @@ async fn main() {
                 }
                 Ok(Value::Null)
             }
+            "mirror_resumable" => Ok(Value::Bool(false)),
             "mirror_send" => match server.as_ref() {
                 Some(listener) => listener
                     .send(

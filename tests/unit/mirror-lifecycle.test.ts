@@ -2,7 +2,10 @@ import { serializeReportToText } from '@/features/session/reportSerialize'
 import { strings } from '@/strings'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 
-import { createBrowserConnection } from '@/features/mirror/browserConnection'
+import {
+  createBrowserConnection,
+  MIRROR_RESUME_GRACE_MS,
+} from '@/features/mirror/browserConnection'
 import { createMirrorHost } from '@/features/mirror/runtime'
 import { MirrorCodec, type MirrorMessage } from '@/features/mirror/wire'
 import type { MirrorSessionSnapshot } from '@/features/mirror/sessionBridge'
@@ -829,7 +832,7 @@ describe('browser recovery and local custody', () => {
       expect(connection.getState().report).toBeNull()
     }
   )
-  test('host loss releases capture immediately, disables commands, and reconnects without reopening devices', async () => {
+  test('host loss keeps capture through the reconnect grace, disables commands, and re-attaches it (#515)', async () => {
     const connection = createBrowserConnection()
     cleanup.push(connection.disconnect)
     const original = TestSocket.instances[0]
@@ -841,24 +844,96 @@ describe('browser recovery and local custody', () => {
     connection.setCapture('screen', screen.stream)
     await vi.advanceTimersByTimeAsync(100)
     original.close()
-    expect(camera.track.stop).toHaveBeenCalledOnce()
-    expect(screen.track.stop).toHaveBeenCalledOnce()
-    expect(connection.getState().status).toBe('disconnected')
+    expect(camera.track.stop).not.toHaveBeenCalled()
+    expect(screen.track.stop).not.toHaveBeenCalled()
+    expect(connection.getState()).toMatchObject({
+      status: 'disconnected',
+      resuming: true,
+      captures: { camera: camera.stream, screen: screen.stream },
+    })
     const count = original.send.mock.calls.length
     connection.sendControl({ type: 'note', text: 'offline' })
     await vi.advanceTimersByTimeAsync(1000)
     expect(original.send.mock.calls).toHaveLength(count)
     const replacement = TestSocket.instances[1]
     await activate(replacement)
-    expect(connection.getState().status).toBe('connected')
+    expect(connection.getState()).toMatchObject({
+      status: 'connected',
+      resuming: false,
+    })
     expect(doubles.peers[1].setCapture.mock.calls).toEqual([
-      ['camera', null],
-      ['screen', null],
+      ['camera', camera.stream],
+      ['screen', screen.stream],
     ])
+    await vi.advanceTimersByTimeAsync(MIRROR_RESUME_GRACE_MS)
+    expect(camera.track.stop).not.toHaveBeenCalled()
     const denied = capture()
     replacement.close()
     connection.setCapture('camera', denied.stream)
     expect(denied.track.stop).toHaveBeenCalledOnce()
+  })
+
+  test('held capture is released when the reconnect grace expires', async () => {
+    const connection = createBrowserConnection()
+    cleanup.push(connection.disconnect)
+    const original = TestSocket.instances[0]
+    await activate(original)
+    const camera = capture()
+    connection.setCapture('camera', camera.stream)
+    original.close()
+    await vi.advanceTimersByTimeAsync(MIRROR_RESUME_GRACE_MS - 1)
+    expect(camera.track.stop).not.toHaveBeenCalled()
+    await vi.advanceTimersByTimeAsync(1)
+    expect(camera.track.stop).toHaveBeenCalledOnce()
+    expect(connection.getState()).toMatchObject({
+      resuming: false,
+      captures: { camera: null, screen: null },
+    })
+  })
+
+  test.each(['disconnect', 'new session', 'takeover'] as const)(
+    'held capture is released immediately on %s',
+    async (reason) => {
+      const connection = createBrowserConnection()
+      cleanup.push(connection.disconnect)
+      const original = TestSocket.instances[0]
+      await activate(original)
+      const camera = capture()
+      connection.setCapture('camera', camera.stream)
+      if (reason === 'takeover') {
+        original.close(4001)
+      } else {
+        original.close()
+        expect(camera.track.stop).not.toHaveBeenCalled()
+        if (reason === 'disconnect') connection.disconnect()
+        else {
+          await vi.advanceTimersByTimeAsync(1000)
+          const replacement = TestSocket.instances[1]
+          replacement.open()
+          await incoming(replacement, {
+            type: 'snapshot',
+            snapshot: { ...snapshot(), sessionId: 'session-2' },
+          })
+        }
+      }
+      expect(camera.track.stop).toHaveBeenCalledOnce()
+      expect(connection.getState().resuming).toBe(false)
+      expect(vi.getTimerCount()).toBeLessThanOrEqual(2)
+    }
+  )
+
+  test('a 4002 host restart reconnects promptly without ending the session view', async () => {
+    const connection = createBrowserConnection()
+    cleanup.push(connection.disconnect)
+    const original = TestSocket.instances[0]
+    await activate(original)
+    const camera = capture()
+    connection.setCapture('camera', camera.stream)
+    original.close(4002)
+    expect(connection.getState().error).toBeNull()
+    expect(camera.track.stop).not.toHaveBeenCalled()
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(TestSocket.instances).toHaveLength(2)
   })
 
   test('a malformed live snapshot closes the connection and releases owned capture', async () => {

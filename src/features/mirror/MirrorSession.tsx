@@ -122,6 +122,7 @@ export function MirrorSession({ connection }: MirrorSessionProps) {
   const [outputDevice, setOutputDevice] = useState<string | null>(null)
   const [volumes, setVolumes] = useState<Record<string, number>>({})
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [notificationsOpen, setNotificationsOpen] = useState(false)
   const [aiConsentOpen, setAiConsentOpen] = useState(false)
   const [aiOpen, setAiOpen] = useState(false)
   const [aiText, setAiText] = useState('')
@@ -198,8 +199,20 @@ export function MirrorSession({ connection }: MirrorSessionProps) {
     })
   }, [talk, shortcut, platform, connected])
   useEffect(() => {
-    if (connected) return () => talk.reset()
-  }, [talk, connected, snapshot?.sessionId, hasReport])
+    if (!connected) return
+    const sessionId = snapshot?.sessionId
+    return () => {
+      // #515 — a reconnect keeps explicit Keep mic on; a hold never survives.
+      const latest = connection.getState()
+      if (
+        latest.resuming &&
+        latest.report === null &&
+        readMirrorSnapshot(latest.snapshot)?.sessionId === sessionId
+      )
+        talk.blur()
+      else talk.reset()
+    }
+  }, [talk, connected, snapshot?.sessionId, hasReport, connection])
   useEffect(() => {
     let previous = connection.getState()
     const id = (snapshot: unknown) =>
@@ -299,7 +312,7 @@ export function MirrorSession({ connection }: MirrorSessionProps) {
     }
   }, [talk])
   useEffect(() => {
-    if (state.status === 'connected') return
+    if (state.status === 'connected' || state.resuming) return
     let cancelled = false
     queueMicrotask(() => {
       if (cancelled) return
@@ -314,7 +327,48 @@ export function MirrorSession({ connection }: MirrorSessionProps) {
     return () => {
       cancelled = true
     }
-  }, [state.status, talk])
+  }, [state.status, state.resuming, talk])
+  // The connection releases held capture on grace expiry or a new session.
+  const heldCaptures = state.captures
+  useEffect(() => {
+    if (!heldCaptures) return
+    let cancelled = false
+    queueMicrotask(() => {
+      if (cancelled) return
+      const current = capturesRef.current
+      if (current.camera && heldCaptures.camera !== current.camera) {
+        setCamera(null)
+        talk.reset()
+      }
+      if (current.screen && heldCaptures.screen !== current.screen)
+        setScreen(null)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [heldCaptures, talk])
+  const resumeRef = useRef<{ sessionId: string; sharing: boolean } | null>(null)
+  useEffect(() => {
+    if (state.resuming && snapshot && !resumeRef.current)
+      resumeRef.current = {
+        sessionId: snapshot.sessionId,
+        sharing: snapshot.screenSharing,
+      }
+    else if (!state.resuming && state.status !== 'connected')
+      resumeRef.current = null
+  }, [state.resuming, state.status, snapshot])
+  useEffect(() => {
+    if (!connected || !snapshot) return
+    const resume = resumeRef.current
+    resumeRef.current = null
+    if (!resume || resume.sessionId !== snapshot.sessionId) return
+    // The desktop muted and stopped sharing when the link dropped; restore
+    // the state this page still holds for the same session.
+    const talkState = talk.getState()
+    control({ type: 'microphone', muted: !talkState.microphoneOpen })
+    if (resume.sharing && capturesRef.current.screen)
+      control({ type: 'screen_sharing', sharing: true })
+  }, [connected, snapshot, talk, control])
   useEffect(() => {
     for (const track of camera?.getVideoTracks() ?? [])
       track.enabled = snapshot?.cameraOn ?? true
@@ -325,6 +379,7 @@ export function MirrorSession({ connection }: MirrorSessionProps) {
       if (cancelled) return
       setAiOpen(false)
       setSettingsOpen(false)
+      setNotificationsOpen(false)
       setAiConsentOpen(false)
       setAiText('')
       setTopicDraft('')
@@ -654,9 +709,8 @@ export function MirrorSession({ connection }: MirrorSessionProps) {
             aria-label={copy.notifications}
             title={copy.notifications}
             onClick={() => {
-              setTopicDraft(snapshot.declaredTopic)
-              setSettingsOpen(true)
-              void notifications()
+              setNotificationHelp(null)
+              setNotificationsOpen(true)
             }}
           >
             <BellIcon />
@@ -701,8 +755,16 @@ export function MirrorSession({ connection }: MirrorSessionProps) {
           role="status"
           className="border-b border-border-default bg-bg-raised px-4 py-3 text-sm"
         >
-          <p>{snapshot.status === 'ended' ? copy.ended : copy.disconnected}</p>
-          <div className="mt-3 max-w-md">{pairingForm}</div>
+          {state.resuming && snapshot.status !== 'ended' ? (
+            <p>{copy.reconnecting}</p>
+          ) : (
+            <>
+              <p>
+                {snapshot.status === 'ended' ? copy.ended : copy.disconnected}
+              </p>
+              <div className="mt-3 max-w-md">{pairingForm}</div>
+            </>
+          )}
           {state.error ? (
             <p role="alert" className="mt-2 text-status-alerted">
               {pairingError}
@@ -758,6 +820,7 @@ export function MirrorSession({ connection }: MirrorSessionProps) {
                 state={tile.state}
                 ptt={tile.local ? talking : tile.ptt}
                 cameraOff={tile.cameraOff}
+                companionSetup={tile.companionSetup}
                 alertReasoning={tile.alertReasoning}
                 sinkId={outputDevice ?? undefined}
                 volume={
@@ -1058,6 +1121,33 @@ export function MirrorSession({ connection }: MirrorSessionProps) {
           ) : null}
         </DialogContent>
       </Dialog>
+      <Dialog open={notificationsOpen} onOpenChange={setNotificationsOpen}>
+        <DialogContent aria-describedby={undefined}>
+          <DialogHeader>
+            <DialogTitle>{copy.notificationsTitle}</DialogTitle>
+          </DialogHeader>
+          <div className="flex flex-col gap-4">
+            <p role="status" className="text-sm text-text-secondary">
+              {notificationHelp ??
+                (notificationPermission === 'granted'
+                  ? copy.notificationsReady
+                  : notificationPermission === 'denied'
+                    ? copy.notificationsDenied
+                    : notificationPermission === 'unavailable'
+                      ? copy.notificationsUnavailable
+                      : copy.notificationsPending)}
+            </p>
+            {notificationPermission !== 'unavailable' &&
+            notificationPermission !== 'denied' ? (
+              <Button onClick={() => void notifications()}>
+                {notificationPermission === 'granted'
+                  ? copy.notificationsTest
+                  : copy.notifications}
+              </Button>
+            ) : null}
+          </div>
+        </DialogContent>
+      </Dialog>
       <Dialog open={settingsOpen} onOpenChange={setSettingsOpen}>
         <DialogContent
           className="max-h-[90vh] overflow-y-auto"
@@ -1131,21 +1221,6 @@ export function MirrorSession({ connection }: MirrorSessionProps) {
                 <Kbd>
                   {comboToInlineDisplay(parseAccelerator(shortcut)!, platform)}
                 </Kbd>
-              </p>
-            ) : null}
-            <Button variant="secondary" onClick={() => void notifications()}>
-              {notificationPermission === 'granted'
-                ? copy.notificationsTest
-                : copy.notifications}
-            </Button>
-            {notificationHelp || notificationPermission !== 'granted' ? (
-              <p role="status" className="text-sm text-text-secondary">
-                {notificationHelp ??
-                  (notificationPermission === 'denied'
-                    ? copy.notificationsDenied
-                    : notificationPermission === 'unavailable'
-                      ? copy.notificationsUnavailable
-                      : copy.notificationsPending)}
               </p>
             ) : null}
             <div className="flex items-center justify-between gap-3">

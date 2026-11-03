@@ -76,6 +76,7 @@ permissions = [
   "allow-mirror-start",
   "allow-mirror-stop",
   "allow-mirror-send",
+  "allow-mirror-resumable",
   "allow-model-paths",
   "allow-model-install-state",
   "allow-model-remove",

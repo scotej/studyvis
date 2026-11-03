@@ -149,6 +149,14 @@ import {
   PTT_STATE_ACTION,
   publishLocalStream,
 } from './lifecycle'
+import {
+  cameraPayload,
+  readCameraPayload,
+  relayTracksEverPublished,
+  swapRelayTracks,
+  watchLiveVideo,
+  type CameraPayload,
+} from './companionMedia'
 import { SessionImageViewer } from './SessionImageViewer'
 import { SessionInviteDialog } from './SessionInviteDialog'
 import {
@@ -215,7 +223,6 @@ function mediaConstraints(
 }
 
 type PttPayload = { active: boolean }
-type CameraPayload = { off: boolean }
 type AuditOptions = { now?: () => number; signal?: AbortSignal }
 
 const DEFAULT_PEER_VOLUME = 1
@@ -573,6 +580,21 @@ export function SessionView({
       screenRequestGenerationRef.current += 1
     }
   }, [room, mirror.takeover])
+  const companionRelayRef = useRef<{
+    room: NonNullable<typeof room>
+    stream: MediaStream
+    offJoin: () => void
+  } | null>(null)
+  const [companionLiveVideo, setCompanionLiveVideo] = useState(false)
+  useEffect(
+    () => watchLiveVideo(mirror.camera, setCompanionLiveVideo),
+    [mirror.camera]
+  )
+  const companionSetup = mirror.takeover && !companionLiveVideo
+  const companionSetupRef = useRef(companionSetup)
+  const [peerCompanionSetup, setPeerCompanionSetup] = useState<
+    Record<string, boolean>
+  >({})
   const cameraSendRef = useRef<
     ((payload: CameraPayload) => Promise<void>) | null
   >(null)
@@ -709,29 +731,56 @@ export function SessionView({
         track.enabled = cameraOnRef.current
       for (const track of stream?.getAudioTracks() ?? [])
         track.enabled = isMicActive(usePttStore.getState())
-      let offJoin: (() => void) | null = null
-      localStreamRef.current = stream
       let cancelled = false
+      const owns = () =>
+        !cancelled &&
+        mirrorTakeoverRef.current &&
+        useSessionStore.getState().room === room &&
+        useSessionStore.getState().status === 'active'
+      if (!stream) localStreamRef.current = null
       if (stream) {
         void (async () => {
           // PR-368 — an unfinished native replacement can overwrite a sender
           // reused by addTrack; acquisition itself must never delay takeover.
           await Promise.all([...audioSenderOperationsRef.current])
-          if (
-            cancelled ||
-            !mirrorTakeoverRef.current ||
-            localStreamRef.current !== stream ||
-            useSessionStore.getState().room !== room ||
-            useSessionStore.getState().status !== 'active'
-          )
-            return
+          if (!owns()) return
           if (
             stream.getTracks().some((track) => track.readyState === 'ended')
           ) {
             setMediaErrorName('NotReadableError')
             return
           }
-          offJoin = publishLocalStream(room, stream)
+          // #515 — publish one relay per takeover and swap its tracks in place,
+          // so a browser reconnect never makes peers renegotiate the stream.
+          const relay = companionRelayRef.current
+          if (relay && relay.room === room) {
+            const swapped = await swapRelayTracks({
+              relay: relay.stream,
+              next: stream,
+              peers: () => Object.values(room.getPeers()),
+              isCurrent: () => owns() && companionRelayRef.current === relay,
+              onReplaceTrack: (operation) => {
+                const operations = audioSenderOperationsRef.current
+                operations.add(operation)
+                void operation.finally(() => operations.delete(operation))
+              },
+            })
+            if (!swapped || !owns()) return
+          } else {
+            const published = new MediaStream(stream.getTracks())
+            companionRelayRef.current = {
+              room,
+              stream: published,
+              offJoin: publishLocalStream(room, published),
+            }
+          }
+          const current = companionRelayRef.current!.stream
+          // Final re-read after every await, as on the native acquire path.
+          for (const track of current.getVideoTracks())
+            track.enabled = cameraOnRef.current
+          for (const track of current.getAudioTracks())
+            track.enabled = isMicActive(usePttStore.getState())
+          localStreamRef.current = current
         })()
       }
       queueMicrotask(() => {
@@ -745,16 +794,6 @@ export function SessionView({
       })
       return () => {
         cancelled = true
-        offJoin?.()
-        if (stream) {
-          try {
-            room.removeStream(stream)
-          } catch {
-            /* already removed */
-          }
-        }
-        localStreamRef.current = null
-        setLocalStream(null)
       }
     }
     let cancelled = false
@@ -878,6 +917,35 @@ export function SessionView({
       setLocalStream(null)
     }
   }, [room, mediaRetryNonce, mirror.takeover, mirror.camera])
+
+  // #515 — the companion relay lives for the whole takeover; ending takeover
+  // or leaving the room is what unpublishes it.
+  useEffect(() => {
+    if (!room || !mirror.takeover) return
+    return () => {
+      const relay = companionRelayRef.current
+      companionRelayRef.current = null
+      if (!relay) return
+      relay.offJoin()
+      const published = new Set(relayTracksEverPublished(relay.stream))
+      try {
+        room.removeStream(relay.stream)
+      } catch {
+        /* already removed */
+      }
+      // An interrupted swap can leave a sender on an earlier relay track.
+      for (const connection of Object.values(room.getPeers()))
+        for (const sender of connection.getSenders())
+          if (sender.track && published.has(sender.track))
+            try {
+              connection.removeTrack(sender)
+            } catch {
+              /* connection already closed */
+            }
+      if (localStreamRef.current === relay.stream) localStreamRef.current = null
+      setLocalStream(null)
+    }
+  }, [room, mirror.takeover])
 
   // S2 — on a genuine session teardown (local leave, forced eviction, unmount)
   // drop PTT so a held key at the moment the room closes can't latch `active`
@@ -1128,14 +1196,28 @@ export function SessionView({
     const action = room.makeAction<CameraPayload>(CAMERA_STATE_ACTION)
     cameraSendRef.current = action.send
     action.receive((data, peerId) => {
-      const off = Boolean((data as CameraPayload)?.off)
+      const { off, companion } = readCameraPayload(data)
       setPeerCameraOff((cur) => ({ ...cur, [peerId]: off }))
+      setPeerCompanionSetup((cur) =>
+        Boolean(cur[peerId]) === companion
+          ? cur
+          : { ...cur, [peerId]: companion }
+      )
     })
     const offJoin = room.onPeerJoin((peerId) => {
-      void action.send({ off: !cameraOnRef.current }, peerId)
+      void action.send(
+        cameraPayload(cameraOnRef.current, companionSetupRef.current),
+        peerId
+      )
     })
     const offLeave = room.onPeerLeave((peerId) => {
       setPeerCameraOff((cur) => {
+        if (!(peerId in cur)) return cur
+        const next = { ...cur }
+        delete next[peerId]
+        return next
+      })
+      setPeerCompanionSetup((cur) => {
         if (!(peerId in cur)) return cur
         const next = { ...cur }
         delete next[peerId]
@@ -1158,9 +1240,10 @@ export function SessionView({
     if (stream) {
       for (const t of stream.getVideoTracks()) t.enabled = cameraOn
     }
+    companionSetupRef.current = companionSetup
     const send = cameraSendRef.current
-    if (send) void send({ off: !cameraOn })
-  }, [cameraOn])
+    if (send) void send(cameraPayload(cameraOn, companionSetup))
+  }, [cameraOn, companionSetup])
 
   // #96 — screen-share controller. Owns the `screen-share` announce channel,
   // the capability gate that keeps a pre-1.9 peer from being handed a second
@@ -3073,6 +3156,7 @@ export function SessionView({
         variant: 'camera',
         ptt: peerPtt[peer.peerId] ?? false,
         cameraOff: peerCameraOff[peer.peerId] ?? false,
+        companionSetup: peerCompanionSetup[peer.peerId] ?? false,
         state: peer.reconnecting
           ? 'reconnecting'
           : stream && alert
@@ -3199,6 +3283,7 @@ export function SessionView({
     alertedPeers,
     peerPtt,
     peerCameraOff,
+    peerCompanionSetup,
     peerConnState,
     aiFeaturesEnabled,
     activeModelId,
@@ -3409,6 +3494,7 @@ export function SessionView({
                   mutePlayback={mirror.takeover}
                   ptt={peerPtt[peer.peerId] ?? false}
                   cameraOff={peerCameraOff[peer.peerId] ?? false}
+                  companionSetup={peerCompanionSetup[peer.peerId] ?? false}
                   state={peerState}
                   alertReasoning={peerAlert?.reasoning}
                   sinkId={activeOutputDeviceId ?? undefined}
@@ -3626,6 +3712,7 @@ export function SessionView({
             starting={mirror.starting}
             connected={mirror.connected}
             takeover={mirror.takeover}
+            diagnostic={mirror.diagnostic}
             onStart={mirror.start}
             onStop={mirror.stop}
           />

@@ -556,6 +556,14 @@ below `xl`. The browser footer may wrap on narrower screens. Browser keyboard
 hold-to-talk uses the desktop's configured binding while the tab is focused.
 An explicit Keep mic on control allows background talking until muted or
 disconnected; focus loss releases temporary holds without reopening them.
+The browser header's bell opens a dedicated notifications dialog; the
+settings button opens settings only. A short reconnect keeps the browser's
+camera, microphone and screen with a "Reconnecting" status rather than the
+pairing form. While a friend sets up or reconnects a browser companion, their
+tile shows a "Connecting browser companion" placeholder instead of a frozen
+frame or the plain camera-off label. The desktop companion panel shows one
+preferred link, other addresses behind a disclosure, connection-problem hints,
+and a "Can't connect?" checklist.
 
 - **Window minimum**: 1024 × 640.
 - **Window default on first launch**: 1280 × 800.
