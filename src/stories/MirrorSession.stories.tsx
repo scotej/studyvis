@@ -208,6 +208,34 @@ export const OfflineReview: Story = {
     }),
   },
 }
+export const Reconnecting: Story = {
+  args: {
+    connection: connection({ status: 'connecting', resuming: true }),
+  },
+  play: async ({ canvasElement }) => {
+    await expect(
+      within(canvasElement).getByText(strings.mirror.reconnecting)
+    ).toBeVisible()
+    await expect(
+      within(canvasElement).queryByLabelText(strings.mirror.password)
+    ).toBeNull()
+  },
+}
+export const NotificationsDialog: Story = {
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement)
+    await userEvent.click(
+      canvas.getByRole('button', { name: strings.mirror.notifications })
+    )
+    const body = within(canvasElement.ownerDocument.body)
+    await expect(
+      body.getByRole('dialog', { name: strings.mirror.notificationsTitle })
+    ).toBeVisible()
+    await expect(
+      body.queryByRole('dialog', { name: strings.mirror.controls })
+    ).toBeNull()
+  },
+}
 export const Pairing: Story = {
   args: { connection: connection({ status: 'pairing', snapshot: null }) },
 }

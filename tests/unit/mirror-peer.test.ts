@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 
-import { createMirrorPeer } from '@/features/mirror/peer'
+import { createMirrorPeer, replaceMdnsCandidates } from '@/features/mirror/peer'
 import type { SignalMessage } from '@/features/mirror/wire'
 
 let streamId = 0
@@ -68,6 +68,8 @@ class TestConnection {
   onnegotiationneeded: (() => void) | null = null
   createDataChannel = vi.fn()
   removeTrack = vi.fn()
+  restartIce = vi.fn()
+  remoteDescriptions: RTCSessionDescriptionInit[] = []
   addEventListener = vi.fn()
   removeEventListener = vi.fn()
   close = vi.fn(() => {
@@ -118,6 +120,7 @@ class TestConnection {
   }
 
   async setRemoteDescription(description: RTCSessionDescriptionInit) {
+    this.remoteDescriptions.push(description)
     this.signalingState =
       description.type === 'answer' ? 'stable' : 'have-remote-offer'
     if (description.type === 'offer' && this.transceivers.length === 0) {
@@ -552,5 +555,159 @@ describe('LAN peer media ownership', () => {
     expect(connection.close).not.toHaveBeenCalled()
     host.close()
     expect(vi.getTimerCount()).toBe(0)
+  })
+})
+
+const MDNS_SDP = [
+  'v=0',
+  'a=candidate:1 1 udp 2122260223 4b1d7f3a-9c2e-4e5f-8a6b-1c2d3e4f5a6b.local 54321 typ host generation 0',
+  'a=candidate:2 1 tcp 1518280447 0f0e0d0c-0b0a-0908-0706-050403020100.local 9 typ host tcptype active',
+  'a=candidate:3 1 udp 2122194687 192.168.1.20 50000 typ host',
+  'a=candidate:4 1 udp 1685987071 203.0.113.9 60000 typ srflx raddr x.local rport 50000',
+  'c=IN IP4 notacandidate.local',
+  '',
+].join('\r\n')
+
+describe('LAN ICE candidate repair (#515)', () => {
+  test('mDNS host candidates take the proven LAN address and nothing else changes', () => {
+    const repaired = replaceMdnsCandidates(MDNS_SDP, '192.168.1.42')
+    const lines = repaired.split('\r\n')
+    expect(lines[1]).toBe(
+      'a=candidate:1 1 udp 2122260223 192.168.1.42 54321 typ host generation 0'
+    )
+    expect(lines[2]).toBe(
+      'a=candidate:2 1 tcp 1518280447 192.168.1.42 9 typ host tcptype active'
+    )
+    expect(lines.slice(3)).toEqual(MDNS_SDP.split('\r\n').slice(3))
+  })
+
+  test.each([
+    '',
+    'host.local',
+    '999.1.1.1',
+    '192.168.1',
+    'fe80::1',
+    '1.2.3.4 ',
+    // A same-computer companion keeps mDNS names that resolve locally.
+    '127.0.0.1',
+    '0.0.0.0',
+  ])('a non-LAN replacement %j leaves the SDP byte-identical', (address) => {
+    expect(replaceMdnsCandidates(MDNS_SDP, address)).toBe(MDNS_SDP)
+  })
+
+  test('each role rewrites only remote descriptions when it knows the peer address', async () => {
+    const browserSend = vi.fn()
+    const browser = createMirrorPeer({
+      role: 'browser',
+      send: browserSend,
+      onFailure: vi.fn(),
+      remoteAddress: '10.0.0.5',
+    })
+    browser.receive({ type: 'offer', sdp: MDNS_SDP })
+    await flush()
+    const browserConnection = TestConnection.instances[0]
+    expect(browserConnection.remoteDescriptions[0].sdp).toContain(
+      ' 10.0.0.5 54321 typ host'
+    )
+    expect(browserSend).toHaveBeenCalledWith({ type: 'answer', sdp: 'answer' })
+
+    const host = createMirrorPeer({
+      role: 'host',
+      send: vi.fn(),
+      onFailure: vi.fn(),
+      remoteAddress: '192.168.1.42',
+    })
+    await flush()
+    host.receive({ type: 'answer', sdp: MDNS_SDP })
+    await flush()
+    expect(TestConnection.instances[1].remoteDescriptions[0].sdp).toContain(
+      ' 192.168.1.42 54321 typ host'
+    )
+    const plain = createMirrorPeer({
+      role: 'host',
+      send: vi.fn(),
+      onFailure: vi.fn(),
+    })
+    await flush()
+    plain.receive({ type: 'answer', sdp: MDNS_SDP })
+    await flush()
+    expect(TestConnection.instances[2].remoteDescriptions[0].sdp).toBe(MDNS_SDP)
+    for (const peer of [browser, host, plain]) peer.close()
+  })
+
+  test('a slow ICE gather sends the candidates gathered so far instead of failing', async () => {
+    vi.useFakeTimers()
+    const send = vi.fn()
+    const failure = vi.fn()
+    const host = createMirrorPeer({ role: 'host', send, onFailure: failure })
+    TestConnection.instances[0].iceGatheringState = 'gathering'
+    await flush()
+    expect(send).not.toHaveBeenCalled()
+    await vi.advanceTimersByTimeAsync(10_000)
+    expect(send).toHaveBeenCalledWith({ type: 'offer', sdp: 'offer' })
+    expect(failure).not.toHaveBeenCalled()
+    host.close()
+  })
+
+  test('the host restarts ICE once before giving up on a failed LAN path', async () => {
+    vi.useFakeTimers()
+    const send = vi.fn()
+    const failure = vi.fn()
+    const host = createMirrorPeer({ role: 'host', send, onFailure: failure })
+    await flush()
+    host.receive({ type: 'answer', sdp: 'answer' })
+    await flush()
+    const connection = TestConnection.instances[0]
+    connection.connectionState = 'connected'
+    connection.onconnectionstatechange?.()
+
+    connection.connectionState = 'disconnected'
+    connection.onconnectionstatechange?.()
+    await vi.advanceTimersByTimeAsync(5000)
+    expect(connection.restartIce).toHaveBeenCalledOnce()
+    expect(connection.createOffer).toHaveBeenLastCalledWith({
+      iceRestart: true,
+    })
+    expect(failure).not.toHaveBeenCalled()
+    host.receive({ type: 'answer', sdp: 'answer' })
+    await flush()
+    connection.connectionState = 'connected'
+    connection.onconnectionstatechange?.()
+    await vi.advanceTimersByTimeAsync(30_000)
+    expect(failure).not.toHaveBeenCalled()
+
+    // Reconnecting earns a fresh attempt; a restart that never recovers fails.
+    connection.connectionState = 'failed'
+    connection.onconnectionstatechange?.()
+    expect(connection.restartIce).toHaveBeenCalledTimes(2)
+    await flush()
+    host.receive({ type: 'answer', sdp: 'answer' })
+    await flush()
+    await vi.advanceTimersByTimeAsync(14_999)
+    expect(failure).not.toHaveBeenCalled()
+    await vi.advanceTimersByTimeAsync(1)
+    expect(failure).toHaveBeenCalledOnce()
+    host.close()
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  test('the browser waits out the host restart window before reconnecting', async () => {
+    vi.useFakeTimers()
+    const failure = vi.fn()
+    const browser = createMirrorPeer({
+      role: 'browser',
+      send: vi.fn(),
+      onFailure: failure,
+    })
+    const connection = TestConnection.instances[0]
+    connection.connectionState = 'failed'
+    connection.onconnectionstatechange?.()
+    // Host grace 5s + restart window 15s + slow re-gather 10s + 5s skew margin.
+    await vi.advanceTimersByTimeAsync(34_999)
+    expect(failure).not.toHaveBeenCalled()
+    expect(connection.restartIce).not.toHaveBeenCalled()
+    await vi.advanceTimersByTimeAsync(1)
+    expect(failure).toHaveBeenCalledOnce()
+    browser.close()
   })
 })

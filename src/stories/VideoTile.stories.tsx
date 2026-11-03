@@ -200,6 +200,15 @@ export const CameraOffPeer: Story = {
   ),
 }
 
+// #515 — a friend is pairing or reconnecting their browser companion.
+export const CompanionSetupPeer: Story = {
+  render: () => (
+    <div className="w-full max-w-md">
+      <MockedTile name="Bo" color={tokens.color.accent.muted} companionSetup />
+    </div>
+  ),
+}
+
 // #96 — a friend's shared screen. Same tile shape as a face, with the
 // person-specific affordances dropped (no focus dot, no PTT, no volume) and
 // letterboxed instead of cropped, because cropping a screen loses whatever the

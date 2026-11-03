@@ -803,7 +803,7 @@ Every message signed with the sender's Ed25519 key. Audit + alert messages sign 
 
 Several signals ride trystero `makeAction`s on their own channels rather than the audit data channel. All are backward-compatible additions — an older peer that never sends or recognizes them is unaffected:
 
-- **`camera-state`** `{ off: boolean }` — on the **session room** (S3). Broadcast on every local camera toggle, and re-sent to a peer on its `onPeerJoin` so a late joiner learns the current state. A disabled video track sends black, not a clean "off" signal, so this drives the explicit camera-off tile. An older peer simply never receives it and keeps rendering the (black) frame; no protocol break.
+- **`camera-state`** `{ off: boolean }` — on the **session room** (S3). Broadcast on every local camera toggle, and re-sent to a peer on its `onPeerJoin` so a late joiner learns the current state. A disabled video track sends black, not a clean "off" signal, so this drives the explicit camera-off tile. An older peer simply never receives it and keeps rendering the (black) frame; no protocol break. Optional `companion: true` (#515) marks a sender whose browser companion is being set up or reconnecting and has no live camera; it is always sent with `off: true`, so older builds show their camera-off tile and ignore the extra field. During companion takeover the desktop relays browser camera changes with `replaceTrack` on its existing senders instead of republishing the stream.
 - **`screen-share`** `{ sharing: boolean, stream_id: string | null }` — on the **session room** (#96). Sent on `onPeerJoin`, on every local start/stop, and targeted at a peer immediately before its copy of the screen stream is added. It does three jobs at once. It **announces capability**: a screen stream is only ever added for a peer that has sent one of these, because a pre-1.9 build binds any incoming stream to that friend's face tile and trystero has no stream-removed event with which to clear it. It **identifies the stream**: `stream_id` is the sender's `MediaStream.id`, which the receiver matches against `onPeerStream` — content-addressed, unlike the `{ kind: 'screen' }` metadata also tagged onto `addStream`, which trystero pairs to incoming streams FIFO and which therefore serves only as the fallback when media outruns the announce. And it **retires the tile**: `sharing: false` is the sole signal that a share has stopped. The stream itself is `getDisplayMedia({ video: { frameRate: { max: 15 } }, audio: false })` — screens are read rather than watched, so the frame rate is what gives (resolution is what makes text legible), and a full 4-mesh where everyone shares is eight concurrent video streams. On Windows the request prefers a `monitor` surface; because the Screen Capture API cannot constrain the picker to monitor surfaces, StudyVis verifies the returned track and stops any window, browser, or unknown surface before publication, asking the user to try again and choose **Entire Screen**. macOS retains its existing native picker and request behavior. No audio: it would echo against the live mic, and no audit-log kind is emitted for a share, because `AuditEventKind` is a cross-version wire contract and an unknown kind renders as a blank row on an older peer.
 
 - **`ptt-state`** and **`session-full`** — on the **session room** (V1-era): the not-transmitting indicator on peer tiles, and the host-enforced 4-user cap eviction notice.
@@ -850,6 +850,17 @@ ports remain available. Corrupt port metadata or a persistent port conflict
 recovers with an available port and saves the new pair; an HTTPS port change
 requires opening the newly displayed companion link, while CA trust stays intact.
 Temporary accept failures retry with bounded backoff without revoking the lease.
+Advertised addresses are ordered by preference: the default-route interface
+first (found by connecting an unsent UDP socket), likely-virtual adapters
+later, loopback last; the leaf certificate covers the sorted set, so order does
+not reissue it. Connections refused because their source is not private, and
+TLS handshakes the browser rejects for an untrusted certificate, raise a
+rate-limited host diagnostic shown in the companion panel. Native log records
+for the companion use categories only, never addresses.
+Restarting the companion for the same session while its server is still live
+(desktop page reload, then interrupted-session rejoin) adopts that server:
+pairing, password and lease survive, and the browser socket closes with 4002 so
+it reconnects to the new page. A different session replaces the server.
 The public CA certificate is available from a separate HTTP download listener
 at each advertised interface address, paired with its HTTPS link; its SHA-256
 fingerprint is displayed on the desktop for comparison before trusting it. The
@@ -857,11 +868,21 @@ CA has critical private-IP name constraints, and private certificate keys stay
 in a private host directory. OS trust-store enforcement of root constraints is
 platform-dependent; this is a user-installed local trust relationship.
 
+Because browsers may obfuscate host ICE candidates as mDNS `.local` names that
+cannot resolve where multicast is filtered, each side rewrites the other's
+`.local` candidates to an address already proven reachable: the browser uses
+the HTTPS origin's IPv4, the host uses the browser address seen by the server.
+ICE gathering that outlasts its timeout proceeds with the candidates gathered.
+The host attempts one ICE restart before treating a disconnected or failed
+link as lost.
 The host is the sole WebRTC offerer. Three reserved transceivers receive browser
 camera, microphone and screen; separate outgoing transceivers forward current
 peer media to the browser without consuming those slots. LAN ICE uses no public
 STUN or TURN. The browser requests capture directly from user gestures, defaults
-the microphone to muted, and releases capture on disconnect. Enabling the
+the microphone to muted, and releases capture on an explicit disconnect, report, session change or
+tab takeover. A transient socket or peer loss keeps capture for a 30-second
+reconnect grace, re-attaches it to the new peer and restores the previous
+microphone and screen-sharing state for the same session; expiry releases it. Enabling the
 companion releases desktop capture and mutes local peer playback while pairing
 and throughout browser operation.
 Pending desktop microphone swaps are cancelled across capture ownership changes;
@@ -872,7 +893,7 @@ temporary holds, survives tab changes, and is cleared on disconnect, report,
 or session changes. Its host intent is scoped to the companion generation;
 native hold-to-talk retains its existing safety timeout.
 Browser screen capture for AI is distinct from explicitly sharing it with peers.
-Losing the browser screen, disconnecting or ending takeover clears sharing consent;
+Losing the browser screen, disconnecting or ending takeover clears sharing consent on the host; within the reconnect grace the browser re-sends an active share for the same still-live screen;
 an AI-only capture after reconnect requires a new explicit share action.
 The sample loop receives a clone of the browser screen and pauses when capture
 is missing; it never falls back to a host display. The mirrored session owns

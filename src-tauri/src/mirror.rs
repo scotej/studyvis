@@ -30,12 +30,25 @@ use tokio::sync::{mpsc, watch, Semaphore};
 use tokio_rustls::rustls::{self, pki_types::PrivatePkcs8KeyDer};
 use tokio_rustls::TlsAcceptor;
 
+use crate::commands::native_log::{self, NativeLevel, NativeValue};
+
+const LOG_SCOPE: &str = "mirror.server";
+
+fn log_info(msg: &str, fields: &[(&'static str, NativeValue)]) {
+    native_log::record(NativeLevel::Info, LOG_SCOPE, msg, fields);
+}
+
 const MAX_MESSAGE_BYTES: usize = 256 * 1024;
 const SOCKET_ACTIVATION_TIMEOUT: Duration = Duration::from_secs(10);
 const PAIR_WINDOW: Duration = Duration::from_secs(60);
 const COOKIE_NAME: &str = "__Host-studyvis-mirror";
 const PASSWORD_ALPHABET: &[u8; 32] = b"ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 const MAX_CONNECTIONS: usize = 32;
+const DIAGNOSTIC_INTERVAL: Duration = Duration::from_secs(30);
+const MAX_DIAGNOSTIC_ENTRIES: usize = 64;
+/// Close code telling a browser its desktop page restarted and adopted this
+/// lease; it reconnects immediately with the same cookie.
+pub const HOST_RESTARTED_CLOSE: u16 = 4002;
 
 pub struct MirrorAsset {
     pub bytes: Vec<u8>,
@@ -43,8 +56,37 @@ pub struct MirrorAsset {
 }
 
 pub enum MirrorEvent {
-    Client { client_id: String, connected: bool },
-    Message { client_id: String, data: String },
+    Client {
+        client_id: String,
+        connected: bool,
+        address: Option<IpAddr>,
+    },
+    Message {
+        client_id: String,
+        data: String,
+    },
+    Diagnostic {
+        address: IpAddr,
+        problem: MirrorProblem,
+    },
+}
+
+/// A connection attempt that reached this computer but could not proceed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum MirrorProblem {
+    /// The source address is outside the private ranges browser access accepts.
+    BlockedNetwork,
+    /// The browser rejected the local certificate during the TLS handshake.
+    Certificate,
+}
+
+impl MirrorProblem {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            MirrorProblem::BlockedNetwork => "blocked_network",
+            MirrorProblem::Certificate => "certificate",
+        }
+    }
 }
 
 type AssetProvider = Arc<dyn Fn(&str) -> Option<MirrorAsset> + Send + Sync>;
@@ -120,6 +162,7 @@ struct Shared {
     on_event: EventConsumer,
     controller: Mutex<Option<Controller>>,
     attempts: Mutex<Attempts>,
+    diagnostics: Mutex<HashMap<(IpAddr, MirrorProblem), Instant>>,
     shutdown: watch::Sender<bool>,
 }
 
@@ -141,9 +184,35 @@ impl Shared {
                 (self.on_event)(MirrorEvent::Client {
                     client_id: connection_id,
                     connected: false,
+                    address: None,
                 });
             }
         }
+    }
+
+    fn diagnose(&self, address: IpAddr, problem: MirrorProblem) {
+        let now = Instant::now();
+        {
+            let mut seen = self.diagnostics.lock().unwrap();
+            if seen
+                .get(&(address, problem))
+                .is_some_and(|at| now.duration_since(*at) < DIAGNOSTIC_INTERVAL)
+            {
+                return;
+            }
+            if seen.len() >= MAX_DIAGNOSTIC_ENTRIES {
+                seen.retain(|_, at| now.duration_since(*at) < DIAGNOSTIC_INTERVAL);
+                if seen.len() >= MAX_DIAGNOSTIC_ENTRIES {
+                    return;
+                }
+            }
+            seen.insert((address, problem), now);
+        }
+        log_info(
+            "connection.rejected",
+            &[("problem", NativeValue::Word(problem.as_str()))],
+        );
+        (self.on_event)(MirrorEvent::Diagnostic { address, problem });
     }
 
     fn authenticated_client(&self, headers: &HeaderMap) -> Option<String> {
@@ -184,18 +253,18 @@ impl MirrorSender {
 
 impl MirrorServer {
     pub async fn start(mut options: MirrorServerOptions) -> Result<Self, String> {
-        options.addresses.retain(|ip| private_ipv4(*ip));
-        options
-            .addresses
-            .sort_by_key(|ip| (ip.is_loopback(), ip.octets()));
-        options.addresses.dedup();
+        options.addresses = advertised_order(&options.addresses);
         if options.addresses.is_empty() {
             return Err("no private network address is available".into());
         }
         if options.lease.is_zero() || options.lease > Duration::from_secs(12 * 60 * 60) {
             return Err("invalid browser access lifetime".into());
         }
-        let certificates = load_certificates(&options.certificate_dir, &options.addresses)?;
+        // The stored leaf is keyed on the address set, not the preference order,
+        // so a default-route change alone never re-issues the certificate.
+        let mut certificate_addresses = options.addresses.clone();
+        certificate_addresses.sort_by_key(|ip| (ip.is_loopback(), ip.octets()));
+        let certificates = load_certificates(&options.certificate_dir, &certificate_addresses)?;
         let ports_path = options.certificate_dir.join("ports.json");
         let saved_ports = match fs::read(&ports_path) {
             Ok(bytes) => serde_json::from_slice::<SavedPorts>(&bytes)
@@ -225,7 +294,8 @@ impl MirrorServer {
             https: port,
             certificate: bootstrap_port,
         };
-        if saved_ports.as_ref() != Some(&ports) {
+        let ports_reused = saved_ports.as_ref() == Some(&ports);
+        if !ports_reused {
             write_private_replace(
                 &ports_path,
                 &serde_json::to_vec(&ports).map_err(|_| "couldn't prepare browser ports")?,
@@ -254,6 +324,7 @@ impl MirrorServer {
             on_event: options.on_event,
             controller: Mutex::new(None),
             attempts: Mutex::new(Attempts::new()),
+            diagnostics: Mutex::new(HashMap::new()),
             shutdown,
         });
         let config = MirrorConfig {
@@ -332,11 +403,40 @@ impl MirrorServer {
                 _ = shutdown.changed() => {},
             }
         });
+        log_info(
+            "server.started",
+            &[
+                (
+                    "lanAddresses",
+                    NativeValue::U64(
+                        options
+                            .addresses
+                            .iter()
+                            .filter(|ip| !ip.is_loopback())
+                            .count() as u64,
+                    ),
+                ),
+                ("portsReused", NativeValue::Bool(ports_reused)),
+            ],
+        );
         Ok(Self {
             config,
             shared,
             listeners: Mutex::new(vec![https_task, bootstrap_task]),
         })
+    }
+
+    pub fn is_active(&self) -> bool {
+        self.shared.active()
+    }
+
+    /// Asks the current browser socket to reconnect so a restarted desktop
+    /// page receives a fresh connection event on the same lease.
+    pub fn reconnect_controller(&self) {
+        let controller = self.shared.controller.lock().unwrap();
+        if let Some(close) = controller.as_ref().and_then(|c| c.close.as_ref()) {
+            let _ = close.send(HOST_RESTARTED_CLOSE);
+        }
     }
 
     pub fn config(&self) -> &MirrorConfig {
@@ -437,7 +537,11 @@ async fn serve(
             }
         };
         retry_delay = Duration::from_millis(25);
-        if !private_source(remote.ip()) || !shared.active() {
+        if !shared.active() {
+            continue;
+        }
+        if !private_source(remote.ip()) {
+            shared.diagnose(remote.ip(), MirrorProblem::BlockedNetwork);
             continue;
         }
         let Ok(permit) = permits.clone().try_acquire_owned() else {
@@ -446,6 +550,7 @@ async fn serve(
         let tls = tls.clone();
         let service = TowerToHyperService::new(router.clone().layer(Extension(remote)));
         let mut close = shared.shutdown.subscribe();
+        let connection_shared = shared.clone();
         tokio::spawn(async move {
             let _permit = permit;
             if *close.borrow() {
@@ -456,8 +561,15 @@ async fn serve(
                     _ = close.changed() => return,
                     accepted = tokio::time::timeout(Duration::from_secs(10), tls.accept(stream)) => accepted,
                 };
-                let Ok(Ok(stream)) = accepted else {
-                    return;
+                let stream = match accepted {
+                    Ok(Ok(stream)) => stream,
+                    Ok(Err(error)) => {
+                        if certificate_rejected(&error) {
+                            connection_shared.diagnose(remote.ip(), MirrorProblem::Certificate);
+                        }
+                        return;
+                    }
+                    Err(_) => return,
                 };
                 let builder = hyper_util::server::conn::auto::Builder::new(TokioExecutor::new());
                 tokio::select! {
@@ -473,6 +585,21 @@ async fn serve(
             }
         });
     }
+}
+
+fn certificate_rejected(error: &std::io::Error) -> bool {
+    use rustls::AlertDescription;
+
+    matches!(
+        error
+            .get_ref()
+            .and_then(|inner| inner.downcast_ref::<rustls::Error>()),
+        Some(rustls::Error::AlertReceived(
+            AlertDescription::UnknownCA
+                | AlertDescription::BadCertificate
+                | AlertDescription::CertificateUnknown
+        ))
+    )
 }
 
 fn host_allowed(headers: &HeaderMap, hosts: &HashSet<String>) -> bool {
@@ -593,6 +720,22 @@ async fn pair(
     if let Some(client_id) = shared.authenticated_client(&headers) {
         return Json(serde_json::json!({"clientId": client_id})).into_response();
     }
+    let response = pair_new(&shared, remote, &request);
+    let result = match response.status() {
+        StatusCode::OK => "ok",
+        StatusCode::UNAUTHORIZED => "unauthorized",
+        StatusCode::TOO_MANY_REQUESTS => "rate_limited",
+        StatusCode::CONFLICT => "in_use",
+        _ => "error",
+    };
+    // Rate-limited floods are driven by any LAN client; they must not reach disk.
+    if result != "rate_limited" {
+        log_info("pair.result", &[("result", NativeValue::Word(result))]);
+    }
+    response
+}
+
+fn pair_new(shared: &Shared, remote: SocketAddr, request: &PairRequest) -> Response {
     if !shared
         .attempts
         .lock()
@@ -640,6 +783,7 @@ async fn status(State(shared): State<Arc<Shared>>, headers: HeaderMap) -> Respon
 
 async fn socket(
     State(shared): State<Arc<Shared>>,
+    Extension(remote): Extension<SocketAddr>,
     headers: HeaderMap,
     ws: WebSocketUpgrade,
 ) -> Response {
@@ -648,11 +792,11 @@ async fn socket(
     };
     ws.max_message_size(MAX_MESSAGE_BYTES)
         .max_frame_size(MAX_MESSAGE_BYTES)
-        .on_upgrade(move |socket| connected(socket, shared, client_id))
+        .on_upgrade(move |socket| connected(socket, shared, client_id, remote.ip()))
         .into_response()
 }
 
-async fn connected(socket: WebSocket, shared: Arc<Shared>, client_id: String) {
+async fn connected(socket: WebSocket, shared: Arc<Shared>, client_id: String, address: IpAddr) {
     let (mut sink, mut source) = socket.split();
     let mut shutdown = shared.shutdown.subscribe();
     if !shared.active() || *shutdown.borrow() {
@@ -695,6 +839,7 @@ async fn connected(socket: WebSocket, shared: Arc<Shared>, client_id: String) {
             (shared.on_event)(MirrorEvent::Client {
                 client_id: previous_id,
                 connected: false,
+                address: None,
             });
         }
         controller.socket_revision += 1;
@@ -704,9 +849,11 @@ async fn connected(socket: WebSocket, shared: Arc<Shared>, client_id: String) {
         (shared.on_event)(MirrorEvent::Client {
             client_id: connection_id.clone(),
             connected: true,
+            address: Some(address),
         });
         controller.socket_revision
     };
+    log_info("socket.opened", &[]);
     let mut source = futures_util::stream::iter([Ok(first_message)]).chain(source);
     let mut heartbeat = tokio::time::interval(Duration::from_secs(15));
     let mut last_pong = Instant::now();
@@ -714,23 +861,24 @@ async fn connected(socket: WebSocket, shared: Arc<Shared>, client_id: String) {
     let mut message_count = 0;
     let mut message_bytes = 0;
     let mut close_code = 1000;
+    let mut ended = "client_closed";
     loop {
         tokio::select! {
             _ = shutdown.changed() => { close_code = 1001; break; },
             _ = closed.changed() => { close_code = *closed.borrow(); break; },
             data = receive.recv() => {
                 let Some(data) = data else { break; };
-                if !matches!(tokio::time::timeout(Duration::from_secs(5), sink.send(Message::Text(data.into()))).await, Ok(Ok(()))) { break; }
+                if !matches!(tokio::time::timeout(Duration::from_secs(5), sink.send(Message::Text(data.into()))).await, Ok(Ok(()))) { ended = "send_failed"; break; }
             },
             message = source.next() => {
                 match message {
                     Some(Ok(Message::Text(data))) => {
                         let controller = shared.controller.lock().unwrap();
-                        if !shared.active() || !controller.as_ref().is_some_and(|c| c.socket_revision == revision && c.connection_id.as_deref() == Some(&connection_id)) { break; }
+                        if !shared.active() || !controller.as_ref().is_some_and(|c| c.socket_revision == revision && c.connection_id.as_deref() == Some(&connection_id)) { ended = "replaced"; break; }
                         if message_window.elapsed() >= Duration::from_secs(1) { message_window = Instant::now(); message_count = 0; message_bytes = 0; }
                         message_count += 1;
                         message_bytes += data.len();
-                        if message_count > 512 || message_bytes > 16 * 1024 * 1024 { break; }
+                        if message_count > 512 || message_bytes > 16 * 1024 * 1024 { ended = "ingress_budget"; break; }
                         (shared.on_event)(MirrorEvent::Message { client_id: connection_id.clone(), data: data.to_string() });
                     },
                     Some(Ok(Message::Pong(_))) => last_pong = Instant::now(),
@@ -739,8 +887,8 @@ async fn connected(socket: WebSocket, shared: Arc<Shared>, client_id: String) {
                 }
             },
             _ = heartbeat.tick() => {
-                if last_pong.elapsed() > Duration::from_secs(45) { break; }
-                if !matches!(tokio::time::timeout(Duration::from_secs(5), sink.send(Message::Ping(Vec::new().into()))).await, Ok(Ok(()))) { break; }
+                if last_pong.elapsed() > Duration::from_secs(45) { ended = "pong_timeout"; break; }
+                if !matches!(tokio::time::timeout(Duration::from_secs(5), sink.send(Message::Ping(Vec::new().into()))).await, Ok(Ok(()))) { ended = "send_failed"; break; }
             },
         }
     }
@@ -752,9 +900,17 @@ async fn connected(socket: WebSocket, shared: Arc<Shared>, client_id: String) {
     }
     let reason = match close_code {
         4001 => "controller replaced",
+        HOST_RESTARTED_CLOSE => "host restarted",
         1001 => "browser access ended",
         _ => "connection ended",
     };
+    ended = match close_code {
+        4001 => "replaced",
+        HOST_RESTARTED_CLOSE => "host_restarted",
+        1001 => "ended",
+        _ => ended,
+    };
+    log_info("socket.closed", &[("reason", NativeValue::Word(ended))]);
     let _ = tokio::time::timeout(
         Duration::from_secs(1),
         sink.send(Message::Close(Some(CloseFrame {
@@ -779,6 +935,7 @@ async fn connected(socket: WebSocket, shared: Arc<Shared>, client_id: String) {
         (shared.on_event)(MirrorEvent::Client {
             client_id: connection_id,
             connected: false,
+            address: None,
         });
     }
 }
@@ -860,18 +1017,142 @@ fn private_source(ip: IpAddr) -> bool {
     matches!(ip, IpAddr::V4(ip) if private_ipv4(ip))
 }
 
+/// One IPv4 interface address as reported by the operating system.
+pub struct LocalInterface {
+    pub name: String,
+    pub address: Ipv4Addr,
+    pub up: bool,
+}
+
+/// Interface names that usually carry a private address no other device on
+/// the user's network can reach (VMs, containers, VPNs, AirDrop).
+pub fn likely_virtual_interface(name: &str) -> bool {
+    let name = name.to_ascii_lowercase();
+    const CONTAINS: &[&str] = &[
+        "vethernet",
+        "wsl",
+        "hyper-v",
+        "docker",
+        "virtualbox",
+        "vbox",
+        "vmware",
+        "vmnet",
+        "virbr",
+        "tailscale",
+        "zerotier",
+        "wireguard",
+        "nordlynx",
+        "openvpn",
+        "anyconnect",
+        "vpn",
+        "podman",
+        "loopback",
+        "pseudo",
+        "npcap",
+    ];
+    const PREFIXES: &[&str] = &[
+        "br-", "veth", "utun", "tun", "tap", "wg", "zt", "awdl", "llw", "lxc", "lxd", "cni",
+        "flannel", "vnic", "ppp", "ipsec", "gif", "stf", "anpi", "bridge",
+    ];
+    CONTAINS.iter().any(|word| name.contains(word))
+        || PREFIXES.iter().any(|prefix| name.starts_with(prefix))
+}
+
+/// Orders private interface addresses by how likely another device on the
+/// same network can reach them: the default-route address first, then real
+/// operational adapters, then likely-virtual ones. Loopback always comes last.
+pub fn rank_addresses(
+    interfaces: &[LocalInterface],
+    default_route: Option<Ipv4Addr>,
+) -> Vec<Ipv4Addr> {
+    let mut ranked: Vec<(u8, Ipv4Addr)> = interfaces
+        .iter()
+        .filter(|interface| private_ipv4(interface.address) && !interface.address.is_loopback())
+        .map(|interface| {
+            let real = interface.up && !likely_virtual_interface(&interface.name);
+            // A full-tunnel VPN owns the default route; its tunnel address is
+            // still unreachable from the LAN, so only a real adapter wins here.
+            let rank = if real && Some(interface.address) == default_route {
+                0
+            } else if real {
+                1
+            } else {
+                2
+            };
+            (rank, interface.address)
+        })
+        .collect();
+    ranked.sort_by_key(|(rank, ip)| (*rank, ip.octets()));
+    let mut addresses = Vec::new();
+    for (_, ip) in ranked {
+        if !addresses.contains(&ip) {
+            addresses.push(ip);
+        }
+    }
+    addresses.push(Ipv4Addr::LOCALHOST);
+    addresses
+}
+
+/// Private addresses in caller order with duplicates removed and loopback last.
+fn advertised_order(addresses: &[Ipv4Addr]) -> Vec<Ipv4Addr> {
+    let mut ordered = Vec::new();
+    for ip in addresses
+        .iter()
+        .filter(|ip| private_ipv4(**ip) && !ip.is_loopback())
+        .chain(addresses.iter().filter(|ip| ip.is_loopback()))
+    {
+        if !ordered.contains(ip) {
+            ordered.push(*ip);
+        }
+    }
+    ordered
+}
+
+fn default_route_ipv4() -> Option<Ipv4Addr> {
+    let socket = std::net::UdpSocket::bind((Ipv4Addr::UNSPECIFIED, 0)).ok()?;
+    // Connecting a UDP socket only asks the OS which interface would route to
+    // this documentation-range address; no packet is sent.
+    socket.connect((Ipv4Addr::new(192, 0, 2, 1), 9)).ok()?;
+    match socket.local_addr().ok()?.ip() {
+        IpAddr::V4(ip) if !ip.is_unspecified() && !ip.is_loopback() => Some(ip),
+        _ => None,
+    }
+}
+
 pub fn local_addresses() -> Result<Vec<Ipv4Addr>, String> {
-    let mut addresses: Vec<_> = if_addrs::get_if_addrs()
+    let interfaces: Vec<_> = if_addrs::get_if_addrs()
         .map_err(|_| "couldn't find the local network")?
         .into_iter()
         .filter_map(|interface| match interface.ip() {
-            IpAddr::V4(ip) if private_ipv4(ip) && !ip.is_loopback() => Some(ip),
+            IpAddr::V4(address) => Some(LocalInterface {
+                up: interface.is_oper_up(),
+                name: interface.name,
+                address,
+            }),
             _ => None,
         })
         .collect();
-    addresses.sort();
-    addresses.dedup();
-    addresses.push(Ipv4Addr::LOCALHOST);
+    let default_route = default_route_ipv4();
+    let addresses = rank_addresses(&interfaces, default_route);
+    let primary = addresses.first().copied();
+    let primary_virtual = interfaces.iter().any(|interface| {
+        Some(interface.address) == primary && likely_virtual_interface(&interface.name)
+    });
+    log_info(
+        "addresses.ranked",
+        &[
+            ("lanAddresses", NativeValue::U64(addresses.len() as u64 - 1)),
+            (
+                "hasDefaultRoute",
+                NativeValue::Bool(default_route.is_some()),
+            ),
+            (
+                "defaultRoutePrivate",
+                NativeValue::Bool(default_route.is_some_and(private_ipv4)),
+            ),
+            ("primaryVirtual", NativeValue::Bool(primary_virtual)),
+        ],
+    );
     Ok(addresses)
 }
 
@@ -1234,6 +1515,137 @@ mod tests {
         assert!(password.bytes().all(|b| PASSWORD_ALPHABET.contains(&b)));
         assert!(constant_equal(b"test", b"test"));
         assert!(!constant_equal(b"test", b"tEst"));
+    }
+
+    #[test]
+    fn ranks_the_default_route_then_real_adapters_before_virtual_ones() {
+        let interface = |name: &str, address: [u8; 4], up: bool| LocalInterface {
+            name: name.into(),
+            address: Ipv4Addr::from(address),
+            up,
+        };
+        let interfaces = [
+            interface("vEthernet (WSL)", [172, 20, 0, 1], true),
+            interface("docker0", [172, 17, 0, 1], true),
+            interface("Ethernet", [10, 0, 0, 5], false),
+            interface("Wi-Fi", [192, 168, 1, 23], true),
+            interface("en5", [192, 168, 2, 9], true),
+            interface("lo", [127, 0, 0, 1], true),
+            interface("public", [8, 8, 8, 8], true),
+            interface("tailscale0", [100, 101, 1, 2], true),
+            interface("Wi-Fi", [192, 168, 1, 23], true),
+        ];
+        let ranked = rank_addresses(&interfaces, Some(Ipv4Addr::new(192, 168, 1, 23)));
+        assert_eq!(
+            ranked,
+            [
+                Ipv4Addr::new(192, 168, 1, 23),
+                Ipv4Addr::new(192, 168, 2, 9),
+                Ipv4Addr::new(10, 0, 0, 5),
+                Ipv4Addr::new(172, 17, 0, 1),
+                Ipv4Addr::new(172, 20, 0, 1),
+                Ipv4Addr::LOCALHOST,
+            ]
+        );
+        // Without a route the real adapter still outranks lower-numbered VMs.
+        let ranked = rank_addresses(&interfaces, None);
+        assert_eq!(ranked[0], Ipv4Addr::new(192, 168, 1, 23));
+        assert_eq!(*ranked.last().unwrap(), Ipv4Addr::LOCALHOST);
+        assert_eq!(rank_addresses(&[], None), [Ipv4Addr::LOCALHOST]);
+        // A full-tunnel VPN owns the default route but is unreachable from the
+        // LAN; the real Wi-Fi adapter must still be offered first.
+        let tunnel = [
+            interface("wg0", [10, 5, 0, 2], true),
+            interface("Wi-Fi", [192, 168, 1, 23], true),
+        ];
+        assert_eq!(
+            rank_addresses(&tunnel, Some(Ipv4Addr::new(10, 5, 0, 2))),
+            [
+                Ipv4Addr::new(192, 168, 1, 23),
+                Ipv4Addr::new(10, 5, 0, 2),
+                Ipv4Addr::LOCALHOST,
+            ]
+        );
+        for name in [
+            "vEthernet (Default Switch)",
+            "VirtualBox Host-Only Network",
+            "VMware Network Adapter VMnet8",
+            "utun3",
+            "br-1a2b",
+            "virbr0",
+            "ZeroTier One [abc]",
+            "wg0",
+        ] {
+            assert!(likely_virtual_interface(name), "{name}");
+        }
+        for name in ["Wi-Fi", "Ethernet", "en0", "wlan0", "enp3s0", "eth0"] {
+            assert!(!likely_virtual_interface(name), "{name}");
+        }
+    }
+
+    #[test]
+    fn advertised_order_keeps_preference_and_puts_loopback_last() {
+        let ordered = advertised_order(&[
+            Ipv4Addr::LOCALHOST,
+            Ipv4Addr::new(192, 168, 1, 23),
+            Ipv4Addr::new(8, 8, 8, 8),
+            Ipv4Addr::new(10, 0, 0, 5),
+            Ipv4Addr::new(192, 168, 1, 23),
+        ]);
+        assert_eq!(
+            ordered,
+            [
+                Ipv4Addr::new(192, 168, 1, 23),
+                Ipv4Addr::new(10, 0, 0, 5),
+                Ipv4Addr::LOCALHOST
+            ]
+        );
+    }
+
+    #[test]
+    fn diagnostics_are_rate_limited_per_address_and_problem() {
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let collected = events.clone();
+        let (shutdown, _) = watch::channel(false);
+        let shared = Shared {
+            active: AtomicBool::new(true),
+            deadline: Instant::now() + Duration::from_secs(60),
+            password: String::new(),
+            hosts: HashSet::new(),
+            bootstrap_hosts: HashSet::new(),
+            certificate: Vec::new(),
+            asset: Arc::new(|_| None),
+            on_event: Arc::new(move |event| {
+                if let MirrorEvent::Diagnostic { address, problem } = event {
+                    collected.lock().unwrap().push((address, problem));
+                }
+            }),
+            controller: Mutex::new(None),
+            attempts: Mutex::new(Attempts::new()),
+            diagnostics: Mutex::new(HashMap::new()),
+            shutdown,
+        };
+        let first: IpAddr = Ipv4Addr::new(100, 64, 0, 1).into();
+        let second: IpAddr = Ipv4Addr::new(8, 8, 8, 8).into();
+        shared.diagnose(first, MirrorProblem::BlockedNetwork);
+        shared.diagnose(first, MirrorProblem::BlockedNetwork);
+        shared.diagnose(first, MirrorProblem::Certificate);
+        shared.diagnose(second, MirrorProblem::BlockedNetwork);
+        assert_eq!(
+            *events.lock().unwrap(),
+            [
+                (first, MirrorProblem::BlockedNetwork),
+                (first, MirrorProblem::Certificate),
+                (second, MirrorProblem::BlockedNetwork),
+            ]
+        );
+        for last in 0..=MAX_DIAGNOSTIC_ENTRIES as u8 {
+            shared.diagnose(
+                Ipv4Addr::new(203, 0, 113, last).into(),
+                MirrorProblem::BlockedNetwork,
+            );
+        }
+        assert!(shared.diagnostics.lock().unwrap().len() <= MAX_DIAGNOSTIC_ENTRIES);
     }
 
     fn test_directory() -> PathBuf {
@@ -1763,6 +2175,7 @@ mod tests {
                     MirrorEvent::Client {
                         client_id,
                         connected,
+                        ..
                     } => Some((client_id.as_str(), *connected)),
                     _ => None,
                 })
@@ -1779,6 +2192,65 @@ mod tests {
             }
         }
         fixture.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn connection_reports_the_browser_address_and_host_restart_reconnects() {
+        let fixture = PairedSocketServer::new(Duration::from_secs(60)).await;
+        let mut socket = fixture.open().await;
+        write_client_frame(&mut socket, 1, b"ready").await;
+        let id = wait_for_connection(&fixture.events, 1).await;
+        assert!(fixture.events.lock().unwrap().iter().any(|event| matches!(
+            event,
+            MirrorEvent::Client { client_id, connected: true, address: Some(address) }
+                if *client_id == id && *address == IpAddr::from(Ipv4Addr::LOCALHOST)
+        )));
+        fixture.server.reconnect_controller();
+        let close_code = loop {
+            let (opcode, payload) = read_server_frame(&mut socket).await;
+            if opcode == 8 {
+                break u16::from_be_bytes([payload[0], payload[1]]);
+            }
+        };
+        assert_eq!(close_code, HOST_RESTARTED_CLOSE);
+        assert!(fixture.server.is_active());
+        // The same cookie keeps its lease and takes control again.
+        let mut replacement = fixture.open().await;
+        write_client_frame(&mut replacement, 1, b"ready").await;
+        let next = wait_for_connection(&fixture.events, 2).await;
+        assert_ne!(next, id);
+        assert!(fixture.server.sender(&next).is_ok());
+        fixture.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn untrusted_certificate_handshakes_are_reported() {
+        let directory = test_directory();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let collected = events.clone();
+        let mut settings = options(&directory, Duration::from_secs(60));
+        settings.on_event = Arc::new(move |event| {
+            if let MirrorEvent::Diagnostic { problem, .. } = event {
+                collected.lock().unwrap().push(problem);
+            }
+        });
+        let server = MirrorServer::start(settings).await.unwrap();
+        let untrusted = reqwest::Client::builder().no_proxy().build().unwrap();
+        assert!(untrusted
+            .get(&server.config().urls[0])
+            .send()
+            .await
+            .is_err());
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while events.lock().unwrap().is_empty() {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .unwrap();
+        assert_eq!(*events.lock().unwrap(), [MirrorProblem::Certificate]);
+        server.shutdown().await;
+        fs::remove_dir_all(directory).unwrap();
     }
 
     #[tokio::test]
@@ -2001,6 +2473,7 @@ mod tests {
                         MirrorEvent::Client {
                             client_id,
                             connected: true,
+                            ..
                         } => Some(client_id.clone()),
                         _ => None,
                     })

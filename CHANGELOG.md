@@ -1,5 +1,24 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- Browser Companion links now prefer the computer's main network instead of a
+  virtual adapter (WSL, Hyper-V, Docker, VPN). Other addresses, a "Can't
+  connect?" checklist and specific hints for blocked networks and untrusted
+  certificates appear on the desktop.
+- The companion's video connection works on networks that block local name
+  discovery, and slow network discovery no longer fails the connection.
+- Brief network drops no longer turn off the browser's camera, microphone or
+  screen; they reconnect and restore your previous state.
+- Friends no longer see a frozen camera when the companion reconnects or
+  changes camera, and see "Connecting browser companion" while you set it up.
+- The browser companion's bell opens notification settings only, separate from
+  Settings.
+- After StudyVis reloads or restarts and you rejoin, the companion reconnects
+  without a new pairing password while the computer keeps running it.
+
 ## 2.1.2 — 2026-10-31 — Browser companion reliability
 
 ### Fixed

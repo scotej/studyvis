@@ -1,4 +1,7 @@
+import { replaceMdnsCandidates } from './lanAddress'
 import type { CaptureKind, SignalMessage } from './wire'
+
+export { isIpv4Literal, replaceMdnsCandidates } from './lanAddress'
 
 export type MirrorPeerOptions = {
   role: 'host' | 'browser'
@@ -6,6 +9,8 @@ export type MirrorPeerOptions = {
   onCapture?: (kind: CaptureKind, stream: MediaStream | null) => void
   onStreams?: (streams: Record<string, MediaStream>) => void
   onFailure: () => void
+  // The peer's IPv4 as already reached over the authenticated LAN socket.
+  remoteAddress?: string | null
 }
 
 export type MirrorPeer = {
@@ -14,6 +19,14 @@ export type MirrorPeer = {
   setStreams: (streams: Record<string, MediaStream>) => void
   close: () => void
 }
+
+const GATHER_TIMEOUT_MS = 10_000
+const HOST_DISCONNECT_GRACE_MS = 5000
+const HOST_RESTART_TIMEOUT_MS = 15_000
+// Outlasts the host's whole restart window, including a slow re-gather and the
+// two sides noticing the drop at different times, so its ICE restart can land.
+const BROWSER_RECOVERY_MS =
+  HOST_DISCONNECT_GRACE_MS + HOST_RESTART_TIMEOUT_MS + GATHER_TIMEOUT_MS + 5000
 
 // Only the host offers. Reserved capture slots let browser track replacement
 // run without glare, while host-to-browser peer tracks renegotiate serially.
@@ -41,6 +54,13 @@ export function createMirrorPeer(options: MirrorPeerOptions): MirrorPeer {
   let disconnectTimer: ReturnType<typeof setTimeout> | null = null
   let answerTimer: ReturnType<typeof setTimeout> | null = null
   let stopGather: (() => void) | null = null
+  let iceRestartRequested = false
+  let iceRestartAttempted = false
+  let restartTimer: ReturnType<typeof setTimeout> | null = null
+  const remoteSdp = (sdp: string) =>
+    options.remoteAddress
+      ? replaceMdnsCandidates(sdp, options.remoteAddress)
+      : sdp
   let cameraReceiver: MediaStream | null = null
   let screenReceiver: MediaStream | null = null
 
@@ -67,9 +87,15 @@ export function createMirrorPeer(options: MirrorPeerOptions): MirrorPeer {
         const check = () => {
           if (pc.iceGatheringState === 'complete') finish()
         }
+        // A slow interface must not discard candidates already gathered.
         const timer = setTimeout(
-          () => finish(new Error('LAN ICE gathering timed out')),
-          10_000
+          () =>
+            finish(
+              pc.localDescription?.sdp
+                ? undefined
+                : new Error('LAN ICE gathering timed out')
+            ),
+          GATHER_TIMEOUT_MS
         )
         stopGather = () => finish(new Error('Mirror connection closed'))
         pc.addEventListener('icegatheringstatechange', check)
@@ -85,7 +111,11 @@ export function createMirrorPeer(options: MirrorPeerOptions): MirrorPeer {
     enqueue(async () => {
       if (!pendingOffer || pc.signalingState !== 'stable') return
       pendingOffer = false
-      await pc.setLocalDescription(await pc.createOffer())
+      const iceRestart = iceRestartRequested
+      iceRestartRequested = false
+      await pc.setLocalDescription(
+        await pc.createOffer(iceRestart ? { iceRestart: true } : undefined)
+      )
       const sdp = await gatheredDescription()
       if (closed) return
       options.send({ type: 'offer', sdp })
@@ -177,14 +207,48 @@ export function createMirrorPeer(options: MirrorPeerOptions): MirrorPeer {
       renderStreams()
     }
   }
+  const restartIce = () => {
+    if (closed) return
+    if (iceRestartAttempted) {
+      options.onFailure()
+      return
+    }
+    iceRestartAttempted = true
+    iceRestartRequested = true
+    pc.restartIce?.()
+    requestOffer()
+    restartTimer = setTimeout(() => {
+      restartTimer = null
+      if (!closed && pc.connectionState !== 'connected') options.onFailure()
+    }, HOST_RESTART_TIMEOUT_MS)
+  }
+
   pc.onconnectionstatechange = () => {
     if (options.role === 'host') renderCaptures()
     if (disconnectTimer) clearTimeout(disconnectTimer)
-    if (pc.connectionState === 'failed') options.onFailure()
-    else if (pc.connectionState === 'disconnected') {
+    disconnectTimer = null
+    const state = pc.connectionState
+    if (state === 'connected') {
+      iceRestartAttempted = false
+      if (restartTimer) clearTimeout(restartTimer)
+      restartTimer = null
+      return
+    }
+    if (state !== 'failed' && state !== 'disconnected') return
+    if (options.role === 'host') {
+      // One ICE restart before the socket-level reconnect tears down media.
+      if (restartTimer) return
+      if (state === 'failed') restartIce()
+      else
+        disconnectTimer = setTimeout(() => {
+          disconnectTimer = null
+          if (!closed) restartIce()
+        }, HOST_DISCONNECT_GRACE_MS)
+    } else {
       disconnectTimer = setTimeout(() => {
+        disconnectTimer = null
         if (!closed) options.onFailure()
-      }, 5000)
+      }, BROWSER_RECOVERY_MS)
     }
   }
   pc.onnegotiationneeded = requestOffer
@@ -213,7 +277,10 @@ export function createMirrorPeer(options: MirrorPeerOptions): MirrorPeer {
         requestOffer()
       } else if (signal.type === 'offer' && options.role === 'browser') {
         enqueue(async () => {
-          await pc.setRemoteDescription({ type: 'offer', sdp: signal.sdp })
+          await pc.setRemoteDescription({
+            type: 'offer',
+            sdp: remoteSdp(signal.sdp),
+          })
           await applyCapture()
           await pc.setLocalDescription(await pc.createAnswer())
           const sdp = await gatheredDescription()
@@ -221,7 +288,10 @@ export function createMirrorPeer(options: MirrorPeerOptions): MirrorPeer {
         })
       } else if (signal.type === 'answer' && options.role === 'host') {
         enqueue(async () => {
-          await pc.setRemoteDescription({ type: 'answer', sdp: signal.sdp })
+          await pc.setRemoteDescription({
+            type: 'answer',
+            sdp: remoteSdp(signal.sdp),
+          })
           if (answerTimer) clearTimeout(answerTimer)
           answerTimer = null
           renderCaptures()
@@ -295,6 +365,7 @@ export function createMirrorPeer(options: MirrorPeerOptions): MirrorPeer {
       stopGather?.()
       if (disconnectTimer) clearTimeout(disconnectTimer)
       if (answerTimer) clearTimeout(answerTimer)
+      if (restartTimer) clearTimeout(restartTimer)
       pc.ontrack = null
       pc.onconnectionstatechange = null
       pc.onnegotiationneeded = null

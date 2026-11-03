@@ -1,5 +1,10 @@
 import { useEffect, useRef } from 'react'
-import { MaximizeIcon, MonitorIcon, VideoOff } from 'lucide-react'
+import {
+  MaximizeIcon,
+  MonitorIcon,
+  MonitorSmartphoneIcon,
+  VideoOff,
+} from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { Slider } from '@/components/ui/slider'
@@ -35,6 +40,9 @@ export type VideoTileProps = {
   // camera state. We render a calm placeholder (VideoOff glyph + caption)
   // instead of the frozen last frame a disabled MediaStreamTrack leaves behind.
   cameraOff?: boolean
+  // #515 — the person is pairing or reconnecting a browser companion. Shown in
+  // place of the camera-off placeholder so friends know the camera is coming.
+  companionSetup?: boolean
   // S4 — audio output routing. Applied via HTMLMediaElement.setSinkId when the
   // engine supports it (macOS WKWebView does NOT — we feature-detect and the
   // picker that feeds this is hidden there, so an unset/unsupported sinkId is
@@ -61,6 +69,7 @@ export function VideoTile({
   mutePlayback = false,
   alertReasoning,
   cameraOff = false,
+  companionSetup = false,
   sinkId,
   volume,
   onVolumeChange,
@@ -75,6 +84,7 @@ export function VideoTile({
   // keeps reporting the real state.
   const resolvedState: FocusState = state ?? (stream ? 'online' : 'offline')
   const isAlerted = resolvedState === 'alerted'
+  const placeholder = cameraOff || companionSetup
 
   useEffect(() => {
     const el = videoRef.current
@@ -125,7 +135,8 @@ export function VideoTile({
       data-testid="video-tile"
       data-state={resolvedState}
       data-variant={variant}
-      data-camera-off={cameraOff ? 'true' : undefined}
+      data-camera-off={placeholder ? 'true' : undefined}
+      data-companion-setup={companionSetup ? 'true' : undefined}
     >
       <video
         ref={videoRef}
@@ -142,14 +153,20 @@ export function VideoTile({
           isScreen ? 'object-contain' : 'object-cover',
           // Keep the element mounted (so the track stays bound) but hide the
           // frozen frame behind the camera-off placeholder.
-          cameraOff && 'invisible'
+          placeholder && 'invisible'
         )}
       />
-      {cameraOff ? (
+      {placeholder ? (
         <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-2 bg-bg-sunk text-text-muted">
-          <VideoOff className="size-7" aria-hidden="true" />
+          {companionSetup ? (
+            <MonitorSmartphoneIcon className="size-7" aria-hidden="true" />
+          ) : (
+            <VideoOff className="size-7" aria-hidden="true" />
+          )}
           <span className="text-xs font-medium">
-            {strings.session.camera.offTileLabel}
+            {companionSetup
+              ? strings.session.camera.companionTileLabel
+              : strings.session.camera.offTileLabel}
           </span>
         </div>
       ) : null}
@@ -178,7 +195,7 @@ export function VideoTile({
           </span>
         </div>
         <div className="flex shrink-0 items-center gap-3">
-          {onExpand && stream && !cameraOff && (isScreen || !isLocal) ? (
+          {onExpand && stream && !placeholder && (isScreen || !isLocal) ? (
             <Button
               type="button"
               variant="ghost"

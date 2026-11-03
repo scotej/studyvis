@@ -72,6 +72,7 @@ const APP_COMMANDS: &[&str] = &[
     "mirror_start",
     "mirror_stop",
     "mirror_send",
+    "mirror_resumable",
     "model_paths",
     "model_install_state",
     "model_remove",

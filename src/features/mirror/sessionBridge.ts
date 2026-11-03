@@ -81,6 +81,8 @@ export type MirrorTile = {
   state?: FocusState
   ptt: boolean
   cameraOff: boolean
+  // #515 — the person is connecting a browser companion, so no camera exists yet.
+  companionSetup?: boolean
   alertReasoning?: string
 }
 
@@ -355,6 +357,8 @@ export function readMirrorSnapshot(
         ['camera', 'screen'].includes(String(tile.variant)) &&
         typeof tile.ptt === 'boolean' &&
         typeof tile.cameraOff === 'boolean' &&
+        (tile.companionSetup === undefined ||
+          typeof tile.companionSetup === 'boolean') &&
         (tile.state === undefined || focus.has(String(tile.state))) &&
         (tile.alertReasoning === undefined || string(tile.alertReasoning, 4096))
     )
