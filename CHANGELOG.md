@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 2.1.3 — 2026-11-03 — Browser companion connections
 
 ### Fixed
 
