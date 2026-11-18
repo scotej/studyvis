@@ -1820,12 +1820,12 @@ CARGO
   source checksum: b67380fd3b2fbe7527a606e18729d21c6f3951633d0500574c4dc22d2d638b9f
   license: cargo:libloading@0.7.4/LICENSE (SHA-256 b29f8b01452350c20dd1af16ef83b598fea3053578ccc1c7a0ef40e57be2620f)
 
-- libsqlite3-sys 0.38.2 — MIT
-  id: cargo:libsqlite3-sys@0.38.2
+- libsqlite3-sys 0.39.1 — MIT
+  id: cargo:libsqlite3-sys@0.39.1
   targets: aarch64-apple-darwin, x86_64-pc-windows-msvc, x86_64-unknown-linux-gnu
-  source: https://crates.io/api/v1/crates/libsqlite3-sys/0.38.2/download
-  source checksum: f1d20bef17f513b9b3004532233187769cd072d790971f4e4da0e346eb6401e8
-  license: cargo:libsqlite3-sys@0.38.2/LICENSE (SHA-256 c10c1f27337546471e5f7e4e97fdd398b35b9d4e126115dcd22de8d8e65abf6f)
+  source: https://crates.io/api/v1/crates/libsqlite3-sys/0.39.1/download
+  source checksum: 14a5f01b87b92705d07b433c06f96cbc764637d81a0bffb5734ce17cf0f9a2b3
+  license: cargo:libsqlite3-sys@0.39.1/LICENSE (SHA-256 c10c1f27337546471e5f7e4e97fdd398b35b9d4e126115dcd22de8d8e65abf6f)
 
 - linux-raw-sys 0.12.1 — Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT
   id: cargo:linux-raw-sys@0.12.1
@@ -2736,12 +2736,12 @@ CARGO
   license: cargo:ring@0.17.14/LICENSE-BoringSSL (SHA-256 005fc765ddc5115da796cca915baa9557abae13ff35e0a47c47affc56f6c414d)
   license: cargo:ring@0.17.14/LICENSE-other-bits (SHA-256 f025ccfb7dfb6bdfedc75ca0f67acc69e6fb4998143d834f7c2f38a29989680f)
 
-- rusqlite 0.40.2 — MIT
-  id: cargo:rusqlite@0.40.2
+- rusqlite 0.41.1 — MIT
+  id: cargo:rusqlite@0.41.1
   targets: aarch64-apple-darwin, x86_64-pc-windows-msvc, x86_64-unknown-linux-gnu
-  source: https://crates.io/api/v1/crates/rusqlite/0.40.2/download
-  source checksum: 23f2a97da3e3873c73cb2a2e71b35c40ff95e0b1eefa8d72d8499a6928c3b5b3
-  license: cargo:rusqlite@0.40.2/LICENSE (SHA-256 c10c1f27337546471e5f7e4e97fdd398b35b9d4e126115dcd22de8d8e65abf6f)
+  source: https://crates.io/api/v1/crates/rusqlite/0.41.1/download
+  source checksum: da9bba6f3506135e120a6586df05be18b48d18896600646a4bec8f993d91a594
+  license: cargo:rusqlite@0.41.1/LICENSE (SHA-256 c10c1f27337546471e5f7e4e97fdd398b35b9d4e126115dcd22de8d8e65abf6f)
 
 - rust-ini 0.21.3 — MIT
   id: cargo:rust-ini@0.21.3
@@ -2766,15 +2766,15 @@ CARGO
   license: cargo:rusticata-macros@4.1.0/LICENSE-APACHE (SHA-256 a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2)
   license: cargo:rusticata-macros@4.1.0/LICENSE-MIT (SHA-256 a5c61b93b6ee1d104af9920cf020ff3c7efe818e31fe562c72261847a728f513)
 
-- rustix 1.1.4 — Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT
-  id: cargo:rustix@1.1.4
+- rustix 1.1.6 — Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT
+  id: cargo:rustix@1.1.6
   targets: aarch64-apple-darwin, x86_64-unknown-linux-gnu
-  source: https://crates.io/api/v1/crates/rustix/1.1.4/download
-  source checksum: b6fe4565b9518b83ef4f91bb47ce29620ca828bd32cb7e408f0062e9930ba190
-  license: cargo:rustix@1.1.4/COPYRIGHT (SHA-256 377c2e7c53250cc5905c0b0532d35973392af16ffb9596a41d99d202cf3617c9)
-  license: cargo:rustix@1.1.4/LICENSE-APACHE (SHA-256 a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2)
-  license: cargo:rustix@1.1.4/LICENSE-Apache-2.0_WITH_LLVM-exception (SHA-256 a6c48161a09acc75a0e25503bab66a731eb5fba5392ed4bb4743e4ba5085327a)
-  license: cargo:rustix@1.1.4/LICENSE-MIT (SHA-256 23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3)
+  source: https://crates.io/api/v1/crates/rustix/1.1.6/download
+  source checksum: e5e76742e5294153d4dde1207dbec5bdd81eef6fabdc0d2118babadabfd858aa
+  license: cargo:rustix@1.1.6/COPYRIGHT (SHA-256 377c2e7c53250cc5905c0b0532d35973392af16ffb9596a41d99d202cf3617c9)
+  license: cargo:rustix@1.1.6/LICENSE-APACHE (SHA-256 a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2)
+  license: cargo:rustix@1.1.6/LICENSE-Apache-2.0_WITH_LLVM-exception (SHA-256 a6c48161a09acc75a0e25503bab66a731eb5fba5392ed4bb4743e4ba5085327a)
+  license: cargo:rustix@1.1.6/LICENSE-MIT (SHA-256 23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3)
 
 - rustls 0.23.46 — Apache-2.0 OR ISC OR MIT
   id: cargo:rustls@0.23.46
@@ -3718,13 +3718,13 @@ CARGO
   license: cargo:tungstenite@0.29.0/LICENSE-APACHE (SHA-256 a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2)
   license: cargo:tungstenite@0.29.0/LICENSE-MIT (SHA-256 7fea0ee51a4ca5d5cea7464135fd55e8b09caf3a61da3d451ac8a22af95c033f)
 
-- typed-path 0.12.3 — MIT OR Apache-2.0
-  id: cargo:typed-path@0.12.3
+- typed-path 0.12.4 — MIT OR Apache-2.0
+  id: cargo:typed-path@0.12.4
   targets: aarch64-apple-darwin, x86_64-pc-windows-msvc, x86_64-unknown-linux-gnu
-  source: https://crates.io/api/v1/crates/typed-path/0.12.3/download
-  source checksum: 8e28f89b80c87b8fb0cf04ab448d5dd0dd0ade2f8891bae878de66a75a28600e
-  license: cargo:typed-path@0.12.3/LICENSE-APACHE (SHA-256 62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a)
-  license: cargo:typed-path@0.12.3/LICENSE-MIT (SHA-256 23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3)
+  source: https://crates.io/api/v1/crates/typed-path/0.12.4/download
+  source checksum: 54ec2755506471f54baf5e4bb5499d8e510cc1caf271270e778a736bd2d7336c
+  license: cargo:typed-path@0.12.4/LICENSE-APACHE (SHA-256 62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a)
+  license: cargo:typed-path@0.12.4/LICENSE-MIT (SHA-256 23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3)
 
 - typeid 1.0.3 — MIT OR Apache-2.0
   id: cargo:typeid@1.0.3
@@ -4353,12 +4353,12 @@ CARGO
   source checksum: 625dc425cab0dca6dc3c3319506e6593dcb08a9f387ea3b284dbd52a92c40555
   license: cargo:zerovec-derive@0.11.3/LICENSE (SHA-256 f367c1b8e1aa262435251e442901da4607b4650e0e63a026f5044473ecfb90f2)
 
-- zip 9.0.3 — MIT
-  id: cargo:zip@9.0.3
+- zip 9.0.5 — MIT
+  id: cargo:zip@9.0.5
   targets: aarch64-apple-darwin, x86_64-pc-windows-msvc, x86_64-unknown-linux-gnu
-  source: https://crates.io/api/v1/crates/zip/9.0.3/download
-  source checksum: c2d98561b612a84ae525331a7a094429ef8a5772514ed507ff6db5f54badc971
-  license: cargo:zip@9.0.3/LICENSE (SHA-256 58545fed1565e42d687aecec6897d35c6d37ccb71479a137c0deb2203e125c79)
+  source: https://crates.io/api/v1/crates/zip/9.0.5/download
+  source checksum: 6e04976da629d3b04204ba8105b396a193af8ad2583b2c79bfb3ab8af580a11e
+  license: cargo:zip@9.0.5/LICENSE (SHA-256 58545fed1565e42d687aecec6897d35c6d37ccb71479a137c0deb2203e125c79)
 
 - zlib-rs 0.6.6 — Zlib
   id: cargo:zlib-rs@0.6.6
@@ -9904,7 +9904,7 @@ Applies to:
 - cargo:ref-cast-impl@1.0.25 — cargo:ref-cast-impl@1.0.25/LICENSE-MIT
 - cargo:ref-cast@1.0.25 — cargo:ref-cast@1.0.25/LICENSE-MIT
 - cargo:rustc-hash@2.1.2 — cargo:rustc-hash@2.1.2/LICENSE-MIT
-- cargo:rustix@1.1.4 — cargo:rustix@1.1.4/LICENSE-MIT
+- cargo:rustix@1.1.6 — cargo:rustix@1.1.6/LICENSE-MIT
 - cargo:semver@1.0.28 — cargo:semver@1.0.28/LICENSE-MIT
 - cargo:serde-untagged@0.1.9 — cargo:serde-untagged@0.1.9/LICENSE-MIT
 - cargo:serde@1.0.229 — cargo:serde@1.0.229/LICENSE-MIT
@@ -9923,7 +9923,7 @@ Applies to:
 - cargo:thiserror-impl@2.0.18 — cargo:thiserror-impl@2.0.18/LICENSE-MIT
 - cargo:thiserror@1.0.69 — cargo:thiserror@1.0.69/LICENSE-MIT
 - cargo:thiserror@2.0.18 — cargo:thiserror@2.0.18/LICENSE-MIT
-- cargo:typed-path@0.12.3 — cargo:typed-path@0.12.3/LICENSE-MIT
+- cargo:typed-path@0.12.4 — cargo:typed-path@0.12.4/LICENSE-MIT
 - cargo:typeid@1.0.3 — cargo:typeid@1.0.3/LICENSE-MIT
 - cargo:unic-char-property@0.9.0 — cargo:serde@1.0.229/LICENSE-MIT
 - cargo:unic-char-range@0.9.0 — cargo:serde@1.0.229/LICENSE-MIT
@@ -11747,7 +11747,7 @@ MIT OR Apache-2.0
 
 SHA-256 377c2e7c53250cc5905c0b0532d35973392af16ffb9596a41d99d202cf3617c9
 Applies to:
-- cargo:rustix@1.1.4 — cargo:rustix@1.1.4/COPYRIGHT
+- cargo:rustix@1.1.6 — cargo:rustix@1.1.6/COPYRIGHT
 
 --------------------------------------------------------------------------------
 
@@ -14454,7 +14454,7 @@ DEALINGS IN THE SOFTWARE.
 
 SHA-256 58545fed1565e42d687aecec6897d35c6d37ccb71479a137c0deb2203e125c79
 Applies to:
-- cargo:zip@9.0.3 — cargo:zip@9.0.3/LICENSE
+- cargo:zip@9.0.5 — cargo:zip@9.0.5/LICENSE
 
 --------------------------------------------------------------------------------
 
@@ -14969,7 +14969,7 @@ Applies to:
 - cargo:thiserror-impl@2.0.18 — cargo:thiserror-impl@2.0.18/LICENSE-APACHE
 - cargo:thiserror@1.0.69 — cargo:thiserror@1.0.69/LICENSE-APACHE
 - cargo:thiserror@2.0.18 — cargo:thiserror@2.0.18/LICENSE-APACHE
-- cargo:typed-path@0.12.3 — cargo:typed-path@0.12.3/LICENSE-APACHE
+- cargo:typed-path@0.12.4 — cargo:typed-path@0.12.4/LICENSE-APACHE
 - cargo:typeid@1.0.3 — cargo:typeid@1.0.3/LICENSE-APACHE
 - cargo:unic-char-property@0.9.0 — cargo:serde@1.0.229/LICENSE-APACHE
 - cargo:unic-char-range@0.9.0 — cargo:serde@1.0.229/LICENSE-APACHE
@@ -21515,7 +21515,7 @@ Applies to:
 - cargo:regex-syntax@0.8.10 — cargo:regex-syntax@0.8.10/LICENSE-APACHE
 - cargo:regex@1.12.3 — cargo:regex@1.12.3/LICENSE-APACHE
 - cargo:rusticata-macros@4.1.0 — cargo:rusticata-macros@4.1.0/LICENSE-APACHE
-- cargo:rustix@1.1.4 — cargo:rustix@1.1.4/LICENSE-APACHE
+- cargo:rustix@1.1.6 — cargo:rustix@1.1.6/LICENSE-APACHE
 - cargo:rustls-native-certs@0.8.4 — cargo:rustls-native-certs@0.8.4/LICENSE-APACHE
 - cargo:rustls@0.23.46 — cargo:rustls@0.23.46/LICENSE-APACHE
 - cargo:scopeguard@1.2.0 — cargo:scopeguard@1.2.0/LICENSE-APACHE
@@ -21758,7 +21758,7 @@ limitations under the License.
 SHA-256 a6c48161a09acc75a0e25503bab66a731eb5fba5392ed4bb4743e4ba5085327a
 Applies to:
 - cargo:linux-raw-sys@0.12.1 — cargo:linux-raw-sys@0.12.1/LICENSE-Apache-2.0_WITH_LLVM-exception
-- cargo:rustix@1.1.4 — cargo:rustix@1.1.4/LICENSE-Apache-2.0_WITH_LLVM-exception
+- cargo:rustix@1.1.6 — cargo:rustix@1.1.6/LICENSE-Apache-2.0_WITH_LLVM-exception
 
 --------------------------------------------------------------------------------
 
@@ -24659,8 +24659,8 @@ THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND 
 
 SHA-256 c10c1f27337546471e5f7e4e97fdd398b35b9d4e126115dcd22de8d8e65abf6f
 Applies to:
-- cargo:libsqlite3-sys@0.38.2 — cargo:libsqlite3-sys@0.38.2/LICENSE
-- cargo:rusqlite@0.40.2 — cargo:rusqlite@0.40.2/LICENSE
+- cargo:libsqlite3-sys@0.39.1 — cargo:libsqlite3-sys@0.39.1/LICENSE
+- cargo:rusqlite@0.41.1 — cargo:rusqlite@0.41.1/LICENSE
 
 --------------------------------------------------------------------------------
 

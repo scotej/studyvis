@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "generatedBy": "scripts/generate-third-party-notices.ts",
   "noticePath": "THIRD-PARTY-NOTICES.txt",
-  "noticeSha256": "f88ce2eaa34e9d281805abf42eaf2d02b00b689d358b8160322c1317d2e037e3",
+  "noticeSha256": "01981596ea35a11f175a7a973fc9f3de76321166e9fbc4d264dad80734c82633",
   "scope": {
     "npm": "package-lock.json v3 entries beneath node_modules whose dev flag is not true",
     "cargo": "normal dependency edges reachable from the StudyVis root under each release target; build/dev edges excluded",
@@ -44,11 +44,11 @@
     },
     {
       "path": "src-tauri/Cargo.lock",
-      "sha256": "9874b87087c3b9f27bc47f545a1b10975f406d2659781a1637eafcf993fece41"
+      "sha256": "d6a1fd49a2664144f49f79c439c73fb2ce884553ffb629daa56bfcf00505fcd3"
     },
     {
       "path": "src-tauri/Cargo.toml",
-      "sha256": "6261cc5d5d4d5416e8c3098a7fc749115736941f85817671261fbab740ffb725"
+      "sha256": "c6bfa18ed98e71778aa64215bf9158ed7d856784bd40e197bf9224ae0a0430b8"
     },
     {
       "path": "src-tauri/vendor/wry/LICENSE-MIT",
@@ -5298,13 +5298,13 @@
       ]
     },
     {
-      "id": "cargo:libsqlite3-sys@0.38.2",
+      "id": "cargo:libsqlite3-sys@0.39.1",
       "ecosystem": "cargo",
       "name": "libsqlite3-sys",
-      "version": "0.38.2",
+      "version": "0.39.1",
       "licenseExpression": "MIT",
-      "source": "https://crates.io/api/v1/crates/libsqlite3-sys/0.38.2/download",
-      "checksum": "f1d20bef17f513b9b3004532233187769cd072d790971f4e4da0e346eb6401e8",
+      "source": "https://crates.io/api/v1/crates/libsqlite3-sys/0.39.1/download",
+      "checksum": "14a5f01b87b92705d07b433c06f96cbc764637d81a0bffb5734ce17cf0f9a2b3",
       "repository": "https://github.com/rusqlite/rusqlite",
       "targets": [
         "aarch64-apple-darwin",
@@ -5313,7 +5313,7 @@
       ],
       "licenseFiles": [
         {
-          "path": "cargo:libsqlite3-sys@0.38.2/LICENSE",
+          "path": "cargo:libsqlite3-sys@0.39.1/LICENSE",
           "sha256": "c10c1f27337546471e5f7e4e97fdd398b35b9d4e126115dcd22de8d8e65abf6f"
         }
       ]
@@ -7984,13 +7984,13 @@
       ]
     },
     {
-      "id": "cargo:rusqlite@0.40.2",
+      "id": "cargo:rusqlite@0.41.1",
       "ecosystem": "cargo",
       "name": "rusqlite",
-      "version": "0.40.2",
+      "version": "0.41.1",
       "licenseExpression": "MIT",
-      "source": "https://crates.io/api/v1/crates/rusqlite/0.40.2/download",
-      "checksum": "23f2a97da3e3873c73cb2a2e71b35c40ff95e0b1eefa8d72d8499a6928c3b5b3",
+      "source": "https://crates.io/api/v1/crates/rusqlite/0.41.1/download",
+      "checksum": "da9bba6f3506135e120a6586df05be18b48d18896600646a4bec8f993d91a594",
       "repository": "https://github.com/rusqlite/rusqlite",
       "targets": [
         "aarch64-apple-darwin",
@@ -7999,7 +7999,7 @@
       ],
       "licenseFiles": [
         {
-          "path": "cargo:rusqlite@0.40.2/LICENSE",
+          "path": "cargo:rusqlite@0.41.1/LICENSE",
           "sha256": "c10c1f27337546471e5f7e4e97fdd398b35b9d4e126115dcd22de8d8e65abf6f"
         }
       ]
@@ -8072,30 +8072,30 @@
       ]
     },
     {
-      "id": "cargo:rustix@1.1.4",
+      "id": "cargo:rustix@1.1.6",
       "ecosystem": "cargo",
       "name": "rustix",
-      "version": "1.1.4",
+      "version": "1.1.6",
       "licenseExpression": "Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT",
-      "source": "https://crates.io/api/v1/crates/rustix/1.1.4/download",
-      "checksum": "b6fe4565b9518b83ef4f91bb47ce29620ca828bd32cb7e408f0062e9930ba190",
+      "source": "https://crates.io/api/v1/crates/rustix/1.1.6/download",
+      "checksum": "e5e76742e5294153d4dde1207dbec5bdd81eef6fabdc0d2118babadabfd858aa",
       "repository": "https://github.com/bytecodealliance/rustix",
       "targets": ["aarch64-apple-darwin", "x86_64-unknown-linux-gnu"],
       "licenseFiles": [
         {
-          "path": "cargo:rustix@1.1.4/COPYRIGHT",
+          "path": "cargo:rustix@1.1.6/COPYRIGHT",
           "sha256": "377c2e7c53250cc5905c0b0532d35973392af16ffb9596a41d99d202cf3617c9"
         },
         {
-          "path": "cargo:rustix@1.1.4/LICENSE-APACHE",
+          "path": "cargo:rustix@1.1.6/LICENSE-APACHE",
           "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2"
         },
         {
-          "path": "cargo:rustix@1.1.4/LICENSE-Apache-2.0_WITH_LLVM-exception",
+          "path": "cargo:rustix@1.1.6/LICENSE-Apache-2.0_WITH_LLVM-exception",
           "sha256": "a6c48161a09acc75a0e25503bab66a731eb5fba5392ed4bb4743e4ba5085327a"
         },
         {
-          "path": "cargo:rustix@1.1.4/LICENSE-MIT",
+          "path": "cargo:rustix@1.1.6/LICENSE-MIT",
           "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3"
         }
       ]
@@ -10946,13 +10946,13 @@
       ]
     },
     {
-      "id": "cargo:typed-path@0.12.3",
+      "id": "cargo:typed-path@0.12.4",
       "ecosystem": "cargo",
       "name": "typed-path",
-      "version": "0.12.3",
+      "version": "0.12.4",
       "licenseExpression": "MIT OR Apache-2.0",
-      "source": "https://crates.io/api/v1/crates/typed-path/0.12.3/download",
-      "checksum": "8e28f89b80c87b8fb0cf04ab448d5dd0dd0ade2f8891bae878de66a75a28600e",
+      "source": "https://crates.io/api/v1/crates/typed-path/0.12.4/download",
+      "checksum": "54ec2755506471f54baf5e4bb5499d8e510cc1caf271270e778a736bd2d7336c",
       "repository": "https://github.com/chipsenkbeil/typed-path",
       "targets": [
         "aarch64-apple-darwin",
@@ -10961,11 +10961,11 @@
       ],
       "licenseFiles": [
         {
-          "path": "cargo:typed-path@0.12.3/LICENSE-APACHE",
+          "path": "cargo:typed-path@0.12.4/LICENSE-APACHE",
           "sha256": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a"
         },
         {
-          "path": "cargo:typed-path@0.12.3/LICENSE-MIT",
+          "path": "cargo:typed-path@0.12.4/LICENSE-MIT",
           "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3"
         }
       ]
@@ -12741,13 +12741,13 @@
       ]
     },
     {
-      "id": "cargo:zip@9.0.3",
+      "id": "cargo:zip@9.0.5",
       "ecosystem": "cargo",
       "name": "zip",
-      "version": "9.0.3",
+      "version": "9.0.5",
       "licenseExpression": "MIT",
-      "source": "https://crates.io/api/v1/crates/zip/9.0.3/download",
-      "checksum": "c2d98561b612a84ae525331a7a094429ef8a5772514ed507ff6db5f54badc971",
+      "source": "https://crates.io/api/v1/crates/zip/9.0.5/download",
+      "checksum": "6e04976da629d3b04204ba8105b396a193af8ad2583b2c79bfb3ab8af580a11e",
       "repository": "https://github.com/zip-rs/zip2",
       "targets": [
         "aarch64-apple-darwin",
@@ -12756,7 +12756,7 @@
       ],
       "licenseFiles": [
         {
-          "path": "cargo:zip@9.0.3/LICENSE",
+          "path": "cargo:zip@9.0.5/LICENSE",
           "sha256": "58545fed1565e42d687aecec6897d35c6d37ccb71479a137c0deb2203e125c79"
         }
       ]
