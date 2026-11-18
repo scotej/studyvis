@@ -79,10 +79,7 @@ export function StudyHeatmap({ heatmap }: StudyHeatmapProps) {
                 className="flex w-fit gap-1"
               >
                 <WeekdayGutter />
-                {/* pr-6 reserves room for the last month label, which is
-                    absolutely placed and so contributes no scroll width of
-                    its own — without it the final "Jul" is clipped. */}
-                <div className="flex flex-col gap-1 pr-6">
+                <div className="flex flex-col gap-1">
                   <MonthRow months={months} weekCount={weeks.length} />
                   <div className="flex gap-0.5">
                     {weeks.map((week, w) => (
@@ -140,9 +137,8 @@ function WeekdayGutter() {
 }
 
 // One slot per week column, so a label lands exactly above the week its month
-// opens in. Labels are wider than a 10px slot, so each is absolutely placed
-// inside its slot and allowed to overflow to the right — months are ~4.3
-// columns apart, which is more than enough room for three characters.
+// opens in. Let the final label contribute its full localized width to the
+// scroll area; there are no later labels for it to push out of alignment.
 function MonthRow({
   months,
   weekCount,
@@ -151,16 +147,21 @@ function MonthRow({
   weekCount: number
 }) {
   const labelByWeek = new Map(months.map((m) => [m.weekIndex, m.label]))
+  const lastLabelWeek = months.at(-1)?.weekIndex
   return (
-    <div className="flex h-4 gap-0.5" aria-hidden="true">
+    <div
+      className="flex h-4 gap-0.5 text-xs leading-none whitespace-nowrap text-text-muted"
+      aria-hidden="true"
+    >
       {Array.from({ length: weekCount }, (_, w) => (
-        <div key={w} className="relative w-2.5 shrink-0">
-          {labelByWeek.has(w) ? (
-            <span className="absolute top-0 left-0 text-xs leading-none whitespace-nowrap text-text-muted">
-              {labelByWeek.get(w)}
-            </span>
-          ) : null}
-        </div>
+        <span
+          key={w}
+          className={
+            w === lastLabelWeek ? 'min-w-2.5 shrink-0' : 'w-2.5 shrink-0'
+          }
+        >
+          {labelByWeek.get(w)}
+        </span>
       ))}
     </div>
   )

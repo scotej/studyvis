@@ -242,8 +242,7 @@ export type HeatmapDay = {
   level: HeatmapLevel
 }
 
-// Which column a month's name is drawn above. One entry per month whose first
-// day of the grid falls in a different month than the column before it.
+// Which week column carries each visible month's name.
 export type HeatmapMonth = { weekIndex: number; label: string }
 
 export type StudyHeatmap = {
@@ -307,13 +306,14 @@ export function buildStudyHeatmap(
       if (minutes > (busiest?.minutes ?? 0)) busiest = cell
     }
     weeks.push(column)
-    // Label a column when its first day opens a month the previous column
-    // didn't already cover. Keyed off the column's Sunday, so a month that
-    // starts mid-week is labelled above the week it starts in.
-    const first = column[0]
-    if (first && first.day.slice(0, 7) !== lastMonth) {
-      lastMonth = first.day.slice(0, 7)
-      months.push({ weekIndex: w, label: monthLabel(first.day, locale) })
+    // The last visible day identifies the month opening in a split week.
+    const lastDay = column.findLast((cell) => cell !== null)
+    if (lastDay && lastDay.day.slice(0, 7) !== lastMonth) {
+      lastMonth = lastDay.day.slice(0, 7)
+      // A short opening fragment leaves too little room for two labels in
+      // the first three 12px columns. Prefer the actual month boundary.
+      if (w > 0 && w < 3) months.pop()
+      months.push({ weekIndex: w, label: monthLabel(lastDay.day, locale) })
     }
   }
 

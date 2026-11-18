@@ -89,12 +89,26 @@ describe('buildStudyHeatmap grid shape', () => {
     expect(map.daysInWindow).toBeGreaterThanOrEqual(365)
   })
 
+  test('labels a new month in its opening week before its first Sunday', () => {
+    const map = buildStudyHeatmap([], Date.UTC(2026, 9, 1), ZONE, LOCALE)
+    expect(map.months.at(-1)).toEqual({
+      weekIndex: HEATMAP_WEEKS - 1,
+      label: 'Oct',
+    })
+  })
+
+  test('leaves room for the first month boundary when the grid opens late in a month', () => {
+    const map = buildStudyHeatmap([], Date.UTC(2027, 2, 21), ZONE, LOCALE)
+    expect(map.months[0]).toEqual({ weekIndex: 1, label: 'Apr' })
+    expect(map.months.at(-1)?.label).toBe('Mar')
+  })
+
   test('labels each column that opens a new month', () => {
     const map = buildStudyHeatmap([], NOW, ZONE, LOCALE)
-    expect(map.months[0]).toEqual({ weekIndex: 0, label: 'Jul' })
+    expect(map.months[0]).toEqual({ weekIndex: 0, label: 'Aug' })
     expect(map.months.map((m) => m.label)).toContain('Jan')
-    // Jul 2025 through Jul 2026: twelve boundaries plus the opening column.
-    expect(map.months).toHaveLength(13)
+    // August opens in the same column as the last few days of July 2025.
+    expect(map.months).toHaveLength(12)
     // Strictly left to right, never two labels on one column.
     const indices = map.months.map((m) => m.weekIndex)
     expect([...indices].sort((a, b) => a - b)).toEqual(indices)
