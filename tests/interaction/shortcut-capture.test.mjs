@@ -33,7 +33,7 @@ test('selecting AI capture disarms friends and assigns the next key only to AI',
     await controls.nth(1).click()
     assert.equal(await controls.nth(0).getAttribute('aria-pressed'), 'false')
     assert.equal(await controls.nth(1).getAttribute('aria-pressed'), 'true')
-    await page.keyboard.press('Control+k')
+    await page.keyboard.press('ControlOrMeta+k')
     assert.deepEqual(await page.evaluate(() => window.fixture.commits), [
       { action: 'ptt-ai', accelerator: 'CmdOrCtrl+K' },
     ])
@@ -77,7 +77,7 @@ test('all microphone shortcuts reject collisions before committing', async () =>
   await withComponentBrowser(source, async (page) => {
     const controls = captures(page)
     await controls.nth(0).click()
-    await page.keyboard.press('Control+Backslash')
+    await page.keyboard.press('ControlOrMeta+Backslash')
     await page.getByRole('alert').waitFor()
     assert.match(
       await page.getByRole('alert').innerText(),
@@ -85,13 +85,13 @@ test('all microphone shortcuts reject collisions before committing', async () =>
     )
     assert.deepEqual(await page.evaluate(() => window.fixture.commits), [])
     await controls.nth(2).click()
-    await page.keyboard.press('Control+BracketLeft')
+    await page.keyboard.press('ControlOrMeta+BracketLeft')
     await page.getByRole('alert').waitFor()
     assert.match(await page.getByRole('alert').innerText(), /Push to talk/)
-    await page.keyboard.press('Control+BracketRight')
+    await page.keyboard.press('ControlOrMeta+BracketRight')
     assert.match(await page.getByRole('alert').innerText(), /Talk to AI/)
     assert.deepEqual(await page.evaluate(() => window.fixture.commits), [])
-    await page.keyboard.press('Control+k')
+    await page.keyboard.press('ControlOrMeta+k')
     assert.deepEqual(await page.evaluate(() => window.fixture.commits), [
       { action: 'mic-toggle', accelerator: 'CmdOrCtrl+K' },
     ])
