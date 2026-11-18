@@ -22,6 +22,7 @@ import {
 
 import {
   listAudioInputs,
+  watchAudioDevices,
   type AudioInputOption,
 } from '@/features/session/audioDevices'
 import { logger } from '@/lib/log'
@@ -49,37 +50,10 @@ export function AudioDevicePicker({
 }: AudioDevicePickerProps) {
   const [devices, setDevices] = useState<AudioInputOption[]>([])
 
-  // setState happens inside the `.then` callback (not the effect body) so
-  // the react-hooks/set-state-in-effect rule treats this as a subscription:
-  // external system (mediaDevices) → async callback → setState. The
-  // `cancelled` flag drops the result if the picker unmounts mid-fetch.
   useEffect(() => {
-    let cancelled = false
-    const apply = (list: AudioInputOption[]) => {
-      if (!cancelled) setDevices(list)
-    }
-    const refresh = () => {
-      listAudioInputs()
-        .then(apply)
-        .catch((err) =>
-          log.error('enumerate.failed', { direction: 'input', err })
-        )
-    }
-    refresh()
-    if (
-      typeof navigator === 'undefined' ||
-      !navigator.mediaDevices ||
-      typeof navigator.mediaDevices.addEventListener !== 'function'
-    ) {
-      return () => {
-        cancelled = true
-      }
-    }
-    navigator.mediaDevices.addEventListener('devicechange', refresh)
-    return () => {
-      cancelled = true
-      navigator.mediaDevices.removeEventListener('devicechange', refresh)
-    }
+    return watchAudioDevices(listAudioInputs, setDevices, (err) =>
+      log.error('enumerate.failed', { direction: 'input', err })
+    )
   }, [])
 
   const active = devices.find((d) => d.deviceId === currentDeviceId)

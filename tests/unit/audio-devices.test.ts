@@ -2,6 +2,7 @@ import { describe, expect, test, vi } from 'vitest'
 
 import {
   swapAudioInput,
+  watchAudioDevices,
   type SwapAudioInputDeps,
 } from '@/features/session/audioDevices'
 
@@ -530,4 +531,27 @@ describe('swapAudioInput (#47 A3)', () => {
     expect(nextRoomOperations.size).toBe(0)
     expect(sender.track).toBeNull()
   })
+})
+
+test('an earlier device scan cannot restore an unplugged microphone', async () => {
+  const events = new EventTarget()
+  vi.stubGlobal('navigator', { mediaDevices: events })
+  const scans: ((devices: { deviceId: string; label: string }[]) => void)[] = []
+  const apply = vi.fn()
+  const cleanup = watchAudioDevices(
+    () => new Promise((resolve) => scans.push(resolve)),
+    apply,
+    vi.fn()
+  )
+  try {
+    events.dispatchEvent(new Event('devicechange'))
+    scans[1]([])
+    await Promise.resolve()
+    scans[0]([{ deviceId: 'disconnected', label: 'USB microphone' }])
+    await Promise.resolve()
+    expect(apply.mock.calls).toEqual([[[]]])
+  } finally {
+    cleanup()
+    vi.unstubAllGlobals()
+  }
 })

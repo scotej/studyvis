@@ -30,6 +30,32 @@ export type AudioInputOption = {
   label: string
 }
 
+export function watchAudioDevices(
+  list: () => Promise<AudioInputOption[]>,
+  apply: (devices: AudioInputOption[]) => void,
+  onError: (error: unknown) => void
+): () => void {
+  let generation = 0
+  const refresh = () => {
+    const request = ++generation
+    void list().then(
+      (devices) => {
+        if (request === generation) apply(devices)
+      },
+      (error: unknown) => {
+        if (request === generation) onError(error)
+      }
+    )
+  }
+  const media = globalThis.navigator?.mediaDevices
+  media?.addEventListener?.('devicechange', refresh)
+  refresh()
+  return () => {
+    generation++
+    media?.removeEventListener?.('devicechange', refresh)
+  }
+}
+
 export type SwapAudioInputDeps = {
   getUserMedia: (constraints: MediaStreamConstraints) => Promise<MediaStream>
   room: TopicRoom | null

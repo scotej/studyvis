@@ -22,6 +22,7 @@ import {
 import {
   listAudioOutputs,
   setSinkIdSupported,
+  watchAudioDevices,
   type AudioInputOption,
 } from '@/features/session/audioDevices'
 import { logger } from '@/lib/log'
@@ -46,32 +47,9 @@ export function AudioOutputPicker({
 
   useEffect(() => {
     if (!supported) return
-    let cancelled = false
-    const apply = (list: AudioInputOption[]) => {
-      if (!cancelled) setDevices(list)
-    }
-    const refresh = () => {
-      listAudioOutputs()
-        .then(apply)
-        .catch((err) =>
-          log.error('enumerate.failed', { direction: 'output', err })
-        )
-    }
-    refresh()
-    if (
-      typeof navigator === 'undefined' ||
-      !navigator.mediaDevices ||
-      typeof navigator.mediaDevices.addEventListener !== 'function'
-    ) {
-      return () => {
-        cancelled = true
-      }
-    }
-    navigator.mediaDevices.addEventListener('devicechange', refresh)
-    return () => {
-      cancelled = true
-      navigator.mediaDevices.removeEventListener('devicechange', refresh)
-    }
+    return watchAudioDevices(listAudioOutputs, setDevices, (err) =>
+      log.error('enumerate.failed', { direction: 'output', err })
+    )
   }, [supported])
 
   if (!supported) return null
