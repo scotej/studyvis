@@ -123,8 +123,20 @@ export function installBrowserTalkShortcut({
     talk.press('shortcut')
   }
   const keyup = (event: KeyboardEvent) => {
-    if (event.code === combo.code || isModifierCode(event.code))
+    if (event.code === combo.code) {
       talk.release('shortcut')
+    } else if (isModifierCode(event.code)) {
+      const pressed = comboFromKeyboardEvent(event, platform)
+      if (
+        // macOS can suppress the binding's keyup while Command is held.
+        (platform === 'mac' && event.code.startsWith('Meta')) ||
+        (shortcutCombo.mod && !pressed.mod) ||
+        (shortcutCombo.ctrl && !pressed.ctrl) ||
+        (shortcutCombo.alt && !pressed.alt) ||
+        (shortcutCombo.shift && !pressed.shift)
+      )
+        talk.release('shortcut')
+    }
   }
   const blur = () => talk.blur()
   const visibility = () => {
