@@ -178,7 +178,12 @@ export function createBrowserConnection(): BrowserConnection {
   const finishResume = () => {
     if (resumeTimer) clearTimeout(resumeTimer)
     resumeTimer = null
-    if (state.resuming) update({ resuming: false })
+    if (state.resuming) {
+      // The fresh snapshot confirms these tracks still belong to this session.
+      for (const kind of ['camera', 'screen'] as const)
+        peer?.setCapture(kind, captures[kind])
+      update({ resuming: false })
+    }
   }
 
   const connect = () => {
@@ -210,8 +215,6 @@ export function createBrowserConnection(): BrowserConnection {
         onStreams: (streams) => update({ streams }),
         onFailure: () => current.close(),
       })
-      for (const kind of ['camera', 'screen'] as const)
-        peer.setCapture(kind, captures[kind])
       send({ type: 'ready' })
       heartbeat = setInterval(() => {
         if (Date.now() - lastHeardAt > 15_000) current.close()
