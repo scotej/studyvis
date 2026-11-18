@@ -48,10 +48,15 @@ export function formatLastTogether(
 ): string {
   const last = strings.friends.list.lastTogether
   if (!ts) return last.never
-  const reference = now ?? Date.now()
-  const deltaMs = Math.max(0, reference - ts)
-  const day = 24 * 60 * 60 * 1000
-  const days = Math.floor(deltaMs / day)
+  // Compare local calendar dates without counting a DST day as 23 or 25 hours.
+  const calendarDay = (time: number) => {
+    const date = new Date(time)
+    return Date.UTC(date.getFullYear(), date.getMonth(), date.getDate())
+  }
+  const days = Math.max(
+    0,
+    (calendarDay(now ?? Date.now()) - calendarDay(ts)) / 86_400_000
+  )
   if (days === 0) return last.today
   if (days === 1) return last.yesterday
   if (days < 7) return last.daysAgo(days)
