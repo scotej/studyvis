@@ -71,6 +71,8 @@ export async function saveTextFile(
 // dashes, collapsed runs, trimmed. Empty input falls back to `fallback`.
 export function slugify(input: string, fallback = 'export'): string {
   const slug = input
+    .normalize('NFD')
+    .replace(/\p{M}+/gu, '')
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '')

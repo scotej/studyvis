@@ -19,6 +19,10 @@ describe('slugify', () => {
     expect(slugify('Linear Algebra — Set 3')).toBe('linear-algebra-set-3')
     expect(slugify('  spaced  out  ')).toBe('spaced-out')
   })
+  test('keeps the same filename for equivalent accented topic spellings', () => {
+    expect(slugify('Café résumé')).toBe('cafe-resume')
+    expect(slugify('Café résumé'.normalize('NFD'))).toBe('cafe-resume')
+  })
   test('falls back when nothing survives', () => {
     expect(slugify('!!!')).toBe('export')
     expect(slugify('', 'session')).toBe('session')
