@@ -62,6 +62,7 @@ export function createScreenShareFullscreenController(
       if (disposed || !monitoring) return
       clearRetry()
       if (!active) {
+        enteredByController = false
         monitoring = false
         checkQueued = false
         onExited()

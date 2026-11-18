@@ -105,7 +105,11 @@ describe('screen-share fullscreen controller', () => {
     await flushMicrotasks()
 
     expect(onExited).toHaveBeenCalledTimes(1)
+    // A new native fullscreen request belongs to the user while the dialog closes.
+    harness.setActive(true)
     await controller.close()
+    expect(harness.runtime.exit).not.toHaveBeenCalled()
+    expect(await harness.runtime.isActive()).toBe(true)
   })
 
   test('retries a transient fullscreen-state query failure', async () => {
