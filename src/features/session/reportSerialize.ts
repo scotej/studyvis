@@ -8,7 +8,7 @@
 // its JSX; the "Copy report" / "Save as…" actions and the section-order test
 // call serializeReportToText.
 
-import { type AuditEventKind, isAuditEventKind } from '@/lib/audit-types'
+import { isAuditEventKind } from '@/lib/audit-types'
 import type { AuditEventRecord } from '@/lib/db/audit'
 import type { SessionRecord } from '@/lib/db/sessions'
 import {
@@ -105,10 +105,9 @@ export function describeRow(
   row: AuditEventRecord,
   detail: Record<string, unknown>
 ): string {
-  const kind = isAuditEventKind(row.kind)
-    ? row.kind
-    : (row.kind as AuditEventKind)
-  const label = strings.audit.kindLabels[kind as AuditEventKind] ?? row.kind
+  const { kind } = row
+  if (!isAuditEventKind(kind)) return kind
+  const label = strings.audit.kindLabels[kind]
   if (kind === 'topic_change') {
     const previous =
       typeof detail.previous_topic === 'string' ? detail.previous_topic : '?'

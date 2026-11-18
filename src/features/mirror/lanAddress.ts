@@ -15,7 +15,7 @@ export function replaceMdnsCandidates(sdp: string, address: string): string {
   // loopback; keep its mDNS names, which resolve locally.
   if (!isIpv4Literal(address) || /^(127|0)\./.test(address)) return sdp
   return sdp.replace(
-    /^(a=candidate:\S+ \d+ \S+ \d+ )([^\s]+\.local)(?= )/gim,
+    /^(a=candidate:\S+ \d+ \S+ \d+ )\S+\.local\.?(?= \d+ typ host(?: |\r?$))/gim,
     (_line, prefix: string) => `${prefix}${address}`
   )
 }

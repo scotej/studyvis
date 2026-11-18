@@ -856,7 +856,9 @@ describe('browser recovery and local custody', () => {
     await vi.advanceTimersByTimeAsync(1000)
     expect(original.send.mock.calls).toHaveLength(count)
     const replacement = TestSocket.instances[1]
-    await activate(replacement)
+    replacement.open()
+    expect(doubles.peers[1].setCapture).not.toHaveBeenCalled()
+    await incoming(replacement, { type: 'snapshot', snapshot: snapshot() })
     expect(connection.getState()).toMatchObject({
       status: 'connected',
       resuming: false,
@@ -914,6 +916,10 @@ describe('browser recovery and local custody', () => {
             type: 'snapshot',
             snapshot: { ...snapshot(), sessionId: 'session-2' },
           })
+          expect(doubles.peers[1].setCapture).not.toHaveBeenCalledWith(
+            'camera',
+            camera.stream
+          )
         }
       }
       expect(camera.track.stop).toHaveBeenCalledOnce()

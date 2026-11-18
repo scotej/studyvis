@@ -180,6 +180,33 @@ describe('browser notification delivery', () => {
     expect(constructor.requestPermission).not.toHaveBeenCalled()
   })
 
+  test('suppresses background-only delivery if the user returns while the worker starts', async () => {
+    const { constructor } = platform()
+    const registration = { active: {}, showNotification: vi.fn(async () => {}) }
+    let activate!: (value: typeof registration) => void
+    vi.stubGlobal('navigator', {
+      serviceWorker: {
+        getRegistration: async () => ({ active: null }),
+        ready: new Promise((resolve) => {
+          activate = resolve
+        }),
+      },
+    })
+    const pending = showBrowserNotification({
+      ...message,
+      onlyWhenHidden: true,
+    })
+    await vi.advanceTimersByTimeAsync(100)
+    vi.stubGlobal('document', {
+      visibilityState: 'visible',
+      hasFocus: () => true,
+    })
+    activate(registration)
+    expect(await pending).toBe(false)
+    expect(registration.showNotification).not.toHaveBeenCalled()
+    expect(constructor).not.toHaveBeenCalled()
+  })
+
   test('suppresses background-only notifications while the companion is focused', async () => {
     const { constructor } = platform()
     vi.stubGlobal('document', {

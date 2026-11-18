@@ -164,11 +164,38 @@ describe('browser foreground push-to-talk shortcut', () => {
       expect(fixture.talk.getState().held).toBe(true)
       fixture.key('keyup', {
         code: platform === 'mac' ? 'MetaLeft' : 'ControlLeft',
+        metaKey: false,
+        ctrlKey: false,
       })
       expect(fixture.talk.getState().held).toBe(false)
       fixture.dispose()
     }
   )
+
+  test('releases a non-Command shortcut when macOS suppresses the binding keyup', () => {
+    const fixture = shortcutFixture('mac', {
+      ...DEFAULT_PTT_FRIENDS_COMBO,
+      mod: false,
+      ctrl: true,
+    })
+    fixture.key('keydown', { ctrlKey: true, metaKey: false })
+    expect(fixture.talk.getState().held).toBe(true)
+    fixture.key('keydown', { code: 'MetaLeft', ctrlKey: true })
+    fixture.key('keyup', { code: 'MetaLeft', ctrlKey: true, metaKey: false })
+    expect(fixture.talk.getState().held).toBe(false)
+    fixture.dispose()
+  })
+
+  test('keeps talking when an unrelated modifier is released while the binding is held', () => {
+    const fixture = shortcutFixture()
+    fixture.key('keydown')
+    fixture.key('keydown', { code: 'ShiftLeft', shiftKey: true })
+    fixture.key('keyup', { code: 'ShiftLeft' })
+    expect(fixture.talk.getState().held).toBe(true)
+    fixture.key('keyup')
+    expect(fixture.talk.getState().held).toBe(false)
+    fixture.dispose()
+  })
 
   test('ignores editable controls, open modals, composition, repeats and wrong shortcuts', () => {
     const fixture = shortcutFixture()

@@ -45,16 +45,16 @@ export async function showBrowserNotification(
   message: MirrorNotification
 ): Promise<boolean> {
   if (browserNotificationPermission() !== 'granted') return false
-  if (
+  const suppressWhileFocused = () =>
     message.onlyWhenHidden &&
     document.visibilityState === 'visible' &&
     document.hasFocus()
-  )
-    return false
+  if (suppressWhileFocused()) return false
 
   try {
     const registration = await notificationRegistration()
     if (registration) {
+      if (suppressWhileFocused()) return false
       await registration.showNotification(message.title, { body: message.body })
       return true
     }
@@ -62,6 +62,7 @@ export async function showBrowserNotification(
     // Desktop notifications can still work if offline worker setup failed.
   }
   try {
+    if (suppressWhileFocused()) return false
     const notification = new Notification(message.title, { body: message.body })
     notification.onclick = () => {
       window.focus()

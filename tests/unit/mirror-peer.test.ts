@@ -581,6 +581,15 @@ describe('LAN ICE candidate repair (#515)', () => {
     expect(lines.slice(3)).toEqual(MDNS_SDP.split('\r\n').slice(3))
   })
 
+  test('repairs an absolute mDNS host name while preserving non-host candidates', () => {
+    const host = 'a=candidate:1 1 udp 123 peer.local. 54321 typ host'
+    const relay = 'a=candidate:2 1 udp 100 relay.local 54322 typ relay'
+    const sdp = [host, relay].join('\r\n')
+    expect(replaceMdnsCandidates(sdp, '10.0.0.7')).toBe(
+      [host.replace('peer.local.', '10.0.0.7'), relay].join('\r\n')
+    )
+  })
+
   test.each([
     '',
     'host.local',

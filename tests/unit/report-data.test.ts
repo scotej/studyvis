@@ -13,6 +13,7 @@ import {
   formatOffset,
   groupTimelineByWho,
   parseAuditDetail,
+  reportTimelineOrigin,
   sampleQualitySummary,
 } from '@/features/session/reportData'
 import type { AuditEventRecord } from '@/lib/db/audit'
@@ -49,6 +50,13 @@ describe('parseAuditDetail', () => {
     expect(parseAuditDetail('null')).toEqual({})
     expect(parseAuditDetail('')).toEqual({})
   })
+})
+
+test('a long legacy journal uses its earliest event as the timeline origin', () => {
+  const event = evt('A', 'joined', 1000)
+  const events = Array<AuditEventRecord>(200_000).fill(event)
+  events.push(evt('B', 'joined', 0))
+  expect(reportTimelineOrigin(null, events)).toBe(START_TS)
 })
 
 describe('groupTimelineByWho', () => {
