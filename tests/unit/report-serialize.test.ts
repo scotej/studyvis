@@ -89,6 +89,13 @@ describe('serializeReportToText section order (R5)', () => {
     }
   )
 
+  test('preserves an unrecognized audit kind in the exported timeline', () => {
+    const text = serializeReportToText(
+      buildData(baseSession(), [evt(ME, 'constructor', 0)])
+    )
+    expect(text).toContain('- 00:00 constructor\n')
+  })
+
   test('renders a recovered unknown duration without fabricating zero minutes', () => {
     const text = serializeReportToText(
       buildData(
