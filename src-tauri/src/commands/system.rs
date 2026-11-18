@@ -1221,28 +1221,31 @@ fn write_text_file(path: &str, contents: &str) -> Result<(), String> {
 
 const IMAGE_SAVE_MAX_BYTES: usize = 5 * 1024 * 1024;
 
-fn image_extension(mime_type: &str) -> Option<&'static str> {
+fn image_extensions(mime_type: &str) -> Option<&'static [&'static str]> {
     match mime_type {
-        "image/jpeg" => Some("jpg"),
-        "image/png" => Some("png"),
-        "image/webp" => Some("webp"),
-        "image/gif" => Some("gif"),
+        "image/jpeg" => Some(&["jpg", "jpeg"]),
+        "image/png" => Some(&["png"]),
+        "image/webp" => Some(&["webp"]),
+        "image/gif" => Some(&["gif"]),
         _ => None,
     }
 }
 
-fn safe_image_filename(filename: &str, extension: &str) -> String {
+fn safe_image_filename(filename: &str, extensions: &[&str]) -> String {
     let basename = filename.rsplit(['/', '\\']).next().unwrap_or_default();
     let cleaned: String = basename
         .chars()
         .filter(|character| !character.is_control() && !r#"<>:"/\|?*"#.contains(*character))
         .take(120)
         .collect();
-    let expected_suffix = format!(".{extension}");
-    if cleaned.to_ascii_lowercase().ends_with(&expected_suffix) {
+    if cleaned.rsplit_once('.').is_some_and(|(_, suffix)| {
+        extensions
+            .iter()
+            .any(|ext| suffix.eq_ignore_ascii_case(ext))
+    }) {
         cleaned
     } else {
-        format!("studyvis-image.{extension}")
+        format!("studyvis-image.{}", extensions[0])
     }
 }
 
@@ -1257,16 +1260,16 @@ pub async fn system_save_image<R: Runtime>(
     mime_type: String,
     bytes: Vec<u8>,
 ) -> Result<bool, String> {
-    let extension = image_extension(&mime_type).ok_or("Unsupported image type")?;
+    let extensions = image_extensions(&mime_type).ok_or("Unsupported image type")?;
     if bytes.is_empty() || bytes.len() > IMAGE_SAVE_MAX_BYTES {
         return Err("Invalid image size".to_string());
     }
-    let default_filename = safe_image_filename(&filename, extension);
+    let default_filename = safe_image_filename(&filename, extensions);
     let Some(destination) = app
         .dialog()
         .file()
         .set_file_name(default_filename)
-        .add_filter("Image", &[extension])
+        .add_filter("Image", extensions)
         .blocking_save_file()
     else {
         return Ok(false);
@@ -1749,7 +1752,7 @@ fn install_context() -> InstallContext {
 
 #[cfg(test)]
 mod tests {
-    use super::{image_extension, safe_image_filename, RELEASES_URL};
+    use super::{image_extensions, safe_image_filename, RELEASES_URL};
 
     #[test]
     fn turn_login_opener_accepts_only_a_ticket_for_the_fixed_broker() {
@@ -1821,12 +1824,15 @@ mod tests {
 
     #[test]
     fn image_save_metadata_is_constrained() {
-        assert_eq!(image_extension("image/jpeg"), Some("jpg"));
-        assert_eq!(image_extension("image/png"), Some("png"));
-        assert_eq!(image_extension("text/plain"), None);
-        assert_eq!(safe_image_filename("../notes.PNG", "png"), "notes.PNG");
+        let jpeg = image_extensions("image/jpeg").unwrap();
+        let png = image_extensions("image/png").unwrap();
+        assert_eq!(jpeg, &["jpg", "jpeg"]);
+        assert_eq!(png, &["png"]);
+        assert_eq!(image_extensions("text/plain"), None);
+        assert_eq!(safe_image_filename("../notes.JPEG", jpeg), "notes.JPEG");
+        assert_eq!(safe_image_filename("../notes.PNG", png), "notes.PNG");
         assert_eq!(
-            safe_image_filename("notes.png.exe", "png"),
+            safe_image_filename("notes.png.exe", png),
             "studyvis-image.png"
         );
     }
