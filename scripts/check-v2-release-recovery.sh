@@ -4,7 +4,7 @@ set -euo pipefail
 : "${GH_REPO:?}" "${TAG:?}" "${RELEASE_SHA:?}"
 original_run=38204769073
 expected_sha=6a0403a721a2ab910fc1afa30dddf026822f0aa3
-[[ "$TAG" == v2.0.0 && "$RELEASE_SHA" == "$expected_sha" ]]
+[[ "$TAG" == v2.0.0 && "$RELEASE_SHA" == "$expected_sha" ]] || exit 1
 run=$(gh api "repos/$GH_REPO/actions/runs/$original_run")
 jq -e --arg sha "$expected_sha" '
   .path == ".github/workflows/release.yml" and .head_branch == "v2.0.0" and
