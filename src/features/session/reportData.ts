@@ -229,10 +229,10 @@ export function reportTimelineOrigin(
   startedAt: number | null | undefined,
   events: ReadonlyArray<AuditEventRecord>
 ): number {
-  return (
-    startedAt ??
-    (events.length > 0 ? Math.min(...events.map((event) => event.ts)) : 0)
-  )
+  if (startedAt != null) return startedAt
+  let earliest = events[0]?.ts ?? 0
+  for (const event of events) earliest = Math.min(earliest, event.ts)
+  return earliest
 }
 
 export function deriveTopicTimeline(
